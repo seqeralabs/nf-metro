@@ -12,7 +12,8 @@ dispatcher never routes the edge through the bypass family, and even once it
 does, the gap placed "to the right of the target's column" lands beyond the
 cell-mate instead of between the cell-mate and the target.
 
-Two fixtures exercise the same invariant at different source-to-cell spacing:
+Three fixtures exercise the same invariant at different source-to-cell spacing
+and row relationships:
 
 * ``packed_cell_cellmate_bypass`` - the bypassing line's source sits one
   column past the packed cell, with an empty gap column between (issue #1228).
@@ -21,6 +22,12 @@ Two fixtures exercise the same invariant at different source-to-cell spacing:
   through (issue #1233). The dispatch gate keyed on column distance hid the
   cell-mate entirely here, so the line collapsed back to a straight run
   through the cell-mate's interior.
+* ``packed_cell_cellmate_bypass_cross_row`` - the source is itself a member
+  of the packed cell, and the target sits a row below and a column over. The
+  cell-mate obstruction is on the *source*'s row rather than a shared row
+  between source and target, so it never registers as "same row" either;
+  the plain L-shape's first leg runs the full source-row width before
+  turning, straight through the cell-mate.
 """
 
 from __future__ import annotations
@@ -36,7 +43,11 @@ from nf_metro.layout.routing.offsets import compute_station_offsets
 from nf_metro.parser import parse_metro_mermaid
 
 TOPOLOGIES = Path(__file__).parent.parent / "examples" / "topologies"
-FIXTURES = ("packed_cell_cellmate_bypass", "packed_cell_cellmate_bypass_adjacent")
+FIXTURES = (
+    "packed_cell_cellmate_bypass",
+    "packed_cell_cellmate_bypass_adjacent",
+    "packed_cell_cellmate_bypass_cross_row",
+)
 
 
 def _layout(fixture: str):
@@ -56,7 +67,10 @@ def test_no_line_routes_through_cell_mate(fixture: str) -> None:
     )
 
 
-@pytest.mark.parametrize("fixture", FIXTURES)
+@pytest.mark.parametrize(
+    "fixture",
+    ("packed_cell_cellmate_bypass", "packed_cell_cellmate_bypass_adjacent"),
+)
 def test_rna_bypass_clears_realign_on_both_sides(fixture: str) -> None:
     """The ``rna`` bypass traverses below ``realign``, not collapsed to a point.
 
@@ -94,3 +108,42 @@ def test_rna_bypass_clears_realign_on_both_sides(fixture: str) -> None:
             f"bypass traverse {traverse_xs} never reaches right of realign "
             f"({realign_right:.1f})"
         )
+
+
+def test_cross_row_bypass_clears_source_row_cell_mate() -> None:
+    """The cross-row ``b`` route from ``quant`` to ``sink`` clears ``rep``.
+
+    ``quant`` and ``rep`` are packed into the same grid cell; ``rep`` sits on
+    ``quant``'s own row, directly between ``quant`` and ``sink`` (one row
+    below, one column over).  No segment of the ``quant``->``sink`` route may
+    cross ``rep``'s box, since that route never touches ``rep``.
+    """
+    graph = _layout("packed_cell_cellmate_bypass_cross_row")
+    rep = graph.sections["rep"]
+    rep_left = rep.bbox_x
+    rep_right = rep.bbox_x + rep.bbox_w
+    rep_top = rep.bbox_y
+    rep_bottom = rep.bbox_y + rep.bbox_h
+    offsets = compute_station_offsets(graph)
+    routes = route_edges_centred(graph, station_offsets=offsets)
+
+    descents = [
+        rp
+        for rp in routes
+        if rp.line_id == "b"
+        and rp.is_inter_section
+        and rp.edge.target == "sink__entry_left_2"
+    ]
+    assert descents, "expected an inter-section b route into sink"
+    for rp in descents:
+        for (ax, ay), (bx, by) in zip(rp.points, rp.points[1:]):
+            if abs(ay - by) > 1.0:
+                continue  # vertical leg: rep's own column check covers it
+            lo_x, hi_x = (ax, bx) if ax <= bx else (bx, ax)
+            crosses_x = lo_x < rep_right and hi_x > rep_left
+            crosses_y = rep_top <= ay <= rep_bottom
+            assert not (crosses_x and crosses_y), (
+                f"leg ({ax:.1f},{ay:.1f})->({bx:.1f},{by:.1f}) cuts through rep "
+                f"(x={rep_left:.1f}..{rep_right:.1f}, "
+                f"y={rep_top:.1f}..{rep_bottom:.1f})"
+            )

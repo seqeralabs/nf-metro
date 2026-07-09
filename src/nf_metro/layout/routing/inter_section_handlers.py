@@ -130,6 +130,7 @@ class _InterFacts:
     tgt_col: int | None
     tgt_row: int | None
     needs_bypass: bool
+    cellmate_blocks_source_row: bool
     merge_ep: Station | None
 
     @property
@@ -411,21 +412,49 @@ def _packed_cell_mate_obstructs(
     src_row: int | None,
     tgt_row: int | None,
 ) -> bool:
-    """Whether a same-row section other than *src*'s/*tgt*'s own sits on the
-    straight path between them.
+    """Whether a genuine packed cell-mate of *src*'s or *tgt*'s own section
+    sits on the source row's straight path between them.
 
     ``_has_intervening_sections`` only sees columns strictly between the
     endpoints' grid columns. A packed cell (``%%metro grid: a, b | col,row``)
     can place more than one section in a boundary column itself, so a
     cell-mate of the route's own endpoint can sit geometrically between the
-    two ports without ever showing up as an "intervening" column.
+    two ports without ever showing up as an "intervening" column - including
+    when the target sits in a row below, since the default L-shape's first
+    leg runs the source row's full width before it turns.
+
+    Scoped to actual ``graph.cell_packs`` membership (not "any section the
+    segment happens to cross"): a same-row section that isn't declared
+    alongside *src*'s or *tgt*'s section is someone else's problem (the
+    intervening-column or entry-side handlers already cover that ground) and
+    forcing it through the bypass family here would just as easily plow it
+    into a *different* box on the source-row leg.
     """
-    if src_row is None or tgt_row is None or src_row != tgt_row:
+    if src_row is None or tgt_row is None:
         return False
     src_sec = resolve_section(graph, src, prefer_upstream=False)
     tgt_sec = resolve_section(graph, tgt, prefer_upstream=False)
     exclude = {sec.id for sec in (src_sec, tgt_sec) if sec is not None}
-    return _h_segment_crosses_other_section(graph, src.x, tgt.x, src.y, exclude)
+    cellmates: set[str] = set()
+    for sec in (src_sec, tgt_sec):
+        if sec is None:
+            continue
+        for member_id in graph.cell_packs.get((sec.grid_col, sec.grid_row), ()):
+            if member_id not in exclude:
+                cellmates.add(member_id)
+    if not cellmates:
+        return False
+    lo_x, hi_x = (src.x, tgt.x) if src.x <= tgt.x else (tgt.x, src.x)
+    for mate_id in cellmates:
+        mate = graph.sections.get(mate_id)
+        if mate is None or mate.bbox_w <= 0:
+            continue
+        right = mate.bbox_x + mate.bbox_w
+        if hi_x <= mate.bbox_x or lo_x >= right:
+            continue
+        if mate.bbox_y <= src.y <= mate.bbox_y + mate.bbox_h:
+            return True
+    return False
 
 
 def _intervening_section_obstructs(
@@ -466,12 +495,17 @@ def _build_inter_facts(
     # the straight path. The latter is independent of the column gap - a same-row
     # cell-mate can obstruct even an adjacent-column hop, where it never registers
     # as an intervening column (see _packed_cell_mate_obstructs).
+    cellmate_blocks_source_row = (
+        src_col is not None
+        and tgt_col is not None
+        and (_packed_cell_mate_obstructs(graph, src, tgt, src_row, tgt_row))
+    )
     needs_bypass = (
         src_col is not None
         and tgt_col is not None
         and (
             _intervening_section_obstructs(graph, src_col, src_row, tgt_col, tgt_row)
-            or _packed_cell_mate_obstructs(graph, src, tgt, src_row, tgt_row)
+            or cellmate_blocks_source_row
         )
     )
     ep_id = ctx.merge.entry_port_for.get(edge.target)
@@ -494,6 +528,7 @@ def _build_inter_facts(
         tgt_col=tgt_col,
         tgt_row=tgt_row,
         needs_bypass=needs_bypass,
+        cellmate_blocks_source_row=cellmate_blocks_source_row,
         merge_ep=graph.stations.get(ep_id) if ep_id else None,
     )
 
@@ -558,7 +593,25 @@ def _route_bypass_family(f: _InterFacts) -> RoutedPath | None:
         and f.tgt_row == f.src_row + 1
     ):
         exclude = {sid for sid in (src.section_id, tgt.section_id) if sid is not None}
-        if not _h_segment_crosses_other_section(graph, f.sx, f.tx, f.ty, exclude):
+        if f.cellmate_blocks_source_row:
+            # A packed cell-mate on the source row can block the plain
+            # L-shape even when a raw source-to-target line at the entry Y
+            # reads clear, but the L-shape's own channel selection may
+            # already dodge it (a same-column packed-to-packed drop balances
+            # its vertical channel in the gap between the two cell-mates) --
+            # so check both legs against its actual vertical channel rather
+            # than the raw endpoint-to-endpoint span.
+            mid_x = _l_shape_mid_x(edge, src, tgt, f.n, ctx)
+            l_shape_clear = not _h_segment_crosses_other_section(
+                graph, f.sx, mid_x, f.sy, exclude
+            ) and not _h_segment_crosses_other_section(
+                graph, mid_x, f.tx, f.ty, exclude
+            )
+        else:
+            l_shape_clear = not _h_segment_crosses_other_section(
+                graph, f.sx, f.tx, f.ty, exclude
+            )
+        if l_shape_clear:
             return _route_l_shape(edge, src, tgt, f.i, f.n, ctx)
         if f.left_entry_from_right:
             # Entry-Y blocked: return through the clear inter-row gap as a
@@ -2255,15 +2308,14 @@ def _route_l_shape(
     return _route_l_shape_fan(edge, src, tgt, fan, ctx)
 
 
-def _route_l_shape_plain(
+def _l_shape_mid_x(
     edge: Edge, src: Station, tgt: Station, n: int, ctx: _RoutingCtx
-) -> RoutedPath | None:
-    """L-shape for a self-contained bundle: centreline + tapering fan.
+) -> float:
+    """The vertical channel X the plain L-shape would use for this edge.
 
-    One H -> V -> H centreline.  The source fan (an exit port / merge junction)
-    and the target entry trunk can have different spreads, so the bundle tapers
-    (each line lands on its own offset at both ends).  A vertical leg shorter
-    than its two corners shrinks the base radius to fit.
+    Shared between :func:`_route_l_shape_plain` (which builds the route on
+    it) and callers that need to know where that channel lands before
+    committing to the L-shape at all.
     """
     sx, sy = src.x, src.y
     tx, ty = tgt.x, tgt.y
@@ -2274,7 +2326,7 @@ def _route_l_shape_plain(
         ctx.graph, src, tgt, sx, tx, dx, max_r, ctx.offset_step
     )
     half_width = (n - 1) * ctx.offset_step / 2
-    mid_x = clear_channel_of_section_edge(
+    return clear_channel_of_section_edge(
         ctx.graph,
         mid_x,
         half_width,
@@ -2283,6 +2335,20 @@ def _route_l_shape_plain(
         endpoint_port_xs(ctx.graph, edge),
         target_x=tx,
     )
+
+
+def _route_l_shape_plain(
+    edge: Edge, src: Station, tgt: Station, n: int, ctx: _RoutingCtx
+) -> RoutedPath | None:
+    """L-shape for a self-contained bundle: centreline + tapering fan.
+
+    One H -> V -> H centreline.  The source fan (an exit port / merge junction)
+    and the target entry trunk can have different spreads, so the bundle tapers
+    (each line lands on its own offset at both ends).  A vertical leg shorter
+    than its two corners shrinks the base radius to fit.
+    """
+    sy, ty = src.y, tgt.y
+    mid_x = _l_shape_mid_x(edge, src, tgt, n, ctx)
 
     route = route_hvh_tapered(
         ctx,
