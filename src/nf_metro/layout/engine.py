@@ -100,6 +100,7 @@ from nf_metro.layout.phases.canvas import (  # noqa: F401
 from nf_metro.layout.phases.fan_bundles import (  # noqa: F401
     _apply_half_grid_2branch_symfan,
     _apply_half_grid_symmetric_diamonds,
+    _carry_symmetric_branch_continuations,
     _convergence_source_ys,
     _divergence_target_ys,
     _iter_symmetric_diamonds,
@@ -1711,6 +1712,10 @@ def _place_pass_c_content(
             y_spacing,
             section_y_padding,
         )
+        # Draw each symmetric fork's dead-end continuation onto its branch
+        # track so the whole branch stays fanned; a branch that leaves via an
+        # exit port is left to fall back to the trunk (Stage 6.7b).
+        _carry_symmetric_branch_continuations(graph, section_y_padding)
         _snap(graph, "6.7")
 
         # Stage 6.8: Re-anchor off-track inputs after the recenter.
