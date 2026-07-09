@@ -833,15 +833,11 @@ def _route_left_exit_around_below_left_entry(
     members = [
         (edge_by_line[lid], lid, -exit_offs[lid], entry_offs[lid]) for lid in line_ids
     ]
-    # A same-row wrap dips below the target box; when the target is tall that dip
-    # runs far below every section before returning the full width.  Hump over the
-    # target's top through the clear band ABOVE its row when that is viable -- the
-    # same-row counterpart of the from-above gap-above approach
-    # (:func:`_route_left_entry_via_gap_above`), which never descends past the box
-    # bottom -- else dip below.  (This handler runs only same-row: a cross-row LEFT
-    # exit to a far LEFT entry is claimed earlier by the LEFT-entry wrap family.)
-    channel_y = _left_exit_wrap_channel_y(graph, src, tgt, cx, vx, ey, by, tgt_row)
-    over_top = channel_y != by
+    # Run the horizontal over the target's top when viable, else dip below it
+    # (see :func:`_left_exit_wrap_over_top_y`).
+    over_gy = _left_exit_wrap_over_top_y(graph, src, tgt, cx, vx, tgt_row)
+    over_top = over_gy is not None
+    channel_y = over_gy if over_gy is not None else by
     centerline = [
         (sx, sy),
         (cx, sy),
@@ -867,25 +863,24 @@ def _route_left_exit_around_below_left_entry(
     return route
 
 
-def _left_exit_wrap_channel_y(
+def _left_exit_wrap_over_top_y(
     graph: MetroGraph,
     src: Station,
     tgt: Station,
     cx: float,
     vx: float,
-    ey: float,
-    by: float,
     tgt_row: int | None,
-) -> float:
-    """Horizontal-channel Y for a same-row LEFT-exit far-LEFT-entry wrap loop.
+) -> float | None:
+    """Over-the-top channel Y for a same-row LEFT-exit far-LEFT-entry wrap loop.
 
-    Returns the centre of the inter-row band ABOVE the target row -- humping the
-    loop over the target's top -- when the port is fed by this line alone, that
-    band exists, is wide enough for the traverse, and all three loop legs
-    (source-side ascent at *cx*, band traverse, target-side descent at *vx*)
-    clear other section interiors.  Otherwise returns the dip *by* below the
-    target box.  Over-the-top keeps the loop from diving far below a tall target
-    and running the full width back, mirroring the from-above gap-above approach.
+    A same-row wrap dips below the target box; when the target is tall that dip
+    runs far below every section before returning the full width.  Returns the
+    centre of the inter-row band ABOVE the target row -- humping the loop over the
+    target's top, never descending past the box bottom, mirroring the from-above
+    gap-above approach -- when the port is fed by this line alone, that band
+    exists, is wide enough for the traverse, and all three loop legs (source-side
+    ascent at *cx*, band traverse, target-side descent at *vx*) clear other
+    section interiors.  Returns ``None`` to keep the dip otherwise.
 
     A port fed by more than one line keeps the dip: the band above holds a single
     channel, so pooling every feeder into it collinearly overlays them, whereas
@@ -895,17 +890,17 @@ def _left_exit_wrap_channel_y(
         _gap_above_target_y(graph, tgt_row) if tgt_row is not None else (0.0, 0.0)
     )
     if gap_bottom <= gap_top or not _inter_row_band_fits(gap_top, gap_bottom):
-        return by
-    if sum(1 for e in graph.edges if e.target == tgt.id) > 1:
-        return by
+        return None
+    if len({e.line_id for e in graph.edges_to(tgt.id)}) > 1:
+        return None
     gy = _center_inter_row_channel(gap_top, gap_bottom)
     exclude = {sid for sid in (src.section_id, tgt.section_id) if sid is not None}
     blocked = (
         _v_segment_crosses_other_section(graph, cx, src.y, gy, exclude)
-        or _v_segment_crosses_other_section(graph, vx, gy, ey, exclude)
+        or _v_segment_crosses_other_section(graph, vx, gy, tgt.y, exclude)
         or _h_segment_crosses_other_section(graph, cx, vx, gy, exclude)
     )
-    return by if blocked else gy
+    return None if blocked else gy
 
 
 def _route_right_entry_cross_row(f: _InterFacts) -> RoutedPath | None:

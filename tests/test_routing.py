@@ -474,9 +474,9 @@ def _segment_crosses_bbox_interior(p0, p1, sec, margin=1.0):
     top = sec.bbox_y + margin
     bottom = sec.bbox_y + sec.bbox_h - margin
     (x0, y0), (x1, y1) = p0, p1
-    if abs(y0 - y1) < 1e-6:  # horizontal
+    if abs(y0 - y1) < 1e-6:
         return top < y0 < bottom and min(x0, x1) < right and max(x0, x1) > left
-    if abs(x0 - x1) < 1e-6:  # vertical
+    if abs(x0 - x1) < 1e-6:
         return left < x0 < right and min(y0, y1) < bottom and max(y0, y1) > top
     return False
 
