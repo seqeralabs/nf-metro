@@ -63,6 +63,7 @@ from nf_metro.layout.routing.common import (
     max_grid_row_with_content,
     merge_trunk_force_cross_row,
     needs_perp_approach_fan,
+    packed_cell_neighbor_edges,
     resolve_section,
     row_bottom_edge,
     row_top_edge,
@@ -613,6 +614,10 @@ def _route_bypass_family(f: _InterFacts) -> RoutedPath | None:
             )
         if l_shape_clear:
             return _route_l_shape(edge, src, tgt, f.i, f.n, ctx)
+        if f.cellmate_blocks_source_row:
+            clean = _route_cellmate_gap_drop(f, exclude)
+            if clean is not None:
+                return clean
         if f.left_entry_from_right:
             # Entry-Y blocked: return through the clear inter-row gap as a
             # concentric serpentine wrap.  The below-row U dive cannot fan a
@@ -624,6 +629,35 @@ def _route_bypass_family(f: _InterFacts) -> RoutedPath | None:
     if f.left_entry_from_right and f.is_left_exit:
         return _route_left_exit_around_below_left_entry(edge, src, tgt, ctx)
     return _route_bypass(edge, src, tgt, f.i, f.src_col, f.tgt_col, ctx, f.src_row)
+
+
+def _route_cellmate_gap_drop(f: _InterFacts, exclude: set[str]) -> RoutedPath | None:
+    """Single-channel L-shape descending the gap before the blocking cell-mate.
+
+    When a packed cell-mate blocks the source row, the gap-centred L-shape
+    channel lands past the cell-mate and its source-row leg plows through it,
+    so the U-bypass would otherwise take over and split the descent into two
+    channels joined by a jog.  A cleaner drop exists when the gap between the
+    source section and that cell-mate has room for the whole descent: run the
+    vertical channel there and turn once along the target row.  Returns
+    ``None`` (deferring to the U-bypass) when there is no such cell-mate gap
+    or any of the three legs is obstructed.
+    """
+    src_sec = resolve_section(f.graph, f.src, prefer_upstream=False)
+    if src_sec is None:
+        return None
+    side = PortSide.RIGHT if f.horizontal is Direction.R else PortSide.LEFT
+    edges = packed_cell_neighbor_edges(f.graph, src_sec.id, side)
+    if edges is None:
+        return None
+    mid_x = (edges[0] + edges[1]) / 2
+    if (
+        _h_segment_crosses_other_section(f.graph, f.sx, mid_x, f.sy, exclude)
+        or _v_segment_crosses_other_section(f.graph, mid_x, f.sy, f.ty, exclude)
+        or _h_segment_crosses_other_section(f.graph, mid_x, f.tx, f.ty, exclude)
+    ):
+        return None
+    return _route_l_shape_plain(f.edge, f.src, f.tgt, f.n, f.ctx, mid_x=mid_x)
 
 
 def _section_right_edge(graph: MetroGraph, station: Station) -> float:
@@ -2338,7 +2372,12 @@ def _l_shape_mid_x(
 
 
 def _route_l_shape_plain(
-    edge: Edge, src: Station, tgt: Station, n: int, ctx: _RoutingCtx
+    edge: Edge,
+    src: Station,
+    tgt: Station,
+    n: int,
+    ctx: _RoutingCtx,
+    mid_x: float | None = None,
 ) -> RoutedPath | None:
     """L-shape for a self-contained bundle: centreline + tapering fan.
 
@@ -2346,9 +2385,13 @@ def _route_l_shape_plain(
     and the target entry trunk can have different spreads, so the bundle tapers
     (each line lands on its own offset at both ends).  A vertical leg shorter
     than its two corners shrinks the base radius to fit.
+
+    *mid_x* pins the vertical channel; when omitted it falls to the
+    gap-centred default (:func:`_l_shape_mid_x`).
     """
     sy, ty = src.y, tgt.y
-    mid_x = _l_shape_mid_x(edge, src, tgt, n, ctx)
+    if mid_x is None:
+        mid_x = _l_shape_mid_x(edge, src, tgt, n, ctx)
 
     route = route_hvh_tapered(
         ctx,

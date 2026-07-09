@@ -27,7 +27,9 @@ and row relationships:
   cell-mate obstruction is on the *source*'s row rather than a shared row
   between source and target, so it never registers as "same row" either;
   the plain L-shape's first leg runs the full source-row width before
-  turning, straight through the cell-mate.
+  turning, straight through the cell-mate. The gap between the source and
+  the cell-mate has room for a single clean descent, so the route drops once
+  in that gap and turns along the target row.
 """
 
 from __future__ import annotations
@@ -147,3 +149,36 @@ def test_cross_row_bypass_clears_source_row_cell_mate() -> None:
                 f"(x={rep_left:.1f}..{rep_right:.1f}, "
                 f"y={rep_top:.1f}..{rep_bottom:.1f})"
             )
+
+
+def test_cross_row_clear_gap_drops_in_a_single_channel() -> None:
+    """When the cell-mate gap is clear the descent is one straight channel.
+
+    The ``b`` route from ``quant`` to ``sink`` drops through the gap between
+    ``quant`` and its cell-mate ``rep`` in a single vertical run, then turns
+    once along the target row.  A two-channel U (descend, short jog, descend)
+    would read as a kink partway down; assert exactly one vertical segment
+    carries the whole descent so that jog can't return.
+    """
+    graph = _layout("packed_cell_cellmate_bypass_cross_row")
+    offsets = compute_station_offsets(graph)
+    routes = route_edges_centred(graph, station_offsets=offsets)
+
+    descents = [
+        rp
+        for rp in routes
+        if rp.line_id == "b"
+        and rp.is_inter_section
+        and rp.edge.target == "sink__entry_left_2"
+    ]
+    assert descents, "expected an inter-section b route into sink"
+    for rp in descents:
+        vertical_xs = {
+            round(ax, 1)
+            for (ax, ay), (bx, by) in zip(rp.points, rp.points[1:])
+            if abs(bx - ax) <= 1.0 and abs(by - ay) > 1.0
+        }
+        assert len(vertical_xs) == 1, (
+            f"expected a single descent channel, got verticals at {vertical_xs} "
+            f"(points {rp.points})"
+        )
