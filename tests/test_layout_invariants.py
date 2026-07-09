@@ -9183,6 +9183,79 @@ def _layout_diamond(fixture: str, style: str) -> MetroGraph:
     return graph
 
 
+# ---------------------------------------------------------------------------
+# diamond_style: symmetric must centre a 2-way fan on its fork
+# ---------------------------------------------------------------------------
+
+
+def _direct_fork_children(
+    graph: MetroGraph,
+) -> list[tuple[Station, Station, Station]]:
+    """Yield ``(fork, child_lo, child_hi)`` for each station or entry port
+    with exactly two real, on-track, non-port children whose sole
+    predecessor is that fork.
+
+    Unlike :func:`_iter_fork_join_diamonds` (used by the half-pitch
+    compaction), this does not require the two children to reconverge at a
+    shared successor, so it also covers a fan whose branches dead-end
+    independently. The fork may be an entry port, covering a fan that
+    diverges immediately on entering a section.
+    """
+    succ: dict[str, set[str]] = defaultdict(set)
+    pred: dict[str, set[str]] = defaultdict(set)
+    for edge in graph.edges:
+        if edge.source in graph.stations and edge.target in graph.stations:
+            succ[edge.source].add(edge.target)
+            pred[edge.target].add(edge.source)
+    triples: list[tuple[Station, Station, Station]] = []
+    for fork_id, child_ids in succ.items():
+        if len(child_ids) != 2:
+            continue
+        fork_st = graph.stations[fork_id]
+        c1, c2 = sorted(child_ids)
+        if pred[c1] != {fork_id} or pred[c2] != {fork_id}:
+            continue
+        st1, st2 = graph.stations[c1], graph.stations[c2]
+        if any(s.is_port or s.is_hidden or s.off_track for s in (st1, st2)):
+            continue
+        triples.append((fork_st, st1, st2))
+    return triples
+
+
+_SYMMETRIC_DEADEND_FANOUT_FIXTURES = [
+    "topologies/symmetric_deadend_fanout.mmd",
+    "topologies/symmetric_deadend_fanout_relay.mmd",
+    "topologies/symmetric_deadend_fanout_deep.mmd",
+]
+
+
+@pytest.mark.parametrize("fixture", _SYMMETRIC_DEADEND_FANOUT_FIXTURES)
+def test_symmetric_fanout_straddles_fork_without_reconvergence(fixture):
+    """A 2-way fan centres on its fork under ``diamond_style: symmetric``,
+    whether or not the branches reconverge.
+
+    ``symmetric_deadend_fanout`` and its ``_relay`` sibling fan directly off
+    the section's first in-section layer; ``_deep`` fans one layer further
+    in, covering both the entry-adjacent and interior cases of the same
+    invariant.
+    """
+    graph = _layout_diamond(fixture, "symmetric")
+    checked = 0
+    for fork, c1, c2 in _direct_fork_children(graph):
+        lo, hi = sorted((c1, c2), key=lambda s: s.y)
+        off_lo = fork.y - lo.y
+        off_hi = hi.y - fork.y
+        if abs(off_lo) < SAME_COORD_TOLERANCE and abs(off_hi) < SAME_COORD_TOLERANCE:
+            continue
+        assert abs(off_lo - off_hi) < 1.0, (
+            f"{fixture}: fork {fork.id!r} (y={fork.y:.1f}) fans to "
+            f"{lo.id!r} (-{off_lo:.1f}) and {hi.id!r} (+{off_hi:.1f}) -- "
+            "not symmetric about the trunk"
+        )
+        checked += 1
+    assert checked, f"{fixture}: no qualifying 2-way fork found"
+
+
 def _interior_fan_branches(graph: MetroGraph) -> list[tuple[str, str, str]]:
     """``(fork, branch, join)`` for each interior fork-join branch.
 

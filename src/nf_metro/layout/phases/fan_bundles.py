@@ -15,6 +15,8 @@ from nf_metro.layout.phases._common import (
     _grid_group_section_ids,
     _section_bundle_lines,
     _section_lr_port_anchor_y,
+    grow_section_bbox_max_edge,
+    grow_section_bbox_min_edge,
 )
 from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
 
@@ -748,14 +750,24 @@ def _section_row_pitch(graph: MetroGraph, section_id: str, default: float) -> fl
     return default
 
 
-def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
+def _recenter_full_bundle_columns(
+    graph: MetroGraph, y_spacing: float, section_y_padding: float = SECTION_Y_PADDING
+) -> None:
     """Re-fan full-bundle station columns around the row's final trunk Y.
 
-    Late-pass companion to ``_redistribute_full_bundle_columns``.  The
-    early pass uses the section's local LR port Y as the symmetric
-    centre, which becomes stale when subsequent phases shift the
-    section relative to the row trunk (e.g. terminal sections whose
-    sole LR port doesn't match the bundle line entering from upstream).
+    Late-pass companion to ``_redistribute_full_bundle_columns`` when
+    ``graph.center_ports`` is set.  The early pass uses the section's
+    local LR port Y as the symmetric centre, which becomes stale when
+    subsequent phases shift the section relative to the row trunk (e.g.
+    terminal sections whose sole LR port doesn't match the bundle line
+    entering from upstream).
+
+    Also runs standalone (without an early pass) under
+    ``graph.diamond_style == 'symmetric'``: a full-bundle column fed
+    directly off a section's entry port has no settled trunk Y before
+    row alignment, so the early pass would only place it correctly by
+    chance -- this late pass, anchored on the final row trunk, is the
+    only one it needs.
 
     For each LR/RL grid section, locate the inter-section bundle Y from
     the entry/exit port station Y (which by this point sits on the
@@ -765,8 +777,9 @@ def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
     pass.
 
     No-op when the existing layout is already symmetric around the
-    anchor; bbox heights are not adjusted because earlier compaction
-    already sized the band to fit two slots either side of the trunk.
+    anchor.  Bbox heights are grown (never shrunk) when the new anchor
+    pushes a column further out than the section's earlier compaction
+    reserved room for.
     """
     grid_sec_ids = _grid_group_section_ids(graph)
     if not grid_sec_ids:
@@ -851,3 +864,17 @@ def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
             offsets = _fan_offsets(n)
             for sid, off in zip(participants, offsets):
                 graph.stations[sid].y = anchor_y + off * pitch
+
+        content_ys = [
+            graph.stations[sid].y
+            for sid in section.station_ids
+            if sid in graph.stations and not graph.stations[sid].is_port
+        ]
+        if not content_ys:
+            continue
+        grow_section_bbox_min_edge(
+            graph, section, "y", min(content_ys) - section_y_padding
+        )
+        grow_section_bbox_max_edge(
+            graph, section, "y", max(content_ys) + section_y_padding
+        )

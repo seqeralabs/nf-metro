@@ -1480,6 +1480,12 @@ def _compute_section_layout(
     _run_placement(
         graph, validate, "4.10", _redistribute_full_bundle_columns, y_spacing
     )
+    if graph.center_ports:
+        # A full-bundle fan can spread a column above the bbox top Stage 4.6
+        # fixed before the redistribution ran (e.g. a fork with no prior
+        # content above its trunk).  Recompute so the bbox contains the
+        # post-redistribution extent.
+        _recompute_grid_group_bboxes(graph)
     _snap(graph, "4.10")
 
     _settle_pass_c(
@@ -1681,20 +1687,29 @@ def _place_pass_c_content(
         _run_pass_c_guards(graph, "after Stage 6.6")
 
     # Stage 6.7: Re-center full-bundle columns around the row's final
-    # trunk Y.  ``_redistribute_full_bundle_columns`` runs early when
-    # only local port Ys are available; for terminal sections whose
-    # port Y differs from the row's eventual trunk Y, the symmetric
-    # fan ends up offset from the trunk row (e.g. Reporting's Shiny at
-    # the trunk row, Quarto two slots below, instead of one above and
-    # one below).  This re-center uses the final inter-section bundle
-    # Y as the anchor so the trunk row stays empty in each fanned
-    # column.
+    # trunk Y.  Under ``center_ports``, ``_redistribute_full_bundle_columns``
+    # runs early when only local port Ys are available; for terminal
+    # sections whose port Y differs from the row's eventual trunk Y, the
+    # symmetric fan ends up offset from the trunk row (e.g. Reporting's
+    # Shiny at the trunk row, Quarto two slots below, instead of one above
+    # and one below).  This re-center uses the final inter-section bundle
+    # Y as the anchor so the trunk row stays empty in each fanned column.
+    #
+    # Under ``diamond_style: symmetric`` this is the sole pass (no early
+    # Stage 4.10 companion runs) -- see ``_recenter_full_bundle_columns``'s
+    # docstring for why anchoring on the final row trunk is correct even
+    # without an earlier guess to correct.
     #
     # Stage 6.8 and Stage 6.9 below restore invariants the recenter
     # breaks.
-    if graph.center_ports:
+    if graph.center_ports or graph.diamond_style == "symmetric":
         _run_placement_per_row(
-            graph, validate, "6.7", _recenter_full_bundle_columns, y_spacing
+            graph,
+            validate,
+            "6.7",
+            _recenter_full_bundle_columns,
+            y_spacing,
+            section_y_padding,
         )
         _snap(graph, "6.7")
 
