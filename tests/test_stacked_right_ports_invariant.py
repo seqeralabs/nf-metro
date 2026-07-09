@@ -81,3 +81,31 @@ def test_coincident_feed_bows_out_with_outward_corners():
         stacked,
         sibling,
     )
+
+
+def test_convergent_feeds_port_corners_nest_concentrically():
+    """The two feeds' port-approach corners nest instead of pinching.
+
+    Built as one shared bundle, the outer feed (the descent further from the
+    port) takes the larger corner radius, so the two arcs are concentric and
+    hold a constant gap through the turn.  Equal radii on centres a step apart
+    would pinch the gap through the corner.
+    """
+    mmd = (TOPOLOGIES_DIR / f"{_COINCIDENT}.mmd").read_text()
+    graph, routes, offsets = _routed(mmd)
+
+    feeds = [
+        r
+        for r in routes
+        if r.is_inter_section and r.edge.target == "below__entry_right_2"
+    ]
+    assert len(feeds) == 2, feeds
+    # Rank by the final descent X: for a RIGHT entry the outer feed descends
+    # further right (larger X), so it must carry the larger port-turn radius.
+    outer, inner = sorted(feeds, key=lambda r: apply_route_offsets(r, offsets)[-2][0])[
+        ::-1
+    ]
+    assert outer.curve_radii[-1] > inner.curve_radii[-1], (
+        outer.curve_radii,
+        inner.curve_radii,
+    )
