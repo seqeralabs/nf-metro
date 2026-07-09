@@ -1969,6 +1969,95 @@ def check_no_riser_hugs_section_edge(
     return violations
 
 
+@dataclass(frozen=True)
+class BareVerticalStackedPortDrop:
+    """A stacked RIGHT-exit -> RIGHT-entry feed drawn as a bare vertical.
+
+    When a section's RIGHT exit and its target's RIGHT entry stack in one grid
+    column, both ports pin to the column's shared right edge, so they land at
+    the same X.  A straight vertical connector between them leaves the RIGHT
+    exit travelling downward (not out its outward side) and enters the RIGHT
+    port from directly above (not from the right), skipping both outward corner
+    curves -- and, when a second feed terminates at the same entry, forces that
+    feed onto its own parallel channel instead of a shared descent.  The feed
+    must bow out into the descent channel past the port's outward edge so both
+    ports curve and co-terminating feeds share one channel.
+    """
+
+    line_id: str
+    edge: tuple[str, str]
+    port_x: float
+    departs_horizontally: bool
+    approaches_from_right: bool
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        faults = []
+        if not self.departs_horizontally:
+            faults.append("leaves the exit downward")
+        if not self.approaches_from_right:
+            faults.append("enters the port from above")
+        return (
+            f"stacked RIGHT-exit -> RIGHT-entry feed drawn as a bare vertical: "
+            f"line {self.line_id!r} ({self.edge[0]}->{self.edge[1]}) "
+            f"{' and '.join(faults)} at the shared column edge x={self.port_x:.1f} "
+            f"instead of bowing out into the descent channel past the port's "
+            f"outward edge"
+        )
+
+
+def check_stacked_right_ports_bow_out(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[BareVerticalStackedPortDrop]:
+    """Return stacked RIGHT-exit -> RIGHT-entry feeds drawn as bare verticals.
+
+    Scoped to an inter-section feed whose source is a RIGHT exit port and whose
+    target is a RIGHT entry port on a section stacked in the *same* grid column
+    a different row away: the two ports share the column's right-edge X.  The
+    feed must leave the exit rightward and approach the entry from the right
+    (the outward-side corner curves); a straight vertical between the coincident
+    ports does neither.
+    """
+    violations: list[BareVerticalStackedPortDrop] = []
+    for rp in routes:
+        if not rp.is_inter_section:
+            continue
+        src_port = graph.ports.get(rp.edge.source)
+        tgt_port = graph.ports.get(rp.edge.target)
+        if src_port is None or tgt_port is None:
+            continue
+        if src_port.is_entry or src_port.side is not PortSide.RIGHT:
+            continue
+        if not tgt_port.is_entry or tgt_port.side is not PortSide.RIGHT:
+            continue
+        src_sec = graph.sections.get(src_port.section_id)
+        tgt_sec = graph.sections.get(tgt_port.section_id)
+        if src_sec is None or tgt_sec is None:
+            continue
+        if src_sec.grid_col != tgt_sec.grid_col or src_sec.grid_row == tgt_sec.grid_row:
+            continue
+
+        pts = apply_route_offsets(rp, offsets)
+        if len(pts) < 2:
+            continue
+        departs_horizontally = pts[1][0] - pts[0][0] > COORD_TOLERANCE
+        approaches_from_right = pts[-2][0] - pts[-1][0] > COORD_TOLERANCE
+        if departs_horizontally and approaches_from_right:
+            continue
+        violations.append(
+            BareVerticalStackedPortDrop(
+                line_id=rp.line_id,
+                edge=(rp.edge.source, rp.edge.target),
+                port_x=pts[-1][0],
+                departs_horizontally=departs_horizontally,
+                approaches_from_right=approaches_from_right,
+            )
+        )
+    return violations
+
+
 @dataclass
 class SplitFanoutDescent:
     """Two same-line fan-out descents that overlap in Y at distinct Xs.
@@ -4225,6 +4314,10 @@ def assert_render_curve_invariants(
             check_no_riser_hugs_section_edge(graph, routes, offsets),
         ),
         (
+            "bare vertical between stacked RIGHT ports",
+            check_stacked_right_ports_bow_out(graph, routes, offsets),
+        ),
+        (
             "merge branch hanging in open space",
             check_merge_branches_meet_trunk(graph, routes, offsets),
         ),
@@ -4349,6 +4442,7 @@ CHECK_REGISTRY: tuple[GuardSpec, ...] = (
     _check_spec(check_no_collinear_distinct_diagonals, "A"),
     _check_spec(check_no_same_line_parallel_descents, "A"),
     _check_spec(check_no_riser_hugs_section_edge, "A"),
+    _check_spec(check_stacked_right_ports_bow_out, "A"),
     _check_spec(check_merge_branches_meet_trunk, "A"),
     _check_spec(check_no_hanging_routes, "A"),
     _check_spec(check_deferred_offsets_apply_laterally, "A"),
@@ -4441,6 +4535,7 @@ __all__ = [
     "check_no_collinear_distinct_diagonals",
     "check_no_same_line_parallel_descents",
     "check_no_riser_hugs_section_edge",
+    "check_stacked_right_ports_bow_out",
     "check_junction_peeloff_rounded",
     "check_peeloff_concentric",
     "check_port_corner_within_bbox",

@@ -168,6 +168,19 @@ _CASES = [
     ),
     pytest.param(dict(tx=0.0), "same-X vertical drop", id="same-X"),
     pytest.param(
+        # A stacked RIGHT-exit -> RIGHT-entry shares the column's right-edge X
+        # (same_x), but the RIGHT-entry wrap must claim it over the same-X drop
+        # so both ports curve out and a co-terminating feed shares the channel.
+        dict(
+            src_port=_port(PortSide.RIGHT, is_entry=False),
+            tgt_port=_port(PortSide.RIGHT, is_entry=True),
+            tx=0.0,
+            tgt_row=1,
+        ),
+        "RIGHT entry wrap",
+        id="stacked-right-ports-beats-same-X",
+    ),
+    pytest.param(
         dict(
             edge=SimpleNamespace(source="j", target="b", line_id="L"),
             ctx=SimpleNamespace(

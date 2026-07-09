@@ -1,0 +1,32 @@
+%%metro title: Stacked RIGHT Ports (coincident X)
+%%metro style: nfcore
+%%metro line: a | A | #e63946
+%%metro line: b | B | #0570b0
+
+%%metro grid: feeder | 0,0
+%%metro grid: above | 1,0
+%%metro grid: below | 1,1
+
+graph LR
+    subgraph feeder [Feeder]
+        f1[Input]
+        f2[Output]
+        f1 -->|a| f2
+    end
+
+    subgraph above [Above]
+        a1[Proc]
+        a2[Out]
+        a1 -->|b| a2
+    end
+
+    subgraph below [Below]
+        %%metro direction: RL
+        %%metro entry: right | a, b
+        b1[Proc]
+        b2[Out]
+        b1 -->|a,b| b2
+    end
+
+    f2 -->|a| b1
+    a2 -->|b| b1
