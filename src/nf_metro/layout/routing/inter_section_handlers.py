@@ -89,6 +89,7 @@ from nf_metro.layout.routing.normalize import (
     _clear_channel_x_in_band,
     _gap_channel_base,
     _h_segment_crosses_other_section,
+    _h_segment_penetrates_section,
     _v_segment_crosses_other_section,
 )
 from nf_metro.layout.routing.perp import (
@@ -431,7 +432,7 @@ def _packed_cell_mate_obstructs(
     forcing it through the bypass family here would just as easily plow it
     into a *different* box on the source-row leg.
     """
-    if src_row is None or tgt_row is None:
+    if src_row is None or tgt_row is None or not graph.cell_packs:
         return False
     src_sec = resolve_section(graph, src, prefer_upstream=False)
     tgt_sec = resolve_section(graph, tgt, prefer_upstream=False)
@@ -443,19 +444,12 @@ def _packed_cell_mate_obstructs(
         for member_id in graph.cell_packs.get((sec.grid_col, sec.grid_row), ()):
             if member_id not in exclude:
                 cellmates.add(member_id)
-    if not cellmates:
-        return False
     lo_x, hi_x = (src.x, tgt.x) if src.x <= tgt.x else (tgt.x, src.x)
-    for mate_id in cellmates:
-        mate = graph.sections.get(mate_id)
-        if mate is None or mate.bbox_w <= 0:
-            continue
-        right = mate.bbox_x + mate.bbox_w
-        if hi_x <= mate.bbox_x or lo_x >= right:
-            continue
-        if mate.bbox_y <= src.y <= mate.bbox_y + mate.bbox_h:
-            return True
-    return False
+    return any(
+        (mate := graph.sections.get(mate_id)) is not None
+        and _h_segment_penetrates_section(lo_x, hi_x, src.y, mate)
+        for mate_id in cellmates
+    )
 
 
 def _intervening_section_obstructs(
@@ -493,13 +487,15 @@ def _build_inter_facts(
     tgt_col, tgt_row = _resolve_section_colrow(graph, tgt)
     # Two independent triggers force a bypass: a multi-column hop blocked by an
     # intervening section, or a packed cell-mate of either endpoint sitting on
-    # the straight path. The latter is independent of the column gap - a same-row
-    # cell-mate can obstruct even an adjacent-column hop, where it never registers
-    # as an intervening column (see _packed_cell_mate_obstructs).
+    # the source row's straight path. The latter is independent of the column
+    # gap - a cell-mate can obstruct even an adjacent-column hop where it never
+    # registers as an intervening column, and whether the target is same-row or
+    # a row below, since the L-shape's first leg spans the full source row
+    # before turning (see _packed_cell_mate_obstructs).
     cellmate_blocks_source_row = (
         src_col is not None
         and tgt_col is not None
-        and (_packed_cell_mate_obstructs(graph, src, tgt, src_row, tgt_row))
+        and _packed_cell_mate_obstructs(graph, src, tgt, src_row, tgt_row)
     )
     needs_bypass = (
         src_col is not None
@@ -595,29 +591,23 @@ def _route_bypass_family(f: _InterFacts) -> RoutedPath | None:
     ):
         exclude = {sid for sid in (src.section_id, tgt.section_id) if sid is not None}
         if f.cellmate_blocks_source_row:
-            # A packed cell-mate on the source row can block the plain
-            # L-shape even when a raw source-to-target line at the entry Y
-            # reads clear, but the L-shape's own channel selection may
-            # already dodge it (a same-column packed-to-packed drop balances
-            # its vertical channel in the gap between the two cell-mates) --
-            # so check both legs against its actual vertical channel rather
-            # than the raw endpoint-to-endpoint span.
+            # The gap-centred L-shape channel lands past the blocking cell-mate,
+            # so test the plain L-shape against its actual vertical channel (both
+            # legs) rather than the raw endpoint-to-endpoint span -- a same-column
+            # packed-to-packed drop balances its channel in the gap between the
+            # two cell-mates and stays clear.
             mid_x = _l_shape_mid_x(edge, src, tgt, f.n, ctx)
-            l_shape_clear = not _h_segment_crosses_other_section(
+            if not _h_segment_crosses_other_section(
                 graph, f.sx, mid_x, f.sy, exclude
             ) and not _h_segment_crosses_other_section(
                 graph, mid_x, f.tx, f.ty, exclude
-            )
-        else:
-            l_shape_clear = not _h_segment_crosses_other_section(
-                graph, f.sx, f.tx, f.ty, exclude
-            )
-        if l_shape_clear:
-            return _route_l_shape(edge, src, tgt, f.i, f.n, ctx)
-        if f.cellmate_blocks_source_row:
+            ):
+                return _route_l_shape(edge, src, tgt, f.i, f.n, ctx)
             clean = _route_cellmate_gap_drop(f, exclude)
             if clean is not None:
                 return clean
+        elif not _h_segment_crosses_other_section(graph, f.sx, f.tx, f.ty, exclude):
+            return _route_l_shape(edge, src, tgt, f.i, f.n, ctx)
         if f.left_entry_from_right:
             # Entry-Y blocked: return through the clear inter-row gap as a
             # concentric serpentine wrap.  The below-row U dive cannot fan a

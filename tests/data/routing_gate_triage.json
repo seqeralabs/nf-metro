@@ -636,11 +636,11 @@
     "status": "defensive"
   },
   "normalize.py::if s.bbox_w <= 0:::#2": {
-    "note": "Degenerate-bbox guard in _h_segment_crosses_other_section: mirror of the bbox_w<=0 guard; sections always have positive width.",
+    "note": "Degenerate-bbox guard in _v_segment_crosses_other_section: mirror of the _h_segment_penetrates_section guard; sections always have positive width.",
     "status": "defensive"
   },
-  "normalize.py::if s.bbox_w <= 0:::#3": {
-    "note": "Degenerate-bbox guard in _v_segment_crosses_other_section: mirror of the _h_segment_crosses_other_section guard; sections always have positive width.",
+  "normalize.py::if section.bbox_w <= 0:::#1": {
+    "note": "Degenerate-bbox guard in _h_segment_penetrates_section (the single-section predicate shared by _h_segment_crosses_other_section and _packed_cell_mate_obstructs): sections always have positive width after layout.",
     "status": "defensive"
   },
   "normalize.py::if sg[0].sign_x != t.sign_x:::#1": {
