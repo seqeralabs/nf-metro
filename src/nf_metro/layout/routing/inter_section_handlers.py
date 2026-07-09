@@ -833,14 +833,79 @@ def _route_left_exit_around_below_left_entry(
     members = [
         (edge_by_line[lid], lid, -exit_offs[lid], entry_offs[lid]) for lid in line_ids
     ]
-    centerline = [(sx, sy), (cx, sy), (cx, by), (vx, by), (vx, ey), (ex, ey)]
+    # A same-row wrap dips below the target box; when the target is tall that dip
+    # runs far below every section before returning the full width.  Hump over the
+    # target's top through the clear band ABOVE its row when that is viable -- the
+    # same-row counterpart of the from-above gap-above approach
+    # (:func:`_route_left_entry_via_gap_above`), which never descends past the box
+    # bottom -- else dip below.  (This handler runs only same-row: a cross-row LEFT
+    # exit to a far LEFT entry is claimed earlier by the LEFT-entry wrap family.)
+    channel_y = _left_exit_wrap_channel_y(graph, src, tgt, cx, vx, ey, by, tgt_row)
+    over_top = channel_y != by
+    centerline = [
+        (sx, sy),
+        (cx, sy),
+        (cx, channel_y),
+        (vx, channel_y),
+        (vx, ey),
+        (ex, ey),
+    ]
+    # The over-top loop's outward-side port approach reads as a backtrack to the
+    # normalize pass, so it opts out; the dip stays normalize-able, letting a
+    # multi-feeder port's dips bundle apart into separate descents.
     route = route_tapered(
-        edge, members, centerline, transition_leg=3, base_radius=ctx.curve_radius
+        edge,
+        members,
+        centerline,
+        transition_leg=3,
+        base_radius=ctx.curve_radius,
+        normalize_exempt=over_top,
     )
     if route is not None:
-        _declare_channel(route, ctx, cx, Direction.D)
-        _declare_channel(route, ctx, vx, Direction.U)
+        _declare_channel(route, ctx, cx, vertical_direction(channel_y - sy))
+        _declare_channel(route, ctx, vx, vertical_direction(ey - channel_y))
     return route
+
+
+def _left_exit_wrap_channel_y(
+    graph: MetroGraph,
+    src: Station,
+    tgt: Station,
+    cx: float,
+    vx: float,
+    ey: float,
+    by: float,
+    tgt_row: int | None,
+) -> float:
+    """Horizontal-channel Y for a same-row LEFT-exit far-LEFT-entry wrap loop.
+
+    Returns the centre of the inter-row band ABOVE the target row -- humping the
+    loop over the target's top -- when the port is fed by this line alone, that
+    band exists, is wide enough for the traverse, and all three loop legs
+    (source-side ascent at *cx*, band traverse, target-side descent at *vx*)
+    clear other section interiors.  Otherwise returns the dip *by* below the
+    target box.  Over-the-top keeps the loop from diving far below a tall target
+    and running the full width back, mirroring the from-above gap-above approach.
+
+    A port fed by more than one line keeps the dip: the band above holds a single
+    channel, so pooling every feeder into it collinearly overlays them, whereas
+    the dips give each feeder its own descent below the target.
+    """
+    gap_top, gap_bottom = (
+        _gap_above_target_y(graph, tgt_row) if tgt_row is not None else (0.0, 0.0)
+    )
+    if gap_bottom <= gap_top or not _inter_row_band_fits(gap_top, gap_bottom):
+        return by
+    if sum(1 for e in graph.edges if e.target == tgt.id) > 1:
+        return by
+    gy = _center_inter_row_channel(gap_top, gap_bottom)
+    exclude = {sid for sid in (src.section_id, tgt.section_id) if sid is not None}
+    blocked = (
+        _v_segment_crosses_other_section(graph, cx, src.y, gy, exclude)
+        or _v_segment_crosses_other_section(graph, vx, gy, ey, exclude)
+        or _h_segment_crosses_other_section(graph, cx, vx, gy, exclude)
+    )
+    return by if blocked else gy
 
 
 def _route_right_entry_cross_row(f: _InterFacts) -> RoutedPath | None:
@@ -1041,10 +1106,18 @@ _INTER_SECTION_RULES: list[_Rule] = [
         lambda f: f.is_tb_perp_exit_against_flow,
         lambda f: _route_perp_exit_over(f.edge, f.src, f.tgt, f.ctx),
     ),
-    # Same Y, no obstacle, not a right-entry plough: a straight horizontal run.
+    # Same Y, no obstacle, neither a right- nor a left-entry far-side plough: a
+    # straight horizontal run.  A far-side entry (source past the port's outward
+    # edge) would cut through the target interior to reach the port, so it cedes
+    # to the wrap families below.
     _Rule(
         "same-Y straight",
-        lambda f: f.same_y and not f.needs_bypass and not f.right_entry_from_left,
+        lambda f: (
+            f.same_y
+            and not f.needs_bypass
+            and not f.right_entry_from_left
+            and not f.left_entry_from_right
+        ),
         _route_straight_connector,
     ),
     # A trailing perp (TOP/BOTTOM) exit feeding a LEFT/RIGHT entry on the
