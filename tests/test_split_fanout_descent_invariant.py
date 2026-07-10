@@ -72,3 +72,52 @@ def test_checker_fires_without_fuse_pass(monkeypatch: pytest.MonkeyPatch) -> Non
     graph, routes, offsets = _route(EXAMPLE_TOPOLOGIES / "divergent_fanout_split.mmd")
     violations = check_no_split_same_line_fanout_descents(graph, routes, offsets)
     assert violations, "expected a split fan-out descent with the fuse pass off"
+
+
+def _opening_descents(routes) -> list[tuple[str, str, float]]:
+    """The opening fan-out descent of each inter-section route: (source, line, x)."""
+    from nf_metro.layout.routing.common import initial_fanout_descent_span
+
+    out: list[tuple[str, str, float]] = []
+    for rp in routes:
+        if not rp.is_inter_section:
+            continue
+        span = initial_fanout_descent_span(rp)
+        if span is not None:
+            out.append((rp.edge.source, rp.line_id, span[0]))
+    return out
+
+
+def test_same_line_fan_stays_bundled_beside_distinct_descent() -> None:
+    """A source fanning several same-line branches plus a distinct-line branch
+    descends as ONE per-line bundle: the same-line branches share a single
+    fused track and the distinct line sits exactly one OFFSET_STEP beside it,
+    rather than each branch splitting onto its own slot (issue #1409)."""
+    from collections import defaultdict
+
+    from nf_metro.layout.constants import OFFSET_STEP
+
+    path = EXAMPLE_TOPOLOGIES / "same_line_fan_distinct_descent.mmd"
+    _graph, routes, _offsets = _route(path)
+
+    descents = _opening_descents(routes)
+    junctions = {src for src, _line, _x in descents if src.startswith("__junction")}
+    assert junctions, "fixture must fan out through a junction"
+
+    for junction in junctions:
+        by_line: dict[str, list[float]] = defaultdict(list)
+        for src, line_id, x in descents:
+            if src == junction:
+                by_line[line_id].append(x)
+        # Every same-line branch shares one fused descent X.
+        for line_id, xs in by_line.items():
+            assert max(xs) - min(xs) < OFFSET_STEP / 2, (
+                f"line {line_id!r} splits into descents at {sorted(xs)}"
+            )
+        # Distinct lines sit one step apart -- a tight bundle, not overlaid.
+        line_xs = sorted(xs[0] for xs in by_line.values())
+        if len(line_xs) >= 2:
+            gaps = [b - a for a, b in zip(line_xs, line_xs[1:])]
+            assert all(abs(g - OFFSET_STEP) < 1.0 for g in gaps), (
+                f"distinct lines not one step apart: {line_xs}"
+            )

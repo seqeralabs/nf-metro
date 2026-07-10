@@ -125,7 +125,6 @@
   "inter_section_handlers.py::if entry_port is None:::#2",
   "inter_section_handlers.py::if entry_side is PortSide.LEFT:::#1",
   "inter_section_handlers.py::if ep_port and ep_port.side == PortSide.LEFT:::#1",
-  "inter_section_handlers.py::if ep_port is None or ep_port.side != PortSide.LEFT:::#2",
   "inter_section_handlers.py::if ep_section and ep_section.bbox_w > 0:::#1",
   "inter_section_handlers.py::if f.horizontal is Direction.L:::#1",
   "inter_section_handlers.py::if f.src_row is not None and f.tgt_row is not None and f.src_row < f.tgt_row:::#1",

@@ -967,11 +967,12 @@ def _bundle_divergent_distinct_descents(
     channels several px apart -- reading as separate strokes from the junction.
 
     Re-seat each such group one ``OFFSET_STEP`` apart on the corridor nearest
-    the source, ordered so a branch sits on the side it later turns toward (a
-    left-turning branch to the left, ordered outermost by the earliest turn), so
-    a branch peeling off never crosses a sibling still descending.  Only groups
-    already spread wider than a tight bundle move; same-line groups are handled
-    by the coincidence pass and skipped here.
+    the source, one slot per LINE (a line's several same-colour branches share
+    the fused track the coincidence pass gave them), ordered so a line sits on
+    the side it later turns toward (a left-turning line to the left, ordered
+    outermost by its earliest turn), so a branch peeling off never crosses a
+    sibling that has not yet turned off.  Only groups already spread wider than a
+    tight one-slot-per-line bundle move.
     """
     by_source: dict[tuple[str, bool], list[_VChannel]] = defaultdict(list)
     for rp in routes:
@@ -983,16 +984,31 @@ def _bundle_divergent_distinct_descents(
 
     step = ctx.offset_step
     for chans in by_source.values():
-        if len({c.route.line_id for c in chans}) < 2:
+        # Same-line descents are one fused stroke -- the coincidence pass has
+        # already snapped them onto a shared X -- so they occupy a SINGLE slot in
+        # the bundle.  Group by line and seat every line's channels on one track;
+        # ranking each channel independently would re-split a fused same-line
+        # trunk across two adjacent slots, the parallel same-colour tracks this
+        # pass exists to prevent.
+        by_line: dict[str, list[_VChannel]] = defaultdict(list)
+        for c in chans:
+            by_line[c.route.line_id].append(c)
+        if len(by_line) < 2:
             continue
         xs = [c.x for c in chans]
-        if max(xs) - min(xs) <= step * (len(chans) - 1) + COORD_TOLERANCE:
+        # A tight bundle is one slot per LINE, not one per channel.
+        if max(xs) - min(xs) <= step * (len(by_line) - 1) + COORD_TOLERANCE:
             continue
 
         base = min(xs)
+        rep = {
+            lid: min(cs, key=_fanout_descent_order_key) for lid, cs in by_line.items()
+        }
+        ordered = sorted(by_line, key=lambda lid: _fanout_descent_order_key(rep[lid]))
         moves = [
             (ch, base + rank * step)
-            for rank, ch in enumerate(sorted(chans, key=_fanout_descent_order_key))
+            for rank, lid in enumerate(ordered)
+            for ch in by_line[lid]
         ]
         # Never re-seat a descent into a section it does not belong to; leave the
         # whole group on its handler channels if any target column is obstructed.

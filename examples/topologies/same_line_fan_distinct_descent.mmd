@@ -1,0 +1,38 @@
+%%metro title: Same-line fan with distinct descent
+%%metro style: dark
+%%metro line: red | Red | #e6007e
+%%metro line: green | Green | #2db572
+%%metro line: blue | Blue | #2b6cb0
+%%metro grid: src | 1,0
+%%metro grid: cont | 2,0
+%%metro grid: far | 0,1
+%%metro grid: near | 0,2
+%%metro grid: mid | 0,3
+
+graph LR
+    subgraph src [Source]
+        %%metro exit: right | red, green, blue
+        s1[Input]
+        s2[Process]
+        s1 -->|red,green,blue| s2
+    end
+    subgraph cont [Continue]
+        %%metro entry: left | red, green, blue
+        c1[Carry on]
+    end
+    subgraph far [Far green]
+        %%metro entry: top | green
+        f1[FarStep]
+    end
+    subgraph near [Near red]
+        %%metro entry: left | red
+        n1[NearStep]
+    end
+    subgraph mid [Mid red]
+        %%metro entry: left | red
+        m1[MidStep]
+    end
+    s2 -->|red,green,blue| c1
+    s2 -->|green| f1
+    s2 -->|red| n1
+    s2 -->|red| m1
