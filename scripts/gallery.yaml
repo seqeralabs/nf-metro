@@ -300,21 +300,6 @@ gallery:
       `diamond_style: symmetric`. The merge anchors on the median feeder track (the
       middle line) rather than the first-declared line's extreme track, so each feeder
       bends toward it by the least amount (#1277)."
-  - id: symmetric_deadend_fanout
-    source_dir: examples/topologies
-    category: Fan-out and Fan-in
-    description:
-      "A 2-way fan-out under `diamond_style: symmetric` whose branches never reconverge:
-      one is a single-station stub, the other a short processing chain ending in a file.
-      Both branches straddle the fork at half pitch and each stays on its own track for
-      its whole length -- the chain does not dip back to the trunk (#1299)."
-  - id: symmetric_deadend_fanout_exit
-    source_dir: examples/topologies
-    category: Fan-out and Fan-in
-    description:
-      "The same symmetric 2-way fan-out where one branch leaves the section via an exit
-      port instead of dead-ending.  The dead-end coverage branch stays fanned to the end,
-      while the exiting branch falls back to the trunk to meet its exit port (#1299)."
   - id: terminal_symmetric_fan
     source_dir: examples/topologies
     category: Fan-out and Fan-in

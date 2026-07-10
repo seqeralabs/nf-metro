@@ -1288,22 +1288,11 @@ def test_symfan_pairs_share_y(fixture):
     placements like (trunk-55, trunk+0) that leave the bottom-fan slot
     empty.
     """
-    from nf_metro.layout.phases.fan_bundles import (
-        _section_has_symmetric_entry_fork,
-    )
-
     graph = _layout(fixture)
     offsets = compute_station_offsets(graph)
     for sec in graph.sections.values():
         cols = _section_fan_columns(graph, sec)
-        # A symmetric fork fed straight from the entry port leaves the trunk
-        # row empty (its dead-end continuations are drawn onto the branch
-        # tracks), so the trunk is the LR port Y, not a station's cy.
-        if _section_has_symmetric_entry_fork(graph, sec):
-            port_ys = _section_lr_port_ys(graph, sec)
-            trunk_cy = port_ys[0] if port_ys else None
-        else:
-            trunk_cy = _section_trunk_marker_cy(graph, sec, offsets)
+        trunk_cy = _section_trunk_marker_cy(graph, sec, offsets)
         if trunk_cy is None:
             continue
         for x, sids in cols.items():
@@ -6272,9 +6261,6 @@ def test_all_stations_snap_to_grid(fixture):
         _iter_symmetric_diamonds,
         _section_symfan_uses_half_grid,
     )
-    from nf_metro.layout.phases.fan_bundles import (
-        _section_has_symmetric_entry_fork,
-    )
 
     y_spacing = 55.0
     tol = 1.0
@@ -6296,18 +6282,13 @@ def test_all_stations_snap_to_grid(fixture):
         if port_ys:
             section_trunk_y[sec.id] = port_ys[0]
 
-    # Sections eligible for the half-grid 2-branch fan exception: a symfan
-    # with an in-section hub, or a symmetric fork fed straight from the entry
-    # port (whose branches and their dead-end continuations are all half-grid).
+    # Sections eligible for the half-grid 2-branch fan exception.
     half_grid_sections = {
         sec.id
         for sec in graph.sections.values()
         if sec.direction in ("LR", "RL")
         and sec.bbox_h > 0
-        and (
-            _section_symfan_uses_half_grid(graph, sec)
-            or _section_has_symmetric_entry_fork(graph, sec)
-        )
+        and _section_symfan_uses_half_grid(graph, sec)
     }
 
     # Branches of symmetric fork-join diamonds compacted per-diamond.
@@ -9200,142 +9181,6 @@ def _layout_diamond(fixture: str, style: str) -> MetroGraph:
     graph.diamond_style = style
     compute_layout(graph)
     return graph
-
-
-# ---------------------------------------------------------------------------
-# diamond_style: symmetric must centre a 2-way fan on its fork
-# ---------------------------------------------------------------------------
-
-
-def _direct_fork_children(
-    graph: MetroGraph,
-) -> list[tuple[Station, Station, Station]]:
-    """Yield ``(fork, child_lo, child_hi)`` for each station or entry port
-    with exactly two real, on-track, non-port children whose sole
-    predecessor is that fork.
-
-    Unlike :func:`_iter_fork_join_diamonds` (used by the half-pitch
-    compaction), this does not require the two children to reconverge at a
-    shared successor, so it also covers a fan whose branches dead-end
-    independently. The fork may be an entry port, covering a fan that
-    diverges immediately on entering a section.
-    """
-    succ: dict[str, set[str]] = defaultdict(set)
-    pred: dict[str, set[str]] = defaultdict(set)
-    for edge in graph.edges:
-        if edge.source in graph.stations and edge.target in graph.stations:
-            succ[edge.source].add(edge.target)
-            pred[edge.target].add(edge.source)
-    triples: list[tuple[Station, Station, Station]] = []
-    for fork_id, child_ids in succ.items():
-        if len(child_ids) != 2:
-            continue
-        fork_st = graph.stations[fork_id]
-        c1, c2 = sorted(child_ids)
-        if pred[c1] != {fork_id} or pred[c2] != {fork_id}:
-            continue
-        st1, st2 = graph.stations[c1], graph.stations[c2]
-        if any(s.is_port or s.is_hidden or s.off_track for s in (st1, st2)):
-            continue
-        triples.append((fork_st, st1, st2))
-    return triples
-
-
-_SYMMETRIC_DEADEND_FANOUT_FIXTURES = [
-    "topologies/symmetric_deadend_fanout.mmd",
-    "topologies/symmetric_deadend_fanout_relay.mmd",
-    "topologies/symmetric_deadend_fanout_deep.mmd",
-    "topologies/symmetric_deadend_fanout_exit.mmd",
-]
-
-
-@pytest.mark.parametrize("fixture", _SYMMETRIC_DEADEND_FANOUT_FIXTURES)
-def test_symmetric_fanout_straddles_fork_without_reconvergence(fixture):
-    """A 2-way fan centres on its fork under ``diamond_style: symmetric``,
-    whether or not the branches reconverge.
-
-    ``symmetric_deadend_fanout`` and its ``_relay`` sibling fan directly off
-    the section's first in-section layer; ``_deep`` fans one layer further
-    in, covering both the entry-adjacent and interior cases of the same
-    invariant.
-    """
-    graph = _layout_diamond(fixture, "symmetric")
-    checked = 0
-    for fork, c1, c2 in _direct_fork_children(graph):
-        lo, hi = sorted((c1, c2), key=lambda s: s.y)
-        off_lo = fork.y - lo.y
-        off_hi = hi.y - fork.y
-        if abs(off_lo) < SAME_COORD_TOLERANCE and abs(off_hi) < SAME_COORD_TOLERANCE:
-            continue
-        assert abs(off_lo - off_hi) < 1.0, (
-            f"{fixture}: fork {fork.id!r} (y={fork.y:.1f}) fans to "
-            f"{lo.id!r} (-{off_lo:.1f}) and {hi.id!r} (+{off_hi:.1f}) -- "
-            "not symmetric about the trunk"
-        )
-        checked += 1
-    assert checked, f"{fixture}: no qualifying 2-way fork found"
-
-
-def _in_section_sole_continuation(graph: MetroGraph, station: Station) -> list[Station]:
-    """The chain of in-section stations that continue *station*'s branch.
-
-    Each step is the sole in-section, non-port successor whose only in-section
-    predecessor is the current station -- i.e. the linear tail of a branch that
-    neither forks nor merges before leaving the section.
-    """
-    sec = station.section_id
-    succ: dict[str, set[str]] = defaultdict(set)
-    pred: dict[str, set[str]] = defaultdict(set)
-    for e in graph.edges:
-        s, t = graph.stations.get(e.source), graph.stations.get(e.target)
-        if s is None or t is None or s.is_port or t.is_port:
-            continue
-        # Off-track file icons are placed by their own lift pass at an
-        # intentional offset from the branch, so they are not part of the
-        # on-track continuation whose Y must match the branch.
-        if t.off_track:
-            continue
-        if s.section_id == sec and t.section_id == sec:
-            succ[e.source].add(e.target)
-            pred[e.target].add(e.source)
-    chain: list[Station] = []
-    current = station.id
-    seen = {station.id}
-    while True:
-        nxts = succ[current] - seen
-        if len(nxts) != 1:
-            break
-        nxt = next(iter(nxts))
-        if pred[nxt] != {current}:
-            break
-        chain.append(graph.stations[nxt])
-        seen.add(nxt)
-        current = nxt
-    return chain
-
-
-@pytest.mark.parametrize("fixture", _SYMMETRIC_DEADEND_FANOUT_FIXTURES)
-def test_symmetric_fanout_branch_continuation_stays_fanned(fixture):
-    """A fanned branch's in-section dead-end continuation follows its track.
-
-    Once a branch peels off the trunk under ``diamond_style: symmetric`` its
-    downstream in-section chain (e.g. ``split -> genomecov -> out1``) must stay
-    on the branch's Y rather than dipping back to the trunk, so the branch reads
-    as one flat run instead of a hump-and-return.
-    """
-    graph = _layout_diamond(fixture, "symmetric")
-    checked = 0
-    for _fork, c1, c2 in _direct_fork_children(graph):
-        for branch in (c1, c2):
-            chain = _in_section_sole_continuation(graph, branch)
-            for st in chain:
-                assert abs(st.y - branch.y) < 1.0, (
-                    f"{fixture}: branch {branch.id!r} (y={branch.y:.1f}) "
-                    f"continuation {st.id!r} sits at y={st.y:.1f} -- the branch "
-                    "dips off its own track instead of staying fanned"
-                )
-                checked += 1
-    assert checked, f"{fixture}: no branch continuation found to check"
 
 
 def _interior_fan_branches(graph: MetroGraph) -> list[tuple[str, str, str]]:
