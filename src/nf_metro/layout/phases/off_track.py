@@ -671,6 +671,72 @@ def _angled_interior_reach(
     return angled_reach
 
 
+def _has_passthrough_branch_label(
+    layer: int,
+    fork_layers: set[int],
+    join_layers: set[int],
+    out_targets: dict[str, set[str]],
+    in_sources: dict[str, set[str]],
+    layers: dict[str, int],
+    tracks: dict[str, float],
+    sub: MetroGraph,
+) -> bool:
+    """Whether a labelled *pass-through* branch station rides this fork/join loop.
+
+    A branch station that carries the fan onward - it feeds a station further from
+    the hub rather than ending at the branch layer - sits with a sibling's
+    divergence/convergence diagonal sweeping across its row, so its label needs the
+    fork/join label's straight-run reservation kept.  A branch that instead ends at
+    the branch layer (a leaf, or the reconvergence hub itself) has no foreign
+    diagonal crossing it and needs only ``routing_clearance``; that is what lets a
+    diamond whose branches terminate at the join pack tight while a branch that
+    threads through the loop keeps its room.
+
+    Requires two or more distinct branch tracks: with the branches all on one track
+    there is no transition diagonal to clear.
+    """
+
+    def any_passthrough(
+        hub: str, branch_ids: set[str], branch_layer: int, diverge: bool
+    ) -> bool:
+        btracks = {
+            b: tracks[b]
+            for b in branch_ids
+            if b in tracks and layers.get(b) == branch_layer
+        }
+        if len({round(t, 3) for t in btracks.values()}) < 2:
+            return False
+        for bid in btracks:
+            station = sub.stations.get(bid)
+            if not (station and station.label.strip()):
+                continue
+            edges = sub.edges_from(bid) if diverge else sub.edges_to(bid)
+            if any(
+                (
+                    layers.get(e.target, branch_layer) > branch_layer
+                    if diverge
+                    else layers.get(e.source, branch_layer) < branch_layer
+                )
+                for e in edges
+            ):
+                return True
+        return False
+
+    if layer in fork_layers:
+        for fsid, ftgts in out_targets.items():
+            if layers.get(fsid) == layer and any_passthrough(
+                fsid, ftgts, layer + 1, diverge=True
+            ):
+                return True
+    if layer in join_layers:
+        for jsid, jsrcs in in_sources.items():
+            if layers.get(jsid) == layer and any_passthrough(
+                jsid, jsrcs, layer - 1, diverge=False
+            ):
+                return True
+    return False
+
+
 def _layer_gap_for(
     layer: int,
     fork_layers: set[int],
@@ -756,11 +822,34 @@ def _layer_gap_for(
             direction,
         )
 
+    # A clean diamond (branches terminate at the join) needs only the geometric
+    # routing_clearance for the fork/join label; the bare label-half is slack that
+    # over-reserves by ``x_spacing - (DIAGONAL_RUN + MIN_STRAIGHT_EDGE + 1)``.  A
+    # branch that threads a labelled station through the loop keeps that reservation
+    # so the sibling's transition diagonal clears the mid-loop label.
+    passthrough_label_half = (
+        fj_label_half
+        if _has_passthrough_branch_label(
+            layer,
+            fork_layers,
+            join_layers,
+            out_targets,
+            in_sources,
+            layers,
+            tracks,
+            sub,
+        )
+        else 0.0
+    )
+
     routing_clearance = (
         fj_label_half + DIAGONAL_RUN + MIN_STRAIGHT_EDGE - x_spacing + 1.0
     )
     return max(
-        base_gap, fj_label_half + bubble_extra, routing_clearance, interior_floor
+        base_gap,
+        routing_clearance + bubble_extra,
+        interior_floor,
+        passthrough_label_half,
     )
 
 
