@@ -1,0 +1,22 @@
+%%metro title: Packed cell-mate bypass (cross-row)
+%%metro line: a | Line A | #e6007e
+%%metro line: b | Line B | #2db572
+%%metro grid: quant, rep | 1,0
+%%metro grid: sink | 2,1
+
+graph LR
+    subgraph quant [Quant]
+        %%metro exit: right | a, b
+        q1[Q1]
+    end
+    subgraph rep [Rep]
+        %%metro entry: left | a, b
+        r1[R1]
+    end
+    subgraph sink [Sink]
+        %%metro entry: left | b
+        k1[K1]
+    end
+
+    q1 -->|a,b| r1
+    q1 -->|b| k1

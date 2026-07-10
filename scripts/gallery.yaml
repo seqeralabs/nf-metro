@@ -787,6 +787,17 @@ gallery:
       column to descend through. The bypass must still loop below the cell-mate's
       box rather than collapse back to a straight run through its interior
       (issue #1233)."
+  - id: packed_cell_cellmate_bypass_cross_row
+    source_dir: examples/topologies
+    category: Serpentine Layout
+    description:
+      "The packed-cell cell-mate bypass where the bypassing line's source is
+      itself a member of the packed cell, and the target sits a row below and
+      a column over rather than sharing the source's row. The default
+      L-shape's source-row leg used to run the full row width before turning,
+      cutting straight through the source's own cell-mate. When the gap
+      between the source and cell-mate is clear the route drops through it in
+      one straight channel and turns along the target row (PR #1405)."
   - id: packed_cell_consumer_drop_in
     source_dir: examples/topologies
     category: Serpentine Layout

@@ -52,7 +52,7 @@ from nf_metro.layout.routing.corners import (
     l_shape_radii,
     widest_coincident_radius,
 )
-from nf_metro.parser.model import MetroGraph, Port, PortSide
+from nf_metro.parser.model import MetroGraph, Port, PortSide, Section
 
 
 @dataclass
@@ -2119,6 +2119,23 @@ def _clear_channel_x_in_band(
     return x
 
 
+def _h_segment_penetrates_section(
+    lo_x: float, hi_x: float, y: float, section: Section, margin: float = 0.0
+) -> bool:
+    """Whether a horizontal segment ``[lo_x, hi_x]`` at *y* penetrates *section*.
+
+    Open-interior test: the segment must enter past the left edge and reach
+    past the right edge (a boundary graze does not count).  ``y`` is inside
+    when it falls within ``[bbox_y - margin, bbox_y + bbox_h + margin]``.
+    """
+    if section.bbox_w <= 0:
+        return False
+    right = section.bbox_x + section.bbox_w
+    if hi_x <= section.bbox_x or lo_x >= right:
+        return False
+    return section.bbox_y - margin <= y <= section.bbox_y + section.bbox_h + margin
+
+
 def _h_segment_crosses_other_section(
     graph: MetroGraph,
     x1: float,
@@ -2130,27 +2147,15 @@ def _h_segment_crosses_other_section(
     """Return True if a horizontal segment at *y* crosses any section interior.
 
     Sections listed in *exclude_section_ids* are skipped entirely.  All
-    other sections are tested against the segment's open interior.  The
-    horizontal segment runs from ``min(x1, x2)`` to ``max(x1, x2)``.
-
-    A section is "crossed" when the segment overlaps its bbox's open
-    interior - i.e. the segment penetrates the section rather than just
-    grazing its boundary.  ``y`` is considered inside when it falls
-    within ``[bbox_y - margin, bbox_y + bbox_h + margin]``.
+    other sections are tested against the segment's open interior via
+    :func:`_h_segment_penetrates_section`.  The horizontal segment runs from
+    ``min(x1, x2)`` to ``max(x1, x2)``.
     """
     lo_x, hi_x = (x1, x2) if x1 <= x2 else (x2, x1)
     for s in graph.sections.values():
-        if s.bbox_w <= 0:
-            continue
         if s.id in exclude_section_ids:
             continue
-        # Strict X interior overlap: segment must enter past the bbox
-        # left edge AND not end before reaching past the right edge.
-        right = s.bbox_x + s.bbox_w
-        if hi_x <= s.bbox_x or lo_x >= right:
-            continue
-        # Y inside bbox (with optional margin so headers/footers count).
-        if s.bbox_y - margin <= y <= s.bbox_y + s.bbox_h + margin:
+        if _h_segment_penetrates_section(lo_x, hi_x, y, s, margin):
             return True
     return False
 
