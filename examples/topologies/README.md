@@ -334,16 +334,17 @@ python scripts/list_topology_fixtures.py
 
 ### Cross-column perpendicular drop / perp entry
 
-| Fixture                                     | What it tests                                                                                                                                 |
-| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cross_col_top_entry.mmd`                   | Cross-column top entry - an LR section's TOP-entry port receiving from a horizontally-offset source; tests the dead-room removal fix (#890)   |
-| `cross_column_perp_drop.mmd`                | Cross-column perpendicular drop - a line dropping from an LR section into a section below and to one side (#879)                              |
-| `cross_column_perp_drop_far_exit.mmd`       | Cross-column perp drop with a far-side exit - the source exits from the far face, requiring the lead-in to span only the source column (#892) |
-| `lr_perp_bottom_exit_perp_entry.mmd`        | LR section exiting via a BOTTOM port into a BOTTOM-entry section below - tests the perpendicular-to-perpendicular drop path                   |
-| `lr_perp_bottom_exit_side_entry.mmd`        | LR section BOTTOM exit into a side-entry section below - tests the BOTTOM-exit / side-entry routing arm                                       |
-| `lr_perp_top_exit_perp_entry.mmd`           | LR section TOP exit into a TOP-entry section above - tests the perpendicular-to-perpendicular upward drop                                     |
-| `lr_perp_top_exit_perp_entry_diverging.mmd` | LR section TOP exit into a diverging TOP-entry target - tests the same path with multiple lines diverging at the entry port                   |
-| `lr_perp_top_exit_side_entry.mmd`           | LR section TOP exit into a side-entry section - tests the TOP-exit / side-entry routing arm                                                   |
+| Fixture                                     | What it tests                                                                                                                                                                                                                                 |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cross_col_top_entry.mmd`                   | Cross-column top entry - an LR section's TOP-entry port receiving from a horizontally-offset source; tests the dead-room removal fix (#890)                                                                                                   |
+| `cross_column_perp_drop.mmd`                | Cross-column perpendicular drop - a line dropping from an LR section into a section below and to one side (#879)                                                                                                                              |
+| `cross_column_perp_drop_far_exit.mmd`       | Cross-column perp drop with a far-side exit - the source exits from the far face, requiring the lead-in to span only the source column (#892)                                                                                                 |
+| `lr_perp_bottom_exit_perp_entry.mmd`        | LR section exiting via a BOTTOM port into a BOTTOM-entry section below - tests the perpendicular-to-perpendicular drop path                                                                                                                   |
+| `lr_perp_bottom_exit_side_entry.mmd`        | LR section BOTTOM exit into a side-entry section below - tests the BOTTOM-exit / side-entry routing arm                                                                                                                                       |
+| `lr_perp_top_exit_perp_entry.mmd`           | LR section TOP exit into a TOP-entry section above - tests the perpendicular-to-perpendicular upward drop                                                                                                                                     |
+| `lr_perp_top_exit_perp_entry_diverging.mmd` | LR section TOP exit into a diverging TOP-entry target - tests the same path with multiple lines diverging at the entry port                                                                                                                   |
+| `lr_perp_top_exit_side_entry.mmd`           | LR section TOP exit into a side-entry section - tests the TOP-exit / side-entry routing arm                                                                                                                                                   |
+| `top_entry_bundle_offset_seam.mmd`          | A line splitting off a shared trunk drops into an LR/RL TOP-entry port carrying a within-bundle offset - tests that the single-line descent lands on the port-crossing X so it meets the intra-section drop without a boundary jitter (#1302) |
 
 ### LR-to-TB top-entry routing
 

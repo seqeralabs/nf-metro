@@ -94,6 +94,7 @@ from nf_metro.layout.routing.normalize import (
 )
 from nf_metro.layout.routing.perp import (
     _perp_approach_fan_x,
+    _perp_entry_crossing_x,
     _perp_riser_lateral,
 )
 from nf_metro.parser.model import (
@@ -2901,9 +2902,16 @@ def _route_top_entry_l_shape(
     # Into a TB/BT trunk each line lands on its trunk X offset so the bundle
     # flows straight on rather than converging on the shared port and re-fanning
     # (a boundary pinch); the target spread is the trunk's, not the source fan's,
-    # so the bundle tapers.  An LR/RL drop lands on its own source-fan channel,
-    # paired with the in-section drop -- target offset equals source offset, a
-    # rigid bundle.
+    # so the bundle tapers.  A single-line LR/RL drop lands on the port-crossing X
+    # its intra-section drop departs from (:func:`perp._perp_entry_crossing_x`,
+    # the single source that drop also reads), so the approach and departure meet
+    # as one stroke at the boundary.  A sole line arriving with an inbound bundle
+    # offset the port does not carry (it split off a shared trunk upstream) bakes
+    # that offset into its lone lane, parting it from the drop at the port -- the
+    # boundary jitter; tapering to the crossing reconciles them.  A multi-line
+    # bundle instead defers its per-line fan uniformly onto the port and needs no
+    # such correction, so the source offset stands (and with no bundled feeder to
+    # align to the crossing is undefined).
     if tgt_sec is not None and tgt_sec.direction in ("TB", "BT"):
 
         def tb_offset(line_id: str) -> float:
@@ -2917,8 +2925,15 @@ def _route_top_entry_l_shape(
         ]
     else:
         final_x = tx
+
+        def tgt_offset(line_id: str) -> float:
+            if len(line_ids) > 1:
+                return src_offset(line_id)
+            crossing = _perp_entry_crossing_x(ctx, edge.target, line_id, tx)
+            return src_offset(line_id) if crossing is None else tx - crossing
+
         members = [
-            (edge_by_line[lid], lid, src_offset(lid), src_offset(lid))
+            (edge_by_line[lid], lid, src_offset(lid), tgt_offset(lid))
             for lid in line_ids
         ]
 
