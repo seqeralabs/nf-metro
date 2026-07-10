@@ -24,6 +24,7 @@ from nf_metro.layout.geometry import AxisFrame, lanes_run_along_x
 from nf_metro.layout.labels import _label_text_height, label_text_width
 from nf_metro.layout.phases._common import (
     _content_station_ids,
+    _section_lr_port_anchor_y,
     dominant_value,
     flow_axis_exit_ports,
     grow_section_bbox_max_edge,
@@ -1013,10 +1014,20 @@ def _off_track_output_below(graph: MetroGraph) -> set[str]:
     for section in graph.sections.values():
         cross = section_cross_axis(section)
         fan_sign = AxisFrame.secondary_sign_for(section.direction or "LR")
-        signed = [
-            fan_sign * getattr(st, cross)
-            for st in _iter_trunk_stations(graph, section, junction_ids)
-        ]
+        trunk_sts = list(_iter_trunk_stations(graph, section, junction_ids))
+        # A symmetric entry fork empties the trunk row -- both branches sit at
+        # +/- half pitch, so the dominant station column is a branch, not the
+        # trunk.  When every trunk station is a fanned branch, anchor the
+        # baseline on the LR port instead, so an off-track output on a
+        # below-trunk branch is recognised and dropped clear rather than lifted
+        # back across the empty trunk.
+        on_trunk = [s for s in trunk_sts if s.id not in graph.half_grid_station_ids]
+        if trunk_sts and not on_trunk and cross == "y":
+            port_y = _section_lr_port_anchor_y(graph, section)
+            if port_y is not None:
+                section_baseline[section.id] = (cross, fan_sign, fan_sign * port_y)
+                continue
+        signed = [fan_sign * getattr(st, cross) for st in trunk_sts]
         if signed:
             baseline_signed = dominant_value(round(v, 1) for v in signed)
             section_baseline[section.id] = (cross, fan_sign, baseline_signed)

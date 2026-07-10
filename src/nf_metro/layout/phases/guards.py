@@ -1946,6 +1946,37 @@ def _guard_off_track_consumer_on_trunk(graph: MetroGraph, phase: str) -> None:
             )
 
 
+def _guard_symfan_entry_port_on_feeder_trunk(graph: MetroGraph, phase: str) -> None:
+    """A symmetric entry fork's port stays on its in-row feeder's trunk.
+
+    Under ``diamond_style: symmetric`` a two-way entry fork's branches straddle
+    the section's LR entry port.  When exactly one same-row section's exit port
+    feeds that entry port, the two must share a Y so the inter-section run is
+    straight; centering the fork on the fork midline instead pulls the port off
+    that trunk and drags the whole row's baseline with it (issue #1299).
+    Restricted to a single same-row feeder so a cross-row feed (which wraps
+    between rows and needn't align) does not trip it.
+    """
+    from nf_metro.layout.phases.fan_bundles import _symfan_entry_port_feeder_y
+
+    if graph.diamond_style != "symmetric":
+        return
+    tol = 1.0
+    for section in graph.sections.values():
+        feeder = _symfan_entry_port_feeder_y(graph, section)
+        if feeder is None:
+            continue
+        entry_port, feeder_y = feeder
+        port_y = graph.stations[entry_port].y
+        if abs(port_y - feeder_y) > tol:
+            raise PhaseInvariantError(
+                f"{phase}: symmetric entry fork {section.id!r} port sits at "
+                f"y={port_y:.1f} but its in-row feeder arrives at y={feeder_y:.1f} "
+                f"({abs(port_y - feeder_y):.0f}px off the trunk); the fork must "
+                f"straddle a port fixed on that trunk, not recentre it"
+            )
+
+
 def _guard_off_track_not_hub(graph: MetroGraph, phase: str) -> None:
     """No off-track station has both a predecessor and a successor.
 
@@ -5230,6 +5261,16 @@ INLINE_GUARD_REGISTRY: tuple[GuardSpec, ...] = (
             "Restricted to consumers with exactly one on-track in-section "
             "successor, so a genuine on-track fork's off-row branches are not "
             "dragged onto the trunk."
+        ),
+    ),
+    GuardSpec(
+        _guard_symfan_entry_port_on_feeder_trunk,
+        "B",
+        issue_pin=("#1299",),
+        narrow_reason=(
+            "Restricted to a symmetric entry fork fed by exactly one same-row "
+            "section's exit port, so a cross-row feed that legitimately wraps "
+            "between rows is not required to align."
         ),
     ),
     GuardSpec(

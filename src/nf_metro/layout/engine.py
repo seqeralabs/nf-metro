@@ -98,8 +98,11 @@ from nf_metro.layout.phases.canvas import (  # noqa: F401
     _translate_graph_y,
 )
 from nf_metro.layout.phases.fan_bundles import (  # noqa: F401
+    _align_symfan_section_to_row_feeder,
     _apply_half_grid_2branch_symfan,
     _apply_half_grid_symmetric_diamonds,
+    _carry_symmetric_branch_continuations,
+    _center_lr_entry_ports_on_fork,
     _convergence_source_ys,
     _divergence_target_ys,
     _iter_symmetric_diamonds,
@@ -199,6 +202,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_single_trunk_off_track_step,
     _guard_station_x_column_drift,
     _guard_stations_in_sections,
+    _guard_symfan_entry_port_on_feeder_trunk,
     _guard_symmetric_diamond_branches_half_pitch,
     _guard_symmetric_diamond_branches_straddle_trunk,
     _guard_tall_anchor_stack_well_formed,
@@ -724,6 +728,7 @@ def _compute_layout_scaled(
         _guard_rail_one_station_per_column(graph, "final")
         _guard_single_trunk_off_track_step(graph, "final")
         _guard_off_track_consumer_on_trunk(graph, "final")
+        _guard_symfan_entry_port_on_feeder_trunk(graph, "final")
         _guard_off_track_input_column_stack(graph, "final")
         _guard_off_track_not_hub(graph, "final")
         _guard_interchange_bar_clears_non_members(graph, "final")
@@ -1681,21 +1686,36 @@ def _place_pass_c_content(
         _run_pass_c_guards(graph, "after Stage 6.6")
 
     # Stage 6.7: Re-center full-bundle columns around the row's final
-    # trunk Y.  ``_redistribute_full_bundle_columns`` runs early when
-    # only local port Ys are available; for terminal sections whose
-    # port Y differs from the row's eventual trunk Y, the symmetric
-    # fan ends up offset from the trunk row (e.g. Reporting's Shiny at
-    # the trunk row, Quarto two slots below, instead of one above and
-    # one below).  This re-center uses the final inter-section bundle
-    # Y as the anchor so the trunk row stays empty in each fanned
-    # column.
+    # trunk Y.  Under ``center_ports``, ``_redistribute_full_bundle_columns``
+    # runs early when only local port Ys are available; for terminal
+    # sections whose port Y differs from the row's eventual trunk Y, the
+    # symmetric fan ends up offset from the trunk row (e.g. Reporting's
+    # Shiny at the trunk row, Quarto two slots below, instead of one above
+    # and one below).  This re-center uses the final inter-section bundle
+    # Y as the anchor so the trunk row stays empty in each fanned column.
+    #
+    # Under ``diamond_style: symmetric`` this is the sole pass (no early
+    # Stage 4.10 companion runs) -- see ``_recenter_full_bundle_columns``'s
+    # docstring for why anchoring on the final row trunk is correct even
+    # without an earlier guess to correct.
     #
     # Stage 6.8 and Stage 6.9 below restore invariants the recenter
     # breaks.
-    if graph.center_ports:
+    if graph.center_ports or graph.diamond_style == "symmetric":
         _run_placement_per_row(
-            graph, validate, "6.7", _recenter_full_bundle_columns, y_spacing
+            graph,
+            validate,
+            "6.7",
+            _recenter_full_bundle_columns,
+            y_spacing,
         )
+        # Stage 6.7b: carry each symmetric fork's dead-end continuation onto its
+        # branch track.  Stage 6.7c/6.7d then pin the section and its entry port
+        # to the incoming bundle -- both must follow the recenter that fixes the
+        # branch Ys they align to.
+        _carry_symmetric_branch_continuations(graph, section_y_padding)
+        _align_symfan_section_to_row_feeder(graph)
+        _center_lr_entry_ports_on_fork(graph, y_spacing)
         _snap(graph, "6.7")
 
         # Stage 6.8: Re-anchor off-track inputs after the recenter.

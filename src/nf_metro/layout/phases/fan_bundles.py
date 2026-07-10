@@ -15,6 +15,8 @@ from nf_metro.layout.phases._common import (
     _grid_group_section_ids,
     _section_bundle_lines,
     _section_lr_port_anchor_y,
+    grow_section_bbox_max_edge,
+    grow_section_bbox_min_edge,
 )
 from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
 
@@ -465,6 +467,65 @@ def _section_symfan_uses_half_grid(graph: MetroGraph, section: Section) -> bool:
     return _symfan_branches_hub(graph, section) is not None
 
 
+def _section_has_symmetric_entry_fork(graph: MetroGraph, section: Section) -> bool:
+    """Return True when the section carries a ``diamond_style: symmetric``
+    two-way fork whose branches share a column and never reconverge.
+
+    This is the fork ``_recenter_full_bundle_columns`` compacts onto half-pitch
+    (leaving the trunk row empty between the branches) and whose dead-end
+    continuation ``_carry_symmetric_branch_continuations`` draws onto the branch
+    track.  The non-reconverging requirement distinguishes it from an in-section
+    fork-join diamond (whose branches mirror about their reconvergence station,
+    not the empty trunk), which the per-diamond compaction handles instead.
+    """
+    if graph.diamond_style != "symmetric" or section.direction not in ("LR", "RL"):
+        return False
+    bundle = _section_bundle_lines(graph, section)
+    if not bundle:
+        return False
+    port_ids = section.port_ids
+    cols: dict[float, list[str]] = defaultdict(list)
+    for sid in section.station_ids:
+        if sid in port_ids:
+            continue
+        st = graph.stations.get(sid)
+        if st is None or st.off_track:
+            continue
+        cols[round(st.x, 3)].append(sid)
+    for sids in cols.values():
+        if len(sids) != 2 or not all(
+            set(graph.station_lines(s)) == bundle for s in sids
+        ):
+            continue
+        if not _branches_reconverge(graph, section, sids[0], sids[1]):
+            return True
+    return False
+
+
+def _branches_reconverge(graph: MetroGraph, section: Section, a: str, b: str) -> bool:
+    """True when *a* and *b* reach a common station inside *section*."""
+
+    def _reachable(start: str) -> set[str]:
+        seen: set[str] = set()
+        stack = [start]
+        while stack:
+            cur = stack.pop()
+            for e in graph.edges_from(cur):
+                t = graph.stations.get(e.target)
+                if (
+                    t is None
+                    or t.is_port
+                    or t.section_id != section.id
+                    or e.target in seen
+                ):
+                    continue
+                seen.add(e.target)
+                stack.append(e.target)
+        return seen
+
+    return bool(_reachable(a) & _reachable(b))
+
+
 def _iter_fork_join_diamonds(
     graph: MetroGraph,
 ) -> Iterator[tuple[Station, Station, Station, Station]]:
@@ -751,11 +812,19 @@ def _section_row_pitch(graph: MetroGraph, section_id: str, default: float) -> fl
 def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
     """Re-fan full-bundle station columns around the row's final trunk Y.
 
-    Late-pass companion to ``_redistribute_full_bundle_columns``.  The
-    early pass uses the section's local LR port Y as the symmetric
-    centre, which becomes stale when subsequent phases shift the
-    section relative to the row trunk (e.g. terminal sections whose
-    sole LR port doesn't match the bundle line entering from upstream).
+    Late-pass companion to ``_redistribute_full_bundle_columns`` when
+    ``graph.center_ports`` is set.  The early pass uses the section's
+    local LR port Y as the symmetric centre, which becomes stale when
+    subsequent phases shift the section relative to the row trunk (e.g.
+    terminal sections whose sole LR port doesn't match the bundle line
+    entering from upstream).
+
+    Also runs standalone (without an early pass) under
+    ``graph.diamond_style == 'symmetric'``: a full-bundle column fed
+    directly off a section's entry port has no settled trunk Y before
+    row alignment, so the early pass would only place it correctly by
+    chance -- this late pass, anchored on the final row trunk, is the
+    only one it needs.
 
     For each LR/RL grid section, locate the inter-section bundle Y from
     the entry/exit port station Y (which by this point sits on the
@@ -764,9 +833,11 @@ def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
     ``y_spacing`` pitch, preserving the order produced by the first
     pass.
 
-    No-op when the existing layout is already symmetric around the
-    anchor; bbox heights are not adjusted because earlier compaction
-    already sized the band to fit two slots either side of the trunk.
+    A ``diamond_style: symmetric`` two-way entry fork is instead compacted
+    onto half-pitch offsets (``trunk +/- 0.5 pitch``) and its branches marked
+    half-grid.
+
+    No-op when the existing layout is already symmetric around the anchor.
     """
     grid_sec_ids = _grid_group_section_ids(graph)
     if not grid_sec_ids:
@@ -777,6 +848,16 @@ def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
             section.id not in grid_sec_ids
             or section.direction not in ("LR", "RL")
             or section.bbox_h <= 0
+        ):
+            continue
+        # Under ``diamond_style: symmetric`` (without ``center_ports``) this is
+        # the sole pass, so it must touch only the two-way symmetric entry fork
+        # it exists to compact.  Re-fanning every full-bundle column here spreads
+        # unrelated columns (e.g. a 5-way fan-in) symmetrically about their
+        # trunk and inflates the section, so all other columns are left as the
+        # section layout placed them.
+        if not graph.center_ports and not _section_has_symmetric_entry_fork(
+            graph, section
         ):
             continue
         bundle = _section_bundle_lines(graph, section)
@@ -848,6 +929,277 @@ def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
                 continue
             participants.sort(key=lambda s: (graph.stations[s].track, s))
             n = len(participants)
+            # A ``diamond_style: symmetric`` two-way fork compacts onto
+            # half-pitch offsets (trunk +/- 0.5 pitch) so it consumes one grid
+            # unit rather than straddling a full empty trunk row; the branches
+            # are marked so the grid snap leaves the half-offsets intact.
+            half = graph.diamond_style == "symmetric" and n == 2
+            if half:
+                # Orient so a branch bearing an off-track file above the trunk
+                # fans to the bottom slot (and one below the trunk to the top).
+                # The file is offset away from its producer, so an above-trunk
+                # file on an up-fanned branch protrudes past the row's top band
+                # and shifts the whole map off the trunk; fanning that branch
+                # down keeps the file within the section's existing band.
+                sides = [
+                    _fork_offtrack_side(graph, section, p, anchor_y)
+                    for p in participants
+                ]
+                if sides[0] == -1 or sides[1] == 1:
+                    participants.reverse()
+            scale = 0.5 if half else 1.0
             offsets = _fan_offsets(n)
             for sid, off in zip(participants, offsets):
-                graph.stations[sid].y = anchor_y + off * pitch
+                graph.stations[sid].y = anchor_y + off * scale * pitch
+                if half:
+                    graph.half_grid_station_ids.add(sid)
+
+
+def _carry_symmetric_branch_continuations(
+    graph: MetroGraph, section_y_padding: float = SECTION_Y_PADDING
+) -> None:
+    """Draw a fanned branch's in-section continuation onto the branch's track.
+
+    Under ``diamond_style: symmetric`` the two-way fork's branch stations are
+    fanned off the trunk (see :func:`_recenter_full_bundle_columns`), but a
+    branch that continues to further stations *inside* the section leaves those
+    successors on the trunk, so the branch humps out and immediately back.
+
+    Walk each fanned branch's sole-successor chain and pull every in-section
+    successor onto the branch's Y, so a dead-end branch stays fanned for its
+    whole length.  The walk stops as soon as a station's forward path leaves the
+    branch -- it gains a second predecessor, forks, or continues only through an
+    exit port -- so a branch that exits the section is left to fall back to the
+    trunk and meet its exit port there.
+    """
+    if graph.diamond_style != "symmetric":
+        return
+    for section in graph.sections.values():
+        if section.direction not in ("LR", "RL"):
+            continue
+        carried: list[str] = []
+        for sid in section.station_ids:
+            if sid not in graph.half_grid_station_ids:
+                continue
+            branch = graph.stations.get(sid)
+            if branch is None:
+                continue
+            carried.extend(_pull_continuation_onto(graph, section, branch))
+        if not carried:
+            continue
+        graph.half_grid_station_ids.update(carried)
+        content_ys = [
+            graph.stations[s].y
+            for s in section.station_ids
+            if s in graph.stations and not graph.stations[s].is_port
+        ]
+        if content_ys:
+            grow_section_bbox_min_edge(
+                graph, section, "y", min(content_ys) - section_y_padding
+            )
+            grow_section_bbox_max_edge(
+                graph, section, "y", max(content_ys) + section_y_padding
+            )
+
+
+def _section_lr_entry_port(graph: MetroGraph, section: Section) -> str | None:
+    """The id of *section*'s first LEFT/RIGHT entry port, or ``None``."""
+    return next(
+        (
+            pid
+            for pid in section.entry_ports
+            if (p := graph.ports.get(pid)) is not None
+            and p.side in (PortSide.LEFT, PortSide.RIGHT)
+        ),
+        None,
+    )
+
+
+def _symfan_entry_port_feeder_y(
+    graph: MetroGraph, section: Section
+) -> tuple[str, float] | None:
+    """``(entry_port_id, feeder_exit_y)`` for a symmetric entry fork whose LR
+    entry port is fed by exactly one same-row section's exit port; else ``None``.
+
+    Shared by the placement pass that slides the section onto that feeder's Y
+    and the guard that checks it stayed there, so the two read one relation and
+    can't drift.  A cross-row feeder (its bundle wraps between rows) is excluded:
+    only a horizontal same-row run should pin the section's vertical position.
+    """
+    if section.direction not in ("LR", "RL") or not _section_has_symmetric_entry_fork(
+        graph, section
+    ):
+        return None
+    entry_port = _section_lr_entry_port(graph, section)
+    if entry_port is None:
+        return None
+    feeder_ys = {
+        round(src.y, 1)
+        for e in graph.edges_to(entry_port)
+        if (src := graph.stations.get(e.source)) is not None
+        and src.is_port
+        and (fsec := graph.sections.get(src.section_id or "")) is not None
+        and fsec.grid_row == section.grid_row
+        and src.id in fsec.exit_ports
+    }
+    if len(feeder_ys) != 1:
+        return None
+    return entry_port, feeder_ys.pop()
+
+
+def _in_section_continuation_chain(
+    graph: MetroGraph, section: Section, start_id: str
+) -> list[str]:
+    """The linear tail of on-track stations continuing *start_id*'s branch.
+
+    Each step is the sole on-track in-section successor whose only in-section
+    predecessor is the current station -- a branch that neither forks nor merges
+    before leaving the section.  Off-track file successors are not part of the
+    chain; the walk stops at the last on-track station.
+    """
+
+    def predecessors(sid: str) -> list[str]:
+        return sorted(
+            {
+                e.source
+                for e in graph.edges_to(sid)
+                if (s := graph.stations.get(e.source)) is not None
+                and not s.is_port
+                and s.section_id == section.id
+            }
+        )
+
+    chain: list[str] = []
+    current = start_id
+    seen = {start_id}
+    while True:
+        succ = [
+            s
+            for s in _in_section_ontrack_successors(graph, section, current)
+            if s not in seen
+        ]
+        if len(succ) != 1 or predecessors(succ[0]) != [current]:
+            break
+        current = succ[0]
+        chain.append(current)
+        seen.add(current)
+    return chain
+
+
+def _in_section_ontrack_successors(
+    graph: MetroGraph, section: Section, sid: str
+) -> list[str]:
+    """Deduped ids of *sid*'s on-track successors within *section*.
+
+    A multi-line edge appears once per line, so the same successor is listed
+    repeatedly; the set collapses those.
+    """
+    return sorted(
+        {
+            e.target
+            for e in graph.edges_from(sid)
+            if _is_in_section_on_track(graph.stations.get(e.target), section.id)
+        }
+    )
+
+
+def _fork_offtrack_side(
+    graph: MetroGraph, section: Section, branch_id: str, anchor_y: float
+) -> int:
+    """Which side of the trunk an off-track file on *branch_id*'s chain sits.
+
+    Walks the branch's in-section continuation and inspects each station for an
+    off-track file successor.  Returns ``-1`` when such a file sits above the
+    trunk ``anchor_y``, ``+1`` when below, and ``0`` when the branch carries no
+    off-track file.  Used to orient the symmetric fork so the file stays within
+    the section's band.
+    """
+    for sid in [branch_id, *_in_section_continuation_chain(graph, section, branch_id)]:
+        for e in graph.edges_from(sid):
+            tgt = graph.stations.get(e.target)
+            if tgt is not None and tgt.off_track and tgt.section_id == section.id:
+                return -1 if tgt.y < anchor_y else 1
+    return 0
+
+
+def _align_symfan_section_to_row_feeder(graph: MetroGraph) -> None:
+    """Slide a symmetric-fork section onto its in-row feeder's exit line.
+
+    Centering the fork on the entry port (see
+    :func:`_recenter_full_bundle_columns`) can leave that port off the trunk of
+    the same-row section feeding it -- the port settled on the fork midline
+    rather than the horizontal bundle arriving from the left.  Translate the
+    whole section (content, ports, bbox) so its entry port shares a Y with that
+    feeder's exit port, straightening the inter-section run.
+    """
+    if graph.diamond_style != "symmetric":
+        return
+    for section in graph.sections.values():
+        feeder = _symfan_entry_port_feeder_y(graph, section)
+        if feeder is None:
+            continue
+        entry_port, feeder_y = feeder
+        delta = feeder_y - graph.stations[entry_port].y
+        if abs(delta) < 1.0:
+            continue
+        for sid in section.station_ids:
+            if sid in graph.stations:
+                graph.stations[sid].y += delta
+        section.bbox_y += delta
+
+
+def _center_lr_entry_ports_on_fork(graph: MetroGraph, y_spacing: float) -> None:
+    """Centre an LR entry port on the two-way fork it fans into.
+
+    Under ``diamond_style: symmetric`` a section's LR entry port that fans into
+    branches at exactly two distinct Ys should sit at their midpoint, so the
+    fork reads symmetric about the incoming bundle and the run from the feeding
+    section arrives straight.  Otherwise the port stays pinned to whichever
+    branch the section layout seated it on (e.g. the top branch of a
+    reconverging diamond), leaving the inter-section run kinked.  Only the port
+    moves; the branch stations keep their places.
+
+    Skipped when the midpoint falls between grid rows (the branches are an odd
+    number of slots apart): seating the port there puts it half a slot off the
+    grid the branches sit on, which reads as an off-grid port rather than a
+    straightened run.
+    """
+    if graph.diamond_style != "symmetric":
+        return
+    for section in graph.sections.values():
+        if section.direction not in ("LR", "RL"):
+            continue
+        pitch = _section_row_pitch(graph, section.id, y_spacing)
+        for pid in section.entry_ports:
+            port = graph.ports.get(pid)
+            if port is None or port.side not in (PortSide.LEFT, PortSide.RIGHT):
+                continue
+            branch_ys = sorted(
+                {
+                    round(graph.stations[s].y, 1)
+                    for s in _in_section_ontrack_successors(graph, section, pid)
+                }
+            )
+            if len(branch_ys) != 2:
+                continue
+            slots = (branch_ys[1] - branch_ys[0]) / pitch if pitch else 0.0
+            if pitch <= 0 or round(slots) % 2 != 0:
+                continue
+            midpoint = (branch_ys[0] + branch_ys[1]) / 2.0
+            if abs(graph.stations[pid].y - midpoint) >= 1.0:
+                graph.stations[pid].y = midpoint
+
+
+def _pull_continuation_onto(
+    graph: MetroGraph, section: Section, branch: Station
+) -> list[str]:
+    """Set each in-section continuation station of *branch* to its Y; return them.
+
+    Off-track file successors are not part of the continuation: they are placed
+    by the off-track lift pass at an intentional offset from their producer, so
+    carrying one onto the branch track would drop the file onto its producer.
+    """
+    carried = _in_section_continuation_chain(graph, section, branch.id)
+    for sid in carried:
+        graph.stations[sid].y = branch.y
+    return carried
