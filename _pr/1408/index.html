@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="nf-metro-render-run" content="29088048007">
+<title>Render diff - PR #1408</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: light-dark(#f5f5f7, #1e1e2e);
+    --surface: light-dark(#eaeaef, #2a2a3c);
+    --border: light-dark(#c9c9d4, #3a3a4c);
+    --text: light-dark(#1e1e2e, #e0e0e0);
+    --muted: light-dark(#666, #888);
+    --accent: light-dark(#1a8575, #4ec9b0);
+    --added: light-dark(rgba(46,160,67,.25), rgba(46,160,67,.44));
+    --removed: light-dark(rgba(218,54,52,.25), rgba(218,54,52,.44));
+  }
+  [data-scheme="dark"] { color-scheme: dark; }
+  [data-scheme="light"] { color-scheme: light; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 2rem;
+    line-height: 1.5;
+  }
+  .page-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+  }
+  h1 {
+    font-size: 1.5rem;
+    color: var(--accent);
+  }
+  .scheme-btn {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 0.35rem 0.75rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
+  .scheme-btn:hover { background: var(--border); }
+  .summary {
+    color: var(--muted);
+    margin-bottom: 2rem;
+    font-size: 0.95rem;
+  }
+  .toc {
+    margin-bottom: 2rem;
+    padding: 1rem 1.5rem;
+    background: var(--surface);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  .toc h2 {
+    font-size: 1rem;
+    margin-bottom: 0.5rem;
+    color: var(--accent);
+  }
+  .toc h3 {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-top: 0.5rem;
+    margin-bottom: 0.25rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .toc ul {
+    list-style: none;
+    columns: 2;
+    column-gap: 2rem;
+  }
+  .toc li {
+    margin-bottom: 0.25rem;
+  }
+  .toc a {
+    color: var(--text);
+    text-decoration: none;
+  }
+  .toc a:hover {
+    color: var(--accent);
+    text-decoration: underline;
+  }
+  .badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    margin-left: 0.4rem;
+    vertical-align: middle;
+  }
+  .badge-changed { background: var(--border); }
+  .badge-added { background: var(--added); }
+  .badge-removed { background: var(--removed); }
+  .section-header {
+    font-size: 1.3rem;
+    color: var(--accent);
+    margin-top: 2.5rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid var(--border);
+  }
+  .diff-entry {
+    margin-bottom: 3rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .diff-entry h3 {
+    font-size: 1.1rem;
+    padding: 0.75rem 1rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .comparison {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+  }
+  .side {
+    padding: 1rem;
+    overflow-x: auto;
+  }
+  .side:first-child {
+    border-right: 1px solid var(--border);
+  }
+  .side h4 {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-bottom: 0.5rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .svg-wrapper { overflow-x: auto; }
+  .svg-wrapper svg, .side img, .side-only img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    border-radius: 4px;
+  }
+  .side-only {
+    padding: 1rem;
+  }
+  .empty {
+    color: var(--muted);
+    font-style: italic;
+    padding: 2rem;
+    text-align: center;
+  }
+  .toggle-bar {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .toggle-bar button {
+    background: var(--border);
+    color: var(--text);
+    border: none;
+    padding: 0.3rem 0.8rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+  .toggle-bar button.active {
+    background: var(--accent);
+    color: var(--bg);
+  }
+  .intro {
+    margin-bottom: 2rem;
+    padding: 1rem 1.5rem;
+    background: var(--surface);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    font-size: 0.9rem;
+    line-height: 1.6;
+  }
+  .intro summary {
+    cursor: pointer;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .intro p {
+    margin-top: 0.75rem;
+  }
+  .intro ul {
+    margin-top: 0.5rem;
+    padding-left: 1.5rem;
+  }
+  .intro li {
+    margin-bottom: 0.25rem;
+  }
+  .intro code {
+    background: var(--border);
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    font-size: 0.85em;
+  }
+  .intro a {
+    color: var(--accent);
+  }
+  .metrics {
+    margin-bottom: 2rem;
+    padding: 1rem 1.5rem;
+    background: var(--surface);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  .metrics h2 {
+    font-size: 1rem;
+    margin-bottom: 0.25rem;
+    color: var(--accent);
+  }
+  .metrics .caption {
+    color: var(--muted);
+    font-size: 0.8rem;
+    margin-bottom: 0.75rem;
+  }
+  .metrics table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.82rem;
+  }
+  .metrics th, .metrics td {
+    padding: 0.3rem 0.6rem;
+    text-align: right;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .metrics th:first-child, .metrics td:first-child {
+    text-align: left;
+  }
+  .metrics th {
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.7rem;
+  }
+  .metrics td a { color: var(--text); text-decoration: none; }
+  .metrics td a:hover { color: var(--accent); }
+  .m-flat { color: var(--muted); }
+  .m-better { color: light-dark(#1a8575, #4ec9b0); font-weight: 600; }
+  .m-worse { color: light-dark(#c0392b, #f38ba8); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="page-header">
+  <h1>Render diff - PR #1408</h1>
+  <button id="scheme-toggle" class="scheme-btn">System</button>
+</div>
+<p class="summary">2 added out of 238 total renders. Generated 2026-07-10 11:00 UTC.</p>
+<details class="intro">
+<summary>What is this page?</summary>
+<p>
+<a href="https://github.com/pinin4fjords/nf-metro">nf-metro</a>
+generates metro-map-style SVG diagrams from Mermaid graph definitions.
+This page is automatically generated for every pull request and shows
+<strong>only the renders that changed</strong> compared to the
+<code>main</code> branch.
+</p>
+<p>
+Use it to check that code changes produce the intended visual result
+without unexpected side-effects on other diagrams. Each entry shows
+the <strong>base</strong> (main) render on the left and the
+<strong>PR</strong> render on the right. Use the toggle buttons to
+switch between side-by-side, base-only, and PR-only views.
+</p>
+<p><strong>What to look for:</strong></p>
+<ul>
+<li>Intended improvements in the PR column</li>
+<li>Unintended regressions (overlapping lines, shifted labels,
+    broken routing) in diagrams you did not mean to change</li>
+<li>New renders (green <em>added</em> badge) or removed renders
+    (red <em>removed</em> badge)</li>
+</ul>
+</details>
+<div class="metrics">
+<h2>Layout-quality metrics</h2>
+<p class="caption">Advisory only &mdash; nothing gates on these. Lower is better; <span class="m-better">green</span> improved, <span class="m-worse">red</span> regressed.</p>
+<table>
+<tr><th>Render</th><th>Crossings</th><th>Near-horiz.</th><th>Lone diag.</th><th>Label strikes</th><th>Excess gaps</th><th>Wasted canvas</th></tr>
+<tr><td><a href="#symmetric_deadend_fanout">symmetric_deadend_fanout</a></td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;66%</td></tr>
+<tr><td><a href="#symmetric_deadend_fanout_exit">symmetric_deadend_fanout_exit</a></td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;56%</td></tr>
+</table>
+</div>
+<div class="toc">
+<h2>Changed renders</h2>
+<h3><a href="#section-fan-out-and-fan-in">Fan-out and Fan-in</a></h3>
+<ul>
+<li><a href="#symmetric_deadend_fanout">symmetric_deadend_fanout</a><span class="badge badge-added">added</span></li>
+<li><a href="#symmetric_deadend_fanout_exit">symmetric_deadend_fanout_exit</a><span class="badge badge-added">added</span></li>
+</ul>
+</div>
+<h2 class="section-header" id="section-fan-out-and-fan-in">Fan-out and Fan-in</h2>
+
+<div class="diff-entry" id="symmetric_deadend_fanout">
+<h3>Symmetric Deadend Fanout <span class="badge badge-added">added</span></h3>
+<div class="side-only"><h4>New in PR</h4><div class="svg-wrapper"><?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="534" height="356" viewBox="0 0 534 356">
+<defs>
+</defs>
+<style>.nf-metro-bg { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }
+.nf-metro-title { fill: var(--nfm-map-title-color, light-dark(#111111, #ffffff)); }
+.nf-metro-station-label { fill: var(--nfm-map-label-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-section-box { fill: var(--nfm-map-section-fill, light-dark(#ededed, #373737)); stroke: var(--nfm-map-section-stroke, light-dark(#e6e6e6, #595959)); }
+.nf-metro-section-label { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-label { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-underline { stroke: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-legend-bg { fill: var(--nfm-map-legend-bg, light-dark(rgba(255, 255, 255, 0.8), rgba(0, 0, 0, 0.3))); }
+.nf-metro-legend-text { fill: var(--nfm-map-legend-text-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-marker-stroke { stroke: var(--nfm-map-marker-stroke, light-dark(#333333, #f0f0f0)); }
+.nf-metro-label-halo { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); stroke: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }</style>
+<rect x="0" y="0" width="534" height="356" fill="#2b2b2b" class="nf-metro-bg" />
+<text x="60.0" y="30.0" font-size="24.0" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" class="nf-metro-title">Symmetric Deadend Fanout</text>
+<rect x="60.0" y="125.2" width="100.0" height="100.0" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box" data-section-id="src" data-section-lines="a" />
+<circle cx="71.0" cy="110.2" r="11" fill="#333333" class="nf-metro-section-num-circle" data-section-id="src" />
+<text x="71.0" y="110.2" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="src">1</text>
+<text x="87.0" y="110.2" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label" data-section-id="src">Src</text>
+<rect x="210.0" y="96.0" width="264.0" height="158.39999999999998" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box" data-section-id="s1" data-section-lines="a" />
+<circle cx="221.0" cy="81.0" r="11" fill="#333333" class="nf-metro-section-num-circle" data-section-id="s1" />
+<text x="221.0" y="81.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="s1">2</text>
+<text x="237.0" y="81.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label" data-section-id="s1">S1</text>
+<path d="M296.0,146.0 L356.0,146.0" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-a" data-line-id="a" />
+<path d="M356.0,146.0 L416.0,146.0" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-a" data-line-id="a" />
+<path d="M110.0,175.2 L160.0,175.2" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-a" data-line-id="a" />
+<path d="M210.0,175.2 L215.0,175.2 Q225.0,175.2,232.1659685053255,168.22512398814982 L247.8340314946745,152.97487601185017 Q255.0,146.0,265.0,146.0 L296.0,146.0" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-a" data-line-id="a" />
+<path d="M210.0,175.2 L215.0,175.2 Q225.0,175.2,232.1659685053255,182.17487601185016 L247.8340314946745,197.4251239881498 Q255.0,204.39999999999998,265.0,204.39999999999998 L296.0,204.39999999999998" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-a" data-line-id="a" />
+<path d="M160.0,175.2 L210.0,175.2" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-a" data-line-id="a" />
+<rect x="105.0" y="170.2" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="entry" data-station-lines="a" data-station-label="Entry" data-section-id="src" data-section-name="Src" />
+<rect x="291.0" y="141.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="split" data-station-lines="a" data-station-label="Split" data-section-id="s1" data-section-name="S1" />
+<rect x="351.0" y="141.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="genomecov" data-station-lines="a" data-station-label="Genomecov" data-section-id="s1" data-section-name="S1" />
+<rect x="291.0" y="199.39999999999998" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="salmon" data-station-lines="a" data-station-label="Salmon" data-section-id="s1" data-section-name="S1" />
+<rect x="411.0" y="141.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="out1" data-station-lines="a" data-station-label="out1" data-section-id="s1" data-section-name="S1" />
+<g data-station-id="out1">
+<path d="M429.0,130.0 L447.0,130.0 L455.0,138.0 L455.0,160.0 Q455.0,162.0,453.0,162.0 L429.0,162.0 Q427.0,162.0,427.0,160.0 L427.0,132.0 Q427.0,130.0,429.0,130.0 Z" fill="#ffffff" stroke="#333333" stroke-width="1.5" stroke-linejoin="round" />
+<path d="M447.0,130.0 L447.0,138.0 L455.0,138.0 Z" fill="#333333" opacity="0.15" stroke="none" />
+<path d="M447.0,130.0 L447.0,138.0 L455.0,138.0" fill="none" stroke="#333333" stroke-width="0.8999999999999999" />
+<text x="441.0" y="147.2" font-size="7.5" fill="#000000" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em">BW</text>
+<text x="441.0" y="166.0" font-size="7.8" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging">Coverage</text>
+</g>
+<text x="296.0" y="157.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="hanging">Split</text>
+<text x="296.0" y="157.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="split" class="nf-metro-station-label">Split</text>
+<text x="110.0" y="186.2" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="hanging">Entry</text>
+<text x="110.0" y="186.2" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="entry" class="nf-metro-station-label">Entry</text>
+<text x="296.0" y="215.39999999999998" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="hanging">Salmon</text>
+<text x="296.0" y="215.39999999999998" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="salmon" class="nf-metro-station-label">Salmon</text>
+<text x="356.0" y="132.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="auto">Genomecov</text>
+<text x="356.0" y="132.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="genomecov" class="nf-metro-station-label">Genomecov</text>
+<circle cx="225.0" cy="175.2" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="255.0" cy="146.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="225.0" cy="175.2" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="255.0" cy="204.39999999999998" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<path d="M160.0,170.2 L165.0,175.2 L160.0,180.2 L155.0,175.2 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
+<text x="160.0" y="167.2" font-size="7" fill="rgba(80, 180, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">src__exit_right_0 (right)</text>
+<path d="M210.0,170.2 L215.0,175.2 L210.0,180.2 L205.0,175.2 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="210.0" y="167.2" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">s1__entry_left_1 (left)</text>
+<path d="M185.0,76.0 L185.0,274.4" stroke="rgba(255, 255, 0, 0.5)" stroke-width="1" stroke-dasharray="6,4" />
+<text x="185.0" y="72.0" font-size="7" fill="rgba(255, 255, 0, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">col 0|1</text>
+<path d="M50.0,146.0 L484.0,146.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="46.0" y="146.0" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0 grid</text>
+<path d="M50.0,175.2 L484.0,175.2" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<path d="M50.0,204.4 L484.0,204.4" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<rect x="60.0" y="284.4" width="106.2" height="48.0" rx="6" ry="6" fill="rgba(0, 0, 0, 0.3)" class="nf-metro-legend-bg" />
+<path d="M72.0,308.4 L96.0,308.4" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" />
+<text x="108.0" y="308.4" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text">Line A</text>
+<text x="504.0" y="348.0" font-size="8" fill="rgba(150, 150, 150, 0.6)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">created with nf-metro v1.1.0+dev</text>
+</svg></div></div>
+</div>
+
+<div class="diff-entry" id="symmetric_deadend_fanout_exit">
+<h3>Symmetric Deadend Fanout Exit <span class="badge badge-added">added</span></h3>
+<div class="side-only"><h4>New in PR</h4><div class="svg-wrapper"><?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="724" height="414" viewBox="0 0 724 414">
+<defs>
+</defs>
+<style>.nf-metro-bg { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }
+.nf-metro-title { fill: var(--nfm-map-title-color, light-dark(#111111, #ffffff)); }
+.nf-metro-station-label { fill: var(--nfm-map-label-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-section-box { fill: var(--nfm-map-section-fill, light-dark(#ededed, #373737)); stroke: var(--nfm-map-section-stroke, light-dark(#e6e6e6, #595959)); }
+.nf-metro-section-label { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-label { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-underline { stroke: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-legend-bg { fill: var(--nfm-map-legend-bg, light-dark(rgba(255, 255, 255, 0.8), rgba(0, 0, 0, 0.3))); }
+.nf-metro-legend-text { fill: var(--nfm-map-legend-text-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-marker-stroke { stroke: var(--nfm-map-marker-stroke, light-dark(#333333, #f0f0f0)); }
+.nf-metro-label-halo { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); stroke: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }</style>
+<rect x="0" y="0" width="724" height="414" fill="#2b2b2b" class="nf-metro-bg" />
+<text x="60.0" y="30.0" font-size="24.0" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" class="nf-metro-title">Symmetric Deadend Fanout Exit</text>
+<rect x="60.0" y="125.19999999999997" width="100.0" height="100.00000000000003" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box" data-section-id="src" data-section-lines="a" />
+<circle cx="71.0" cy="110.19999999999997" r="11" fill="#333333" class="nf-metro-section-num-circle" data-section-id="src" />
+<text x="71.0" y="110.19999999999997" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="src">1</text>
+<text x="87.0" y="110.19999999999997" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label" data-section-id="src">Src</text>
+<rect x="210.0" y="95.99999999999999" width="274.0" height="216.79999999999995" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box" data-section-id="s1" data-section-lines="a" />
+<circle cx="221.0" cy="80.99999999999999" r="11" fill="#333333" class="nf-metro-section-num-circle" data-section-id="s1" />
+<text x="221.0" y="80.99999999999999" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="s1">2</text>
+<text x="237.0" y="80.99999999999999" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label" data-section-id="s1">S1</text>
+<rect x="564.0" y="125.19999999999997" width="100.0" height="100.00000000000003" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box" data-section-id="sink" data-section-lines="a" />
+<circle cx="575.0" cy="110.19999999999997" r="11" fill="#333333" class="nf-metro-section-num-circle" data-section-id="sink" />
+<text x="575.0" y="110.19999999999997" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="sink">3</text>
+<text x="591.0" y="110.19999999999997" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label" data-section-id="sink">Sink</text>
+<path d="M296.0,204.39999999999998 L356.0,204.39999999999998" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-a" data-line-id="a" />
+<path d="M356.0,204.39999999999998 L366.0,204.39999999999998 Q376.0,204.39999999999998,380.5693498139703,213.29500097119552 L401.4306501860297,253.9049990288044 Q406.0,262.79999999999995,416.0,262.79999999999995 L426.0,262.79999999999995" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-a" data-line-id="a" />
+<path d="M110.0,175.2 L160.0,175.2" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-a" data-line-id="a" />
+<path d="M210.0,175.2 L215.0,175.2 Q225.0,175.2,232.1659685053255,182.17487601185016 L247.8340314946745,197.4251239881498 Q255.0,204.39999999999998,265.0,204.39999999999998 L296.0,204.39999999999998" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-a" data-line-id="a" />
+<path d="M210.0,175.2 L215.0,175.2 Q225.0,175.2,232.1659685053255,168.22512398814982 L247.8340314946745,152.97487601185017 Q255.0,146.0,265.0,146.0 L296.0,146.0" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-a" data-line-id="a" />
+<path d="M296.0,146.0 L429.0,146.0 Q439.0,146.0,446.1659685053255,152.97487601185017 L461.8340314946745,168.22512398814982 Q469.0,175.2,479.0,175.2 L484.0,175.2" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-a" data-line-id="a" />
+<path d="M564.0,175.2 L614.0,175.2" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-a" data-line-id="a" />
+<path d="M160.0,175.2 L210.0,175.2" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-a" data-line-id="a" />
+<path d="M484.0,175.2 L564.0,175.2" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-a" data-line-id="a" />
+<rect x="105.0" y="170.2" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="entry" data-station-lines="a" data-station-label="Entry" data-section-id="src" data-section-name="Src" />
+<rect x="291.0" y="199.39999999999998" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="split" data-station-lines="a" data-station-label="Split" data-section-id="s1" data-section-name="S1" />
+<rect x="351.0" y="199.39999999999998" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="genomecov" data-station-lines="a" data-station-label="Genomecov" data-section-id="s1" data-section-name="S1" />
+<rect x="291.0" y="141.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="salmon" data-station-lines="a" data-station-label="Salmon" data-section-id="s1" data-section-name="S1" />
+<rect x="421.0" y="257.79999999999995" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="cov_out" data-station-lines="a" data-station-label="cov_out" data-section-id="s1" data-section-name="S1" />
+<g data-station-id="cov_out">
+<path d="M439.0,246.79999999999995 L457.0,246.79999999999995 L465.0,254.79999999999995 L465.0,276.79999999999995 Q465.0,278.79999999999995,463.0,278.79999999999995 L439.0,278.79999999999995 Q437.0,278.79999999999995,437.0,276.79999999999995 L437.0,248.79999999999995 Q437.0,246.79999999999995,439.0,246.79999999999995 Z" fill="#ffffff" stroke="#333333" stroke-width="1.5" stroke-linejoin="round" />
+<path d="M457.0,246.79999999999995 L457.0,254.79999999999995 L465.0,254.79999999999995 Z" fill="#333333" opacity="0.15" stroke="none" />
+<path d="M457.0,246.79999999999995 L457.0,254.79999999999995 L465.0,254.79999999999995" fill="none" stroke="#333333" stroke-width="0.8999999999999999" />
+<text x="451.0" y="263.99999999999994" font-size="7.5" fill="#000000" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em">BW</text>
+<text x="451.0" y="282.79999999999995" font-size="7.8" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging">Coverage</text>
+</g>
+<rect x="609.0" y="170.2" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="report" data-station-lines="a" data-station-label="Report" data-section-id="sink" data-section-name="Sink" />
+<text x="296.0" y="190.39999999999998" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="auto">Split</text>
+<text x="296.0" y="190.39999999999998" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="split" class="nf-metro-station-label">Split</text>
+<text x="110.0" y="186.2" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="hanging">Entry</text>
+<text x="110.0" y="186.2" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="entry" class="nf-metro-station-label">Entry</text>
+<text x="296.0" y="132.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="auto">Salmon</text>
+<text x="296.0" y="132.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="salmon" class="nf-metro-station-label">Salmon</text>
+<text x="614.0" y="186.2" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="hanging">Report</text>
+<text x="614.0" y="186.2" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="report" class="nf-metro-station-label">Report</text>
+<text x="356.0" y="215.39999999999998" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="hanging">Genomecov</text>
+<text x="356.0" y="215.39999999999998" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="genomecov" class="nf-metro-station-label">Genomecov</text>
+<circle cx="376.0" cy="204.39999999999998" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="406.0" cy="262.79999999999995" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="225.0" cy="175.2" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="255.0" cy="204.39999999999998" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="225.0" cy="175.2" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="255.0" cy="146.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="439.0" cy="146.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="469.0" cy="175.2" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<path d="M160.0,170.2 L165.0,175.2 L160.0,180.2 L155.0,175.2 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
+<text x="160.0" y="167.2" font-size="7" fill="rgba(80, 180, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">src__exit_right_0 (right)</text>
+<path d="M484.0,170.2 L489.0,175.2 L484.0,180.2 L479.0,175.2 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
+<text x="484.0" y="167.2" font-size="7" fill="rgba(80, 180, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">s1__exit_right_1 (right)</text>
+<path d="M210.0,170.2 L215.0,175.2 L210.0,180.2 L205.0,175.2 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="210.0" y="167.2" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">s1__entry_left_2 (left)</text>
+<path d="M564.0,170.2 L569.0,175.2 L564.0,180.2 L559.0,175.2 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="564.0" y="167.2" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">sink__entry_left_3 (left)</text>
+<path d="M185.0,75.99999999999999 L185.0,332.79999999999995" stroke="rgba(255, 255, 0, 0.5)" stroke-width="1" stroke-dasharray="6,4" />
+<text x="185.0" y="71.99999999999999" font-size="7" fill="rgba(255, 255, 0, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">col 0|1</text>
+<path d="M524.0,75.99999999999999 L524.0,332.79999999999995" stroke="rgba(255, 255, 0, 0.5)" stroke-width="1" stroke-dasharray="6,4" />
+<text x="524.0" y="71.99999999999999" font-size="7" fill="rgba(255, 255, 0, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">col 1|2</text>
+<path d="M50.0,146.0 L674.0,146.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="46.0" y="146.0" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0 grid</text>
+<path d="M50.0,175.2 L674.0,175.2" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<path d="M50.0,204.4 L674.0,204.4" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<path d="M50.0,262.8 L674.0,262.8" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<rect x="60.0" y="342.79999999999995" width="106.2" height="48.0" rx="6" ry="6" fill="rgba(0, 0, 0, 0.3)" class="nf-metro-legend-bg" />
+<path d="M72.0,366.79999999999995 L96.0,366.79999999999995" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" />
+<text x="108.0" y="366.79999999999995" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text">Line A</text>
+<text x="694.0" y="406.0" font-size="8" fill="rgba(150, 150, 150, 0.6)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">created with nf-metro v1.1.0+dev</text>
+</svg></div></div>
+</div>
+<script>
+(function() {
+  const root = document.documentElement;
+  const btn = document.getElementById('scheme-toggle');
+  const schemes = ['auto', 'dark', 'light'];
+  const labels = {'auto': 'System', 'dark': 'Dark', 'light': 'Light'};
+  let idx = 0;
+  function apply() {
+    const s = schemes[idx];
+    if (s === 'auto') {
+      root.removeAttribute('data-scheme');
+    } else {
+      root.setAttribute('data-scheme', s);
+    }
+    btn.textContent = labels[s];
+  }
+  apply();
+  btn.addEventListener('click', function() {
+    idx = (idx + 1) % schemes.length;
+    apply();
+  });
+})();
+document.querySelectorAll('.toggle-bar button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const entry = btn.closest('.diff-entry');
+    const mode = btn.dataset.mode;
+    const buttons = entry.querySelectorAll('.toggle-bar button');
+    buttons.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const comp = entry.querySelector('.comparison');
+    const sideBase = comp.querySelector('.side-base');
+    const sidePr = comp.querySelector('.side-pr');
+    if (mode === 'side-by-side') {
+      comp.style.gridTemplateColumns = '1fr 1fr';
+      sideBase.style.display = '';
+      sidePr.style.display = '';
+    } else if (mode === 'base') {
+      comp.style.gridTemplateColumns = '1fr';
+      sideBase.style.display = '';
+      sidePr.style.display = 'none';
+    } else if (mode === 'pr') {
+      comp.style.gridTemplateColumns = '1fr';
+      sideBase.style.display = 'none';
+      sidePr.style.display = '';
+    }
+  });
+});
+</script>
+</body>
+</html>
