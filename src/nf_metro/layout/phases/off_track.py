@@ -711,14 +711,25 @@ def _has_passthrough_branch_label(
     diamond whose branches terminate at the join pack tight while a branch that
     threads through the loop keeps its room.
 
-    Requires two or more distinct branch tracks: with the branches all on one track
-    there is no transition diagonal to clear.
+    Requires a genuine fork/join (the hub has two or more targets/sources) whose
+    branches span a transition diagonal - they must not all sit on the hub's own
+    track (a single off-track branch dips away and back; two branches on different
+    tracks fan apart).  A single-input or single-output station that merely shares a
+    fan's layer converges nothing, so it is not considered.
     """
-    for _hub, branch_ids, branch_layer, diverge in _iter_hub_branches(
+    for hub, branch_ids, branch_layer, diverge in _iter_hub_branches(
         layer, fork_layers, join_layers, out_targets, in_sources, layers
     ):
+        if len(branch_ids) < 2:
+            continue
         btracks = _branch_tracks(branch_ids, branch_layer, layers, tracks)
-        if len({round(t, 3) for t in btracks.values()}) < 2:
+        diagonal_tracks = list(btracks.values())
+        hub_track = tracks.get(hub)
+        if hub_track is not None:
+            diagonal_tracks.append(hub_track)
+        if not diagonal_tracks:
+            continue
+        if max(diagonal_tracks) - min(diagonal_tracks) <= SAME_COORD_TOLERANCE:
             continue
         edges_of = sub.edges_from if diverge else sub.edges_to
         for bid in btracks:
