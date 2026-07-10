@@ -984,12 +984,10 @@ def _bundle_divergent_distinct_descents(
 
     step = ctx.offset_step
     for chans in by_source.values():
-        # Same-line descents are one fused stroke -- the coincidence pass has
-        # already snapped them onto a shared X -- so they occupy a SINGLE slot in
-        # the bundle.  Group by line and seat every line's channels on one track;
-        # ranking each channel independently would re-split a fused same-line
-        # trunk across two adjacent slots, the parallel same-colour tracks this
-        # pass exists to prevent.
+        # Same-line descents share one X (the coincidence pass snaps them onto a
+        # common track), so a line occupies ONE bundle slot however many branches
+        # it carries.  Seat per line, not per channel: keying each channel
+        # individually spreads a single line across adjacent slots.
         by_line: dict[str, list[_VChannel]] = defaultdict(list)
         for c in chans:
             by_line[c.route.line_id].append(c)
@@ -1001,10 +999,11 @@ def _bundle_divergent_distinct_descents(
             continue
 
         base = min(xs)
-        rep = {
-            lid: min(cs, key=_fanout_descent_order_key) for lid, cs in by_line.items()
+        line_key = {
+            lid: min(_fanout_descent_order_key(c) for c in cs)
+            for lid, cs in by_line.items()
         }
-        ordered = sorted(by_line, key=lambda lid: _fanout_descent_order_key(rep[lid]))
+        ordered = sorted(by_line, key=line_key.__getitem__)
         moves = [
             (ch, base + rank * step)
             for rank, lid in enumerate(ordered)
