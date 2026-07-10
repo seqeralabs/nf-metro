@@ -139,6 +139,15 @@ gallery:
       section while the other routes through it, and reconverge at the final
       section. Every shared channel keeps the two lines an OFFSET_STEP apart
       rather than collapsing one stroke onto the other."
+  - id: top_entry_bundle_offset_seam
+    source_dir: examples/topologies
+    category: Feature Showcase
+    description:
+      "A line splits off a shared multi-line trunk and drops into a section
+      through its `entry: top` port while carrying a within-bundle offset. The
+      inter-section descent tapers that offset away before the boundary so it
+      lands on the port's own X, meeting the intra-section drop as one
+      continuous stroke rather than stepping sideways across the top edge."
 
   # ── Realistic Pipelines ────────────────────────────────────────────────────
   - id: genomic_pipeline

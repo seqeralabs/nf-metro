@@ -1,0 +1,36 @@
+%%metro title: Top-entry bundle-offset seam
+%%metro line: a | Line A | #e6007e
+%%metro line: b | Line B | #2db572
+%%metro line: c | Line C | #2b6cb0
+%%metro grid: src | 0,0
+%%metro grid: other | 3,0
+%%metro grid: dst | 2,1
+%%metro grid: mid | 1,1
+
+graph LR
+    subgraph src [Src]
+        %%metro exit: right | a, b, c
+        s1[S1]
+    end
+    subgraph other [Other]
+        %%metro entry: left | a, b, c
+        o1[O1]
+    end
+    subgraph dst [Dst]
+        %%metro direction: RL
+        %%metro entry: top | b
+        %%metro exit: left | b
+        d1[D1]
+        d2[D2]
+        d3[D3]
+        d1 -->|b| d2
+        d2 -->|b| d3
+    end
+    subgraph mid [Mid]
+        %%metro direction: RL
+        %%metro entry: right | b
+        m1[M1]
+    end
+    s1 -->|a,b,c| o1
+    s1 -->|b| d1
+    d3 -->|b| m1
