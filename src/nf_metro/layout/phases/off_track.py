@@ -543,6 +543,40 @@ def _wide_fan_bubble_extra(
     return _loop_widening_for_label_half(bubble_label_half, x_spacing)
 
 
+def _iter_hub_branches(
+    layer: int,
+    fork_layers: set[int],
+    join_layers: set[int],
+    out_targets: dict[str, set[str]],
+    in_sources: dict[str, set[str]],
+    layers: dict[str, int],
+) -> Iterator[tuple[str, set[str], int, bool]]:
+    """Yield ``(hub, branch_ids, branch_layer, diverge)`` for each fork/join hub on
+    ``layer``: a fork hub feeds the layer above, a join hub the layer below."""
+    if layer in fork_layers:
+        for hub, tgts in out_targets.items():
+            if layers.get(hub) == layer:
+                yield hub, tgts, layer + 1, True
+    if layer in join_layers:
+        for hub, srcs in in_sources.items():
+            if layers.get(hub) == layer:
+                yield hub, srcs, layer - 1, False
+
+
+def _branch_tracks(
+    branch_ids: set[str],
+    branch_layer: int,
+    layers: dict[str, int],
+    tracks: dict[str, float],
+) -> dict[str, float]:
+    """Track of each branch station that actually sits on ``branch_layer``."""
+    return {
+        b: tracks[b]
+        for b in branch_ids
+        if b in tracks and layers.get(b) == branch_layer
+    }
+
+
 def _interior_branch_loop_floor(
     layer: int,
     fork_layers: set[int],
@@ -573,18 +607,12 @@ def _interior_branch_loop_floor(
     thin one.
     """
     floor = 0.0
-
-    def consider(
-        hub: str, branch_ids: set[str], branch_layer: int, diverge: bool
-    ) -> None:
-        nonlocal floor
-        btracks = {
-            b: tracks[b]
-            for b in branch_ids
-            if b in tracks and layers.get(b) == branch_layer
-        }
+    for hub, branch_ids, branch_layer, diverge in _iter_hub_branches(
+        layer, fork_layers, join_layers, out_targets, in_sources, layers
+    ):
+        btracks = _branch_tracks(branch_ids, branch_layer, layers, tracks)
         if len(btracks) < 3:
-            return
+            continue
         top, bottom = min(btracks.values()), max(btracks.values())
         hub_edges = sub.edges_from(hub) if diverge else sub.edges_to(hub)
         sibling_lines = Counter((e.target if diverge else e.source) for e in hub_edges)
@@ -600,15 +628,6 @@ def _interior_branch_loop_floor(
                 continue
             half = _flow_axis_label_half(station.label, direction)
             floor = max(floor, _loop_widening_for_label_half(half, x_spacing))
-
-    if layer in fork_layers:
-        for fsid, ftgts in out_targets.items():
-            if layers.get(fsid) == layer:
-                consider(fsid, ftgts, layer + 1, diverge=True)
-    if layer in join_layers:
-        for jsid, jsrcs in in_sources.items():
-            if layers.get(jsid) == layer:
-                consider(jsid, jsrcs, layer - 1, diverge=False)
     return floor
 
 
@@ -695,45 +714,27 @@ def _has_passthrough_branch_label(
     Requires two or more distinct branch tracks: with the branches all on one track
     there is no transition diagonal to clear.
     """
-
-    def any_passthrough(
-        hub: str, branch_ids: set[str], branch_layer: int, diverge: bool
-    ) -> bool:
-        btracks = {
-            b: tracks[b]
-            for b in branch_ids
-            if b in tracks and layers.get(b) == branch_layer
-        }
+    for _hub, branch_ids, branch_layer, diverge in _iter_hub_branches(
+        layer, fork_layers, join_layers, out_targets, in_sources, layers
+    ):
+        btracks = _branch_tracks(branch_ids, branch_layer, layers, tracks)
         if len({round(t, 3) for t in btracks.values()}) < 2:
-            return False
+            continue
+        edges_of = sub.edges_from if diverge else sub.edges_to
         for bid in btracks:
             station = sub.stations.get(bid)
             if not (station and station.label.strip()):
                 continue
-            edges = sub.edges_from(bid) if diverge else sub.edges_to(bid)
-            if any(
-                (
-                    layers.get(e.target, branch_layer) > branch_layer
+            for edge in edges_of(bid):
+                neighbor = edge.target if diverge else edge.source
+                neighbor_layer = layers.get(neighbor, branch_layer)
+                away = (
+                    neighbor_layer > branch_layer
                     if diverge
-                    else layers.get(e.source, branch_layer) < branch_layer
+                    else neighbor_layer < branch_layer
                 )
-                for e in edges
-            ):
-                return True
-        return False
-
-    if layer in fork_layers:
-        for fsid, ftgts in out_targets.items():
-            if layers.get(fsid) == layer and any_passthrough(
-                fsid, ftgts, layer + 1, diverge=True
-            ):
-                return True
-    if layer in join_layers:
-        for jsid, jsrcs in in_sources.items():
-            if layers.get(jsid) == layer and any_passthrough(
-                jsid, jsrcs, layer - 1, diverge=False
-            ):
-                return True
+                if away:
+                    return True
     return False
 
 
@@ -822,11 +823,8 @@ def _layer_gap_for(
             direction,
         )
 
-    # A clean diamond (branches terminate at the join) needs only the geometric
-    # routing_clearance for the fork/join label; the bare label-half is slack that
-    # over-reserves by ``x_spacing - (DIAGONAL_RUN + MIN_STRAIGHT_EDGE + 1)``.  A
-    # branch that threads a labelled station through the loop keeps that reservation
-    # so the sibling's transition diagonal clears the mid-loop label.
+    # The bare label-half over-reserves by x_spacing - routing_clearance; keep it
+    # only where a mid-loop label rides the loop and a sibling diagonal sweeps it.
     passthrough_label_half = (
         fj_label_half
         if _has_passthrough_branch_label(

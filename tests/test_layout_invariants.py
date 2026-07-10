@@ -2967,7 +2967,6 @@ def test_clean_diamond_fork_gap_drops_bare_label_slack():
     """
     from nf_metro.layout.constants import DIAGONAL_RUN, MIN_STRAIGHT_EDGE
     from nf_metro.layout.labels import label_text_width
-    from nf_metro.parser.mermaid import parse_metro_mermaid
 
     graph = parse_metro_mermaid(_CLEAN_DIAMOND_MMD)
     compute_layout(graph)
@@ -2990,8 +2989,6 @@ def test_passthrough_loop_keeps_bare_label_reservation():
     but the branches thread a labelled station through the loop, so the gap must
     stay wider than the clean-diamond tight clearance.
     """
-    from nf_metro.parser.mermaid import parse_metro_mermaid
-
     clean = parse_metro_mermaid(_CLEAN_DIAMOND_MMD)
     compute_layout(clean)
     clean_gap = clean.stations["leaf_a"].x - clean.stations["hub"].x
