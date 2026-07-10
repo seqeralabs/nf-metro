@@ -543,6 +543,40 @@ def _wide_fan_bubble_extra(
     return _loop_widening_for_label_half(bubble_label_half, x_spacing)
 
 
+def _iter_hub_branches(
+    layer: int,
+    fork_layers: set[int],
+    join_layers: set[int],
+    out_targets: dict[str, set[str]],
+    in_sources: dict[str, set[str]],
+    layers: dict[str, int],
+) -> Iterator[tuple[str, set[str], int, bool]]:
+    """Yield ``(hub, branch_ids, branch_layer, diverge)`` for each fork/join hub on
+    ``layer``: a fork hub feeds the layer above, a join hub the layer below."""
+    if layer in fork_layers:
+        for hub, tgts in out_targets.items():
+            if layers.get(hub) == layer:
+                yield hub, tgts, layer + 1, True
+    if layer in join_layers:
+        for hub, srcs in in_sources.items():
+            if layers.get(hub) == layer:
+                yield hub, srcs, layer - 1, False
+
+
+def _branch_tracks(
+    branch_ids: set[str],
+    branch_layer: int,
+    layers: dict[str, int],
+    tracks: dict[str, float],
+) -> dict[str, float]:
+    """Track of each branch station that actually sits on ``branch_layer``."""
+    return {
+        b: tracks[b]
+        for b in branch_ids
+        if b in tracks and layers.get(b) == branch_layer
+    }
+
+
 def _interior_branch_loop_floor(
     layer: int,
     fork_layers: set[int],
@@ -573,18 +607,12 @@ def _interior_branch_loop_floor(
     thin one.
     """
     floor = 0.0
-
-    def consider(
-        hub: str, branch_ids: set[str], branch_layer: int, diverge: bool
-    ) -> None:
-        nonlocal floor
-        btracks = {
-            b: tracks[b]
-            for b in branch_ids
-            if b in tracks and layers.get(b) == branch_layer
-        }
+    for hub, branch_ids, branch_layer, diverge in _iter_hub_branches(
+        layer, fork_layers, join_layers, out_targets, in_sources, layers
+    ):
+        btracks = _branch_tracks(branch_ids, branch_layer, layers, tracks)
         if len(btracks) < 3:
-            return
+            continue
         top, bottom = min(btracks.values()), max(btracks.values())
         hub_edges = sub.edges_from(hub) if diverge else sub.edges_to(hub)
         sibling_lines = Counter((e.target if diverge else e.source) for e in hub_edges)
@@ -600,15 +628,6 @@ def _interior_branch_loop_floor(
                 continue
             half = _flow_axis_label_half(station.label, direction)
             floor = max(floor, _loop_widening_for_label_half(half, x_spacing))
-
-    if layer in fork_layers:
-        for fsid, ftgts in out_targets.items():
-            if layers.get(fsid) == layer:
-                consider(fsid, ftgts, layer + 1, diverge=True)
-    if layer in join_layers:
-        for jsid, jsrcs in in_sources.items():
-            if layers.get(jsid) == layer:
-                consider(jsid, jsrcs, layer - 1, diverge=False)
     return floor
 
 
@@ -669,6 +688,64 @@ def _angled_interior_reach(
                     angled_reach, label_text_width(station.label) * cos_a
                 )
     return angled_reach
+
+
+def _off_track_branch_needs_loop_room(
+    layer: int,
+    fork_layers: set[int],
+    join_layers: set[int],
+    out_targets: dict[str, set[str]],
+    in_sources: dict[str, set[str]],
+    layers: dict[str, int],
+    tracks: dict[str, float],
+    sub: MetroGraph,
+) -> bool:
+    """Whether an off-track branch dips through this fork/join and needs loop room.
+
+    An off-track branch leaves the hub's track on a transition diagonal, so it
+    needs the fork/join label's straight-run reservation kept for its own flat run
+    (and to keep its dip centred).  A join's off-track source always dips up to the
+    internal join station, so it always qualifies.  A fork's off-track target only
+    qualifies if it reconverges at an internal station (an onward edge to a real
+    station); a target that merely exits the section through a port - or a diamond
+    whose branches all terminate at the fork - has no dip to keep room for, so the
+    column packs tight.
+
+    Requires a genuine fork/join (two or more targets/sources) whose branches span
+    a transition diagonal: they must not all sit within ``SAME_COORD_TOLERANCE`` of
+    the hub's own track.
+    """
+    for hub, branch_ids, branch_layer, diverge in _iter_hub_branches(
+        layer, fork_layers, join_layers, out_targets, in_sources, layers
+    ):
+        if len(branch_ids) < 2:
+            continue
+        btracks = _branch_tracks(branch_ids, branch_layer, layers, tracks)
+        hub_track = tracks.get(hub)
+        diagonal_tracks = list(btracks.values())
+        if hub_track is not None:
+            diagonal_tracks.append(hub_track)
+        if not diagonal_tracks:
+            continue
+        if max(diagonal_tracks) - min(diagonal_tracks) <= SAME_COORD_TOLERANCE:
+            continue
+        for bid, btrack in btracks.items():
+            station = sub.stations.get(bid)
+            if not (station and station.label.strip()):
+                continue
+            if (
+                hub_track is not None
+                and abs(btrack - hub_track) <= SAME_COORD_TOLERANCE
+            ):
+                continue
+            if not diverge:
+                return True
+            if any(
+                (nxt := sub.stations.get(e.target)) is not None and not nxt.is_port
+                for e in sub.edges_from(bid)
+            ):
+                return True
+    return False
 
 
 def _layer_gap_for(
@@ -756,11 +833,31 @@ def _layer_gap_for(
             direction,
         )
 
+    # The bare label-half over-reserves by x_spacing - routing_clearance; keep it
+    # only where an off-track branch dips through the loop and needs that room.
+    dip_label_half = (
+        fj_label_half
+        if _off_track_branch_needs_loop_room(
+            layer,
+            fork_layers,
+            join_layers,
+            out_targets,
+            in_sources,
+            layers,
+            tracks,
+            sub,
+        )
+        else 0.0
+    )
+
     routing_clearance = (
         fj_label_half + DIAGONAL_RUN + MIN_STRAIGHT_EDGE - x_spacing + 1.0
     )
     return max(
-        base_gap, fj_label_half + bubble_extra, routing_clearance, interior_floor
+        base_gap,
+        routing_clearance + bubble_extra,
+        interior_floor,
+        dip_label_half,
     )
 
 

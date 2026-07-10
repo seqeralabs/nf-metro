@@ -2924,6 +2924,85 @@ def test_no_line_strikes_through_label(fixture):
     )
 
 
+_CLEAN_DIAMOND_MMD = """\
+%%metro line: a | A | #e6007e
+%%metro line: b | B | #2db572
+graph LR
+    src[Source]
+    hub[An Extremely Wide Fork Hub Label]
+    leaf_a[Leaf A]
+    leaf_b[Leaf B]
+    src -->|a,b| hub
+    hub -->|a| leaf_a
+    hub -->|b| leaf_b
+"""
+
+_PASSTHROUGH_LOOP_MMD = """\
+%%metro line: a | A | #e6007e
+%%metro line: b | B | #2db572
+graph LR
+    src[Source]
+    hub[An Extremely Wide Fork Hub Label]
+    mid_a[Mid A]
+    mid_b[Mid B]
+    join[Join]
+    src -->|a,b| hub
+    hub -->|a| mid_a
+    hub -->|b| mid_b
+    mid_a -->|a| join
+    mid_b -->|b| join
+"""
+
+
+def test_clean_diamond_fork_gap_drops_bare_label_slack():
+    """A fork whose branches terminate at the branch layer reserves only the
+    geometric routing clearance, not the full fork-label half-width.
+
+    The gap from the fork station to its branch layer must be
+    ``label_half + DIAGONAL_RUN + MIN_STRAIGHT_EDGE + 1`` (the ``x_spacing``
+    pitch cancels): the diagonal starts past the label, runs its length, and
+    keeps a minimum straight edge.  Reserving the bare ``label_half`` on top of
+    the whole pitch would over-space the column by
+    ``x_spacing - (DIAGONAL_RUN + MIN_STRAIGHT_EDGE + 1)``.
+    """
+    from nf_metro.layout.constants import DIAGONAL_RUN, MIN_STRAIGHT_EDGE
+    from nf_metro.layout.labels import label_text_width
+
+    graph = parse_metro_mermaid(_CLEAN_DIAMOND_MMD)
+    compute_layout(graph)
+    hub = graph.stations["hub"]
+    gap = graph.stations["leaf_a"].x - hub.x
+    label_half = label_text_width(hub.label) / 2
+    expected = label_half + DIAGONAL_RUN + MIN_STRAIGHT_EDGE + 1.0
+    assert gap == pytest.approx(expected, abs=0.5), (
+        f"clean-diamond fork gap {gap} should be the tight routing clearance "
+        f"{expected} (label_half={label_half}), not the {label_half + X_SPACING} "
+        "bare-label reservation"
+    )
+
+
+def test_passthrough_loop_keeps_bare_label_reservation():
+    """A fork feeding a labelled mid-loop station keeps the label-half straight
+    run so a sibling's transition diagonal clears that station's label.
+
+    Same fork label as :func:`test_clean_diamond_fork_gap_drops_bare_label_slack`,
+    but the branches thread a labelled station through the loop, so the gap must
+    stay wider than the clean-diamond tight clearance.
+    """
+    clean = parse_metro_mermaid(_CLEAN_DIAMOND_MMD)
+    compute_layout(clean)
+    clean_gap = clean.stations["leaf_a"].x - clean.stations["hub"].x
+
+    loop = parse_metro_mermaid(_PASSTHROUGH_LOOP_MMD)
+    compute_layout(loop)
+    loop_gap = loop.stations["mid_a"].x - loop.stations["hub"].x
+
+    assert loop_gap > clean_gap, (
+        f"pass-through fork gap {loop_gap} must exceed the clean-diamond gap "
+        f"{clean_gap}: a mid-loop label needs the bare-label reservation kept"
+    )
+
+
 def _bypass_v_own_label_strikes(fixture: str) -> list[str]:
     """Return ids of stations whose own bypass-V diagonal rakes their label.
 
