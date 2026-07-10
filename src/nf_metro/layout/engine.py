@@ -1709,17 +1709,12 @@ def _place_pass_c_content(
             _recenter_full_bundle_columns,
             y_spacing,
         )
-        # Draw each symmetric fork's dead-end continuation onto its branch
-        # track so the whole branch stays fanned; a branch that leaves via an
-        # exit port is left to fall back to the trunk (Stage 6.7b).
+        # Stage 6.7b: carry each symmetric fork's dead-end continuation onto its
+        # branch track.  Stage 6.7c/6.7d then pin the section and its entry port
+        # to the incoming bundle -- both must follow the recenter that fixes the
+        # branch Ys they align to.
         _carry_symmetric_branch_continuations(graph, section_y_padding)
-        # Stage 6.7c: slide a symmetric-fork section onto its in-row feeder's
-        # exit line, so centering the fork on the entry port doesn't strand the
-        # section off the horizontal bundle arriving from its row neighbour.
         _align_symfan_section_to_row_feeder(graph)
-        # Stage 6.7d: centre each LR entry port on the two-way fork it fans into
-        # so the run from the feeding section arrives straight instead of kinked
-        # onto whichever branch the section layout seated the port on.
         _center_lr_entry_ports_on_fork(graph, y_spacing)
         _snap(graph, "6.7")
 

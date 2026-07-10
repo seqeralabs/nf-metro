@@ -1002,39 +1002,119 @@ def _carry_symmetric_branch_continuations(
             )
 
 
+def _section_lr_entry_port(graph: MetroGraph, section: Section) -> str | None:
+    """The id of *section*'s first LEFT/RIGHT entry port, or ``None``."""
+    return next(
+        (
+            pid
+            for pid in section.entry_ports
+            if (p := graph.ports.get(pid)) is not None
+            and p.side in (PortSide.LEFT, PortSide.RIGHT)
+        ),
+        None,
+    )
+
+
+def _symfan_entry_port_feeder_y(
+    graph: MetroGraph, section: Section
+) -> tuple[str, float] | None:
+    """``(entry_port_id, feeder_exit_y)`` for a symmetric entry fork whose LR
+    entry port is fed by exactly one same-row section's exit port; else ``None``.
+
+    Shared by the placement pass that slides the section onto that feeder's Y
+    and the guard that checks it stayed there, so the two read one relation and
+    can't drift.  A cross-row feeder (its bundle wraps between rows) is excluded:
+    only a horizontal same-row run should pin the section's vertical position.
+    """
+    if section.direction not in ("LR", "RL") or not _section_has_symmetric_entry_fork(
+        graph, section
+    ):
+        return None
+    entry_port = _section_lr_entry_port(graph, section)
+    if entry_port is None:
+        return None
+    feeder_ys = {
+        round(src.y, 1)
+        for e in graph.edges_to(entry_port)
+        if (src := graph.stations.get(e.source)) is not None
+        and src.is_port
+        and (fsec := graph.sections.get(src.section_id or "")) is not None
+        and fsec.grid_row == section.grid_row
+        and src.id in fsec.exit_ports
+    }
+    if len(feeder_ys) != 1:
+        return None
+    return entry_port, feeder_ys.pop()
+
+
+def _in_section_continuation_chain(
+    graph: MetroGraph, section: Section, start_id: str
+) -> list[str]:
+    """The linear tail of on-track stations continuing *start_id*'s branch.
+
+    Each step is the sole on-track in-section successor whose only in-section
+    predecessor is the current station -- a branch that neither forks nor merges
+    before leaving the section.  Off-track file successors are not part of the
+    chain; the walk stops at the last on-track station.
+    """
+
+    def predecessors(sid: str) -> list[str]:
+        return sorted(
+            {
+                e.source
+                for e in graph.edges_to(sid)
+                if (s := graph.stations.get(e.source)) is not None
+                and not s.is_port
+                and s.section_id == section.id
+            }
+        )
+
+    chain: list[str] = []
+    current = start_id
+    seen = {start_id}
+    while True:
+        succ = [
+            s
+            for s in _in_section_ontrack_successors(graph, section, current)
+            if s not in seen
+        ]
+        if len(succ) != 1 or predecessors(succ[0]) != [current]:
+            break
+        current = succ[0]
+        chain.append(current)
+        seen.add(current)
+    return chain
+
+
+def _in_section_ontrack_successors(
+    graph: MetroGraph, section: Section, sid: str
+) -> list[str]:
+    """Deduped ids of *sid*'s on-track successors within *section*.
+
+    A multi-line edge appears once per line, so the same successor is listed
+    repeatedly; the set collapses those.
+    """
+    return sorted(
+        {
+            e.target
+            for e in graph.edges_from(sid)
+            if _is_in_section_on_track(graph.stations.get(e.target), section.id)
+        }
+    )
+
+
 def _fork_offtrack_side(
     graph: MetroGraph, section: Section, branch_id: str, anchor_y: float
 ) -> int:
     """Which side of the trunk an off-track file on *branch_id*'s chain sits.
 
-    Walks the branch's in-section on-track sole-successor chain (the same walk
-    :func:`_pull_continuation_onto` carries) and inspects each station for an
+    Walks the branch's in-section continuation and inspects each station for an
     off-track file successor.  Returns ``-1`` when such a file sits above the
     trunk ``anchor_y``, ``+1`` when below, and ``0`` when the branch carries no
     off-track file.  Used to orient the symmetric fork so the file stays within
     the section's band.
     """
-    seen = {branch_id}
-    current = branch_id
-    chain = [branch_id]
-    while True:
-        succ = sorted(
-            {
-                e.target
-                for e in graph.edges_from(current)
-                if e.target in graph.stations
-                and not graph.stations[e.target].is_port
-                and not graph.stations[e.target].off_track
-                and graph.stations[e.target].section_id == section.id
-                and e.target not in seen
-            }
-        )
-        if len(succ) != 1:
-            break
-        current = succ[0]
-        seen.add(current)
-        chain.append(current)
-    for sid in chain:
+    for sid in [branch_id, *_in_section_continuation_chain(graph, section, branch_id)]:
         for e in graph.edges_from(sid):
             tgt = graph.stations.get(e.target)
             if tgt is not None and tgt.off_track and tgt.section_id == section.id:
@@ -1048,41 +1128,18 @@ def _align_symfan_section_to_row_feeder(graph: MetroGraph) -> None:
     Centering the fork on the entry port (see
     :func:`_recenter_full_bundle_columns`) can leave that port off the trunk of
     the same-row section feeding it -- the port settled on the fork midline
-    rather than the horizontal bundle arriving from the left.  When a symmetric
-    entry-fork section's LR entry port is fed by exactly one same-row section's
-    exit port, translate the whole section (content, ports, bbox) so the two
-    ports share a Y, straightening that inter-section run.  A cross-row feeder
-    (its bundle wraps between rows) is ignored: only a horizontal same-row run
-    should pin the section's vertical position.
+    rather than the horizontal bundle arriving from the left.  Translate the
+    whole section (content, ports, bbox) so its entry port shares a Y with that
+    feeder's exit port, straightening the inter-section run.
     """
+    if graph.diamond_style != "symmetric":
+        return
     for section in graph.sections.values():
-        if section.direction not in ("LR", "RL"):
+        feeder = _symfan_entry_port_feeder_y(graph, section)
+        if feeder is None:
             continue
-        if not _section_has_symmetric_entry_fork(graph, section):
-            continue
-        entry_port = next(
-            (
-                pid
-                for pid in section.entry_ports
-                if (p := graph.ports.get(pid)) is not None
-                and p.side in (PortSide.LEFT, PortSide.RIGHT)
-            ),
-            None,
-        )
-        if entry_port is None:
-            continue
-        feeder_ys = {
-            round(src.y, 1)
-            for e in graph.edges_to(entry_port)
-            if (src := graph.stations.get(e.source)) is not None
-            and src.is_port
-            and (fsec := graph.sections.get(src.section_id or "")) is not None
-            and fsec.grid_row == section.grid_row
-            and src.id in fsec.exit_ports
-        }
-        if len(feeder_ys) != 1:
-            continue
-        delta = feeder_ys.pop() - graph.stations[entry_port].y
+        entry_port, feeder_y = feeder
+        delta = feeder_y - graph.stations[entry_port].y
         if abs(delta) < 1.0:
             continue
         for sid in section.station_ids:
@@ -1119,12 +1176,8 @@ def _center_lr_entry_ports_on_fork(graph: MetroGraph, y_spacing: float) -> None:
                 continue
             branch_ys = sorted(
                 {
-                    round(tgt.y, 1)
-                    for e in graph.edges_from(pid)
-                    if (tgt := graph.stations.get(e.target)) is not None
-                    and not tgt.is_port
-                    and not tgt.off_track
-                    and tgt.section_id == section.id
+                    round(graph.stations[s].y, 1)
+                    for s in _in_section_ontrack_successors(graph, section, pid)
                 }
             )
             if len(branch_ys) != 2:
@@ -1140,52 +1193,13 @@ def _center_lr_entry_ports_on_fork(graph: MetroGraph, y_spacing: float) -> None:
 def _pull_continuation_onto(
     graph: MetroGraph, section: Section, branch: Station
 ) -> list[str]:
-    """Set each in-section sole-successor of *branch* to its Y; return their ids.
+    """Set each in-section continuation station of *branch* to its Y; return them.
 
-    Off-track file successors are skipped: they are placed by the off-track
-    lift pass at an intentional offset from their producer, so carrying one onto
-    the branch track would drop the file onto its producer marker.  Skipping it
-    also keeps a producer with an off-track file plus one on-track successor
-    reading as a single continuation rather than a fork.
+    Off-track file successors are not part of the continuation: they are placed
+    by the off-track lift pass at an intentional offset from their producer, so
+    carrying one onto the branch track would drop the file onto its producer.
     """
-
-    def _in_section_successors(sid: str) -> list[str]:
-        # Dedupe: a multi-line edge appears once per line, so the same
-        # successor is listed repeatedly.
-        return sorted(
-            {
-                e.target
-                for e in graph.edges_from(sid)
-                if e.target in graph.stations
-                and not graph.stations[e.target].is_port
-                and not graph.stations[e.target].off_track
-                and graph.stations[e.target].section_id == section.id
-            }
-        )
-
-    def _in_section_predecessors(sid: str) -> list[str]:
-        return sorted(
-            {
-                e.source
-                for e in graph.edges_to(sid)
-                if e.source in graph.stations
-                and not graph.stations[e.source].is_port
-                and graph.stations[e.source].section_id == section.id
-            }
-        )
-
-    carried: list[str] = []
-    current = branch.id
-    seen = {branch.id}
-    while True:
-        succ = [s for s in _in_section_successors(current) if s not in seen]
-        if len(succ) != 1:
-            break
-        nxt = succ[0]
-        if _in_section_predecessors(nxt) != [current]:
-            break
-        graph.stations[nxt].y = branch.y
-        carried.append(nxt)
-        seen.add(nxt)
-        current = nxt
+    carried = _in_section_continuation_chain(graph, section, branch.id)
+    for sid in carried:
+        graph.stations[sid].y = branch.y
     return carried
