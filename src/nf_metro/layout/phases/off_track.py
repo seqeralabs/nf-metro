@@ -690,7 +690,7 @@ def _angled_interior_reach(
     return angled_reach
 
 
-def _has_passthrough_branch_label(
+def _off_track_branch_needs_loop_room(
     layer: int,
     fork_layers: set[int],
     join_layers: set[int],
@@ -700,22 +700,20 @@ def _has_passthrough_branch_label(
     tracks: dict[str, float],
     sub: MetroGraph,
 ) -> bool:
-    """Whether a labelled *pass-through* branch station rides this fork/join loop.
+    """Whether an off-track branch dips through this fork/join and needs loop room.
 
-    A branch station that carries the fan onward - it feeds a station further from
-    the hub rather than ending at the branch layer - sits with a sibling's
-    divergence/convergence diagonal sweeping across its row, so its label needs the
-    fork/join label's straight-run reservation kept.  A branch that instead ends at
-    the branch layer (a leaf, or the reconvergence hub itself) has no foreign
-    diagonal crossing it and needs only ``routing_clearance``; that is what lets a
-    diamond whose branches terminate at the join pack tight while a branch that
-    threads through the loop keeps its room.
+    An off-track branch leaves the hub's track on a transition diagonal, so it
+    needs the fork/join label's straight-run reservation kept for its own flat run
+    (and to keep its dip centred).  A join's off-track source always dips up to the
+    internal join station, so it always qualifies.  A fork's off-track target only
+    qualifies if it reconverges at an internal station (an onward edge to a real
+    station); a target that merely exits the section through a port - or a diamond
+    whose branches all terminate at the fork - has no dip to keep room for, so the
+    column packs tight.
 
-    Requires a genuine fork/join (the hub has two or more targets/sources) whose
-    branches span a transition diagonal - they must not all sit on the hub's own
-    track (a single off-track branch dips away and back; two branches on different
-    tracks fan apart).  A single-input or single-output station that merely shares a
-    fan's layer converges nothing, so it is not considered.
+    Requires a genuine fork/join (two or more targets/sources) whose branches span
+    a transition diagonal: they must not all sit within ``SAME_COORD_TOLERANCE`` of
+    the hub's own track.
     """
     for hub, branch_ids, branch_layer, diverge in _iter_hub_branches(
         layer, fork_layers, join_layers, out_targets, in_sources, layers
@@ -723,29 +721,30 @@ def _has_passthrough_branch_label(
         if len(branch_ids) < 2:
             continue
         btracks = _branch_tracks(branch_ids, branch_layer, layers, tracks)
-        diagonal_tracks = list(btracks.values())
         hub_track = tracks.get(hub)
+        diagonal_tracks = list(btracks.values())
         if hub_track is not None:
             diagonal_tracks.append(hub_track)
         if not diagonal_tracks:
             continue
         if max(diagonal_tracks) - min(diagonal_tracks) <= SAME_COORD_TOLERANCE:
             continue
-        edges_of = sub.edges_from if diverge else sub.edges_to
-        for bid in btracks:
+        for bid, btrack in btracks.items():
             station = sub.stations.get(bid)
             if not (station and station.label.strip()):
                 continue
-            for edge in edges_of(bid):
-                neighbor = edge.target if diverge else edge.source
-                neighbor_layer = layers.get(neighbor, branch_layer)
-                away = (
-                    neighbor_layer > branch_layer
-                    if diverge
-                    else neighbor_layer < branch_layer
-                )
-                if away:
-                    return True
+            if (
+                hub_track is not None
+                and abs(btrack - hub_track) <= SAME_COORD_TOLERANCE
+            ):
+                continue
+            if not diverge:
+                return True
+            if any(
+                (nxt := sub.stations.get(e.target)) is not None and not nxt.is_port
+                for e in sub.edges_from(bid)
+            ):
+                return True
     return False
 
 
@@ -835,10 +834,10 @@ def _layer_gap_for(
         )
 
     # The bare label-half over-reserves by x_spacing - routing_clearance; keep it
-    # only where a mid-loop label rides the loop and a sibling diagonal sweeps it.
-    passthrough_label_half = (
+    # only where an off-track branch dips through the loop and needs that room.
+    dip_label_half = (
         fj_label_half
-        if _has_passthrough_branch_label(
+        if _off_track_branch_needs_loop_room(
             layer,
             fork_layers,
             join_layers,
@@ -858,7 +857,7 @@ def _layer_gap_for(
         base_gap,
         routing_clearance + bubble_extra,
         interior_floor,
-        passthrough_label_half,
+        dip_label_half,
     )
 
 
