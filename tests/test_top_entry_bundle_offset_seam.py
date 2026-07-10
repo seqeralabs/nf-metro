@@ -11,8 +11,8 @@ jitter where the stroke steps sideways as it crosses the section's top edge.
 ``top_entry_bundle_offset_seam`` is the committed minimal fixture: line ``b``
 splits off the ``a,b,c`` trunk at a junction (giving it a non-zero offset) and
 drops into ``dst`` through its ``entry: top`` port.  ``fold_left_exit_right_entry``
-carries an offset-free top/side entry and stands in as the generalisation guard
-that the reconciliation does not perturb the zero-offset case.
+carries an offset-free top/side entry and guards the zero-offset case: an entry
+with no inbound bundle offset must land directly on the port's X.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ import pytest
 
 from nf_metro import api
 from nf_metro.layout.routing import compute_station_offsets, route_edges_centred
+from nf_metro.layout.routing.common import apply_route_offsets
 from nf_metro.layout.routing.invariants import (
     check_perp_entry_boundary_consistent,
     check_seam_segments_meet_at_port,
@@ -68,7 +69,5 @@ def test_top_entry_descent_lands_on_port_x() -> None:
     descent = next(
         r for r in routes if r.line_id == "b" and r.edge.target == "dst__entry_top_3"
     )
-    from nf_metro.layout.routing.common import apply_route_offsets
-
     landing_x = apply_route_offsets(descent, offsets)[-1][0]
     assert landing_x == pytest.approx(port.x, abs=1.0)
