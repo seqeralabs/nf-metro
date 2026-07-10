@@ -15,6 +15,8 @@ from nf_metro.layout.phases._common import (
     _grid_group_section_ids,
     _section_bundle_lines,
     _section_lr_port_anchor_y,
+    grow_section_bbox_max_edge,
+    grow_section_bbox_min_edge,
 )
 from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
 
@@ -465,6 +467,65 @@ def _section_symfan_uses_half_grid(graph: MetroGraph, section: Section) -> bool:
     return _symfan_branches_hub(graph, section) is not None
 
 
+def _section_has_symmetric_entry_fork(graph: MetroGraph, section: Section) -> bool:
+    """Return True when the section carries a ``diamond_style: symmetric``
+    two-way fork whose branches share a column and never reconverge.
+
+    This is the fork ``_recenter_full_bundle_columns`` compacts onto half-pitch
+    (leaving the trunk row empty between the branches) and whose dead-end
+    continuation ``_carry_symmetric_branch_continuations`` draws onto the branch
+    track.  The non-reconverging requirement distinguishes it from an in-section
+    fork-join diamond (whose branches mirror about their reconvergence station,
+    not the empty trunk), which the per-diamond compaction handles instead.
+    """
+    if graph.diamond_style != "symmetric" or section.direction not in ("LR", "RL"):
+        return False
+    bundle = _section_bundle_lines(graph, section)
+    if not bundle:
+        return False
+    port_ids = section.port_ids
+    cols: dict[float, list[str]] = defaultdict(list)
+    for sid in section.station_ids:
+        if sid in port_ids:
+            continue
+        st = graph.stations.get(sid)
+        if st is None or st.off_track:
+            continue
+        cols[round(st.x, 3)].append(sid)
+    for sids in cols.values():
+        if len(sids) != 2 or not all(
+            set(graph.station_lines(s)) == bundle for s in sids
+        ):
+            continue
+        if not _branches_reconverge(graph, section, sids[0], sids[1]):
+            return True
+    return False
+
+
+def _branches_reconverge(graph: MetroGraph, section: Section, a: str, b: str) -> bool:
+    """True when *a* and *b* reach a common station inside *section*."""
+
+    def _reachable(start: str) -> set[str]:
+        seen: set[str] = set()
+        stack = [start]
+        while stack:
+            cur = stack.pop()
+            for e in graph.edges_from(cur):
+                t = graph.stations.get(e.target)
+                if (
+                    t is None
+                    or t.is_port
+                    or t.section_id != section.id
+                    or e.target in seen
+                ):
+                    continue
+                seen.add(e.target)
+                stack.append(e.target)
+        return seen
+
+    return bool(_reachable(a) & _reachable(b))
+
+
 def _iter_fork_join_diamonds(
     graph: MetroGraph,
 ) -> Iterator[tuple[Station, Station, Station, Station]]:
@@ -748,14 +809,24 @@ def _section_row_pitch(graph: MetroGraph, section_id: str, default: float) -> fl
     return default
 
 
-def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
+def _recenter_full_bundle_columns(
+    graph: MetroGraph, y_spacing: float, section_y_padding: float = SECTION_Y_PADDING
+) -> None:
     """Re-fan full-bundle station columns around the row's final trunk Y.
 
-    Late-pass companion to ``_redistribute_full_bundle_columns``.  The
-    early pass uses the section's local LR port Y as the symmetric
-    centre, which becomes stale when subsequent phases shift the
-    section relative to the row trunk (e.g. terminal sections whose
-    sole LR port doesn't match the bundle line entering from upstream).
+    Late-pass companion to ``_redistribute_full_bundle_columns`` when
+    ``graph.center_ports`` is set.  The early pass uses the section's
+    local LR port Y as the symmetric centre, which becomes stale when
+    subsequent phases shift the section relative to the row trunk (e.g.
+    terminal sections whose sole LR port doesn't match the bundle line
+    entering from upstream).
+
+    Also runs standalone (without an early pass) under
+    ``graph.diamond_style == 'symmetric'``: a full-bundle column fed
+    directly off a section's entry port has no settled trunk Y before
+    row alignment, so the early pass would only place it correctly by
+    chance -- this late pass, anchored on the final row trunk, is the
+    only one it needs.
 
     For each LR/RL grid section, locate the inter-section bundle Y from
     the entry/exit port station Y (which by this point sits on the
@@ -765,8 +836,9 @@ def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
     pass.
 
     No-op when the existing layout is already symmetric around the
-    anchor; bbox heights are not adjusted because earlier compaction
-    already sized the band to fit two slots either side of the trunk.
+    anchor.  Bbox heights are grown (never shrunk) when the new anchor
+    pushes a column further out than the section's earlier compaction
+    reserved room for.
     """
     grid_sec_ids = _grid_group_section_ids(graph)
     if not grid_sec_ids:
@@ -848,6 +920,121 @@ def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
                 continue
             participants.sort(key=lambda s: (graph.stations[s].track, s))
             n = len(participants)
+            # A ``diamond_style: symmetric`` two-way fork compacts onto
+            # half-pitch offsets (trunk +/- 0.5 pitch) so it consumes one grid
+            # unit rather than straddling a full empty trunk row; the branches
+            # are marked so the grid snap leaves the half-offsets intact.
+            half = graph.diamond_style == "symmetric" and n == 2
+            scale = 0.5 if half else 1.0
             offsets = _fan_offsets(n)
             for sid, off in zip(participants, offsets):
-                graph.stations[sid].y = anchor_y + off * pitch
+                graph.stations[sid].y = anchor_y + off * scale * pitch
+                if half:
+                    graph.half_grid_station_ids.add(sid)
+
+        content_ys = [
+            graph.stations[sid].y
+            for sid in section.station_ids
+            if sid in graph.stations and not graph.stations[sid].is_port
+        ]
+        if not content_ys:
+            continue
+        grow_section_bbox_min_edge(
+            graph, section, "y", min(content_ys) - section_y_padding
+        )
+        grow_section_bbox_max_edge(
+            graph, section, "y", max(content_ys) + section_y_padding
+        )
+
+
+def _carry_symmetric_branch_continuations(
+    graph: MetroGraph, section_y_padding: float = SECTION_Y_PADDING
+) -> None:
+    """Draw a fanned branch's in-section continuation onto the branch's track.
+
+    Under ``diamond_style: symmetric`` the two-way fork's branch stations are
+    fanned off the trunk (see :func:`_recenter_full_bundle_columns`), but a
+    branch that continues to further stations *inside* the section leaves those
+    successors on the trunk, so the branch humps out and immediately back.
+
+    Walk each fanned branch's sole-successor chain and pull every in-section
+    successor onto the branch's Y, so a dead-end branch stays fanned for its
+    whole length.  The walk stops as soon as a station's forward path leaves the
+    branch -- it gains a second predecessor, forks, or continues only through an
+    exit port -- so a branch that exits the section is left to fall back to the
+    trunk and meet its exit port there.
+    """
+    if graph.diamond_style != "symmetric":
+        return
+    for section in graph.sections.values():
+        if section.direction not in ("LR", "RL"):
+            continue
+        carried: list[str] = []
+        for sid in section.station_ids:
+            if sid not in graph.half_grid_station_ids:
+                continue
+            branch = graph.stations.get(sid)
+            if branch is None:
+                continue
+            carried.extend(_pull_continuation_onto(graph, section, branch))
+        if not carried:
+            continue
+        graph.half_grid_station_ids.update(carried)
+        content_ys = [
+            graph.stations[s].y
+            for s in section.station_ids
+            if s in graph.stations and not graph.stations[s].is_port
+        ]
+        if content_ys:
+            grow_section_bbox_min_edge(
+                graph, section, "y", min(content_ys) - section_y_padding
+            )
+            grow_section_bbox_max_edge(
+                graph, section, "y", max(content_ys) + section_y_padding
+            )
+
+
+def _pull_continuation_onto(
+    graph: MetroGraph, section: Section, branch: Station
+) -> list[str]:
+    """Set each in-section sole-successor of *branch* to its Y; return their ids."""
+
+    def _in_section_successors(sid: str) -> list[str]:
+        # Dedupe: a multi-line edge appears once per line, so the same
+        # successor is listed repeatedly.
+        return sorted(
+            {
+                e.target
+                for e in graph.edges_from(sid)
+                if e.target in graph.stations
+                and not graph.stations[e.target].is_port
+                and graph.stations[e.target].section_id == section.id
+            }
+        )
+
+    def _in_section_predecessors(sid: str) -> list[str]:
+        return sorted(
+            {
+                e.source
+                for e in graph.edges_to(sid)
+                if e.source in graph.stations
+                and not graph.stations[e.source].is_port
+                and graph.stations[e.source].section_id == section.id
+            }
+        )
+
+    carried: list[str] = []
+    current = branch.id
+    seen = {branch.id}
+    while True:
+        succ = [s for s in _in_section_successors(current) if s not in seen]
+        if len(succ) != 1:
+            break
+        nxt = succ[0]
+        if _in_section_predecessors(nxt) != [current]:
+            break
+        graph.stations[nxt].y = branch.y
+        carried.append(nxt)
+        seen.add(nxt)
+        current = nxt
+    return carried
