@@ -1,0 +1,30 @@
+%%metro title: Symmetric Deadend Fanout Exit
+%%metro diamond_style: symmetric
+%%metro file: cov_out | BW | Coverage
+%%metro line: a | Line A | #e6007e
+
+graph LR
+    subgraph src [Src]
+        %%metro exit: right | a
+        entry[Entry]
+    end
+
+    subgraph s1 [S1]
+        %%metro entry: left | a
+        %%metro exit: right | a
+        split[Split]
+        genomecov[Genomecov]
+        salmon[Salmon]
+
+        split -->|a| genomecov
+        genomecov -->|a| cov_out
+    end
+
+    subgraph sink [Sink]
+        %%metro entry: left | a
+        report[Report]
+    end
+
+    entry -->|a| split
+    entry -->|a| salmon
+    salmon -->|a| report
