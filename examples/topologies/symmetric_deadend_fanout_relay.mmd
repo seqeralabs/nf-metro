@@ -1,0 +1,25 @@
+%%metro title: Symmetric Deadend Fanout Relay
+%%metro diamond_style: symmetric
+%%metro file: out1 | BW | Coverage
+%%metro line: a | Line A | #e6007e
+
+graph LR
+    subgraph src [Src]
+        %%metro exit: right | a
+        entry[Entry]
+    end
+
+    subgraph s1 [S1]
+        %%metro entry: left | a
+        relay[Relay]
+        split[Split]
+        genomecov[Genomecov]
+        salmon[Salmon]
+
+        relay -->|a| split
+        relay -->|a| salmon
+        split -->|a| genomecov
+        genomecov -->|a| out1
+    end
+
+    entry -->|a| relay

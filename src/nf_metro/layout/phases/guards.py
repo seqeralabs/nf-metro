@@ -1946,6 +1946,60 @@ def _guard_off_track_consumer_on_trunk(graph: MetroGraph, phase: str) -> None:
             )
 
 
+def _guard_symfan_entry_port_on_feeder_trunk(graph: MetroGraph, phase: str) -> None:
+    """A symmetric entry fork's port stays on its in-row feeder's trunk.
+
+    Under ``diamond_style: symmetric`` a two-way entry fork's branches straddle
+    the section's LR entry port.  When exactly one same-row section's exit port
+    feeds that entry port, the two must share a Y so the inter-section run is
+    straight; centering the fork on the fork midline instead pulls the port off
+    that trunk and drags the whole row's baseline with it (issue #1299).
+    Restricted to a single same-row feeder so a cross-row feed (which wraps
+    between rows and needn't align) does not trip it.
+    """
+    from nf_metro.layout.phases.fan_bundles import _section_has_symmetric_entry_fork
+
+    if graph.diamond_style != "symmetric":
+        return
+    tol = 1.0
+    for section in graph.sections.values():
+        if section.direction not in ("LR", "RL"):
+            continue
+        if not _section_has_symmetric_entry_fork(graph, section):
+            continue
+        entry_port = next(
+            (
+                pid
+                for pid in section.entry_ports
+                if (p := graph.ports.get(pid)) is not None
+                and p.side in (PortSide.LEFT, PortSide.RIGHT)
+            ),
+            None,
+        )
+        if entry_port is None:
+            continue
+        feeder_ys = {
+            round(src.y, 1)
+            for e in graph.edges_to(entry_port)
+            if (src := graph.stations.get(e.source)) is not None
+            and src.is_port
+            and (fsec := graph.sections.get(src.section_id or "")) is not None
+            and fsec.grid_row == section.grid_row
+            and src.id in fsec.exit_ports
+        }
+        if len(feeder_ys) != 1:
+            continue
+        feeder_y = feeder_ys.pop()
+        port_y = graph.stations[entry_port].y
+        if abs(port_y - feeder_y) > tol:
+            raise PhaseInvariantError(
+                f"{phase}: symmetric entry fork {section.id!r} port sits at "
+                f"y={port_y:.1f} but its in-row feeder arrives at y={feeder_y:.1f} "
+                f"({abs(port_y - feeder_y):.0f}px off the trunk); the fork must "
+                f"straddle a port fixed on that trunk, not recentre it"
+            )
+
+
 def _guard_off_track_not_hub(graph: MetroGraph, phase: str) -> None:
     """No off-track station has both a predecessor and a successor.
 
@@ -5230,6 +5284,16 @@ INLINE_GUARD_REGISTRY: tuple[GuardSpec, ...] = (
             "Restricted to consumers with exactly one on-track in-section "
             "successor, so a genuine on-track fork's off-row branches are not "
             "dragged onto the trunk."
+        ),
+    ),
+    GuardSpec(
+        _guard_symfan_entry_port_on_feeder_trunk,
+        "B",
+        issue_pin=("#1299",),
+        narrow_reason=(
+            "Restricted to a symmetric entry fork fed by exactly one same-row "
+            "section's exit port, so a cross-row feed that legitimately wraps "
+            "between rows is not required to align."
         ),
     ),
     GuardSpec(
