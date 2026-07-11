@@ -1,6 +1,6 @@
 ---
 name: fix-issue
-description: End-to-end workflow for fixing GitHub issues on the nf-metro repo with diagnostic rigor. Use when the user references a GitHub issue (by number, URL, or description) and wants it fixed. Handles worktree setup, a reused persistent env (no per-issue env creation), diagnostic-first investigation, authoring-mistake-vs-engine-bug triage (never dodge an engine bug by doctoring the reproducer), invariant-test-first implementation, runtime validators, evidence-cited fix verification, /simplify pass, full-repo lint, visual review via render preview, narrow-the-fix iteration on regressions, cost discipline (targeted tests, CI render-diff over local gallery rebuilds, skip-ci on WIP), additive-only PR hygiene (no force-push, no narrative comments), origin verification after every push, and PR creation. Trigger on phrases like "fix issue #N", "address #N", "work on issue N", or any request to fix a bug or implement a feature that references an issue. For shepherding a chain of already-existing PRs back to main, see `pr-chain-vet` instead.
+description: End-to-end workflow for fixing GitHub issues on the nf-metro repo with diagnostic rigor. Use when the user references a GitHub issue (by number, URL, or description) and wants it fixed. Handles worktree setup, a reused persistent env (no per-issue env creation), diagnostic-first investigation, authoring-mistake-vs-engine-bug triage (never dodge an engine bug by doctoring the reproducer), invariant-test-first implementation, runtime validators, evidence-cited fix verification, /simplify pass, full-repo lint, visual review via render preview, narrow-the-fix iteration on regressions, cost discipline (targeted tests, CI render-diff over local gallery rebuilds, skip-ci on WIP), standalone issue-body hygiene, additive-only PR hygiene (no force-push, no narrative comments), clean execution of an authorised admin-merge (preserve history, no CI re-run), origin verification after every push, and PR creation. Trigger on phrases like "fix issue #N", "address #N", "work on issue N", or any request to fix a bug or implement a feature that references an issue. For shepherding a chain of already-existing PRs back to main, see `pr-chain-vet` instead.
 ---
 
 # Fix Issue
@@ -8,6 +8,11 @@ description: End-to-end workflow for fixing GitHub issues on the nf-metro repo w
 Structured workflow for fixing nf-metro GitHub issues in an isolated worktree.
 Emphasises diagnostic-first investigation, invariant tests before code, and
 additive-only PR hygiene so a fix never silently regresses the gallery.
+
+**Communication:** keep status updates terse and lead any explanation of a
+mechanism or a render with one plain-English sentence before the code or
+coordinates. Prefer a narrow table to a wide one. When asked to "explain
+simply" or for "less words", cut - don't re-expand.
 
 **Conventions** (substitute if your setup differs):
 - Local nf-metro checkout: `~/projects/nf-metro`
@@ -24,6 +29,17 @@ gh issue view <N> --repo seqeralabs/nf-metro
 ```
 
 Summarize the problem and proposed approach. Wait for user confirmation before proceeding.
+
+### Issue hygiene
+
+Every issue is run through *this skill* fresh in a later session, so the
+**issue body must be standalone and self-contained**. When you learn
+something during the fix that a future session would need (the real cause, a
+repro, a constraint), fold it into the **issue body** - do not scatter it
+across comments, and do not leave superseded-approach detail that would
+mislead a fresh reader. Keep the body concise. If the fix uncovers a
+genuinely separable defect, file it as a **child issue** rather than
+expanding this one's scope or quietly hiding it.
 
 ## Step 2: Worktree + Environment Setup
 
@@ -93,6 +109,16 @@ before writing any code:
 
 Only after the symptom is pinned down to specific numbers should you reason
 about which layout pass / function produced them.
+
+### Check your premise against current `origin/main` first
+
+Diagnose against latest remote, not a stale tree. `git fetch origin main` and
+confirm the bug **still reproduces on latest** before reasoning about a cause -
+a sibling PR may already have fixed it or changed the very code you're reading.
+If the user says something is already addressed, re-fetch and look again before
+disagreeing; "I'm looking at outdated code" is a recurring wrong turn. If a
+related PR merges mid-session, `git merge origin/main` into the worktree and
+re-diagnose before continuing.
 
 ### Classify: authoring mistake or engine bug?
 
@@ -218,6 +244,12 @@ refactor: tighten <area> after fix for #<N>
 Keeping `fix:` and `refactor:` commits separate makes the fix itself easy
 to review and easy to revert in isolation if regressions surface.
 
+**Re-running it later:** `/simplify` is expensive, so don't re-run it after
+every follow-up commit. Only re-run it on the final aggregate diff if later
+steps (narrowing a regression, lint/mypy fixes) added a **substantial** chunk
+of new production code the first pass never saw. A couple of small,
+already-clean follow-up edits don't warrant a second pass.
+
 ## Step 7: Lint and Tests
 
 The repo's `prek` hooks (config `prek.toml`) run on every `git commit`: ruff
@@ -333,6 +365,35 @@ In **all** cases, merging is the user's call, made per-PR:
   cite "prior PRs were admin-merged" as authorisation; past instances
   are history, not standing consent.
 
+### When the user *does* authorise a merge
+
+Once the user says "merge" / "admin merge" for this PR, that word **is** the
+authorisation - execute it, don't re-litigate. The recurring mistakes (this
+is the single most-corrected behaviour across sessions) are all forms of
+doing *too much*:
+
+- **Merge with a merge commit, never squash:** `gh pr merge <N> --admin
+  --merge --delete-branch`. Preserve the branch's commit history;
+  `--squash` collapses it and is the wrong default here. (`--admin` bypasses
+  only the review gate, not CI - it's fine once CI is green or the unverified
+  delta is CI-irrelevant.) Omit `--delete-branch` if a child PR is based on
+  this branch - deleting it auto-closes the child; retarget children first
+  per Step 12.
+- **Do NOT update the branch first.** If GitHub says "head branch is not up
+  to date", do not `git merge origin/main` into it, do not push a commit, do
+  not "refresh" it - all of these fire a full CI re-run the user is
+  explicitly trying to avoid. The diff was already CI-validated; a trivial
+  base-behind is CI-irrelevant, which is exactly what `--admin` is for.
+- **Do NOT re-run or wait on fresh CI**, and cancel in-flight runs first if
+  any (`gh run cancel`). "Merge" means merge now, then clean up (Step 12) -
+  not "start another test cycle".
+
+This is the `pinin4fjords:eco-merge` philosophy; that skill encapsulates the
+"bypass the up-to-date requirement when the unverified delta is
+CI-irrelevant" check if you want it. The self-initiation guardrail above
+still holds: you never reach for admin-merge on your own; you execute it
+cleanly *when told*.
+
 ### State the evidence for every "it's fixed" claim
 
 Never assert a fix works without naming what proved it. Every "resolved" /
@@ -391,6 +452,11 @@ classify the visual delta as one of:
 - **N** (neutral) - keep
 - **D** (detrimental) - must be narrowed
 
+The bar is "no **meaningful** visual regression", not pixel-identity. A
+subtle spacing or coordinate shift that comes with a cleaner, more elegant
+implementation is fine (classify it N or I); do not contort the code to
+preserve a byte-identical render. Only a genuine degradation is a D.
+
 For each detrimental delta, find the **precondition** that distinguishes
 the target case (where the fix helps) from the regressing case (where it
 hurts). Gate the fix on that precondition (e.g. a topology predicate, a
@@ -441,6 +507,10 @@ Never rewrite shared history (no `--force`, no `--force-with-lease`, no
 interactive rebase on a pushed branch). This applies even when "it would
 be cleaner" - cleanliness is not worth the risk of an agent silently
 dropping work.
+
+An ordinary additive (fast-forward) push is **not** blocked by that hook -
+only rewrites are. Don't mistake an unrelated push failure for a force-push
+block, and don't ask the user to run a plain push you can run yourself.
 
 ### Narrative belongs in the PR description, not in comments
 
