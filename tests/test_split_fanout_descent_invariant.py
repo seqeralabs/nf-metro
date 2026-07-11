@@ -150,3 +150,31 @@ def test_same_line_fan_traverses_read_as_one_stroke() -> None:
             f"line {line_id!r} from {src} runs parallel traverses to riser "
             f"x={riser_x} at {sorted(ys)} instead of one fused band"
         )
+
+
+def test_distinct_line_fan_traverses_nest_as_one_bundle() -> None:
+    """Distinct lines fanning from one source and sharing the corridor they turn
+    onto nest their traverses one OFFSET_STEP apart -- a tight bundle -- rather
+    than running on independently-sized bands several px apart (issue #1409)."""
+    from collections import defaultdict
+
+    from nf_metro.layout.constants import OFFSET_STEP
+    from nf_metro.layout.routing.normalize import _fanout_traverse_legs
+
+    path = EXAMPLE_TOPOLOGIES / "same_line_fan_distinct_descent.mmd"
+    _graph, routes, _offsets = _route(path)
+
+    nested = False
+    for legs in _fanout_traverse_legs(routes).values():
+        per_line = defaultdict(list)
+        for leg in legs:
+            per_line[leg.route.line_id].append(leg.seg.y)
+        if len(per_line) < 2:
+            continue
+        band_ys = sorted(min(ys) for ys in per_line.values())
+        gaps = [b - a for a, b in zip(band_ys, band_ys[1:])]
+        assert all(abs(g - OFFSET_STEP) < 1.0 for g in gaps), (
+            f"distinct-line traverses from one source not one step apart: {band_ys}"
+        )
+        nested = True
+    assert nested, "fixture must fan distinct lines onto a shared corridor"

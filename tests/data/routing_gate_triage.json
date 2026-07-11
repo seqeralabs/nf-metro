@@ -555,6 +555,10 @@
     "note": "Every non-exempt inter-section route ends with a vertical descent into the target Y then a short horizontal port lead (V->H tail); routes with non-V tails are normalize_exempt. The second-to-last-not-vertical reject in _final_port_approach is unreachable. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
   },
+  "normalize.py::if any(::#4": {
+    "note": "In _bundle_divergent_distinct_traverses: the section-cross veto. No corpus fan would re-band a traverse across a foreign section, so the veto arm is never taken. Defensive.",
+    "status": "defensive"
+  },
   "normalize.py::if band is not None:::#1": {
     "note": "Same-line dogleg: the band-found arm is exercised by dogleg_exempt_sameline; the band-is-None arm is defensive (both colliding trunks route through _center_inter_row_channel, so the trunk Y always resolves to a gap band).",
     "status": "defensive"
@@ -599,12 +603,20 @@
     "note": "Bounds guard in _restack_channel: the skip arm guards k or k+2 out of range for a real interior channel; defensive.",
     "status": "defensive"
   },
+  "normalize.py::if k == desc.idx + 1:::#1": {
+    "note": "In _fanout_traverse_legs: the corpus fan-out routes carry the traverse as their only interior horizontal trunk, so the loop matches on the first trunk and the non-match arm is never taken. Defensive.",
+    "status": "defensive"
+  },
   "normalize.py::if len(slots) < 2 or len(slots) > _MAX_BAND_PERMUTE:::#1": {
     "note": "_suboptimal_trunk_bands slot-count guard: validate-only, not on the render path.",
     "status": "defensive"
   },
   "normalize.py::if len(trunks) < 2:::#1": {
     "note": "Early-return in _suboptimal_trunk_bands, called only from the _guard_* validator (phases/guards.py) and a unit test, never on the production render path. The coverage sweep renders with validate=False, so neither arm registers. Defensive (exercised via the validate=True guard / test surface; cf. #728 validate-only precedent).",
+    "status": "defensive"
+  },
+  "normalize.py::if len(turns) != 1:::#1": {
+    "note": "In _bundle_divergent_distinct_traverses: every fan in the corpus turns its traverses the same way, so the mixed-direction skip is never taken. Defensive.",
     "status": "defensive"
   },
   "normalize.py::if len({id(t.route) for t in grp}) < 2:::#2": {

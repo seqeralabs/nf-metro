@@ -570,6 +570,89 @@ def _coincide_same_line_traverses(routes: list[RoutedPath], ctx: _RoutingCtx) ->
                 _set_htrunk_y(m.route, m.idx, ref_y)
 
 
+def _fanout_traverse_legs(
+    routes: list[RoutedPath],
+) -> dict[tuple[str, bool], list[_TraverseLeg]]:
+    """The horizontal leg each fan-out route turns onto after its opening descent.
+
+    A branch that leaves a source ``H`` then ``V`` and then turns to run along a
+    corridor has that corridor leg at ``descent.idx + 1`` -- an interior trunk
+    flanked by the descent and the onward riser.  Collect those legs keyed by
+    ``(source, descent-direction)`` so a fan's same-direction traverses nest
+    together, the same grouping :func:`_bundle_divergent_distinct_descents` uses.
+    """
+    by_source: dict[tuple[str, bool], list[_TraverseLeg]] = defaultdict(list)
+    for rp in routes:
+        if not rp.is_inter_section:
+            continue
+        desc = _initial_fanout_descent(rp)
+        if desc is None:
+            continue
+        for k, seg in iter_horizontal_trunks(rp):
+            if k == desc.idx + 1:
+                by_source[(rp.edge.source, desc.down)].append(_TraverseLeg(rp, k, seg))
+                break
+    return by_source
+
+
+def _bundle_divergent_distinct_traverses(
+    routes: list[RoutedPath], ctx: _RoutingCtx
+) -> None:
+    """Nest distinct-line fan-out traverses one step apart until they fork.
+
+    The horizontal counterpart of :func:`_bundle_divergent_distinct_descents`.
+    Even once a fan's opening descents nest one ``OFFSET_STEP`` apart, the corridor
+    each line turns onto may sit on an independently-sized band several px from its
+    siblings, so the shared run reads as separate strokes rather than one bundle.
+    Nest the near-parallel traverses one step apart, ordered so a line's
+    traverse-Y rank matches its descent-X rank through the shared corner (a
+    left-turning bundle puts its leftmost descent on top, a right-turning one
+    mirrors it), holding a constant bundle width until each line turns off.
+    """
+    step = ctx.offset_step
+    for members in _fanout_traverse_legs(routes).values():
+        by_line: dict[str, list[_TraverseLeg]] = defaultdict(list)
+        for m in members:
+            by_line[m.route.line_id].append(m)
+        if len(by_line) < 2:
+            continue
+        # One representative band per line (same-line traverses are already fused).
+        rep = {lid: ms[0].seg for lid, ms in by_line.items()}
+        ys = [s.y for s in rep.values()]
+        if max(ys) - min(ys) <= step * (len(by_line) - 1) + COORD_TOLERANCE:
+            continue
+        # Every member of a fan turns the same way; skip a mixed group rather than
+        # nest legs whose corners face opposite directions.
+        turns = {s.xb < s.xa for s in rep.values()}
+        if len(turns) != 1:
+            continue
+        left_turn = next(iter(turns))
+        ordered = sorted(
+            rep, key=lambda lid: rep[lid].xa if left_turn else -rep[lid].xa
+        )
+        base = min(ys)
+        targets = {lid: base + i * step for i, lid in enumerate(ordered)}
+        moves = [
+            (m, targets[m.route.line_id])
+            for m in members
+            if abs(m.seg.y - targets[m.route.line_id]) > COORD_TOLERANCE
+        ]
+        # Never re-band a traverse across a foreign section; the fan's own targets
+        # are exempt (each traverse legitimately ends at one).
+        exempt = {
+            sec
+            for m in members
+            if (sec := ctx.graph.section_for_station(m.route.edge.target)) is not None
+        }
+        if any(
+            _h_segment_crosses_other_section(ctx.graph, m.seg.xa, m.seg.xb, ty, exempt)
+            for m, ty in moves
+        ):
+            continue
+        for m, ty in moves:
+            _set_htrunk_y(m.route, m.idx, ty)
+
+
 def _unify_coincident_corner_radii(routes: list[RoutedPath]) -> None:
     """Give same-line turns shared by several legs one radius.
 

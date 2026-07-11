@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from nf_metro.layout.constants import CURVE_RADIUS
+from nf_metro.layout.constants import CURVE_RADIUS, OFFSET_STEP
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.common import RoutedPath
@@ -621,6 +621,18 @@ class TestConcentricArcCenters:
                 continue
             n_corners = min(len(r.curve_radii) for r, _ in applied)
             for corner_idx in range(n_corners):
+                # Concentricity only applies where the lines remain one bundle.
+                # Once a branch peels off (a same-line fan reaching its own port at
+                # a different depth), its turn vertex jumps clear of the bundle's
+                # concentric stagger; the corners past that point are separate
+                # routes, not a delaminating bundle, so stop comparing.
+                verts = [pts[corner_idx + 1] for _r, pts in applied]
+                vspread = max(
+                    max(v[0] for v in verts) - min(v[0] for v in verts),
+                    max(v[1] for v in verts) - min(v[1] for v in verts),
+                )
+                if vspread > len(applied) * OFFSET_STEP + self.CENTER_EPS:
+                    break
                 centers = [
                     _arc_center(
                         pts[corner_idx],
