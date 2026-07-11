@@ -395,12 +395,12 @@ doing *too much*:
   delta is CI-irrelevant.) Omit `--delete-branch` if a child PR is based on
   this branch - deleting it auto-closes the child; retarget children first
   per Step 12.
-- **Do NOT update the branch first.** If GitHub says "head branch is not up
+- **Don't update the branch first.** If GitHub says "head branch is not up
   to date", do not `git merge origin/main` into it, do not push a commit, do
   not "refresh" it - all of these fire a full CI re-run the user is
   explicitly trying to avoid. The diff was already CI-validated; a trivial
   base-behind is CI-irrelevant, which is exactly what `--admin` is for.
-- **Do NOT re-run or wait on fresh CI**, and cancel in-flight runs first if
+- **Don't re-run or wait on fresh CI**, and cancel in-flight runs first if
   any (`gh run cancel`). "Merge" means merge now, then clean up (Step 12) -
   not "start another test cycle".
 
@@ -423,7 +423,7 @@ Two traps this closes:
 
 - **"Didn't abort" / "the one invariant passes" is not "renders
   correctly".** Removing an abort can merely expose a poor layout the abort
-  was masking. After any layout/routing fix, LOOK at the full render (crop
+  was masking. After any layout/routing fix, look at the full render (crop
   the region and read it) and run `probe_layout` + `inspect_layout` for the
   whole-layout picture (crossings, port alignment, column gaps), not only the
   invariant you targeted.
@@ -575,7 +575,9 @@ GitHub auto-closing dependent PRs:
    (or via the GitHub UI's auto-delete on merge).
 3. Remove the local worktree: `git worktree remove /tmp/nf-metro-fix-<N>`.
 4. Delete the local branch: `git branch -D fix/<N>-<slug>`.
-5. Remove the conda env: `/opt/homebrew/bin/micromamba env remove -n nf-metro-fix-<N> -y`.
+
+Leave the shared `nf-metro-dev` env in place - it is reused across issues
+(Step 2), so there is nothing per-issue to remove.
 
 Offer this cleanup to the user; only run it after they agree.
 
