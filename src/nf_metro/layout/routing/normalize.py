@@ -512,6 +512,64 @@ def _coincide_same_line_tracks(routes: list[RoutedPath], ctx: _RoutingCtx) -> No
     _join_fanout_upstream_tails(routes, ctx)
 
 
+class _TraverseLeg(NamedTuple):
+    """One same-line interior horizontal trunk considered for band fusion."""
+
+    route: RoutedPath
+    idx: int
+    seg: HTrunkSeg
+
+
+def _coincide_same_line_traverses(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
+    """Fuse same-line horizontal traverse legs onto one band.
+
+    The horizontal counterpart of the divergent-source vertical fusion in
+    :func:`_coincide_same_line_tracks`.  Two branches of one line leaving one
+    source can wrap to the same target column through DIFFERENT handlers -- a
+    gap-above approach and an inter-row wrap -- each sizing its own inter-row
+    band a few px apart, so the shared leftward traverse (and the riser it feeds)
+    renders as two parallel same-colour tracks.  Snap every near-parallel
+    traverse sharing a source, a line and a riser column onto the band of the
+    member whose riser reaches deepest -- the trunk the others peel off -- so the
+    shared run reads as one stroke that splits only where each branch turns into
+    its port.
+
+    Like the vertical same-line fusion, this reads and moves ``normalize_exempt``
+    routes: a wrap owns its own concentric loop, yet two same-line wraps belong on
+    one band, and unifying their independently-sized bands is this pass's job.
+
+    Runs after the vertical descents are fused (their shared descent column is
+    the precondition for the two traverses to overlap in X at all).
+    """
+    by_riser: dict[tuple[str, str, int], list[_TraverseLeg]] = defaultdict(list)
+    for rp in routes:
+        if not rp.is_inter_section:
+            continue
+        for k, seg in iter_horizontal_trunks(rp):
+            key = (rp.edge.source, rp.line_id, round(seg.xb))
+            by_riser[key].append(_TraverseLeg(rp, k, seg))
+
+    for members in by_riser.values():
+        if len(members) < 2:
+            continue
+        ys = [m.seg.y for m in members]
+        # Already one stroke, or genuinely distinct corridors a full step-plus
+        # apart -- leave both alone; only near-parallel same-line runs collapse.
+        spread = max(ys) - min(ys)
+        if spread <= COORD_TOLERANCE or spread > ctx.offset_step + COORD_TOLERANCE:
+            continue
+        # A genuine shared run overlaps in X; disjoint traverses that merely land
+        # on one riser column keep their own bands.
+        lo = max(m.seg.x_lo for m in members)
+        hi = min(m.seg.x_hi for m in members)
+        if hi - lo <= COORD_TOLERANCE:
+            continue
+        ref_y = max(members, key=lambda m: abs(m.seg.after_y - m.seg.y)).seg.y
+        for m in members:
+            if abs(m.seg.y - ref_y) > COORD_TOLERANCE:
+                _set_htrunk_y(m.route, m.idx, ref_y)
+
+
 def _unify_coincident_corner_radii(routes: list[RoutedPath]) -> None:
     """Give same-line turns shared by several legs one radius.
 
@@ -866,6 +924,27 @@ def _set_vchannel_x(ch: _VChannel, new_x: float, offset: float = 0.0) -> None:
             prev_pt, corner_pt, next_pt = pts[radius_idx : radius_idx + 3]
             rp.curve_radii[radius_idx] = concentric_corner_radius_at(
                 prev_pt, corner_pt, next_pt, offset
+            )
+
+
+def _set_htrunk_y(rp: RoutedPath, k: int, new_y: float) -> None:
+    """Move an interior horizontal trunk (``points[k]->[k+1]``) to *new_y*.
+
+    The horizontal counterpart of :func:`_set_vchannel_x`: it re-derives the
+    trunk's two flanking corners from the moved waypoints via
+    :func:`concentric_corner_radius_at`, so a fused same-line trunk draws one arc
+    at each end rather than a corner sized for its old band.
+    """
+    pts = rp.points
+    pts[k] = (pts[k][0], new_y)
+    pts[k + 1] = (pts[k + 1][0], new_y)
+    if rp.curve_radii is None:
+        return
+    for radius_idx in (k - 1, k):
+        if 0 <= radius_idx < len(rp.curve_radii):
+            prev_pt, corner_pt, next_pt = pts[radius_idx : radius_idx + 3]
+            rp.curve_radii[radius_idx] = concentric_corner_radius_at(
+                prev_pt, corner_pt, next_pt, 0.0
             )
 
 

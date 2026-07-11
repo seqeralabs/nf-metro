@@ -121,3 +121,32 @@ def test_same_line_fan_stays_bundled_beside_distinct_descent() -> None:
             assert all(abs(g - OFFSET_STEP) < 1.0 for g in gaps), (
                 f"distinct lines not one step apart: {line_xs}"
             )
+
+
+def test_same_line_fan_traverses_read_as_one_stroke() -> None:
+    """The same-line branches wrapping to one column also share their horizontal
+    traverse band: two branches that ride the same descent and riser column must
+    not run their leftward traverse on parallel same-colour tracks a few px apart
+    (issue #1409)."""
+    from collections import defaultdict
+
+    from nf_metro.layout.routing.common import iter_horizontal_trunks
+
+    path = EXAMPLE_TOPOLOGIES / "same_line_fan_distinct_descent.mmd"
+    _graph, routes, _offsets = _route(path)
+
+    # Group each source's same-line interior traverses by their riser column.
+    by_riser: dict[tuple[str, str, int], list[float]] = defaultdict(list)
+    for rp in routes:
+        if not rp.is_inter_section:
+            continue
+        for _k, seg in iter_horizontal_trunks(rp):
+            by_riser[(rp.edge.source, rp.line_id, round(seg.xb))].append(seg.y)
+
+    shared = {k: ys for k, ys in by_riser.items() if len(ys) >= 2}
+    assert shared, "fixture must have two same-line branches sharing a riser column"
+    for (src, line_id, riser_x), ys in shared.items():
+        assert max(ys) - min(ys) < 1.0, (
+            f"line {line_id!r} from {src} runs parallel traverses to riser "
+            f"x={riser_x} at {sorted(ys)} instead of one fused band"
+        )
