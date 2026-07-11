@@ -276,9 +276,25 @@ Layout iteration is where sessions burn tokens and compute. Keep it tight:
 
 - **Reuse the persistent env** (Step 2). Do not `micromamba create` per
   issue - it re-solves the whole dependency set every session for nothing.
-- **Iterate with targeted tests.** During the fix loop use
-  `python -m pytest -k <selector>` (or `path::test`), not the whole suite.
-  Run the **full** suite once before pushing, not on every edit.
+- **Full suite vs targeted.** `addopts` bakes in `-n auto`, so the whole
+  suite parallelises to ~half a minute - the cost of a full run is not
+  wall-time, it's *repetition* and each run's summary re-entering context.
+  So: inside the edit loop run the narrowest selection
+  (`python -m pytest tests/test_layout_invariants.py -k "<fixture-or-invariant>"`,
+  then `--lf` to re-run only what just failed), with `-q --no-header -x` to
+  keep the output tiny. Run the **full** suite once per stable state before a
+  push - and do **not** re-run it while it's still green; only after you've
+  changed code again. The routing/TB ratchets are 3.11-only, so keep the env
+  on 3.11 or they skip locally and red only in CI.
+- **Read coordinates, don't rasterize, for non-visual questions.**
+  `inspect_layout.py` / `probe_layout.py` print the geometry as cheap text;
+  a render -> cairosvg PNG -> open -> image-into-context cycle is far heavier
+  and only earns its cost for a genuine *visual* check. "Is station X on the
+  trunk?" is a coordinate read, not a screenshot.
+- **Poll CI once, in the background.** A single background watch
+  (`until gh pr checks <N> ...; done`) pulls you back when checks resolve;
+  re-running `gh pr checks` by hand each turn just dumps status into context
+  repeatedly.
 - **Lean on the CI render-diff for regression review; don't rebuild the
   gallery locally in a loop.** The CI preview (Step 8) is the authoritative
   whole-corpus diff. A local `build_gallery` / render-diff sweep repeated
