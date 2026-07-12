@@ -550,57 +550,6 @@ class _TraverseLeg(NamedTuple):
     seg: HTrunkSeg
 
 
-def _same_line_traverse_spans(
-    rp: RoutedPath,
-) -> Iterable[tuple[tuple[str, str, int], _TraverseLeg]]:
-    """Every interior horizontal trunk of a route, keyed by source, line and riser."""
-    for k, seg in iter_horizontal_trunks(rp):
-        yield (rp.edge.source, rp.line_id, round(seg.xb)), _TraverseLeg(rp, k, seg)
-
-
-def _coincide_same_line_traverses(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
-    """Fuse same-line horizontal traverse legs onto one band.
-
-    The horizontal counterpart of the divergent-source vertical fusion in
-    :func:`_coincide_same_line_tracks`.  Two branches of one line leaving one
-    source can wrap to the same target column through DIFFERENT handlers -- a
-    gap-above approach and an inter-row wrap -- each sizing its own inter-row
-    band a few px apart, so the shared leftward traverse (and the riser it feeds)
-    renders as two parallel same-colour tracks.  Snap every near-parallel
-    traverse sharing a source, a line and a riser column onto the band of the
-    member whose riser reaches deepest -- the trunk the others peel off -- so the
-    shared run reads as one stroke that splits only where each branch turns into
-    its port.
-
-    Like the vertical same-line fusion, this reads and moves ``normalize_exempt``
-    routes: a wrap owns its own concentric loop, yet two same-line wraps belong on
-    one band, and unifying their independently-sized bands is this pass's job.
-
-    Runs after the vertical descents are fused (their shared descent column is
-    the precondition for the two traverses to overlap in X at all).
-    """
-    by_riser = _group_channels_by(routes, _same_line_traverse_spans)
-    for members in by_riser.values():
-        if len(members) < 2:
-            continue
-        ys = [m.seg.y for m in members]
-        # Already one stroke, or genuinely distinct corridors a full step-plus
-        # apart -- leave both alone; only near-parallel same-line runs collapse.
-        spread = max(ys) - min(ys)
-        if spread <= COORD_TOLERANCE or spread > ctx.offset_step + COORD_TOLERANCE:
-            continue
-        # A genuine shared run overlaps in X; disjoint traverses that merely land
-        # on one riser column keep their own bands.
-        lo = max(m.seg.x_lo for m in members)
-        hi = min(m.seg.x_hi for m in members)
-        if hi - lo <= COORD_TOLERANCE:
-            continue
-        ref_y = max(members, key=lambda m: abs(m.seg.after_y - m.seg.y)).seg.y
-        for m in members:
-            if abs(m.seg.y - ref_y) > COORD_TOLERANCE:
-                _set_htrunk_y(m.route, m.idx, ref_y)
-
-
 def _fanout_traverse_spans(
     rp: RoutedPath,
 ) -> Iterable[tuple[tuple[str, bool], _TraverseLeg]]:
