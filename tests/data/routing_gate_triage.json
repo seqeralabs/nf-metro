@@ -183,6 +183,10 @@
     "note": "As the first occurrence, in the index-exclude pass: a trunk-source junction always has a resolved column, so the no-column skip arm never fires.",
     "status": "defensive"
   },
+  "context.py::if jst is None:::#2": {
+    "note": "In _compute_fan_corridors, jid ranges over junction_fan_info sources, all present in graph.stations; the missing-station continue never fires.",
+    "status": "defensive"
+  },
   "context.py::if not ctx.station_offsets:::#1": {
     "note": "Pairs with _get_offset's guard: compute_station_offsets is never empty on the render path, so _max_offset_at's early-return arm guards only the route_edges(station_offsets=None) call path used by tests.",
     "status": "defensive"
@@ -193,6 +197,10 @@
   },
   "context.py::if not mst:::#1": {
     "note": "mjid ranges over junctions, a subset of junction_ids all present in graph.stations; the missing-station continue never fires.",
+    "status": "defensive"
+  },
+  "context.py::if src_row is None or col is None:::#1": {
+    "note": "In _compute_fan_corridors, a fanning junction always resolves to a section column and row; the unresolved continue guards a malformed graph the render path never produces.",
     "status": "defensive"
   },
   "context.py::if not pred:::#1": {
@@ -343,11 +351,19 @@
     "note": "Reachable only via a defective render (inter-row corridor on a <78px gap); see #722.",
     "status": "needs-review"
   },
-  "inter_section_handlers.py::if fan is not None and ep_col is not None:::#1": {
-    "note": "Reachable only via a defective render (inter-row corridor on a <78px gap); see #722.",
+  "inter_section_handlers.py::if corridor is not None:::#1": {
+    "note": "A top-entry fan branch whose junction has no fitting FanCorridor (the inter-row gap below the junction row is too narrow to hold the fan bundle) keeps its own inter_row_channel_y band; the corpus fans only through gaps wide enough to earn a corridor, so the no-corridor arm is unexercised.",
     "status": "needs-review"
   },
-  "inter_section_handlers.py::if fan is not None:::#4": {
+  "inter_section_handlers.py::if fan is not None and corridor is not None:::#2": {
+    "note": "Corridor-feeder shared-band gate: the corpus's fanning junctions all earn a FanCorridor (their in-column gap below fits the bundle), so the no-corridor short-circuit arm is unexercised; it falls to the elif fan-is-not-None global-band branch.",
+    "status": "needs-review"
+  },
+  "inter_section_handlers.py::elif fan is not None:::#1": {
+    "note": "Corridor-feeder fallback for a fan whose junction earned no corridor (its in-column gap below does not fit the bundle); the corpus's fans all earn a corridor, so this global-band branch is unexercised.",
+    "status": "needs-review"
+  },
+  "inter_section_handlers.py::if fan is not None and ep_col is not None:::#1": {
     "note": "Reachable only via a defective render (inter-row corridor on a <78px gap); see #722.",
     "status": "needs-review"
   },
@@ -363,9 +379,17 @@
     "note": "Reachable only via a defective render (LR->TB TOP-entry routing); see #720.",
     "status": "needs-review"
   },
+  "inter_section_handlers.py::if lead is Direction.R:::#1": {
+    "note": "A top-entry fan branch leading LEFT out of the junction skips the _v1_corner_x right-edge clearance bump; the corpus's fan branches all lead right, so the left-lead arm is unexercised.",
+    "status": "needs-review"
+  },
   "inter_section_handlers.py::if not _inter_row_band_fits(gap_top, gap_bottom):::#1": {
     "note": "Band-fit test in _right_entry_gap_above_is_clear (#889), reached only when the cross-row RIGHT-entry drop-in is not clear (the exotic blocked-descent case above). The corpus always takes the drop-in, so neither arm of the gap-above fallback is exercised. Defensive.",
     "status": "defensive"
+  },
+  "inter_section_handlers.py::if not straight_drop:::#1": {
+    "note": "A top-entry fan branch fed straight from directly above the junction (straight_drop) keeps its lead-in column at the source X rather than the shared fan pivot; the corpus's fan branches all carry horizontal travel, so the straight-drop arm is unexercised.",
+    "status": "needs-review"
   },
   "inter_section_handlers.py::if route is None:::#2": {
     "note": "Defensive in _declare_trunk: _route_inter_section only reaches the declaration after a matched rule (or the L-shape fall-through) produced a route, so the None guard never fires on the corpus; it mirrors _declare_channel's same guard for a handler that returns None.",

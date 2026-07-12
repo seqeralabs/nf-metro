@@ -19,8 +19,11 @@ from nf_metro.layout.routing.common import (
     RoutedPath,
     bypass_bottom_y,
     compute_bundle_info,
+    fan_corridor_band,
     merge_trunk_force_cross_row,
     resolve_section,
+    row_bottom_edge,
+    row_top_edge,
     vertical_flow_sections,
 )
 from nf_metro.layout.routing.reversal import (
@@ -70,6 +73,22 @@ class _MergeRouting:
     """Edges excluded from gap/fan indexing but still routed."""
 
 
+@dataclass(frozen=True)
+class FanCorridor:
+    """Shared inter-row-gap geometry for one fanning junction.
+
+    A junction fan's inter-row-gap branches (top-entry L-shape, LEFT/RIGHT entry
+    wrap) each traverse the gap immediately below the junction's row.  Computed
+    once per fanning junction and cached on the routing context, the corridor
+    pins that traverse band so every branch shares one reference instead of each
+    sizing its own via ``inter_row_channel_y`` and leaving the normalize stack to
+    reconcile them.  Descent-column sharing across co-descending branches runs
+    through ``_fan_left_entry_descent_x`` keyed on the fan rank.
+    """
+
+    band_y: float
+
+
 @dataclass
 class _RoutingCtx:
     """Pre-computed state shared by edge routing handlers."""
@@ -93,6 +112,7 @@ class _RoutingCtx:
     skip_edges: set[_EdgeKey] = field(default_factory=set)
     built_routes: list[RoutedPath] = field(default_factory=list)
     junction_fan_info: dict[_EdgeKey, tuple[int, int]] = field(default_factory=dict)
+    fan_corridors: dict[str, FanCorridor] = field(default_factory=dict)
     section_trunk_y: dict[str, float] = field(default_factory=dict)
     merge: _MergeRouting = field(
         default_factory=lambda: _MergeRouting(
@@ -303,6 +323,9 @@ def _build_routing_context(
     junction_fan_info = _compute_junction_fan_info(
         graph, junction_ids, line_priority, skip_edges=all_exclude
     )
+    fan_corridors = _compute_fan_corridors(
+        graph, junction_fan_info, resolve_offset_step(graph.track_gap)
+    )
 
     return _RoutingCtx(
         graph=graph,
@@ -322,6 +345,7 @@ def _build_routing_context(
         diagonal_run=diagonal_run,
         curve_radius=curve_radius,
         junction_fan_info=junction_fan_info,
+        fan_corridors=fan_corridors,
         skip_edges=merge.skip_edges,
         section_trunk_y=section_trunk_y,
         merge=merge,
@@ -1029,3 +1053,41 @@ def _compute_junction_fan_info(
                 )
 
     return result
+
+
+def _compute_fan_corridors(
+    graph: MetroGraph,
+    junction_fan_info: dict[_EdgeKey, tuple[int, int]],
+    offset_step: float,
+) -> dict[str, FanCorridor]:
+    """Shared inter-row-gap corridor per fanning junction.
+
+    A junction that fans branches into the row(s) below routes them through the
+    inter-row gap directly beneath its own row (a top-entry L-shape drops into
+    that gap and turns; a LEFT/RIGHT entry wrap traverses it before descending
+    further).  Pin one traverse band per fanning junction so those branches share
+    it rather than each centring an independent run.  The gap is measured in the
+    junction's own column (matching :func:`_route_inter_row_gap_corridor`), so a
+    tall row-span section stacked in another column does not collapse the band.  A
+    junction with no fitting gap below (its row is bottommost, the fan is same-row
+    or above, or the in-column gap is too narrow for the bundle) gets no corridor.
+    """
+    fan_n: dict[str, int] = {}
+    for (jsrc, _tgt, _lid), (_i, n) in junction_fan_info.items():
+        fan_n[jsrc] = n
+
+    corridors: dict[str, FanCorridor] = {}
+    for jid, n in fan_n.items():
+        jst = graph.stations.get(jid)
+        if jst is None:
+            continue
+        col, src_row = _resolve_section_colrow(graph, jst)
+        if src_row is None or col is None:
+            continue
+        upper_bottom = row_bottom_edge(graph, src_row, col=col)
+        lower_top = row_top_edge(graph, src_row + 1, col=col, default=upper_bottom)
+        band_y = fan_corridor_band(upper_bottom, lower_top, span=(n - 1) * offset_step)
+        if band_y is None:
+            continue
+        corridors[jid] = FanCorridor(band_y=band_y)
+    return corridors

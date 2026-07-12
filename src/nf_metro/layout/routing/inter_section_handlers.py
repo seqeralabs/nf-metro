@@ -2899,6 +2899,28 @@ def _route_top_entry_l_shape(
     # Reference line: the source-offset-0 line the centreline anchors on.
     ref_lid = min(line_ids, key=src_offset)
 
+    # A branch of a junction fan consumes the fan's shared per-line rank so its
+    # source-side first corner coincides with the bypass/wrap siblings' rather
+    # than seating an independent lead-in column that the normalize stack then
+    # has to reconcile.  Scoped to a single-line fan edge (the branch peels its
+    # own line to its own target); a multi-line top-entry keeps the co-travelling
+    # bundle build below (its fan is the edge's own lines, not the junction's).
+    fan = ctx.junction_fan_info.get((edge.source, edge.target, edge.line_id))
+    fan_single = fan if fan is not None and len(line_ids) == 1 else None
+    if fan_single is not None:
+        pos_i, pos_n = fan_single
+        corridor = ctx.fan_corridors.get(edge.source)
+        if corridor is not None:
+            # Drop into the fan's shared traverse band, so this branch and its
+            # wrap siblings turn at one Y rather than a few px apart.
+            mid_y = corridor.band_y
+        if not straight_drop:
+            lx0 = sx + lead.sign * (
+                ctx.curve_radius + (pos_n - 1) * ctx.offset_step / 2
+            )
+            if lead is Direction.R:
+                lx0 = _v1_corner_x(ctx, src, sx, lx0)
+
     # Into a TB/BT trunk each line lands on its trunk X offset so the bundle
     # flows straight on rather than converging on the shared port and re-fanning
     # (a boundary pinch); the target spread is the trunk's, not the source fan's,
@@ -2955,6 +2977,22 @@ def _route_top_entry_l_shape(
             (final_x, ty),
         ]
         transition_leg = 3
+
+    if fan_single is not None:
+        # Fan the source-region legs by the shared junction rank (so the branch
+        # nests concentrically with its off-edge siblings through the first
+        # corner) and taper onto this line's own target offset at the port.
+        e0, lid0, _s0, t0 = members[0]
+        member = (e0, lid0, fan_offsets(pos_n, ctx.offset_step)[pos_i], t0)
+        return route_tapered_anchored(
+            member,
+            centerline,
+            transition_leg=transition_leg,
+            base_radius=ctx.curve_radius,
+            src_bundle_offsets=fan_offsets(pos_n, ctx.offset_step),
+            tgt_bundle_offsets=[t0],
+            normalize_exempt=True,
+        )
 
     routes = build_tapered_bundle(
         members,
@@ -3182,12 +3220,21 @@ def _route_left_entry_wrap(
     # only picks the channel Y below.
     fan, pos_n, delta, corner_x = _wrap_fan_geometry(ctx, edge, src, i, n, Direction.D)
 
-    # Horizontal channel Y in the inter-row gap.  ``inter_row_channel_y`` clamps
-    # the per-line stagger inside the clearance band (a narrow gap must not let
-    # the run graze the source box); the builder re-adds ``delta`` on the
-    # leftward traverse, so pre-subtract it here to land on the clamped Y.
-    hy = inter_row_channel_y(ctx.graph, src, tgt, sy, ty, dy, ctx.curve_radius, delta)
-    hy -= delta
+    # Horizontal channel Y in the inter-row gap.  A fanned wrap traverses the
+    # junction's shared corridor band so it coincides with the fan's other
+    # inter-row-gap branches; an un-fanned wrap centres its own run via
+    # ``inter_row_channel_y``, which clamps the per-line stagger inside the
+    # clearance band (a narrow gap must not let the run graze the source box) --
+    # the builder re-adds ``delta`` on the leftward traverse, so pre-subtract it
+    # here to land on the clamped Y.
+    corridor = ctx.fan_corridors.get(edge.source)
+    if fan is not None and corridor is not None:
+        hy = corridor.band_y
+    else:
+        hy = inter_row_channel_y(
+            ctx.graph, src, tgt, sy, ty, dy, ctx.curve_radius, delta
+        )
+        hy -= delta
 
     # V2 descent channel centre, left of the target section.
     vx = _left_entry_descent_x(ctx, tgt.x, pos_n)
@@ -3472,11 +3519,15 @@ def _route_inter_row_gap_corridor(
     # section-header badge, not just the bbox edge.
     gap_top = row_bottom_edge(ctx.graph, src_row, col=src_col)
     gap_bottom = row_top_edge(ctx.graph, src_row + 1, col=src_col, default=gap_top)
-    if fan is not None:
-        # Share the sibling wrap's inter-row band: it centres the leftward
-        # traverse in the gap below the SOURCE row using the global (non
-        # column-restricted) row edges, so the two bundles' H legs coincide
-        # rather than smearing 3px apart.
+    corridor = ctx.fan_corridors.get(edge.source)
+    if fan is not None and corridor is not None:
+        # Traverse the fan's one shared band so this feeder's H leg coincides
+        # with the sibling wrap's rather than smearing a few px apart.
+        gy_base = corridor.band_y
+    elif fan is not None:
+        # Fan whose junction earned no corridor (its in-column gap below does not
+        # fit the bundle): centre on the global row edges to coincide with the
+        # sibling wrap, which centres the same way.
         wrap_top = row_bottom_edge(ctx.graph, src_row, default=gap_top)
         wrap_bottom = row_top_edge(ctx.graph, src_row + 1, default=wrap_top)
         gy_base = _center_inter_row_channel(wrap_top, wrap_bottom)
