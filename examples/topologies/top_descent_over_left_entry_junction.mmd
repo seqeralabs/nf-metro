@@ -1,0 +1,36 @@
+%%metro title: Top descent over left entry (junction feeder)
+%%metro line: rr | Red | #e6007e
+%%metro line: gg | Green | #2db572
+%%metro grid: up | 0,0
+%%metro grid: left | 0,1
+%%metro grid: other | 1,0
+%%metro grid: target | 1,1
+
+graph LR
+    subgraph up [Upstream]
+        %%metro exit: right | gg
+        u1[U1]
+        u2[U2]
+        u1 -->|gg| u2
+    end
+    subgraph left [Left feeder]
+        %%metro exit: right | rr
+        l1[L1]
+        l2[L2]
+        l1 -->|rr| l2
+    end
+    subgraph other [Other]
+        %%metro entry: left | gg
+        o1[O1]
+    end
+    subgraph target [Target]
+        %%metro entry: left | rr, gg
+        t1[Prep]
+        t2[Branch A]
+        t3[Branch B]
+        t1 -->|rr,gg| t2
+        t1 -->|rr,gg| t3
+    end
+    u2 -->|gg| o1
+    u2 -->|gg| t1
+    l2 -->|rr| t1

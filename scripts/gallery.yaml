@@ -1048,6 +1048,21 @@ gallery:
       feeder whose source sits highest takes the topmost lane) rather than by
       declaration order, so the line runs straight into the port instead of
       dropping down across its bundle-mate.
+  - id: top_descent_over_left_entry
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      A line descending into a shared LEFT entry port from a section above takes
+      the topmost lane rather than diving under the feeder arriving level from the
+      left, so the two keep a consistent z-order with no boundary crossover.
+  - id: top_descent_over_left_entry_junction
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      The descending feeder reaches the shared LEFT entry port through a fan-out
+      junction (as the riboseq map's translational-efficiency section does); it
+      still takes the topmost lane, since junction feeders have no section to count
+      (issue #1410).
   - id: terminus_join
     source_dir: examples/topologies
     category: Merge & Convergence

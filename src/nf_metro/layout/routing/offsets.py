@@ -2211,7 +2211,9 @@ def _order_convergence_by_approach(ctx: _OffsetCtx) -> None:
     holds it from the port to its first station.
 
     The non-compact bundle order emerges crossing-free from its own pipeline
-    (:func:`_order_convergence_entry_ports`), so this targets compact mode.
+    (:func:`_order_convergence_entry_ports`) except for the top-descent case
+    handled by :func:`_order_top_descent_over_left_entry`, so this targets
+    compact mode.
     """
     if not ctx.compact:
         return
@@ -2231,6 +2233,71 @@ def _order_convergence_by_approach(ctx: _OffsetCtx) -> None:
             continue
         ordered = sorted(
             source_y, key=lambda lid: (source_y[lid], ctx.line_priority.get(lid, 0))
+        )
+        cur = {lid: ctx.offsets.get((port_id, lid), 0.0) for lid in ordered}
+        base = min(cur.values())
+        new_offs = {
+            lid: base + rank * ctx.offset_step for rank, lid in enumerate(ordered)
+        }
+        if not any(
+            abs(new_offs[lid] - cur[lid]) > _OFFSET_EQ_TOLERANCE for lid in new_offs
+        ):
+            continue
+        _apply_offsets_along_bundle(ctx, port_id, port.section_id, new_offs)
+        for lid in ordered:
+            _apply_offset_upstream_on_row(ctx, port_id, lid, new_offs[lid])
+
+
+def _left_entry_feeder_rows(
+    ctx: _OffsetCtx, port_id: str, grid_col: int
+) -> dict[str, int] | None:
+    """Each line's feeder grid row at a LEFT entry *port_id*.
+
+    Rows resolve through fan-out junctions (whose own section is undefined).
+    Returns ``None`` if any feeder reaches the port from a column right of
+    *grid_col* -- a bypass wrap whose shared runway trunk cannot hold a per-lane
+    split -- or from a source with no resolvable grid cell.
+    """
+    graph = ctx.graph
+    line_row: dict[str, int] = {}
+    for edge in graph.edges_to(port_id):
+        col, row = _resolve_section_colrow(graph, graph.stations.get(edge.source))
+        if col is None or row is None or col > grid_col:
+            return None
+        line_row[edge.line_id] = min(line_row.get(edge.line_id, row), row)
+    return line_row
+
+
+def _order_top_descent_over_left_entry(ctx: _OffsetCtx) -> None:
+    """Put a line descending into a LEFT entry port from above on the top lane.
+
+    A section fed at one LEFT entry port by a line arriving level from its own
+    grid row and a line descending from a row above slots the bundle by line
+    declaration order, so a descending line declared last lands on the bottom
+    lane and dives under the level feeder at the boundary -- reading as the
+    lower stroke through every internal branch (#1410).  Order the lanes so the
+    feeder from the highest row leads, matching the height each arrives at.
+
+    Scoped to the forward top-descent case the compact-only
+    :func:`_order_convergence_by_approach` mirrors: every feeder must reach the
+    port from a column at or left of the target (see
+    :func:`_left_entry_feeder_rows`), and at least one must descend from a row
+    above.
+    """
+    if ctx.compact:
+        return
+    graph = ctx.graph
+    for port_id, port in _left_entry_lr_ports(ctx):
+        if _convergence_feeders(graph, port_id) is not None:
+            continue
+        section = graph.sections[port.section_id]
+        line_row = _left_entry_feeder_rows(ctx, port_id, section.grid_col)
+        if line_row is None or len(line_row) < 2:
+            continue
+        if min(line_row.values()) >= section.grid_row:
+            continue
+        ordered = sorted(
+            line_row, key=lambda lid: (line_row[lid], ctx.line_priority.get(lid, 0))
         )
         cur = {lid: ctx.offsets.get((port_id, lid), 0.0) for lid in ordered}
         base = min(cur.values())
@@ -2400,6 +2467,11 @@ def compute_station_offsets(
        feeder source Y (highest source on the topmost lane) so a feeder
        above the sink is not forced to run down across its mates into a
        bottom lane (compact only).
+    7e. **Top-descent lane ordering** - the non-compact counterpart of 7d
+       for the forward top-descent case: at a LEFT entry port fed level
+       from the target's own row and by a line descending from a row above
+       (all feeders arriving from at-or-left columns), puts the descending
+       line on the top lane so it does not dive under the level feeder.
     8. **Horizontal reconciliation** - snaps mismatched offsets on
        same-Y edges to eliminate almost-horizontal slopes.
     8b. **Flat TB-exit/entry alignment** - on an auto-folded return row,
@@ -2442,6 +2514,7 @@ def compute_station_offsets(
     _allocate_merge_ports_by_approach(ctx)
     _order_convergence_entry_ports(ctx)
     _order_convergence_by_approach(ctx)
+    _order_top_descent_over_left_entry(ctx)
     _reconcile_horizontal_offsets(ctx)
     _align_flat_tb_exit_to_entry(ctx)
     _recenter_partial_fan_branches(ctx)
