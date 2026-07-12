@@ -2899,6 +2899,21 @@ def _route_top_entry_l_shape(
     # Reference line: the source-offset-0 line the centreline anchors on.
     ref_lid = min(line_ids, key=src_offset)
 
+    # A branch of a junction fan consumes the fan's shared per-line rank so its
+    # source-side first corner coincides with the bypass/wrap siblings' rather
+    # than seating an independent lead-in column that the normalize stack then
+    # has to reconcile.  Scoped to a single-line fan edge (the branch peels its
+    # own line to its own target); a multi-line top-entry keeps the co-travelling
+    # bundle build below.
+    fan = ctx.junction_fan_info.get((edge.source, edge.target, edge.line_id))
+    fan_single = fan is not None and len(line_ids) == 1
+    if fan_single:
+        pos_i, pos_n = fan
+        if not straight_drop:
+            lx0 = sx + lead.sign * (ctx.curve_radius + (pos_n - 1) * ctx.offset_step / 2)
+            if lead is Direction.R:
+                lx0 = _v1_corner_x(ctx, src, sx, lx0)
+
     # Into a TB/BT trunk each line lands on its trunk X offset so the bundle
     # flows straight on rather than converging on the shared port and re-fanning
     # (a boundary pinch); the target spread is the trunk's, not the source fan's,
@@ -2955,6 +2970,22 @@ def _route_top_entry_l_shape(
             (final_x, ty),
         ]
         transition_leg = 3
+
+    if fan_single:
+        # Fan the source-region legs by the shared junction rank (so the branch
+        # nests concentrically with its off-edge siblings through the first
+        # corner) and taper onto this line's own target offset at the port.
+        e0, lid0, _s0, t0 = members[0]
+        member = (e0, lid0, fan_offsets(pos_n, ctx.offset_step)[pos_i], t0)
+        return route_tapered_anchored(
+            member,
+            centerline,
+            transition_leg=transition_leg,
+            base_radius=ctx.curve_radius,
+            src_bundle_offsets=fan_offsets(pos_n, ctx.offset_step),
+            tgt_bundle_offsets=[t0],
+            normalize_exempt=True,
+        )
 
     routes = build_tapered_bundle(
         members,
