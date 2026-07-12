@@ -603,10 +603,6 @@
     "note": "Unused default-arg branch: all three callers of _band_order_crossings pass feats explicitly, so the feats-is-None compute-it arm is never taken.",
     "status": "defensive"
   },
-  "normalize.py::if hi - lo <= COORD_TOLERANCE:::#1": {
-    "note": "In _coincide_same_line_traverses: same-source same-line traverses sharing a riser column overlap in X in every corpus topology, so the disjoint (opposite-direction) arm is never taken. Defensive.",
-    "status": "defensive"
-  },
   "normalize.py::if k < len(rp.curve_radii) and k + 2 < len(pts):::#1": {
     "note": "Bounds guard in _restack_htrunk: for a real interior trunk k and k+2 are in range; the skip arm is defensive.",
     "status": "defensive"

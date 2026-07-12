@@ -234,7 +234,6 @@
   "normalize.py::if down_ok and up_ok and (cross_down is None) != (cross_up is None):::#1",
   "normalize.py::if feats is None:::#1",
   "normalize.py::if gap_right <= gap_left:::#1",
-  "normalize.py::if hi - lo <= COORD_TOLERANCE:::#1",
   "normalize.py::if k < len(rp.curve_radii) and k + 2 < len(pts):::#1",
   "normalize.py::if k < len(rp.curve_radii) and k + 2 < len(pts):::#2",
   "normalize.py::if k == desc.idx + 1:::#1",
