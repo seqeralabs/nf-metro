@@ -1671,6 +1671,26 @@ def _inter_row_band_fits(upper_bottom: float, lower_top: float) -> bool:
     )
 
 
+def fan_corridor_band(
+    upper_bottom: float, lower_top: float, span: float
+) -> float | None:
+    """Centre Y of the routing band between two stacked rows, or ``None``.
+
+    The band keeps :data:`INTER_ROW_EDGE_CLEARANCE` below the upper row's bottom
+    and :data:`INTER_ROW_HEADER_CLEARANCE` above the lower row's header badge.  A
+    :class:`FanCorridor` shares one traverse band across a junction fan's
+    branches, so the band must hold the whole nested bundle: returns the centre
+    only when the clearance band is at least *span* wide (the bundle's full
+    lateral extent), else ``None`` so those branches keep their own per-line
+    clamped runs rather than nest past a box edge in a too-narrow gap.
+    """
+    lo = upper_bottom + INTER_ROW_EDGE_CLEARANCE
+    hi = lower_top - INTER_ROW_HEADER_CLEARANCE
+    if hi - lo < span:
+        return None
+    return (lo + hi) / 2
+
+
 def _center_inter_row_channel(
     upper_bottom: float, lower_top: float, offset: float = 0.0
 ) -> float:
