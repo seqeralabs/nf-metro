@@ -75,18 +75,29 @@ class _MergeRouting:
 
 @dataclass(frozen=True)
 class FanCorridor:
-    """Shared inter-row-gap geometry for one fanning junction.
+    """Shared traverse geometry for one fanning junction, one band per kind.
 
-    A junction fan's inter-row-gap branches (top-entry L-shape, LEFT/RIGHT entry
-    wrap) each traverse the gap immediately below the junction's row.  Computed
-    once per fanning junction and cached on the routing context, the corridor
-    pins that traverse band so every branch shares one reference instead of each
-    sizing its own via ``inter_row_channel_y`` and leaving the normalize stack to
-    reconcile them.  Descent-column sharing across co-descending branches runs
-    through ``_fan_left_entry_descent_x`` keyed on the fan rank.
+    A junction fans branches through different handlers that each traverse a
+    horizontal band below the junction: the inter-row-gap branches (top-entry
+    L-shape, LEFT/RIGHT entry wrap) run in the gap immediately below the
+    junction's row, while a bypass branch runs lower, below the sections its
+    U-shape clears.  The corridor models that band CHOICE -- it owns one band per
+    kind, computed once per fanning junction and cached on the routing context,
+    so every branch of a kind shares one reference instead of each sizing its own
+    and leaving the normalize stack to reconcile them.
+
+    ``band_y`` is the inter-row-gap band (``None`` when the in-column gap below
+    the junction is too narrow to hold the fan bundle).  ``bypass_band_y`` is the
+    below-row bypass band: the deepest ``bypass_bottom_y`` across the fan's
+    bypass branches, so a shallower sibling shares the deepest one's band rather
+    than running a few px above it (``None`` when the fan has no bypass branch).
+    A corridor exists whenever either band is available.  Descent-column sharing
+    across co-descending branches runs through ``_fan_left_entry_descent_x``,
+    keyed on the fan rank.
     """
 
-    band_y: float
+    band_y: float | None = None
+    bypass_band_y: float | None = None
 
 
 @dataclass
@@ -324,7 +335,7 @@ def _build_routing_context(
         graph, junction_ids, line_priority, skip_edges=all_exclude
     )
     fan_corridors = _compute_fan_corridors(
-        graph, junction_fan_info, resolve_offset_step(graph.track_gap)
+        graph, junction_fan_info, resolve_offset_step(graph.track_gap), merge.junctions
     )
 
     return _RoutingCtx(
@@ -1059,18 +1070,24 @@ def _compute_fan_corridors(
     graph: MetroGraph,
     junction_fan_info: dict[_EdgeKey, tuple[int, int]],
     offset_step: float,
+    merge_junctions: set[str],
 ) -> dict[str, FanCorridor]:
-    """Shared inter-row-gap corridor per fanning junction.
+    """Shared traverse bands per fanning junction, one per band kind.
 
-    A junction that fans branches into the row(s) below routes them through the
-    inter-row gap directly beneath its own row (a top-entry L-shape drops into
-    that gap and turns; a LEFT/RIGHT entry wrap traverses it before descending
-    further).  Pin one traverse band per fanning junction so those branches share
-    it rather than each centring an independent run.  The gap is measured in the
-    junction's own column (matching :func:`_route_inter_row_gap_corridor`), so a
-    tall row-span section stacked in another column does not collapse the band.  A
-    junction with no fitting gap below (its row is bottommost, the fan is same-row
-    or above, or the in-column gap is too narrow for the bundle) gets no corridor.
+    A junction fans branches into the row(s) below through handlers that traverse
+    different bands: the inter-row-gap branches (top-entry L-shape drops into the
+    gap directly beneath the junction's row and turns; LEFT/RIGHT entry wrap
+    traverses it before descending) share ``band_y``, while bypass branches share
+    the lower ``bypass_band_y``.  Pinning one band per kind lets those branches
+    share a reference rather than each centring an independent run.  The inter-row
+    gap is measured in the junction's own column (matching
+    :func:`_route_inter_row_gap_corridor`), so a tall row-span section stacked in
+    another column does not collapse it; it is ``None`` when its row is bottommost,
+    the fan is same-row or above, or the in-column gap is too narrow for the
+    bundle.  A junction with neither band gets no corridor.
+
+    ``merge_junctions`` are excluded from the bypass band: a feed into a merge
+    converges on the merge's own ``trunk_by`` drop level, not a fan band.
     """
     fan_n: dict[str, int] = {}
     for (jsrc, _tgt, _lid), (_i, n) in junction_fan_info.items():
@@ -1087,7 +1104,63 @@ def _compute_fan_corridors(
         upper_bottom = row_bottom_edge(graph, src_row, col=col)
         lower_top = row_top_edge(graph, src_row + 1, col=col, default=upper_bottom)
         band_y = fan_corridor_band(upper_bottom, lower_top, span=(n - 1) * offset_step)
-        if band_y is None:
+        bypass_band_y = _fan_bypass_band(graph, jid, col, src_row, merge_junctions)
+        if band_y is None and bypass_band_y is None:
             continue
-        corridors[jid] = FanCorridor(band_y=band_y)
+        corridors[jid] = FanCorridor(band_y=band_y, bypass_band_y=bypass_band_y)
     return corridors
+
+
+def _fan_bypass_band(
+    graph: MetroGraph,
+    jid: str,
+    src_col: int,
+    src_row: int,
+    merge_junctions: set[str],
+) -> float | None:
+    """Deepest below-row bypass band across a fanning junction's bypass branches.
+
+    Each of a fan's bypass branches sizes its own traverse via
+    :func:`bypass_bottom_y` from the sections its U-shape clears; siblings that
+    span different columns can land a few px apart.  Return the deepest so the
+    shallower ones share it rather than running above it -- ``max`` guarantees no
+    branch is pulled shallower than the sections it must clear.  ``None`` when the
+    fan has no cross-column bypass branch.
+
+    The bypass predicate mirrors the one in :func:`_compute_junction_fan_info`
+    (an intervening section blocks the source row, or a cross-row hop's target
+    row), so the band reflects the same edges the fan treats as bypass.  A feed
+    into a merge junction is skipped: it converges on the merge's own drop level,
+    not this band.
+    """
+    deepest: float | None = None
+    for edge in graph.edges_from(jid):
+        if edge.target in merge_junctions:
+            continue
+        tgt = graph.stations.get(edge.target)
+        if tgt is None:
+            continue
+        tgt_col, tgt_row = _resolve_section_colrow(graph, tgt)
+        if tgt_col is None:
+            continue
+        cross_row = tgt_row is not None and tgt_row != src_row
+        is_bypass = abs(tgt_col - src_col) > 1 and (
+            _has_intervening_sections(graph, src_col, tgt_col, src_row)
+            or (
+                cross_row
+                and _has_intervening_sections(graph, src_col, tgt_col, tgt_row)
+            )
+        )
+        if not is_bypass:
+            continue
+        by = bypass_bottom_y(
+            graph,
+            src_col,
+            tgt_col,
+            BYPASS_CLEARANCE,
+            src_row=src_row,
+            cross_row=cross_row,
+            tgt_row=tgt_row,
+        )
+        deepest = by if deepest is None else max(deepest, by)
+    return deepest

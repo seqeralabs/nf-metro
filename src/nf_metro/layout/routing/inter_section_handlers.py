@@ -1968,6 +1968,26 @@ def _route_bypass(
         base_y = sy + src_off
         nest_offset = 0.0
 
+    # A bypass branch of a junction fan traverses the fan's one shared below-row
+    # band (the deepest sibling's ``bypass_bottom_y``), so its trunk coincides
+    # with its bypass siblings' by construction.  Only ever lowers a shallower
+    # branch onto the shared band -- never lifts one above a section it must
+    # clear -- and the source-track special cases above keep precedence.  A feed
+    # into a merge junction is excluded: its convergence shares the merge's own
+    # ``trunk_by`` drop level, which a fan band would desync it from.
+    if (
+        fan is not None
+        and base_y > sy + COORD_TOLERANCE
+        and edge.target not in ctx.merge.junctions
+    ):
+        corridor = ctx.fan_corridors.get(edge.source)
+        if (
+            corridor is not None
+            and corridor.bypass_band_y is not None
+            and corridor.bypass_band_y >= base_y - COORD_TOLERANCE
+        ):
+            base_y = corridor.bypass_band_y
+
     # Determine actual vertical direction at each gap from the geometry.
     # Gap1 goes from source Y to trunk Y; gap2 from trunk Y to target Y.
     # Normally gap1 goes down and gap2 goes up, but when the source is
@@ -2910,7 +2930,7 @@ def _route_top_entry_l_shape(
     if fan_single is not None:
         pos_i, pos_n = fan_single
         corridor = ctx.fan_corridors.get(edge.source)
-        if corridor is not None:
+        if corridor is not None and corridor.band_y is not None:
             # Drop into the fan's shared traverse band, so this branch and its
             # wrap siblings turn at one Y rather than a few px apart.
             mid_y = corridor.band_y
@@ -3228,7 +3248,7 @@ def _route_left_entry_wrap(
     # the builder re-adds ``delta`` on the leftward traverse, so pre-subtract it
     # here to land on the clamped Y.
     corridor = ctx.fan_corridors.get(edge.source)
-    if fan is not None and corridor is not None:
+    if fan is not None and corridor is not None and corridor.band_y is not None:
         hy = corridor.band_y
     else:
         hy = inter_row_channel_y(
@@ -3520,7 +3540,7 @@ def _route_inter_row_gap_corridor(
     gap_top = row_bottom_edge(ctx.graph, src_row, col=src_col)
     gap_bottom = row_top_edge(ctx.graph, src_row + 1, col=src_col, default=gap_top)
     corridor = ctx.fan_corridors.get(edge.source)
-    if fan is not None and corridor is not None:
+    if fan is not None and corridor is not None and corridor.band_y is not None:
         # Traverse the fan's one shared band so this feeder's H leg coincides
         # with the sibling wrap's rather than smearing a few px apart.
         gy_base = corridor.band_y
