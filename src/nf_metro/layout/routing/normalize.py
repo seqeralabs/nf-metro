@@ -34,6 +34,7 @@ from nf_metro.layout.routing.common import (
     iter_inter_row_gaps,
     iter_port_peeloff_bundles,
     iter_vertical_segments,
+    merge_fanout_pivot_reference,
     packed_cell_neighbor_edges,
     peeloff_target_slots,
     perp_peeloff_off_horizontal_junction,
@@ -502,6 +503,71 @@ def _snap_group(group: _Coincidence) -> None:
     for ch in group.channels:
         if abs(ch.x - group.ref_x) > COORD_TOLERANCE:
             _set_vchannel_x(ch, group.ref_x)
+
+
+def _route_first_vertical(rp: RoutedPath) -> _VChannel | None:
+    """The first vertical leg of a route, whichever way it turns, or ``None``.
+
+    Direction-agnostic (unlike :func:`_initial_fanout_descent`, which requires a
+    horizontal lead into a downward descent): a fan-out arm that turns up off its
+    lead-out is as much an opening pivot as one that turns down.  ``None`` when
+    the route runs straight into its target with no vertical turn.
+    """
+    pts = rp.points
+    for i in range(len(pts) - 1):
+        x0, y0 = pts[i]
+        x1, y1 = pts[i + 1]
+        if abs(x1 - x0) <= COORD_TOLERANCE and abs(y1 - y0) > COORD_TOLERANCE:
+            return _VChannel(
+                route=rp,
+                idx=i,
+                x=x0,
+                y_lo=min(y0, y1),
+                y_hi=max(y0, y1),
+                down=y1 > y0,
+            )
+    return None
+
+
+def _coincide_merge_fanout_pivots(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
+    """Fuse a merge fan-out's branch first corners onto one shared pivot column.
+
+    A merge fan-out's branches leave one source together and each turns off its
+    lead-out through a first corner (:func:`merge_fanout_junctions`).  Handlers
+    place those corners independently, so same-direction branches can open a few
+    pixels apart -- the lead-out reads as forking into two columns.  Snap them
+    onto the corner nearest the source so the fork pivots through one column and
+    splits only where each branch turns off.
+
+    Branches are grouped by turn direction: an up-turning arm and a down-turning
+    arm of one fork never share a column (one shared column would fold the line
+    back over itself), so only same-direction arms fuse.  Only branches INTO
+    merge junctions are considered; a co-travelling branch to another target
+    keeps its own handler channel.
+    """
+    fanouts = ctx.merge_fanouts
+    if not fanouts:
+        return
+    merges = ctx.merge_junctions
+    by_key: dict[tuple[str, bool], list[_VChannel]] = defaultdict(list)
+    for rp in routes:
+        if not rp.is_inter_section or rp.edge.source not in fanouts:
+            continue
+        if rp.edge.target not in merges:
+            continue
+        ch = _route_first_vertical(rp)
+        if ch is not None:
+            by_key[(rp.edge.source, ch.down)].append(ch)
+
+    for chans in by_key.values():
+        xs = [ch.x for ch in chans]
+        source_x = chans[0].route.points[0][0]
+        ref = merge_fanout_pivot_reference(xs, source_x, COORD_TOLERANCE)
+        if ref is None:
+            continue
+        for ch in chans:
+            if abs(ch.x - ref) > COORD_TOLERANCE:
+                _set_vchannel_x(ch, ref)
 
 
 def _coincide_same_line_tracks(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:

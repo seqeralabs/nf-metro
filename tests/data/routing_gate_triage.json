@@ -139,6 +139,10 @@
     "note": "None-station guard: every production caller passes a concrete Station (grep-verified); the None arm only guards the typed Station|None parameter.",
     "status": "defensive"
   },
+  "common.py::if succ_port is not None and succ_port.is_entry:::#1": {
+    "note": "merge_junction_ids mirrors _classify_merge_edges: a merge junction is one whose single successor is the section entry port it was inserted before, so succ_port is always a present entry port; the reject arm (successor absent or non-entry) never fires.",
+    "status": "defensive"
+  },
   "common.py::if t < -0.01 or t > 1.01:::#1": {
     "note": "point_on_polyline parameter-range branch, reached only via the --animate renderer; the render-path coverage sweep doesn't animate. Exercised by test_animation.py / test_routing.py.",
     "status": "defensive"

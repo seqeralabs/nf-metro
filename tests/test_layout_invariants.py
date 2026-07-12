@@ -99,11 +99,12 @@ from nf_metro.layout.routing import (
     route_edges,
     route_edges_centred,
 )
-from nf_metro.layout.routing.common import resolve_section
+from nf_metro.layout.routing.common import merge_fanout_junctions, resolve_section
 from nf_metro.layout.routing.invariants import (
     assert_render_curve_invariants,
     check_bundle_order_preserved,
     check_collinear_distinct_lines,
+    check_merge_fanout_pivots_shared,
 )
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import (
@@ -329,6 +330,19 @@ _FIXTURES_WITH_OFF_TRACK_ANY = sorted(
 )
 _FIXTURES_MULTI_SECTION = _fixtures_with(lambda t: t.count("subgraph") >= 2)
 _FIXTURES_COMPACT = _fixtures_with(lambda t: "compact_offsets: true" in t)
+
+
+def _has_merge_fanout(text: str) -> bool:
+    """Whether a fixture contains a merge fan-out (one line to two merges)."""
+    try:
+        g = parse_metro_mermaid(text)
+        compute_layout(g)
+    except Exception:
+        return False
+    return bool(merge_fanout_junctions(g))
+
+
+_FIXTURES_WITH_MERGE_FANOUT = _fixtures_with(_has_merge_fanout)
 
 # Multi-section gallery fixtures plus the serpentine-stacked
 # regression.  The regression's narrow ``reporting`` column nests under the
@@ -1271,6 +1285,59 @@ def _section_fan_columns(graph: MetroGraph, section) -> dict[float, list[str]]:
             continue
         cols[round(st.x, 1)].append(sid)
     return {x: sids for x, sids in cols.items() if len(sids) >= 2}
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_WITH_MERGE_FANOUT)
+def test_merge_fanout_pivots_share_first_corner(fixture):
+    """A merge fan-out's same-direction branches pivot through one shared corner.
+
+    When one source fans the same line to two merge junctions, the branches
+    leave together and should open their descents on a single column, splitting
+    only where each turns off to its own merge -- not on columns a few pixels
+    apart that read as two parallel same-colour tracks off the fork.  Branches
+    turning OPPOSITE ways (one up, one down) never share a column -- doing so
+    would fold the line back over itself -- so the guard holds only same-
+    direction arms to a common corner.
+
+    Exercised over every fixture carrying a merge fan-out (the ``merge_*``
+    corpus plus the ``genomeassembly`` / ``fan_in_merge`` families), so the
+    invariant generalises rather than pinning a single ``.mmd``.
+    """
+    graph = _layout(fixture)
+    routes = route_edges(graph)
+    offsets = compute_station_offsets(graph)
+    violations = check_merge_fanout_pivots_shared(graph, routes, offsets)
+    assert not violations, "; ".join(v.message() for v in violations)
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    [
+        "topologies/merge_around_below_leftmost.mmd",
+        "topologies/merge_trunk_out_of_range_section.mmd",
+        "topologies/merge_bottom_row_bypass.mmd",
+    ],
+)
+def test_merge_fanout_shares_corner_by_construction(fixture, monkeypatch):
+    """Merge fan-outs share their corner without the divergent-descent passes.
+
+    With ``_divergent_source_groups`` and ``_merge_feeder_groups`` stubbed to
+    no-ops, a merge fan-out's same-direction branches share their first corner
+    purely through ``_coincide_merge_fanout_pivots`` -- which recognises the fan
+    and runs at gap-materialisation time.  This pins the sharing to construction
+    rather than to the later reconciliation passes.  Removing
+    ``_coincide_merge_fanout_pivots`` makes this assertion fail, so it genuinely
+    exercises that pass.
+    """
+    import nf_metro.layout.routing.normalize as normalize_mod
+
+    monkeypatch.setattr(normalize_mod, "_divergent_source_groups", lambda routes: [])
+    monkeypatch.setattr(normalize_mod, "_merge_feeder_groups", lambda routes, ctx: [])
+    graph = _layout(fixture, _cache=False)
+    routes = route_edges(graph)
+    offsets = compute_station_offsets(graph)
+    violations = check_merge_fanout_pivots_shared(graph, routes, offsets)
+    assert not violations, "; ".join(v.message() for v in violations)
 
 
 @pytest.mark.parametrize(
