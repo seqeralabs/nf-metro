@@ -216,7 +216,7 @@
   "normalize.py::if band is not None:::#2",
   "normalize.py::if below_ok and above_ok and (cross_below is None) != (cross_above is None):::#1",
   "normalize.py::if best < cur:::#1",
-  "normalize.py::if ch is None:::#5",
+  "normalize.py::if ch is None:::#4",
   "normalize.py::if ch is not None:::#1",
   "normalize.py::if col is None:::#1",
   "normalize.py::if down is None or len(up.points) < 2:::#1",

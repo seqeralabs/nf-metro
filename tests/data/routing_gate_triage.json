@@ -600,7 +600,7 @@
     "status": "defensive"
   },
   "normalize.py::if k == desc.idx + 1:::#1": {
-    "note": "In _fanout_traverse_legs: the corpus fan-out routes carry the traverse as their only interior horizontal trunk, so the loop matches on the first trunk and the non-match arm is never taken. Defensive.",
+    "note": "In _fanout_traverse_spans: the corpus fan-out routes carry the traverse as their only interior horizontal trunk, so the loop matches on the first trunk and the non-match arm is never taken. Defensive.",
     "status": "defensive"
   },
   "normalize.py::if len(slots) < 2 or len(slots) > _MAX_BAND_PERMUTE:::#1": {
