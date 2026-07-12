@@ -1713,18 +1713,22 @@ def merge_junction_ids(graph: MetroGraph) -> set[str]:
     return merges
 
 
-def merge_fanout_junctions(graph: MetroGraph) -> set[str]:
+def merge_fanout_junctions(
+    graph: MetroGraph, merges: set[str] | None = None
+) -> set[str]:
     """Sources that fan ONE line to two or more distinct merge junctions.
 
     A *merge fan-out* is a source whose same-line outgoing edges reach two or
-    more :func:`merge_junction_ids`.  Its merge branches leave the source
-    together and should pivot through one shared first corner before each turns
-    off to its own merge, rather than opening their descents on columns a few
-    pixels apart.  A co-travelling branch to some other target (e.g. an entry
-    port) is out of scope here -- only the branches into merge junctions define
-    the shared corner.
+    more merge junctions (``merges``, defaulting to :func:`merge_junction_ids`;
+    a caller that already holds the set passes it to avoid recomputing).  Its
+    merge branches leave the source together and should pivot through one shared
+    first corner before each turns off to its own merge, rather than opening
+    their descents on columns a few pixels apart.  A co-travelling branch to
+    some other target (e.g. an entry port) is out of scope here -- only the
+    branches into merge junctions define the shared corner.
     """
-    merges = merge_junction_ids(graph)
+    if merges is None:
+        merges = merge_junction_ids(graph)
     fanouts: set[str] = set()
     for src in {e.source for e in graph.edges}:
         by_line: dict[str, set[str]] = defaultdict(set)

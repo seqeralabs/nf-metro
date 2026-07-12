@@ -513,20 +513,28 @@ def _route_first_vertical(rp: RoutedPath) -> _VChannel | None:
     lead-out is as much an opening pivot as one that turns down.  ``None`` when
     the route runs straight into its target with no vertical turn.
     """
-    pts = rp.points
-    for i in range(len(pts) - 1):
-        x0, y0 = pts[i]
-        x1, y1 = pts[i + 1]
-        if abs(x1 - x0) <= COORD_TOLERANCE and abs(y1 - y0) > COORD_TOLERANCE:
-            return _VChannel(
-                route=rp,
-                idx=i,
-                x=x0,
-                y_lo=min(y0, y1),
-                y_hi=max(y0, y1),
-                down=y1 > y0,
-            )
-    return None
+    return next(
+        (
+            _VChannel(route=rp, idx=k, x=x, y_lo=y_lo, y_hi=y_hi, down=down)
+            for k, x, y_lo, y_hi, down in iter_vertical_segments(rp)
+        ),
+        None,
+    )
+
+
+def _merge_fanout_pivot_spans(
+    rp: RoutedPath, fanouts: set[str], merges: set[str]
+) -> Iterable[tuple[tuple[str, bool], _VChannel]]:
+    """A merge-fanout branch's opening pivot, keyed by source and turn direction.
+
+    Yields nothing for a route that is not a merge-fanout branch into a merge
+    junction, or that opens with no vertical turn.
+    """
+    if rp.edge.source not in fanouts or rp.edge.target not in merges:
+        return
+    ch = _route_first_vertical(rp)
+    if ch is not None:
+        yield (rp.edge.source, ch.down), ch
 
 
 def _coincide_merge_fanout_pivots(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
@@ -548,26 +556,17 @@ def _coincide_merge_fanout_pivots(routes: list[RoutedPath], ctx: _RoutingCtx) ->
     fanouts = ctx.merge_fanouts
     if not fanouts:
         return
-    merges = ctx.merge_junctions
-    by_key: dict[tuple[str, bool], list[_VChannel]] = defaultdict(list)
-    for rp in routes:
-        if not rp.is_inter_section or rp.edge.source not in fanouts:
-            continue
-        if rp.edge.target not in merges:
-            continue
-        ch = _route_first_vertical(rp)
-        if ch is not None:
-            by_key[(rp.edge.source, ch.down)].append(ch)
-
-    for chans in by_key.values():
-        xs = [ch.x for ch in chans]
-        source_x = chans[0].route.points[0][0]
-        ref = merge_fanout_pivot_reference(xs, source_x, COORD_TOLERANCE)
-        if ref is None:
-            continue
-        for ch in chans:
-            if abs(ch.x - ref) > COORD_TOLERANCE:
-                _set_vchannel_x(ch, ref)
+    merges = ctx.merge.junctions
+    groups = _group_channels_by(
+        routes, lambda rp: _merge_fanout_pivot_spans(rp, fanouts, merges)
+    )
+    for (src, _down), chans in groups.items():
+        source_x = ctx.graph.stations[src].x
+        ref = merge_fanout_pivot_reference(
+            [c.x for c in chans], source_x, COORD_TOLERANCE
+        )
+        if ref is not None:
+            _snap_group(_Coincidence(chans, ref))
 
 
 def _coincide_same_line_tracks(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
