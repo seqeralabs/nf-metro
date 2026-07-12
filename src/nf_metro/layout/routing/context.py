@@ -547,7 +547,7 @@ def _resolve_section_row(graph: MetroGraph, station: Station) -> int | None:
 
 
 def _resolve_section_colrow(
-    graph: MetroGraph, station: Station
+    graph: MetroGraph, station: Station | None
 ) -> tuple[int | None, int | None]:
     """Resolve grid ``(col, row)`` for a port/junction station in one pass.
 
