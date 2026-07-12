@@ -5,8 +5,9 @@ from __future__ import annotations
 import functools
 import itertools
 from collections import defaultdict
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import NamedTuple
+from typing import NamedTuple, TypeVar
 
 from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
@@ -72,6 +73,35 @@ class _VChannel:
     y_lo: float
     y_hi: float
     down: bool
+
+
+_GroupKey = TypeVar("_GroupKey")
+_GroupItem = TypeVar("_GroupItem")
+
+
+def _group_channels_by(
+    routes: list[RoutedPath],
+    keyed_spans: Callable[[RoutedPath], Iterable[tuple[_GroupKey, _GroupItem]]],
+) -> defaultdict[_GroupKey, list[_GroupItem]]:
+    """Bucket per-route channel spans over the inter-section routes.
+
+    ``keyed_spans`` yields ``(bucket_key, item)`` pairs for one route -- none,
+    one, or several.  The fan reconciliation passes all share this
+    iterate-the-inter-section-routes-and-bucket loop and differ only in which
+    span they extract and how they key it, so each supplies its own
+    ``keyed_spans`` and keeps its reseat/ordering/guard logic separate.
+
+    Buckets preserve route order (and, within a route, span order): every pass
+    reads a bucket's members positionally -- picking a reference member,
+    ordering by rank -- so the collection order is part of each pass's contract.
+    """
+    groups: defaultdict[_GroupKey, list[_GroupItem]] = defaultdict(list)
+    for rp in routes:
+        if not rp.is_inter_section:
+            continue
+        for key, item in keyed_spans(rp):
+            groups[key].append(item)
+    return groups
 
 
 def _split_corridors(chans: list[_VChannel]) -> list[list[_VChannel]]:
@@ -520,6 +550,14 @@ class _TraverseLeg(NamedTuple):
     seg: HTrunkSeg
 
 
+def _same_line_traverse_spans(
+    rp: RoutedPath,
+) -> Iterable[tuple[tuple[str, str, int], _TraverseLeg]]:
+    """Every interior horizontal trunk of a route, keyed by source, line and riser."""
+    for k, seg in iter_horizontal_trunks(rp):
+        yield (rp.edge.source, rp.line_id, round(seg.xb)), _TraverseLeg(rp, k, seg)
+
+
 def _coincide_same_line_traverses(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
     """Fuse same-line horizontal traverse legs onto one band.
 
@@ -541,14 +579,7 @@ def _coincide_same_line_traverses(routes: list[RoutedPath], ctx: _RoutingCtx) ->
     Runs after the vertical descents are fused (their shared descent column is
     the precondition for the two traverses to overlap in X at all).
     """
-    by_riser: dict[tuple[str, str, int], list[_TraverseLeg]] = defaultdict(list)
-    for rp in routes:
-        if not rp.is_inter_section:
-            continue
-        for k, seg in iter_horizontal_trunks(rp):
-            key = (rp.edge.source, rp.line_id, round(seg.xb))
-            by_riser[key].append(_TraverseLeg(rp, k, seg))
-
+    by_riser = _group_channels_by(routes, _same_line_traverse_spans)
     for members in by_riser.values():
         if len(members) < 2:
             continue
@@ -570,29 +601,31 @@ def _coincide_same_line_traverses(routes: list[RoutedPath], ctx: _RoutingCtx) ->
                 _set_htrunk_y(m.route, m.idx, ref_y)
 
 
-def _fanout_traverse_legs(
-    routes: list[RoutedPath],
-) -> dict[tuple[str, bool], list[_TraverseLeg]]:
-    """The horizontal leg each fan-out route turns onto after its opening descent.
+def _fanout_traverse_spans(
+    rp: RoutedPath,
+) -> Iterable[tuple[tuple[str, bool], _TraverseLeg]]:
+    """The horizontal leg a fan-out route turns onto after its opening descent.
 
     A branch that leaves a source ``H`` then ``V`` and then turns to run along a
     corridor has that corridor leg at ``descent.idx + 1`` -- an interior trunk
-    flanked by the descent and the onward riser.  Collect those legs keyed by
+    flanked by the descent and the onward riser.  Key it by
     ``(source, descent-direction)`` so a fan's same-direction traverses nest
     together, the same grouping :func:`_bundle_divergent_distinct_descents` uses.
     """
-    by_source: dict[tuple[str, bool], list[_TraverseLeg]] = defaultdict(list)
-    for rp in routes:
-        if not rp.is_inter_section:
-            continue
-        desc = _initial_fanout_descent(rp)
-        if desc is None:
-            continue
-        for k, seg in iter_horizontal_trunks(rp):
-            if k == desc.idx + 1:
-                by_source[(rp.edge.source, desc.down)].append(_TraverseLeg(rp, k, seg))
-                break
-    return by_source
+    desc = _initial_fanout_descent(rp)
+    if desc is None:
+        return
+    for k, seg in iter_horizontal_trunks(rp):
+        if k == desc.idx + 1:
+            yield (rp.edge.source, desc.down), _TraverseLeg(rp, k, seg)
+            break
+
+
+def _fanout_traverse_legs(
+    routes: list[RoutedPath],
+) -> defaultdict[tuple[str, bool], list[_TraverseLeg]]:
+    """Fan-out traverse legs bucketed by source and descent direction."""
+    return _group_channels_by(routes, _fanout_traverse_spans)
 
 
 def _bundle_divergent_distinct_traverses(
@@ -957,19 +990,21 @@ def _convergent_port_groups(
     source not folded into the merge) share one approach key and fuse.
     """
     entry_port_for = ctx.merge.entry_port_for
-    by_port: dict[tuple[str, str, bool], list[_VChannel]] = defaultdict(list)
-    for rp in routes:
-        if not rp.is_inter_section:
-            continue
+
+    def spans(
+        rp: RoutedPath,
+    ) -> Iterable[tuple[tuple[str, str, bool], _VChannel]]:
         ch = _final_port_approach(rp)
         if ch is None:
-            continue
+            return
         # Group by the destination port, not its exact terminal (x, y): two
         # same-line descents into one port can land a per-line offset apart
         # before render offsets are applied, and keying on the raw endpoint
         # would split that single convergence into two.
         target = entry_port_for.get(rp.edge.target, rp.edge.target)
-        by_port[(target, rp.line_id, ch.down)].append(ch)
+        yield (target, rp.line_id, ch.down), ch
+
+    by_port = _group_channels_by(routes, spans)
 
     groups: list[_Coincidence] = []
     for chans in by_port.values():
@@ -1081,6 +1116,24 @@ def _initial_fanout_descent(rp: RoutedPath) -> _VChannel | None:
     return _VChannel(route=rp, idx=1, x=x, y_lo=y_lo, y_hi=y_hi, down=down)
 
 
+def _divergent_source_spans(
+    rp: RoutedPath,
+) -> Iterable[tuple[tuple[str, str, bool], _VChannel]]:
+    """A route's opening fan-out descent, keyed by source, line and direction."""
+    ch = _initial_fanout_descent(rp)
+    if ch is not None:
+        yield (rp.edge.source, rp.line_id, ch.down), ch
+
+
+def _distinct_descent_spans(
+    rp: RoutedPath,
+) -> Iterable[tuple[tuple[str, bool], _VChannel]]:
+    """A route's opening fan-out descent, keyed by source and direction."""
+    ch = _initial_fanout_descent(rp)
+    if ch is not None:
+        yield (rp.edge.source, ch.down), ch
+
+
 def _divergent_source_groups(routes: list[RoutedPath]) -> list[_Coincidence]:
     """Same-line opening descents leaving one source, grouped to fuse.
 
@@ -1109,16 +1162,12 @@ def _divergent_source_groups(routes: list[RoutedPath]) -> list[_Coincidence]:
     into a bundle-mate of another line; only an all-free group falls back to the
     descent nearest the source.
     """
+    by_source = _group_channels_by(routes, _divergent_source_spans)
     lines_per_edge: dict[tuple[str, str], set[str]] = defaultdict(set)
-    by_source: dict[tuple[str, str, bool], list[_VChannel]] = defaultdict(list)
-    for rp in routes:
-        if not rp.is_inter_section:
-            continue
-        ch = _initial_fanout_descent(rp)
-        if ch is None:
-            continue
-        lines_per_edge[(rp.edge.source, rp.edge.target)].add(rp.line_id)
-        by_source[(rp.edge.source, rp.line_id, ch.down)].append(ch)
+    for chans in by_source.values():
+        for ch in chans:
+            e = ch.route.edge
+            lines_per_edge[(e.source, e.target)].add(ch.route.line_id)
 
     def bundle_locked(ch: _VChannel) -> bool:
         e = ch.route.edge
@@ -1172,13 +1221,7 @@ def _bundle_divergent_distinct_descents(
     sibling that has not yet turned off.  Only groups already spread wider than a
     tight one-slot-per-line bundle move.
     """
-    by_source: dict[tuple[str, bool], list[_VChannel]] = defaultdict(list)
-    for rp in routes:
-        if not rp.is_inter_section:
-            continue
-        ch = _initial_fanout_descent(rp)
-        if ch is not None:
-            by_source[(rp.edge.source, ch.down)].append(ch)
+    by_source = _group_channels_by(routes, _distinct_descent_spans)
 
     step = ctx.offset_step
     for chans in by_source.values():
