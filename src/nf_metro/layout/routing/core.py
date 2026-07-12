@@ -74,7 +74,6 @@ from nf_metro.layout.routing.normalize import (  # noqa: F401
     _clamp_inter_row_band_top,
     _clear_channel_x_in_band,
     _coincide_same_line_tracks,
-    _coincide_same_line_traverses,
     _coincident_trunk_slots,
     _collect_htrunks,
     _distinct_line_order,
@@ -218,10 +217,6 @@ def _route_edges(
     # keep their opening descents one step apart until each turns off, rather
     # than on independent channels that read as separate strokes from the start.
     _bundle_divergent_distinct_descents(routes, ctx)
-    # Same-line branches wrapping to one target column via different handlers size
-    # their inter-row bands independently; fuse the near-parallel traverses onto
-    # the deepest member's band so the shared run reads as one stroke.
-    _coincide_same_line_traverses(routes, ctx)
     # Distinct lines fanning out share the corridor they turn onto; nest their
     # traverses one step apart so the bundle holds a constant width until each
     # line peels off, rather than running on independently-sized bands.
