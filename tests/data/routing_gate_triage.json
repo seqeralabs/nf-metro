@@ -540,11 +540,7 @@
     "status": "defensive"
   },
   "normalize.py::if 0 <= radius_idx < len(rp.curve_radii):::#1": {
-    "note": "Bounds guard in _set_vchannel_x: radius_idx in (k-1, k) for a real channel stays in range; the out-of-range skip arm is defensive.",
-    "status": "defensive"
-  },
-  "normalize.py::if 0 <= radius_idx < len(rp.curve_radii):::#2": {
-    "note": "In _set_htrunk_y: a moved interior trunk always has both flanking corner radii in range, so the out-of-range arm is never taken. Defensive (mirrors _set_vchannel_x).",
+    "note": "Bounds guard in _reseat_concentric_flanking: radius_idx in (k-1, k) for a real moved segment stays in range; the out-of-range skip arm is defensive.",
     "status": "defensive"
   },
   "normalize.py::if abs(ly - pts[1][1]) < COORD_TOLERANCE:::#1": {
@@ -636,7 +632,7 @@
     "status": "defensive"
   },
   "normalize.py::if rp.curve_radii is None:::#1": {
-    "note": "curve_radii is always a concrete list for inter-section routes (every inter-section handler sets it); the None arm in _set_vchannel_x is a belt-and-suspenders guard.",
+    "note": "curve_radii is always a concrete list for inter-section routes (every inter-section handler sets it); the None arm in _reseat_concentric_flanking is a belt-and-suspenders guard.",
     "status": "defensive"
   },
   "normalize.py::if rp.curve_radii is None:::#2": {
@@ -645,10 +641,6 @@
   },
   "normalize.py::if rp.curve_radii is None:::#3": {
     "note": "curve_radii is always set for inter-section routes; the None arm in _restack_channel is a defensive guard.",
-    "status": "defensive"
-  },
-  "normalize.py::if rp.curve_radii is None:::#4": {
-    "note": "In _set_htrunk_y: a routed inter-section path always carries curve_radii by the time the coincidence passes run, so the None short-circuit is never taken. Defensive (mirrors _set_vchannel_x).",
     "status": "defensive"
   },
   "normalize.py::if s.bbox_w <= 0:::#1": {

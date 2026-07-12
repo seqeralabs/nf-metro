@@ -984,6 +984,42 @@ def _convergent_port_groups(
     return groups
 
 
+def _reseat_concentric_flanking(
+    rp: RoutedPath,
+    k: int,
+    new_coord: float,
+    axis: int,
+    offset_in: float = 0.0,
+    offset_out: float = 0.0,
+) -> None:
+    """Move the ``points[k] -> points[k+1]`` segment onto *new_coord* and re-derive
+    its two flanking corners concentrically.
+
+    *axis* selects the moved coordinate: ``0`` slides a vertical channel to a new
+    X, ``1`` slides a horizontal trunk to a new Y.  Both segment endpoints take
+    *new_coord* on that axis and keep their other coordinate, so the segment stays
+    straight and the flanking legs stretch to meet it.
+
+    ``offset_in`` / ``offset_out`` are the signed displacements from the bundle's
+    reference line at the incoming (``k-1``) and outgoing (``k``) corners; each
+    flanking radius is re-derived through :func:`concentric_corner_radius_at` on
+    the moved waypoints, so the outer lanes take the wider, concentric radius and
+    the arcs hold a constant gap through the turn.
+    """
+    pts = rp.points
+    for j in (k, k + 1):
+        px, py = pts[j]
+        pts[j] = (new_coord, py) if axis == 0 else (px, new_coord)
+    if rp.curve_radii is None:
+        return
+    for radius_idx, offset in ((k - 1, offset_in), (k, offset_out)):
+        if 0 <= radius_idx < len(rp.curve_radii):
+            prev_pt, corner_pt, next_pt = pts[radius_idx : radius_idx + 3]
+            rp.curve_radii[radius_idx] = concentric_corner_radius_at(
+                prev_pt, corner_pt, next_pt, offset
+            )
+
+
 def _set_vchannel_x(ch: _VChannel, new_x: float, offset: float = 0.0) -> None:
     """Move a vertical channel to *new_x*, re-deriving its flanking corners.
 
@@ -999,19 +1035,9 @@ def _set_vchannel_x(ch: _VChannel, new_x: float, offset: float = 0.0) -> None:
     line's rank displacement so the outer lanes take the wider, concentric
     radius and the arcs hold a constant gap through the turn.
     """
-    rp = ch.route
-    pts = rp.points
-    k = ch.idx
-    pts[k] = (new_x, pts[k][1])
-    pts[k + 1] = (new_x, pts[k + 1][1])
-    if rp.curve_radii is None:
-        return
-    for radius_idx in (k - 1, k):
-        if 0 <= radius_idx < len(rp.curve_radii):
-            prev_pt, corner_pt, next_pt = pts[radius_idx : radius_idx + 3]
-            rp.curve_radii[radius_idx] = concentric_corner_radius_at(
-                prev_pt, corner_pt, next_pt, offset
-            )
+    _reseat_concentric_flanking(
+        ch.route, ch.idx, new_x, axis=0, offset_in=offset, offset_out=offset
+    )
 
 
 def _set_htrunk_y(
@@ -1036,17 +1062,9 @@ def _set_htrunk_y(
     the line's rank displacement, but the outgoing corner -- where it peels off
     to its own port, alone -- keeps the base radius (zero).
     """
-    pts = rp.points
-    pts[k] = (pts[k][0], new_y)
-    pts[k + 1] = (pts[k + 1][0], new_y)
-    if rp.curve_radii is None:
-        return
-    for radius_idx, off in ((k - 1, offset_in), (k, offset_out)):
-        if 0 <= radius_idx < len(rp.curve_radii):
-            prev_pt, corner_pt, next_pt = pts[radius_idx : radius_idx + 3]
-            rp.curve_radii[radius_idx] = concentric_corner_radius_at(
-                prev_pt, corner_pt, next_pt, off
-            )
+    _reseat_concentric_flanking(
+        rp, k, new_y, axis=1, offset_in=offset_in, offset_out=offset_out
+    )
 
 
 def _initial_fanout_descent(rp: RoutedPath) -> _VChannel | None:
