@@ -1678,8 +1678,8 @@ def fan_corridor_band(
 
     The band keeps :data:`INTER_ROW_EDGE_CLEARANCE` below the upper row's bottom
     and :data:`INTER_ROW_HEADER_CLEARANCE` above the lower row's header badge.  A
-    :class:`FanCorridor` shares one traverse band across a junction fan's
-    branches, so the band must hold the whole nested bundle: returns the centre
+    :class:`FanCorridor` shares one inter-row traverse band across a junction
+    fan's branches, so the band must hold the whole nested bundle: returns the centre
     only when the clearance band is at least *span* wide (the bundle's full
     lateral extent), else ``None`` so those branches keep their own per-line
     clamped runs rather than nest past a box edge in a too-narrow gap.

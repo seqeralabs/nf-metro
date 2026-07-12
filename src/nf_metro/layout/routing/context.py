@@ -612,6 +612,33 @@ def _has_intervening_sections(
     return False
 
 
+def _intervening_section_obstructs(
+    graph: MetroGraph,
+    src_col: int,
+    src_row: int | None,
+    tgt_col: int,
+    tgt_row: int | None,
+) -> bool:
+    """Whether a multi-column hop is blocked by a section in a column it spans.
+
+    The horizontal run blocks on the source row, or - for a cross-row L-shape,
+    whose horizontal leg runs at the target entry Y - the target row, plowed
+    through even when the source row is clear. Only meaningful when the columns
+    are more than one apart; an adjacent hop has no column between them to
+    intervene.
+    """
+    if abs(tgt_col - src_col) <= 1:
+        return False
+    if _has_intervening_sections(graph, src_col, tgt_col, src_row):
+        return True
+    return (
+        src_row is not None
+        and tgt_row is not None
+        and tgt_row != src_row
+        and _has_intervening_sections(graph, src_col, tgt_col, tgt_row)
+    )
+
+
 def is_far_side_around_below_left_entry(graph: MetroGraph, port: Port) -> bool:
     """Whether *port* is a LEFT entry reached by an around-below wrap.
 
@@ -1127,11 +1154,11 @@ def _fan_bypass_band(
     branch is pulled shallower than the sections it must clear.  ``None`` when the
     fan has no cross-column bypass branch.
 
-    The bypass predicate mirrors the one in :func:`_compute_junction_fan_info`
-    (an intervening section blocks the source row, or a cross-row hop's target
-    row), so the band reflects the same edges the fan treats as bypass.  A feed
-    into a merge junction is skipped: it converges on the merge's own drop level,
-    not this band.
+    Whether an edge bypasses is :func:`_intervening_section_obstructs`, the same
+    predicate :func:`_build_inter_facts` uses for ``needs_bypass`` -- so the band
+    reflects the edges the dispatcher actually routes via ``_route_bypass``.  A
+    feed into a merge junction is skipped: it converges on the merge's own drop
+    level, not this band.
     """
     deepest: float | None = None
     for edge in graph.edges_from(jid):
@@ -1143,15 +1170,9 @@ def _fan_bypass_band(
         tgt_col, tgt_row = _resolve_section_colrow(graph, tgt)
         if tgt_col is None:
             continue
-        cross_row = tgt_row is not None and tgt_row != src_row
-        is_bypass = abs(tgt_col - src_col) > 1 and (
-            _has_intervening_sections(graph, src_col, tgt_col, src_row)
-            or (
-                cross_row
-                and _has_intervening_sections(graph, src_col, tgt_col, tgt_row)
-            )
-        )
-        if not is_bypass:
+        if not _intervening_section_obstructs(
+            graph, src_col, src_row, tgt_col, tgt_row
+        ):
             continue
         by = bypass_bottom_y(
             graph,
@@ -1159,7 +1180,7 @@ def _fan_bypass_band(
             tgt_col,
             BYPASS_CLEARANCE,
             src_row=src_row,
-            cross_row=cross_row,
+            cross_row=tgt_row is not None and tgt_row != src_row,
             tgt_row=tgt_row,
         )
         deepest = by if deepest is None else max(deepest, by)

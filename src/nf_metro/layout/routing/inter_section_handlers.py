@@ -74,6 +74,7 @@ from nf_metro.layout.routing.common import (
 from nf_metro.layout.routing.context import (
     _get_offset,
     _has_intervening_sections,
+    _intervening_section_obstructs,
     _resolve_section_col,
     _resolve_section_colrow,
     _resolve_section_row,
@@ -450,33 +451,6 @@ def _packed_cell_mate_obstructs(
         (mate := graph.sections.get(mate_id)) is not None
         and _h_segment_penetrates_section(lo_x, hi_x, src.y, mate)
         for mate_id in cellmates
-    )
-
-
-def _intervening_section_obstructs(
-    graph: MetroGraph,
-    src_col: int,
-    src_row: int | None,
-    tgt_col: int,
-    tgt_row: int | None,
-) -> bool:
-    """Whether a multi-column hop is blocked by a section in a column it spans.
-
-    The horizontal run blocks on the source row, or - for a cross-row L-shape,
-    whose horizontal leg runs at the target entry Y - the target row, plowed
-    through even when the source row is clear. Only meaningful when the columns
-    are more than one apart; an adjacent hop has no column between them to
-    intervene.
-    """
-    if abs(tgt_col - src_col) <= 1:
-        return False
-    if _has_intervening_sections(graph, src_col, tgt_col, src_row):
-        return True
-    return (
-        src_row is not None
-        and tgt_row is not None
-        and tgt_row != src_row
-        and _has_intervening_sections(graph, src_col, tgt_col, tgt_row)
     )
 
 
