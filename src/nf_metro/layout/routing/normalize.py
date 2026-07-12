@@ -632,8 +632,9 @@ def _bundle_divergent_distinct_traverses(
         )
         base = min(ys)
         targets = {lid: base + i * step for i, lid in enumerate(ordered)}
+        rank_off = {lid: i * step for i, lid in enumerate(ordered)}
         moves = [
-            (m, targets[m.route.line_id])
+            (m, targets[m.route.line_id], rank_off[m.route.line_id])
             for m in members
             if abs(m.seg.y - targets[m.route.line_id]) > COORD_TOLERANCE
         ]
@@ -646,11 +647,14 @@ def _bundle_divergent_distinct_traverses(
         }
         if any(
             _h_segment_crosses_other_section(ctx.graph, m.seg.xa, m.seg.xb, ty, exempt)
-            for m, ty in moves
+            for m, ty, _off in moves
         ):
             continue
-        for m, ty in moves:
-            _set_htrunk_y(m.route, m.idx, ty)
+        # The band nests one step per rank off the innermost, so its incoming
+        # corner off the shared descent sizes concentrically; the outgoing corner
+        # is where the line peels off alone, so it keeps the base radius.
+        for m, ty, off in moves:
+            _set_htrunk_y(m.route, m.idx, ty, off, 0.0)
 
 
 def _unify_coincident_corner_radii(routes: list[RoutedPath]) -> None:
@@ -1010,24 +1014,38 @@ def _set_vchannel_x(ch: _VChannel, new_x: float, offset: float = 0.0) -> None:
             )
 
 
-def _set_htrunk_y(rp: RoutedPath, k: int, new_y: float) -> None:
+def _set_htrunk_y(
+    rp: RoutedPath,
+    k: int,
+    new_y: float,
+    offset_in: float = 0.0,
+    offset_out: float = 0.0,
+) -> None:
     """Move an interior horizontal trunk (``points[k]->[k+1]``) to *new_y*.
 
     The horizontal counterpart of :func:`_set_vchannel_x`: it re-derives the
     trunk's two flanking corners from the moved waypoints via
     :func:`concentric_corner_radius_at`, so a fused same-line trunk draws one arc
     at each end rather than a corner sized for its old band.
+
+    ``offset_in`` / ``offset_out`` are the trunk's signed displacement from the
+    bundle's reference line at its incoming (``k-1``) and outgoing (``k``)
+    corners.  A fused same-line trunk passes zero on both (one stroke, base
+    radius).  A distinct-line corridor traverse nests only where it runs
+    alongside its bundle-mates: the incoming corner off the shared descent takes
+    the line's rank displacement, but the outgoing corner -- where it peels off
+    to its own port, alone -- keeps the base radius (zero).
     """
     pts = rp.points
     pts[k] = (pts[k][0], new_y)
     pts[k + 1] = (pts[k + 1][0], new_y)
     if rp.curve_radii is None:
         return
-    for radius_idx in (k - 1, k):
+    for radius_idx, off in ((k - 1, offset_in), (k, offset_out)):
         if 0 <= radius_idx < len(rp.curve_radii):
             prev_pt, corner_pt, next_pt = pts[radius_idx : radius_idx + 3]
             rp.curve_radii[radius_idx] = concentric_corner_radius_at(
-                prev_pt, corner_pt, next_pt, 0.0
+                prev_pt, corner_pt, next_pt, off
             )
 
 
@@ -1167,19 +1185,23 @@ def _bundle_divergent_distinct_descents(
         }
         ordered = sorted(by_line, key=line_key.__getitem__)
         moves = [
-            (ch, base + rank * step)
+            (ch, base + rank * step, rank * step)
             for rank, lid in enumerate(ordered)
             for ch in by_line[lid]
         ]
         # Never re-seat a descent into a section it does not belong to; leave the
         # whole group on its handler channels if any target column is obstructed.
         if any(
-            _descent_crosses_section(ctx.graph, ch, target_x) for ch, target_x in moves
+            _descent_crosses_section(ctx.graph, ch, target_x)
+            for ch, target_x, _rank_off in moves
         ):
             continue
-        for ch, target_x in moves:
+        # Each line's descent nests one step per rank off the innermost, so the
+        # shared descent-foot corner sizes concentrically rather than every line
+        # taking the base radius and delaminating through the turn.
+        for ch, target_x, rank_off in moves:
             if abs(ch.x - target_x) > COORD_TOLERANCE:
-                _set_vchannel_x(ch, target_x)
+                _set_vchannel_x(ch, target_x, rank_off)
 
 
 def _descent_crosses_section(graph: MetroGraph, ch: _VChannel, x: float) -> bool:
