@@ -3524,6 +3524,13 @@ def _route_inter_row_gap_corridor(
         # Traverse the fan's one shared band so this feeder's H leg coincides
         # with the sibling wrap's rather than smearing a few px apart.
         gy_base = corridor.band_y
+    elif fan is not None:
+        # Fan whose junction earned no corridor (its in-column gap below does not
+        # fit the bundle): centre on the global row edges to coincide with the
+        # sibling wrap, which centres the same way.
+        wrap_top = row_bottom_edge(ctx.graph, src_row, default=gap_top)
+        wrap_bottom = row_top_edge(ctx.graph, src_row + 1, default=wrap_top)
+        gy_base = _center_inter_row_channel(wrap_top, wrap_bottom)
     elif gap_bottom > gap_top:
         gy_base = _center_inter_row_channel(gap_top, gap_bottom)
     else:

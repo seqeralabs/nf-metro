@@ -20,9 +20,10 @@ from nf_metro.layout.routing.common import (
     bypass_bottom_y,
     compute_bundle_info,
     fan_corridor_band,
-    iter_inter_row_gaps,
     merge_trunk_force_cross_row,
     resolve_section,
+    row_bottom_edge,
+    row_top_edge,
     vertical_flow_sections,
 )
 from nf_metro.layout.routing.reversal import (
@@ -1065,28 +1066,27 @@ def _compute_fan_corridors(
     inter-row gap directly beneath its own row (a top-entry L-shape drops into
     that gap and turns; a LEFT/RIGHT entry wrap traverses it before descending
     further).  Pin one traverse band per fanning junction so those branches share
-    it rather than each centring an independent run.  A junction with no gap below
-    (its row is bottommost, or the fan is same-row / above) gets no corridor.
+    it rather than each centring an independent run.  The gap is measured in the
+    junction's own column (matching :func:`_route_inter_row_gap_corridor`), so a
+    tall row-span section stacked in another column does not collapse the band.  A
+    junction with no fitting gap below (its row is bottommost, the fan is same-row
+    or above, or the in-column gap is too narrow for the bundle) gets no corridor.
     """
     fan_n: dict[str, int] = {}
     for (jsrc, _tgt, _lid), (_i, n) in junction_fan_info.items():
         fan_n[jsrc] = n
 
-    gaps = list(iter_inter_row_gaps(graph))
     corridors: dict[str, FanCorridor] = {}
     for jid, n in fan_n.items():
         jst = graph.stations.get(jid)
         if jst is None:
             continue
-        _col, src_row = _resolve_section_colrow(graph, jst)
-        if src_row is None:
+        col, src_row = _resolve_section_colrow(graph, jst)
+        if src_row is None or col is None:
             continue
-        band = next(
-            ((top, bottom) for upper, top, bottom in gaps if upper >= src_row), None
-        )
-        if band is None:
-            continue
-        band_y = fan_corridor_band(*band, span=(n - 1) * offset_step)
+        upper_bottom = row_bottom_edge(graph, src_row, col=col)
+        lower_top = row_top_edge(graph, src_row + 1, col=col, default=upper_bottom)
+        band_y = fan_corridor_band(upper_bottom, lower_top, span=(n - 1) * offset_step)
         if band_y is None:
             continue
         corridors[jid] = FanCorridor(band_y=band_y)

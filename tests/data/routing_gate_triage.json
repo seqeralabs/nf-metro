@@ -199,8 +199,8 @@
     "note": "mjid ranges over junctions, a subset of junction_ids all present in graph.stations; the missing-station continue never fires.",
     "status": "defensive"
   },
-  "context.py::if src_row is None:::#1": {
-    "note": "In _compute_fan_corridors, a fanning junction always resolves to a section row; the unresolved-row continue guards a malformed graph the render path never produces.",
+  "context.py::if src_row is None or col is None:::#1": {
+    "note": "In _compute_fan_corridors, a fanning junction always resolves to a section column and row; the unresolved continue guards a malformed graph the render path never produces.",
     "status": "defensive"
   },
   "context.py::if not pred:::#1": {
@@ -353,6 +353,14 @@
   },
   "inter_section_handlers.py::if corridor is not None:::#1": {
     "note": "A top-entry fan branch whose junction has no fitting FanCorridor (the inter-row gap below the junction row is too narrow to hold the fan bundle) keeps its own inter_row_channel_y band; the corpus fans only through gaps wide enough to earn a corridor, so the no-corridor arm is unexercised.",
+    "status": "needs-review"
+  },
+  "inter_section_handlers.py::if fan is not None and corridor is not None:::#2": {
+    "note": "Corridor-feeder shared-band gate: the corpus's fanning junctions all earn a FanCorridor (their in-column gap below fits the bundle), so the no-corridor short-circuit arm is unexercised; it falls to the elif fan-is-not-None global-band branch.",
+    "status": "needs-review"
+  },
+  "inter_section_handlers.py::elif fan is not None:::#1": {
+    "note": "Corridor-feeder fallback for a fan whose junction earned no corridor (its in-column gap below does not fit the bundle); the corpus's fans all earn a corridor, so this global-band branch is unexercised.",
     "status": "needs-review"
   },
   "inter_section_handlers.py::if fan is not None and ep_col is not None:::#1": {
