@@ -512,6 +512,151 @@ def _coincide_same_line_tracks(routes: list[RoutedPath], ctx: _RoutingCtx) -> No
     _join_fanout_upstream_tails(routes, ctx)
 
 
+class _TraverseLeg(NamedTuple):
+    """One same-line interior horizontal trunk considered for band fusion."""
+
+    route: RoutedPath
+    idx: int
+    seg: HTrunkSeg
+
+
+def _coincide_same_line_traverses(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
+    """Fuse same-line horizontal traverse legs onto one band.
+
+    The horizontal counterpart of the divergent-source vertical fusion in
+    :func:`_coincide_same_line_tracks`.  Two branches of one line leaving one
+    source can wrap to the same target column through DIFFERENT handlers -- a
+    gap-above approach and an inter-row wrap -- each sizing its own inter-row
+    band a few px apart, so the shared leftward traverse (and the riser it feeds)
+    renders as two parallel same-colour tracks.  Snap every near-parallel
+    traverse sharing a source, a line and a riser column onto the band of the
+    member whose riser reaches deepest -- the trunk the others peel off -- so the
+    shared run reads as one stroke that splits only where each branch turns into
+    its port.
+
+    Like the vertical same-line fusion, this reads and moves ``normalize_exempt``
+    routes: a wrap owns its own concentric loop, yet two same-line wraps belong on
+    one band, and unifying their independently-sized bands is this pass's job.
+
+    Runs after the vertical descents are fused (their shared descent column is
+    the precondition for the two traverses to overlap in X at all).
+    """
+    by_riser: dict[tuple[str, str, int], list[_TraverseLeg]] = defaultdict(list)
+    for rp in routes:
+        if not rp.is_inter_section:
+            continue
+        for k, seg in iter_horizontal_trunks(rp):
+            key = (rp.edge.source, rp.line_id, round(seg.xb))
+            by_riser[key].append(_TraverseLeg(rp, k, seg))
+
+    for members in by_riser.values():
+        if len(members) < 2:
+            continue
+        ys = [m.seg.y for m in members]
+        # Already one stroke, or genuinely distinct corridors a full step-plus
+        # apart -- leave both alone; only near-parallel same-line runs collapse.
+        spread = max(ys) - min(ys)
+        if spread <= COORD_TOLERANCE or spread > ctx.offset_step + COORD_TOLERANCE:
+            continue
+        # A genuine shared run overlaps in X; disjoint traverses that merely land
+        # on one riser column keep their own bands.
+        lo = max(m.seg.x_lo for m in members)
+        hi = min(m.seg.x_hi for m in members)
+        if hi - lo <= COORD_TOLERANCE:
+            continue
+        ref_y = max(members, key=lambda m: abs(m.seg.after_y - m.seg.y)).seg.y
+        for m in members:
+            if abs(m.seg.y - ref_y) > COORD_TOLERANCE:
+                _set_htrunk_y(m.route, m.idx, ref_y)
+
+
+def _fanout_traverse_legs(
+    routes: list[RoutedPath],
+) -> dict[tuple[str, bool], list[_TraverseLeg]]:
+    """The horizontal leg each fan-out route turns onto after its opening descent.
+
+    A branch that leaves a source ``H`` then ``V`` and then turns to run along a
+    corridor has that corridor leg at ``descent.idx + 1`` -- an interior trunk
+    flanked by the descent and the onward riser.  Collect those legs keyed by
+    ``(source, descent-direction)`` so a fan's same-direction traverses nest
+    together, the same grouping :func:`_bundle_divergent_distinct_descents` uses.
+    """
+    by_source: dict[tuple[str, bool], list[_TraverseLeg]] = defaultdict(list)
+    for rp in routes:
+        if not rp.is_inter_section:
+            continue
+        desc = _initial_fanout_descent(rp)
+        if desc is None:
+            continue
+        for k, seg in iter_horizontal_trunks(rp):
+            if k == desc.idx + 1:
+                by_source[(rp.edge.source, desc.down)].append(_TraverseLeg(rp, k, seg))
+                break
+    return by_source
+
+
+def _bundle_divergent_distinct_traverses(
+    routes: list[RoutedPath], ctx: _RoutingCtx
+) -> None:
+    """Nest distinct-line fan-out traverses one step apart until they fork.
+
+    The horizontal counterpart of :func:`_bundle_divergent_distinct_descents`.
+    Even once a fan's opening descents nest one ``OFFSET_STEP`` apart, the corridor
+    each line turns onto may sit on an independently-sized band several px from its
+    siblings, so the shared run reads as separate strokes rather than one bundle.
+    Nest the near-parallel traverses one step apart, ordered so a line's
+    traverse-Y rank matches its descent-X rank through the shared corner (a
+    left-turning bundle puts its leftmost descent on top, a right-turning one
+    mirrors it), holding a constant bundle width until each line turns off.
+    """
+    step = ctx.offset_step
+    for members in _fanout_traverse_legs(routes).values():
+        by_line: dict[str, list[_TraverseLeg]] = defaultdict(list)
+        for m in members:
+            by_line[m.route.line_id].append(m)
+        if len(by_line) < 2:
+            continue
+        # One representative band per line (same-line traverses are already fused).
+        rep = {lid: ms[0].seg for lid, ms in by_line.items()}
+        ys = [s.y for s in rep.values()]
+        if max(ys) - min(ys) <= step * (len(by_line) - 1) + COORD_TOLERANCE:
+            continue
+        # Every member of a fan turns the same way; skip a mixed group rather than
+        # nest legs whose corners face opposite directions.
+        turns = {s.xb < s.xa for s in rep.values()}
+        if len(turns) != 1:
+            continue
+        left_turn = next(iter(turns))
+        ordered = sorted(
+            rep, key=lambda lid: rep[lid].xa if left_turn else -rep[lid].xa
+        )
+        base = min(ys)
+        targets = {lid: base + i * step for i, lid in enumerate(ordered)}
+        rank_off = {lid: i * step for i, lid in enumerate(ordered)}
+        moves = [
+            (m, targets[m.route.line_id], rank_off[m.route.line_id])
+            for m in members
+            if abs(m.seg.y - targets[m.route.line_id]) > COORD_TOLERANCE
+        ]
+        # Never re-band a traverse across a foreign section; the fan's own targets
+        # are exempt (each traverse legitimately ends at one).
+        exempt = {
+            sec
+            for m in members
+            if (sec := ctx.graph.section_for_station(m.route.edge.target)) is not None
+        }
+        if any(
+            _h_segment_crosses_other_section(ctx.graph, m.seg.xa, m.seg.xb, ty, exempt)
+            for m, ty, _off in moves
+        ):
+            continue
+        # The band nests one step per rank off the innermost, so its incoming
+        # corner off the shared descent sizes concentrically; the outgoing corner
+        # is where the line peels off alone, so it keeps the base radius.
+        for m, ty, off in moves:
+            _set_htrunk_y(m.route, m.idx, ty, off, 0.0)
+
+
 def _unify_coincident_corner_radii(routes: list[RoutedPath]) -> None:
     """Give same-line turns shared by several legs one radius.
 
@@ -869,6 +1014,41 @@ def _set_vchannel_x(ch: _VChannel, new_x: float, offset: float = 0.0) -> None:
             )
 
 
+def _set_htrunk_y(
+    rp: RoutedPath,
+    k: int,
+    new_y: float,
+    offset_in: float = 0.0,
+    offset_out: float = 0.0,
+) -> None:
+    """Move an interior horizontal trunk (``points[k]->[k+1]``) to *new_y*.
+
+    The horizontal counterpart of :func:`_set_vchannel_x`: it re-derives the
+    trunk's two flanking corners from the moved waypoints via
+    :func:`concentric_corner_radius_at`, so a fused same-line trunk draws one arc
+    at each end rather than a corner sized for its old band.
+
+    ``offset_in`` / ``offset_out`` are the trunk's signed displacement from the
+    bundle's reference line at its incoming (``k-1``) and outgoing (``k``)
+    corners.  A fused same-line trunk passes zero on both (one stroke, base
+    radius).  A distinct-line corridor traverse nests only where it runs
+    alongside its bundle-mates: the incoming corner off the shared descent takes
+    the line's rank displacement, but the outgoing corner -- where it peels off
+    to its own port, alone -- keeps the base radius (zero).
+    """
+    pts = rp.points
+    pts[k] = (pts[k][0], new_y)
+    pts[k + 1] = (pts[k + 1][0], new_y)
+    if rp.curve_radii is None:
+        return
+    for radius_idx, off in ((k - 1, offset_in), (k, offset_out)):
+        if 0 <= radius_idx < len(rp.curve_radii):
+            prev_pt, corner_pt, next_pt = pts[radius_idx : radius_idx + 3]
+            rp.curve_radii[radius_idx] = concentric_corner_radius_at(
+                prev_pt, corner_pt, next_pt, off
+            )
+
+
 def _initial_fanout_descent(rp: RoutedPath) -> _VChannel | None:
     """The first vertical descent leaving a route's source, when it leads H then V.
 
@@ -967,11 +1147,12 @@ def _bundle_divergent_distinct_descents(
     channels several px apart -- reading as separate strokes from the junction.
 
     Re-seat each such group one ``OFFSET_STEP`` apart on the corridor nearest
-    the source, ordered so a branch sits on the side it later turns toward (a
-    left-turning branch to the left, ordered outermost by the earliest turn), so
-    a branch peeling off never crosses a sibling still descending.  Only groups
-    already spread wider than a tight bundle move; same-line groups are handled
-    by the coincidence pass and skipped here.
+    the source, one slot per LINE (a line's several same-colour branches share
+    the fused track the coincidence pass gave them), ordered so a line sits on
+    the side it later turns toward (a left-turning line to the left, ordered
+    outermost by its earliest turn), so a branch peeling off never crosses a
+    sibling that has not yet turned off.  Only groups already spread wider than a
+    tight one-slot-per-line bundle move.
     """
     by_source: dict[tuple[str, bool], list[_VChannel]] = defaultdict(list)
     for rp in routes:
@@ -983,26 +1164,44 @@ def _bundle_divergent_distinct_descents(
 
     step = ctx.offset_step
     for chans in by_source.values():
-        if len({c.route.line_id for c in chans}) < 2:
+        # Same-line descents share one X (the coincidence pass snaps them onto a
+        # common track), so a line occupies ONE bundle slot however many branches
+        # it carries.  Seat per line, not per channel: keying each channel
+        # individually spreads a single line across adjacent slots.
+        by_line: dict[str, list[_VChannel]] = defaultdict(list)
+        for c in chans:
+            by_line[c.route.line_id].append(c)
+        if len(by_line) < 2:
             continue
         xs = [c.x for c in chans]
-        if max(xs) - min(xs) <= step * (len(chans) - 1) + COORD_TOLERANCE:
+        # A tight bundle is one slot per LINE, not one per channel.
+        if max(xs) - min(xs) <= step * (len(by_line) - 1) + COORD_TOLERANCE:
             continue
 
         base = min(xs)
+        line_key = {
+            lid: min(_fanout_descent_order_key(c) for c in cs)
+            for lid, cs in by_line.items()
+        }
+        ordered = sorted(by_line, key=line_key.__getitem__)
         moves = [
-            (ch, base + rank * step)
-            for rank, ch in enumerate(sorted(chans, key=_fanout_descent_order_key))
+            (ch, base + rank * step, rank * step)
+            for rank, lid in enumerate(ordered)
+            for ch in by_line[lid]
         ]
         # Never re-seat a descent into a section it does not belong to; leave the
         # whole group on its handler channels if any target column is obstructed.
         if any(
-            _descent_crosses_section(ctx.graph, ch, target_x) for ch, target_x in moves
+            _descent_crosses_section(ctx.graph, ch, target_x)
+            for ch, target_x, _rank_off in moves
         ):
             continue
-        for ch, target_x in moves:
+        # Each line's descent nests one step per rank off the innermost, so the
+        # shared descent-foot corner sizes concentrically rather than every line
+        # taking the base radius and delaminating through the turn.
+        for ch, target_x, rank_off in moves:
             if abs(ch.x - target_x) > COORD_TOLERANCE:
-                _set_vchannel_x(ch, target_x)
+                _set_vchannel_x(ch, target_x, rank_off)
 
 
 def _descent_crosses_section(graph: MetroGraph, ch: _VChannel, x: float) -> bool:

@@ -920,6 +920,15 @@ gallery:
       "One line fans out from a single source to a near and a far target in the row
       below. The two descents stay fused as one trunk until the near branch turns off, so the
       farther branch never peels onto the inside of the nearer one and crosses it (issue #702)."
+  - id: same_line_fan_distinct_descent
+    source_dir: examples/topologies
+    category: Bypass Routing
+    description:
+      "A source fans two same-line branches plus a distinct-line branch down into the
+      rows below while a third line carries straight on. Red and green descend as one
+      per-line bundle - the two red branches share a single fused track and green sits
+      one step beside it - peeling off one branch at a time, rather than the red
+      splitting into two parallel same-colour strokes (issue #1409)."
   - id: disjoint_sameline_trunks
     source_dir: examples/topologies
     category: Bypass Routing

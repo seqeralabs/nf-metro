@@ -331,10 +331,6 @@
     "note": "Contract guard in _route_inter_section: a merge entry port always resolves to a Port on the LEFT side here, so the non-LEFT/None arm (fall through to _route_l_shape at L344) is never taken (0/128). The earlier 'multiline phantom' note was inaccurate -- this is a recorded gate whose arm is never taken. Defensive guard. Reclassified defensive (#762).",
     "status": "defensive"
   },
-  "inter_section_handlers.py::if ep_port is None or ep_port.side != PortSide.LEFT:::#2": {
-    "note": "Reachable only via a defective render (route skirts/crosses section boundary); see #724.",
-    "status": "needs-review"
-  },
   "inter_section_handlers.py::if ep_section and ep_section.bbox_w > 0:::#1": {
     "note": "entry_port.section_id is always set and the section has bbox_w>0 after layout; the else arm never fires.",
     "status": "defensive"
@@ -547,12 +543,20 @@
     "note": "Bounds guard in _set_vchannel_x: radius_idx in (k-1, k) for a real channel stays in range; the out-of-range skip arm is defensive.",
     "status": "defensive"
   },
+  "normalize.py::if 0 <= radius_idx < len(rp.curve_radii):::#2": {
+    "note": "In _set_htrunk_y: a moved interior trunk always has both flanking corner radii in range, so the out-of-range arm is never taken. Defensive (mirrors _set_vchannel_x).",
+    "status": "defensive"
+  },
   "normalize.py::if abs(ly - pts[1][1]) < COORD_TOLERANCE:::#1": {
     "note": "A re-stacked gap channel at points-index 1 always has a horizontal lead-in (L-shape and bypass routes open with a horizontal segment); routes opening non-horizontally are normalize_exempt and skipped by the materialization. The non-horizontal-lead return in _restack_channel is unreachable. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
   },
   "normalize.py::if abs(x3 - x2) > COORD_TOLERANCE or abs(y3 - y2) <= COORD_TOLERANCE:::#1": {
     "note": "Every non-exempt inter-section route ends with a vertical descent into the target Y then a short horizontal port lead (V->H tail); routes with non-V tails are normalize_exempt. The second-to-last-not-vertical reject in _final_port_approach is unreachable. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
+    "status": "defensive"
+  },
+  "normalize.py::if any(::#4": {
+    "note": "In _bundle_divergent_distinct_traverses: the section-cross veto. No corpus fan would re-band a traverse across a foreign section, so the veto arm is never taken. Defensive.",
     "status": "defensive"
   },
   "normalize.py::if band is not None:::#1": {
@@ -587,6 +591,10 @@
     "note": "Unused default-arg branch: all three callers of _band_order_crossings pass feats explicitly, so the feats-is-None compute-it arm is never taken.",
     "status": "defensive"
   },
+  "normalize.py::if hi - lo <= COORD_TOLERANCE:::#1": {
+    "note": "In _coincide_same_line_traverses: same-source same-line traverses sharing a riser column overlap in X in every corpus topology, so the disjoint (opposite-direction) arm is never taken. Defensive.",
+    "status": "defensive"
+  },
   "normalize.py::if k < len(rp.curve_radii) and k + 2 < len(pts):::#1": {
     "note": "Bounds guard in _restack_htrunk: for a real interior trunk k and k+2 are in range; the skip arm is defensive.",
     "status": "defensive"
@@ -595,12 +603,20 @@
     "note": "Bounds guard in _restack_channel: the skip arm guards k or k+2 out of range for a real interior channel; defensive.",
     "status": "defensive"
   },
+  "normalize.py::if k == desc.idx + 1:::#1": {
+    "note": "In _fanout_traverse_legs: the corpus fan-out routes carry the traverse as their only interior horizontal trunk, so the loop matches on the first trunk and the non-match arm is never taken. Defensive.",
+    "status": "defensive"
+  },
   "normalize.py::if len(slots) < 2 or len(slots) > _MAX_BAND_PERMUTE:::#1": {
     "note": "_suboptimal_trunk_bands slot-count guard: validate-only, not on the render path.",
     "status": "defensive"
   },
   "normalize.py::if len(trunks) < 2:::#1": {
     "note": "Early-return in _suboptimal_trunk_bands, called only from the _guard_* validator (phases/guards.py) and a unit test, never on the production render path. The coverage sweep renders with validate=False, so neither arm registers. Defensive (exercised via the validate=True guard / test surface; cf. #728 validate-only precedent).",
+    "status": "defensive"
+  },
+  "normalize.py::if len(turns) != 1:::#1": {
+    "note": "In _bundle_divergent_distinct_traverses: every fan in the corpus turns its traverses the same way, so the mixed-direction skip is never taken. Defensive.",
     "status": "defensive"
   },
   "normalize.py::if len({id(t.route) for t in grp}) < 2:::#2": {
@@ -629,6 +645,10 @@
   },
   "normalize.py::if rp.curve_radii is None:::#3": {
     "note": "curve_radii is always set for inter-section routes; the None arm in _restack_channel is a defensive guard.",
+    "status": "defensive"
+  },
+  "normalize.py::if rp.curve_radii is None:::#4": {
+    "note": "In _set_htrunk_y: a routed inter-section path always carries curve_radii by the time the coincidence passes run, so the None short-circuit is never taken. Defensive (mirrors _set_vchannel_x).",
     "status": "defensive"
   },
   "normalize.py::if s.bbox_w <= 0:::#1": {
