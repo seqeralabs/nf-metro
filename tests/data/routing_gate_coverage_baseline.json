@@ -40,6 +40,7 @@
   "common.py::if src_row is not None:::#1",
   "common.py::if st is not None and st.is_port:::#1",
   "common.py::if station is None:::#1",
+  "common.py::if succ_port is not None and succ_port.is_entry:::#1",
   "common.py::if t < -0.01 or t > 1.01:::#1",
   "common.py::if top is None or bottom is None:::#1",
   "common.py::if trunk_ys[-1] - trunk_ys[0] <= COORD_TOLERANCE:::#1",

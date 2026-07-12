@@ -1691,6 +1691,73 @@ def fan_corridor_band(
     return (lo + hi) / 2
 
 
+def merge_junction_ids(graph: MetroGraph) -> set[str]:
+    """Hidden convergence junctions, matching the routing merge classifier.
+
+    A merge junction has two or more predecessors converging on a single
+    successor that is an entry port (the same test :func:`_classify_merge_edges`
+    applies), so a two-in / two-out crossing junction is not counted.
+    """
+    preds: dict[str, set[str]] = defaultdict(set)
+    succs: dict[str, set[str]] = defaultdict(set)
+    for e in graph.edges:
+        preds[e.target].add(e.source)
+        succs[e.source].add(e.target)
+    merges: set[str] = set()
+    for jid in graph.junction_ids:
+        if len(preds[jid]) <= 1 or len(succs[jid]) != 1:
+            continue
+        succ_port = graph.ports.get(next(iter(succs[jid])))
+        if succ_port is not None and succ_port.is_entry:
+            merges.add(jid)
+    return merges
+
+
+def merge_fanout_junctions(
+    graph: MetroGraph, merges: set[str] | None = None
+) -> set[str]:
+    """Sources that fan ONE line to two or more distinct merge junctions.
+
+    A *merge fan-out* is a source whose same-line outgoing edges reach two or
+    more merge junctions (``merges``, defaulting to :func:`merge_junction_ids`;
+    a caller that already holds the set passes it to avoid recomputing).  Its
+    merge branches leave the source together and should pivot through one shared
+    first corner before each turns off to its own merge, rather than opening
+    their descents on columns a few pixels apart.  A co-travelling branch to
+    some other target (e.g. an entry port) is out of scope here -- only the
+    branches into merge junctions define the shared corner.
+    """
+    if merges is None:
+        merges = merge_junction_ids(graph)
+    fanouts: set[str] = set()
+    for src in {e.source for e in graph.edges}:
+        by_line: dict[str, set[str]] = defaultdict(set)
+        for e in graph.edges_from(src):
+            if e.target in merges:
+                by_line[e.line_id].add(e.target)
+        if any(len(tgts) >= 2 for tgts in by_line.values()):
+            fanouts.add(src)
+    return fanouts
+
+
+def merge_fanout_pivot_reference(
+    junction_xs: list[float],
+    source_x: float,
+    tol: float,
+) -> float | None:
+    """Shared first-corner X for one merge fan-out junction's same-direction pivots.
+
+    ``junction_xs`` are the first-corner Xs of one source's branches that turn
+    the same way.  They leave the source together, so they fuse onto the corner
+    nearest the source (the one hugging the fork) and the free branches snap onto
+    it.  Returns ``None`` when there is nothing to share -- fewer than two
+    branches, or they already coincide.
+    """
+    if len(junction_xs) < 2 or max(junction_xs) - min(junction_xs) <= tol:
+        return None
+    return min(junction_xs, key=lambda x: abs(x - source_x))
+
+
 def _center_inter_row_channel(
     upper_bottom: float, lower_top: float, offset: float = 0.0
 ) -> float:

@@ -73,6 +73,7 @@ from nf_metro.layout.routing.normalize import (  # noqa: F401
     _bundle_divergent_distinct_traverses,
     _clamp_inter_row_band_top,
     _clear_channel_x_in_band,
+    _coincide_merge_fanout_pivots,
     _coincide_same_line_tracks,
     _coincident_trunk_slots,
     _collect_htrunks,
@@ -208,6 +209,11 @@ def _route_edges(
     # Re-stack peel-off risers against the settled trunk depths, so each rises
     # on the concentric slot its post-repack depth earns.
     _reconcile_port_peeloff_risers(routes, ctx)
+    # A merge fan-out's branches leave one fork and turn off its lead-out
+    # through a first corner each; fuse those corners onto one shared pivot
+    # column so the fork opens as one stroke, before the same-line coincidence
+    # pass reads the settled channels.
+    _coincide_merge_fanout_pivots(routes, ctx)
     # Coincidence runs after the trunk/gap channels are finalised: it snaps
     # same-line tracks onto a reference read from that final geometry (the
     # port-side track, the source-side track, the merge trunk's descent, and

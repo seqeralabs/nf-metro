@@ -58,6 +58,9 @@ from nf_metro.layout.routing.common import (
     iter_horizontal_trunks,
     iter_port_peeloff_bundles,
     iter_vertical_segments,
+    merge_fanout_junctions,
+    merge_fanout_pivot_reference,
+    merge_junction_ids,
     peeloff_target_slots,
     perp_peeloff_off_horizontal_junction,
     resolve_section,
@@ -1878,6 +1881,95 @@ def check_no_same_line_parallel_descents(
                     span=span,
                 )
             )
+    return violations
+
+
+@dataclass(frozen=True)
+class MergeFanoutPivotSplit:
+    """A merge fan-out branch whose first corner drifts off the shared pivot.
+
+    The branches of a merge fan-out leave one source together and should pivot
+    through a single first corner before each turns off to its own merge.  This
+    flags a branch whose first-corner X sits away from the shared pivot, so the
+    fork's lead-out reads as forking into two columns instead of one.
+    """
+
+    source: str
+    line_id: str
+    target: str
+    pivot_x: float
+    reference_x: float
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"merge fan-out split: line {self.line_id!r} from {self.source} "
+            f"to {self.target} pivots at x={self.pivot_x:.1f}, off the shared "
+            f"fork corner x={self.reference_x:.1f}"
+        )
+
+
+def _first_corner(pts: Sequence[tuple[float, float]]) -> tuple[float, bool] | None:
+    """First-corner X and turn direction where a route opens into a vertical leg.
+
+    Returns ``(x, down)`` for the first vertical segment (the opening pivot
+    corner), or ``None`` when the route opens with no vertical turn (a straight
+    run into an adjacent merge, which has no corner to share).
+    """
+    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+        if abs(x1 - x0) <= COORD_TOLERANCE and abs(y1 - y0) > COORD_TOLERANCE:
+            return x0, y1 > y0
+    return None
+
+
+def check_merge_fanout_pivots_shared(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[MergeFanoutPivotSplit]:
+    """Return merge fan-out branches whose first corner is off the shared pivot.
+
+    A merge fan-out's branches should pivot through one shared first corner (see
+    :func:`merge_fanout_junctions`).  Branches are grouped by source and turn
+    DIRECTION: an up-turning arm and a down-turning arm of one fork leave on the
+    same lead but never share a column (sharing one would fold the line back
+    over itself), so only same-direction arms are held to a common corner.  For
+    each group this derives the shared pivot with
+    :func:`merge_fanout_pivot_reference` and flags any branch off it.
+    """
+    fanouts = merge_fanout_junctions(graph)
+    if not fanouts:
+        return []
+    merges = merge_junction_ids(graph)
+    by_key: dict[tuple[str, bool], list[tuple[str, str, float]]] = defaultdict(list)
+    for rp in routes:
+        if not rp.is_inter_section or rp.edge.source not in fanouts:
+            continue
+        if rp.edge.target not in merges:
+            continue
+        corner = _first_corner(apply_route_offsets(rp, offsets))
+        if corner is not None:
+            cx, down = corner
+            by_key[(rp.edge.source, down)].append((rp.edge.target, rp.line_id, cx))
+
+    violations: list[MergeFanoutPivotSplit] = []
+    for (src, _down), branches in by_key.items():
+        xs = [x for _tgt, _lid, x in branches]
+        source_x = graph.stations[src].x if src in graph.stations else xs[0]
+        ref = merge_fanout_pivot_reference(xs, source_x, COORD_TOLERANCE)
+        if ref is None:
+            continue
+        for tgt, lid, x in branches:
+            if abs(x - ref) > COORD_TOLERANCE:
+                violations.append(
+                    MergeFanoutPivotSplit(
+                        source=src,
+                        line_id=lid,
+                        target=tgt,
+                        pivot_x=x,
+                        reference_x=ref,
+                    )
+                )
     return violations
 
 
@@ -4392,6 +4484,10 @@ def assert_render_curve_invariants(
             check_junction_peeloff_rounded(graph, routes),
         ),
         (
+            "merge fan-out branches split off one fork corner",
+            check_merge_fanout_pivots_shared(graph, routes, offsets),
+        ),
+        (
             "port approach corner overshoots the section boundary",
             check_port_corner_within_bbox(graph, routes),
         ),
@@ -4485,6 +4581,7 @@ CHECK_REGISTRY: tuple[GuardSpec, ...] = (
     _check_spec(check_trunks_declared, "A"),
     _check_spec(check_peeloff_concentric, "A"),
     _check_spec(check_junction_peeloff_rounded, "A"),
+    _check_spec(check_merge_fanout_pivots_shared, "A"),
     _check_spec(check_port_corner_within_bbox, "A"),
     # --- Tier B: invoked only by a validate-path ``_guard_*`` wrapper ---
     _check_spec(check_tb_exit_corner_preserves_column_order, "B"),

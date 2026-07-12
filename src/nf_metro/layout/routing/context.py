@@ -20,6 +20,7 @@ from nf_metro.layout.routing.common import (
     bypass_bottom_y,
     compute_bundle_info,
     fan_corridor_band,
+    merge_fanout_junctions,
     merge_trunk_force_cross_row,
     resolve_section,
     row_bottom_edge,
@@ -125,6 +126,7 @@ class _RoutingCtx:
     junction_fan_info: dict[_EdgeKey, tuple[int, int]] = field(default_factory=dict)
     fan_corridors: dict[str, FanCorridor] = field(default_factory=dict)
     section_trunk_y: dict[str, float] = field(default_factory=dict)
+    merge_fanouts: set[str] = field(default_factory=set)
     merge: _MergeRouting = field(
         default_factory=lambda: _MergeRouting(
             junctions=set(),
@@ -360,6 +362,7 @@ def _build_routing_context(
         skip_edges=merge.skip_edges,
         section_trunk_y=section_trunk_y,
         merge=merge,
+        merge_fanouts=merge_fanout_junctions(graph, merge.junctions),
     )
 
 
