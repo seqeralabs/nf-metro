@@ -178,14 +178,12 @@ def _collinear_from(
     guards enforce, so the strike-clearance loop can step back a widening that
     would overshoot into a collinear defect rather than ship it.
     """
-    from nf_metro.layout.routing.invariants import (
-        check_intra_section_collinear_distinct_lines,
-        check_no_collinear_distinct_lines,
-    )
+    from nf_metro.layout.routing.invariants import check_collinear_distinct_lines
 
     return bool(
-        check_no_collinear_distinct_lines(graph, routes, offsets)
-        or check_intra_section_collinear_distinct_lines(graph, routes, offsets)
+        check_collinear_distinct_lines(
+            graph, routes, offsets, scopes=("inter", "intra")
+        )
     )
 
 

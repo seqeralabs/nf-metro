@@ -172,9 +172,7 @@ python scripts/guard_cost_audit.py --json /tmp/guard_cost.json
 | ---------------------------------------------------------- | ---- | ------: | --------------------------------------------- |
 | `check_bundle_order_preserved`                             | A    |    34.9 | render chokepoint (always-on)                 |
 | `check_concentric_bundle_corners`                          | A    |    41.1 | render chokepoint (always-on)                 |
-| `check_no_collinear_distinct_lines`                        | A    |    16.6 | render chokepoint (always-on)                 |
-| `check_intra_section_collinear_distinct_lines`             | A    |   103.6 | render chokepoint (always-on)                 |
-| `check_no_collinear_distinct_diagonals`                    | A    |    79.8 | render chokepoint (always-on)                 |
+| `check_collinear_distinct_lines`                           | A    |   200.0 | render chokepoint (always-on)                 |
 | `check_no_same_line_parallel_descents`                     | A    |     5.6 | render chokepoint (always-on)                 |
 | `check_merge_branches_meet_trunk`                          | A    |     6.9 | render chokepoint (always-on)                 |
 | `check_no_hanging_routes`                                  | A    |   430.0 | render chokepoint (always-on)                 |
@@ -254,7 +252,8 @@ general inline guards (`_guard_no_negative_grid_columns`,
 `_guard_explicit_grid_directions`) carry no pin: they state a general structural
 property, not a special case.
 
-A further candidate left for later is folding the collinear-distinct check
-family (`check_no_collinear_distinct_lines`,
-`check_intra_section_collinear_distinct_lines`,
-`check_no_collinear_distinct_diagonals`) into one parametrised check.
+The collinear-distinct overlay checks are unified as one always-on
+`check_collinear_distinct_lines`, whose `scopes` argument selects the
+inter-section, intra-section, and diagonal scans; the render chokepoint runs
+every scope while callers that need a subset (the strike-clearance probe, the
+per-scope unit tests) pass the scopes they want.

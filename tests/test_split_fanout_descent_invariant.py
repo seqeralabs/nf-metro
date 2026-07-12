@@ -26,6 +26,7 @@ import nf_metro.layout.routing.core as routing_core
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.invariants import (
+    check_concentric_bundle_corners,
     check_no_split_same_line_fanout_descents,
 )
 from nf_metro.parser.mermaid import parse_metro_mermaid
@@ -178,3 +179,80 @@ def test_distinct_line_fan_traverses_nest_as_one_bundle() -> None:
         )
         nested = True
     assert nested, "fixture must fan distinct lines onto a shared corridor"
+
+
+def _same_line_fan_sources(routes) -> set[str]:
+    """Sources that fan ONE line to >= 2 distinct targets (a peel-off fan).
+
+    These are exactly the branches whose turn vertices diverge as each peels
+    off to its own port, so grouping them together would splay their shared
+    corners apart.
+    """
+    from collections import defaultdict
+
+    by_source_line: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for rp in routes:
+        by_source_line[(rp.edge.source, rp.line_id)].add(rp.edge.target)
+    return {src for (src, _line), tgts in by_source_line.items() if len(tgts) >= 2}
+
+
+# Fixtures whose bundles genuinely exercise the concentric-corner pair check
+# (many real same-edge comparisons) and, for the first two, also carry a
+# same-line peel-off fan -- the shape the isolation guarantee protects.
+_CONCENTRIC_COMPARISON_FIXTURES = (
+    EXAMPLES / "rnaseq_sections.mmd",
+    EXAMPLES / "genomic_pipeline.mmd",
+    EXAMPLE_TOPOLOGIES / "folded_corridor_distinct_lanes.mmd",
+)
+
+
+@pytest.mark.parametrize("path", _CONCENTRIC_COMPARISON_FIXTURES, ids=lambda p: p.stem)
+def test_concentric_guard_never_compares_across_targets(
+    path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The runtime concentric-corner guard only ever compares routes on the
+    same ``(source, target)`` edge, so a same-line fan peeling to ports at
+    different depths is never cross-compared and cannot trip a false
+    delamination abort (issue #1417).
+
+    ``check_concentric_bundle_corners`` bundles strictly by exact edge, so the
+    divergent branches of a peel-off fan land in separate bundles.  This is the
+    always-on render-path counterpart of the peel-off break the #1409 test
+    oracle (``TestConcentricArcCenters``) added: once two branches' turn
+    vertices diverge they are separate routes, not a delaminating bundle.
+
+    Capture every route pair the guard actually compares and assert none crosses
+    targets.  A regression that loosened the grouping (e.g. by source alone)
+    would compare divergent branches and be caught here.
+    """
+    import nf_metro.layout.routing.invariants as inv
+
+    compared: list[tuple[tuple[str, str], tuple[str, str]]] = []
+    real = inv._pair_corner_violation
+
+    def spy(src_id, tgt_id, ra, pa, radii_a, rb, pb, radii_b):
+        compared.append(
+            ((ra.edge.source, ra.edge.target), (rb.edge.source, rb.edge.target))
+        )
+        return real(src_id, tgt_id, ra, pa, radii_a, rb, pb, radii_b)
+
+    monkeypatch.setattr(inv, "_pair_corner_violation", spy)
+
+    graph, routes, offsets = _route(path)
+    inv.check_concentric_bundle_corners(graph, routes, offsets)
+
+    assert compared, f"{path.name}: no bundle pairs compared -- test is vacuous"
+    for edge_a, edge_b in compared:
+        assert edge_a == edge_b, (
+            f"{path.name}: concentric guard compared routes across edges "
+            f"{edge_a} vs {edge_b}; distinct-target branches must never nest"
+        )
+
+
+def test_concentric_guard_isolates_a_peeloff_fan() -> None:
+    """A same-line fan peeling to two different-depth targets stays silent on the
+    always-on guard: its divergent branches share a source but land in separate
+    exact-edge bundles, so they are never nested against each other (#1417)."""
+    graph, routes, offsets = _route(EXAMPLE_TOPOLOGIES / "divergent_fanout_split.mmd")
+    assert _same_line_fan_sources(routes), "fixture lost its peel-off fan"
+    assert not check_concentric_bundle_corners(graph, routes, offsets)

@@ -25,8 +25,8 @@ from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.invariants import (
     assert_render_curve_invariants,
     check_bundle_order_preserved,
+    check_collinear_distinct_lines,
     check_concentric_bundle_corners,
-    check_no_collinear_distinct_lines,
 )
 from nf_metro.parser.mermaid import parse_metro_mermaid
 
@@ -57,7 +57,7 @@ def test_serpentine_grid_bundle_renders_clean(stem):
 def test_serpentine_grid_bundle_no_collinear_overlay(stem):
     """No two distinct lines of the wrap coincide on a shared channel."""
     graph, offsets, routes = _laid_out(stem)
-    assert not check_no_collinear_distinct_lines(graph, routes, offsets)
+    assert not check_collinear_distinct_lines(graph, routes, offsets, scopes=("inter",))
 
 
 @pytest.mark.parametrize("stem", FIXTURES)

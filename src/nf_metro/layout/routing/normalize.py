@@ -741,7 +741,7 @@ def _stagger_convergent_distinct_lines(
     feeders of DIFFERENT lines converging on one entry port can be forced down
     the same vertical channel -- the only inter-column gap left of a wide
     row-span target admits just one -- drawing one stroke on top of the other,
-    the overlay ``check_no_collinear_distinct_lines`` forbids.  Both feeds are
+    the overlay ``check_collinear_distinct_lines`` forbids.  Both feeds are
     self-contained concentric loops (``normalize_exempt``), so neither the
     gap-slot pass nor the same-line coincidence pass separates them.
 

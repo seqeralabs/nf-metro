@@ -25,10 +25,10 @@ import math
 import os
 import warnings
 from collections import defaultdict, deque
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Collection, Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
@@ -1479,17 +1479,17 @@ def _collinear_overlay_violations(
     return violations
 
 
-def check_no_collinear_distinct_lines(
+def _inter_section_collinear(
     graph: MetroGraph,
     routes: list[RoutedPath],
     offsets: dict[tuple[str, str], float],
 ) -> list[CollinearOverlapViolation]:
-    """Return distinct-line inter-section segments drawn exactly on top.
+    """Distinct-line inter-section segments drawn exactly on top.
 
     Two co-travelling lines that share a bundle must occupy distinct
     parallel slots (at least ``OFFSET_STEP`` apart laterally).  When a
     bundling/offset defect collapses them to the same channel they
-    render as one stroke obscuring the other.  This check looks at the
+    render as one stroke obscuring the other.  This scan looks at the
     final, offset-applied geometry: it flags pairs of DIFFERENT-line
     axis-aligned inter-section segments whose channel coordinate
     coincides within ``_COLLINEAR_LATERAL_TOL`` and whose overlap along
@@ -1508,20 +1508,19 @@ def check_no_collinear_distinct_lines(
     return _collinear_overlay_violations(routes, offsets, port_xy, inter_section=True)
 
 
-def check_intra_section_collinear_distinct_lines(
+def _intra_section_collinear(
     graph: MetroGraph,
     routes: list[RoutedPath],
     offsets: dict[tuple[str, str], float],
 ) -> list[CollinearOverlapViolation]:
-    """Return distinct-line *intra-section* segments drawn exactly on top.
+    """Distinct-line *intra-section* segments drawn exactly on top.
 
-    The intra-section counterpart to
-    :func:`check_no_collinear_distinct_lines` (which only scans
-    ``is_inter_section`` routes).  Two distinct lines running inside one
-    section must keep their parallel slots there too; a collapse hides one
-    line behind another within the section body.  Convergence onto a
-    shared endpoint station (a real merge/fork node, not a boundary port)
-    is excused, so genuine reconvergences are not flagged.
+    The intra-section counterpart to :func:`_inter_section_collinear`
+    (which only scans ``is_inter_section`` routes).  Two distinct lines
+    running inside one section must keep their parallel slots there too; a
+    collapse hides one line behind another within the section body.
+    Convergence onto a shared endpoint station (a real merge/fork node, not
+    a boundary port) is excused, so genuine reconvergences are not flagged.
     """
     station_xy = {sid: (st.x, st.y) for sid, st in graph.stations.items()}
     # Edges internal to a rail-mode section legitimately run several
@@ -1664,15 +1663,15 @@ def _diagonal_coincidence(seg_a: _Seg, seg_b: _Seg) -> tuple[float, float] | Non
     return max(abs(g_lo), abs(g_hi)), span
 
 
-def check_no_collinear_distinct_diagonals(
+def _diagonal_collinear(
     graph: MetroGraph,
     routes: list[RoutedPath],
     offsets: dict[tuple[str, str], float],
 ) -> list[DiagonalOverlapViolation]:
-    """Return distinct-line diagonal segments collapsed on top of each other.
+    """Distinct-line diagonal segments collapsed on top of each other.
 
-    The diagonal counterpart to :func:`check_no_collinear_distinct_lines` and
-    :func:`check_intra_section_collinear_distinct_lines`, which only inspect
+    The diagonal counterpart to :func:`_inter_section_collinear` and
+    :func:`_intra_section_collinear`, which only inspect
     axis-aligned segments.  A bundle's per-line offset is applied along a fixed
     axis, so on a diagonal the perpendicular separation shrinks to
     ``OFFSET_STEP * sin(theta)`` and the lines fuse into one stroke.  This flags
@@ -1714,6 +1713,49 @@ def check_no_collinear_distinct_diagonals(
                     min_sep=min_sep,
                 )
             )
+    return violations
+
+
+CollinearScope = Literal["inter", "intra", "diagonal"]
+
+_ALL_COLLINEAR_SCOPES: tuple[CollinearScope, ...] = ("inter", "intra", "diagonal")
+
+
+def check_collinear_distinct_lines(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+    *,
+    scopes: Collection[CollinearScope] = _ALL_COLLINEAR_SCOPES,
+) -> list[CollinearOverlapViolation | DiagonalOverlapViolation]:
+    """Return distinct lines drawn collinearly on top of one another.
+
+    Two different lines that share a bundle must occupy distinct parallel
+    slots; a bundling/offset defect that collapses them to one channel
+    renders as a single stroke obscuring the other.  This is the single
+    always-on overlay check, selectable by *scopes* over three cohesive
+    scans of the final, offset-applied geometry:
+
+    * ``"inter"`` -- inter-section axis-aligned segments whose channel
+      coordinate coincides (ports converging on a shared endpoint,
+      one-``OFFSET_STEP`` bundles, and short lead-ins are excused).
+    * ``"intra"`` -- the intra-section counterpart (convergence onto a
+      shared endpoint station is excused; rail-section internals run on
+      explicit parallel rails and are dropped before the scan).
+    * ``"diagonal"`` -- near-parallel diagonals fused within
+      ``OFFSET_STEP * sin(theta)`` without crossing.
+
+    The render chokepoint runs every scope; the strike-clearance probe in
+    ``phases/spacing.py`` runs only the orthogonal pair, and the unit tests
+    exercise each scope in isolation.
+    """
+    violations: list[CollinearOverlapViolation | DiagonalOverlapViolation] = []
+    if "inter" in scopes:
+        violations.extend(_inter_section_collinear(graph, routes, offsets))
+    if "intra" in scopes:
+        violations.extend(_intra_section_collinear(graph, routes, offsets))
+    if "diagonal" in scopes:
+        violations.extend(_diagonal_collinear(graph, routes, offsets))
     return violations
 
 
@@ -4295,15 +4337,7 @@ def assert_render_curve_invariants(
         ),
         (
             "collinear distinct lines",
-            check_no_collinear_distinct_lines(graph, routes, offsets),
-        ),
-        (
-            "intra-section collinear distinct lines",
-            check_intra_section_collinear_distinct_lines(graph, routes, offsets),
-        ),
-        (
-            "collinear distinct diagonals",
-            check_no_collinear_distinct_diagonals(graph, routes, offsets),
+            check_collinear_distinct_lines(graph, routes, offsets),
         ),
         (
             "same-line parallel descents",
@@ -4437,9 +4471,7 @@ CHECK_REGISTRY: tuple[GuardSpec, ...] = (
     _check_spec(check_bundle_order_preserved, "A"),
     _check_spec(check_concentric_bundle_corners, "A"),
     _check_spec(check_coincident_corner_radii, "A"),
-    _check_spec(check_no_collinear_distinct_lines, "A"),
-    _check_spec(check_intra_section_collinear_distinct_lines, "A"),
-    _check_spec(check_no_collinear_distinct_diagonals, "A"),
+    _check_spec(check_collinear_distinct_lines, "A"),
     _check_spec(check_no_same_line_parallel_descents, "A"),
     _check_spec(check_no_riser_hugs_section_edge, "A"),
     _check_spec(check_stacked_right_ports_bow_out, "A"),
@@ -4531,8 +4563,7 @@ __all__ = [
     "check_merge_branches_meet_trunk",
     "check_merge_port_approach_side",
     "check_no_hanging_routes",
-    "check_no_collinear_distinct_lines",
-    "check_no_collinear_distinct_diagonals",
+    "check_collinear_distinct_lines",
     "check_no_same_line_parallel_descents",
     "check_no_riser_hugs_section_edge",
     "check_stacked_right_ports_bow_out",
