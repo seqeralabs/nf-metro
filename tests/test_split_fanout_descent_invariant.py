@@ -196,9 +196,17 @@ def _same_line_fan_sources(routes) -> set[str]:
     return {src for (src, _line), tgts in by_source_line.items() if len(tgts) >= 2}
 
 
-@pytest.mark.parametrize(
-    "path", _gather_fixtures(), ids=lambda p: p.relative_to(REPO_ROOT).as_posix()
+# Fixtures whose bundles genuinely exercise the concentric-corner pair check
+# (many real same-edge comparisons) and, for the first two, also carry a
+# same-line peel-off fan -- the shape the isolation guarantee protects.
+_CONCENTRIC_COMPARISON_FIXTURES = (
+    EXAMPLES / "rnaseq_sections.mmd",
+    EXAMPLES / "genomic_pipeline.mmd",
+    EXAMPLE_TOPOLOGIES / "folded_corridor_distinct_lanes.mmd",
 )
+
+
+@pytest.mark.parametrize("path", _CONCENTRIC_COMPARISON_FIXTURES, ids=lambda p: p.stem)
 def test_concentric_guard_never_compares_across_targets(
     path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -211,9 +219,11 @@ def test_concentric_guard_never_compares_across_targets(
     divergent branches of a peel-off fan land in separate bundles.  This is the
     always-on render-path counterpart of the peel-off break the #1409 test
     oracle (``TestConcentricArcCenters``) added: once two branches' turn
-    vertices diverge they are separate routes, not a delaminating bundle.  A
-    regression that loosened the grouping (e.g. by source alone) would compare
-    the divergent branches and is caught here.
+    vertices diverge they are separate routes, not a delaminating bundle.
+
+    Capture every route pair the guard actually compares and assert none crosses
+    targets.  A regression that loosened the grouping (e.g. by source alone)
+    would compare divergent branches and be caught here.
     """
     import nf_metro.layout.routing.invariants as inv
 
@@ -231,6 +241,7 @@ def test_concentric_guard_never_compares_across_targets(
     graph, routes, offsets = _route(path)
     inv.check_concentric_bundle_corners(graph, routes, offsets)
 
+    assert compared, f"{path.name}: no bundle pairs compared -- test is vacuous"
     for edge_a, edge_b in compared:
         assert edge_a == edge_b, (
             f"{path.name}: concentric guard compared routes across edges "
@@ -238,11 +249,10 @@ def test_concentric_guard_never_compares_across_targets(
         )
 
 
-def test_peeloff_fan_arms_the_concentric_guard_trap() -> None:
-    """The isolation test above is a genuine trap, not vacuous: this fixture has
-    a same-line fan peeling to two different-depth targets, so loosening the
-    guard's grouping to compare same-source branches would immediately produce a
-    cross-target comparison.  The guard, as shipped, stays silent on it."""
+def test_concentric_guard_isolates_a_peeloff_fan() -> None:
+    """A same-line fan peeling to two different-depth targets stays silent on the
+    always-on guard: its divergent branches share a source but land in separate
+    exact-edge bundles, so they are never nested against each other (#1417)."""
     graph, routes, offsets = _route(EXAMPLE_TOPOLOGIES / "divergent_fanout_split.mmd")
     assert _same_line_fan_sources(routes), "fixture lost its peel-off fan"
     assert not check_concentric_bundle_corners(graph, routes, offsets)
