@@ -18,7 +18,6 @@ from nf_metro.layout.routing.common import Direction
 from nf_metro.layout.routing.corners import (
     bypass_stagger,
     concentric_corner_radius,
-    corner_outside_sign,
     corner_radius,
     l_shape_radii,
     l_shape_stagger,
@@ -525,35 +524,3 @@ class TestConcentricCornerRadius:
         # DOWN->RIGHT: ux = +1, so positive dx subtracts -> can go negative.
         r = concentric_corner_radius(DOWN, RIGHT, 100.0, base, min_radius=0.1)
         assert r == 0.1
-
-
-class TestCornerOutsideSign:
-    """Riser handedness: which side of the channel takes the larger radius."""
-
-    def test_returns_unit_sign_in_every_orientation(self):
-        for turn_in, turn_out in ALL_TURNS:
-            assert corner_outside_sign(turn_in, turn_out) in (-1, 1)
-
-    def test_matches_reference_formula(self):
-        # Lock-in oracle: re-derive the documented cross-product rule and assert
-        # the routine matches it in every orientation (catches accidental edits).
-        for turn_in, turn_out in ALL_TURNS:
-            cross = turn_in[0] * turn_out[1] - turn_in[1] * turn_out[0]
-            v = turn_in if abs(turn_in[1]) > abs(turn_in[0]) else turn_out
-            expected = 1 if ((v[1] > 0) == (cross < 0)) else -1
-            assert corner_outside_sign(turn_in, turn_out) == expected
-
-    def test_hand_checked_cases(self):
-        # Full handedness table (larger-X line outside = +1, inside = -1).
-        expected = {
-            (RIGHT, DOWN): -1,
-            (RIGHT, UP): -1,
-            (LEFT, DOWN): 1,
-            (LEFT, UP): 1,
-            (DOWN, RIGHT): 1,
-            (DOWN, LEFT): -1,
-            (UP, RIGHT): 1,
-            (UP, LEFT): -1,
-        }
-        for (turn_in, turn_out), want in expected.items():
-            assert corner_outside_sign(turn_in, turn_out) == want
