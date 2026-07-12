@@ -569,6 +569,33 @@ def _coincide_merge_fanout_pivots(routes: list[RoutedPath], ctx: _RoutingCtx) ->
             _snap_group(_Coincidence(chans, ref))
 
 
+def _coincide_fanout_opening_descents(
+    routes: list[RoutedPath], ctx: _RoutingCtx
+) -> None:
+    """Own the opening-descent column of every fan-out, one owner for both intents.
+
+    A junction that fans branches out through different handlers leaves each
+    branch to open its own vertical descent, which :func:`_materialize_gap_slots`
+    then re-stacks per gap -- so branches of one fan open a few pixels apart and
+    read as separate strokes off the source.  This is the single pass that settles
+    a fan's opening-descent column: it fuses each line's same-source descents onto
+    the track nearest the source (:func:`_divergent_source_groups`), then nests the
+    distinct lines one ``OFFSET_STEP`` apart until each turns off
+    (:func:`_bundle_divergent_distinct_descents`).
+
+    It runs *after* :func:`_coincide_same_line_tracks` so convergence has already
+    settled the perpendicular drops: a branch that peels straight down the
+    junction's own column into a TOP/BOTTOM port (rounded later by
+    :func:`_round_junction_perp_peeloff`) lands on the junction column during
+    convergence, presenting here as a bare vertical drop rather than a
+    horizontal-then-vertical opening, so it stays clear of an L-shaped sibling
+    that genuinely diverges to another column.
+    """
+    for group in _divergent_source_groups(routes):
+        _snap_group(group)
+    _bundle_divergent_distinct_descents(routes, ctx)
+
+
 def _coincide_same_line_tracks(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
     """Fuse same-line vertical legs that should read as a single stroke.
 
@@ -599,8 +626,6 @@ def _coincide_same_line_tracks(routes: list[RoutedPath], ctx: _RoutingCtx) -> No
     the handler could have anticipated.
     """
     for group in _convergent_port_groups(routes, ctx):
-        _snap_group(group)
-    for group in _divergent_source_groups(routes):
         _snap_group(group)
     for group in _merge_feeder_groups(routes, ctx):
         _snap_group(group)
