@@ -31,8 +31,7 @@ from nf_metro.layout.routing import (
 )
 from nf_metro.layout.routing.invariants import (
     assert_render_curve_invariants,
-    check_intra_section_collinear_distinct_lines,
-    check_no_collinear_distinct_lines,
+    check_collinear_distinct_lines,
 )
 from nf_metro.parser.mermaid import parse_metro_mermaid
 
@@ -86,9 +85,9 @@ def test_folded_sink_is_fed_through_top_entry_convergence(fold: int) -> None:
 def test_folded_convergence_channels_do_not_collapse(fold: int) -> None:
     graph, routes, offsets = _route_at_fold(fold)
 
-    inter = check_no_collinear_distinct_lines(graph, routes, offsets)
-    intra = check_intra_section_collinear_distinct_lines(graph, routes, offsets)
-    violations = inter + intra
+    violations = check_collinear_distinct_lines(
+        graph, routes, offsets, scopes=("inter", "intra")
+    )
     assert not violations, "\n".join(v.message() for v in violations)
 
 

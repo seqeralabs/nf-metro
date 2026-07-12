@@ -30,10 +30,7 @@ import pytest
 
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges_centred
-from nf_metro.layout.routing.invariants import (
-    check_intra_section_collinear_distinct_lines,
-    check_no_collinear_distinct_lines,
-)
+from nf_metro.layout.routing.invariants import check_collinear_distinct_lines
 from nf_metro.parser.mermaid import parse_metro_mermaid
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -59,12 +56,16 @@ def _routes(path: Path):
 @pytest.mark.parametrize("path", FIXTURES, ids=IDS)
 def test_no_inter_section_collinear_overlay(path: Path) -> None:
     graph, routes, offsets = _routes(path)
-    violations = check_no_collinear_distinct_lines(graph, routes, offsets)
+    violations = check_collinear_distinct_lines(
+        graph, routes, offsets, scopes=("inter",)
+    )
     assert not violations, "\n".join(v.message() for v in violations)
 
 
 @pytest.mark.parametrize("path", FIXTURES, ids=IDS)
 def test_no_intra_section_collinear_overlay(path: Path) -> None:
     graph, routes, offsets = _routes(path)
-    violations = check_intra_section_collinear_distinct_lines(graph, routes, offsets)
+    violations = check_collinear_distinct_lines(
+        graph, routes, offsets, scopes=("intra",)
+    )
     assert not violations, "\n".join(v.message() for v in violations)

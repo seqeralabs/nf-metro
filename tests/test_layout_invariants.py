@@ -103,7 +103,7 @@ from nf_metro.layout.routing.common import resolve_section
 from nf_metro.layout.routing.invariants import (
     assert_render_curve_invariants,
     check_bundle_order_preserved,
-    check_no_collinear_distinct_lines,
+    check_collinear_distinct_lines,
 )
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import (
@@ -1360,14 +1360,14 @@ def test_no_collinear_distinct_lines(fixture):
     channel draws one stroke over the other.  Uses the final,
     offset-applied geometry.
     """
-    from nf_metro.layout.routing.invariants import (
-        check_no_collinear_distinct_lines,
-    )
+    from nf_metro.layout.routing.invariants import check_collinear_distinct_lines
 
     graph = _layout(fixture)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
-    violations = check_no_collinear_distinct_lines(graph, routes, offsets)
+    violations = check_collinear_distinct_lines(
+        graph, routes, offsets, scopes=("inter",)
+    )
     assert not violations, "; ".join(v.message() for v in violations)
 
 
@@ -1377,19 +1377,19 @@ def test_no_intra_section_collinear_distinct_lines(fixture):
     a section either.
 
     The intra-section counterpart to ``test_no_collinear_distinct_lines``:
-    ``check_no_collinear_distinct_lines`` only scans inter-section routes,
-    so a defect that collapsed two co-travelling lines onto one channel
-    inside a section body would slip through.  Uses the final,
+    the ``"inter"`` scope only scans inter-section routes, so a defect that
+    collapsed two co-travelling lines onto one channel inside a section body
+    would slip through the ``"intra"`` scope tested here.  Uses the final,
     offset-applied geometry.
     """
-    from nf_metro.layout.routing.invariants import (
-        check_intra_section_collinear_distinct_lines,
-    )
+    from nf_metro.layout.routing.invariants import check_collinear_distinct_lines
 
     graph = _layout(fixture)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
-    violations = check_intra_section_collinear_distinct_lines(graph, routes, offsets)
+    violations = check_collinear_distinct_lines(
+        graph, routes, offsets, scopes=("intra",)
+    )
     assert not violations, "; ".join(v.message() for v in violations)
 
 
@@ -1404,9 +1404,7 @@ def test_intra_section_collinear_check_detects_overlay():
     from types import SimpleNamespace
 
     from nf_metro.layout.routing.common import RoutedPath
-    from nf_metro.layout.routing.invariants import (
-        check_intra_section_collinear_distinct_lines,
-    )
+    from nf_metro.layout.routing.invariants import check_collinear_distinct_lines
     from nf_metro.parser.model import Edge
 
     def _run(src, tgt, line):
@@ -1420,7 +1418,7 @@ def test_intra_section_collinear_check_detects_overlay():
 
     graph = SimpleNamespace(stations={})  # no endpoints => no convergence excuse
     routes = [_run("a", "b", "red"), _run("c", "d", "blue")]
-    violations = check_intra_section_collinear_distinct_lines(graph, routes, {})
+    violations = check_collinear_distinct_lines(graph, routes, {}, scopes=("intra",))
     assert violations, "expected a collinear overlay to be detected"
     assert {violations[0].line_a, violations[0].line_b} == {"red", "blue"}
 
@@ -1436,14 +1434,14 @@ def test_no_collinear_distinct_diagonals(fixture):
     distinct-line diagonals that run near-parallel, overlap meaningfully, and
     stay closer than half an ``OFFSET_STEP`` apart.
     """
-    from nf_metro.layout.routing.invariants import (
-        check_no_collinear_distinct_diagonals,
-    )
+    from nf_metro.layout.routing.invariants import check_collinear_distinct_lines
 
     graph = _layout(fixture)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
-    violations = check_no_collinear_distinct_diagonals(graph, routes, offsets)
+    violations = check_collinear_distinct_lines(
+        graph, routes, offsets, scopes=("diagonal",)
+    )
     assert not violations, "; ".join(v.message() for v in violations)
 
 
@@ -1458,9 +1456,7 @@ def test_diagonal_overlay_check_detects_collapse():
     from types import SimpleNamespace
 
     from nf_metro.layout.routing.common import RoutedPath
-    from nf_metro.layout.routing.invariants import (
-        check_no_collinear_distinct_diagonals,
-    )
+    from nf_metro.layout.routing.invariants import check_collinear_distinct_lines
     from nf_metro.parser.model import Edge
 
     def _diag(src, tgt, line, pts):
@@ -1478,7 +1474,9 @@ def test_diagonal_overlay_check_detects_collapse():
         _diag("a", "b", "red", [(0.0, 0.0), (30.0, 300.0)]),
         _diag("a", "b", "blue", [(0.5, 0.0), (30.5, 300.0)]),
     ]
-    violations = check_no_collinear_distinct_diagonals(graph, collapsed, {})
+    violations = check_collinear_distinct_lines(
+        graph, collapsed, {}, scopes=("diagonal",)
+    )
     assert violations, "expected a diagonal overlay to be detected"
     assert {violations[0].line_a, violations[0].line_b} == {"red", "blue"}
 
@@ -1488,7 +1486,9 @@ def test_diagonal_overlay_check_detects_collapse():
         _diag("a", "b", "red", [(0.0, 0.0), (30.0, 300.0)]),
         _diag("a", "c", "blue", [(0.0, 0.0), (45.0, 300.0)]),
     ]
-    assert not check_no_collinear_distinct_diagonals(graph, diverging, {})
+    assert not check_collinear_distinct_lines(
+        graph, diverging, {}, scopes=("diagonal",)
+    )
 
 
 _TITLED_FIXTURES = _fixtures_with(lambda t: "%%metro title:" in t)
@@ -5401,7 +5401,7 @@ def test_lr_perp_multiline_exit_routes_cleanly(fixture):
     # The exiting lines must not collapse onto one channel anywhere.
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
-    assert not check_no_collinear_distinct_lines(graph, routes, offsets)
+    assert not check_collinear_distinct_lines(graph, routes, offsets, scopes=("inter",))
     assert not check_bundle_order_preserved(routes)
 
 

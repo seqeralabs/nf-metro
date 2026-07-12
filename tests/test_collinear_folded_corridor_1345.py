@@ -24,9 +24,7 @@ from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.invariants import (
     _axis_aligned,
     apply_route_offsets,
-    check_intra_section_collinear_distinct_lines,
-    check_no_collinear_distinct_diagonals,
-    check_no_collinear_distinct_lines,
+    check_collinear_distinct_lines,
 )
 from nf_metro.parser.mermaid import parse_metro_mermaid
 
@@ -50,9 +48,7 @@ def _laid_out():
 def test_no_collinear_overlay():
     """No two distinct lines coincide on a shared channel anywhere."""
     graph, offsets, routes = _laid_out()
-    assert not check_no_collinear_distinct_lines(graph, routes, offsets)
-    assert not check_intra_section_collinear_distinct_lines(graph, routes, offsets)
-    assert not check_no_collinear_distinct_diagonals(graph, routes, offsets)
+    assert not check_collinear_distinct_lines(graph, routes, offsets)
 
 
 def _distinct_line_vertical_legs(routes, offsets):
