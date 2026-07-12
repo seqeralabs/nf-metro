@@ -5,7 +5,6 @@ from __future__ import annotations
 import functools
 import itertools
 from collections import defaultdict
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import NamedTuple
 
@@ -21,7 +20,6 @@ from nf_metro.layout.constants import (
     SECTION_HEADER_PROTRUSION,
     resolve_offset_step,
 )
-from nf_metro.layout.geometry import Point
 from nf_metro.layout.routing.common import (
     Direction,
     GapSlot,
@@ -986,28 +984,27 @@ def _convergent_port_groups(
     return groups
 
 
-def _reseat_flanking_segment(
+def _reseat_concentric_flanking(
     rp: RoutedPath,
     k: int,
     new_coord: float,
     axis: int,
-    radius_in: Callable[[Point, Point, Point], float],
-    radius_out: Callable[[Point, Point, Point], float],
+    offset_in: float = 0.0,
+    offset_out: float = 0.0,
 ) -> None:
-    """Move the ``points[k] -> points[k+1]`` segment onto *new_coord*, re-deriving
-    its two flanking corner radii.
+    """Move the ``points[k] -> points[k+1]`` segment onto *new_coord* and re-derive
+    its two flanking corners concentrically.
 
     *axis* selects the moved coordinate: ``0`` slides a vertical channel to a new
     X, ``1`` slides a horizontal trunk to a new Y.  Both segment endpoints take
     *new_coord* on that axis and keep their other coordinate, so the segment stays
     straight and the flanking legs stretch to meet it.
 
-    *radius_in* / *radius_out* supply the incoming (``curve_radii[k-1]``) and
-    outgoing (``curve_radii[k]``) corner radii.  They are evaluated on the *moved*
-    waypoints ``(prev, corner, next)``, so a geometry-derived policy (e.g.
-    :func:`concentric_corner_radius_at`) sees the final corner positions while a
-    fixed-radius policy ignores its arguments.  ``curve_radii`` has length
-    ``len(points) - 2``, so any live radius index is flanked by three points.
+    ``offset_in`` / ``offset_out`` are the signed displacements from the bundle's
+    reference line at the incoming (``k-1``) and outgoing (``k``) corners; each
+    flanking radius is re-derived through :func:`concentric_corner_radius_at` on
+    the moved waypoints, so the outer lanes take the wider, concentric radius and
+    the arcs hold a constant gap through the turn.
     """
     pts = rp.points
     for j in (k, k + 1):
@@ -1015,21 +1012,12 @@ def _reseat_flanking_segment(
         pts[j] = (new_coord, py) if axis == 0 else (px, new_coord)
     if rp.curve_radii is None:
         return
-    for radius_idx, radius_fn in ((k - 1, radius_in), (k, radius_out)):
+    for radius_idx, offset in ((k - 1, offset_in), (k, offset_out)):
         if 0 <= radius_idx < len(rp.curve_radii):
             prev_pt, corner_pt, next_pt = pts[radius_idx : radius_idx + 3]
-            rp.curve_radii[radius_idx] = radius_fn(prev_pt, corner_pt, next_pt)
-
-
-def _concentric_corner_fn(offset: float) -> Callable[[Point, Point, Point], float]:
-    """A flanking-corner radius policy nesting at signed *offset* from the bundle's
-    reference line, sized by :func:`concentric_corner_radius_at` on the moved
-    waypoints (so the outer lanes take the wider, concentric radius)."""
-
-    def corner(prev_pt: Point, corner_pt: Point, next_pt: Point) -> float:
-        return concentric_corner_radius_at(prev_pt, corner_pt, next_pt, offset)
-
-    return corner
+            rp.curve_radii[radius_idx] = concentric_corner_radius_at(
+                prev_pt, corner_pt, next_pt, offset
+            )
 
 
 def _set_vchannel_x(ch: _VChannel, new_x: float, offset: float = 0.0) -> None:
@@ -1047,9 +1035,8 @@ def _set_vchannel_x(ch: _VChannel, new_x: float, offset: float = 0.0) -> None:
     line's rank displacement so the outer lanes take the wider, concentric
     radius and the arcs hold a constant gap through the turn.
     """
-    corner = _concentric_corner_fn(offset)
-    _reseat_flanking_segment(
-        ch.route, ch.idx, new_x, axis=0, radius_in=corner, radius_out=corner
+    _reseat_concentric_flanking(
+        ch.route, ch.idx, new_x, axis=0, offset_in=offset, offset_out=offset
     )
 
 
@@ -1075,13 +1062,8 @@ def _set_htrunk_y(
     the line's rank displacement, but the outgoing corner -- where it peels off
     to its own port, alone -- keeps the base radius (zero).
     """
-    _reseat_flanking_segment(
-        rp,
-        k,
-        new_y,
-        axis=1,
-        radius_in=_concentric_corner_fn(offset_in),
-        radius_out=_concentric_corner_fn(offset_out),
+    _reseat_concentric_flanking(
+        rp, k, new_y, axis=1, offset_in=offset_in, offset_out=offset_out
     )
 
 
@@ -1880,6 +1862,14 @@ def _restack_htrunk(
     (0 = innermost / shallowest); the two flanking corners are sized so the
     bundle stays concentric, mirroring :func:`_restack_channel`.
     """
+    rp = t.route
+    pts = rp.points
+    k = t.idx
+    pts[k] = (pts[k][0], new_y)
+    pts[k + 1] = (pts[k + 1][0], new_y)
+
+    if rp.curve_radii is None:
+        return
     max_off = (n - 1) * step
     off = inner * step
     # An innermost trunk turns on the INSIDE of both flanking corners (smaller
@@ -1890,9 +1880,10 @@ def _restack_htrunk(
     # inverts that, giving the inside line the LARGEST radius and tearing the
     # bundle apart at the dip corners.
     r = corner_radius(off, max_off, outside=True, base_radius=base_radius)
-    _reseat_flanking_segment(
-        t.route, t.idx, new_y, axis=1, radius_in=lambda *_: r, radius_out=lambda *_: r
-    )
+    if 0 <= k - 1 < len(rp.curve_radii):
+        rp.curve_radii[k - 1] = r
+    if k < len(rp.curve_radii) and k + 2 < len(pts):
+        rp.curve_radii[k] = r
 
 
 def _join_fanout_upstream_tails(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
@@ -2225,6 +2216,13 @@ def _restack_channel(
     sweep sits on the LEFT.
     """
     rp = ch.route
+    pts = rp.points
+    k = ch.idx
+    pts[k] = (new_x, pts[k][1])
+    pts[k + 1] = (new_x, pts[k + 1][1])
+
+    if rp.curve_radii is None:
+        return
     vertical = Direction.D if ch.down else Direction.U
     # Map left-to-right index to l_shape_radii's convention: i=0 is the outside
     # (largest) line, which sits on the right for a rightward-leading trunk and
@@ -2233,17 +2231,11 @@ def _restack_channel(
     _, r_first, r_second = l_shape_radii(
         li, n, vertical=vertical, offset_step=step, base_radius=base_radius
     )
-    _reseat_flanking_segment(
-        rp,
-        ch.idx,
-        new_x,
-        axis=0,
-        radius_in=lambda *_: r_first,
-        radius_out=lambda *_: r_second,
-    )
-    if rp.curve_radii is None:
-        return
-    pts = rp.points
+    # Lead corner radius lives at curve_radii[k-1]; trail at curve_radii[k].
+    if 0 <= k - 1 < len(rp.curve_radii):
+        rp.curve_radii[k - 1] = r_first
+    if k < len(rp.curve_radii) and k + 2 < len(pts):
+        rp.curve_radii[k] = r_second
 
     # Unclamp the source-side fan lead-in.  When this channel's lead-in is the
     # route's first segment (a concentric fan corner hugging the junction), it
@@ -2252,7 +2244,7 @@ def _restack_channel(
     # concentric (shared-centre) spacing.  Extend the lead start back along its
     # own axis so the full r_first fits; the extra length overlaps the upstream
     # same-line tail (re-joined by _join_fanout_upstream_tails), so it is free.
-    if ch.idx == 1:
+    if k == 1:
         lx, ly = pts[0]
         if abs(ly - pts[1][1]) < COORD_TOLERANCE:
             if lx <= new_x:  # lead approaches from the left (R-going fan)
