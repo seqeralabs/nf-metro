@@ -575,6 +575,14 @@
         "mmd": "%%metro title: Convergence Sink Above\n%%metro style: dark\n%%metro compact_offsets: true\n%%metro line: lower | Lower | #e63946\n%%metro line: upper | Upper | #0570b0\n%%metro grid: up_in | 0,0\n%%metro grid: low_in | 0,1\n%%metro grid: sink | 1,1\n\ngraph LR\n    subgraph up_in [Upper Input]\n        u1[Load]\n        u2[Prep]\n        u1 -->|upper| u2\n    end\n    subgraph low_in [Lower Input]\n        d1[Load]\n        d2[Prep]\n        d1 -->|lower| d2\n    end\n    subgraph sink [Merge]\n        s1[Collect]\n        s2[Report]\n        s1 -->|lower,upper| s2\n    end\n    d2 -->|lower| s1\n    u2 -->|upper| s1\n"
       },
       {
+        "name": "top_descent_over_left_entry",
+        "mmd": "%%metro title: Top descent over left entry\n%%metro line: rr | Red | #e6007e\n%%metro line: gg | Green | #2db572\n%%metro grid: up | 0,0\n%%metro grid: left | 0,1\n%%metro grid: target | 1,1\n\ngraph LR\n    subgraph up [Upstream]\n        %%metro exit: right | gg\n        u1[U1]\n        u2[U2]\n        u1 -->|gg| u2\n    end\n    subgraph left [Left feeder]\n        %%metro exit: right | rr\n        l1[L1]\n        l2[L2]\n        l1 -->|rr| l2\n    end\n    subgraph target [Target]\n        %%metro entry: left | rr, gg\n        t1[Prep]\n        t2[Branch A]\n        t3[Branch B]\n        t1 -->|rr,gg| t2\n        t1 -->|rr,gg| t3\n    end\n    u2 -->|gg| t1\n    l2 -->|rr| t1\n"
+      },
+      {
+        "name": "top_descent_over_left_entry_junction",
+        "mmd": "%%metro title: Top descent over left entry (junction feeder)\n%%metro line: rr | Red | #e6007e\n%%metro line: gg | Green | #2db572\n%%metro grid: up | 0,0\n%%metro grid: left | 0,1\n%%metro grid: other | 1,0\n%%metro grid: target | 1,1\n\ngraph LR\n    subgraph up [Upstream]\n        %%metro exit: right | gg\n        u1[U1]\n        u2[U2]\n        u1 -->|gg| u2\n    end\n    subgraph left [Left feeder]\n        %%metro exit: right | rr\n        l1[L1]\n        l2[L2]\n        l1 -->|rr| l2\n    end\n    subgraph other [Other]\n        %%metro entry: left | gg\n        o1[O1]\n    end\n    subgraph target [Target]\n        %%metro entry: left | rr, gg\n        t1[Prep]\n        t2[Branch A]\n        t3[Branch B]\n        t1 -->|rr,gg| t2\n        t1 -->|rr,gg| t3\n    end\n    u2 -->|gg| o1\n    u2 -->|gg| t1\n    l2 -->|rr| t1\n"
+      },
+      {
         "name": "terminus_join",
         "mmd": "%%metro title: Terminus Join\n%%metro style: dark\n%%metro line: l1 | Line 1 | #e63946\n%%metro line: l2 | Line 2 | #2db572\n%%metro file: sink_out | OUT | Results\n\ngraph LR\n    src_a[Process A]\n    src_b[Process B]\n    sink_out[ ]\n    src_a -->|l1| sink_out\n    src_b -->|l2| sink_out\n"
       },
