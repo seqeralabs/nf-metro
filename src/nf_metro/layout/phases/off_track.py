@@ -24,6 +24,7 @@ from nf_metro.layout.geometry import AxisFrame, lanes_run_along_x
 from nf_metro.layout.labels import _label_text_height, label_text_width
 from nf_metro.layout.phases._common import (
     _content_station_ids,
+    _section_bundle_lines,
     _section_lr_port_anchor_y,
     dominant_value,
     flow_axis_exit_ports,
@@ -112,6 +113,75 @@ def _insert_phantom_pass_throughs(
             sub.add_edge(
                 Edge(source=phantom_id, target=earliest_target, line_id=line_id)
             )
+
+    _materialize_pass_through_lines(graph, section, sub)
+
+
+def _materialize_pass_through_lines(
+    graph: MetroGraph,
+    section: Section,
+    sub: MetroGraph,
+) -> None:
+    """Give a full-bundle entry->exit pass-through its line membership in *sub*.
+
+    A real station whose only edges are inter-section -- fed by an entry port
+    and feeding an exit port, with no internal neighbours -- is isolated (and so
+    lineless) in the port-stripped subgraph.  The track allocator then treats it
+    as an orphan and drops it on a bottom track, letting an in-section dead-end
+    chain claim the section trunk while this through-station -- the one that
+    actually carries the bundle across the section -- fans off it.
+
+    Attaching a hidden phantom successor carrying the station's exit-port lines
+    restores that membership without adding an internal predecessor (so the
+    station stays a layer-0 root beside its entry-fed siblings).  The track
+    allocator then sees it as the line-superset trunk of its fan and pins it on
+    the trunk, so the continuing chain runs straight and the dead-end peels off.
+
+    Narrow by construction to that trunk-theft shape: the pass-through must carry
+    the full section bundle (it is the real trunk), and the section must contain a
+    competing *subset chain* -- an on-track station carrying a proper subset of
+    the bundle that has its own in-section edge, i.e. the dead-end run that would
+    otherwise seize the trunk.  Without a subset chain there is nothing stealing
+    the trunk, so materialising the pass-through would only reshuffle an already
+    sound fan (e.g. two equal full-bundle pass-throughs).
+    """
+    bundle = _section_bundle_lines(graph, section)
+    if not bundle:
+        return
+
+    def _is_subset_chain(sid: str, st: Station) -> bool:
+        if st.is_hidden or st.is_port or st.off_track:
+            return False
+        lines = set(graph.station_lines(sid))
+        return (
+            bool(lines)
+            and lines < bundle
+            and bool(sub.edges_from(sid) or sub.edges_to(sid))
+        )
+
+    if not any(_is_subset_chain(sid, st) for sid, st in sub.stations.items()):
+        return
+
+    exit_port_ids = set(section.exit_ports)
+    for sid, station in list(sub.stations.items()):
+        if station.is_hidden or station.is_port or station.off_track:
+            continue
+        if sub.edges_from(sid) or sub.edges_to(sid):
+            continue
+        if set(graph.station_lines(sid)) != bundle:
+            continue
+        fed_by_entry = any(e.source in section.entry_ports for e in graph.edges_to(sid))
+        exit_lines = sorted(
+            {e.line_id for e in graph.edges_from(sid) if e.target in exit_port_ids}
+        )
+        if not fed_by_entry or not exit_lines:
+            continue
+        phantom_id = f"_passthrough_{section.id}_{sid}"
+        sub.add_station(
+            Station(id=phantom_id, label="", section_id=section.id, is_hidden=True)
+        )
+        for line_id in exit_lines:
+            sub.add_edge(Edge(source=sid, target=phantom_id, line_id=line_id))
 
 
 def _off_track_output_lead(

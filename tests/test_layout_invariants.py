@@ -1203,6 +1203,55 @@ def test_port_station_sync_guard_fires_on_desync():
         _guard_port_station_coords_synced(graph, "test")
 
 
+def _sole_port_y(graph: MetroGraph, port_ids) -> float:
+    """Y of a section's single LEFT/RIGHT port in *port_ids*."""
+    ys = [
+        graph.stations[pid].y
+        for pid in port_ids
+        if graph.ports[pid].side in (PortSide.LEFT, PortSide.RIGHT)
+    ]
+    assert len(ys) == 1, f"expected one LR port, got {ys}"
+    return ys[0]
+
+
+def test_shared_cell_fork_continuing_branch_holds_trunk():
+    """A shared-cell row stays straight and the continuing branch holds the trunk.
+
+    ``shared_cell_fork_trunk_align`` packs three sections into grid cell 0,0.
+    ``prep`` is a tall symmetric fan, so its flow trunk sits below the row's top
+    edge; ``quant`` carries a full-bundle pass-through (``q_pass``, the branch
+    that continues to the exit) alongside a coverage dead-end chain
+    (``q_split`` -> ``q_depth``) that has no forward path out of the section.
+
+    The engine must (a) align the row so the through-bundle runs at one Y across
+    ``prep`` -> ``mid`` -> ``quant`` -> ``report`` (no boundary kink), and (b)
+    seat the continuing pass-through on that trunk with the coverage dead-end
+    peeling off -- not the reverse, which strands the through-line off-trunk.
+    """
+    graph = _layout("topologies/shared_cell_fork_trunk_align.mmd", center_ports=False)
+
+    prep_exit = _sole_port_y(graph, graph.sections["prep"].exit_ports)
+    mid_entry = _sole_port_y(graph, graph.sections["mid"].entry_ports)
+    mid_exit = _sole_port_y(graph, graph.sections["mid"].exit_ports)
+    quant_entry = _sole_port_y(graph, graph.sections["quant"].entry_ports)
+    quant_exit = _sole_port_y(graph, graph.sections["quant"].exit_ports)
+    report_entry = _sole_port_y(graph, graph.sections["report"].entry_ports)
+
+    row = [prep_exit, mid_entry, mid_exit, quant_entry, quant_exit, report_entry]
+    assert max(row) - min(row) <= _Y_TOL, f"row-0 through-bundle kinks: port Ys {row}"
+
+    # The continuing pass-through rides the trunk; the coverage dead-end peels.
+    q_pass = graph.stations["q_pass"].y
+    q_split = graph.stations["q_split"].y
+    assert abs(q_pass - quant_entry) <= _Y_TOL, (
+        f"continuing branch q_pass y={q_pass:.1f} off the trunk y={quant_entry:.1f}"
+    )
+    assert abs(q_split - quant_entry) > _Y_TOL, (
+        f"coverage dead-end q_split y={q_split:.1f} did not peel off trunk "
+        f"y={quant_entry:.1f}"
+    )
+
+
 @lru_cache(maxsize=None)
 def _declared_center_ports(fixture: str) -> bool:
     """The ``center_ports`` value the shipping render uses for *fixture*.
