@@ -574,6 +574,28 @@ def _guard_ports_on_boundaries(graph: MetroGraph, phase: str) -> None:
             )
 
 
+def _guard_port_station_coords_synced(graph: MetroGraph, phase: str) -> None:
+    """A port's Station record and Port record must hold the same coordinates.
+
+    Every port is both a ``Station`` (placed by layout, read by routing and
+    rendering) and a ``Port`` (read by later phases as the settled position).
+    Phases move ports through :func:`_set_port_y` / :func:`_set_port_x` /
+    :func:`shift_section`, which write both; a raw ``station.y = ...`` that
+    skips the Port record desyncs the two, so a later phase reads a stale
+    position and leaves the inter-section run kinked.
+    """
+    tolerance = GUARD_TOLERANCE
+    for pid, port in graph.ports.items():
+        st = graph.stations.get(pid)
+        if st is None:
+            continue
+        if abs(st.x - port.x) > tolerance or abs(st.y - port.y) > tolerance:
+            raise PhaseInvariantError(
+                f"{phase}: port {pid!r} station record ({st.x:.1f}, {st.y:.1f}) "
+                f"desynced from port record ({port.x:.1f}, {port.y:.1f})"
+            )
+
+
 def _tb_top_entry_drop_overshoot(
     graph: MetroGraph,
 ) -> list[tuple[str, float]]:
@@ -4875,6 +4897,10 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
     ),
     GuardSpec(_guard_station_x_column_drift, "A", bisection_safe=True),
     # --- final-only set (run only at the closing ``after final`` boundary) ---
+    # A desync feeds a stale port position to later phases, not the renderer
+    # (routing reads the Station record), so this is a pipeline-consistency
+    # check for validate runs rather than a render-output guard.
+    GuardSpec(_guard_port_station_coords_synced, "B"),
     GuardSpec(_guard_no_section_overlap, "B"),
     # The row trunk Y is only finalised once Stage 6.7 has re-centred
     # ``center_ports`` graphs, so this cannot bisect.

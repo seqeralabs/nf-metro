@@ -12,6 +12,7 @@ from nf_metro.layout.phase_state import require_phase_field
 from nf_metro.layout.phases.canvas import _canvas_top_preserved, _translate_graph_y
 from nf_metro.layout.phases.fan_bundles import _convergence_source_ys
 from nf_metro.layout.phases.junctions import _position_junctions
+from nf_metro.layout.phases.ports import _set_port_y
 from nf_metro.parser.model import MetroGraph, PortSide
 
 
@@ -181,7 +182,7 @@ def _snap_group_to_grid(
                 continue
             if pid in convergence_sources:
                 continue
-            port_st.y = _slot_snap(port_st.y, origin_r, pitch, half)
+            _set_port_y(graph, pid, _slot_snap(port_st.y, origin_r, pitch, half))
 
 
 def _restore_convergence_midpoints(
@@ -196,7 +197,7 @@ def _restore_convergence_midpoints(
         if len(set(round(y, 3) for y in new_src_ys)) < 2:
             continue
         midpoint = (max(new_src_ys) + min(new_src_ys)) / 2.0
-        st.y = midpoint
+        _set_port_y(graph, target_id, midpoint)
 
 
 def _snap_canvas_y_to_grid(

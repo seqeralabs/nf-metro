@@ -789,7 +789,7 @@ def _snap_grid_group_entry_ports(graph: MetroGraph) -> None:
                 break
 
         if target_y is not None and abs(port_st.y - target_y) >= 1.0:
-            port_st.y = target_y
+            _set_port_y(graph, port_id, target_y)
 
 
 def _snap_grid_group_exit_ports(graph: MetroGraph) -> None:
@@ -880,7 +880,7 @@ def _snap_grid_group_exit_ports(graph: MetroGraph) -> None:
             target_y = match
 
         if abs(port_st.y - target_y) >= 1.0:
-            port_st.y = target_y
+            _set_port_y(graph, port_id, target_y)
 
 
 def _resolve_downstream_entry_y(

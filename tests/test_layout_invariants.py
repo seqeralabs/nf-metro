@@ -78,6 +78,7 @@ from nf_metro.layout.phases.bbox import (
     _section_fit_top,
 )
 from nf_metro.layout.phases.guards import (
+    _guard_port_station_coords_synced,
     _perp_fed_entry_consumer_y,
     _tb_top_entry_drop_overshoot,
 )
@@ -1169,6 +1170,37 @@ def test_flow_exit_port_anchors_to_carrying_station(fixture):
             f"row y={carrier_y:.1f} (carriers {sorted(carrier_ids)}); the "
             f"boundary run will read as a diagonal instead of a clean riser"
         )
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_port_station_and_port_records_share_coords(fixture):
+    """A port's Station record and Port record must hold the same coordinates.
+
+    Every port is both a ``Station`` (placed by layout, read by routing and
+    rendering) and a ``Port`` (read by later phases as the settled position).
+    A phase that moves a port by writing ``station.y`` directly, skipping the
+    Port record, desyncs the two so a later phase reads a stale position and
+    leaves the inter-section boundary run kinked.  The move helpers
+    (``_set_port_y`` / ``_set_port_x`` / ``shift_section``) write both.
+    """
+    graph = _layout(fixture, center_ports=_declared_center_ports(fixture))
+    for pid, port in graph.ports.items():
+        st = graph.stations.get(pid)
+        if st is None:
+            continue
+        assert abs(st.x - port.x) <= _Y_TOL and abs(st.y - port.y) <= _Y_TOL, (
+            f"{fixture}: port {pid} station record ({st.x:.1f}, {st.y:.1f}) "
+            f"desynced from port record ({port.x:.1f}, {port.y:.1f})"
+        )
+
+
+def test_port_station_sync_guard_fires_on_desync():
+    """The runtime guard raises when a port's Station and Port records diverge."""
+    graph = _layout("variant_calling.mmd")
+    pid = next(iter(graph.ports))
+    graph.stations[pid].y += 50.0
+    with pytest.raises(PhaseInvariantError, match="desynced"):
+        _guard_port_station_coords_synced(graph, "test")
 
 
 @lru_cache(maxsize=None)
