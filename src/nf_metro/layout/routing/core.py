@@ -73,8 +73,9 @@ from nf_metro.layout.routing.normalize import (  # noqa: F401
     _bundle_divergent_distinct_traverses,
     _clamp_inter_row_band_top,
     _clear_channel_x_in_band,
+    _coincide_fanout_opening_descents,
+    _coincide_merge_fanout_pivots,
     _coincide_same_line_tracks,
-    _coincide_same_line_traverses,
     _coincident_trunk_slots,
     _collect_htrunks,
     _distinct_line_order,
@@ -209,19 +210,22 @@ def _route_edges(
     # Re-stack peel-off risers against the settled trunk depths, so each rises
     # on the concentric slot its post-repack depth earns.
     _reconcile_port_peeloff_risers(routes, ctx)
+    # A merge fan-out's branches leave one fork and turn off its lead-out
+    # through a first corner each; fuse those corners onto one shared pivot
+    # column so the fork opens as one stroke, before the same-line coincidence
+    # pass reads the settled channels.
+    _coincide_merge_fanout_pivots(routes, ctx)
     # Coincidence runs after the trunk/gap channels are finalised: it snaps
     # same-line tracks onto a reference read from that final geometry (the
     # port-side track, the source-side track, the merge trunk's descent, and
     # the fan-out junction handoff tail), so a single line reads as one stroke.
     _coincide_same_line_tracks(routes, ctx)
-    # Distinct lines fanning out from one source leave the section as one bundle;
-    # keep their opening descents one step apart until each turns off, rather
-    # than on independent channels that read as separate strokes from the start.
-    _bundle_divergent_distinct_descents(routes, ctx)
-    # Same-line branches wrapping to one target column via different handlers size
-    # their inter-row bands independently; fuse the near-parallel traverses onto
-    # the deepest member's band so the shared run reads as one stroke.
-    _coincide_same_line_traverses(routes, ctx)
+    # Settle every fan-out's opening-descent column in one pass: fuse each line's
+    # same-source descents onto the source-nearest track and nest the distinct
+    # lines one step apart until each turns off.  Runs after the coincidence pass
+    # so a perpendicular drop already resolved onto the junction column stays
+    # clear of an L-shaped sibling diverging to another column.
+    _coincide_fanout_opening_descents(routes, ctx)
     # Distinct lines fanning out share the corridor they turn onto; nest their
     # traverses one step apart so the bundle holds a constant width until each
     # line peels off, rather than running on independently-sized bands.
