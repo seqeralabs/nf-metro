@@ -979,10 +979,7 @@ def _route_gap_span(
     """
     if not r.is_inter_section:
         return None
-    src = graph.stations.get(r.edge.source)
-    tgt = graph.stations.get(r.edge.target)
-    if src is None or tgt is None:
-        return None
+    src, tgt = graph.edge_endpoints(r.edge)
     src_below = src.y > gap_bottom - COORD_TOLERANCE
     tgt_below = tgt.y > gap_bottom - COORD_TOLERANCE
     src_above = src.y < gap_top + COORD_TOLERANCE

@@ -159,9 +159,8 @@ def _route_edges(
 
         rail_edges = []
         for edge in graph.edges:
-            src = graph.stations.get(edge.source)
-            tgt = graph.stations.get(edge.target)
-            if src is None or tgt is None or src.is_port or tgt.is_port:
+            src, tgt = graph.edge_endpoints(edge)
+            if src.is_port or tgt.is_port:
                 continue
             if (
                 src.section_id == tgt.section_id
@@ -185,10 +184,7 @@ def _route_edges(
         if (edge.source, edge.target, edge.line_id) in rail_internal:
             continue
 
-        src = graph.stations.get(edge.source)
-        tgt = graph.stations.get(edge.target)
-        if not src or not tgt:
-            continue
+        src, tgt = graph.edge_endpoints(edge)
 
         # Try each routing handler in priority order.
         # The first handler that returns a RoutedPath wins.

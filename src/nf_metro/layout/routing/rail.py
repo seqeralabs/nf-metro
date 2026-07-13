@@ -329,10 +329,7 @@ def route_rail_edges(
     for edge in edge_list:
         if (edge.source, edge.target, edge.line_id) in routed_connector:
             continue
-        src = graph.stations.get(edge.source)
-        tgt = graph.stations.get(edge.target)
-        if src is None or tgt is None:
-            continue
+        src, tgt = graph.edge_endpoints(edge)
 
         # An off-track endpoint sits off the rails: drop straight down onto the
         # consumer's rail (a clean perpendicular crossing reads better than a

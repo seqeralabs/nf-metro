@@ -354,6 +354,17 @@ class RouteSegment:
     edge: Edge | None = None
 
 
+class UnresolvedEndpointError(ValueError):
+    """Raised when an edge references a station id that is not in the graph.
+
+    Every edge that reaches layout must resolve both endpoints to a
+    :class:`Station`; the resolver inserts ports and junctions as real
+    stations, so a dangling endpoint means a malformed graph, not a routable
+    topology. :meth:`MetroGraph.edge_endpoints` enforces this per read and the
+    layout boundary enforces it once over the whole edge list.
+    """
+
+
 @dataclass
 class MetroGraph:
     """Complete metro map graph definition."""
@@ -699,6 +710,29 @@ class MetroGraph:
                 idx.setdefault(e.target, []).append(e)
             self._edges_to_cache = idx
         return self._edges_to_cache.get(station_id, [])
+
+    def edge_endpoints(self, edge: Edge) -> tuple[Station, Station]:
+        """Resolve an edge's ``source`` and ``target`` to their stations.
+
+        Both endpoints of a laid-out edge always resolve, so callers read the
+        returned stations directly rather than re-checking each for ``None``.
+        Raises :class:`UnresolvedEndpointError` on a dangling endpoint, turning
+        a malformed graph into a clear failure instead of a routing handler
+        silently skipping the edge (or a bare ``KeyError`` deeper in layout).
+        """
+        src = self.stations.get(edge.source)
+        tgt = self.stations.get(edge.target)
+        if src is None or tgt is None:
+            missing = [
+                sid
+                for sid, st in ((edge.source, src), (edge.target, tgt))
+                if st is None
+            ]
+            raise UnresolvedEndpointError(
+                f"Edge {edge.source} -> {edge.target} (line '{edge.line_id}') "
+                f"references unresolved station(s): {', '.join(missing)}"
+            )
+        return src, tgt
 
     def is_hub(self, station_id: str) -> bool:
         """A station with both a predecessor and a successor edge.

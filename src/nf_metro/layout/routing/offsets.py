@@ -116,10 +116,7 @@ def _build_same_y_adj(
     """
     same_y_adj: dict[str, dict[str, list[tuple[str, str]]]] = {}
     for edge in graph.edges:
-        src = graph.stations.get(edge.source)
-        tgt = graph.stations.get(edge.target)
-        if not src or not tgt:
-            continue
+        src, tgt = graph.edge_endpoints(edge)
         if not src.section_id or src.section_id != tgt.section_id:
             continue
         if abs(src.y - tgt.y) > _SAME_Y_TOLERANCE:
