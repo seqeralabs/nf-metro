@@ -33,7 +33,13 @@ from nf_metro.layout.phases.single_section import (
     _multiline_label_padding,
     _terminus_y_overhang,
 )
-from nf_metro.parser.model import MetroGraph, PortSide, RowGridInfo, Section
+from nf_metro.parser.model import (
+    MetroGraph,
+    PortSide,
+    RowGridInfo,
+    Section,
+    is_bypass_v,
+)
 
 
 def _group_sections_by_row(
@@ -647,10 +653,10 @@ def _align_row_trunk_ys(graph: MetroGraph) -> None:
 
             # Re-snap each shifted section's LR ports to target_y when they
             # have a single internal station at target_y.  A port fanning to
-            # 2+ distinct internal Ys is normally left centred (fan-in), but
-            # when one of those neighbours is the section trunk (a full-bundle
-            # station at target_y) the port rides that trunk while the others
-            # peel off, so it snaps to target_y regardless.
+            # 2+ distinct internal Ys is centred (fan-in) unless one neighbour
+            # is the section trunk (a full-bundle station at target_y), in which
+            # case the port rides that trunk while the others peel off and snaps
+            # to target_y.
             for section in group:
                 if section.id not in shifted:
                     continue
@@ -683,8 +689,12 @@ def _align_row_trunk_ys(graph: MetroGraph) -> None:
                             connected_ys.add(round(st.y, 1))
                             if abs(st.y - target_y) < SAME_COORD_TOLERANCE:
                                 target_aligned = True
+                                # A bypass-V helper carries the full bundle but
+                                # is a routing artefact, not the trunk (matching
+                                # _section_trunk_y's own exclusion).
                                 if (
                                     bundle
+                                    and not is_bypass_v(other_id)
                                     and set(graph.station_lines(other_id)) == bundle
                                 ):
                                     trunk_at_target = True

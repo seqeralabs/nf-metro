@@ -1147,6 +1147,7 @@ def _section_row_through_lines(graph: MetroGraph, section: Section) -> set[str]:
         return found
 
     lines: set[str] = set()
+    # Entry ports walk backward toward their feeder; exit ports walk forward.
     for port_ids, forward in ((section.entry_ports, False), (section.exit_ports, True)):
         for pid in port_ids:
             port = graph.ports.get(pid)

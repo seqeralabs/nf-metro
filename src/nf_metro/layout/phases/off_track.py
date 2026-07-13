@@ -148,16 +148,18 @@ def _materialize_pass_through_lines(
     bundle = _section_bundle_lines(graph, section)
     if not bundle:
         return
-    has_subset_chain = any(
-        not st.is_hidden
-        and not st.is_port
-        and not st.off_track
-        and (lines := set(graph.station_lines(sid)))
-        and lines < bundle
-        and (sub.edges_from(sid) or sub.edges_to(sid))
-        for sid, st in sub.stations.items()
-    )
-    if not has_subset_chain:
+
+    def _is_subset_chain(sid: str, st: Station) -> bool:
+        if st.is_hidden or st.is_port or st.off_track:
+            return False
+        lines = set(graph.station_lines(sid))
+        return (
+            bool(lines)
+            and lines < bundle
+            and bool(sub.edges_from(sid) or sub.edges_to(sid))
+        )
+
+    if not any(_is_subset_chain(sid, st) for sid, st in sub.stations.items()):
         return
 
     exit_port_ids = set(section.exit_ports)
