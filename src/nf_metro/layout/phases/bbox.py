@@ -850,11 +850,16 @@ def _tighten_lower_rows_after_shrink(graph: MetroGraph, section_y_gap: float) ->
             continue
         # Use the Phase 1 content-hugging bbox bottom (bbox_y + bbox_h) as the
         # row-ending extent.  When a pre-populated structural snapshot exists,
-        # use it instead (per-section override, falls back to bbox_h).
+        # take it as a lower bound on the extent but never below the section's
+        # actual drawn bbox bottom: a snapshot captured before a later pass grew
+        # the box (e.g. an off-track lift adding real content) would otherwise
+        # understate the extent and let the tighten pull the row below up into
+        # the grown box.
         struct = graph._struct_height_below_top
         if struct:
             max_above_bot = max(
-                s.bbox_y + struct.get(s.id, s.bbox_h) for s in ending_at_prev
+                s.bbox_y + max(struct.get(s.id, s.bbox_h), s.bbox_h)
+                for s in ending_at_prev
             )
         else:
             max_above_bot = max(s.bbox_y + s.bbox_h for s in ending_at_prev)
