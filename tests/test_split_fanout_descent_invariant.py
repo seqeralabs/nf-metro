@@ -68,7 +68,7 @@ def test_checker_fires_without_fuse_pass(monkeypatch: pytest.MonkeyPatch) -> Non
     """Disabling the fan-out fuse pass reproduces the split descents the
     invariant is meant to catch, proving the check is not vacuous."""
     monkeypatch.setattr(
-        routing_core, "_coincide_same_line_tracks", lambda routes, ctx: None
+        routing_core, "_coincide_fanout_opening_descents", lambda routes, ctx: None
     )
     graph, routes, offsets = _route(EXAMPLE_TOPOLOGIES / "divergent_fanout_split.mmd")
     violations = check_no_split_same_line_fanout_descents(graph, routes, offsets)

@@ -73,6 +73,7 @@ from nf_metro.layout.routing.normalize import (  # noqa: F401
     _bundle_divergent_distinct_traverses,
     _clamp_inter_row_band_top,
     _clear_channel_x_in_band,
+    _coincide_fanout_opening_descents,
     _coincide_merge_fanout_pivots,
     _coincide_same_line_tracks,
     _coincident_trunk_slots,
@@ -219,10 +220,12 @@ def _route_edges(
     # port-side track, the source-side track, the merge trunk's descent, and
     # the fan-out junction handoff tail), so a single line reads as one stroke.
     _coincide_same_line_tracks(routes, ctx)
-    # Distinct lines fanning out from one source leave the section as one bundle;
-    # keep their opening descents one step apart until each turns off, rather
-    # than on independent channels that read as separate strokes from the start.
-    _bundle_divergent_distinct_descents(routes, ctx)
+    # Settle every fan-out's opening-descent column in one pass: fuse each line's
+    # same-source descents onto the source-nearest track and nest the distinct
+    # lines one step apart until each turns off.  Runs after the coincidence pass
+    # so a perpendicular drop already resolved onto the junction column stays
+    # clear of an L-shaped sibling diverging to another column.
+    _coincide_fanout_opening_descents(routes, ctx)
     # Distinct lines fanning out share the corridor they turn onto; nest their
     # traverses one step apart so the bundle holds a constant width until each
     # line peels off, rather than running on independently-sized bands.
