@@ -1156,6 +1156,75 @@ def _section_row_through_lines(graph: MetroGraph, section: Section) -> set[str]:
     return lines
 
 
+def _is_fan_branch_leaf(graph: MetroGraph, section: Section) -> bool:
+    """True for a terminal section reached purely as a fan-out branch.
+
+    Such a section continues nothing horizontally along its row (a leaf), and
+    every line feeding it is also carried -- from the same feeding junction --
+    on to another section.  It therefore rides that continuing line's trunk
+    and fans off it through the junction, so leaving it compact costs
+    nothing: the shared line keeps the feeder's exit port on the trunk.
+
+    A leaf fed by a *private* line (one that terminates only here) instead
+    shares its feeder's exit port with a disjoint route to another section, so
+    pulling it onto the trunk keeps that port there too; compacting it would
+    drag the port off the trunk and lengthen the other route.  Such a leaf is
+    not a fan branch and stays aligned.
+    """
+    row = section.grid_row
+    junction_ids = graph.junction_ids
+
+    def forward_sections(start: str, line: str) -> set[str]:
+        # Sections other than this one that *line* reaches forward from *start*,
+        # following the flow through junctions and stopping at the first port or
+        # station in another section.
+        seen: set[str] = set()
+        stack = [start]
+        others: set[str] = set()
+        while stack:
+            nid = stack.pop()
+            if nid in seen:
+                continue
+            seen.add(nid)
+            if nid in junction_ids:
+                stack += [e.target for e in graph.edges_from(nid) if e.line_id == line]
+                continue
+            node = graph.ports.get(nid) or graph.stations.get(nid)
+            osec = getattr(node, "section_id", None)
+            if osec is not None and osec != section.id:
+                others.add(osec)
+        return others
+
+    for pid in section.exit_ports:
+        port = graph.ports.get(pid)
+        if port is None or port.side not in (PortSide.LEFT, PortSide.RIGHT):
+            continue
+        for e in graph.edges_from(pid):
+            if any(
+                graph.sections[s].grid_row == row
+                for s in forward_sections(e.target, e.line_id)
+            ):
+                return False
+
+    feed: set[str] = set()
+    shared: set[str] = set()
+    for pid in section.entry_ports:
+        port = graph.ports.get(pid)
+        if port is None or port.side not in (PortSide.LEFT, PortSide.RIGHT):
+            continue
+        for e in graph.edges_to(pid):
+            feed.add(e.line_id)
+            for sibling in graph.edges_from(e.source):
+                if (
+                    sibling.line_id == e.line_id
+                    and sibling.target != pid
+                    and forward_sections(sibling.target, sibling.line_id)
+                ):
+                    shared.add(e.line_id)
+                    break
+    return bool(feed) and feed <= shared
+
+
 def section_exit_lines(graph: MetroGraph, section: Section) -> set[str]:
     """Return the line IDs that leave a section.
 

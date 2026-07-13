@@ -21,6 +21,7 @@ from nf_metro.layout.labels import active_font_scale
 from nf_metro.layout.phases._common import (
     _classify_multi_station_ys,
     _classify_section_station_ys,
+    _is_fan_branch_leaf,
     _max_stations_per_layer,
     _row_contiguous_column_groups,
     _section_bundle_lines,
@@ -613,6 +614,13 @@ def _align_row_trunk_ys(graph: MetroGraph) -> None:
                 groups.append([s])
 
         for group in groups:
+            # A terminal section reached purely as a fan-out branch rides its
+            # feeding line's trunk through a junction, so pulling it onto the
+            # row trunk only wastes canvas -- keep it compact and let it fan
+            # off (see _is_fan_branch_leaf).  A leaf fed by a private line stays
+            # in, else compacting it would drag a shared exit port off the
+            # trunk.
+            group = [s for s in group if not _is_fan_branch_leaf(graph, s)]
             if len(group) < 2:
                 continue
             # Only realign when every section in the group shares the same
