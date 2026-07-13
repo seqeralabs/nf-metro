@@ -24,6 +24,7 @@ from nf_metro.layout.phases._common import (
     _max_stations_per_layer,
     _row_contiguous_column_groups,
     _section_bundle_lines,
+    _section_row_through_lines,
     _section_trunk_y,
     iter_stacked_rows_in_rowspan_band,
 )
@@ -608,14 +609,17 @@ def _align_row_trunk_ys(graph: MetroGraph) -> None:
         for group in groups:
             if len(group) < 2:
                 continue
-            # Only realign when every LR-bearing section in the group
-            # shares the same bundle.  Differing bundles mean the row
-            # has no single trunk crossing all sections, so forcing a
-            # common Y just shifts content downward without any
-            # geometric gain.
-            bundles = [_section_bundle_lines(graph, s) for s in group]
-            non_empty = [b for b in bundles if b]
-            if not non_empty or any(b != non_empty[0] for b in non_empty):
+            # Only realign when every section in the group shares the same
+            # through-trunk -- the lines that cross it horizontally along the
+            # row.  A section may carry extra lines that fork off to another
+            # row via a junction; those ride a perpendicular runway, not the
+            # trunk, so they are excluded (see _section_row_through_lines).
+            # Differing through-trunks mean no single trunk crosses all
+            # sections, so forcing a common Y just shifts content downward
+            # without geometric gain.
+            through = [_section_row_through_lines(graph, s) for s in group]
+            non_empty = [t for t in through if t]
+            if not non_empty or any(t != non_empty[0] for t in non_empty):
                 continue
             trunks = {
                 s.id: t for s in group if (t := _section_trunk_y(graph, s)) is not None
@@ -641,12 +645,16 @@ def _align_row_trunk_ys(graph: MetroGraph) -> None:
                 section.bbox_h += delta
                 shifted.add(section.id)
 
-            # Re-snap each shifted section's LR ports to target_y when
-            # they have a single internal station at target_y.  Skip
-            # ports with 2+ distinct internal Ys (fan-in centering).
+            # Re-snap each shifted section's LR ports to target_y when they
+            # have a single internal station at target_y.  A port fanning to
+            # 2+ distinct internal Ys is normally left centred (fan-in), but
+            # when one of those neighbours is the section trunk (a full-bundle
+            # station at target_y) the port rides that trunk while the others
+            # peel off, so it snaps to target_y regardless.
             for section in group:
                 if section.id not in shifted:
                     continue
+                bundle = _section_bundle_lines(graph, section)
                 port_set = section.port_ids
                 internal_ids = set(section.station_ids) - port_set
                 for pid in port_set:
@@ -661,6 +669,7 @@ def _align_row_trunk_ys(graph: MetroGraph) -> None:
                         continue
                     connected_ys: set[float] = set()
                     target_aligned = False
+                    trunk_at_target = False
                     neighbours: list[str] = []
                     for edge in graph.edges_from(pid):
                         if edge.target in internal_ids:
@@ -674,7 +683,12 @@ def _align_row_trunk_ys(graph: MetroGraph) -> None:
                             connected_ys.add(round(st.y, 1))
                             if abs(st.y - target_y) < SAME_COORD_TOLERANCE:
                                 target_aligned = True
-                    if len(connected_ys) < 2 and target_aligned:
+                                if (
+                                    bundle
+                                    and set(graph.station_lines(other_id)) == bundle
+                                ):
+                                    trunk_at_target = True
+                    if target_aligned and (len(connected_ys) < 2 or trunk_at_target):
                         _set_port_y(graph, pid, target_y)
 
 

@@ -695,6 +695,18 @@ gallery:
       over the trunk to reach it, the entry re-anchors to the section's leading
       edge; the producer then reaches it by wrapping over the section top, so the
       line reads as a clean loop and the consumer is a straight pass-through."
+  - id: shared_cell_fork_trunk_align
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "Three sections share one grid cell along a row. The tall pre-processing
+      fan pushes its flow trunk below the row's top edge, and the quantification
+      section carries a full-bundle pass-through (the branch continuing to the
+      exit) beside a coverage dead-end chain. The engine aligns the row so the
+      through-bundle runs straight across, seats the continuing pass-through on
+      the trunk in line with the preceding exit, and peels the coverage dead-end
+      off below -- rather than letting the dead-end seize the trunk and kink the
+      through-line at the boundary."
   - id: riboseq_fold_two_dir_entry_hintless
     source_dir: examples/topologies
     category: Serpentine Layout

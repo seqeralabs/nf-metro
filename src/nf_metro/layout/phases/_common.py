@@ -1098,6 +1098,63 @@ def _section_bundle_lines(graph: MetroGraph, section: Section) -> set[str]:
     return bundle
 
 
+def _section_row_through_lines(graph: MetroGraph, section: Section) -> set[str]:
+    """Lines on a section's LEFT/RIGHT ports that connect to a same-row section.
+
+    A LEFT/RIGHT port line that only reaches sections in a *different* grid row
+    (a fork peeling off to another row via a junction) is excluded: it rides a
+    perpendicular runway, not the section's horizontal trunk.  This isolates the
+    lines that form the row's through-trunk from downstream forks, so trunk
+    alignment can compare the horizontal flow rather than the raw port bundle.
+    """
+    junction_ids = graph.junction_ids
+    row = section.grid_row
+
+    def reaches_same_row(start: str, line: str, forward: bool) -> bool:
+        # Follow only edges carrying *line*, and only in the flow direction
+        # away from this section (a junction fans several lines to different
+        # rows, and a bidirectional walk would loop back to the origin), until
+        # the line lands on another section's port in the same grid row.
+        seen: set[str] = set()
+        stack = [start]
+        while stack:
+            nid = stack.pop()
+            if nid in seen:
+                continue
+            seen.add(nid)
+            if nid in junction_ids:
+                edges = graph.edges_from(nid) if forward else graph.edges_to(nid)
+                for e in edges:
+                    if e.line_id == line:
+                        stack.append(e.target if forward else e.source)
+                continue
+            nport = graph.ports.get(nid)
+            if nport is not None:
+                nsec = graph.sections.get(nport.section_id)
+                if nsec is not None and nsec.id != section.id and nsec.grid_row == row:
+                    return True
+        return False
+
+    def port_through_lines(pid: str, forward: bool) -> set[str]:
+        found: set[str] = set()
+        edges = graph.edges_from(pid) if forward else graph.edges_to(pid)
+        for line in graph.station_lines(pid):
+            hops = [
+                (e.target if forward else e.source) for e in edges if e.line_id == line
+            ]
+            if any(reaches_same_row(h, line, forward) for h in hops):
+                found.add(line)
+        return found
+
+    lines: set[str] = set()
+    for port_ids, forward in ((section.entry_ports, False), (section.exit_ports, True)):
+        for pid in port_ids:
+            port = graph.ports.get(pid)
+            if port is not None and port.side in (PortSide.LEFT, PortSide.RIGHT):
+                lines |= port_through_lines(pid, forward)
+    return lines
+
+
 def section_exit_lines(graph: MetroGraph, section: Section) -> set[str]:
     """Return the line IDs that leave a section.
 

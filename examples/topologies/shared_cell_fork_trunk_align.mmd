@@ -1,0 +1,56 @@
+%%metro title: Shared-cell fork trunk alignment
+%%metro style: nfcore
+%%metro diamond_style: symmetric
+%%metro file: cov_out | BW | Coverage
+%%metro line: main | Main | #e6007e
+%%metro line: side | Side fork | #2db572
+%%metro grid: prep, mid, quant | 0,0
+%%metro grid: report | 1,0
+%%metro grid: branch | 1,1
+
+graph LR
+    subgraph prep [Pre-processing]
+        %%metro exit: right | main
+        p_in[Input]
+        p_hub[Hub]
+        p_up[Up branch]
+        p_mid[Mid branch]
+        p_down[Down branch]
+        p_merge[Merge]
+        p_in -->|main| p_hub
+        p_hub -->|main| p_up
+        p_hub -->|main| p_mid
+        p_hub -->|main| p_down
+        p_up -->|main| p_merge
+        p_mid -->|main| p_merge
+        p_down -->|main| p_merge
+    end
+    subgraph mid [Middle]
+        %%metro entry: left | main
+        %%metro exit: right | main
+        m_a[Stage A]
+        m_b[Stage B]
+        m_a -->|main| m_b
+    end
+    subgraph quant [Quantification]
+        %%metro entry: left | main
+        %%metro exit: right | main, side
+        q_split[Split]
+        q_depth[Depth]
+        q_pass[Passthrough]
+        q_split -->|main| q_depth
+        q_depth -->|main| cov_out
+    end
+    subgraph report [Report]
+        %%metro entry: left | main
+        r_a[Report]
+    end
+    subgraph branch [Branch]
+        %%metro entry: left | side
+        b_a[Side stage]
+    end
+    p_merge -->|main| m_a
+    m_b -->|main| q_split
+    m_b -->|main| q_pass
+    q_pass -->|main| r_a
+    q_pass -->|side| b_a
