@@ -101,10 +101,8 @@ def _snap_inter_section_port_pairs(graph: MetroGraph) -> None:
         # in the inter-section gap rather than a diagonal dragging the exit off
         # its row.  Covers a single carrying station or a parallel bundle, and
         # exits feeding a fan-out junction (see ``flow_exit_carrier_anchor``).
-        # Lift the entry port up to meet it when the entry's own consumers all
-        # share one row, so the boundary crossing straightens onto a single
-        # unambiguous row.  An entry fanning to several rows is left, since no
-        # one port Y can face them all.
+        # Lift the entry up to meet it as well when all of the entry's own
+        # consumers share that row; an entry fanning to several rows is left.
         anchor = flow_exit_carrier_anchor(graph, port_id, section, junction_ids)
         if anchor is not None and abs(port_st.y - anchor[0]) < SAME_COORD_TOLERANCE:
             carrier_y, _carrier_ids = anchor
@@ -113,9 +111,8 @@ def _snap_inter_section_port_pairs(graph: MetroGraph) -> None:
                 if ep_st is None or abs(ep_st.y - carrier_y) < SAME_COORD_TOLERANCE:
                     continue
                 consumer_ys = _entry_consumer_ys(graph, eid)
-                if (
-                    consumer_ys
-                    and max(consumer_ys) - min(consumer_ys) < SAME_COORD_TOLERANCE
+                if consumer_ys and all(
+                    abs(cy - carrier_y) < SAME_COORD_TOLERANCE for cy in consumer_ys
                 ):
                     _set_port_y(graph, eid, carrier_y)
             continue
