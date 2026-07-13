@@ -9,6 +9,7 @@ from nf_metro.layout.constants import (
     SAME_COORD_TOLERANCE,
     SECTION_Y_PADDING,
 )
+from nf_metro.layout.geometry import shift_section
 from nf_metro.layout.phase_state import require_phase_field
 from nf_metro.layout.phases._common import (
     _fan_offsets,
@@ -18,6 +19,7 @@ from nf_metro.layout.phases._common import (
     grow_section_bbox_max_edge,
     grow_section_bbox_min_edge,
 )
+from nf_metro.layout.phases.ports import _set_port_y
 from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
 
 
@@ -1142,10 +1144,7 @@ def _align_symfan_section_to_row_feeder(graph: MetroGraph) -> None:
         delta = feeder_y - graph.stations[entry_port].y
         if abs(delta) < 1.0:
             continue
-        for sid in section.station_ids:
-            if sid in graph.stations:
-                graph.stations[sid].y += delta
-        section.bbox_y += delta
+        shift_section(graph, section, dy=delta)
 
 
 def _center_lr_entry_ports_on_fork(graph: MetroGraph, y_spacing: float) -> None:
@@ -1187,7 +1186,7 @@ def _center_lr_entry_ports_on_fork(graph: MetroGraph, y_spacing: float) -> None:
                 continue
             midpoint = (branch_ys[0] + branch_ys[1]) / 2.0
             if abs(graph.stations[pid].y - midpoint) >= 1.0:
-                graph.stations[pid].y = midpoint
+                _set_port_y(graph, pid, midpoint)
 
 
 def _pull_continuation_onto(

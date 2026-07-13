@@ -71,6 +71,10 @@ from nf_metro.layout.phases._common import (
     section_cross_axis,
     wrap_exit_carrier_anchor,
 )
+from nf_metro.layout.phases.balancing import (
+    _downstream_same_row_entry_ports,
+    _entry_consumer_ys,
+)
 from nf_metro.layout.phases.bbox import (
     _min_drawn_section_bbox_top,
     _section_band_is_empty,
@@ -78,6 +82,7 @@ from nf_metro.layout.phases.bbox import (
     _section_fit_top,
 )
 from nf_metro.layout.phases.guards import (
+    _guard_port_station_coords_synced,
     _perp_fed_entry_consumer_y,
     _tb_top_entry_drop_overshoot,
 )
@@ -1169,6 +1174,65 @@ def test_flow_exit_port_anchors_to_carrying_station(fixture):
             f"row y={carrier_y:.1f} (carriers {sorted(carrier_ids)}); the "
             f"boundary run will read as a diagonal instead of a clean riser"
         )
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_port_station_and_port_records_share_coords(fixture):
+    """A port's Station record and Port record must hold the same coordinates.
+
+    Every port is both a ``Station`` (placed by layout, read by routing and
+    rendering) and a ``Port`` (read by later phases as the settled position).
+    A phase that moves a port by writing ``station.y`` directly, skipping the
+    Port record, desyncs the two so a later phase reads a stale position and
+    leaves the inter-section boundary run kinked.  The move helpers
+    (``_set_port_y`` / ``_set_port_x`` / ``shift_section``) write both.
+    """
+    graph = _layout(fixture, center_ports=_declared_center_ports(fixture))
+    for pid, port in graph.ports.items():
+        st = graph.stations.get(pid)
+        if st is None:
+            continue
+        assert abs(st.x - port.x) <= _Y_TOL and abs(st.y - port.y) <= _Y_TOL, (
+            f"{fixture}: port {pid} station record ({st.x:.1f}, {st.y:.1f}) "
+            f"desynced from port record ({port.x:.1f}, {port.y:.1f})"
+        )
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_carrier_anchored_entry_lifts_when_consumers_share_row(fixture):
+    """A same-row entry fed by a carrier-anchored exit lands on the carrier row
+    when its own consumers all share one row.
+
+    The exit stays on its carriers' row so the level change is a riser in the
+    inter-section gap; the entry must then reconcile to that same row so the
+    boundary crossing is straight rather than a diagonal jog.  The lift only
+    fires when the entry's consumers form a single unit -- an entry fanning to
+    several rows is left where it is, since no one lift can serve them all.
+    """
+    graph = _layout(fixture, center_ports=_declared_center_ports(fixture))
+    junction_ids = graph.junction_ids
+    for pid, _carrier_ids, carrier_y in _carrier_anchored_flow_exit_ports(graph):
+        if abs(graph.stations[pid].y - carrier_y) > _Y_TOL:
+            continue
+        section = graph.sections[graph.ports[pid].section_id]
+        for eid in _downstream_same_row_entry_ports(graph, pid, section, junction_ids):
+            consumer_ys = _entry_consumer_ys(graph, eid)
+            if not consumer_ys or max(consumer_ys) - min(consumer_ys) > _Y_TOL:
+                continue
+            assert abs(graph.stations[eid].y - carrier_y) <= _Y_TOL, (
+                f"{fixture}: entry {eid} y={graph.stations[eid].y:.1f} left off "
+                f"exit {pid}'s carrier row y={carrier_y:.1f} though its consumers "
+                f"share one row -> diagonal jog at the section boundary"
+            )
+
+
+def test_port_station_sync_guard_fires_on_desync():
+    """The runtime guard raises when a port's Station and Port records diverge."""
+    graph = _layout("variant_calling.mmd")
+    pid = next(iter(graph.ports))
+    graph.stations[pid].y += 50.0
+    with pytest.raises(PhaseInvariantError, match="desynced"):
+        _guard_port_station_coords_synced(graph, "test")
 
 
 @lru_cache(maxsize=None)

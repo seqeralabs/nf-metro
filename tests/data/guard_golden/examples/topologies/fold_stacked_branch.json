@@ -174,6 +174,7 @@
     "_guard_no_line_crosses_non_consumer|after final",
     "_guard_sparse_loop_station_clears_column_neighbour|after final",
     "_guard_station_x_column_drift|after final",
+    "_guard_port_station_coords_synced|after final",
     "_guard_no_section_overlap|after final",
     "_guard_row_trunk_cy_consistent|after final",
     "_guard_off_track_clear_of_anchor|after final",

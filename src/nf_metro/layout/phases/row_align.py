@@ -517,11 +517,7 @@ def _top_align_row_sections(graph: MetroGraph) -> None:
                 delta = section.bbox_y - min_top
                 if delta <= 0:
                     continue
-                for sid in section.station_ids:
-                    station = graph.stations.get(sid)
-                    if station:
-                        station.y -= delta
-                section.bbox_y -= delta
+                shift_section(graph, section, dy=-delta)
 
 
 def _distribute_stacked_rows_in_rowspan_band(graph: MetroGraph) -> None:
