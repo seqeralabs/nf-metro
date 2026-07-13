@@ -13,7 +13,12 @@ from pathlib import Path
 
 import networkx as nx
 
-from nf_metro.parser.model import MetroGraph, UnresolvedEndpointError
+from nf_metro.parser.model import (
+    Edge,
+    MetroGraph,
+    UnresolvedEndpointError,
+    format_unresolved_endpoint,
+)
 
 ERROR = "error"
 WARNING = "warning"
@@ -23,21 +28,32 @@ class CyclicGraphError(ValueError):
     """Raised when a graph the layout engine requires to be a DAG has a cycle."""
 
 
-def require_resolved_edge_endpoints(graph: MetroGraph) -> None:
-    """Enforce, once over the whole edge list, that every endpoint resolves.
+def find_unresolved_endpoints(graph: MetroGraph) -> list[tuple[Edge, list[str]]]:
+    """Return each edge with an endpoint id absent from ``graph.stations``.
 
-    Called at the layout boundary alongside the DAG check so a malformed graph
-    fails with the full list of offending edges before any handler runs, rather
-    than each handler re-checking ``graph.stations.get(...)`` for ``None``.
+    Detector shared by the layout-boundary raise and the soft ``validate_graph``
+    path, mirroring :func:`find_cycle` / :func:`format_cycle_error`.
     """
-    dangling = [
-        f"{edge.source} -> {edge.target} (line '{edge.line_id}')"
+    return [
+        (edge, missing)
         for edge in graph.edges
-        if edge.source not in graph.stations or edge.target not in graph.stations
+        if (
+            missing := [
+                sid for sid in (edge.source, edge.target) if sid not in graph.stations
+            ]
+        )
     ]
-    if dangling:
+
+
+def require_resolved_edge_endpoints(graph: MetroGraph) -> None:
+    """Raise at the layout boundary if any edge endpoint fails to resolve."""
+    unresolved = find_unresolved_endpoints(graph)
+    if unresolved:
         raise UnresolvedEndpointError(
-            "Edges reference unresolved station(s): " + "; ".join(dangling)
+            "; ".join(
+                format_unresolved_endpoint(edge, missing)
+                for edge, missing in unresolved
+            )
         )
 
 
@@ -103,16 +119,13 @@ def validate_graph(graph: MetroGraph) -> list[ValidationIssue]:
                     line=edge.source_line,
                 )
             )
-        for role, sid in (("source", edge.source), ("target", edge.target)):
-            if sid not in graph.stations:
-                issues.append(
-                    ValidationIssue(
-                        ERROR,
-                        f"Edge {edge.source} -> {edge.target} references "
-                        f"unknown {role} station '{sid}'",
-                        line=edge.source_line,
-                    )
-                )
+
+    for edge, missing in find_unresolved_endpoints(graph):
+        issues.append(
+            ValidationIssue(
+                ERROR, format_unresolved_endpoint(edge, missing), line=edge.source_line
+            )
+        )
 
     for section in graph.sections.values():
         for sid in section.station_ids:

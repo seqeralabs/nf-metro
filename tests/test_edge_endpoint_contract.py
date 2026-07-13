@@ -1,13 +1,10 @@
 """Contract: every edge's endpoints resolve to a station in the graph.
 
-The routing engine's handlers read ``graph.stations.get(edge.source)`` and
-``.get(edge.target)`` and historically hedged each read with an ``if not src or
-not tgt`` skip arm. Those arms are unreachable for any valid parse: the resolver
-inserts ports and junctions as real stations, so both endpoints always resolve.
-This module pins that contract as a construction guarantee -- :meth:`MetroGraph.
-edge_endpoints` returns non-optional stations, and both the layout boundary and
-:func:`validate_graph` reject an edge whose endpoint does not resolve -- so the
-per-handler hedges can be retired.
+The resolver inserts ports and junctions as real stations, so both endpoints of
+any parsed edge always resolve. This module pins that as a construction
+guarantee: :meth:`MetroGraph.edge_endpoints` returns non-optional stations, and
+both the layout boundary and :func:`validate_graph` reject an edge whose
+endpoint does not resolve.
 """
 
 from __future__ import annotations
