@@ -538,6 +538,41 @@ def _clamp_centering_shift(
     return max(lo, min(hi, shift))
 
 
+def _symfan_sibling_diag_end_x(
+    graph: MetroGraph,
+    ctx: _BubbleCtx,
+    sid: str,
+    station: Station,
+    flat_in_rp: RoutedPath,
+) -> float | None:
+    """Near-station straighten X shared by a flat-in fan sibling's diagonals.
+
+    A bubble station whose incoming edge is flat sits on its fork's entry row,
+    so its flat run reaches all the way back to the fork.  Measuring that
+    incoming flat from its far (fork) end places the station's centring midpoint
+    far left of a diagonal-in sibling's, splitting two branches that share a
+    column and should land at one X.  When the flat edge's fork also feeds
+    diagonal-in siblings that sit in this station's column, borrow the X where
+    their diagonals straighten near the station, so the flat sibling centres to
+    the same target by construction.  Returns None when no such sibling exists,
+    leaving an isolated flat-in station on its far-end measurement.
+
+    A fork's outgoing diagonals are exactly the sibling stations' incoming
+    diagonals, so the sibling straighten Xs are read off ``ctx.outgoing`` keyed
+    by the shared fork.
+    """
+    own_x = ctx.original_x.get(sid, station.x)
+    ends = [
+        rp.points[2][0]
+        for rp in ctx.outgoing.get(flat_in_rp.edge.source, [])
+        if rp.edge.target != sid
+        and (other := graph.stations.get(rp.edge.target)) is not None
+        and other.section_id == station.section_id
+        and abs(ctx.original_x.get(rp.edge.target, other.x) - own_x) <= 1
+    ]
+    return max(ends) if ends else None
+
+
 def _centering_candidate(
     graph: MetroGraph, ctx: _BubbleCtx, sid: str, station: Station
 ) -> _StationMoveCandidate | None:
@@ -597,7 +632,8 @@ def _centering_candidate(
         in_diag_end_x = in_rp.points[2][0]
     else:
         assert flat_in_rp is not None
-        in_diag_end_x = flat_in_rp.points[0][0]
+        borrowed = _symfan_sibling_diag_end_x(graph, ctx, sid, station, flat_in_rp)
+        in_diag_end_x = borrowed if borrowed is not None else flat_in_rp.points[0][0]
 
     if not multi_diag:
         if out_rp:

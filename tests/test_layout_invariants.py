@@ -1488,6 +1488,58 @@ def test_symfan_pairs_share_y(fixture):
             )
 
 
+def _diamond_sibling_columns(graph: MetroGraph) -> list[list[str]]:
+    """Same-column station groups sharing a fork predecessor and join successor.
+
+    These are fan-diamond siblings: they diverge from a common upstream node,
+    sit in one placement column (same pre-centring X), and reconverge on a
+    common downstream node.  Mirror images around the trunk, they must render at
+    one X.
+    """
+    preds: dict[str, set[str]] = defaultdict(set)
+    succs: dict[str, set[str]] = defaultdict(set)
+    for e in graph.edges:
+        preds[e.target].add(e.source)
+        succs[e.source].add(e.target)
+    by_col: dict[tuple[str | None, float], list[str]] = defaultdict(list)
+    for sid, st in graph.stations.items():
+        if st.is_port or st.is_hidden or st.off_track:
+            continue
+        by_col[(st.section_id, round(st.x, 1))].append(sid)
+    groups = []
+    for sids in by_col.values():
+        if len(sids) < 2:
+            continue
+        common_pred = set.intersection(*(preds[s] for s in sids))
+        common_succ = set.intersection(*(succs[s] for s in sids))
+        if common_pred and common_succ:
+            groups.append(sids)
+    return groups
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_fan_diamond_siblings_share_rendered_x(fixture):
+    """Fan-diamond siblings in one column render at the same X.
+
+    Two branches that fork from a common node, share a placement column, and
+    reconverge on a common node are mirror images and must land at one X after
+    the bubble-centring pass.  When one branch's incoming edge is flat (it sits
+    on the fork's entry row) its centring midpoint was measured from the far end
+    of that flat run rather than a near-station point comparable to a diagonal
+    sibling's, pulling it off the shared column (issue #1458).
+    """
+    graph = _layout(fixture)
+    groups = _diamond_sibling_columns(graph)
+    if not groups:
+        return
+    route_edges_centred(graph)
+    for sids in groups:
+        xs = {sid: round(graph.stations[sid].x, 1) for sid in sids}
+        assert max(xs.values()) - min(xs.values()) <= 1.0, (
+            f"Fan-diamond siblings must share rendered X, got {xs}"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Grid snap keeps same-column stations on distinct slots
 # ---------------------------------------------------------------------------
