@@ -26,36 +26,48 @@ simply" or for "less words", cut - don't re-expand.
 
 This skill has historically erred toward "that's a separate issue" the moment
 a fix surfaces a second problem - a related engine bug, a coverage gap, a
-stale test, a lint violation in a file already open. That default is flipped:
-**fixing fallout in this same session is the default; filing-and-walking-away
-is the exception.** A queue of maybe-someday child issues is administrative
-burden on the user, not a scope win - re-triaging each one later costs more
-than fixing it now while the context is already loaded.
+stale test, a lint violation in a file already open, even one in a
+completely different subsystem. That default is flipped: **resolving
+fallout within this same session is the default; filing an issue and leaving
+it for a future session is the exception.** A queue of maybe-someday child
+issues is administrative burden on the user, not a scope win - re-triaging
+each one later costs more than fixing it now while the context is already
+loaded.
 
 - When diagnosis, implementation, `/simplify`, lint, or CI turns up an
-  adjacent, fixable problem that's still in this repo's blast radius (not a
-  different subsystem's redesign, not something needing the user's product
-  judgment), fix it in this session instead of filing it and moving on.
+  adjacent, fixable problem anywhere in the repo - including in a different
+  subsystem than the one you're already editing - fix it in this session
+  rather than filing it and moving on. Being in a different subsystem,
+  needing its own worktree, or requiring you to load unfamiliar code is
+  **not, by itself**, a reason to defer.
 - Use the `Agent` tool to protect your own context budget while doing this,
-  not as a reason to skip it. Hand the fallout to a `sonnet` subagent by
-  default, or `opus` when the triage or fix genuinely needs harder judgment;
-  run it in the background (or a separate worktree, per the global worktree
-  rule, if it touches files you're not actively editing) and fold its result
-  back in before the session ends. "It would blow my context" is exactly what
-  delegation solves - it is not a reason to defer work that still fits this
-  PR's scope.
+  not as a reason to skip it. Hand each piece of fallout to a `sonnet`
+  subagent by default, or `opus` when the triage or fix genuinely needs
+  harder judgment; run agents in the background (or a separate worktree, per
+  the global worktree rule, if the fallout touches files you're not actively
+  editing) and fold results back in before the session ends. Independent
+  pieces of fallout can run as concurrent subagents instead of serially
+  eating your own context - that's what makes taking on a different
+  subsystem's fix tractable in the same session.
+- "Resolved in this session" does not mean "crammed into one PR." If folding
+  the fallout into the primary PR would make it harder to review, ship it as
+  its own sibling PR instead. The bar is that the fallout's PR gets built,
+  pushed, and left in a reviewable state before the session ends - not that a
+  future session has to rediscover it from a filed issue.
 - Reserve an actual filed issue + deferral for cases that are genuinely
-  disproportionate: a different subsystem's redesign, a decision only the
-  user can make, or an investigation big enough to make this PR unreviewable.
-  When you do defer, say so explicitly and why - deferral should be a stated
-  judgment call, never the silent default.
-- This is not licence for scope creep into unrelated features. The test is
-  "would fixing this now make the PR harder to review or riskier to ship" -
-  if yes, still split it out; if no, fix it.
+  disproportionate: a fix that would take multiple sessions to complete in
+  its own right, or something that needs a decision only the user can make.
+  **Size and duration are the test, not which subsystem the fallout lives
+  in.** When you do defer, say so explicitly and why - deferral should be a
+  stated judgment call, never the silent default.
+- This is not licence for scope creep into features the user didn't ask
+  about - it's about not walking away from problems the *current* work
+  surfaced.
 
 This governs every step below: the "second finding" in Step 3, coverage gaps
 in the Step 7 gate-coverage ratchet, and anything `/simplify` or review turns
-up in Step 6 all default to fix-now-via-subagent over file-and-defer.
+up in Step 6 all default to fix-now-via-subagent (in this PR or a sibling
+one) over file-and-defer.
 
 ## Step 1: Understand the Issue
 
@@ -75,9 +87,10 @@ across comments, and do not leave superseded-approach detail that would
 mislead a fresh reader. Keep the body concise. If the fix uncovers a
 genuinely separable defect, default to fixing it in this session (see
 "Scope discipline" above - delegate to a subagent if it would crowd your
-diagnostic context) rather than filing a child issue and walking away. File
-a standalone child issue only when the defect is disproportionate to this
-PR, and say so explicitly.
+diagnostic context, even for a different subsystem) rather than filing a
+child issue and walking away. File a standalone child issue only when the
+defect is a multi-session undertaking in its own right, and say so
+explicitly.
 
 ## Step 2: Worktree + Environment Setup
 
@@ -187,8 +200,9 @@ constructing it (e.g. shortening a multi-line label so a label-interaction
 bug won't show). A second bad render is a **second finding** - per "Scope
 discipline" above, default to fixing it in this session (spin up a subagent
 to diagnose/fix it in parallel rather than letting it derail your primary
-diagnosis) rather than just noting it and moving on. Only file it standalone
-and defer if it is genuinely disproportionate to this PR. A fixture that has
+diagnosis, even if it lands in an unrelated part of the engine) rather than
+just noting it and moving on. Only file it standalone and defer if it is
+genuinely a multi-session undertaking on its own. A fixture that has
 been quietly simplified to look clean no longer locks the bug it was meant to
 lock. (Real example: a `"ORF quant"` -> `"ORFquant"` relabel that hid a
 multi-line-label interaction rather than reporting it.)
