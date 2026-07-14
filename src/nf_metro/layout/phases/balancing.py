@@ -21,7 +21,7 @@ from nf_metro.layout.phases._common import (
 from nf_metro.layout.phases.bbox import (
     _lift_would_cause_uturn,
     _loop_corner_x,
-    _push_lower_rows_after_bbox_grow,
+    push_lower_rows_after_bbox_grow,
 )
 from nf_metro.layout.phases.ports import _set_port_y
 from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
@@ -1044,7 +1044,7 @@ def _shift_and_propagate_loop_stations(
     when phase 1 didn't grow anything.
     """
     _shift_sparse_loop_stations_to_clear_bundle(graph, y_spacing, section_y_padding)
-    _push_lower_rows_after_bbox_grow(graph, section_y_gap)
+    push_lower_rows_after_bbox_grow(graph, section_y_gap)
 
 
 def _inbound_bundle_spans_x(graph: MetroGraph, consumer: Station, x: float) -> bool:

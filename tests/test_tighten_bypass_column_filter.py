@@ -3,7 +3,7 @@
 ``_tighten_lower_rows_after_shrink`` pulls lower-row sections up to close the
 slack a bbox shrink reveals.  When reserving inter-row space for a row's bypass
 routes it must column-filter each bypass span against the lower section it would
-crowd -- exactly as its downward sibling ``_push_lower_rows_after_bbox_grow``
+crowd -- exactly as its downward sibling ``push_lower_rows_after_bbox_grow``
 does -- so a bypass running over one set of columns does not hold down a stacked
 section sitting in a column the bypass never runs over.
 

@@ -84,13 +84,13 @@ from nf_metro.layout.phases.bbox import (  # noqa: F401
     _loop_corner_x,
     _min_section_bbox_top,
     _predicted_bypass_bottom_in_row,
-    _push_lower_rows_after_bbox_grow,
     _section_fit_top,
     _shrink_and_tighten_rows,
     _shrink_bboxes_to_content_bottom,
     _snapshot_struct_heights_below_top,
     _tighten_lower_rows_after_shrink,
     _top_align_side_entered_vertical_to_feeder,
+    push_lower_rows_after_bbox_grow,
 )
 from nf_metro.layout.phases.canvas import (  # noqa: F401
     _renumber_sections_by_grid,

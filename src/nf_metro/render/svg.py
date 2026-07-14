@@ -19,6 +19,7 @@ from nf_metro.layout.constants import (
     LABEL_LINE_HEIGHT,
     OFFTRACK_TERMINUS_NUB_CLEARANCE,
     SAME_COORD_TOLERANCE,
+    SECTION_Y_GAP,
     resolve_offset_step,
 )
 from nf_metro.layout.geometry import lanes_run_along_x, segment_intersects_bbox
@@ -28,11 +29,15 @@ from nf_metro.layout.labels import (
     font_scale_context,
     place_labels,
 )
+from nf_metro.layout.phases.bbox import push_lower_rows_after_bbox_grow
 from nf_metro.layout.phases.guards import (
     FoldThresholdError,
+    assert_render_header_clearance,
     assert_render_layout_invariants,
     iter_opposing_line_overlaps,
+    render_header_collision,
 )
+from nf_metro.layout.phases.spacing import _bypass_label_obstacles
 from nf_metro.layout.routing import (
     RoutedPath,
     apply_route_offsets,
@@ -573,6 +578,64 @@ def _scale_theme_fonts(theme: Theme, scale: float) -> Theme:
     )
 
 
+def _settle_render_geometry(
+    graph: MetroGraph, theme: Theme, offset_step: float, section_y_gap: float
+) -> tuple[dict[tuple[str, str], float], list[RoutedPath], list[LabelPlacement]]:
+    """Route, place labels, and reconcile a header collision for the render.
+
+    Returns the settled ``(station_offsets, routes, labels)``.  Label wrapping
+    needs the theme's font/icon metrics, so it runs here rather than in
+    ``compute_layout``; when it grows a section's bbox downward it can push the
+    lower section's header badge up into the box above.  Only that genuine
+    collision is reconciled -- push the lower rows down to restore
+    ``section_y_gap``, then re-settle so routes and labels track the shifted
+    sections (routing is idempotent on the settled ``Station.x``, so the second
+    pass grows the same bboxes).  A smaller sub-``section_y_gap`` shortfall
+    draws no overlap and is left as laid out.
+
+    Rail-mode sections run a separate layout pipeline whose per-line centrelines
+    are anchored during ``compute_layout`` and cannot be re-derived from a
+    render-time row shift, so a collision involving one is left for the guard to
+    surface rather than reflowed into kinked tracks.
+
+    The Tier-A layout guards run on the pre-growth routed geometry (label growth
+    legitimately moves a bbox edge past an invisible port, which the port guards
+    would otherwise flag); the header-clearance guard runs last, on the settled
+    geometry.
+    """
+
+    def _place(
+        station_offsets: dict[tuple[str, str], float], routes: list[RoutedPath]
+    ) -> list[LabelPlacement]:
+        icon_obstacles = _compute_icon_obstacles(graph, theme, station_offsets)
+        return place_labels(
+            graph,
+            station_offsets=station_offsets,
+            icon_obstacles=icon_obstacles,
+            routes=routes,
+            label_angle=graph.label_angle or 0.0,
+        )
+
+    station_offsets = compute_station_offsets(graph, offset_step=offset_step)
+    routes = route_edges_centred(graph, station_offsets=station_offsets)
+    assert_render_curve_invariants(graph, routes, station_offsets)
+    assert_render_layout_invariants(graph, routes, station_offsets, strict=graph.strict)
+
+    labels = _place(station_offsets, routes)
+    if render_header_collision(graph) and not graph.has_rail_sections:
+        push_lower_rows_after_bbox_grow(graph, section_y_gap)
+        # The shift moved section-anchored geometry; refresh the bypass-label
+        # obstacle boxes (derived from station Ys, read by the router) so the
+        # re-route does not seat a bypass corner against a stale box.
+        graph.bypass_label_obstacles = _bypass_label_obstacles(graph)
+        station_offsets = compute_station_offsets(graph, offset_step=offset_step)
+        routes = route_edges_centred(graph, station_offsets=station_offsets)
+        labels = _place(station_offsets, routes)
+        assert_render_curve_invariants(graph, routes, station_offsets)
+    assert_render_header_clearance(graph, strict=graph.strict)
+    return station_offsets, routes, labels
+
+
 def _render_svg_scaled(
     graph: MetroGraph,
     theme: Theme,
@@ -595,24 +658,15 @@ def _render_svg_scaled(
         legend_position if legend_position is not None else graph.legend_position
     )
 
-    station_offsets = compute_station_offsets(
-        graph, offset_step=resolve_offset_step(graph.track_gap, theme.line_width)
+    offset_step = resolve_offset_step(graph.track_gap, theme.line_width)
+    section_y_gap = (
+        graph.section_y_gap if graph.section_y_gap is not None else SECTION_Y_GAP
     )
-    routes = route_edges_centred(graph, station_offsets=station_offsets)
-    assert_render_curve_invariants(graph, routes, station_offsets)
-    assert_render_layout_invariants(graph, routes, station_offsets, strict=graph.strict)
-    header_polylines = [apply_route_offsets(route, station_offsets) for route in routes]
+    station_offsets, routes, labels = _settle_render_geometry(
+        graph, theme, offset_step, section_y_gap
+    )
 
-    # Compute labels early so section bbox expansions are applied
-    # before section boxes are drawn and canvas bounds are computed.
-    icon_obstacles = _compute_icon_obstacles(graph, theme, station_offsets)
-    labels = place_labels(
-        graph,
-        station_offsets=station_offsets,
-        icon_obstacles=icon_obstacles,
-        routes=routes,
-        label_angle=graph.label_angle or 0.0,
-    )
+    header_polylines = [apply_route_offsets(route, station_offsets) for route in routes]
 
     # Per-station rendered label (top, bottom) Y, so group bands clear the
     # (possibly diagonal) station labels rather than just the markers.

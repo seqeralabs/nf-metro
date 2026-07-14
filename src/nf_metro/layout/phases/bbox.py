@@ -123,16 +123,16 @@ def _aggregate_bypass_spans(
     return combined
 
 
-def _push_lower_rows_after_bbox_grow(graph: MetroGraph, section_y_gap: float) -> None:
+def push_lower_rows_after_bbox_grow(graph: MetroGraph, section_y_gap: float) -> bool:
     """Push lower-row sections down when an upper-row bbox grows.
 
     Shared helper called by stages that may grow a section's
     ``bbox_h`` downward after row offsets are already fixed (e.g.
     ``_shift_and_propagate_loop_stations`` at Stage 6.14, the sparse
-    loop-station shift).  Row offsets were fixed earlier by
-    ``_compute_section_offsets`` from pre-grow bbox heights, so the
-    section below a grown one can end up sitting closer than
-    ``section_y_gap`` from the new bbox bottom.
+    loop-station shift, and the render-time label-wrap growth).  Row
+    offsets were fixed earlier by ``_compute_section_offsets`` from
+    pre-grow bbox heights, so the section below a grown one can end up
+    sitting closer than ``section_y_gap`` from the new bbox bottom.
 
     For each row ``r >= 1``, measure the deficit between the lowest
     bbox bottom of sections ending at row ``r - 1`` and the top of
@@ -144,16 +144,20 @@ def _push_lower_rows_after_bbox_grow(graph: MetroGraph, section_y_gap: float) ->
     ``r`` and below downward by that deficit (sections + stations +
     ports).  Junctions live in inter-section space and are reproduced
     by routing.
+
+    Returns ``True`` when any row was shifted, so a render-time caller
+    can recompute the geometry that tracks the moved sections.
     """
     if not graph.sections:
-        return
+        return False
 
     sections_by_row_start: dict[int, list[Section]] = defaultdict(list)
     for s in graph.sections.values():
         sections_by_row_start[s.grid_row].append(s)
     if not sections_by_row_start:
-        return
+        return False
     max_row = max(s.grid_row + s.grid_row_span - 1 for s in graph.sections.values())
+    shifted = False
 
     def _cols_overlap(a: Section, b: Section) -> bool:
         a_start = a.grid_col
@@ -208,6 +212,7 @@ def _push_lower_rows_after_bbox_grow(graph: MetroGraph, section_y_gap: float) ->
         if deficit <= SAME_COORD_TOLERANCE:
             continue
 
+        shifted = True
         shifted_section_ids = {
             sid for sid, s in graph.sections.items() if s.grid_row >= r
         }
@@ -223,6 +228,8 @@ def _push_lower_rows_after_bbox_grow(graph: MetroGraph, section_y_gap: float) ->
             port = graph.ports.get(stid)
             if port is not None:
                 port.y += deficit
+
+    return shifted
 
 
 def _loop_corner_x(
@@ -870,7 +877,7 @@ def _tighten_lower_rows_after_shrink(graph: MetroGraph, section_y_gap: float) ->
         # The whole row shifts up by one amount, so it can rise only as far as
         # its most-constrained section allows -- hence the min over ``lower``.
         # Each section's floor counts only the bypass spans whose columns it
-        # actually sits under (as ``_push_lower_rows_after_bbox_grow`` does):
+        # actually sits under (as ``push_lower_rows_after_bbox_grow`` does):
         # a bypass running over columns a section never spans reserves no
         # clearance against it.
         slack = float("inf")

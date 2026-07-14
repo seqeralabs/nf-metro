@@ -968,7 +968,7 @@ in pipeline order.
   `test_section_bbox_matches_content_extent`.
 - **Lifecycle:** invariant - content-hugging bbox bottoms and correct
   inter-row gaps hold at the final boundary (maintained by Stage 6.14,
-  which restores the gap via `_push_lower_rows_after_bbox_grow` whenever
+  which restores the gap via `push_lower_rows_after_bbox_grow` whenever
   it grows a bbox downward). *liftable:* no - one-shot, order-dependent
   (computes against the final content extent).
 
@@ -980,7 +980,7 @@ in pipeline order.
   grows a section's bbox downward, push lower-row sections down
   internally to restore `section_y_gap`.
 - **Helper**: `_shift_and_propagate_loop_stations`
-  (calls `_push_lower_rows_after_bbox_grow` when any bbox grew).
+  (calls `push_lower_rows_after_bbox_grow` when any bbox grew).
 - **Precondition**: Bundle Ys final.
 - **Postcondition**: Sparse single-line loop stations whose row Y
   conflicts with a busier sibling's bundle move to a half-pitch
