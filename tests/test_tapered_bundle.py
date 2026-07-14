@@ -30,6 +30,7 @@ from nf_metro.layout.routing import (
 )
 from nf_metro.layout.routing.bundle import (
     build_concentric_bundle,
+    build_offset_bundle,
     build_tapered_bundle,
 )
 from nf_metro.parser.mermaid import parse_metro_mermaid
@@ -101,6 +102,34 @@ def test_tapered_lands_on_both_offsets() -> None:
     # Baked, so the renderer must not re-apply or deform.
     assert all(r.offset_regime is OffsetRegime.BAKED for r in routes)
     assert all(r.normalize_exempt for r in routes)
+
+
+# ---------------------------------------------------------------------------
+# Construction contract: a bundle centreline is a >=2-vertex polyline
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda cl: build_concentric_bundle([(_edge("a"), "a", 0.0)], cl, 11.5),
+        lambda cl: build_tapered_bundle(
+            [(_edge("a"), "a", 0.0, 0.0)], cl, transition_leg=0, base_radius=11.5
+        ),
+        lambda cl: build_offset_bundle([(_edge("a"), "a", [])], cl, 11.5),
+    ],
+    ids=["concentric", "tapered", "offset"],
+)
+def test_bundle_rejects_degenerate_centreline(call) -> None:
+    """Every builder enforces the >=2-vertex centreline contract at one point.
+
+    The three public builders differ only in how they expand per-leg offsets;
+    all three funnel through ``_fan_bundle``, which owns the single guard.  A
+    one-vertex centreline has no leg to fan, so construction must raise rather
+    than emit a degenerate route.
+    """
+    with pytest.raises(ValueError, match="two vertices"):
+        call([(0.0, 0.0)])
 
 
 # ---------------------------------------------------------------------------
