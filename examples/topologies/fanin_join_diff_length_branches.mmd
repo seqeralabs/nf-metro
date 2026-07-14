@@ -1,0 +1,34 @@
+%%metro title: RNA-seq fan-in example
+%%metro line: align | Alignment | #2db572
+%%metro line: qc | QC | #e6550d
+%%metro line: quant | Quantification | #0570b0
+%%metro line: fusion | Fusion detection | #756bb1
+
+graph LR
+    reads_in[Reads]
+    bbduk[BBDuk trim]
+    star[STAR 2-pass]
+    cram[samtools CRAM]
+    flagstat[flagstat + mosdepth]
+    markdup[sambamba markdup]
+    rnaseqc[RNA-SeQC]
+    rsem[RSEM]
+    geneann[Gene annotation]
+    arriba[Arriba]
+    starfusion[STAR-Fusion]
+    merge[Merge fusions]
+    draw[Draw fusions]
+
+    reads_in -->|align,qc,quant,fusion| bbduk
+    bbduk -->|align,qc,quant,fusion| star
+    star -->|align| cram
+    star -->|qc| flagstat
+    star -->|qc| markdup
+    markdup -->|qc| rnaseqc
+    star -->|quant| rsem
+    rsem -->|quant| geneann
+    star -->|fusion| arriba
+    star -->|fusion| starfusion
+    arriba -->|fusion| merge
+    starfusion -->|fusion| merge
+    merge -->|fusion| draw
