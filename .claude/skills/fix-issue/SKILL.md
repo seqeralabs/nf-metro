@@ -1,6 +1,6 @@
 ---
 name: fix-issue
-description: End-to-end workflow for fixing GitHub issues on the nf-metro repo with diagnostic rigor. Use when the user references a GitHub issue (by number, URL, or description) and wants it fixed. Handles worktree setup, a reused persistent env (no per-issue env creation), diagnostic-first investigation, authoring-mistake-vs-engine-bug triage (never dodge an engine bug by doctoring the reproducer), invariant-test-first implementation, runtime validators, evidence-cited fix verification, /simplify pass, full-repo lint, visual review via render preview, narrow-the-fix iteration on regressions, cost discipline (targeted tests, CI render-diff over local gallery rebuilds, skip-ci on WIP), standalone issue-body hygiene, additive-only PR hygiene (no force-push, no narrative comments), clean execution of an authorised admin-merge (preserve history, no CI re-run), origin verification after every push, and PR creation. Trigger on phrases like "fix issue #N", "address #N", "work on issue N", or any request to fix a bug or implement a feature that references an issue. For shepherding a chain of already-existing PRs back to main, see `pr-chain-vet` instead.
+description: End-to-end workflow for fixing GitHub issues on the nf-metro repo with diagnostic rigor. Use when the user references a GitHub issue (by number, URL, or description) and wants it fixed. Handles worktree setup, a reused persistent env (no per-issue env creation), diagnostic-first investigation, authoring-mistake-vs-engine-bug triage (never dodge an engine bug by doctoring the reproducer), invariant-test-first implementation, runtime validators, evidence-cited fix verification, /simplify pass, full-repo lint, visual review via render preview, narrow-the-fix iteration on regressions, cost discipline (targeted tests, CI render-diff over local gallery rebuilds, skip-ci on WIP), scope discipline that fixes adjacent fallout in-session via delegated subagents instead of deferring it to a child issue, standalone issue-body hygiene, additive-only PR hygiene (no force-push, no narrative comments), clean execution of an authorised admin-merge (preserve history, no CI re-run), origin verification after every push, and PR creation. Trigger on phrases like "fix issue #N", "address #N", "work on issue N", or any request to fix a bug or implement a feature that references an issue. For shepherding a chain of already-existing PRs back to main, see `pr-chain-vet` instead.
 ---
 
 # Fix Issue
@@ -22,6 +22,53 @@ simply" or for "less words", cut - don't re-expand.
 - micromamba: `/opt/homebrew/bin/micromamba` (macOS Apple Silicon codesign
   workaround). On other platforms, just `micromamba` if it's on PATH.
 
+## Scope discipline: fix the fallout, don't defer it
+
+This skill has historically erred toward "that's a separate issue" the moment
+a fix surfaces a second problem - a related engine bug, a coverage gap, a
+stale test, a lint violation in a file already open, even one in a
+completely different subsystem. That default is flipped: **resolving
+fallout within this same session is the default; filing an issue and leaving
+it for a future session is the exception.** A queue of maybe-someday child
+issues is administrative burden on the user, not a scope win - re-triaging
+each one later costs more than fixing it now while the context is already
+loaded.
+
+- When diagnosis, implementation, `/simplify`, lint, or CI turns up an
+  adjacent, fixable problem anywhere in the repo - including in a different
+  subsystem than the one you're already editing - fix it in this session
+  rather than filing it and moving on. Being in a different subsystem,
+  needing its own worktree, or requiring you to load unfamiliar code is
+  **not, by itself**, a reason to defer.
+- Use the `Agent` tool to protect your own context budget while doing this,
+  not as a reason to skip it. Hand each piece of fallout to a `sonnet`
+  subagent by default, or `opus` when the triage or fix genuinely needs
+  harder judgment; run agents in the background (or a separate worktree, per
+  the global worktree rule, if the fallout touches files you're not actively
+  editing) and fold results back in before the session ends. Independent
+  pieces of fallout can run as concurrent subagents instead of serially
+  eating your own context - that's what makes taking on a different
+  subsystem's fix tractable in the same session.
+- "Resolved in this session" does not mean "crammed into one PR." If folding
+  the fallout into the primary PR would make it harder to review, ship it as
+  its own sibling PR instead. The bar is that the fallout's PR gets built,
+  pushed, and left in a reviewable state before the session ends - not that a
+  future session has to rediscover it from a filed issue.
+- Reserve an actual filed issue + deferral for cases that are genuinely
+  disproportionate: a fix that would take multiple sessions to complete in
+  its own right, or something that needs a decision only the user can make.
+  **Size and duration are the test, not which subsystem the fallout lives
+  in.** When you do defer, say so explicitly and why - deferral should be a
+  stated judgment call, never the silent default.
+- This is not licence for scope creep into features the user didn't ask
+  about - it's about not walking away from problems the *current* work
+  surfaced.
+
+This governs every step below: the "second finding" in Step 3, coverage gaps
+in the Step 7 gate-coverage ratchet, and anything `/simplify` or review turns
+up in Step 6 all default to fix-now-via-subagent (in this PR or a sibling
+one) over file-and-defer.
+
 ## Step 1: Understand the Issue
 
 ```bash
@@ -38,8 +85,12 @@ something during the fix that a future session would need (the real cause, a
 repro, a constraint), fold it into the **issue body** - do not scatter it
 across comments, and do not leave superseded-approach detail that would
 mislead a fresh reader. Keep the body concise. If the fix uncovers a
-genuinely separable defect, file it as a **child issue** rather than
-expanding this one's scope or quietly hiding it.
+genuinely separable defect, default to fixing it in this session (see
+"Scope discipline" above - delegate to a subagent if it would crowd your
+diagnostic context, even for a different subsystem) rather than filing a
+child issue and walking away. File a standalone child issue only when the
+defect is a multi-session undertaking in its own right, and say so
+explicitly.
 
 ## Step 2: Worktree + Environment Setup
 
@@ -146,8 +197,12 @@ the engine must handle it.
 This applies to fixtures you *author*, too: when building a new regression
 fixture, don't file it down to sidestep a second bad render you notice while
 constructing it (e.g. shortening a multi-line label so a label-interaction
-bug won't show). A second bad render is a **second finding** - note it, file
-it if warranted - not a licence to sculpt the fixture. A fixture that has
+bug won't show). A second bad render is a **second finding** - per "Scope
+discipline" above, default to fixing it in this session (spin up a subagent
+to diagnose/fix it in parallel rather than letting it derail your primary
+diagnosis, even if it lands in an unrelated part of the engine) rather than
+just noting it and moving on. Only file it standalone and defer if it is
+genuinely a multi-session undertaking on its own. A fixture that has
 been quietly simplified to look clean no longer locks the bug it was meant to
 lock. (Real example: a `"ORF quant"` -> `"ORFquant"` relabel that hid a
 multi-line-label interaction rather than reporting it.)
