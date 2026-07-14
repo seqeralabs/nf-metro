@@ -83,6 +83,7 @@ from nf_metro.layout.phases.spacing import (
 from nf_metro.parser.model import (
     LineSpread,
     MetroGraph,
+    PermissiveGuardWarning,
     Port,
     PortSide,
     Section,
@@ -5497,7 +5498,7 @@ def assert_render_layout_invariants(
     )
     if strict:
         raise LayoutInvariantError(msg)
-    warnings.warn(msg, stacklevel=2)
+    warnings.warn(msg, category=PermissiveGuardWarning, stacklevel=2)
 
 
 def render_header_collision(graph: MetroGraph) -> bool:
@@ -5537,4 +5538,4 @@ def assert_render_header_clearance(graph: MetroGraph, *, strict: bool = False) -
     )
     if strict:
         raise LayoutInvariantError(msg)
-    warnings.warn(msg, stacklevel=2)
+    warnings.warn(msg, category=PermissiveGuardWarning, stacklevel=2)

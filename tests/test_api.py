@@ -13,9 +13,12 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+import nf_metro.api as api_module
 from nf_metro.api import RenderConfig, prepare_graph, render_string
 from nf_metro.cli import cli
+from nf_metro.layout import PhaseInvariantError
 from nf_metro.parser import CyclicGraphError
+from nf_metro.parser.model import PermissiveGuardWarning
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES = REPO_ROOT / "examples"
@@ -102,6 +105,26 @@ def test_render_string_propagates_layout_error() -> None:
     )
     with pytest.raises(CyclicGraphError):
         render_string(cyclic)
+
+
+def test_prepare_graph_permissive_downgrades_phase_invariant_error(monkeypatch) -> None:
+    """A layout guard failure aborts ``prepare_graph`` by default; under
+    ``permissive`` it is downgraded to a warning and the partially-laid-out
+    graph is returned instead, for a caller-side best-effort render."""
+    mmd = "%%metro line: a | A | #f00\ngraph LR\n  n1[N1] -->|a| n2[N2]\n"
+
+    def _boom(graph, *args, **kwargs) -> None:
+        graph.stations["n1"].x = 42.0
+        raise PhaseInvariantError("synthetic guard trip")
+
+    monkeypatch.setattr(api_module, "compute_layout", _boom)
+
+    with pytest.raises(PhaseInvariantError, match="synthetic guard trip"):
+        prepare_graph(mmd)
+
+    with pytest.warns(PermissiveGuardWarning, match="synthetic guard trip"):
+        graph = prepare_graph(mmd, layout_options={"permissive": True})
+    assert graph.stations["n1"].x == 42.0
 
 
 def _data_uri_logo_mmd(logo_directive: str) -> str:

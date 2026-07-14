@@ -40,7 +40,7 @@ from nf_metro.layout.routing.invariants import (
     _route_axis_segments,
 )
 from nf_metro.parser.mermaid import parse_metro_mermaid
-from nf_metro.parser.model import MetroGraph
+from nf_metro.parser.model import MetroGraph, PermissiveGuardWarning
 from nf_metro.render import render_svg
 from nf_metro.themes import THEMES
 
@@ -94,6 +94,16 @@ def test_injected_violation_warns_by_default(name: str) -> None:
     graph = _laid_out(name)
     _inject_coincident_stations(graph)
     with pytest.warns(UserWarning, match="Tier-A invariants"):
+        render_svg(graph, THEMES["nfcore"])
+
+
+@pytest.mark.parametrize("name", CLEAN_FIXTURES)
+def test_injected_violation_warning_is_a_permissive_guard_warning(name: str) -> None:
+    """The default-path warning is categorised so a ``--permissive`` caller can
+    tell a guard downgrade apart from an unrelated warning raised mid-render."""
+    graph = _laid_out(name)
+    _inject_coincident_stations(graph)
+    with pytest.warns(PermissiveGuardWarning, match="Tier-A invariants"):
         render_svg(graph, THEMES["nfcore"])
 
 
@@ -198,7 +208,7 @@ def test_render_header_clearance_guard_fires_under_strict() -> None:
 
     with pytest.raises(LayoutInvariantError, match="section header over the box"):
         assert_render_header_clearance(graph, strict=True)
-    with pytest.warns(UserWarning, match="section header over the box"):
+    with pytest.warns(PermissiveGuardWarning, match="section header over the box"):
         assert_render_header_clearance(graph, strict=False)
 
 

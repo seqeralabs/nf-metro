@@ -69,7 +69,14 @@ from nf_metro.layout.routing.common import (
     vertical_direction,
     vertical_flow_sections,
 )
-from nf_metro.parser.model import Edge, MetroGraph, PortSide, Section, Station
+from nf_metro.parser.model import (
+    Edge,
+    MetroGraph,
+    PermissiveGuardWarning,
+    PortSide,
+    Section,
+    Station,
+)
 
 # Segments shorter than this are sub-pixel artefacts of per-line
 # offsets and carry no meaningful direction of travel.
@@ -4395,7 +4402,9 @@ def assert_render_curve_invariants(
     through the builder too -- not to relax the check.
 
     Set ``NF_METRO_ALLOW_BAD_CURVES=1`` to downgrade to a warning (debugging a
-    work-in-progress handler only; not a supported render mode).
+    work-in-progress handler only; not a supported render mode). ``graph.permissive``
+    (``--permissive`` / ``%%metro permissive:``) downgrades the same way, as a
+    supported best-effort render mode.
 
     A layout that bridges a perpendicular connection across grid columns (a
     ``direction:`` override -- explicit or inferred -- that feeds a section's
@@ -4501,8 +4510,8 @@ def assert_render_curve_invariants(
         "concentric_corner_radius_at and fan every leg consistently.\n  "
         f"{detail}"
     )
-    if os.environ.get("NF_METRO_ALLOW_BAD_CURVES"):
-        warnings.warn(msg, stacklevel=2)
+    if graph.permissive or os.environ.get("NF_METRO_ALLOW_BAD_CURVES"):
+        warnings.warn(msg, category=PermissiveGuardWarning, stacklevel=2)
         return
     bridged = sorted(graph._cross_column_perp_bridges)
     if bridged:

@@ -228,6 +228,13 @@ LAYOUT_OPTIONS: tuple[LayoutOption, ...] = (
         "geometry as an error (non-zero exit) instead of a warning.",
     ),
     LayoutOption(
+        name="permissive",
+        kind="bool",
+        help="Downgrade layout/render guard failures to warnings and render "
+        "best-effort on whatever geometry was computed, instead of aborting "
+        "with no output. Overrides --strict.",
+    ),
+    LayoutOption(
         name="auto_process",
         kind="bool",
         parse_time=True,
