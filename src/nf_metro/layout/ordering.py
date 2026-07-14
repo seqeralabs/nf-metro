@@ -306,6 +306,17 @@ def _predecessor_avg(
     return sum(tracks[p] for p in preds) / len(preds)
 
 
+def _median_pred_track(preds: list[str], tracks: dict[str, float]) -> float | None:
+    """Median track of a node's already-placed predecessors, or None.
+
+    ``median_low`` returns an actual feeder track, so a merge anchored here
+    stays on-grid even for an even feeder count (a mean would land on a
+    half-track).
+    """
+    pred_tracks = [tracks[p] for p in preds if p in tracks]
+    return median_low(pred_tracks) if pred_tracks else None
+
+
 def _place_single_node(
     node: str,
     base: float,
@@ -337,6 +348,7 @@ def _place_single_node(
     # Detect divergence: predecessor has more lines than this node
     if graph is not None:
         preds = list(G.predecessors(node))
+        node_layer = layers.get(node, 0) if layers else 0
         node_lines = set(graph.station_lines(node))
         pred_lines: set[str] = set()
         for p in preds:
@@ -356,7 +368,6 @@ def _place_single_node(
                 if G.in_degree(preds[0]) > 1 or node in continuation_nodes:
                     return pred_avg
             # Check if this is a diamond (temporary fork-join)
-            node_layer = layers.get(node, 0) if layers else 0
             if diamond_members is not None and node in diamond_members:
                 # Diamond: compress toward trunk for compact visual
                 return pred_avg + (base - pred_avg) * DIAMOND_COMPRESSION
@@ -412,13 +423,11 @@ def _place_single_node(
                 # declared line's, often an extreme of the feeder spread, so
                 # snapping there forces every other feeder into a longer
                 # detour.  In symmetric mode anchor on the median feeder track,
-                # minimising total feeder bend; median_low returns an actual
-                # feeder track so the merge stays on-grid even for an even
-                # feeder count (a mean would land on a half-track).
+                # minimising total feeder bend.
                 if graph.diamond_style == "symmetric":
-                    pred_tracks = [tracks[p] for p in preds if p in tracks]
-                    if pred_tracks:
-                        return median_low(pred_tracks)
+                    median = _median_pred_track(preds, tracks)
+                    if median is not None:
+                        return median
                 return base
 
             # Trunk junction: at least one predecessor already carries the
@@ -444,16 +453,15 @@ def _place_single_node(
             and len(preds) > 1
             and any(p in diamond_members for p in preds)
         ):
-            node_layer = layers.get(node, 0) if layers else 0
             base_contested = (
                 layer_occupancy is not None
                 and _is_track_occupied_at_layer(base, node_layer, layer_occupancy, node)
             )
             if not base_contested:
                 return base
-            pred_tracks = [tracks[p] for p in preds if p in tracks]
-            if pred_tracks:
-                return median_low(pred_tracks)
+            median = _median_pred_track(preds, tracks)
+            if median is not None:
+                return median
 
     # Direct single-predecessor alignment: when a node has exactly one
     # predecessor on the same line(s), snap to the predecessor's track
