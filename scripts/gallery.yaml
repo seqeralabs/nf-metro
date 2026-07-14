@@ -364,6 +364,14 @@ gallery:
       "A profiling section whose stacked tools share a fan-in/fan-out: a line the
       'FMH FunProfiler' station does not carry would rake its wide below-station label, so
       the label flips to its clear side and the diagonal no longer strikes the glyphs."
+  - id: fanin_join_diff_length_branches
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      "One station fans out to four lines of differing branch lengths, one of which is a
+      two-way fork-join. Regression fixture for #1456: under the default `straight` diamond
+      the join snapped onto its line's declaration-order base track, which a wide fan-out had
+      already given to another line's station, stacking two stations in one cell."
 
   # ── Branching and Multipath ────────────────────────────────────────────────
   - id: asymmetric_tree

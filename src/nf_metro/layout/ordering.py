@@ -433,14 +433,27 @@ def _place_single_node(
 
         # Diamond merge: when straight diamonds are active, snap the
         # join node back to the base track so lines return to the trunk
-        # after an asymmetric fork-join.
+        # after an asymmetric fork-join.  The line's nominal base is its
+        # trunk only when it is free here; a wide fan-out can push another
+        # line's station onto that base track, so snapping would stack the
+        # join on top of it.  When contested, keep the join with its fork
+        # branches (their median track) instead of returning across the row.
         if (
             graph.diamond_style == "straight"
             and diamond_members is not None
             and len(preds) > 1
             and any(p in diamond_members for p in preds)
         ):
-            return base
+            node_layer = layers.get(node, 0) if layers else 0
+            base_contested = (
+                layer_occupancy is not None
+                and _is_track_occupied_at_layer(base, node_layer, layer_occupancy, node)
+            )
+            if not base_contested:
+                return base
+            pred_tracks = [tracks[p] for p in preds if p in tracks]
+            if pred_tracks:
+                return median_low(pred_tracks)
 
     # Direct single-predecessor alignment: when a node has exactly one
     # predecessor on the same line(s), snap to the predecessor's track
