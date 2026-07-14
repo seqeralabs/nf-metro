@@ -347,10 +347,6 @@
     "note": "The column-gap enforcer keeps inter-column gaps positive, so gap_right>gap_left always holds at the target row.",
     "status": "defensive"
   },
-  "inter_section_handlers.py::if js and js.is_port:::#1": {
-    "note": "Reachable only via a defective render (LR->TB TOP-entry routing); see #720.",
-    "status": "needs-review"
-  },
   "inter_section_handlers.py::if lead is Direction.R:::#1": {
     "note": "A top-entry fan branch leading LEFT out of the junction skips the _v1_corner_x right-edge clearance bump; the corpus's fan branches all lead right, so the left-lead arm is unexercised.",
     "status": "needs-review"
@@ -385,10 +381,6 @@
   },
   "inter_section_handlers.py::if sx >= (left_edge + right_edge) / 2:::#1": {
     "note": "Defensive symmetry: a merge feeder junction sits in the inter-column gap downstream of its fork, i.e. right of its source section's centre, so the exit-right arm always fires in the corpus. The exit-left arm mirrors it for a junction sitting left of centre; no fixture places a merge feeder there.",
-    "status": "defensive"
-  },
-  "inter_section_handlers.py::if tgt is None:::#1": {
-    "note": "Edge targets are always registered stations after resolve; the None arm never fires.",
     "status": "defensive"
   },
   "inter_section_handlers.py::if tgt_col is not None:::#1": {
@@ -823,10 +815,6 @@
     "note": "Defensive guard in _convergence_feeders: a LEFT entry port section always has a grid column after placement, so the unresolved-target-column early return is never taken.",
     "status": "defensive"
   },
-  "offsets.py::if tgt_st and not tgt_st.is_port:::#1": {
-    "note": "edges_from(port_id) for an entry port yields edges to internal section stations. In the resolved graph, entry ports are connected directly to internal (non-port) stations; there are no entry-port-to-entry-port or entry-port-to-exit-port edges. So tgt_st is always a valid non-port station, and the loop-back arm (799->797) where tgt_st is None or is_port is unreachable for any valid resolved graph.",
-    "status": "defensive"
-  },
   "offsets.py::if trunk_feeder_id is not None:::#2": {
     "note": "len(unique_ys) < 2 means every port line's feeder stations average to a single Y. Under track-per-line layout, distinct lines occupy distinct tracks, so a shared Y across >=2 lines implies one trunk feeder carrying all of them (trunk_feeder_id set); the no-trunk arm is therefore not reached by a track-separated topology.",
     "status": "defensive"
@@ -951,20 +939,8 @@
     "note": "Cycle guard in _entry_ports_through_junctions' junction walk. The True arm fires only if a junction is reached twice while walking out from one exit-port-fed junction (a junction reachable by two paths). Resolved peel-off fans are trees, so no junction is revisited and the arm is unreached; the guard keeps the walk terminating should chained junctions ever form a cycle.",
     "status": "defensive"
   },
-  "reversal.py::if not s2 or not s2.is_port:::#1": {
-    "note": "Junction look-through: s2 is the source of an edge feeding a fold junction. Junctions are synthetic resolution nodes fed only by exit ports or upstream junctions (both is_port=True), so s2 is always present and port-like. The continue is a structural-contract guard no valid topology reaches.",
-    "status": "defensive"
-  },
   "reversal.py::if not section:::#1": {
     "note": "_propagate_reversal_along_rows iterates sec_id values drawn from reversed_secs, which only ever holds real section ids added from graph.sections. graph.sections.get(sec_id) is never None; the continue is a defensive null guard.",
-    "status": "defensive"
-  },
-  "reversal.py::if not src or not src.is_port:::#1": {
-    "note": "Phase 1a (_detect_tb_bottom_top_entries) iterates edges feeding a TOP entry port. Entry ports are synthetic nodes created by section resolution; the only edges targeting them are the resolved chain's exit_port->entry_port and junction->entry_port links, so edge.source is always a registered port or junction station (both is_port=True). The continue (missing or non-port source) is a structural-contract guard no valid topology reaches.",
-    "status": "defensive"
-  },
-  "reversal.py::if not src:::#1": {
-    "note": "_section_fed_by_tb_lr_exit iterates edges feeding a LEFT/RIGHT entry port; edge.source is always a registered station, so graph.stations.get is never None. Defensive null guard.",
     "status": "defensive"
   },
   "reversal.py::if not succ:::#1": {

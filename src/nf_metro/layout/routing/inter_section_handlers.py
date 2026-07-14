@@ -2749,8 +2749,7 @@ def _top_entry_side_fan_traverse_is_clear(
         and sib.target != edge.target
         and (sib_port := graph.ports.get(sib.target)) is not None
         and sib_port.side in (PortSide.TOP, PortSide.BOTTOM)
-        and (sib_tgt := graph.stations.get(sib.target)) is not None
-        and abs(sib_tgt.x - src.x) <= ctx.curve_radius
+        and abs(graph.station_for_edge_target(sib).x - src.x) <= ctx.curve_radius
         for sib in graph.edges_from(edge.source)
     )
     if not aligned_sibling:
@@ -2859,8 +2858,8 @@ def _route_top_entry_l_shape(
         lead = Direction.R
         if src.id in ctx.graph.junctions:
             for je in ctx.graph.edges_to(src.id):
-                js = ctx.graph.stations.get(je.source)
-                if js and js.is_port:
+                js = ctx.graph.station_for_edge_source(je)
+                if js.is_port:
                     if abs(js.x - src.x) <= COORD_TOLERANCE:
                         straight_drop = True
                     else:
@@ -3392,9 +3391,7 @@ def _fan_has_corridor_sibling(junction_id: str, ctx: _RoutingCtx) -> bool:
     """
     graph = ctx.graph
     for edge in graph.edges_from(junction_id):
-        tgt = graph.stations.get(edge.target)
-        if tgt is None:
-            continue
+        tgt = graph.station_for_edge_target(edge)
         ep_id = ctx.merge.entry_port_for.get(edge.target)
         ep = graph.stations.get(ep_id) if ep_id else tgt
         if ep is not None and _corridor_is_viable(ctx, graph.stations[junction_id], ep):

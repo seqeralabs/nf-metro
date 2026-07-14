@@ -366,13 +366,12 @@ def _aligned_tb_drop_target(
     """
     for e in ctx.graph.edges_from(exit_port_id):
         entry_port = ctx.graph.ports.get(e.target)
-        entry_st = ctx.graph.stations.get(e.target)
+        entry_st = ctx.graph.station_for_edge_target(e)
         if (
             entry_port is not None
             and entry_port.is_entry
             and entry_port.side in (PortSide.TOP, PortSide.BOTTOM)
             and entry_port.section_id in ctx.tb_sections
-            and entry_st is not None
             and abs(entry_st.x - exit_x) <= COORD_TOLERANCE
         ):
             return e.target, entry_port.section_id

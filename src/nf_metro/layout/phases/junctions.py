@@ -59,14 +59,13 @@ def _position_junctions(graph: MetroGraph) -> None:
         exit_port_id: str | None = None
 
         for edge in graph.edges_to(jid):
-            src = graph.stations.get(edge.source)
-            if src:
-                predecessors.append(src)
-                if src.is_port:
-                    exit_port_id = edge.source
+            src = graph.station_for_edge_source(edge)
+            predecessors.append(src)
+            if src.is_port:
+                exit_port_id = edge.source
         for edge in graph.edges_from(jid):
-            tgt = graph.stations.get(edge.target)
-            if tgt and tgt.is_port:
+            tgt = graph.station_for_edge_target(edge)
+            if tgt.is_port:
                 successor_ports.append(tgt)
 
         # Merge junction: N>1 predecessors, 1 entry port successor
@@ -159,8 +158,8 @@ def _resolve_source_section_id(
     src_section_id = src.section_id
     if edge_source in junction_ids:
         for e2 in graph.edges_to(edge_source):
-            s2 = graph.stations.get(e2.source)
-            if s2 and s2.section_id:
+            s2 = graph.station_for_edge_source(e2)
+            if s2.section_id:
                 src_section_id = s2.section_id
                 break
     return src_section_id
@@ -199,8 +198,8 @@ def _resolve_source_xy(
         if e.source in junction_ids:
             chained.append(e.source)
             continue
-        exit_st = graph.stations.get(e.source)
-        if not exit_st or not exit_st.is_port:
+        exit_st = graph.station_for_edge_source(e)
+        if not exit_st.is_port:
             continue
         exit_port_obj = graph.ports.get(e.source)
         if not exit_port_obj:

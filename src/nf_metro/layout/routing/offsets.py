@@ -1494,8 +1494,8 @@ def _propagate_lr_rl_exit_to_entry(ctx: _OffsetCtx) -> None:
                 entry_offs[lid] = paired_off
         if len(entry_offs) >= 2:
             for e2 in graph.edges_from(port_id):
-                tgt_st = graph.stations.get(e2.target)
-                if tgt_st and not tgt_st.is_port:
+                tgt_st = graph.station_for_edge_target(e2)
+                if not tgt_st.is_port:
                     tgt_lines = graph.station_lines(e2.target)
                     overlap = [lid for lid in tgt_lines if lid in entry_offs]
                     if len(overlap) >= 2:

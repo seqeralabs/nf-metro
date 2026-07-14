@@ -41,13 +41,13 @@ def _convergence_source_ys(graph: MetroGraph) -> dict[str, list[str]]:
         src_id = edge.source
         if src_id in junction_ids:
             for e2 in graph.edges_to(src_id):
-                pre = graph.stations.get(e2.source)
-                if pre is None or pre.is_port:
+                pre = graph.station_for_edge_source(e2)
+                if pre.is_port:
                     continue
                 inbound[edge.target].add(e2.source)
         else:
-            src = graph.stations.get(src_id)
-            if src is None or src.is_port:
+            src = graph.station_for_edge_source(edge)
+            if src.is_port:
                 continue
             inbound[edge.target].add(src_id)
 
@@ -93,13 +93,13 @@ def _divergence_target_ys(graph: MetroGraph) -> set[str]:
         tgt_id = edge.target
         if tgt_id in junction_ids:
             for e2 in graph.edges_from(tgt_id):
-                post = graph.stations.get(e2.target)
-                if post is None or post.is_port:
+                post = graph.station_for_edge_target(e2)
+                if post.is_port:
                     continue
                 outbound[edge.source].add(e2.target)
         else:
-            tgt = graph.stations.get(tgt_id)
-            if tgt is None or tgt.is_port:
+            tgt = graph.station_for_edge_target(edge)
+            if tgt.is_port:
                 continue
             outbound[edge.source].add(tgt_id)
 
@@ -513,13 +513,8 @@ def _branches_reconverge(graph: MetroGraph, section: Section, a: str, b: str) ->
         while stack:
             cur = stack.pop()
             for e in graph.edges_from(cur):
-                t = graph.stations.get(e.target)
-                if (
-                    t is None
-                    or t.is_port
-                    or t.section_id != section.id
-                    or e.target in seen
-                ):
+                t = graph.station_for_edge_target(e)
+                if t.is_port or t.section_id != section.id or e.target in seen:
                     continue
                 seen.add(e.target)
                 stack.append(e.target)
@@ -1038,8 +1033,7 @@ def _symfan_entry_port_feeder_y(
     feeder_ys = {
         round(src.y, 1)
         for e in graph.edges_to(entry_port)
-        if (src := graph.stations.get(e.source)) is not None
-        and src.is_port
+        if (src := graph.station_for_edge_source(e)).is_port
         and (fsec := graph.sections.get(src.section_id or "")) is not None
         and fsec.grid_row == section.grid_row
         and src.id in fsec.exit_ports
@@ -1065,8 +1059,7 @@ def _in_section_continuation_chain(
             {
                 e.source
                 for e in graph.edges_to(sid)
-                if (s := graph.stations.get(e.source)) is not None
-                and not s.is_port
+                if not (s := graph.station_for_edge_source(e)).is_port
                 and s.section_id == section.id
             }
         )
@@ -1100,7 +1093,7 @@ def _in_section_ontrack_successors(
         {
             e.target
             for e in graph.edges_from(sid)
-            if _is_in_section_on_track(graph.stations.get(e.target), section.id)
+            if _is_in_section_on_track(graph.station_for_edge_target(e), section.id)
         }
     )
 
@@ -1118,8 +1111,8 @@ def _fork_offtrack_side(
     """
     for sid in [branch_id, *_in_section_continuation_chain(graph, section, branch_id)]:
         for e in graph.edges_from(sid):
-            tgt = graph.stations.get(e.target)
-            if tgt is not None and tgt.off_track and tgt.section_id == section.id:
+            tgt = graph.station_for_edge_target(e)
+            if tgt.off_track and tgt.section_id == section.id:
                 return -1 if tgt.y < anchor_y else 1
     return 0
 
