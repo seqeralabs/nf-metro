@@ -977,10 +977,7 @@ def _compute_port_label_preference(
     """
     result: dict[str, bool] = {}
     for edge in graph.edges:
-        src = graph.stations.get(edge.source)
-        tgt = graph.stations.get(edge.target)
-        if not src or not tgt:
-            continue
+        src, tgt = graph.edge_endpoints(edge)
 
         # Only consider station -> exit port edges.  Exit routes depart
         # from the station toward the section boundary and can pass

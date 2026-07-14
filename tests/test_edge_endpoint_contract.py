@@ -58,6 +58,8 @@ def test_every_edge_resolves_to_stations(path: Path) -> None:
         assert isinstance(tgt, Station)
         assert src is graph.stations[edge.source]
         assert tgt is graph.stations[edge.target]
+        assert graph.station_for_edge_source(edge) is src
+        assert graph.station_for_edge_target(edge) is tgt
 
 
 def test_edge_endpoints_raises_on_dangling_endpoint() -> None:
@@ -65,6 +67,25 @@ def test_edge_endpoints_raises_on_dangling_endpoint() -> None:
     graph, dangling = _dangling_graph()
     with pytest.raises(UnresolvedEndpointError) as excinfo:
         graph.edge_endpoints(dangling)
+    assert "ghost" in str(excinfo.value)
+
+
+def test_station_for_edge_target_raises_on_dangling_target() -> None:
+    """The single-endpoint target accessor fails loudly, not with a None."""
+    graph, dangling = _dangling_graph()
+    with pytest.raises(UnresolvedEndpointError) as excinfo:
+        graph.station_for_edge_target(dangling)
+    assert "ghost" in str(excinfo.value)
+
+
+def test_station_for_edge_source_resolves_and_raises() -> None:
+    """The source accessor returns the station, and raises on a dangling source."""
+    graph, _ = _dangling_graph()
+    resolved = graph.edges[0]
+    assert graph.station_for_edge_source(resolved) is graph.stations[resolved.source]
+    orphan_source = Edge(source="ghost", target="a", line_id="l1")
+    with pytest.raises(UnresolvedEndpointError) as excinfo:
+        graph.station_for_edge_source(orphan_source)
     assert "ghost" in str(excinfo.value)
 
 

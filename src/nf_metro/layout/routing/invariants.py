@@ -385,8 +385,7 @@ def check_tb_exit_corner_preserves_column_order(
         column_sources = [
             edge.source
             for edge in graph.edges_to(station.id)
-            if (s := graph.stations.get(edge.source)) is not None
-            and not s.is_port
+            if not (s := graph.station_for_edge_source(edge)).is_port
             and s.section_id == sid
         ]
         if not column_sources:
@@ -868,9 +867,7 @@ def _immediate_feeder(graph, port_id: str, line_id: str):  # noqa: ANN001, ANN20
     for edge in graph.edges_to(port_id):
         if edge.line_id != line_id:
             continue
-        src = graph.stations.get(edge.source)
-        if src is None:
-            return None, False
+        src = graph.station_for_edge_source(edge)
         return src, edge.source in graph.junctions
     return None, False
 
@@ -899,8 +896,8 @@ def bypass_horizontal_targets(
         edge = outgoing.get(lid)
         if edge is None:
             continue
-        tgt = graph.stations.get(edge.target)
-        if tgt is None or tgt.is_port:
+        tgt = graph.station_for_edge_target(edge)
+        if tgt.is_port:
             continue
         if abs(tgt.y - port_st.y) > COORD_TOLERANCE_FINE:
             result[lid] = tgt
@@ -1539,9 +1536,8 @@ def _intra_section_collinear(
 
 def _edge_in_rail_section(graph: MetroGraph, edge: Edge) -> bool:
     """True when both endpoints of *edge* are real stations of one rail section."""
-    src = graph.stations.get(edge.source)
-    tgt = graph.stations.get(edge.target)
-    if src is None or tgt is None or src.is_port or tgt.is_port:
+    src, tgt = graph.edge_endpoints(edge)
+    if src.is_port or tgt.is_port:
         return False
     return (
         src.section_id is not None
@@ -2679,9 +2675,8 @@ def check_trunk_continuation_drops_straight(
     route_by_edge = {(rp.edge.source, rp.edge.target, rp.line_id): rp for rp in routes}
     violations: list[TrunkContinuationJog] = []
     for edge in graph.edges:
-        src = graph.stations.get(edge.source)
-        tgt = graph.stations.get(edge.target)
-        if src is None or tgt is None or src.is_port or tgt.is_port:
+        src, tgt = graph.edge_endpoints(edge)
+        if src.is_port or tgt.is_port:
             continue
         sec_id = src.section_id
         if sec_id is None or sec_id != tgt.section_id:
@@ -3352,7 +3347,7 @@ def _merge_entry_port(graph: MetroGraph, merge_id: str) -> Station | None:
     for e in graph.edges_from(merge_id):
         port = graph.ports.get(e.target)
         if port and port.is_entry:
-            return graph.stations.get(e.target)
+            return graph.station_for_edge_target(e)
     return None
 
 

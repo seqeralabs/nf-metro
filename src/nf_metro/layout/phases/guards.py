@@ -794,8 +794,8 @@ def _converge_sibling_merge_violations(
             continue
         srcs_by_layer: dict[int, set[str]] = defaultdict(set)
         for edge in graph.edges_to(sid):
-            src = graph.stations.get(edge.source)
-            if src is None or src.section_id != st.section_id:
+            src = graph.station_for_edge_source(edge)
+            if src.section_id != st.section_id:
                 continue
             srcs_by_layer[src.layer].add(edge.source)
         for layer, srcs in srcs_by_layer.items():
@@ -1344,8 +1344,7 @@ def _perp_fed_entry_consumer_y(
     consumer_ys = {
         round(st.y, 1)
         for edge in graph.edges_from(port_id)
-        if (st := graph.stations.get(edge.target)) is not None
-        and not st.is_port
+        if not (st := graph.station_for_edge_target(edge)).is_port
         and st.section_id == entry_section.id
     }
     if len(consumer_ys) != 1:
@@ -1946,8 +1945,7 @@ def _guard_off_track_consumer_on_trunk(graph: MetroGraph, phase: str) -> None:
         succs = [
             tgt
             for e in graph.edges_from(cons_id)
-            if (tgt := graph.stations.get(e.target)) is not None
-            and not tgt.is_port
+            if not (tgt := graph.station_for_edge_target(e)).is_port
             and tgt.id not in junction_ids
             and not tgt.off_track
             and tgt.section_id == cons.section_id
@@ -4535,12 +4533,12 @@ def _guard_fanout_junction_shares_exit_port_y(graph: MetroGraph, phase: str) -> 
         port_preds = {
             e.source
             for e in graph.edges_to(jid)
-            if (src := graph.stations.get(e.source)) and src.is_port
+            if graph.station_for_edge_source(e).is_port
         }
         entry_succs = {
             e.target
             for e in graph.edges_from(jid)
-            if (tgt := graph.stations.get(e.target)) and tgt.is_port
+            if graph.station_for_edge_target(e).is_port
         }
         if len(port_preds) != 1 or len(entry_succs) <= 1:
             continue
@@ -4592,8 +4590,8 @@ def _guard_entry_port_fed_only_by_ports(graph: MetroGraph, phase: str) -> None:
     for section in graph.sections.values():
         for pid in section.entry_ports:
             for edge in graph.edges_to(pid):
-                src = graph.stations.get(edge.source)
-                if src is not None and not src.is_port:
+                src = graph.station_for_edge_source(edge)
+                if not src.is_port:
                     raise PhaseInvariantError(
                         f"{phase}: entry port {pid!r} is fed by non-port station "
                         f"{edge.source!r}; entry ports must be fed only by ports"
@@ -4625,9 +4623,7 @@ def _guard_perp_entry_feed_not_collinear(graph: MetroGraph, phase: str) -> None:
             if entry_st is None:
                 continue
             for edge in graph.edges_to(pid):
-                feeder = graph.stations.get(edge.source)
-                if feeder is None:
-                    continue
+                feeder = graph.station_for_edge_source(edge)
                 feeder_port = graph.ports.get(edge.source)
                 if (
                     feeder_port is not None

@@ -144,8 +144,8 @@ def perp_peeloff_off_horizontal_junction(
         (
             fs
             for e in graph.edges_to(junction.id)
-            if (fs := graph.stations.get(e.source)) is not None
-            and abs(fs.y - junction.y) <= COORD_TOLERANCE
+            if abs((fs := graph.station_for_edge_source(e)).y - junction.y)
+            <= COORD_TOLERANCE
             and abs(fs.x - junction.x) > COORD_TOLERANCE
         ),
         key=lambda fs: abs(fs.x - junction.x),
@@ -219,9 +219,9 @@ def needs_perp_approach_fan(graph: MetroGraph, port_id: str) -> bool:
         return False
     feeders_by_line: dict[str, set[str]] = {}
     for edge in graph.edges_to(port_id):
-        src = graph.stations.get(edge.source)
+        src = graph.station_for_edge_source(edge)
         sp = graph.ports.get(edge.source)
-        if src is None or not src.is_port or sp is None or sp.is_entry:
+        if not src.is_port or sp is None or sp.is_entry:
             continue
         feeders_by_line.setdefault(edge.line_id, set()).add(edge.source)
     feeder_sources = {fid for sources in feeders_by_line.values() for fid in sources}
@@ -1072,17 +1072,12 @@ def compute_bundle_info(
             # proper offsets.  Fall back to round(sx) for junctions
             # or edges without section info.
             h_dir = 1 if dx > 0 else -1
-            src_st = graph.stations.get(edge.source)
-            tgt_st = graph.stations.get(edge.target)
+            src_st, tgt_st = graph.edge_endpoints(edge)
             src_sec = (
-                graph.sections.get(src_st.section_id)
-                if src_st and src_st.section_id
-                else None
+                graph.sections.get(src_st.section_id) if src_st.section_id else None
             )
             tgt_sec = (
-                graph.sections.get(tgt_st.section_id)
-                if tgt_st and tgt_st.section_id
-                else None
+                graph.sections.get(tgt_st.section_id) if tgt_st.section_id else None
             )
             col_key: int | tuple[int, ...]
             if src_sec and tgt_sec and src_sec.grid_col != tgt_sec.grid_col:
@@ -1332,8 +1327,8 @@ def line_source_y_at_port(
     """
     line_y: dict[str, float] = {}
     for edge in graph.edges_to(port_id):
-        src = graph.stations.get(edge.source)
-        if src and not src.is_port:
+        src = graph.station_for_edge_source(edge)
+        if not src.is_port:
             line_y[edge.line_id] = src.y
     return line_y
 
@@ -1553,8 +1548,8 @@ def resolve_section(
 
     if prefer_upstream:
         for e in graph.edges_to(station.id):
-            other = graph.stations.get(e.source)
-            if other and other.section_id:
+            other = graph.station_for_edge_source(e)
+            if other.section_id:
                 sec = graph.sections.get(other.section_id)
                 if sec:
                     return sec
@@ -1563,17 +1558,16 @@ def resolve_section(
         # the first incident edge winning when a junction has neighbours
         # in multiple sections.
         for e in graph.edges:
-            other_id = None
             if e.source == station.id:
-                other_id = e.target
+                other = graph.station_for_edge_target(e)
             elif e.target == station.id:
-                other_id = e.source
-            if other_id:
-                other = graph.stations.get(other_id)
-                if other and other.section_id:
-                    sec = graph.sections.get(other.section_id)
-                    if sec:
-                        return sec
+                other = graph.station_for_edge_source(e)
+            else:
+                continue
+            if other.section_id:
+                sec = graph.sections.get(other.section_id)
+                if sec:
+                    return sec
     return None
 
 

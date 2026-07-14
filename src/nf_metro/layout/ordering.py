@@ -913,11 +913,10 @@ def _reorder_by_span(graph: MetroGraph, line_order: list[str]) -> list[str]:
         lid = edge.line_id
         if lid not in line_sections:
             continue
-        src = graph.stations.get(edge.source)
-        tgt = graph.stations.get(edge.target)
-        if src and src.section_id:
+        src, tgt = graph.edge_endpoints(edge)
+        if src.section_id:
             line_sections[lid].add(src.section_id)
-        if tgt and tgt.section_id:
+        if tgt.section_id:
             line_sections[lid].add(tgt.section_id)
 
     # Stable sort: descending by section count, preserving original order for ties

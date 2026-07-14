@@ -680,20 +680,18 @@ def _rows_overlap(a: Section, b: Section) -> bool:
 
 def _station_column(
     graph: MetroGraph,
-    station: Station | None,
+    station: Station,
     col_assign: dict[str, int],
     junction_ids: set[str],
 ) -> int | None:
     """Resolve a station's grid column via its section or junction chain."""
-    if station is None:
-        return None
     if station.section_id and station.section_id in col_assign:
         return col_assign[station.section_id]
     # Junction: trace back to its source port's section
     if station.id in junction_ids:
         for edge in graph.edges_to(station.id):
-            src = graph.stations.get(edge.source)
-            if src and src.section_id and src.section_id in col_assign:
+            src = graph.station_for_edge_source(edge)
+            if src.section_id and src.section_id in col_assign:
                 return col_assign[src.section_id]
     return None
 
@@ -788,9 +786,9 @@ def _entry_wrap_edges(
         if port is None or not port.is_entry or port.side not in sides:
             continue
         tgt_sec = graph.sections.get(port.section_id)
-        src = graph.stations.get(edge.source)
-        if tgt_sec is None or src is None:
+        if tgt_sec is None:
             continue
+        src = graph.station_for_edge_source(edge)
         src_sec = resolve_section(graph, src)
         if src_sec is None:
             continue
@@ -843,7 +841,7 @@ def _merge_trunk_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]
         lines: set[str] = set()
         crosses_row = False
         for edge in graph.edges_to(mjid):
-            src_sec = resolve_section(graph, graph.stations.get(edge.source))
+            src_sec = resolve_section(graph, graph.station_for_edge_source(edge))
             if src_sec is not None and src_sec.grid_row < max_row:
                 crosses_row = True
             lines.add(edge.line_id)
@@ -969,10 +967,7 @@ def _bundles_in_gap(
     lo, hi = min(col_a, col_b), max(col_a, col_b)
 
     for edge in graph.edges:
-        src = graph.stations.get(edge.source)
-        tgt = graph.stations.get(edge.target)
-        if not src or not tgt:
-            continue
+        src, tgt = graph.edge_endpoints(edge)
         is_inter = (src.is_port or edge.source in junction_ids) and (
             tgt.is_port or edge.target in junction_ids
         )
@@ -1061,7 +1056,7 @@ def _has_merge_routing_in_gap(
         for edge in graph.edges_to(mjid):
             src_col = _station_column(
                 graph,
-                graph.stations.get(edge.source),
+                graph.station_for_edge_source(edge),
                 col_assign,
                 junction_ids,
             )
@@ -1581,8 +1576,8 @@ def _find_downstream_bundle_y(
         for edge in graph.edges_from(eid):
             if edge.target not in ds_internal:
                 continue
-            st = stations.get(edge.target)
-            if st and not st.is_port:
+            st = graph.station_for_edge_target(edge)
+            if not st.is_port:
                 targets.setdefault(edge.target, set()).add(edge.line_id)
         if not targets:
             continue

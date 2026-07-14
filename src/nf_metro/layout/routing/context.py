@@ -199,9 +199,7 @@ def _classify_merge_edges(
         farthest_span = 0
         trunk_pred_by = 0.0
         for edge in graph.edges_to(mjid):
-            pred = graph.stations.get(edge.source)
-            if not pred:
-                continue
+            pred = graph.station_for_edge_source(edge)
             pred_col, pred_row = _resolve_section_colrow(graph, pred)
             if (
                 pred_col is not None
@@ -663,9 +661,9 @@ def is_far_side_around_below_left_entry(graph: MetroGraph, port: Port) -> bool:
     if psec is None:
         return False
     for edge in graph.edges_to(port.id):
-        src = graph.stations.get(edge.source)
+        src = graph.station_for_edge_source(edge)
         src_port = graph.ports.get(edge.source)
-        if src is None or src_port is None or src_port.is_entry:
+        if src_port is None or src_port.is_entry:
             continue
         if src_port.side is not PortSide.LEFT:
             continue
@@ -769,8 +767,8 @@ def fanout_divergence_peel_order(
     drow: dict[str, int] = {}
     claimed: dict[str, str] = {}
     for edge in graph.edges_from(jid):
-        tgt = graph.stations.get(edge.target)
-        if tgt is None or not (tgt.is_port or edge.target in graph.junction_ids):
+        tgt = graph.station_for_edge_target(edge)
+        if not (tgt.is_port or edge.target in graph.junction_ids):
             return None
         tgt_port = graph.ports.get(edge.target)
         if tgt_port is None or not tgt_port.is_entry:
@@ -977,8 +975,8 @@ def _compute_junction_fan_info(
         # there; the unified fan is the only thing that separates them.
         near_src_channel: dict[int, set[tuple[str, str]]] = defaultdict(set)
         for edge in graph.edges_from(jid):
-            tgt = graph.stations.get(edge.target)
-            if not tgt or not (tgt.is_port or edge.target in junction_ids):
+            tgt = graph.station_for_edge_target(edge)
+            if not (tgt.is_port or edge.target in junction_ids):
                 continue
             tgt_col, tgt_row = _resolve_section_colrow(graph, tgt)
             if tgt_col is None:
@@ -1065,8 +1063,7 @@ def _compute_junction_fan_info(
         all_outgoing = [
             e
             for e in graph.edges_from(jid)
-            if (es := graph.stations.get(e.target)) is not None
-            and (es.is_port or e.target in junction_ids)
+            if graph.station_for_edge_target(e).is_port or e.target in junction_ids
         ]
         # A clean divergence (distinct lines peeling to disjoint targets) is
         # ordered outermost-to-innermost by reach so the descent X order stays
@@ -1164,9 +1161,7 @@ def _fan_bypass_band(
     for edge in graph.edges_from(jid):
         if edge.target in merge_junctions:
             continue
-        tgt = graph.stations.get(edge.target)
-        if tgt is None:
-            continue
+        tgt = graph.station_for_edge_target(edge)
         tgt_col, tgt_row = _resolve_section_colrow(graph, tgt)
         if tgt_col is None:
             continue
