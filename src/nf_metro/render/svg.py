@@ -19,6 +19,7 @@ from nf_metro.layout.constants import (
     LABEL_LINE_HEIGHT,
     OFFTRACK_TERMINUS_NUB_CLEARANCE,
     SAME_COORD_TOLERANCE,
+    SECTION_Y_GAP,
     resolve_offset_step,
 )
 from nf_metro.layout.geometry import lanes_run_along_x, segment_intersects_bbox
@@ -28,9 +29,11 @@ from nf_metro.layout.labels import (
     font_scale_context,
     place_labels,
 )
+from nf_metro.layout.phases.bbox import _push_lower_rows_after_bbox_grow
 from nf_metro.layout.phases.guards import (
     FoldThresholdError,
     assert_render_layout_invariants,
+    assert_render_row_gaps,
     iter_opposing_line_overlaps,
 )
 from nf_metro.layout.routing import (
@@ -595,13 +598,18 @@ def _render_svg_scaled(
         legend_position if legend_position is not None else graph.legend_position
     )
 
-    station_offsets = compute_station_offsets(
-        graph, offset_step=resolve_offset_step(graph.track_gap, theme.line_width)
+    offset_step = resolve_offset_step(graph.track_gap, theme.line_width)
+    section_y_gap = (
+        graph.section_y_gap if graph.section_y_gap is not None else SECTION_Y_GAP
     )
+
+    station_offsets = compute_station_offsets(graph, offset_step=offset_step)
     routes = route_edges_centred(graph, station_offsets=station_offsets)
+    # Validate the routed layout before render-time label growth perturbs the
+    # bboxes: label wrapping legitimately moves a box edge past an invisible
+    # port, which the Tier-A port guards would otherwise flag.
     assert_render_curve_invariants(graph, routes, station_offsets)
     assert_render_layout_invariants(graph, routes, station_offsets, strict=graph.strict)
-    header_polylines = [apply_route_offsets(route, station_offsets) for route in routes]
 
     # Compute labels early so section bbox expansions are applied
     # before section boxes are drawn and canvas bounds are computed.
@@ -613,6 +621,29 @@ def _render_svg_scaled(
         routes=routes,
         label_angle=graph.label_angle or 0.0,
     )
+
+    # Label wrapping needs the theme's font/icon metrics, so it runs here rather
+    # than in ``compute_layout``; when it grows a section's bbox downward, the
+    # row below (placed by the layout from the pre-wrap height) can lose its
+    # ``section_y_gap``.  Push the lower rows down to restore it, then re-settle
+    # offsets/routes/labels so they track the shifted sections (routing is
+    # idempotent on the settled ``Station.x``, so the second pass grows the
+    # same bboxes).
+    if _push_lower_rows_after_bbox_grow(graph, section_y_gap):
+        station_offsets = compute_station_offsets(graph, offset_step=offset_step)
+        routes = route_edges_centred(graph, station_offsets=station_offsets)
+        icon_obstacles = _compute_icon_obstacles(graph, theme, station_offsets)
+        labels = place_labels(
+            graph,
+            station_offsets=station_offsets,
+            icon_obstacles=icon_obstacles,
+            routes=routes,
+            label_angle=graph.label_angle or 0.0,
+        )
+        assert_render_curve_invariants(graph, routes, station_offsets)
+    assert_render_row_gaps(graph, section_y_gap, strict=graph.strict)
+
+    header_polylines = [apply_route_offsets(route, station_offsets) for route in routes]
 
     # Per-station rendered label (top, bottom) Y, so group bands clear the
     # (possibly diagonal) station labels rather than just the markers.

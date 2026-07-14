@@ -1,0 +1,53 @@
+%%metro title: label-wrap row gap
+%%metro style: dark
+%%metro dir: metrics_out | RNA-SeQC
+%%metro file: sexcheck_out | TSV | Sex check
+%%metro line: qc | QC | #e6550d
+%%metro line: quant | Quantification | #0570b0
+%%metro line: fusion | Fusion detection | #38b927
+
+graph LR
+    subgraph align_sec [Alignment]
+        reads_in[ ]
+        bbduk[BBDuk trim]
+        star[STAR 2-pass]
+        cram_out[ ]
+
+        reads_in -->|qc,quant,fusion| bbduk
+        bbduk -->|qc,quant,fusion| star
+        star -->|qc,quant,fusion| cram_out
+    end
+
+    subgraph qc_sec [QC]
+        flagstat[flagstat + mosdepth]
+        markdup[sambamba markdup]
+        rnaseqc[RNA-SeQC]
+        sexcheck_out[ ]
+        metrics_out[ ]
+
+        star -->|qc| flagstat
+        flagstat -->|qc| sexcheck_out
+        star -->|qc| markdup
+        markdup -->|qc| rnaseqc
+        rnaseqc -->|qc| metrics_out
+    end
+
+    subgraph quant_sec [Quantification]
+        rsem[RSEM]
+        geneann[Gene annotation]
+        expr_out[ ]
+
+        star -->|quant| rsem
+        rsem -->|quant| geneann
+        geneann -->|quant| expr_out
+    end
+
+    subgraph fusion_sec [Fusion detection]
+        arriba[Arriba]
+        starfusion[STAR-Fusion]
+        fusions_out[ ]
+
+        star -->|fusion| arriba
+        arriba -->|fusion| starfusion
+        starfusion -->|fusion| fusions_out
+    end

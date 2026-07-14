@@ -14,6 +14,7 @@ two authoring-error guards are excluded from the warn-by-default path.
 
 from __future__ import annotations
 
+import re
 import warnings
 from pathlib import Path
 
@@ -183,6 +184,84 @@ def test_breeze_through_guards_on_render_path(guard_name: str) -> None:
     always-on render chokepoint set (Tier A), not the validate-only set."""
     names = {spec.name for spec in render_layout_invariant_specs()}
     assert guard_name in names
+
+
+def test_render_row_gap_guard_fires_under_strict() -> None:
+    """``assert_render_row_gaps`` raises under strict when a section's bbox has
+    grown into the row below, and warns otherwise (the render-path chokepoint
+    that catches a label-wrap growth the reflow failed to absorb)."""
+    from nf_metro.layout.constants import SECTION_Y_GAP
+    from nf_metro.layout.phases.guards import assert_render_row_gaps
+
+    graph = _laid_out("topologies/render_labelwrap_row_gap.mmd")
+    upper = graph.sections["qc_sec"]
+    upper.bbox_h += SECTION_Y_GAP + 10.0  # crowd the row below past its gap
+
+    with pytest.raises(LayoutInvariantError, match="row-gap invariant"):
+        assert_render_row_gaps(graph, SECTION_Y_GAP, strict=True)
+    with pytest.warns(UserWarning, match="row-gap invariant"):
+        assert_render_row_gaps(graph, SECTION_Y_GAP, strict=False)
+
+
+# Fixtures whose sections stack vertically; the first forces late label
+# wrapping (a two-word ``sambamba markdup`` and an ``RNA-SeQC`` dir-icon
+# branch squeezed together) directly above another section, the case #1461
+# regressed on.
+ROW_GAP_FIXTURES = [
+    "topologies/render_labelwrap_row_gap.mmd",
+    "sarek_metro.mmd",
+    "variant_calling.mmd",
+]
+
+_SECTION_RECT_RE = re.compile(
+    r'<rect\b[^>]*\bclass="[^"]*nf-metro-section-box[^"]*"[^>]*'
+    r'\bdata-section-id="(?P<sid>[^"]+)"'
+)
+_ATTR_RE = {a: re.compile(rf'\b{a}="([0-9.]+)"') for a in ("x", "y", "width", "height")}
+
+
+def _rendered_section_rects(svg: str) -> dict[str, tuple[float, float, float, float]]:
+    """Map each section id to its drawn ``(x, y, w, h)`` box in the final SVG.
+
+    The rendered box reflects render-time label-wrap growth the pre-render
+    layout bboxes never saw, so it is the geometry the row-gap invariant must
+    hold against.
+    """
+    rects: dict[str, tuple[float, float, float, float]] = {}
+    for m in _SECTION_RECT_RE.finditer(svg):
+        tag = svg[m.start() : svg.index(">", m.start())]
+        vals = {a: float(_ATTR_RE[a].search(tag).group(1)) for a in _ATTR_RE}
+        rects[m.group("sid")] = (vals["x"], vals["y"], vals["width"], vals["height"])
+    return rects
+
+
+@pytest.mark.parametrize("name", ROW_GAP_FIXTURES)
+def test_rendered_row_gap_survives_label_wrap(name: str) -> None:
+    """Column-overlapping adjacent-row sections keep ``section_y_gap`` in the
+    *rendered* SVG, after label wrapping has grown any bbox (#1461)."""
+    from nf_metro.layout.constants import SAME_COORD_TOLERANCE, SECTION_Y_GAP
+
+    graph = _laid_out(name)
+    theme_name = graph.style if graph.style in THEMES else "nfcore"
+    rects = _rendered_section_rects(render_svg(graph, THEMES[theme_name]))
+    gap = graph.section_y_gap if graph.section_y_gap is not None else SECTION_Y_GAP
+
+    for usid, us in graph.sections.items():
+        if usid not in rects:
+            continue
+        ux, uy, uw, uh = rects[usid]
+        next_row = us.grid_row + us.grid_row_span
+        for lsid, ls in graph.sections.items():
+            if ls.grid_row != next_row or lsid not in rects:
+                continue
+            lx, ly, lw, lh = rects[lsid]
+            if ux >= lx + lw or lx >= ux + uw:  # no horizontal overlap
+                continue
+            drawn_gap = ly - (uy + uh)
+            assert drawn_gap >= gap - SAME_COORD_TOLERANCE, (
+                f"{name}: rendered row gap {usid!r} -> {lsid!r} is "
+                f"{drawn_gap:.1f}px, expected >= {gap:.1f}px"
+            )
 
 
 def _render_fixture(name: str, *, strict: bool = False) -> None:

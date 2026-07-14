@@ -1548,6 +1548,15 @@ gallery:
       and output. Each plain off-track node renders a station marker at its line end rather
       than a bare stub, and the input's label sits above the node clear of its drop and the
       adjacent station's label."
+  - id: render_labelwrap_row_gap
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "A QC section whose station labels only wrap at render time (`sambamba markdup`
+      onto four lines, an `RNA-SeQC` dir-icon branch) grows the section box taller than
+      the layout reserved for it. The section directly below keeps the full inter-section
+      gap: the render reflows the lower rows down to absorb the late growth rather than
+      letting its header badge collide with the grown box."
 
 pipelines:
   - id: rnaseq_auto
