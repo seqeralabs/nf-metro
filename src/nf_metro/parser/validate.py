@@ -16,8 +16,11 @@ import networkx as nx
 from nf_metro.parser.model import (
     Edge,
     MetroGraph,
+    Port,
     UnresolvedEndpointError,
+    UnresolvedPortSectionError,
     format_unresolved_endpoint,
+    format_unresolved_port_section,
 )
 
 ERROR = "error"
@@ -54,6 +57,26 @@ def require_resolved_edge_endpoints(graph: MetroGraph) -> None:
                 format_unresolved_endpoint(edge, missing)
                 for edge, missing in unresolved
             )
+        )
+
+
+def find_unresolved_port_sections(graph: MetroGraph) -> list[Port]:
+    """Return each port whose ``section_id`` is absent from ``graph.sections``.
+
+    Detector shared by the layout-boundary raise and the soft ``validate_graph``
+    path, mirroring :func:`find_unresolved_endpoints`.
+    """
+    return [
+        port for port in graph.ports.values() if port.section_id not in graph.sections
+    ]
+
+
+def require_resolved_port_sections(graph: MetroGraph) -> None:
+    """Raise at the layout boundary if any port's section fails to resolve."""
+    unresolved = find_unresolved_port_sections(graph)
+    if unresolved:
+        raise UnresolvedPortSectionError(
+            "; ".join(format_unresolved_port_section(port) for port in unresolved)
         )
 
 
@@ -126,6 +149,9 @@ def validate_graph(graph: MetroGraph) -> list[ValidationIssue]:
                 ERROR, format_unresolved_endpoint(edge, missing), line=edge.source_line
             )
         )
+
+    for port in find_unresolved_port_sections(graph):
+        issues.append(ValidationIssue(ERROR, format_unresolved_port_section(port)))
 
     for section in graph.sections.values():
         for sid in section.station_ids:

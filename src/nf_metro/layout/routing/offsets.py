@@ -1215,8 +1215,8 @@ def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
         # exit-port line has an established order: preserve it at the exit so a
         # straight-through line keeps its slot instead of being re-sorted by
         # feeder Y.
-        section = graph.sections.get(port_obj.section_id)
-        entry_ports = list(section.entry_ports) if section else []
+        section = graph.section_for_port(port_obj)
+        entry_ports = list(section.entry_ports)
         if len(entry_ports) == 1:
             entry_id = entry_ports[0]
             entry_lines = graph.station_lines(entry_id)
@@ -1409,9 +1409,7 @@ def _entry_top_from_tb_bottom_exits(ctx: _OffsetCtx) -> None:
         if needs_perp_approach_fan(graph, port_id):
             _slot_perp_fan_bundle(ctx, port_id)
             continue
-        entry_section = graph.sections.get(port_obj.section_id)
-        if entry_section is None:
-            continue
+        entry_section = graph.section_for_port(port_obj)
         for edge in graph.edges_to(port_id):
             src = graph.station_for_edge_source(edge)
             if not src.is_port:
@@ -2140,12 +2138,8 @@ def _left_entry_lr_ports(ctx: _OffsetCtx) -> Iterator[tuple[str, Port]]:
     for port_id, port in graph.ports.items():
         if not (port.is_entry and port.side is PortSide.LEFT):
             continue
-        sec = graph.sections.get(port.section_id)
-        if (
-            sec is None
-            or sec.direction != "LR"
-            or port.section_id in ctx.reversed_sections
-        ):
+        sec = graph.section_for_port(port)
+        if sec.direction != "LR" or port.section_id in ctx.reversed_sections:
             continue
         yield port_id, port
 

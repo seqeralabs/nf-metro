@@ -203,13 +203,17 @@
     "note": "Ports listed in a section's entry_ports/exit_ports always have a backing station; the missing-station continue never fires.",
     "status": "defensive"
   },
+  "context.py::if pst is None:::#1": {
+    "note": "pst = graph.stations.get(port.id): a port is always registered as a backing station, so the guard is never taken across the corpus. Kept as a station-id string read (no Edge in hand), the idiom deferred by the #1438 single-endpoint migration for a future station-id accessor; the sibling section lookup here was migrated to graph.section_for_port.",
+    "status": "needs-review"
+  },
   "context.py::if sec and sec.grid_col >= 0:::#1": {
-    "note": "After section placement every resolved section carries a non-negative grid_col, so the None-return for an unplaced/missing column never fires.",
-    "status": "defensive"
+    "note": "grid-col sentinel: a rail-mode section carries grid_col == -1 (it is placed outside the section grid), so the negative-column arm returning None is load-bearing, not dead. No corpus routing path resolves a rail section's column, so the arm is un-exercised, but a rail topology can reach it; do not fold into a non-optional accessor.",
+    "status": "needs-review"
   },
   "context.py::if sec and sec.grid_row >= 0:::#1": {
-    "note": "After section placement every resolved section carries a non-negative grid_row, so the None-return for an unplaced/missing row never fires.",
-    "status": "defensive"
+    "note": "grid-row sentinel: a rail-mode section carries grid_row == -1 (placed outside the section grid), so the negative-row arm returning None is load-bearing, not dead. No corpus routing path resolves a rail section's row, so the arm is un-exercised, but a rail topology can reach it; do not fold into a non-optional accessor.",
+    "status": "needs-review"
   },
   "context.py::if sec is None:::#1": {
     "note": "_resolve_section_colrow is called for ports/junctions that always resolve to a section; the None-section early-return never fires (mirrors the grid-sentinel guards at L395/L403).",
@@ -719,10 +723,6 @@
     "note": "In _align_flat_tb_exit_to_entry: scopes the flat-seam exit/entry reconciliation to horizontal (LEFT/RIGHT) entry ports, whose per-line offsets are Y like the TB exit's. A TOP/BOTTOM entry stores X-offsets, so copying across would be a category error. No corpus fixture routes a TB LEFT/RIGHT exit directly into a TOP/BOTTOM entry at the same Y, so the skip arm is never taken; defensive against that cross-axis seam.",
     "status": "defensive"
   },
-  "offsets.py::if entry_section is None:::#1": {
-    "note": "Defensive null guard: every port in graph.ports is created by the resolver with a valid section_id, so graph.sections.get(port_obj.section_id) is never None at routing time. The continue branch is a safety net against a malformed port that no valid graph produces.",
-    "status": "defensive"
-  },
   "offsets.py::if exit_lines == set(j_lines):::#1": {
     "note": "Reaches the realignment body of _align_junction_to_entry_port only via a TB-reversed two-line bundle fanning into a junction (the #704 boundary fix is in, so this body is now provably reachable). The junction_entry_reversed_fold fixture now ships that topology; with the bundle order carried concentrically through the reversal corners the junction offsets already match their entry ports, so the realignment body short-circuits before its offset-writing arms and they stay un-exercised corpus-wide. Defensive. Its lines-differ arm (->1147) is additionally defensive: a fan-out junction carries exactly its single exit port's fanned lines, so exit_lines == j_lines always.",
     "status": "defensive"
@@ -817,10 +817,6 @@
   },
   "offsets.py::if trunk_feeder_id is not None:::#2": {
     "note": "len(unique_ys) < 2 means every port line's feeder stations average to a single Y. Under track-per-line layout, distinct lines occupy distinct tracks, so a shared Y across >=2 lines implies one trunk feeder carrying all of them (trunk_feeder_id set); the no-trunk arm is therefore not reached by a track-separated topology.",
-    "status": "defensive"
-  },
-  "offsets.py::sec is None::#1": {
-    "note": "Bypass-convergence LEFT-entry feeder scan: the loop only inspects existing LEFT entry ports, whose section always resolves, so the leading `sec is None` short-circuit that skips the port is never taken.",
     "status": "defensive"
   },
   "offsets.py::while stack:::#1": {
@@ -921,10 +917,6 @@
   },
   "rail.py::if st is None:::#1": {
     "note": "_line_rail_y is only ever called with a real station id (on_rail.id, edge.source/target, or a sibling edge endpoint), all of which exist in graph.stations - the route loop pre-filters None endpoints at the src/tgt guard. The None arm is a contract guard no render-path call reaches.",
-    "status": "defensive"
-  },
-  "rail.py::if up is None or down is None:::#1": {
-    "note": "Null guard over the two ports' sections in the rail inter-section connector; a boundary port's section_id always resolves in graph.sections, so the early-return arm is a contract guard no render-path call reaches.",
     "status": "defensive"
   },
   "reversal.py::elif src.is_port:::#1": {

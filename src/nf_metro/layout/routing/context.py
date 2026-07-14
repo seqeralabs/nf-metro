@@ -657,9 +657,7 @@ def is_far_side_around_below_left_entry(graph: MetroGraph, port: Port) -> bool:
     """
     if not (port.is_entry and port.side is PortSide.LEFT):
         return False
-    psec = graph.sections.get(port.section_id)
-    if psec is None:
-        return False
+    psec = graph.section_for_port(port)
     for edge in graph.edges_to(port.id):
         src = graph.station_for_edge_source(edge)
         src_port = graph.ports.get(edge.source)
@@ -701,9 +699,9 @@ def is_near_vertical_junction_right_entry(graph: MetroGraph, port: Port) -> bool
     """
     if not (port.is_entry and port.side is PortSide.RIGHT):
         return False
-    psec = graph.sections.get(port.section_id)
+    psec = graph.section_for_port(port)
     pst = graph.stations.get(port.id)
-    if psec is None or pst is None:
+    if pst is None:
         return False
     lines_by_source: dict[str, set[str]] = defaultdict(set)
     for edge in graph.edges_to(port.id):

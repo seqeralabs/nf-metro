@@ -492,9 +492,7 @@ def check_seam_approach_equals_departure(
         port = graph.ports.get(route.edge.target)
         if port is None or not port.is_entry:
             continue
-        section = graph.sections.get(port.section_id)
-        if section is None:
-            continue
+        section = graph.section_for_port(port)
         primary_axis, _lane_axis = AxisFrame.axes_for_direction(section.direction)
         edge_runs_lateral = port.side in (PortSide.LEFT, PortSide.RIGHT)
         if lanes_run_along_y(section.direction) != edge_runs_lateral:
@@ -1032,8 +1030,8 @@ def check_convergence_shallow_feeder_concentric(
     for port_id, port in graph.ports.items():
         if not (port.is_entry and port.side is PortSide.LEFT):
             continue
-        sec = graph.sections.get(port.section_id)
-        if sec is None or sec.direction != "LR" or port.section_id in reversed_sections:
+        sec = graph.section_for_port(port)
+        if sec.direction != "LR" or port.section_id in reversed_sections:
             continue
         feeders = _convergence_feeders(graph, port_id)
         if feeders is None:
@@ -1201,8 +1199,8 @@ def check_exit_inherits_entry_bundle_order(
     for port_id, port in graph.ports.items():
         if port.is_entry or port.side not in (PortSide.LEFT, PortSide.RIGHT):
             continue
-        section = graph.sections.get(port.section_id)
-        if section is None or section.direction not in ("LR", "RL"):
+        section = graph.section_for_port(port)
+        if section.direction not in ("LR", "RL"):
             continue
         entry_ports = list(section.entry_ports)
         if len(entry_ports) != 1:
@@ -2162,10 +2160,8 @@ def check_stacked_right_ports_bow_out(
             continue
         if not tgt_port.is_entry or tgt_port.side is not PortSide.RIGHT:
             continue
-        src_sec = graph.sections.get(src_port.section_id)
-        tgt_sec = graph.sections.get(tgt_port.section_id)
-        if src_sec is None or tgt_sec is None:
-            continue
+        src_sec = graph.section_for_port(src_port)
+        tgt_sec = graph.section_for_port(tgt_port)
         if src_sec.grid_col != tgt_sec.grid_col or src_sec.grid_row == tgt_sec.grid_row:
             continue
 

@@ -317,6 +317,7 @@ from nf_metro.parser.validate import (
     find_cycle,
     format_cycle_error,
     require_resolved_edge_endpoints,
+    require_resolved_port_sections,
 )
 
 # ---------------------------------------------------------------------------
@@ -472,6 +473,7 @@ def compute_layout(
         raise CyclicGraphError(format_cycle_error(witness))
 
     require_resolved_edge_endpoints(graph)
+    require_resolved_port_sections(graph)
 
     if x_spacing is None:
         x_spacing = graph.x_spacing
