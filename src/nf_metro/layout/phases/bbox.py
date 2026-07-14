@@ -218,6 +218,13 @@ def push_lower_rows_after_bbox_grow(graph: MetroGraph, section_y_gap: float) -> 
         }
         for sid in shifted_section_ids:
             graph.sections[sid].bbox_y += deficit
+            # A rail-mode section's per-line rail centres are anchored
+            # independently of its station Ys; shift them together so the
+            # rail routing does not kink against a stale centreline.
+            rail = graph._rail_y.get(sid)
+            if rail:
+                for line_id in rail:
+                    rail[line_id] += deficit
         shifted_station_ids = set()
         for sid in shifted_section_ids:
             shifted_station_ids.update(graph.sections[sid].station_ids)

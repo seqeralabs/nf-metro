@@ -36,6 +36,7 @@ from nf_metro.layout.phases.guards import (
     assert_render_row_gaps,
     iter_opposing_line_overlaps,
 )
+from nf_metro.layout.phases.spacing import _bypass_label_obstacles
 from nf_metro.layout.routing import (
     RoutedPath,
     apply_route_offsets,
@@ -614,6 +615,10 @@ def _settle_render_geometry(
 
     labels = _place(station_offsets, routes)
     if push_lower_rows_after_bbox_grow(graph, section_y_gap):
+        # The shift moved section-anchored geometry; refresh the bypass-label
+        # obstacle boxes (derived from station Ys, read by the router) so the
+        # re-route does not seat a bypass corner against a stale box.
+        graph.bypass_label_obstacles = _bypass_label_obstacles(graph)
         station_offsets = compute_station_offsets(graph, offset_step=offset_step)
         routes = route_edges_centred(graph, station_offsets=station_offsets)
         labels = _place(station_offsets, routes)

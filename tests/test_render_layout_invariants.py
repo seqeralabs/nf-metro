@@ -263,6 +263,42 @@ def test_rendered_row_gap_survives_label_wrap(name: str) -> None:
             )
 
 
+def test_render_reflow_shifts_rail_centrelines_with_stations() -> None:
+    """When the render-time row reflow shifts a rail-mode section, its rail
+    centrelines move by the same amount as its stations, so the tracks stay
+    straight instead of kinking against a stale ``_rail_y`` (#1461).
+
+    ``sarek_metro`` has a rail-mode ``calling`` section one row below a section
+    whose labels wrap at render, so the reflow shifts it.
+    """
+    graph = _laid_out("sarek_metro.mmd")
+    rail_sections = {sid for sid in graph._rail_y}
+    assert rail_sections, "expected sarek_metro to have a rail-mode section"
+    pre_rail = {sid: dict(lines) for sid, lines in graph._rail_y.items()}
+    pre_y = {sid: st.y for sid, st in graph.stations.items()}
+
+    render_svg(graph, THEMES["nfcore"])
+
+    for sid in rail_sections:
+        rail_delta = {
+            line: graph._rail_y[sid][line] - pre_rail[sid][line]
+            for line in pre_rail[sid]
+        }
+        common = next(iter(rail_delta.values()))
+        assert all(abs(d - common) < 1e-6 for d in rail_delta.values()), (
+            f"{sid}: rail centrelines shifted by differing amounts {rail_delta}"
+        )
+        for stid in graph.sections[sid].station_ids:
+            st = graph.stations.get(stid)
+            if st is None or st.is_port or stid not in pre_y:
+                continue
+            station_delta = st.y - pre_y[stid]
+            assert abs(station_delta - common) < 1e-6, (
+                f"{sid}: station {stid!r} shifted {station_delta:.1f}px but its "
+                f"rail centrelines shifted {common:.1f}px (stale rail centreline)"
+            )
+
+
 def _render_fixture(name: str, *, strict: bool = False) -> None:
     graph = parse_metro_mermaid((FIXTURES / name).read_text())
     graph.strict = strict
