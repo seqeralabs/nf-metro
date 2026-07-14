@@ -1215,8 +1215,8 @@ def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
         # exit-port line has an established order: preserve it at the exit so a
         # straight-through line keeps its slot instead of being re-sorted by
         # feeder Y.
-        section = graph.sections.get(port_obj.section_id)
-        entry_ports = list(section.entry_ports) if section else []
+        section = graph.section_for_port(port_obj)
+        entry_ports = list(section.entry_ports)
         if len(entry_ports) == 1:
             entry_id = entry_ports[0]
             entry_lines = graph.station_lines(entry_id)
