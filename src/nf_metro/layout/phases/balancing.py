@@ -80,8 +80,8 @@ def _snap_inter_section_port_pairs(graph: MetroGraph) -> None:
         port_set = section.port_ids
         src_ys: set[float] = set()
         for edge in graph.edges_to(port_id):
-            src = graph.stations.get(edge.source)
-            if src and not src.is_port and edge.source not in port_set:
+            src = graph.station_for_edge_source(edge)
+            if not src.is_port and edge.source not in port_set:
                 src_ys.add(round(src.y, 1))
 
         # Fan-in exits (multiple distinct internal source Ys) want to
@@ -163,8 +163,8 @@ def _entry_consumer_ys(graph: MetroGraph, entry_id: str) -> list[float]:
         return []
     ys: list[float] = []
     for edge in graph.edges_from(entry_id):
-        st = graph.stations.get(edge.target)
-        if st is not None and not st.is_port and st.section_id == ep.section_id:
+        st = graph.station_for_edge_target(edge)
+        if not st.is_port and st.section_id == ep.section_id:
             ys.append(st.y)
     return ys
 
@@ -868,8 +868,8 @@ def _loop_column_key(
     pred_x: float | None = None
     succ_x: float | None = None
     for e in graph.edges_to(sid):
-        p = graph.stations.get(e.source)
-        if p is None or p.is_hidden:
+        p = graph.station_for_edge_source(e)
+        if p.is_hidden:
             continue
         if abs(p.y - section_trunk_y) > SAME_COORD_TOLERANCE:
             return None
@@ -880,8 +880,8 @@ def _loop_column_key(
         ):
             pred_x = p.x
     for e in graph.edges_from(sid):
-        t = graph.stations.get(e.target)
-        if t is None or t.is_hidden:
+        t = graph.station_for_edge_target(e)
+        if t.is_hidden:
             continue
         if abs(t.y - section_trunk_y) > SAME_COORD_TOLERANCE:
             return None
@@ -946,12 +946,12 @@ def _snap_column_to_anchors(
         visible_ins = [
             e
             for e in graph.edges_to(sid)
-            if ((gs := graph.stations.get(e.source)) is not None and not gs.is_hidden)
+            if not graph.station_for_edge_source(e).is_hidden
         ]
         visible_outs = [
             e
             for e in graph.edges_from(sid)
-            if ((gs := graph.stations.get(e.target)) is not None and not gs.is_hidden)
+            if not graph.station_for_edge_target(e).is_hidden
         ]
         if len(visible_ins) == 1 and len(visible_outs) == 1:
             anchor_xs.append(st.x)

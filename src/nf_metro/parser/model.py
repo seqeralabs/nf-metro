@@ -736,6 +736,29 @@ class MetroGraph:
             raise UnresolvedEndpointError(format_unresolved_endpoint(edge, missing))
         return src, tgt
 
+    def _station_for_endpoint(self, edge: Edge, node_id: str) -> Station:
+        st = self.stations.get(node_id)
+        if st is None:
+            raise UnresolvedEndpointError(format_unresolved_endpoint(edge, [node_id]))
+        return st
+
+    def station_for_edge_source(self, edge: Edge) -> Station:
+        """Resolve an edge's ``source`` to its station (non-optional).
+
+        The endpoint-resolution contract lets a caller reading only one end
+        skip the ``None`` guard :meth:`edge_endpoints` embeds. A dangling
+        source raises :class:`UnresolvedEndpointError`.
+        """
+        return self._station_for_endpoint(edge, edge.source)
+
+    def station_for_edge_target(self, edge: Edge) -> Station:
+        """Resolve an edge's ``target`` to its station (non-optional).
+
+        The target counterpart of :meth:`station_for_edge_source`; raises
+        :class:`UnresolvedEndpointError` on a dangling target.
+        """
+        return self._station_for_endpoint(edge, edge.target)
+
     def is_hub(self, station_id: str) -> bool:
         """A station with both a predecessor and a successor edge.
 

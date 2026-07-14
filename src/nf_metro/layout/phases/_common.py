@@ -186,9 +186,7 @@ def _lr_exit_aligned_target(
     bbox_top = exit_section.bbox_y
     bbox_bot = exit_section.bbox_y + exit_section.bbox_h
     for edge in graph.edges_from(port_id):
-        tgt = graph.stations.get(edge.target)
-        if not tgt:
-            continue
+        tgt = graph.station_for_edge_target(edge)
         if edge.target in junction_ids:
             return None
         if not tgt.is_port:
@@ -1555,8 +1553,8 @@ def _in_section_exit_carriers(
     """Y of each non-port station inside *section* that feeds *exit_port_id*."""
     carriers: dict[str, float] = {}
     for e in graph.edges_to(exit_port_id):
-        s = graph.stations.get(e.source)
-        if s is not None and not s.is_port and s.section_id == section.id:
+        s = graph.station_for_edge_source(e)
+        if not s.is_port and s.section_id == section.id:
             carriers[e.source] = s.y
     return carriers
 

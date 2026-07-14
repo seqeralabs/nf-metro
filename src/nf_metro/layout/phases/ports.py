@@ -97,8 +97,7 @@ def _entry_consumer_y(
     ys = [
         st.y
         for edge in graph.edges_from(port_id)
-        if (st := graph.stations.get(edge.target)) is not None
-        and not st.is_port
+        if not (st := graph.station_for_edge_target(edge)).is_port
         and st.section_id == entry_section.id
     ]
     port_st = graph.stations.get(port_id)
@@ -116,8 +115,8 @@ def _align_lr_entry_port(
 ) -> None:
     """Align a LEFT/RIGHT entry port's Y with its incoming source."""
     for edge in graph.edges_to(port_id):
-        src = graph.stations.get(edge.source)
-        if not src or not (src.is_port or edge.source in junction_ids):
+        src = graph.station_for_edge_source(edge)
+        if not (src.is_port or edge.source in junction_ids):
             continue
 
         # Derive effective source coordinates (computes junction
@@ -289,8 +288,8 @@ def _align_tb_entry_port(
     # _resolve_source_xy so junctions don't need to be pre-positioned.
     sources: list[tuple[float, float, str | None]] = []
     for edge in graph.edges_to(port_id):
-        src = graph.stations.get(edge.source)
-        if not src or not (src.is_port or edge.source in junction_ids):
+        src = graph.station_for_edge_source(edge)
+        if not (src.is_port or edge.source in junction_ids):
             continue
         src_xy = _resolve_source_xy(graph, edge.source, junction_ids)
         if src_xy is None:
@@ -532,8 +531,8 @@ def _align_ports_to_downstream(graph: MetroGraph) -> None:
                 # Fan-out to junction -- don't override
                 target_entry_id = None
                 break
-            tgt = graph.stations.get(edge.target)
-            if tgt and tgt.is_port:
+            tgt = graph.station_for_edge_target(edge)
+            if tgt.is_port:
                 tgt_port = graph.ports.get(edge.target)
                 if tgt_port and tgt_port.is_entry:
                     target_entry_id = edge.target
@@ -783,8 +782,8 @@ def _snap_grid_group_entry_ports(graph: MetroGraph) -> None:
         # Find the first non-port station connected to this port.
         target_y = None
         for edge in graph.edges_from(port_id):
-            tgt = graph.stations.get(edge.target)
-            if tgt and not tgt.is_port and tgt.section_id == section.id:
+            tgt = graph.station_for_edge_target(edge)
+            if not tgt.is_port and tgt.section_id == section.id:
                 target_y = tgt.y
                 break
 
@@ -835,8 +834,8 @@ def _snap_grid_group_exit_ports(graph: MetroGraph) -> None:
         exit_lines: set[str] = set()
         for edge in graph.edges_to(port_id):
             exit_lines.add(edge.line_id)
-            src = graph.stations.get(edge.source)
-            if src and not src.is_port and src.section_id == section.id:
+            src = graph.station_for_edge_source(edge)
+            if not src.is_port and src.section_id == section.id:
                 source_ys.append(src.y)
 
         if not source_ys:
@@ -905,18 +904,16 @@ def _resolve_downstream_entry_y(
         # Direct exit -> entry connection
         dp = graph.ports.get(edge.target)
         if dp and dp.is_entry:
-            ds_st = graph.stations.get(edge.target)
-            if ds_st:
-                entry_ys.append(ds_st.y)
+            ds_st = graph.station_for_edge_target(edge)
+            entry_ys.append(ds_st.y)
             continue
         # Via junction
         if edge.target in junction_ids:
             for e2 in graph.edges_from(edge.target):
                 dp2 = graph.ports.get(e2.target)
                 if dp2 and dp2.is_entry:
-                    ds_st = graph.stations.get(e2.target)
-                    if ds_st:
-                        entry_ys.append(ds_st.y)
+                    ds_st = graph.station_for_edge_target(e2)
+                    entry_ys.append(ds_st.y)
 
     if entry_ys:
         return min(entry_ys, key=lambda y: abs(y - port_st.y))
@@ -1453,16 +1450,16 @@ def _clamp_tb_entry_port(
     if edge.source in junction_ids:
         for e2 in graph.edges:
             if e2.target == edge.source:
-                ep = graph.stations.get(e2.source)
-                if ep and ep.is_port:
+                ep = graph.station_for_edge_source(e2)
+                if ep.is_port:
                     exit_pid = e2.source
                     break
 
     top_src_y = None
     for e3 in graph.edges:
         if e3.target == exit_pid:
-            s3 = graph.stations.get(e3.source)
-            if s3 and not s3.is_port and e3.source not in junction_ids:
+            s3 = graph.station_for_edge_source(e3)
+            if not s3.is_port and e3.source not in junction_ids:
                 if top_src_y is None or s3.y < top_src_y:
                     top_src_y = s3.y
 
@@ -1479,8 +1476,8 @@ def _clamp_tb_entry_port(
     if edge.source in junction_ids:
         for e2 in graph.edges:
             if e2.target == edge.source:
-                ep = graph.stations.get(e2.source)
-                if ep and ep.is_port:
+                ep = graph.station_for_edge_source(e2)
+                if ep.is_port:
                     ep.y = target_y
                     if e2.source in graph.ports:
                         graph.ports[e2.source].y = target_y

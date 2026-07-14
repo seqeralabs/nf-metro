@@ -499,9 +499,7 @@ def _section_line_feeders(ctx: _OffsetCtx, section: Section) -> dict[str, str]:
     line_feeder: dict[str, str] = {}
     for pid in section.entry_ports:
         for edge in graph.edges_to(pid):
-            src = graph.stations.get(edge.source)
-            if not src:
-                continue
+            src = graph.station_for_edge_source(edge)
             feeder_sec = src.section_id
             if feeder_sec is not None:
                 line_feeder[edge.line_id] = feeder_sec
@@ -845,8 +843,8 @@ def _entry_fed_in_section(graph: MetroGraph, sid: str, lid: str, sec_id: str) ->
             port = graph.ports.get(e.source)
             if port and port.is_entry:
                 return True
-            src = graph.stations.get(e.source)
-            if src and not src.is_port and src.section_id == sec_id:
+            src = graph.station_for_edge_source(e)
+            if not src.is_port and src.section_id == sec_id:
                 stack.append(e.source)
     return False
 
@@ -1104,7 +1102,7 @@ def _propagate_exit_offsets_to_hubs(
     feeder_ids = {
         edge.source
         for edge in graph.edges_to(port_id)
-        if (st := graph.stations.get(edge.source)) is not None and not st.is_port
+        if not graph.station_for_edge_source(edge).is_port
     }
     if len(feeder_ids) < 2:
         return
@@ -1170,8 +1168,8 @@ def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
             continue
         internal_offs: dict[str, float] = {}
         for edge in graph.edges_to(port_id):
-            src_st = graph.stations.get(edge.source)
-            if src_st and not src_st.is_port:
+            src_st = graph.station_for_edge_source(edge)
+            if not src_st.is_port:
                 internal_offs[edge.line_id] = ctx.offsets.get(
                     (edge.source, edge.line_id), 0.0
                 )
@@ -1204,8 +1202,8 @@ def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
         # branch, not at the bundle's exit.
         line_feeders: dict[str, list[tuple[str, float]]] = {}
         for edge in graph.edges_to(port_id):
-            src_st = graph.stations.get(edge.source)
-            if src_st and not src_st.is_port:
+            src_st = graph.station_for_edge_source(edge)
+            if not src_st.is_port:
                 line_feeders.setdefault(edge.line_id, []).append(
                     (edge.source, src_st.y)
                 )
@@ -1315,9 +1313,9 @@ def _propagate_to_junctions(ctx: _OffsetCtx) -> None:
     graph = ctx.graph
     for jid in graph.junctions:
         for edge in graph.edges_to(jid):
-            src = graph.stations.get(edge.source)
+            src = graph.station_for_edge_source(edge)
             port_obj = graph.ports.get(edge.source)
-            if src and src.is_port and port_obj and not port_obj.is_entry:
+            if src.is_port and port_obj and not port_obj.is_entry:
                 for lid in graph.station_lines(jid):
                     port_off = ctx.offsets.get((edge.source, lid))
                     if port_off is not None:
@@ -1339,8 +1337,8 @@ def _perp_entry_run_turns_right(graph: MetroGraph, port_id: str) -> bool:
     if port_st is None:
         return False
     for edge in graph.edges_from(port_id):
-        consumer = graph.stations.get(edge.target)
-        if consumer is not None and not consumer.is_port:
+        consumer = graph.station_for_edge_target(edge)
+        if not consumer.is_port:
             return consumer.x > port_st.x + COORD_TOLERANCE_FINE
     return False
 
@@ -1361,7 +1359,7 @@ def _slot_perp_fan_bundle(ctx: _OffsetCtx, port_id: str) -> None:
     feeders = sorted(
         (src.y, ctx.line_priority.get(edge.line_id, 0), edge.line_id)
         for edge in graph.edges_to(port_id)
-        if (src := graph.stations.get(edge.source)) is not None and src.is_port
+        if (src := graph.station_for_edge_source(edge)).is_port
     )
     new_offs = {
         line_id: rank * ctx.offset_step
@@ -1415,8 +1413,8 @@ def _entry_top_from_tb_bottom_exits(ctx: _OffsetCtx) -> None:
         if entry_section is None:
             continue
         for edge in graph.edges_to(port_id):
-            src = graph.stations.get(edge.source)
-            if not src or not src.is_port:
+            src = graph.station_for_edge_source(edge)
+            if not src.is_port:
                 continue
             src_port = graph.ports.get(edge.source)
             if not (
@@ -1463,8 +1461,8 @@ def _propagate_lr_rl_exit_to_entry(ctx: _OffsetCtx) -> None:
             continue
         feeding_exit_ports: set[str] = set()
         for edge in graph.edges_to(port_id):
-            src = graph.stations.get(edge.source)
-            if not src or not src.is_port:
+            src = graph.station_for_edge_source(edge)
+            if not src.is_port:
                 continue
             src_port = graph.ports.get(edge.source)
             if src_port and not src_port.is_entry:
@@ -1496,8 +1494,8 @@ def _propagate_lr_rl_exit_to_entry(ctx: _OffsetCtx) -> None:
                 entry_offs[lid] = paired_off
         if len(entry_offs) >= 2:
             for e2 in graph.edges_from(port_id):
-                tgt_st = graph.stations.get(e2.target)
-                if tgt_st and not tgt_st.is_port:
+                tgt_st = graph.station_for_edge_target(e2)
+                if not tgt_st.is_port:
                     tgt_lines = graph.station_lines(e2.target)
                     overlap = [lid for lid in tgt_lines if lid in entry_offs]
                     if len(overlap) >= 2:
@@ -2094,9 +2092,7 @@ def _convergence_feeders(
 
     feeders: list[tuple[str, int, bool]] = []
     for edge in graph.edges_to(port_id):
-        src = graph.stations.get(edge.source)
-        if src is None:
-            return None
+        src = graph.station_for_edge_source(edge)
         col, row = _resolve_section_colrow(graph, src)
         if col is None:
             return None
@@ -2219,9 +2215,7 @@ def _order_convergence_by_approach(ctx: _OffsetCtx) -> None:
         source_y: dict[str, float] = {}
         upstream_secs: set[str] = set()
         for edge in graph.edges_to(port_id):
-            src = graph.stations.get(edge.source)
-            if src is None:
-                continue
+            src = graph.station_for_edge_source(edge)
             lid = edge.line_id
             source_y[lid] = min(source_y.get(lid, src.y), src.y)
             if src.section_id is not None and src.section_id != port.section_id:
@@ -2258,7 +2252,7 @@ def _left_entry_feeder_rows(
     graph = ctx.graph
     line_row: dict[str, int] = {}
     for edge in graph.edges_to(port_id):
-        col, row = _resolve_section_colrow(graph, graph.stations.get(edge.source))
+        col, row = _resolve_section_colrow(graph, graph.station_for_edge_source(edge))
         if col is None or row is None or col > grid_col:
             return None
         line_row[edge.line_id] = min(line_row.get(edge.line_id, row), row)

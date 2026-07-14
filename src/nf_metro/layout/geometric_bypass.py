@@ -218,11 +218,8 @@ def _insert_helpers(graph: MetroGraph, crossings: list[_Crossing]) -> list[str]:
         seen: dict[str, _Crossing] = {}
         for c in edge_crossings:
             seen.setdefault(c.crossed_id, c)
-        src_station = graph.stations.get(edge.source)
-        tgt_station = graph.stations.get(edge.target)
-        left_to_right = (
-            src_station is None or tgt_station is None or src_station.x <= tgt_station.x
-        )
+        src_station, tgt_station = graph.edge_endpoints(edge)
+        left_to_right = src_station.x <= tgt_station.x
         ordered = sorted(
             seen.values(), key=lambda c: c.cross_x, reverse=not left_to_right
         )

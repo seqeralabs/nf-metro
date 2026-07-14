@@ -87,12 +87,12 @@
     "note": "Empty-bundle guard: all callers (normalize.py 291/1648, inter_section_handlers.py 783/796/2132) derive bundle_widths from a non-empty bundle line count, so n is always >=1; the empty-list arm is never taken.",
     "status": "defensive"
   },
-  "common.py::if other and other.section_id:::#1": {
-    "note": "edges_to upstream guard: a junction's incoming neighbour is always an exit_port with section_id set, so the False (continue) arm only guards a junction-to-junction edge that valid construction never produces.",
+  "common.py::if other.section_id:::#1": {
+    "note": "A junction resolved upstream reads its incoming neighbour, always a sectioned exit port; the section-less (False) arm only guards a junction-to-junction edge valid construction never produces.",
     "status": "defensive"
   },
-  "common.py::if other and other.section_id:::#2": {
-    "note": "prefer_upstream=False neighbour guard: a junction's neighbours are always sectioned ports, so the False (continue) arm only guards a junction-to-junction edge valid construction never produces.",
+  "common.py::if other.section_id:::#2": {
+    "note": "The prefer_upstream=False scan reads a junction's incident neighbour on either side, always a sectioned station or port; the section-less (False) arm only guards a junction-to-junction edge valid construction never produces.",
     "status": "defensive"
   },
   "common.py::if s.bbox_h <= 0:::#1": {
@@ -117,10 +117,6 @@
   },
   "common.py::if seg_len2 == 0:::#1": {
     "note": "point_on_polyline degenerate-segment branch, reached only via the --animate renderer (render/animate.py); the render-path coverage sweep doesn't animate. Exercised by test_animation.py / test_routing.py, not the corpus.",
-    "status": "defensive"
-  },
-  "common.py::if src and not src.is_port:::#1": {
-    "note": "Null/port-source guard: edges to an exit port always originate at an internal (non-port) station after _resolve_sections, so the continue arm (None or port source) only guards a malformed pre-resolve graph.",
     "status": "defensive"
   },
   "common.py::if src_row is not None:::#1": {
@@ -201,14 +197,6 @@
   },
   "context.py::if src_row is None or col is None:::#1": {
     "note": "In _compute_fan_corridors, a fanning junction always resolves to a section column and row; the unresolved continue guards a malformed graph the render path never produces.",
-    "status": "defensive"
-  },
-  "context.py::if not pred:::#1": {
-    "note": "edge.source for an edge into the junction is always a present station; the missing-predecessor continue never fires.",
-    "status": "defensive"
-  },
-  "context.py::if not tgt or not (tgt.is_port or edge.target in junction_ids):::#1": {
-    "note": "A junction's outgoing inter-section edges always target a port or another junction (junctions are synthesised only on exit-port -> entry-port chains); the skip arm for a plain-station target never fires.",
     "status": "defensive"
   },
   "context.py::if port_st is None:::#1": {
@@ -359,10 +347,6 @@
     "note": "The column-gap enforcer keeps inter-column gaps positive, so gap_right>gap_left always holds at the target row.",
     "status": "defensive"
   },
-  "inter_section_handlers.py::if js and js.is_port:::#1": {
-    "note": "Reachable only via a defective render (LR->TB TOP-entry routing); see #720.",
-    "status": "needs-review"
-  },
   "inter_section_handlers.py::if lead is Direction.R:::#1": {
     "note": "A top-entry fan branch leading LEFT out of the junction skips the _v1_corner_x right-edge clearance bump; the corpus's fan branches all lead right, so the left-lead arm is unexercised.",
     "status": "needs-review"
@@ -397,10 +381,6 @@
   },
   "inter_section_handlers.py::if sx >= (left_edge + right_edge) / 2:::#1": {
     "note": "Defensive symmetry: a merge feeder junction sits in the inter-column gap downstream of its fork, i.e. right of its source section's centre, so the exit-right arm always fires in the corpus. The exit-left arm mirrors it for a junction sitting left of centre; no fixture places a merge feeder there.",
-    "status": "defensive"
-  },
-  "inter_section_handlers.py::if tgt is None:::#1": {
-    "note": "Edge targets are always registered stations after resolve; the None arm never fires.",
     "status": "defensive"
   },
   "inter_section_handlers.py::if tgt_col is not None:::#1": {
@@ -783,18 +763,6 @@
     "note": "The parser calls _remove_empty_sections() (resolve.py:26) which deletes any section whose station_ids list is empty before port creation. Ports are only added to station_ids during _create_port_stations() (resolve.py:527), which runs AFTER _remove_empty_sections(). Therefore every section in graph.sections at layout time has at least one non-port station; sec_stations is never empty.",
     "status": "defensive"
   },
-  "offsets.py::if not src or not src.is_port:::#1": {
-    "note": "In the resolved graph, all edges to entry ports come from either exit ports or junctions, both of which are is_port=True stations. A direct internal-station-to-entry-port edge does not exist after _resolve_sections rewrites inter-section edges into port-chain form. There is no valid topology where an edge to a TOP entry port has a source that is not a port.",
-    "status": "defensive"
-  },
-  "offsets.py::if not src or not src.is_port:::#2": {
-    "note": "_propagate_lr_rl_exit_to_entry iterates edges_to(port_id) for LEFT/RIGHT entry ports. In the resolved graph, all edges to entry ports originate from exit ports or junctions, which are always is_port=True stations. A direct internal-station-to-entry-port edge does not exist after resolution. The true arm (775->776) requires a source that is not a station or not a port, which no valid resolved topology produces.",
-    "status": "defensive"
-  },
-  "offsets.py::if not src:::#1": {
-    "note": "_section_line_feeders calls graph.stations.get(edge.source) for edges feeding an entry port. All edge sources are registered stations after _resolve_sections (exit ports, junctions, and merge junctions are all added via add_station), so .get() always returns a non-None Station and `if not src` is never True.",
-    "status": "defensive"
-  },
   "offsets.py::if not target_id:::#1": {
     "note": "An exit-only line at station sid is identified by being present in station_lines(sid) but absent from ctx.inbound[sid]. station_lines() returns lines appearing in any edge whose source or target is sid. For a line to be exit-only at sid, it must appear in at least one outbound edge from sid; otherwise it would not appear in station_lines(sid) at all. If an outbound edge exists, outbound_target[(sid, lid)] is always set, so target_id is never None when execution reaches L422. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
@@ -835,24 +803,8 @@
     "note": "Reaches the realignment body of _align_junction_to_entry_port only via a TB-reversed two-line bundle fanning into a junction (the #704 boundary fix is in, so this body is now provably reachable). The junction_entry_reversed_fold fixture now ships that topology; with the bundle order carried concentrically through the reversal corners the junction offsets already match their entry ports, so the realignment body short-circuits before its offset-writing arms and they stay un-exercised corpus-wide. Defensive. Its False arm (->1147) is additionally defensive: a >=2-line junction reaching this body is always a single-exit-port-fed fan-out junction (merge junctions carry one line and are skipped by len(j_lines)<2).",
     "status": "defensive"
   },
-  "offsets.py::if src and not src.is_port and src.section_id == sec_id:::#1": {
-    "note": "The false arm fires when an edge source is an internal station (not a port) whose section_id differs from sec_id. After _resolve_sections(), all inter-section edges run through port stations; no direct edge from an internal station of section A to an internal station of section B exists. DFS back-walk via edges_to() from within a section can only reach: (a) entry ports (return True), (b) same-section internal stations (pushed), or (c) other-section ports (is_port=True, skipped by `port and port.is_entry` check). Cross-section internal stations are structurally unreachable via direct edges after resolution.",
-    "status": "defensive"
-  },
-  "offsets.py::if src is None:::#1": {
-    "note": "Defensive guard in _convergence_feeders: every edge feeding an entry port has a source station, so the missing-source early return is never taken.",
-    "status": "defensive"
-  },
   "offsets.py::if src_port and not src_port.is_entry:::#2": {
     "note": "Reaches the realignment body of _align_junction_to_entry_port only via a TB-reversed two-line bundle fanning into a junction (the #704 boundary fix is in, so this body is now provably reachable). The junction_entry_reversed_fold fixture now ships that topology; with the bundle order carried concentrically through the reversal corners the junction offsets already match their entry ports, so the realignment body short-circuits before its offset-writing arms and they stay un-exercised corpus-wide. Defensive. Its else arm (->1203) is additionally defensive: the sole feeder of a >=2-line fan-out junction is its exit port, a non-entry port.",
-    "status": "defensive"
-  },
-  "offsets.py::if src_st and not src_st.is_port:::#1": {
-    "note": "In `_rewrite_edges_with_junctions` (resolve.py L594), edges to exit ports are always created as `Edge(source=edge.source, target=exit_port_id)` where `edge.source` is the original inter-section edge's source — an internal section station, not a port. So `src_st` is never None and `src_st.is_port` is always False. The false arm cannot be taken by any valid parsed graph.",
-    "status": "defensive"
-  },
-  "offsets.py::if src_st and not src_st.is_port:::#2": {
-    "note": "Same invariant as L602: edges to LR/RL exit ports are always from internal (non-port) stations, created by `_rewrite_edges_with_junctions` (resolve.py L594-595). The false arm (`src_st` is None or `src_st.is_port`) cannot be taken by any valid parsed graph.",
     "status": "defensive"
   },
   "offsets.py::if swap_lid is None:::#1": {
@@ -861,10 +813,6 @@
   },
   "offsets.py::if tgt_col is None:::#1": {
     "note": "Defensive guard in _convergence_feeders: a LEFT entry port section always has a grid column after placement, so the unresolved-target-column early return is never taken.",
-    "status": "defensive"
-  },
-  "offsets.py::if tgt_st and not tgt_st.is_port:::#1": {
-    "note": "edges_from(port_id) for an entry port yields edges to internal section stations. In the resolved graph, entry ports are connected directly to internal (non-port) stations; there are no entry-port-to-entry-port or entry-port-to-exit-port edges. So tgt_st is always a valid non-port station, and the loop-back arm (799->797) where tgt_st is None or is_port is unreachable for any valid resolved graph.",
     "status": "defensive"
   },
   "offsets.py::if trunk_feeder_id is not None:::#2": {
@@ -991,20 +939,8 @@
     "note": "Cycle guard in _entry_ports_through_junctions' junction walk. The True arm fires only if a junction is reached twice while walking out from one exit-port-fed junction (a junction reachable by two paths). Resolved peel-off fans are trees, so no junction is revisited and the arm is unreached; the guard keeps the walk terminating should chained junctions ever form a cycle.",
     "status": "defensive"
   },
-  "reversal.py::if not s2 or not s2.is_port:::#1": {
-    "note": "Junction look-through: s2 is the source of an edge feeding a fold junction. Junctions are synthetic resolution nodes fed only by exit ports or upstream junctions (both is_port=True), so s2 is always present and port-like. The continue is a structural-contract guard no valid topology reaches.",
-    "status": "defensive"
-  },
   "reversal.py::if not section:::#1": {
     "note": "_propagate_reversal_along_rows iterates sec_id values drawn from reversed_secs, which only ever holds real section ids added from graph.sections. graph.sections.get(sec_id) is never None; the continue is a defensive null guard.",
-    "status": "defensive"
-  },
-  "reversal.py::if not src or not src.is_port:::#1": {
-    "note": "Phase 1a (_detect_tb_bottom_top_entries) iterates edges feeding a TOP entry port. Entry ports are synthetic nodes created by section resolution; the only edges targeting them are the resolved chain's exit_port->entry_port and junction->entry_port links, so edge.source is always a registered port or junction station (both is_port=True). The continue (missing or non-port source) is a structural-contract guard no valid topology reaches.",
-    "status": "defensive"
-  },
-  "reversal.py::if not src:::#1": {
-    "note": "_section_fed_by_tb_lr_exit iterates edges feeding a LEFT/RIGHT entry port; edge.source is always a registered station, so graph.stations.get is never None. Defensive null guard.",
     "status": "defensive"
   },
   "reversal.py::if not succ:::#1": {
@@ -1049,10 +985,6 @@
   },
   "inter_section_handlers.py::and corridor.bypass_band_y >= base_y - COORD_TOLERANCE::#1": {
     "note": "Safety fallback: the shared bypass band is the deepest sibling's bypass_bottom_y, so a branch's own base_y never exceeds it; the arm that would decline a shallower shared band (guarding a predicate mismatch) is unexercised in the corpus.",
-    "status": "needs-review"
-  },
-  "context.py::if tgt is None:::#1": {
-    "note": "Defensive: _fan_bypass_band skips an edge whose target station does not resolve; every corpus fan edge resolves, so the skip arm is unexercised.",
     "status": "needs-review"
   },
   "context.py::if tgt_col is None:::#3": {

@@ -168,8 +168,8 @@ def _detect_tb_bottom_top_entries(
             if not port or port.side != PortSide.TOP:
                 continue
             for edge in graph.edges_to(port_id):
-                src = graph.stations.get(edge.source)
-                if not src or not src.is_port:
+                src = graph.station_for_edge_source(edge)
+                if not src.is_port:
                     continue
                 src_port = graph.ports.get(edge.source)
                 if not (
@@ -383,14 +383,12 @@ def _section_fed_by_tb_lr_exit(
         if not port or port.side not in (PortSide.LEFT, PortSide.RIGHT):
             continue
         for edge in graph.edges_to(port_id):
-            src = graph.stations.get(edge.source)
-            if not src:
-                continue
+            src = graph.station_for_edge_source(edge)
             if edge.source in junction_ids:
                 # Look through junction to find upstream exit port
                 for e2 in graph.edges_to(edge.source):
-                    s2 = graph.stations.get(e2.source)
-                    if not s2 or not s2.is_port:
+                    s2 = graph.station_for_edge_source(e2)
+                    if not s2.is_port:
                         continue
                     s2_port = graph.ports.get(e2.source)
                     if _is_tb_lr_exit_nonreversed(

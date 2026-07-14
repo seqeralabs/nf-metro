@@ -741,10 +741,10 @@ def _position_ports_and_junctions(
             continue
         # Place the junction midway between its predecessors and successors
         # in X, at the average rail Y of the lines passing through it.
-        neighbours = [graph.stations.get(e.source) for e in graph.edges_to(jid)] + [
-            graph.stations.get(e.target) for e in graph.edges_from(jid)
+        neighbours = [graph.station_for_edge_source(e) for e in graph.edges_to(jid)] + [
+            graph.station_for_edge_target(e) for e in graph.edges_from(jid)
         ]
-        xs = [n.x for n in neighbours if n is not None]
+        xs = [n.x for n in neighbours]
         st.x = sum(xs) / len(xs) if xs else 0.0
         # Junction Y: average of its lines' rails across whichever section
         # rail map contains them (use the target section's map if present).

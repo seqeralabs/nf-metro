@@ -367,8 +367,8 @@ def _perp_drop_x(edge: Edge, src_x: float, dx: float, ctx: _RoutingCtx) -> float
     calling edge (to pick the route shape) and its bundle-mates (to anchor the
     corner), so every line in the bundle reads the same channel.
     """
-    tgt = ctx.graph.stations.get(edge.target)
-    tgt_sec = ctx.graph.sections.get(tgt.section_id) if tgt and tgt.section_id else None
+    tgt = ctx.graph.station_for_edge_target(edge)
+    tgt_sec = ctx.graph.sections.get(tgt.section_id) if tgt.section_id else None
     if tgt_sec is not None and tgt_sec.direction not in ("TB", "BT"):
         crossing_x = _perp_entry_crossing_x(ctx, edge.source, edge.line_id, src_x)
         if crossing_x is not None:
@@ -484,12 +484,11 @@ def _perp_corridor_feeder(
     """
     for feed in ctx.graph.edges_to(edge.source):
         port = ctx.graph.ports.get(feed.source)
-        feeder_st = ctx.graph.stations.get(feed.source)
+        feeder_st = ctx.graph.station_for_edge_source(feed)
         if (
             port is not None
             and not port.is_entry
             and port.side in (PortSide.TOP, PortSide.BOTTOM)
-            and feeder_st is not None
             and abs(feeder_st.y - entry_st.y) <= COORD_TOLERANCE
         ):
             return port
