@@ -108,8 +108,6 @@ def build_concentric_bundle(
     per-line offset is in the points, not left to the renderer's heuristic.
     """
     n_legs = len(centerline) - 1
-    if n_legs < 1:
-        raise ValueError("centerline needs at least two vertices")
     anchor = (
         [[s] * n_legs for s in bundle_offsets] if bundle_offsets is not None else None
     )
@@ -178,10 +176,6 @@ def build_tapered_bundle(
         both ends.  ``None`` anchors on *members* themselves.
     """
     n_legs = len(centerline) - 1
-    if n_legs < 1:
-        raise ValueError("centerline needs at least two vertices")
-    if not 0 <= transition_leg <= n_legs:
-        raise ValueError(f"transition_leg {transition_leg} out of range [0, {n_legs}]")
 
     def per_leg(src: float, tgt: float) -> list[float]:
         return [src if leg < transition_leg else tgt for leg in range(n_legs)]
@@ -241,9 +235,6 @@ def build_offset_bundle(
         each corner on the innermost line.  A handler routing its siblings one at
         a time passes the full fan here; ``None`` anchors on *members*.
     """
-    n_legs = len(centerline) - 1
-    if n_legs < 1:
-        raise ValueError("centerline needs at least two vertices")
     return _fan_bundle(
         [(edge, line_id, list(offs)) for edge, line_id, offs in members],
         centerline,
@@ -282,7 +273,13 @@ def _fan_bundle(
     derives the anchor from the offsets alone, so no caller pre-bumps the base by
     the bundle's half-width.  ``anchor_offsets`` is the per-leg offsets of the
     full bundle; ``None`` anchors on *members* themselves (the bundle is whole).
+
+    All three public builders funnel through here, so this is the single point
+    that enforces the centreline contract: a fanned bundle needs at least one
+    leg to offset along, i.e. a ``>= 2``-vertex centreline.
     """
+    if len(centerline) < 2:
+        raise ValueError("centerline needs at least two vertices")
     legs = [
         _axis_unit(centerline[i], centerline[i + 1]) for i in range(len(centerline) - 1)
     ]

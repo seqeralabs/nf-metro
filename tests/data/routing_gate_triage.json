@@ -1,18 +1,6 @@
 {
-  "bundle.py::if n_legs < 1:::#1": {
-    "note": "Defensive guard: build_concentric_bundle rejects a centreline of fewer than two vertices. Every caller (route_along / route_straight and the handler centrelines) builds a >=2-vertex polyline, so the raise arm is never taken.",
-    "status": "defensive"
-  },
-  "bundle.py::if n_legs < 1:::#2": {
-    "note": "Defensive guard: build_tapered_bundle rejects a centreline of fewer than two vertices, mirroring build_concentric_bundle. Every caller passes a >=2-vertex centreline, so the raise arm is never taken.",
-    "status": "defensive"
-  },
-  "bundle.py::if n_legs < 1:::#3": {
-    "note": "Defensive guard: build_offset_bundle rejects a centreline of fewer than two vertices, mirroring build_concentric_bundle and build_tapered_bundle. Every caller passes a >=2-vertex centreline, so the raise arm is never taken.",
-    "status": "defensive"
-  },
-  "bundle.py::if not 0 <= transition_leg <= n_legs:::#1": {
-    "note": "Defensive guard: build_tapered_bundle rejects a transition_leg outside [0, n_legs]. Handlers pass a literal 1 against a 3- or 4-vertex centreline, so the raise arm is never taken.",
+  "bundle.py::if len(centerline) < 2:::#1": {
+    "note": "Single enforcement point for the bundle-centreline contract: a fanned bundle needs at least one leg, i.e. a >=2-vertex centreline. All three public builders (build_concentric_bundle / build_tapered_bundle / build_offset_bundle) funnel through _fan_bundle, which owns this one guard in place of the four per-builder re-checks the corpus never took (#1438). Every caller builds a >=2-vertex polyline by construction, so the raise arm stays un-exercised.",
     "status": "defensive"
   },
   "common.py::elif tgt_sec:::#1": {
