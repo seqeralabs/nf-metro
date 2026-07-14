@@ -41,14 +41,23 @@ loaded.
   needing its own worktree, or requiring you to load unfamiliar code is
   **not, by itself**, a reason to defer.
 - Use the `Agent` tool to protect your own context budget while doing this,
-  not as a reason to skip it. Hand each piece of fallout to a `sonnet`
-  subagent by default, or `opus` when the triage or fix genuinely needs
-  harder judgment; run agents in the background (or a separate worktree, per
-  the global worktree rule, if the fallout touches files you're not actively
-  editing) and fold results back in before the session ends. Independent
-  pieces of fallout can run as concurrent subagents instead of serially
-  eating your own context - that's what makes taking on a different
-  subsystem's fix tractable in the same session.
+  not as a reason to skip it. **Always pass an explicit `model` param on the
+  `Agent` call - never omit it and let the child silently inherit the
+  session's model.** Omitting `model` is not "no decision was made", it's
+  "opus got picked by default without anyone deciding that." Default to
+  `model: "sonnet"`; set `model: "opus"` only when you decide *before
+  spawning* that the triage or fix genuinely needs harder judgment, and say
+  so in one line when you do. If you notice after the fact that a child ran
+  on opus with no `model` param set, that's a mistake to correct (restart it
+  on sonnet), not a choice to defend - don't rationalize keeping it because
+  the task turned out to suit opus in hindsight; that judgment call has to
+  happen at spawn time, explicitly, or not at all. Run agents in the
+  background (or a separate worktree, per the global worktree rule, if the
+  fallout touches files you're not actively editing) and fold results back
+  in before the session ends. Independent pieces of fallout can run as
+  concurrent subagents instead of serially eating your own context - that's
+  what makes taking on a different subsystem's fix tractable in the same
+  session.
 - "Resolved in this session" does not mean "crammed into one PR." If folding
   the fallout into the primary PR would make it harder to review, ship it as
   its own sibling PR instead. The bar is that the fallout's PR gets built,
