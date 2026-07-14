@@ -1151,10 +1151,13 @@ def _center_lr_entry_ports_on_fork(graph: MetroGraph, y_spacing: float) -> None:
     reconverging diamond), leaving the inter-section run kinked.  Only the port
     moves; the branch stations keep their places.
 
-    Skipped when the midpoint falls between grid rows (the branches are an odd
-    number of slots apart): seating the port there puts it half a slot off the
-    grid the branches sit on, which reads as an off-grid port rather than a
-    straightened run.
+    An off-grid midpoint (branches an odd number of slots apart) is only a
+    valid seat when the fork reconverges at an in-section join: that join
+    already sits at the midpoint, so the port matches it and the exit fork it
+    mirrors.  A non-reconverging dead-end fan instead keeps its port on the
+    feeder trunk with the branches straddling half a slot either side, so
+    seating the port on the off-grid midpoint there would drag the row's trunk
+    off the inter-section run.
     """
     if graph.diamond_style != "symmetric":
         return
@@ -1166,20 +1169,24 @@ def _center_lr_entry_ports_on_fork(graph: MetroGraph, y_spacing: float) -> None:
             port = graph.ports.get(pid)
             if port is None or port.side not in (PortSide.LEFT, PortSide.RIGHT):
                 continue
-            branch_ys = sorted(
-                {
-                    round(graph.stations[s].y, 1)
-                    for s in _in_section_ontrack_successors(graph, section, pid)
-                }
-            )
-            if len(branch_ys) != 2:
+            branches = _in_section_ontrack_successors(graph, section, pid)
+            branch_ys = sorted({round(graph.stations[s].y, 1) for s in branches})
+            if len(branch_ys) != 2 or pitch <= 0:
                 continue
-            slots = (branch_ys[1] - branch_ys[0]) / pitch if pitch else 0.0
-            if pitch <= 0 or round(slots) % 2 != 0:
+            slots = (branch_ys[1] - branch_ys[0]) / pitch
+            off_grid = round(slots) % 2 != 0
+            if off_grid and not _branches_reconverge(
+                graph, section, branches[0], branches[1]
+            ):
                 continue
             midpoint = (branch_ys[0] + branch_ys[1]) / 2.0
             if abs(graph.stations[pid].y - midpoint) >= 1.0:
                 _set_port_y(graph, pid, midpoint)
+            if off_grid:
+                # The port (and the diamond spine it feeds) rides the off-grid
+                # midpoint centreline, like the join it reconverges at, so the
+                # grid snap must treat it as half-grid, not re-seat it on a row.
+                graph.half_grid_station_ids.add(pid)
 
 
 def _pull_continuation_onto(
