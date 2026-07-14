@@ -324,6 +324,14 @@ gallery:
       "The same symmetric 2-way fan-out where one branch leaves the section via an exit
       port instead of dead-ending.  The dead-end coverage branch stays fanned to the end,
       while the exiting branch falls back to the trunk to meet its exit port (#1299)."
+  - id: symmetric_diamond_odd_slot_entry
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      "A reconverging 2-way diamond under `diamond_style: symmetric` whose branches sit
+      an odd number of grid slots apart, so the fork midpoint lands off-grid.  The LR
+      entry port centres on that midpoint -- matching the join station the branches
+      reconverge at -- so the entry fork reads as symmetric as the exit fork (#1459)."
   - id: terminal_symmetric_fan
     source_dir: examples/topologies
     category: Fan-out and Fan-in

@@ -1,0 +1,33 @@
+%%metro title: Symmetric diamond, odd-slot entry fork
+%%metro diamond_style: symmetric
+%%metro style: dark
+%%metro line: quant | Quantification | #0570b0
+%%metro line: fusion | Fusion detection | #38b927
+%%metro grid: align_sec | 0,0,1,1
+%%metro grid: quant_sec | 1,0,1,1
+%%metro grid: fusion_sec | 1,1,1,1
+
+graph LR
+    subgraph align_sec [Alignment]
+        star[STAR 2-pass]
+    end
+
+    subgraph quant_sec [Quantification]
+        quantnode[Quant step]
+        star -->|quant| quantnode
+    end
+
+    subgraph fusion_sec [Fusion detection]
+        arriba[Arriba]
+        starfusion[STAR-Fusion]
+        merge[Merge fusions]
+        out1[ ]
+        out2[ ]
+
+        star -->|fusion| arriba
+        star -->|fusion| starfusion
+        arriba -->|fusion| merge
+        starfusion -->|fusion| merge
+        merge -->|fusion| out1
+        merge -->|fusion| out2
+    end

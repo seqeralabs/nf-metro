@@ -16,6 +16,7 @@ from __future__ import annotations
 import copy
 import warnings
 from collections import defaultdict
+from collections.abc import Iterator
 from functools import lru_cache
 from pathlib import Path
 
@@ -528,9 +529,8 @@ def _row_lr_sections(graph: MetroGraph) -> dict[int, list]:
     return rows
 
 
-def _section_lr_port_ys(graph: MetroGraph, section) -> list[float]:
-    """Return Y values of the section's LR (LEFT/RIGHT) ports."""
-    ys: list[float] = []
+def _iter_lr_ports(graph: MetroGraph, section) -> Iterator[tuple[str, Station]]:
+    """``(id, station)`` for each LR (LEFT/RIGHT) port, entries before exits."""
     for pid in list(section.entry_ports) + list(section.exit_ports):
         port = graph.ports.get(pid)
         st = graph.stations.get(pid)
@@ -539,8 +539,21 @@ def _section_lr_port_ys(graph: MetroGraph, section) -> list[float]:
             and st is not None
             and port.side in (PortSide.LEFT, PortSide.RIGHT)
         ):
-            ys.append(st.y)
-    return ys
+            yield pid, st
+
+
+def _section_lr_port_ys(graph: MetroGraph, section) -> list[float]:
+    """Return Y values of the section's LR (LEFT/RIGHT) ports."""
+    return [st.y for _pid, st in _iter_lr_ports(graph, section)]
+
+
+def _first_lr_port(graph: MetroGraph, section) -> tuple[str, float] | None:
+    """``(id, y)`` of the section's first LR port -- the trunk anchor
+    :func:`_section_lr_port_ys` returns first -- or ``None``."""
+    return next(
+        ((pid, st.y) for pid, st in _iter_lr_ports(graph, section)),
+        None,
+    )
 
 
 def _section_trunk_info(
@@ -6514,14 +6527,25 @@ def test_all_stations_snap_to_grid(fixture):
         port_ids.update(sec.exit_ports)
     junction_ids = set(graph.junctions)
 
-    # Compute each LR/RL section's trunk Y from its LR ports.
+    # Compute each LR/RL section's trunk Y from its LR ports.  A port centred
+    # on an odd-slot reconverging fork rides the half-grid centreline (it is
+    # registered in half_grid_ids): the section's real grid rows are the
+    # branches, half a slot away, so anchor the grid there and remember the
+    # centreline as a spine the join and any pass-through legitimately sit on.
     section_trunk_y: dict[str, float] = {}
+    section_spine_y: dict[str, float] = {}
     for sec in graph.sections.values():
         if sec.direction not in ("LR", "RL") or sec.bbox_h <= 0:
             continue
-        port_ys = _section_lr_port_ys(graph, sec)
-        if port_ys:
-            section_trunk_y[sec.id] = port_ys[0]
+        anchor = _first_lr_port(graph, sec)
+        if anchor is None:
+            continue
+        anchor_id, anchor_y = anchor
+        if anchor_id in half_grid_ids:
+            section_trunk_y[sec.id] = anchor_y + 0.5 * y_spacing
+            section_spine_y[sec.id] = anchor_y
+        else:
+            section_trunk_y[sec.id] = anchor_y
 
     # Sections eligible for the half-grid 2-branch fan exception: a symfan
     # with an in-section hub, or a symmetric fork fed straight from the entry
@@ -6561,6 +6585,12 @@ def test_all_stations_snap_to_grid(fixture):
         nearest_int = round(offset)
         on_grid = abs(offset - nearest_int) * y_spacing <= tol
         if on_grid:
+            continue
+        spine_y = section_spine_y.get(st.section_id)
+        if spine_y is not None and abs(st.y - spine_y) <= tol:
+            # On the diamond spine centreline the centred entry port rides:
+            # the reconvergence join (and any pass-through) legitimately sits
+            # there, half a slot off the branch grid.
             continue
         # Half-grid exception is allowed only for 2-branch fan members
         # whose section legitimately uses the half-grid layout.
@@ -9607,6 +9637,46 @@ def test_symmetric_fork_entry_port_stays_on_feeder_trunk(fixture):
             )
             checked += 1
     assert checked, f"{fixture}: no symmetric entry fork found to check"
+
+
+_SYMMETRIC_RECONVERGING_DIAMOND_FIXTURES = [
+    "topologies/symmetric_diamond_odd_slot_entry.mmd",
+]
+
+
+@pytest.mark.parametrize("fixture", _SYMMETRIC_RECONVERGING_DIAMOND_FIXTURES)
+def test_symmetric_reconverging_diamond_entry_port_centres_on_fork(fixture):
+    """A reconverging symmetric diamond centres its LR entry port on the fork.
+
+    When a ``diamond_style: symmetric`` fork reconverges at an in-section join,
+    the join sits at the branch midpoint, so the entry port fanning into that
+    fork must sit there too -- even when the branches are an odd number of grid
+    slots apart and the midpoint lands off-grid.  Otherwise the entry fork reads
+    lopsided (the run lands level with one branch, the other kinks off it) while
+    the exit fork about the join is symmetric.  The off-grid-midpoint skip
+    applies only to a non-reconverging dead-end fan, whose port stays on its
+    feeder trunk.
+    """
+    graph = _layout_diamond(fixture, "symmetric")
+    checked = 0
+    for fork, c1, c2 in _direct_fork_children(graph):
+        if not fork.is_port:
+            continue
+        lo, hi = sorted((c1, c2), key=lambda s: s.y)
+        off_lo = fork.y - lo.y
+        off_hi = hi.y - fork.y
+        assert abs(off_lo - off_hi) < 1.0, (
+            f"{fixture}: entry port {fork.id!r} (y={fork.y:.1f}) fans to "
+            f"{lo.id!r} (-{off_lo:.1f}) and {hi.id!r} (+{off_hi:.1f}) -- "
+            "not symmetric about the fork midpoint"
+        )
+        port = graph.ports.get(fork.id)
+        assert port is not None and abs(port.y - fork.y) < 1.0, (
+            f"{fixture}: entry port {fork.id!r} station y={fork.y:.1f} but port "
+            f"record y={None if port is None else round(port.y, 1)} -- desynced"
+        )
+        checked += 1
+    assert checked, f"{fixture}: no entry-port fork found to check"
 
 
 def _interior_fan_branches(graph: MetroGraph) -> list[tuple[str, str, str]]:
