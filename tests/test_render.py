@@ -8,11 +8,15 @@ from dataclasses import replace
 import pytest
 
 from nf_metro.layout.engine import compute_layout
+from nf_metro.layout.geometry import lanes_run_along_x
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import Station
+from nf_metro.render.constants import FILES_ICON_OFFSET_RATIO
 from nf_metro.render.svg import (
     _label_halo_color,
     _terminus_icon_centers,
+    _terminus_icon_centers_for,
+    _terminus_icon_flow_sign,
     render_svg,
 )
 from nf_metro.themes import (
@@ -820,6 +824,57 @@ def test_terminus_icons_bt_mirror_tb():
         st, "BT", is_source=False, n=1, first_offset=10.0, step=4.0, bundle_center=0.0
     )
     assert sink == [(100.0, 40.0)]
+
+
+def _files_terminus_mmd(direction: str, role: str) -> str:
+    """A minimal graph with one `files:` terminus, station `t`, as source or sink."""
+    other_edge = "t -->|main| other" if role == "source" else "other -->|main| t"
+    return (
+        "%%metro line: main | Main | #ff0000\n"
+        "%%metro files: t | FASTQ | Reads\n"
+        "graph LR\n"
+        "    subgraph sec [Section]\n"
+        f"        %%metro direction: {direction}\n"
+        "        t[ ]\n"
+        "        other[Other]\n"
+        f"        {other_edge}\n"
+        "    end\n"
+    )
+
+
+@pytest.mark.parametrize("direction", ["LR", "RL", "TB", "BT"])
+@pytest.mark.parametrize("role", ["source", "sink"])
+def test_stacked_files_icon_back_page_does_not_crowd_marker(direction, role):
+    """A `files:` terminus's back page must sit at least as far from the
+    station marker as the front page, on every flow direction and role (#1460).
+    """
+    graph = parse_metro_mermaid(_files_terminus_mmd(direction, role))
+    compute_layout(graph)
+    station = graph.stations["t"]
+    section = graph.sections["sec"]
+    assert section.direction == direction
+    is_source = role == "source"
+
+    front_cx, front_cy = _terminus_icon_centers_for(
+        station, graph, NFCORE_THEME, 0.0, 0.0
+    )[0]
+    off = NFCORE_THEME.terminus_width * FILES_ICON_OFFSET_RATIO
+    flow_sign = _terminus_icon_flow_sign(direction, is_source)
+    is_vertical_flow = lanes_run_along_x(direction)
+
+    if is_vertical_flow:
+        marker_flow, front_flow = station.y, front_cy
+        back_flow = front_cy + off * flow_sign
+    else:
+        marker_flow, front_flow = station.x, front_cx
+        back_flow = front_cx + off * flow_sign
+
+    front_gap = abs(marker_flow - front_flow)
+    back_gap = abs(marker_flow - back_flow)
+    assert back_gap >= front_gap, (
+        f"{direction}/{role}: back page gap {back_gap:.1f} < front page gap "
+        f"{front_gap:.1f} -- back page crowds the marker"
+    )
 
 
 def test_render_tb_section_file_icon_below_station():

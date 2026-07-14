@@ -293,22 +293,26 @@ def render_files_icon(
     font_color: str,
     font_family: str,
     banner: bool = False,
+    back_dx_sign: float = 1.0,
+    back_dy_sign: float = -1.0,
 ) -> None:
     """Render a stacked-files icon (two overlapping documents).
 
     The front page (identical to the single file icon, and the one carrying the
     label) is centered on (cx, cy) so a files icon's left edge lines up with
-    single file icons sharing a row; the back page peeks up and to the right,
-    into the open space ahead of the icon, so it never crowds the icon to its
-    left.
+    single file icons sharing a row; the back page peeks out diagonally behind
+    it. ``back_dx_sign``/``back_dy_sign`` (each +1.0 or -1.0) pick which
+    diagonal the back page peeks into -- the caller must choose the signs that
+    point away from the station marker along the flow axis, or the back page
+    encroaches on the reserved marker clearance instead of extending past it.
     """
     off = width * FILES_ICON_OFFSET_RATIO
 
-    # Back page (peeks up-right behind the centered front page)
+    # Back page (peeks diagonally behind the centered front page)
     render_file_icon(
         d,
-        cx=cx + off,
-        cy=cy - off,
+        cx=cx + off * back_dx_sign,
+        cy=cy + off * back_dy_sign,
         width=width,
         height=height,
         fold_size=fold_size,

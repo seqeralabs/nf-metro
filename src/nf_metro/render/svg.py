@@ -2367,6 +2367,17 @@ def _terminus_icon_centers_for(
     )
 
 
+def _terminus_icon_flow_sign(section_dir: str, is_source: bool) -> float:
+    """+1 if a terminus icon extends in the forward flow direction, else -1.
+
+    Sinks sit at the end of the flow and extend forwards; sources sit at
+    the start and extend backwards.  RL/BT reverse the forward direction so
+    icons always point to the outside of the diagram.
+    """
+    extends_forward = is_source if section_dir in ("RL", "BT") else not is_source
+    return 1.0 if extends_forward else -1.0
+
+
 def _terminus_icon_centers(
     station: Station,
     section_dir: str,
@@ -2393,10 +2404,7 @@ def _terminus_icon_centers(
     # the standard router handles) are untouched.
     if station.off_track and is_rail:
         return [(station.x, station.y - (first_offset + i * step)) for i in range(n)]
-    # Sinks sit at the end of the flow and extend forwards; sources sit at
-    # the start and extend backwards.  RL/BT reverse the forward direction.
-    extends_forward = is_source if section_dir in ("RL", "BT") else not is_source
-    sign = 1.0 if extends_forward else -1.0
+    sign = _terminus_icon_flow_sign(section_dir, is_source)
     centers: list[tuple[float, float]] = []
     for i in range(n):
         flow = sign * (first_offset + i * step)
@@ -2427,6 +2435,8 @@ def _render_terminus_icons(
     )
     section_dir = section.direction if section else "LR"
     is_vertical_flow = lanes_run_along_x(section_dir)
+    is_source = not graph.edges_to(station.id)
+    flow_sign = _terminus_icon_flow_sign(section_dir, is_source)
     icon_half_w = theme.terminus_width / 2
     icon_half_h = theme.terminus_height / 2
 
@@ -2493,8 +2503,16 @@ def _render_terminus_icons(
         if icon_type == ICON_TYPE_DIR:
             render_folder_icon(d, **common)
         elif icon_type == ICON_TYPE_FILES:
+            back_dx_sign, back_dy_sign = (
+                (1.0, flow_sign) if is_vertical_flow else (flow_sign, -1.0)
+            )
             render_files_icon(
-                d, **common, fold_size=theme.terminus_fold_size, banner=banner
+                d,
+                **common,
+                fold_size=theme.terminus_fold_size,
+                banner=banner,
+                back_dx_sign=back_dx_sign,
+                back_dy_sign=back_dy_sign,
             )
         else:
             render_file_icon(
