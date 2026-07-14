@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Literal, TypedDict
@@ -14,6 +15,31 @@ class RowGridInfo(TypedDict):
     slot_count: int
     slot_spacing: float
     max_y_pad: float
+
+
+class PermissiveGuardWarning(UserWarning):
+    """A layout/render guard failure downgraded to a warning under ``graph.permissive``.
+
+    Distinct from an ordinary :class:`UserWarning` so a caller collecting
+    warnings (the CLI's ``--permissive`` report, the playground) can tell a
+    guard downgrade apart from an unrelated warning raised during the same
+    render.
+    """
+
+
+def split_guard_warnings(
+    caught: list[warnings.WarningMessage],
+) -> tuple[list[warnings.WarningMessage], list[warnings.WarningMessage]]:
+    """Split a ``warnings.catch_warnings(record=True)`` capture by category.
+
+    Returns ``(guard_warnings, other_warnings)``: entries categorised
+    :class:`PermissiveGuardWarning` (a guard downgrade), and everything else,
+    so a caller can report the former distinctly and replay the latter
+    through the normal warning printer (``warnings.showwarning``).
+    """
+    guard = [w for w in caught if issubclass(w.category, PermissiveGuardWarning)]
+    other = [w for w in caught if not issubclass(w.category, PermissiveGuardWarning)]
+    return guard, other
 
 
 @dataclass
@@ -433,6 +459,10 @@ class MetroGraph:
     animate: bool = False
     directional: bool = False
     strict: bool = False
+    # When True, a layout/render guard failure is downgraded to a UserWarning
+    # and the render proceeds best-effort on whatever geometry exists, instead
+    # of aborting with no output. Takes precedence over strict.
+    permissive: bool = False
     embed_manifest: bool = True
     # Whether a render will actually draw a title/logo band at the canvas
     # top for a titled map. Set by prepare_graph (from --bare, %%metro

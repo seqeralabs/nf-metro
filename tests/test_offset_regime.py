@@ -40,7 +40,7 @@ from nf_metro.layout.routing.invariants import (
     check_deferred_offsets_apply_laterally,
 )
 from nf_metro.parser.mermaid import parse_metro_mermaid
-from nf_metro.parser.model import Edge
+from nf_metro.parser.model import Edge, PermissiveGuardWarning
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES = REPO_ROOT / "examples"
@@ -162,4 +162,15 @@ def test_planted_vertical_deferred_offset_aborts_render_path() -> None:
 
     _plant_vertical_deferred_offset(routes, offsets)
     with pytest.raises(CurveInvariantError, match="deferred route offset"):
+        assert_render_curve_invariants(graph, routes, offsets)
+
+
+def test_planted_vertical_deferred_offset_permissive_downgrades_to_warning() -> None:
+    """``graph.permissive`` downgrades the same defect to a warning instead of
+    aborting, letting a caller render the defective geometry best-effort."""
+    graph, routes, offsets = _route(FIXTURES / "rnaseq_sections.mmd")
+    _plant_vertical_deferred_offset(routes, offsets)
+
+    graph.permissive = True
+    with pytest.warns(PermissiveGuardWarning, match="deferred route offset"):
         assert_render_curve_invariants(graph, routes, offsets)

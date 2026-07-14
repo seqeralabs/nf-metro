@@ -618,8 +618,11 @@ def _settle_render_geometry(
 
     station_offsets = compute_station_offsets(graph, offset_step=offset_step)
     routes = route_edges_centred(graph, station_offsets=station_offsets)
+    effective_strict = graph.strict and not graph.permissive
     assert_render_curve_invariants(graph, routes, station_offsets)
-    assert_render_layout_invariants(graph, routes, station_offsets, strict=graph.strict)
+    assert_render_layout_invariants(
+        graph, routes, station_offsets, strict=effective_strict
+    )
 
     labels = _place(station_offsets, routes)
     if render_header_collision(graph) and not graph.has_rail_sections:
@@ -632,7 +635,7 @@ def _settle_render_geometry(
         routes = route_edges_centred(graph, station_offsets=station_offsets)
         labels = _place(station_offsets, routes)
         assert_render_curve_invariants(graph, routes, station_offsets)
-    assert_render_header_clearance(graph, strict=graph.strict)
+    assert_render_header_clearance(graph, strict=effective_strict)
     return station_offsets, routes, labels
 
 

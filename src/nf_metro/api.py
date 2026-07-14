@@ -19,11 +19,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
-from nf_metro.layout import compute_layout
+from nf_metro.layout import PhaseInvariantError, compute_layout
 from nf_metro.options import LAYOUT_OPTIONS
 from nf_metro.parser import parse_metro_mermaid
 from nf_metro.parser.directives import apply_legend_directive
-from nf_metro.parser.model import LineSpread, MetroGraph
+from nf_metro.parser.model import LineSpread, MetroGraph, PermissiveGuardWarning
 from nf_metro.render import render_svg
 from nf_metro.render.html import render_html
 from nf_metro.render.legend import (
@@ -164,6 +164,14 @@ def prepare_graph(
     :class:`~nf_metro.layout.BackwardFlowError`,
     :class:`~nf_metro.layout.MixedEntryDirectionError`,
     :class:`~nf_metro.layout.PhaseInvariantError`.
+
+    When ``graph.permissive`` is set (``%%metro permissive: true`` or
+    ``--permissive``), a :class:`~nf_metro.layout.PhaseInvariantError` raised
+    mid-layout is downgraded to a :class:`UserWarning` instead; the graph is
+    returned carrying whatever coordinates the engine had computed before the
+    failing phase, for a caller-side best-effort render attempt. A real
+    cycle, backward flow, or mixed entry directions raise unconditionally:
+    those leave no geometry to fall back to.
     """
     opts = layout_options or {}
 
@@ -210,7 +218,18 @@ def prepare_graph(
         not bare and not logo_in_legend
     )
 
-    compute_layout(graph)
+    if graph.permissive:
+        try:
+            compute_layout(graph)
+        except PhaseInvariantError as e:
+            warnings.warn(
+                f"layout guard downgraded under permissive mode: "
+                f"{type(e).__name__}: {e}",
+                category=PermissiveGuardWarning,
+                stacklevel=2,
+            )
+    else:
+        compute_layout(graph)
     return graph
 
 

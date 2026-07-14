@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import warnings
 from collections.abc import Callable, Iterable
@@ -31,7 +32,11 @@ from nf_metro.parser import (
     parse_metro_mermaid,
     validate_graph,
 )
-from nf_metro.parser.model import LineSpread
+from nf_metro.parser.model import (
+    LineSpread,
+    PermissiveGuardWarning,
+    split_guard_warnings,
+)
 from nf_metro.render import validate_render
 from nf_metro.themes import THEMES
 
@@ -443,97 +448,124 @@ def _render_one_unsafe(
     quiet: bool,
 ) -> None:
     text = input_file.read_text()
+    permissive = bool(layout_opts.get("permissive"))
 
-    try:
-        graph = prepare_graph(
-            text,
-            from_nextflow=from_nextflow,
-            title=title,
-            line_spread=line_spread,
-            logo=str(logo) if logo is not None else None,
-            legend=legend,
-            layout_options=layout_opts,
-            source_dir=str(input_file.resolve().parent),
-            bare=bare,
-            output_format=format_,
-        )
-    except (
-        ValueError,
-        CyclicGraphError,
-        BackwardFlowError,
-        MixedEntryDirectionError,
-        PhaseInvariantError,
-    ) as e:
-        raise click.ClickException(str(e))
+    # Under --permissive, every warning raised during the render is captured
+    # here rather than printed live. Only PermissiveGuardWarning's filter is
+    # forced to "always" (so a guard downgrade is never lost to the default
+    # once-per-location dedup); any other captured warning is replayed
+    # through the normal printer afterwards, deduped exactly as it would be
+    # without --permissive.
+    warn_ctx = (
+        warnings.catch_warnings(record=True) if permissive else contextlib.nullcontext()
+    )
+    with warn_ctx as caught:
+        if permissive:
+            warnings.filterwarnings("always", category=PermissiveGuardWarning)
 
-    theme_obj = resolve_theme(theme, graph, mode=mode)
-
-    if format_ == "html":
-        # The interactive page supplies its own responsive frame, chrome, and
-        # per-map class scoping, so the SVG-only sizing/namespacing flags have
-        # nothing to act on. Font portability and the dark-mode block do reach
-        # the inlined SVG, so they are threaded through.
-        ignored = [
-            name
-            for name, enabled in (
-                ("--responsive", responsive),
-                ("--bare", bare),
-                ("--svg-class-prefix", bool(svg_class_prefix)),
+        try:
+            graph = prepare_graph(
+                text,
+                from_nextflow=from_nextflow,
+                title=title,
+                line_spread=line_spread,
+                logo=str(logo) if logo is not None else None,
+                legend=legend,
+                layout_options=layout_opts,
+                source_dir=str(input_file.resolve().parent),
+                bare=bare,
+                output_format=format_,
             )
-            if enabled
-        ]
-        if ignored:
+        except (
+            ValueError,
+            CyclicGraphError,
+            BackwardFlowError,
+            MixedEntryDirectionError,
+            PhaseInvariantError,
+        ) as e:
+            raise click.ClickException(str(e))
+
+        theme_obj = resolve_theme(theme, graph, mode=mode)
+
+        if format_ == "html":
+            # The interactive page supplies its own responsive frame, chrome, and
+            # per-map class scoping, so the SVG-only sizing/namespacing flags have
+            # nothing to act on. Font portability and the dark-mode block do reach
+            # the inlined SVG, so they are threaded through.
+            ignored = [
+                name
+                for name, enabled in (
+                    ("--responsive", responsive),
+                    ("--bare", bare),
+                    ("--svg-class-prefix", bool(svg_class_prefix)),
+                )
+                if enabled
+            ]
+            if ignored:
+                click.echo(
+                    f"Note: {', '.join(ignored)} only affect --format svg and are "
+                    "ignored for --format html (the interactive page is already "
+                    "responsive and scopes each map independently).",
+                    err=True,
+                )
+
+        # Tier-A layout-invariant violations on the settled geometry surface here
+        # under --strict (LayoutInvariantError is a PhaseInvariantError); without
+        # --strict they are warnings the default handler prints to stderr.
+        try:
+            content = render_graph(
+                graph,
+                theme_obj,
+                RenderConfig(
+                    output_format=format_,
+                    debug=debug,
+                    responsive=responsive,
+                    embed_font=embed_font,
+                    text_to_paths=text_to_paths,
+                    svg_class_prefix=svg_class_prefix,
+                    inject_dark_mode_css=not no_dark_mode_css,
+                    chrome_css=not no_chrome_css,
+                    self_color_scheme=not no_self_color_scheme,
+                    baked_mode=(mode or graph.mode).strip() or None,
+                    bare=bare,
+                    embed_basename=output.name,
+                ),
+            )
+        except (ValueError, FoldThresholdError, PhaseInvariantError) as e:
+            raise click.ClickException(str(e))
+
+        if validate_geometry:
+            if format_ == "html":
+                raise click.ClickException("--validate applies to --format svg only.")
+            findings = validate_render(content, graph=graph)
+            if findings:
+                detail = "\n".join(f"  - {f.message}" for f in findings)
+                raise click.ClickException(
+                    f"render-geometry validation found {len(findings)} "
+                    f"defect(s) in the drawn SVG:\n{detail}"
+                )
+
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(content if content.endswith("\n") else content + "\n")
+        if not quiet:
             click.echo(
-                f"Note: {', '.join(ignored)} only affect --format svg and are "
-                "ignored for --format html (the interactive page is already "
-                "responsive and scopes each map independently).",
+                f"Rendered {len(graph.stations)} stations, "
+                f"{len(graph.edges)} edges, "
+                f"{len(graph.lines)} lines -> {output}"
+            )
+
+    if permissive and caught:
+        guard_warnings, other_warnings = split_guard_warnings(caught)
+        for w in other_warnings:
+            warnings.showwarning(w.message, w.category, w.filename, w.lineno)
+        if guard_warnings:
+            click.echo(
+                f"--permissive: {len(guard_warnings)} guard(s) downgraded to "
+                "warnings; the rendered geometry may be defective at these points:",
                 err=True,
             )
-
-    # Tier-A layout-invariant violations on the settled geometry surface here
-    # under --strict (LayoutInvariantError is a PhaseInvariantError); without
-    # --strict they are warnings the default handler prints to stderr.
-    try:
-        content = render_graph(
-            graph,
-            theme_obj,
-            RenderConfig(
-                output_format=format_,
-                debug=debug,
-                responsive=responsive,
-                embed_font=embed_font,
-                text_to_paths=text_to_paths,
-                svg_class_prefix=svg_class_prefix,
-                inject_dark_mode_css=not no_dark_mode_css,
-                chrome_css=not no_chrome_css,
-                self_color_scheme=not no_self_color_scheme,
-                baked_mode=(mode or graph.mode).strip() or None,
-                bare=bare,
-                embed_basename=output.name,
-            ),
-        )
-    except (ValueError, FoldThresholdError, PhaseInvariantError) as e:
-        raise click.ClickException(str(e))
-
-    if validate_geometry:
-        if format_ == "html":
-            raise click.ClickException("--validate applies to --format svg only.")
-        findings = validate_render(content, graph=graph)
-        if findings:
-            detail = "\n".join(f"  - {f.message}" for f in findings)
-            raise click.ClickException(
-                f"render-geometry validation found {len(findings)} "
-                f"defect(s) in the drawn SVG:\n{detail}"
-            )
-
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(content if content.endswith("\n") else content + "\n")
-    if not quiet:
-        click.echo(
-            f"Rendered {len(graph.stations)} stations, "
-            f"{len(graph.edges)} edges, "
-            f"{len(graph.lines)} lines -> {output}"
-        )
+            for w in guard_warnings:
+                click.echo(f"  - {w.message}", err=True)
 
 
 @cli.command(name="render-many")
