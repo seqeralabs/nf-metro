@@ -123,7 +123,7 @@ def _aggregate_bypass_spans(
     return combined
 
 
-def _push_lower_rows_after_bbox_grow(graph: MetroGraph, section_y_gap: float) -> bool:
+def push_lower_rows_after_bbox_grow(graph: MetroGraph, section_y_gap: float) -> bool:
     """Push lower-row sections down when an upper-row bbox grows.
 
     Shared helper called by stages that may grow a section's
@@ -877,7 +877,7 @@ def _tighten_lower_rows_after_shrink(graph: MetroGraph, section_y_gap: float) ->
         # The whole row shifts up by one amount, so it can rise only as far as
         # its most-constrained section allows -- hence the min over ``lower``.
         # Each section's floor counts only the bypass spans whose columns it
-        # actually sits under (as ``_push_lower_rows_after_bbox_grow`` does):
+        # actually sits under (as ``push_lower_rows_after_bbox_grow`` does):
         # a bypass running over columns a section never spans reserves no
         # clearance against it.
         slack = float("inf")

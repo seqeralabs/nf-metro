@@ -5493,13 +5493,13 @@ def assert_render_row_gaps(
 ) -> None:
     """Run :func:`_guard_row_gaps` on the final render geometry.
 
-    Split from :func:`assert_render_layout_invariants` because it must run
-    *after* render-time label wrapping has grown section bboxes and the row
-    reflow that follows -- the point where a shrunk row gap becomes visible --
-    whereas the Tier-A layout guards run on the pre-wrap routed geometry (label
-    growth legitimately moves a bbox edge past an invisible port, which those
-    guards would otherwise flag).  ``_guard_row_gaps`` is a Tier-B guard whose
-    invariant only holds at the final boundary, which is exactly here.
+    Runs after render-time label wrapping has grown section bboxes and the
+    row reflow that follows -- the point where a shrunk row gap becomes
+    visible.  The Tier-A ``assert_render_layout_invariants`` set cannot host
+    this check: those guards run on the pre-wrap routed geometry (label growth
+    legitimately moves a bbox edge past an invisible port, which the Tier-A
+    port guards would flag), whereas ``_guard_row_gaps`` is a Tier-B guard
+    whose invariant only holds at the final boundary.
 
     Warns by default; raises :class:`LayoutInvariantError` under *strict*,
     matching the sibling chokepoints.

@@ -205,8 +205,7 @@ def test_render_row_gap_guard_fires_under_strict() -> None:
 
 # Fixtures whose sections stack vertically; the first forces late label
 # wrapping (a two-word ``sambamba markdup`` and an ``RNA-SeQC`` dir-icon
-# branch squeezed together) directly above another section, the case #1461
-# regressed on.
+# branch squeezed together) in a section sitting directly above another (#1461).
 ROW_GAP_FIXTURES = [
     "topologies/render_labelwrap_row_gap.mmd",
     "sarek_metro.mmd",
