@@ -70,10 +70,8 @@ def seam_orientation(
     half-turn that transposes the bundle end to end, else
     :attr:`SeamOrientation.PRESERVE`.
     """
-    feeder = graph.sections.get(exit_port.section_id)
-    consumer = graph.sections.get(entry_port.section_id)
-    if feeder is None or consumer is None:
-        return SeamOrientation.PRESERVE
+    feeder = graph.section_for_port(exit_port)
+    consumer = graph.section_for_port(entry_port)
     if _reverses(graph, exit_port, entry_port, feeder, consumer):
         return SeamOrientation.REVERSE
     return SeamOrientation.PRESERVE

@@ -155,8 +155,8 @@ def _aligned_horizontal_drop_entry(ctx: _RoutingCtx, exit_port_id: str) -> str |
         return None
     if entry_port.side not in (PortSide.TOP, PortSide.BOTTOM):
         return None
-    entry_section = graph.sections.get(entry_port.section_id)
-    if entry_section is None or not lanes_run_along_y(entry_section.direction):
+    entry_section = graph.section_for_port(entry_port)
+    if not lanes_run_along_y(entry_section.direction):
         return None
     if needs_perp_approach_fan(graph, entry_port.id):
         return None

@@ -214,8 +214,8 @@ def needs_perp_approach_fan(graph: MetroGraph, port_id: str) -> bool:
         or port.side not in (PortSide.TOP, PortSide.BOTTOM)
     ):
         return False
-    section = graph.sections.get(port.section_id)
-    if section is None or not lanes_run_along_y(section.direction):
+    section = graph.section_for_port(port)
+    if not lanes_run_along_y(section.direction):
         return False
     feeders_by_line: dict[str, set[str]] = {}
     for edge in graph.edges_to(port_id):
@@ -242,8 +242,7 @@ def tb_right_entry_sections(graph: MetroGraph) -> set[str]:
         for port in graph.ports.values()
         if port.is_entry
         and port.side == PortSide.RIGHT
-        and graph.sections.get(port.section_id) is not None
-        and graph.sections[port.section_id].direction == "TB"
+        and graph.section_for_port(port).direction == "TB"
     }
 
 

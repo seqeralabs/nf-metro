@@ -226,10 +226,8 @@ def _route_inter_section_connector(
     """
     if exit_port.side is not PortSide.RIGHT or entry_port.side is not PortSide.LEFT:
         return None
-    up = graph.sections.get(exit_port.section_id)
-    down = graph.sections.get(entry_port.section_id)
-    if up is None or down is None:
-        return None
+    up = graph.section_for_port(exit_port)
+    down = graph.section_for_port(entry_port)
 
     rails = [
         (

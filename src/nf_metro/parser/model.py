@@ -371,6 +371,21 @@ def format_unresolved_endpoint(edge: Edge, missing: list[str]) -> str:
     )
 
 
+class UnresolvedPortSectionError(ValueError):
+    """Raised when a port's ``section_id`` is absent from the graph's sections.
+
+    Every port carries a required ``section_id`` naming the section it bounds,
+    and that section is registered before layout, so a laid-out port always
+    resolves to its section; a missing one means a malformed graph, not a
+    routable topology.
+    """
+
+
+def format_unresolved_port_section(port: Port) -> str:
+    """Render a port and its unresolved section id as an error message."""
+    return f"Port {port.id} references unresolved section '{port.section_id}'"
+
+
 @dataclass
 class MetroGraph:
     """Complete metro map graph definition."""
@@ -758,6 +773,19 @@ class MetroGraph:
         :class:`UnresolvedEndpointError` on a dangling target.
         """
         return self._station_for_endpoint(edge, edge.target)
+
+    def section_for_port(self, port: Port) -> Section:
+        """Resolve a port's section (non-optional).
+
+        A port's ``section_id`` is a required field naming a section registered
+        before layout, so the lookup always resolves. A missing section raises
+        :class:`UnresolvedPortSectionError` rather than yielding a ``None`` a
+        caller would have to guard.
+        """
+        section = self.sections.get(port.section_id)
+        if section is None:
+            raise UnresolvedPortSectionError(format_unresolved_port_section(port))
+        return section
 
     def is_hub(self, station_id: str) -> bool:
         """A station with both a predecessor and a successor edge.
