@@ -158,6 +158,7 @@
     "_guard_interchange_label_clears_connector|final",
     "_guard_tb_top_entry_drop_hugs_top|final",
     "_guard_side_entered_vertical_top_not_below_feeder|final",
+    "_guard_row_mate_bbox_tops_aligned|final",
     "_guard_symmetric_diamond_branches_straddle_trunk|final",
     "_guard_symmetric_diamond_branches_half_pitch|final",
     "_guard_converge_siblings_merge_locally|final",

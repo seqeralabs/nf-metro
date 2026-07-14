@@ -1,0 +1,26 @@
+%%metro title: Flat-trunk row-mate top alignment
+%%metro style: dark
+%%metro diamond_style: symmetric
+%%metro line: qc | QC | #e6550d
+%%metro line: quant | Quantification | #0570b0
+
+graph LR
+    subgraph align_sec [Alignment]
+        reads_in[ ]
+        star[STAR 2-pass]
+        cram_out[ ]
+        reads_in -->|qc,quant| star
+        star -->|qc,quant| cram_out
+    end
+
+    subgraph qc_sec [QC]
+        flagstat[flagstat + mosdepth]
+        markdup[sambamba markdup]
+        star -->|qc| flagstat
+        star -->|qc| markdup
+    end
+
+    subgraph quant_sec [Quantification]
+        rsem[RSEM]
+        star -->|quant| rsem
+    end

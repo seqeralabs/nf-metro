@@ -103,22 +103,22 @@ def _build_graph():
 
 _EDGE = Edge("__junction_5", "multiqc__entry_left_4", "fastq_files")
 
-# The reported up-step: leave the exit at y=320, climb to a mid-lane y=275
+# The reported up-step: leave the exit at y=360, climb to a mid-lane y=275
 # (just below the intervening Run-Folder box), run the long traverse there,
 # then climb again into MultiQC.
 _UP_STEP = [
-    (474.0, 320.0),
+    (474.0, 360.0),
     (492.0, 275.0),
     (865.0, 275.0),
-    (879.0, 138.0),
-    (904.0, 124.0),
+    (879.0, 178.0),
+    (904.0, 164.0),
 ]
-# The straight run: stay on the exit row y=320 across the span, turn up once.
+# The straight run: stay on the exit row y=360 across the span, turn up once.
 _STRAIGHT = [
-    (474.0, 320.0),
-    (865.0, 320.0),
-    (879.0, 138.0),
-    (904.0, 124.0),
+    (474.0, 360.0),
+    (865.0, 360.0),
+    (879.0, 178.0),
+    (904.0, 164.0),
 ]
 
 

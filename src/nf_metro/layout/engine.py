@@ -80,6 +80,7 @@ from nf_metro.layout.phases.balancing import (  # noqa: F401
 from nf_metro.layout.phases.bbox import (  # noqa: F401
     _aggregate_bypass_spans,
     _fit_bboxes_to_content_top,
+    _level_row_mate_bbox_tops,
     _lift_would_cause_uturn,
     _loop_corner_x,
     _min_section_bbox_top,
@@ -89,7 +90,6 @@ from nf_metro.layout.phases.bbox import (  # noqa: F401
     _shrink_bboxes_to_content_bottom,
     _snapshot_struct_heights_below_top,
     _tighten_lower_rows_after_shrink,
-    _top_align_side_entered_vertical_to_feeder,
     push_lower_rows_after_bbox_grow,
 )
 from nf_metro.layout.phases.canvas import (  # noqa: F401
@@ -194,6 +194,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_right_entry_drop_in_when_clear,
     _guard_routes_enter_sections_at_ports,
     _guard_row_gaps,
+    _guard_row_mate_bbox_tops_aligned,
     _guard_row_trunk_cy_consistent,
     _guard_section_bboxes_positive,
     _guard_section_top_padding,
@@ -740,6 +741,7 @@ def _compute_layout_scaled(
         _guard_interchange_label_clears_connector(graph, "final")
         _guard_tb_top_entry_drop_hugs_top(graph, "final")
         _guard_side_entered_vertical_top_not_below_feeder(graph, "final")
+        _guard_row_mate_bbox_tops_aligned(graph, "final", section_y_gap=section_y_gap)
         _guard_symmetric_diamond_branches_straddle_trunk(graph, "final")
         _guard_symmetric_diamond_branches_half_pitch(graph, "final")
         _guard_converge_siblings_merge_locally(graph, "final")
@@ -1844,9 +1846,9 @@ def _finalize_layout(
     # re-fit's non-grid shift is then cleaned up by the Stage 6.15
     # canvas snap below.
     _fit_bboxes_to_content_top(graph, section_y_padding, section_y_gap)
-    # Follows the grow above: a side-entered vertical section beside a
-    # row-mate whose top just grew is lifted to that feeder.
-    _top_align_side_entered_vertical_to_feeder(graph)
+    # Per-section content-hug fitting can leave a shorter row-mate below its
+    # taller neighbour's top; level contiguous row-mates to the row's highest.
+    _level_row_mate_bbox_tops(graph, section_y_gap)
     _distribute_stacked_rows_in_rowspan_band(graph)
     _shift_graph_into_canvas(graph, section_y_padding)
     # Must precede the structural snapshot: the extent counts the exit port and

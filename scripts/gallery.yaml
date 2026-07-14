@@ -226,6 +226,15 @@ gallery:
       trunk. Regression fixture: when the feeder row-mate's top grows, the
       side-entered vertical section must follow it up rather than hugging its
       low content, keeping its number badge level with the rest of the grid row."
+  - id: rowmate_flat_trunk_top_align
+    source_dir: examples/topologies
+    category: Realistic Pipelines
+    description:
+      "A flat-trunk Alignment section shares row 0 with a symmetric-fan QC
+      section whose box top grows upward to fit its branch above the trunk.
+      Regression fixture: when the fan row-mate's top grows, the flat-trunk
+      section must follow it up rather than hugging its own content, keeping its
+      number badge level with the rest of the grid row."
   - id: seqinspector
     source_dir: examples/showcase
     category: Realistic Pipelines

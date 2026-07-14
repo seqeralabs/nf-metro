@@ -5,13 +5,12 @@ from pathlib import Path
 import pytest
 from layout_validator import Severity, check_station_as_elbow
 
-from nf_metro.layout.constants import CHAR_WIDTH, SECTION_Y_PADDING
+from nf_metro.layout.constants import CHAR_WIDTH
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.labels import label_text_width
 from nf_metro.layout.layers import assign_layers
 from nf_metro.layout.ordering import assign_tracks
 from nf_metro.parser.mermaid import parse_metro_mermaid
-from nf_metro.parser.model import is_bypass_v
 
 
 def _patch_layout_helper(monkeypatch, name, replacement):
@@ -164,9 +163,9 @@ def test_compute_layout_rowspan_section_compacts_content():
 
     A row-spanning section without its own off-track content should
     sit on the row's trunk Y so a straight inter-section bundle passes
-    through it without kinking.  Its bbox top hugs its own content
-    rather than following an off-track row-mate's raised top, so the two
-    do not share a bbox top.
+    through it without kinking.  Its bbox top levels up to an off-track
+    row-mate's raised top so the two share the row's top edge, while its
+    trunk stays on the shared row Y.
     """
     graph = parse_metro_mermaid(
         "%%metro line: main | Main | #ff0000\n"
@@ -203,19 +202,10 @@ def test_compute_layout_rowspan_section_compacts_content():
     assert a_out_y == pytest.approx(b_y), (
         f"a_out y={a_out_y} and b y={b_y} must share trunk Y across sections"
     )
-    # Each section hugs its own content, so the rowspan top sits below
-    # the off-track row-mate's raised top instead of matching it.
-    tall_content_top = min(
-        graph.stations[sid].y
-        for sid in tall.station_ids
-        if not graph.stations[sid].is_port and not is_bypass_v(sid)
-    )
-    assert tall.bbox_y == pytest.approx(tall_content_top - SECTION_Y_PADDING), (
-        f"tall bbox_y={tall.bbox_y} should hug its content "
-        f"(top {tall_content_top} - padding {SECTION_Y_PADDING})"
-    )
-    assert tall.bbox_y > short.bbox_y + 1, (
-        f"tall bbox_y={tall.bbox_y} should sit below short's off-track-raised "
+    # The rowspan section levels its top up to the off-track row-mate's
+    # raised top so the two share the row's top edge.
+    assert tall.bbox_y == pytest.approx(short.bbox_y), (
+        f"tall bbox_y={tall.bbox_y} should level up to short's off-track-raised "
         f"top ({short.bbox_y})"
     )
 

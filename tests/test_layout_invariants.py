@@ -74,6 +74,7 @@ from nf_metro.layout.phases._common import (
 )
 from nf_metro.layout.phases.bbox import (
     _min_drawn_section_bbox_top,
+    _row_above_ceiling,
     _section_band_is_empty,
     _section_content_hug_top,
     _section_fit_top,
@@ -7177,10 +7178,18 @@ def test_section_bbox_top_hugs_content(fixture):
     :func:`_section_fit_top` above the ceiling-free
     :func:`_section_content_hug_top`) legitimately keep a band so the
     header badge clears the inter-row routing; they are skipped here and
-    covered by the floor test instead.
+    covered by the floor test instead.  Sections flushed up to a taller
+    contiguous row-mate (:func:`_level_row_mate_bbox_tops`) likewise keep an
+    intentional band so their top edge lines up with the rest of the grid row.
     """
     graph = _layout(fixture)
     tol = 1.0
+
+    row_top: dict[str, float] = {}
+    for group in _row_contiguous_column_groups(graph):
+        group_top = min(s.bbox_y for s in group)
+        for s in group:
+            row_top[s.id] = group_top
 
     offenders: list[str] = []
     for sec in graph.sections.values():
@@ -7191,6 +7200,10 @@ def test_section_bbox_top_hugs_content(fixture):
         # fit > hug means the row-above ceiling raised the top above the
         # content-hug, so a band is reserved for the header badge.
         if fit is None or hug is None or fit > hug + tol:
+            continue
+        # A taller contiguous row-mate raised the row's top edge above this
+        # section's own content-hug, so its leftover band re-levels the row.
+        if sec.id in row_top and row_top[sec.id] < hug - tol:
             continue
         # The bbox top must sit exactly at the content-hug: a padding band
         # above the topmost marker for an LR/RL section, or hugging the icon
@@ -7242,6 +7255,44 @@ def test_side_entered_vertical_section_top_not_below_feeder_neighbour(fixture):
     assert not offenders, (
         f"{fixture}: side-entered vertical-flow sections must not drop below "
         f"their feeder row-mate's bbox top: " + "; ".join(offenders)
+    )
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES_MULTI_SECTION)
+def test_row_mate_bbox_tops_aligned(fixture):
+    """Sections in one contiguous row column group share a bbox top.
+
+    A row's rendered height is governed by its tallest box, so a shorter
+    row-mate gains no canvas by hugging its own content: it only floats its
+    number badge below the rest of the grid row.  Content-hug re-fitting can
+    grow one box's top up to seat fanned content or shrink another's down to
+    an empty band, either of which pulls a row-mate off the row's top edge;
+    the final layout must re-level them.  A section held down by its own
+    row-above ceiling cannot rise to the row top without crowding the row
+    below, so it is exempt.  (``line_spread: rails`` graphs take a separate
+    layout pipeline and are excluded from this fixture set.)
+    """
+    graph = _layout(fixture)
+    tol = 1.0
+
+    offenders: list[str] = []
+    for group in _row_contiguous_column_groups(graph):
+        top = min(s.bbox_y for s in group)
+        for section in group:
+            if section.bbox_y - top <= tol:
+                continue
+            ceiling = _row_above_ceiling(graph, section, SECTION_Y_GAP)
+            if ceiling is not None and ceiling > top + tol:
+                continue
+            offenders.append(
+                f"section {section.id!r}: bbox_y={section.bbox_y:.1f} "
+                f"sits {section.bbox_y - top:.1f} below its row's top edge "
+                f"{top:.1f}"
+            )
+
+    assert not offenders, (
+        f"{fixture}: contiguous row-mates must share a bbox top: "
+        + "; ".join(offenders)
     )
 
 

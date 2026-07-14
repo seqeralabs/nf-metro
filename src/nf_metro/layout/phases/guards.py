@@ -43,6 +43,7 @@ from nf_metro.layout.phases._common import (
     _canvas_width,
     _restoring_layout_geometry,
     _route_crosses_section_boundary,
+    _row_contiguous_column_groups,
     _section_bundle_lines,
     _section_lr_port_anchor_y,
     _side_entered_vertical_feeder_pairs,
@@ -66,6 +67,7 @@ from nf_metro.layout.phases._common import (
 from nf_metro.layout.phases.bbox import (
     _min_drawn_section_bbox_top,
     _predict_section_content_bottom,
+    _row_above_ceiling,
     _section_fit_top,
 )
 from nf_metro.layout.phases.off_track import (
@@ -672,6 +674,35 @@ def _guard_side_entered_vertical_top_not_below_feeder(
                 f"bbox top y={section.bbox_y:.1f} drops "
                 f"{section.bbox_y - neighbour.bbox_y:.1f}px below its feeder "
                 f"row-mate {neighbour.id!r} (top y={neighbour.bbox_y:.1f})"
+            )
+
+
+def _guard_row_mate_bbox_tops_aligned(
+    graph: MetroGraph, phase: str, *, section_y_gap: float
+) -> None:
+    """Final: sections in one contiguous row column group share a bbox top.
+
+    Checks the invariant :func:`_level_row_mate_bbox_tops` enforces.  A section
+    held down by its own row-above ceiling (:func:`_row_above_ceiling`) cannot
+    rise to the row top without crowding the row below, so it is exempt;
+    rail-flagged sections carry a baked centreline and are excluded too.
+    """
+    tol = SAME_COORD_TOLERANCE
+    for group in _row_contiguous_column_groups(graph):
+        members = [s for s in group if not graph.is_rail_section(s.id)]
+        if len(members) < 2:
+            continue
+        top = min(s.bbox_y for s in members)
+        for section in members:
+            if section.bbox_y - top <= tol:
+                continue
+            ceiling = _row_above_ceiling(graph, section, section_y_gap)
+            if ceiling is not None and ceiling > top + tol:
+                continue
+            raise PhaseInvariantError(
+                f"{phase}: row-mate section {section.id!r} bbox top "
+                f"y={section.bbox_y:.1f} sits {section.bbox_y - top:.1f}px "
+                f"below its row's top edge y={top:.1f}"
             )
 
 
@@ -5341,6 +5372,11 @@ INLINE_GUARD_REGISTRY: tuple[GuardSpec, ...] = (
         ),
     ),
     GuardSpec(_guard_side_entered_vertical_top_not_below_feeder, "B"),
+    GuardSpec(
+        _guard_row_mate_bbox_tops_aligned,
+        "B",
+        needs=frozenset({"section_y_gap"}),
+    ),
     GuardSpec(
         _guard_converge_siblings_merge_locally,
         "B",

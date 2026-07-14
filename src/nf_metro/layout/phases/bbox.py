@@ -24,8 +24,8 @@ from nf_metro.layout.phases._common import (
     _is_side_entered_vertical_section,
     _pull_section_ports_to_edge,
     _ref_y,
+    _row_contiguous_column_groups,
     _set_section_bbox_top,
-    _side_entered_vertical_feeder_pairs,
     _station_bundle_offset_span,
     _trunk_symmetric_fan_ids,
 )
@@ -627,21 +627,33 @@ def _section_fit_top(
     target = _section_content_hug_top(graph, section, section_y_padding, offsets)
     if target is None:
         return None
+    ceiling = _row_above_ceiling(graph, section, section_y_gap)
+    return target if ceiling is None else max(target, ceiling)
 
-    above_bots: list[float] = []
-    for other in graph.sections.values():
-        if other.id == section.id or other.bbox_w <= 0 or other.bbox_h <= 0:
-            continue
-        if other.grid_row + max(1, other.grid_row_span) != section.grid_row:
-            continue
-        if not _bbox_cols_overlap(other, section):
-            continue
-        above_bots.append(other.bbox_y + other.bbox_h)
-    if above_bots:
-        target = max(
-            target, max(above_bots) + section_y_gap + SECTION_HEADER_PROTRUSION
-        )
-    return target
+
+def _row_above_ceiling(
+    graph: MetroGraph, section: Section, section_y_gap: float
+) -> float | None:
+    """Highest bbox top ``section`` may reach without crowding the row above.
+
+    A section's top cannot rise past the deepest bbox bottom of the sections
+    in the row directly above that overlap its columns, plus ``section_y_gap +
+    SECTION_HEADER_PROTRUSION`` (the header badge protrudes above the top and
+    inter-section routes dip into the gap).  Returns ``None`` when no section
+    sits above, so the top is free to rise.
+    """
+    above_bots = [
+        other.bbox_y + other.bbox_h
+        for other in graph.sections.values()
+        if other.id != section.id
+        and other.bbox_w > 0
+        and other.bbox_h > 0
+        and other.grid_row + max(1, other.grid_row_span) == section.grid_row
+        and _bbox_cols_overlap(other, section)
+    ]
+    if not above_bots:
+        return None
+    return max(above_bots) + section_y_gap + SECTION_HEADER_PROTRUSION
 
 
 def _section_content_hug_top(
@@ -793,23 +805,30 @@ def _fit_bboxes_to_content_top(
             _set_section_bbox_top(graph, section, hug)
 
 
-def _top_align_side_entered_vertical_to_feeder(graph: MetroGraph) -> None:
-    """Grow a side-entered vertical section's bbox top up to its feeder
-    row-mate's top.
+def _level_row_mate_bbox_tops(graph: MetroGraph, section_y_gap: float) -> None:
+    """Grow each contiguous row-mate's bbox top up to the row's highest top.
 
-    When a horizontal-flow row-mate grows its top to fit a branch fanned
-    above its trunk (:func:`_fit_bboxes_to_content_top`), a side-entered
-    vertical (TB/BT) section beside it keeps its content-hugged top, dropping
-    its number badge below the rest of the grid row.  The band above such a
-    section's first station carries the perpendicular entry approach, so
-    growing the top upward (stations stay put) re-levels the badge without
-    disturbing routing.  Growth is upward only, so a section already at or
-    above its feeder is untouched, and empty-band sections with no side entry
-    keep their content-hug.
+    The per-section content-hug re-fit in :func:`_fit_bboxes_to_content_top`
+    can leave a flat-trunk section below a neighbour whose fanned content
+    lifted its top.  The row's rendered height is already set by that tallest
+    box, so a shorter row-mate hugging its own content saves no canvas and only
+    floats its number badge below the rest of the grid row.  Grow each
+    row-mate's top up to the row's highest -- bounded by
+    :func:`_row_above_ceiling`, so a section sitting above a lower row is not
+    grown into the inter-row gap.  Growth is upward only, moving the bbox top
+    without touching the stations inside, so a section already at (or held
+    below the row top by its ceiling) is left in place.  Rail-flagged sections
+    carry a baked centreline anchored to their bbox, so they are excluded.
     """
-    for section, neighbour in _side_entered_vertical_feeder_pairs(graph):
-        if section.bbox_y - neighbour.bbox_y > SAME_COORD_TOLERANCE:
-            _grow_section_bbox_upward(graph, section, neighbour.bbox_y)
+    for group in _row_contiguous_column_groups(graph):
+        members = [s for s in group if not graph.is_rail_section(s.id)]
+        if len(members) < 2:
+            continue
+        target = min(section.bbox_y for section in members)
+        for section in members:
+            ceiling = _row_above_ceiling(graph, section, section_y_gap)
+            new_top = target if ceiling is None else max(target, ceiling)
+            _grow_section_bbox_upward(graph, section, new_top)
 
 
 def _tighten_lower_rows_after_shrink(graph: MetroGraph, section_y_gap: float) -> None:
