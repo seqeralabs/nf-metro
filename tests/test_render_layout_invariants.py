@@ -186,30 +186,30 @@ def test_breeze_through_guards_on_render_path(guard_name: str) -> None:
     assert guard_name in names
 
 
-def test_render_row_gap_guard_fires_under_strict() -> None:
-    """``assert_render_row_gaps`` raises under strict when a section's bbox has
-    grown into the row below, and warns otherwise (the render-path chokepoint
-    that catches a label-wrap growth the reflow failed to absorb)."""
-    from nf_metro.layout.constants import SECTION_Y_GAP
-    from nf_metro.layout.phases.guards import assert_render_row_gaps
+def test_render_header_clearance_guard_fires_under_strict() -> None:
+    """``assert_render_header_clearance`` raises under strict when a section's
+    bbox has grown far enough that the row below's header would overlap it, and
+    warns otherwise."""
+    from nf_metro.layout.constants import SECTION_HEADER_PROTRUSION
+    from nf_metro.layout.phases.guards import assert_render_header_clearance
 
     graph = _laid_out("topologies/render_labelwrap_row_gap.mmd")
-    upper = graph.sections["qc_sec"]
-    upper.bbox_h += SECTION_Y_GAP + 10.0  # crowd the row below past its gap
+    graph.sections["qc_sec"].bbox_h += SECTION_HEADER_PROTRUSION + 40.0
 
-    with pytest.raises(LayoutInvariantError, match="row-gap invariant"):
-        assert_render_row_gaps(graph, SECTION_Y_GAP, strict=True)
-    with pytest.warns(UserWarning, match="row-gap invariant"):
-        assert_render_row_gaps(graph, SECTION_Y_GAP, strict=False)
+    with pytest.raises(LayoutInvariantError, match="section header over the box"):
+        assert_render_header_clearance(graph, strict=True)
+    with pytest.warns(UserWarning, match="section header over the box"):
+        assert_render_header_clearance(graph, strict=False)
 
 
-# Fixtures whose sections stack vertically; the first forces late label
-# wrapping (a two-word ``sambamba markdup`` and an ``RNA-SeQC`` dir-icon
-# branch squeezed together) in a section sitting directly above another (#1461).
+# Non-rail fixtures whose sections stack vertically; the first forces late
+# label wrapping (a two-word ``sambamba markdup`` and an ``RNA-SeQC`` dir-icon
+# branch squeezed together) in a section sitting directly above another
+# (#1461). Rail-mode graphs are exempt (see test_render_does_not_reflow_...).
 ROW_GAP_FIXTURES = [
     "topologies/render_labelwrap_row_gap.mmd",
-    "sarek_metro.mmd",
     "variant_calling.mmd",
+    "rnaseq_auto.mmd",
 ]
 
 _SECTION_RECT_RE = re.compile(
@@ -223,7 +223,7 @@ def _rendered_section_rects(svg: str) -> dict[str, tuple[float, float, float, fl
     """Map each section id to its drawn ``(x, y, w, h)`` box in the final SVG.
 
     The rendered box reflects render-time label-wrap growth the pre-render
-    layout bboxes never saw, so it is the geometry the row-gap invariant must
+    layout bboxes never saw, so it is the geometry the clearance invariant must
     hold against.
     """
     rects: dict[str, tuple[float, float, float, float]] = {}
@@ -234,17 +234,10 @@ def _rendered_section_rects(svg: str) -> dict[str, tuple[float, float, float, fl
     return rects
 
 
-@pytest.mark.parametrize("name", ROW_GAP_FIXTURES)
-def test_rendered_row_gap_survives_label_wrap(name: str) -> None:
-    """Column-overlapping adjacent-row sections keep ``section_y_gap`` in the
-    *rendered* SVG, after label wrapping has grown any bbox (#1461)."""
-    from nf_metro.layout.constants import SAME_COORD_TOLERANCE, SECTION_Y_GAP
-
-    graph = _laid_out(name)
-    theme_name = graph.style if graph.style in THEMES else "nfcore"
-    rects = _rendered_section_rects(render_svg(graph, THEMES[theme_name]))
-    gap = graph.section_y_gap if graph.section_y_gap is not None else SECTION_Y_GAP
-
+def _min_rendered_row_gap(graph: MetroGraph, rects: dict) -> float | None:
+    """Smallest gap between a column-overlapping adjacent-row section pair in
+    the rendered rects, or ``None`` if no such pair exists."""
+    smallest: float | None = None
     for usid, us in graph.sections.items():
         if usid not in rects:
             continue
@@ -253,50 +246,75 @@ def test_rendered_row_gap_survives_label_wrap(name: str) -> None:
         for lsid, ls in graph.sections.items():
             if ls.grid_row != next_row or lsid not in rects:
                 continue
-            lx, ly, lw, lh = rects[lsid]
-            if ux >= lx + lw or lx >= ux + uw:  # no horizontal overlap
+            lx, ly, _, _ = rects[lsid]
+            if ux >= lx + rects[lsid][2] or lx >= ux + uw:  # no horizontal overlap
                 continue
-            drawn_gap = ly - (uy + uh)
-            assert drawn_gap >= gap - SAME_COORD_TOLERANCE, (
-                f"{name}: rendered row gap {usid!r} -> {lsid!r} is "
-                f"{drawn_gap:.1f}px, expected >= {gap:.1f}px"
-            )
+            gap = ly - (uy + uh)
+            smallest = gap if smallest is None else min(smallest, gap)
+    return smallest
 
 
-def test_render_reflow_shifts_rail_centrelines_with_stations() -> None:
-    """When the render-time row reflow shifts a rail-mode section, its rail
-    centrelines move by the same amount as its stations, so the tracks stay
-    straight instead of kinking against a stale ``_rail_y`` (#1461).
+@pytest.mark.parametrize("name", ROW_GAP_FIXTURES)
+def test_rendered_sections_clear_header_after_label_wrap(name: str) -> None:
+    """No lower section's header badge overlaps the box above it in the
+    *rendered* SVG, after label wrapping has grown any bbox (#1461)."""
+    from nf_metro.layout.constants import (
+        SAME_COORD_TOLERANCE,
+        SECTION_HEADER_PROTRUSION,
+    )
 
-    ``sarek_metro`` has a rail-mode ``calling`` section one row below a section
-    whose labels wrap at render, so the reflow shifts it.
+    graph = _laid_out(name)
+    assert not graph.has_rail_sections, f"{name}: rail graphs are reflow-exempt"
+    theme_name = graph.style if graph.style in THEMES else "nfcore"
+    rects = _rendered_section_rects(render_svg(graph, THEMES[theme_name]))
+
+    smallest = _min_rendered_row_gap(graph, rects)
+    if smallest is None:
+        return
+    assert smallest >= SECTION_HEADER_PROTRUSION - SAME_COORD_TOLERANCE, (
+        f"{name}: smallest rendered row gap {smallest:.1f}px leaves the lower "
+        f"header overlapping (needs >= {SECTION_HEADER_PROTRUSION:.1f}px)"
+    )
+
+
+def test_header_collision_reflow_restores_section_y_gap() -> None:
+    """The #1461 fixture's QC labels wrap at render and grow the box into the
+    Quantification header; the reflow restores the full ``section_y_gap``."""
+    from nf_metro.layout.constants import SAME_COORD_TOLERANCE, SECTION_Y_GAP
+
+    graph = _laid_out("topologies/render_labelwrap_row_gap.mmd")
+    rects = _rendered_section_rects(render_svg(graph, THEMES["nfcore"]))
+    qx, qy, qw, qh = rects["qc_sec"]
+    gap = rects["quant_sec"][1] - (qy + qh)
+    assert gap >= SECTION_Y_GAP - SAME_COORD_TOLERANCE, (
+        f"qc_sec -> quant_sec gap {gap:.1f}px, expected >= {SECTION_Y_GAP:.1f}px"
+    )
+
+
+def test_render_does_not_reflow_rail_mode_graph() -> None:
+    """A rail-mode graph is left un-reflowed at render: its stations keep their
+    laid-out Ys, so the rail tracks stay straight (#1461).
+
+    Rail-mode sections anchor their per-line centrelines during
+    ``compute_layout``; a render-time row shift cannot re-derive them, so
+    pushing a rail row would kink the tracks. ``sarek_metro`` has a rail-mode
+    ``calling`` section one row below a section whose labels wrap at render --
+    the reflow trigger -- so this pins that the reflow is skipped for it.
     """
+    from nf_metro.layout.constants import SAME_COORD_TOLERANCE
+
     graph = _laid_out("sarek_metro.mmd")
-    rail_sections = {sid for sid in graph._rail_y}
-    assert rail_sections, "expected sarek_metro to have a rail-mode section"
-    pre_rail = {sid: dict(lines) for sid, lines in graph._rail_y.items()}
+    assert graph.has_rail_sections, "expected sarek_metro to have a rail-mode section"
     pre_y = {sid: st.y for sid, st in graph.stations.items()}
 
     render_svg(graph, THEMES["nfcore"])
 
-    for sid in rail_sections:
-        rail_delta = {
-            line: graph._rail_y[sid][line] - pre_rail[sid][line]
-            for line in pre_rail[sid]
-        }
-        common = next(iter(rail_delta.values()))
-        assert all(abs(d - common) < 1e-6 for d in rail_delta.values()), (
-            f"{sid}: rail centrelines shifted by differing amounts {rail_delta}"
-        )
-        for stid in graph.sections[sid].station_ids:
-            st = graph.stations.get(stid)
-            if st is None or st.is_port or stid not in pre_y:
-                continue
-            station_delta = st.y - pre_y[stid]
-            assert abs(station_delta - common) < 1e-6, (
-                f"{sid}: station {stid!r} shifted {station_delta:.1f}px but its "
-                f"rail centrelines shifted {common:.1f}px (stale rail centreline)"
-            )
+    moved = {
+        sid: (pre_y[sid], graph.stations[sid].y)
+        for sid in pre_y
+        if abs(graph.stations[sid].y - pre_y[sid]) > SAME_COORD_TOLERANCE
+    }
+    assert not moved, f"render reflowed a rail-mode graph, shifting stations: {moved}"
 
 
 def _render_fixture(name: str, *, strict: bool = False) -> None:

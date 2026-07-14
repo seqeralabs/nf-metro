@@ -24,6 +24,7 @@ from nf_metro.layout.constants import (
     ROW_BAND_SLACK,
     SAME_COORD_TOLERANCE,
     SAME_Y_TOLERANCE,
+    SECTION_HEADER_PROTRUSION,
     SECTION_Y_GAP,
     SECTION_Y_PADDING,
     STATION_RADIUS_APPROX,
@@ -1525,13 +1526,15 @@ def _guard_tall_anchor_stack_well_formed(graph: MetroGraph, phase: str) -> None:
         )
 
 
-def _guard_row_gaps(graph: MetroGraph, phase: str, *, section_y_gap: float) -> None:
-    """Final phase: column-overlapping adjacent-row section pairs must
-    keep at least ``section_y_gap`` between the upper section's bbox
-    bottom and the lower section's bbox top.
+def _deepest_row_gap_deficit(
+    graph: MetroGraph, min_gap: float
+) -> tuple[float, float, str, str] | None:
+    """Deepest ``(deficit, gap, upper_id, lower_id)`` where a column-overlapping
+    adjacent-row section pair sits closer than *min_gap*, or ``None`` if every
+    such pair clears it.
 
-    Sections that don't share horizontal extent are unconstrained --
-    their vertical proximity has no visual impact.
+    Sections that don't share horizontal extent are unconstrained -- their
+    vertical proximity has no visual impact -- so they are skipped.
     """
     tol = SAME_COORD_TOLERANCE
     sections_by_row_start: dict[int, list[tuple[str, Section]]] = defaultdict(list)
@@ -1540,7 +1543,7 @@ def _guard_row_gaps(graph: MetroGraph, phase: str, *, section_y_gap: float) -> N
             continue
         sections_by_row_start[sec.grid_row].append((sid, sec))
     if not sections_by_row_start:
-        return
+        return None
 
     deepest: tuple[float, float, str, str] | None = None
     for usid, us in graph.sections.items():
@@ -1551,9 +1554,18 @@ def _guard_row_gaps(graph: MetroGraph, phase: str, *, section_y_gap: float) -> N
             if not _bbox_cols_overlap(us, ls):
                 continue
             gap = ls.bbox_y - (us.bbox_y + us.bbox_h)
-            deficit = section_y_gap - gap
+            deficit = min_gap - gap
             if deficit > tol and (deepest is None or deficit > deepest[0]):
                 deepest = (deficit, gap, usid, lsid)
+    return deepest
+
+
+def _guard_row_gaps(graph: MetroGraph, phase: str, *, section_y_gap: float) -> None:
+    """Final phase: column-overlapping adjacent-row section pairs must
+    keep at least ``section_y_gap`` between the upper section's bbox
+    bottom and the lower section's bbox top.
+    """
+    deepest = _deepest_row_gap_deficit(graph, section_y_gap)
     if deepest is None:
         return
     deficit, gap, usid, lsid = deepest
@@ -5488,30 +5500,41 @@ def assert_render_layout_invariants(
     warnings.warn(msg, stacklevel=2)
 
 
-def assert_render_row_gaps(
-    graph: MetroGraph, section_y_gap: float, *, strict: bool = False
-) -> None:
-    """Run :func:`_guard_row_gaps` on the final render geometry.
+def render_header_collision(graph: MetroGraph) -> bool:
+    """True when a lower section's header badge overlaps the box above it.
 
-    Runs after render-time label wrapping has grown section bboxes and the
-    row reflow that follows -- the point where a shrunk row gap becomes
+    The header badge protrudes ``SECTION_HEADER_PROTRUSION`` above its section
+    box, so a column-overlapping adjacent-row pair collides once its gap falls
+    below that -- the visible damage render-time label growth can cause (#1461).
+    A larger-but-still-sub-``section_y_gap`` gap is cosmetic, not a collision.
+    """
+    return _deepest_row_gap_deficit(graph, SECTION_HEADER_PROTRUSION) is not None
+
+
+def assert_render_header_clearance(graph: MetroGraph, *, strict: bool = False) -> None:
+    """Guard the final render geometry against a section-header collision.
+
+    Runs after render-time label wrapping has grown section bboxes (and any
+    row reflow that followed) -- the point where a header overlap becomes
     visible.  The Tier-A ``assert_render_layout_invariants`` set cannot host
-    this check: those guards run on the pre-wrap routed geometry (label growth
-    legitimately moves a bbox edge past an invisible port, which the Tier-A
-    port guards would flag), whereas ``_guard_row_gaps`` is a Tier-B guard
-    whose invariant only holds at the final boundary.
+    this: those guards run on the pre-wrap routed geometry (label growth
+    legitimately moves a bbox edge past an invisible port), whereas this holds
+    only on the final, grown boxes.
 
     Warns by default; raises :class:`LayoutInvariantError` under *strict*,
     matching the sibling chokepoints.
     """
-    try:
-        _guard_row_gaps(graph, "render", section_y_gap=section_y_gap)
-    except PhaseInvariantError as exc:
-        msg = (
-            "the settled layout violates a row-gap invariant the renderer is "
-            "about to draw. The map will render but sections crowd; fix the "
-            f"layout that produced this geometry.\n  [_guard_row_gaps] {exc}"
-        )
-        if strict:
-            raise LayoutInvariantError(msg) from exc
-        warnings.warn(msg, stacklevel=2)
+    deepest = _deepest_row_gap_deficit(graph, SECTION_HEADER_PROTRUSION)
+    if deepest is None:
+        return
+    _, gap, usid, lsid = deepest
+    msg = (
+        "the settled layout draws a section header over the box above it: "
+        f"sections {usid!r} (bottom) and {lsid!r} (top) overlap horizontally "
+        f"and are {gap:.1f}px apart, below the {SECTION_HEADER_PROTRUSION:.1f}px "
+        "the lower header needs to clear the box above.  Fix the layout (or "
+        "directive combination) that produced this geometry."
+    )
+    if strict:
+        raise LayoutInvariantError(msg)
+    warnings.warn(msg, stacklevel=2)
