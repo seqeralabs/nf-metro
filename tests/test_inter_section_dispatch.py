@@ -25,7 +25,7 @@ from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing import inter_section_handlers as H
 from nf_metro.parser.mermaid import parse_metro_mermaid
-from nf_metro.parser.model import PortSide
+from nf_metro.parser.model import PortSide, UnresolvedEndpointError
 
 _ROOT = Path(__file__).resolve().parents[1]
 
@@ -315,8 +315,11 @@ def test_would_route_around_section_below(
     expected: bool,
 ) -> None:
     edge = SimpleNamespace(source="s", target="t", line_id="L")
+    stations = {"s": object(), "t": object()}
     ctx = SimpleNamespace(
-        graph=SimpleNamespace(stations={"s": object(), "t": object()})
+        graph=SimpleNamespace(
+            edge_endpoints=lambda e: (stations[e.source], stations[e.target])
+        )
     )
     sentinel = object()
     matched = None if route is None else SimpleNamespace(route=route)
@@ -328,17 +331,22 @@ def test_would_route_around_section_below(
     assert H._would_route_around_section_below(edge, ctx) is expected  # type: ignore[arg-type]
 
 
-def test_would_route_around_section_below_abstains_on_missing_endpoint(
+def test_would_route_around_section_below_propagates_missing_endpoint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A dangling endpoint surfaces as the contract error, not a silent abstain."""
     edge = SimpleNamespace(source="s", target="absent", line_id="L")
-    ctx = SimpleNamespace(graph=SimpleNamespace(stations={"s": object()}))
+
+    def unresolved(_e: object) -> object:
+        raise UnresolvedEndpointError("absent")
 
     def fail(*_a: object) -> object:
         raise AssertionError("must not dispatch when an endpoint is missing")
 
+    ctx = SimpleNamespace(graph=SimpleNamespace(edge_endpoints=unresolved))
     monkeypatch.setattr(H, "_build_inter_facts", fail)
-    assert H._would_route_around_section_below(edge, ctx) is False  # type: ignore[arg-type]
+    with pytest.raises(UnresolvedEndpointError):
+        H._would_route_around_section_below(edge, ctx)  # type: ignore[arg-type]
 
 
 def test_rule_names_unique() -> None:

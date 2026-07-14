@@ -87,10 +87,6 @@
     "note": "Empty-bundle guard: all callers (normalize.py 291/1648, inter_section_handlers.py 783/796/2132) derive bundle_widths from a non-empty bundle line count, so n is always >=1; the empty-list arm is never taken.",
     "status": "defensive"
   },
-  "common.py::if not src or not tgt:::#1": {
-    "note": "Null-endpoint guard: the parser creates a Station for every edge endpoint, so graph.stations.get() never returns None for a real edge; the continue arm only guards a malformed graph.",
-    "status": "defensive"
-  },
   "common.py::if other and other.section_id:::#1": {
     "note": "edges_to upstream guard: a junction's incoming neighbour is always an exit_port with section_id set, so the False (continue) arm only guards a junction-to-junction edge that valid construction never produces.",
     "status": "defensive"
@@ -211,10 +207,6 @@
     "note": "edge.source for an edge into the junction is always a present station; the missing-predecessor continue never fires.",
     "status": "defensive"
   },
-  "context.py::if not src or not tgt:::#1": {
-    "note": "Edge endpoints are always present stations; the missing-endpoint continue never fires.",
-    "status": "defensive"
-  },
   "context.py::if not tgt or not (tgt.is_port or edge.target in junction_ids):::#1": {
     "note": "A junction's outgoing inter-section edges always target a port or another junction (junctions are synthesised only on exit-port -> entry-port chains); the skip arm for a plain-station target never fires.",
     "status": "defensive"
@@ -253,10 +245,6 @@
   },
   "context.py::if tgt_col is None:::#2": {
     "note": "A junction's port/junction target always resolves to a grid column; the unresolved-column continue never fires.",
-    "status": "defensive"
-  },
-  "core.py::if not src or not tgt:::#1": {
-    "note": "Main edge-loop guard against a missing endpoint station. After section resolution every edge endpoint exists in graph.stations (parse _ensure_station's all referenced nodes; resolved chains insert their own ports/junctions), so the guard never fires and only the proceed-to-routing arm is reachable.",
     "status": "defensive"
   },
   "core.py::if result is not None:::#1": {
@@ -393,10 +381,6 @@
   },
   "inter_section_handlers.py::if shared_vx is not None:::#1": {
     "note": "_fan_left_entry_descent_x returns None only when col_left<=0; col_left_edge for the target's own column is always >0.",
-    "status": "defensive"
-  },
-  "inter_section_handlers.py::if src is None or tgt is None:::#1": {
-    "note": "Endpoint lookup guard in _would_route_around_section_below; every edge endpoint is a registered station after parse+resolve, so graph.stations.get never returns None here. Defensive.",
     "status": "defensive"
   },
   "inter_section_handlers.py::if src.id in ctx.graph.junctions:::#1": {
@@ -780,7 +764,7 @@
     "status": "defensive"
   },
   "offsets.py::if lid not in seen:::#1": {
-    "note": "The iterator at L554 is `sorted(set(sec_entry_lines), ...)`. The outer `set()` deduplicates the list before iteration, so each `lid` appears exactly once and `seen` never contains it when processed. The false arm (lid already in seen) is logically unreachable \u2014 the dedup happens at set construction, making the `seen` guard dead code. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
+    "note": "The iterator at L554 is `sorted(set(sec_entry_lines), ...)`. The outer `set()` deduplicates the list before iteration, so each `lid` appears exactly once and `seen` never contains it when processed. The false arm (lid already in seen) is logically unreachable — the dedup happens at set construction, making the `seen` guard dead code. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
   },
   "offsets.py::if max_steps <= 0:::#1": {
@@ -805,10 +789,6 @@
   },
   "offsets.py::if not src or not src.is_port:::#2": {
     "note": "_propagate_lr_rl_exit_to_entry iterates edges_to(port_id) for LEFT/RIGHT entry ports. In the resolved graph, all edges to entry ports originate from exit ports or junctions, which are always is_port=True stations. A direct internal-station-to-entry-port edge does not exist after resolution. The true arm (775->776) requires a source that is not a station or not a port, which no valid resolved topology produces.",
-    "status": "defensive"
-  },
-  "offsets.py::if not src or not tgt:::#1": {
-    "note": "_build_same_y_adj calls graph.stations.get(edge.source/target). All edge endpoints are registered stations after _resolve_sections (regular nodes, ports, junctions all go through add_station), so both .get() calls always return non-None Station objects and the `if not src or not tgt` branch is never taken.",
     "status": "defensive"
   },
   "offsets.py::if not src:::#1": {
@@ -868,7 +848,7 @@
     "status": "defensive"
   },
   "offsets.py::if src_st and not src_st.is_port:::#1": {
-    "note": "In `_rewrite_edges_with_junctions` (resolve.py L594), edges to exit ports are always created as `Edge(source=edge.source, target=exit_port_id)` where `edge.source` is the original inter-section edge's source \u2014 an internal section station, not a port. So `src_st` is never None and `src_st.is_port` is always False. The false arm cannot be taken by any valid parsed graph.",
+    "note": "In `_rewrite_edges_with_junctions` (resolve.py L594), edges to exit ports are always created as `Edge(source=edge.source, target=exit_port_id)` where `edge.source` is the original inter-section edge's source — an internal section station, not a port. So `src_st` is never None and `src_st.is_port` is always False. The false arm cannot be taken by any valid parsed graph.",
     "status": "defensive"
   },
   "offsets.py::if src_st and not src_st.is_port:::#2": {
@@ -991,10 +971,6 @@
     "note": "_off_track_drop_order is only called for an off-track elbow edge that exists in graph.edges, so the feeder<->consumer set it scans always contains at least that edge; the empty-sib_rails arm (skip the mirror-corner reversal) is a contract guard no render-path call reaches.",
     "status": "defensive"
   },
-  "rail.py::if src is None or tgt is None:::#1": {
-    "note": "Null guard over an edge's endpoints; every graph.edges endpoint exists in graph.stations, so the continue arm is a contract guard no render-path call reaches.",
-    "status": "defensive"
-  },
   "rail.py::if st is None:::#1": {
     "note": "_line_rail_y is only ever called with a real station id (on_rail.id, edge.source/target, or a sibling edge endpoint), all of which exist in graph.stations - the route loop pre-filters None endpoints at the src/tgt guard. The None arm is a contract guard no render-path call reaches.",
     "status": "defensive"
@@ -1025,10 +1001,6 @@
   },
   "reversal.py::if not src or not src.is_port:::#1": {
     "note": "Phase 1a (_detect_tb_bottom_top_entries) iterates edges feeding a TOP entry port. Entry ports are synthetic nodes created by section resolution; the only edges targeting them are the resolved chain's exit_port->entry_port and junction->entry_port links, so edge.source is always a registered port or junction station (both is_port=True). The continue (missing or non-port source) is a structural-contract guard no valid topology reaches.",
-    "status": "defensive"
-  },
-  "reversal.py::if not src or not tgt:::#1": {
-    "note": "_build_section_adjacency iterates graph.edges; every edge endpoint is a registered station, so graph.stations.get never returns None for edge.source or edge.target. The continue is a defensive null guard no valid graph reaches.",
     "status": "defensive"
   },
   "reversal.py::if not src:::#1": {

@@ -278,10 +278,7 @@ def _build_section_adjacency(
             horizontal_succ_pairs.add((src_sec, tgt_sec))
 
     for edge in graph.edges:
-        src = graph.stations.get(edge.source)
-        tgt = graph.stations.get(edge.target)
-        if not src or not tgt:
-            continue
+        src, tgt = graph.edge_endpoints(edge)
         if src.section_id and tgt.section_id and src.section_id != tgt.section_id:
             _record(edge.source, src.section_id, edge.target, tgt.section_id)
         elif src.section_id and edge.target in junction_ids:

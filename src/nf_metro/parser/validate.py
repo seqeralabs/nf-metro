@@ -13,7 +13,12 @@ from pathlib import Path
 
 import networkx as nx
 
-from nf_metro.parser.model import MetroGraph
+from nf_metro.parser.model import (
+    Edge,
+    MetroGraph,
+    UnresolvedEndpointError,
+    format_unresolved_endpoint,
+)
 
 ERROR = "error"
 WARNING = "warning"
@@ -21,6 +26,35 @@ WARNING = "warning"
 
 class CyclicGraphError(ValueError):
     """Raised when a graph the layout engine requires to be a DAG has a cycle."""
+
+
+def find_unresolved_endpoints(graph: MetroGraph) -> list[tuple[Edge, list[str]]]:
+    """Return each edge with an endpoint id absent from ``graph.stations``.
+
+    Detector shared by the layout-boundary raise and the soft ``validate_graph``
+    path, mirroring :func:`find_cycle` / :func:`format_cycle_error`.
+    """
+    return [
+        (edge, missing)
+        for edge in graph.edges
+        if (
+            missing := [
+                sid for sid in (edge.source, edge.target) if sid not in graph.stations
+            ]
+        )
+    ]
+
+
+def require_resolved_edge_endpoints(graph: MetroGraph) -> None:
+    """Raise at the layout boundary if any edge endpoint fails to resolve."""
+    unresolved = find_unresolved_endpoints(graph)
+    if unresolved:
+        raise UnresolvedEndpointError(
+            "; ".join(
+                format_unresolved_endpoint(edge, missing)
+                for edge, missing in unresolved
+            )
+        )
 
 
 def find_cycle(graph: MetroGraph) -> list[str] | None:
@@ -85,6 +119,13 @@ def validate_graph(graph: MetroGraph) -> list[ValidationIssue]:
                     line=edge.source_line,
                 )
             )
+
+    for edge, missing in find_unresolved_endpoints(graph):
+        issues.append(
+            ValidationIssue(
+                ERROR, format_unresolved_endpoint(edge, missing), line=edge.source_line
+            )
+        )
 
     for section in graph.sections.values():
         for sid in section.station_ids:

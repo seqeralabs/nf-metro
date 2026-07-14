@@ -844,10 +844,7 @@ def _compute_bypass_gap_indices(
         if ekey in _skip:
             continue
 
-        src = graph.stations.get(edge.source)
-        tgt = graph.stations.get(edge.target)
-        if not src or not tgt:
-            continue
+        src, tgt = graph.edge_endpoints(edge)
 
         is_inter = (src.is_port or edge.source in junction_ids) and (
             tgt.is_port or edge.target in junction_ids

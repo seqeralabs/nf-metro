@@ -1670,10 +1670,7 @@ def _would_route_around_section_below(edge: Edge, ctx: _RoutingCtx) -> bool:
     it, so this consults the dispatch table rather than re-deriving the
     bypass / section-crossing predicates.
     """
-    src = ctx.graph.stations.get(edge.source)
-    tgt = ctx.graph.stations.get(edge.target)
-    if src is None or tgt is None:
-        return False
+    src, tgt = ctx.graph.edge_endpoints(edge)
     f = _build_inter_facts(edge, src, tgt, ctx)
     rule = _match_inter_section_rule(f)
     return (

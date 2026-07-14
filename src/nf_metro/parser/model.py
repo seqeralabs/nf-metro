@@ -354,6 +354,23 @@ class RouteSegment:
     edge: Edge | None = None
 
 
+class UnresolvedEndpointError(ValueError):
+    """Raised when an edge references a station id that is not in the graph.
+
+    The resolver inserts ports and junctions as real stations, so both
+    endpoints of a laid-out edge always resolve; a dangling endpoint means a
+    malformed graph, not a routable topology.
+    """
+
+
+def format_unresolved_endpoint(edge: Edge, missing: list[str]) -> str:
+    """Render an edge and its unresolved endpoint ids as an error message."""
+    return (
+        f"Edge {edge.source} -> {edge.target} (line '{edge.line_id}') "
+        f"references unresolved station(s): {', '.join(missing)}"
+    )
+
+
 @dataclass
 class MetroGraph:
     """Complete metro map graph definition."""
@@ -699,6 +716,25 @@ class MetroGraph:
                 idx.setdefault(e.target, []).append(e)
             self._edges_to_cache = idx
         return self._edges_to_cache.get(station_id, [])
+
+    def edge_endpoints(self, edge: Edge) -> tuple[Station, Station]:
+        """Resolve an edge's ``source`` and ``target`` to their stations.
+
+        Both endpoints of a laid-out edge always resolve, so the return type is
+        non-optional. A dangling endpoint raises
+        :class:`UnresolvedEndpointError` rather than yielding a ``None`` a
+        caller would have to guard.
+        """
+        src = self.stations.get(edge.source)
+        tgt = self.stations.get(edge.target)
+        if src is None or tgt is None:
+            missing = [
+                sid
+                for sid, st in ((edge.source, src), (edge.target, tgt))
+                if st is None
+            ]
+            raise UnresolvedEndpointError(format_unresolved_endpoint(edge, missing))
+        return src, tgt
 
     def is_hub(self, station_id: str) -> bool:
         """A station with both a predecessor and a successor edge.
