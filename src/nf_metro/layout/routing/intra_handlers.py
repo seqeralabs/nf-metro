@@ -53,6 +53,7 @@ from nf_metro.layout.routing.tb_handlers import (
 )
 from nf_metro.parser.model import (
     Edge,
+    MetroGraph,
     PortSide,
     Section,
     Station,
@@ -533,6 +534,30 @@ def _is_side_branch_ascent(
     return True
 
 
+def _bypass_v_is_one_way_step(graph: MetroGraph, v_id: str) -> bool:
+    """True when a bypass V's predecessor and successor sit on different rows.
+
+    A one-way step (the bypassed lines leave one row and land on another) has a
+    single descending diagonal with no symmetric return leg.  A symmetric bypass
+    loop (predecessor and successor on the same row, the V dipping away and back)
+    returns False: its two legs mirror each other, so widening them by whatever
+    horizontal room each leg happens to have would leave the loop lopsided.
+    """
+    preds = [
+        graph.stations[e.source].y
+        for e in graph.edges_to(v_id)
+        if e.source in graph.stations
+    ]
+    succs = [
+        graph.stations[e.target].y
+        for e in graph.edges_from(v_id)
+        if e.target in graph.stations
+    ]
+    if not preds or not succs:
+        return False
+    return abs(min(preds) - min(succs)) > COORD_TOLERANCE
+
+
 def _route_diagonal(
     edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
 ) -> RoutedPath:
@@ -625,11 +650,17 @@ def _route_diagonal(
     # by only OFFSET_STEP * cos(theta); past 45 degrees that falls below the
     # channel floor and the strokes fuse.  Flatten toward 45 degrees (diagonal
     # run >= vertical drop) within the horizontal room the endpoint straights
-    # leave, so the bundle keeps distinct slots.  Scoped to bypass V helpers:
-    # they have no rendered marker, so widening the diagonal cannot rake a
-    # station label the way a fan-out to a real target would.
+    # leave, so the bundle keeps distinct slots.  Scoped to a one-way-step bypass
+    # V (no rendered marker, and no symmetric return leg to unbalance); a
+    # symmetric bypass loop keeps its legs' shared run.
     drop = abs(ty - sy)
-    if is_bypass_edge and drop > diagonal_run:
+    v_id = edge.target if tgt_is_bypass_v else edge.source if src_is_bypass_v else None
+    if (
+        is_bypass_edge
+        and drop > diagonal_run
+        and v_id is not None
+        and _bypass_v_is_one_way_step(ctx.graph, v_id)
+    ):
         _, line_ids, _ = gather_member_edges(ctx.graph, edge)
         if len(line_ids) > 1:
             room = abs(dx) - src_min - tgt_min
