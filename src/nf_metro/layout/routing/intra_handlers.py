@@ -504,9 +504,8 @@ def _is_side_branch_ascent(
     stays meaningful (the side-branch line does not appear to merge
     with the main trunk bundle mid-section).
 
-    Only fires for non-port sources with a single outgoing line set
-    that exits the section via a shared exit port or feeds the trunk
-    bundle's join station.
+    Fires for non-port sources that exit the section via a shared exit port
+    (any line count) or feed the trunk bundle's join station (single line only).
     """
     if src.is_port or src.section_id is None:
         return False
@@ -526,9 +525,13 @@ def _is_side_branch_ascent(
     )
     if not (same_sec or is_exit_port):
         return False
-    # Multi-line trunks may momentarily dip below trunk Y; only single-line
-    # exits count as a side branch slot.
-    if len(ctx.graph.station_lines(edge.source)) > 1:
+    # A multi-line station momentarily dipping below trunk Y to reach an
+    # internal join is a trunk continuation, not a side branch, so restrict the
+    # in-section join case to a single line.  A bundle exiting via a shared exit
+    # port is a genuine side branch whatever its line count: it rides its own
+    # track and turns up late at the port, clearing sibling trunk labels rather
+    # than seating mid-section where a name extends.
+    if not is_exit_port and len(ctx.graph.station_lines(edge.source)) > 1:
         return False
     return True
 

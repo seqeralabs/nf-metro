@@ -3423,6 +3423,40 @@ def test_diagonal_strike_guard_teeth_and_exemptions():
     _guard_no_diagonal_strikes_horizontal_label(bypass, "test")
 
 
+_FAN_TO_EXIT_LABEL_CLEARANCE_FIXTURES = [
+    "through_section/riboseq_packed_lr.mmd",
+    "topologies/variant_calling.mmd",
+    "rnaseq_sections.mmd",
+]
+
+
+@pytest.mark.parametrize("fixture", _FAN_TO_EXIT_LABEL_CLEARANCE_FIXTURES)
+def test_multiline_ascent_to_exit_clears_sibling_label(fixture):
+    """A multi-line side branch ascending to an exit port clears sibling labels.
+
+    When a station carrying the full bundle sits off the trunk and exits via a
+    shared exit port, its ascent diagonal must turn late (near the port) so it
+    stays on its own track rather than seating mid-section where a trunk
+    sibling's horizontal name label extends.  The packed riboseq map is the
+    reported repro (#1449): ``salmon_quant`` fans up to ``quantification``'s
+    right exit and its riser must clear ``genomecov``'s label; the other
+    fixtures already satisfy the invariant, so it generalises.
+
+    Parsed the render way (no ``center_ports`` override) so the geometry matches
+    what the runtime guard checks.
+    """
+    from nf_metro.layout.phases.spacing import _struck_stations_and_collinear
+
+    path = _resolve_fixture(fixture)
+    graph = parse_metro_mermaid(path.read_text())
+    compute_layout(graph)
+    struck, collinear = _struck_stations_and_collinear(graph)
+    assert not struck, f"{fixture}: diagonals rake label glyph ink: " + ", ".join(
+        sorted(graph.stations[s].label for s in struck)
+    )
+    assert not collinear, f"{fixture}: collinear overlay"
+
+
 @pytest.mark.parametrize("fixture", _FIXTURES_WITH_DOWNWARD_OUTPUT)
 def test_downward_off_track_output_route_clears_producer_label(fixture):
     """A downward off-track output's route clears its producer's name label
