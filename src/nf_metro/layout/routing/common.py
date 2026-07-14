@@ -140,12 +140,12 @@ def perp_peeloff_off_horizontal_junction(
         return None
     if abs(x1 - x0) > COORD_TOLERANCE or abs(y1 - y0) <= COORD_TOLERANCE:
         return None
+    feeders = (graph.station_for_edge_source(e) for e in graph.edges_to(junction.id))
     feeder = min(
         (
             fs
-            for e in graph.edges_to(junction.id)
-            if abs((fs := graph.station_for_edge_source(e)).y - junction.y)
-            <= COORD_TOLERANCE
+            for fs in feeders
+            if abs(fs.y - junction.y) <= COORD_TOLERANCE
             and abs(fs.x - junction.x) > COORD_TOLERANCE
         ),
         key=lambda fs: abs(fs.x - junction.x),
