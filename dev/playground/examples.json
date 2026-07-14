@@ -837,6 +837,10 @@
       {
         "name": "rail_offtrack_plain_io",
         "mmd": "%%metro title: Rail off-track plain input and output\n%%metro style: dark\n%%metro line_spread: rails\n%%metro line: a | A | #2db572\n%%metro line: b | B | #f4a300\n%%metro file: cram_in | CRAM\n\ngraph LR\n    subgraph sec [Calling]\n        cram_in[ ]\n        align[Align]\n        call[Call]\n        report[Report]\n        aux[Targets BED]\n        qc[QC report]\n\n        cram_in -->|a,b| align\n        align -->|a,b| call\n        call -->|a,b| report\n        aux -->|a| call\n        call -->|a| qc\n    end\n%%metro off_track: aux\n%%metro off_track: qc\n"
+      },
+      {
+        "name": "render_labelwrap_row_gap",
+        "mmd": "%%metro title: label-wrap row gap\n%%metro style: dark\n%%metro dir: metrics_out | RNA-SeQC\n%%metro file: sexcheck_out | TSV | Sex check\n%%metro line: qc | QC | #e6550d\n%%metro line: quant | Quantification | #0570b0\n%%metro line: fusion | Fusion detection | #38b927\n\ngraph LR\n    subgraph align_sec [Alignment]\n        reads_in[ ]\n        bbduk[BBDuk trim]\n        star[STAR 2-pass]\n        cram_out[ ]\n\n        reads_in -->|qc,quant,fusion| bbduk\n        bbduk -->|qc,quant,fusion| star\n        star -->|qc,quant,fusion| cram_out\n    end\n\n    subgraph qc_sec [QC]\n        flagstat[flagstat + mosdepth]\n        markdup[sambamba markdup]\n        rnaseqc[RNA-SeQC]\n        sexcheck_out[ ]\n        metrics_out[ ]\n\n        star -->|qc| flagstat\n        flagstat -->|qc| sexcheck_out\n        star -->|qc| markdup\n        markdup -->|qc| rnaseqc\n        rnaseqc -->|qc| metrics_out\n    end\n\n    subgraph quant_sec [Quantification]\n        rsem[RSEM]\n        geneann[Gene annotation]\n        expr_out[ ]\n\n        star -->|quant| rsem\n        rsem -->|quant| geneann\n        geneann -->|quant| expr_out\n    end\n\n    subgraph fusion_sec [Fusion detection]\n        arriba[Arriba]\n        starfusion[STAR-Fusion]\n        fusions_out[ ]\n\n        star -->|fusion| arriba\n        arriba -->|fusion| starfusion\n        starfusion -->|fusion| fusions_out\n    end\n"
       }
     ]
   },
