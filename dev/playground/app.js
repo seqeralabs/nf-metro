@@ -55,12 +55,20 @@ const SAMPLE_NEXTFLOW_DAG = `flowchart TB
 // coordinates, so changing them skips layout and only re-runs render_svg.
 // The style: and mode: directives are stripped before hashing so toggling brand
 // or render mode doesn't bust the geometry cache.
+//
+// permissive is always forced on (see currentOptions()): a guard failure
+// downgrades to a PermissiveGuardWarning and the render proceeds best-effort,
+// instead of the whole editor going blank on one bad topology. Warnings are
+// collected per-call (never accumulated onto the cached graph) and returned
+// alongside the svg so the UI can show both.
 const PY_GLUE = `
 import hashlib
 import json
 import re as _re
+import warnings
 from nf_metro.api import prepare_graph, resolve_theme
 from nf_metro.convert import convert_nextflow_dag
+from nf_metro.parser.model import PermissiveGuardWarning, split_guard_warnings
 from nf_metro.render import render_svg
 
 _cached_graph = None
@@ -79,29 +87,37 @@ def nfm_render(mmd, opts_json):
     mmd_norm = _STYLE_RE.sub("", mmd).strip()
     cache_key = hashlib.md5((mmd_norm + "\\x00" + json.dumps(layout_geom, sort_keys=True)).encode()).hexdigest()
 
-    try:
-        if cache_key != _cached_key:
-            graph = prepare_graph(mmd, layout_options=layout_geom)
-            _cached_graph = graph
-            _cached_key = cache_key
-        else:
-            graph = _cached_graph
+    svg = None
+    error = None
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.filterwarnings("always", category=PermissiveGuardWarning)
+        try:
+            if cache_key != _cached_key:
+                graph = prepare_graph(mmd, layout_options=layout_geom)
+                _cached_graph = graph
+                _cached_key = cache_key
+            else:
+                graph = _cached_graph
 
-        for k, v in render_only.items():
-            setattr(graph, k, bool(v))
+            for k, v in render_only.items():
+                setattr(graph, k, bool(v))
 
-        theme_obj = resolve_theme(opts.get("theme") or None, graph, mode=opts.get("mode") or None)
-        svg = render_svg(
-            graph,
-            theme_obj,
-            debug=bool(opts.get("debug")),
-            responsive=True,
-            font_portability="embed",
-            self_color_scheme=False,
-        )
-        return json.dumps({"ok": True, "svg": svg})
-    except Exception as e:
-        return json.dumps({"ok": False, "error": f"{type(e).__name__}: {e}"})
+            theme_obj = resolve_theme(opts.get("theme") or None, graph, mode=opts.get("mode") or None)
+            svg = render_svg(
+                graph,
+                theme_obj,
+                debug=bool(opts.get("debug")),
+                responsive=True,
+                font_portability="embed",
+                self_color_scheme=False,
+            )
+        except Exception as e:
+            error = f"{type(e).__name__}: {e}"
+
+    guard_warnings = [str(w.message) for w in split_guard_warnings(caught)[0]]
+    if svg is not None:
+        return json.dumps({"ok": True, "svg": svg, "warnings": guard_warnings})
+    return json.dumps({"ok": False, "error": error, "warnings": guard_warnings})
 
 def nfm_convert(nextflow_dag):
     try:
@@ -236,6 +252,10 @@ function currentOptions() {
     layout_options: {
       animate: el("opt-animate").checked,
       directional: el("opt-directional").checked,
+      // Always on: a guard failure on a novel/edge-case topology should
+      // still produce a render (with a visible warning) instead of leaving
+      // the preview blank.
+      permissive: true,
     },
   };
 }
@@ -270,14 +290,25 @@ function doRender() {
       return;
     }
     el("preview").classList.remove("rendering");
-    if (res.ok) {
-      showError(null);
+    // permissive mode means a guard failure can still hand back an svg (of the
+    // defective geometry) alongside the warning(s) it downgraded, so the two
+    // are reported independently rather than one replacing the other.
+    if (res.svg) {
       lastSvg = res.svg;
       el("preview").innerHTML = res.svg;
       applyZoom();
+    }
+    const warnings =
+      res.warnings && res.warnings.length ? res.warnings.join("\n\n") : "";
+    if (!res.ok) {
+      // No svg at all (or a fatal error on top of any downgraded guards):
+      // keep the last good render visible and report everything we know.
+      const parts = warnings ? [warnings, res.error] : [res.error];
+      showError(friendlyRenderError(parts.join("\n\n")));
+    } else if (warnings) {
+      showError(friendlyRenderError(warnings));
     } else {
-      // Keep the last good render visible; just report the problem.
-      showError(friendlyRenderError(res.error));
+      showError(null);
     }
     refreshLineColors();
     syncDirectiveControls();
