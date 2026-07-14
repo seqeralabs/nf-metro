@@ -264,11 +264,36 @@ To run the checks without committing (needs `prek`, which lives on the
 micromamba run -n nf-core prek run --all-files
 ```
 
-Then run the test suite:
+Then run the **targeted** tests for the area you changed - not the full
+suite by default:
 
 ```bash
-cd /tmp/nf-metro-fix-<N> && PYTHONPATH=src python -m pytest
+cd /tmp/nf-metro-fix-<N> && PYTHONPATH=src python -m pytest tests/test_layout_invariants.py -k "<fixture-or-invariant>" -q --no-header
 ```
+
+CI already runs the complete suite across three Python versions x three
+shards on every push (the `test` matrix in `.github/workflows/ci.yml`), so a
+routine full local run mostly duplicates work CI is about to do anyway - if
+something's broken, the push reds just as loudly, without paying for a local
+pass first. Reserve a full local run for when it earns its cost:
+
+- **The change is risky** - it touches shared/widely-used code (`engine.py`
+  orchestration, a helper called from many phases, the parser's core model,
+  a shared dispatch table) where a narrow selector genuinely can't see the
+  blast radius. Here a full local run is *worth it precisely because it's
+  faster than CI*: half a minute locally beats waiting on the full
+  three-version x three-shard matrix to come back red on something a local
+  run would have caught immediately.
+- You're about to ask for an admin-merge and want that confidence *before*
+  bypassing the review gate, not after.
+- A targeted run passed but you have a concrete reason to suspect a wider
+  regression it wouldn't reproduce (e.g. you touched a shared constant or a
+  cross-cutting guard used well outside the issue's area).
+
+For an ordinary fix scoped to one function, one routing handler, or one
+layout phase, targeted tests (plus the gate-coverage ratchet below, if the
+change is in `layout/routing/`) is enough - let CI's matrix be the
+full-suite gate rather than re-running it locally "just to be safe."
 
 ### Cost discipline (applies throughout)
 
@@ -276,16 +301,18 @@ Layout iteration is where sessions burn tokens and compute. Keep it tight:
 
 - **Reuse the persistent env** (Step 2). Do not `micromamba create` per
   issue - it re-solves the whole dependency set every session for nothing.
-- **Full suite vs targeted.** `addopts` bakes in `-n auto`, so the whole
-  suite parallelises to ~half a minute - the cost of a full run is not
-  wall-time, it's *repetition* and each run's summary re-entering context.
-  So: inside the edit loop run the narrowest selection
+- **Full suite vs targeted.** Default to the narrowest selection
   (`python -m pytest tests/test_layout_invariants.py -k "<fixture-or-invariant>"`,
   then `--lf` to re-run only what just failed), with `-q --no-header -x` to
-  keep the output tiny. Run the **full** suite once per stable state before a
-  push - and do **not** re-run it while it's still green; only after you've
-  changed code again. The routing/TB ratchets are 3.11-only, so keep the env
-  on 3.11 or they skip locally and red only in CI.
+  keep the output tiny. Don't run the full suite locally as a routine
+  pre-push step - see the reserved-cases list above; when none of them
+  apply, skip straight to pushing and let CI's matrix be the full-suite
+  check. `addopts` bakes in `-n auto` so a full run *is* cheap in
+  wall-time (~half a minute), but the cost that matters here is
+  *repetition* - each run's summary re-entering context - so don't pay it
+  when CI is about to run the same suite for free. The routing/TB ratchets
+  are 3.11-only, so if you do run locally, keep the env on 3.11 or they
+  skip and only red in CI.
 - **Read coordinates, don't rasterize, for non-visual questions.**
   `inspect_layout.py` / `probe_layout.py` print the geometry as cheap text;
   a render -> cairosvg PNG -> open -> image-into-context cycle is far heavier
