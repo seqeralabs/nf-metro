@@ -602,23 +602,43 @@ def _route_diagonal(
     # equal V-side flat reservations so V sits at the centre of the
     # straight segment of the bypass loop.
     v_flat_half = CURVE_RADIUS + MIN_STATION_FLAT_LENGTH / 2
-    if tgt.is_hidden and is_bypass_v(edge.target):
+    diagonal_run = ctx.diagonal_run
+    tgt_is_bypass_v = tgt.is_hidden and is_bypass_v(edge.target)
+    src_is_bypass_v = src.is_hidden and is_bypass_v(edge.source)
+    is_bypass_edge = tgt_is_bypass_v or src_is_bypass_v
+    if tgt_is_bypass_v:
         is_fork_flag = False
         is_join_flag = True
         tgt_min = v_flat_half
-        if src_min + tgt_min + ctx.diagonal_run > abs(dx):
+        if src_min + tgt_min + diagonal_run > abs(dx):
             tgt_min = MIN_STRAIGHT_EDGE
-    elif src.is_hidden and is_bypass_v(edge.source):
+    elif src_is_bypass_v:
         is_fork_flag = True
         is_join_flag = False
         src_min = v_flat_half
-        if src_min + tgt_min + ctx.diagonal_run > abs(dx):
+        if src_min + tgt_min + diagonal_run > abs(dx):
             src_min = MIN_STRAIGHT_EDGE
+
+    # A multi-line bypass bundle stepping between two horizontal runs (leaving
+    # the trunk row for a lower exit-port row around an in-line terminal) carries
+    # a vertical per-line offset onto the diagonal, where adjacent lines separate
+    # by only OFFSET_STEP * cos(theta); past 45 degrees that falls below the
+    # channel floor and the strokes fuse.  Flatten toward 45 degrees (diagonal
+    # run >= vertical drop) within the horizontal room the endpoint straights
+    # leave, so the bundle keeps distinct slots.  Scoped to bypass V helpers:
+    # they have no rendered marker, so widening the diagonal cannot rake a
+    # station label the way a fan-out to a real target would.
+    drop = abs(ty - sy)
+    if is_bypass_edge and drop > diagonal_run:
+        _, line_ids, _ = gather_member_edges(ctx.graph, edge)
+        if len(line_ids) > 1:
+            room = abs(dx) - src_min - tgt_min
+            diagonal_run = max(diagonal_run, min(drop, room))
 
     diag_start_x, diag_end_x = _compute_diagonal_placement(
         sx,
         tx,
-        ctx.diagonal_run,
+        diagonal_run,
         src_min,
         tgt_min,
         is_fork_flag,

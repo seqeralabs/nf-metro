@@ -1,0 +1,50 @@
+%%metro title: Multi-row source, stacked fan
+%%metro file: reads_in | FASTQ | Reads
+%%metro line: align | Alignment | #2db572
+%%metro line: qc | QC | #e6550d
+%%metro line: quant | Quantification | #0570b0
+%%metro line: fusion | Fusion detection | #756bb1
+%%metro grid: align_sec | 0,0,3,1
+%%metro grid: qc_sec | 1,0,1,1
+%%metro grid: quant_sec | 1,1,1,1
+%%metro grid: fusion_sec | 1,2,1,1
+
+graph LR
+    subgraph align_sec [Alignment]
+        %%metro exit: right | qc, quant, fusion
+        reads_in[ ]
+        bbduk[BBDuk trim]
+        star[STAR 2-pass]
+        cram[samtools CRAM]
+        reads_in -->|align,qc,quant,fusion| bbduk
+        bbduk -->|align,qc,quant,fusion| star
+        star -->|align| cram
+    end
+    subgraph qc_sec [QC]
+        %%metro entry: left | qc
+        flagstat[flagstat + mosdepth]
+        markdup[sambamba markdup]
+        rnaseqc[RNA-SeQC]
+        star -->|qc| flagstat
+        star -->|qc| markdup
+        markdup -->|qc| rnaseqc
+    end
+    subgraph quant_sec [Quantification]
+        %%metro entry: left | quant
+        rsem[RSEM]
+        geneann[Gene annotation]
+        star -->|quant| rsem
+        rsem -->|quant| geneann
+    end
+    subgraph fusion_sec [Fusion detection]
+        %%metro entry: left | fusion
+        arriba[Arriba]
+        starfusion[STAR-Fusion]
+        merge[Merge fusions]
+        draw[Draw fusions]
+        star -->|fusion| arriba
+        star -->|fusion| starfusion
+        arriba -->|fusion| merge
+        starfusion -->|fusion| merge
+        merge -->|fusion| draw
+    end

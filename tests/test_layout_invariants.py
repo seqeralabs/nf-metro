@@ -6980,6 +6980,12 @@ _XFAIL_BBOX_TOP_PAD: dict[str, str] = {
         "restore deliberately stops short. Revisit if the row gap or routing "
         "changes."
     ),
+    "topologies/multirow_source_stacked_fan.mmd": (
+        "fusion_sec's port-fed reconverging diamond straddles its trunk at full "
+        "grid pitch, so the top branch sits under a full section_y_padding from "
+        "the bbox edge. Compacting such a diamond to half pitch (which restores "
+        "the padding) is tracked in #1473; remove this xfail when that lands."
+    ),
 }
 
 
