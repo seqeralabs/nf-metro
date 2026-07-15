@@ -1348,7 +1348,9 @@ def _perp_entry_run_turns_right(graph: MetroGraph, port_id: str) -> bool:
     return False
 
 
-def _slot_perp_fan_bundle(ctx: _OffsetCtx, port_id: str) -> None:
+def _slot_perp_fan_bundle(
+    ctx: _OffsetCtx, port_id: str, *, avoid_collision: bool = False
+) -> None:
     """Slot a distinct-line perp-entry bundle by feeder approach order.
 
     At a fan port (:func:`needs_perp_approach_fan`) the lines arrive on disjoint
@@ -1359,6 +1361,10 @@ def _slot_perp_fan_bundle(ctx: _OffsetCtx, port_id: str) -> None:
     :func:`perp._perp_approach_fan_x` fans the approach channels by that bundle
     index; agreeing keeps the descent, the turn, and the shared run consistent so
     the distinct lines never cross.
+
+    ``avoid_collision`` forwards to :func:`_apply_offsets_along_bundle` so a perp
+    line merging with a line entered from another side keeps its distinct slot on
+    the shared in-section run rather than collapsing onto it.
     """
     graph = ctx.graph
     feeders = sorted(
@@ -1370,7 +1376,13 @@ def _slot_perp_fan_bundle(ctx: _OffsetCtx, port_id: str) -> None:
         line_id: rank * ctx.offset_step
         for rank, (_y, _priority, line_id) in enumerate(feeders)
     }
-    _apply_offsets_along_bundle(ctx, port_id, graph.ports[port_id].section_id, new_offs)
+    _apply_offsets_along_bundle(
+        ctx,
+        port_id,
+        graph.ports[port_id].section_id,
+        new_offs,
+        avoid_collision=avoid_collision,
+    )
 
 
 def _entry_top_from_tb_bottom_exits(ctx: _OffsetCtx) -> None:
@@ -1619,7 +1631,7 @@ def _reslot_multi_side_perp_entry_ports(ctx: _OffsetCtx) -> None:
             continue
         if needs_perp_approach_fan(graph, port_id):
             continue
-        _slot_perp_fan_bundle(ctx, port_id)
+        _slot_perp_fan_bundle(ctx, port_id, avoid_collision=True)
 
 
 def _compute_entry_port_offsets(ctx: _OffsetCtx) -> None:
@@ -2027,6 +2039,8 @@ def _apply_offsets_along_bundle(
     port_id: str,
     sec_id: str | None,
     new_offs: dict[str, float],
+    *,
+    avoid_collision: bool = False,
 ) -> None:
     """Set ``new_offs`` at ``port_id`` and carry it along the bundle.
 
@@ -2037,12 +2051,20 @@ def _apply_offsets_along_bundle(
     keeps that slot all the way to its consumer rather than crossing back on
     the outgoing run.  A line that turns off the row stops the walk there and
     transitions its slot at the turn.
+
+    With ``avoid_collision``, a line is not stamped onto a downstream station
+    where another present line already holds the new offset, and the walk stops
+    there for that line.  A perp entry line re-slotted to the port's rank-0 slot
+    would otherwise collapse onto a flow-axis line it merges with on a shared
+    in-section run; keeping the merge station's distinct slot lets the two lines
+    run parallel while the port itself still takes the straight-drop slot.
     """
     graph = ctx.graph
     row_y = graph.stations[port_id].y
     for lid, off in new_offs.items():
         ctx.offsets[(port_id, lid)] = off
 
+    stop_lines: set[str] = set()
     visited = {port_id}
     queue = deque([port_id])
     while queue:
@@ -2058,8 +2080,12 @@ def _apply_offsets_along_bundle(
                 continue
             visited.add(tgt_id)
             for lid in graph.station_lines(tgt_id):
-                if lid in new_offs:
-                    ctx.offsets[(tgt_id, lid)] = new_offs[lid]
+                if lid not in new_offs or lid in stop_lines:
+                    continue
+                if avoid_collision and _would_collide(ctx, tgt_id, lid, new_offs[lid]):
+                    stop_lines.add(lid)
+                    continue
+                ctx.offsets[(tgt_id, lid)] = new_offs[lid]
             queue.append(tgt_id)
 
 

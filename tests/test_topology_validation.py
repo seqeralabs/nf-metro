@@ -1018,7 +1018,7 @@ class TestMergeRouting:
                 )
 
     def test_bypass_bundle_uses_offset_step(self):
-        """Bundled bypass routes should be OFFSET_STEP apart."""
+        """Distinct below-row bypass channels stay at least OFFSET_STEP apart."""
         from nf_metro.layout.constants import OFFSET_STEP
 
         graph = _load_and_layout(GENOMEASSEMBLY_FILE)
@@ -1026,8 +1026,11 @@ class TestMergeRouting:
         # Collect all horizontal segments per line for inter-section
         # bypass routes.  Bypass segments are horizontal runs that sit
         # between the source and target section Y ranges (i.e. below
-        # the top-row stations).  We look for pairs at nearby Y values
-        # that differ by exactly OFFSET_STEP.
+        # the top-row stations).  The scaffolding bottom-port drop-in and
+        # the assemblies fan-in are distinct channels (different targets):
+        # they must not collapse onto one another, but the drop-in hugs the
+        # box while the fan-in seats deeper, so they need not share a bundle
+        # pitch -- only stay at least one offset step apart.
         horiz_by_line: dict[str, list[float]] = {}
         for r in routes:
             if not r.is_inter_section:
@@ -1041,8 +1044,8 @@ class TestMergeRouting:
         if a_ys and h_ys:
             # Find the pair of horizontal segments closest to each other
             min_gap = min(abs(a - h) for a in a_ys for h in h_ys if abs(a - h) > 0)
-            assert min_gap == OFFSET_STEP, (
-                f"Bypass bundle gap {min_gap}px, expected {OFFSET_STEP}px"
+            assert min_gap >= OFFSET_STEP, (
+                f"Bypass channel gap {min_gap}px, expected >= {OFFSET_STEP}px"
             )
 
 

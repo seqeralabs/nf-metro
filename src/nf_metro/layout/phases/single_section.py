@@ -39,6 +39,7 @@ from nf_metro.layout.geometry import (
 from nf_metro.layout.labels import (
     _label_text_height,
     active_font_scale,
+    label_glyph_advance_width,
     label_text_width,
 )
 from nf_metro.layout.layers import assign_layers
@@ -1039,6 +1040,46 @@ def _adjust_terminus_icon_clearance(
                     section.bbox_w += needed - clearance
 
 
+def _perp_entry_drop_gap(
+    graph: MetroGraph,
+    section: Section,
+    port_ids: set[str],
+    run_lo: float,
+    run_hi: float,
+    entry_on_left: bool,
+    desired_gap: float,
+) -> float:
+    """Gap to reserve between a perp entry port and the entry-side run.
+
+    The marker-only default clears the entry-side station markers.  On a
+    section entered from more than one side the perp riser must also clear the
+    entry-side column's label ink -- a wide station name reaches back over the
+    riser's lateral even though the marker sits clear -- so the gap widens to
+    the widest half-advance of those labels plus a pad, matching the ink model
+    the strike guard uses.  Single-side sections keep the marker-only gap.
+    """
+    from nf_metro.layout.phases.row_align import _entered_from_multiple_sides
+
+    if not _entered_from_multiple_sides(graph, section):
+        return desired_gap
+    edge_x = run_lo if entry_on_left else run_hi
+    label_reach = max(
+        (
+            label_glyph_advance_width(s.label) / 2
+            for sid in section.station_ids
+            if sid not in port_ids
+            and (s := graph.stations.get(sid)) is not None
+            and not s.is_port
+            and s.label.strip()
+            and abs(s.x - edge_x) <= SAME_COORD_TOLERANCE
+        ),
+        default=0.0,
+    )
+    if not label_reach:
+        return desired_gap
+    return max(desired_gap, label_reach + LABEL_PAD)
+
+
 def _shift_lr_perp_entry_stations(
     graph: MetroGraph,
     x_spacing: float,
@@ -1100,7 +1141,11 @@ def _shift_lr_perp_entry_stations(
             port_x = max(perp_port_xs)
             current_gap = port_x - run_hi
 
-        shift = desired_gap - current_gap
+        section_gap = _perp_entry_drop_gap(
+            graph, section, port_ids, run_lo, run_hi, entry_on_left, desired_gap
+        )
+
+        shift = section_gap - current_gap
         if shift <= 0:
             continue  # gap is already sufficient
 

@@ -1818,16 +1818,29 @@ def _route_bypass(
     if perp_entry_side is not None:
         lo_col, hi_col = min(src_col, tgt_col), max(src_col, tgt_col)
         if perp_entry_side is PortSide.BOTTOM:
-            traverse = max(base_y, ty + BYPASS_CLEARANCE)
-            # Cap the below-box traverse to clear any next-row section header
-            # protruding up into the gap, never rising above the box edge plus a
-            # corner radius (the drop still needs a turn-in into the port).
+            # A bottom-port entry only needs room to turn in below the target
+            # box (a corner radius), not the full bypass clearance.  Hugging the
+            # box keeps the drop-in clear of the deeper below-box fan-in channels
+            # that feed later sections -- seated a full clearance below the box,
+            # they would otherwise draw flush with a drop-in at that same level.
+            traverse = ty + ctx.curve_radius
             for s in graph.sections.values():
                 if (
-                    s.bbox_w > 0
-                    and lo_col <= s.grid_col <= hi_col
-                    and s.bbox_y > ty + COORD_TOLERANCE
+                    s.bbox_w <= 0
+                    or not (lo_col <= s.grid_col <= hi_col)
+                    or s.id == tgt.section_id
                 ):
+                    continue
+                if (
+                    s.bbox_y <= ty + COORD_TOLERANCE
+                    and s.bbox_y + s.bbox_h > ty + COORD_TOLERANCE
+                ):
+                    # A same-row section extends below the target box bottom: run
+                    # below it with clearance rather than through it.
+                    traverse = max(traverse, s.bbox_y + s.bbox_h + BYPASS_CLEARANCE)
+                elif s.bbox_y > ty + COORD_TOLERANCE:
+                    # A lower-row section header protrudes up into the gap: never
+                    # rise below its safe boundary.
                     traverse = min(
                         traverse,
                         max(section_header_safe_cap(s), ty + ctx.curve_radius),
@@ -3465,6 +3478,31 @@ def _descent_rightward_clearable_pierce(
     )
 
 
+def _approach_blocker_right_edge(ctx: _RoutingCtx, entry_port: Station) -> float | None:
+    """Right edge of the nearest section blocking a LEFT entry's approach.
+
+    A LEFT entry is reached by a horizontal run at the entry Y from its own
+    side.  Any other section whose box straddles that Y and lies left of the
+    port sits across that run; the rightmost such box (the immediate blocker) is
+    the edge the descent channel must clear.  Returns its right edge, or
+    ``None`` when nothing straddles the entry Y.
+    """
+    ey, ex = entry_port.y, entry_port.x
+    own = entry_port.section_id
+    best: float | None = None
+    for sid, s in ctx.graph.sections.items():
+        if sid == own or s.bbox_w <= 0:
+            continue
+        right = s.bbox_x + s.bbox_w
+        if (
+            s.bbox_y - COORD_TOLERANCE <= ey <= s.bbox_y + s.bbox_h + COORD_TOLERANCE
+            and right < ex - COORD_TOLERANCE
+            and (best is None or right > best)
+        ):
+            best = right
+    return best
+
+
 def _route_around_section_below(
     edge: Edge,
     src: Station,
@@ -3559,6 +3597,20 @@ def _route_around_section_below(
         # Sanity floor: keep the V_up clear of the target section's left
         # edge when the gap is too narrow for full symmetric placement.
         vx = min(vx, _left_entry_descent_x(ctx, section_left, pos_n))
+        # ``column_gap_edges`` spans an empty intervening grid column back to the
+        # canvas origin, seating the V_up far left of the real neighbour so the
+        # entry-Y approach still crosses it.  Float the V_up right of any section
+        # straddling the entry Y (a neighbour whose box grew into this row),
+        # capped left of the target so the U-turn into the LEFT port stays valid.
+        blocker_right = _approach_blocker_right_edge(ctx, entry_port)
+        if blocker_right is not None:
+            vx = max(
+                vx,
+                min(
+                    blocker_right + ctx.curve_radius,
+                    _left_entry_descent_x(ctx, section_left, pos_n),
+                ),
+            )
     else:
         # Fallback for degenerate cases without column info: anchored to the
         # target section's left edge.

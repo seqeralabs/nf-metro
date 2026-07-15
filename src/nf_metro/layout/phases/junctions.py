@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from nf_metro.layout.constants import (
+    COORD_TOLERANCE,
     JUNCTION_MARGIN,
 )
-from nf_metro.parser.model import MetroGraph, PortSide, Station
+from nf_metro.parser.model import MetroGraph, Port, PortSide, Station
 
 
 def _required_junction_margin(n: int) -> float:
@@ -78,6 +79,8 @@ def _position_junctions(graph: MetroGraph) -> None:
                     junction,
                     predecessors,
                     entry_port,
+                    entry_port_obj,
+                    graph,
                     n=_junction_incoming_line_count(graph, jid),
                 )
                 continue
@@ -117,10 +120,44 @@ def _position_junctions(graph: MetroGraph) -> None:
                 junction.y = exit_port_y
 
 
+def _merge_run_blocked_across_gap(
+    graph: MetroGraph, entry_port: Station, entry_port_obj: Port | None
+) -> bool:
+    """Whether the merge->entry run at the entry Y crosses a separated box.
+
+    A LEFT entry whose column has an *empty* immediate-left neighbour column,
+    with a box straddling the entry Y further left (e.g. a taller section grown
+    downward by a bottom-entry port), would have the merged single-line segment
+    run straight through that box.  Merging local to the target keeps the merge
+    right of the box so only the individual feeders take the around-below
+    detour.  An occupied neighbour column anchors the run on its own, so those
+    (and non-LEFT entries) are left on the default placement.
+    """
+    if entry_port_obj is None or entry_port_obj.side != PortSide.LEFT:
+        return False
+    ep_section = graph.sections.get(entry_port.section_id or "")
+    if ep_section is None or ep_section.grid_col is None or ep_section.grid_col == 0:
+        return False
+    ep_col = ep_section.grid_col
+    if any(s.grid_col == ep_col - 1 and s.bbox_w > 0 for s in graph.sections.values()):
+        return False
+    ey, ex = entry_port.y, entry_port.x
+    own = entry_port.section_id
+    return any(
+        sid != own
+        and s.bbox_w > 0
+        and s.bbox_y - COORD_TOLERANCE <= ey <= s.bbox_y + s.bbox_h + COORD_TOLERANCE
+        and s.bbox_x + s.bbox_w < ex - COORD_TOLERANCE
+        for sid, s in graph.sections.items()
+    )
+
+
 def _position_merge_junction(
     junction: Station,
     predecessors: list[Station],
     entry_port: Station,
+    entry_port_obj: Port | None,
+    graph: MetroGraph,
     n: int = 1,
 ) -> None:
     """Position a merge junction near the entry port it feeds.
@@ -138,7 +175,12 @@ def _position_merge_junction(
     # merging at max_pred_x forces the whole merged bundle to backtrack the full
     # width into the entry.  Merge local to the target instead, so only the
     # individual feeders make the long approach and the merge->entry hop is short.
-    if entry_port.x < max_pred_x - margin:
+    # A merge whose straight run would cross a section separated from the target
+    # by an empty column is merged local to the target for the same reason: the
+    # single-line segment then stays clear of that box.
+    if entry_port.x < max_pred_x - margin or _merge_run_blocked_across_gap(
+        graph, entry_port, entry_port_obj
+    ):
         junction.x = entry_port.x - margin
     else:
         junction.x = max_pred_x + margin
