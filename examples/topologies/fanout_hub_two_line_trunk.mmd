@@ -1,0 +1,59 @@
+%%metro title: Fan-out hub, two-line trunk
+%%metro diamond_style: symmetric
+%%metro style: dark
+%%metro legend: bl
+%%metro files: in_0 | IN | Input
+%%metro files: out_main | OUT | Main output
+%%metro file: out_a | AUX | Branch output
+%%metro file: out_x1 | AUX | Output X1
+%%metro dir: out_x2 | Out
+%%metro files: out_y1 | OUT | Output Y1
+%%metro file: out_y2 | OUT | Output Y2
+%%metro line: a | Line A | #e6550d
+%%metro line: b | Line B | #0570b0
+
+graph LR
+    subgraph sec_main [Stage 1]
+        in_0[ ]
+        s1[Step 1]
+        s2[Step 2]
+        hub[Fan-out\nhub]
+        s3[Branch\nstep]
+        out_main[ ]
+        out_a[ ]
+
+        in_0 -->|a,b| s1
+        s1 -->|a,b| s2
+        s2 -->|a,b| hub
+        hub -->|a,b| out_main
+        hub -->|b| s3
+        s3 -->|b| out_a
+    end
+
+    subgraph sec_x [Stage 2]
+        x1[Step X1]
+        x2[Step X2]
+        x3[Step X3]
+        out_x1[ ]
+        out_x2[ ]
+
+        hub -->|a| x1
+        x1 -->|a| out_x1
+        hub -->|a| x2
+        x2 -->|a| x3
+        x3 -->|a| out_x2
+    end
+
+    subgraph sec_y [Stage 3]
+        y1[Step Y1]
+        y2[Step Y2]
+        y3[Step Y3]
+        out_y1[ ]
+        out_y2[ ]
+
+        s3 -->|b| y1
+        y1 -->|b| y2
+        y2 -->|b| out_y1
+        y2 -->|b| y3
+        y3 -->|b| out_y2
+    end

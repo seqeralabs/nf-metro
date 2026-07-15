@@ -1089,14 +1089,51 @@ def _apply_compact_section_consistency(ctx: _OffsetCtx) -> None:
                 ctx.offsets[(sid_s, slines[0])] = sec_offs[slines[0]]
 
 
+def _hub_copy_would_desync_trunk_row(
+    ctx: _OffsetCtx, hub_id: str, overlap: Sequence[str], offs: dict[str, float]
+) -> bool:
+    """Whether copying *offs* onto *hub_id* would only base-shift a trunk-row hub.
+
+    The port re-centres its bundle on the feeder nearest its own Y (see
+    :func:`_compute_exit_port_offsets`); when that leaves the port's overlap lines
+    in the same rank order the hub already has, copying it does not reorder the
+    bundle -- it only shifts its base.  Applying that shift to a hub sitting on a
+    shared trunk row (a same-section, same-Y neighbour carrying two or more of the
+    overlap lines) desyncs the hub from its row-mates, and horizontal
+    reconciliation then unions the mismatch out to double width with an empty
+    centre lane.  Only this base-shift case is caught; a genuine reorder (a
+    different rank order, as a two-feeder fan-out needs) is not.
+    """
+    graph = ctx.graph
+    hub = graph.stations[hub_id]
+    port_order = sorted(overlap, key=lambda lid: offs[lid])
+    hub_order = sorted(overlap, key=lambda lid: ctx.offsets.get((hub_id, lid), 0.0))
+    if port_order != hub_order:
+        return False
+    overlap_set = set(overlap)
+    section = graph.sections.get(hub.section_id) if hub.section_id else None
+    for sid in section.station_ids if section else ():
+        station = graph.stations[sid]
+        if (
+            sid == hub_id
+            or station.is_port
+            or abs(station.y - hub.y) > _SAME_Y_TOLERANCE
+        ):
+            continue
+        if len(overlap_set & set(graph.station_lines(sid))) >= 2:
+            return True
+    return False
+
+
 def _propagate_exit_offsets_to_hubs(
     ctx: _OffsetCtx, port_id: str, offs: dict[str, float]
 ) -> None:
     """Copy a port's per-line offsets onto its upstream hub stations.
 
-    A hub is a station feeding two or more of the port's feeders; giving it
-    the port's bundle ordering keeps the in-section run consistent up to the
-    fan-out point.
+    A hub is a station feeding two or more of the port's feeders; giving it the
+    port's bundle ordering keeps the in-section run consistent up to the fan-out
+    point.  A copy that would only base-shift a hub already on a shared trunk row
+    is skipped; see :func:`_hub_copy_would_desync_trunk_row` for why.
     """
     graph = ctx.graph
     feeder_ids = {
@@ -1109,9 +1146,12 @@ def _propagate_exit_offsets_to_hubs(
     hub_candidates = {edge.source for fid in feeder_ids for edge in graph.edges_to(fid)}
     for hub_id in hub_candidates:
         overlap = [lid for lid in graph.station_lines(hub_id) if lid in offs]
-        if len(overlap) >= 2:
-            for lid in overlap:
-                ctx.offsets[(hub_id, lid)] = offs[lid]
+        if len(overlap) < 2 or _hub_copy_would_desync_trunk_row(
+            ctx, hub_id, overlap, offs
+        ):
+            continue
+        for lid in overlap:
+            ctx.offsets[(hub_id, lid)] = offs[lid]
 
 
 def _tb_exit_port_offset(
@@ -1138,6 +1178,38 @@ def _rerank_contiguous(
     """
     order = sorted(lines, key=lambda lid: (values[lid], ctx.line_priority.get(lid, 0)))
     return {lid: i * ctx.offset_step for i, lid in enumerate(order)}
+
+
+def _exit_line_destination_y(
+    graph: MetroGraph, port_id: str, line_id: str
+) -> float | None:
+    """Y of the node *line_id* lands on after leaving exit port *port_id*.
+
+    Follows the line forward through intermediate junctions (which carry the
+    line but are not where it settles) to the first entry port or real station
+    it reaches, and returns that node's Y. Returns ``None`` when the line dead-
+    ends or loops before reaching such a node.
+    """
+    current = port_id
+    seen = {port_id}
+    for _ in range(len(graph.stations) + 1):
+        edge = next(
+            (e for e in graph.edges_from(current) if e.line_id == line_id), None
+        )
+        if edge is None:
+            return None
+        nxt = edge.target
+        if nxt in seen:
+            return None
+        seen.add(nxt)
+        st = graph.station_for_edge_target(edge)
+        port_obj = graph.ports.get(nxt)
+        if (port_obj is not None and port_obj.is_entry) or (
+            st is not None and not st.is_port
+        ):
+            return st.y if st is not None else None
+        current = nxt
+    return None
 
 
 def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
@@ -1285,6 +1357,28 @@ def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
             key=lambda lid: (abs(line_avg_y[lid] - port_y), spatial_offs[lid]),
         )
         anchor_off = spatial_offs[anchor_line]
+        # The feeder-Y anchor can pick a line that TURNS AWAY (its downstream
+        # destination sits off the port's Y) while a different line continues
+        # LEVEL to a destination at the port's Y. Anchoring on the turning line
+        # leaves the level line off-centre, ramping its junction->entry
+        # connector into an almost-horizontal segment. When a line genuinely
+        # continues level and the feeder-Y anchor does not, re-anchor on the
+        # level line so its connector stays flat and the turning line absorbs
+        # the offset in its turn.
+        dest_ys = {
+            lid: _exit_line_destination_y(graph, port_id, lid) for lid in line_avg_y
+        }
+        level_lines = {
+            lid: dy
+            for lid, dy in dest_ys.items()
+            if dy is not None and abs(dy - port_y) <= _SAME_Y_TOLERANCE
+        }
+        if level_lines and anchor_line not in level_lines:
+            anchor_line = min(
+                level_lines,
+                key=lambda lid: (abs(level_lines[lid] - port_y), spatial_offs[lid]),
+            )
+            anchor_off = spatial_offs[anchor_line]
         # A section whose flow was flipped to keep this exit on its producer's
         # end (a re-oriented backward feed) carries a cross-row fan whose
         # feeders sit on non-zero base slots; re-centring the port-nearest line
