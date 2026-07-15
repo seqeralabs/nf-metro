@@ -32,6 +32,7 @@ from nf_metro.layout.routing.invariants import (
     check_partial_branch_offset_gaps,
     classify_merge_port_feeders,
     distinct_offset_levels,
+    max_interior_offset_gap,
 )
 from nf_metro.layout.routing.reversal import detect_reversed_sections
 from nf_metro.layout.routing.seam import SeamOrientation, seam_orientation
@@ -1615,6 +1616,56 @@ def _propagate_lr_rl_exit_to_entry(ctx: _OffsetCtx) -> None:
                             ctx.offsets[(e2.target, lid)] = entry_offs[lid]
 
 
+def _inherit_level_convergence_entry_offsets(ctx: _OffsetCtx) -> None:
+    """A LR/RL entry port fed level by two or more upstream sources inherits
+    each line's feeder offset, keeping the converged bundle consistent.
+
+    The single-feeder propagation (:func:`_propagate_lr_rl_exit_to_entry`) does
+    not fire when a port's lines arrive from more than one upstream port or
+    junction, so a convergence entry falls back to base declaration order.  A
+    through-trunk line fed level from the adjacent section (a reporting line
+    that visited that section's station) is then slotted by declaration
+    priority and dives across the fan to reach its lane, instead of riding the
+    slot its feeder already presents on the trunk.
+
+    Restricted to a genuine convergence (two or more distinct feeders) whose
+    every feeder arrives on the port's own row (a level, horizontal seam) and
+    whose inherited offsets form one distinct, contiguous run.  A gapped
+    inherit would spread the entry bundle wider than base ordering (leaving an
+    empty interior lane), so a subset-reserving or cross-row bundle - which the
+    reindex and convergence-approach phases own - is left untouched.
+    """
+    graph = ctx.graph
+    for port_id, port_obj in graph.ports.items():
+        if not port_obj.is_entry or port_obj.side not in (
+            PortSide.LEFT,
+            PortSide.RIGHT,
+        ):
+            continue
+        if port_obj.section_id not in ctx.lr_rl_sections:
+            continue
+        port_y = graph.stations[port_id].y
+        feeders: set[str] = set()
+        inherited: dict[str, float] = {}
+        level = True
+        for edge in graph.edges_to(port_id):
+            feeders.add(edge.source)
+            if abs(graph.stations[edge.source].y - port_y) > _SAME_Y_TOLERANCE:
+                level = False
+                break
+            inherited[edge.line_id] = ctx.offsets.get((edge.source, edge.line_id), 0.0)
+        if not level or len(feeders) < 2:
+            continue
+        if set(inherited) != set(graph.station_lines(port_id)):
+            continue
+        if len(set(inherited.values())) != len(inherited):
+            continue
+        levels = distinct_offset_levels(inherited.values())
+        if max_interior_offset_gap(levels, ctx.offset_step) is not None:
+            continue
+        _apply_offsets_along_bundle(ctx, port_id, port_obj.section_id, inherited)
+
+
 def _align_flat_tb_exit_to_entry(ctx: _OffsetCtx) -> None:
     """Snap a TB section's flat-seam LEFT/RIGHT exit bundle onto the entry it feeds.
 
@@ -1710,6 +1761,7 @@ def _compute_entry_port_offsets(ctx: _OffsetCtx) -> None:
     """
     _entry_top_from_tb_bottom_exits(ctx)
     _propagate_lr_rl_exit_to_entry(ctx)
+    _inherit_level_convergence_entry_offsets(ctx)
     _recenter_single_line_corridor_entry(ctx)
 
 

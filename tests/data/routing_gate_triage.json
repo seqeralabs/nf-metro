@@ -978,5 +978,9 @@
   "offsets.py::if src_n <= tgt_n:::#1": {
     "note": "_reconcile_horizontal_offsets' bundle-shift fallback moves the edge endpoint with fewer lines. The else arm (src_n > tgt_n: move the target) was exercised in the corpus solely by the fan-port drag where a many-line entry/exit port is the edge source and a same-Y trunk-row station with fewer lines is the target (funcprofiler_upstream's humann3 at its entry port). The #1480 exit-port ordering fix (merge_trunk_lines in _compute_exit_port_offsets) rides the trunk-continuation merge line out on the trunk slot, so that port and station now agree and the edge no longer needs shifting. The remaining corpus shift (sr_qc into its input exit port) has the fewer-line station as the source, taking the src_n <= tgt_n true arm. The else arm stays defensive for a same-Y bundle conflict whose higher-line-count endpoint is the edge source.",
     "status": "defensive"
+  },
+  "offsets.py::if set(inherited) != set(graph.station_lines(port_id)):::#1": {
+    "note": "_inherit_level_convergence_entry_offsets skips a convergence entry port when the lines it inherits from its immediate feeders do not cover every line the port carries. A convergence entry's lines are, by construction, exactly the union of its inbound edges' lines, and each inbound edge supplies that line's feeder offset, so the inherited set always equals the port's line set and the mismatch arm is never taken. Defensive against a port line with no inbound edge (a malformed graph).",
+    "status": "defensive"
   }
 }
