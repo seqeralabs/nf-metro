@@ -310,19 +310,32 @@ def test_offset_collapse_caught_when_spread_pair_drawn_flush() -> None:
 
 def test_same_slot_bundle_is_not_offset_collapse() -> None:
     """Distinct lines the regime put on one slot draw flush without a finding."""
-    name = "topologies/funcprofiler_upstream.mmd"
-    if name not in CORPUS:
-        pytest.skip(f"{name} not in renderable corpus")
     from nf_metro.render.validate import _flush_run
 
-    svg = _render(name)
-    segs = drawn_segments(parse_route_polylines(svg))
-    flush = any(
-        la != lb and _flush_run((a1, a2), (b1, b2)) is not None
-        for i, (la, a1, a2) in enumerate(segs)
-        for lb, b1, b2 in segs[i + 1 :]
+    # Fixtures whose offset regime draws two distinct lines flush on one slot.
+    # Iterated rather than pinned to one so improving any single fixture's
+    # layout leaves the validator property exercised by the others.
+    candidates = (
+        "topologies/same_line_fan_distinct_descent.mmd",
+        "topologies/top_entry_bundle_offset_seam.mmd",
     )
-    assert flush, "fixture no longer exercises a same-slot flush bundle"
-
-    findings = validate_render(svg, graph=_LAID_OUT[name])
-    assert not [f for f in findings if f.kind == OFFSET_COLLAPSE]
+    exercised = False
+    for name in candidates:
+        if name not in CORPUS:
+            continue
+        svg = _render(name)
+        segs = drawn_segments(parse_route_polylines(svg))
+        flush = any(
+            la != lb and _flush_run((a1, a2), (b1, b2)) is not None
+            for i, (la, a1, a2) in enumerate(segs)
+            for lb, b1, b2 in segs[i + 1 :]
+        )
+        if not flush:
+            continue
+        exercised = True
+        findings = validate_render(svg, graph=_LAID_OUT[name])
+        assert not [f for f in findings if f.kind == OFFSET_COLLAPSE], (
+            f"{name}: distinct lines the regime put on one slot were flagged "
+            f"as an offset collapse"
+        )
+    assert exercised, "no candidate fixture exercises a same-slot flush bundle"
