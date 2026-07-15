@@ -1015,6 +1015,102 @@ def check_merge_port_approach_side(
     return violations
 
 
+@dataclass(frozen=True)
+class FanPortBundleGapViolation:
+    """A multi-line station's bundle inflated by a wider same-Y fan port.
+
+    A station on a section trunk row shares its Y with a fan-in/fan-out port
+    that aggregates more lines than the station carries.  Snapping the
+    station's lines onto the port's spread slots pulls one line out of the
+    station's own bundle, opening an empty interior lane so the marker draws
+    wider than its line count.  ``levels`` are the station's distinct offset
+    lanes; ``expected`` is the contiguous run they should form.
+    """
+
+    station_id: str
+    port_id: str
+    levels: tuple[float, ...]
+    expected: tuple[float, ...]
+
+    def message(self) -> str:
+        return (
+            f"station {self.station_id!r} borders wider fan port "
+            f"{self.port_id!r} on its own row and its bundle lanes "
+            f"{list(self.levels)} are not the contiguous run "
+            f"{list(self.expected)}; an empty interior lane widens the marker"
+        )
+
+
+def fan_port_and_station(
+    graph,  # noqa: ANN001 - MetroGraph (avoid import cycle)
+    edge: Edge,
+) -> tuple[str, str] | None:
+    """Return ``(port_id, station_id)`` when *edge* joins a multi-line station
+    to a strictly-wider fan port, else ``None``.
+
+    A fan-in convergence or fan-out hub port aggregates more lines than the
+    station it borders.  A station carrying two or more lines is the only one
+    whose own bundle the port's spread slots can inflate; a single-line
+    station stays contiguous at any offset, and an equal-or-narrower port has
+    no spread to leak.  The same-Y / same-section context that decides whether
+    the mismatch actually reaches the station's bundle is left to the caller.
+    """
+    src = graph.stations[edge.source]
+    tgt = graph.stations[edge.target]
+    if src.is_port == tgt.is_port:
+        return None
+    port_id, station_id = (
+        (edge.source, edge.target) if src.is_port else (edge.target, edge.source)
+    )
+    n_station = len(graph.station_lines(station_id))
+    if n_station <= 1 or len(graph.station_lines(port_id)) <= n_station:
+        return None
+    return port_id, station_id
+
+
+def check_station_bundle_contiguous_at_fan_port(
+    graph,  # noqa: ANN001 - MetroGraph (avoid import cycle)
+    offsets: dict[tuple[str, str], float],
+) -> list[FanPortBundleGapViolation]:
+    """Return multi-line stations whose bundle a wider same-Y port inflated.
+
+    For every multi-line station bordering a strictly-wider port at the same
+    base Y (the trunk-row station of a fan-in convergence or fan-out hub), the
+    station's distinct offset lanes must form one contiguous ``OFFSET_STEP``
+    run.  The port's slot spread is owned by the port-offset phases and
+    resolved into the station via a routing riser, so it must not leak into the
+    station's own marker bundle.
+    """
+    step = resolve_offset_step(graph.track_gap)
+    pairs = {
+        pair
+        for edge in graph.edges
+        if (pair := fan_port_and_station(graph, edge)) is not None
+    }
+    violations: list[FanPortBundleGapViolation] = []
+    for port_id, station_id in sorted(pairs):
+        port_y = graph.stations[port_id].y
+        station_y = graph.stations[station_id].y
+        if abs(port_y - station_y) > SAME_Y_TOLERANCE:
+            continue
+        levels = distinct_offset_levels(
+            offsets.get((station_id, lid), 0.0)
+            for lid in graph.station_lines(station_id)
+        )
+        if max_interior_offset_gap(levels, step) is None:
+            continue
+        expected = [levels[0] + i * step for i in range(len(levels))]
+        violations.append(
+            FanPortBundleGapViolation(
+                station_id=station_id,
+                port_id=port_id,
+                levels=tuple(round(v, 2) for v in levels),
+                expected=tuple(round(v, 2) for v in expected),
+            )
+        )
+    return violations
+
+
 def check_convergence_shallow_feeder_concentric(
     graph,  # noqa: ANN001 - MetroGraph (avoid import cycle)
     offsets: dict[tuple[str, str], float],
@@ -4589,6 +4685,19 @@ CHECK_REGISTRY: tuple[GuardSpec, ...] = (
     _check_spec(check_fanout_tail_join, "B"),
     _check_spec(check_merge_port_approach_side, "B"),
     _check_spec(check_convergence_shallow_feeder_concentric, "B"),
+    _check_spec(
+        check_station_bundle_contiguous_at_fan_port,
+        "B",
+        issue_pin=("#1476", "#1480"),
+        narrow_reason=(
+            "Restricted to a multi-line station sharing its base Y with a "
+            "strictly-wider fan-in/fan-out port it borders -- the only place "
+            "the port's spread slots can leak into a station's bundle. A "
+            "single-line station stays contiguous at any offset, and a station "
+            "not on a fan port's row keeps its own bundle ordering, so neither "
+            "is a false positive."
+        ),
+    ),
     _check_spec(check_merge_port_outgoing_side_preserved, "B"),
     _check_spec(check_exit_inherits_entry_bundle_order, "B"),
     _check_spec(check_partial_branch_offset_gaps, "B"),

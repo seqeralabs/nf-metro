@@ -843,10 +843,18 @@ def test_subset_section_bundle_anchored_on_trunk(fixture, section_id):
 # leak back onto the trunk row (hub and its same-Y row-mates in_0/s2/out_main)
 # and get unioned to double width by horizontal reconciliation.  annotate / star
 # are clean two-line bundles.
+#
+# funcprofiler_upstream is the fan-*in* mirror: humann3 sits on the trunk row,
+# same Y as the convergence exit port that aggregates all seven profilers' lines
+# into a wide bundle.  Reconciliation must not snap humann3's own three-line bundle
+# onto the port's spread slots; humann4 is an off-trunk sibling control that is
+# never same-Y with the port and must stay clean regardless.
 _CONTIGUOUS_STATION_BUNDLES = [
     ("topologies/fanout_hub_two_line_trunk.mmd", "hub"),
     ("topologies/fanout_hub_two_line_trunk.mmd", "s2"),
     ("topologies/fanout_hub_two_line_trunk.mmd", "out_main"),
+    ("topologies/funcprofiler_upstream.mmd", "humann3"),
+    ("topologies/funcprofiler_upstream.mmd", "humann4"),
     ("da_pipeline.mmd", "annotate"),
     ("rnaseq_auto.mmd", "star"),
 ]

@@ -234,13 +234,14 @@ def test_layout_quality_warnings_report(path, capsys):
             )
 
 
-# --- Positive-control regression: funcprofiler_upstream ---
+# --- Regression guard: funcprofiler_upstream reporting line ---
 #
-# This fixture is a known-bad layout used as a stress test for the new
-# validators. The asserts below pin the *current* defect set so the test
-# fails (loudly) whenever the layout improves OR regresses, prompting a
-# baseline update or a fix. When the underlying engine bug is fixed and
-# violations drop to zero, replace the lower bounds with `== 0`.
+# funcprofiler_upstream is a real upstream pipeline (11 lines, 7 parallel
+# profilers) whose reporting (multiqc) line is the through-trunk line: it
+# visits MultiQC on the trunk between the profiling and output sections. The
+# exit- and entry-port trunk-slot ordering keeps that merge line on the trunk
+# end to end, so it runs level rather than diving through the fan bundle at
+# either port boundary.
 
 FUNCPROFILER_FIXTURE = TOPOLOGIES_DIR / "funcprofiler_upstream.mmd"
 
@@ -248,33 +249,29 @@ FUNCPROFILER_FIXTURE = TOPOLOGIES_DIR / "funcprofiler_upstream.mmd"
 @pytest.mark.skipif(
     not FUNCPROFILER_FIXTURE.exists(), reason="funcprofiler_upstream fixture absent"
 )
-class TestFuncprofilerUpstreamDefects:
-    """Lock in the funcprofiler_upstream layout defects the validators detect.
-
-    The fixture is a real upstream pipeline with 11 lines and 7 parallel
-    profiling tools. It currently exhibits intra-section diagonals (the
-    sr_qc -> merge concat edge in the Input section) that the engine
-    cannot resolve without the in-flight funcprofiler-fix work.
-    """
+class TestFuncprofilerUpstreamReportingLine:
+    """The reporting line rides the trunk through funcprofiler_upstream."""
 
     @pytest.fixture
     def graph(self):
         return _load_and_layout(FUNCPROFILER_FIXTURE)
 
-    def test_validator_detects_single_segment_diagonals(self, graph):
-        """The reporting line crossing from Quality Check to Output renders
-        as a single straight diagonal between the two ports; confirm the
-        detector picks it up. (The intra-section sr_qc -> merge diagonal
-        only appears under the in-flight funcprofiler-fix branch's
-        exit-port snapping; main code routes it as an L-shape.)
+    def test_reporting_line_no_qc_to_output_diagonal(self, graph):
+        """The reporting (multiqc) line runs level from Quality Check to Output
+        on the trunk, not as a single straight diagonal between the two ports.
+
+        The through-trunk merge line rides the trunk slot at both the QC exit
+        and the Output convergence entry, so its inter-section connector runs
+        level across each port boundary (#1480).
         """
         violations = check_single_segment_diagonals(graph)
         flagged = {(v.context["source"], v.context["target"]) for v in violations}
-        port_pair_present = any(
-            "QC__exit" in s and "Output__entry" in t for s, t in flagged
-        )
-        assert port_pair_present, (
-            f"expected QC -> Output single-diagonal port hop; got {flagged}"
+        qc_to_output = {
+            (s, t) for s, t in flagged if "QC__exit" in s and "Output__entry" in t
+        }
+        assert not qc_to_output, (
+            f"reporting line should run level QC -> Output on the trunk, not a "
+            f"single diagonal; got {sorted(flagged)}"
         )
 
 
