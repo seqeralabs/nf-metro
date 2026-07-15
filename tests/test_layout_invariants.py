@@ -3485,7 +3485,7 @@ def test_multiline_ascent_to_exit_clears_sibling_label():
     """
     from nf_metro.layout.phases.spacing import _struck_stations_and_collinear
 
-    path = _resolve_fixture("through_section/exit_fan_label_strike.mmd")
+    path = _resolve_fixture("topologies/exit_fan_label_strike.mmd")
     graph = parse_metro_mermaid(path.read_text())
     compute_layout(graph)
     struck, collinear = _struck_stations_and_collinear(graph)
@@ -3502,9 +3502,13 @@ def test_fan_up_keeps_same_line_chain_axis_aligned():
     unused top slack.  A station that heads a same-line linear chain continuing
     at or below the trunk must not be lifted across the trunk: doing so turns
     the chain's horizontal hop into a steep cross-trunk diagonal that rakes the
-    pinned trunk station's name label.  In the packed riboseq map (#1449) that
-    lift split ``plastid_psite -> plastid_wiggle`` across ``psite_id``'s trunk
-    and clipped ``ribowaltz``'s label.
+    pinned trunk station's name label.  In the packed riboseq map (#1449) the
+    lift split ``plastid_psite -> plastid_wiggle`` across ``psite_id``'s trunk.
+
+    The fan-up slack only arises in a packed multi-row grid, and every such grid
+    that reproduces it also carries a far-side-entry fold-back elsewhere (#1363),
+    so this lock cannot yet live on a clean gallery fixture; it stays on the
+    ``riboseq_packed_lr`` repro until #1363 lands.
     """
     from layout_validator import check_intra_section_chain_alignment
 

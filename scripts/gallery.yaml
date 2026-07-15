@@ -1018,6 +1018,14 @@ gallery:
       and bypasses a higher row to climb to a far target. The onward run keeps the line's offset
       over the row-level traverse so it leaves the exit port straight, with the single level
       change a clean riser at the far gap rather than a one-offset-step jog at the exit corner.
+  - id: exit_fan_label_strike
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      A multi-line side branch (Salmon) fed only from the section boundary sits
+      off the trunk and exits right past a wide trunk-sibling label (BEDTools
+      genomecov). It rides its own track and turns up late at the exit port, so
+      its riser clears the label rather than raking through it mid-section.
   - id: convergent_offrow_exit_climb
     source_dir: examples/topologies
     category: Bypass Routing
