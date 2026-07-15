@@ -149,6 +149,46 @@ def flow_axis_exit_ports(section: Section, graph: MetroGraph) -> set[str]:
     }
 
 
+def section_entry_sides(graph: MetroGraph, section: Section) -> set[PortSide]:
+    """The distinct sides through which lines actually enter *section*.
+
+    Only entry ports carrying at least one edge count -- an entry port with no
+    line is not an approach.  A section with more than one side here is entered
+    from multiple directions (a perpendicular multi-side entry), which drives
+    the entry-side placement and routing that a single-side section skips.
+    """
+    return {
+        port.side
+        for pid in section.entry_ports
+        if (port := graph.ports.get(pid)) is not None
+        and any(True for _ in graph.edges_to(pid))
+    }
+
+
+def leftward_blocker_right_edge(graph: MetroGraph, entry_port: Station) -> float | None:
+    """Right edge of the nearest section box straddling *entry_port*'s Y to its left.
+
+    A LEFT entry is reached by a horizontal run at the port's Y from its own
+    side; any other section whose box spans that Y and lies left of the port
+    sits across that run.  Returns the rightmost such box's right edge (the
+    immediate blocker), or ``None`` when nothing straddles the Y.
+    """
+    ey, ex = entry_port.y, entry_port.x
+    own = entry_port.section_id
+    best: float | None = None
+    for sid, s in graph.sections.items():
+        if sid == own or s.bbox_w <= 0:
+            continue
+        right = s.bbox_x + s.bbox_w
+        if (
+            s.bbox_y - COORD_TOLERANCE <= ey <= s.bbox_y + s.bbox_h + COORD_TOLERANCE
+            and right < ex - COORD_TOLERANCE
+            and (best is None or right > best)
+        ):
+            best = right
+    return best
+
+
 def _is_fold_section(section: Section) -> bool:
     """``True`` for a section the row-fold logic produced.
 

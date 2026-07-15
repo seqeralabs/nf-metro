@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from nf_metro.layout.constants import (
-    COORD_TOLERANCE,
     JUNCTION_MARGIN,
 )
+from nf_metro.layout.phases._common import leftward_blocker_right_edge
 from nf_metro.parser.model import MetroGraph, Port, PortSide, Station
 
 
@@ -141,15 +141,7 @@ def _merge_run_blocked_across_gap(
     ep_col = ep_section.grid_col
     if any(s.grid_col == ep_col - 1 and s.bbox_w > 0 for s in graph.sections.values()):
         return False
-    ey, ex = entry_port.y, entry_port.x
-    own = entry_port.section_id
-    return any(
-        sid != own
-        and s.bbox_w > 0
-        and s.bbox_y - COORD_TOLERANCE <= ey <= s.bbox_y + s.bbox_h + COORD_TOLERANCE
-        and s.bbox_x + s.bbox_w < ex - COORD_TOLERANCE
-        for sid, s in graph.sections.items()
-    )
+    return leftward_blocker_right_edge(graph, entry_port) is not None
 
 
 def _position_merge_junction(

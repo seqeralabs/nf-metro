@@ -48,6 +48,7 @@ from nf_metro.layout.phases._common import (
     _build_section_subgraph,
     iter_sole_trunk_continuations,
     perp_entry_lands_left,
+    section_entry_sides,
     section_exit_lines,
 )
 from nf_metro.layout.phases.off_track import (
@@ -1058,9 +1059,7 @@ def _perp_entry_drop_gap(
     the widest half-advance of those labels plus a pad, matching the ink model
     the strike guard uses.  Single-side sections keep the marker-only gap.
     """
-    from nf_metro.layout.phases.row_align import _entered_from_multiple_sides
-
-    if not _entered_from_multiple_sides(graph, section):
+    if len(section_entry_sides(graph, section)) <= 1:
         return desired_gap
     edge_x = run_lo if entry_on_left else run_hi
     label_reach = max(

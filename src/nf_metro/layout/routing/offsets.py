@@ -13,7 +13,10 @@ from nf_metro.layout.constants import (
     resolve_offset_step,
 )
 from nf_metro.layout.geometry import lanes_run_along_x
-from nf_metro.layout.phases._common import iter_corridor_fed_solo_entries
+from nf_metro.layout.phases._common import (
+    iter_corridor_fed_solo_entries,
+    section_entry_sides,
+)
 from nf_metro.layout.routing.arranger import BoundaryConfig, lane_order
 from nf_metro.layout.routing.common import (
     needs_perp_approach_fan,
@@ -1624,10 +1627,7 @@ def _reslot_multi_side_perp_entry_ports(ctx: _OffsetCtx) -> None:
         section = graph.sections.get(port.section_id)
         if section is None:
             continue
-        entry_sides = {
-            graph.ports[pid].side for pid in section.entry_ports if pid in graph.ports
-        }
-        if len(entry_sides) <= 1:
+        if len(section_entry_sides(graph, section)) <= 1:
             continue
         if needs_perp_approach_fan(graph, port_id):
             continue

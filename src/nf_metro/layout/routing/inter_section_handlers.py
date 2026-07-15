@@ -24,6 +24,10 @@ from nf_metro.layout.constants import (
     MERGE_ROUTE_MARGIN,
     SECTION_ROUTE_CLEARANCE,
 )
+from nf_metro.layout.phases._common import (
+    leftward_blocker_right_edge,
+    section_entry_sides,
+)
 from nf_metro.layout.routing.bundle import build_tapered_bundle
 from nf_metro.layout.routing.centrelines import (
     fan_offsets,
@@ -993,6 +997,28 @@ def _route_right_entry_plough_bypass(f: _InterFacts) -> RoutedPath | None:
     )
 
 
+def _perp_multi_side_entry_needs_bypass(f: _InterFacts) -> bool:
+    """A perpendicular entry on a multi-side section drops in via the U-bypass.
+
+    The standard L-shape fallback would drop to the section boundary and slide
+    along it into the port; the bypass drops straight in from beyond the
+    boundary instead (see the perp branch in :func:`_route_bypass`).
+    """
+    return (
+        _perp_multi_side_entry_side(f.graph, f.edge.target) is not None
+        and f.src_col is not None
+        and f.tgt_col is not None
+    )
+
+
+def _route_perp_multi_side_entry_bypass(f: _InterFacts) -> RoutedPath | None:
+    # Columns are guaranteed non-None by _perp_multi_side_entry_needs_bypass.
+    assert f.src_col is not None and f.tgt_col is not None
+    return _route_bypass(
+        f.edge, f.src, f.tgt, f.i, f.src_col, f.tgt_col, f.ctx, f.src_row
+    )
+
+
 @dataclass(frozen=True)
 class _Rule:
     """One row of the dispatch table: a named predicate and its route builder."""
@@ -1153,6 +1179,15 @@ _INTER_SECTION_RULES: list[_Rule] = [
         ),
         _route_right_entry_cross_row,
     ),
+    # A perpendicular (TOP/BOTTOM) entry on a section entered from more than one
+    # side, unclaimed by any rule above: drop in via the U-bypass rather than
+    # the L-shape fall-through, which would slide along the boundary.  Last, so
+    # it only takes the L-shape's would-be cases.
+    _Rule(
+        "perp multi-side entry -> bypass",
+        _perp_multi_side_entry_needs_bypass,
+        _route_perp_multi_side_entry_bypass,
+    ),
 ]
 
 
@@ -1176,17 +1211,6 @@ def _route_inter_section(
     rule = _match_inter_section_rule(f)
     if rule is not None:
         route = rule.route(f)
-    elif (
-        _perp_multi_side_entry_side(ctx.graph, edge.target) is not None
-        and f.src_col is not None
-        and f.tgt_col is not None
-    ):
-        # No dispatch rule claimed a perpendicular entry on a multi-side
-        # section: the standard L-shape fallback would drop to the boundary and
-        # slide into the port along it.  Route via the U-bypass instead, which
-        # drops straight into the port from beyond the boundary (see the perp
-        # branch in ``_route_bypass``).  A rule-claimed edge keeps its handler.
-        route = _route_bypass(edge, src, tgt, f.i, f.src_col, f.tgt_col, ctx, f.src_row)
     else:
         # Standard L-shape: the default when no rule above claims the edge.
         route = _route_l_shape(edge, src, tgt, f.i, f.n, ctx)
@@ -1685,8 +1709,7 @@ def _perp_multi_side_entry_side(graph: MetroGraph, target_id: str) -> PortSide |
     section = graph.sections.get(port.section_id)
     if section is None:
         return None
-    sides = {graph.ports[pid].side for pid in section.entry_ports if pid in graph.ports}
-    return port.side if len(sides) > 1 else None
+    return port.side if len(section_entry_sides(graph, section)) > 1 else None
 
 
 def _route_bypass(
@@ -2097,21 +2120,20 @@ def _route_bypass(
     # bypass out of a right-edge junction leads in rightward), so a single
     # direction would mis-sign the compensation.
     tgt_off = _get_offset(ctx, edge.target, edge.line_id)
+    n3x = 1.0 if gap2_vertical is Direction.U else -1.0
     if perp_entry_side is not None:
         # Land the gap2 rise on the departure's crossing column so the final
         # leg is a straight perpendicular crossing sharing the in-section
         # drop's X, not a slide along the boundary.  The rise renders at
         # ``gap2_x - delta2 + delta2 * n3x``, so solve that back to the
         # crossing X (``effective_tx``) whichever way the rise runs.
-        n3x_perp = 1.0 if gap2_vertical is Direction.U else -1.0
-        gap2_x = effective_tx + delta2 * (1.0 - n3x_perp)
+        gap2_x = effective_tx + delta2 * (1.0 - n3x)
     gap1_mid = gap1_x - off1
     gap2_mid = gap2_x - delta2
     n0y = 1.0 if gap1_mid >= sx else -1.0
     n2y = 1.0 if gap2_mid >= gap1_mid else -1.0
     n4y = 1.0 if effective_tx >= gap2_mid else -1.0
     n1x = -1.0 if gap1_vertical is Direction.D else 1.0
-    n3x = 1.0 if gap2_vertical is Direction.U else -1.0
     sigma1 = off1 * n1x
     sigma2 = delta2 * n3x
     src_y = sy + src_off - sigma1 * n0y
@@ -2805,17 +2827,9 @@ def _route_top_entry_l_shape(
     # A section entered from more than one side re-slots its perp entry port
     # from the lines that port alone carries, independently of the feeder, so
     # the multi-side branches below diverge from the single-side behaviour that
-    # every existing render relies on.
-    multi_side_entry = tgt_sec is not None and (
-        len(
-            {
-                ctx.graph.ports[pid].side
-                for pid in tgt_sec.entry_ports
-                if pid in ctx.graph.ports
-            }
-        )
-        > 1
-    )
+    # every existing render relies on.  This handler only runs for a TOP entry,
+    # so the port's own multi-side verdict answers it.
+    multi_side_entry = _perp_multi_side_entry_side(ctx.graph, edge.target) is not None
 
     if tgt_sec is not None and tgt_sec.direction in ("TB", "BT"):
 
@@ -2858,34 +2872,26 @@ def _route_top_entry_l_shape(
         mid_y = min(crossed_bottom + INTER_ROW_EDGE_CLEARANCE, ty - ctx.curve_radius)
 
     # Traverse at the source Y to the port column, then drop straight in.
+    #
+    # A lead-in near the landing column jogs onto it directly.  A multi-side
+    # entry drops straight from the lead-in (which already sits on the port
+    # column within tolerance); a single-side entry jogs the last step to the
+    # column at the boundary, as its renders have always done.  A lead-in
+    # further off returns to the column in the inter-row gap above the boundary,
+    # so the drop enters the port straight rather than reversing laterally at
+    # it.
+    near_column = ctx.curve_radius if not multi_side_entry else COORD_TOLERANCE
     if _top_entry_side_fan_traverse_is_clear(edge, src, tgt, final_x, ctx):
         centerline = [(sx, sy), (final_x, sy), (final_x, ty)]
         transition_leg = 1
-    elif not multi_side_entry:
-        # Single-side entry keeps the original lead-in shapes: a short lead-in
-        # that lands within a corner radius of the column jogs to it at the
-        # boundary; otherwise the lateral return runs in the inter-row gap.
-        if abs(lx0 - final_x) <= ctx.curve_radius:
-            centerline = [(sx, sy), (lx0, sy), (lx0, ty), (final_x, ty)]
-            transition_leg = 2
-        else:
-            centerline = [
-                (sx, sy),
-                (lx0, sy),
-                (lx0, mid_y),
-                (final_x, mid_y),
-                (final_x, ty),
-            ]
-            transition_leg = 3
-    elif abs(lx0 - final_x) <= COORD_TOLERANCE:
-        # Multi-side entry: the lead-in already sits on the landing column, so
-        # drop straight from it.
-        centerline = [(sx, sy), (lx0, sy), (lx0, ty)]
+    elif abs(lx0 - final_x) <= near_column:
+        centerline = (
+            [(sx, sy), (lx0, sy), (lx0, ty)]
+            if multi_side_entry
+            else [(sx, sy), (lx0, sy), (lx0, ty), (final_x, ty)]
+        )
         transition_leg = 2
     else:
-        # Multi-side entry: return to the landing column in the inter-row gap,
-        # above the entry boundary, so the drop enters the port straight rather
-        # than reversing laterally at the boundary.
         centerline = [
             (sx, sy),
             (lx0, sy),
@@ -3481,26 +3487,9 @@ def _descent_rightward_clearable_pierce(
 def _approach_blocker_right_edge(ctx: _RoutingCtx, entry_port: Station) -> float | None:
     """Right edge of the nearest section blocking a LEFT entry's approach.
 
-    A LEFT entry is reached by a horizontal run at the entry Y from its own
-    side.  Any other section whose box straddles that Y and lies left of the
-    port sits across that run; the rightmost such box (the immediate blocker) is
-    the edge the descent channel must clear.  Returns its right edge, or
-    ``None`` when nothing straddles the entry Y.
+    The descent channel must clear this edge to reach the port.
     """
-    ey, ex = entry_port.y, entry_port.x
-    own = entry_port.section_id
-    best: float | None = None
-    for sid, s in ctx.graph.sections.items():
-        if sid == own or s.bbox_w <= 0:
-            continue
-        right = s.bbox_x + s.bbox_w
-        if (
-            s.bbox_y - COORD_TOLERANCE <= ey <= s.bbox_y + s.bbox_h + COORD_TOLERANCE
-            and right < ex - COORD_TOLERANCE
-            and (best is None or right > best)
-        ):
-            best = right
-    return best
+    return leftward_blocker_right_edge(ctx.graph, entry_port)
 
 
 def _route_around_section_below(

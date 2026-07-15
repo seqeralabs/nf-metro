@@ -27,6 +27,7 @@ from nf_metro.layout.phases._common import (
     _section_bundle_lines,
     _section_trunk_y,
     iter_stacked_rows_in_rowspan_band,
+    section_entry_sides,
 )
 from nf_metro.layout.phases.ports import _set_port_y
 from nf_metro.layout.phases.single_section import _multiline_label_padding
@@ -484,7 +485,7 @@ def _recompute_grid_group_bboxes(graph: MetroGraph) -> None:
             # is entered from more than one side: its perpendicular entry port
             # is not the vertical extreme, so the recompute above can leave it
             # within the span and off the boundary.
-            if _entered_from_multiple_sides(graph, section):
+            if len(section_entry_sides(graph, section)) > 1:
                 _pull_section_ports_to_edge(
                     graph, section, PortSide.TOP, section.bbox_y
                 )
@@ -563,22 +564,6 @@ def _distribute_stacked_rows_in_rowspan_band(graph: MetroGraph) -> None:
             cursor += section.bbox_h + gap
 
 
-def _entered_from_multiple_sides(graph: MetroGraph, section: Section) -> bool:
-    """Whether *section* has line-carrying entry ports on more than one side.
-
-    A perpendicular (TOP/BOTTOM) entry port only needs re-pinning onto a moved
-    bbox edge when the section is entered from a second side as well; a
-    single-side section keeps its perp port as the vertical extreme, so the
-    gate leaves those renders untouched.
-    """
-    sides: set[PortSide] = set()
-    for pid in section.entry_ports:
-        port = graph.ports.get(pid)
-        if port is not None and any(True for _ in graph.edges_to(pid)):
-            sides.add(port.side)
-    return len(sides) > 1
-
-
 def _top_align_row_bboxes_only(graph: MetroGraph) -> None:
     """Align bbox tops within each row by growing bboxes upward.
 
@@ -603,7 +588,7 @@ def _top_align_row_bboxes_only(graph: MetroGraph) -> None:
             section.bbox_h += delta
             # A perpendicular TOP entry port sat on the pre-growth edge; the
             # raised top strands it inside the section unless carried up.
-            if _entered_from_multiple_sides(graph, section):
+            if len(section_entry_sides(graph, section)) > 1:
                 _pull_section_ports_to_edge(
                     graph, section, PortSide.TOP, section.bbox_y
                 )
