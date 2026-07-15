@@ -874,21 +874,22 @@ def _build_entry_side_mapping(
 
     A line resolves to one entry side:
 
-    - a line named on a single hint side uses that side.  A line named on
-      *several* sides (the author offered alternatives) collapses to one of
-      *its own* named sides via ``_collapse_within``, so an off-hint feed
-      direction can never pull that line's entry onto a side it was not hinted
-      for (which folds the connector back across the section's internal flow).
-      When the section's hint sides differ only across lines (each line named
-      on one side) the shared side is the dominant feed side, else flow-natural,
-      keeping the section's entry unambiguous;
+    - a line named on a single hint side uses that side, so the author's
+      explicit choice is honoured even when a different line on the same
+      section enters from another side;
+    - a line named on *several* sides (the author offered alternatives)
+      collapses to one of *its own* named sides via ``_collapse_within``, so an
+      off-hint feed direction can never pull that line's entry onto a side it
+      was not hinted for (which folds the connector back across the section's
+      internal flow);
     - a line with no hint takes its side from where its feeds arrive
       (``_dominant_entry_side``), falling back to the LEFT default at lookup
       (left unmapped here) when no predecessor geometry is available.
 
-    Different lines may resolve to different sides; a section fed from more than
-    one approach direction is caught downstream by
-    ``_guard_no_mixed_entry_directions``.  Returns dict mapping
+    Different lines may resolve to different sides; a section entered from two
+    opposing directions (or one line pulled onto two sides) is rejected
+    downstream by ``_guard_no_mixed_entry_directions``, while two lines entering
+    from perpendicular sides are permitted.  Returns dict mapping
     (section_id, line_id) -> PortSide.
     """
     dag = graph.section_dag
@@ -909,21 +910,14 @@ def _build_entry_side_mapping(
 
         dominant = _dominant_entry_side(graph, sec_id)
         natural = _natural_entry_side(section.direction)
-        hint_sides = {s for s, _ in section.entry_hints}
-        if len(hint_sides) == 1:
-            hinted_side: PortSide | None = next(iter(hint_sides))
-        elif hint_sides:
-            hinted_side = dominant or natural
-        else:
-            hinted_side = None
 
         for lid in incoming:
             own_sides = line_hint_sides.get(lid)
             side: PortSide | None
             if own_sides and len(own_sides) >= 2:
                 side = _collapse_within(own_sides, dominant, natural)
-            elif lid in hinted_lines:
-                side = hinted_side
+            elif own_sides:
+                side = next(iter(own_sides))
             else:
                 side = dominant
             if side is not None:

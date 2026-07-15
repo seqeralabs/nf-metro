@@ -22,6 +22,7 @@ from nf_metro.layout.phases._common import (
     _classify_multi_station_ys,
     _classify_section_station_ys,
     _max_stations_per_layer,
+    _pull_section_ports_to_edge,
     _row_contiguous_column_groups,
     _section_bundle_lines,
     _section_trunk_y,
@@ -479,6 +480,14 @@ def _recompute_grid_group_bboxes(graph: MetroGraph) -> None:
                         section.bbox_h = st.y - section.bbox_y
                     top = section.bbox_y
                     bot = section.bbox_y + section.bbox_h
+            # Snap TOP/BOTTOM ports onto the recomputed edges: a perpendicular
+            # entry port that lands within the recomputed span (a section
+            # entered from more than one side, whose perp port is not the
+            # vertical extreme) would otherwise sit off the boundary.
+            _pull_section_ports_to_edge(graph, section, PortSide.TOP, section.bbox_y)
+            _pull_section_ports_to_edge(
+                graph, section, PortSide.BOTTOM, section.bbox_y + section.bbox_h
+            )
 
 
 def _top_align_row_sections(graph: MetroGraph) -> None:

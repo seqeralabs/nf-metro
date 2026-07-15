@@ -2722,8 +2722,30 @@ def _route_top_entry_l_shape(
         ]
     else:
         final_x = tx
+        # A perp entry port on a section entered from more than one side is
+        # re-slotted from the lines it alone carries
+        # (``_reslot_multi_side_perp_entry_ports``), so its per-line offset
+        # differs from the feeder's; land on the port's own offset there.  A
+        # single-side entry keeps the feeder offset the propagation already
+        # matched to the port, so its rigid bundle is untouched.
+        multi_side_entry = tgt_sec is not None and (
+            len(
+                {
+                    ctx.graph.ports[pid].side
+                    for pid in tgt_sec.entry_ports
+                    if pid in ctx.graph.ports
+                }
+            )
+            > 1
+        )
+
+        def tgt_offset(line_id: str) -> float:
+            if multi_side_entry:
+                return _get_offset(ctx, edge.target, line_id)
+            return src_offset(line_id)
+
         members = [
-            (edge_by_line[lid], lid, src_offset(lid), src_offset(lid))
+            (edge_by_line[lid], lid, src_offset(lid), tgt_offset(lid))
             for lid in line_ids
         ]
 
@@ -2744,12 +2766,15 @@ def _route_top_entry_l_shape(
     if _top_entry_side_fan_traverse_is_clear(edge, src, tgt, final_x, ctx):
         centerline = [(sx, sy), (final_x, sy), (final_x, ty)]
         transition_leg = 1
-    # When the lead-in already sits at the landing X the trunk leg collapses;
-    # drop straight from the lead-in and jog into the port instead.
-    elif abs(lx0 - final_x) <= ctx.curve_radius:
-        centerline = [(sx, sy), (lx0, sy), (lx0, ty), (final_x, ty)]
+    elif abs(lx0 - final_x) <= COORD_TOLERANCE:
+        # The lead-in already sits on the landing column: drop straight from it.
+        centerline = [(sx, sy), (lx0, sy), (lx0, ty)]
         transition_leg = 2
     else:
+        # The lead-in cleared the source box a corner off the landing column;
+        # return to it in the inter-row gap, above the entry boundary, so the
+        # drop enters the port straight rather than reversing laterally at the
+        # boundary.
         centerline = [
             (sx, sy),
             (lx0, sy),

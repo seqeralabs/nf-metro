@@ -101,6 +101,33 @@ def test_multi_side_line_hint_resolves_to_a_hinted_side() -> None:
     assert mapping[("sec_d", "l1")] is PortSide.LEFT
 
 
+def test_per_line_differing_hints_keep_their_own_side() -> None:
+    """Lines each hinted on a different single side keep that side (#1363).
+
+    ``sec_g`` in the packed serpentine grid hints ``l1`` on LEFT and ``l2`` on
+    TOP -- two lines, two perpendicular sides.  The author's explicit choice is
+    honoured per line rather than collapsed onto one section-wide side; the two
+    approaches are perpendicular, so they read unambiguously and are permitted.
+    """
+    graph = _parse("examples/topologies/packed_multiline_serpentine_grid.mmd")
+    mapping = resolve._build_entry_side_mapping(graph)
+    assert mapping[("sec_g", "l1")] is PortSide.LEFT
+    assert mapping[("sec_g", "l2")] is PortSide.TOP
+
+
+def test_genomeassembly_scaffolding_honours_bottom_hint() -> None:
+    """A distinct line hinted on a perpendicular side enters there (#1363).
+
+    ``scaffolding`` hints ``assemblies`` on LEFT (flow-natural) and ``hic_reads``
+    on BOTTOM; ``hic_reads`` must enter from the bottom as authored rather than
+    being pulled onto the shared LEFT edge.
+    """
+    graph = _parse("examples/genomeassembly.mmd")
+    mapping = resolve._build_entry_side_mapping(graph)
+    assert mapping[("scaffolding", "assemblies")] is PortSide.LEFT
+    assert mapping[("scaffolding", "hic_reads")] is PortSide.BOTTOM
+
+
 def test_build_mapping_shares_one_side_across_a_sections_lines() -> None:
     """Every line entering a section resolves to the same single side."""
     graph = _parse("examples/topologies/riboseq_fold_two_dir_entry_hintless.mmd")

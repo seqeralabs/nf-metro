@@ -1590,6 +1590,38 @@ def _recenter_single_line_corridor_entry(ctx: _OffsetCtx) -> None:
             ctx.offsets[(sid, line_id)] = 0.0
 
 
+def _reslot_multi_side_perp_entry_ports(ctx: _OffsetCtx) -> None:
+    """Re-slot a perp entry port on a section entered from more than one side.
+
+    When a section is entered on a perpendicular side by only *some* of its
+    lines (the rest enter from a flow-axis side), the section-wide bundle slot
+    stamped on the port differs from the slot the feeder delivers those lines
+    on: the vertical drop and the in-section departure read different laterals
+    and the perp approach reverses across the boundary.  Re-slot the port from
+    the lines it actually carries, by feeder approach order, so the drop stays
+    straight.
+
+    Gated on the section having entry ports on more than one side, so a section
+    entered from a single side -- where the perp port already carries every
+    entering line -- is untouched.
+    """
+    graph = ctx.graph
+    for port_id, port in graph.ports.items():
+        if not port.is_entry or port.side not in (PortSide.TOP, PortSide.BOTTOM):
+            continue
+        section = graph.sections.get(port.section_id)
+        if section is None:
+            continue
+        entry_sides = {
+            graph.ports[pid].side for pid in section.entry_ports if pid in graph.ports
+        }
+        if len(entry_sides) <= 1:
+            continue
+        if needs_perp_approach_fan(graph, port_id):
+            continue
+        _slot_perp_fan_bundle(ctx, port_id)
+
+
 def _compute_entry_port_offsets(ctx: _OffsetCtx) -> None:
     """Compute entry port offsets and propagate to downstream stations.
 
@@ -1604,6 +1636,7 @@ def _compute_entry_port_offsets(ctx: _OffsetCtx) -> None:
     _entry_top_from_tb_bottom_exits(ctx)
     _propagate_lr_rl_exit_to_entry(ctx)
     _recenter_single_line_corridor_entry(ctx)
+    _reslot_multi_side_perp_entry_ports(ctx)
 
 
 def _compact_station_gaps(ctx: _OffsetCtx) -> None:

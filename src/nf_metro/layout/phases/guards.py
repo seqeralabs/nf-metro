@@ -1006,44 +1006,77 @@ def _guard_no_same_row_backward_feed(graph: MetroGraph) -> None:
         )
 
 
+_OPPOSING_SIDE = {
+    PortSide.LEFT: PortSide.RIGHT,
+    PortSide.RIGHT: PortSide.LEFT,
+    PortSide.TOP: PortSide.BOTTOM,
+    PortSide.BOTTOM: PortSide.TOP,
+}
+
+
 def _guard_no_mixed_entry_directions(graph: MetroGraph) -> None:
-    """Reject a section whose incoming lines approach from more than one
-    cardinal direction (entry ports on more than one side).
+    """Reject a section whose incoming lines approach from *conflicting*
+    cardinal directions.
 
     Routed metro lines are undirected polylines with no arrowheads, so the
-    reader infers flow from how a line enters a section.  When one line enters
-    a section heading one way (say, rightward into a LEFT port) and another
-    enters a different side heading another (downward into a TOP port, or
-    leftward into a RIGHT port), the approaches conflict and the rendered flow
-    direction is unreadable.  Reject the topology rather than emit an ambiguous
-    diagram.
+    reader infers flow from how a line enters a section.  Two conflicts make the
+    flow unreadable and are rejected:
 
-    A section fed from a single side reads cleanly: parser-inferred multi-side
-    entry hints that collapse to one natural side therefore pass, and an entry
-    port carrying no line is not an approach.
+    - a *single* line entering through ports on more than one side (it would
+      have to run into the box from two places at once);
+    - two lines entering through *opposing* sides (LEFT with RIGHT, or TOP with
+      BOTTOM): one implies rightward flow through the box while the other
+      implies leftward, a contradiction over the same stations.
+
+    Perpendicular approaches by *different* lines (e.g. one line entering LEFT
+    and another entering TOP) do not imply opposing flow and read cleanly, so
+    they are permitted.  An entry port carrying no line is not an approach.
     """
     for sec_id, section in sorted(graph.sections.items()):
         sides: dict[PortSide, set[str]] = defaultdict(set)
+        line_sides: dict[str, set[PortSide]] = defaultdict(set)
         for pid in section.entry_ports:
             port = graph.ports.get(pid)
             if port is None:
                 continue
             lines = {edge.line_id for edge in graph.edges_to(pid)}
-            if lines:
-                sides[port.side].update(lines)
-        if len(sides) <= 1:
+            for lid in lines:
+                sides[port.side].add(lid)
+                line_sides[lid].add(port.side)
+
+        split_line = next(
+            (lid for lid, s in sorted(line_sides.items()) if len(s) > 1), None
+        )
+        opposing = next(
+            (
+                (side, _OPPOSING_SIDE[side])
+                for side in sorted(sides, key=lambda s: s.value)
+                if _OPPOSING_SIDE[side] in sides
+            ),
+            None,
+        )
+        if split_line is None and opposing is None:
             continue
+
         detail = ", ".join(
             f"{side.value} ({'+'.join(sorted(lines))})"
             for side, lines in sorted(sides.items(), key=lambda kv: kv[0].value)
         )
+        if split_line is not None:
+            reason = (
+                f"line '{split_line}' enters from "
+                f"{'+'.join(sorted(s.value for s in line_sides[split_line]))}"
+            )
+        else:
+            assert opposing is not None
+            lo, hi = opposing
+            reason = f"lines enter from opposing sides {lo.value}/{hi.value}"
         raise MixedEntryDirectionError(
-            f"section '{sec_id}' receives lines from more than one approach "
-            f"direction: {detail}.  Routed lines have no arrowheads, so entries "
-            f"from different sides leave the flow direction ambiguous.  Feed "
-            f"'{sec_id}' from a single side (align the producers' grid columns "
-            f"so every line enters the same edge), or split it into separate "
-            f"sections."
+            f"section '{sec_id}' receives lines from conflicting approach "
+            f"directions ({reason}): {detail}.  Routed lines have no arrowheads, "
+            f"so this leaves the flow direction ambiguous.  Feed '{sec_id}' from "
+            f"one side (or perpendicular sides for distinct lines), align the "
+            f"producers' grid columns, or split it into separate sections."
         )
 
 

@@ -1136,24 +1136,25 @@ def _shift_lr_perp_entry_stations(
             section.bbox_w = (run_hi + shift + right_pad) - section.bbox_x
 
         if grew_right_entry or grew_left_entry:
-            _repin_flow_axis_exit_ports(section, graph)
+            _repin_flow_axis_ports(section, graph)
             any_grew = True
 
     return any_grew
 
 
-def _repin_flow_axis_exit_ports(section: Section, graph: MetroGraph) -> None:
-    """Snap an LR/RL section's flow-axis exit ports back onto their bbox edge.
+def _repin_flow_axis_ports(section: Section, graph: MetroGraph) -> None:
+    """Snap an LR/RL section's flow-axis ports back onto their bbox edge.
 
-    A LEFT/RIGHT exit port's X is fixed on the section edge in Stage 3.1, but
-    the Stage 3.3 runway grow moves that edge; without re-pinning the port
-    stays on the old edge and its exit leg doubles back over the run.  Only the
-    flow-axis X moves -- the port keeps its carrying-station Y, so the
-    station-as-elbow constraint is untouched -- and perpendicular (TOP/BOTTOM)
-    ports are left alone.
+    A LEFT/RIGHT port's X is fixed on the section edge in Stage 3.1, but the
+    perpendicular-entry station shift re-wraps the edge; without re-pinning the
+    port stays on the old edge -- an exit leg then doubles back over the run,
+    and a flow-axis entry port is left stranded off the boundary.  Both exit and
+    entry ports are re-pinned.  Only the flow-axis X moves -- the port keeps its
+    carrying-station Y, so the station-as-elbow constraint is untouched -- and
+    perpendicular (TOP/BOTTOM) ports are left alone.
     """
     right_x = section.bbox_x + section.bbox_w
-    for pid in section.exit_ports:
+    for pid in (*section.exit_ports, *section.entry_ports):
         port = graph.ports.get(pid)
         station = graph.stations.get(pid)
         if not port or not station:

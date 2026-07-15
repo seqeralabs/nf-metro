@@ -16,7 +16,6 @@ INVALID_DIR = Path(__file__).resolve().parent / "fixtures" / "invalid"
 # `validate` (semantic only) and `validate --with-layout`.
 SEMANTIC_VALID_LAYOUT_BROKEN = [
     "mixed_entry_opposing.mmd",
-    "mixed_entry_perpendicular.mmd",
     "backward_feed_rl.mmd",
     "merge_trunk_rightward_source.mmd",
 ]

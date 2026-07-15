@@ -469,6 +469,25 @@ def test_tb_exit_terminal_on_carrier_validates_strict() -> None:
     compute_layout(graph, validate=True)
 
 
+PACKED_GRID_FIXTURES = [
+    "packed_multiline_serpentine_grid.mmd",
+    "serpentine_grid_tall_bundle.mmd",
+    "serpentine_grid_wide_bundle.mmd",
+]
+
+
+@pytest.mark.parametrize("name", PACKED_GRID_FIXTURES)
+def test_packed_grid_validates_strict(name: str) -> None:
+    """Packed multi-section-per-cell grids lay out clean under ``validate=True``.
+
+    A section fed by a grid-cell co-tenant resolves its entry side flow-aligned
+    rather than onto the flow-opposing side, so no line folds back over its own
+    internal track (#1363, ``_guard_no_opposing_line_overlap``).
+    """
+    graph = parse_metro_mermaid((EXAMPLES / "topologies" / name).read_text())
+    compute_layout(graph, validate=True)
+
+
 CONVERGENT_ENTRY_FIXTURES = [
     "tb_exit_terminal_on_carrier.mmd",
 ]
