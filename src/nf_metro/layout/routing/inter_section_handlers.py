@@ -65,6 +65,7 @@ from nf_metro.layout.routing.common import (
     resolve_section,
     row_bottom_edge,
     row_top_edge,
+    section_header_safe_cap,
     symmetric_bundle_midpoint,
     trailing_perp_side,
     vertical_direction,
@@ -91,6 +92,7 @@ from nf_metro.layout.routing.normalize import (
 )
 from nf_metro.layout.routing.perp import (
     _perp_approach_fan_x,
+    _perp_entry_crossing_x,
     _perp_riser_lateral,
 )
 from nf_metro.parser.model import (
@@ -1174,6 +1176,17 @@ def _route_inter_section(
     rule = _match_inter_section_rule(f)
     if rule is not None:
         route = rule.route(f)
+    elif (
+        _perp_multi_side_entry_side(ctx.graph, edge.target) is not None
+        and f.src_col is not None
+        and f.tgt_col is not None
+    ):
+        # No dispatch rule claimed a perpendicular entry on a multi-side
+        # section: the standard L-shape fallback would drop to the boundary and
+        # slide into the port along it.  Route via the U-bypass instead, which
+        # drops straight into the port from beyond the boundary (see the perp
+        # branch in ``_route_bypass``).  A rule-claimed edge keeps its handler.
+        route = _route_bypass(edge, src, tgt, f.i, f.src_col, f.tgt_col, ctx, f.src_row)
     else:
         # Standard L-shape: the default when no rule above claims the edge.
         route = _route_l_shape(edge, src, tgt, f.i, f.n, ctx)
@@ -1653,6 +1666,29 @@ def _bottom_row_climb_corridor_clear(
     return not _has_intervening_sections(graph, src_col, tgt_col, src_row)
 
 
+def _perp_multi_side_entry_side(graph: MetroGraph, target_id: str) -> PortSide | None:
+    """The side of a TOP/BOTTOM entry port on a multi-side-entry section.
+
+    Returns ``PortSide.TOP``/``PortSide.BOTTOM`` when *target_id* is a
+    perpendicular entry port whose section is entered from more than one side
+    (some lines enter through a flow-axis side, others through this perp one),
+    else ``None``.  A perpendicular entry is reached by a straight drop into
+    the port from beyond the section boundary; a section entered from a single
+    side -- where the perp port carries every entering line -- is not treated
+    specially and keeps its existing routing.
+    """
+    port = graph.ports.get(target_id)
+    if port is None or not port.is_entry:
+        return None
+    if port.side not in (PortSide.TOP, PortSide.BOTTOM):
+        return None
+    section = graph.sections.get(port.section_id)
+    if section is None:
+        return None
+    sides = {graph.ports[pid].side for pid in section.entry_ports if pid in graph.ports}
+    return port.side if len(sides) > 1 else None
+
+
 def _route_bypass(
     edge: Edge,
     src: Station,
@@ -1770,6 +1806,42 @@ def _route_bypass(
         # the span, so run straight along it and turn up once at the target.
         base_y = sy + src_off
         nest_offset = 0.0
+
+    # A perpendicular (TOP/BOTTOM) entry on a section entered from more than one
+    # side is reached by a straight drop into the port from beyond the section
+    # boundary.  The bypass otherwise seats its traverse at a level that clears
+    # the intervening sections but not the taller target box, then slides along
+    # the boundary into the port -- a lateral reversal at the crossing.  Carry
+    # the traverse past the target's own edge so the final leg is a clean
+    # vertical crossing at the port X (pinned via gap2 below).
+    perp_entry_side = _perp_multi_side_entry_side(graph, edge.target)
+    if perp_entry_side is not None:
+        lo_col, hi_col = min(src_col, tgt_col), max(src_col, tgt_col)
+        if perp_entry_side is PortSide.BOTTOM:
+            traverse = max(base_y, ty + BYPASS_CLEARANCE)
+            # Cap the below-box traverse to clear any next-row section header
+            # protruding up into the gap, never rising above the box edge plus a
+            # corner radius (the drop still needs a turn-in into the port).
+            for s in graph.sections.values():
+                if (
+                    s.bbox_w > 0
+                    and lo_col <= s.grid_col <= hi_col
+                    and s.bbox_y > ty + COORD_TOLERANCE
+                ):
+                    traverse = min(
+                        traverse,
+                        max(section_header_safe_cap(s), ty + ctx.curve_radius),
+                    )
+            base_y = traverse
+        else:
+            base_y = min(base_y, ty - BYPASS_CLEARANCE)
+        nest_offset = 0.0
+        # Land the drop on the exact per-line X the in-section departure
+        # leaves the port at, so approach and departure cross the boundary as
+        # one straight line (``check_perp_entry_boundary_consistent``).
+        crossing_x = _perp_entry_crossing_x(ctx, edge.target, edge.line_id, tx)
+        if crossing_x is not None:
+            effective_tx = crossing_x
 
     # Determine actual vertical direction at each gap from the geometry.
     # Gap1 goes from source Y to trunk Y; gap2 from trunk Y to target Y.
@@ -2012,6 +2084,14 @@ def _route_bypass(
     # bypass out of a right-edge junction leads in rightward), so a single
     # direction would mis-sign the compensation.
     tgt_off = _get_offset(ctx, edge.target, edge.line_id)
+    if perp_entry_side is not None:
+        # Land the gap2 rise on the departure's crossing column so the final
+        # leg is a straight perpendicular crossing sharing the in-section
+        # drop's X, not a slide along the boundary.  The rise renders at
+        # ``gap2_x - delta2 + delta2 * n3x``, so solve that back to the
+        # crossing X (``effective_tx``) whichever way the rise runs.
+        n3x_perp = 1.0 if gap2_vertical is Direction.U else -1.0
+        gap2_x = effective_tx + delta2 * (1.0 - n3x_perp)
     gap1_mid = gap1_x - off1
     gap2_mid = gap2_x - delta2
     n0y = 1.0 if gap1_mid >= sx else -1.0
