@@ -123,6 +123,25 @@ def _aggregate_bypass_spans(
     return combined
 
 
+def _shift_rows_from(graph: MetroGraph, from_row: int, deficit: float) -> None:
+    """Shift every section at or below *from_row* down by *deficit*.
+
+    Moves the sections' bboxes and their stations/ports together. Junctions live
+    in inter-section space and are reproduced by routing, so they are not moved.
+    """
+    for s in graph.sections.values():
+        if s.grid_row < from_row:
+            continue
+        s.bbox_y += deficit
+        for stid in s.station_ids:
+            st = graph.stations.get(stid)
+            if st is not None:
+                st.y += deficit
+            port = graph.ports.get(stid)
+            if port is not None:
+                port.y += deficit
+
+
 def push_lower_rows_after_bbox_grow(graph: MetroGraph, section_y_gap: float) -> bool:
     """Push lower-row sections down when an upper-row bbox grows.
 
@@ -213,21 +232,7 @@ def push_lower_rows_after_bbox_grow(graph: MetroGraph, section_y_gap: float) -> 
             continue
 
         shifted = True
-        shifted_section_ids = {
-            sid for sid, s in graph.sections.items() if s.grid_row >= r
-        }
-        for sid in shifted_section_ids:
-            graph.sections[sid].bbox_y += deficit
-        shifted_station_ids = set()
-        for sid in shifted_section_ids:
-            shifted_station_ids.update(graph.sections[sid].station_ids)
-        for stid in shifted_station_ids:
-            st = graph.stations.get(stid)
-            if st is not None:
-                st.y += deficit
-            port = graph.ports.get(stid)
-            if port is not None:
-                port.y += deficit
+        _shift_rows_from(graph, r, deficit)
 
     return shifted
 
@@ -742,6 +747,66 @@ def _section_band_is_empty(graph: MetroGraph, section: Section) -> bool:
         if (st.is_port or is_bypass_v(sid)) and st.y < topmost - SAME_COORD_TOLERANCE:
             return False
     return True
+
+
+def _reserve_row_gap_for_top_padding(
+    graph: MetroGraph,
+    section_y_padding: float,
+    section_y_gap: float,
+) -> None:
+    """Push a stacked row down when the row above blocks its top padding.
+
+    A fan-redistribution pass can lift a section's highest marker above the
+    content-top line its bbox was sized for.  :func:`_fit_bboxes_to_content_top`
+    then tries to grow the bbox top back to a full ``section_y_padding`` band,
+    but the row-above ceiling (``section_y_gap + SECTION_HEADER_PROTRUSION``)
+    forbids the grow when a same-column section sits directly above, leaving the
+    padding short.  Growing up is blocked, so widen the inter-row gap instead:
+    shift the short section's row (and every row below) down by the shortfall so
+    the subsequent restore reaches the full band while header clearance to the
+    row above is preserved.
+
+    Scoped to sections whose highest marker sits within ``section_y_padding`` of
+    the box top: a section already at or above the full-padding line is
+    untouched, so the push fires only where a fan-lift left a section crowded
+    against the box top.  The full-band target and its row-above ceiling both come
+    from :func:`_section_fit_top` (``fit_top - hug`` is the shortfall the ceiling
+    imposed), so the ceiling formula lives in one place.
+    """
+    from nf_metro.layout.routing import compute_station_offsets
+
+    offsets = compute_station_offsets(graph)
+    max_row = max(
+        (s.grid_row + s.grid_row_span - 1 for s in graph.sections.values()),
+        default=0,
+    )
+    for r in range(1, max_row + 1):
+        deficit = 0.0
+        for sec in graph.sections.values():
+            if sec.grid_row != r or sec.bbox_h <= 0:
+                continue
+            port_ids = set(sec.entry_ports) | set(sec.exit_ports)
+            marker_ys = [
+                graph.stations[sid].y
+                for sid in sec.station_ids
+                if sid in graph.stations
+                and sid not in port_ids
+                and not graph.stations[sid].is_hidden
+            ]
+            if not marker_ys:
+                continue
+            if min(marker_ys) - sec.bbox_y >= section_y_padding - SAME_COORD_TOLERANCE:
+                continue
+            hug = _section_content_hug_top(graph, sec, section_y_padding, offsets)
+            fit_top = _section_fit_top(
+                graph, sec, section_y_padding, section_y_gap, offsets
+            )
+            if hug is None or fit_top is None:
+                continue
+            deficit = max(deficit, fit_top - hug)
+        if deficit <= SAME_COORD_TOLERANCE:
+            continue
+        _shift_rows_from(graph, r, deficit)
 
 
 def _fit_bboxes_to_content_top(

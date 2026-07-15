@@ -84,6 +84,7 @@ from nf_metro.layout.phases.bbox import (  # noqa: F401
     _loop_corner_x,
     _min_section_bbox_top,
     _predicted_bypass_bottom_in_row,
+    _reserve_row_gap_for_top_padding,
     _section_fit_top,
     _shrink_and_tighten_rows,
     _shrink_bboxes_to_content_bottom,
@@ -1843,6 +1844,7 @@ def _finalize_layout(
     # topmost section above the canvas top margin, so re-fit; the
     # re-fit's non-grid shift is then cleaned up by the Stage 6.15
     # canvas snap below.
+    _reserve_row_gap_for_top_padding(graph, section_y_padding, section_y_gap)
     _fit_bboxes_to_content_top(graph, section_y_padding, section_y_gap)
     # Follows the grow above: a side-entered vertical section beside a
     # row-mate whose top just grew is lifted to that feeder.
