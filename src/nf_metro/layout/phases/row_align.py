@@ -480,14 +480,23 @@ def _recompute_grid_group_bboxes(graph: MetroGraph) -> None:
                         section.bbox_h = st.y - section.bbox_y
                     top = section.bbox_y
                     bot = section.bbox_y + section.bbox_h
-            # Snap TOP/BOTTOM ports onto the recomputed edges: a perpendicular
-            # entry port that lands within the recomputed span (a section
-            # entered from more than one side, whose perp port is not the
-            # vertical extreme) would otherwise sit off the boundary.
-            _pull_section_ports_to_edge(graph, section, PortSide.TOP, section.bbox_y)
-            _pull_section_ports_to_edge(
-                graph, section, PortSide.BOTTOM, section.bbox_y + section.bbox_h
-            )
+            # Snap TOP/BOTTOM ports onto the recomputed edges when the section
+            # is entered from more than one side: its perpendicular entry port
+            # is not the vertical extreme, so the recompute above can leave it
+            # within the span and off the boundary.  A single-side entry keeps
+            # its extreme perp port on the edge already, so leave it untouched.
+            entry_sides = {
+                graph.ports[pid].side
+                for pid in section.entry_ports
+                if pid in graph.ports
+            }
+            if len(entry_sides) > 1:
+                _pull_section_ports_to_edge(
+                    graph, section, PortSide.TOP, section.bbox_y
+                )
+                _pull_section_ports_to_edge(
+                    graph, section, PortSide.BOTTOM, section.bbox_y + section.bbox_h
+                )
 
 
 def _top_align_row_sections(graph: MetroGraph) -> None:

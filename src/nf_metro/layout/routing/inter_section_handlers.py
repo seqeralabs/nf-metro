@@ -2709,6 +2709,21 @@ def _route_top_entry_l_shape(
     # so the bundle tapers.  An LR/RL drop lands on its own source-fan channel,
     # paired with the in-section drop -- target offset equals source offset, a
     # rigid bundle.
+    # A section entered from more than one side re-slots its perp entry port
+    # from the lines that port alone carries, independently of the feeder, so
+    # the multi-side branches below diverge from the single-side behaviour that
+    # every existing render relies on.
+    multi_side_entry = tgt_sec is not None and (
+        len(
+            {
+                ctx.graph.ports[pid].side
+                for pid in tgt_sec.entry_ports
+                if pid in ctx.graph.ports
+            }
+        )
+        > 1
+    )
+
     if tgt_sec is not None and tgt_sec.direction in ("TB", "BT"):
 
         def tb_offset(line_id: str) -> float:
@@ -2722,23 +2737,10 @@ def _route_top_entry_l_shape(
         ]
     else:
         final_x = tx
-        # A perp entry port on a section entered from more than one side is
-        # re-slotted from the lines it alone carries
-        # (``_reslot_multi_side_perp_entry_ports``), so its per-line offset
-        # differs from the feeder's; land on the port's own offset there.  A
-        # single-side entry keeps the feeder offset the propagation already
-        # matched to the port, so its rigid bundle is untouched.
-        multi_side_entry = tgt_sec is not None and (
-            len(
-                {
-                    ctx.graph.ports[pid].side
-                    for pid in tgt_sec.entry_ports
-                    if pid in ctx.graph.ports
-                }
-            )
-            > 1
-        )
 
+        # The re-slotted port offset differs from the feeder's, so land on the
+        # port's own offset for a multi-side entry; a single-side entry keeps
+        # the feeder offset the propagation already matched to the port.
         def tgt_offset(line_id: str) -> float:
             if multi_side_entry:
                 return _get_offset(ctx, edge.target, line_id)
@@ -2766,15 +2768,31 @@ def _route_top_entry_l_shape(
     if _top_entry_side_fan_traverse_is_clear(edge, src, tgt, final_x, ctx):
         centerline = [(sx, sy), (final_x, sy), (final_x, ty)]
         transition_leg = 1
+    elif not multi_side_entry:
+        # Single-side entry keeps the original lead-in shapes: a short lead-in
+        # that lands within a corner radius of the column jogs to it at the
+        # boundary; otherwise the lateral return runs in the inter-row gap.
+        if abs(lx0 - final_x) <= ctx.curve_radius:
+            centerline = [(sx, sy), (lx0, sy), (lx0, ty), (final_x, ty)]
+            transition_leg = 2
+        else:
+            centerline = [
+                (sx, sy),
+                (lx0, sy),
+                (lx0, mid_y),
+                (final_x, mid_y),
+                (final_x, ty),
+            ]
+            transition_leg = 3
     elif abs(lx0 - final_x) <= COORD_TOLERANCE:
-        # The lead-in already sits on the landing column: drop straight from it.
+        # Multi-side entry: the lead-in already sits on the landing column, so
+        # drop straight from it.
         centerline = [(sx, sy), (lx0, sy), (lx0, ty)]
         transition_leg = 2
     else:
-        # The lead-in cleared the source box a corner off the landing column;
-        # return to it in the inter-row gap, above the entry boundary, so the
-        # drop enters the port straight rather than reversing laterally at the
-        # boundary.
+        # Multi-side entry: return to the landing column in the inter-row gap,
+        # above the entry boundary, so the drop enters the port straight rather
+        # than reversing laterally at the boundary.
         centerline = [
             (sx, sy),
             (lx0, sy),
