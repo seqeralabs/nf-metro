@@ -4289,21 +4289,20 @@ def test_compact_multiline_entry_ports_pre_separated(fixture):
     graph = _layout(fixture)
     offsets = compute_station_offsets(graph)
     for section in graph.sections.values():
-        entry_lines = {
-            lid for pid in section.entry_ports for lid in graph.station_lines(pid)
-        }
-        if len(entry_lines) < 2:
-            continue
-        existing = [
-            offsets.get((pid, lid), 0.0)
-            for pid in section.entry_ports
-            for lid in entry_lines
-            if lid in graph.station_lines(pid)
-        ]
-        assert len(set(existing)) >= 2, (
-            f"{fixture}: section {section.id} multi-line entry ports share one "
-            f"offset {set(existing)}; the separation pass was not redundant"
-        )
+        # Separation is a within-port concern: a single port carrying two or
+        # more lines must not stack them on one offset.  Lines split across
+        # entry ports on different sides ride distinct edges and may share an
+        # offset, so check each multi-line port on its own.
+        for pid in section.entry_ports:
+            port_lines = set(graph.station_lines(pid))
+            if len(port_lines) < 2:
+                continue
+            existing = [offsets.get((pid, lid), 0.0) for lid in port_lines]
+            assert len(set(existing)) >= 2, (
+                f"{fixture}: section {section.id} multi-line entry port {pid} "
+                f"shares one offset {set(existing)}; the separation pass was "
+                f"not redundant"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -8703,10 +8702,10 @@ def test_refanned_trunk_stays_on_inflated_row_pitch():
     asmstats) rides that inflated pitch.  Re-fanning the section's internal
     full-bundle columns at the base pitch would leave them a fraction of a
     slot off the trunk; recentering at the row pitch keeps the whole trunk
-    -- the fanned ``minimap2``/``cooler``, the hub ``yahs`` and the exit port
+    -- the fanned centre column ``juicer``, the hub ``yahs`` and the exit port
     -- collinear."""
     graph = _layout("genomeassembly_organellar.mmd")
-    trunk = ["scaffolding_minimap2", "yahs", "cooler", "scaffolding__exit_right_3"]
+    trunk = ["scaffolding_minimap2", "yahs", "juicer", "scaffolding__exit_right_3"]
     ys = [graph.stations[sid].y for sid in trunk]
     assert max(ys) - min(ys) < 1.0, dict(zip(trunk, ys))
 
