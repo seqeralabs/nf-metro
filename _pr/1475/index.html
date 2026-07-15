@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="nf-metro-render-run" content="29423504887">
+<meta name="nf-metro-render-run" content="29428319529">
 <title>Render diff - PR #1475</title>
 <style>
   :root {
@@ -257,7 +257,7 @@
   <h1>Render diff - PR #1475</h1>
   <button id="scheme-toggle" class="scheme-btn">System</button>
 </div>
-<p class="summary">2 changed out of 248 total renders. Generated 2026-07-15 14:26 UTC.</p>
+<p class="summary">2 changed, 1 added out of 249 total renders. Generated 2026-07-15 15:30 UTC.</p>
 <details class="intro">
 <summary>What is this page?</summary>
 <p>
@@ -289,6 +289,7 @@ switch between side-by-side, base-only, and PR-only views.
 <table>
 <tr><th>Render</th><th>Crossings</th><th>Near-horiz.</th><th>Lone diag.</th><th>Label strikes</th><th>Excess gaps</th><th>Wasted canvas</th></tr>
 <tr><td><a href="#convergent_offrow_exit_climb">convergent_offrow_exit_climb</a></td><td class="m-better">15&rarr;14 (−1)</td><td class="m-flat">0</td><td class="m-flat">0</td><td class="m-flat">0</td><td class="m-flat">1</td><td class="m-flat">41%</td></tr>
+<tr><td><a href="#exit_fan_label_strike">exit_fan_label_strike</a></td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;58%</td></tr>
 <tr><td><a href="#longread_variant_calling">longread_variant_calling</a></td><td class="m-better">17&rarr;16 (−1)</td><td class="m-flat">0</td><td class="m-flat">0</td><td class="m-flat">0</td><td class="m-flat">1</td><td class="m-flat">21%</td></tr>
 </table>
 </div>
@@ -297,6 +298,10 @@ switch between side-by-side, base-only, and PR-only views.
 <h3><a href="#section-bypass-routing">Bypass Routing</a></h3>
 <ul>
 <li><a href="#convergent_offrow_exit_climb">convergent_offrow_exit_climb</a><span class="badge badge-changed">changed</span></li>
+</ul>
+<h3><a href="#section-inter-section-routing">Inter-section Routing</a></h3>
+<ul>
+<li><a href="#exit_fan_label_strike">exit_fan_label_strike</a><span class="badge badge-added">added</span></li>
 </ul>
 <h3><a href="#section-realistic-pipelines">Realistic Pipelines</a></h3>
 <ul>
@@ -1545,6 +1550,135 @@ sort/index" data-section-id="preprocessing" data-section-name="Pre-processing" /
 <text x="2292.0" y="750.0" font-size="8" fill="rgba(150, 150, 150, 0.6)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">created with nf-metro v1.1.0+dev</text>
 </svg></div></div>
 </div>
+</div>
+
+<h2 class="section-header" id="section-inter-section-routing">Inter-section Routing</h2>
+
+<div class="diff-entry" id="exit_fan_label_strike">
+<h3>Exit Fan Label Strike <span class="badge badge-added">added</span></h3>
+<div class="side-only"><h4>New in PR</h4><div class="svg-wrapper"><?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="736" height="433" viewBox="0 0 736 433">
+<defs>
+</defs>
+<style>.nf-metro-bg { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }
+.nf-metro-title { fill: var(--nfm-map-title-color, light-dark(#111111, #ffffff)); }
+.nf-metro-station-label { fill: var(--nfm-map-label-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-section-box { fill: var(--nfm-map-section-fill, light-dark(#ededed, #373737)); stroke: var(--nfm-map-section-stroke, light-dark(#e6e6e6, #595959)); }
+.nf-metro-section-label { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-label { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-underline { stroke: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-legend-bg { fill: var(--nfm-map-legend-bg, light-dark(rgba(255, 255, 255, 0.8), rgba(0, 0, 0, 0.3))); }
+.nf-metro-legend-text { fill: var(--nfm-map-legend-text-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-marker-stroke { stroke: var(--nfm-map-marker-stroke, light-dark(#333333, #f0f0f0)); }
+.nf-metro-label-halo { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); stroke: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }</style>
+<rect x="0" y="0" width="736" height="433" fill="#2b2b2b" class="nf-metro-bg" />
+<text x="60.0" y="30.0" font-size="24.0" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" class="nf-metro-title">Exit-fan label strike</text>
+<rect x="60.0" y="125.19999999999997" width="100.0" height="100.00000000000003" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box" data-section-id="up" data-section-lines="a,b,c" />
+<circle cx="71.0" cy="110.19999999999997" r="11" fill="#333333" class="nf-metro-section-num-circle" data-section-id="up" />
+<text x="71.0" y="110.19999999999997" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="up">1</text>
+<text x="87.0" y="110.19999999999997" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label" data-section-id="up">Upstream</text>
+<rect x="210.0" y="66.8" width="286.5" height="216.8" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box" data-section-id="sec" data-section-lines="a,b,c" />
+<circle cx="221.0" cy="51.8" r="11" fill="#333333" class="nf-metro-section-num-circle" data-section-id="sec" />
+<text x="221.0" y="51.8" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="sec">2</text>
+<text x="237.0" y="51.8" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label" data-section-id="sec">Coverage &amp; quantification</text>
+<rect x="576.5" y="125.19999999999997" width="100.0" height="100.00000000000003" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box" data-section-id="down" data-section-lines="a,b,c" />
+<circle cx="587.5" cy="110.19999999999997" r="11" fill="#333333" class="nf-metro-section-num-circle" data-section-id="down" />
+<text x="587.5" y="110.19999999999997" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="down">3</text>
+<text x="603.5" y="110.19999999999997" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label" data-section-id="down">Reporting</text>
+<path d="M308.5,183.2 L368.5,183.2" stroke="#2b6cb0" stroke-width="3.0" stroke-linecap="round" class="metro-line-c" data-line-id="c" />
+<path d="M368.5,183.2 L380.9421133639516,183.2 Q390.9421133639516,183.2,395.5114631779219,174.30499902880445 L416.3727635499813,133.6950009711955 Q420.9421133639516,124.79999999999997,430.9421133639516,124.79999999999997 L438.5,124.79999999999997" stroke="#2b6cb0" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-c" data-line-id="c" />
+<path d="M110.0,183.2 L160.0,183.2" stroke="#2b6cb0" stroke-width="3.0" stroke-linecap="round" class="metro-line-c" data-line-id="c" />
+<path d="M210.0,183.2 L308.5,183.2" stroke="#2b6cb0" stroke-width="3.0" stroke-linecap="round" class="metro-line-c" data-line-id="c" />
+<path d="M210.0,183.2 L212.55788663604844,183.2 Q222.55788663604844,183.2,227.12723645001876,192.09500097119553 L247.98853682207812,232.70499902880445 Q252.55788663604844,241.6,262.55788663604847,241.6 L308.5,241.6" stroke="#2b6cb0" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-c" data-line-id="c" />
+<path d="M308.5,241.6 L443.9421133639516,241.6 Q453.9421133639516,241.6,458.5114631779219,232.70499902880445 L479.3727635499813,192.09500097119553 Q483.9421133639516,183.2,493.9421133639516,183.2 L496.5,183.2" stroke="#2b6cb0" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-c" data-line-id="c" />
+<path d="M576.5,183.2 L626.5,183.2" stroke="#2b6cb0" stroke-width="3.0" stroke-linecap="round" class="metro-line-c" data-line-id="c" />
+<path d="M160.0,183.2 L210.0,183.2" stroke="#2b6cb0" stroke-width="3.0" stroke-linecap="round" class="metro-line-c" data-line-id="c" />
+<path d="M496.5,183.2 L576.5,183.2" stroke="#2b6cb0" stroke-width="3.0" stroke-linecap="round" class="metro-line-c" data-line-id="c" />
+<path d="M308.5,179.2 L368.5,179.2" stroke="#2db572" stroke-width="3.0" stroke-linecap="round" class="metro-line-b" data-line-id="b" />
+<path d="M368.5,179.2 L378.5,179.2 Q388.5,179.2,393.0693498139703,170.30499902880445 L413.9306501860297,129.6950009711955 Q418.5,120.79999999999997,428.5,120.79999999999997 L438.5,120.79999999999997" stroke="#2db572" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-b" data-line-id="b" />
+<path d="M110.0,179.2 L160.0,179.2" stroke="#2db572" stroke-width="3.0" stroke-linecap="round" class="metro-line-b" data-line-id="b" />
+<path d="M210.0,179.2 L308.5,179.2" stroke="#2db572" stroke-width="3.0" stroke-linecap="round" class="metro-line-b" data-line-id="b" />
+<path d="M210.0,179.2 L215.0,179.2 Q225.0,179.2,229.56934981397032,188.09500097119553 L250.43065018602968,228.70499902880445 Q255.0,237.6,265.0,237.6 L308.5,237.6" stroke="#2db572" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-b" data-line-id="b" />
+<path d="M308.5,237.6 L441.5,237.6 Q451.5,237.6,456.0693498139703,228.70499902880445 L476.9306501860297,188.09500097119553 Q481.5,179.2,491.5,179.2 L496.5,179.2" stroke="#2db572" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-b" data-line-id="b" />
+<path d="M576.5,179.2 L626.5,179.2" stroke="#2db572" stroke-width="3.0" stroke-linecap="round" class="metro-line-b" data-line-id="b" />
+<path d="M160.0,179.2 L210.0,179.2" stroke="#2db572" stroke-width="3.0" stroke-linecap="round" class="metro-line-b" data-line-id="b" />
+<path d="M496.5,179.2 L576.5,179.2" stroke="#2db572" stroke-width="3.0" stroke-linecap="round" class="metro-line-b" data-line-id="b" />
+<path d="M308.5,175.2 L368.5,175.2" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-a" data-line-id="a" />
+<path d="M368.5,175.2 L376.0578866360484,175.2 Q386.0578866360484,175.2,390.6272364500187,166.30499902880445 L411.4885368220781,125.6950009711955 Q416.0578866360484,116.79999999999997,426.0578866360484,116.79999999999997 L438.5,116.79999999999997" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-a" data-line-id="a" />
+<path d="M110.0,175.2 L160.0,175.2" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-a" data-line-id="a" />
+<path d="M210.0,175.2 L308.5,175.2" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-a" data-line-id="a" />
+<path d="M210.0,175.2 L217.44211336395156,175.2 Q227.44211336395156,175.2,232.01146317792188,184.09500097119553 L252.87276354998127,224.70499902880445 Q257.4421133639516,233.6,267.4421133639516,233.6 L308.5,233.6" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-a" data-line-id="a" />
+<path d="M308.5,233.6 L439.0578866360484,233.6 Q449.0578866360484,233.6,453.6272364500187,224.70499902880445 L474.4885368220781,184.09500097119553 Q479.0578866360484,175.2,489.0578866360484,175.2 L496.5,175.2" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-a" data-line-id="a" />
+<path d="M576.5,175.2 L626.5,175.2" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-a" data-line-id="a" />
+<path d="M160.0,175.2 L210.0,175.2" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-a" data-line-id="a" />
+<path d="M496.5,175.2 L576.5,175.2" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-a" data-line-id="a" />
+<rect x="105.0" y="170.2" width="10.0" height="18.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="src" data-station-lines="a,b,c" data-station-label="Dedup" data-section-id="up" data-section-name="Upstream" />
+<rect x="303.5" y="170.2" width="10.0" height="18.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="split" data-station-lines="a,b,c" data-station-label="SAMtools split strand" data-section-id="sec" data-section-name="Coverage &amp; quantification" />
+<rect x="363.5" y="170.2" width="10.0" height="18.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="genomecov" data-station-lines="a,b,c" data-station-label="BEDTools genomecov" data-section-id="sec" data-section-name="Coverage &amp; quantification" />
+<rect x="303.5" y="228.6" width="10.0" height="18.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="salmon" data-station-lines="a,b,c" data-station-label="Salmon" data-section-id="sec" data-section-name="Coverage &amp; quantification" />
+<rect x="433.5" y="111.79999999999997" width="10.0" height="18.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="cov_out" data-station-lines="a,b,c" data-station-label="cov_out" data-section-id="sec" data-section-name="Coverage &amp; quantification" />
+<g data-station-id="cov_out">
+<path d="M451.5,104.79999999999997 L469.5,104.79999999999997 L477.5,112.79999999999997 L477.5,134.79999999999995 Q477.5,136.79999999999995,475.5,136.79999999999995 L451.5,136.79999999999995 Q449.5,136.79999999999995,449.5,134.79999999999995 L449.5,106.79999999999997 Q449.5,104.79999999999997,451.5,104.79999999999997 Z" fill="#ffffff" stroke="#333333" stroke-width="1.5" stroke-linejoin="round" />
+<path d="M469.5,104.79999999999997 L469.5,112.79999999999997 L477.5,112.79999999999997 Z" fill="#333333" opacity="0.15" stroke="none" />
+<path d="M469.5,104.79999999999997 L469.5,112.79999999999997 L477.5,112.79999999999997" fill="none" stroke="#333333" stroke-width="0.8999999999999999" />
+<text x="463.5" y="121.99999999999997" font-size="7.5" fill="#000000" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em">BW</text>
+<text x="463.5" y="140.79999999999995" font-size="7.8" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging">Coverage</text>
+</g>
+<rect x="621.5" y="170.2" width="10.0" height="18.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station" data-station-id="sink" data-station-lines="a,b,c" data-station-label="MultiQC" data-section-id="down" data-section-name="Reporting" />
+<text x="308.5" y="161.2" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="auto">SAMtools split strand</text>
+<text x="308.5" y="161.2" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="split" class="nf-metro-station-label">SAMtools split strand</text>
+<text x="110.0" y="194.2" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="hanging">Dedup</text>
+<text x="110.0" y="194.2" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="src" class="nf-metro-station-label">Dedup</text>
+<text x="308.5" y="252.6" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="hanging">Salmon</text>
+<text x="308.5" y="252.6" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="salmon" class="nf-metro-station-label">Salmon</text>
+<text x="626.5" y="194.2" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="hanging">MultiQC</text>
+<text x="626.5" y="194.2" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="sink" class="nf-metro-station-label">MultiQC</text>
+<text x="368.5" y="194.2" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo" text-anchor="middle" dominant-baseline="hanging">BEDTools genomecov</text>
+<text x="368.5" y="194.2" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="genomecov" class="nf-metro-station-label">BEDTools genomecov</text>
+<circle cx="386.0578866360484" cy="175.2" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="416.0578866360484" cy="116.79999999999997" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="388.5" cy="179.2" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="418.5" cy="120.79999999999997" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="390.9421133639516" cy="183.2" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="420.9421133639516" cy="124.79999999999997" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="227.44211336395156" cy="175.2" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="257.4421133639516" cy="233.6" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="225.0" cy="179.2" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="255.0" cy="237.6" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="222.55788663604844" cy="183.2" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="252.55788663604844" cy="241.6" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="449.0578866360484" cy="233.6" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="479.0578866360484" cy="175.2" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="451.5" cy="237.6" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="481.5" cy="179.2" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="453.9421133639516" cy="241.6" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="483.9421133639516" cy="183.2" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<path d="M160.0,170.2 L165.0,175.2 L160.0,180.2 L155.0,175.2 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
+<text x="160.0" y="167.2" font-size="7" fill="rgba(80, 180, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">up__exit_right_0 (right)</text>
+<path d="M496.5,170.2 L501.5,175.2 L496.5,180.2 L491.5,175.2 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
+<text x="496.5" y="167.2" font-size="7" fill="rgba(80, 180, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">sec__exit_right_1 (right)</text>
+<path d="M210.0,170.2 L215.0,175.2 L210.0,180.2 L205.0,175.2 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="210.0" y="167.2" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">sec__entry_left_2 (left)</text>
+<path d="M576.5,170.2 L581.5,175.2 L576.5,180.2 L571.5,175.2 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="576.5" y="167.2" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">down__entry_left_3 (left)</text>
+<path d="M185.0,46.8 L185.0,303.6" stroke="rgba(255, 255, 0, 0.5)" stroke-width="1" stroke-dasharray="6,4" />
+<text x="185.0" y="42.8" font-size="7" fill="rgba(255, 255, 0, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">col 0|1</text>
+<path d="M536.5,46.8 L536.5,303.6" stroke="rgba(255, 255, 0, 0.5)" stroke-width="1" stroke-dasharray="6,4" />
+<text x="536.5" y="42.8" font-size="7" fill="rgba(255, 255, 0, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">col 1|2</text>
+<path d="M50.0,116.8 L686.5,116.8" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="46.0" y="116.8" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0 grid</text>
+<path d="M50.0,175.2 L686.5,175.2" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<path d="M50.0,233.6 L686.5,233.6" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<rect x="60.0" y="313.6" width="98.5" height="96.0" rx="6" ry="6" fill="rgba(0, 0, 0, 0.3)" class="nf-metro-legend-bg" />
+<path d="M72.0,337.6 L96.0,337.6" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" />
+<text x="108.0" y="337.6" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text">Alpha</text>
+<path d="M72.0,361.6 L96.0,361.6" stroke="#2db572" stroke-width="3.0" stroke-linecap="round" />
+<text x="108.0" y="361.6" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text">Beta</text>
+<path d="M72.0,385.6 L96.0,385.6" stroke="#2b6cb0" stroke-width="3.0" stroke-linecap="round" />
+<text x="108.0" y="385.6" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text">Gamma</text>
+<text x="706.0" y="425.0" font-size="8" fill="rgba(150, 150, 150, 0.6)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">created with nf-metro v1.1.0+dev</text>
+</svg></div></div>
 </div>
 
 <h2 class="section-header" id="section-realistic-pipelines">Realistic Pipelines</h2>
