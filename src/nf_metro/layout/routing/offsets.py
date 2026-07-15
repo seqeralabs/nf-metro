@@ -32,10 +32,12 @@ from nf_metro.layout.routing.invariants import (
     check_partial_branch_offset_gaps,
     classify_merge_port_feeders,
     distinct_offset_levels,
+    fan_port_and_station,
 )
 from nf_metro.layout.routing.reversal import detect_reversed_sections
 from nf_metro.layout.routing.seam import SeamOrientation, seam_orientation
 from nf_metro.parser.model import (
+    Edge,
     LineSpread,
     MetroGraph,
     Port,
@@ -2425,6 +2427,28 @@ def _recenter_partial_fan_branches(ctx: _OffsetCtx) -> None:
             ctx.offsets[(violation.station_id, lid)] = base + idx * ctx.offset_step
 
 
+def _snaps_station_onto_fan_port(ctx: _OffsetCtx, edge: Edge) -> bool:
+    """Would this edge drag a multi-line station onto a fan port's slots?
+
+    A convergence (fan-in) or fan-out port aggregates more lines than the
+    station bordering it, so its slots are spread across the whole fan by
+    the port-offset phases.  When such a port shares a station's base Y -
+    i.e. the station sits on the trunk row the port exits/enters - the
+    same-Y edge between them is a reconciliation candidate.  Snapping one of
+    the station's lines onto the port's fan slot pulls that line out of the
+    station's own contiguous bundle, opening an empty interior lane and
+    widening the marker.  The offset mismatch at the port boundary belongs
+    to routing (a short riser as the line joins the fan), not to the
+    station's bundle.
+
+    Only a multi-line station can develop an interior lane: a single-line
+    bundle stays contiguous whatever its offset, and snapping it flat to
+    the port removes a shallow slope with no downside, so those edges stay
+    eligible for reconciliation.
+    """
+    return fan_port_and_station(ctx.graph, edge) is not None
+
+
 def _reconcile_horizontal_offsets(ctx: _OffsetCtx, max_iterations: int = 10) -> None:
     """Snap offsets for same-section edges where endpoints share base Y.
 
@@ -2451,6 +2475,7 @@ def _reconcile_horizontal_offsets(ctx: _OffsetCtx, max_iterations: int = 10) -> 
         if abs(ctx.graph.stations[edge.source].y - ctx.graph.stations[edge.target].y)
         <= _SAME_Y_TOLERANCE
         and _same_section(ctx.graph, edge.source, edge.target)
+        and not _snaps_station_onto_fan_port(ctx, edge)
     ]
 
     for _ in range(max_iterations):

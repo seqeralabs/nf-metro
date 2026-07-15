@@ -4133,6 +4133,37 @@ def _guard_merge_port_approach_side(
     raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
 
 
+def _guard_station_bundle_contiguous_at_fan_port(
+    graph: MetroGraph,
+    phase: str,
+    *,
+    offsets: dict[tuple[str, str], float] | None = None,
+) -> None:
+    """Final-phase: a multi-line station sharing its row with a wider fan port
+    keeps its own bundle contiguous, so the port's spread slots do not inflate
+    the station's marker with an empty interior lane.
+
+    See
+    :func:`nf_metro.layout.routing.invariants.check_station_bundle_contiguous_at_fan_port`
+    for the semantic definition.
+    """
+    from nf_metro.layout.routing.invariants import (
+        check_station_bundle_contiguous_at_fan_port,
+    )
+
+    if offsets is None:
+        from nf_metro.layout.routing import compute_station_offsets
+
+        offsets = compute_station_offsets(graph)
+
+    violations = check_station_bundle_contiguous_at_fan_port(graph, offsets)
+    if not violations:
+        return
+    first = violations[0]
+    extra = f" (+{len(violations) - 1} more)" if len(violations) > 1 else ""
+    raise PhaseInvariantError(f"{phase}: {first.message()}{extra}")
+
+
 def _guard_convergence_shallow_feeder_concentric(
     graph: MetroGraph,
     phase: str,
@@ -5009,6 +5040,20 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
         _guard_convergence_shallow_feeder_concentric,
         "B",
         needs=frozenset({"offsets"}),
+    ),
+    GuardSpec(
+        _guard_station_bundle_contiguous_at_fan_port,
+        "B",
+        needs=frozenset({"offsets"}),
+        issue_pin=("#1476", "#1480"),
+        narrow_reason=(
+            "Restricted to a multi-line station sharing its base Y with a "
+            "strictly-wider fan-in/fan-out port it borders -- the only place "
+            "the port's spread slots can leak into a station's bundle. A "
+            "single-line station stays contiguous at any offset, and a station "
+            "not on a fan port's row keeps its own bundle ordering, so neither "
+            "is a false positive."
+        ),
     ),
     GuardSpec(
         _guard_merge_port_outgoing_side_preserved,

@@ -974,5 +974,21 @@
   "normalize.py::if ca != cb:::#1": {
     "note": "Peel-off ordering tie-break by deep-end crossings: after the fan-band sharing pins bypass siblings on one shared trunk, no corpus fan reaches this comparator with the approach-crossing counts equal but the peel crossings differing, so the arm is unexercised.",
     "status": "needs-review"
+  },
+  "offsets.py::for candidate in (larger, smaller):::#1": {
+    "note": "The reconcile bundle-shift fallback and its companion arms (the candidate loop falling through without an applied snap, the fewer-lines station selection, and the per-line bundle shift). Corpus instrumentation shows these were exercised across the whole corpus solely by a station sharing its base Y with a strictly-wider fan-in/fan-out port (funcprofiler_upstream's humann3 and sr_qc): the port's spread slots collided with both snap candidates, forcing the bundle shift. The #1480 fix pre-filters that station-to-wider-fan-port edge out of reconciliation (_snaps_station_onto_fan_port), so no corpus fixture reaches the fallback. It remains defensive handling for a same-Y same-section bundle conflict, which the offset phases do not currently produce without a fan port.",
+    "status": "defensive"
+  },
+  "offsets.py::if not applied:::#1": {
+    "note": "The reconcile bundle-shift fallback and its companion arms (the candidate loop falling through without an applied snap, the fewer-lines station selection, and the per-line bundle shift). Corpus instrumentation shows these were exercised across the whole corpus solely by a station sharing its base Y with a strictly-wider fan-in/fan-out port (funcprofiler_upstream's humann3 and sr_qc): the port's spread slots collided with both snap candidates, forcing the bundle shift. The #1480 fix pre-filters that station-to-wider-fan-port edge out of reconciliation (_snaps_station_onto_fan_port), so no corpus fixture reaches the fallback. It remains defensive handling for a same-Y same-section bundle conflict, which the offset phases do not currently produce without a fan port.",
+    "status": "defensive"
+  },
+  "offsets.py::if src_n <= tgt_n:::#1": {
+    "note": "The reconcile bundle-shift fallback and its companion arms (the candidate loop falling through without an applied snap, the fewer-lines station selection, and the per-line bundle shift). Corpus instrumentation shows these were exercised across the whole corpus solely by a station sharing its base Y with a strictly-wider fan-in/fan-out port (funcprofiler_upstream's humann3 and sr_qc): the port's spread slots collided with both snap candidates, forcing the bundle shift. The #1480 fix pre-filters that station-to-wider-fan-port edge out of reconciliation (_snaps_station_onto_fan_port), so no corpus fixture reaches the fallback. It remains defensive handling for a same-Y same-section bundle conflict, which the offset phases do not currently produce without a fan port.",
+    "status": "defensive"
+  },
+  "offsets.py::for other_lid in ctx.graph.station_lines(move_sid):::#1": {
+    "note": "The reconcile bundle-shift fallback and its companion arms (the candidate loop falling through without an applied snap, the fewer-lines station selection, and the per-line bundle shift). Corpus instrumentation shows these were exercised across the whole corpus solely by a station sharing its base Y with a strictly-wider fan-in/fan-out port (funcprofiler_upstream's humann3 and sr_qc): the port's spread slots collided with both snap candidates, forcing the bundle shift. The #1480 fix pre-filters that station-to-wider-fan-port edge out of reconciliation (_snaps_station_onto_fan_port), so no corpus fixture reaches the fallback. It remains defensive handling for a same-Y same-section bundle conflict, which the offset phases do not currently produce without a fan port.",
+    "status": "defensive"
   }
 }
