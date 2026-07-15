@@ -1634,4 +1634,3 @@ render_only:
     - genomeassembly_organellar
     - target_entry_runway_bypass
     - tb_exit_terminal_on_carrier
-    - through_section/riboseq_packed_lr
