@@ -220,6 +220,21 @@ The only legitimate input edits during an engine fix are: authoring a
 faithful *new* reproducer, or correcting a genuine (a)-class authoring
 mistake you've identified as the actual cause.
 
+### This rule holds for the whole fix, not just the freeze moment
+
+The pull toward touching the `.mmd` instead of `src/` doesn't only show up
+when you first classify the bug - it resurfaces later, when the code fix
+turns out to be harder than expected: trimming a label, dropping a station,
+reordering lines, splitting a section, or adding a directive so the
+reproducer renders cleanly while the engine still mishandles the general
+case. That is the same workaround wearing the disguise of "polish" or
+"narrowing." Step 9's narrowing means gating the *code path* on a real
+structural precondition (a topology predicate, a config flag) - never
+gating it by rewording the input so the bad path isn't exercised anymore.
+If you catch yourself thinking "what if I just changed the mmd instead"
+partway through implementation, treat that as the signal to stop and go
+fix the engine, not as a shortcut worth taking.
+
 ### Diagnostic tooling
 
 The repo bundles two scripts that do exactly this render-and-read-the-numbers
@@ -266,6 +281,27 @@ grep -rn "#<N>" tests/ scripts/build_gallery.py examples/topologies/
   marker** so the now-passing assertion becomes a permanent positive guard.
   (Deleting the whole test loses the guard; leaving the marker keeps CI red.)
 - **If no lock exists** (the common case), proceed with the steps below.
+
+### xfail is a lock on a known bug, not an escape hatch
+
+The `strict=True` xfail pattern above exists for issues that arrive with
+regression infra already wired in - it locks a bug that's already filed and
+tracked. It is not a tool for *this* session to reach for when the real fix
+turns out to be harder than expected. Do not mark a new test `xfail`
+(strict or otherwise) so you can move on and leave the actual bug for a
+future session to untangle - that's the same deferral "Scope discipline"
+above already rejects, just spelled with a pytest decorator instead of a
+filed child issue. If a test you write in the steps below won't pass, that
+means the fix isn't done yet; keep going. It does not mean the test should
+be muted.
+
+The only acceptable use of a *new* xfail is the genuine multi-session case
+"Scope discipline" already covers: the underlying fix is disproportionate to
+this issue, you've said so explicitly, and you're filing a follow-up issue
+for it - the xfail marker is a byproduct of that stated deferral, not a
+substitute for making it. Treat "I'll xfail this for now" as the same red
+flag as "I'll simplify the mmd for now": both quietly convert a bug the
+engine has into a fixture that dodges it instead of one that gets fixed.
 
 Before any production code change:
 
