@@ -3426,12 +3426,13 @@ def test_diagonal_strike_guard_teeth_and_exemptions():
 def test_multiline_ascent_to_exit_clears_sibling_label():
     """A multi-line side branch ascending to an exit port clears sibling labels.
 
-    When a station carrying the full bundle sits off the trunk and exits via a
-    shared exit port, its ascent diagonal must turn late (near the port) so it
-    stays on its own track rather than seating mid-section where a trunk
-    sibling's horizontal name label extends.  In the packed riboseq map (#1449)
-    ``salmon_quant`` fans up to ``quantification``'s right exit and its riser
-    must clear ``genomecov``'s label.
+    A station carrying the full bundle sitting off the trunk and fed only from
+    the section boundary is a genuine side branch: its ascent to the shared exit
+    port must turn late (near the port) so it rides its own track rather than
+    seating mid-section, where a trunk sibling's horizontal name label extends.
+    The ``exit_fan_label_strike`` fixture isolates the #1449 repro -- ``Salmon``
+    fans up to the exit past the wide ``BEDTools genomecov`` label; a midpoint
+    diagonal rakes that label.
 
     Parsed the render way (no ``center_ports`` override that ``_layout`` applies
     to ``tests/fixtures/`` files) so the geometry matches what the runtime guard
@@ -3440,7 +3441,7 @@ def test_multiline_ascent_to_exit_clears_sibling_label():
     """
     from nf_metro.layout.phases.spacing import _struck_stations_and_collinear
 
-    path = _resolve_fixture("through_section/riboseq_packed_lr.mmd")
+    path = _resolve_fixture("through_section/exit_fan_label_strike.mmd")
     graph = parse_metro_mermaid(path.read_text())
     compute_layout(graph)
     struck, collinear = _struck_stations_and_collinear(graph)
