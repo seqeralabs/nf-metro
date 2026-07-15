@@ -44,7 +44,7 @@ _ALLOWED = [
     ),
     pytest.param(EXAMPLES / "rnaseq_sections.mmd", id="rnaseq"),
     pytest.param(TOPOLOGIES / "around_section_below.mmd", id="around-below"),
-    pytest.param(INVALID / "mixed_entry_perpendicular.mmd", id="perpendicular"),
+    pytest.param(TOPOLOGIES / "mixed_entry_perpendicular.mmd", id="perpendicular"),
 ]
 
 # Opposing-axis pairs: their co-presence on one section is the rejected case.
