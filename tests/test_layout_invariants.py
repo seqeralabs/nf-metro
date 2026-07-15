@@ -834,6 +834,50 @@ def test_subset_section_bundle_anchored_on_trunk(fixture, section_id):
 
 
 # ---------------------------------------------------------------------------
+# A station's own bundle occupies contiguous offset lanes (no empty centre)
+# ---------------------------------------------------------------------------
+
+# (fixture, station_id) for stations carrying a co-travelling multi-line bundle.
+# The hub in sec_main fans out into two downstream sections: the RIGHT exit port
+# re-centres its bundle on the fan-out feeder, and that re-centred base must not
+# leak back onto the trunk row (hub and its same-Y row-mates in_0/s2/out_main)
+# and get unioned to double width by horizontal reconciliation.  annotate / star
+# are clean two-line bundles.
+_CONTIGUOUS_STATION_BUNDLES = [
+    ("topologies/fanout_hub_two_line_trunk.mmd", "hub"),
+    ("topologies/fanout_hub_two_line_trunk.mmd", "s2"),
+    ("topologies/fanout_hub_two_line_trunk.mmd", "out_main"),
+    ("da_pipeline.mmd", "annotate"),
+    ("rnaseq_auto.mmd", "star"),
+]
+
+
+@pytest.mark.parametrize("fixture,station_id", _CONTIGUOUS_STATION_BUNDLES)
+def test_station_bundle_lanes_contiguous(fixture, station_id):
+    """A station's per-line offset lanes form one contiguous OFFSET_STEP run.
+
+    An empty interior lane draws the marker's bundle wider than it should be --
+    a two-line bundle splitting to +/- one step opens a centre lane and renders
+    at double width (#1476).  The distinct offset levels must step by exactly
+    one ``OFFSET_STEP`` with no gap.
+    """
+    graph = _layout(fixture)
+    step = resolve_offset_step(graph.track_gap)
+    offsets = compute_station_offsets(graph)
+    levels = sorted(
+        {
+            round(offsets.get((station_id, lid), 0.0), 1)
+            for lid in graph.station_lines(station_id)
+        }
+    )
+    expected = [round(levels[0] + i * step, 1) for i in range(len(levels))]
+    assert levels == expected, (
+        f"{fixture}: station {station_id} offset lanes {levels} are not "
+        f"contiguous {expected}; an empty interior lane widens the bundle"
+    )
+
+
+# ---------------------------------------------------------------------------
 # A bundle terminator's sole successor stays on the trunk row
 # ---------------------------------------------------------------------------
 
@@ -7016,23 +7060,11 @@ def test_section_bbox_has_bottom_padding(fixture):
     )
 
 
-# Section bbox top doesn't carry the configured section_y_padding above
-# the highest station marker (the mirror of bottom padding).  Affects
-# sections whose content fans above the trunk: a fan-redistribution pass
-# lifts a station above the content-top line the bbox was sized for,
-# crowding the topmost marker against the bbox top while the bottom keeps
-# its full band.  Sections gap-bounded against the row above (where full
-# top padding would crowd the section-header badge against an inter-row
-# route) belong here as xfails.
-_XFAIL_BBOX_TOP_PAD: dict[str, str] = {
-    "differentialabundance_default.mmd": (
-        "plots is gap-bounded: growing its top to a full padding band would "
-        "bring its section-header badge within the inter-row route clearance "
-        "(test_routed_paths_clear_next_row_headers), so the top-padding "
-        "restore deliberately stops short. Revisit if the row gap or routing "
-        "changes."
-    ),
-}
+# A section that fans a branch above its trunk gets a full top padding band
+# restored by ``_reserve_row_gap_for_top_padding`` + ``_fit_bboxes_to_content_top``:
+# when a same-column section directly above would clamp the grow, the lower row is
+# pushed down to make room.  No fixture is expected to fall short.
+_XFAIL_BBOX_TOP_PAD: dict[str, str] = {}
 
 
 @pytest.mark.parametrize(

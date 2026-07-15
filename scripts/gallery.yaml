@@ -1566,6 +1566,15 @@ gallery:
       gap: the render reflows the lower rows down to absorb the late growth rather than
       letting its header badge collide with the grown box."
 
+  - id: fanout_hub_two_line_trunk
+    source_dir: examples/topologies
+    category: Multi-line Bundles
+    description:
+      "A two-line trunk (`a`, `b`) that fans out at a hub into two downstream
+      sections. The two-line trunk bundle must render one `OFFSET_STEP` wide, not
+      double-width with an empty centre lane, even though the hub's exit port
+      re-centres its bundle on the fan-out feeder."
+
 pipelines:
   - id: rnaseq_auto
     title: nf-core/rnaseq
