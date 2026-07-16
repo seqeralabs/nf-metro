@@ -1477,7 +1477,7 @@ def _guard_entry_port_not_opposite_targets(graph: MetroGraph, phase: str) -> Non
         section = graph.sections.get(port.section_id)
         if section is None or section.bbox_w <= 0 or section.bbox_h <= 0:
             continue
-        flow_horizontal = not lanes_run_along_x(section.direction)
+        flow_horizontal = lanes_run_along_y(section.direction)
         port_horizontal = port.side in (PortSide.LEFT, PortSide.RIGHT)
         if port_horizontal != flow_horizontal:
             continue
@@ -1498,15 +1498,15 @@ def _guard_entry_port_not_opposite_targets(graph: MetroGraph, phase: str) -> Non
             target = sum(st.y for st in consumers) / len(consumers)
             port_pos = graph.stations[pid].y
         mid = (lo + hi) / 2
-        flow_end_hi = AxisFrame.flow_sign(section.direction) > 0
-        port_on_flow_end = (port_pos > mid) == flow_end_hi
-        consumers_toward_start = (target < mid) == flow_end_hi
-        if (
-            port_on_flow_end
-            and consumers_toward_start
-            and abs(target - mid) > GUARD_TOLERANCE
-        ):
-            end_edge = "hi" if flow_end_hi else "lo"
+        sign = AxisFrame.flow_sign(section.direction)
+        # Signed distance from the section midpoint along the flow direction:
+        # the port is on the flow-END edge when its distance is positive, and
+        # the consumers cluster toward the flow-START edge when theirs is
+        # clearly negative.
+        port_signed = sign * (port_pos - mid)
+        target_signed = sign * (target - mid)
+        if port_signed > 0 and target_signed < -GUARD_TOLERANCE:
+            end_edge = "hi" if sign > 0 else "lo"
             raise PhaseInvariantError(
                 f"{phase}: entry port {pid!r} sits on the flow-END ({end_edge}) "
                 f"edge of section {section.id!r} while its consumers cluster "

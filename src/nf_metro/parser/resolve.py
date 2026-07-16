@@ -899,7 +899,7 @@ def _collapse_hint_sides(
     """
     if not section.entry_hints:
         return None
-    unique = dict.fromkeys(s for s, _ in section.entry_hints)  # declaration order
+    unique = {s for s, _ in section.entry_hints}
     if len(unique) == 1:
         return next(iter(unique))
     chosen = dominant or _natural_entry_side(section.direction)
