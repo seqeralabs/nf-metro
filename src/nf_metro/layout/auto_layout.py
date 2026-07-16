@@ -15,6 +15,7 @@ from collections import defaultdict, deque
 from collections.abc import Callable
 from collections.abc import Set as AbstractSet
 
+from nf_metro.layout.geometry import AxisFrame
 from nf_metro.layout.layers import assign_layers
 from nf_metro.parser.model import (
     Interchange,
@@ -1485,18 +1486,18 @@ def _infer_port_sides(
                         section.entry_hints.append((side, sorted(lines)))
 
 
-_FLOW_START_SIDE = {
-    "LR": PortSide.LEFT,
-    "RL": PortSide.RIGHT,
-    "TB": PortSide.TOP,
-    "BT": PortSide.BOTTOM,
-}
-_FLOW_END_SIDE = {
-    "LR": PortSide.RIGHT,
-    "RL": PortSide.LEFT,
-    "TB": PortSide.BOTTOM,
-    "BT": PortSide.TOP,
-}
+def _flow_edge_sides(direction: str) -> tuple[PortSide, PortSide]:
+    """``(flow-start side, flow-end side)`` for a section direction.
+
+    Derived from the :class:`AxisFrame` primitive rather than a per-direction
+    branch: the flow axis (X for LR/RL, Y for TB/BT) fixes the edge pair
+    (LEFT/RIGHT or TOP/BOTTOM), and the flow sign fixes which is the start.
+    """
+    on_x = AxisFrame.axes_for_direction(direction)[0] == "x"
+    low, high = (
+        (PortSide.LEFT, PortSide.RIGHT) if on_x else (PortSide.TOP, PortSide.BOTTOM)
+    )
+    return (low, high) if AxisFrame.flow_sign(direction) > 0 else (high, low)
 
 
 def _same_cell_side(graph: MetroGraph, sec_id: str, other: str) -> PortSide:
@@ -1508,14 +1509,19 @@ def _same_cell_side(graph: MetroGraph, sec_id: str, other: str) -> PortSide:
     ``sec_id`` feeds sits on the flow-end edge.  Co-tenants the section DAG does
     not order keep the flow-end default, matching :func:`_relative_side`'s
     same-position fallback.
+
+    A section with no internal flow (a pure fan target with no internal edges)
+    has no flow-start edge for the co-tenant to align to, so the co-tenant keeps
+    the same-position default and the section's entry follows its dominant
+    external feed instead.
     """
     dag = graph.section_dag
-    if dag is not None:
-        direction = graph.sections[sec_id].direction
+    if dag is not None and graph.sections[sec_id].internal_edges:
+        start, end = _flow_edge_sides(graph.sections[sec_id].direction)
         if other in dag.predecessors.get(sec_id, set()):
-            return _FLOW_START_SIDE.get(direction, PortSide.LEFT)
+            return start
         if other in dag.successors.get(sec_id, set()):
-            return _FLOW_END_SIDE.get(direction, PortSide.RIGHT)
+            return end
     return PortSide.RIGHT
 
 

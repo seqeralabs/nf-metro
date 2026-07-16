@@ -888,27 +888,21 @@ def _collapse_hint_sides(
     """The single entry side a section's entry hints collapse to.
 
     A section has one entry side, so hints naming more than one side are
-    contradictory input.  The collapse never leaves the hinted set (that is the
-    bug being fixed -- an off-hint feed direction pulling the entry onto a side
-    the author never named, folding the connector back over the section's
-    internal flow).  Among the hinted sides it prefers the one a feed actually
-    arrives on (``dominant``), else the flow-natural side, else the
-    first-declared -- and warns, naming the sides it drops.  Returns ``None``
-    for a section with no entry hints.
+    contradictory input and must collapse to one approach.  The section enters
+    where a feed actually arrives (``dominant``), else on its flow-natural side
+    -- and warns, naming the sides it drops.  The chosen side may be one the
+    author did not hint when that is where the feed lands (e.g. a fed member of
+    a packed cell entered from the edge its dominant feeder drops onto); the
+    :func:`_guard_entry_port_not_opposite_targets` invariant is what forbids a
+    genuinely flow-opposing entry, not the hint set.  Returns ``None`` for a
+    section with no entry hints.
     """
     if not section.entry_hints:
         return None
-    hint_sides = [s for s, _ in section.entry_hints]
-    unique = dict.fromkeys(hint_sides)  # de-dup, preserve declaration order
+    unique = dict.fromkeys(s for s, _ in section.entry_hints)  # declaration order
     if len(unique) == 1:
         return next(iter(unique))
-    natural = _natural_entry_side(section.direction)
-    if dominant in unique:
-        chosen = dominant
-    elif natural in unique:
-        chosen = natural
-    else:
-        chosen = hint_sides[0]
+    chosen = dominant or _natural_entry_side(section.direction)
     dropped = sorted(s.name for s in unique if s is not chosen)
     warnings.warn(
         f"section {section.id!r}: entry hints name multiple sides; keeping "

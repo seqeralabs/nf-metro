@@ -32,6 +32,7 @@ from nf_metro.layout.constants import (
     X_SPACING,
 )
 from nf_metro.layout.geometry import (
+    AxisFrame,
     BBoxXIndex,
     iter_section_overlaps,
     lanes_run_along_x,
@@ -1497,7 +1498,7 @@ def _guard_entry_port_not_opposite_targets(graph: MetroGraph, phase: str) -> Non
             target = sum(st.y for st in consumers) / len(consumers)
             port_pos = graph.stations[pid].y
         mid = (lo + hi) / 2
-        flow_end_hi = section.direction in ("LR", "TB")
+        flow_end_hi = AxisFrame.flow_sign(section.direction) > 0
         port_on_flow_end = (port_pos > mid) == flow_end_hi
         consumers_toward_start = (target < mid) == flow_end_hi
         if (

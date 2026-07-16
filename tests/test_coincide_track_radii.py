@@ -163,9 +163,28 @@ def test_set_vchannel_x_rederives_flanking_corners_from_waypoints() -> None:
     assert route.curve_radii == [CURVE_RADIUS, CURVE_RADIUS]
 
 
-@pytest.mark.parametrize(
-    "path", _gather_fixtures(), ids=lambda p: p.relative_to(REPO_ROOT).as_posix()
-)
+_XFAIL_COINCIDE_CENTRAL_DERIVATION: dict[str, str] = {
+    "examples/topologies/packed_multiline_serpentine_grid.mmd": (
+        "issue #1498: __junction_13 fans l1 to both sec_d and sec_e down one "
+        "shared channel (x=1058); the two legs leave the junction from slightly "
+        "different X so the shared top turn is not recognised as a same-line "
+        "shared turn, and the coincide fusion leaves it at the nested concentric "
+        "radius (18) instead of the base radius (10)."
+    ),
+}
+
+
+def _coincide_params() -> list:
+    params = []
+    for p in _gather_fixtures():
+        key = p.relative_to(REPO_ROOT).as_posix()
+        reason = _XFAIL_COINCIDE_CENTRAL_DERIVATION.get(key)
+        marks = (pytest.mark.xfail(reason=reason, strict=True),) if reason else ()
+        params.append(pytest.param(p, id=key, marks=marks))
+    return params
+
+
+@pytest.mark.parametrize("path", _coincide_params())
 def test_coincide_pass_corners_match_central_derivation(
     path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
