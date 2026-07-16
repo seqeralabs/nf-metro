@@ -35,6 +35,7 @@ def assign_tracks(
     entry_top: bool = False,
     continuation_nodes: frozenset[str] = frozenset(),
     terminal_nodes: frozenset[str] = frozenset(),
+    exit_reaching: frozenset[str] = frozenset(),
 ) -> dict[str, float]:
     """Assign each station a track using the track-per-line strategy.
 
@@ -54,6 +55,10 @@ def assign_tracks(
             section, so their chain ends inside it (a terminal spur). Supplied
             by the caller because the section subgraph omits the exit-port
             edges that distinguish a spur from a through-line.
+        exit_reaching: Stations with a forward path to a section exit port --
+            the section's through-line. Supplied by the caller (the subgraph
+            omits the exit-port edges), and used to keep the through-chain on
+            the trunk when a short output spur shares its entry fan.
 
     Returns a dict mapping station_id -> track (float).
     """
@@ -162,6 +167,7 @@ def assign_tracks(
                     straight_diamonds=graph.diamond_style == "straight",
                     layer_idx=layer_idx if entry_top else -1,
                     graph=graph,
+                    exit_reaching=exit_reaching,
                 )
                 for n in nodes:
                     layer_occupancy[layer_idx][n] = tracks[n]
@@ -644,6 +650,31 @@ def _phantom_trunk_node(nodes: list[str], graph: MetroGraph | None) -> str | Non
     return None
 
 
+def _leads_only_to_off_track_output(
+    node: str, G: nx.DiGraph[str], graph: MetroGraph
+) -> bool:
+    """Whether *node*'s whole forward path terminates at output file(s).
+
+    True when *node* has at least one descendant and every descendant is a
+    file-icon terminus or an off-track station -- i.e. it feeds only output
+    files and continues no on-track chain.  Such a node is a short output spur,
+    not the section's through-line, so at a fan-out it should peel off the
+    trunk rather than take it.  A node with no descendants (a plain terminal
+    marker) or with any on-track continuation is not a spur.
+
+    A file-icon leaf is only flagged ``off_track`` on the engine's re-run pass;
+    on the first pass it reads as a terminus, so both are treated as outputs
+    here to catch the spur before any crossing forces that re-run.
+    """
+    descendants = nx.descendants(G, node)
+    if not descendants:
+        return False
+    return all(
+        (st := graph.stations.get(d)) is not None and (st.off_track or st.is_terminus)
+        for d in descendants
+    )
+
+
 def _place_fan_out(
     nodes: list[str],
     base: float,
@@ -654,6 +685,7 @@ def _place_fan_out(
     straight_diamonds: bool = False,
     layer_idx: int = -1,
     graph: MetroGraph | None = None,
+    exit_reaching: frozenset[str] = frozenset(),
 ) -> None:
     """Place multiple nodes in the same layer+line, centered around an anchor.
 
@@ -754,6 +786,35 @@ def _place_fan_out(
         for i, node in enumerate(ordered[1:], 1):
             tracks[node] = anchor + i * fan_spacing
         return
+
+    # Off-track-output spur peel: at the section entry, the fan of root
+    # stations (no in-section predecessor, each fed straight from the entry
+    # port) competes for the trunk.  When one root is the section's through-line
+    # (reaches an exit port) and another dead-ends at an off-track output, keep
+    # the through-root(s) centred on the anchor (the section trunk) and peel the
+    # output spur(s) below them.  Otherwise the short spur takes the trunk and
+    # the main chain is pushed onto a diagonal that crosses it (#1487).
+    #
+    # Gated tightly: only the root fan (a deeper fan-out sits on a placed
+    # predecessor track and has no trunk to contest), and only when a genuine
+    # through-line exists -- a terminal section whose branches all end in output
+    # files has no trunk to award, so its fan keeps the default placement.
+    if graph is not None and not pred_avgs:
+        mains = [node for node in nodes if node in exit_reaching]
+        spurs = [
+            node
+            for node in nodes
+            if node not in exit_reaching
+            and _leads_only_to_off_track_output(node, G, graph)
+        ]
+        if mains and spurs and len(mains) + len(spurs) == n:
+            m = len(mains)
+            for i, node in enumerate(mains):
+                tracks[node] = anchor + (i - (m - 1) / 2) * fan_spacing
+            bottom = max(tracks[node] for node in mains)
+            for i, node in enumerate(spurs, 1):
+                tracks[node] = bottom + i * fan_spacing
+            return
 
     # Trunk-anchored placement: when one node carries a strict superset
     # of every sibling's line set, it's the bundle trunk.  Pin it at
