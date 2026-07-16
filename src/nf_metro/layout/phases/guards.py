@@ -56,6 +56,7 @@ from nf_metro.layout.phases._common import (
     iter_fold_lr_exits_short_of_target,
     iter_sole_trunk_continuations,
     iter_stacked_rows_in_rowspan_band,
+    line_forks_within_section,
     marker_cross_exempt,
     routes_through_own_section_interior,
     routes_through_unrelated_sections,
@@ -1389,6 +1390,10 @@ def _guard_corridor_fed_solo_rides_trunk(
     never enter it.  The vertical corridor absorbs the lane step, so both the
     LEFT/RIGHT entry port and the consumer it feeds must ride offset 0.  Scope
     is exactly :func:`iter_corridor_fed_solo_entries`.
+
+    A section whose line forks internally checks only the entry port: its fan
+    branches straddle the trunk and may each hold a lane aligning them with a
+    downstream multi-line section, so they are not required to ride offset 0.
     """
     if offsets is None:
         from nf_metro.layout.routing import compute_station_offsets
@@ -1402,6 +1407,8 @@ def _guard_corridor_fed_solo_rides_trunk(
                 f"{port_off:.1f} for sole line {line_id!r}; a corridor-fed "
                 "single-line section must anchor its entry on the trunk"
             )
+        if line_forks_within_section(graph, graph.sections[sec_id], line_id):
+            continue
         for sid in graph.sections[sec_id].station_ids:
             st = graph.stations.get(sid)
             if st is None or st.is_port or line_id not in graph.station_lines(sid):
@@ -1442,6 +1449,70 @@ def _guard_perp_entry_clears_vertical_trunk_head(graph: MetroGraph, phase: str) 
                     f"vertical-flow section {section.id!r}; the line routes "
                     f"through the marker with no room for a level turn-in"
                 )
+
+
+def _guard_entry_port_not_opposite_targets(graph: MetroGraph, phase: str) -> None:
+    """A flow-axis entry never sits on the flow-END edge when its consumers are
+    toward the flow-START edge.
+
+    Such an entry forces its line to enter at the end of the section's internal
+    flow and double back over that flow to reach consumers clustered at the
+    start -- the #1363 fold-back a contradictory entry hint produced when an
+    off-hint feed direction pulled the entry onto a flow-opposing side.
+
+    The flow-end edge is taken from the section direction (RIGHT for LR, LEFT
+    for RL, BOTTOM for TB, TOP for BT), so a genuinely reversed-flow section
+    entered on its own flow-start edge stays valid rather than being forbidden
+    a RIGHT entry outright.  The consumer centroid must be clearly toward the
+    flow-start edge, so an entry legitimately feeding flow-end-clustered
+    stations is not flagged.  Only entries on the flow axis are checked; a
+    perpendicular drop-in (a TOP/BOTTOM entry into an LR/RL section, or a
+    LEFT/RIGHT entry into a TB/BT section) is a different idiom that legitimately
+    sits far from its target along the perpendicular axis.
+    """
+    for pid, port in graph.ports.items():
+        if not port.is_entry:
+            continue
+        section = graph.sections.get(port.section_id)
+        if section is None or section.bbox_w <= 0 or section.bbox_h <= 0:
+            continue
+        flow_horizontal = not lanes_run_along_x(section.direction)
+        port_horizontal = port.side in (PortSide.LEFT, PortSide.RIGHT)
+        if port_horizontal != flow_horizontal:
+            continue
+        consumers = [
+            st
+            for edge in graph.edges_from(pid)
+            if not (st := graph.station_for_edge_target(edge)).is_port
+            and st.section_id == section.id
+        ]
+        if not consumers:
+            continue
+        if flow_horizontal:
+            lo, hi = section.bbox_x, section.bbox_x + section.bbox_w
+            target = sum(st.x for st in consumers) / len(consumers)
+            port_pos = graph.stations[pid].x
+        else:
+            lo, hi = section.bbox_y, section.bbox_y + section.bbox_h
+            target = sum(st.y for st in consumers) / len(consumers)
+            port_pos = graph.stations[pid].y
+        mid = (lo + hi) / 2
+        flow_end_hi = section.direction in ("LR", "TB")
+        port_on_flow_end = (port_pos > mid) == flow_end_hi
+        consumers_toward_start = (target < mid) == flow_end_hi
+        if (
+            port_on_flow_end
+            and consumers_toward_start
+            and abs(target - mid) > GUARD_TOLERANCE
+        ):
+            end_edge = "hi" if flow_end_hi else "lo"
+            raise PhaseInvariantError(
+                f"{phase}: entry port {pid!r} sits on the flow-END ({end_edge}) "
+                f"edge of section {section.id!r} while its consumers cluster "
+                f"toward the flow-start: port at {port_pos:.1f}, consumer centroid "
+                f"{target:.1f} in [{lo:.1f}, {hi:.1f}]; the line must double back "
+                f"over the section's internal flow to reach them"
+            )
 
 
 def _guard_post_convergence_trunk_continues(graph: MetroGraph, phase: str) -> None:
@@ -4959,6 +5030,18 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
         ),
     ),
     GuardSpec(_guard_fanout_junction_resolves_upstream, "B"),
+    GuardSpec(
+        _guard_entry_port_not_opposite_targets,
+        "B",
+        issue_pin=("#1363",),
+        narrow_reason=(
+            "Only flow-axis entries are checked (LEFT/RIGHT on LR/RL, TOP/BOTTOM "
+            "on TB/BT), and only when the consumer centroid is clearly on the "
+            "opposite half from the port; a perpendicular drop-in legitimately "
+            "sits far from its target along the perpendicular axis, and a "
+            "reversed-flow section entered on its own flow-start edge is valid."
+        ),
+    ),
     GuardSpec(_guard_entry_port_fed_only_by_ports, "B"),
     GuardSpec(_guard_flow_exit_anchored_to_carrier, "B"),
     GuardSpec(_guard_wrap_exit_anchored_to_carrier, "B"),

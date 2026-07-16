@@ -13,7 +13,10 @@ from nf_metro.layout.constants import (
     resolve_offset_step,
 )
 from nf_metro.layout.geometry import lanes_run_along_x
-from nf_metro.layout.phases._common import iter_corridor_fed_solo_entries
+from nf_metro.layout.phases._common import (
+    iter_corridor_fed_solo_entries,
+    line_forks_within_section,
+)
 from nf_metro.layout.routing.arranger import BoundaryConfig, lane_order
 from nf_metro.layout.routing.common import (
     needs_perp_approach_fan,
@@ -1726,12 +1729,17 @@ def _recenter_single_line_corridor_entry(ctx: _OffsetCtx) -> None:
     the lone consumer off the section trunk, so the section reserves empty space
     for lines that never enter it.  When every feeder reaches the port on a
     different base Y -- a vertical corridor -- the lane step resolves in that
-    vertical leg, so re-anchor the whole section (entry port and every consumer
-    carrying the line) at offset 0.  Anchoring the consumers too, rather than
-    leaving horizontal reconciliation to settle them, keeps reconciliation's
+    vertical leg, so re-anchor the entry port (and, for a straight chain, every
+    consumer carrying the line) at offset 0.  Anchoring the consumers too, rather
+    than leaving horizontal reconciliation to settle them, keeps reconciliation's
     larger-magnitude preference from snapping the port back off the trunk onto
     the consumer's lane.  A flat (same-Y) seam is left untouched: re-basing there
     would slope the straight-through run into an almost-horizontal segment.
+
+    When the single line forks internally, only the entry port is re-anchored:
+    the fan branches straddle the trunk and each may hold a lane that aligns it
+    with a downstream multi-line section, so pinning them to offset 0 would kink
+    those hand-offs.
 
     Scope is exactly :func:`iter_corridor_fed_solo_entries` -- the same set the
     :func:`_guard_corridor_fed_solo_rides_trunk` invariant certifies.
@@ -1741,6 +1749,8 @@ def _recenter_single_line_corridor_entry(ctx: _OffsetCtx) -> None:
         graph, _SAME_Y_TOLERANCE
     ):
         ctx.offsets[(port_id, line_id)] = 0.0
+        if line_forks_within_section(graph, graph.sections[sec_id], line_id):
+            continue
         for sid in graph.sections[sec_id].station_ids:
             st = graph.stations.get(sid)
             if st is None or st.is_port or line_id not in graph.station_lines(sid):

@@ -184,6 +184,7 @@
     "_guard_off_track_clear_of_anchor|after final",
     "_guard_fanout_junction_shares_exit_port_y|after final",
     "_guard_fanout_junction_resolves_upstream|after final",
+    "_guard_entry_port_not_opposite_targets|after final",
     "_guard_entry_port_fed_only_by_ports|after final",
     "_guard_flow_exit_anchored_to_carrier|after final",
     "_guard_wrap_exit_anchored_to_carrier|after final",
