@@ -1,0 +1,56 @@
+%%metro title: Packed-cell left-entry descent under a cell-neighbour
+%%metro line: l1 | Line 1 | #e6007e
+%%metro line: l2 | Line 2 | #2db572
+%%metro grid: sec_a | 0,0
+%%metro grid: sec_b | 1,0
+%%metro grid: sec_f, sec_h | 2,0
+%%metro grid: sec_e, sec_g | 2,1
+
+graph LR
+    subgraph sec_a [Section A]
+        %%metro exit: right | l1, l2
+        a1[A1]
+        a1 -->|l1,l2| file1
+    end
+    subgraph sec_b [Section B]
+        %%metro entry: left | l1, l2
+        %%metro exit: right | l1, l2
+        b1[B1]
+        b1 -->|l1,l2| file2
+    end
+    subgraph sec_f [Section F]
+        %%metro entry: left | l1, l2
+        %%metro exit: right | l2
+        f1[F1]
+        f2[F2]
+        f1 -->|l1,l2| f2
+    end
+    subgraph sec_h [Section H]
+        %%metro entry: left | l1
+        h1[H1]
+        h2[H2]
+        h1 -->|l1| h2
+    end
+    subgraph sec_e [Section E]
+        %%metro entry: left | l1
+        e1[E1]
+        e2[E2]
+        e3[E3]
+        e4[E4]
+        e5[E5]
+        e1 -->|l1| e2
+        e2 -->|l1| e3
+        e3 -->|l1| e4
+        e4 -->|l1| e5
+    end
+    subgraph sec_g [Section G]
+        %%metro entry: left | l2
+        g1[G1]
+        g2[G2]
+        g1 -->|l2| g2
+    end
+    a1 -->|l1,l2| b1
+    b1 -->|l1,l2| f1
+    f2 -->|l1| h1
+    b1 -->|l1| e1
+    f2 -->|l2| g1
