@@ -951,10 +951,6 @@
     "note": "Perp-entry drop crossing-X override: the edge's target is always a sectioned station, so tgt_sec resolves and the `tgt_sec is None` short-circuit to the plain drop is never taken; the `direction in (TB, BT)` arm (a drop continuing into a vertical-flow trunk) and the horizontal-target arm are both exercised.",
     "status": "defensive"
   },
-  "inter_section_handlers.py::if corridor is not None and corridor.band_y is not None:::#1": {
-    "note": "A single-line top-entry fan branch drops into the fan's shared inter-row band only when its junction earns a band_y corridor; the corpus's single-line top-entry fans sit at junctions with a bypass-only corridor (band_y is None) or none, so the band_y arm is unexercised.",
-    "status": "needs-review"
-  },
   "inter_section_handlers.py::if fan is not None and corridor is not None and corridor.band_y is not None:::#2": {
     "note": "Corridor-feeder shared inter-row band gate: the corpus's corridor feeders belong to fans whose corridor carries a band_y, so the short-circuit past it (no corridor or bypass-only) is unexercised; it falls to the elif fan-is-not-None global-band branch.",
     "status": "needs-review"
