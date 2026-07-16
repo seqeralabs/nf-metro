@@ -1575,6 +1575,17 @@ gallery:
       double-width with an empty centre lane, even though the hub's exit port
       re-centres its bundle on the fan-out feeder."
 
+  - id: packed_multiline_serpentine_grid
+    source_dir: examples/topologies
+    category: Serpentine Layout
+    description:
+      "A packed multi-row grid where section G shares a grid cell with its
+      upstream producer section E and is also fed from the section above it.
+      Its `entry: top` and `entry: left` hints name conflicting sides; the
+      first-declared side wins and the section enters cleanly from the top
+      rather than resolving to a flow-opposing right entry that folds a line
+      back over its own track."
+
 pipelines:
   - id: rnaseq_auto
     title: nf-core/rnaseq

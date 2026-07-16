@@ -882,6 +882,42 @@ def _natural_entry_side(direction: str) -> PortSide:
     return PortSide.LEFT  # LR default
 
 
+def _collapse_hint_sides(
+    section: Section, dominant: PortSide | None
+) -> PortSide | None:
+    """The single entry side a section's entry hints collapse to.
+
+    A section has one entry side, so hints naming more than one side are
+    contradictory input.  The collapse never leaves the hinted set (that is the
+    bug being fixed -- an off-hint feed direction pulling the entry onto a side
+    the author never named, folding the connector back over the section's
+    internal flow).  Among the hinted sides it prefers the one a feed actually
+    arrives on (``dominant``), else the flow-natural side, else the
+    first-declared -- and warns, naming the sides it drops.  Returns ``None``
+    for a section with no entry hints.
+    """
+    if not section.entry_hints:
+        return None
+    hint_sides = [s for s, _ in section.entry_hints]
+    unique = dict.fromkeys(hint_sides)  # de-dup, preserve declaration order
+    if len(unique) == 1:
+        return next(iter(unique))
+    natural = _natural_entry_side(section.direction)
+    if dominant in unique:
+        chosen = dominant
+    elif natural in unique:
+        chosen = natural
+    else:
+        chosen = hint_sides[0]
+    dropped = sorted(s.name for s in unique if s is not chosen)
+    warnings.warn(
+        f"section {section.id!r}: entry hints name multiple sides; keeping "
+        f"{chosen.name}, dropping {', '.join(dropped)}",
+        stacklevel=2,
+    )
+    return chosen
+
+
 _SIDE_PRIORITY = (PortSide.LEFT, PortSide.RIGHT, PortSide.TOP, PortSide.BOTTOM)
 
 
@@ -936,11 +972,10 @@ def _build_entry_side_mapping(
 
     A line resolves to one entry side:
 
-    - a line named on the section's entry hints uses the hint side.  When the
-      hints agree on one side that side is used (this keeps carriage-return
-      wraps on their leading edge); when they name several sides they collapse
-      to one approach -- the flow-natural side when a feed reaches it, else the
-      dominant feed direction -- so the section reads unambiguously;
+    - a line named on the section's entry hints uses the section's hinted side.
+      A section has one entry side, so hints naming several sides are
+      contradictory: they collapse to one side (:func:`_collapse_hint_sides`),
+      the rest dropped with a warning;
     - a line with no hint takes its side from where its feeds arrive
       (``_dominant_entry_side``), falling back to the LEFT default at lookup
       (left unmapped here) when no predecessor geometry is available.
@@ -965,13 +1000,7 @@ def _build_entry_side_mapping(
             continue
 
         dominant = _dominant_entry_side(graph, sec_id)
-        hint_sides = {s for s, _ in section.entry_hints}
-        if len(hint_sides) == 1:
-            hinted_side = next(iter(hint_sides))
-        elif hint_sides:
-            hinted_side = dominant or _natural_entry_side(section.direction)
-        else:
-            hinted_side = None
+        hinted_side = _collapse_hint_sides(section, dominant)
 
         for lid in incoming:
             side = hinted_side if lid in hinted_lines else dominant

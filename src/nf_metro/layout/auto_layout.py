@@ -1485,6 +1485,40 @@ def _infer_port_sides(
                         section.entry_hints.append((side, sorted(lines)))
 
 
+_FLOW_START_SIDE = {
+    "LR": PortSide.LEFT,
+    "RL": PortSide.RIGHT,
+    "TB": PortSide.TOP,
+    "BT": PortSide.BOTTOM,
+}
+_FLOW_END_SIDE = {
+    "LR": PortSide.RIGHT,
+    "RL": PortSide.LEFT,
+    "TB": PortSide.BOTTOM,
+    "BT": PortSide.TOP,
+}
+
+
+def _same_cell_side(graph: MetroGraph, sec_id: str, other: str) -> PortSide:
+    """Side of ``sec_id`` that a grid-cell co-tenant ``other`` faces.
+
+    Sections packed into one grid cell pack along the flow axis, so their order
+    is the dataflow order: a co-tenant that feeds ``sec_id`` is upstream and
+    sits on its flow-start edge (LEFT for a left-to-right cell); a co-tenant
+    ``sec_id`` feeds sits on the flow-end edge.  Co-tenants the section DAG does
+    not order keep the flow-end default, matching :func:`_relative_side`'s
+    same-position fallback.
+    """
+    dag = graph.section_dag
+    if dag is not None:
+        direction = graph.sections[sec_id].direction
+        if other in dag.predecessors.get(sec_id, set()):
+            return _FLOW_START_SIDE.get(direction, PortSide.LEFT)
+        if other in dag.successors.get(sec_id, set()):
+            return _FLOW_END_SIDE.get(direction, PortSide.RIGHT)
+    return PortSide.RIGHT
+
+
 def _neighbour_side_votes(
     graph: MetroGraph,
     sec_id: str,
@@ -1518,9 +1552,12 @@ def _neighbour_side_votes(
         )
         if skip_unplaced and other_col < 0:
             continue
-        side = _relative_side(
-            my_col, my_row, other_col, other_row, my_col_span, other_col_span
-        )
+        if (other_col, other_row) == (my_col, my_row):
+            side = _same_cell_side(graph, sec_id, other)
+        else:
+            side = _relative_side(
+                my_col, my_row, other_col, other_row, my_col_span, other_col_span
+            )
         votes[side] += len(edge_lines.get(edge_key(other), set()))
     return votes
 
