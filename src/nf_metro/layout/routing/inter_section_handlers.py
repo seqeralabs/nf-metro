@@ -2904,12 +2904,6 @@ def _route_top_entry_l_shape(
             # Drop into the fan's shared traverse band, so this branch and its
             # wrap siblings turn at one Y rather than a few px apart.
             mid_y = corridor.band_y
-        elif _fan_shares_inter_row_channel(ctx, edge):
-            # No shared corridor band, but sibling branches co-travel this
-            # inter-row gap: stagger the channel by the fan rank to keep it an
-            # ``OFFSET_STEP`` off its siblings (which stagger the same way)
-            # rather than leaving every branch on the band centre (an overlay).
-            mid_y = mid_y + fan_offsets(pos_n, ctx.offset_step)[pos_i]
         if not straight_drop:
             lx0 = sx + lead.sign * (
                 ctx.curve_radius + (pos_n - 1) * ctx.offset_step / 2
@@ -3252,17 +3246,22 @@ def _route_left_entry_wrap(
         hy = corridor.band_y
     elif fan is not None and _fan_shares_inter_row_channel(ctx, edge):
         # A fanned wrap with no shared corridor band but sibling branches
-        # co-travelling this inter-row gap shares the channel with them.  The
-        # top-entry siblings seat their run at the band centre plus their
-        # ``fan_offsets`` rank; clamping this branch's stagger into the (often
-        # degenerate) band would collapse the shared channel below
-        # ``OFFSET_STEP``, so land on the same fan-ranked Y.  The builder re-adds
-        # ``delta`` on the traverse, so pre-subtract it.
-        pos_i = fan[0]
-        band_centre = inter_row_channel_y(
-            ctx.graph, src, tgt, sy, ty, dy, ctx.curve_radius
-        )
-        hy = band_centre + fan_offsets(pos_n, ctx.offset_step)[pos_i] - delta
+        # co-travelling this inter-row gap shares the channel with them.  Seat it
+        # on the same band centre the top-entry siblings use -- the unclamped gap
+        # centre, lifted so the fan bundle clears the source section's bottom
+        # edge (mirroring the top-entry's n>1 lift).  The builder re-adds
+        # ``delta`` on the traverse, giving the concentric ``band + delta``
+        # stagger the top-entry taper produces, so the two run one OFFSET_STEP
+        # apart rather than a frame offset apart.  Clamping into the (often
+        # degenerate) band would instead collapse the shared channel.
+        hy = inter_row_channel_y(ctx.graph, src, tgt, sy, ty, dy, ctx.curve_radius)
+        src_sec = resolve_section(ctx.graph, src)
+        if src_sec is not None:
+            src_bottom = src_sec.bbox_y + src_sec.bbox_h
+            hy = max(
+                hy,
+                src_bottom + INTER_ROW_EDGE_CLEARANCE + (pos_n - 1) * ctx.offset_step,
+            )
     else:
         hy = inter_row_channel_y(
             ctx.graph, src, tgt, sy, ty, dy, ctx.curve_radius, delta

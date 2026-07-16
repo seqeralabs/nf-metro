@@ -331,6 +331,14 @@
     "note": "Defensive guard in _fan_shares_inter_row_channel: the edge is a fan branch into an entry port, which always resolves to a section, so the None arm is unreachable in practice.",
     "status": "defensive"
   },
+  "inter_section_handlers.py::if src_sec is not None:::#1": {
+    "note": "Defensive guard in the fanned entry-wrap source-clearance lift: a fan-out junction always resolves to its source section, so the None arm is unreachable in practice.",
+    "status": "defensive"
+  },
+  "context.py::if len(set(tx.values())) < 2:::#1": {
+    "note": "Defensive guard in fanout_divergence_peel_order's packed-cell branch: distinct sections sharing one grid cell have distinct entry-port X, so the same-X arm (which bails to declaration order) is unreachable in the corpus.",
+    "status": "defensive"
+  },
   "inter_section_handlers.py::if fan is not None and ep_col is not None:::#1": {
     "note": "Reachable only via a defective render (inter-row corridor on a <78px gap); see #722.",
     "status": "needs-review"
