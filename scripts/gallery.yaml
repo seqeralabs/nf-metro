@@ -727,6 +727,21 @@ gallery:
       "A two-line bundle folds through a 2x3 section grid, wrapping twice. Each wrap
       returns through its own inter-row gap, so the two stacked return runs stay on
       distinct channels rather than collapsing onto one."
+  - id: packed_multiline_serpentine_grid
+    source_dir: examples/topologies
+    category: Serpentine Layout
+    description:
+      "A packed multi-row grid where a section shares its cell with the producer
+      that feeds it and is also fed from the row above: one line enters from the
+      left, another from the top. The two perpendicular approaches are honoured
+      separately instead of folding back over the section's own track."
+  - id: mixed_entry_perpendicular
+    source_dir: examples/topologies
+    category: Serpentine Layout
+    description:
+      "A destination section entered by one line from the left and another from the
+      top. Distinct lines on perpendicular sides read unambiguously, so each keeps
+      its own entry side rather than collapsing onto one."
   - id: serpentine_rl_bundle
     source_dir: examples/topologies
     category: Serpentine Layout
