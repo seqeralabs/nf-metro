@@ -23,6 +23,8 @@ from nf_metro.layout.constants import (
     INTER_ROW_EDGE_CLEARANCE,
     INTER_ROW_HEADER_CLEARANCE,
     MERGE_ROUTE_MARGIN,
+    NEXT_ROW_HEADER_BADGE_CLEARANCE,
+    SECTION_HEADER_PROTRUSION,
     SECTION_ROUTE_CLEARANCE,
 )
 from nf_metro.layout.routing.bundle import build_tapered_bundle
@@ -2806,7 +2808,10 @@ def _route_top_entry_l_shape(
     # For a same-row cross-column producer the generic fallback in
     # inter_row_channel_y places the channel at ty + clearance (inside the
     # section bbox).  The route must approach the TOP entry from ABOVE the
-    # boundary, so override mid_y to sit above the row's top edge.
+    # boundary; seat the channel just above the target's own top edge, clearing
+    # its header badge and a corner curve.  The full inter-row header band is
+    # for a route traversing the whole gap, and would overshoot far past the
+    # port before turning back down.
     src_sec = resolve_section(ctx.graph, src)
     tgt_sec = resolve_section(ctx.graph, tgt)
     if (
@@ -2815,13 +2820,11 @@ def _route_top_entry_l_shape(
         and src_sec.grid_row == tgt_sec.grid_row
         and mid_y > ty
     ):
-        # The route must approach the TOP entry from above the row's top edge.
-        mid_y = header_corridor_y(
-            ctx.graph,
-            tgt_sec.grid_row,
-            below=False,
-            base_radius=ctx.curve_radius,
-            default=ty,
+        mid_y = (
+            ty
+            - SECTION_HEADER_PROTRUSION
+            - NEXT_ROW_HEADER_BADGE_CLEARANCE
+            - ctx.curve_radius
         )
 
     # A multi-line bundle fans the channel toward the source box (the line
