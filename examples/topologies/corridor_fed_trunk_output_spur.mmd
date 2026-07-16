@@ -1,0 +1,50 @@
+%%metro title: Corridor-fed trunk short output spur
+%%metro style: nfcore
+%%metro file: fdata | DATA
+%%metro file: out1 | OUTPUT
+%%metro line: l1 | Line 1 | #e6007e
+%%metro grid: corr_sec | 1,0
+%%metro grid: feed_sec | 0,1
+%%metro grid: main_sec | 2,1
+%%metro grid: dst_sec | 3,1
+
+graph LR
+    subgraph corr_sec [Corridor]
+        %%metro exit: right | l1
+        b1[B1]
+        b2[B2]
+
+        b1 -->|l1| b2
+    end
+
+    subgraph feed_sec [Feeder]
+        %%metro exit: right | l1
+        d1[D1]
+        d2[D2]
+
+        d1 -->|l1| d2
+        d2 -->|l1| fdata
+    end
+
+    subgraph main_sec [Main]
+        %%metro entry: left | l1
+        %%metro exit: right | l1
+        e1[E1]
+        e2[E2]
+        e3[E3]
+        e4[E4]
+
+        e1 -->|l1| out1
+        e2 -->|l1| e3
+        e3 -->|l1| e4
+    end
+
+    subgraph dst_sec [Sink]
+        %%metro entry: left | l1
+        z1[Z1]
+    end
+
+    b2 -->|l1| e1
+    b2 -->|l1| e2
+    fdata -->|l1| e2
+    e4 -->|l1| z1
