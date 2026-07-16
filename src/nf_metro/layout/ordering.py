@@ -826,14 +826,9 @@ def _place_fan_out(
     # through-line exists -- a terminal section whose branches all end in output
     # files has no trunk to award, so its fan keeps the default placement.
     if graph is not None and not pred_avgs:
-        mains = [node for node in nodes if node in exit_reaching]
-        spurs = [
-            node
-            for node in nodes
-            if node not in exit_reaching
-            and _leads_only_to_off_track_output(node, G, graph)
-        ]
-        if mains and spurs and len(mains) + len(spurs) == n:
+        split = split_output_spur_fan(nodes, exit_reaching, G, graph)
+        if split is not None:
+            mains, spurs = split
             m = len(mains)
             for i, node in enumerate(mains):
                 tracks[node] = anchor + (i - (m - 1) / 2) * fan_spacing
