@@ -3485,6 +3485,34 @@ def test_diagonal_strike_guard_teeth_and_exemptions():
     _guard_no_diagonal_strikes_horizontal_label(bypass, "test")
 
 
+def test_multiline_ascent_to_exit_clears_sibling_label():
+    """A multi-line side branch ascending to an exit port clears sibling labels.
+
+    A station carrying the full bundle sitting off the trunk and fed only from
+    the section boundary is a genuine side branch: its ascent to the shared exit
+    port must turn late (near the port) so it rides its own track rather than
+    seating mid-section, where a trunk sibling's horizontal name label extends.
+    The ``exit_fan_label_strike`` fixture isolates the #1449 repro -- ``Salmon``
+    fans up to the exit past the wide ``BEDTools genomecov`` label; a midpoint
+    diagonal rakes that label.
+
+    Parsed the render way (no ``center_ports`` override that ``_layout`` applies
+    to ``tests/fixtures/`` files) so the geometry matches what the runtime guard
+    checks.  The broader strike-free invariant over the example corpus lives in
+    ``test_no_diagonal_strikes_label``.
+    """
+    from nf_metro.layout.phases.spacing import _struck_stations_and_collinear
+
+    path = _resolve_fixture("topologies/exit_fan_label_strike.mmd")
+    graph = parse_metro_mermaid(path.read_text())
+    compute_layout(graph)
+    struck, collinear = _struck_stations_and_collinear(graph)
+    assert not struck, "diagonals rake label glyph ink: " + ", ".join(
+        sorted(graph.stations[s].label for s in struck)
+    )
+    assert not collinear, "collinear overlay"
+
+
 @pytest.mark.parametrize("fixture", _FIXTURES_WITH_DOWNWARD_OUTPUT)
 def test_downward_off_track_output_route_clears_producer_label(fixture):
     """A downward off-track output's route clears its producer's name label
