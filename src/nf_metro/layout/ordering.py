@@ -675,6 +675,32 @@ def _leads_only_to_off_track_output(
     )
 
 
+def split_output_spur_fan(
+    candidates: list[str],
+    exit_reaching: frozenset[str],
+    G: nx.DiGraph[str],
+    graph: MetroGraph,
+) -> tuple[list[str], list[str]] | None:
+    """Split a root fan into through-chain mains and off-track output spurs.
+
+    Returns ``(mains, spurs)`` when every candidate is either a through-line
+    reaching a section exit or a short spur dead-ending at an off-track output,
+    with both groups non-empty; otherwise ``None``.  The section trunk belongs
+    to the mains so the through-chain rides it and the spurs peel off; a fan
+    with no genuine through-line (every branch ends in an output file) has no
+    trunk to award and yields ``None``.
+    """
+    mains = [node for node in candidates if node in exit_reaching]
+    spurs = [
+        node
+        for node in candidates
+        if node not in exit_reaching and _leads_only_to_off_track_output(node, G, graph)
+    ]
+    if mains and spurs and len(mains) + len(spurs) == len(candidates):
+        return mains, spurs
+    return None
+
+
 def _place_fan_out(
     nodes: list[str],
     base: float,
@@ -800,14 +826,9 @@ def _place_fan_out(
     # through-line exists -- a terminal section whose branches all end in output
     # files has no trunk to award, so its fan keeps the default placement.
     if graph is not None and not pred_avgs:
-        mains = [node for node in nodes if node in exit_reaching]
-        spurs = [
-            node
-            for node in nodes
-            if node not in exit_reaching
-            and _leads_only_to_off_track_output(node, G, graph)
-        ]
-        if mains and spurs and len(mains) + len(spurs) == n:
+        split = split_output_spur_fan(nodes, exit_reaching, G, graph)
+        if split is not None:
+            mains, spurs = split
             m = len(mains)
             for i, node in enumerate(mains):
                 tracks[node] = anchor + (i - (m - 1) / 2) * fan_spacing

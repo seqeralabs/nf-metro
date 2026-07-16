@@ -1525,6 +1525,14 @@ gallery:
       file. The long chain rides the section trunk straight and the short output branch
       peels off it, rather than the short branch taking the trunk and forcing the main
       chain onto a diagonal that crosses it (issue #1487)."
+  - id: corridor_fed_trunk_output_spur
+    source_dir: examples/topologies
+    category: Off-track & Rails
+    description:
+      "A section entered through a LEFT corridor port that fans to a through-chain arm
+      (reaching the exit) plus a short off-track output spur. The through-chain rides the
+      entry trunk with the spur peeling off below, and the same-row feeder runs straight
+      into the port rather than kinking down onto an off-trunk entry (issue #1497)."
   - id: off_track_convergence
     source_dir: examples/topologies
     category: Off-track & Rails
