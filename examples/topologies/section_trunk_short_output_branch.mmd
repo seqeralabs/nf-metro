@@ -1,0 +1,35 @@
+%%metro title: Section trunk short output branch
+%%metro style: nfcore
+%%metro file: sink | OUTPUT
+%%metro line: l1 | Line 1 | #e6007e
+
+graph LR
+    subgraph src_sec [Source]
+        %%metro exit: right | l1
+        p1[P1]
+        p2[P2]
+    end
+
+    subgraph main_sec [Main]
+        %%metro entry: left | l1
+        %%metro exit: right | l1
+        s1[S1]
+        s2[S2]
+        s3[S3]
+        s4[S4]
+        s5[S5]
+
+        s1 -->|l1| sink
+        s2 -->|l1| s3
+        s3 -->|l1| s4
+        s3 -->|l1| s5
+    end
+
+    subgraph dst_sec [Sink]
+        %%metro entry: left | l1
+        t1[T1]
+    end
+
+    p1 -->|l1| s1
+    p2 -->|l1| s2
+    s4 -->|l1| t1
