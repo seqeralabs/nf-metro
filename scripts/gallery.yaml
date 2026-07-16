@@ -854,6 +854,16 @@ gallery:
       traverses below the neighbour, rather than descending the crossed column's
       outer gap and threading the neighbour's interior (issue #1486, vertical
       descent variant)."
+  - id: fan_top_entry_over_tall_section
+    source_dir: examples/topologies
+    category: Serpentine Layout
+    description:
+      "A fan-out junction with mixed-handler branches shares one inter-row
+      traverse band. One branch is a TOP-entry drop into a section stacked below
+      a different, shorter column; its horizontal trunk leg must clear the taller
+      row-above section in the crossed column rather than skim its interior. The
+      band is measured across the columns the fan's gap branches traverse so the
+      run drops below that taller box (issue #1486, horizontal channel variant)."
   - id: branch_fold_forward
     source_dir: examples/topologies
     category: Serpentine Layout
