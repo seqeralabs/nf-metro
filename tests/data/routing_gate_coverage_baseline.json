@@ -210,6 +210,7 @@
   "normalize.py::if abs(dx) > COORD_TOLERANCE:::#1",
   "normalize.py::if abs(ly - pts[1][1]) < COORD_TOLERANCE:::#1",
   "normalize.py::if abs(x3 - x2) > COORD_TOLERANCE or abs(y3 - y2) <= COORD_TOLERANCE:::#1",
+  "normalize.py::if anchor_section_id is not None and anchor_side is not None:::#1",
   "normalize.py::if any(::#3",
   "normalize.py::if any(::#4",
   "normalize.py::if band is not None:::#1",
