@@ -1493,16 +1493,7 @@ def test_merge_fanout_shares_corner_by_construction(fixture, monkeypatch):
     assert not violations, "; ".join(v.message() for v in violations)
 
 
-_XFAIL_SYMFAN_PAIRS_SHARE_Y: dict[str, str] = {
-    "topologies/packed_multiline_serpentine_grid.mmd": (
-        "issue #1497: sec_e is a corridor-fed single-line section whose entry "
-        "fans to a through-chain arm (e2->e3->e4/e5) plus a short output spur "
-        "(e1->file5); the through-chain arm rides y=508 while the entry sits at "
-        "y=548, so the section carries two vertically-offset symmetric fans and "
-        "the single-trunk oracle cannot hold for both. The #1487 same-row trunk "
-        "selection does not compose onto this corridor-fed + cross-fed variant."
-    ),
-}
+_XFAIL_SYMFAN_PAIRS_SHARE_Y: dict[str, str] = {}
 
 
 @pytest.mark.parametrize(
