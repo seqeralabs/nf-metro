@@ -106,6 +106,45 @@ def _entry_consumer_y(
     return min(ys, key=lambda y: abs(y - port_st.y))
 
 
+def _entry_fan_trunk_station(
+    graph: MetroGraph, port_id: str, entry_section: Section
+) -> Station | None:
+    """The trunk station of this entry port's own internal root fan, if any.
+
+    When a single entry port feeds more than one station directly (a root
+    fan), the port should sit flush with whichever of those directly-fed
+    targets carries every line the port carries -- not with whatever row one
+    arbitrary upstream predecessor happens to occupy.  Trusting the
+    predecessor's row is fine for the common single-target case, but for a
+    multi-target fan it can drift onto a row that matches none of the port's
+    own targets, forcing every line into a dogleg right at the section
+    boundary.
+
+    The superset check is scoped to lines carried *directly from this port*
+    to each target, not each target's full line set: a target can aggregate
+    an extra line internally (e.g. via a predecessor also fed by this same
+    port), which would tie it with the true trunk on line count alone even
+    though only the trunk receives every port line first-hand.
+
+    Returns ``None`` when the port feeds a single target or its targets have
+    no unique such trunk.
+    """
+    lines_by_target: dict[str, set[str]] = {}
+    for edge in graph.edges_from(port_id):
+        st = graph.station_for_edge_target(edge)
+        if st.is_port or st.section_id != entry_section.id:
+            continue
+        lines_by_target.setdefault(st.id, set()).add(edge.line_id)
+    if len(lines_by_target) < 2:
+        return None
+    trunk_id, trunk_lines = max(lines_by_target.items(), key=lambda kv: len(kv[1]))
+    if all(
+        lines < trunk_lines for tid, lines in lines_by_target.items() if tid != trunk_id
+    ):
+        return graph.stations.get(trunk_id)
+    return None
+
+
 def _align_lr_entry_port(
     graph: MetroGraph,
     port_id: str,
@@ -114,6 +153,12 @@ def _align_lr_entry_port(
     junction_ids: set[str],
 ) -> None:
     """Align a LEFT/RIGHT entry port's Y with its incoming source."""
+    if lanes_run_along_y(entry_section.direction):
+        trunk_st = _entry_fan_trunk_station(graph, port_id, entry_section)
+        if trunk_st is not None:
+            _set_port_y(graph, port_id, trunk_st.y)
+            return
+
     for edge in graph.edges_to(port_id):
         src = graph.station_for_edge_source(edge)
         if not (src.is_port or edge.source in junction_ids):
