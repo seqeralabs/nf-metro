@@ -23,6 +23,7 @@ from nf_metro.layout.constants import (
     INTER_ROW_EDGE_CLEARANCE,
     INTER_ROW_HEADER_CLEARANCE,
     MERGE_ROUTE_MARGIN,
+    NEXT_ROW_HEADER_BADGE_CLEARANCE,
     SECTION_ROUTE_CLEARANCE,
 )
 from nf_metro.layout.routing.bundle import build_tapered_bundle
@@ -67,6 +68,7 @@ from nf_metro.layout.routing.common import (
     resolve_section,
     row_bottom_edge,
     row_top_edge,
+    section_header_top,
     symmetric_bundle_midpoint,
     trailing_perp_side,
     vertical_direction,
@@ -2814,7 +2816,13 @@ def _route_top_entry_l_shape(
     # For a same-row cross-column producer the generic fallback in
     # inter_row_channel_y places the channel at ty + clearance (inside the
     # section bbox).  The route must approach the TOP entry from ABOVE the
-    # boundary, so override mid_y to sit above the row's top edge.
+    # boundary.  header_corridor_y gives the safe channel that clears the
+    # row-above band (and, for the topmost row, stays out of the canvas title
+    # band); when that band over-reserves -- a section merely exists somewhere
+    # in the row above, so the full inter-row clearance applies even though
+    # nothing sits over the target's own column -- pull the channel down to
+    # just clear the target's own header badge, so the up-leg doesn't overshoot
+    # far past the port before turning back down.
     src_sec = resolve_section(ctx.graph, src)
     tgt_sec = resolve_section(ctx.graph, tgt)
     if (
@@ -2823,14 +2831,19 @@ def _route_top_entry_l_shape(
         and src_sec.grid_row == tgt_sec.grid_row
         and mid_y > ty
     ):
-        # The route must approach the TOP entry from above the row's top edge.
-        mid_y = header_corridor_y(
+        corridor_y = header_corridor_y(
             ctx.graph,
             tgt_sec.grid_row,
             below=False,
             base_radius=ctx.curve_radius,
             default=ty,
         )
+        badge_clear_y = (
+            section_header_top(tgt_sec)
+            - NEXT_ROW_HEADER_BADGE_CLEARANCE
+            - ctx.curve_radius
+        )
+        mid_y = max(corridor_y, badge_clear_y)
 
     # A multi-line bundle fans the channel toward the source box (the line
     # nearest it sits a bundle-width above the centre); keep the centre low

@@ -1,0 +1,27 @@
+%%metro title: Top Entry Fed From Left Neighbour
+%%metro directional: true
+%%metro line: main | Main | #2db572
+%%metro file: aux | Ref
+%%metro off_track: aux
+%%metro grid: intake | 0,0
+%%metro grid: screen | 1,0
+%%metro grid: producer | 1,1
+%%metro grid: consumer | 2,1
+
+graph LR
+    subgraph intake [Intake]
+        i0[Load]
+    end
+    subgraph screen [Screen]
+        s0[Filter]
+    end
+    subgraph producer [Producer]
+        aux[ ] -->|main| p0
+        p0[Prep]
+    end
+    subgraph consumer [Consumer]
+        %%metro entry: top | main
+        c0[Analyse]
+    end
+    i0 -->|main| s0
+    p0 -->|main| c0

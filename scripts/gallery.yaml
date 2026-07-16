@@ -148,6 +148,16 @@ gallery:
       inter-section descent tapers that offset away before the boundary so it
       lands on the port's own X, meeting the intra-section drop as one
       continuous stroke rather than stepping sideways across the top edge."
+  - id: top_entry_left_neighbour
+    source_dir: examples/topologies
+    category: Feature Showcase
+    description:
+      "A section with a `entry: top` port fed by its left neighbour in the same
+      grid row. The connector rises in the inter-section gap to just above the
+      target's top edge, runs across to the port's column, and drops straight
+      in. The port rides the top edge even when the box grows upward to align
+      with a taller row-mate, and the up-leg clears only the header badge rather
+      than overshooting into the shared inter-row channel."
 
   # ── Realistic Pipelines ────────────────────────────────────────────────────
   - id: genomic_pipeline
