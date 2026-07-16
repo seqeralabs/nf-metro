@@ -763,6 +763,7 @@ def fanout_divergence_peel_order(
 
     reach: dict[str, int] = {}
     drow: dict[str, int] = {}
+    tx: dict[str, float] = {}
     claimed: dict[str, str] = {}
     for edge in graph.edges_from(jid):
         tgt = graph.station_for_edge_target(edge)
@@ -781,6 +782,7 @@ def fanout_divergence_peel_order(
         claimed[edge.target] = edge.line_id
         reach[edge.line_id] = tcol - src_col
         drow[edge.line_id] = trow - src_row
+        tx[edge.line_id] = tgt.x
 
     if len(reach) < 2:
         return None
@@ -790,8 +792,24 @@ def fanout_divergence_peel_order(
         # member that leads as the shallowest peel, unlike the column-spreading
         # branch below, which rejects any zero descent.
         descenders = [d for d in drow.values() if d != 0]
-        if len(set(drow.values())) < 2 or len({d > 0 for d in descenders}) != 1:
+        if len({d > 0 for d in descenders}) != 1:
             return None
+        if len(set(drow.values())) < 2:
+            # Grid rows coincide: the targets are distinct sections packed into
+            # one cell, so order by each entry port's actual X -- the descent
+            # spreads to distinct columns even though the grid does not. The
+            # farthest-reaching port rides the outer side of the shared drop, the
+            # same rule the distinct-column fan below applies to ``reach``.
+            if len(set(tx.values())) < 2:
+                return None
+            drop_down = descenders[0] > 0
+            return sorted(
+                reach,
+                key=lambda lid: (
+                    abs(tx[lid] - jst.x) if drop_down else -abs(tx[lid] - jst.x),
+                    line_priority.get(lid, 0),
+                ),
+            )
         return sorted(reach, key=lambda lid: (drow[lid], line_priority.get(lid, 0)))
 
     if 0 in drow.values():

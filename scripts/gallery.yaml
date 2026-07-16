@@ -1604,6 +1604,17 @@ gallery:
       gap: the render reflows the lower rows down to absorb the late growth rather than
       letting its header badge collide with the grown box."
 
+  - id: fanout_intersection_shared_channel
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "A source fans out at a junction to two stacked sections below it, and the
+      two feed routes co-travel a shared horizontal inter-section channel before
+      peeling into a top entry and a left entry. The co-travelling lines keep one
+      `OFFSET_STEP` apart on the shared run rather than collapsing to a half-step
+      overlay when the inter-row gap is too narrow to reserve a shared fan
+      corridor."
+
   - id: fanout_hub_two_line_trunk
     source_dir: examples/topologies
     category: Multi-line Bundles

@@ -309,33 +309,68 @@ def test_offset_collapse_caught_when_spread_pair_drawn_flush() -> None:
 
 
 def test_same_slot_bundle_is_not_offset_collapse() -> None:
-    """Distinct lines the regime put on one slot draw flush without a finding."""
-    from nf_metro.render.validate import _flush_run
+    """Distinct lines the regime put on one slot draw flush without a finding.
 
-    # Fixtures whose offset regime draws two distinct lines flush on one slot.
-    # Iterated rather than pinned to one so improving any single fixture's
-    # layout leaves the validator property exercised by the others.
-    candidates = (
-        "topologies/same_line_fan_distinct_descent.mmd",
-        "topologies/top_entry_bundle_offset_seam.mmd",
+    An interchange (rail) bundle assigns two distinct lines one shared slot;
+    when such a pair draws flush the validator must recognise the assigned gap
+    is sub-step and raise nothing, unlike a real collapse (a pair the regime
+    spread by a full step drawn onto one stroke).  The engine spreads every
+    ordinary bundle, so a genuine same-slot pair is located from the assigned
+    geometry and forced onto one drawn stroke to exercise the tolerance.
+    """
+    from nf_metro.render.validate import (
+        _PITCH_MIN,
+        _RUN_MIN,
+        _expected_line_segments,
+        _flush_run,
     )
-    exercised = False
-    for name in candidates:
-        if name not in CORPUS:
-            continue
-        svg = _render(name)
-        segs = drawn_segments(parse_route_polylines(svg))
-        flush = any(
-            la != lb and _flush_run((a1, a2), (b1, b2)) is not None
-            for i, (la, a1, a2) in enumerate(segs)
-            for lb, b1, b2 in segs[i + 1 :]
-        )
-        if not flush:
-            continue
-        exercised = True
-        findings = validate_render(svg, graph=_LAID_OUT[name])
-        assert not [f for f in findings if f.kind == OFFSET_COLLAPSE], (
-            f"{name}: distinct lines the regime put on one slot were flagged "
-            f"as an offset collapse"
-        )
-    assert exercised, "no candidate fixture exercises a same-slot flush bundle"
+
+    name = "rail_mode.mmd"
+    graph = _LAID_OUT[name]
+    svg = _render(name)
+    expected = _expected_line_segments(graph)
+
+    def h_runs(line: str) -> list[tuple[float, float, float]]:
+        return [
+            (min(s[0][0], s[1][0]), max(s[0][0], s[1][0]), s[0][1])
+            for s in expected.get(line, [])
+            if abs(s[0][1] - s[1][1]) < 0.1 and abs(s[1][0] - s[0][0]) >= _RUN_MIN
+        ]
+
+    lines = sorted(expected)
+    pair = next(
+        (
+            (la, lb, max(xa0, xb0), min(xa1, xb1), (ya + yb) / 2)
+            for i, la in enumerate(lines)
+            for lb in lines[i + 1 :]
+            for xa0, xa1, ya in h_runs(la)
+            for xb0, xb1, yb in h_runs(lb)
+            if abs(ya - yb) < _PITCH_MIN
+            and min(xa1, xb1) - max(xa0, xb0) >= _RUN_MIN + 2
+        ),
+        None,
+    )
+    assert pair is not None, f"{name} has no same-slot assigned distinct-line run"
+    line_a, line_b, x_lo, x_hi, y = pair
+
+    merged = _inject_segment(svg, line_a, (x_lo + 1, y), (x_hi - 1, y))
+    merged = _inject_segment(merged, line_b, (x_lo + 1, y), (x_hi - 1, y))
+
+    drawn = drawn_segments(parse_route_polylines(merged))
+    flushed = any(
+        {la, lb} == {line_a, line_b} and _flush_run((a1, a2), (b1, b2)) is not None
+        for i, (la, a1, a2) in enumerate(drawn)
+        for lb, b1, b2 in drawn[i + 1 :]
+    )
+    assert flushed, "injected same-slot pair did not draw flush"
+
+    collapses = [
+        f
+        for f in validate_render(merged, graph=graph)
+        if f.kind == OFFSET_COLLAPSE
+        and f"'{line_a}'" in f.message
+        and f"'{line_b}'" in f.message
+    ]
+    assert not collapses, (
+        f"same-slot bundle {line_a!r}/{line_b!r} wrongly flagged as an offset collapse"
+    )
