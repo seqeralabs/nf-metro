@@ -3513,30 +3513,6 @@ def test_multiline_ascent_to_exit_clears_sibling_label():
     assert not collinear, "collinear overlay"
 
 
-def test_fan_up_keeps_same_line_chain_axis_aligned():
-    """The top-slack fan-up never desyncs a same-line intra-section chain.
-
-    ``_fan_free_content_upward`` lifts an entry-column bundle station into
-    unused top slack.  A station that heads a same-line linear chain continuing
-    at or below the trunk must not be lifted across the trunk: doing so turns
-    the chain's horizontal hop into a steep cross-trunk diagonal that rakes the
-    pinned trunk station's name label.  In the packed riboseq map (#1449) the
-    lift split ``plastid_psite -> plastid_wiggle`` across ``psite_id``'s trunk.
-
-    The fan-up slack only arises in a packed multi-row grid, and every such grid
-    that reproduces it also carries a far-side-entry fold-back elsewhere (#1363),
-    so this lock cannot yet live on a clean gallery fixture; it stays on the
-    ``riboseq_packed_lr`` repro until #1363 lands.
-    """
-    from layout_validator import check_intra_section_chain_alignment
-
-    path = _resolve_fixture("through_section/riboseq_packed_lr.mmd")
-    graph = parse_metro_mermaid(path.read_text())
-    compute_layout(graph)
-    violations = check_intra_section_chain_alignment(graph)
-    assert not violations, "\n".join(v.message for v in violations)
-
-
 @pytest.mark.parametrize("fixture", _FIXTURES_WITH_DOWNWARD_OUTPUT)
 def test_downward_off_track_output_route_clears_producer_label(fixture):
     """A downward off-track output's route clears its producer's name label

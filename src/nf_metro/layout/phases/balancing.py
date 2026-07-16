@@ -169,35 +169,6 @@ def _entry_consumer_ys(graph: MetroGraph, entry_id: str) -> list[float]:
     return ys
 
 
-def _lift_would_desync_successor(
-    graph: MetroGraph,
-    station_id: str,
-    internal_ids: set[str],
-    anchor_y: float,
-) -> bool:
-    """Return True when lifting *station_id* above ``anchor_y`` would separate
-    it from a same-line successor that stays at or below the trunk.
-
-    The fan-up assumes an entry-column trunk candidate's downstream chain
-    branches away from the trunk, so lifting the candidate alone keeps that
-    chain's relation to the trunk station it branches from.  When the candidate
-    instead heads a same-line linear continuation that stays inside the section
-    at or below the anchor (trunk) Y, lifting the candidate across the trunk
-    turns that horizontal hop into a steep cross-trunk diagonal, which rakes the
-    pinned trunk station's horizontal name label.
-    """
-    lines = set(graph.station_lines(station_id))
-    for edge in graph.edges_from(station_id):
-        succ = edge.target
-        if (
-            succ in internal_ids
-            and set(graph.station_lines(succ)) == lines
-            and _ref_y(graph, succ) >= anchor_y - SAME_COORD_TOLERANCE
-        ):
-            return True
-    return False
-
-
 def _fan_free_content_upward(
     graph: MetroGraph, section_y_padding: float, y_spacing: float
 ) -> None:
@@ -277,12 +248,10 @@ def _fan_free_content_upward(
         trunk_candidates.sort(key=lambda s: _ref_y(graph, s))
         pinned = trunk_candidates[0]
         anchor_y = _ref_y(graph, pinned)
-        internal_set = set(internal_ids)
         to_lift = [
             sid
             for sid in trunk_candidates[1 : 1 + slots]
             if not _lift_would_cause_uturn(graph, sid, section.id, anchor_y)
-            and not _lift_would_desync_successor(graph, sid, internal_set, anchor_y)
         ]
         for i, sid in enumerate(to_lift, 1):
             graph.stations[sid].y = anchor_y - i * y_spacing
