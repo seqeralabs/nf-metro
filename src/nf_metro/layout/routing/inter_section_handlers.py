@@ -2904,6 +2904,12 @@ def _route_top_entry_l_shape(
             # Drop into the fan's shared traverse band, so this branch and its
             # wrap siblings turn at one Y rather than a few px apart.
             mid_y = corridor.band_y
+        elif _fan_shares_inter_row_channel(ctx, edge):
+            # No shared corridor band, but sibling branches co-travel this
+            # inter-row gap: stagger the channel by the fan rank to keep it an
+            # ``OFFSET_STEP`` off its siblings (which stagger the same way)
+            # rather than leaving every branch on the band centre (an overlay).
+            mid_y = mid_y + fan_offsets(pos_n, ctx.offset_step)[pos_i]
         if not straight_drop:
             lx0 = sx + lead.sign * (
                 ctx.curve_radius + (pos_n - 1) * ctx.offset_step / 2
@@ -3079,6 +3085,30 @@ def _v1_corner_x(ctx: _RoutingCtx, src: Station, sx: float, corner_x: float) -> 
     return corner_x + max(0.0, SECTION_ROUTE_CLEARANCE - current_gap)
 
 
+def _fan_shares_inter_row_channel(ctx: _RoutingCtx, edge: Edge) -> bool:
+    """True when *edge*'s fan-out junction sends two or more distinct lines into
+    *edge*'s target row.
+
+    Those branches drop into the same inter-row gap and co-travel it before
+    peeling into their own targets, so they form one bundle that must keep an
+    ``OFFSET_STEP`` between its lines.  A junction whose only branch into this
+    row is *edge*'s own line runs a solo channel with nothing to separate from,
+    so it keeps the plain band-centred run rather than a fan stagger.
+    """
+    graph = ctx.graph
+    port = graph.ports.get(edge.target)
+    tgt_sec = graph.sections.get(port.section_id) if port is not None else None
+    if tgt_sec is None:
+        return False
+    lines: set[str] = set()
+    for sibling in graph.edges_from(edge.source):
+        sib_port = graph.ports.get(sibling.target)
+        sib_sec = graph.sections.get(sib_port.section_id) if sib_port else None
+        if sib_sec is not None and sib_sec.grid_row == tgt_sec.grid_row:
+            lines.add(sibling.line_id)
+    return len(lines) >= 2
+
+
 def _wrap_fan_geometry(
     ctx: _RoutingCtx, edge: Edge, src: Station, i: int, n: int, vertical: Direction
 ) -> tuple[tuple[int, int] | None, int, float, float]:
@@ -3220,14 +3250,14 @@ def _route_left_entry_wrap(
     corridor = ctx.fan_corridors.get(edge.source)
     if fan is not None and corridor is not None and corridor.band_y is not None:
         hy = corridor.band_y
-    elif fan is not None:
-        # A fanned wrap with no shared corridor band (the inter-row gap is too
-        # narrow to reserve one) shares the channel with top-entry fan siblings,
-        # which seat their run at the band centre plus their ``fan_offsets`` rank
-        # unclamped.  Clamping this branch's stagger into the degenerate band
-        # instead would collapse the shared channel below ``OFFSET_STEP``, so
-        # land on the same fan-ranked Y; the builder re-adds ``delta`` on the
-        # traverse, so pre-subtract it.
+    elif fan is not None and _fan_shares_inter_row_channel(ctx, edge):
+        # A fanned wrap with no shared corridor band but sibling branches
+        # co-travelling this inter-row gap shares the channel with them.  The
+        # top-entry siblings seat their run at the band centre plus their
+        # ``fan_offsets`` rank; clamping this branch's stagger into the (often
+        # degenerate) band would collapse the shared channel below
+        # ``OFFSET_STEP``, so land on the same fan-ranked Y.  The builder re-adds
+        # ``delta`` on the traverse, so pre-subtract it.
         pos_i = fan[0]
         band_centre = inter_row_channel_y(
             ctx.graph, src, tgt, sy, ty, dy, ctx.curve_radius

@@ -763,7 +763,13 @@ def _wrap_bundle_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]
             # A multi-row crossing routed around below the stack
             # (``_route_around_section_below``) is sized by that path.
             continue
-        per_gap[gap][edge.target].add(edge.line_id)
+        # A fan-out junction's branches into different ports co-travel one
+        # shared channel through the gap, so their lines must be reserved
+        # together (keyed by the junction) rather than counted per-port -- a
+        # per-port count reserves a single-line band and squeezes the fan
+        # bundle flush against the box edges.
+        key = edge.source if graph.is_fanout_junction(edge.source) else edge.target
+        per_gap[gap][key].add(edge.line_id)
 
     offset_step = resolve_offset_step(graph.track_gap)
     return {

@@ -323,9 +323,13 @@
     "note": "Reachable only via a defective render (inter-row corridor on a <78px gap); see #722.",
     "status": "needs-review"
   },
-  "inter_section_handlers.py::elif fan is not None:::#2": {
+  "inter_section_handlers.py::elif fan is not None:::#1": {
     "note": "Corridor-feeder fallback for a fan whose junction earned no corridor (its in-column gap below does not fit the bundle); the corpus's fans all earn a corridor, so this global-band branch is unexercised.",
     "status": "needs-review"
+  },
+  "inter_section_handlers.py::if tgt_sec is None:::#1": {
+    "note": "Defensive guard in _fan_shares_inter_row_channel: the edge is a fan branch into an entry port, which always resolves to a section, so the None arm is unreachable in practice.",
+    "status": "defensive"
   },
   "inter_section_handlers.py::if fan is not None and ep_col is not None:::#1": {
     "note": "Reachable only via a defective render (inter-row corridor on a <78px gap); see #722.",
