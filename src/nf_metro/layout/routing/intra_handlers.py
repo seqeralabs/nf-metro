@@ -644,15 +644,17 @@ def _route_diagonal(
         if src_min + tgt_min + diagonal_run > abs(dx):
             src_min = MIN_STRAIGHT_EDGE
 
-    # A multi-line bypass bundle stepping between two horizontal runs (leaving
-    # the trunk row for a lower exit-port row around an in-line terminal) carries
-    # a vertical per-line offset onto the diagonal, where adjacent lines separate
-    # by only OFFSET_STEP * cos(theta); past 45 degrees that falls below the
-    # channel floor and the strokes fuse.  Flatten toward 45 degrees (diagonal
-    # run >= vertical drop) within the horizontal room the endpoint straights
-    # leave, so the bundle keeps distinct slots.  Scoped to a one-way-step bypass
-    # V (no rendered marker, and no symmetric return leg to unbalance); a
-    # symmetric bypass loop keeps its legs' shared run.
+    # A steep multi-line bypass bundle descending past an in-line terminal is
+    # squeezed through the narrow channel between that terminal's name label and
+    # the source station's, and a near-vertical descent there fails two ways at
+    # once: its vertically-offset lines separate by only OFFSET_STEP * cos(theta),
+    # fusing below the channel floor, and the steep diagonal rakes the source
+    # label.  A gentler diagonal clears both, so flatten toward 45 degrees
+    # (diagonal run >= vertical drop) within the room the endpoint straights
+    # leave.  Scoped to a one-way-step bypass V: a symmetric bypass loop threads
+    # the same descent as two mirrored legs whose spread stagger already
+    # separates them, and widening those legs by whatever room each happens to
+    # have would leave the loop lopsided, so it keeps its shared run.
     drop = abs(ty - sy)
     v_id = edge.target if tgt_is_bypass_v else edge.source if src_is_bypass_v else None
     if (
