@@ -60,9 +60,11 @@ EXAMPLES = REPO_ROOT / "examples"
 
 _RADIUS_TOLERANCE = 1e-6
 
-# The production re-derivation, captured before any test patches the module so
-# the corpus spy can wrap it (and the meaningfulness test can swap it out).
+# The production re-derivations, captured before any test patches the module so
+# the corpus spy can wrap them (and the meaningfulness test can swap the
+# vertical-channel one out).
 _PROD_SET_VCHANNEL_X = normalize._set_vchannel_x
+_PROD_SET_HTRUNK_Y = normalize._set_htrunk_y
 
 # Fixtures whose layout actually drives the coincide pass; the gallery sweep
 # below covers the rest vacuously (no corner snapped -> nothing to check).
@@ -90,45 +92,69 @@ def _gather_fixtures() -> list[Path]:
 def _touched_corner_mismatches(
     path: Path, monkeypatch: pytest.MonkeyPatch, impl=_PROD_SET_VCHANNEL_X
 ) -> list[tuple[str, int, float, float]]:
-    """Route *path*, recording every corner the coincide pass snaps via *impl*.
+    """Route *path*, recording every corner a coincide/reseat pass snaps.
 
-    Returns, for each snapped corner, any disagreement between the stored radius
-    and the central concentric derivation for the route's final waypoints at the
-    displacement the pass moved it with: ``(line_id, radius_index, stored,
-    expected)``.  A same-line fusion moves at zero displacement (base radius); a
-    distinct-line convergent cluster moves each lane at its rank displacement so
-    the outer lanes nest wider.
+    Both channel entry points re-derive their flanking corners through the same
+    central helper: :func:`_set_vchannel_x` moves a vertical channel and reseats
+    its two flanking corners at one displacement, while :func:`_set_htrunk_y`
+    moves a horizontal trunk and reseats each flanking corner at its own
+    incoming/outgoing displacement.  A corner a fused same-line channel first
+    snaps to the base radius can be re-snapped by a later distinct-line traverse
+    to its concentric bundle offset, so record the *last* displacement applied to
+    each corner and derive the expected radius at that offset -- the corner's
+    actual final bundle offset, not whichever pass touched it first.
+
+    Only corners on the *final* routes are checked; the intermediate route
+    objects an earlier layout pass discards are filtered out through their
+    identity, so a stale corner from a superseded pass cannot report a mismatch.
+    Returns any disagreement between the stored radius and the central derivation
+    as ``(line_id, radius_index, stored, expected)``.
     """
-    touched: list[tuple[RoutedPath, int, float]] = []
+    # (id(route), radius_index) -> (route, offset); the last reseat wins, so the
+    # recorded offset is the one the final radius was derived at.
+    touched: dict[tuple[int, int], tuple[RoutedPath, float]] = {}
 
-    def spy(ch: _VChannel, new_x: float, offset: float = 0.0) -> None:
+    def vspy(ch: _VChannel, new_x: float, offset: float = 0.0) -> None:
         impl(ch, new_x, offset)
-        touched.append((ch.route, ch.idx, offset))
+        for radius_idx in (ch.idx - 1, ch.idx):
+            touched[(id(ch.route), radius_idx)] = (ch.route, offset)
 
-    monkeypatch.setattr(normalize, "_set_vchannel_x", spy)
+    def hspy(
+        rp: RoutedPath,
+        k: int,
+        new_y: float,
+        offset_in: float = 0.0,
+        offset_out: float = 0.0,
+    ) -> None:
+        _PROD_SET_HTRUNK_Y(rp, k, new_y, offset_in, offset_out)
+        touched[(id(rp), k - 1)] = (rp, offset_in)
+        touched[(id(rp), k)] = (rp, offset_out)
+
+    monkeypatch.setattr(normalize, "_set_vchannel_x", vspy)
+    monkeypatch.setattr(normalize, "_set_htrunk_y", hspy)
     graph = parse_metro_mermaid(path.read_text())
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
     shared = shared_same_line_turn_vertices(routes)
+    route_ids = {id(r) for r in routes}
 
     mismatches: list[tuple[str, int, float, float]] = []
-    for rp, k, offset in touched:
+    for (rid, radius_idx), (rp, offset) in touched.items():
+        if rid not in route_ids:
+            continue
         radii = rp.curve_radii
-        if radii is None:
+        if radii is None or not 0 <= radius_idx < len(radii):
             continue
         pts = rp.points
-        for radius_idx in (k - 1, k):
-            if not 0 <= radius_idx < len(radii):
-                continue
-            vertex = pts[radius_idx + 1]
-            if (rp.line_id, round(vertex[0]), round(vertex[1])) in shared:
-                continue  # owned by the coincident-corner unification pass
-            expected = concentric_corner_radius_at(
-                pts[radius_idx], pts[radius_idx + 1], pts[radius_idx + 2], offset
-            )
-            if abs(radii[radius_idx] - expected) > _RADIUS_TOLERANCE:
-                mismatches.append((rp.line_id, radius_idx, radii[radius_idx], expected))
+        vertex = pts[radius_idx + 1]
+        if (rp.line_id, round(vertex[0]), round(vertex[1])) in shared:
+            continue  # owned by the coincident-corner unification pass
+        expected = concentric_corner_radius_at(
+            pts[radius_idx], pts[radius_idx + 1], pts[radius_idx + 2], offset
+        )
+        if abs(radii[radius_idx] - expected) > _RADIUS_TOLERANCE:
+            mismatches.append((rp.line_id, radius_idx, radii[radius_idx], expected))
     return mismatches
 
 
@@ -163,9 +189,20 @@ def test_set_vchannel_x_rederives_flanking_corners_from_waypoints() -> None:
     assert route.curve_radii == [CURVE_RADIUS, CURVE_RADIUS]
 
 
-@pytest.mark.parametrize(
-    "path", _gather_fixtures(), ids=lambda p: p.relative_to(REPO_ROOT).as_posix()
-)
+_XFAIL_COINCIDE_CENTRAL_DERIVATION: dict[str, str] = {}
+
+
+def _coincide_params() -> list:
+    params = []
+    for p in _gather_fixtures():
+        key = p.relative_to(REPO_ROOT).as_posix()
+        reason = _XFAIL_COINCIDE_CENTRAL_DERIVATION.get(key)
+        marks = (pytest.mark.xfail(reason=reason, strict=True),) if reason else ()
+        params.append(pytest.param(p, id=key, marks=marks))
+    return params
+
+
+@pytest.mark.parametrize("path", _coincide_params())
 def test_coincide_pass_corners_match_central_derivation(
     path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -15,6 +15,8 @@ from nf_metro.layout.constants import (
     STATION_ELBOW_TOLERANCE,
 )
 from nf_metro.layout.geometry import AxisFrame, lanes_run_along_x, lanes_run_along_y
+from nf_metro.layout.layers import build_station_digraph
+from nf_metro.layout.ordering import split_output_spur_fan
 from nf_metro.layout.phases._common import (
     _expand_bbox_for_y,
     _grid_group_section_ids,
@@ -35,6 +37,7 @@ from nf_metro.layout.phases.junctions import (
     _resolve_source_section_id,
     _resolve_source_xy,
 )
+from nf_metro.layout.phases.single_section import _exit_reaching_nodes
 from nf_metro.parser.model import Edge, MetroGraph, Port, PortSide, Section, Station
 
 
@@ -106,6 +109,84 @@ def _entry_consumer_y(
     return min(ys, key=lambda y: abs(y - port_st.y))
 
 
+def _entry_fan_trunk_station(
+    graph: MetroGraph, port_id: str, entry_section: Section
+) -> Station | None:
+    """The trunk station of this entry port's own internal root fan, if any.
+
+    When a single entry port feeds more than one station directly (a root
+    fan), the port should sit flush with whichever of those directly-fed
+    targets carries every line the port carries -- not with whatever row one
+    arbitrary upstream predecessor happens to occupy.  Trusting the
+    predecessor's row is fine for the common single-target case, but for a
+    multi-target fan it can drift onto a row that matches none of the port's
+    own targets, forcing every line into a dogleg right at the section
+    boundary.
+
+    The superset check is scoped to lines carried *directly from this port*
+    to each target, not each target's full line set: a target can aggregate
+    an extra line internally (e.g. via a predecessor also fed by this same
+    port), which would tie it with the true trunk on line count alone even
+    though only the trunk receives every port line first-hand.
+
+    When line count can't split the fan (e.g. every arm carries the same
+    single line) the trunk is the arm that continues to a section exit while
+    the others dead-end at off-track output files, so the through-chain rides
+    the entry trunk and the output spur peels off.
+
+    Returns ``None`` when the port feeds a single target or its targets have
+    no unique such trunk.
+    """
+    lines_by_target: dict[str, set[str]] = {}
+    for edge in graph.edges_from(port_id):
+        st = graph.station_for_edge_target(edge)
+        if st.is_port or st.section_id != entry_section.id:
+            continue
+        lines_by_target.setdefault(st.id, set()).add(edge.line_id)
+    if len(lines_by_target) < 2:
+        return None
+    trunk_id, trunk_lines = max(lines_by_target.items(), key=lambda kv: len(kv[1]))
+    if all(
+        lines < trunk_lines for tid, lines in lines_by_target.items() if tid != trunk_id
+    ):
+        return graph.stations.get(trunk_id)
+
+    # Roots are the arms fed straight from this port (no in-section feeder of
+    # their own); a deeper cross-fed convergence arm doesn't contest the trunk.
+    roots = [
+        tid
+        for tid in lines_by_target
+        if not _has_in_section_feeder(graph, tid, section=entry_section)
+    ]
+    if len(roots) < 2:
+        return None
+    split = split_output_spur_fan(
+        roots,
+        _exit_reaching_nodes(graph, entry_section),
+        build_station_digraph(graph),
+        graph,
+    )
+    if split is not None and len(split[0]) == 1:
+        return graph.stations.get(split[0][0])
+    return None
+
+
+def _has_in_section_feeder(
+    graph: MetroGraph, station_id: str, *, section: Section
+) -> bool:
+    """Whether *station_id* is fed by another (non-port) station in *section*.
+
+    A root fan target is fed only from an entry port; a target with its own
+    in-section predecessor sits at a deeper layer (e.g. a cross-fed convergence
+    node) and does not contest the entry trunk.
+    """
+    for edge in graph.edges_to(station_id):
+        src = graph.stations.get(edge.source)
+        if src is not None and not src.is_port and src.section_id == section.id:
+            return True
+    return False
+
+
 def _align_lr_entry_port(
     graph: MetroGraph,
     port_id: str,
@@ -114,6 +195,12 @@ def _align_lr_entry_port(
     junction_ids: set[str],
 ) -> None:
     """Align a LEFT/RIGHT entry port's Y with its incoming source."""
+    if lanes_run_along_y(entry_section.direction):
+        trunk_st = _entry_fan_trunk_station(graph, port_id, entry_section)
+        if trunk_st is not None:
+            _set_port_y(graph, port_id, trunk_st.y)
+            return
+
     for edge in graph.edges_to(port_id):
         src = graph.station_for_edge_source(edge)
         if not (src.is_port or edge.source in junction_ids):
@@ -779,13 +866,21 @@ def _snap_grid_group_entry_ports(graph: MetroGraph) -> None:
         if not section or section.direction not in ("LR", "RL"):
             continue
 
-        # Find the first non-port station connected to this port.
-        target_y = None
-        for edge in graph.edges_from(port_id):
-            tgt = graph.station_for_edge_target(edge)
-            if not tgt.is_port and tgt.section_id == section.id:
-                target_y = tgt.y
-                break
+        # Snap to the fan's through-chain trunk when the port feeds several
+        # arms (one reaching the exit, the rest short output spurs); otherwise
+        # the first connected non-port station.  Picking the first target
+        # arbitrarily can land the port on an output spur or a cross-fed
+        # convergence arm rather than the main chain.
+        trunk_st = _entry_fan_trunk_station(graph, port_id, section)
+        if trunk_st is not None:
+            target_y = trunk_st.y
+        else:
+            target_y = None
+            for edge in graph.edges_from(port_id):
+                tgt = graph.station_for_edge_target(edge)
+                if not tgt.is_port and tgt.section_id == section.id:
+                    target_y = tgt.y
+                    break
 
         if target_y is not None and abs(port_st.y - target_y) >= 1.0:
             _set_port_y(graph, port_id, target_y)

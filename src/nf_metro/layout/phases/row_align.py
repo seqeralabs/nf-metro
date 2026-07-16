@@ -564,9 +564,10 @@ def _top_align_row_bboxes_only(graph: MetroGraph) -> None:
     Unlike ``_top_align_row_sections`` (which shifts stations together
     with their bbox), this phase only moves ``bbox_y`` and grows
     ``bbox_h`` so the section background extends upward to match the
-    row's topmost bbox.  Station, port and junction Ys inside the
-    section are left in place, producing empty space at the top of
-    sections that didn't have off-track inputs to lift.
+    row's topmost bbox.  Interior station and junction Ys are left in
+    place, producing empty space at the top of sections that didn't have
+    off-track inputs to lift; TOP ports, which ride the top edge, are
+    carried up to the new top so they stay on the boundary.
 
     Used after ``_lift_off_track_stations`` so off-track expansion in
     one section doesn't leave other row-mates with misaligned bbox
@@ -580,6 +581,12 @@ def _top_align_row_bboxes_only(graph: MetroGraph) -> None:
                 continue
             section.bbox_y = min_top
             section.bbox_h += delta
+            # TOP ports ride the top edge; the upward growth must carry them to
+            # the new top so they don't strand inside the box.
+            for pid in (*section.entry_ports, *section.exit_ports):
+                port = graph.ports.get(pid)
+                if port is not None and port.side == PortSide.TOP:
+                    _set_port_y(graph, pid, min_top)
 
 
 def _align_row_trunk_ys(graph: MetroGraph) -> None:

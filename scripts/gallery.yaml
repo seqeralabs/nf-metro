@@ -148,6 +148,16 @@ gallery:
       inter-section descent tapers that offset away before the boundary so it
       lands on the port's own X, meeting the intra-section drop as one
       continuous stroke rather than stepping sideways across the top edge."
+  - id: top_entry_left_neighbour
+    source_dir: examples/topologies
+    category: Feature Showcase
+    description:
+      "A section with a `entry: top` port fed by its left neighbour in the same
+      grid row. The connector rises in the inter-section gap to just above the
+      target's top edge, runs across to the port's column, and drops straight
+      in. The port rides the top edge even when the box grows upward to align
+      with a taller row-mate, and the up-leg clears only the header badge rather
+      than overshooting into the shared inter-row channel."
 
   # ── Realistic Pipelines ────────────────────────────────────────────────────
   - id: genomic_pipeline
@@ -844,6 +854,26 @@ gallery:
       comes from the right; geometry-aware entry-side inference resolves its
       entry to the right edge so the feed drops straight in rather than wrapping
       below every section to reach a left port (issue #1311)."
+  - id: packed_cell_left_entry_under_neighbour
+    source_dir: examples/topologies
+    category: Serpentine Layout
+    description:
+      "A section whose packed cell-mate in the row above is wider has its LEFT
+      entry port sitting under that neighbour's box. A fan-out junction feeding
+      that entry opens its descent in the inter-cell gap beside the source and
+      traverses below the neighbour, rather than descending the crossed column's
+      outer gap and threading the neighbour's interior (issue #1486, vertical
+      descent variant)."
+  - id: fan_top_entry_over_tall_section
+    source_dir: examples/topologies
+    category: Serpentine Layout
+    description:
+      "A fan-out junction with mixed-handler branches shares one inter-row
+      traverse band. One branch is a TOP-entry drop into a section stacked below
+      a different, shorter column; its horizontal trunk leg must clear the taller
+      row-above section in the crossed column rather than skim its interior. The
+      band is measured across the columns the fan's gap branches traverse so the
+      run drops below that taller box (issue #1486, horizontal channel variant)."
   - id: branch_fold_forward
     source_dir: examples/topologies
     category: Serpentine Layout
@@ -1495,6 +1525,22 @@ gallery:
       the port cleanly rather than bulging outside the section and doubling back (issue #1314)."
 
   # ── Off-track & Rails ──────────────────────────────────────────────────────
+  - id: section_trunk_short_output_branch
+    source_dir: examples/topologies
+    category: Off-track & Rails
+    description:
+      "A section holding a long main chain plus a short branch to an off-track output
+      file. The long chain rides the section trunk straight and the short output branch
+      peels off it, rather than the short branch taking the trunk and forcing the main
+      chain onto a diagonal that crosses it (issue #1487)."
+  - id: corridor_fed_trunk_output_spur
+    source_dir: examples/topologies
+    category: Off-track & Rails
+    description:
+      "A section entered through a LEFT corridor port that fans to a through-chain arm
+      (reaching the exit) plus a short off-track output spur. The through-chain rides the
+      entry trunk with the spur peeling off below, and the same-row feeder runs straight
+      into the port rather than kinking down onto an off-trunk entry (issue #1497)."
   - id: off_track_convergence
     source_dir: examples/topologies
     category: Off-track & Rails
@@ -1574,6 +1620,17 @@ gallery:
       gap: the render reflows the lower rows down to absorb the late growth rather than
       letting its header badge collide with the grown box."
 
+  - id: fanout_intersection_shared_channel
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "A source fans out at a junction to two stacked sections below it, and the
+      two feed routes co-travel a shared horizontal inter-section channel before
+      peeling into a top entry and a left entry. The co-travelling lines keep one
+      `OFFSET_STEP` apart on the shared run rather than collapsing to a half-step
+      overlay when the inter-row gap is too narrow to reserve a shared fan
+      corridor."
+
   - id: fanout_hub_two_line_trunk
     source_dir: examples/topologies
     category: Multi-line Bundles
@@ -1582,6 +1639,17 @@ gallery:
       sections. The two-line trunk bundle must render one `OFFSET_STEP` wide, not
       double-width with an empty centre lane, even though the hub's exit port
       re-centres its bundle on the fan-out feeder."
+
+  - id: packed_multiline_serpentine_grid
+    source_dir: examples/topologies
+    category: Serpentine Layout
+    description:
+      "A packed multi-row grid where section G shares a grid cell with its
+      upstream producer section E and is also fed from the section above it.
+      Its `entry: top` and `entry: left` hints name conflicting sides; the
+      first-declared side wins and the section enters cleanly from the top
+      rather than resolving to a flow-opposing right entry that folds a line
+      back over its own track."
 
 pipelines:
   - id: rnaseq_auto

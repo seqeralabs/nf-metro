@@ -23,6 +23,7 @@ from nf_metro.layout.constants import (
     INTER_ROW_EDGE_CLEARANCE,
     INTER_ROW_HEADER_CLEARANCE,
     MERGE_ROUTE_MARGIN,
+    NEXT_ROW_HEADER_BADGE_CLEARANCE,
     SECTION_ROUTE_CLEARANCE,
 )
 from nf_metro.layout.routing.bundle import build_tapered_bundle
@@ -67,6 +68,7 @@ from nf_metro.layout.routing.common import (
     resolve_section,
     row_bottom_edge,
     row_top_edge,
+    section_header_top,
     symmetric_bundle_midpoint,
     trailing_perp_side,
     vertical_direction,
@@ -1996,7 +1998,15 @@ def _route_bypass(
             ui, un = fan
             fan_delta = l_shape_stagger(ui, un, gap1_vertical, ctx.offset_step)
             near = sx + ctx.curve_radius + (un - 1) * ctx.offset_step / 2
-            slot = _gap_channel_base(graph, src_col, src_row, un, ctx.offset_step)
+            slot = _gap_channel_base(
+                graph,
+                src_col,
+                src_row,
+                un,
+                ctx.offset_step,
+                anchor_section_id=src_sec_id,
+                anchor_side=PortSide.RIGHT,
+            )
             fan_mid_x = max(near, slot)
             off1 = fan_delta
             gap1_x = fan_mid_x + fan_delta
@@ -2086,7 +2096,15 @@ def _route_bypass(
             ui, un = fan
             fan_delta = l_shape_stagger(ui, un, gap1_vertical, ctx.offset_step)
             near = sx - ctx.curve_radius - (un - 1) * ctx.offset_step / 2
-            slot = _gap_channel_base(graph, src_col - 1, src_row, un, ctx.offset_step)
+            slot = _gap_channel_base(
+                graph,
+                src_col - 1,
+                src_row,
+                un,
+                ctx.offset_step,
+                anchor_section_id=src_sec_id,
+                anchor_side=PortSide.LEFT,
+            )
             fan_mid_x = min(near, slot)
             off1 = fan_delta
             gap1_x = fan_mid_x + fan_delta
@@ -2806,7 +2824,13 @@ def _route_top_entry_l_shape(
     # For a same-row cross-column producer the generic fallback in
     # inter_row_channel_y places the channel at ty + clearance (inside the
     # section bbox).  The route must approach the TOP entry from ABOVE the
-    # boundary, so override mid_y to sit above the row's top edge.
+    # boundary.  header_corridor_y gives the safe channel that clears the
+    # row-above band (and, for the topmost row, stays out of the canvas title
+    # band); when that band over-reserves -- a section merely exists somewhere
+    # in the row above, so the full inter-row clearance applies even though
+    # nothing sits over the target's own column -- pull the channel down to
+    # just clear the target's own header badge, so the up-leg doesn't overshoot
+    # far past the port before turning back down.
     src_sec = resolve_section(ctx.graph, src)
     tgt_sec = resolve_section(ctx.graph, tgt)
     if (
@@ -2815,14 +2839,19 @@ def _route_top_entry_l_shape(
         and src_sec.grid_row == tgt_sec.grid_row
         and mid_y > ty
     ):
-        # The route must approach the TOP entry from above the row's top edge.
-        mid_y = header_corridor_y(
+        corridor_y = header_corridor_y(
             ctx.graph,
             tgt_sec.grid_row,
             below=False,
             base_radius=ctx.curve_radius,
             default=ty,
         )
+        badge_clear_y = (
+            section_header_top(tgt_sec)
+            - NEXT_ROW_HEADER_BADGE_CLEARANCE
+            - ctx.curve_radius
+        )
+        mid_y = max(corridor_y, badge_clear_y)
 
     # A multi-line bundle fans the channel toward the source box (the line
     # nearest it sits a bundle-width above the centre); keep the centre low
@@ -2898,7 +2927,7 @@ def _route_top_entry_l_shape(
     fan = ctx.junction_fan_info.get((edge.source, edge.target, edge.line_id))
     fan_single = fan if fan is not None and len(line_ids) == 1 else None
     if fan_single is not None:
-        pos_i, pos_n = fan_single
+        _pos_i, pos_n = fan_single
         corridor = ctx.fan_corridors.get(edge.source)
         if corridor is not None and corridor.band_y is not None:
             # Drop into the fan's shared traverse band, so this branch and its
@@ -2969,17 +2998,25 @@ def _route_top_entry_l_shape(
         transition_leg = 3
 
     if fan_single is not None:
-        # Fan the source-region legs by the shared junction rank (so the branch
-        # nests concentrically with its off-edge siblings through the first
-        # corner) and taper onto this line's own target offset at the port.
-        e0, lid0, _s0, t0 = members[0]
-        member = (e0, lid0, fan_offsets(pos_n, ctx.offset_step)[pos_i], t0)
+        # Anchor the source-region legs on the branch's own station offset -- the
+        # lane it rides down the shared junction trunk -- so the lead-in leaves
+        # the junction collinear with that trunk (no peel-off stub), and anchor
+        # the concentric first corner against the whole fan's offsets so the
+        # branch nests with its off-edge siblings.  Symmetric fan_offsets would
+        # re-centre the branch on the fan's mean, parting it from its trunk lane
+        # by half a step at the junction.
+        e0, lid0, s0, t0 = members[0]
+        fan_src_offsets = sorted(
+            _get_offset(ctx, edge.source, lid)
+            for lid in ctx.graph.station_lines(edge.source)
+        )
+        member = (e0, lid0, s0, t0)
         return route_tapered_anchored(
             member,
             centerline,
             transition_leg=transition_leg,
             base_radius=ctx.curve_radius,
-            src_bundle_offsets=fan_offsets(pos_n, ctx.offset_step),
+            src_bundle_offsets=fan_src_offsets,
             tgt_bundle_offsets=[t0],
             normalize_exempt=True,
         )
@@ -3077,6 +3114,30 @@ def _v1_corner_x(ctx: _RoutingCtx, src: Station, sx: float, corner_x: float) -> 
         section_right = sx
     current_gap = sx + ctx.curve_radius - section_right
     return corner_x + max(0.0, SECTION_ROUTE_CLEARANCE - current_gap)
+
+
+def _fan_shares_inter_row_channel(ctx: _RoutingCtx, edge: Edge) -> bool:
+    """True when *edge*'s fan-out junction sends two or more distinct lines into
+    *edge*'s target row.
+
+    Those branches drop into the same inter-row gap and co-travel it before
+    peeling into their own targets, so they form one bundle that must keep an
+    ``OFFSET_STEP`` between its lines.  A junction whose only branch into this
+    row is *edge*'s own line runs a solo channel with nothing to separate from,
+    so it keeps the plain band-centred run rather than a fan stagger.
+    """
+    graph = ctx.graph
+    port = graph.ports.get(edge.target)
+    tgt_sec = graph.sections.get(port.section_id) if port is not None else None
+    if tgt_sec is None:
+        return False
+    lines: set[str] = set()
+    for sibling in graph.edges_from(edge.source):
+        sib_port = graph.ports.get(sibling.target)
+        sib_sec = graph.sections.get(sib_port.section_id) if sib_port else None
+        if sib_sec is not None and sib_sec.grid_row == tgt_sec.grid_row:
+            lines.add(sibling.line_id)
+    return len(lines) >= 2
 
 
 def _wrap_fan_geometry(
@@ -3220,6 +3281,24 @@ def _route_left_entry_wrap(
     corridor = ctx.fan_corridors.get(edge.source)
     if fan is not None and corridor is not None and corridor.band_y is not None:
         hy = corridor.band_y
+    elif fan is not None and _fan_shares_inter_row_channel(ctx, edge):
+        # A fanned wrap with no shared corridor band but sibling branches
+        # co-travelling this inter-row gap shares the channel with them.  Seat it
+        # on the same band centre the top-entry siblings use -- the unclamped gap
+        # centre, lifted so the fan bundle clears the source section's bottom
+        # edge (mirroring the top-entry's n>1 lift).  The builder re-adds
+        # ``delta`` on the traverse, giving the concentric ``band + delta``
+        # stagger the top-entry taper produces, so the two run one OFFSET_STEP
+        # apart rather than a frame offset apart.  Clamping into the (often
+        # degenerate) band would instead collapse the shared channel.
+        hy = inter_row_channel_y(ctx.graph, src, tgt, sy, ty, dy, ctx.curve_radius)
+        src_sec = resolve_section(ctx.graph, src)
+        if src_sec is not None:
+            src_bottom = src_sec.bbox_y + src_sec.bbox_h
+            hy = max(
+                hy,
+                src_bottom + INTER_ROW_EDGE_CLEARANCE + (pos_n - 1) * ctx.offset_step,
+            )
     else:
         hy = inter_row_channel_y(
             ctx.graph, src, tgt, sy, ty, dy, ctx.curve_radius, delta

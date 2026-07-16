@@ -68,6 +68,7 @@ from nf_metro.layout.phases._common import (
     iter_corridor_fed_solo_entries,
     iter_fold_lr_exit_straight_runs,
     iter_fold_lr_exits_short_of_target,
+    line_forks_within_section,
     section_axes,
     section_cross_axis,
     wrap_exit_carrier_anchor,
@@ -843,10 +844,18 @@ def test_subset_section_bundle_anchored_on_trunk(fixture, section_id):
 # leak back onto the trunk row (hub and its same-Y row-mates in_0/s2/out_main)
 # and get unioned to double width by horizontal reconciliation.  annotate / star
 # are clean two-line bundles.
+#
+# funcprofiler_upstream is the fan-*in* mirror: humann3 sits on the trunk row,
+# same Y as the convergence exit port that aggregates all seven profilers' lines
+# into a wide bundle.  Reconciliation must not snap humann3's own three-line bundle
+# onto the port's spread slots; humann4 is an off-trunk sibling control that is
+# never same-Y with the port and must stay clean regardless.
 _CONTIGUOUS_STATION_BUNDLES = [
     ("topologies/fanout_hub_two_line_trunk.mmd", "hub"),
     ("topologies/fanout_hub_two_line_trunk.mmd", "s2"),
     ("topologies/fanout_hub_two_line_trunk.mmd", "out_main"),
+    ("topologies/funcprofiler_upstream.mmd", "humann3"),
+    ("topologies/funcprofiler_upstream.mmd", "humann4"),
     ("da_pipeline.mmd", "annotate"),
     ("rnaseq_auto.mmd", "star"),
 ]
@@ -1101,6 +1110,10 @@ def test_single_line_corridor_section_rides_trunk(fixture):
     section trunk -- the section then reserves empty space for lines that never
     enter it.  The vertical corridor absorbs the lane step, so both the entry
     port and the consumer it feeds must anchor on the trunk (#1173).
+
+    A section whose line forks internally checks only the entry port: its fan
+    branches straddle the trunk and may each hold a lane that aligns them with a
+    downstream multi-line section, so they are not required to ride offset 0.
     """
     graph = _layout(fixture)
     offsets = compute_station_offsets(graph)
@@ -1113,6 +1126,8 @@ def test_single_line_corridor_section_rides_trunk(fixture):
             f"{port_off} for sole line {line_id}; a corridor-fed single-line "
             "section should anchor its entry on the trunk"
         )
+        if line_forks_within_section(graph, graph.sections[sec_id], line_id):
+            continue
         consumers = [
             sid
             for sid in graph.sections[sec_id].station_ids
@@ -1478,9 +1493,12 @@ def test_merge_fanout_shares_corner_by_construction(fixture, monkeypatch):
     assert not violations, "; ".join(v.message() for v in violations)
 
 
+_XFAIL_SYMFAN_PAIRS_SHARE_Y: dict[str, str] = {}
+
+
 @pytest.mark.parametrize(
     "fixture",
-    ALL_FIXTURES,
+    _params_with_xfails(ALL_FIXTURES, _XFAIL_SYMFAN_PAIRS_SHARE_Y),
 )
 def test_symfan_pairs_share_y(fixture):
     """When a section has exactly two full-bundle stations in the same
