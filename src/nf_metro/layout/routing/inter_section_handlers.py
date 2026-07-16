@@ -1996,7 +1996,15 @@ def _route_bypass(
             ui, un = fan
             fan_delta = l_shape_stagger(ui, un, gap1_vertical, ctx.offset_step)
             near = sx + ctx.curve_radius + (un - 1) * ctx.offset_step / 2
-            slot = _gap_channel_base(graph, src_col, src_row, un, ctx.offset_step)
+            slot = _gap_channel_base(
+                graph,
+                src_col,
+                src_row,
+                un,
+                ctx.offset_step,
+                anchor_section_id=src_sec_id,
+                anchor_side=PortSide.RIGHT,
+            )
             fan_mid_x = max(near, slot)
             off1 = fan_delta
             gap1_x = fan_mid_x + fan_delta

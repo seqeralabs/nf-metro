@@ -844,6 +844,16 @@ gallery:
       comes from the right; geometry-aware entry-side inference resolves its
       entry to the right edge so the feed drops straight in rather than wrapping
       below every section to reach a left port (issue #1311)."
+  - id: packed_cell_left_entry_under_neighbour
+    source_dir: examples/topologies
+    category: Serpentine Layout
+    description:
+      "A section whose packed cell-mate in the row above is wider has its LEFT
+      entry port sitting under that neighbour's box. A fan-out junction feeding
+      that entry opens its descent in the inter-cell gap beside the source and
+      traverses below the neighbour, rather than descending the crossed column's
+      outer gap and threading the neighbour's interior (issue #1486, vertical
+      descent variant)."
   - id: fan_top_entry_over_tall_section
     source_dir: examples/topologies
     category: Serpentine Layout
