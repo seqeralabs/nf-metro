@@ -1517,6 +1517,14 @@ gallery:
       the port cleanly rather than bulging outside the section and doubling back (issue #1314)."
 
   # ── Off-track & Rails ──────────────────────────────────────────────────────
+  - id: section_trunk_short_output_branch
+    source_dir: examples/topologies
+    category: Off-track & Rails
+    description:
+      "A section holding a long main chain plus a short branch to an off-track output
+      file. The long chain rides the section trunk straight and the short output branch
+      peels off it, rather than the short branch taking the trunk and forcing the main
+      chain onto a diagonal that crosses it (issue #1487)."
   - id: off_track_convergence
     source_dir: examples/topologies
     category: Off-track & Rails
