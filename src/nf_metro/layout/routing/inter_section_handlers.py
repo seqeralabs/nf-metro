@@ -3220,6 +3220,19 @@ def _route_left_entry_wrap(
     corridor = ctx.fan_corridors.get(edge.source)
     if fan is not None and corridor is not None and corridor.band_y is not None:
         hy = corridor.band_y
+    elif fan is not None:
+        # A fanned wrap with no shared corridor band (the inter-row gap is too
+        # narrow to reserve one) shares the channel with top-entry fan siblings,
+        # which seat their run at the band centre plus their ``fan_offsets`` rank
+        # unclamped.  Clamping this branch's stagger into the degenerate band
+        # instead would collapse the shared channel below ``OFFSET_STEP``, so
+        # land on the same fan-ranked Y; the builder re-adds ``delta`` on the
+        # traverse, so pre-subtract it.
+        pos_i = fan[0]
+        band_centre = inter_row_channel_y(
+            ctx.graph, src, tgt, sy, ty, dy, ctx.curve_radius
+        )
+        hy = band_centre + fan_offsets(pos_n, ctx.offset_step)[pos_i] - delta
     else:
         hy = inter_row_channel_y(
             ctx.graph, src, tgt, sy, ty, dy, ctx.curve_radius, delta
