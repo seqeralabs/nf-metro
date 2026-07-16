@@ -2919,7 +2919,7 @@ def _route_top_entry_l_shape(
     fan = ctx.junction_fan_info.get((edge.source, edge.target, edge.line_id))
     fan_single = fan if fan is not None and len(line_ids) == 1 else None
     if fan_single is not None:
-        pos_i, pos_n = fan_single
+        _pos_i, pos_n = fan_single
         corridor = ctx.fan_corridors.get(edge.source)
         if corridor is not None and corridor.band_y is not None:
             # Drop into the fan's shared traverse band, so this branch and its
@@ -2990,17 +2990,25 @@ def _route_top_entry_l_shape(
         transition_leg = 3
 
     if fan_single is not None:
-        # Fan the source-region legs by the shared junction rank (so the branch
-        # nests concentrically with its off-edge siblings through the first
-        # corner) and taper onto this line's own target offset at the port.
-        e0, lid0, _s0, t0 = members[0]
-        member = (e0, lid0, fan_offsets(pos_n, ctx.offset_step)[pos_i], t0)
+        # Anchor the source-region legs on the branch's own station offset -- the
+        # lane it rides down the shared junction trunk -- so the lead-in leaves
+        # the junction collinear with that trunk (no peel-off stub), and anchor
+        # the concentric first corner against the whole fan's offsets so the
+        # branch nests with its off-edge siblings.  Symmetric fan_offsets would
+        # re-centre the branch on the fan's mean, parting it from its trunk lane
+        # by half a step at the junction.
+        e0, lid0, s0, t0 = members[0]
+        fan_src_offsets = sorted(
+            _get_offset(ctx, edge.source, lid)
+            for lid in ctx.graph.station_lines(edge.source)
+        )
+        member = (e0, lid0, s0, t0)
         return route_tapered_anchored(
             member,
             centerline,
             transition_leg=transition_leg,
             base_radius=ctx.curve_radius,
-            src_bundle_offsets=fan_offsets(pos_n, ctx.offset_step),
+            src_bundle_offsets=fan_src_offsets,
             tgt_bundle_offsets=[t0],
             normalize_exempt=True,
         )

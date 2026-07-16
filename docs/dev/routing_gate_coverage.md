@@ -219,43 +219,43 @@ Gates with an un-exercised arm:
 | 2884 | `if abs(js.x - src.x) <= COORD_TOLERANCE:` | `->L2887` |  |
 | 2928 | `if not straight_drop:` | `->L2948` | **needs-review** -- A top-entry fan branch fed straight from directly above the junction (straight_drop) keeps its lead-in column at the source X rather than the shared fan pivot; the corpus's fan branches all carry horizontal travel, so the straight-drop arm is unexercised. |
 | 2932 | `if lead is Direction.R:` | `->L2948` | **needs-review** -- A top-entry fan branch leading LEFT out of the junction skips the _v1_corner_x right-edge clearance bump; the corpus's fan branches all lead right, so the left-lead arm is unexercised. |
-| 3116 | `if tgt_sec is None:` | `->L3117` | **defensive** -- Defensive guard in _fan_shares_inter_row_channel: the edge is a fan branch into an entry port, which always resolves to a section, so the None arm is unreachable in practice. |
-| 3280 | `if src_sec is not None:` | `->L3293` | **defensive** -- Defensive guard in the fanned entry-wrap source-clearance lift: a fan-out junction always resolves to its source section, so the None arm is unreachable in practice. |
-| 3299 | `if tgt_col is not None:` | `->L3304` | **defensive** -- tgt_col from _resolve_section_col on a valid LEFT entry port is always non-None (sections get grid_col>=0 after auto-layout). |
-| 3301 | `if shared_vx is not None:` | `->L3304` | **defensive** -- _fan_left_entry_descent_x returns None only when col_left<=0; col_left_edge for the target's own column is always >0. |
-| 3350 | `if entry_side is PortSide.LEFT:` | `->L3353` |  |
-| 3385 | `if entry_port is None:` | `->L3386` | **defensive** -- _route_around_section_below is always called with a non-None entry_port (both dispatch sites pass a checked station). |
-| 3396 | `if trunk_src is None or trunk_src == edge.source:` | `->L3398` | **needs-review** -- Reachable only via a defective render (merge-junction tangle); see #721. |
-| 3415 | `if gap_right <= gap_left:` | `->L3416` | **defensive** -- The column-gap enforcer keeps inter-column gaps positive, so gap_right>gap_left always holds at the target row. |
-| 3442 | `if col_left <= 0.0:` | `->L3443` | **defensive** -- col_left_edge's 0.0 default only fires for a column with no sections; the target's own column always holds its section. |
-| 3479 | `if entry_port is None:` | `->L3480` | **defensive** -- Every caller of _corridor_is_viable passes a non-None entry_port. |
-| 3486 | `if src_row is None or ep_row is None or src_col is None or ep_col is None:` | `->L3487` | **defensive** -- _resolve_section_colrow returns (None,None) only for a station with no section; valid entry ports always have a section with non-negative grid coords. |
-| 3574 | `if fan is not None and corridor is not None and corridor.band_y is not None:` | `->L3578` | **needs-review** -- Corridor-feeder shared inter-row band gate: the corpus's corridor feeders belong to fans whose corridor carries a band_y, so the short-circuit past it (no corridor or bypass-only) is unexercised; it falls to the elif fan-is-not-None global-band branch. |
-| 3578 | `elif fan is not None:` | `->L3582`, `->L3585` | **needs-review** -- Corridor-feeder fallback for a fan whose junction earned no corridor (its in-column gap below does not fit the bundle); the corpus's fans all earn a corridor, so this global-band branch is unexercised. |
-| 3585 | `elif gap_bottom > gap_top:` | `->L3586`, `->L3588` | **needs-review** -- Reachable only via a defective render (inter-row corridor on a <78px gap); see #722. |
-| 3593 | `if fan is None and gap_bottom > gap_top:` | `->L3594` | **needs-review** -- Reachable only via a defective render (inter-row corridor on a <78px gap); see #722. |
-| 3604 | `if fan is not None and ep_col is not None:` | `->L3606` | **needs-review** -- Reachable only via a defective render (inter-row corridor on a <78px gap); see #722. |
-| 3606 | `if vx is None:` | `->L3607` | **needs-review** -- Reachable only via a defective render (inter-row corridor on a <78px gap); see #722. |
-| 3719 | `if ep_section and ep_section.bbox_w > 0:` | `->L3722` | **defensive** -- entry_port.section_id is always set and the section has bbox_w>0 after layout; the else arm never fires. |
-| 4001 | `if gap_bottom <= gap_top:` | `->L4002` | **defensive** -- The row-gap enforcer keeps stacked rows separated, so the inter-row band above a target row (row_bottom_edge(tgt_row-1) up to row_top_edge(tgt_row)) has positive height whenever a RIGHT entry is fed from a higher row; the degenerate-band arm guards an abutting-rows layout placement never produces. |
-| 4005 | `if not _inter_row_band_fits(gap_top, gap_bottom):` | `->L4006` | **defensive** -- Band-fit test in _right_entry_gap_above_is_clear (#889), reached only when the cross-row RIGHT-entry drop-in is not clear (the exotic blocked-descent case above). The corpus always takes the drop-in, so neither arm of the gap-above fallback is exercised. Defensive. |
-| 4085 | `if not normalize_exempt:` | `->L4089` |  |
-| 4160 | `if gap_bottom <= gap_top:` | `->L4161` |  |
-| 4162 | `if not _inter_row_band_fits(gap_top, gap_bottom):` | `->L4163` |  |
-| 4172 | `if _v_segment_crosses_other_section(graph, vx, gy, tgt.y, exclude):` | `->L4173` |  |
-| 4252 | `if source is None or source.bbox_w <= 0:` | `->L4253` |  |
-| 4257 | `if source.id not in members:` | `->L4258` |  |
-| 4263 | `if other.bbox_x <= source_right + COORD_TOLERANCE:` | `->L4264` |  |
-| 4265 | `if cellmate_left is None or other.bbox_x < cellmate_left:` | `->L4259` |  |
-| 4267 | `if cellmate_left is None:` | `->L4268` |  |
-| 4305 | `if band0_bottom <= band0_top or not _inter_row_band_fits(band0_top, band0_bottom):` | `->L4306` |  |
-| 4307 | `if band1_bottom <= band1_top or not _inter_row_band_fits(band1_top, band1_bottom):` | `->L4308` |  |
-| 4309 | `if band1_top <= band0_bottom + COORD_TOLERANCE:` | `->L4310` |  |
-| 4321 | `if _v_segment_crosses_other_section(graph, corner_x, band0_y, band1_y, exclude):` | `->L4322` |  |
-| 4356 | `if geom is None:` | `->L4357` |  |
-| 4360 | `if _v_segment_crosses_other_section(` | `->L4363` |  |
-| 4364 | `if _h_segment_crosses_other_section(` | `->L4367` |  |
-| 4368 | `if _h_segment_crosses_other_section(` | `->L4371` |  |
+| 3124 | `if tgt_sec is None:` | `->L3125` | **defensive** -- Defensive guard in _fan_shares_inter_row_channel: the edge is a fan branch into an entry port, which always resolves to a section, so the None arm is unreachable in practice. |
+| 3288 | `if src_sec is not None:` | `->L3301` | **defensive** -- Defensive guard in the fanned entry-wrap source-clearance lift: a fan-out junction always resolves to its source section, so the None arm is unreachable in practice. |
+| 3307 | `if tgt_col is not None:` | `->L3312` | **defensive** -- tgt_col from _resolve_section_col on a valid LEFT entry port is always non-None (sections get grid_col>=0 after auto-layout). |
+| 3309 | `if shared_vx is not None:` | `->L3312` | **defensive** -- _fan_left_entry_descent_x returns None only when col_left<=0; col_left_edge for the target's own column is always >0. |
+| 3358 | `if entry_side is PortSide.LEFT:` | `->L3361` |  |
+| 3393 | `if entry_port is None:` | `->L3394` | **defensive** -- _route_around_section_below is always called with a non-None entry_port (both dispatch sites pass a checked station). |
+| 3404 | `if trunk_src is None or trunk_src == edge.source:` | `->L3406` | **needs-review** -- Reachable only via a defective render (merge-junction tangle); see #721. |
+| 3423 | `if gap_right <= gap_left:` | `->L3424` | **defensive** -- The column-gap enforcer keeps inter-column gaps positive, so gap_right>gap_left always holds at the target row. |
+| 3450 | `if col_left <= 0.0:` | `->L3451` | **defensive** -- col_left_edge's 0.0 default only fires for a column with no sections; the target's own column always holds its section. |
+| 3487 | `if entry_port is None:` | `->L3488` | **defensive** -- Every caller of _corridor_is_viable passes a non-None entry_port. |
+| 3494 | `if src_row is None or ep_row is None or src_col is None or ep_col is None:` | `->L3495` | **defensive** -- _resolve_section_colrow returns (None,None) only for a station with no section; valid entry ports always have a section with non-negative grid coords. |
+| 3582 | `if fan is not None and corridor is not None and corridor.band_y is not None:` | `->L3586` | **needs-review** -- Corridor-feeder shared inter-row band gate: the corpus's corridor feeders belong to fans whose corridor carries a band_y, so the short-circuit past it (no corridor or bypass-only) is unexercised; it falls to the elif fan-is-not-None global-band branch. |
+| 3586 | `elif fan is not None:` | `->L3590`, `->L3593` | **needs-review** -- Corridor-feeder fallback for a fan whose junction earned no corridor (its in-column gap below does not fit the bundle); the corpus's fans all earn a corridor, so this global-band branch is unexercised. |
+| 3593 | `elif gap_bottom > gap_top:` | `->L3594`, `->L3596` | **needs-review** -- Reachable only via a defective render (inter-row corridor on a <78px gap); see #722. |
+| 3601 | `if fan is None and gap_bottom > gap_top:` | `->L3602` | **needs-review** -- Reachable only via a defective render (inter-row corridor on a <78px gap); see #722. |
+| 3612 | `if fan is not None and ep_col is not None:` | `->L3614` | **needs-review** -- Reachable only via a defective render (inter-row corridor on a <78px gap); see #722. |
+| 3614 | `if vx is None:` | `->L3615` | **needs-review** -- Reachable only via a defective render (inter-row corridor on a <78px gap); see #722. |
+| 3727 | `if ep_section and ep_section.bbox_w > 0:` | `->L3730` | **defensive** -- entry_port.section_id is always set and the section has bbox_w>0 after layout; the else arm never fires. |
+| 4009 | `if gap_bottom <= gap_top:` | `->L4010` | **defensive** -- The row-gap enforcer keeps stacked rows separated, so the inter-row band above a target row (row_bottom_edge(tgt_row-1) up to row_top_edge(tgt_row)) has positive height whenever a RIGHT entry is fed from a higher row; the degenerate-band arm guards an abutting-rows layout placement never produces. |
+| 4013 | `if not _inter_row_band_fits(gap_top, gap_bottom):` | `->L4014` | **defensive** -- Band-fit test in _right_entry_gap_above_is_clear (#889), reached only when the cross-row RIGHT-entry drop-in is not clear (the exotic blocked-descent case above). The corpus always takes the drop-in, so neither arm of the gap-above fallback is exercised. Defensive. |
+| 4093 | `if not normalize_exempt:` | `->L4097` |  |
+| 4168 | `if gap_bottom <= gap_top:` | `->L4169` |  |
+| 4170 | `if not _inter_row_band_fits(gap_top, gap_bottom):` | `->L4171` |  |
+| 4180 | `if _v_segment_crosses_other_section(graph, vx, gy, tgt.y, exclude):` | `->L4181` |  |
+| 4260 | `if source is None or source.bbox_w <= 0:` | `->L4261` |  |
+| 4265 | `if source.id not in members:` | `->L4266` |  |
+| 4271 | `if other.bbox_x <= source_right + COORD_TOLERANCE:` | `->L4272` |  |
+| 4273 | `if cellmate_left is None or other.bbox_x < cellmate_left:` | `->L4267` |  |
+| 4275 | `if cellmate_left is None:` | `->L4276` |  |
+| 4313 | `if band0_bottom <= band0_top or not _inter_row_band_fits(band0_top, band0_bottom):` | `->L4314` |  |
+| 4315 | `if band1_bottom <= band1_top or not _inter_row_band_fits(band1_top, band1_bottom):` | `->L4316` |  |
+| 4317 | `if band1_top <= band0_bottom + COORD_TOLERANCE:` | `->L4318` |  |
+| 4329 | `if _v_segment_crosses_other_section(graph, corner_x, band0_y, band1_y, exclude):` | `->L4330` |  |
+| 4364 | `if geom is None:` | `->L4365` |  |
+| 4368 | `if _v_segment_crosses_other_section(` | `->L4371` |  |
+| 4372 | `if _h_segment_crosses_other_section(` | `->L4375` |  |
+| 4376 | `if _h_segment_crosses_other_section(` | `->L4379` |  |
 
 ## `intra_handlers.py`
 

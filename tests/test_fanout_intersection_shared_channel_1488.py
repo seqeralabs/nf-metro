@@ -107,3 +107,43 @@ def test_fanout_shared_channel_keeps_offset_step(fixture: Path) -> None:
         if gap < OFFSET_STEP - COORD_TOLERANCE_FINE
     ]
     assert not too_close, "; ".join(too_close)
+
+
+@pytest.mark.parametrize("fixture", FIXTURES, ids=IDS)
+def test_fanout_branch_is_continuous_through_junction(fixture: Path) -> None:
+    """Every line runs continuously through a fan-out junction (no peel stub).
+
+    A line feeds into a fan-out junction on the lane it rides down the shared
+    trunk, and its outgoing branch must leave on that same lane so the two meet
+    at one point.  A branch that re-centres on the fan's mean instead departs
+    half an ``OFFSET_STEP`` off its incoming lane, opening a bare vertical stub
+    right at the junction -- an asymmetric kink that reads as a jitter or, when
+    the offset is a full step, a visible disconnect.
+    """
+    graph = parse_metro_mermaid(fixture.read_text())
+    compute_layout(graph, validate=False)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges_centred(graph, station_offsets=offsets)
+
+    stubs = []
+    for jid in graph.junctions:
+        if not graph.is_fanout_junction(jid):
+            continue
+        incoming = {
+            rp.line_id: apply_route_offsets(rp, offsets)[-1]
+            for rp in routes
+            if rp.edge.target == jid
+        }
+        for rp in routes:
+            if rp.edge.source != jid or rp.line_id not in incoming:
+                continue
+            in_pt = incoming[rp.line_id]
+            out_pt = apply_route_offsets(rp, offsets)[0]
+            gap = ((in_pt[0] - out_pt[0]) ** 2 + (in_pt[1] - out_pt[1]) ** 2) ** 0.5
+            if gap > COORD_TOLERANCE_FINE:
+                stubs.append(
+                    f"line {rp.line_id!r} at {jid}: feeds in at "
+                    f"({in_pt[0]:.1f},{in_pt[1]:.1f}) but branch departs from "
+                    f"({out_pt[0]:.1f},{out_pt[1]:.1f}) -- a {gap:.1f}px stub"
+                )
+    assert not stubs, "; ".join(stubs)
