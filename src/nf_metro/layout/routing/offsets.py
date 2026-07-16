@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter, deque
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 
 from nf_metro.layout.constants import (
@@ -13,7 +13,10 @@ from nf_metro.layout.constants import (
     resolve_offset_step,
 )
 from nf_metro.layout.geometry import lanes_run_along_x
-from nf_metro.layout.phases._common import iter_corridor_fed_solo_entries
+from nf_metro.layout.phases._common import (
+    iter_corridor_fed_solo_entries,
+    line_forks_within_section,
+)
 from nf_metro.layout.routing.arranger import BoundaryConfig, lane_order
 from nf_metro.layout.routing.common import (
     needs_perp_approach_fan,
@@ -1726,12 +1729,17 @@ def _recenter_single_line_corridor_entry(ctx: _OffsetCtx) -> None:
     the lone consumer off the section trunk, so the section reserves empty space
     for lines that never enter it.  When every feeder reaches the port on a
     different base Y -- a vertical corridor -- the lane step resolves in that
-    vertical leg, so re-anchor the whole section (entry port and every consumer
-    carrying the line) at offset 0.  Anchoring the consumers too, rather than
-    leaving horizontal reconciliation to settle them, keeps reconciliation's
+    vertical leg, so re-anchor the entry port (and, for a straight chain, every
+    consumer carrying the line) at offset 0.  Anchoring the consumers too, rather
+    than leaving horizontal reconciliation to settle them, keeps reconciliation's
     larger-magnitude preference from snapping the port back off the trunk onto
     the consumer's lane.  A flat (same-Y) seam is left untouched: re-basing there
     would slope the straight-through run into an almost-horizontal segment.
+
+    When the single line forks internally, only the entry port is re-anchored:
+    the fan branches straddle the trunk and each may hold a lane that aligns it
+    with a downstream multi-line section, so pinning them to offset 0 would kink
+    those hand-offs.
 
     Scope is exactly :func:`iter_corridor_fed_solo_entries` -- the same set the
     :func:`_guard_corridor_fed_solo_rides_trunk` invariant certifies.
@@ -1741,6 +1749,8 @@ def _recenter_single_line_corridor_entry(ctx: _OffsetCtx) -> None:
         graph, _SAME_Y_TOLERANCE
     ):
         ctx.offsets[(port_id, line_id)] = 0.0
+        if line_forks_within_section(graph, graph.sections[sec_id], line_id):
+            continue
         for sid in graph.sections[sec_id].station_ids:
             st = graph.stations.get(sid)
             if st is None or st.is_port or line_id not in graph.station_lines(sid):
@@ -2189,20 +2199,48 @@ def _apply_offsets_along_bundle(
             queue.append(tgt_id)
 
 
-def _apply_offset_upstream_on_row(
-    ctx: _OffsetCtx, port_id: str, line_id: str, off: float
-) -> None:
-    """Carry a reslotted feeder's offset upstream along its flat approach.
+def _is_symmetric_fork_arm(graph: MetroGraph, sid: str) -> bool:
+    """True when *sid* is one arm of a symmetric in-section fork.
 
-    Walks ``edges_to`` from the port following *line_id*, copying *off* onto
-    each source-side station while the run stays on the port's row.  A feeder
-    re-slotted at the port whose approach is horizontal (an adjacent on-row
-    feeder) would otherwise kink where its source-side slot differs from the
-    port slot; carrying the new slot back to its source keeps it straight.  The
-    walk stops at the first station off the row, so a feeder that turns off the
-    row (a riser) transitions its slot at that turn rather than upstream.
+    Two stations that share an in-section predecessor and sit on opposite sides
+    of it in Y mirror about the section trunk, so their rendered markers must
+    stay equidistant from it.  Only one arm can lie on a downstream port's row,
+    so a re-slot that shifts that arm's line off its base offset skews the pair
+    off the trunk.
     """
-    graph = ctx.graph
+    st = graph.stations[sid]
+    for pred_edge in graph.edges_to(sid):
+        pred = graph.stations.get(pred_edge.source)
+        if pred is None:
+            continue
+        d = st.y - pred.y
+        if abs(d) <= _SAME_Y_TOLERANCE:
+            continue
+        for sib_edge in graph.edges_from(pred_edge.source):
+            if sib_edge.target == sid:
+                continue
+            sib = graph.stations.get(sib_edge.target)
+            if sib is None or sib.section_id != st.section_id:
+                continue
+            if (sib.y - pred.y) * d < 0:
+                return True
+    return False
+
+
+def _row_upstream_line_sources(
+    graph: MetroGraph,
+    port_id: str,
+    line_id: str,
+    descend: Callable[[str], bool] = lambda _sid: True,
+) -> Iterator[str]:
+    """Yield sources on *line_id*'s flat approach into *port_id*, breadth-first.
+
+    Follows ``edges_to`` from the port along *line_id* while the run stays on the
+    port's row, yielding each source-side station.  *descend* decides, per
+    yielded station, whether the walk continues past it; a feeder that turns off
+    the row (a riser) is never reached, and a caller can prune further (e.g. stop
+    before a slot collision).
+    """
     row_y = graph.stations[port_id].y
     visited = {port_id}
     queue = deque([port_id])
@@ -2211,17 +2249,47 @@ def _apply_offset_upstream_on_row(
         for edge in graph.edges_to(cur):
             if edge.line_id != line_id or edge.source in visited:
                 continue
-            src = graph.stations[edge.source]
-            if abs(src.y - row_y) > _SAME_Y_TOLERANCE:
+            if abs(graph.stations[edge.source].y - row_y) > _SAME_Y_TOLERANCE:
                 continue
             visited.add(edge.source)
-            if _would_collide(ctx, edge.source, line_id, off):
-                # Re-slotting onto another line's slot here would fuse the two
-                # into one stroke; stop before the collision and let the feeder
-                # transition its slot at this station instead.
-                continue
-            ctx.offsets[(edge.source, line_id)] = off
-            queue.append(edge.source)
+            yield edge.source
+            if descend(edge.source):
+                queue.append(edge.source)
+
+
+def _line_traces_to_fork_arm(graph: MetroGraph, port_id: str, line_id: str) -> bool:
+    """True when *line_id*'s flat approach into *port_id* rides a fork arm.
+
+    Any symmetric fork arm on the approach must keep its base offset, so a
+    re-slot that would shift the line has to anchor on it instead.
+    """
+    return any(
+        _is_symmetric_fork_arm(graph, src)
+        for src in _row_upstream_line_sources(graph, port_id, line_id)
+    )
+
+
+def _apply_offset_upstream_on_row(
+    ctx: _OffsetCtx, port_id: str, line_id: str, off: float
+) -> None:
+    """Carry a reslotted feeder's offset upstream along its flat approach.
+
+    Copies *off* onto each source-side station on *line_id*'s flat approach into
+    the port.  A feeder re-slotted at the port whose approach is horizontal (an
+    adjacent on-row feeder) would otherwise kink where its source-side slot
+    differs from the port slot; carrying the new slot back to its source keeps it
+    straight.  The walk stops before a slot collision (which would fuse two lines
+    into one stroke), letting that feeder transition its slot at the collision
+    station rather than upstream.
+    """
+    for src in _row_upstream_line_sources(
+        ctx.graph,
+        port_id,
+        line_id,
+        descend=lambda sid: not _would_collide(ctx, sid, line_id, off),
+    ):
+        if not _would_collide(ctx, src, line_id, off):
+            ctx.offsets[(src, line_id)] = off
 
 
 def _convergence_feeders(
@@ -2452,6 +2520,14 @@ def _order_top_descent_over_left_entry(ctx: _OffsetCtx) -> None:
         )
         cur = {lid: ctx.offsets.get((port_id, lid), 0.0) for lid in ordered}
         base = min(cur.values())
+        # A feeder whose flat approach rides a symmetric fork arm must keep its
+        # base offset: shifting it strands the offset as an almost-flat seam and
+        # skews the fork off the trunk.  Anchor the ladder on it so the
+        # descending line takes the slot above rather than pushing it down.
+        for rank, lid in enumerate(ordered):
+            if _line_traces_to_fork_arm(graph, port_id, lid):
+                base = cur[lid] - rank * ctx.offset_step
+                break
         new_offs = {
             lid: base + rank * ctx.offset_step for rank, lid in enumerate(ordered)
         }

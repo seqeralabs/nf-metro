@@ -106,6 +106,34 @@ def iter_sole_trunk_continuations(
                 yield (section.id, pred, sid)
 
 
+def line_forks_within_section(
+    graph: MetroGraph, section: Section, line_id: str
+) -> bool:
+    """``True`` when *line_id* has an on-track fan inside *section*.
+
+    A fork is a non-port station with more than one in-section, on-line
+    successor.  Its branches straddle the trunk rather than following one chain,
+    so a corridor-fed solo section that forks re-anchors only its entry port to
+    the trunk, leaving the fan to place the branches (the consumers cannot all
+    ride offset 0).
+    """
+    members = set(section.station_ids)
+    for sid in section.station_ids:
+        st = graph.stations.get(sid)
+        if st is None or st.is_port or line_id not in graph.station_lines(sid):
+            continue
+        on_line_successors = sum(
+            1
+            for edge in graph.edges_from(sid)
+            if edge.target in members
+            and not graph.stations[edge.target].is_port
+            and line_id in graph.station_lines(edge.target)
+        )
+        if on_line_successors > 1:
+            return True
+    return False
+
+
 def iter_corridor_fed_solo_entries(
     graph: MetroGraph, tol: float
 ) -> Iterator[tuple[str, str, str]]:

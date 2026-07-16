@@ -971,10 +971,6 @@
     "note": "Corridor-feeder shared inter-row band gate: the corpus's corridor feeders belong to fans whose corridor carries a band_y, so the short-circuit past it (no corridor or bypass-only) is unexercised; it falls to the elif fan-is-not-None global-band branch.",
     "status": "needs-review"
   },
-  "inter_section_handlers.py::and corridor.bypass_band_y is not None::#1": {
-    "note": "A fan bypass branch consumes the shared below-row band; the arm where its junction has a corridor with no bypass_band_y is unreached, since a corridor gains a bypass band exactly when the fan has a non-merge bypass branch (this one).",
-    "status": "needs-review"
-  },
   "inter_section_handlers.py::and corridor.bypass_band_y >= base_y - COORD_TOLERANCE::#1": {
     "note": "Safety fallback: the shared bypass band is the deepest sibling's bypass_bottom_y, so a branch's own base_y never exceeds it; the arm that would decline a shallower shared band (guarding a predicate mismatch) is unexercised in the corpus.",
     "status": "needs-review"
