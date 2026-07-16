@@ -527,6 +527,10 @@
     "note": "Every non-exempt inter-section route ends with a vertical descent into the target Y then a short horizontal port lead (V->H tail); routes with non-V tails are normalize_exempt. The second-to-last-not-vertical reject in _final_port_approach is unreachable. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
   },
+  "normalize.py::if anchor_section_id is not None and anchor_side is not None:::#1": {
+    "note": "_gap_channel_base falls back to the column gap when passed a null anchor. All six call sites (in _route_bypass) pass the bypass source/target section id, which is None only when that endpoint has no resolvable section (src_sec_id/tgt_sec_id in _route_bypass); the corpus has no bypass with a sectionless endpoint, so the null-anchor arm is never taken. Defensive guard for a sectionless bypass endpoint.",
+    "status": "defensive"
+  },
   "normalize.py::if any(::#4": {
     "note": "In _bundle_divergent_distinct_traverses: the section-cross veto. No corpus fan would re-band a traverse across a foreign section, so the veto arm is never taken. Defensive.",
     "status": "defensive"
