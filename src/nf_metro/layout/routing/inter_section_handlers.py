@@ -24,7 +24,6 @@ from nf_metro.layout.constants import (
     INTER_ROW_HEADER_CLEARANCE,
     MERGE_ROUTE_MARGIN,
     NEXT_ROW_HEADER_BADGE_CLEARANCE,
-    SECTION_HEADER_PROTRUSION,
     SECTION_ROUTE_CLEARANCE,
 )
 from nf_metro.layout.routing.bundle import build_tapered_bundle
@@ -69,6 +68,7 @@ from nf_metro.layout.routing.common import (
     resolve_section,
     row_bottom_edge,
     row_top_edge,
+    section_header_top,
     symmetric_bundle_midpoint,
     trailing_perp_side,
     vertical_direction,
@@ -2821,8 +2821,7 @@ def _route_top_entry_l_shape(
         and mid_y > ty
     ):
         mid_y = (
-            ty
-            - SECTION_HEADER_PROTRUSION
+            section_header_top(tgt_sec)
             - NEXT_ROW_HEADER_BADGE_CLEARANCE
             - ctx.curve_radius
         )
