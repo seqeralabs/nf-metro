@@ -763,6 +763,7 @@ def fanout_divergence_peel_order(
 
     reach: dict[str, int] = {}
     drow: dict[str, int] = {}
+    tx: dict[str, float] = {}
     claimed: dict[str, str] = {}
     for edge in graph.edges_from(jid):
         tgt = graph.station_for_edge_target(edge)
@@ -781,6 +782,7 @@ def fanout_divergence_peel_order(
         claimed[edge.target] = edge.line_id
         reach[edge.line_id] = tcol - src_col
         drow[edge.line_id] = trow - src_row
+        tx[edge.line_id] = tgt.x
 
     if len(reach) < 2:
         return None
@@ -790,8 +792,24 @@ def fanout_divergence_peel_order(
         # member that leads as the shallowest peel, unlike the column-spreading
         # branch below, which rejects any zero descent.
         descenders = [d for d in drow.values() if d != 0]
-        if len(set(drow.values())) < 2 or len({d > 0 for d in descenders}) != 1:
+        if len({d > 0 for d in descenders}) != 1:
             return None
+        if len(set(drow.values())) < 2:
+            # Grid rows coincide: the targets are distinct sections packed into
+            # one cell, so order by each entry port's actual X -- the descent
+            # spreads to distinct columns even though the grid does not. The
+            # farthest-reaching port rides the outer side of the shared drop, the
+            # same rule the distinct-column fan below applies to ``reach``.
+            if len(set(tx.values())) < 2:
+                return None
+            drop_down = descenders[0] > 0
+            return sorted(
+                reach,
+                key=lambda lid: (
+                    abs(tx[lid] - jst.x) if drop_down else -abs(tx[lid] - jst.x),
+                    line_priority.get(lid, 0),
+                ),
+            )
         return sorted(reach, key=lambda lid: (drow[lid], line_priority.get(lid, 0)))
 
     if 0 in drow.values():
@@ -1088,6 +1106,37 @@ def _compute_junction_fan_info(
     return result
 
 
+def _fan_gap_branch_columns(
+    graph: MetroGraph,
+    jid: str,
+    src_col: int,
+    src_row: int,
+) -> set[int]:
+    """Grid columns a fanning junction's inter-row-gap branches traverse.
+
+    The branches sharing ``band_y`` (top-entry L-shape / LEFT-RIGHT wrap) run a
+    horizontal leg through that band from the junction's column to their target
+    column; a bypass branch drops to the lower ``bypass_band_y`` instead, so its
+    columns do not constrain this band.  Return every column spanned by a
+    gap-branch's horizontal leg (always including the junction's own column) so
+    the band can be measured clear of the row-``src_row`` sections those legs
+    actually cross -- a backward-reaching branch behind a taller row-mate
+    included, an untraversed far column left out.
+    """
+    cols = {src_col}
+    for edge in graph.edges_from(jid):
+        tgt = graph.station_for_edge_target(edge)
+        if not (tgt.is_port or edge.target in graph.junction_ids):
+            continue
+        tgt_col, tgt_row = _resolve_section_colrow(graph, tgt)
+        if tgt_col is None or tgt_row is None or tgt_row == src_row:
+            continue
+        if _intervening_section_obstructs(graph, src_col, src_row, tgt_col, tgt_row):
+            continue
+        cols.update(range(min(src_col, tgt_col), max(src_col, tgt_col) + 1))
+    return cols
+
+
 def _compute_fan_corridors(
     graph: MetroGraph,
     junction_fan_info: dict[_EdgeKey, tuple[int, int]],
@@ -1102,10 +1151,12 @@ def _compute_fan_corridors(
     traverses it before descending) share ``band_y``, while bypass branches share
     the lower ``bypass_band_y``.  Pinning one band per kind lets those branches
     share a reference rather than each centring an independent run.  The inter-row
-    gap is measured in the junction's own column (matching
-    :func:`_route_inter_row_gap_corridor`), so a tall row-span section stacked in
-    another column does not collapse it; it is ``None`` when its row is bottommost,
-    the fan is same-row or above, or the in-column gap is too narrow for the
+    gap's upper edge is measured across the columns the gap branches actually
+    traverse (:func:`_fan_gap_branch_columns`), so a taller section in a crossed
+    column drops the band below its box while an untraversed far column leaves it
+    unconstrained; the lower edge stays in the junction's own column, matching
+    :func:`_route_inter_row_gap_corridor`.  ``band_y`` is ``None`` when its row is
+    bottommost, the fan is same-row or above, or the gap is too narrow for the
     bundle.  A junction with neither band gets no corridor.
 
     ``merge_junctions`` are excluded from the bypass band: a feed into a merge
@@ -1123,7 +1174,8 @@ def _compute_fan_corridors(
         col, src_row = _resolve_section_colrow(graph, jst)
         if src_row is None or col is None:
             continue
-        upper_bottom = row_bottom_edge(graph, src_row, col=col)
+        gap_cols = _fan_gap_branch_columns(graph, jid, col, src_row)
+        upper_bottom = max(row_bottom_edge(graph, src_row, col=c) for c in gap_cols)
         lower_top = row_top_edge(graph, src_row + 1, col=col, default=upper_bottom)
         band_y = fan_corridor_band(upper_bottom, lower_top, span=(n - 1) * offset_step)
         bypass_band_y = _fan_bypass_band(graph, jid, col, src_row, merge_junctions)

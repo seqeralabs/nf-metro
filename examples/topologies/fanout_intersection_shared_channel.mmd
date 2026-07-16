@@ -1,0 +1,37 @@
+%%metro title: Fan-out inter-section shared channel
+%%metro style: nfcore
+%%metro line: l1 | Line 1 | #e6007e
+%%metro line: l2 | Line 2 | #2db572
+%%metro grid: src | 1,0
+%%metro grid: sec_c, sec_d | 0,1
+
+graph LR
+    subgraph src [Source]
+        %%metro exit: right | l1, l2
+        s_a[Ingest]
+        s_b[Prepare]
+
+        s_a -->|l1,l2| s_b
+    end
+
+    subgraph sec_c [Top target]
+        %%metro entry: top | l2
+        c_a[Call]
+        c_b[Report]
+
+        c_a -->|l2| c_b
+    end
+
+    subgraph sec_d [Lower target]
+        %%metro entry: left | l1
+        d_a[Assemble]
+        d_b[Merge]
+
+        d_a -->|l1| d_b
+    end
+
+    %% One source fans to two stacked sections; the feeds drop to a shared
+    %% horizontal channel and co-travel it before peeling into a top entry (l2)
+    %% and a left entry (l1).
+    s_b -->|l2| c_a
+    s_b -->|l1| d_a

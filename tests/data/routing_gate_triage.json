@@ -327,6 +327,18 @@
     "note": "Corridor-feeder fallback for a fan whose junction earned no corridor (its in-column gap below does not fit the bundle); the corpus's fans all earn a corridor, so this global-band branch is unexercised.",
     "status": "needs-review"
   },
+  "inter_section_handlers.py::if tgt_sec is None:::#1": {
+    "note": "Defensive guard in _fan_shares_inter_row_channel: the edge is a fan branch into an entry port, which always resolves to a section, so the None arm is unreachable in practice.",
+    "status": "defensive"
+  },
+  "inter_section_handlers.py::if src_sec is not None:::#1": {
+    "note": "Defensive guard in the fanned entry-wrap source-clearance lift: a fan-out junction always resolves to its source section, so the None arm is unreachable in practice.",
+    "status": "defensive"
+  },
+  "context.py::if len(set(tx.values())) < 2:::#1": {
+    "note": "Defensive guard in fanout_divergence_peel_order's packed-cell branch: distinct sections sharing one grid cell have distinct entry-port X, so the same-X arm (which bails to declaration order) is unreachable in the corpus.",
+    "status": "defensive"
+  },
   "inter_section_handlers.py::if fan is not None and ep_col is not None:::#1": {
     "note": "Reachable only via a defective render (inter-row corridor on a <78px gap); see #722.",
     "status": "needs-review"
@@ -950,10 +962,6 @@
   "tb_handlers.py::if tgt_sec is not None and tgt_sec.direction not in (\"TB\", \"BT\"):::#1": {
     "note": "Perp-entry drop crossing-X override: the edge's target is always a sectioned station, so tgt_sec resolves and the `tgt_sec is None` short-circuit to the plain drop is never taken; the `direction in (TB, BT)` arm (a drop continuing into a vertical-flow trunk) and the horizontal-target arm are both exercised.",
     "status": "defensive"
-  },
-  "inter_section_handlers.py::if corridor is not None and corridor.band_y is not None:::#1": {
-    "note": "A single-line top-entry fan branch drops into the fan's shared inter-row band only when its junction earns a band_y corridor; the corpus's single-line top-entry fans sit at junctions with a bypass-only corridor (band_y is None) or none, so the band_y arm is unexercised.",
-    "status": "needs-review"
   },
   "inter_section_handlers.py::if fan is not None and corridor is not None and corridor.band_y is not None:::#2": {
     "note": "Corridor-feeder shared inter-row band gate: the corpus's corridor feeders belong to fans whose corridor carries a band_y, so the short-circuit past it (no corridor or bypass-only) is unexercised; it falls to the elif fan-is-not-None global-band branch.",
