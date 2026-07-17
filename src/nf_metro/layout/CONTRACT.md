@@ -268,6 +268,25 @@ when `y_spacing` is auto-resolved), and `graph._resolved_x_spacing` (the
 resolved column pitch recorded before layout, read as the cross-axis off-track
 step for vertical-flow sections).
 
+A further group crosses a subsystem boundary rather than two numbered stages,
+so their `PhaseFieldSpec` names a lifecycle phase (`pre-layout`, `post-layout`,
+`rail-layout`) in place of a stage id. They carry no runtime check either:
+
+- `graph._cross_column_perp_bridges` - sections whose perpendicular drop was
+  bridged across grid columns, accumulated by the Stage 3.2 / 3.4 port
+  alignment; routing's render-curve invariant reads it to relax its abort to a
+  warning for those bundles.
+- `graph._fold_compressed_sections` / `graph._fold_reoriented_sections` -
+  recorded at parse/resolve time for sections a lowered fold threshold
+  relocated or whose flow direction was flipped; read by the fold-exit-side
+  guard, the render fold-abort chokepoint, and routing's exit-port offset.
+- `graph._rail_y` - the per-section `{line_id: rail_y}` map produced by the
+  opt-in rail-mode layout; read by the rail router, label placement, and rail
+  guards, empty when rail mode is off.
+- `graph._defer_final_guards` / `graph._after_final_deferred` - pass-control
+  flags `compute_layout` uses so the final-geometry guards defer while the
+  pre-bypass passes run, then validate the settled post-bypass geometry once.
+
 ## Stage overview
 
 The pipeline groups into six stages aligned with the coord-regime

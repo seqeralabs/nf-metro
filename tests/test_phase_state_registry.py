@@ -8,8 +8,8 @@ drift from:
 * the engine's ``_snap`` stage checkpoints (``CANONICAL_STAGE_ORDER``), and
 * ``CONTRACT.md``,
 
-and they fail when a new bare cross-phase ``graph._*`` poke is introduced
-without being declared, so the protocol can't grow an undocumented member.
+and they fail when any bare ``graph._*`` poke in the layout package is neither
+registered nor allowlisted, so the protocol can't grow an undocumented member.
 A behavioural test pins the write-before-read enforcement itself.
 """
 
@@ -23,6 +23,7 @@ import pytest
 
 from nf_metro.layout.phase_state import (
     CANONICAL_STAGE_ORDER,
+    NON_STAGE_PHASES,
     PHASE_FIELD_REGISTRY,
     PRE_LAYOUT,
     FieldEnforcement,
@@ -39,30 +40,26 @@ LAYOUT_DIR = REPO / "src" / "nf_metro" / "layout"
 ENGINE = LAYOUT_DIR / "engine.py"
 CONTRACT = LAYOUT_DIR / "CONTRACT.md"
 
-# Cross-phase ``graph._*`` channels that are deliberately NOT part of the
-# inter-phase positioning protocol, so they are not in PHASE_FIELD_REGISTRY:
-#   - _stages_completed / _validate_active: the enforcement mechanism itself.
-#   - _defer_final_guards: a pass-control flag toggled by compute_layout.
-#   - _explicit_directions: parse/auto-layout metadata, read by a guard.
-#   - _rail_y: rail-mode router metadata, not section positioning.
-#   - _cross_column_perp_bridges: a routing-invariant relaxation flag.
-_NON_PROTOCOL_CROSS_PHASE = {
+# ``graph._*`` names accessed in the layout package that are deliberately NOT
+# inter-phase positioning channels, so they are absent from PHASE_FIELD_REGISTRY:
+#   - _stages_completed / _validate_active: the write-before-read enforcement
+#     machinery itself.
+#   - _phase_snapshots_enabled: a per-run coordinate-snapshot flag stashed to
+#     avoid signature churn (#363), pure observation.
+#   - _explicit_grid / _explicit_directions: authoring provenance mutated by
+#     inference; owned by #681's provenance design rather than this protocol.
+_BOOKKEEPING_ALLOWLIST = {
     "_stages_completed",
     "_validate_active",
-    "_defer_final_guards",
+    "_phase_snapshots_enabled",
+    "_explicit_grid",
     "_explicit_directions",
-    "_rail_y",
-    "_cross_column_perp_bridges",
 }
 
 _COMMENT = re.compile(r"#.*$", re.MULTILINE)
 _SNAP_ID = re.compile(r'_snap\(graph,\s*"([^"]+)"\)')
 _STAGE_ID = re.compile(r"^\d+\.\d+[a-z]?$")
-_GRAPH_ATTR = re.compile(r"\bgraph\.([A-Za-z_][A-Za-z0-9_]*)")
-_GRAPH_WRITE = re.compile(
-    r"\bgraph\.([A-Za-z_][A-Za-z0-9_]*)\s*"
-    r"(?:=[^=]|\.(?:append|extend|update|add|clear|pop|setdefault|discard)\b|\[)"
-)
+_GRAPH_UNDERSCORE = re.compile(r"\bgraph\.(_[A-Za-z0-9_]*)")
 
 
 def _strip_comments(text: str) -> str:
@@ -93,12 +90,14 @@ def test_registered_field_is_a_repr_false_dataclass_field(name):
 @pytest.mark.parametrize("name", sorted(PHASE_FIELD_REGISTRY))
 def test_writer_and_reader_stages_are_known(name):
     spec = PHASE_FIELD_REGISTRY[name]
-    assert (
-        spec.writer_stage in CANONICAL_STAGE_ORDER or spec.writer_stage == PRE_LAYOUT
-    ), f"{name}: writer_stage {spec.writer_stage!r} is not a known stage"
+    known = set(CANONICAL_STAGE_ORDER) | set(NON_STAGE_PHASES)
+    assert spec.writer_stage in known, (
+        f"{name}: writer_stage {spec.writer_stage!r} is not a known stage or "
+        f"lifecycle phase"
+    )
     for r in spec.reader_stages:
-        assert r in CANONICAL_STAGE_ORDER, (
-            f"{name}: reader_stage {r!r} is not in CANONICAL_STAGE_ORDER"
+        assert r in known, (
+            f"{name}: reader_stage {r!r} is not a known stage or lifecycle phase"
         )
 
 
@@ -113,10 +112,12 @@ def test_require_writer_fields_have_writer_before_readers(name):
     spec = PHASE_FIELD_REGISTRY[name]
     if spec.enforcement is not FieldEnforcement.REQUIRE_WRITER:
         pytest.skip("FALLBACK field: write-before-read ordering not required")
-    if spec.writer_stage == PRE_LAYOUT:
+    if spec.writer_stage in NON_STAGE_PHASES:
         return
     w = CANONICAL_STAGE_ORDER.index(spec.writer_stage)
     for r in spec.reader_stages:
+        if r in NON_STAGE_PHASES:
+            continue
         assert w < CANONICAL_STAGE_ORDER.index(r), (
             f"{name}: writer Stage {spec.writer_stage} does not precede "
             f"reader Stage {r}"
@@ -160,40 +161,41 @@ def test_pass_c_bisection_order_is_a_subsequence():
         )
 
 
-# --- no unregistered cross-phase poke --------------------------------------
+# --- no unregistered graph channel -----------------------------------------
 
 
-def _cross_phase_underscore_attrs() -> set[str]:
-    """``graph._*`` attrs written in one layout module and read in another."""
-    writers: dict[str, set[str]] = {}
-    readers: dict[str, set[str]] = {}
+def _layout_graph_underscore_attrs() -> dict[str, set[str]]:
+    """Every ``graph._*`` attr accessed in the layout package -> modules using it."""
+    accessed: dict[str, set[str]] = {}
     for path in LAYOUT_DIR.rglob("*.py"):
         if path.name == "phase_state.py":
             continue  # the registry/helper module, not a phase
         text = _strip_comments(path.read_text())
         mod = str(path.relative_to(LAYOUT_DIR))
-        for m in _GRAPH_WRITE.finditer(text):
-            writers.setdefault(m.group(1), set()).add(mod)
-        for m in _GRAPH_ATTR.finditer(text):
-            readers.setdefault(m.group(1), set()).add(mod)
-    cross: set[str] = set()
-    for attr, ws in writers.items():
-        if not attr.startswith("_"):
-            continue
-        if readers.get(attr, set()) - ws:  # read somewhere it isn't written
-            cross.add(attr)
-    return cross
+        for m in _GRAPH_UNDERSCORE.finditer(text):
+            accessed.setdefault(m.group(1), set()).add(mod)
+    return accessed
 
 
-def test_no_unregistered_cross_phase_channel():
-    """A new cross-phase ``graph._*`` poke must be registered or allowlisted."""
-    cross = _cross_phase_underscore_attrs()
-    unaccounted = cross - set(PHASE_FIELD_REGISTRY) - _NON_PROTOCOL_CROSS_PHASE
+def test_no_unregistered_graph_channel():
+    """Every ``graph._*`` poke in layout must be registered or allowlisted.
+
+    Grepping the whole package (not only fields read across module boundaries)
+    means a new private channel between phases cannot enter without either a
+    ``PHASE_FIELD_REGISTRY`` entry declaring its dataflow or an explicit
+    ``_BOOKKEEPING_ALLOWLIST`` line marking it non-protocol.
+    """
+    accessed = _layout_graph_underscore_attrs()
+    unaccounted = set(accessed) - set(PHASE_FIELD_REGISTRY) - _BOOKKEEPING_ALLOWLIST
     assert not unaccounted, (
-        "These graph._* fields are written in one layout module and read in "
-        "another but are neither in PHASE_FIELD_REGISTRY nor allowlisted as "
-        f"non-protocol state: {sorted(unaccounted)}. Declare them in "
-        "phase_state.py (preferred) or add to _NON_PROTOCOL_CROSS_PHASE."
+        "These graph._* fields are accessed in the layout package but are "
+        "neither in PHASE_FIELD_REGISTRY nor on _BOOKKEEPING_ALLOWLIST: "
+        + ", ".join(
+            f"{name} (in {', '.join(sorted(accessed[name]))})"
+            for name in sorted(unaccounted)
+        )
+        + ". Declare them in phase_state.py (preferred) or add to "
+        "_BOOKKEEPING_ALLOWLIST with a rationale."
     )
 
 
