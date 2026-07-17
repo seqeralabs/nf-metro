@@ -281,6 +281,62 @@ page).
 For a ready-made server that does exactly this for a live Nextflow run - no code
 to write - see [Live progress](/nf-metro/live/).
 
+## Calling the Python API directly
+
+The CLI wraps parse/layout errors into a clean `click.ClickException` message.
+An embedder calling `nf_metro.render_string()` (or `prepare_graph()` plus
+`render_graph()`) directly from Python gets the pipeline's typed errors raw,
+so it can decide for itself how to present a rejected input to its own users.
+
+Every one of the specific parse/layout-authoring error types below
+subclasses `nf_metro.NfMetroError`, so one `except` clause covers all of
+them without enumerating each type by name:
+
+```python
+from nf_metro import render_string, NfMetroError
+
+try:
+    svg = render_string(mmd_text)
+except NfMetroError as e:
+    # e.g. show the author their `.mmd` was rejected, with str(e) as the reason
+    ...
+except ValueError as e:
+    # a grammar/directive syntax error - not an NfMetroError, still worth
+    # catching separately if you want the same "bad input" handling for it
+    ...
+```
+
+| Raised when...                                                                   | Type                                                                     | When                 | Also a...    |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | -------------------- | ------------ |
+| The `.mmd` grammar or a directive is malformed                                   | plain `ValueError` (**not** an `NfMetroError`, see below)                | parsing              | -            |
+| An edge or port survives parsing with a dangling reference                       | `nf_metro.parser.UnresolvedEndpointError` / `UnresolvedPortSectionError` | parsing/layout       | `ValueError` |
+| The station graph has a cycle                                                    | `nf_metro.parser.CyclicGraphError`                                       | layout               | `ValueError` |
+| An inter-section edge would have to flow backward                                | `nf_metro.layout.BackwardFlowError`                                      | layout               | `ValueError` |
+| One section is entered from more than one direction                              | `nf_metro.layout.MixedEntryDirectionError`                               | layout               | `ValueError` |
+| A layout-engine self-check fails mid-layout                                      | `nf_metro.layout.PhaseInvariantError`                                    | layout               | -            |
+| A user-set `fold_threshold` compresses the grid past what the router can resolve | `nf_metro.layout.FoldThresholdError`                                     | **render step only** | `ValueError` |
+
+The first row is deliberately outside the hierarchy: the parser raises a
+plain `ValueError` ad hoc for most grammar/directive problems rather than
+through a dedicated type, so `except ValueError` is the right catch-all for
+"the `.mmd` text itself doesn't parse." `except NfMetroError` covers every
+problem detected _after_ parsing succeeds - a graph that parsed fine but
+can't be laid out (or, for `FoldThresholdError`, drawn) honestly.
+
+Catch a specific row instead of the base class when the distinction matters -
+for example, offering "fix your fold threshold" only for
+`FoldThresholdError`, or falling back to `%%metro permissive: true`
+semantics only for `PhaseInvariantError`.
+
+**Not** part of this hierarchy: `render_string()`'s render step also runs a
+handful of self-checks (`CurveInvariantError`, `BridgeInvariantError`,
+`SectionHeaderClashError`, `SectionHeaderOverflowError`, `OffsetAnchorError`)
+that indicate a defect in nf-metro's own drawing rather than a problem with
+your input, so they are left out of `NfMetroError` on purpose - see the
+`render_string` docstring for the full list and rationale. Report one if you
+hit it; only catching `Exception` broadly shields a host page from them, and
+doing so also masks genuine nf-metro bugs.
+
 ## Versioning and stability
 
 The manifest schema and the driver contract are versioned independently, both

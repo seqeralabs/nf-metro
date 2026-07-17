@@ -158,12 +158,38 @@ def prepare_graph(
     title/logo band regardless of ``bare``/``%%metro legend:`` (its embedded
     SVG forces the legend off and ignores ``bare``), so it always reserves.
 
-    Returns the settled graph. Propagates the pipeline's typed errors:
-    :class:`ValueError` (parse), and the layout errors
-    :class:`~nf_metro.layout.CyclicGraphError`,
-    :class:`~nf_metro.layout.BackwardFlowError`,
-    :class:`~nf_metro.layout.MixedEntryDirectionError`,
-    :class:`~nf_metro.layout.PhaseInvariantError`.
+    Returns the settled graph.
+
+    **Exception contract.** Propagates the pipeline's typed errors. The
+    specific parse/layout-authoring types below all subclass
+    :class:`~nf_metro.NfMetroError`, so catching that one type handles "this
+    input was rejected" generically; catch a specific type instead to handle
+    that case distinctly. A grammar or directive error in the ``.mmd`` text
+    can also surface as a plain :class:`ValueError` that is *not* an
+    :class:`~nf_metro.NfMetroError` (the parser raises many of these ad hoc,
+    not through a dedicated type); catch ``ValueError`` separately to cover
+    that case too.
+
+    - A dangling edge or port reference that survived parsing:
+      :class:`~nf_metro.parser.UnresolvedEndpointError` /
+      :class:`~nf_metro.parser.UnresolvedPortSectionError` (both also
+      :class:`ValueError`).
+    - A cyclic station graph: :class:`~nf_metro.parser.CyclicGraphError`
+      (also a :class:`ValueError`).
+    - A section grid that cannot be rendered honestly:
+      :class:`~nf_metro.layout.BackwardFlowError` (an inter-section edge
+      would have to flow backward) or
+      :class:`~nf_metro.layout.MixedEntryDirectionError` (one section is
+      entered from more than one approach direction) - both also
+      :class:`ValueError`.
+    - An engine self-check failing mid-layout:
+      :class:`~nf_metro.layout.PhaseInvariantError` (not a ``ValueError``;
+      indicates a problem in the layout engine's own intermediate state
+      rather than the input).
+
+    This function only parses and lays out the graph; it never draws it, so
+    it cannot raise the render-time self-checks described in
+    :func:`render_string`'s docstring.
 
     When ``graph.permissive`` is set (``%%metro permissive: true`` or
     ``--permissive``), a :class:`~nf_metro.layout.PhaseInvariantError` raised
@@ -277,6 +303,29 @@ def render_string(
     resolve against the viewer's OS preference. Set ``False`` when inlining the
     SVG into a host page that owns the color-scheme (matches ``--no-self-color-scheme``
     on the CLI).
+
+    Raises everything :func:`prepare_graph` documents, plus two render-only
+    cases from the draw step (:func:`render_graph`):
+
+    - A ``fold_threshold`` set too small for the map can leave the router
+      unable to separate bundles at the compacted width; this is reframed
+      as :class:`~nf_metro.layout.FoldThresholdError` (also an
+      :class:`~nf_metro.NfMetroError` and a :class:`ValueError`) naming the
+      directive to relax, rather than the render-time engine self-check it
+      would otherwise raise.
+    - At the map's natural (un-folded) width, a raw render-time self-check
+      can fire directly:
+      :class:`~nf_metro.layout.routing.invariants.CurveInvariantError`,
+      :class:`~nf_metro.render.section_header.SectionHeaderClashError`,
+      :class:`~nf_metro.render.section_header.SectionHeaderOverflowError`,
+      :class:`~nf_metro.render.bridges.BridgeInvariantError`, or
+      :class:`~nf_metro.layout.routing.offsets.OffsetAnchorError`. These are
+      deliberately **not** part of the :class:`~nf_metro.NfMetroError`
+      hierarchy: they signal a defect in nf-metro's own drawing of an
+      otherwise-valid graph, not a problem with the caller's input, so they
+      are left uncaught here the same way the CLI leaves them as a raw
+      traceback rather than a clean error message - report them as nf-metro
+      bugs rather than handling them as expected input.
     """
     graph = prepare_graph(
         text,

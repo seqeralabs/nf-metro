@@ -14,6 +14,7 @@ import pytest
 from click.testing import CliRunner
 
 import nf_metro.api as api_module
+from nf_metro import NfMetroError
 from nf_metro.api import RenderConfig, prepare_graph, render_string
 from nf_metro.cli import cli
 from nf_metro.layout import PhaseInvariantError
@@ -100,11 +101,15 @@ def test_prepare_graph_returns_settled_graph() -> None:
 
 
 def test_render_string_propagates_layout_error() -> None:
+    """A cyclic graph raises CyclicGraphError, which is also an NfMetroError
+    (see tests/test_error_hierarchy.py for the rest of that contract:
+    backward-flow, mixed-entry, and the plain-ValueError parse-error case)."""
     cyclic = (
         "%%metro line: a | A | #f00\ngraph LR\n  n1[N1] -->|a| n2[N2]\n  n2 -->|a| n1\n"
     )
-    with pytest.raises(CyclicGraphError):
+    with pytest.raises(CyclicGraphError) as excinfo:
         render_string(cyclic)
+    assert isinstance(excinfo.value, NfMetroError)
 
 
 def test_prepare_graph_permissive_downgrades_phase_invariant_error(monkeypatch) -> None:

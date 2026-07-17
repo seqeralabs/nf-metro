@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Literal, TypedDict
 
+from nf_metro.errors import NfMetroError
+
 
 class RowGridInfo(TypedDict):
     """Per-row grid metadata recorded by Stage 1.2 (``_align_row_y_grids``)."""
@@ -380,7 +382,7 @@ class RouteSegment:
     edge: Edge | None = None
 
 
-class UnresolvedEndpointError(ValueError):
+class UnresolvedEndpointError(NfMetroError, ValueError):
     """Raised when an edge references a station id that is not in the graph.
 
     The resolver inserts ports and junctions as real stations, so both
@@ -397,7 +399,7 @@ def format_unresolved_endpoint(edge: Edge, missing: list[str]) -> str:
     )
 
 
-class UnresolvedPortSectionError(ValueError):
+class UnresolvedPortSectionError(NfMetroError, ValueError):
     """Raised when a port's ``section_id`` is absent from the graph's sections.
 
     Every port carries a required ``section_id`` naming the section it bounds,

@@ -13,6 +13,7 @@ from pathlib import Path
 
 import networkx as nx
 
+from nf_metro.errors import NfMetroError
 from nf_metro.parser.model import (
     Edge,
     MetroGraph,
@@ -27,7 +28,7 @@ ERROR = "error"
 WARNING = "warning"
 
 
-class CyclicGraphError(ValueError):
+class CyclicGraphError(NfMetroError, ValueError):
     """Raised when a graph the layout engine requires to be a DAG has a cycle."""
 
 
