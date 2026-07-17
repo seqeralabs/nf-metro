@@ -9,6 +9,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, NamedTuple
 
+from nf_metro.errors import NfMetroError
 from nf_metro.layout.constants import (
     COLLINEAR_AXIS_TOL,
     COMPONENT_BAND_OVERLAP_TOLERANCE,
@@ -104,7 +105,7 @@ if TYPE_CHECKING:
         def message(self) -> str: ...
 
 
-class PhaseInvariantError(Exception):
+class PhaseInvariantError(NfMetroError):
     """Raised when a layout phase produces invalid intermediate state."""
 
 
@@ -122,7 +123,7 @@ class LayoutInvariantError(PhaseInvariantError):
     """
 
 
-class BackwardFlowError(ValueError):
+class BackwardFlowError(NfMetroError, ValueError):
     """Raised when a layout places a section so an inter-section edge must
     flow backward against its own row's flow direction.
 
@@ -133,7 +134,7 @@ class BackwardFlowError(ValueError):
     """
 
 
-class MixedEntryDirectionError(ValueError):
+class MixedEntryDirectionError(NfMetroError, ValueError):
     """Raised when one section receives incoming lines from more than one
     approach direction (entry ports on more than one cardinal side).
 
@@ -146,7 +147,7 @@ class MixedEntryDirectionError(ValueError):
     """
 
 
-class FoldThresholdError(ValueError):
+class FoldThresholdError(NfMetroError, ValueError):
     """Raised when a ``fold_threshold`` the user set is too small for the map.
 
     A ``--fold-threshold`` / ``%%metro fold_threshold`` below a map's natural
