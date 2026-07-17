@@ -7,6 +7,7 @@ from collections import Counter, defaultdict
 from collections.abc import Iterator
 
 from nf_metro.layout.constants import (
+    COORD_GROUP_DIGITS_COARSE,
     DIAGONAL_RUN,
     EXIT_GAP_MULTIPLIER,
     ICON_CAPTION_FONT_HEIGHT,
@@ -14,13 +15,14 @@ from nf_metro.layout.constants import (
     ICON_HALF_HEIGHT,
     LABEL_BBOX_MARGIN,
     MIN_STRAIGHT_EDGE,
+    OFF_TRACK_TRUNK_CLEARANCE_MARGIN,
     SAME_COORD_TOLERANCE,
     SECTION_Y_PADDING,
     TERMINUS_WIDTH,
     X_SPACING,
     resolve_offset_step,
 )
-from nf_metro.layout.geometry import AxisFrame, lanes_run_along_x
+from nf_metro.layout.geometry import AxisFrame, lanes_run_along_x, quantize_coord
 from nf_metro.layout.labels import _label_text_height, label_text_width
 from nf_metro.layout.phases._common import (
     _content_station_ids,
@@ -1196,7 +1198,9 @@ def _off_track_output_below(graph: MetroGraph) -> set[str]:
                 continue
         signed = [fan_sign * getattr(st, cross) for st in trunk_sts]
         if signed:
-            baseline_signed = dominant_value(round(v, 1) for v in signed)
+            baseline_signed = dominant_value(
+                quantize_coord(v, COORD_GROUP_DIGITS_COARSE) for v in signed
+            )
             section_baseline[section.id] = (cross, fan_sign, baseline_signed)
 
     below: set[str] = set()
@@ -1278,7 +1282,7 @@ def _section_distinct_trunk_cross_coords(
     """
     axis = section_cross_axis(section)
     return {
-        round(getattr(st, axis), 1)
+        quantize_coord(getattr(st, axis), COORD_GROUP_DIGITS_COARSE)
         for st in _iter_trunk_stations(graph, section, junction_ids)
     }
 
@@ -1358,7 +1362,7 @@ def _per_column_stack_steps(
     steps: dict[str, int] = {}
     per_col: dict[float, int] = defaultdict(int)
     for st in innermost_first:
-        col = round(getattr(st, flow_axis), 1)
+        col = quantize_coord(getattr(st, flow_axis), COORD_GROUP_DIGITS_COARSE)
         per_col[col] += 1
         steps[st.id] = per_col[col]
     return steps
@@ -1434,11 +1438,15 @@ def _place_off_track_relative_to_anchors(
                 step,
                 section,
                 junction_ids,
-                sibling_cross=used_cross_per_col[round(getattr(st, flow_axis), 1)],
+                sibling_cross=used_cross_per_col[
+                    quantize_coord(getattr(st, flow_axis), COORD_GROUP_DIGITS_COARSE)
+                ],
                 direction=bump_dir,
             )
         setattr(st, cross_axis, candidate)
-        used_cross_per_col[round(getattr(st, flow_axis), 1)].append(candidate)
+        used_cross_per_col[
+            quantize_coord(getattr(st, flow_axis), COORD_GROUP_DIGITS_COARSE)
+        ].append(candidate)
         signed = lift_sign * candidate
         if bump_dir == lift_sign:
             if lift_extreme is None or signed > lift_sign * lift_extreme:
@@ -1506,8 +1514,6 @@ def _bump_off_track_clear_of_trunks(
     # half-width on X.
     icon_half = ICON_HALF_HEIGHT if cross_axis == "y" else TERMINUS_WIDTH / 2
 
-    # A small margin so the icon's stroke doesn't touch a track.
-    MARGIN = 2.0
     # Limit attempts so a pathological column doesn't pull the icon off-canvas.
     MAX_STEPS = 6
 
@@ -1553,11 +1559,11 @@ def _bump_off_track_clear_of_trunks(
         if cross_axis == "y" and off_st.terminus_names and any(off_st.terminus_names)
         else 0.0
     )
-    sibling_clearance = 2 * icon_half + caption_reach + MARGIN
+    sibling_clearance = 2 * icon_half + caption_reach + OFF_TRACK_TRUNK_CLEARANCE_MARGIN
 
     def _overlaps(c: float) -> bool:
-        lo = c - icon_half - MARGIN
-        hi = c + icon_half + MARGIN
+        lo = c - icon_half - OFF_TRACK_TRUNK_CLEARANCE_MARGIN
+        hi = c + icon_half + OFF_TRACK_TRUNK_CLEARANCE_MARGIN
         for band_lo, band_hi in zip(trunk_bands[::2], trunk_bands[1::2]):
             if not (hi < band_lo or band_hi < lo):
                 return True

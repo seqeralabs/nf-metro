@@ -14,6 +14,16 @@ if TYPE_CHECKING:
 _Box = tuple[float, float, float, float]
 
 
+def quantize_coord(value: float, ndigits: int) -> float:
+    """Round *value* to *ndigits* decimal places for use as a grouping key.
+
+    Snaps a float coordinate to a stable dict/set key so layout passes can
+    group stations sharing a column, row, or trunk coordinate despite float
+    drift from arithmetic (averaging, offset accumulation).
+    """
+    return round(value, ndigits)
+
+
 def shift_section(
     graph: MetroGraph, section: Section, *, dx: float = 0.0, dy: float = 0.0
 ) -> None:

@@ -8,12 +8,21 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 from nf_metro.layout.constants import (
+    BOUNDARY_CROSSING_INSET,
+    COORD_GROUP_DIGITS_COARSE,
+    COORD_GROUP_DIGITS_FINE,
     COORD_TOLERANCE,
+    PORT_BOUNDARY_CROSSING_TOL,
     SAME_COORD_TOLERANCE,
     SECTION_Y_PADDING,
     STATION_RADIUS_APPROX,
 )
-from nf_metro.layout.geometry import AxisFrame, lanes_run_along_x, lanes_run_along_y
+from nf_metro.layout.geometry import (
+    AxisFrame,
+    lanes_run_along_x,
+    lanes_run_along_y,
+    quantize_coord,
+)
 from nf_metro.layout.phase_state import require_phase_field
 from nf_metro.parser.model import (
     Edge,
@@ -510,18 +519,22 @@ def _trunk_symmetric_fan_ids(graph: MetroGraph, section: Section) -> set[str]:
         return set()
     counts: dict[float, int] = defaultdict(int)
     for sid in content_ids:
-        counts[round(graph.stations[sid].y, 1)] += 1
+        counts[quantize_coord(graph.stations[sid].y, COORD_GROUP_DIGITS_COARSE)] += 1
     trunk_y = max(counts.items(), key=lambda kv: (kv[1], -kv[0]))[0]
     by_x: dict[float, list[str]] = defaultdict(list)
     for sid in content_ids:
-        by_x[round(graph.stations[sid].x, 1)].append(sid)
+        by_x[quantize_coord(graph.stations[sid].x, COORD_GROUP_DIGITS_COARSE)].append(
+            sid
+        )
     result: set[str] = set()
     for sids in by_x.values():
         if len(sids) < 2:
             continue
         seen_by_offset: dict[float, list[str]] = defaultdict(list)
         for sid in sids:
-            off = round(graph.stations[sid].y - trunk_y, 1)
+            off = quantize_coord(
+                graph.stations[sid].y - trunk_y, COORD_GROUP_DIGITS_COARSE
+            )
             if off == 0.0:
                 continue
             mirrors = seen_by_offset.get(-off)
@@ -629,9 +642,9 @@ def _route_crosses_section_boundary(
     graph: MetroGraph,
     routes: list[RoutedPath],
     *,
-    port_tol: float = 24.0,
-    inset: float = 4.0,
-    axis_tol: float = 1.0,
+    port_tol: float = PORT_BOUNDARY_CROSSING_TOL,
+    inset: float = BOUNDARY_CROSSING_INSET,
+    axis_tol: float = COORD_TOLERANCE,
 ) -> tuple[RoutedPath, str, float, float] | None:
     """Return the first ``(route, section_id, x, y)`` where an axis-aligned
     routed segment crosses a section bbox edge away from any declared port,
@@ -1120,7 +1133,7 @@ def _section_trunk_y(graph: MetroGraph, section: Section) -> float | None:
                 and not is_bypass_v(other_id)
                 and set(graph.station_lines(other_id)) == bundle
             ):
-                trunk_ys.add(round(st.y, 3))
+                trunk_ys.add(quantize_coord(st.y, COORD_GROUP_DIGITS_FINE))
     return min(trunk_ys) if trunk_ys else None
 
 
@@ -1471,41 +1484,6 @@ def grow_section_bbox_max_edge(
     if new_max <= getattr(section, origin_attr) + getattr(section, size_attr):
         return
     move_section_bbox_max_edge(graph, section, axis, new_max)
-
-
-def _set_section_bbox_top(
-    graph: MetroGraph, section: Section, new_bbox_top: float
-) -> None:
-    """Move a section's bbox top to *new_bbox_top* and pull TOP ports along.
-
-    Works in both directions: a smaller *new_bbox_top* grows the box
-    upward, a larger one shrinks it.  BOTTOM ports stay put because only
-    the top edge moves.  The Y-axis case of
-    :func:`move_section_bbox_min_edge`.
-    """
-    move_section_bbox_min_edge(graph, section, "y", new_bbox_top)
-
-
-def _grow_section_bbox_upward(
-    graph: MetroGraph, section: Section, new_bbox_top: float
-) -> None:
-    """Expand a section's bbox upward to *new_bbox_top* and pull TOP ports.
-
-    The Y-axis case of :func:`grow_section_bbox_min_edge`: grow-only, so a
-    *new_bbox_top* at or below the current top is a no-op.
-    """
-    grow_section_bbox_min_edge(graph, section, "y", new_bbox_top)
-
-
-def _grow_section_bbox_downward(
-    graph: MetroGraph, section: Section, new_bbox_bottom: float
-) -> None:
-    """Expand a section's bbox downward to *new_bbox_bottom* and pull BOTTOM
-    ports along.  Grow-only: a *new_bbox_bottom* at or above the current
-    bottom edge is a no-op, so the box is never raised.  The Y-axis case of
-    :func:`grow_section_bbox_max_edge`.
-    """
-    grow_section_bbox_max_edge(graph, section, "y", new_bbox_bottom)
 
 
 def exit_run_corridor_clear(

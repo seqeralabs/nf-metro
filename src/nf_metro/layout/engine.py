@@ -52,8 +52,6 @@ from nf_metro.layout.phases._common import (  # noqa: F401
     _fan_offsets,
     _grid_group_section_ids,
     _grid_rows_top_to_bottom,
-    _grow_section_bbox_downward,
-    _grow_section_bbox_upward,
     _max_stations_per_layer,
     _route_crosses_section_boundary,
     _row_contiguous_column_groups,

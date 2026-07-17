@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 from nf_metro.layout.constants import (
+    COORD_TOLERANCE,
     CURVE_RADIUS,
     ENTRY_SHIFT_TB,
     EXIT_CORRIDOR_ICON_CLEARANCE,
@@ -696,7 +697,7 @@ def _align_ports_to_downstream(graph: MetroGraph) -> None:
                 center_y = shorter.bbox_y + shorter.bbox_h / 2
                 lo = min(upstream_y, target_y)
                 hi = max(upstream_y, target_y)
-                if lo <= center_y <= hi or abs(upstream_y - target_y) < 1.0:
+                if lo <= center_y <= hi or abs(upstream_y - target_y) < COORD_TOLERANCE:
                     target_y = center_y
 
         # Only move if target_y fits within both section bboxes
@@ -810,7 +811,7 @@ def _snap_sole_layer_stations_to_ports(graph: MetroGraph) -> None:
                 if len(siblings) > 1:
                     break
 
-                if abs(st.y - port_y) >= 1.0:
+                if abs(st.y - port_y) >= COORD_TOLERANCE:
                     st.y = port_y
 
                 # Only continue the chain when center_ports is on.
@@ -882,7 +883,7 @@ def _snap_grid_group_entry_ports(graph: MetroGraph) -> None:
                     target_y = tgt.y
                     break
 
-        if target_y is not None and abs(port_st.y - target_y) >= 1.0:
+        if target_y is not None and abs(port_st.y - target_y) >= COORD_TOLERANCE:
             _set_port_y(graph, port_id, target_y)
 
 
@@ -941,7 +942,7 @@ def _snap_grid_group_exit_ports(graph: MetroGraph) -> None:
         unique_source_ys = sorted(set(source_ys))
         spread = unique_source_ys[-1] - unique_source_ys[0]
         n_unique = len(unique_source_ys)
-        single_source = n_unique == 1 or spread <= 1.0
+        single_source = n_unique == 1 or spread <= COORD_TOLERANCE
 
         # A flow-aligned exit anchors on its carriers' shared row, so the level
         # change becomes a riser in the inter-section gap rather than a diagonal
@@ -951,7 +952,9 @@ def _snap_grid_group_exit_ports(graph: MetroGraph) -> None:
         # bundle, a fan-in, or a merge junction keep the downstream-aligned
         # placement so the inter-section run stays straight (see
         # ``flow_exit_carrier_anchor``).
-        keep_downstream_aligned = ds_y is not None and abs(port_st.y - ds_y) < 1.0
+        keep_downstream_aligned = (
+            ds_y is not None and abs(port_st.y - ds_y) < COORD_TOLERANCE
+        )
         anchors_to_carrier = (
             flow_exit_carrier_anchor(graph, port_id, section, junction_ids) is not None
         )
@@ -968,12 +971,14 @@ def _snap_grid_group_exit_ports(graph: MetroGraph) -> None:
             # redundant rather than a true fan-in).
             if ds_y is None or (n_unique >= 3 and len(exit_lines) < 2):
                 continue
-            match = next((y for y in unique_source_ys if abs(y - ds_y) < 1.0), None)
+            match = next(
+                (y for y in unique_source_ys if abs(y - ds_y) < COORD_TOLERANCE), None
+            )
             if match is None:
                 continue
             target_y = match
 
-        if abs(port_st.y - target_y) >= 1.0:
+        if abs(port_st.y - target_y) >= COORD_TOLERANCE:
             _set_port_y(graph, port_id, target_y)
 
 
