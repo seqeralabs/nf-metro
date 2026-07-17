@@ -81,16 +81,13 @@ def require_resolved_port_sections(graph: MetroGraph) -> None:
         )
 
 
-def find_cycle(graph: MetroGraph) -> list[str] | None:
-    """Return a node sequence witnessing a cycle, or ``None`` if acyclic.
+def _cycle_witness(g: nx.DiGraph[str]) -> list[str] | None:
+    """Return a node sequence witnessing a cycle in ``g``, or ``None`` if acyclic.
 
     The returned path closes back on its first node (``["a", "b", "a"]`` for a
     two-node cycle, ``["a", "a"]`` for a self-loop) so it reads directly as
     ``a -> b -> a`` when joined.
     """
-    g: nx.DiGraph[str] = nx.DiGraph()
-    for edge in graph.edges:
-        g.add_edge(edge.source, edge.target)
     if nx.is_directed_acyclic_graph(g):
         return None
     cycle_edges = nx.find_cycle(g)
@@ -99,9 +96,40 @@ def find_cycle(graph: MetroGraph) -> list[str] | None:
     return nodes
 
 
+def find_cycle(graph: MetroGraph) -> list[str] | None:
+    """Return a station-id sequence witnessing a cycle, or ``None`` if acyclic."""
+    g: nx.DiGraph[str] = nx.DiGraph()
+    for edge in graph.edges:
+        g.add_edge(edge.source, edge.target)
+    return _cycle_witness(g)
+
+
 def format_cycle_error(witness: list[str]) -> str:
     """Render a cycle witness path as a fatal error message."""
     return f"Graph contains a cycle: {' -> '.join(witness)}"
+
+
+def find_section_cycle(graph: MetroGraph) -> list[str] | None:
+    """Return a section-id sequence witnessing a section-DAG cycle, or ``None``.
+
+    Sections can close a loop (``sec_a`` feeds ``sec_b`` which feeds back into
+    ``sec_a``) while every underlying station edge still points forward, so the
+    station digraph in :func:`find_cycle` cannot see it. The returned path
+    closes back on its first section (``["sec_a", "sec_b", "sec_a"]``) so it
+    reads directly as ``sec_a -> sec_b -> sec_a`` when joined.
+    """
+    g: nx.DiGraph[str] = nx.DiGraph()
+    for edge in graph.edges:
+        src_sec = graph.section_for_station(edge.source)
+        tgt_sec = graph.section_for_station(edge.target)
+        if src_sec and tgt_sec and src_sec != tgt_sec:
+            g.add_edge(src_sec, tgt_sec)
+    return _cycle_witness(g)
+
+
+def format_section_cycle_error(witness: list[str]) -> str:
+    """Render a section-cycle witness path as a fatal error message."""
+    return f"Sections form a cycle: {' -> '.join(witness)}"
 
 
 @dataclass(frozen=True)
@@ -132,6 +160,12 @@ def validate_graph(graph: MetroGraph) -> list[ValidationIssue]:
     witness = find_cycle(graph)
     if witness is not None:
         issues.append(ValidationIssue(ERROR, format_cycle_error(witness)))
+
+    section_witness = find_section_cycle(graph)
+    if section_witness is not None:
+        issues.append(
+            ValidationIssue(ERROR, format_section_cycle_error(section_witness))
+        )
 
     for edge in graph.edges:
         if edge.line_id != "default" and edge.line_id not in graph.lines:

@@ -24,6 +24,7 @@ from nf_metro.parser.model import (
     Section,
     SectionDAG,
 )
+from nf_metro.parser.validate import CyclicGraphError
 
 
 def infer_interchanges(graph: MetroGraph) -> None:
@@ -293,8 +294,14 @@ def _internal_station_depths(
 ) -> dict[str, int] | None:
     """Longest-path depth of each station through a section's internal edges.
 
-    Returns ``None`` when the section has no internal edges or contains a
-    cycle (no roots), so callers fall back to a station count.
+    Returns ``None`` when the section has no internal edges, so callers fall
+    back to a station count for the size estimate.
+
+    The graph is assumed acyclic: cyclic graphs are rejected by
+    ``compute_layout`` and reported by ``validate_graph`` before layout
+    inference reaches this estimator. A section whose internal edges form a
+    cycle would leave no root to rank from, so that case raises loudly rather
+    than falling back to a distorted station-count estimate.
     """
     section = graph.sections[section_id]
     station_ids = set(section.station_ids)
@@ -310,7 +317,10 @@ def _internal_station_depths(
         return None
     roots = station_ids - has_pred
     if not roots:
-        return None
+        raise CyclicGraphError(
+            f"Section '{section_id}' has cyclic internal edges: "
+            f"{', '.join(sorted(station_ids))}"
+        )
 
     depth: dict[str, int] = {sid: 0 for sid in station_ids}
     queue: deque[str] = deque(roots)

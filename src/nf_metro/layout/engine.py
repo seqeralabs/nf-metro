@@ -316,7 +316,9 @@ from nf_metro.parser.model import LineSpread, MetroGraph, Section, is_bypass_v
 from nf_metro.parser.validate import (
     CyclicGraphError,
     find_cycle,
+    find_section_cycle,
     format_cycle_error,
+    format_section_cycle_error,
     require_resolved_edge_endpoints,
     require_resolved_port_sections,
 )
@@ -472,6 +474,10 @@ def compute_layout(
     witness = find_cycle(graph)
     if witness is not None:
         raise CyclicGraphError(format_cycle_error(witness))
+
+    section_witness = find_section_cycle(graph)
+    if section_witness is not None:
+        raise CyclicGraphError(format_section_cycle_error(section_witness))
 
     require_resolved_edge_endpoints(graph)
     require_resolved_port_sections(graph)
