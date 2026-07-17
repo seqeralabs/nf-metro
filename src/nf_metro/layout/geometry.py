@@ -17,10 +17,9 @@ _Box = tuple[float, float, float, float]
 def quantize_coord(value: float, ndigits: int) -> float:
     """Round *value* to *ndigits* decimal places for use as a grouping key.
 
-    Single code path for the "snap a float coordinate to a stable dict/set
-    key" pattern used across layout passes to group stations sharing a
-    column, row, or trunk coordinate despite float drift from arithmetic
-    (averaging, offset accumulation).
+    Snaps a float coordinate to a stable dict/set key so layout passes can
+    group stations sharing a column, row, or trunk coordinate despite float
+    drift from arithmetic (averaging, offset accumulation).
     """
     return round(value, ndigits)
 

@@ -9,13 +9,20 @@ from typing import TYPE_CHECKING
 
 from nf_metro.layout.constants import (
     BOUNDARY_CROSSING_INSET,
+    COORD_GROUP_DIGITS_COARSE,
+    COORD_GROUP_DIGITS_FINE,
     COORD_TOLERANCE,
     PORT_BOUNDARY_CROSSING_TOL,
     SAME_COORD_TOLERANCE,
     SECTION_Y_PADDING,
     STATION_RADIUS_APPROX,
 )
-from nf_metro.layout.geometry import AxisFrame, lanes_run_along_x, lanes_run_along_y
+from nf_metro.layout.geometry import (
+    AxisFrame,
+    lanes_run_along_x,
+    lanes_run_along_y,
+    quantize_coord,
+)
 from nf_metro.layout.phase_state import require_phase_field
 from nf_metro.parser.model import (
     Edge,
@@ -512,18 +519,22 @@ def _trunk_symmetric_fan_ids(graph: MetroGraph, section: Section) -> set[str]:
         return set()
     counts: dict[float, int] = defaultdict(int)
     for sid in content_ids:
-        counts[round(graph.stations[sid].y, 1)] += 1
+        counts[quantize_coord(graph.stations[sid].y, COORD_GROUP_DIGITS_COARSE)] += 1
     trunk_y = max(counts.items(), key=lambda kv: (kv[1], -kv[0]))[0]
     by_x: dict[float, list[str]] = defaultdict(list)
     for sid in content_ids:
-        by_x[round(graph.stations[sid].x, 1)].append(sid)
+        by_x[quantize_coord(graph.stations[sid].x, COORD_GROUP_DIGITS_COARSE)].append(
+            sid
+        )
     result: set[str] = set()
     for sids in by_x.values():
         if len(sids) < 2:
             continue
         seen_by_offset: dict[float, list[str]] = defaultdict(list)
         for sid in sids:
-            off = round(graph.stations[sid].y - trunk_y, 1)
+            off = quantize_coord(
+                graph.stations[sid].y - trunk_y, COORD_GROUP_DIGITS_COARSE
+            )
             if off == 0.0:
                 continue
             mirrors = seen_by_offset.get(-off)
@@ -1122,7 +1133,7 @@ def _section_trunk_y(graph: MetroGraph, section: Section) -> float | None:
                 and not is_bypass_v(other_id)
                 and set(graph.station_lines(other_id)) == bundle
             ):
-                trunk_ys.add(round(st.y, 3))
+                trunk_ys.add(quantize_coord(st.y, COORD_GROUP_DIGITS_FINE))
     return min(trunk_ys) if trunk_ys else None
 
 
