@@ -329,10 +329,12 @@ each regex case-insensitively against the target, collecting the `id`s that hit.
 `matching_node_ids` is the same matcher over a plain `id -> [pattern]` mapping,
 for a producer whose data isn't manifest-shaped.
 
-## Drive a live overlay
+## Drive a live overlay: the state snapshot
 
-Everything above defines the compatibility contract; the state model below is
-optional convention. A consumer that only needs static addressing can stop here.
+Everything above defines the static compatibility contract (geometry and
+addressing); this section defines the second, optional half - **the runtime
+state vocabulary** a progress overlay is driven from. A consumer that only
+needs static addressing can stop at the manifest and skip this section.
 
 :::tip[Worked example]
 The [tutorial](#tutorial-light-up-a-diagram-as-a-job-runs) at the end of this
@@ -342,28 +344,138 @@ end to end, in ~40 lines.
 
 The manifest gives an overlay everything it needs without a re-render: the
 `viewBox` to share, and each node's `id`, centre, and radius. **The standard
-fixes the geometry and the addressing, not the visual style** - how you draw
-"running" vs "done" is yours.
+fixes the geometry, the addressing, and the state vocabulary below - not the
+visual style.** How you draw "running" vs "done" (a halo, a badge, a colour
+change on the node itself) is yours.
 
-A common shape for progress is a small per-node state model:
+### How the pieces fit together
 
-| Field            | Meaning                                                                                                                                      |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `state`          | One of `pending`, `queued`, `running`, `done`, `failed`.                                                                                     |
-| `done` / `total` | Tasks finished vs seen so far for that node. Nextflow's task count is dynamic, so this is "done / submitted so far", not a fixed percentage. |
+Three layers, each narrower than the last:
 
-plus a run-level `{ name, state }` where `state` is `idle` / `running` /
-`complete` / `error`.
+1. **The standard** - this manifest schema plus the state snapshot schema
+   below. Tool-neutral; any producer can emit it.
+2. **A binding** - turns one runtime's native events into the state snapshot.
+   nf-metro ships one binding for Nextflow: the `-with-weblog` HTTP receiver
+   (`nf-metro serve`) and, optionally, the
+   [nf-metro Nextflow plugin](https://github.com/seqeralabs/nf-metro-plugin)
+   that wires it up from pipeline config. A binding for another workflow
+   engine or CI system would translate that system's own events into the same
+   snapshot shape instead.
+3. **nf-metro itself** - one _producer_ of conforming SVGs, and the author of
+   the one binding above. A consumer that already owns authoritative task
+   state (for example, a platform that tracks a run's tasks directly) needs
+   only layer 1 - the manifest and this state vocabulary - not the weblog
+   server or the plugin.
 
-nf-metro's `serve` is **one reference implementation** of this: it draws a glowing
-LED halo per node and recolours it by state (see [Live progress](/nf-metro/live/)). A
-host application is free to map the same state vocabulary onto its own visual
-language - filled badges, a progress bar, a colour change on the node itself.
-Take the geometry and the state model from the standard; bring your own paint.
+### The snapshot shape
 
-To turn a specific runtime's events into that state model, write a binding.
-nf-metro ships one for Nextflow's `-with-weblog` stream; that path, the server,
-and the Nextflow plugin are documented under [Live progress](/nf-metro/live/).
+A **snapshot** is the full progress picture at one instant: every node's
+display state plus the run's own lifecycle state. nf-metro's live server
+serves one as `GET /state`, and pushes a fresh one as the `data:` payload of
+every Server-Sent Event on `GET /stream`:
+
+```json
+{
+  "run": { "name": "grave_babbage", "state": "running" },
+  "stations": {
+    "trim": { "state": "done", "done": 2, "total": 2 },
+    "qc": { "state": "running", "done": 0, "total": 1 }
+  }
+}
+```
+
+- **`stations`** is keyed by node id - the same `id` as a manifest node /
+  `data-node-id`, so a consumer joins the two without any translation. A node
+  the runtime hasn't reported on yet is simply absent from a hand-built
+  snapshot, or present with `{state: "pending", done: 0, total: 0}` in
+  nf-metro's own server (it pre-populates every mapped node so a fresh
+  subscriber never sees a missing key).
+- **`run`** is one lifecycle value for the whole snapshot, not per-node.
+
+A machine-readable **JSON Schema** (draft 2020-12) ships with the package
+(`nf_metro/live/state_schema.json`); `state_schema()` returns it as a dict,
+mirroring `manifest_schema()`:
+
+```python
+import jsonschema
+from nf_metro.live import state_schema
+
+jsonschema.validate(snapshot, state_schema())   # raises ValidationError if it doesn't conform
+```
+
+Unlike the manifest, **no `version` field travels inside the snapshot
+itself** - it's a live response, not a durable artifact committed to a repo.
+The schema file is versioned on disk (`STATE_SCHEMA_VERSION`, currently
+`"1.0"`) and evolves under the identical forward-compatibility rule as the
+manifest (below).
+
+### The state enum and its transitions
+
+Each station's `state` is one of:
+
+| State     | Meaning                                                                                                                                                                              |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pending` | No task has been submitted for this node yet. The initial value.                                                                                                                     |
+| `queued`  | At least one task has been submitted; none of them is running yet. `done` may already be greater than 0 if an earlier task for the same node finished before this one was submitted. |
+| `running` | At least one task for this node is currently running.                                                                                                                                |
+| `done`    | Every task submitted for this node reached a terminal status, and none of them failed.                                                                                               |
+| `failed`  | **Sticky** - once any task for this node has failed, it reports `failed` for the rest of the run, even if other tasks for the same node are later running or complete.               |
+
+The precedence a producer must apply when several conditions hold at once is
+`failed` > `running` > `queued` > `done` > `pending` (checked in that order):
+a node with one failed task and another still running still reads `failed`,
+never `running`.
+
+### `done` / `total` semantics
+
+- **`total`** is the count of tasks submitted so far for this node in the
+  current run - not a fixed denominator. A workflow engine's task count for a
+  node is dynamic (a scatter over samples, say), so `total` only ever
+  reflects what has been _seen_ so far, and can still grow after the node
+  starts reporting `running`.
+- **`done`** is the count of tasks that reached a _successful_ terminal
+  status for this node so far. A failed task is not counted in `done`.
+- Both are cumulative across the run and only ever reset by a fresh `started`
+  event (below) - they never decrease mid-run.
+
+### Run lifecycle
+
+The `run` object's `state` is one lifecycle shared by the whole snapshot:
+
+| State      | Meaning                                                                     |
+| ---------- | --------------------------------------------------------------------------- |
+| `idle`     | No run has reported in yet. The initial value; `name` is `null`.            |
+| `running`  | A run announced itself has started, and no terminal event has followed yet. |
+| `complete` | The run finished successfully.                                              |
+| `error`    | The run (or the binding reporting it) signalled a failure.                  |
+
+**Only a fresh `started`-equivalent event moves a run off `complete` or
+`error`**, and doing so resets every station back to `pending`/`0`/`0` - so
+re-running the same pipeline re-animates a clean map rather than layering a
+new run's progress on top of the last one's leftovers.
+
+### Forward compatibility
+
+Identical rule to the manifest: **consumers MUST ignore unknown fields**, so
+a producer can add fields to `run`, to a station entry, or a wholly new
+top-level key without breaking an existing reader. A change that is not
+purely additive (removing a field, changing an enum's existing members,
+changing `done`/`total` semantics) is a breaking change and bumps the schema
+file's own version and nf-metro's major version together, exactly as for the
+manifest.
+
+### Bring your own binding
+
+nf-metro's `serve` is **one reference implementation**: it turns Nextflow's
+`-with-weblog` task events into the snapshot above (`process_submitted` →
+`queued`, `process_started` → `running`, `process_completed` → `done` or
+`failed` depending on status), then draws a glowing halo per node and
+recolours it by state (see [Live progress](/nf-metro/live/)). A host
+application is free to write its **own** binding from its own runtime's
+events to this same snapshot shape, and to map the state vocabulary onto its
+own visual language - filled badges, a progress bar, a colour change on the
+node itself. Take the geometry (manifest) and the state vocabulary (this
+section) from the standard; bring your own events and your own paint.
 
 ## Tutorial: light up a diagram as a job runs
 

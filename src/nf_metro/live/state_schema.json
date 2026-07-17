@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pinin4fjords.github.io/nf-metro/state.schema.json",
+  "title": "Live state snapshot",
+  "description": "The runtime progress snapshot served by nf-metro's live server (GET /state, and each Server-Sent Event on /stream) - the state half of the live-diagram contract, paired with the diagram manifest (nf_metro/manifest/schema.json). A node's key here is the manifest's node.id / data-node-id join key. Tool-neutral and experimental (pre-1.0): unlike the manifest, no version field travels inside the snapshot itself, since it is a live response rather than a durable artifact; this schema file is versioned 1.0 and evolves under the same rule as the manifest - consumers MUST ignore unknown fields, and additive fields keep the same major version.",
+  "type": "object",
+  "required": ["run", "stations"],
+  "properties": {
+    "run": {
+      "type": "object",
+      "description": "Run-level lifecycle, reported once per snapshot regardless of station count.",
+      "required": ["name", "state"],
+      "properties": {
+        "name": {
+          "type": ["string", "null"],
+          "description": "The run name from the workflow engine's 'started' event, or null before any run has reported in."
+        },
+        "state": {
+          "enum": ["idle", "running", "complete", "error"],
+          "description": "idle: no run has reported in yet (the initial value). running: a 'started' event was received and no terminal event has followed. complete: a 'completed' event was received. error: an 'error' event was received. Only a fresh 'started' event moves off complete/error, resetting every station to pending."
+        }
+      }
+    },
+    "stations": {
+      "type": "object",
+      "description": "Per-node display state, keyed by node id. A node with no matching task events stays {state: pending, done: 0, total: 0}.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["state", "done", "total"],
+        "properties": {
+          "state": {
+            "enum": ["pending", "queued", "running", "done", "failed"],
+            "description": "pending: no task has been submitted for this node yet. queued: at least one task submitted, none yet running (done may already be > 0 if an earlier task for this node finished before a new one was submitted). running: at least one task currently running. done: every submitted task reached a terminal status and none failed. failed: sticky - once any task for this node fails, the node reports failed for the rest of the run even if other tasks for it are later running or complete."
+          },
+          "done": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Count of tasks that reached a successful terminal status for this node so far in the current run."
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Count of tasks submitted so far for this node in the current run. Not a fixed denominator: a workflow engine's task count for a node is dynamic, so this is 'done out of submitted so far', not a percentage of a known total."
+          }
+        }
+      }
+    }
+  }
+}
