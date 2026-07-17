@@ -505,9 +505,11 @@ def _is_side_branch_ascent(
     stays meaningful (the side-branch line does not appear to merge
     with the main trunk bundle mid-section).
 
-    Only fires for non-port sources with a single outgoing line set
-    that exits the section via a shared exit port or feeds the trunk
-    bundle's join station.
+    Fires for non-port sources feeding the trunk bundle's join station (single
+    line only) or exiting via a shared exit port.  A multi-line exit ascent
+    counts only when the source is fed solely from the section boundary (a
+    genuine parallel branch); a multi-line node with an in-section predecessor
+    is a trunk continuation momentarily dipping below trunk Y, not a branch.
     """
     if src.is_port or src.section_id is None:
         return False
@@ -527,10 +529,17 @@ def _is_side_branch_ascent(
     )
     if not (same_sec or is_exit_port):
         return False
-    # Multi-line trunks may momentarily dip below trunk Y; only single-line
-    # exits count as a side branch slot.
     if len(ctx.graph.station_lines(edge.source)) > 1:
-        return False
+        # A single-line side branch always rides its own track.  A multi-line
+        # source is a branch only when it exits via the port AND is fed solely
+        # from the section boundary (entry port / inter-section edge): a
+        # multi-line node fed by an in-section station is the trunk bundle
+        # dipping to reach an internal join or the exit, and keeps the midpoint
+        # diagonal so it does not read as a mid-section merge.
+        if not is_exit_port or _has_in_section_predecessor(
+            ctx.graph, edge.source, sec_id
+        ):
+            return False
     return True
 
 
@@ -556,6 +565,19 @@ def _bypass_v_is_one_way_step(graph: MetroGraph, v_id: str) -> bool:
     if not preds or not succs:
         return False
     return abs(min(preds) - min(succs)) > COORD_TOLERANCE
+
+
+def _has_in_section_predecessor(
+    graph: MetroGraph, station_id: str, section_id: str
+) -> bool:
+    """Whether any edge into *station_id* starts at a non-port station in the
+    same section (as opposed to the section boundary: an entry port or an
+    inter-section feed)."""
+    for e in graph.edges_to(station_id):
+        pred = graph.stations.get(e.source)
+        if pred is not None and not pred.is_port and pred.section_id == section_id:
+            return True
+    return False
 
 
 def _route_diagonal(

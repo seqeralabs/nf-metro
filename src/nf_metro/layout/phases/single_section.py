@@ -126,6 +126,29 @@ def _has_horizontal_predecessor_section(graph: MetroGraph, section: Section) -> 
     return False
 
 
+def _exit_reaching_nodes(graph: MetroGraph, section: Section) -> frozenset[str]:
+    """Internal stations with a forward path to one of *section*'s exit ports.
+
+    Walks backward from each exit port through in-section, non-port feeders, so
+    a station is included when the flow through it continues out of the section
+    (the section's through-line) rather than dead-ending inside it.  A terminal
+    section with no exit port yields the empty set.
+    """
+    sec_ids = set(section.station_ids)
+    reaching: set[str] = set()
+    stack = list(section.exit_ports)
+    while stack:
+        node = stack.pop()
+        for edge in graph.edges_to(node):
+            src = edge.source
+            st = graph.stations.get(src)
+            if src in reaching or src not in sec_ids or st is None or st.is_port:
+                continue
+            reaching.add(src)
+            stack.append(src)
+    return frozenset(reaching)
+
+
 def _layout_single_section(
     graph: MetroGraph,
     section: Section,
@@ -177,12 +200,18 @@ def _layout_single_section(
         and (lines := set(graph.station_lines(sid)))
         and not (lines & exit_lines)
     )
+    # Internal stations with a forward path to one of the section's exit ports:
+    # the section's genuine through-line.  The subgraph omits the exit-port
+    # edges, so this too is classified against the full graph (walking backward
+    # from the exit ports through in-section feeders).
+    exit_reaching = _exit_reaching_nodes(graph, section)
     tracks = assign_tracks(
         sub,
         layers,
         entry_top=entry_top,
         continuation_nodes=continuation_nodes,
         terminal_nodes=terminal_nodes,
+        exit_reaching=exit_reaching,
     )
 
     if not layers:

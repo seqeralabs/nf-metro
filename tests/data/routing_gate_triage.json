@@ -327,6 +327,18 @@
     "note": "Corridor-feeder fallback for a fan whose junction earned no corridor (its in-column gap below does not fit the bundle); the corpus's fans all earn a corridor, so this global-band branch is unexercised.",
     "status": "needs-review"
   },
+  "inter_section_handlers.py::if tgt_sec is None:::#1": {
+    "note": "Defensive guard in _fan_shares_inter_row_channel: the edge is a fan branch into an entry port, which always resolves to a section, so the None arm is unreachable in practice.",
+    "status": "defensive"
+  },
+  "inter_section_handlers.py::if src_sec is not None:::#1": {
+    "note": "Defensive guard in the fanned entry-wrap source-clearance lift: a fan-out junction always resolves to its source section, so the None arm is unreachable in practice.",
+    "status": "defensive"
+  },
+  "context.py::if len(set(tx.values())) < 2:::#1": {
+    "note": "Defensive guard in fanout_divergence_peel_order's packed-cell branch: distinct sections sharing one grid cell have distinct entry-port X, so the same-X arm (which bails to declaration order) is unreachable in the corpus.",
+    "status": "defensive"
+  },
   "inter_section_handlers.py::if fan is not None and ep_col is not None:::#1": {
     "note": "Reachable only via a defective render (inter-row corridor on a <78px gap); see #722.",
     "status": "needs-review"
@@ -529,6 +541,10 @@
   },
   "normalize.py::if abs(x3 - x2) > COORD_TOLERANCE or abs(y3 - y2) <= COORD_TOLERANCE:::#1": {
     "note": "Every non-exempt inter-section route ends with a vertical descent into the target Y then a short horizontal port lead (V->H tail); routes with non-V tails are normalize_exempt. The second-to-last-not-vertical reject in _final_port_approach is unreachable. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
+    "status": "defensive"
+  },
+  "normalize.py::if anchor_section_id is not None and anchor_side is not None:::#1": {
+    "note": "_gap_channel_base falls back to the column gap when passed a null anchor. All six call sites (in _route_bypass) pass the bypass source/target section id, which is None only when that endpoint has no resolvable section (src_sec_id/tgt_sec_id in _route_bypass); the corpus has no bypass with a sectionless endpoint, so the null-anchor arm is never taken. Defensive guard for a sectionless bypass endpoint.",
     "status": "defensive"
   },
   "normalize.py::if any(::#4": {
@@ -955,16 +971,8 @@
     "note": "Perp-entry drop crossing-X override: the edge's target is always a sectioned station, so tgt_sec resolves and the `tgt_sec is None` short-circuit to the plain drop is never taken; the `direction in (TB, BT)` arm (a drop continuing into a vertical-flow trunk) and the horizontal-target arm are both exercised.",
     "status": "defensive"
   },
-  "inter_section_handlers.py::if corridor is not None and corridor.band_y is not None:::#1": {
-    "note": "A single-line top-entry fan branch drops into the fan's shared inter-row band only when its junction earns a band_y corridor; the corpus's single-line top-entry fans sit at junctions with a bypass-only corridor (band_y is None) or none, so the band_y arm is unexercised.",
-    "status": "needs-review"
-  },
   "inter_section_handlers.py::if fan is not None and corridor is not None and corridor.band_y is not None:::#2": {
     "note": "Corridor-feeder shared inter-row band gate: the corpus's corridor feeders belong to fans whose corridor carries a band_y, so the short-circuit past it (no corridor or bypass-only) is unexercised; it falls to the elif fan-is-not-None global-band branch.",
-    "status": "needs-review"
-  },
-  "inter_section_handlers.py::and corridor.bypass_band_y is not None::#1": {
-    "note": "A fan bypass branch consumes the shared below-row band; the arm where its junction has a corridor with no bypass_band_y is unreached, since a corridor gains a bypass band exactly when the fan has a non-merge bypass branch (this one).",
     "status": "needs-review"
   },
   "inter_section_handlers.py::and corridor.bypass_band_y >= base_y - COORD_TOLERANCE::#1": {
@@ -978,5 +986,13 @@
   "normalize.py::if ca != cb:::#1": {
     "note": "Peel-off ordering tie-break by deep-end crossings: after the fan-band sharing pins bypass siblings on one shared trunk, no corpus fan reaches this comparator with the approach-crossing counts equal but the peel crossings differing, so the arm is unexercised.",
     "status": "needs-review"
+  },
+  "offsets.py::if src_n <= tgt_n:::#1": {
+    "note": "_reconcile_horizontal_offsets' bundle-shift fallback moves the edge endpoint with fewer lines. The else arm (src_n > tgt_n: move the target) was exercised in the corpus solely by the fan-port drag where a many-line entry/exit port is the edge source and a same-Y trunk-row station with fewer lines is the target (funcprofiler_upstream's humann3 at its entry port). The #1480 exit-port ordering fix (merge_trunk_lines in _compute_exit_port_offsets) rides the trunk-continuation merge line out on the trunk slot, so that port and station now agree and the edge no longer needs shifting. The remaining corpus shift (sr_qc into its input exit port) has the fewer-line station as the source, taking the src_n <= tgt_n true arm. The else arm stays defensive for a same-Y bundle conflict whose higher-line-count endpoint is the edge source.",
+    "status": "defensive"
+  },
+  "offsets.py::if set(inherited) != set(graph.station_lines(port_id)):::#1": {
+    "note": "_inherit_level_convergence_entry_offsets skips a convergence entry port when the lines it inherits from its immediate feeders do not cover every line the port carries. A convergence entry's lines are, by construction, exactly the union of its inbound edges' lines, and each inbound edge supplies that line's feeder offset, so the inherited set always equals the port's line set and the mismatch arm is never taken. Defensive against a port line with no inbound edge (a malformed graph).",
+    "status": "defensive"
   }
 }

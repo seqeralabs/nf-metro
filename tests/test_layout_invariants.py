@@ -68,6 +68,7 @@ from nf_metro.layout.phases._common import (
     iter_corridor_fed_solo_entries,
     iter_fold_lr_exit_straight_runs,
     iter_fold_lr_exits_short_of_target,
+    line_forks_within_section,
     section_axes,
     section_cross_axis,
     wrap_exit_carrier_anchor,
@@ -834,6 +835,58 @@ def test_subset_section_bundle_anchored_on_trunk(fixture, section_id):
 
 
 # ---------------------------------------------------------------------------
+# A station's own bundle occupies contiguous offset lanes (no empty centre)
+# ---------------------------------------------------------------------------
+
+# (fixture, station_id) for stations carrying a co-travelling multi-line bundle.
+# The hub in sec_main fans out into two downstream sections: the RIGHT exit port
+# re-centres its bundle on the fan-out feeder, and that re-centred base must not
+# leak back onto the trunk row (hub and its same-Y row-mates in_0/s2/out_main)
+# and get unioned to double width by horizontal reconciliation.  annotate / star
+# are clean two-line bundles.
+#
+# funcprofiler_upstream is the fan-*in* mirror: humann3 sits on the trunk row,
+# same Y as the convergence exit port that aggregates all seven profilers' lines
+# into a wide bundle.  Reconciliation must not snap humann3's own three-line bundle
+# onto the port's spread slots; humann4 is an off-trunk sibling control that is
+# never same-Y with the port and must stay clean regardless.
+_CONTIGUOUS_STATION_BUNDLES = [
+    ("topologies/fanout_hub_two_line_trunk.mmd", "hub"),
+    ("topologies/fanout_hub_two_line_trunk.mmd", "s2"),
+    ("topologies/fanout_hub_two_line_trunk.mmd", "out_main"),
+    ("topologies/funcprofiler_upstream.mmd", "humann3"),
+    ("topologies/funcprofiler_upstream.mmd", "humann4"),
+    ("da_pipeline.mmd", "annotate"),
+    ("rnaseq_auto.mmd", "star"),
+]
+
+
+@pytest.mark.parametrize("fixture,station_id", _CONTIGUOUS_STATION_BUNDLES)
+def test_station_bundle_lanes_contiguous(fixture, station_id):
+    """A station's per-line offset lanes form one contiguous OFFSET_STEP run.
+
+    An empty interior lane draws the marker's bundle wider than it should be --
+    a two-line bundle splitting to +/- one step opens a centre lane and renders
+    at double width (#1476).  The distinct offset levels must step by exactly
+    one ``OFFSET_STEP`` with no gap.
+    """
+    graph = _layout(fixture)
+    step = resolve_offset_step(graph.track_gap)
+    offsets = compute_station_offsets(graph)
+    levels = sorted(
+        {
+            round(offsets.get((station_id, lid), 0.0), 1)
+            for lid in graph.station_lines(station_id)
+        }
+    )
+    expected = [round(levels[0] + i * step, 1) for i in range(len(levels))]
+    assert levels == expected, (
+        f"{fixture}: station {station_id} offset lanes {levels} are not "
+        f"contiguous {expected}; an empty interior lane widens the bundle"
+    )
+
+
+# ---------------------------------------------------------------------------
 # A bundle terminator's sole successor stays on the trunk row
 # ---------------------------------------------------------------------------
 
@@ -1057,6 +1110,10 @@ def test_single_line_corridor_section_rides_trunk(fixture):
     section trunk -- the section then reserves empty space for lines that never
     enter it.  The vertical corridor absorbs the lane step, so both the entry
     port and the consumer it feeds must anchor on the trunk (#1173).
+
+    A section whose line forks internally checks only the entry port: its fan
+    branches straddle the trunk and may each hold a lane that aligns them with a
+    downstream multi-line section, so they are not required to ride offset 0.
     """
     graph = _layout(fixture)
     offsets = compute_station_offsets(graph)
@@ -1069,6 +1126,8 @@ def test_single_line_corridor_section_rides_trunk(fixture):
             f"{port_off} for sole line {line_id}; a corridor-fed single-line "
             "section should anchor its entry on the trunk"
         )
+        if line_forks_within_section(graph, graph.sections[sec_id], line_id):
+            continue
         consumers = [
             sid
             for sid in graph.sections[sec_id].station_ids
@@ -1434,9 +1493,12 @@ def test_merge_fanout_shares_corner_by_construction(fixture, monkeypatch):
     assert not violations, "; ".join(v.message() for v in violations)
 
 
+_XFAIL_SYMFAN_PAIRS_SHARE_Y: dict[str, str] = {}
+
+
 @pytest.mark.parametrize(
     "fixture",
-    ALL_FIXTURES,
+    _params_with_xfails(ALL_FIXTURES, _XFAIL_SYMFAN_PAIRS_SHARE_Y),
 )
 def test_symfan_pairs_share_y(fixture):
     """When a section has exactly two full-bundle stations in the same
@@ -1486,6 +1548,58 @@ def test_symfan_pairs_share_y(fixture):
                 f"mirrored around trunk cy={trunk_cy} "
                 f"(above_gap={above_gap}, below_gap={below_gap})"
             )
+
+
+def _diamond_sibling_columns(graph: MetroGraph) -> list[list[str]]:
+    """Same-column station groups sharing a fork predecessor and join successor.
+
+    These are fan-diamond siblings: they diverge from a common upstream node,
+    sit in one placement column (same pre-centring X), and reconverge on a
+    common downstream node.  Mirror images around the trunk, they must render at
+    one X.
+    """
+    preds: dict[str, set[str]] = defaultdict(set)
+    succs: dict[str, set[str]] = defaultdict(set)
+    for e in graph.edges:
+        preds[e.target].add(e.source)
+        succs[e.source].add(e.target)
+    by_col: dict[tuple[str | None, float], list[str]] = defaultdict(list)
+    for sid, st in graph.stations.items():
+        if st.is_port or st.is_hidden or st.off_track:
+            continue
+        by_col[(st.section_id, round(st.x, 1))].append(sid)
+    groups = []
+    for sids in by_col.values():
+        if len(sids) < 2:
+            continue
+        common_pred = set.intersection(*(preds[s] for s in sids))
+        common_succ = set.intersection(*(succs[s] for s in sids))
+        if common_pred and common_succ:
+            groups.append(sids)
+    return groups
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_fan_diamond_siblings_share_rendered_x(fixture):
+    """Fan-diamond siblings in one column render at the same X.
+
+    Two branches that fork from a common node, share a placement column, and
+    reconverge on a common node are mirror images and must land at one X after
+    the bubble-centring pass.  When one branch's incoming edge is flat (it sits
+    on the fork's entry row) its centring midpoint was measured from the far end
+    of that flat run rather than a near-station point comparable to a diagonal
+    sibling's, pulling it off the shared column (issue #1458).
+    """
+    graph = _layout(fixture)
+    groups = _diamond_sibling_columns(graph)
+    if not groups:
+        return
+    route_edges_centred(graph)
+    for sids in groups:
+        xs = {sid: round(graph.stations[sid].x, 1) for sid in sids}
+        assert max(xs.values()) - min(xs.values()) <= 1.0, (
+            f"Fan-diamond siblings must share rendered X, got {xs}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -3369,6 +3483,34 @@ def test_diagonal_strike_guard_teeth_and_exemptions():
 
     bypass = _layout("guide/06a_without_hidden.mmd")
     _guard_no_diagonal_strikes_horizontal_label(bypass, "test")
+
+
+def test_multiline_ascent_to_exit_clears_sibling_label():
+    """A multi-line side branch ascending to an exit port clears sibling labels.
+
+    A station carrying the full bundle sitting off the trunk and fed only from
+    the section boundary is a genuine side branch: its ascent to the shared exit
+    port must turn late (near the port) so it rides its own track rather than
+    seating mid-section, where a trunk sibling's horizontal name label extends.
+    The ``exit_fan_label_strike`` fixture isolates the #1449 repro -- ``Salmon``
+    fans up to the exit past the wide ``BEDTools genomecov`` label; a midpoint
+    diagonal rakes that label.
+
+    Parsed the render way (no ``center_ports`` override that ``_layout`` applies
+    to ``tests/fixtures/`` files) so the geometry matches what the runtime guard
+    checks.  The broader strike-free invariant over the example corpus lives in
+    ``test_no_diagonal_strikes_label``.
+    """
+    from nf_metro.layout.phases.spacing import _struck_stations_and_collinear
+
+    path = _resolve_fixture("topologies/exit_fan_label_strike.mmd")
+    graph = parse_metro_mermaid(path.read_text())
+    compute_layout(graph)
+    struck, collinear = _struck_stations_and_collinear(graph)
+    assert not struck, "diagonals rake label glyph ink: " + ", ".join(
+        sorted(graph.stations[s].label for s in struck)
+    )
+    assert not collinear, "collinear overlay"
 
 
 @pytest.mark.parametrize("fixture", _FIXTURES_WITH_DOWNWARD_OUTPUT)
@@ -6964,29 +7106,11 @@ def test_section_bbox_has_bottom_padding(fixture):
     )
 
 
-# Section bbox top doesn't carry the configured section_y_padding above
-# the highest station marker (the mirror of bottom padding).  Affects
-# sections whose content fans above the trunk: a fan-redistribution pass
-# lifts a station above the content-top line the bbox was sized for,
-# crowding the topmost marker against the bbox top while the bottom keeps
-# its full band.  Sections gap-bounded against the row above (where full
-# top padding would crowd the section-header badge against an inter-row
-# route) belong here as xfails.
-_XFAIL_BBOX_TOP_PAD: dict[str, str] = {
-    "differentialabundance_default.mmd": (
-        "plots is gap-bounded: growing its top to a full padding band would "
-        "bring its section-header badge within the inter-row route clearance "
-        "(test_routed_paths_clear_next_row_headers), so the top-padding "
-        "restore deliberately stops short. Revisit if the row gap or routing "
-        "changes."
-    ),
-    "topologies/multirow_source_stacked_fan.mmd": (
-        "fusion_sec's port-fed reconverging diamond straddles its trunk at full "
-        "grid pitch, so the top branch sits under a full section_y_padding from "
-        "the bbox edge. Compacting such a diamond to half pitch (which restores "
-        "the padding) is tracked in #1473; remove this xfail when that lands."
-    ),
-}
+# A section that fans a branch above its trunk gets a full top padding band
+# restored by ``_reserve_row_gap_for_top_padding`` + ``_fit_bboxes_to_content_top``:
+# when a same-column section directly above would clamp the grow, the lower row is
+# pushed down to make room.  No fixture is expected to fall short.
+_XFAIL_BBOX_TOP_PAD: dict[str, str] = {}
 
 
 @pytest.mark.parametrize(

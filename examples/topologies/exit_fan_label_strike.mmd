@@ -1,0 +1,29 @@
+%%metro title: Exit-fan label strike
+%%metro line: a | Alpha | #e6007e
+%%metro line: b | Beta | #2db572
+%%metro line: c | Gamma | #2b6cb0
+%%metro file: cov_out | BW | Coverage
+
+graph LR
+    subgraph up [Upstream]
+        %%metro exit: right | a, b, c
+        src[Dedup]
+    end
+    subgraph sec [Coverage & quantification]
+        %%metro entry: left | a, b, c
+        %%metro exit: right | a, b, c
+        split[SAMtools split strand]
+        genomecov[BEDTools genomecov]
+        salmon[Salmon]
+
+        split -->|a,b,c| genomecov
+        genomecov -->|a,b,c| cov_out
+    end
+    subgraph down [Reporting]
+        %%metro entry: left | a, b, c
+        sink[MultiQC]
+    end
+
+    src -->|a,b,c| split
+    src -->|a,b,c| salmon
+    salmon -->|a,b,c| sink

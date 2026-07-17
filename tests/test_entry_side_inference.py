@@ -15,7 +15,7 @@ import pytest
 
 from nf_metro.parser import resolve
 from nf_metro.parser.mermaid import parse_metro_mermaid
-from nf_metro.parser.model import MetroGraph, PortSide, Section, SectionDAG
+from nf_metro.parser.model import Edge, MetroGraph, PortSide, Section, SectionDAG
 
 
 def _parse(path: str) -> MetroGraph:
@@ -80,6 +80,55 @@ def test_build_mapping_shares_one_side_across_a_sections_lines() -> None:
         by_section.setdefault(sec_id, set()).add(side)
     for sec_id, sides in by_section.items():
         assert len(sides) == 1, f"{sec_id} resolved to multiple entry sides: {sides}"
+
+
+def test_conflicting_side_hints_collapse_to_one_fed_hinted_side_and_warn() -> None:
+    """A section hinted on two sides collapses to the fed side and warns.
+
+    ``packed_multiline_serpentine_grid``'s ``sec_g`` hints ``top | l2`` then
+    ``left | l1``.  A section has one entry side, so the two hints are
+    contradictory input.  The collapse prefers the side a feed actually arrives
+    on: its upstream cell-neighbour ``sec_e`` feeds it from the LEFT, so every
+    entering line resolves to LEFT (never the unhinted RIGHT that would fold a
+    line back over its own track) and the dropped TOP hint is reported.
+    """
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        graph = parse_metro_mermaid(
+            open("examples/topologies/packed_multiline_serpentine_grid.mmd").read()
+        )
+        mapping = resolve._build_entry_side_mapping(graph)
+    sec_g_sides = {side for (sec, _line), side in mapping.items() if sec == "sec_g"}
+    assert sec_g_sides == {PortSide.LEFT}, f"sec_g resolved to {sec_g_sides}"
+    assert any("sec_g" in str(w.message) and "TOP" in str(w.message) for w in caught), (
+        "no warning naming the dropped sec_g TOP hint"
+    )
+
+
+def test_dominant_orders_same_cell_producer_upstream() -> None:
+    """A producer sharing an internal-flow consumer's grid cell is upstream.
+
+    In a left-to-right cell the producer sits to the LEFT, so its feed arrives
+    on the consumer's flow-natural LEFT edge -- not the flow-opposing RIGHT that
+    a same-cell tie would otherwise default to.  The consumer carries internal
+    flow (``c1 -> c2``); a pure fan target with no internal flow keeps the
+    same-position default and follows its dominant external feed instead.
+    """
+    graph = MetroGraph()
+    for sid in ("prod", "cons"):
+        section = Section(id=sid, name=sid, direction="LR")
+        section.grid_col, section.grid_row = 2, 1
+        graph.sections[sid] = section
+        graph.grid_overrides[sid] = (2, 1, 1, 1)
+    graph.sections["cons"].internal_edges = [
+        Edge(source="c1", target="c2", line_id="x")
+    ]
+    graph.section_dag = SectionDAG(
+        successors={"prod": {"cons"}},
+        predecessors={"cons": {"prod"}},
+        edge_lines={("prod", "cons"): {"x"}},
+    )
+    assert resolve._dominant_entry_side(graph, "cons") is PortSide.LEFT
 
 
 _ALL_FIXTURES = sorted(glob.glob("examples/**/*.mmd", recursive=True))
