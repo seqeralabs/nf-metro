@@ -20,14 +20,14 @@ from nf_metro.layout.phases._common import (
     _bbox_cols_overlap,
     _content_station_ids,
     _content_station_ys,
-    _grow_section_bbox_upward,
     _is_side_entered_vertical_section,
     _pull_section_ports_to_edge,
     _ref_y,
-    _set_section_bbox_top,
     _side_entered_vertical_feeder_pairs,
     _station_bundle_offset_span,
     _trunk_symmetric_fan_ids,
+    grow_section_bbox_min_edge,
+    move_section_bbox_min_edge,
 )
 from nf_metro.layout.phases.single_section import (
     _terminus_y_overhang,
@@ -834,8 +834,8 @@ def _fit_bboxes_to_content_top(
 
     The grow branch keeps precedence, so a section whose top the row-above
     ceiling pushed down is grown rather than shrunk into the badge.  Both
-    moves go through the bidirectional :func:`_set_section_bbox_top` (TOP
-    ports follow the new edge).
+    moves go through the bidirectional :func:`move_section_bbox_min_edge`
+    (TOP ports follow the new edge).
     """
     from nf_metro.layout.routing import compute_station_offsets
 
@@ -847,7 +847,7 @@ def _fit_bboxes_to_content_top(
             graph, section, section_y_padding, section_y_gap, offsets
         )
         if target is not None and target < section.bbox_y - SAME_COORD_TOLERANCE:
-            _set_section_bbox_top(graph, section, target)
+            move_section_bbox_min_edge(graph, section, "y", target)
             continue
         hug = _section_content_hug_top(graph, section, section_y_padding, offsets)
         if (
@@ -855,7 +855,7 @@ def _fit_bboxes_to_content_top(
             and hug > section.bbox_y + SAME_COORD_TOLERANCE
             and _section_band_is_empty(graph, section)
         ):
-            _set_section_bbox_top(graph, section, hug)
+            move_section_bbox_min_edge(graph, section, "y", hug)
 
 
 def _top_align_side_entered_vertical_to_feeder(graph: MetroGraph) -> None:
@@ -874,7 +874,7 @@ def _top_align_side_entered_vertical_to_feeder(graph: MetroGraph) -> None:
     """
     for section, neighbour in _side_entered_vertical_feeder_pairs(graph):
         if section.bbox_y - neighbour.bbox_y > SAME_COORD_TOLERANCE:
-            _grow_section_bbox_upward(graph, section, neighbour.bbox_y)
+            grow_section_bbox_min_edge(graph, section, "y", neighbour.bbox_y)
 
 
 def _tighten_lower_rows_after_shrink(graph: MetroGraph, section_y_gap: float) -> None:

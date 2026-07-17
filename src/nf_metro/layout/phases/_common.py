@@ -1475,41 +1475,6 @@ def grow_section_bbox_max_edge(
     move_section_bbox_max_edge(graph, section, axis, new_max)
 
 
-def _set_section_bbox_top(
-    graph: MetroGraph, section: Section, new_bbox_top: float
-) -> None:
-    """Move a section's bbox top to *new_bbox_top* and pull TOP ports along.
-
-    Works in both directions: a smaller *new_bbox_top* grows the box
-    upward, a larger one shrinks it.  BOTTOM ports stay put because only
-    the top edge moves.  The Y-axis case of
-    :func:`move_section_bbox_min_edge`.
-    """
-    move_section_bbox_min_edge(graph, section, "y", new_bbox_top)
-
-
-def _grow_section_bbox_upward(
-    graph: MetroGraph, section: Section, new_bbox_top: float
-) -> None:
-    """Expand a section's bbox upward to *new_bbox_top* and pull TOP ports.
-
-    The Y-axis case of :func:`grow_section_bbox_min_edge`: grow-only, so a
-    *new_bbox_top* at or below the current top is a no-op.
-    """
-    grow_section_bbox_min_edge(graph, section, "y", new_bbox_top)
-
-
-def _grow_section_bbox_downward(
-    graph: MetroGraph, section: Section, new_bbox_bottom: float
-) -> None:
-    """Expand a section's bbox downward to *new_bbox_bottom* and pull BOTTOM
-    ports along.  Grow-only: a *new_bbox_bottom* at or above the current
-    bottom edge is a no-op, so the box is never raised.  The Y-axis case of
-    :func:`grow_section_bbox_max_edge`.
-    """
-    grow_section_bbox_max_edge(graph, section, "y", new_bbox_bottom)
-
-
 def exit_run_corridor_clear(
     graph: MetroGraph,
     exit_port_id: str,
