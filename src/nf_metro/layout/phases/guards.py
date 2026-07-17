@@ -34,7 +34,11 @@ from nf_metro.layout.constants import (
 from nf_metro.layout.geometry import (
     AxisFrame,
     BBoxXIndex,
+    iter_bbox_checkable_stations,
+    iter_coincident_stations,
     iter_section_overlaps,
+    iter_serpentine_backtracks,
+    iter_stations_outside_bbox,
     lanes_run_along_x,
     lanes_run_along_y,
     segment_intersects_bbox,
@@ -225,22 +229,6 @@ def _guard_coordinates_finite(graph: MetroGraph, phase: str) -> None:
                 )
 
 
-def _bbox_guarded_stations(
-    graph: MetroGraph,
-) -> Iterator[tuple[str, Station, Section]]:
-    """Yield ``(sid, station, section)`` for each rendered station that a
-    bbox-containment guard should check: skips ports, junctions, and
-    stations whose section has no sized bbox.  Shared by the marker-edge
-    and centre-containment guards so they can't drift on what they exempt.
-    """
-    junction_ids = graph.junction_ids
-    for sid, st in graph.stations.items():
-        sec = graph.sections.get(st.section_id or "")
-        if not sec or st.is_port or sid in junction_ids or sec.bbox_w == 0:
-            continue
-        yield sid, st, sec
-
-
 def _guard_stations_in_sections(graph: MetroGraph, phase: str) -> None:
     """After Stage 2.1+: rendered station markers (and terminus icons) must
     be fully within their section bbox.
@@ -254,7 +242,7 @@ def _guard_stations_in_sections(graph: MetroGraph, phase: str) -> None:
     section.
     """
     tol = GUARD_TOLERANCE
-    for sid, st, sec in _bbox_guarded_stations(graph):
+    for sid, st, sec in iter_bbox_checkable_stations(graph):
         # Off-track inputs and terminus icons render at icon scale; on-track
         # markers render at station-pill scale.  Use the wider reach so the
         # guard catches icon spill-over above the bbox top.
@@ -321,12 +309,7 @@ def _guard_stations_within_bbox(graph: MetroGraph, phase: str) -> None:
     the right of its own bbox, and the engine must reject that loudly
     rather than render it silently.
     """
-    tol = GUARD_TOLERANCE
-    for sid, st, sec in _bbox_guarded_stations(graph):
-        inside_x = sec.bbox_x - tol <= st.x <= sec.bbox_x + sec.bbox_w + tol
-        inside_y = sec.bbox_y - tol <= st.y <= sec.bbox_y + sec.bbox_h + tol
-        if inside_x and inside_y:
-            continue
+    for sid, st, sec in iter_stations_outside_bbox(graph, GUARD_TOLERANCE):
         detail = (
             f"{phase}: station {sid!r} centre ({st.x:.1f}, {st.y:.1f}) "
             f"outside section {st.section_id!r} bbox "
@@ -2179,21 +2162,10 @@ def _guard_no_coincident_station_coords(
     render as per-rail knobs across the rail bundle, so a shared centre is
     not a visual collision there.
     """
-    exempt_rail = graph.has_rail_sections
-    placed: list[tuple[str, float, float]] = []
-    for sid, st in graph.stations.items():
-        if st.is_port or st.is_hidden or (exempt_rail and graph.station_is_rail(sid)):
-            continue
-        placed.append((sid, st.x, st.y))
-    placed.sort(key=lambda p: p[1])
-    for i, (sid, x, y) in enumerate(placed):
-        for oid, ox, oy in placed[i + 1 :]:
-            if ox - x > tolerance:
-                break  # Sorted by x; no further coincidence possible.
-            if abs(y - oy) <= tolerance:
-                raise PhaseInvariantError(
-                    f"{phase}: {sid!r} and {oid!r} share coordinate ({x:.1f}, {y:.1f})"
-                )
+    for sid, oid, x, y in iter_coincident_stations(graph, tolerance):
+        raise PhaseInvariantError(
+            f"{phase}: {sid!r} and {oid!r} share coordinate ({x:.1f}, {y:.1f})"
+        )
 
 
 def _guard_no_line_crosses_non_consumer(
@@ -3777,31 +3749,12 @@ def _guard_no_artefactual_counter_flow(
             )
 
 
-def _is_side_entry_turn_in(graph: MetroGraph, rp: RoutedPath) -> bool:
-    """Whether *rp* is the turn-in leg from an entry port perpendicular to flow.
-
-    An entry port on the axis perpendicular to its section's flow (LEFT/RIGHT on
-    a vertical-flow TB/BT section, TOP/BOTTOM on a horizontal-flow LR/RL one)
-    reaches the trunk via one traverse perpendicular to that flow.  That leg is
-    the entry, bounded by the section width, not a serpentine fold-back, so
-    backtrack accounting excludes it.
-    """
-    port = graph.ports.get(rp.edge.source)
-    if not port or not port.is_entry:
-        return False
-    section = graph.sections.get(port.section_id)
-    if section is None:
-        return False
-    if lanes_run_along_y(section.direction):
-        return port.side in (PortSide.TOP, PortSide.BOTTOM)
-    return port.side in (PortSide.LEFT, PortSide.RIGHT)
-
-
 def _guard_serpentine_no_backtrack(
     graph: MetroGraph,
     phase: str,
     *,
     routes: list[RoutedPath] | None = None,
+    offsets: dict[tuple[str, str], float] | None = None,
 ) -> None:
     """After routing: stacked same-direction sections must not backtrack.
 
@@ -3813,46 +3766,20 @@ def _guard_serpentine_no_backtrack(
     run, the wrong-way horizontal travel of its internal segments must stay
     below half the section width.
     """
-    from nf_metro.layout.auto_layout import detect_serpentine_runs
-
     routes = _ensure_routes(graph, routes)
+    if offsets is None:
+        from nf_metro.layout.routing import compute_station_offsets
 
-    dag = graph.section_dag
-    if dag is None:
-        return
-    runs = detect_serpentine_runs(graph, dag.successors, dag.predecessors)
-    serpentine_sections = {sid for run in runs for sid in run}
-    if not serpentine_sections:
-        return
+        offsets = compute_station_offsets(graph)
 
-    wrong_way: dict[str, float] = {sid: 0.0 for sid in serpentine_sections}
-    for rp in routes:
-        src_sec = graph.section_for_station(rp.edge.source)
-        if src_sec != graph.section_for_station(rp.edge.target):
-            continue
-        if src_sec not in serpentine_sections:
-            continue
-        if _is_side_entry_turn_in(graph, rp):
-            # A LEFT/RIGHT entry port feeds the trunk via one turn-in leg
-            # perpendicular to the section's flow -- the entry itself, bounded
-            # by the section width, not a serpentine fold-back.
-            continue
-        forward = 1.0 if graph.sections[src_sec].direction != "RL" else -1.0
-        xs = [p[0] for p in rp.points]
-        for x1, x2 in zip(xs, xs[1:]):
-            dx = x2 - x1
-            if dx * forward < 0:
-                wrong_way[src_sec] += abs(dx)
-
-    for sid, against in wrong_way.items():
-        section = graph.sections[sid]
-        limit = 0.5 * max(section.bbox_w, 1.0)
-        if against > limit + GUARD_TOLERANCE:
-            raise PhaseInvariantError(
-                f"{phase}: stacked section {sid!r} (dir={section.direction}) "
-                f"backtracks {against:.1f}px against its flow (>{limit:.1f}px); "
-                f"the serpentine chain is kinking instead of dropping vertically"
-            )
+    for sid, against, limit, section in iter_serpentine_backtracks(
+        graph, routes, offsets, tolerance=GUARD_TOLERANCE
+    ):
+        raise PhaseInvariantError(
+            f"{phase}: stacked section {sid!r} (dir={section.direction}) "
+            f"backtracks {against:.1f}px against its flow (>{limit:.1f}px); "
+            f"the serpentine chain is kinking instead of dropping vertically"
+        )
 
 
 def _guard_inter_row_run_clearance(
@@ -5360,7 +5287,11 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
             "channel are not flagged."
         ),
     ),
-    GuardSpec(_guard_serpentine_no_backtrack, "A", needs=frozenset({"routes"})),
+    GuardSpec(
+        _guard_serpentine_no_backtrack,
+        "A",
+        needs=frozenset({"routes", "offsets"}),
+    ),
     GuardSpec(
         _guard_no_artefactual_counter_flow,
         "B",

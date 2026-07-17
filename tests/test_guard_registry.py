@@ -143,6 +143,65 @@ def test_no_registry_guard_duplicates_an_always_on_check() -> None:
     )
 
 
+# Geometric properties checked by both a runtime guard and the offline
+# validator oracle, each single-sourced through one shared predicate: the
+# guard contributes tier/registry/raise semantics, the oracle contributes
+# ``Violation`` packaging, and neither re-implements the geometry.  The tuple
+# is ``(guard_name, oracle_name, shared_predicate_name)``.
+_SHARED_GEOMETRY_PREDICATES = (
+    ("_guard_no_section_overlap", "check_section_overlap", "iter_section_overlaps"),
+    (
+        "_guard_stations_within_bbox",
+        "check_station_containment",
+        "iter_stations_outside_bbox",
+    ),
+    (
+        "_guard_no_coincident_station_coords",
+        "check_coincident_stations",
+        "iter_coincident_stations",
+    ),
+    (
+        "_guard_no_route_through_section",
+        "check_edge_section_crossing",
+        "routes_through_unrelated_sections",
+    ),
+    ("_guard_no_label_overlap", "check_label_overlap", "_residual_label_overlaps"),
+    (
+        "_guard_serpentine_no_backtrack",
+        "check_serpentine_no_backtrack",
+        "iter_serpentine_backtracks",
+    ),
+)
+
+
+def test_guard_and_oracle_share_one_geometry_predicate() -> None:
+    """Each duplicated geometric property is single-sourced across the
+    guards/oracle file boundary: both the runtime guard and the offline
+    validator check must reference the same shared predicate, so a geometry
+    rule (tolerance, exemption scope) lives in exactly one place and the two
+    cannot silently drift."""
+    import layout_validator
+
+    missing: dict[str, list[str]] = {}
+    for guard_name, oracle_name, predicate in _SHARED_GEOMETRY_PREDICATES:
+        guard_src = inspect.getsource(getattr(guards, guard_name))
+        oracle_src = inspect.getsource(getattr(layout_validator, oracle_name))
+        absent = [
+            f"{side}:{name}"
+            for side, name, src in (
+                ("guard", guard_name, guard_src),
+                ("oracle", oracle_name, oracle_src),
+            )
+            if predicate not in src
+        ]
+        if absent:
+            missing[predicate] = absent
+    assert not missing, (
+        "guard/oracle pairs not routed through their shared predicate "
+        f"(each side must call it, not re-implement the geometry): {missing}"
+    )
+
+
 def test_every_guard_is_classified_in_exactly_one_registry() -> None:
     """Every defined ``_guard_*`` lives in exactly one of the two guard
     registries, so no guard escapes tier / issue-pin classification."""
