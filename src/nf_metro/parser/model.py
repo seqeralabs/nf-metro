@@ -539,7 +539,7 @@ class MetroGraph:
     # flow-axis port on its consumer/producer's end (see resolve.py
     # _reanchor_flow_axis_ports).  Their exit-port offsets anchor on the
     # feeder bundle frame rather than re-centring on zero.
-    _fold_reoriented_sections: set[str] = field(default_factory=set)
+    _fold_reoriented_sections: set[str] = field(default_factory=set, repr=False)
     # Section IDs whose entry/exit port sides were author-specified via
     # %%metro entry:/exit: directives (tracked separately because auto_layout
     # fills entry_hints/exit_hints for sections that have none, so the hint
@@ -553,14 +553,14 @@ class MetroGraph:
     # through such a forced-perpendicular drop may not satisfy the strict
     # render-curve invariants, so their presence relaxes that check to a
     # warning instead of a hard render abort.
-    _cross_column_perp_bridges: set[str] = field(default_factory=set)
+    _cross_column_perp_bridges: set[str] = field(default_factory=set, repr=False)
     # Effective row-wrap width when the author set one (--fold-threshold or
     # %%metro fold_threshold), plus the auto-laid sections whose grid cell that
     # width shifted versus the unbounded layout.  A non-empty set means the
     # user-chosen threshold compressed the section grid; the render chokepoint
     # uses it to reframe a fold-induced routing abort as FoldThresholdError.
     _fold_threshold_effective: int | None = None
-    _fold_compressed_sections: set[str] = field(default_factory=set)
+    _fold_compressed_sections: set[str] = field(default_factory=set, repr=False)
     # Pending terminus designations: station_id ->
     # list of (label, icon_type, name, banner)
     _pending_terminus: dict[str, list[tuple[str, str, str, bool]]] = field(

@@ -32,9 +32,25 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from nf_metro.parser.model import MetroGraph
 
-# Writer marker for a field populated before Stage 1.1 (i.e. during spacing
-# resolution in ``compute_layout``, before the stage pipeline begins).
+# Lifecycle-phase markers for fields whose writer or reader is not one of the
+# numbered section-layout stages.  They stand in for a stage id in a
+# ``PhaseFieldSpec`` so a channel that crosses a subsystem boundary (parse ->
+# routing, rail-mode layout, the bypass-pass control wrapper) is declarable as
+# data alongside the inter-stage channels.
+
+# Populated before Stage 1.1: parse/resolve rewrites or the spacing resolution
+# in ``compute_layout``, before the stage pipeline begins.
 PRE_LAYOUT = "pre-layout"
+# Written or read after the stage pipeline has positioned every station: by
+# routing, render, or the closing validate guards.
+POST_LAYOUT = "post-layout"
+# Owned by the opt-in rail-mode layout (``layout/rail_mode.py``), a
+# self-contained path that runs instead of the numbered section pipeline.
+RAIL_LAYOUT = "rail-layout"
+
+# Non-stage phases a writer_stage / reader_stage may name in place of a
+# CANONICAL_STAGE_ORDER id.
+NON_STAGE_PHASES: tuple[str, ...] = (PRE_LAYOUT, POST_LAYOUT, RAIL_LAYOUT)
 
 # Section-layout stage ids in execution order.  Mirrors the ``_snap(graph, ...)``
 # checkpoints in ``engine._compute_section_layout`` and its Pass C helpers;
@@ -186,6 +202,77 @@ PHASE_FIELD_REGISTRY: dict[str, PhaseFieldSpec] = {
             "resolved column pitch recorded before layout; a vertical-flow (TB/BT) "
             "section's off-track band is offset by this cross-axis pitch, read with "
             "a None/getattr fallback to X_SPACING when it is unset"
+        ),
+    ),
+    "_cross_column_perp_bridges": PhaseFieldSpec(
+        name="_cross_column_perp_bridges",
+        writer_stage="3.4",
+        reader_stages=(POST_LAYOUT,),
+        enforcement=FieldEnforcement.FALLBACK,
+        why=(
+            "section IDs whose perpendicular drop had to be bridged across grid "
+            "columns, accumulated by the Stage 3.2 entry-port and Stage 3.4 "
+            "exit-port alignment; routing's render-curve invariant reads the set "
+            "to relax its hard abort to a warning for those forced-perpendicular "
+            "bundles, tolerating the empty default"
+        ),
+    ),
+    "_fold_compressed_sections": PhaseFieldSpec(
+        name="_fold_compressed_sections",
+        writer_stage=PRE_LAYOUT,
+        reader_stages=("1.1", POST_LAYOUT),
+        enforcement=FieldEnforcement.FALLBACK,
+        why=(
+            "sections a lowered fold threshold relocated onto a return row, "
+            "recorded at parse time; the fold-exit-side guard at the Stage 1.1 "
+            "checkpoint and the render fold-abort chokepoint read the set and "
+            "tolerate its empty default when no fold compression occurred"
+        ),
+    ),
+    "_fold_reoriented_sections": PhaseFieldSpec(
+        name="_fold_reoriented_sections",
+        writer_stage=PRE_LAYOUT,
+        reader_stages=(POST_LAYOUT,),
+        enforcement=FieldEnforcement.FALLBACK,
+        why=(
+            "sections whose flow direction resolve.py flipped to keep a flow-axis "
+            "port on its consumer/producer end; routing's exit-port offset reads "
+            "the set to anchor on the feeder-bundle frame, tolerating the empty "
+            "default"
+        ),
+    ),
+    "_rail_y": PhaseFieldSpec(
+        name="_rail_y",
+        writer_stage=RAIL_LAYOUT,
+        reader_stages=(POST_LAYOUT,),
+        enforcement=FieldEnforcement.FALLBACK,
+        why=(
+            "per-section {line_id: rail_y} map produced by the opt-in rail-mode "
+            "layout; the rail router, label placement, and rail guards read it "
+            "and fall back to the empty default when rail mode is off"
+        ),
+    ),
+    "_defer_final_guards": PhaseFieldSpec(
+        name="_defer_final_guards",
+        writer_stage=PRE_LAYOUT,
+        reader_stages=(POST_LAYOUT,),
+        enforcement=FieldEnforcement.FALLBACK,
+        why=(
+            "pass-control flag compute_layout sets while the pre-bypass passes "
+            "run so the final-geometry guards defer on transient state; the "
+            "breeze-through and after-final guards read it, tolerating the False "
+            "default"
+        ),
+    ),
+    "_after_final_deferred": PhaseFieldSpec(
+        name="_after_final_deferred",
+        writer_stage=POST_LAYOUT,
+        reader_stages=(POST_LAYOUT,),
+        enforcement=FieldEnforcement.FALLBACK,
+        why=(
+            "flag the after-final checkpoint sets when it is reached but deferred, "
+            "so compute_layout runs the checkpoint once on the settled post-bypass "
+            "geometry; read by compute_layout, tolerating the False default"
         ),
     ),
 }
