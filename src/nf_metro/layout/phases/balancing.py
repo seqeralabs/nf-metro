@@ -5,12 +5,15 @@ from __future__ import annotations
 from collections import defaultdict
 
 from nf_metro.layout.constants import (
+    COORD_GROUP_DIGITS_COARSE,
+    COORD_GROUP_DIGITS_FINE,
     DIAGONAL_RUN,
     ICON_HALF_HEIGHT,
     SAME_COORD_TOLERANCE,
     SECTION_Y_PADDING,
     STATION_RADIUS_APPROX,
 )
+from nf_metro.layout.geometry import quantize_coord
 from nf_metro.layout.phases._common import (
     _ref_bbox_top,
     _ref_y,
@@ -82,7 +85,7 @@ def _snap_inter_section_port_pairs(graph: MetroGraph) -> None:
         for edge in graph.edges_to(port_id):
             src = graph.station_for_edge_source(edge)
             if not src.is_port and edge.source not in port_set:
-                src_ys.add(round(src.y, 1))
+                src_ys.add(quantize_coord(src.y, COORD_GROUP_DIGITS_COARSE))
 
         # Fan-in exits (multiple distinct internal source Ys) want to
         # keep their centred-midpoint convergence Y, so don't move the
@@ -224,14 +227,19 @@ def _fan_free_content_upward(
 
         # Trunk candidates: stations in the entry column carrying the
         # full bundle; topmost stays pinned, others stack above it.
-        xs = sorted({round(graph.stations[sid].x, 3) for sid in internal_ids})
+        xs = sorted(
+            {
+                quantize_coord(graph.stations[sid].x, COORD_GROUP_DIGITS_FINE)
+                for sid in internal_ids
+            }
+        )
         if not xs:
             continue
         entry_x = xs[0] if section.direction == "LR" else xs[-1]
         trunk_candidates = [
             sid
             for sid in internal_ids
-            if round(graph.stations[sid].x, 3) == entry_x
+            if quantize_coord(graph.stations[sid].x, COORD_GROUP_DIGITS_FINE) == entry_x
             and set(graph.station_lines(sid)) == bundle
         ]
         if len(trunk_candidates) < 2:
@@ -241,7 +249,9 @@ def _fan_free_content_upward(
         # has already symmetrically fanned them around the section's
         # port Y and we must not collapse that into a one-sided stack.
         entry_col_all = [
-            sid for sid in internal_ids if round(graph.stations[sid].x, 3) == entry_x
+            sid
+            for sid in internal_ids
+            if quantize_coord(graph.stations[sid].x, COORD_GROUP_DIGITS_FINE) == entry_x
         ]
         if len(trunk_candidates) == len(entry_col_all) and graph.center_ports:
             continue
@@ -344,10 +354,17 @@ def _fan_source_inputs_upward(graph: MetroGraph, y_spacing: float) -> None:
         if not bundle:
             continue
 
-        xs = sorted({round(graph.stations[sid].x, 3) for sid in internal_ids})
+        xs = sorted(
+            {
+                quantize_coord(graph.stations[sid].x, COORD_GROUP_DIGITS_FINE)
+                for sid in internal_ids
+            }
+        )
         entry_x = xs[0] if section.direction == "LR" else xs[-1]
         entry_col = [
-            sid for sid in internal_ids if round(graph.stations[sid].x, 3) == entry_x
+            sid
+            for sid in internal_ids
+            if quantize_coord(graph.stations[sid].x, COORD_GROUP_DIGITS_FINE) == entry_x
         ]
         trunks = [s for s in entry_col if set(graph.station_lines(s)) == bundle]
         if len(trunks) != 1:
@@ -570,7 +587,7 @@ def _balance_one_section(graph: MetroGraph, section: Section, y_spacing: float) 
 
     cols: dict[float, list[str]] = defaultdict(list)
     for sid in internal_ids:
-        cols[round(graph.stations[sid].x, 3)].append(sid)
+        cols[quantize_coord(graph.stations[sid].x, COORD_GROUP_DIGITS_FINE)].append(sid)
 
     section_top_y = min(graph.stations[s].y for s in internal_ids)
     top_band = section_top_y - _ref_bbox_top(graph, section)
@@ -726,11 +743,13 @@ def _compact_below_trunk_band(
         st = graph.stations.get(sid)
         if st is None or st.is_hidden:
             continue
-        cols_nonmovable[round(st.x, 3)].add(round(st.y, 3))
+        cols_nonmovable[quantize_coord(st.x, COORD_GROUP_DIGITS_FINE)].add(
+            quantize_coord(st.y, COORD_GROUP_DIGITS_FINE)
+        )
     for sid in movables:
         st = graph.stations[sid]
         new_y = st.y - y_spacing
-        col_x = round(st.x, 3)
+        col_x = quantize_coord(st.x, COORD_GROUP_DIGITS_FINE)
         if any(
             abs(oy - new_y) < y_spacing / 2 - SAME_COORD_TOLERANCE
             for oy in cols_nonmovable.get(col_x, set())
@@ -893,7 +912,10 @@ def _loop_column_key(
             succ_x = t.x
     if pred_x is None or succ_x is None:
         return None
-    return (round(pred_x, 3), round(succ_x, 3))
+    return (
+        quantize_coord(pred_x, COORD_GROUP_DIGITS_FINE),
+        quantize_coord(succ_x, COORD_GROUP_DIGITS_FINE),
+    )
 
 
 def _build_loop_columns(

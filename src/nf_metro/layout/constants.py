@@ -391,6 +391,21 @@ into one coordinate."""
 SAME_Y_TOLERANCE: float = 0.1
 """Tolerance for treating two stations as sharing a base Y row."""
 
+COORD_GROUP_DIGITS_COARSE: int = 1
+"""Decimal places for the coarser of the two coordinate-grouping precisions.
+
+Several layout passes group stations into a column/row bucket by rounding a
+coordinate to a stable dict/set key (absorbing float drift from arithmetic
+like averaging).  This precision is used where the grouped axis only needs to
+resolve to sub-pixel-visible differences (e.g. off-track column stacking)."""
+
+COORD_GROUP_DIGITS_FINE: int = 3
+"""Decimal places for the finer of the two coordinate-grouping precisions.
+
+Used where a coordinate-grouping key must distinguish stations placed by
+finer arithmetic (e.g. sub-pixel column alignment during bundle balancing)
+than :data:`COORD_GROUP_DIGITS_COARSE` would resolve."""
+
 DIAGONAL_SLOPE_RATIO: float = 0.05
 """Slope above which a route segment counts as a diagonal (``|dy| >= |dx| *
 this``) rather than a flat trunk run.  A diagonal is what can rake a label."""
@@ -720,6 +735,10 @@ renderer lifts the icon by the same amount keeps the icon fixed and slides the
 nub clear below the caption.  Shared by ``rail_mode`` (the drop) and
 ``render.svg`` (the matching icon lift) so the two stay in lockstep."""
 
+OFF_TRACK_TRUNK_CLEARANCE_MARGIN: float = 2.0
+"""Small margin so an off-track icon's stroke doesn't touch a trunk line
+track it is being bumped clear of."""
+
 TERMINUS_ICON_GAP: float = 6.0
 """Gap between a terminus station pill and its first file icon.
 
@@ -789,6 +808,16 @@ COLLINEAR_AXIS_TOL: float = 0.5
 """Maximum constant-axis separation for two axis-aligned legs to count as
 sharing one track.  Tight (sub-pixel) so legs on a single track register as
 collinear while neighbouring legs one slot apart in a routing channel do not."""
+
+PORT_BOUNDARY_CROSSING_TOL: float = 24.0
+"""Distance from a declared port within which a routed segment crossing a
+section bbox edge is treated as that port's legitimate entry/exit, not a
+guard-forbidden cut through the box."""
+
+BOUNDARY_CROSSING_INSET: float = 4.0
+"""Inward slack on a section bbox edge when checking whether a crossing
+point falls within the edge's perpendicular extent, absorbing routed
+segments that land a few pixels past the box's own corner."""
 
 COMPONENT_BAND_OVERLAP_TOLERANCE: float = 0.5
 """Slack permitted when checking that independently-stacked disconnected

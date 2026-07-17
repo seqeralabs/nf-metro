@@ -8,7 +8,9 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 from nf_metro.layout.constants import (
+    BOUNDARY_CROSSING_INSET,
     COORD_TOLERANCE,
+    PORT_BOUNDARY_CROSSING_TOL,
     SAME_COORD_TOLERANCE,
     SECTION_Y_PADDING,
     STATION_RADIUS_APPROX,
@@ -629,9 +631,9 @@ def _route_crosses_section_boundary(
     graph: MetroGraph,
     routes: list[RoutedPath],
     *,
-    port_tol: float = 24.0,
-    inset: float = 4.0,
-    axis_tol: float = 1.0,
+    port_tol: float = PORT_BOUNDARY_CROSSING_TOL,
+    inset: float = BOUNDARY_CROSSING_INSET,
+    axis_tol: float = COORD_TOLERANCE,
 ) -> tuple[RoutedPath, str, float, float] | None:
     """Return the first ``(route, section_id, x, y)`` where an axis-aligned
     routed segment crosses a section bbox edge away from any declared port,
