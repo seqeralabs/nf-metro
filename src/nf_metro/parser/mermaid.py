@@ -43,6 +43,7 @@ from nf_metro.parser.resolve import (
     _remove_empty_sections,
     _resolve_sections,
 )
+from nf_metro.parser.validate import find_cycle, find_section_cycle
 
 # A row-wrap width no real map reaches, so section packing never folds: the
 # layout it yields is the unbounded baseline a user-set threshold is judged
@@ -241,8 +242,6 @@ def _finalize_graph(
     """Validate, run the post-parse resolution, and apply buffered metadata."""
     _validate_edge_annotations(graph)
 
-    # Remove empty sections, create implicit section for loose stations,
-    # auto-infer layout parameters, then resolve sections.
     if graph.sections:
         _remove_empty_sections(graph)
 
@@ -250,6 +249,30 @@ def _finalize_graph(
     if graph.sections:
         _create_implicit_section(graph)
 
+    # Layout inference (interchange expansion, section grids, port/junction
+    # resolution) assumes the graph is a DAG. A cyclic graph is rejected at the
+    # render boundary (compute_layout) and reported by validate_graph, so leave
+    # it un-inferred here rather than feed a distorted size estimate into
+    # strategy selection.
+    if find_cycle(graph) is None and find_section_cycle(graph) is None:
+        _infer_layout(graph, max_station_columns)
+
+    # A caller value (the --auto-process / --process-scope CLI flags) wins over
+    # the matching %%metro directive set during statement application.
+    if auto_process is not None:
+        graph.auto_process = auto_process
+    if process_scope is not None:
+        graph.process_scope = process_scope
+
+    _apply_pending_metadata(graph)
+
+
+def _infer_layout(graph: MetroGraph, max_station_columns: int | None) -> None:
+    """Run interchange expansion, section-grid inference, and section resolution.
+
+    The graph must be acyclic: the section-grid size estimator and the
+    topological passes this drives assume a DAG.
+    """
     from nf_metro.layout.auto_layout import (
         infer_interchanges,
         infer_section_layout,
@@ -298,15 +321,6 @@ def _finalize_graph(
         _insert_terminus_convergence_stations(graph)
         _resolve_sections(graph)
         _insert_bypass_stations(graph)
-
-    # A caller value (the --auto-process / --process-scope CLI flags) wins over
-    # the matching %%metro directive set during statement application.
-    if auto_process is not None:
-        graph.auto_process = auto_process
-    if process_scope is not None:
-        graph.process_scope = process_scope
-
-    _apply_pending_metadata(graph)
 
 
 def _apply_pending_metadata(graph: MetroGraph) -> None:
