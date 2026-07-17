@@ -543,6 +543,30 @@ def _is_side_branch_ascent(
     return True
 
 
+def _bypass_v_is_one_way_step(graph: MetroGraph, v_id: str) -> bool:
+    """True when a bypass V's predecessor and successor sit on different rows.
+
+    A one-way step (the bypassed lines leave one row and land on another) has a
+    single descending diagonal with no symmetric return leg.  A symmetric bypass
+    loop (predecessor and successor on the same row, the V dipping away and back)
+    returns False: its two legs mirror each other, so widening them by whatever
+    horizontal room each leg happens to have would leave the loop lopsided.
+    """
+    preds = [
+        graph.stations[e.source].y
+        for e in graph.edges_to(v_id)
+        if e.source in graph.stations
+    ]
+    succs = [
+        graph.stations[e.target].y
+        for e in graph.edges_from(v_id)
+        if e.target in graph.stations
+    ]
+    if not preds or not succs:
+        return False
+    return abs(min(preds) - min(succs)) > COORD_TOLERANCE
+
+
 def _has_in_section_predecessor(
     graph: MetroGraph, station_id: str, section_id: str
 ) -> bool:
@@ -625,23 +649,51 @@ def _route_diagonal(
     # equal V-side flat reservations so V sits at the centre of the
     # straight segment of the bypass loop.
     v_flat_half = CURVE_RADIUS + MIN_STATION_FLAT_LENGTH / 2
-    if tgt.is_hidden and is_bypass_v(edge.target):
+    diagonal_run = ctx.diagonal_run
+    tgt_is_bypass_v = tgt.is_hidden and is_bypass_v(edge.target)
+    src_is_bypass_v = src.is_hidden and is_bypass_v(edge.source)
+    is_bypass_edge = tgt_is_bypass_v or src_is_bypass_v
+    if tgt_is_bypass_v:
         is_fork_flag = False
         is_join_flag = True
         tgt_min = v_flat_half
-        if src_min + tgt_min + ctx.diagonal_run > abs(dx):
+        if src_min + tgt_min + diagonal_run > abs(dx):
             tgt_min = MIN_STRAIGHT_EDGE
-    elif src.is_hidden and is_bypass_v(edge.source):
+    elif src_is_bypass_v:
         is_fork_flag = True
         is_join_flag = False
         src_min = v_flat_half
-        if src_min + tgt_min + ctx.diagonal_run > abs(dx):
+        if src_min + tgt_min + diagonal_run > abs(dx):
             src_min = MIN_STRAIGHT_EDGE
+
+    # A steep multi-line bypass bundle descending past an in-line terminal is
+    # squeezed through the narrow channel between that terminal's name label and
+    # the source station's, and a near-vertical descent there fails two ways at
+    # once: its vertically-offset lines separate by only OFFSET_STEP * cos(theta),
+    # fusing below the channel floor, and the steep diagonal rakes the source
+    # label.  A gentler diagonal clears both, so flatten toward 45 degrees
+    # (diagonal run >= vertical drop) within the room the endpoint straights
+    # leave.  Scoped to a one-way-step bypass V: a symmetric bypass loop threads
+    # the same descent as two mirrored legs whose spread stagger already
+    # separates them, and widening those legs by whatever room each happens to
+    # have would leave the loop lopsided, so it keeps its shared run.
+    drop = abs(ty - sy)
+    v_id = edge.target if tgt_is_bypass_v else edge.source if src_is_bypass_v else None
+    if (
+        is_bypass_edge
+        and drop > diagonal_run
+        and v_id is not None
+        and _bypass_v_is_one_way_step(ctx.graph, v_id)
+    ):
+        _, line_ids, _ = gather_member_edges(ctx.graph, edge)
+        if len(line_ids) > 1:
+            room = abs(dx) - src_min - tgt_min
+            diagonal_run = max(diagonal_run, min(drop, room))
 
     diag_start_x, diag_end_x = _compute_diagonal_placement(
         sx,
         tx,
-        ctx.diagonal_run,
+        diagonal_run,
         src_min,
         tgt_min,
         is_fork_flag,

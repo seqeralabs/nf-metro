@@ -467,6 +467,10 @@
     "note": "Trunk-row entry bow (#1315). Exercised by tests/fixtures/regressions/entry_trunk_row_bow.mmd, which is kept out of the validate=True corpus and the gate-coverage corpus (it exercises the always-on render path only), so no clean corpus fixture takes this arm. The render-path invariant test test_entry_trunk_row_bow_clears_non_consumer covers the drawn detour.",
     "status": "defensive"
   },
+  "intra_handlers.py::if not preds or not succs:::#1": {
+    "note": "A bypass V exists to carry lines from one station to another, so by the time _bypass_v_is_one_way_step runs (only for a bypass endpoint of a routed edge) the V always has at least one predecessor and one successor edge. The empty-list return-False arm guards a malformed graph rather than a topology, so it stays un-exercised.",
+    "status": "defensive"
+  },
   "intra_handlers.py::if not section:::#1": {
     "note": "_route_entry_runway only runs on an entry-port -> internal-station edge; the target of such an edge always carries a section_id that resolves, so the guard's return-None arm protects against a malformed graph rather than a topology.",
     "status": "defensive"

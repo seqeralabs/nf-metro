@@ -148,6 +148,16 @@ gallery:
       inter-section descent tapers that offset away before the boundary so it
       lands on the port's own X, meeting the intra-section drop as one
       continuous stroke rather than stepping sideways across the top edge."
+  - id: multirow_source_stacked_fan
+    source_dir: examples/topologies
+    category: Feature Showcase
+    description:
+      "A source section spanning three grid rows feeds three vertically stacked
+      downstream sections through one right-exit port, while an in-section
+      terminal forces the exiting lines onto a bypass. The three lines descend
+      together from the trunk to the lower exit row over a diagonal flattened
+      toward 45 degrees, so they read as distinct parallel tracks rather than
+      fusing into one stroke on a near-vertical drop."
   - id: top_entry_left_neighbour
     source_dir: examples/topologies
     category: Feature Showcase

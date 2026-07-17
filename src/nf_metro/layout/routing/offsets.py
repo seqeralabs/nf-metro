@@ -15,6 +15,7 @@ from nf_metro.layout.constants import (
 from nf_metro.layout.geometry import lanes_run_along_x
 from nf_metro.layout.phases._common import (
     iter_corridor_fed_solo_entries,
+    iter_flat_seam_solo_entries,
     line_forks_within_section,
 )
 from nf_metro.layout.routing.arranger import BoundaryConfig, lane_order
@@ -1733,29 +1734,53 @@ def _recenter_single_line_corridor_entry(ctx: _OffsetCtx) -> None:
     consumer carrying the line) at offset 0.  Anchoring the consumers too, rather
     than leaving horizontal reconciliation to settle them, keeps reconciliation's
     larger-magnitude preference from snapping the port back off the trunk onto
-    the consumer's lane.  A flat (same-Y) seam is left untouched: re-basing there
-    would slope the straight-through run into an almost-horizontal segment.
+    the consumer's lane.
 
     When the single line forks internally, only the entry port is re-anchored:
     the fan branches straddle the trunk and each may hold a lane that aligns it
     with a downstream multi-line section, so pinning them to offset 0 would kink
     those hand-offs.
 
-    Scope is exactly :func:`iter_corridor_fed_solo_entries` -- the same set the
-    :func:`_guard_corridor_fed_solo_rides_trunk` invariant certifies.
+    A flat (same-Y) seam is re-anchored too, but only when its feeder already
+    rides the trunk (offset 0): a solo entry level with a fan-out junction that
+    was re-slotted onto slot 0 keeps a stale priority lane, so its
+    junction-to-port run reads as an almost-horizontal slope.  Anchoring the
+    entry to 0 there lands it flat and on the trunk.  When the feeder rides a
+    non-zero lane the seam is left alone -- re-basing would tilt the level run.
+
+    The corridor scope is exactly :func:`iter_corridor_fed_solo_entries` -- the
+    same set the :func:`_guard_corridor_fed_solo_rides_trunk` invariant
+    certifies.
     """
     graph = ctx.graph
-    for sec_id, port_id, line_id in iter_corridor_fed_solo_entries(
-        graph, _SAME_Y_TOLERANCE
-    ):
+
+    def _anchor(sec_id: str, port_id: str, line_id: str) -> None:
         ctx.offsets[(port_id, line_id)] = 0.0
         if line_forks_within_section(graph, graph.sections[sec_id], line_id):
-            continue
+            return
         for sid in graph.sections[sec_id].station_ids:
             st = graph.stations.get(sid)
             if st is None or st.is_port or line_id not in graph.station_lines(sid):
                 continue
             ctx.offsets[(sid, line_id)] = 0.0
+
+    for sec_id, port_id, line_id in iter_corridor_fed_solo_entries(
+        graph, _SAME_Y_TOLERANCE
+    ):
+        _anchor(sec_id, port_id, line_id)
+
+    for sec_id, port_id, line_id in iter_flat_seam_solo_entries(
+        graph, _SAME_Y_TOLERANCE
+    ):
+        feeder_offsets = [
+            ctx.offsets.get((e.source, line_id), 0.0)
+            for e in graph.edges_to(port_id)
+            if e.source in graph.stations
+        ]
+        if feeder_offsets and all(
+            abs(off) <= COORD_TOLERANCE_FINE for off in feeder_offsets
+        ):
+            _anchor(sec_id, port_id, line_id)
 
 
 def _compute_entry_port_offsets(ctx: _OffsetCtx) -> None:

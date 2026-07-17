@@ -182,6 +182,7 @@
   "intra_handlers.py::if not (same_sec or is_exit_port):::#1",
   "intra_handlers.py::if not (tgt.x - src.x <= 0 and abs(dy) > CROSS_ROW_THRESHOLD and not same_section):::#1",
   "intra_handlers.py::if not blockers:::#1",
+  "intra_handlers.py::if not preds or not succs:::#1",
   "intra_handlers.py::if not section:::#1",
   "intra_handlers.py::if not st or st.is_port:::#1",
   "intra_handlers.py::if over_end - over_start < 2 * ctx.curve_radius:::#1",
