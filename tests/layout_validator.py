@@ -11,9 +11,18 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from nf_metro.layout.constants import Y_SPACING
-from nf_metro.layout.geometry import iter_section_overlaps
-from nf_metro.layout.phases._common import section_axes
+from nf_metro.layout.geometry import (
+    iter_coincident_stations,
+    iter_section_overlaps,
+    iter_serpentine_backtracks,
+    iter_stations_outside_bbox,
+)
+from nf_metro.layout.phases._common import (
+    routes_through_unrelated_sections,
+    section_axes,
+)
 from nf_metro.layout.phases.off_track import _off_track_anchor_of
+from nf_metro.layout.phases.spacing import _residual_label_overlaps
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.common import RoutedPath, is_orthogonal_turn
 from nf_metro.parser.model import MetroGraph, PortSide
@@ -76,7 +85,7 @@ def validate_layout(graph: MetroGraph) -> list[Violation]:
     precomputed = _compute_routes(graph)
     violations.extend(check_edge_waypoints(graph, _precomputed=precomputed))
     if precomputed is not None:
-        violations.extend(check_label_overlap(graph, _precomputed=precomputed))
+        violations.extend(check_label_overlap(graph))
         violations.extend(check_edge_section_crossing(graph, _precomputed=precomputed))
         violations.extend(
             check_bypass_section_clearance(graph, _precomputed=precomputed)
@@ -137,37 +146,29 @@ def check_section_overlap(
 def check_station_containment(
     graph: MetroGraph, margin: float = 5.0
 ) -> list[Violation]:
-    """Check that non-port stations are within their section bbox (with margin)."""
+    """Check that non-port stations are within their section bbox (with margin).
+
+    Delegates the centre-in-bbox geometry to
+    :func:`iter_stations_outside_bbox`, the same predicate the always-on
+    runtime guard uses.
+    """
     violations: list[Violation] = []
 
-    for sid, station in graph.stations.items():
-        if station.is_port or station.section_id is None:
-            continue
-
-        section = graph.sections.get(station.section_id)
-        if not section or section.bbox_w == 0:
-            continue
-
-        sx1 = section.bbox_x - margin
-        sy1 = section.bbox_y - margin
-        sx2 = section.bbox_x + section.bbox_w + margin
-        sy2 = section.bbox_y + section.bbox_h + margin
-
-        if not (sx1 <= station.x <= sx2 and sy1 <= station.y <= sy2):
-            violations.append(
-                Violation(
-                    check="station_containment",
-                    severity=Severity.ERROR,
-                    message=(
-                        f"Station '{sid}' at ({station.x:.1f},{station.y:.1f}) "
-                        f"is outside section '{station.section_id}' "
-                        f"bbox ({section.bbox_x:.0f},{section.bbox_y:.0f},"
-                        f"{section.bbox_x + section.bbox_w:.0f},"
-                        f"{section.bbox_y + section.bbox_h:.0f})"
-                    ),
-                    context={"station": sid, "section": station.section_id},
-                )
+    for sid, station, section in iter_stations_outside_bbox(graph, margin):
+        violations.append(
+            Violation(
+                check="station_containment",
+                severity=Severity.ERROR,
+                message=(
+                    f"Station '{sid}' at ({station.x:.1f},{station.y:.1f}) "
+                    f"is outside section '{station.section_id}' "
+                    f"bbox ({section.bbox_x:.0f},{section.bbox_y:.0f},"
+                    f"{section.bbox_x + section.bbox_w:.0f},"
+                    f"{section.bbox_y + section.bbox_h:.0f})"
+                ),
+                context={"station": sid, "section": station.section_id},
             )
+        )
 
     return violations
 
@@ -273,27 +274,18 @@ def check_coincident_stations(
     """
     violations: list[Violation] = []
 
-    placed: list[tuple[str, float, float]] = []
-    for sid, station in graph.stations.items():
-        if station.is_port or station.is_hidden:
-            continue
-        if graph.station_is_rail(sid):
-            continue
-        for other, ox, oy in placed:
-            if abs(station.x - ox) <= tolerance and abs(station.y - oy) <= tolerance:
-                violations.append(
-                    Violation(
-                        check="coincident_stations",
-                        severity=Severity.ERROR,
-                        message=(
-                            f"Stations '{other}' and '{sid}' share coordinate "
-                            f"({station.x:.1f}, {station.y:.1f})"
-                        ),
-                        context={"stations": [other, sid]},
-                    )
-                )
-                break
-        placed.append((sid, station.x, station.y))
+    for sid_a, sid_b, x, y in iter_coincident_stations(graph, tolerance):
+        violations.append(
+            Violation(
+                check="coincident_stations",
+                severity=Severity.ERROR,
+                message=(
+                    f"Stations '{sid_a}' and '{sid_b}' share coordinate "
+                    f"({x:.1f}, {y:.1f})"
+                ),
+                context={"stations": [sid_a, sid_b]},
+            )
+        )
 
     return violations
 
@@ -348,45 +340,16 @@ def check_minimum_section_spacing(
     return violations
 
 
-def check_label_overlap(
-    graph: MetroGraph,
-    _precomputed: tuple[dict[tuple[str, str], float], list[RoutedPath]] | None = None,
-) -> list[Violation]:
+def check_label_overlap(graph: MetroGraph) -> list[Violation]:
     """Check that no station label overlaps another label or a marker.
 
-    Mirrors the runtime guard: label/label overlap is never allowed;
-    label/marker grazes within ``LABEL_OVERLAP_TOL`` are tolerated.  Uses the
-    same detector the engine and wrapping pass use, so this reports exactly
-    what the final render would draw.
+    Delegates to :func:`_residual_label_overlaps`, the same place-and-detect
+    pipeline the runtime guard validates, so this reports exactly the
+    fully-wrapped state the renderer will draw: label/label overlap is never
+    allowed; label/marker grazes within ``LABEL_OVERLAP_TOL`` are tolerated.
     """
-    from nf_metro.layout.labels import find_label_overlaps, place_labels
-
     violations: list[Violation] = []
-    if _precomputed is not None:
-        offsets, routes = _precomputed
-    else:
-        precomputed = _compute_routes(graph)
-        if precomputed is None:
-            return violations
-        offsets, routes = precomputed
-
-    try:
-        placements = place_labels(
-            graph,
-            station_offsets=offsets,
-            routes=routes,
-            label_angle=graph.label_angle or 0.0,
-        )
-    except Exception as e:
-        return [
-            Violation(
-                check="label_overlap",
-                severity=Severity.ERROR,
-                message=f"Label placement failed: {e}",
-            )
-        ]
-
-    for ov in find_label_overlaps(graph, placements, offsets):
+    for ov in _residual_label_overlaps(graph, allow_hyphenation=True):
         target = "label" if ov.kind == "label" else "marker"
         violations.append(
             Violation(
@@ -464,76 +427,6 @@ def check_edge_waypoints(
     return violations
 
 
-def _segment_crosses_bbox(
-    x1: float,
-    y1: float,
-    x2: float,
-    y2: float,
-    bx: float,
-    by: float,
-    bw: float,
-    bh: float,
-    margin: float = 2.0,
-) -> bool:
-    """Test if a line segment passes through (not just touches) an AABB.
-
-    Uses an inset margin so segments running along a bbox edge don't
-    trigger false positives.  Handles axis-aligned segments (common in
-    metro routing) as simple range overlaps.
-    """
-    # Inset the bbox by margin so edge-touching doesn't count
-    bx1 = bx + margin
-    by1 = by + margin
-    bx2 = bx + bw - margin
-    by2 = by + bh - margin
-
-    if bx1 >= bx2 or by1 >= by2:
-        return False  # Section too small after inset
-
-    # Normalise segment endpoints
-    seg_x_min, seg_x_max = min(x1, x2), max(x1, x2)
-    seg_y_min, seg_y_max = min(y1, y2), max(y1, y2)
-
-    # Quick reject: no overlap on either axis
-    if seg_x_max <= bx1 or seg_x_min >= bx2:
-        return False
-    if seg_y_max <= by1 or seg_y_min >= by2:
-        return False
-
-    # Horizontal segment
-    if abs(y1 - y2) < 0.5:
-        return by1 < y1 < by2
-
-    # Vertical segment
-    if abs(x1 - x2) < 0.5:
-        return bx1 < x1 < bx2
-
-    # Diagonal / general segment: use parametric clipping (Liang-Barsky)
-    dx = x2 - x1
-    dy = y2 - y1
-    t_min, t_max = 0.0, 1.0
-
-    for p, q in [
-        (-dx, x1 - bx1),
-        (dx, bx2 - x1),
-        (-dy, y1 - by1),
-        (dy, by2 - y1),
-    ]:
-        if abs(p) < 1e-9:
-            if q < 0:
-                return False
-        else:
-            t = q / p
-            if p < 0:
-                t_min = max(t_min, t)
-            else:
-                t_max = min(t_max, t)
-            if t_min > t_max:
-                return False
-
-    return t_min < t_max
-
-
 def _edge_home_sections(graph: MetroGraph, source_id: str, target_id: str) -> set[str]:
     """Return section IDs that own the source and target of an edge."""
     home: set[str] = set()
@@ -567,7 +460,14 @@ def check_edge_section_crossing(
     margin: float = 2.0,
     _precomputed: tuple[dict[tuple[str, str], float], list[RoutedPath]] | None = None,
 ) -> list[Violation]:
-    """Check no routed edge segment passes through a non-home section."""
+    """Check no routed segment passes through a section it does not connect to.
+
+    Delegates the crossing geometry to
+    :func:`routes_through_unrelated_sections`, the single-source helper the
+    always-on runtime guard uses (route offsets applied, every route including
+    fan bundles, section membership via ``section_for_station``, own-line trunk
+    overlays exempt).
+    """
     violations: list[Violation] = []
 
     if _precomputed is not None:
@@ -579,58 +479,29 @@ def check_edge_section_crossing(
         except Exception:
             return violations
 
-    # Pre-collect sections with valid bboxes
-    sections = [
-        (sid, s) for sid, s in graph.sections.items() if s.bbox_w > 0 and s.bbox_h > 0
-    ]
-
-    for route in routes:
-        if not route.is_inter_section:
-            continue
-
-        home = _edge_home_sections(graph, route.edge.source, route.edge.target)
-
-        for k in range(len(route.points) - 1):
-            x1, y1 = route.points[k]
-            x2, y2 = route.points[k + 1]
-
-            for sid, sec in sections:
-                if sid in home:
-                    continue
-
-                if _segment_crosses_bbox(
-                    x1,
-                    y1,
-                    x2,
-                    y2,
-                    sec.bbox_x,
-                    sec.bbox_y,
-                    sec.bbox_w,
-                    sec.bbox_h,
-                    margin=margin,
-                ):
-                    violations.append(
-                        Violation(
-                            check="edge_section_crossing",
-                            severity=Severity.ERROR,
-                            message=(
-                                f"Edge {route.edge.source}->{route.edge.target} "
-                                f"(line={route.line_id}) segment {k} "
-                                f"({x1:.0f},{y1:.0f})->({x2:.0f},{y2:.0f}) "
-                                f"crosses section '{sid}' "
-                                f"bbox ({sec.bbox_x:.0f},{sec.bbox_y:.0f},"
-                                f"{sec.bbox_x + sec.bbox_w:.0f},"
-                                f"{sec.bbox_y + sec.bbox_h:.0f})"
-                            ),
-                            context={
-                                "source": route.edge.source,
-                                "target": route.edge.target,
-                                "line": route.line_id,
-                                "segment": k,
-                                "crossed_section": sid,
-                            },
-                        )
-                    )
+    for route, sid in routes_through_unrelated_sections(
+        graph, inset=margin, routes=routes, offsets=offsets
+    ):
+        sec = graph.sections[sid]
+        violations.append(
+            Violation(
+                check="edge_section_crossing",
+                severity=Severity.ERROR,
+                message=(
+                    f"Edge {route.edge.source}->{route.edge.target} "
+                    f"(line={route.line_id}) crosses section '{sid}' "
+                    f"bbox ({sec.bbox_x:.0f},{sec.bbox_y:.0f},"
+                    f"{sec.bbox_x + sec.bbox_w:.0f},"
+                    f"{sec.bbox_y + sec.bbox_h:.0f})"
+                ),
+                context={
+                    "source": route.edge.source,
+                    "target": route.edge.target,
+                    "line": route.line_id,
+                    "crossed_section": sid,
+                },
+            )
+        )
 
     return violations
 
@@ -1657,18 +1528,6 @@ def check_exit_port_feeder_alignment(
     return violations
 
 
-def _entry_perpendicular_to_flow(port, section) -> bool:
-    """Whether an entry port sits on the axis perpendicular to its flow.
-
-    LEFT/RIGHT on a vertical-flow (TB/BT) section, TOP/BOTTOM on a
-    horizontal-flow (LR/RL) one.  Such a port's turn-in leg is the entry,
-    perpendicular to flow, not a serpentine fold-back.
-    """
-    if section.direction in ("LR", "RL"):
-        return port.side in (PortSide.TOP, PortSide.BOTTOM)
-    return port.side in (PortSide.LEFT, PortSide.RIGHT)
-
-
 def check_serpentine_no_backtrack(
     graph: MetroGraph,
     backtrack_frac: float = 0.5,
@@ -1676,19 +1535,15 @@ def check_serpentine_no_backtrack(
 ) -> list[Violation]:
     """Stacked same-direction sections must not backtrack horizontally.
 
-    When same-direction sections are stacked in one grid column and chained
-    (issue #421), the engine serpentines their effective flow so consecutive
-    sections meet on a shared side joined by a short vertical drop.  A section
-    that fails to serpentine instead enters on the wrong side and folds its
-    internal route back across (nearly) the full section width.
+    When same-direction sections are stacked in one grid column and chained,
+    the engine serpentines their effective flow so consecutive sections meet
+    on a shared side joined by a short vertical drop.  A section that fails to
+    serpentine instead enters on the wrong side and folds its internal route
+    back across (nearly) the full section width.
 
-    For every section in a detected serpentine run, this sums the horizontal
-    travel of its internal routed segments that runs *against* the section's
-    flow direction.  If that wrong-way travel exceeds ``backtrack_frac`` of the
-    section width, the section is kinking the chain.
+    Delegates the backtrack geometry to :func:`iter_serpentine_backtracks`,
+    the same predicate the runtime guard uses.
     """
-    from nf_metro.layout.auto_layout import detect_serpentine_runs
-
     violations: list[Violation] = []
 
     if _precomputed is not None:
@@ -1700,56 +1555,27 @@ def check_serpentine_no_backtrack(
         except Exception:
             return violations
 
-    dag = graph.section_dag
-    if dag is None:
-        return violations
-    runs = detect_serpentine_runs(graph, dag.successors, dag.predecessors)
-    serpentine_sections = {sid for run in runs for sid in run}
-    if not serpentine_sections:
-        return violations
-
-    # Internal route segments grouped by home section.
-    wrong_way: dict[str, float] = {sid: 0.0 for sid in serpentine_sections}
-    for route in routes:
-        src_sec = graph.section_for_station(route.edge.source)
-        tgt_sec = graph.section_for_station(route.edge.target)
-        if src_sec != tgt_sec or src_sec not in serpentine_sections:
-            continue
-        port = graph.ports.get(route.edge.source)
-        section = graph.sections[src_sec]
-        if port and port.is_entry and _entry_perpendicular_to_flow(port, section):
-            # An entry port's turn-in to the trunk is the entry, one leg
-            # perpendicular to flow, not a serpentine fold-back.
-            continue
-        forward = 1.0 if section.direction != "RL" else -1.0
-        pts = apply_route_offsets(route, offsets)
-        for k in range(len(pts) - 1):
-            dx = pts[k + 1][0] - pts[k][0]
-            if dx * forward < 0:
-                wrong_way[src_sec] += abs(dx)
-
-    for sid, against in wrong_way.items():
-        section = graph.sections[sid]
-        limit = backtrack_frac * max(section.bbox_w, 1.0)
-        if against > limit:
-            violations.append(
-                Violation(
-                    check="serpentine_no_backtrack",
-                    severity=Severity.ERROR,
-                    message=(
-                        f"Stacked section '{sid}' (dir={section.direction}) "
-                        f"backtracks {against:.0f}px against its flow "
-                        f"(>{limit:.0f}px = {backtrack_frac:.0%} of width "
-                        f"{section.bbox_w:.0f}); the serpentine chain is "
-                        f"kinking instead of dropping vertically"
-                    ),
-                    context={
-                        "section": sid,
-                        "direction": section.direction,
-                        "against": against,
-                        "limit": limit,
-                    },
-                )
+    for sid, against, limit, section in iter_serpentine_backtracks(
+        graph, routes, offsets, backtrack_frac=backtrack_frac
+    ):
+        violations.append(
+            Violation(
+                check="serpentine_no_backtrack",
+                severity=Severity.ERROR,
+                message=(
+                    f"Stacked section '{sid}' (dir={section.direction}) "
+                    f"backtracks {against:.0f}px against its flow "
+                    f"(>{limit:.0f}px = {backtrack_frac:.0%} of width "
+                    f"{section.bbox_w:.0f}); the serpentine chain is "
+                    f"kinking instead of dropping vertically"
+                ),
+                context={
+                    "section": sid,
+                    "direction": section.direction,
+                    "against": against,
+                    "limit": limit,
+                },
             )
+        )
 
     return violations

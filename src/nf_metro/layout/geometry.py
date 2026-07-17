@@ -9,7 +9,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from nf_metro.parser.model import MetroGraph, Section
+    from nf_metro.layout.routing.common import RoutedPath
+    from nf_metro.parser.model import MetroGraph, Section, Station
 
 _Box = tuple[float, float, float, float]
 
@@ -72,6 +73,86 @@ def iter_section_overlaps(
             )
             if overlap_x and overlap_y:
                 yield sid_a, sid_b, box_a, box_b
+
+
+def iter_coincident_stations(
+    graph: MetroGraph, tolerance: float = 1.0
+) -> Iterator[tuple[str, str, float, float]]:
+    """Yield ``(sid_a, sid_b, x, y)`` for every pair of distinct visible
+    stations placed within *tolerance* of the same centre.
+
+    Two real (non-port, non-hidden) stations sharing an ``(x, y)`` render
+    their pill markers on top of each other.  Rail-mode stations are exempt:
+    their markers render as per-rail knobs distributed across the rail bundle,
+    so a shared centre is not a visual collision there.  Sorting by ``x`` lets
+    the inner scan stop once a candidate's ``x`` clears the tolerance window.
+    Shared by the runtime guard and the offline validator so the two cannot
+    drift.
+    """
+    exempt_rail = graph.has_rail_sections
+    placed: list[tuple[str, float, float]] = []
+    for sid, station in graph.stations.items():
+        if station.is_port or station.is_hidden:
+            continue
+        if exempt_rail and graph.station_is_rail(sid):
+            continue
+        placed.append((sid, station.x, station.y))
+    placed.sort(key=lambda p: p[1])
+    for i, (sid, x, y) in enumerate(placed):
+        for oid, ox, oy in placed[i + 1 :]:
+            if ox - x > tolerance:
+                break
+            if abs(y - oy) <= tolerance:
+                yield sid, oid, ox, oy
+
+
+def iter_bbox_checkable_stations(
+    graph: MetroGraph,
+) -> Iterator[tuple[str, Station, Section]]:
+    """Yield ``(sid, station, section)`` for each rendered station a
+    bbox-containment check should inspect: skips ports, junctions, and
+    stations whose section has no sized bbox.
+
+    Ports live on the boundary by construction and junctions are invisible
+    synthetic nodes, so neither is a visible-station containment concern.
+    Shared by the marker-edge guard, the centre-containment guard, and the
+    offline validator so they cannot drift on what they exempt.
+    """
+    junction_ids = graph.junction_ids
+    for sid, station in graph.stations.items():
+        section = graph.sections.get(station.section_id or "")
+        if (
+            section is None
+            or station.is_port
+            or sid in junction_ids
+            or section.bbox_w == 0
+        ):
+            continue
+        yield sid, station, section
+
+
+def iter_stations_outside_bbox(
+    graph: MetroGraph, margin: float
+) -> Iterator[tuple[str, Station, Section]]:
+    """Yield ``(sid, station, section)`` for each rendered station whose
+    centre lies outside its section's bbox by more than *margin*.
+
+    Shared by the always-on centre-containment guard and the offline
+    validator so the two report the same defect from one implementation.
+    """
+    for sid, station, section in iter_bbox_checkable_stations(graph):
+        inside_x = (
+            section.bbox_x - margin
+            <= station.x
+            <= section.bbox_x + section.bbox_w + margin
+        )
+        inside_y = (
+            section.bbox_y - margin
+            <= station.y
+            <= section.bbox_y + section.bbox_h + margin
+        )
+        if not (inside_x and inside_y):
+            yield sid, station, section
 
 
 class _HasXY(Protocol):
@@ -408,3 +489,80 @@ class BBoxXIndex:
             key, bbox = self._items[i]
             if bbox[2] >= qx_min:
                 yield key, bbox
+
+
+def _route_is_side_entry_turn_in(graph: MetroGraph, rp: RoutedPath) -> bool:
+    """Whether *rp* is the turn-in leg from an entry port perpendicular to flow.
+
+    An entry port on the axis perpendicular to its section's flow (LEFT/RIGHT
+    on a vertical-flow TB/BT section, TOP/BOTTOM on a horizontal-flow LR/RL
+    one) reaches the trunk via one traverse perpendicular to that flow.  That
+    leg is the entry, bounded by the section width, not a serpentine fold-back,
+    so backtrack accounting excludes it.
+    """
+    from nf_metro.parser.model import PortSide
+
+    port = graph.ports.get(rp.edge.source)
+    if not port or not port.is_entry:
+        return False
+    section = graph.sections.get(port.section_id)
+    if section is None:
+        return False
+    if lanes_run_along_y(section.direction):
+        return port.side in (PortSide.TOP, PortSide.BOTTOM)
+    return port.side in (PortSide.LEFT, PortSide.RIGHT)
+
+
+def iter_serpentine_backtracks(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+    *,
+    backtrack_frac: float = 0.5,
+    tolerance: float = 0.0,
+) -> Iterator[tuple[str, float, float, Section]]:
+    """Yield ``(sid, against, limit, section)`` for each stacked section that
+    backtracks against its flow beyond ``backtrack_frac`` of its width.
+
+    Same-direction sections stacked in one grid column and chained serpentine
+    their effective flow row by row so consecutive sections meet on a shared
+    side joined by a short vertical drop.  A section that fails to
+    alternate enters on the wrong side and folds its internal route back across
+    the section width.  For every section in a detected serpentine run this
+    sums the wrong-way horizontal travel of its internal segments, measured on
+    the rendered geometry (route offsets applied), and reports the section when
+    that travel exceeds ``backtrack_frac * width + tolerance``.  Shared by the
+    runtime guard and the offline validator so the two cannot drift.
+    """
+    from nf_metro.layout.auto_layout import detect_serpentine_runs
+    from nf_metro.layout.routing.common import apply_route_offsets
+
+    dag = graph.section_dag
+    if dag is None:
+        return
+    runs = detect_serpentine_runs(graph, dag.successors, dag.predecessors)
+    serpentine_sections = {sid for run in runs for sid in run}
+    if not serpentine_sections:
+        return
+
+    wrong_way: dict[str, float] = {sid: 0.0 for sid in serpentine_sections}
+    for rp in routes:
+        src_sec = graph.section_for_station(rp.edge.source)
+        if src_sec != graph.section_for_station(rp.edge.target):
+            continue
+        if src_sec not in serpentine_sections:
+            continue
+        if _route_is_side_entry_turn_in(graph, rp):
+            continue
+        forward = 1.0 if graph.sections[src_sec].direction != "RL" else -1.0
+        pts = apply_route_offsets(rp, offsets)
+        for k in range(len(pts) - 1):
+            dx = pts[k + 1][0] - pts[k][0]
+            if dx * forward < 0:
+                wrong_way[src_sec] += abs(dx)
+
+    for sid, against in wrong_way.items():
+        section = graph.sections[sid]
+        limit = backtrack_frac * max(section.bbox_w, 1.0)
+        if against > limit + tolerance:
+            yield sid, against, limit, section

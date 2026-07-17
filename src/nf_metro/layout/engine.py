@@ -122,7 +122,6 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     FoldThresholdError,
     MixedEntryDirectionError,
     PhaseInvariantError,
-    _bbox_guarded_stations,
     _bisection_should_run,
     _ensure_routes,
     _guard_anchors_frozen_during_placement,
