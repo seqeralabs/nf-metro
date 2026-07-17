@@ -148,8 +148,20 @@ the same standard any non-metro tool can emit. Set `%%metro manifest: false`
 (or `--no-manifest`) to emit the drawn map only, with no manifest, no
 `data-node-*` attributes, and no station-group wrapper.
 
-`serve` is one ready-made consumer of that manifest. To drive the overlay from
-your **own** application instead, see the [Embedding guide](/nf-metro/embedding/).
+The manifest is only the static half of the contract. The **runtime state**
+this section drives an overlay from - the `pending`/`queued`/`running`/`done`/
+`failed` enum, the `done`/`total` counts, and the snapshot JSON shape `GET
+/state` and `/stream` below serve - is specified normatively, with its own
+JSON Schema, in [Data manifest → Drive a live
+overlay](/nf-metro/manifest/#drive-a-live-overlay-the-state-snapshot).
+Everything in this page below that point (the weblog receiver, `serve`, the
+Nextflow plugin) is **one binding** of that vocabulary to Nextflow; a host
+that already has its own authoritative task state needs only the manifest and
+the state schema, not this server.
+
+`serve` is one ready-made consumer of the manifest and one reference
+producer of the state snapshot. To drive the overlay from your **own**
+application instead, see the [Embedding guide](/nf-metro/embedding/).
 
 ## 2. Serve the map
 
@@ -247,12 +259,16 @@ switching style never re-renders the map. Animations respect
 
 ### Endpoints
 
-| Path           | Purpose                                                |
-| -------------- | ------------------------------------------------------ |
-| `GET /`        | The live page (static SVG + status overlay).           |
-| `GET /stream`  | Server-sent events; the page subscribes to this.       |
-| `GET /state`   | Current state as JSON (handy for scripting/debugging). |
-| `POST /events` | Nextflow weblog receiver.                              |
+| Path           | Purpose                                                                                    |
+| -------------- | ------------------------------------------------------------------------------------------ |
+| `GET /`        | The live page (static SVG + status overlay).                                               |
+| `GET /stream`  | Server-sent events; the page subscribes to this. Each event's `data:` is a state snapshot. |
+| `GET /state`   | Current state snapshot as JSON (handy for scripting/debugging).                            |
+| `POST /events` | Nextflow weblog receiver.                                                                  |
+
+`/state` and each `/stream` message share one JSON shape - the [state
+snapshot](/nf-metro/manifest/#drive-a-live-overlay-the-state-snapshot), validatable
+via `nf_metro.live.state_schema()`.
 
 ## 2b. Persistent server (many runs)
 
