@@ -1,0 +1,7 @@
+- id: nf-metro
+  name: nf-metro (render metro map)
+  description: Re-render the metro-map SVG from its .mmd source.
+  entry: nf-metro render
+  language: python
+  files: \.mmd$
+  args: [--theme, nfcore, --embed-font]
