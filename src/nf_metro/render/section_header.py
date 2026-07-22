@@ -16,7 +16,6 @@ clear of routes, never moving a route to do so, following the priority chain:
 
 from __future__ import annotations
 
-import math
 import re
 from dataclasses import dataclass
 from typing import Literal
@@ -533,21 +532,28 @@ def _nudge(
     the band it would occupy.  Always clears, at the cost of a header that may
     overhang the box to the right.
 
-    The band is unbounded to the right, not clipped to the un-nudged header's
-    box-width extent: the shifted header occupies ``[start, start + length]``,
-    so a route crossing the header's vertical band anywhere to the right of the
-    box must be stepped past.  Sweeping the band unbounded to the right
-    guarantees the placed header sits past every route, which is what makes
-    nudge a true last-resort clear."""
+    The shift is a fixpoint over the header's own footprint ``[start, start +
+    length]``, not a single pass over the un-nudged box-width extent: stepping
+    right to clear a route can slide a route that was beyond the old footprint
+    into the new one, so the step is repeated against the shifted footprint
+    until nothing crosses it.  This is what makes nudge a true last-resort
+    clear, while stopping at the leftmost clear position rather than sweeping
+    past routes the finite-width header would never reach."""
     pad = SECTION_HEADER_ROUTE_PAD
     bx0, by0, _, by1 = above.keepout
-    band = (bx0 - pad, by0 - pad, math.inf, by1 + pad)
+    y_lo, y_hi = by0 - pad, by1 + pad
     start = x0
-    for poly in polylines:
-        for i in range(len(poly) - 1):
-            span = _segment_rect_xspan(poly[i], poly[i + 1], band)
-            if span is not None:
-                start = max(start, span + pad)
+    while True:
+        band = (start - pad, y_lo, start + length + pad, y_hi)
+        rightmost = None
+        for poly in polylines:
+            for i in range(len(poly) - 1):
+                span = _segment_rect_xspan(poly[i], poly[i + 1], band)
+                if span is not None:
+                    rightmost = span if rightmost is None else max(rightmost, span)
+        if rightmost is None or rightmost + pad <= start:
+            break
+        start = rightmost + pad
     cx = start + circle_r
     cy = y0 - circle_r - num_y
     return SectionHeaderPlacement(
