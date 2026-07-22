@@ -28,6 +28,7 @@ from nf_metro.layout.constants import (
 )
 from nf_metro.layout.routing.bundle import build_tapered_bundle
 from nf_metro.layout.routing.centrelines import (
+    _TaperedMember,
     fan_offsets,
     gather_bundle,
     gather_member_edges,
@@ -1594,10 +1595,22 @@ def _route_bottom_exit_junction(
     exit_offs = [exit_x_offset(line_id) for _e, line_id, _s, _t in members]
     vx = src.x + sum(exit_offs) / len(exit_offs)
     hy = tgt.y + tgt_center
+
     # Each line keeps its source offset on both legs: the channel is anchored
     # on the exit fan, so a per-end taper would detach the descent from the
     # entry offsets it never carried.
     rigid = [(e, line_id, src_off, src_off) for e, line_id, src_off, _tgt in members]
+
+    # The plain L runs its horizontal leg at the target's entry row.  When a
+    # section sits between the descent column and the target that leg ploughs
+    # through the intervening box (an offset target one or more columns past a
+    # same-row neighbour); route it through the clear inter-row gap instead.
+    exclude = {sid for sid in (src.section_id, tgt.section_id) if sid is not None}
+    if _h_segment_crosses_other_section(ctx.graph, vx, tgt.x, hy, exclude):
+        detour = _route_bottom_exit_junction_via_gap(edge, src, tgt, ctx, vx, rigid)
+        if detour is not None:
+            return detour
+
     return route_tapered(
         edge,
         rigid,
@@ -1605,6 +1618,51 @@ def _route_bottom_exit_junction(
         transition_leg=1,
         base_radius=ctx.curve_radius,
     )
+
+
+def _route_bottom_exit_junction_via_gap(
+    edge: Edge,
+    src: Station,
+    tgt: Station,
+    ctx: _RoutingCtx,
+    vx: float,
+    rigid: list[_TaperedMember],
+) -> RoutedPath | None:
+    """Detour a bottom-exit-junction feed whose horizontal leg crosses a box.
+
+    The junction already sits in the inter-row gap below its source section, so
+    the bundle drops straight down its exit channel to the header-clear gap Y,
+    traverses that gap to the clear inter-column channel just left of the target
+    column (above the crossed box, whose row starts below the gap), then drops
+    into the target's LEFT entry::
+
+        (vx, jy) -> (vx, gy) -> (corner_x, gy) -> (corner_x, ty) -> (tx, ty)
+
+    Returns ``None`` for a target this shape does not cover (a non-LEFT entry,
+    or one with no clear inter-column channel to its left), so the caller falls
+    back to the plain L.
+    """
+    tgt_port = ctx.graph.ports.get(edge.target)
+    if tgt_port is None or tgt_port.side != PortSide.LEFT:
+        return None
+    ep_col, ep_row = _resolve_section_colrow(ctx.graph, tgt)
+    if ep_col is None or ep_row is None:
+        return None
+    corner_x = _corridor_descent_x(ctx, ep_col, ep_row, 0.0)
+    if corner_x is None:
+        return None
+    gy = inter_row_channel_y(
+        ctx.graph, src, tgt, src.y, tgt.y, tgt.y - src.y, ctx.curve_radius
+    )
+    route = route_tapered(
+        edge,
+        rigid,
+        [(vx, src.y), (vx, gy), (corner_x, gy), (corner_x, tgt.y), (tgt.x, tgt.y)],
+        transition_leg=1,
+        base_radius=ctx.curve_radius,
+    )
+    _declare_channel(route, ctx, corner_x, vertical_direction(tgt.y - gy))
+    return route
 
 
 def _route_merge_branch(

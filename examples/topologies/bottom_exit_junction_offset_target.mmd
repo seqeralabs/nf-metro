@@ -1,0 +1,31 @@
+%%metro title: Bottom-exit junction offset-target detour
+%%metro line: a | Line A | #e6007e
+%%metro grid: src | 1,0
+%%metro grid: first | 1,1
+%%metro grid: second | 2,1
+
+graph LR
+    subgraph src [Src]
+        %%metro direction: TB
+        %%metro exit: bottom | a
+        s1[S1]
+        s2[S2]
+        s3[S3]
+        s1 -->|a| s2
+        s2 -->|a| s3
+    end
+    subgraph first [First]
+        %%metro direction: TB
+        %%metro entry: top | a
+        f1[F1]
+        f2[F2]
+        f1 -->|a| f2
+    end
+    subgraph second [Second]
+        %%metro entry: left | a
+        g1[G1]
+        g2[G2]
+        g1 -->|a| g2
+    end
+    s3 -->|a| f1
+    s3 -->|a| g1
