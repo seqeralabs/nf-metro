@@ -16,6 +16,7 @@ clear of routes, never moving a route to do so, following the priority chain:
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from typing import Literal
@@ -530,10 +531,17 @@ def _nudge(
 ) -> SectionHeaderPlacement:
     """Shift the above-left header right until it clears every route crossing
     the band it would occupy.  Always clears, at the cost of a header that may
-    overhang the box to the right."""
+    overhang the box to the right.
+
+    The band is unbounded to the right, not clipped to the un-nudged header's
+    box-width extent: the shifted header occupies ``[start, start + length]``,
+    so a route crossing the header's vertical band anywhere to the right of the
+    box must be stepped past.  Sweeping the band unbounded to the right
+    guarantees the placed header sits past every route, which is what makes
+    nudge a true last-resort clear."""
     pad = SECTION_HEADER_ROUTE_PAD
-    bx0, by0, bx1, by1 = above.keepout
-    band = (bx0 - pad, by0 - pad, bx1 + pad, by1 + pad)
+    bx0, by0, _, by1 = above.keepout
+    band = (bx0 - pad, by0 - pad, math.inf, by1 + pad)
     start = x0
     for poly in polylines:
         for i in range(len(poly) - 1):
