@@ -165,6 +165,16 @@ gallery:
       descends as one straight vertical run into the top-entry port rather than
       leading out to a parallel channel and jogging back onto the port at the
       section boundary."
+  - id: peeloff_straight_drop_near_wall
+    source_dir: examples/topologies
+    category: Feature Showcase
+    description:
+      "A branch peels off an inter-section trunk at a junction and drops into a
+      single-line section two rows directly below, sharing the junction's X with
+      the top-entry port. The drop column runs one curve radius outside the
+      flanking boxes' walls on both sides; the leg still descends as one straight
+      vertical into the port rather than stepping out past the column and jogging
+      back onto the port at the boundary."
   - id: top_entry_bundle_offset_seam
     source_dir: examples/topologies
     category: Feature Showcase

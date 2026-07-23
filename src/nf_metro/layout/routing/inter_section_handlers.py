@@ -2931,31 +2931,26 @@ def _top_entry_below_wrap_riser_x(
     return next((rx for rx in ordered if is_clear(rx)), None)
 
 
-def _straight_drop_clears_walls(
+def _straight_drop_column_clear(
     ctx: _RoutingCtx, x: float, y_lo: float, y_hi: float
 ) -> bool:
-    """A vertical drop at *x* over ``[y_lo, y_hi]`` clears both gap walls.
+    """A vertical drop at *x* over ``[y_lo, y_hi]`` stays out of every section.
 
-    True when the column is open on at least one side, or the nearest flanking
-    section on each side stands at least a riser's edge clearance away.  A
-    two-sided gap whose drop hugs one wall would climb the box edge rather than
-    ride the gap middle, which :func:`check_no_riser_hugs_section_edge` rejects;
-    only a clear column may take the straight descent.  Reuses that guard's own
-    :func:`_flanking_walls` and clearance so the routing decision and the
-    validator cannot drift on what counts as clear.
+    A junction feeding a TOP entry port directly below it (shared X) descends as
+    one straight vertical whenever its column does not penetrate any section's
+    interior.  Running alongside a box -- even a curve radius off its wall -- is
+    adequate clearance and reads far cleaner than the lateral out-and-back the
+    offset machinery would otherwise stitch across the boundary.  The column
+    landing on the target's top edge is not a penetration (the port sits on that
+    edge); a flanking box is cleared as long as the column stays out of its open
+    interior.  A column that would instead pass through a box interior falls
+    through to the offset machinery, which routes around it.
+
+    :func:`check_no_riser_hugs_section_edge` exempts this same junction-fed
+    straight drop, so the routing decision and the validator agree: the near-wall
+    descent it emits is never rejected as a wall-hug.
     """
-    from nf_metro.layout.routing.invariants import (
-        _MIN_RISER_EDGE_CLEARANCE,
-        _flanking_walls,
-    )
-
-    sections = [s for s in ctx.graph.sections.values() if s.bbox_w > 0 and s.bbox_h > 0]
-    left, right = _flanking_walls(sections, x, y_lo, y_hi)
-    if left is None or right is None:
-        return True
-    return (x - left[1]) >= _MIN_RISER_EDGE_CLEARANCE and (
-        right[1] - x
-    ) >= _MIN_RISER_EDGE_CLEARANCE
+    return not _v_segment_crosses_other_section(ctx.graph, x, y_lo, y_hi, set())
 
 
 def _route_top_entry_l_shape(
@@ -3046,19 +3041,21 @@ def _route_top_entry_l_shape(
                     break
 
     # A junction stands off-box in the inter-section gap; when its target port
-    # sits directly below and the drop column clears both gap walls, the line
-    # descends straight into the port.  The junction already carries the line at
-    # its own lane coordinate (a feed trunk's per-line Y is baked into the
-    # junction point), so the drop rides that column with no fan -- a 2-point
-    # vertical whose ends carry the junction and port lanes.  This
+    # sits directly below (shared X) and the drop column stays out of every box
+    # interior, the line descends straight into the port.  The junction already
+    # carries the line at its own lane coordinate (a feed trunk's per-line Y is
+    # baked into the junction point), so the drop rides that column with no fan
+    # -- a 2-point vertical whose ends carry the junction and port lanes.  This
     # avoids the lead-out-and-jog the offset machinery below would otherwise
     # stitch when the landing column coincides with the lead-in: a lateral
-    # out-and-back straddling the boundary.  A column that would instead hug a
-    # gap wall keeps that jogged lead-out, which is what clears the wall.
+    # out-and-back straddling the boundary.  Running a curve radius outside a
+    # flanking box wall is adequate clearance, not a reason to keep the jog; a
+    # column that would instead cross a box interior falls through to the offset
+    # machinery, which routes around it.
     if (
         abs(dx) <= COORD_TOLERANCE
         and src.id in ctx.graph.junctions
-        and _straight_drop_clears_walls(ctx, sx, min(sy, ty), max(sy, ty))
+        and _straight_drop_column_clear(ctx, sx, min(sy, ty), max(sy, ty))
     ):
         src_off = _get_offset(ctx, edge.source, edge.line_id)
         tgt_off = _get_offset(ctx, edge.target, edge.line_id)
