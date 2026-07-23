@@ -16,6 +16,11 @@ aborts a full render, so it lives under ``tests/fixtures`` rather than the
 gallery and is checked at the routing layer here.  The remaining fixtures are
 multi-row gallery topologies that already satisfy the invariant, so it
 generalises beyond the one repro.
+
+``right_entry_over_top_tall_upstream`` is the over-the-top cousin (#1364): a
+same-row RIGHT-entry wrap whose over-top channel, derived from the target's own
+top, would run inside a taller upstream row-mate protruding into the band above
+the target unless it is dropped below that box's bottom edge.
 """
 
 from __future__ import annotations
@@ -37,6 +42,7 @@ FIXTURES = [
     FIXTURES_DIR / "through_section" / "riboseq_packed_lr.mmd",
     TOPOLOGIES / "packed_cell_cellmate_bypass.mmd",
     TOPOLOGIES / "lr_bottom_exit_rl_top_entry_jog.mmd",
+    TOPOLOGIES / "right_entry_over_top_tall_upstream.mmd",
 ]
 IDS = [p.stem for p in FIXTURES]
 

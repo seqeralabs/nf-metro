@@ -558,6 +558,14 @@ gallery:
       "A two-line bundle into a stacked TB section's RIGHT entry from a same-row
       left source: it loops over the section top and descends into the port, the U-turn transposing
       the bundle, with concentric corners built via `build_concentric_bundle` (#707)."
+  - id: right_entry_over_top_tall_upstream
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      "A same-row bundle wraps over the top of a stacked TB section's RIGHT entry
+      while a taller upstream row-mate protrudes into the band above the target.
+      The over-top channel drops into the inter-row gap below that box's bottom
+      edge instead of running through its interior (#1364)."
   - id: tb_bottom_entry_flow_start
     source_dir: examples/topologies
     category: TB / BT Sections

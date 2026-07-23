@@ -1,0 +1,45 @@
+%%metro title: Over-top right entry, tall upstream
+%%metro style: dark
+%%metro line: alpha | Alpha | #e63946
+%%metro line: beta | Beta | #0570b0
+%%metro grid: source | 0,0
+%%metro grid: tall | 1,0
+%%metro grid: feeder | 0,1
+%%metro grid: target | 1,1
+
+graph LR
+    subgraph source [Source]
+        s1[Prepare A]
+        s2[Prepare B]
+        s1 -->|alpha,beta| s2
+    end
+
+    subgraph tall [Tall Upstream]
+        %%metro direction: TB
+        t1[Step 1]
+        t2[Step 2]
+        t3[Step 3]
+        t4[Step 4]
+        t5[Step 5]
+        t1 -->|alpha,beta| t2
+        t2 -->|alpha,beta| t3
+        t3 -->|alpha,beta| t4
+        t4 -->|alpha,beta| t5
+    end
+
+    subgraph feeder [Feeder]
+        f1[Prep C]
+        f2[Prep D]
+        f1 -->|alpha,beta| f2
+    end
+
+    subgraph target [Target]
+        %%metro direction: TB
+        %%metro entry: right | alpha, beta
+        g1[Merge]
+        g2[Report]
+        g1 -->|alpha,beta| g2
+    end
+
+    s2 -->|alpha,beta| t1
+    f2 -->|alpha,beta| g1

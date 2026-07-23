@@ -62,6 +62,7 @@ from nf_metro.layout.routing.common import (
     inter_row_wrap_band,
     iter_horizontal_trunks,
     iter_vertical_segments,
+    lowest_section_bottom_crossing_span,
     max_grid_row_with_content,
     merge_trunk_force_cross_row,
     needs_perp_approach_fan,
@@ -3888,6 +3889,27 @@ def _route_right_entry_over_top(
     descent_x = (
         section_right + ctx.curve_radius + ctx.offset_step + SECTION_ROUTE_CLEARANCE
     )
+
+    # Keep the over-top channel below the bottom of any upstream section its
+    # horizontal span crosses: channel_y derives from the target's own top and
+    # would otherwise sit inside a taller row-mate above the span whose bottom
+    # edge dips into the band (#1364).
+    exclude = frozenset(
+        sid for sid in (src.section_id, tgt.section_id) if sid is not None
+    )
+    crossed_bottom = lowest_section_bottom_crossing_span(
+        graph,
+        min(lead_x, descent_x),
+        max(lead_x, descent_x),
+        above_y=section_top,
+        exclude=exclude,
+    )
+    if crossed_bottom is not None:
+        fan_reach = (len(members) - 1) * ctx.offset_step
+        channel_y = max(
+            channel_y, crossed_bottom + INTER_ROW_EDGE_CLEARANCE + fan_reach
+        )
+
     mid_sy = sy + src_center
     mid_ey = ey + src_center
     centerline = [
