@@ -1,7 +1,7 @@
 """Each compensation pass is a geometric no-op when replayed after full
 layout settling.
 
-Six ``engine.py`` call sites exist purely to correct a side effect an
+Named ``engine.py`` call sites exist purely to correct a side effect an
 *earlier* stage introduced (a bbox push, a bbox grow, a consumer move) --
 see ``COMPENSATION_PASSES`` in ``conftest.py`` for the stage/disturber table.
 The property that matters for a compensation pass is not
@@ -13,26 +13,32 @@ again at that point moves something, a later stage violates the
 precondition the compensation pass assumed, and that later stage is where
 the real fix belongs.
 
-Mechanism: monkeypatch each of the five distinct helper functions backing
-the six stage labels with a probe that applies the real pass (so the
-pipeline computes its ordinary output) and records the ``(args, kwargs)``
-it was invoked with most recently. Once the full corpus fixture's layout has
-settled, replay each stage's helper(s) with those captured arguments
-directly on the settled graph, diff against a snapshot taken just before,
-then restore. Restoring covers ports as well as stations (see
-``snapshot_graph_state``) so the diagnostic replay leaves the graph's
-station/port pair in sync for anything running after this test.
+Mechanism: monkeypatch each distinct helper function backing the stage
+labels with a mock that wraps the real implementation (so the pipeline
+computes its ordinary output) and records the call it was invoked with most
+recently. Once the full corpus fixture's layout has settled, replay each
+stage's helper(s) with that captured call directly on the settled graph,
+diff against a snapshot taken just before, then restore. Restoring covers
+ports as well as stations (see ``snapshot_graph_state``) so the diagnostic
+replay leaves the graph's station/port pair in sync for anything running
+after this test.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from unittest.mock import MagicMock
+
 import pytest
 from conftest import (
     COMPENSATION_PASSES,
+    Diff,
     compute_corpus_layout,
     content_corpus,
+    diff_station_coords,
     restore_graph_state,
     snapshot_graph_state,
+    snapshot_stations,
 )
 
 import nf_metro.layout.engine as engine
@@ -40,14 +46,18 @@ from nf_metro.parser.model import MetroGraph
 
 CORPUS = content_corpus()
 
-TOL = 1e-6
-
-_Point = tuple[float, float]
-_Diff = tuple[str, _Point | None, _Point | None]
-
 _HELPER_NAMES = sorted({name for _, names in COMPENSATION_PASSES for name in names})
 
-_Call = tuple[tuple, dict]
+# Stages 6.7 through 6.9 in engine.py execute only when
+# ``graph.center_ports or graph.diamond_style == "symmetric"``. A stage
+# gated here is skipped for a fixture where that block never runs, so a
+# helper's most-recently-recorded call -- from an earlier, unconditional
+# call site that happens to share the same function -- is never mistaken
+# for this stage's own execution.
+_CONDITIONAL_STAGES: dict[str, Callable[[MetroGraph], bool]] = {
+    "6.8": lambda graph: graph.center_ports or graph.diamond_style == "symmetric",
+    "6.9": lambda graph: graph.center_ports or graph.diamond_style == "symmetric",
+}
 
 # Fixtures where a stage's compensation pass is not currently a no-op when
 # replayed after full layout settling, keyed to the stage label(s) that
@@ -56,10 +66,10 @@ _Call = tuple[tuple, dict]
 # content redistributed above the trunk, or an off-track lift) without a
 # corresponding shift for sibling sections in its row, breaking the row-top
 # flush alignment ``_top_align_row_sections`` established by the time the
-# whole layout has settled. ``topologies/tb_off_track_inputs``'s "6.8" entry is
-# a distinct mechanism: replaying ``_reanchor_off_track_to_consumer`` swaps
-# the X positions of two off-track sibling stations instead of reproducing
-# them, so the pass is order-sensitive rather than idempotent.
+# whole layout has settled. ``topologies/tb_off_track_inputs``'s "6.6" entry
+# is a distinct mechanism: replaying ``_reanchor_off_track_to_consumer``
+# swaps the X positions of two off-track sibling stations instead of
+# reproducing them, so the pass is order-sensitive rather than idempotent.
 #
 # Entries are removed only when the underlying stage genuinely becomes an
 # end-of-layout no-op; the assertions below fail loudly both on any new,
@@ -84,33 +94,10 @@ _KNOWN_END_OF_LAYOUT_GAPS: dict[str, frozenset[str]] = {
     "topologies/symmetric_deadend_fanout_deep": frozenset({"3.5", "4.7"}),
     "topologies/symmetric_deadend_fanout_exit": frozenset({"3.5", "4.7"}),
     "topologies/symmetric_deadend_fanout_relay": frozenset({"3.5", "4.7"}),
-    "topologies/tb_off_track_inputs": frozenset({"6.8"}),
+    "topologies/tb_off_track_inputs": frozenset({"6.6"}),
     "topologies/terminal_symmetric_fan": frozenset({"3.5", "4.7"}),
     "topologies/trunk_through_fan": frozenset({"3.5", "4.7"}),
 }
-
-
-def _make_capture_probe(original, last_call: dict[str, _Call], name: str):
-    """Wrap ``original`` to apply it for real and record the most recent
-    ``(args, kwargs)`` it was invoked with under ``name``."""
-
-    def probe(graph: MetroGraph, *args, **kwargs):
-        original(graph, *args, **kwargs)
-        last_call[name] = (args, kwargs)
-
-    return probe
-
-
-def _diff_stations(before: dict[str, _Point], after: dict[str, _Point]) -> list[_Diff]:
-    diffs: list[_Diff] = []
-    for sid, (x1, y1) in before.items():
-        if sid not in after:
-            diffs.append((sid, (x1, y1), None))
-        elif abs(after[sid][0] - x1) > TOL or abs(after[sid][1] - y1) > TOL:
-            diffs.append((sid, (x1, y1), after[sid]))
-    for sid in after.keys() - before.keys():
-        diffs.append((sid, None, after[sid]))
-    return diffs
 
 
 @pytest.mark.parametrize(
@@ -120,34 +107,35 @@ def test_compensation_pass_is_end_of_layout_noop(fid, path, is_nextflow, monkeyp
     """Every compensation pass is a no-op when replayed after full settling
     on ``fid``.
 
-    All six stage labels share one layout pass: their helpers are captured
-    (not disturbed) while the real pipeline runs, then replayed in stage
-    order on the settled graph, one at a time, each restored before the
-    next runs so a failure in an earlier stage can't mask a later one.
+    All stage labels share one layout pass: their helpers are wrapped (not
+    disturbed) while the real pipeline runs, then replayed in stage order on
+    the settled graph, one at a time, each restored before the next runs so
+    a failure in an earlier stage can't mask a later one.
     """
     original_fns = {name: getattr(engine, name) for name in _HELPER_NAMES}
-    last_call: dict[str, _Call] = {}
-    for name in _HELPER_NAMES:
-        monkeypatch.setattr(
-            engine, name, _make_capture_probe(original_fns[name], last_call, name)
-        )
+    mocks = {name: MagicMock(wraps=original_fns[name]) for name in _HELPER_NAMES}
+    for name, mock in mocks.items():
+        monkeypatch.setattr(engine, name, mock)
 
     graph = compute_corpus_layout(path, is_nextflow)
 
-    diffs_by_stage: dict[str, list[_Diff]] = {}
+    full_snap = snapshot_graph_state(graph)
+    before = full_snap[0]
+
+    diffs_by_stage: dict[str, list[Diff]] = {}
     for stage_label, helper_names in COMPENSATION_PASSES:
-        missing = [name for name in helper_names if name not in last_call]
-        if missing:
+        gate = _CONDITIONAL_STAGES.get(stage_label)
+        if gate is not None and not gate(graph):
+            continue  # this stage's call site is never reached for this fixture
+        if any(mocks[name].call_args is None for name in helper_names):
             continue  # this stage's call site never fired for this fixture
 
-        snap = snapshot_graph_state(graph)
-        before = snap[0]
         for name in helper_names:
-            args, kwargs = last_call[name]
-            original_fns[name](graph, *args, **kwargs)
-        after = snapshot_graph_state(graph)[0]
-        diffs_by_stage[stage_label] = _diff_stations(before, after)
-        restore_graph_state(graph, snap)
+            call = mocks[name].call_args
+            original_fns[name](graph, *call.args[1:], **call.kwargs)
+        after = snapshot_stations(graph)
+        diffs_by_stage[stage_label] = diff_station_coords(before, after)
+        restore_graph_state(graph, full_snap)
 
     found_gaps = {label for label, diffs in diffs_by_stage.items() if diffs}
     expected_gaps = _KNOWN_END_OF_LAYOUT_GAPS.get(fid, frozenset())

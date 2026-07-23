@@ -71,21 +71,27 @@ CONTENT_PLACEMENT_PHASES = (
     "_recenter_loop_side_stations",  # Stage 6.12
 )
 
-# Six named compensation-pass call sites, keyed by (stage label,
-# engine-module attribute name(s) invoked at that stage).  Each corrects a
-# specific earlier stage's side effect rather than being derived from graph
-# structure directly, so idempotence at end-of-layout is not guaranteed by
+# Compensation-pass call sites in engine.py, keyed by (stage label,
+# attribute name(s) invoked at that stage).  Each corrects a specific
+# earlier stage's side effect rather than being derived from graph structure
+# directly, so idempotence at end-of-layout is not guaranteed by
 # construction and must be checked.  3.5/4.7 and 5.3/6.9 name the same
 # underlying helper under two labels because each label identifies the
-# distinct disturber its engine.py call site corrects; removing one call
-# site should retire only its own entry here, independent of the other
-# label's. 6.16 is a composite: ``_position_junctions`` reads the entry-port
-# Ys ``_align_entry_ports`` just settled, so the pair is applied together,
-# in order, as a single unit.
+# distinct disturber its own engine.py call site corrects; removing one
+# call site should retire only its own entry here, independent of the other
+# label's.  6.6 and 6.8 also share a helper but are not equivalent: 6.6 runs
+# unconditionally while 6.8 (like 6.9) only runs when
+# ``graph.center_ports or graph.diamond_style == "symmetric"`` -- see the
+# test's ``_CONDITIONAL_STAGES`` gate, which keeps a fixture that never
+# reaches the 6.8/6.9 block from having a finding misattributed to it.
+# 6.16 is a composite: ``_position_junctions`` reads the entry-port Ys
+# ``_align_entry_ports`` just settled, so the pair is applied together, in
+# order, as a single unit.
 COMPENSATION_PASSES = (
     ("3.5", ("_top_align_row_sections",)),
     ("4.7", ("_top_align_row_sections",)),
     ("5.3", ("_top_align_row_bboxes_only",)),
+    ("6.6", ("_reanchor_off_track_to_consumer",)),
     ("6.8", ("_reanchor_off_track_to_consumer",)),
     ("6.9", ("_top_align_row_bboxes_only",)),
     ("6.16", ("_align_entry_ports", "_position_junctions")),
@@ -146,6 +152,16 @@ def compute_corpus_layout(path: Path, is_nextflow: bool) -> MetroGraph:
 # --- Mutable-geometry snapshot/restore ---
 
 Coords = dict[str, tuple[float, float]]
+Diff = tuple[str, tuple[float, float] | None, tuple[float, float] | None]
+
+
+def snapshot_stations(graph: MetroGraph) -> Coords:
+    """Capture every station ``(x, y)`` only.
+
+    Cheaper than :func:`snapshot_graph_state` for a read-only diff that
+    never needs to restore bboxes or ports afterwards.
+    """
+    return {sid: (s.x, s.y) for sid, s in graph.stations.items()}
 
 
 def snapshot_graph_state(graph: MetroGraph) -> tuple[Coords, Coords, Coords]:
@@ -159,27 +175,47 @@ def snapshot_graph_state(graph: MetroGraph) -> tuple[Coords, Coords, Coords]:
     station side would leave ``graph.ports`` at the second call's position,
     desyncing the two id-aliased objects for the rest of the pipeline.
     """
-    stations = {sid: (s.x, s.y) for sid, s in graph.stations.items()}
     bboxes = {sec.id: (sec.bbox_y, sec.bbox_h) for sec in graph.sections.values()}
     ports = {pid: (p.x, p.y) for pid, p in graph.ports.items()}
-    return stations, bboxes, ports
+    return snapshot_stations(graph), bboxes, ports
+
+
+def _write_xy(objects: dict, coords: Coords) -> None:
+    """Write each ``coords`` entry's ``(x, y)`` onto the same-id object in
+    ``objects``, skipping any id absent from ``objects``."""
+    for oid, (x, y) in coords.items():
+        obj = objects.get(oid)
+        if obj is not None:
+            obj.x, obj.y = x, y
 
 
 def restore_graph_state(graph: MetroGraph, snap: tuple[Coords, Coords, Coords]) -> None:
     """Write a :func:`snapshot_graph_state` result back onto ``graph``."""
     stations, bboxes, ports = snap
-    for sid, (x, y) in stations.items():
-        st = graph.stations.get(sid)
-        if st is not None:
-            st.x, st.y = x, y
+    _write_xy(graph.stations, stations)
     for sid, (y, h) in bboxes.items():
         sec = graph.sections.get(sid)
         if sec is not None:
             sec.bbox_y, sec.bbox_h = y, h
-    for pid, (x, y) in ports.items():
-        port = graph.ports.get(pid)
-        if port is not None:
-            port.x, port.y = x, y
+    _write_xy(graph.ports, ports)
+
+
+def diff_station_coords(before: Coords, after: Coords, tol: float = 1e-6) -> list[Diff]:
+    """Return per-station ``(id, before, after)`` diffs beyond ``tol``.
+
+    Shared by the content-placement idempotence probe and the
+    compensation-pass end-of-layout replay so both compare snapshots the
+    same way.
+    """
+    diffs: list[Diff] = []
+    for sid, (x1, y1) in before.items():
+        if sid not in after:
+            diffs.append((sid, (x1, y1), None))
+        elif abs(after[sid][0] - x1) > tol or abs(after[sid][1] - y1) > tol:
+            diffs.append((sid, (x1, y1), after[sid]))
+    for sid in after.keys() - before.keys():
+        diffs.append((sid, None, after[sid]))
+    return diffs
 
 
 # --- Parse/layout helpers ---
