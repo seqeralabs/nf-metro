@@ -2931,28 +2931,6 @@ def _top_entry_below_wrap_riser_x(
     return next((rx for rx in ordered if is_clear(rx)), None)
 
 
-def _straight_drop_column_clear(
-    ctx: _RoutingCtx, x: float, y_lo: float, y_hi: float
-) -> bool:
-    """A vertical drop at *x* over ``[y_lo, y_hi]`` stays out of every section.
-
-    A junction feeding a TOP entry port directly below it (shared X) descends as
-    one straight vertical whenever its column does not penetrate any section's
-    interior.  Running alongside a box -- even a curve radius off its wall -- is
-    adequate clearance and reads far cleaner than the lateral out-and-back the
-    offset machinery would otherwise stitch across the boundary.  The column
-    landing on the target's top edge is not a penetration (the port sits on that
-    edge); a flanking box is cleared as long as the column stays out of its open
-    interior.  A column that would instead pass through a box interior falls
-    through to the offset machinery, which routes around it.
-
-    :func:`check_no_riser_hugs_section_edge` exempts this same junction-fed
-    straight drop, so the routing decision and the validator agree: the near-wall
-    descent it emits is never rejected as a wall-hug.
-    """
-    return not _v_segment_crosses_other_section(ctx.graph, x, y_lo, y_hi, set())
-
-
 def _route_top_entry_l_shape(
     edge: Edge, src: Station, tgt: Station, n: int, ctx: _RoutingCtx
 ) -> RoutedPath:
@@ -3041,22 +3019,17 @@ def _route_top_entry_l_shape(
                     break
 
     # A junction stands off-box in the inter-section gap; when its target port
-    # sits directly below (shared X) and the drop column stays out of every box
-    # interior, the line descends straight into the port.  The junction already
-    # carries the line at its own lane coordinate (a feed trunk's per-line Y is
-    # baked into the junction point), so the drop rides that column with no fan
-    # -- a 2-point vertical whose ends carry the junction and port lanes.  This
-    # avoids the lead-out-and-jog the offset machinery below would otherwise
-    # stitch when the landing column coincides with the lead-in: a lateral
-    # out-and-back straddling the boundary.  Running a curve radius outside a
-    # flanking box wall is adequate clearance, not a reason to keep the jog; a
-    # column that would instead cross a box interior falls through to the offset
-    # machinery, which routes around it.
-    if (
-        abs(dx) <= COORD_TOLERANCE
-        and src.id in ctx.graph.junctions
-        and _straight_drop_column_clear(ctx, sx, min(sy, ty), max(sy, ty))
-    ):
+    # sits directly below it (shared X), the line descends straight into the
+    # port.  The junction already carries the line at its own lane coordinate (a
+    # feed trunk's per-line Y is baked into the junction point), so the drop
+    # rides that column with no fan -- a 2-point vertical whose ends carry the
+    # junction and port lanes.  This avoids the lead-out-and-jog the offset
+    # machinery below would otherwise stitch when the landing column coincides
+    # with the lead-in: a lateral out-and-back straddling the boundary.  Running
+    # a curve radius outside a flanking box wall is adequate clearance, not a
+    # reason to keep the jog; check_no_riser_hugs_section_edge exempts this
+    # junction-fed drop so the near-wall descent is not rejected as a wall-hug.
+    if abs(dx) <= COORD_TOLERANCE and src.id in ctx.graph.junctions:
         src_off = _get_offset(ctx, edge.source, edge.line_id)
         tgt_off = _get_offset(ctx, edge.target, edge.line_id)
         drop = route_along(
