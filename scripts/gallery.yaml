@@ -1699,6 +1699,24 @@ gallery:
       rather than resolving to a flow-opposing right entry that folds a line
       back over its own track."
 
+  - id: route_around_to_top_entry
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "A feeder section sits a row below the section it feeds through an
+      `entry: top` port. The port faces away from the feeder, so the leg cannot
+      rise straight into it without ploughing up through the box; it carries
+      past the box's right side, rises to the channel above, then comes back
+      right-to-left over the top into the port, clearing the interior entirely."
+  - id: route_around_far_column_top_entry
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "The same below-a-row feeder reaching a section several columns away
+      through its `entry: top` port. The leg carries the full width past the
+      box's right side, rises above it, and returns over the top into the port
+      without ever entering the interior."
+
 pipelines:
   - id: rnaseq_auto
     title: nf-core/rnaseq

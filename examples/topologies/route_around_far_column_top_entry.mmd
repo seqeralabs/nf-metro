@@ -1,0 +1,15 @@
+%%metro title: Below Feeder Wraps Around Rightmost Section
+%%metro directional: true
+%%metro line: rnaseq | RNA-seq | #e64980
+%%metro grid: orf_calling | 2,1
+%%metro grid: novel_transcripts | 0,2
+
+graph LR
+    subgraph orf_calling [ORF]
+        %%metro entry: top | rnaseq
+        o0[Call ORFs]
+    end
+    subgraph novel_transcripts [Novel]
+        nt0[Assemble Transcripts]
+    end
+    nt0 -->|rnaseq| o0
