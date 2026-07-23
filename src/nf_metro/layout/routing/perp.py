@@ -34,7 +34,7 @@ from __future__ import annotations
 
 from nf_metro.layout.constants import COORD_TOLERANCE
 from nf_metro.layout.geometry import lanes_run_along_x, lanes_run_along_y
-from nf_metro.layout.routing.common import needs_perp_approach_fan
+from nf_metro.layout.routing.common import needs_perp_approach_fan, resolve_section
 from nf_metro.layout.routing.context import (
     _get_offset,
     _max_offset_at,
@@ -125,6 +125,17 @@ def _perp_entry_crossing_x(
     feeder_st = ctx.graph.stations.get(source)
     section_id = feeder_st.section_id if feeder_st else None
     feeder_sec = ctx.graph.sections.get(section_id) if section_id else None
+    if feeder_sec is None:
+        # A junction feeder carries no ``section_id`` of its own; resolve it
+        # through its incoming edge to the section it descends from.  A
+        # vertical-flow (TB/BT) upstream crosses on the trunk column -- the same
+        # X the inter-section approach lands on -- rather than falling to the
+        # generic bundle-index fan, which would offset the lone descending line
+        # off the trunk and part it from the approach at the boundary.  A
+        # horizontal-flow upstream is left unresolved so it keeps that fan.
+        upstream = resolve_section(ctx.graph, feeder_st, prefer_upstream=True)
+        if upstream is not None and lanes_run_along_x(upstream.direction):
+            return port_x + _tb_x_offset(ctx, source, line_id, upstream.id)
     if feeder_sec is not None and lanes_run_along_x(feeder_sec.direction):
         return port_x + _tb_x_offset(ctx, source, line_id, section_id)
     if feeder_sec is not None and lanes_run_along_y(feeder_sec.direction):

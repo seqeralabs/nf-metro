@@ -12,7 +12,12 @@ from nf_metro.layout.routing.common import (
     tb_right_entry_sections,
     vertical_flow_sections,
 )
-from nf_metro.parser.model import MetroGraph, Port, PortSide, Section
+from nf_metro.parser.model import Edge, MetroGraph, Port, PortSide, Section
+
+
+def _is_bottom_exit_port(port: Port | None) -> bool:
+    """True if ``port`` is a section's BOTTOM exit (not an entry)."""
+    return port is not None and not port.is_entry and port.side == PortSide.BOTTOM
 
 
 def _fed_by_bottom_exit_fold(
@@ -28,8 +33,7 @@ def _fed_by_bottom_exit_fold(
         if edge.source not in junction_ids:
             continue
         for upstream in graph.edges_to(edge.source):
-            src_port = graph.ports.get(upstream.source)
-            if src_port and not src_port.is_entry and src_port.side == PortSide.BOTTOM:
+            if _is_bottom_exit_port(graph.ports.get(upstream.source)):
                 return True
     return False
 
@@ -134,6 +138,19 @@ def tb_positive_fan_sections(graph: MetroGraph) -> set[str]:
     }
 
 
+def _fed_by_bottom_exit(graph: MetroGraph, edge: Edge, junction_ids: set[str]) -> bool:
+    """Whether a BOTTOM exit feeds TOP-entry ``edge``, directly or via a junction.
+
+    A direct ``BOTTOM exit -> TOP entry`` edge and a
+    ``BOTTOM exit -> fan-out junction -> TOP entry`` feed count alike, so a
+    junction between the exit and the entry is transparent to the reversal rule
+    (the classifier already resolves the feeder through the junction, so the
+    machinery must agree).
+    """
+    upstreams = graph.edges_to(edge.source) if edge.source in junction_ids else [edge]
+    return any(_is_bottom_exit_port(graph.ports.get(up.source)) for up in upstreams)
+
+
 def _detect_tb_bottom_top_entries(
     graph: MetroGraph,
     tb_sections: set[str],
@@ -160,6 +177,7 @@ def _detect_tb_bottom_top_entries(
     # cascade: a newly-marked vertical section is itself positive_fan for its
     # downstream vertical receivers.
     tb_positive_fan: set[str] = set(initial_tb_positive_fan or ())
+    junction_ids = graph.junction_ids
     # vertical_receivers[src_sec] = set of vertical-receiver sec_ids
     vertical_receivers: dict[str, set[str]] = {}
     for sec_id, section in graph.sections.items():
@@ -168,28 +186,26 @@ def _detect_tb_bottom_top_entries(
             if not port or port.side != PortSide.TOP:
                 continue
             for edge in graph.edges_to(port_id):
-                src = graph.station_for_edge_source(edge)
-                if not src.is_port:
-                    continue
-                src_port = graph.ports.get(edge.source)
-                if not (
-                    src_port
-                    and not src_port.is_entry
-                    and src_port.side == PortSide.BOTTOM
-                ):
-                    continue
                 if lanes_run_along_x(section.direction):
                     # Vertical (TB/BT) receiver: a straight column continuation.
-                    # Only a vertical-flow feeder seeds the positive_fan cascade;
-                    # a horizontal-flow feeder drops in on the trunk column with no
-                    # order flip, so it needs no marking.
-                    if src.section_id in tb_sections:
+                    # Only a DIRECT vertical-flow BOTTOM exit seeds the positive_fan
+                    # cascade; a horizontal-flow feeder drops in on the trunk column
+                    # with no order flip, and a junction-fed vertical receiver is a
+                    # fork/merge diamond the seam classifier preserves.
+                    src = graph.station_for_edge_source(edge)
+                    if not src.is_port:
+                        continue
+                    if (
+                        _is_bottom_exit_port(graph.ports.get(edge.source))
+                        and src.section_id in tb_sections
+                    ):
                         vertical_receivers.setdefault(src.section_id, set()).add(sec_id)
-                else:
+                elif _fed_by_bottom_exit(graph, edge, junction_ids):
                     # Horizontal (LR/RL) receiver: the BOTTOM-exit drop turns into
                     # the trunk through a corner that reverses bundle ordering,
-                    # whatever the feeder's flow axis (a horizontal-flow feeder is
-                    # the true-serpentine fold, an LR row folding into an RL row).
+                    # whatever the feeder's flow axis and whether it arrives directly
+                    # or through a fan-out junction (a horizontal-flow feeder is the
+                    # true-serpentine fold, an LR row folding into an RL row).
                     reversed_secs.add(sec_id)
 
     # BFS: propagate positive_fan through vertical chains.

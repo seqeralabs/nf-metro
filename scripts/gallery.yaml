@@ -750,6 +750,17 @@ gallery:
       through the intervening section at the target's station row; it detours
       through the clear inter-row gap above the box instead, dropping into the
       target from the clear inter-column channel (issue #1428)."
+  - id: bottom_exit_junction_collinear_top_entry
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "A bottom-exit junction fans to two targets in the row below and one sits
+      directly beneath it, entered on its top. The single line drops collinearly
+      down the trunk column into that horizontal-flow target: the inter-section
+      approach lands on the trunk column and the in-section drop departs from the
+      same column, so approach and drop meet as one straight stroke at the port
+      boundary rather than parting onto a bundle-index fan lane (issue #1428
+      defect 2 / #1509)."
   - id: shared_cell_fork_trunk_align
     source_dir: examples/topologies
     category: Inter-section Routing
