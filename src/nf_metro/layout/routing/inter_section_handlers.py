@@ -2931,6 +2931,33 @@ def _top_entry_below_wrap_riser_x(
     return next((rx for rx in ordered if is_clear(rx)), None)
 
 
+def _straight_drop_clears_walls(
+    ctx: _RoutingCtx, x: float, y_lo: float, y_hi: float
+) -> bool:
+    """A vertical drop at *x* over ``[y_lo, y_hi]`` clears both gap walls.
+
+    True when the column is open on at least one side, or the nearest flanking
+    section on each side stands at least a riser's edge clearance away.  A
+    two-sided gap whose drop hugs one wall would climb the box edge rather than
+    ride the gap middle, which :func:`check_no_riser_hugs_section_edge` rejects;
+    only a clear column may take the straight descent.  Reuses that guard's own
+    :func:`_flanking_walls` and clearance so the routing decision and the
+    validator cannot drift on what counts as clear.
+    """
+    from nf_metro.layout.routing.invariants import (
+        _MIN_RISER_EDGE_CLEARANCE,
+        _flanking_walls,
+    )
+
+    sections = [s for s in ctx.graph.sections.values() if s.bbox_w > 0 and s.bbox_h > 0]
+    left, right = _flanking_walls(sections, x, y_lo, y_hi)
+    if left is None or right is None:
+        return True
+    return (x - left[1]) >= _MIN_RISER_EDGE_CLEARANCE and (
+        right[1] - x
+    ) >= _MIN_RISER_EDGE_CLEARANCE
+
+
 def _route_top_entry_l_shape(
     edge: Edge, src: Station, tgt: Station, n: int, ctx: _RoutingCtx
 ) -> RoutedPath:
@@ -3018,6 +3045,33 @@ def _route_top_entry_l_shape(
                         lead = Direction.R if js.x < src.x else Direction.L
                     break
 
+    # A junction stands off-box in the inter-section gap; when its target port
+    # sits directly below and the drop column clears both gap walls, the line
+    # descends straight into the port.  The junction already carries the line at
+    # its own lane coordinate (a feed trunk's per-line Y is baked into the
+    # junction point), so the drop rides that column with no fan -- a 2-point
+    # vertical whose ends carry the junction and port lanes.  This
+    # avoids the lead-out-and-jog the offset machinery below would otherwise
+    # stitch when the landing column coincides with the lead-in: a lateral
+    # out-and-back straddling the boundary.  A column that would instead hug a
+    # gap wall keeps that jogged lead-out, which is what clears the wall.
+    if (
+        abs(dx) <= COORD_TOLERANCE
+        and src.id in ctx.graph.junctions
+        and _straight_drop_clears_walls(ctx, sx, min(sy, ty), max(sy, ty))
+    ):
+        src_off = _get_offset(ctx, edge.source, edge.line_id)
+        tgt_off = _get_offset(ctx, edge.target, edge.line_id)
+        drop = route_along(
+            edge,
+            [(edge, edge.line_id, 0.0)],
+            [(sx, sy + src_off), (tx, ty + tgt_off)],
+            base_radius=ctx.curve_radius,
+            normalize_exempt=True,
+        )
+        assert drop is not None
+        return drop
+
     lx0 = sx if straight_drop else sx + lead.sign * ctx.curve_radius
 
     # A same-row horizontal exit whose minimal lead-in would seat the vertical
@@ -3040,6 +3094,19 @@ def _route_top_entry_l_shape(
 
     # Reference line: the source-offset-0 line the centreline anchors on.
     ref_lid = min(line_ids, key=src_offset)
+
+    # The bundle builder fans each source-region leg by the right-hand normal of
+    # its travel direction, so a LEFT exit -- whose lead-in departs leftward --
+    # seats the fan on the opposite side of the port from the section's own +Y
+    # lane draw.  That parts the inter-section departure from the intra trunk by
+    # twice the offset right at the boundary.  Signing the source offset by the
+    # exit lead lands the departure on the section's lane whichever side the line
+    # leaves from; a RIGHT exit (and a junction source, whose off-box point has
+    # no intra trunk to meet) keep the raw offset.
+    src_sign = lead.sign if exit_side is not None and src.is_port else 1.0
+
+    def src_geom(line_id: str) -> float:
+        return src_sign * src_offset(line_id)
 
     # A branch of a junction fan consumes the fan's shared per-line rank so its
     # source-side first corner coincides with the bypass/wrap siblings' rather
@@ -3084,7 +3151,7 @@ def _route_top_entry_l_shape(
         ref_tb = tb_offset(ref_lid)
         final_x = tx + ref_tb
         members = [
-            (edge_by_line[lid], lid, src_offset(lid), ref_tb - tb_offset(lid))
+            (edge_by_line[lid], lid, src_geom(lid), ref_tb - tb_offset(lid))
             for lid in line_ids
         ]
     else:
@@ -3092,13 +3159,12 @@ def _route_top_entry_l_shape(
 
         def tgt_offset(line_id: str) -> float:
             if len(line_ids) > 1:
-                return src_offset(line_id)
+                return src_geom(line_id)
             crossing = _perp_entry_crossing_x(ctx, edge.target, line_id, tx)
-            return src_offset(line_id) if crossing is None else tx - crossing
+            return src_geom(line_id) if crossing is None else tx - crossing
 
         members = [
-            (edge_by_line[lid], lid, src_offset(lid), tgt_offset(lid))
-            for lid in line_ids
+            (edge_by_line[lid], lid, src_geom(lid), tgt_offset(lid)) for lid in line_ids
         ]
 
     # A feeder rising from a row below the target cannot drop straight into a

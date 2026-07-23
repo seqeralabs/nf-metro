@@ -95,6 +95,7 @@ from nf_metro.layout.routing.normalize import (  # noqa: F401
     _restack_htrunk,
     _restack_trunk_band,
     _round_junction_perp_peeloff,
+    _separate_opposing_inter_row_trunks,
     _set_vchannel_x,
     _stagger_convergent_distinct_lines,
     _suboptimal_trunk_bands,
@@ -203,6 +204,12 @@ def _route_edges(
     _spread_diagonal_bundles(routes, ctx)
     _materialize_gap_slots(routes, ctx)
     _materialize_trunk_slots(routes, ctx)
+    # Counter-running flows that entered one inter-row gap from opposite rows
+    # sit in different dip groups the trunk-slot pass never compares, so they
+    # both centre on the gap and fold over each other; split them onto their
+    # own direction-specific bands before the downstream coincidence passes read
+    # the settled channels.
+    _separate_opposing_inter_row_trunks(routes, ctx)
     # Re-stack peel-off risers against the settled trunk depths, so each rises
     # on the concentric slot its post-repack depth earns.
     _reconcile_port_peeloff_risers(routes, ctx)
