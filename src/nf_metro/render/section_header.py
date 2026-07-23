@@ -545,12 +545,12 @@ def _nudge(
     start = x0
     while True:
         band = (start - pad, y_lo, start + length + pad, y_hi)
-        rightmost = None
-        for poly in polylines:
-            for i in range(len(poly) - 1):
-                span = _segment_rect_xspan(poly[i], poly[i + 1], band)
-                if span is not None:
-                    rightmost = span if rightmost is None else max(rightmost, span)
+        spans = (
+            _segment_rect_xspan(poly[i], poly[i + 1], band)
+            for poly in polylines
+            for i in range(len(poly) - 1)
+        )
+        rightmost = max((s for s in spans if s is not None), default=None)
         if rightmost is None or rightmost + pad <= start:
             break
         start = rightmost + pad
