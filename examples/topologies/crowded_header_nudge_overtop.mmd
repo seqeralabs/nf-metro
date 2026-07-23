@@ -1,0 +1,28 @@
+%%metro title: Crowded nudge over-top
+%%metro style: dark
+%%metro line: a | A | #e6007e
+
+%%metro grid: feed | 1,0
+%%metro grid: mid | 0,1
+%%metro grid: tail | 1,1
+
+graph LR
+    subgraph feed [Feed]
+        %%metro direction: TB
+        %%metro exit: bottom | a
+        e1[E1]
+    end
+    subgraph mid [Alignment Sorting Markdup Long Stage]
+        %%metro direction: TB
+        %%metro entry: top | a
+        %%metro exit: bottom | a
+        m1[M1]
+        m2[M2]
+        m1 -->|a| m2
+    end
+    subgraph tail [Tail]
+        %%metro entry: left | a
+        t1[T1]
+    end
+    e1 -->|a| m1
+    m2 -->|a| t1
