@@ -367,6 +367,10 @@
         "mmd": "%%metro title: Header Nudged Past Trunk\n%%metro style: dark\n%%metro line: a | A | #e63946\n\n%%metro grid: src_sec | 0,0\n%%metro grid: tgt_sec | 0,1\n%%metro grid: snk_sec | 0,2\n\ngraph LR\n    subgraph src_sec [Up]\n        %%metro direction: TB\n        %%metro exit: bottom | a\n        s1[One]\n    end\n\n    subgraph tgt_sec [Alignment Sorting Markdup Stage]\n        %%metro direction: TB\n        %%metro entry: top | a\n        %%metro exit: bottom | a\n        t1[Two]\n        t2[Three]\n        t1 -->|a| t2\n    end\n\n    subgraph snk_sec [Down]\n        %%metro direction: TB\n        %%metro entry: top | a\n        k1[Four]\n    end\n\n    s1 -->|a| t1\n    t2 -->|a| k1\n"
       },
       {
+        "name": "crowded_header_nudge_overtop",
+        "mmd": "%%metro title: Crowded nudge over-top\n%%metro style: dark\n%%metro line: a | A | #e6007e\n\n%%metro grid: feed | 1,0\n%%metro grid: mid | 0,1\n%%metro grid: tail | 1,1\n\ngraph LR\n    subgraph feed [Feed]\n        %%metro direction: TB\n        %%metro exit: bottom | a\n        e1[E1]\n    end\n    subgraph mid [Alignment Sorting Markdup Long Stage]\n        %%metro direction: TB\n        %%metro entry: top | a\n        %%metro exit: bottom | a\n        m1[M1]\n        m2[M2]\n        m1 -->|a| m2\n    end\n    subgraph tail [Tail]\n        %%metro entry: left | a\n        t1[T1]\n    end\n    e1 -->|a| m1\n    m2 -->|a| t1\n"
+      },
+      {
         "name": "lr_to_tb_top_drop",
         "mmd": "%%metro title: LR to TB Top Drop\n%%metro style: dark\n%%metro line: a | A | #e63946\n\n%%metro grid: src_sec | 0,0\n%%metro grid: tgt_sec | 0,1\n\ngraph LR\n    subgraph src_sec [Source]\n        %%metro direction: LR\n        s1[Start]\n        s2[End]\n        s1 -->|a| s2\n    end\n\n    subgraph tgt_sec [Target]\n        %%metro direction: TB\n        %%metro entry: top | a\n        %%metro exit: right | a\n        t1[Process]\n        t2[Result]\n        t1 -->|a| t2\n    end\n\n    s2 -->|a| t1\n"
       },
