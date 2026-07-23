@@ -144,9 +144,9 @@ them.
   entry, shift internal stations' X so the entry port has runway
   before stations begin.
 - **Stage 3.4**: Align LEFT / RIGHT exit ports on row-spanning (fold)
-  sections with the target section's Y.
-- **Stage 3.5**: Top-align sections within each grid row so contiguous
-  column groups share their bbox tops.
+  sections with the target section's Y. Pushing a target down drops its
+  bbox top below its row-mates', so the move finishes by top-aligning the
+  rows it disturbed (contiguous column groups sharing their bbox tops).
 
 Pass A leaves ports on bbox edges with first-approximation alignment.
 Subsequent passes refine.

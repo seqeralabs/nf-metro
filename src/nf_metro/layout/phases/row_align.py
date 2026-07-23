@@ -399,7 +399,7 @@ def _align_row_y_grids(
     2. **Bbox dimensions** (bbox_w, bbox_h) are unchanged.  Stations may
        shift within their bbox but the box itself keeps its Stage-1.1 size.
     3. **y_pad compensation**: a uniform shift of ``max_y_pad - y_pad``
-       is applied to every station so that after Stage 3.5 top-aligns
+       is applied to every station so that after Stage 3.4 top-aligns
        bbox_y, the first-station Y matches across sections despite
        differing ``_multiline_label_padding``.
 
@@ -492,13 +492,18 @@ def _recompute_grid_group_bboxes(graph: MetroGraph) -> None:
                     bot = section.bbox_y + section.bbox_h
 
 
-def _top_align_row_sections(graph: MetroGraph) -> None:
+def _top_align_row_sections(graph: MetroGraph, rows: set[int] | None = None) -> None:
     """Shift sections up so bbox tops align within each grid row.
 
     Only aligns sections that form contiguous column groups within the
     row.  Sections separated by a column gap (e.g. reporting at col 3
     vs dna_analysis at col 1 with no row-mate at col 2) are aligned
     independently so structurally-determined positions aren't disturbed.
+
+    When ``rows`` is given, only those grid rows are re-flushed; callers
+    that disturbed a known set of rows (see ``_align_exit_ports``) pass it
+    to confine the realign to the rows they moved.  ``None`` realigns every
+    row.
     """
     row_sections: dict[int, list[Section]] = defaultdict(list)
     for section in graph.sections.values():
@@ -506,6 +511,8 @@ def _top_align_row_sections(graph: MetroGraph) -> None:
             row_sections[section.grid_row].append(section)
 
     for row, sections in row_sections.items():
+        if rows is not None and row not in rows:
+            continue
         if len(sections) < 2:
             continue
         # Group into contiguous column runs

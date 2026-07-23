@@ -1027,8 +1027,17 @@ def _align_exit_ports(graph: MetroGraph) -> None:
     These have exit ports placed near the section bottom, but the target
     section's entry may be at a different Y. Aligning ensures a straight
     horizontal inter-section connection.
+
+    Aligning a fold exit to a target below it (``_resolve_tb_exit_y``) can
+    push that target section down, dropping its bbox top below its row-mates'.
+    The final step re-flushes the tops of exactly the rows this move disturbed
+    so the alignment cleans up after itself rather than leaving the fix to a
+    separate stage.
     """
+    from nf_metro.layout.phases.row_align import _top_align_row_sections
+
     junction_ids = graph.junction_ids
+    bbox_y_before = {sid: sec.bbox_y for sid, sec in graph.sections.items()}
 
     for port_id, port in graph.ports.items():
         if port.is_entry:
@@ -1065,6 +1074,15 @@ def _align_exit_ports(graph: MetroGraph) -> None:
 
         if port.side in (PortSide.LEFT, PortSide.RIGHT):
             _align_lr_exit_port(graph, port_id, port, exit_section, junction_ids)
+
+    disturbed_rows = {
+        sec.grid_row
+        for sid, sec in graph.sections.items()
+        if sec.grid_row >= 0
+        and abs(sec.bbox_y - bbox_y_before.get(sid, sec.bbox_y)) > SAME_COORD_TOLERANCE
+    }
+    if disturbed_rows:
+        _top_align_row_sections(graph, disturbed_rows)
 
 
 def _align_perpendicular_exit_port(
