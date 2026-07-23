@@ -3888,6 +3888,27 @@ def _route_right_entry_over_top(
     descent_x = (
         section_right + ctx.curve_radius + ctx.offset_step + SECTION_ROUTE_CLEARANCE
     )
+
+    # Keep the over-top channel below the bottom of any upstream section its
+    # horizontal span crosses: channel_y derives from the target's own top and
+    # would otherwise sit inside a taller row-mate above the span whose bottom
+    # edge dips into the band (#1364).  The ``max`` is a no-op when the gap is
+    # already wide enough, so a clean over-top run is left untouched.
+    span_lo, span_hi = min(lead_x, descent_x), max(lead_x, descent_x)
+    fan_reach = (len(members) - 1) * ctx.offset_step
+    for sec in graph.sections.values():
+        if sec.id in (src.section_id, tgt.section_id) or sec.bbox_w <= 0:
+            continue
+        s_bottom = sec.bbox_y + sec.bbox_h
+        # Only sections sitting above the target (upper-row neighbours) can
+        # protrude down into the over-top band.
+        if s_bottom > section_top + COORD_TOLERANCE:
+            continue
+        s_left, s_right = sec.bbox_x, sec.bbox_x + sec.bbox_w
+        if s_right <= span_lo + COORD_TOLERANCE or s_left >= span_hi - COORD_TOLERANCE:
+            continue
+        channel_y = max(channel_y, s_bottom + INTER_ROW_EDGE_CLEARANCE + fan_reach)
+
     mid_sy = sy + src_center
     mid_ey = ey + src_center
     centerline = [
