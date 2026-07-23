@@ -470,18 +470,19 @@ in pipeline order.
   as their target section's entry port (within section bbox extent);
   same-row contiguous-column sections whose top the exit move disturbed
   share `bbox_y` again (station/port Ys shift by the same delta,
-  preserving Stage 3.2 alignment).
+  preserving Stage 3.2 alignment). The row re-flush is a transient
+  intermediate property, not a final guarantee: Stage 6.15a later grows
+  a fanned section's bbox top above the flush line, so finished same-row
+  tops are not guaranteed flush (measured ~40px non-flush on
+  `terminal_symmetric_fan` / `trunk_through_fan`; see Stage 4.7, which
+  re-flushes and carries the same transient tag).
 - **Invariants preserved**: Real station coords. Entry-port Ys.
 - **Validate guard after**: `_guard_ports_on_boundaries` (the row
   re-flush preserves port-on-edge by shifting ports with stations).
 - **Related tests**: `test_no_kink_at_section_boundary`,
   `test_inter_section_route_y_stays_within_row_band`.
 - **Lifecycle:** invariant - the fold/TB exit-port no-kink Y holds at
-  the end (re-asserted by Stage 5.5). The row re-flush is transient -
-  superseded by Stage 6.15a, which grows a fanned section's bbox top
-  above the flush line, so finished same-row tops are not guaranteed
-  flush (measured ~40px non-flush on `terminal_symmetric_fan` /
-  `trunk_through_fan`).
+  the end (re-asserted by Stage 5.5).
 
 ### Stage 4.1: align ports to downstream
 - **Purpose**: For non-fold LR/RL sections, pull exit-entry port

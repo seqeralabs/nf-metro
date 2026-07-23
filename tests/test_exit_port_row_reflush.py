@@ -46,9 +46,11 @@ def test_align_exit_ports_reflushes_disturbed_rows(fid, monkeypatch):
     graph = parse_metro_mermaid(text)
 
     real = engine._align_exit_ports
-    captured: dict[str, object] = {}
+    disturbed: set[str] = set()
+    worst = 0.0
 
     def wrapper(g):
+        nonlocal disturbed, worst
         before = {sid: sec.bbox_y for sid, sec in g.sections.items()}
         real(g)
         disturbed = {
@@ -56,24 +58,21 @@ def test_align_exit_ports_reflushes_disturbed_rows(fid, monkeypatch):
             for sid, sec in g.sections.items()
             if abs(sec.bbox_y - before[sid]) > SAME_COORD_TOLERANCE
         }
-        worst = 0.0
         for group in _row_contiguous_column_groups(g):
             if not any(sec.id in disturbed for sec in group):
                 continue
             tops = [sec.bbox_y for sec in group]
             worst = max(worst, max(tops) - min(tops))
-        captured["disturbed"] = disturbed
-        captured["worst"] = worst
 
     monkeypatch.setattr(engine, "_align_exit_ports", wrapper)
     compute_layout(graph, validate=True)
 
-    assert captured["disturbed"], (
+    assert disturbed, (
         f"{fid} no longer disturbs any bbox_y at Stage 3.4; this fixture no "
         f"longer guards the exit-port row re-flush -- pick another"
     )
-    assert captured["worst"] <= SAME_COORD_TOLERANCE, (
+    assert worst <= SAME_COORD_TOLERANCE, (
         f"{fid}: after _align_exit_ports a contiguous column group it pushed "
-        f"is non-flush by {captured['worst']:.1f}px; the exit-port move must "
-        f"re-flush the rows it disturbs (folded-in Stage 3.5)"
+        f"is non-flush by {worst:.1f}px; the exit-port move must re-flush the "
+        f"rows it disturbs"
     )

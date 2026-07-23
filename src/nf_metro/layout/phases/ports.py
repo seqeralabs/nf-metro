@@ -1079,10 +1079,9 @@ def _align_exit_ports(graph: MetroGraph) -> None:
         sec.grid_row
         for sid, sec in graph.sections.items()
         if sec.grid_row >= 0
-        and abs(sec.bbox_y - bbox_y_before.get(sid, sec.bbox_y)) > SAME_COORD_TOLERANCE
+        and abs(sec.bbox_y - bbox_y_before[sid]) > SAME_COORD_TOLERANCE
     }
-    if disturbed_rows:
-        _top_align_row_sections(graph, disturbed_rows)
+    _top_align_row_sections(graph, disturbed_rows)
 
 
 def _align_perpendicular_exit_port(
