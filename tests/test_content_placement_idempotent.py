@@ -26,8 +26,10 @@ from __future__ import annotations
 import pytest
 from conftest import (
     CONTENT_PLACEMENT_PHASES,
+    Diff,
     compute_corpus_layout,
     content_corpus,
+    diff_station_coords,
     restore_graph_state,
     snapshot_graph_state,
 )
@@ -37,13 +39,8 @@ from nf_metro.parser.model import MetroGraph
 
 CORPUS = content_corpus()
 
-TOL = 1e-6
 
-_Point = tuple[float, float]
-_Diff = tuple[str, _Point | None, _Point | None]
-
-
-def _make_idempotence_probe(original, diffs: list[_Diff]):
+def _make_idempotence_probe(original, diffs: list[Diff]):
     """Wrap ``original`` to check ``P(P(x)) == P(x)`` locally, recording into
     ``diffs`` any station added, removed or moved by the second application."""
 
@@ -55,13 +52,7 @@ def _make_idempotence_probe(original, diffs: list[_Diff]):
         original(graph, *args, **kwargs)
         after2 = snapshot_graph_state(graph)[0]
 
-        for sid, (x1, y1) in after1.items():
-            if sid not in after2:
-                diffs.append((sid, (x1, y1), None))
-            elif abs(after2[sid][0] - x1) > TOL or abs(after2[sid][1] - y1) > TOL:
-                diffs.append((sid, (x1, y1), after2[sid]))
-        for sid in after2.keys() - after1.keys():
-            diffs.append((sid, None, after2[sid]))
+        diffs.extend(diff_station_coords(after1, after2))
 
         restore_graph_state(graph, snap1)
 
@@ -81,7 +72,7 @@ def test_placement_phase_is_idempotent(fid, path, is_nextflow, monkeypatch):
     cascaded final layout, and covers the same (fixture, phase) pairs at
     one-eighth the layout cost.
     """
-    diffs_by_phase: dict[str, list[_Diff]] = {}
+    diffs_by_phase: dict[str, list[Diff]] = {}
     for phase_name in CONTENT_PLACEMENT_PHASES:
         diffs_by_phase[phase_name] = []
         original = getattr(engine, phase_name)
