@@ -1550,6 +1550,38 @@ def test_symfan_pairs_share_y(fixture):
             )
 
 
+@pytest.mark.parametrize("center_ports", [False, True])
+def test_out_of_section_retag_preserves_source_section_fan(center_ports):
+    """Retagging a station's outbound, out-of-section edges must not disturb
+    the source section's own internal layout (#1426).
+
+    A section's symmetric-fan eligibility keys off the lines that traverse
+    its trunk, not the raw union of every line crossing its ports.  A
+    peel-off line a station sends toward a downstream section inflates that
+    port bundle without changing the section's internal topology, so the
+    recolored map's ``secA`` must lay out identically to the base map's
+    under either ports mode.
+    """
+    recolor = (EXAMPLES / "topologies" / "out_of_section_retag_fan.mmd").read_text()
+    base = recolor.replace("s_peel -->|x| t1", "s_peel -->|a| t1").replace(
+        "s_peel -->|y| t2", "s_peel -->|a| t2"
+    )
+    assert base != recolor, "retag reversal did not alter the fixture text"
+
+    def source_section_ys(text: str) -> dict[str, float]:
+        graph = parse_metro_mermaid(text)
+        graph.center_ports = center_ports
+        compute_layout(graph)
+        sec = graph.sections["secA"]
+        return {
+            sid: round(graph.stations[sid].y, 3)
+            for sid in sec.station_ids
+            if not graph.stations[sid].is_port and not graph.stations[sid].off_track
+        }
+
+    assert source_section_ys(base) == source_section_ys(recolor)
+
+
 def _diamond_sibling_columns(graph: MetroGraph) -> list[list[str]]:
     """Same-column station groups sharing a fork predecessor and join successor.
 

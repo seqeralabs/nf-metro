@@ -1168,6 +1168,35 @@ def _section_bundle_lines(graph: MetroGraph, section: Section) -> set[str]:
     return bundle
 
 
+def _section_fan_trunk_lines(graph: MetroGraph, section: Section) -> set[str]:
+    """Lines that traverse the section's trunk, for fan-symmetry classification.
+
+    Starts from :func:`_section_bundle_lines` (every line crossing the LR ports)
+    but drops lines that only *leave* the section: a line present on an exit port
+    yet absent from every entry port and every internal station-to-station edge
+    rides an outbound peel-off toward a downstream section and never flows along
+    this section's own horizontal trunk.  Counting it would let a retag on an
+    edge exiting the section inflate the bundle and disqualify an otherwise
+    clean in-section symmetric fan (#1426).  Falls back to the raw bundle when
+    the filter would empty it.
+    """
+    bundle = _section_bundle_lines(graph, section)
+    if not bundle:
+        return bundle
+    internal_ids = set(section.station_ids) - section.port_ids
+    traversing: set[str] = set()
+    for pid in section.entry_ports:
+        port = graph.ports.get(pid)
+        if port is not None and port.side in (PortSide.LEFT, PortSide.RIGHT):
+            traversing.update(graph.station_lines(pid))
+    for sid in internal_ids:
+        for edge in graph.edges_from(sid):
+            if edge.target in internal_ids:
+                traversing.add(edge.line_id)
+    trunk = {ln for ln in bundle if ln in traversing}
+    return trunk or bundle
+
+
 def _section_row_through_lines(graph: MetroGraph, section: Section) -> set[str]:
     """Lines on a section's LEFT/RIGHT ports that connect to a same-row section.
 
