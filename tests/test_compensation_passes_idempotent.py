@@ -8,10 +8,13 @@ The property that matters for a compensation pass is not
 ``test_content_placement_idempotent``'s back-to-back ``P(P(x)) == P(x))``:
 because a compensation pass exists to correct the disturber stage that ran
 before it, the meaningful question is whether it remains a no-op once every
-later stage has also run and the whole layout has settled. If invoking it
-again at that point moves something, a later stage violates the
-precondition the compensation pass assumed, and that later stage is where
-the real fix belongs.
+later stage has also run and the whole layout has settled. Finding movement
+here is the start of an investigation, not proof of a bug: a later stage may
+be violating the precondition the compensation pass assumed, but it may
+instead have an independently documented, tested reason to diverge from it
+on purpose (see the confirmed example in ``_KNOWN_END_OF_LAYOUT_GAPS``
+below). Cross-check any other invariant test covering the same geometry and
+render the fixture before concluding a fix belongs in the later stage.
 
 Mechanism: monkeypatch each distinct helper function backing the stage
 labels with a mock that wraps the real implementation (so the pipeline
@@ -59,17 +62,26 @@ _CONDITIONAL_STAGES: dict[str, Callable[[MetroGraph], bool]] = {
     "6.9": lambda graph: graph.center_ports or graph.diamond_style == "symmetric",
 }
 
-# Fixtures where a stage's compensation pass is not currently a no-op when
-# replayed after full layout settling, keyed to the stage label(s) that
-# reproduce it. In every ``{"3.5", "4.7"}`` case the mechanism is the same:
-# a section grid-row-mate's bbox top grows upward later in the layout (fan
-# content redistributed above the trunk, or an off-track lift) without a
-# corresponding shift for sibling sections in its row, breaking the row-top
-# flush alignment ``_top_align_row_sections`` established by the time the
-# whole layout has settled. ``topologies/tb_off_track_inputs``'s "6.6" entry
-# is a distinct mechanism: replaying ``_reanchor_off_track_to_consumer``
-# swaps the X positions of two off-track sibling stations instead of
-# reproducing them, so the pass is order-sensitive rather than idempotent.
+# Fixtures where a stage's compensation pass is not a no-op when replayed
+# after full layout settling, keyed to the stage label(s) that reproduce it.
+#
+# The ``{"3.5", "4.7"}`` cases are CONFIRMED INTENTIONAL, not a bug: Stage
+# 6.15a's ``_fit_bboxes_to_content_top`` deliberately un-flushes a row-mate's
+# bbox top to hug its own content exactly whenever that section's top band is
+# genuinely empty. ``test_section_bbox_top_hugs_content``
+# (test_layout_invariants.py) already passes on every one of these fixtures
+# and encodes that same content-hug requirement independently; row-flush is
+# documented in ``_fit_bboxes_to_content_top``'s own docstring as a transient
+# property of the intermediate stages, not a final-state guarantee, so
+# ``_top_align_row_sections`` finding movement here on replay is expected,
+# not a defect awaiting a fix (confirmed by inserting a row-realign call
+# after Stage 6.15a: it immediately reds ``test_section_bbox_top_hugs_content``
+# on these exact fixtures).
+#
+# ``topologies/tb_off_track_inputs``'s "6.6" entry is unrelated and NOT
+# confirmed intentional: replaying ``_reanchor_off_track_to_consumer`` swaps
+# the X positions of two off-track sibling stations instead of reproducing
+# them, an order-sensitivity bug that has not been investigated further.
 #
 # Entries are removed only when the underlying stage genuinely becomes an
 # end-of-layout no-op; the assertions below fail loudly both on any new,
