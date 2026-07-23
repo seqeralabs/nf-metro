@@ -8347,6 +8347,20 @@ def test_routes_dont_loop_backwards(fixture):
         tgt_col = _resolve_section_col_for_station(graph, tgt_st)
         if src_col is not None and tgt_col is not None and src_col == tgt_col:
             continue
+        # A feeder reaching a perpendicular (TOP/BOTTOM) entry port from a
+        # different grid row must wrap around a side of the target box and
+        # cross over/under it into the port; that traverse reverses the overall
+        # X direction by construction (#1522) and is not the #250 pinwheel,
+        # which curves into the next column at the flow level.
+        tgt_port = graph.ports.get(r.edge.target)
+        if (
+            tgt_port is not None
+            and tgt_port.side in (PortSide.TOP, PortSide.BOTTOM)
+            and src_sec is not None
+            and tgt_sec is not None
+            and src_sec.grid_row != tgt_sec.grid_row
+        ):
+            continue
         overall_dx = pts[-1][0] - pts[0][0]
         if abs(overall_dx) < 1.0:
             continue

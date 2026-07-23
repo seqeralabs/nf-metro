@@ -2855,6 +2855,82 @@ def _corridor_riser_x(
     )
 
 
+def _top_entry_above_channel_y(ctx: _RoutingCtx, tgt_sec: Section) -> float:
+    """Y of the routing channel just above a TOP-entry target's header band.
+
+    A TOP entry is reached from above, so the drop into the port departs from a
+    channel that clears the target row's header band (and, for the topmost row,
+    the canvas title band).  When that band over-reserves -- a section merely
+    exists somewhere in the row above so the full inter-row clearance applies
+    even though nothing sits over the target's own column -- the channel is
+    pulled down to just clear the target's own header badge, so the approach
+    doesn't overshoot far past the port before turning back down.
+    """
+    corridor_y = header_corridor_y(
+        ctx.graph,
+        tgt_sec.grid_row,
+        below=False,
+        base_radius=ctx.curve_radius,
+        default=tgt_sec.bbox_y,
+    )
+    badge_clear_y = (
+        section_header_top(tgt_sec) - NEXT_ROW_HEADER_BADGE_CLEARANCE - ctx.curve_radius
+    )
+    return max(corridor_y, badge_clear_y)
+
+
+def _top_entry_below_wrap_riser_x(
+    src: Station,
+    tgt: Station,
+    final_x: float,
+    above_y: float,
+    ctx: _RoutingCtx,
+) -> float | None:
+    """Riser X to route a below-row feeder around a section into its TOP port.
+
+    A TOP entry port sits on the target's top edge, so it must be entered from
+    above.  When the feeder's source section is in a lower grid row than the
+    target the inter-row channel lies *below* the target, and a straight rise
+    into the port would plough up through the box interior, striking the
+    interior station and its label (#1522).  The leg instead carries past one
+    vertical side of the box, rises to the channel above it, then comes back
+    over the top into the port.
+
+    Returns the X of that riser -- outside the box on a side clear of every
+    other section, preferring the side away from the feeder's approach so the
+    leg carries past the box and returns over the top rather than re-crossing a
+    near-side approach.  Returns ``None`` when the feeder is level with or above
+    the target (the ordinary from-above approach), or when neither side is
+    clear (the fall-through route then handles it and the runtime guard stays
+    the backstop).
+    """
+    graph = ctx.graph
+    src_sec = resolve_section(graph, src)
+    tgt_sec = resolve_section(graph, tgt)
+    if src_sec is None or tgt_sec is None or src_sec.grid_row <= tgt_sec.grid_row:
+        return None
+
+    exclude = {sid for sid in (src.section_id, tgt.section_id) if sid is not None}
+    clearance = ctx.curve_radius + SECTION_ROUTE_CLEARANCE
+    box_left = tgt_sec.bbox_x
+    box_right = tgt_sec.bbox_x + tgt_sec.bbox_w
+    right_x = col_right_edge(graph, tgt_sec.grid_col, default=box_right) + clearance
+    left_x = col_left_edge(graph, tgt_sec.grid_col, default=box_left) - clearance
+    # Prefer the side away from the feeder so the leg carries past the box and
+    # returns over the top rather than re-crossing a near-side approach.
+    prefer_right = src.x <= (box_left + box_right) / 2
+    ordered = [right_x, left_x] if prefer_right else [left_x, right_x]
+
+    def is_clear(rx: float) -> bool:
+        return not (
+            _h_segment_crosses_other_section(graph, src.x, rx, src.y, exclude)
+            or _v_segment_crosses_other_section(graph, rx, src.y, above_y, exclude)
+            or _h_segment_crosses_other_section(graph, rx, final_x, above_y, exclude)
+        )
+
+    return next((rx for rx in ordered if is_clear(rx)), None)
+
+
 def _straight_drop_clears_walls(
     ctx: _RoutingCtx, x: float, y_lo: float, y_hi: float
 ) -> bool:
@@ -2925,19 +3001,7 @@ def _route_top_entry_l_shape(
         and src_sec.grid_row == tgt_sec.grid_row
         and mid_y > ty
     ):
-        corridor_y = header_corridor_y(
-            ctx.graph,
-            tgt_sec.grid_row,
-            below=False,
-            base_radius=ctx.curve_radius,
-            default=ty,
-        )
-        badge_clear_y = (
-            section_header_top(tgt_sec)
-            - NEXT_ROW_HEADER_BADGE_CLEARANCE
-            - ctx.curve_radius
-        )
-        mid_y = max(corridor_y, badge_clear_y)
+        mid_y = _top_entry_above_channel_y(ctx, tgt_sec)
 
     # A multi-line bundle fans the channel toward the source box (the line
     # nearest it sits a bundle-width above the centre); keep the centre low
@@ -3103,8 +3167,26 @@ def _route_top_entry_l_shape(
             (edge_by_line[lid], lid, src_geom(lid), tgt_offset(lid)) for lid in line_ids
         ]
 
+    # A feeder rising from a row below the target cannot drop straight into a
+    # TOP port without ploughing up through the box; carry past one side, rise
+    # to the channel above, and come back over the top into the port.
+    above_y = _top_entry_above_channel_y(ctx, tgt_sec) if tgt_sec is not None else ty
+    wrap_x = (
+        _top_entry_below_wrap_riser_x(src, tgt, final_x, above_y, ctx)
+        if not straight_drop
+        else None
+    )
     # Traverse at the source Y to the port column, then drop straight in.
-    if _top_entry_side_fan_traverse_is_clear(edge, src, tgt, final_x, ctx):
+    if wrap_x is not None:
+        centerline = [
+            (sx, sy),
+            (wrap_x, sy),
+            (wrap_x, above_y),
+            (final_x, above_y),
+            (final_x, ty),
+        ]
+        transition_leg = 3
+    elif _top_entry_side_fan_traverse_is_clear(edge, src, tgt, final_x, ctx):
         centerline = [(sx, sy), (final_x, sy), (final_x, ty)]
         transition_leg = 1
     # When the lead-in already sits at the landing X the trunk leg collapses;

@@ -418,6 +418,46 @@ def test_interior_wrap_guard_fires_on_an_injected_crossing() -> None:
         )
 
 
+# A feeder rising from a row below the target into the target's TOP entry port:
+# the port faces away from the feeder, so a straight rise into it would plough
+# up through the box interior (#1522).  The leg must instead route around a side
+# of the box and approach the port from above.  Both fixtures place
+# ``novel_transcripts`` below ``orf_calling``; the second sits several columns
+# away so the leg carries the full width before wrapping the box's far side.
+TOPOLOGIES = EXAMPLES / "topologies"
+ROUTE_AROUND_TOP_ENTRY_FIXTURES = [
+    "route_around_to_top_entry.mmd",
+    "route_around_far_column_top_entry.mmd",
+]
+
+
+@pytest.mark.parametrize("name", ROUTE_AROUND_TOP_ENTRY_FIXTURES)
+def test_below_feeder_routes_around_target_into_top_entry(name: str) -> None:
+    """The ``novel_transcripts -> orf_calling`` leg reaches the top entry port by
+    routing around the box, with zero crossings of ``orf_calling``'s interior."""
+    graph = parse_metro_mermaid((TOPOLOGIES / name).read_text())
+    compute_layout(graph)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges_centred(graph, station_offsets=offsets)
+    leg = next(
+        (
+            rp
+            for rp in routes
+            if "novel_transcripts" in rp.edge.source and "orf_calling" in rp.edge.target
+        ),
+        None,
+    )
+    assert leg is not None, f"{name}: no novel_transcripts->orf_calling leg routed"
+    offenders = routes_through_own_section_interior(
+        graph, routes=routes, offsets=offsets
+    )
+    crossed = [sid for rp, sid in offenders if rp.edge is leg.edge]
+    assert not crossed, (
+        f"{name}: novel_transcripts->orf_calling leg runs through the interior "
+        f"of {crossed}; points={[(round(x), round(y)) for x, y in leg.points]}"
+    )
+
+
 # A side-branch section sharing a topo column with the spine: when the fold
 # budget lands on that branch column, one branch member is a sink that defeats
 # the straight-drop, so a downstream section is placed behind its producer and
