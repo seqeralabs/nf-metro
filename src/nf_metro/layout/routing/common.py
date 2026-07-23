@@ -24,7 +24,7 @@ from nf_metro.layout.constants import (
     SECTION_ROUTE_CLEARANCE,
 )
 from nf_metro.layout.geometry import AxisFrame, lanes_run_along_x, lanes_run_along_y
-from nf_metro.parser.model import Edge, MetroGraph, PortSide, Section, Station
+from nf_metro.parser.model import Edge, MetroGraph, Port, PortSide, Section, Station
 
 
 class OffsetRegime(Enum):
@@ -1522,6 +1522,20 @@ def merge_trunk_force_cross_row(
 # ---------------------------------------------------------------------------
 
 
+def junction_source_ports(graph: MetroGraph, junction_id: str) -> Iterator[Port]:
+    """Yield, in edge order, the source ports feeding a fan-out junction.
+
+    The single backwards hop through a fan-out junction (``section_id is None``)
+    to the upstream exit ports on its incoming edges; a non-port source (a
+    chained junction) is skipped, so each yielded port carries the side / entry
+    / section a caller reads.
+    """
+    for edge in graph.edges_to(junction_id):
+        port = graph.ports.get(edge.source)
+        if port is not None:
+            yield port
+
+
 def resolve_section(
     graph: MetroGraph,
     station: Station | None,
@@ -1546,12 +1560,10 @@ def resolve_section(
         return graph.sections.get(station.section_id)
 
     if prefer_upstream:
-        for e in graph.edges_to(station.id):
-            other = graph.station_for_edge_source(e)
-            if other.section_id:
-                sec = graph.sections.get(other.section_id)
-                if sec:
-                    return sec
+        for port in junction_source_ports(graph, station.id):
+            sec = graph.sections.get(port.section_id)
+            if sec:
+                return sec
     else:
         # Preserve original graph.edges insertion order: callers depend on
         # the first incident edge winning when a junction has neighbours

@@ -11,12 +11,12 @@
     "note": "No-preference graph.edges scan loop-exit: a fan-out junction always has a sectioned incident port (its exit/entry ports carry a section_id), so the loop always returns and never exhausts graph.edges; the fall-through to the type-contract return None is the never-taken no-neighbour fallback.",
     "status": "defensive"
   },
-  "common.py::for e in graph.edges_to(station.id):::#1": {
-    "note": "Upstream edges_to loop-exit: every fan-out junction is emitted with an exit_port->junction edge whose source carries the source section id, so the upstream loop always returns; the fall-through to the type-contract return None is the never-taken no-upstream fallback.",
-    "status": "defensive"
-  },
   "common.py::for i in range(len(pts) - 1):::#1": {
     "note": "point_on_polyline is used only by the --animate renderer (render/animate.py); the matrix's render-path coverage sweep calls render_svg without animation, so none of its branches are reached. Exercised instead by test_animation.py / test_routing.py.",
+    "status": "defensive"
+  },
+  "common.py::for port in junction_source_ports(graph, station.id):::#1": {
+    "note": "Upstream loop-exit in resolve_section: every fan-out junction is emitted with an exit_port->junction edge whose source port carries a section id, so junction_source_ports always yields a sectioned port and the loop returns; the fall-through to the type-contract return None is the never-taken no-upstream fallback.",
     "status": "defensive"
   },
   "common.py::if abs(point[0] - ax) <= tol and abs(point[1] - ay) <= tol:::#1": {
@@ -76,10 +76,6 @@
     "status": "defensive"
   },
   "common.py::if other.section_id:::#1": {
-    "note": "A junction resolved upstream reads its incoming neighbour, always a sectioned exit port; the section-less (False) arm only guards a junction-to-junction edge valid construction never produces.",
-    "status": "defensive"
-  },
-  "common.py::if other.section_id:::#2": {
     "note": "The prefer_upstream=False scan reads a junction's incident neighbour on either side, always a sectioned station or port; the section-less (False) arm only guards a junction-to-junction edge valid construction never produces.",
     "status": "defensive"
   },
@@ -96,7 +92,7 @@
     "status": "defensive"
   },
   "common.py::if sec:::#1": {
-    "note": "edges_to section-lookup guard: graph.sections.get(section_id) returning None requires a section_id absent from graph.sections, a corrupted state no valid parse produces; null-guard.",
+    "note": "Upstream section-lookup guard: graph.sections.get(section_id) returning None requires a section_id absent from graph.sections, a corrupted state no valid parse produces; null-guard.",
     "status": "defensive"
   },
   "common.py::if sec:::#2": {
