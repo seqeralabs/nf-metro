@@ -1422,27 +1422,41 @@ def _materialize_trunk_slots(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
         # direction and lay each direction on its own non-overlapping Y band,
         # with a clear visual gap between them; within a band the co-travelling
         # same-direction trunks still fan tight (OFFSET_STEP, concentric).
-        dips = grp[0].dips_down
         by_dir = {sign: [t for t in grp if t.sign_x == sign] for sign in (1, -1)}
         bands = [b for b in by_dir.values() if b]
         # Order bands top -> bottom by current vertical position so allocation
         # moves each the least and never reorders the two flows (no new
-        # crossing).  Slot layouts (and per-band heights) are computed up front.
+        # crossing).
         bands.sort(key=lambda b: min(t.y for t in b))
-        planned = [_plan_trunk_band(b) for b in bands]
-        gap = BUNDLE_TO_BUNDLE_CLEARANCE
-        total = sum((n - 1) * step for _o, _t, n in planned) + gap * (len(planned) - 1)
-        # Stack the bands top -> bottom with a clear gap; anchor at the current
-        # cluster top, then slide the whole stack up if its bottom would crowd
-        # the next row's header.  Sliding up (into the free upper gap) preserves
-        # the inter-band gap without pushing the lower band into the header.
-        top = min(t.y for t in grp)
-        band_top = _clamp_inter_row_band_top(ctx, top, total)
-        for order, track_of, n in planned:
-            _restack_trunk_band(order, track_of, n, band_top, dips, step, ctx, bundled)
-            band_top += (n - 1) * step + gap
+        _stack_trunk_bands(bands, ctx, step, bundled)
 
     _dogleg_off_exempt_trunks(routes, ctx, skip=bundled)
+
+
+def _stack_trunk_bands(
+    bands: list[list[_HTrunk]], ctx: _RoutingCtx, step: float, bundled: set[int]
+) -> None:
+    """Lay an ordered top -> bottom list of trunk bands into their inter-row gap.
+
+    Each band fans concentrically onto its own packed tracks; the bands stack
+    with a clear :data:`BUNDLE_TO_BUNDLE_CLEARANCE` gap between them, anchored at
+    the current cluster top and slid up as a block if the stack would breach the
+    next row's header clearance (sliding into the free upper gap keeps the
+    inter-band gap intact rather than crowding the lower band into the header).
+    Each band carries its own dip direction, so a down-dip and an up-dip band
+    can stack together; a single-direction caller passes bands that all share
+    one dip.
+    """
+    planned = [_plan_trunk_band(b) for b in bands]
+    gap = BUNDLE_TO_BUNDLE_CLEARANCE
+    total = sum((n - 1) * step for _o, _t, n in planned) + gap * (len(bands) - 1)
+    top = min(t.y for b in bands for t in b)
+    band_top = _clamp_inter_row_band_top(ctx, top, total)
+    for (order, track_of, n), band in zip(planned, bands):
+        _restack_trunk_band(
+            order, track_of, n, band_top, band[0].dips_down, step, ctx, bundled
+        )
+        band_top += (n - 1) * step + gap
 
 
 def _separate_opposing_inter_row_trunks(
@@ -1491,17 +1505,8 @@ def _separate_opposing_inter_row_trunks(
         if not shares_corridor:
             continue
 
-        bundled: set[int] = set()
-        bands = [down, up]  # down-dip feed on top, up-dip return beneath it
-        planned = [_plan_trunk_band(b) for b in bands]
-        gap = BUNDLE_TO_BUNDLE_CLEARANCE
-        total = sum((n - 1) * step for _o, _t, n in planned) + gap * (len(bands) - 1)
-        band_top = _clamp_inter_row_band_top(ctx, min(t.y for t in gtrunks), total)
-        for (order, track_of, n), band in zip(planned, bands):
-            _restack_trunk_band(
-                order, track_of, n, band_top, band[0].dips_down, step, ctx, bundled
-            )
-            band_top += (n - 1) * step + gap
+        # down-dip feed on top, up-dip return beneath it, a clear lane apart.
+        _stack_trunk_bands([down, up], ctx, step, set())
 
 
 class _SlotFeatures(NamedTuple):
