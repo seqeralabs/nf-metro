@@ -30,9 +30,15 @@ from nf_metro.layout.routing.invariants import (
 FIXTURES = [
     "examples/topologies/top_entry_bundle_offset_seam.mmd",
     "examples/topologies/fold_left_exit_right_entry.mmd",
+    "examples/topologies/straight_drop_below.mmd",
 ]
 
 REPRO = "examples/topologies/top_entry_bundle_offset_seam.mmd"
+
+# A junction feeding a TOP entry port directly below it, in a column that
+# clears both gap walls: the drop descends as one constant-X vertical into the
+# port, with no lateral lead-out-and-jog straddling the section boundary.
+STRAIGHT_DROP = "examples/topologies/straight_drop_below.mmd"
 
 
 def _route(path: str):
@@ -71,3 +77,29 @@ def test_top_entry_descent_lands_on_port_x() -> None:
     )
     landing_x = apply_route_offsets(descent, offsets)[-1][0]
     assert landing_x == pytest.approx(port.x, abs=1.0)
+
+
+def test_straight_drop_below_is_one_vertical_run() -> None:
+    """A junction's drop into the port directly below is one vertical run.
+
+    The branch reaches ``bottom__entry_top_1`` straight below its feeding
+    junction.  Every point from where the descent turns vertical down to the
+    port shares the port's X, so the line enters the TOP port from directly
+    above -- no lateral lead-out to a parallel channel and jog back onto the
+    port marker.
+    """
+    graph, routes, offsets = _route(STRAIGHT_DROP)
+    port = graph.ports["bottom__entry_top_1"]
+    drop = next(
+        r
+        for r in routes
+        if r.line_id == "branch" and r.edge.target == "bottom__entry_top_1"
+    )
+    pts = apply_route_offsets(drop, offsets)
+    assert pts[-1] == pytest.approx((port.x, port.y), abs=1.0)
+    # From the first point on the port's column, the run stays on that column.
+    descent = [p for p in pts if p[0] == pytest.approx(port.x, abs=1.0)]
+    assert len(descent) >= 2
+    assert all(x == pytest.approx(port.x, abs=1.0) for x, _ in descent)
+    # No point sits on the far side of the port's column (an out-and-back).
+    assert max(x for x, _ in pts) <= port.x + 1.0

@@ -156,6 +156,15 @@ gallery:
       leftward to a sibling below. The descending feed and the returning leg share
       one inter-row gap; each takes its own horizontal corridor a clear lane apart
       instead of the two grazing at a 4px sliver."
+  - id: straight_drop_below
+    source_dir: examples/topologies
+    category: Feature Showcase
+    description:
+      "A branch fans off at a junction and drops into a section directly below
+      it, in a column that clears both neighbouring boxes. The connecting leg
+      descends as one straight vertical run into the top-entry port rather than
+      leading out to a parallel channel and jogging back onto the port at the
+      section boundary."
   - id: top_entry_bundle_offset_seam
     source_dir: examples/topologies
     category: Feature Showcase

@@ -733,9 +733,15 @@ def check_fanout_tail_join(
         seg_len = (tx * tx + ty * ty) ** 0.5
         if seg_len < _MIN_SEGMENT_LENGTH:
             continue
-        # Project the (downstream_start - upstream_end) offset onto the
-        # unit travel direction: the along-line component.
-        tangent_gap = abs(((dx - ux) * tx + (dy - uy) * ty) / seg_len)
+        # Project the (downstream_start - upstream_end) offset onto the unit
+        # travel direction.  A positive component means the downstream starts
+        # PAST the junction along the incoming travel -- the branch stops short
+        # of its own bend, the visible apex notch.  A negative one means it
+        # starts BEHIND, its lead-in back-extended over the incoming trunk (a
+        # perpendicular drop rounded by :func:`_round_junction_perp_peeloff`):
+        # that overlaps the trunk rather than gapping it, so only the forward
+        # component is a notch.
+        tangent_gap = ((dx - ux) * tx + (dy - uy) * ty) / seg_len
         if tangent_gap > _TAIL_JOIN_TANGENT_TOLERANCE:
             gaps.append(
                 FanoutTailGap(
