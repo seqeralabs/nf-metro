@@ -2880,7 +2880,6 @@ def _top_entry_above_channel_y(ctx: _RoutingCtx, tgt_sec: Section) -> float:
 
 
 def _top_entry_below_wrap_riser_x(
-    edge: Edge,
     src: Station,
     tgt: Station,
     final_x: float,
@@ -3107,7 +3106,7 @@ def _route_top_entry_l_shape(
     # to the channel above, and come back over the top into the port.
     above_y = _top_entry_above_channel_y(ctx, tgt_sec) if tgt_sec is not None else ty
     wrap_x = (
-        _top_entry_below_wrap_riser_x(edge, src, tgt, final_x, above_y, ctx)
+        _top_entry_below_wrap_riser_x(src, tgt, final_x, above_y, ctx)
         if not straight_drop
         else None
     )
