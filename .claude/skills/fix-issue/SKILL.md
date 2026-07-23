@@ -110,6 +110,19 @@ child issue at all, you owe its resolution - an agent, a sibling PR - the same
 session. Track the arithmetic explicitly at the end: issues closed vs. issues
 opened-and-still-open; the second number must be 0, or the total must go down.
 
+**Bounded to the fix's fallout, not a frontier.** This mode resolves what the
+*current* work surfaces - a coupled defect, an incident bug, a `/simplify`
+refactor of code you just touched - with a proportionate handful of agents. It
+is not licence to keep pulling threads into a full-engine overhaul or a cascade
+of dozens of child sessions. If a surfaced item is itself a large program - a
+subsystem rewrite, a sweeping cross-cutting refactor, anything that would
+genuinely need many agents or several sessions *in its own right* - that is the
+one case that still stops: flag it, size it, and get a user decision rather
+than silently recursing into it. The bar is "finish the thing I was asked to
+fix, plus the debris it kicked up", not "fix everything adjacent". Deferral
+returns here, and only here - narrowed to genuinely large programs, never to
+"this is hard" or "it is a different subsystem".
+
 **Still in force in this mode - do not over-read "autonomous":**
 - Never merge without explicit per-PR authorisation from the user. Autonomy is
   about resolving and pushing *complete* work, not self-authorising merges.
