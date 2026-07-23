@@ -740,6 +740,16 @@ gallery:
       over the trunk to reach it, the entry re-anchors to the section's leading
       edge; the producer then reaches it by wrapping over the section top, so the
       line reads as a clean loop and the consumer is a straight pass-through."
+  - id: bottom_exit_junction_offset_target
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "A bottom-exit junction fans to two targets in the row below: the section
+      directly beneath it and one an extra column over, past an intervening box,
+      entered on its left. The offset feed's horizontal leg would run straight
+      through the intervening section at the target's station row; it detours
+      through the clear inter-row gap above the box instead, dropping into the
+      target from the clear inter-column channel (issue #1428)."
   - id: shared_cell_fork_trunk_align
     source_dir: examples/topologies
     category: Inter-section Routing
