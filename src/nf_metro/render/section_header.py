@@ -8,10 +8,14 @@ clear of routes, never moving a route to do so, following the priority chain:
 1. ``above`` - the default top-left position, when the top edge is clear.
 2. ``below`` - mirror at the bottom-left, when the top is blocked but the bottom
    is clear.
-3. ``left`` / ``right`` - the title rotated to read down a vertical edge, when
-   both horizontal edges are blocked but a side is clear and the title fits.
-4. ``nudge`` - the top-left header shifted right past the clashing routes, as a
-   last resort that always clears.
+3. ``left`` / ``right`` - the title rotated to run down a vertical edge, when
+   both horizontal edges are blocked but a side edge is clear.  ``left`` anchors
+   the badge at the bottom of the edge and reads upward; ``right`` anchors it at
+   the top and reads downward.  A title longer than the box height overhangs
+   past the box ends rather than being ruled out, since a rotated header is
+   never wrapped.
+4. ``nudge`` - the top-left header shifted right past the clashing routes, the
+   last resort when no side edge is clear; it always clears.
 """
 
 from __future__ import annotations
@@ -45,8 +49,9 @@ class SectionHeaderPlacement:
     """Resolved drawing geometry for one section's header.
 
     ``badge_*`` locate the numbered circle; ``label_*`` locate the title text.
-    ``label_rotation`` is 0 for the horizontal positions and 90 for the rotated
-    side positions (title reads top-to-bottom).  ``label_lines`` is the title
+    ``label_rotation`` is 0 for the horizontal positions, 90 for ``right``
+    (title reads top-to-bottom) and 270 for ``left`` (title reads bottom-to-top,
+    badge at the bottom of the edge).  ``label_lines`` is the title
     split onto separate lines when it would otherwise overhang the section box
     (a rotated header is never split); ``label_y`` is the topmost line's
     position, with each later line drawn :func:`header_line_height` further
@@ -328,7 +333,7 @@ def resolve_section_header_placement(
     box_right = section.bbox_x + section.bbox_w
     half_text = SECTION_LABEL_HALF_HEIGHT_RATIO * label_font_size
 
-    # A rotated side header runs down the box height and is never wrapped; a
+    # A rotated side header runs down a vertical edge and is never wrapped; a
     # horizontal header wraps onto extra lines instead of overhanging bbox_w,
     # growing away from the box - upward for above/nudge, downward for below -
     # capped at however many lines fit before whatever is nearest that way.
@@ -349,8 +354,14 @@ def resolve_section_header_placement(
         section.name, label_font_size, section.bbox_w, side_length, down_max_lines
     )
 
-    # The left column additionally needs room between the box and the canvas origin.
-    side_fits = side_length <= section.bbox_h
+    # A rotated side header needs the box only as tall as its badge; an overlong
+    # title overhangs past the box ends rather than being ruled out (see module
+    # docstring). ``_left`` reads upward, so it additionally needs room to the
+    # left of the box and enough canvas above the box bottom for that upward
+    # overhang (the canvas grows for a downward ``_right`` overhang but not an
+    # upward one). ``_right`` reads downward into always-growable canvas.
+    badge_diameter = 2.0 * circle_r
+    side_room = section.bbox_h >= badge_diameter
     candidates = [
         above,
         _below(
@@ -365,9 +376,15 @@ def resolve_section_header_placement(
             capped_dn,
         ),
     ]
-    if side_fits and x0 - gap - 2.0 * circle_r >= 0.0:
-        candidates.append(_left(x0, y0, circle_r, gap, side_length, section.name))
-    if side_fits:
+    if (
+        side_room
+        and x0 - gap - badge_diameter >= 0.0
+        and box_bottom - side_length >= 0.0
+    ):
+        candidates.append(
+            _left(x0, box_bottom, circle_r, gap, side_length, section.name)
+        )
+    if side_room:
         candidates.append(
             _right(box_right, y0, circle_r, gap, side_length, section.name)
         )
@@ -473,23 +490,23 @@ def _below(
 
 def _left(
     x0: float,
-    y0: float,
+    box_bottom: float,
     circle_r: float,
     gap: float,
     length: float,
     name: str,
 ) -> SectionHeaderPlacement:
     col_x = x0 - gap - circle_r
-    cy = y0 + circle_r
+    cy = box_bottom - circle_r
     return SectionHeaderPlacement(
         mode="left",
         badge_cx=col_x,
         badge_cy=cy,
         label_x=col_x,
-        label_y=cy + circle_r + SECTION_LABEL_TEXT_OFFSET,
-        label_rotation=90.0,
+        label_y=cy - circle_r - SECTION_LABEL_TEXT_OFFSET,
+        label_rotation=270.0,
         label_lines=(name,),
-        keepout=(col_x - circle_r, y0, x0, y0 + length),
+        keepout=(col_x - circle_r, box_bottom - length, x0, box_bottom),
     )
 
 
@@ -530,16 +547,30 @@ def _nudge(
 ) -> SectionHeaderPlacement:
     """Shift the above-left header right until it clears every route crossing
     the band it would occupy.  Always clears, at the cost of a header that may
-    overhang the box to the right."""
+    overhang the box to the right.
+
+    The shift is a fixpoint over the header's own footprint ``[start, start +
+    length]``, not a single pass over the un-nudged box-width extent: stepping
+    right to clear a route can slide a route that was beyond the old footprint
+    into the new one, so the step is repeated against the shifted footprint
+    until nothing crosses it.  This is what makes nudge a true last-resort
+    clear, while stopping at the leftmost clear position rather than sweeping
+    past routes the finite-width header would never reach."""
     pad = SECTION_HEADER_ROUTE_PAD
-    bx0, by0, bx1, by1 = above.keepout
-    band = (bx0 - pad, by0 - pad, bx1 + pad, by1 + pad)
+    bx0, by0, _, by1 = above.keepout
+    y_lo, y_hi = by0 - pad, by1 + pad
     start = x0
-    for poly in polylines:
-        for i in range(len(poly) - 1):
-            span = _segment_rect_xspan(poly[i], poly[i + 1], band)
-            if span is not None:
-                start = max(start, span + pad)
+    while True:
+        band = (start - pad, y_lo, start + length + pad, y_hi)
+        spans = (
+            _segment_rect_xspan(poly[i], poly[i + 1], band)
+            for poly in polylines
+            for i in range(len(poly) - 1)
+        )
+        rightmost = max((s for s in spans if s is not None), default=None)
+        if rightmost is None or rightmost + pad <= start:
+            break
+        start = rightmost + pad
     cx = start + circle_r
     cy = y0 - circle_r - num_y
     return SectionHeaderPlacement(
