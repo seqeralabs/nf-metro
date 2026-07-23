@@ -139,6 +139,23 @@ gallery:
       section while the other routes through it, and reconverge at the final
       section. Every shared channel keeps the two lines an OFFSET_STEP apart
       rather than collapsing one stroke onto the other."
+  - id: opposing_bypass_corridor
+    source_dir: examples/topologies
+    category: Serpentine Layout
+    description:
+      "A line runs left-to-right into a folded row and right-to-left back out of
+      it through the same inter-row gap. The counter-running feed and return get
+      distinct, direction-specific corridors: the LR feed rides an upper band and
+      the RL return keeps its own lower band a full lane beneath it, rather than
+      folding back over one shared track."
+  - id: opposing_return_row_pair
+    source_dir: examples/topologies
+    category: Serpentine Layout
+    description:
+      "A single line drops from the top row into a right-hand section then returns
+      leftward to a sibling below. The descending feed and the returning leg share
+      one inter-row gap; each takes its own horizontal corridor a clear lane apart
+      instead of the two grazing at a 4px sliver."
   - id: top_entry_bundle_offset_seam
     source_dir: examples/topologies
     category: Feature Showcase

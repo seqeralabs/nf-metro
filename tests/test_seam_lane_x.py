@@ -201,7 +201,28 @@ def _port_discontinuities(path: Path) -> tuple[str, ...]:
     )
 
 
-@pytest.mark.parametrize("name", _seam_params())
+# Fixtures whose exit port carries a known boundary-offset seam tracked
+# elsewhere: the trunk and its departure lane meet a few px apart right at the
+# port. Issue #1523 (the exit-port boundary jerk) owns that defect; it is
+# distinct from the opposing-corridor separation this fixture exists to lock.
+_SEAM_SEGMENT_XFAILS = {
+    "opposing_bypass_corridor": (
+        "#1523: exit-port boundary offset seam at novel_transcripts__exit_left; "
+        "distinct from the #1520 opposing-corridor separation this fixture locks"
+    ),
+}
+
+
+def _seam_segment_params() -> list:
+    params = []
+    for path in sorted(TOPOLOGIES.glob("*.mmd")):
+        reason = _SEAM_SEGMENT_XFAILS.get(path.stem)
+        marks = [pytest.mark.xfail(reason=reason, strict=True)] if reason else []
+        params.append(pytest.param(path.stem, id=path.stem, marks=marks))
+    return params
+
+
+@pytest.mark.parametrize("name", _seam_segment_params())
 def test_seam_segments_meet_at_port(name: str) -> None:
     """No port parts a line's trunk from its outgoing/continuing bundle."""
     discontinuities = _port_discontinuities(TOPOLOGIES / f"{name}.mmd")

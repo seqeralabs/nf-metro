@@ -1,0 +1,32 @@
+%%metro title: Opposing Return-Row Pair
+%%metro directional: true
+%%metro line: main | Main | #2db572
+%%metro grid: intake | 0,0
+%%metro grid: process | 1,0
+%%metro grid: collect | 2,0
+%%metro grid: left_out | 1,1
+%%metro grid: right_out | 3,1
+
+graph LR
+    subgraph intake [Intake]
+        i0[Intake]
+    end
+    subgraph process [Process]
+        pr0[Process]
+    end
+    subgraph collect [Collect]
+        c0[Collect]
+    end
+    subgraph left_out [Left Out]
+        %%metro entry: top | main
+        lo0[Left]
+    end
+    subgraph right_out [Right Out]
+        %%metro entry: top | main
+        %%metro exit: left | main
+        ro0[Right]
+    end
+    i0 -->|main| pr0
+    pr0 -->|main| c0
+    pr0 -->|main| ro0
+    ro0 -->|main| lo0

@@ -1,0 +1,52 @@
+%%metro title: Opposing Bypass Corridor
+%%metro directional: true
+%%metro line: ribo | Ribo-seq | #2db572
+%%metro line: rnaseq | RNA-seq | #e64980
+%%metro grid: preprocessing | 0,0
+%%metro grid: alignment | 1,0
+%%metro grid: quantification | 2,0
+%%metro grid: reporting | 3,0
+%%metro grid: orf_calling | 3,1
+%%metro grid: psite_id | 2,1
+%%metro grid: te | 1,1
+%%metro grid: novel_transcripts | 4,1
+
+graph LR
+    subgraph preprocessing [Preprocessing]
+        p0[Trim]
+    end
+    subgraph alignment [Alignment]
+        a0[Align]
+    end
+    subgraph quantification [Quantification]
+        q0[Quantify]
+    end
+    subgraph reporting [Reporting]
+        r0[Report]
+    end
+    subgraph orf_calling [ORF Calling]
+        %%metro exit: left | ribo
+        o0[Call ORFs]
+    end
+    subgraph psite_id [P-site ID]
+        %%metro entry: top | ribo
+        %%metro exit: left | ribo
+        ps0[P-sites]
+    end
+    subgraph te [TE]
+        %%metro entry: right | ribo
+        t0[TE]
+    end
+    subgraph novel_transcripts [Novel Transcripts]
+        %%metro entry: top | rnaseq
+        %%metro exit: left | rnaseq
+        nt0[Assemble Transcripts]
+    end
+    p0 -->|ribo| a0
+    a0 -->|ribo| q0
+    q0 -->|ribo| r0
+    q0 -->|ribo| o0
+    o0 -->|ribo| ps0
+    ps0 -->|ribo| t0
+    a0 -->|rnaseq| nt0
+    nt0 -->|rnaseq| o0

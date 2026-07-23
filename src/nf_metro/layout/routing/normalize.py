@@ -1445,6 +1445,65 @@ def _materialize_trunk_slots(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
     _dogleg_off_exempt_trunks(routes, ctx, skip=bundled)
 
 
+def _separate_opposing_inter_row_trunks(
+    routes: list[RoutedPath], ctx: _RoutingCtx
+) -> None:
+    """Split counter-running trunks sharing one inter-row gap onto distinct bands.
+
+    :func:`_materialize_trunk_slots` fans same-direction trunks and, within a
+    single dip group, splits opposing traversal directions onto separate Y
+    bands.  It cannot separate two flows that enter one inter-row gap from
+    *opposite rows* -- a drop-in descending from the upper row (``dips_down``)
+    and a return leg rising from the lower row (``not dips_down``) -- because
+    the two land in different dip groups and, being handler-owned
+    (``normalize_exempt``), are left untouched.  Both then centre on the gap
+    via :func:`bypass_bottom_y` and collide, drawing the line back over its own
+    track (#1520).
+
+    This direction-aware net groups every declared inter-row trunk by the gap
+    it occupies and, wherever a gap carries both dip directions over a shared
+    X range, lays the down-dip feed on an upper band and the up-dip return on a
+    lower band, a full :data:`BUNDLE_TO_BUNDLE_CLEARANCE` lane apart.  Keeping
+    the return low stops it rising to bundle with the LR feed.  Gaps with only
+    one dip direction are left to the same-direction fanning above.
+    """
+    step = ctx.offset_step
+    by_gap: dict[int, list[_HTrunk]] = defaultdict(list)
+    for t in _declared_htrunks(routes):
+        slot = t.route.trunk_slot
+        if slot is not None and slot.gap_upper_row is not None:
+            by_gap[slot.gap_upper_row].append(t)
+
+    for gtrunks in by_gap.values():
+        down = [t for t in gtrunks if t.dips_down]
+        up = [t for t in gtrunks if not t.dips_down]
+        if not down or not up:
+            continue
+        # Only separate when the two dip directions actually share a corridor:
+        # a down trunk overlapping a return trunk in X while within a lane of
+        # it in Y.  Well-separated or X-disjoint flows already read cleanly.
+        shares_corridor = any(
+            _x_overlap((d.x_lo, d.x_hi), (u.x_lo, u.x_hi)) > 0
+            and abs(d.y - u.y) < BUNDLE_TO_BUNDLE_CLEARANCE
+            for d in down
+            for u in up
+        )
+        if not shares_corridor:
+            continue
+
+        bundled: set[int] = set()
+        bands = [down, up]  # down-dip feed on top, up-dip return beneath it
+        planned = [_plan_trunk_band(b) for b in bands]
+        gap = BUNDLE_TO_BUNDLE_CLEARANCE
+        total = sum((n - 1) * step for _o, _t, n in planned) + gap * (len(bands) - 1)
+        band_top = _clamp_inter_row_band_top(ctx, min(t.y for t in gtrunks), total)
+        for (order, track_of, n), band in zip(planned, bands):
+            _restack_trunk_band(
+                order, track_of, n, band_top, band[0].dips_down, step, ctx, bundled
+            )
+            band_top += (n - 1) * step + gap
+
+
 class _SlotFeatures(NamedTuple):
     """Riser leg xs and trunk x-spans for one slot.
 
