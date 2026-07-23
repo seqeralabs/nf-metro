@@ -1,6 +1,6 @@
 ---
 name: fix-issue
-description: End-to-end workflow for fixing GitHub issues on the nf-metro repo with diagnostic rigor. Use when the user references a GitHub issue (by number, URL, or description) and wants it fixed. Handles worktree setup, a reused persistent env (no per-issue env creation), diagnostic-first investigation, authoring-mistake-vs-engine-bug triage (never dodge an engine bug by doctoring the reproducer), invariant-test-first implementation, runtime validators, evidence-cited fix verification, /simplify pass, full-repo lint, visual review via render preview, narrow-the-fix iteration on regressions, cost discipline (targeted tests, CI render-diff over local gallery rebuilds, skip-ci on WIP), scope discipline that fixes adjacent fallout in-session via delegated subagents instead of deferring it to a child issue, standalone issue-body hygiene, additive-only PR hygiene (no force-push, no narrative comments), clean execution of an authorised admin-merge (preserve history, no CI re-run), origin verification after every push, and PR creation. Trigger on phrases like "fix issue #N", "address #N", "work on issue N", or any request to fix a bug or implement a feature that references an issue. For shepherding a chain of already-existing PRs back to main, see `pr-chain-vet` instead.
+description: End-to-end workflow for fixing GitHub issues on the nf-metro repo with diagnostic rigor. Use when the user references a GitHub issue (by number, URL, or description) and wants it fixed. Handles worktree setup, a reused persistent env (no per-issue env creation), diagnostic-first investigation, authoring-mistake-vs-engine-bug triage (never dodge an engine bug by doctoring the reproducer), invariant-test-first implementation, runtime validators, evidence-cited fix verification, /simplify pass, full-repo lint, visual review via render preview, narrow-the-fix iteration on regressions, cost discipline (targeted tests, CI render-diff over local gallery rebuilds, skip-ci on WIP), scope discipline that fixes adjacent fallout in-session via delegated subagents instead of deferring it to a child issue, standalone issue-body hygiene, additive-only PR hygiene (no force-push, no narrative comments), clean execution of an authorised admin-merge (preserve history, no CI re-run), origin verification after every push, and PR creation. Supports an optional autonomous / net-negative mode (activated by "no deferrals", "work overnight", "net-negative issues", "drive it to conclusion", or "push a complete fix and address all the fallout") that suspends the multi-session-deferral carve-out and drives every surfaced fallout issue to a landed, reviewable PR the same session, while still merging only what the user authorises per-PR. Trigger on phrases like "fix issue #N", "address #N", "work on issue N", or any request to fix a bug or implement a feature that references an issue. For shepherding a chain of already-existing PRs back to main, see `pr-chain-vet` instead.
 ---
 
 # Fix Issue
@@ -78,13 +78,77 @@ in the Step 7 gate-coverage ratchet, and anything `/simplify` or review turns
 up in Step 6 all default to fix-now-via-subagent (in this PR or a sibling
 one) over file-and-defer.
 
+## Optional mode: autonomous / net-negative
+
+Activate this mode when the user signals it - "no deferrals", "no giving up",
+"drive it to conclusion", "net-negative issues", "work overnight", "I'll leave
+you to it", or an explicit "push a complete fix and address all the fallout".
+It does not relax the diagnostic or verification rigour of the steps below; it
+changes two defaults.
+
+**1. The deferral exception is suspended.** The "genuinely disproportionate /
+multi-session" carve-out above does not apply in this mode. A coupled or hard
+defect, and any incident issue the work surfaces (a second engine bug, a
+seam/reversal soundness gap, a hygiene refactor `/simplify` flags), is driven
+to a landed, reviewable PR *this session* - not filed and left. Delegate the
+heavy work to agents (one own worktree each, explicit `model`, run in the
+background so independent fallout runs concurrently), and give each a hard
+acceptance bar rather than an open question: "clean render AND byte-identical
+corpus verified via real `render_svg()` md5 hashes; iterate until both hold;
+do not report not-bounded." The CI render-diff is the vetting gate that makes a
+corpus-risky change to shared code safe to ship autonomously - a byte-identical
+corpus plus a green render-diff is the proof, so you are free to touch a shared
+handler as long as that holds. When a first agent reports "blocked / not
+bounded", re-brief it with the diagnosis it produced and push through; a
+thorough diagnosis is the *start* of the fix, never a substitute for it.
+
+**2. Net-negative open-issue count.** The session must END with fewer open
+issues than it started. Never open an issue and stop: opening one only to close
+it via a same-session PR is fine (net zero on that issue); leaving it OPEN at
+session end is the failure mode this mode exists to prevent. If you file a
+child issue at all, you owe its resolution - an agent, a sibling PR - the same
+session. Track the arithmetic explicitly at the end: issues closed vs. issues
+opened-and-still-open; the second number must be 0, or the total must go down.
+
+**Bounded to the fix's fallout, not a frontier.** This mode resolves what the
+*current* work surfaces - a coupled defect, an incident bug, a `/simplify`
+refactor of code you just touched - with a proportionate handful of agents. It
+is not licence to keep pulling threads into a full-engine overhaul or a cascade
+of dozens of child sessions. If a surfaced item is itself a large program - a
+subsystem rewrite, a sweeping cross-cutting refactor, anything that would
+genuinely need many agents or several sessions *in its own right* - that is the
+one case that still stops: flag it, size it, and get a user decision rather
+than silently recursing into it. The bar is "finish the thing I was asked to
+fix, plus the debris it kicked up", not "fix everything adjacent". Deferral
+returns here, and only here - narrowed to genuinely large programs, never to
+"this is hard" or "it is a different subsystem".
+
+**Still in force in this mode - do not over-read "autonomous":**
+- Never merge without explicit per-PR authorisation from the user. Autonomy is
+  about resolving and pushing *complete* work, not self-authorising merges.
+  "Drive to conclusion" means "get every PR green and reviewable"; merge only
+  what the user okays, per-PR (Step 8 / Step 12). Pre-authorisation to *work*
+  overnight is not pre-authorisation to *merge*.
+- Every step's rigour below still applies to every PR, including the fallout
+  ones: diagnostic-first, invariant-test-first, `/simplify`, evidence-cited
+  verification, additive-only pushes, origin check, standalone issue bodies.
+- Verify each delegated agent's result yourself - re-run the byte-identical
+  corpus diff with real renders, confirm the test fails without the fix - and
+  eyeball the actual render; do not merge a claim.
+- The one acceptable open-at-end issue is one that genuinely needs a decision
+  only the user can make - and then you say so explicitly and get agreement,
+  you do not default to it.
+
 ## Step 1: Understand the Issue
 
 ```bash
 gh issue view <N> --repo seqeralabs/nf-metro
 ```
 
-Summarize the problem and proposed approach. Wait for user confirmation before proceeding.
+Summarize the problem and proposed approach. Wait for user confirmation before
+proceeding - unless the user has pre-authorised autonomous work (the optional
+mode above; e.g. "I'll leave you to work overnight, drive it to conclusion"),
+in which case proceed without blocking and report as you go.
 
 ### Issue hygiene
 
