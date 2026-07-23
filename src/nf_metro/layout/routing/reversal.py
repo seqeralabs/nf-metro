@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from nf_metro.layout.geometry import AxisFrame, lanes_run_along_x
 from nf_metro.layout.routing.common import (
+    junction_source_ports,
     tb_right_entry_sections,
     vertical_flow_sections,
 )
@@ -29,13 +30,13 @@ def _fed_by_bottom_exit_fold(
     -> junction) and turns it into the entry port; the down->turn
     concentric corner is what reverses the bundle ordering.
     """
-    for edge in graph.edges_to(port_id):
-        if edge.source not in junction_ids:
-            continue
-        for upstream in graph.edges_to(edge.source):
-            if _is_bottom_exit_port(graph.ports.get(upstream.source)):
-                return True
-    return False
+    return any(
+        edge.source in junction_ids
+        and any(
+            _is_bottom_exit_port(p) for p in junction_source_ports(graph, edge.source)
+        )
+        for edge in graph.edges_to(port_id)
+    )
 
 
 def detect_reversed_sections(graph: MetroGraph) -> set[str]:
@@ -147,8 +148,11 @@ def _fed_by_bottom_exit(graph: MetroGraph, edge: Edge, junction_ids: set[str]) -
     (the classifier already resolves the feeder through the junction, so the
     machinery must agree).
     """
-    upstreams = graph.edges_to(edge.source) if edge.source in junction_ids else [edge]
-    return any(_is_bottom_exit_port(graph.ports.get(up.source)) for up in upstreams)
+    if edge.source in junction_ids:
+        return any(
+            _is_bottom_exit_port(p) for p in junction_source_ports(graph, edge.source)
+        )
+    return _is_bottom_exit_port(graph.ports.get(edge.source))
 
 
 def _detect_tb_bottom_top_entries(
