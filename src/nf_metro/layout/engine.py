@@ -1215,9 +1215,10 @@ def _compute_section_layout(
        stay local.
     2. **Globalise** (Stage 2.1).  Single-stage coord-regime
        transition: translate stations and bboxes to canvas coordinates.
-    3. **Pass A - port positioning** (Stages 3.1 to 3.5).  Place ports
+    3. **Pass A - port positioning** (Stages 3.1 to 3.4).  Place ports
        on bbox edges, align entry ports, shift LR/RL perp-entry
-       stations, align fold-section exit ports, top-align rows.
+       stations, align fold-section exit ports (re-flushing the rows the
+       exit move pushes down).
     4. **Pass B - downstream alignment & trunk-Y consolidation**
        (Stages 4.1 to 4.10).  Pull ports toward downstream content,
        snap to grid-group stations, space from termini, recompute
@@ -1396,17 +1397,12 @@ def _compute_section_layout(
 
     # Stage 3.4: Align LEFT/RIGHT exit ports on row-spanning (fold)
     # sections with their target's Y so the exit is at the return row.
-    # May push target sections down (via _resolve_tb_exit_y), which
-    # top-align in the next step corrects.
+    # Pushing a target section down (via _resolve_tb_exit_y) drops its bbox
+    # top below its row-mates', so the move re-flushes the tops of the rows
+    # it disturbs before returning; same-row port pairs shift by the same
+    # delta, preserving entry-port alignment.
     _align_exit_ports(graph)
     _snap(graph, "3.4")
-
-    # Stage 3.5: Top-align sections within each grid row.
-    # Runs after fold-exit alignment so it corrects any bbox_y shifts
-    # from Stage 3.4's target-section push.  Same-row port pairs shift
-    # by the same delta, preserving entry-port alignment.
-    _top_align_row_sections(graph)
-    _snap(graph, "3.5")
 
     if validate:
         _guard_ports_on_boundaries(graph, "after top-align")
@@ -1577,10 +1573,10 @@ def _place_pass_c_content(
         _run_pass_c_guards(graph, "after Stage 5.2")
 
     # Stage 5.3: Re-align bbox tops within each grid row after off-track
-    # lifting expanded some sections upward.  Unlike Stages 3.5 / 4.7 which
-    # shifts stations with the bbox, this only grows the bbox upward so
-    # the empty input-band space lines up across the row.  Station Ys
-    # in unlifted sections are preserved.
+    # lifting expanded some sections upward.  Unlike the Stage 3.4 / 4.7 row
+    # realign which shifts stations with the bbox, this only grows the bbox
+    # upward so the empty input-band space lines up across the row.  Station
+    # Ys in unlifted sections are preserved.
     _top_align_row_bboxes_only(graph)
     _snap(graph, "5.3")
     if validate:

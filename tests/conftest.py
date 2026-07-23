@@ -75,11 +75,11 @@ CONTENT_PLACEMENT_PHASES = (
 # attribute name(s) invoked at that stage).  Each corrects a specific
 # earlier stage's side effect rather than being derived from graph structure
 # directly, so idempotence at end-of-layout is not guaranteed by
-# construction and must be checked.  3.5/4.7 and 5.3/6.9 name the same
-# underlying helper under two labels because each label identifies the
-# distinct disturber its own engine.py call site corrects; removing one
-# call site should retire only its own entry here, independent of the other
-# label's.  6.6 and 6.8 also share a helper but are not equivalent: 6.6 runs
+# construction and must be checked.  5.3/6.9 name the same underlying helper
+# under two labels because each label identifies the distinct disturber its
+# own engine.py call site corrects; removing one call site should retire only
+# its own entry here, independent of the other label's.  6.6 and 6.8 also
+# share a helper but are not equivalent: 6.6 runs
 # unconditionally while 6.8 (like 6.9) only runs when
 # ``graph.center_ports or graph.diamond_style == "symmetric"`` -- see the
 # test's ``_CONDITIONAL_STAGES`` gate, which keeps a fixture that never
@@ -88,7 +88,6 @@ CONTENT_PLACEMENT_PHASES = (
 # ``_align_entry_ports`` just settled, so the pair is applied together, in
 # order, as a single unit.
 COMPENSATION_PASSES = (
-    ("3.5", ("_top_align_row_sections",)),
     ("4.7", ("_top_align_row_sections",)),
     ("5.3", ("_top_align_row_bboxes_only",)),
     ("6.6", ("_reanchor_off_track_to_consumer",)),
