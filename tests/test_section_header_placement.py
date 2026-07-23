@@ -24,10 +24,12 @@ from nf_metro.api import resolve_theme
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges_centred
 from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.model import MetroGraph, Section
 from nf_metro.render.section_header import (
     check_section_headers_clear_routes,
     check_section_headers_fit_box_width,
     resolve_all_section_headers,
+    resolve_section_header_placement,
 )
 from nf_metro.render.svg import apply_route_offsets
 
@@ -87,6 +89,37 @@ def test_default_above_placement_would_clash(
     )
     clashes = check_section_headers_clear_routes(placements, polylines)
     assert clashes, "expected an above-left header to clash with the route"
+
+
+def test_nudge_clears_a_route_to_the_right_of_the_box() -> None:
+    """The nudge fallback must clear routes crossing to the right of the box.
+
+    A header nudged right occupies ``[start, start + length]``; a route crossing
+    its vertical band anywhere in that span must be stepped past, so the nudge
+    consults the full width to its right rather than only the box-width extent.
+    Leaving a route inside the nudged keepout hard-aborts a slightly crowded map
+    on the render-time guard.
+
+    ``above``/``below`` are blocked by a full-height trunk and the side columns
+    do not fit the short box, so the resolver falls through to ``nudge``.  The
+    trunk fixes the nudge origin; a second route sits to the right of the box,
+    past the un-nudged header's right edge, inside the nudged header's span."""
+    graph = MetroGraph()
+    section = Section(id="s", name="Alignment")
+    section.bbox_x, section.bbox_y = 0.0, 100.0
+    section.bbox_w, section.bbox_h = 97.0, 18.0
+    graph.sections["s"] = section
+
+    trunk = [(90.0, 70.0), (90.0, 150.0)]
+    right_route = [(150.0, 70.0), (150.0, 105.0)]
+    polylines = [trunk, right_route]
+
+    placement = resolve_section_header_placement(
+        graph, section, label_font_size=13.0, polylines=polylines, title_font_size=13.0
+    )
+    assert placement.mode == "nudge"
+    clashes = check_section_headers_clear_routes({"s": placement}, polylines)
+    assert not clashes, "\n".join(c.message() for c in clashes)
 
 
 @pytest.mark.parametrize(
