@@ -324,6 +324,41 @@ def row_top_edge(
     return min((s.bbox_y for s in secs), default=default) if secs else default
 
 
+def lowest_section_bottom_crossing_span(
+    graph: MetroGraph,
+    span_lo: float,
+    span_hi: float,
+    *,
+    above_y: float,
+    exclude: frozenset[str] = frozenset(),
+) -> float | None:
+    """Lowest bbox bottom edge among sections that cross a horizontal span.
+
+    A section crosses the span when its (label-grown) x-range overlaps
+    ``[span_lo, span_hi]``.  Only sections lying entirely above ``above_y`` are
+    considered, so this answers "how far down does the row above dip into the
+    band a horizontal run at some Y just above ``above_y`` would occupy" -- the
+    caller drops the run below the returned edge to clear it.  Sections in
+    ``exclude`` and zero-width (unplaced) sections are skipped.  ``None`` when
+    no section crosses the span.  Unlike :func:`row_bottom_edge` this keys on
+    geometric x-overlap rather than a grid column, so it also catches a box
+    grown past its cell by an angled label.
+    """
+    lowest: float | None = None
+    for sec in graph.sections.values():
+        if sec.id in exclude or sec.bbox_w <= 0:
+            continue
+        s_bottom = sec.bbox_y + sec.bbox_h
+        if s_bottom > above_y + COORD_TOLERANCE:
+            continue
+        s_left = sec.bbox_x
+        s_right = s_left + sec.bbox_w
+        if s_right <= span_lo + COORD_TOLERANCE or s_left >= span_hi - COORD_TOLERANCE:
+            continue
+        lowest = s_bottom if lowest is None else max(lowest, s_bottom)
+    return lowest
+
+
 def iter_inter_row_gaps(graph: MetroGraph) -> Iterator[tuple[int, float, float]]:
     """Yield ``(upper_row, top, bottom)`` for each inter-row gap, top to bottom.
 
