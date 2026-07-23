@@ -71,6 +71,26 @@ CONTENT_PLACEMENT_PHASES = (
     "_recenter_loop_side_stations",  # Stage 6.12
 )
 
+# Six named compensation-pass call sites, keyed by (stage label,
+# engine-module attribute name(s) invoked at that stage).  Each corrects a
+# specific earlier stage's side effect rather than being derived from graph
+# structure directly, so idempotence at end-of-layout is not guaranteed by
+# construction and must be checked.  3.5/4.7 and 5.3/6.9 name the same
+# underlying helper under two labels because each label identifies the
+# distinct disturber its engine.py call site corrects; removing one call
+# site should retire only its own entry here, independent of the other
+# label's. 6.16 is a composite: ``_position_junctions`` reads the entry-port
+# Ys ``_align_entry_ports`` just settled, so the pair is applied together,
+# in order, as a single unit.
+COMPENSATION_PASSES = (
+    ("3.5", ("_top_align_row_sections",)),
+    ("4.7", ("_top_align_row_sections",)),
+    ("5.3", ("_top_align_row_bboxes_only",)),
+    ("6.8", ("_reanchor_off_track_to_consumer",)),
+    ("6.9", ("_top_align_row_bboxes_only",)),
+    ("6.16", ("_align_entry_ports", "_position_junctions")),
+)
+
 
 # --- Render corpus ---
 
@@ -128,16 +148,26 @@ def compute_corpus_layout(path: Path, is_nextflow: bool) -> MetroGraph:
 Coords = dict[str, tuple[float, float]]
 
 
-def snapshot_graph_state(graph: MetroGraph) -> tuple[Coords, Coords]:
-    """Capture every station ``(x, y)`` and section ``(bbox_y, bbox_h)``."""
+def snapshot_graph_state(graph: MetroGraph) -> tuple[Coords, Coords, Coords]:
+    """Capture every station ``(x, y)``, section ``(bbox_y, bbox_h)``, and
+    port ``(x, y)``.
+
+    Every port also exists as a station with the same id (``add_port``), so
+    the station dict alone already reflects a port's current position; the
+    separate ``Port`` object (``graph.ports``) is snapshotted too because a
+    probe that calls a real phase a second time and then restores only the
+    station side would leave ``graph.ports`` at the second call's position,
+    desyncing the two id-aliased objects for the rest of the pipeline.
+    """
     stations = {sid: (s.x, s.y) for sid, s in graph.stations.items()}
     bboxes = {sec.id: (sec.bbox_y, sec.bbox_h) for sec in graph.sections.values()}
-    return stations, bboxes
+    ports = {pid: (p.x, p.y) for pid, p in graph.ports.items()}
+    return stations, bboxes, ports
 
 
-def restore_graph_state(graph: MetroGraph, snap: tuple[Coords, Coords]) -> None:
+def restore_graph_state(graph: MetroGraph, snap: tuple[Coords, Coords, Coords]) -> None:
     """Write a :func:`snapshot_graph_state` result back onto ``graph``."""
-    stations, bboxes = snap
+    stations, bboxes, ports = snap
     for sid, (x, y) in stations.items():
         st = graph.stations.get(sid)
         if st is not None:
@@ -146,6 +176,10 @@ def restore_graph_state(graph: MetroGraph, snap: tuple[Coords, Coords]) -> None:
         sec = graph.sections.get(sid)
         if sec is not None:
             sec.bbox_y, sec.bbox_h = y, h
+    for pid, (x, y) in ports.items():
+        port = graph.ports.get(pid)
+        if port is not None:
+            port.x, port.y = x, y
 
 
 # --- Parse/layout helpers ---
