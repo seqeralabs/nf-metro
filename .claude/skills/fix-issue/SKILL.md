@@ -536,6 +536,35 @@ four verdicts, why these tests exist, the phantom-arc trap) is in
 [`docs/dev/routing_gate_triage.md`](../../../docs/dev/routing_gate_triage.md);
 for a dedicated triage campaign use the `nf-metro-gate-triage` skill.
 
+### If you added a topology fixture: regenerate the guard-trace golden
+
+Every fixture under `examples/topologies/` carries a committed guard-trace
+golden at `tests/data/guard_golden/examples/topologies/<stem>.json` (the
+ordered list of which guard fired at which stage). A **new** fixture has no
+golden yet, so `tests/test_guard_registry_golden.py` reds with
+"`<stem>.mmd` absent from the golden baseline". This is a **full-corpus**
+gate: the targeted tests you run for the fix's own area never touch it, so
+it only surfaces when you run that test (or the full suite) or on the push.
+Run one of those before pushing rather than eating a red CI cycle.
+
+Regenerate:
+
+```bash
+NF_METRO_REGEN_GUARD_GOLDEN=1 python tests/test_guard_registry_golden.py
+```
+
+Then **check the blast radius with `git status`**: only your new fixture's
+`.json` should appear. A handful of guards sit on a float threshold and fire
+differently across architectures, so if the regen also rewrites *other*
+fixtures' goldens you are on arm64 committing an x86_64-divergent trace -
+revert those and keep only the new file. CI checks the golden on x86_64, so
+when a fixture's trace is genuinely arch-sensitive, regenerate on a Linux
+x86_64 box (per the cross-architecture rule).
+
+A new topology fixture therefore owes **three** committed artifacts, not
+one: the `.mmd`, its `GALLERY_ENTRIES`/`gallery.yaml` row (Step 8, so the
+render-diff sees it), and this guard-trace golden.
+
 ## Step 8: Visual Review via Render Preview
 
 ### Primary method: CI render preview (authoritative)
