@@ -503,8 +503,11 @@ def _top_align_row_sections(graph: MetroGraph, rows: set[int] | None = None) -> 
     When ``rows`` is given, only those grid rows are re-flushed; callers
     that disturbed a known set of rows (see ``_align_exit_ports``) pass it
     to confine the realign to the rows they moved.  ``None`` realigns every
-    row.
+    row; an empty set realigns none.
     """
+    if rows is not None and not rows:
+        return
+
     row_sections: dict[int, list[Section]] = defaultdict(list)
     for section in graph.sections.values():
         if section.bbox_h > 0 and section.grid_row >= 0:

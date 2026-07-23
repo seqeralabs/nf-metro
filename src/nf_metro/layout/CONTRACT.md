@@ -480,7 +480,8 @@ in pipeline order.
 - **Validate guard after**: `_guard_ports_on_boundaries` (the row
   re-flush preserves port-on-edge by shifting ports with stations).
 - **Related tests**: `test_no_kink_at_section_boundary`,
-  `test_inter_section_route_y_stays_within_row_band`.
+  `test_inter_section_route_y_stays_within_row_band`,
+  `test_exit_port_row_reflush`.
 - **Lifecycle:** invariant - the fold/TB exit-port no-kink Y holds at
   the end (re-asserted by Stage 5.5).
 
