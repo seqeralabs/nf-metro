@@ -19,7 +19,6 @@ from nf_metro.layout.constants import (
     BYPASS_CLEARANCE,
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
-    CURVE_RADIUS,
     EDGE_TO_BUNDLE_CLEARANCE,
     INTER_ROW_EDGE_CLEARANCE,
     INTER_ROW_HEADER_CLEARANCE,
@@ -2865,28 +2864,22 @@ def _straight_drop_clears_walls(
     section on each side stands at least a riser's edge clearance away.  A
     two-sided gap whose drop hugs one wall would climb the box edge rather than
     ride the gap middle, which :func:`check_no_riser_hugs_section_edge` rejects;
-    only a clear column may take the straight descent.  Mirrors that guard's
-    flanking-wall geometry (and its ``CURVE_RADIUS`` thresholds) so the two
-    agree on what counts as clear.
+    only a clear column may take the straight descent.  Reuses that guard's own
+    :func:`_flanking_walls` and clearance so the routing decision and the
+    validator cannot drift on what counts as clear.
     """
-    min_clear = CURVE_RADIUS + COORD_TOLERANCE
-    left: float | None = None
-    right: float | None = None
-    for sec in ctx.graph.sections.values():
-        if sec.bbox_w <= 0 or sec.bbox_h <= 0:
-            continue
-        overlap = min(y_hi, sec.bbox_y + sec.bbox_h) - max(y_lo, sec.bbox_y)
-        if overlap <= CURVE_RADIUS:
-            continue
-        right_edge = sec.bbox_x + sec.bbox_w
-        if right_edge <= x + COORD_TOLERANCE:
-            left = right_edge if left is None else max(left, right_edge)
-        left_edge = sec.bbox_x
-        if left_edge >= x - COORD_TOLERANCE:
-            right = left_edge if right is None else min(right, left_edge)
+    from nf_metro.layout.routing.invariants import (
+        _MIN_RISER_EDGE_CLEARANCE,
+        _flanking_walls,
+    )
+
+    sections = [s for s in ctx.graph.sections.values() if s.bbox_w > 0 and s.bbox_h > 0]
+    left, right = _flanking_walls(sections, x, y_lo, y_hi)
     if left is None or right is None:
         return True
-    return (x - left) >= min_clear and (right - x) >= min_clear
+    return (x - left[1]) >= _MIN_RISER_EDGE_CLEARANCE and (
+        right[1] - x
+    ) >= _MIN_RISER_EDGE_CLEARANCE
 
 
 def _route_top_entry_l_shape(
