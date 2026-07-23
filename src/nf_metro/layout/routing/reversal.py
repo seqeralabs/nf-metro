@@ -15,6 +15,11 @@ from nf_metro.layout.routing.common import (
 from nf_metro.parser.model import Edge, MetroGraph, Port, PortSide, Section
 
 
+def _is_bottom_exit_port(port: Port | None) -> bool:
+    """True if ``port`` is a section's BOTTOM exit (not an entry)."""
+    return port is not None and not port.is_entry and port.side == PortSide.BOTTOM
+
+
 def _fed_by_bottom_exit_fold(
     graph: MetroGraph, port_id: str, junction_ids: set[str]
 ) -> bool:
@@ -28,8 +33,7 @@ def _fed_by_bottom_exit_fold(
         if edge.source not in junction_ids:
             continue
         for upstream in graph.edges_to(edge.source):
-            src_port = graph.ports.get(upstream.source)
-            if src_port and not src_port.is_entry and src_port.side == PortSide.BOTTOM:
+            if _is_bottom_exit_port(graph.ports.get(upstream.source)):
                 return True
     return False
 
@@ -134,30 +138,17 @@ def tb_positive_fan_sections(graph: MetroGraph) -> set[str]:
     }
 
 
-def _feeding_bottom_exit_sections(
-    graph: MetroGraph, edge: Edge, junction_ids: set[str]
-) -> list[str]:
-    """Section ids of the BOTTOM exit ports feeding a TOP-entry ``edge``.
+def _fed_by_bottom_exit(graph: MetroGraph, edge: Edge, junction_ids: set[str]) -> bool:
+    """Whether a BOTTOM exit feeds TOP-entry ``edge``, directly or via a junction.
 
-    Resolves a direct ``BOTTOM exit -> TOP entry`` edge and a
-    ``BOTTOM exit -> fan-out junction -> TOP entry`` feed alike, so a junction
-    between the exit and the entry is transparent to the reversal rule (the
-    classifier already resolves the feeder through the junction, so the
-    machinery must agree).  A feed that does not originate at a BOTTOM exit
-    yields nothing.
+    A direct ``BOTTOM exit -> TOP entry`` edge and a
+    ``BOTTOM exit -> fan-out junction -> TOP entry`` feed count alike, so a
+    junction between the exit and the entry is transparent to the reversal rule
+    (the classifier already resolves the feeder through the junction, so the
+    machinery must agree).
     """
     upstreams = graph.edges_to(edge.source) if edge.source in junction_ids else [edge]
-    sections: list[str] = []
-    for up in upstreams:
-        src_port = graph.ports.get(up.source)
-        if (
-            src_port
-            and not src_port.is_entry
-            and src_port.side == PortSide.BOTTOM
-            and src_port.section_id is not None
-        ):
-            sections.append(src_port.section_id)
-    return sections
+    return any(_is_bottom_exit_port(graph.ports.get(up.source)) for up in upstreams)
 
 
 def _detect_tb_bottom_top_entries(
@@ -204,15 +195,12 @@ def _detect_tb_bottom_top_entries(
                     src = graph.station_for_edge_source(edge)
                     if not src.is_port:
                         continue
-                    src_port = graph.ports.get(edge.source)
                     if (
-                        src_port
-                        and not src_port.is_entry
-                        and src_port.side == PortSide.BOTTOM
+                        _is_bottom_exit_port(graph.ports.get(edge.source))
                         and src.section_id in tb_sections
                     ):
                         vertical_receivers.setdefault(src.section_id, set()).add(sec_id)
-                elif _feeding_bottom_exit_sections(graph, edge, junction_ids):
+                elif _fed_by_bottom_exit(graph, edge, junction_ids):
                     # Horizontal (LR/RL) receiver: the BOTTOM-exit drop turns into
                     # the trunk through a corner that reverses bundle ordering,
                     # whatever the feeder's flow axis and whether it arrives directly

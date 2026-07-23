@@ -128,15 +128,14 @@ def _perp_entry_crossing_x(
     if feeder_sec is None:
         # A junction feeder carries no ``section_id`` of its own; resolve it
         # through its incoming edge to the section it descends from.  A
-        # vertical-flow (TB/BT) feeder dropping into the port is then recognised
-        # below and crosses on the trunk column -- the same X the inter-section
-        # approach lands on -- rather than falling to the generic bundle-index
-        # fan, which would offset the lone descending line off the trunk and part
-        # it from the approach at the boundary.
+        # vertical-flow (TB/BT) upstream crosses on the trunk column -- the same
+        # X the inter-section approach lands on -- rather than falling to the
+        # generic bundle-index fan, which would offset the lone descending line
+        # off the trunk and part it from the approach at the boundary.  A
+        # horizontal-flow upstream is left unresolved so it keeps that fan.
         upstream = resolve_section(ctx.graph, feeder_st, prefer_upstream=True)
         if upstream is not None and lanes_run_along_x(upstream.direction):
-            feeder_sec = upstream
-            section_id = upstream.id
+            return port_x + _tb_x_offset(ctx, source, line_id, upstream.id)
     if feeder_sec is not None and lanes_run_along_x(feeder_sec.direction):
         return port_x + _tb_x_offset(ctx, source, line_id, section_id)
     if feeder_sec is not None and lanes_run_along_y(feeder_sec.direction):
