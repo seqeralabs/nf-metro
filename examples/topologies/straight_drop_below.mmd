@@ -1,0 +1,21 @@
+%%metro title: Straight Drop Below
+%%metro directional: true
+%%metro line: main | Main | #2db572
+%%metro line: branch | Branch | #e64980
+%%metro grid: top | 0,0
+%%metro grid: bottom | 0,1
+%%metro grid: sink | 1,1
+
+graph LR
+    subgraph top [Top]
+        t0[Source]
+    end
+    subgraph bottom [Bottom]
+        %%metro entry: top | branch
+        b0[Assemble]
+    end
+    subgraph sink [Sink]
+        s0[Collect]
+    end
+    t0 -->|branch| b0
+    t0 -->|main| s0
