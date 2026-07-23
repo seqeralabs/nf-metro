@@ -213,9 +213,6 @@ def _redistribute_fanout_siblings(graph: MetroGraph, y_spacing: float) -> None:
             cols[round(st.x, 3)].append(sid)
 
         for sids in cols.values():
-            # The column's trunk station is the unique one carrying the whole
-            # trunk bundle (superset-tolerant: a station may also bear peel-off
-            # lines it sends off toward a downstream section).
             trunks = [s for s in sids if set(graph.station_lines(s)) >= trunk]
             if len(trunks) != 1:
                 continue
