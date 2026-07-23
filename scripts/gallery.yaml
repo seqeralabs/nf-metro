@@ -648,6 +648,15 @@ gallery:
       "A title too long to fit a rotated side, on a section blocked top and bottom
       by its trunk: the header shifts right past the trunk as a last resort, the canvas growing
       to keep it visible."
+  - id: crowded_header_nudge_overtop
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      "A TB section fed by a TOP entry from an offset source: the feed's horizontal
+      lead-in runs over the section's header band, and a route crossing to the right of the
+      header's box-width extent must be stepped past. The nudge shifts the header far enough
+      right to clear every route in its band, so a crowded header degrades to a clear position
+      instead of aborting the render."
   - id: lr_to_tb_top_drop
     source_dir: examples/topologies
     category: TB / BT Sections
