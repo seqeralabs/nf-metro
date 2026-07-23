@@ -1405,7 +1405,7 @@ def _compute_section_layout(
     _snap(graph, "3.4")
 
     if validate:
-        _guard_ports_on_boundaries(graph, "after Stage 3.4")
+        _guard_ports_on_boundaries(graph, "after top-align")
 
     # ---- Stage 4 - Pass B: Downstream alignment & trunk-Y consolidation -
     # Stage 4.5's port-terminus spacing can expand bboxes via
