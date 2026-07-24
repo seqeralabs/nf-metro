@@ -982,5 +982,9 @@
   "offsets.py::if set(inherited) != set(graph.station_lines(port_id)):::#1": {
     "note": "_inherit_level_convergence_entry_offsets skips a convergence entry port when the lines it inherits from its immediate feeders do not cover every line the port carries. A convergence entry's lines are, by construction, exactly the union of its inbound edges' lines, and each inbound edge supplies that line's feeder offset, so the inherited set always equals the port's line set and the mismatch arm is never taken. Defensive against a port line with no inbound edge (a malformed graph).",
     "status": "defensive"
+  },
+  "normalize.py::if not (COORD_TOLERANCE < abs(gap) <= radius) or overlap <= COORD_TOLERANCE:::#1": {
+    "note": "_separate_merge_trunk_opposite_arm fires only when a merge fan-out's down-trunk and an opposite up-arm of the same line settle within a curve radius while overlapping in Y -- the near-parallel doubled corner _guard_no_opposing_line_overlap forbids. The not(...) skip arm covers a pair that is already clear (coincident, or more than a curve radius apart): the normal no-op for well-separated arms. The corpus's one triggering fixture pairs the anchored up-arm only with in-range trunk descents, so this already-clear arm stays un-exercised.",
+    "status": "defensive"
   }
 }
