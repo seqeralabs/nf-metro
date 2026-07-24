@@ -215,6 +215,7 @@
     "_guard_inter_section_route_clears_own_section_interior|after final",
     "_guard_feeder_exits_section_through_side|after final",
     "_guard_entry_approach_from_port_side|after final",
+    "_guard_entry_landing_no_station_backtrack|after final",
     "_guard_no_opposing_line_overlap|after final",
     "_guard_serpentine_no_backtrack|after final",
     "_guard_no_artefactual_counter_flow|after final",

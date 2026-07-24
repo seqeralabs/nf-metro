@@ -3163,6 +3163,71 @@ def _guard_inter_section_route_no_backtrack(
         )
 
 
+def _guard_entry_landing_no_station_backtrack(
+    graph: MetroGraph,
+    phase: str,
+) -> None:
+    """After layout: a section's entry landing must not reverse past its own
+    stations.
+
+    A line entering a section on a port and then travelling against the
+    section's flow axis to reach its entry station, passing one or more of the
+    section's OTHER stations on the way, renders as a backtrack -- the line
+    dives through markers to reach a far one, then the section flow carries it
+    back out.  A short perpendicular drop-in that reaches the nearest station
+    without passing another is not a backtrack; this fires only when the entry
+    drags past an interior station.
+
+    The archetype is a BT (or TB) section whose entry lands on the flow-end
+    edge instead of the flow-start edge, forcing the feed the full length of
+    the section against its flow.  Frame-symmetric port inference keeps the
+    entry on the flow-start edge; this is the always-on net that catches any
+    residual (a hand-authored port hint, a future orientation) that would ship
+    the backtrack instead.
+    """
+    tol = COORD_TOLERANCE
+    junction_ids = graph.junction_ids
+    by_sec: dict[str, list[Station]] = defaultdict(list)
+    for sid, st in graph.stations.items():
+        if st.is_port or sid in junction_ids or not st.section_id:
+            continue
+        by_sec[st.section_id].append(st)
+
+    for edge in graph.edges:
+        src = graph.stations.get(edge.source)
+        tgt = graph.stations.get(edge.target)
+        if src is None or tgt is None or not src.is_port or tgt.is_port:
+            continue
+        if src.section_id != tgt.section_id or src.section_id is None:
+            continue
+        section = graph.sections.get(src.section_id)
+        if section is None:
+            continue
+        flow_axis, _cross = section_axes(section)
+        sign = AxisFrame.flow_sign(section.direction)
+
+        port_flow = getattr(src, flow_axis) * sign
+        entry_flow = getattr(tgt, flow_axis) * sign
+        if entry_flow - port_flow >= -tol:
+            # Entry station is at or ahead of the port in the flow direction:
+            # a with-flow landing, never a backtrack.
+            continue
+        lo, hi = sorted((port_flow, entry_flow))
+        passed = [
+            other.id
+            for other in by_sec.get(src.section_id, ())
+            if other.id != tgt.id
+            and lo + tol < getattr(other, flow_axis) * sign < hi - tol
+        ]
+        if passed:
+            raise PhaseInvariantError(
+                f"{phase}: entry {edge.source!r}->{edge.target!r} in section "
+                f"{section.id!r} reverses against its {section.direction} flow "
+                f"past {len(passed)} station(s) {sorted(passed)} to reach its "
+                "entry station -- a backtrack through the section's own markers"
+            )
+
+
 def _guard_fan_bundles_coincide_or_separate(
     graph: MetroGraph,
     phase: str,
@@ -5275,6 +5340,17 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
             "Catches a route reaching its OWN target's far-edge entry port by "
             "slicing through the box interior; complements "
             "_guard_no_route_through_section, which exempts the target section."
+        ),
+    ),
+    GuardSpec(
+        _guard_entry_landing_no_station_backtrack,
+        "A",
+        issue_pin=("#1442",),
+        narrow_reason=(
+            "Fires only when an entry landing reverses PAST an interior station "
+            "of its own section (the flow-end-edge entry backtrack); a with-flow "
+            "landing or a short perpendicular drop that passes no station is "
+            "left alone, so it does not subsume the general routing guards."
         ),
     ),
     GuardSpec(

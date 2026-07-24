@@ -1667,3 +1667,17 @@ def test_rail_bridge_over_interchange_validates_clean(fixture, crossed_id):
             f"{fixture.name}: expected a line to thread {crossed_id!r}'s marker "
             f"so the rail-idiom exemption is load-bearing"
         )
+
+
+def test_rail_mode_rejects_explicit_non_lr_direction():
+    """Rail mode lays rails left-to-right; an explicit non-LR direction on a
+    rail section is an authoring contradiction that must fail loudly rather
+    than be silently overwritten to LR.
+    """
+    text = RAIL_MMD.read_text().replace(
+        "    subgraph calling [Variant calling]\n",
+        "    subgraph calling [Variant calling]\n        %%metro direction: BT\n",
+    )
+    graph = parse_metro_mermaid(text)
+    with pytest.raises(ValueError, match="rail mode"):
+        compute_layout(graph, validate=True)
