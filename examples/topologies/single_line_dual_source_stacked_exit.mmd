@@ -1,0 +1,25 @@
+%%metro title: Single-line dual-source stacked exit
+%%metro line: l | Line | #0570b0
+
+graph LR
+    subgraph src [Source]
+        a[A]
+        b[B]
+        a -->|l| b
+    end
+    subgraph top_sec [Top]
+        t[T]
+        t_up[Up]
+        t_dn[Down]
+        a -->|l| t
+        t -->|l| t_up
+        t -->|l| t_dn
+    end
+    subgraph mid_sec [Mid]
+        m[M]
+        b -->|l| m
+    end
+    subgraph bot_sec [Bot]
+        n[N]
+        b -->|l| n
+    end

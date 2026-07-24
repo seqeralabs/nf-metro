@@ -1786,6 +1786,15 @@ gallery:
       through its `entry: top` port. The leg carries the full width past the
       box's right side, rises above it, and returns over the top into the port
       without ever entering the interior."
+  - id: single_line_dual_source_stacked_exit
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      "One line exits a section from two chained source stations (`a -> b`, both
+      emitting onward) to three stacked downstream sections. The shared exit is a
+      feed-forward chain, so the line leaves on the feeders' row as one horizontal
+      trunk and drops on a single riser in the gap, rather than dragging both
+      feeders into near-parallel diagonals through the section's bottom corner."
 
 pipelines:
   - id: rnaseq_auto
