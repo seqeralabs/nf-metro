@@ -18,7 +18,6 @@ graph LR
 
     subgraph secA [Quant]
         %%metro entry: left | a, b, c
-        %%metro exit: right | a, b, c
         s_split[Split strand]
         s_gc[Genome cov]
         s_peel[Salmon]
@@ -28,12 +27,10 @@ graph LR
     end
 
     subgraph secB [TE]
-        t1[Gene TE]
-        t2[ORF TE]
+        te[TE]
     end
 
     dedup -->|a,b,c| s_split
     dedup -->|a,b,c| s_peel
-    s_gc -->|a,b,c| t1
-    s_peel -->|x| t1
-    s_peel -->|y| t2
+    s_gc -->|a,b,c| te
+    s_peel -->|x,y| te

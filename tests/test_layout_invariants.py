@@ -1565,9 +1565,7 @@ def test_out_of_section_retag_preserves_source_section_fan(center_ports):
     under either ports mode.
     """
     recolor = (EXAMPLES / "topologies" / "out_of_section_retag_fan.mmd").read_text()
-    base = recolor.replace("s_peel -->|x| t1", "s_peel -->|a| t1").replace(
-        "s_peel -->|y| t2", "s_peel -->|a| t2"
-    )
+    base = recolor.replace("s_peel -->|x,y| te", "s_peel -->|a| te")
     assert base != recolor, "retag reversal did not alter the fixture text"
 
     def source_section_ys(text: str) -> dict[str, float]:
