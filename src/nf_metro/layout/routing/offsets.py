@@ -36,6 +36,7 @@ from nf_metro.layout.routing.invariants import (
     check_partial_branch_offset_gaps,
     classify_merge_port_feeders,
     distinct_offset_levels,
+    fan_port_and_station,
     max_interior_offset_gap,
 )
 from nf_metro.layout.routing.reversal import detect_reversed_sections
@@ -136,6 +137,21 @@ def _build_same_y_adj(
             (edge.source, edge.line_id)
         )
     return same_y_adj
+
+
+def _build_sec_layer_stations(graph: MetroGraph) -> dict[str, dict[int, list[str]]]:
+    """Map each section to its real (non-port) stations, grouped by layer.
+
+    Used by the compaction passes' same-layer peer-conflict check
+    (:func:`_compaction_peer_conflict`).
+    """
+    sec_layer_stations: dict[str, dict[int, list[str]]] = {}
+    for sid, st in graph.stations.items():
+        if st.section_id and not st.is_port:
+            sec_layer_stations.setdefault(st.section_id, {}).setdefault(
+                st.layer, []
+            ).append(sid)
+    return sec_layer_stations
 
 
 def _stores_reflected(ctx: _OffsetCtx, sec_id: str | None) -> bool:
@@ -1800,7 +1816,11 @@ def _compute_entry_port_offsets(ctx: _OffsetCtx) -> None:
     _recenter_single_line_corridor_entry(ctx)
 
 
-def _compact_station_gaps(ctx: _OffsetCtx) -> None:
+def _compact_station_gaps(
+    ctx: _OffsetCtx,
+    same_y_adj: dict[str, dict[str, list[tuple[str, str]]]],
+    sec_layer_stations: dict[str, dict[int, list[str]]],
+) -> None:
     """Close offset gaps at stations where intermediate lines are absent.
 
     When a station carries two non-adjacent lines (e.g. star_salmon and
@@ -1815,22 +1835,15 @@ def _compact_station_gaps(ctx: _OffsetCtx) -> None:
     the reordering conflicts with existing offset assignments (e.g. a
     multi-line hub where swapping slots would collide).
 
-    Only triggers when gaps are actually found; no-op otherwise.
+    Only triggers when gaps are actually found; no-op otherwise.  ``same_y_adj``
+    and ``sec_layer_stations`` are section/layer indexes over graph structure
+    (not per-line offsets), so :func:`_recompact_fan_port_bordering_stations`
+    reuses the same ones rather than rebuilding them.
     """
     if ctx.compact:
         return
 
     graph = ctx.graph
-    same_y_adj = _build_same_y_adj(graph)
-
-    # Pre-build layer index per section for same-layer checks
-    sec_layer_stations: dict[str, dict[int, list[str]]] = {}
-    for sid, st in graph.stations.items():
-        if st.section_id and not st.is_port:
-            sec_layer_stations.setdefault(st.section_id, {}).setdefault(
-                st.layer, []
-            ).append(sid)
-
     for sec_id, section in graph.sections.items():
         sec_stations = [
             sid for sid in section.station_ids if not graph.stations[sid].is_port
@@ -1848,6 +1861,95 @@ def _compact_station_gaps(ctx: _OffsetCtx) -> None:
             already_compacted |= _compact_one_seed(
                 ctx, same_y_adj, sec_layer_stations, sec_id, seed_sid, len(sec_stations)
             )
+
+
+def _recompact_fan_port_bordering_stations(
+    ctx: _OffsetCtx,
+    same_y_adj: dict[str, dict[str, list[tuple[str, str]]]],
+    sec_layer_stations: dict[str, dict[int, list[str]]],
+) -> None:
+    """Re-close gaps at real stations a same-Y fan port re-opened after phase 4.
+
+    Phase 4 (:func:`_compact_station_gaps`) runs before the exit and entry
+    port phases (5-7) settle each port's own spatial or inherited order, and
+    that settling always wins a straight rerun -- it can reopen a gap phase 4
+    already closed at a real station bordering the port.  Resweeping the
+    whole corpus a second time would risk disturbing unrelated compactions
+    elsewhere that phases 5-11 legitimately depend on, so this only rechecks
+    the stations :func:`invariants.fan_port_and_station` itself would flag --
+    the exact precondition
+    :func:`invariants.check_station_bundle_contiguous_at_fan_port` checks --
+    and recompacts just those, via :func:`_compact_one_seed_with_retry`.
+    """
+    if ctx.compact:
+        return
+    graph = ctx.graph
+    candidates: set[tuple[str, str]] = set()
+    for edge in graph.edges:
+        pair = fan_port_and_station(graph, edge)
+        if pair is None:
+            continue
+        port_id, station_id = pair
+        station = graph.stations[station_id]
+        if abs(graph.stations[port_id].y - station.y) > _SAME_Y_TOLERANCE:
+            continue
+        if station.section_id is not None:
+            candidates.add((station.section_id, station_id))
+
+    for sec_id, station_id in sorted(candidates):
+        section = graph.sections.get(sec_id)
+        if section is None:
+            continue
+        n_sec_stations = sum(
+            1 for sid in section.station_ids if not graph.stations[sid].is_port
+        )
+        touched = _compact_one_seed_with_retry(
+            ctx, same_y_adj, sec_layer_stations, sec_id, station_id, n_sec_stations
+        )
+        _propagate_touched_exit_ports_to_entries(ctx, touched)
+
+
+def _propagate_touched_exit_ports_to_entries(
+    ctx: _OffsetCtx, touched: set[str]
+) -> None:
+    """Forward a recompacted exit port's new line offsets across its seam.
+
+    :func:`_compact_one_seed_with_retry` only walks same-section edges, so any
+    exit port it touched must be pushed across its seam to stay consistent
+    with the entry port(s) it feeds in other sections -- the property
+    :func:`invariants.check_seam_approach_equals_departure` checks.  Only the
+    specific ports this recompaction changed are forwarded, not a full
+    :func:`_compute_entry_port_offsets` rerun, which would re-derive entry
+    ports from feeder geometry across the whole graph and undo unrelated,
+    already-settled compactions elsewhere.
+
+    Restricted to the same seams :func:`_propagate_lr_rl_exit_to_entry`
+    would itself forward: a TOP/BOTTOM entry, a vertical-flow (TB) consumer,
+    or a reversing seam each carry the line on their own arrival-order lane
+    rather than the feeder's raw stored offset, so a direct copy there would
+    be wrong, not merely redundant.
+    """
+    graph = ctx.graph
+    for sid in touched:
+        src_port = graph.ports.get(sid)
+        if src_port is None or src_port.is_entry:
+            continue
+        for edge in graph.edges_from(sid):
+            tgt_port = graph.ports.get(edge.target)
+            if tgt_port is None or not tgt_port.is_entry:
+                continue
+            if tgt_port.side not in (PortSide.LEFT, PortSide.RIGHT):
+                continue
+            if tgt_port.section_id in ctx.tb_sections:
+                continue
+            reversed_seam = (
+                seam_orientation(graph, src_port, tgt_port) is SeamOrientation.REVERSE
+            )
+            if not _stores_reflected(ctx, tgt_port.section_id) and reversed_seam:
+                continue
+            off = ctx.offsets.get((sid, edge.line_id))
+            if off is not None:
+                ctx.offsets[(edge.target, edge.line_id)] = off
 
 
 def _seed_compaction(ctx: _OffsetCtx, seed_sid: str) -> dict[str, float] | None:
@@ -1873,6 +1975,61 @@ def _seed_compaction(ctx: _OffsetCtx, seed_sid: str) -> dict[str, float] | None:
     return compacted
 
 
+def _anchored_seed_compaction(
+    ctx: _OffsetCtx, seed_sid: str, fixed: frozenset[str]
+) -> dict[str, float] | None:
+    """Like :func:`_seed_compaction`, but ``fixed`` lines keep their offset.
+
+    Used only by :func:`_compact_one_seed_with_retry`: a line a prior attempt
+    found unsafe to move stays put, and the remaining movable lines slide
+    into the free slots immediately below and above it instead.
+    """
+    graph = ctx.graph
+    seed_lines = graph.station_lines(seed_sid)
+    if len(seed_lines) < 2:
+        return None
+
+    current = {lid: ctx.offsets.get((seed_sid, lid), 0.0) for lid in seed_lines}
+    fixed_here = fixed & set(seed_lines)
+    movable = [lid for lid in seed_lines if lid not in fixed_here]
+    if not fixed_here or not movable:
+        return None
+
+    fixed_levels = distinct_offset_levels(current[lid] for lid in fixed_here)
+    if max_interior_offset_gap(fixed_levels, ctx.offset_step) is not None:
+        return None  # the fixed lines themselves already have a gap
+    low, high = fixed_levels[0], fixed_levels[-1]
+    compacted = {lid: current[lid] for lid in fixed_here}
+    below = sorted(
+        (lid for lid in movable if current[lid] <= low), key=lambda lid: -current[lid]
+    )
+    above = sorted(
+        (lid for lid in movable if current[lid] > low), key=lambda lid: current[lid]
+    )
+    next_below = low - ctx.offset_step
+    for lid in below:
+        compacted[lid] = next_below
+        next_below -= ctx.offset_step
+    next_above = high + ctx.offset_step
+    for lid in above:
+        compacted[lid] = next_above
+        next_above += ctx.offset_step
+
+    if not any(
+        abs(compacted[lid] - current[lid]) > _OFFSET_EQ_TOLERANCE for lid in seed_lines
+    ):
+        return None
+    return compacted
+
+
+class _CompactionConflict(Exception):
+    """Raised when propagation would need to also move an unsafe peer's line."""
+
+    def __init__(self, lid: str) -> None:
+        super().__init__(lid)
+        self.lid = lid
+
+
 def _compact_one_seed(
     ctx: _OffsetCtx,
     same_y_adj: dict[str, dict[str, list[tuple[str, str]]]],
@@ -1882,13 +2039,12 @@ def _compact_one_seed(
     n_sec_stations: int,
 ) -> set[str]:
     """Compact one seed station's gaps, returning the stations it touched."""
-    graph = ctx.graph
     compacted = _seed_compaction(ctx, seed_sid)
     if compacted is None:
         return set()
     changed_lids = {
         lid
-        for lid in graph.station_lines(seed_sid)
+        for lid in ctx.graph.station_lines(seed_sid)
         if abs(compacted[lid] - ctx.offsets.get((seed_sid, lid), 0.0))
         > _OFFSET_EQ_TOLERANCE
     }
@@ -1912,22 +2068,99 @@ def _compact_one_seed(
     return set(pending)
 
 
+def _compact_one_seed_with_retry(
+    ctx: _OffsetCtx,
+    same_y_adj: dict[str, dict[str, list[tuple[str, str]]]],
+    sec_layer_stations: dict[str, dict[int, list[str]]],
+    sec_id: str,
+    seed_sid: str,
+    n_sec_stations: int,
+) -> set[str]:
+    """Compact one seed's gaps, retrying with an unsafe line held fixed.
+
+    A line whose propagation would cross into a same-layer peer's own
+    territory (:func:`_compaction_peer_conflict`) is unsafe to move -- e.g. a
+    line reused on two non-adjacent legs of a shared fan port, where each leg
+    wants a different partner adjacent to it.  Rather than abandon the seed's
+    gap entirely (:func:`_compact_one_seed`'s behaviour), retry holding that
+    specific line fixed (:func:`_anchored_seed_compaction`) and moving only
+    the seed's other lines, until either a safe combination is found or every
+    line has been tried as the fixed one.  Every attempt, including the first
+    (where no line is fixed yet and the target matches :func:`_seed_compaction`'s),
+    excludes the seed itself from peer-conflict checks -- see ``mover`` on
+    :func:`_propagate_compaction`.
+    """
+    graph = ctx.graph
+    seed_lines = graph.station_lines(seed_sid)
+    fixed: set[str] = set()
+    for _ in range(len(seed_lines)):
+        compacted = (
+            _seed_compaction(ctx, seed_sid)
+            if not fixed
+            else _anchored_seed_compaction(ctx, seed_sid, frozenset(fixed))
+        )
+        if compacted is None:
+            return set()
+        changed_lids = {
+            lid
+            for lid in seed_lines
+            if abs(compacted[lid] - ctx.offsets.get((seed_sid, lid), 0.0))
+            > _OFFSET_EQ_TOLERANCE
+        }
+        if not changed_lids:
+            return set()
+
+        try:
+            pending = _propagate_compaction(
+                ctx,
+                same_y_adj,
+                sec_layer_stations,
+                sec_id,
+                seed_sid,
+                compacted,
+                changed_lids,
+                n_sec_stations,
+                mover=seed_sid,
+            )
+        except _CompactionConflict as exc:
+            fixed.add(exc.lid)
+            continue
+
+        if pending is None:
+            return set()
+
+        for sid, line_offsets in pending.items():
+            for lid, off in line_offsets.items():
+                ctx.offsets[(sid, lid)] = off
+        return set(pending)
+
+    return set()
+
+
 def _compaction_peer_conflict(
     graph: MetroGraph,
     sec_layer_stations: dict[str, dict[int, list[str]]],
     sec_id: str,
     nbr_sid: str,
     lid: str,
+    *,
+    exclude: str | None = None,
 ) -> bool:
-    """True if a visible same-layer peer also carries this line.
+    """True if another visible same-layer peer also carries this line.
 
     Compaction can't guarantee consistency in that case without cascading
-    into unrelated stations, so propagation must abort.
+    into unrelated stations, so propagation must abort.  ``exclude`` -- when
+    given, the station propagation is arriving from -- shares ``nbr_sid``'s
+    layer only coincidentally when it has no other in-section predecessor; it
+    is the line's own mover, not an external peer, so it never counts as a
+    conflict against itself.  Only :func:`_compact_one_seed_with_retry`'s
+    retryable propagation passes this; :func:`_compact_one_seed`'s plain,
+    non-retrying path leaves it unset and applies the check unconditionally.
     """
     nbr_st = graph.stations[nbr_sid]
     layer_peers = sec_layer_stations.get(sec_id, {}).get(nbr_st.layer, [])
     for peer_sid in layer_peers:
-        if peer_sid == nbr_sid:
+        if peer_sid == nbr_sid or peer_sid == exclude:
             continue
         if graph.stations[peer_sid].is_hidden:
             continue
@@ -1945,8 +2178,18 @@ def _propagate_compaction(
     compacted: dict[str, float],
     changed_lids: set[str],
     n_sec_stations: int,
+    *,
+    mover: str | None = None,
 ) -> dict[str, dict[str, float]] | None:
-    """BFS the compaction along same-Y edges; return updates, or None if unsafe."""
+    """BFS the compaction along same-Y edges; return updates, or None if unsafe.
+
+    ``mover`` is set only by :func:`_compact_one_seed_with_retry`: it excludes
+    the seed itself from peer-conflict checks (see
+    :func:`_compaction_peer_conflict`) and raises :class:`_CompactionConflict`
+    (naming the offending line) instead of returning ``None`` on a conflict,
+    so the caller can retry holding that one line fixed.  Left unset, a
+    conflict aborts the whole compaction for this seed.
+    """
     graph = ctx.graph
     # Map: station_id -> {line_id: new_offset}
     pending: dict[str, dict[str, float]] = {seed_sid: compacted}
@@ -1979,8 +2222,10 @@ def _propagate_compaction(
                 continue
 
             if _compaction_peer_conflict(
-                graph, sec_layer_stations, sec_id, nbr_sid, lid
+                graph, sec_layer_stations, sec_id, nbr_sid, lid, exclude=mover
             ):
+                if mover is not None:
+                    raise _CompactionConflict(lid)
                 return None
 
             nbr_lines = graph.station_lines(nbr_sid)
@@ -2740,6 +2985,11 @@ def compute_station_offsets(
        merge, permutes the merge's offsets so the line continuing straight
        to a station directly below rides the trunk-drawing slot, instead of
        a collinear-from-above feeder forcing it outboard (non-compact TB).
+    12. **Fan-port-bordering re-compaction** - phase 4 runs before the exit
+       and entry port phases (5-7) settle a port's own spatial/inherited
+       order, which can reopen a real station's gap phase 4 already closed
+       against that same port; a final pass rechecks just the stations the
+       fan-port guard itself flags and recompacts those (non-compact only).
 
     Returns dict mapping (station_id, line_id) -> y_offset.
     """
@@ -2752,13 +3002,18 @@ def compute_station_offsets(
         offset_step if offset_step is not None else resolve_offset_step(graph.track_gap)
     )
     ctx = _build_offset_ctx(graph, resolved)
+    # Section/layer indexes over graph structure, not per-line offsets, so
+    # they stay valid across every phase below and are built once here for
+    # both compaction passes (phase 4 and phase 12) to share.
+    same_y_adj = _build_same_y_adj(graph)
+    sec_layer_stations = _build_sec_layer_stations(graph)
     _compute_base_offsets(ctx)
     _reindex_section_local(ctx)
     _assert_sections_anchored_on_trunk(ctx)
     _reorder_exit_only_lines(ctx)
     _reorder_fanout_divergence(ctx)
     _apply_compact_section_consistency(ctx)
-    _compact_station_gaps(ctx)
+    _compact_station_gaps(ctx, same_y_adj, sec_layer_stations)
     _compute_exit_port_offsets(ctx)
     _propagate_to_junctions(ctx)
     _compute_entry_port_offsets(ctx)
@@ -2771,6 +3026,7 @@ def compute_station_offsets(
     _align_flat_tb_exit_to_entry(ctx)
     _recenter_partial_fan_branches(ctx)
     _reverse_near_vertical_junction_right_entry_offsets(ctx)
+    _recompact_fan_port_bordering_stations(ctx, same_y_adj, sec_layer_stations)
     return ctx.offsets
 
 

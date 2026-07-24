@@ -858,6 +858,7 @@ _CONTIGUOUS_STATION_BUNDLES = [
     ("topologies/funcprofiler_upstream.mmd", "humann4"),
     ("da_pipeline.mmd", "annotate"),
     ("rnaseq_auto.mmd", "star"),
+    ("topologies/fanout_line_reused_nonadjacent_leg.mmd", "n1_0"),
 ]
 
 

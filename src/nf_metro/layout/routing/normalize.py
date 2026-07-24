@@ -1270,6 +1270,19 @@ def _bundle_divergent_distinct_descents(
             by_line[c.route.line_id].append(c)
         if len(by_line) < 2:
             continue
+        # Distinct lines that all reach ONE shared entry port do not diverge --
+        # they converge into that port as a single concentric peel-off bundle,
+        # whose slot order :func:`_reconcile_port_peeloff_risers` owns (by trunk
+        # depth into the port).  Re-seating them here by their divergent turn-Y
+        # order would fight that owner and flip the bundle where the port's
+        # offsets step across the section seam: a line reused on non-adjacent
+        # fan legs can leave an empty interior lane there, which widens the
+        # peel-x span past a tight bundle, so this pass would otherwise claim them.
+        targets = {c.route.edge.target for c in chans}
+        if len(targets) == 1:
+            port = ctx.graph.ports.get(next(iter(targets)))
+            if port is not None and port.is_entry:
+                continue
         xs = [c.x for c in chans]
         # A tight bundle is one slot per LINE, not one per channel.
         if max(xs) - min(xs) <= step * (len(by_line) - 1) + COORD_TOLERANCE:
