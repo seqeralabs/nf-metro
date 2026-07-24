@@ -1,0 +1,31 @@
+%%metro title: Side-branch ascent label strike
+%%metro line: a | Alpha | #e6007e
+%%metro line: b | Beta | #2db572
+%%metro line: fwd | Forward | #6c757d
+%%metro line: rev | Reverse | #b08968
+%%metro diamond_style: symmetric
+%%metro file: cov_out | BW | Coverage
+
+graph LR
+    subgraph up [Upstream]
+        %%metro exit: right | a, b, fwd, rev
+        src[Dedup]
+    end
+    subgraph sec [Coverage & quantification]
+        %%metro entry: left | a, b, fwd, rev
+        %%metro exit: right | a, b
+        split[SAMtools split strand]
+        genomecov[BEDTools genomecov]
+        salmon[Salmon]
+
+        split -->|fwd,rev| genomecov
+        genomecov -->|fwd,rev| cov_out
+    end
+    subgraph down [Reporting]
+        %%metro entry: left | a, b
+        sink[MultiQC]
+    end
+
+    src -->|fwd,rev| split
+    src -->|a,b| salmon
+    salmon -->|a,b| sink

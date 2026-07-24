@@ -380,6 +380,15 @@ gallery:
       "The same symmetric 2-way fan-out where one branch leaves the section via an exit
       port instead of dead-ending.  The dead-end coverage branch stays fanned to the end,
       while the exiting branch falls back to the trunk to meet its exit port (#1299)."
+  - id: side_branch_ascent_label_strike
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      A symmetric 2-way fan-out where a multi-line side branch (Salmon) ascends
+      from off the trunk to the section's shared exit port, passing a wide
+      trunk-sibling label (BEDTools genomecov) along the way. It rides its own
+      track and turns up late at the exit port, so its riser clears the label
+      rather than raking through it mid-section.
   - id: symmetric_diamond_odd_slot_entry
     source_dir: examples/topologies
     category: Fan-out and Fan-in

@@ -3519,16 +3519,27 @@ def test_diagonal_strike_guard_teeth_and_exemptions():
     _guard_no_diagonal_strikes_horizontal_label(bypass, "test")
 
 
-def test_multiline_ascent_to_exit_clears_sibling_label():
+@pytest.mark.parametrize(
+    "fixture",
+    [
+        "topologies/exit_fan_label_strike.mmd",
+        "topologies/side_branch_ascent_label_strike.mmd",
+    ],
+)
+def test_multiline_ascent_to_exit_clears_sibling_label(fixture):
     """A multi-line side branch ascending to an exit port clears sibling labels.
 
     A station carrying the full bundle sitting off the trunk and fed only from
     the section boundary is a genuine side branch: its ascent to the shared exit
     port must turn late (near the port) so it rides its own track rather than
     seating mid-section, where a trunk sibling's horizontal name label extends.
-    The ``exit_fan_label_strike`` fixture isolates the #1449 repro -- ``Salmon``
-    fans up to the exit past the wide ``BEDTools genomecov`` label; a midpoint
-    diagonal rakes that label.
+    ``exit_fan_label_strike`` uses the default (straight) diamond placement,
+    where the continuing branch holds the trunk outright, so it is a
+    clean-render check rather than a genuine ascent.
+    ``side_branch_ascent_label_strike`` sets ``%%metro diamond_style: symmetric``,
+    which keeps both fan branches off the trunk: ``Salmon`` fans up to the exit
+    past the wide ``BEDTools genomecov`` label, exercising the ascent-clearance
+    turn directly.
 
     Parsed the render way (no ``center_ports`` override that ``_layout`` applies
     to ``tests/fixtures/`` files) so the geometry matches what the runtime guard
@@ -3537,7 +3548,7 @@ def test_multiline_ascent_to_exit_clears_sibling_label():
     """
     from nf_metro.layout.phases.spacing import _struck_stations_and_collinear
 
-    path = _resolve_fixture("topologies/exit_fan_label_strike.mmd")
+    path = _resolve_fixture(fixture)
     graph = parse_metro_mermaid(path.read_text())
     compute_layout(graph)
     struck, collinear = _struck_stations_and_collinear(graph)

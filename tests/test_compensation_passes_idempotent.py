@@ -101,6 +101,7 @@ _KNOWN_END_OF_LAYOUT_GAPS: dict[str, frozenset[str]] = {
     "topologies/packed_multiline_serpentine_grid": frozenset({"3.5", "4.7"}),
     "topologies/rl_entry_right_exit_left": frozenset({"3.5", "4.7"}),
     "topologies/rowmate_tb_side_entry_top_align_grow": frozenset({"3.5", "4.7"}),
+    "topologies/side_branch_ascent_label_strike": frozenset({"3.5", "4.7"}),
     "topologies/symmetric_deadend_fanout": frozenset({"3.5", "4.7"}),
     "topologies/symmetric_deadend_fanout_deep": frozenset({"3.5", "4.7"}),
     "topologies/symmetric_deadend_fanout_exit": frozenset({"3.5", "4.7"}),
