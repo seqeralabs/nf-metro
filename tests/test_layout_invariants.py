@@ -1289,11 +1289,13 @@ def _sole_port_y(graph: MetroGraph, port_ids) -> float:
 def test_shared_cell_fork_continuing_branch_holds_trunk():
     """A shared-cell row stays straight and the continuing branch holds the trunk.
 
-    ``shared_cell_fork_trunk_align`` packs three sections into grid cell 0,0.
-    ``prep`` is a tall symmetric fan, so its flow trunk sits below the row's top
-    edge; ``quant`` carries a full-bundle pass-through (``q_pass``, the branch
-    that continues to the exit) alongside a coverage dead-end chain
-    (``q_split`` -> ``q_depth``) that has no forward path out of the section.
+    Under ``diamond_style: straight`` a fan keeps the through-line straight and
+    peels its dead-ends, so this is the mode that must seat the continuing
+    pass-through on the trunk.  ``shared_cell_fork_trunk_align`` packs three
+    sections into grid cell 0,0; ``quant`` carries a full-bundle pass-through
+    (``q_pass``, the branch that continues to the exit) alongside a coverage
+    dead-end chain (``q_split`` -> ``q_depth``) that has no forward path out of
+    the section.
 
     The engine must (a) align the row so the through-bundle runs at one Y across
     ``prep`` -> ``mid`` -> ``quant`` -> ``report`` (no boundary kink), and (b)

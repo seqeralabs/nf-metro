@@ -151,17 +151,36 @@ def _materialize_pass_through_lines(
     if not bundle:
         return
 
-    def _is_subset_chain(sid: str, st: Station) -> bool:
+    exit_reaching: set[str] = set()
+    stack = list(section.exit_ports)
+    while stack:
+        for e in graph.edges_to(stack.pop()):
+            s = graph.stations.get(e.source)
+            if (
+                s is not None
+                and not s.is_port
+                and s.section_id == section.id
+                and e.source not in exit_reaching
+            ):
+                exit_reaching.add(e.source)
+                stack.append(e.source)
+
+    def _competes_for_trunk(sid: str, st: Station) -> bool:
         if st.is_hidden or st.is_port or st.off_track:
             return False
         lines = set(graph.station_lines(sid))
-        return (
-            bool(lines)
-            and lines < bundle
-            and bool(sub.edges_from(sid) or sub.edges_to(sid))
-        )
+        if not lines or not (sub.edges_from(sid) or sub.edges_to(sid)):
+            return False
+        if lines < bundle:
+            return True
+        # A full-bundle chain that dead-ends inside the section (never reaching
+        # an exit port) would otherwise seize the trunk from the real pass-
+        # through; under straight mode the pass-through must hold the trunk, so
+        # this counts as a competitor.  Symmetric mode straddles instead and
+        # needs no materialised trunk anchor.
+        return graph.diamond_style == "straight" and sid not in exit_reaching
 
-    if not any(_is_subset_chain(sid, st) for sid, st in sub.stations.items()):
+    if not any(_competes_for_trunk(sid, st) for sid, st in sub.stations.items()):
         return
 
     exit_port_ids = set(section.exit_ports)
