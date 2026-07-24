@@ -155,7 +155,7 @@ groupings, not axis swaps, and likewise stay.
 | after Stage 1.1 | `_guard_section_bboxes_positive` |
 | after Stage 2.1 | finite coords, stations-in-sections, bboxes-positive |
 | after Stage 3.1 | ports-on-boundaries |
-| after top-align (Stage 3.5) | ports-on-boundaries |
+| after exit-port align + row re-flush (Stage 3.4) | ports-on-boundaries |
 | after each Pass C sub-stage (bisection) | finite coords, bboxes-positive, ports-on-boundaries, station-x-column-drift, plus three phase-gated guards (see below) |
 | after final | bisection set (all unconditional) + off-track-above-anchor, row-trunk-cy-consistent, inter-section-routes-in-row-band |
 
@@ -458,36 +458,32 @@ in pipeline order.
 ### Stage 3.4: align fold-section exit ports
 - **Purpose**: For row-spanning (fold) and TB-direction sections,
   shift LEFT/RIGHT exit ports to the target section's entry Y. May
-  push the target section down via `_resolve_tb_exit_y`.
+  push the target section down via `_resolve_tb_exit_y`; the move then
+  re-flushes the tops of the rows it pushed so it cleans up after
+  itself rather than leaving the correction to a separate stage.
 - **Helper**: `_align_exit_ports` (`phases/ports.py`), dispatching to
-  `_align_lr_exit_port`.
+  `_align_lr_exit_port` and finishing with a `_top_align_row_sections`
+  (`phases/row_align.py`) call scoped to the pushed rows.
 - **Precondition**: Entry ports aligned (Stage 3.2); target sections
   positioned (Stage 1.3/4).
 - **Postcondition**: Exit ports on fold/TB sections sit at the same Y
-  as their target section's entry port (within section bbox extent).
-- **Invariants preserved**: Real station coords. Entry-port Ys
-  (Stage 3.5's top-align corrects any bbox push-down).
+  as their target section's entry port (within section bbox extent);
+  same-row contiguous-column sections whose top the exit move disturbed
+  share `bbox_y` again (station/port Ys shift by the same delta,
+  preserving Stage 3.2 alignment). The row re-flush is a transient
+  intermediate property, not a final guarantee: Stage 6.15a later grows
+  a fanned section's bbox top above the flush line, so finished same-row
+  tops are not guaranteed flush (measured ~40px non-flush on
+  `terminal_symmetric_fan` / `trunk_through_fan`; see Stage 4.7, which
+  re-flushes and carries the same transient tag).
+- **Invariants preserved**: Real station coords. Entry-port Ys.
+- **Validate guard after**: `_guard_ports_on_boundaries` (the row
+  re-flush preserves port-on-edge by shifting ports with stations).
 - **Related tests**: `test_no_kink_at_section_boundary`,
-  `test_inter_section_route_y_stays_within_row_band`.
+  `test_inter_section_route_y_stays_within_row_band`,
+  `test_exit_port_row_reflush`.
 - **Lifecycle:** invariant - the fold/TB exit-port no-kink Y holds at
   the end (re-asserted by Stage 5.5).
-
-### Stage 3.5: top-align sections within each grid row
-- **Purpose**: Shift sections up so contiguous column groups within a
-  row share the same `bbox_y`.
-- **Helper**: `_top_align_row_sections` (`phases/row_align.py`).
-- **Precondition**: All Stage-3.4 bbox shifts settled.
-- **Postcondition**: Same-row contiguous-column sections share
-  `bbox_y` (and station/port Y shifts by the same delta, preserving
-  Stage 3.2 alignment).
-- **Invariants preserved**: Relative station-to-section position
-  inside each shifted section. Bbox heights.
-- **Validate guard after**: `_guard_ports_on_boundaries` (top-align
-  preserves port-on-edge by shifting ports with stations).
-- **Lifecycle:** transient - superseded by Stage 6.15a, which grows a
-  fanned section's bbox top above the flush line, so finished same-row
-  tops are not guaranteed flush (measured ~40px non-flush on
-  `terminal_symmetric_fan` / `trunk_through_fan`).
 
 ### Stage 4.1: align ports to downstream
 - **Purpose**: For non-fold LR/RL sections, pull exit-entry port
@@ -567,14 +563,17 @@ in pipeline order.
   the final bbox sizing in Stage 6.13 (bottom) and Stage 6.15a (top).
 
 ### Stage 4.7: re-run top-align
-- **Purpose**: Repeat Stage 3.5 after Stage 4.5 expanded bboxes via
-  `_expand_bbox_for_y`.
-- **Helper**: `_top_align_row_sections` (re-invoked).
+- **Purpose**: Re-flush row tops after Stage 4.5 expanded bboxes via
+  `_expand_bbox_for_y` (the same row-top alignment Stage 3.4 applies to
+  the rows it pushes, here run over every row).
+- **Helper**: `_top_align_row_sections` (`phases/row_align.py`).
 - **Precondition**: Stages 4.5 / 4.6 complete.
-- **Postcondition**: As Stage 3.5.
-- **Invariants preserved**: As Stage 3.5.
-- **Lifecycle:** transient - superseded by Stage 6.15a (flush row tops,
-  as Stage 3.5).
+- **Postcondition**: Same-row contiguous-column sections share
+  `bbox_y` (station/port Ys shift by the same delta).
+- **Invariants preserved**: Relative station-to-section position inside
+  each shifted section. Bbox heights.
+- **Lifecycle:** transient - superseded by Stage 6.15a, which grows a
+  fanned section's bbox top above the flush line.
 
 ### Stage 4.8: align row trunk Ys
 - **Purpose**: Within each row, shift content downward in shallower
@@ -685,7 +684,7 @@ in pipeline order.
   bboxes share `bbox_y` (heights extended upward as needed).
 - **Invariants preserved**: All station / port Ys.
 - **Lifecycle:** transient - superseded by Stage 6.15a (flush row tops,
-  as Stage 3.5).
+  as Stage 4.7).
 
 ### Stage 5.4: compact row content to bbox top
 - **Purpose**: Shift each row's column-group up by the smallest
@@ -903,7 +902,7 @@ in pipeline order.
 - **Postcondition**: Row bboxes flush at the top across all row mates.
 - **Invariants preserved**: Station Ys (only bbox tops move).
 - **Lifecycle:** transient - superseded by Stage 6.15a (flush row tops,
-  as Stage 3.5).
+  as Stage 4.7).
 
 ### Stage 6.10: align terminus to upstream
 - **Purpose**: After Stage 6.7 re-pitched fanned columns, a single-station

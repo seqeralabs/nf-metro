@@ -65,7 +65,7 @@ _CONDITIONAL_STAGES: dict[str, Callable[[MetroGraph], bool]] = {
 # Fixtures where a stage's compensation pass is not a no-op when replayed
 # after full layout settling, keyed to the stage label(s) that reproduce it.
 #
-# The ``{"3.5", "4.7"}`` cases are CONFIRMED INTENTIONAL, not a bug: Stage
+# The ``{"4.7"}`` cases are CONFIRMED INTENTIONAL, not a bug: Stage
 # 6.15a's ``_fit_bboxes_to_content_top`` deliberately un-flushes a row-mate's
 # bbox top to hug its own content exactly whenever that section's top band is
 # genuinely empty. ``test_section_bbox_top_hugs_content``
@@ -88,27 +88,27 @@ _CONDITIONAL_STAGES: dict[str, Callable[[MetroGraph], bool]] = {
 # unregistered gap and on any registered gap that stops reproducing, so this
 # dict can't silently drift out of sync with engine behaviour.
 _KNOWN_END_OF_LAYOUT_GAPS: dict[str, frozenset[str]] = {
-    "examples/differentialabundance": frozenset({"3.5", "4.7"}),
-    "examples/differentialabundance_default": frozenset({"3.5", "4.7"}),
-    "tests/da_pipeline": frozenset({"3.5", "4.7"}),
-    "tests/trunk_align_matching_bundle": frozenset({"3.5", "4.7"}),
-    "topologies/fanout_hub_two_line_trunk": frozenset({"3.5", "4.7"}),
-    "topologies/internal_source_equal_sibling_2fan": frozenset({"3.5", "4.7"}),
-    "topologies/off_track_convergence": frozenset({"3.5", "4.7"}),
-    "topologies/off_track_convergence_multiline": frozenset({"3.5", "4.7"}),
-    "topologies/off_track_input_above_consumer": frozenset({"3.5", "4.7"}),
-    "topologies/out_of_section_retag_fan": frozenset({"3.5", "4.7"}),
-    "topologies/packed_multiline_serpentine_grid": frozenset({"3.5", "4.7"}),
-    "topologies/rl_entry_right_exit_left": frozenset({"3.5", "4.7"}),
-    "topologies/rowmate_tb_side_entry_top_align_grow": frozenset({"3.5", "4.7"}),
-    "topologies/side_branch_ascent_label_strike": frozenset({"3.5", "4.7"}),
-    "topologies/symmetric_deadend_fanout": frozenset({"3.5", "4.7"}),
-    "topologies/symmetric_deadend_fanout_deep": frozenset({"3.5", "4.7"}),
-    "topologies/symmetric_deadend_fanout_exit": frozenset({"3.5", "4.7"}),
-    "topologies/symmetric_deadend_fanout_relay": frozenset({"3.5", "4.7"}),
+    "examples/differentialabundance": frozenset({"4.7"}),
+    "examples/differentialabundance_default": frozenset({"4.7"}),
+    "tests/da_pipeline": frozenset({"4.7"}),
+    "tests/trunk_align_matching_bundle": frozenset({"4.7"}),
+    "topologies/exit_fan_label_strike": frozenset({"4.7"}),
+    "topologies/fanout_hub_two_line_trunk": frozenset({"4.7"}),
+    "topologies/internal_source_equal_sibling_2fan": frozenset({"4.7"}),
+    "topologies/off_track_convergence": frozenset({"4.7"}),
+    "topologies/off_track_convergence_multiline": frozenset({"4.7"}),
+    "topologies/off_track_input_above_consumer": frozenset({"4.7"}),
+    "topologies/packed_multiline_serpentine_grid": frozenset({"4.7"}),
+    "topologies/rl_entry_right_exit_left": frozenset({"4.7"}),
+    "topologies/rowmate_tb_side_entry_top_align_grow": frozenset({"4.7"}),
+    "topologies/shared_cell_fork_trunk_align": frozenset({"4.7"}),
+    "topologies/symmetric_deadend_fanout": frozenset({"4.7"}),
+    "topologies/symmetric_deadend_fanout_deep": frozenset({"4.7"}),
+    "topologies/symmetric_deadend_fanout_exit": frozenset({"4.7"}),
+    "topologies/symmetric_deadend_fanout_relay": frozenset({"4.7"}),
     "topologies/tb_off_track_inputs": frozenset({"6.6"}),
-    "topologies/terminal_symmetric_fan": frozenset({"3.5", "4.7"}),
-    "topologies/trunk_through_fan": frozenset({"3.5", "4.7"}),
+    "topologies/terminal_symmetric_fan": frozenset({"4.7"}),
+    "topologies/trunk_through_fan": frozenset({"4.7"}),
 }
 
 

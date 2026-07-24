@@ -555,7 +555,7 @@ ENTRY_INSET_LR: float = 0.3
 ENTRY_SHIFT_LR: float = 0.5
 """Station shift multiplier for LR/RL sections with perpendicular entry.
 
-Applied after port positioning (Stage 3.5+) so that internal stations move
+Applied after port positioning (Stage 3.4+) so that internal stations move
 inward while ports stay put, creating a gap between the perpendicular
 entry port and the first internal station.  Mirrors ENTRY_SHIFT_TB."""
 

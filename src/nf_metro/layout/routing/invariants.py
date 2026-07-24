@@ -2168,6 +2168,12 @@ def check_no_riser_hugs_section_edge(
     the target's top and is the shape the corridor-centred riser owns.  A riser
     reaching a LEFT/RIGHT entry is a separate class routed by other handlers and
     is not covered here.
+
+    A junction feeding a TOP port directly below it (shared X) is exempt: its
+    straight drop rides the junction's own lane, not a side-exit lead-in seated
+    against a wall, so running a curve radius outside a flanking box is a clean
+    descent rather than a wall-hug.  This mirrors the straight-drop routing
+    decision in :func:`_straight_drop_column_clear`.
     """
     sections = [s for s in graph.sections.values() if s.bbox_w > 0 and s.bbox_h > 0]
     violations: list[RiserHugsSectionEdge] = []
@@ -2177,6 +2183,13 @@ def check_no_riser_hugs_section_edge(
         tgt_port = graph.ports.get(rp.edge.target)
         if tgt_port is None or tgt_port.side is not PortSide.TOP:
             continue
+        if rp.edge.source in graph.junctions:
+            src_junction = graph.stations.get(rp.edge.source)
+            if (
+                src_junction is not None
+                and abs(src_junction.x - tgt_port.x) <= COORD_TOLERANCE
+            ):
+                continue
         pts = apply_route_offsets(rp, offsets)
         edge = (rp.edge.source, rp.edge.target)
         for p1, p2 in zip(pts, pts[1:]):
