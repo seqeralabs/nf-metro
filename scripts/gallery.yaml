@@ -455,6 +455,14 @@ gallery:
       two-way fork-join. Regression fixture for #1456: under the default `straight` diamond
       the join snapped onto its line's declaration-order base track, which a wide fan-out had
       already given to another line's station, stacking two stations in one cell."
+  - id: fanout_line_reused_nonadjacent_leg
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      "A four-leg fan-out reuses the same line on two non-adjacent legs, with two
+      distinct lines on the legs between them. Regression fixture for #1529: fan-port lane
+      assignment gave the repeated line separate inner and outer lanes, leaving an empty
+      interior lane that made the station's bundle non-contiguous and aborted rendering."
 
   # ── Branching and Multipath ────────────────────────────────────────────────
   - id: asymmetric_tree

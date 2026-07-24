@@ -1,0 +1,29 @@
+graph LR
+%%metro line: l0 | L0 | #e41a1c
+%%metro line: l1 | L1 | #377eb8
+%%metro line: l2 | L2 | #4daf4a
+%%metro line: l3 | L3 | #984ea3
+%%metro line: l4 | L4 | #ff7f00
+%%metro line: l5 | L5 | #a65628
+    subgraph s0 [Sec 0]
+        n0_0[N0.0]
+        n0_1[N0.1]
+    end
+    subgraph s1 [Sec 1]
+        n1_0[N1.0]
+        n1_1[N1.1]
+        n1_2[N1.2]
+        n1_3[N1.3]
+    end
+    subgraph s2 [Sec 2]
+        n2_0[N2.0]
+        n2_1[N2.1]
+        n2_2[N2.2]
+    end
+    n0_1 -->|l4| n1_0
+    n0_1 -->|l1| n1_1
+    n0_1 -->|l2| n1_2
+    n0_1 -->|l4| n1_3
+    n1_3 -->|l2| n2_0
+    n1_1 -->|l1| n2_1
+    n1_0 -->|l0| n2_2
