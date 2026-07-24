@@ -45,6 +45,7 @@ from nf_metro.layout.layers import assign_layers
 from nf_metro.layout.ordering import assign_tracks
 from nf_metro.layout.phases._common import (
     _build_section_subgraph,
+    _exit_reaching_nodes,
     iter_sole_trunk_continuations,
     perp_entry_lands_left,
     section_exit_lines,
@@ -124,29 +125,6 @@ def _has_horizontal_predecessor_section(graph: MetroGraph, section: Section) -> 
             if src_sec and src_sec.direction in ("LR", "RL"):
                 return True
     return False
-
-
-def _exit_reaching_nodes(graph: MetroGraph, section: Section) -> frozenset[str]:
-    """Internal stations with a forward path to one of *section*'s exit ports.
-
-    Walks backward from each exit port through in-section, non-port feeders, so
-    a station is included when the flow through it continues out of the section
-    (the section's through-line) rather than dead-ending inside it.  A terminal
-    section with no exit port yields the empty set.
-    """
-    sec_ids = set(section.station_ids)
-    reaching: set[str] = set()
-    stack = list(section.exit_ports)
-    while stack:
-        node = stack.pop()
-        for edge in graph.edges_to(node):
-            src = edge.source
-            st = graph.stations.get(src)
-            if src in reaching or src not in sec_ids or st is None or st.is_port:
-                continue
-            reaching.add(src)
-            stack.append(src)
-    return frozenset(reaching)
 
 
 def _layout_single_section(
