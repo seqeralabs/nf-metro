@@ -379,10 +379,6 @@
     "note": "A bypass source section always resolves and has bbox_w>0 (the parser never emits an empty section); the None/zero-width arm never fires.",
     "status": "defensive"
   },
-  "inter_section_handlers.py::if sx >= (left_edge + right_edge) / 2:::#1": {
-    "note": "Defensive symmetry: a merge feeder junction sits in the inter-column gap downstream of its fork, i.e. right of its source section's centre, so the exit-right arm always fires in the corpus. The exit-left arm mirrors it for a junction sitting left of centre; no fixture places a merge feeder there.",
-    "status": "defensive"
-  },
   "inter_section_handlers.py::if tgt_col is not None:::#1": {
     "note": "tgt_col from _resolve_section_col on a valid LEFT entry port is always non-None (sections get grid_col>=0 after auto-layout).",
     "status": "defensive"

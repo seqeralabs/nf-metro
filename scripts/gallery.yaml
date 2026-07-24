@@ -1267,6 +1267,13 @@ gallery:
       "A two-line bundle whose order is preserved across the junction-to-entry-port
       boundary, so the straight-through line stays horizontal instead of slanting to swap slots
       (issue #704)."
+  - id: merge_feeder_shared_channel_gap
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      Two fan sources each feed one merge junction and one side section; a packed
+      cell-mate pushes their shared merge descent into an inter-column gap, so both
+      feeders fuse onto a single descent channel that splits to the side and target.
   - id: merge_trunk_out_of_range_section
     source_dir: examples/topologies
     category: Merge & Convergence
