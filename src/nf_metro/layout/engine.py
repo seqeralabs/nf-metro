@@ -132,6 +132,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_convergence_shallow_feeder_concentric,
     _guard_coordinates_finite,
     _guard_entry_approach_from_port_side,
+    _guard_entry_landing_no_station_backtrack,
     _guard_entry_port_fed_only_by_ports,
     _guard_exit_inherits_entry_bundle_order,
     _guard_explicit_grid_directions,

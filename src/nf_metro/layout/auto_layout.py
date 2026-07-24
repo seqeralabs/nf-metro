@@ -1221,11 +1221,12 @@ def _infer_directions(
     fold_sections: set[str],
     below_fold_sections: AbstractSet[str] = frozenset(),
 ) -> None:
-    """Infer section flow direction (LR/RL/TB) from grid positions.
+    """Infer section flow direction (LR/RL/TB/BT) from grid positions.
 
     Only modifies sections NOT in graph._explicit_directions.
     Fold sections are forced to TB (they bridge between row bands).
-    Sections whose predecessors are all to the right get RL.
+    Every other auto-gridded section is classified by
+    :func:`_classify_inferred_direction`.
 
     Explicitly-gridded sections are skipped: their grid position is manual
     layout intent, not a flow-direction signal (#446). They also still read
@@ -1245,77 +1246,81 @@ def _infer_directions(
             section.direction = "TB"
             continue
 
-        my_col = section.grid_col
-        my_row = section.grid_row
-
-        # Get successor positions
-        succ_cols = []
-        succ_rows = []
-        for tgt in successors.get(sec_id, set()):
-            tgt_sec = graph.sections.get(tgt)
-            if tgt_sec and tgt_sec.grid_col >= 0:
-                succ_cols.append(tgt_sec.grid_col)
-                succ_rows.append(tgt_sec.grid_row)
-
-        # Get predecessor positions
-        pred_cols = []
-        pred_rows = []
-        for src in predecessors.get(sec_id, set()):
-            src_sec = graph.sections.get(src)
-            if src_sec and src_sec.grid_col >= 0:
-                pred_cols.append(src_sec.grid_col)
-                pred_rows.append(src_sec.grid_row)
-
-        # RL: all successors to the left (unless they're all strictly
-        # below, which is better handled as TB -- but below-fold sections
-        # keep RL even when successors are below, since they're on a
-        # return row routing leftward)
-        if succ_cols and all(c < my_col for c in succ_cols):
-            if not all(r > my_row for r in succ_rows) or sec_id in below_fold_sections:
-                section.direction = "RL"
-                continue
-
-        # RL: leaf section (no successors) and all predecessors are
-        # to the right or same column, with at least one strictly to
-        # the right or above (post-fold return row or below-fold).
-        if not succ_cols and pred_cols:
-            if all(c >= my_col for c in pred_cols) and (
-                any(r < my_row for r in pred_rows) or any(c > my_col for c in pred_cols)
-            ):
-                section.direction = "RL"
-                continue
-
-        # TB: vertical bridge/serpentine turn. Only when every successor sits
-        # in the row directly below the section's bottom and no further right
-        # than the adjacent column. Successors to the left or directly below
-        # are a same-column drop or a return-row turn that TB serves cleanly;
-        # a successor down-and-to-the-right is instead reached by a flow-aligned
-        # exit plus an inter-section across+down L-shape, so the section stays
-        # horizontal. Successors a row gap away are likewise left to LR + drop.
-        my_bottom = my_row + section.grid_row_span - 1
-        if succ_rows and all(
-            sr == my_bottom + 1 and sc <= my_col + 1
-            for sc, sr in zip(succ_cols, succ_rows)
-        ):
-            section.direction = "TB"
-            continue
-
-        # Default: LR
-        section.direction = "LR"
+        section.direction = _classify_inferred_direction(
+            graph, sec_id, successors, predecessors, below_fold_sections
+        )
 
 
-def _flow_aligned_sides(direction: str) -> tuple[PortSide, PortSide]:
-    """Return ``(entry_side, exit_side)`` aligned with a section's flow.
+def _classify_inferred_direction(
+    graph: MetroGraph,
+    sec_id: str,
+    successors: dict[str, set[str]],
+    predecessors: dict[str, set[str]],
+    below_fold_sections: AbstractSet[str],
+) -> str:
+    """Map a section's neighbour grid geometry to one of LR/RL/TB/BT.
 
-    A left-to-right section enters on the LEFT and exits on the RIGHT; a
-    right-to-left section is mirrored.  Horizontal-flow sections always
-    present flow-aligned ports regardless of where their neighbours sit
-    on the grid; the inter-section router carriage-returns the connection
-    (right -> down -> left -> down -> right) for a same-column stack.
+    An ordered classification returning the first matching flow direction.
+    Forward flow runs left-to-right and fans downward, so the drop (TB) and
+    climb (BT) turns are mirror images with one asymmetry: TB's column envelope
+    extends one column into the forward (right) direction (a down-and-one-right
+    successor counts as a fold turn), while BT's does not (an up-and-right
+    successor is forward flow reached by an L-shaped exit, so the section stays
+    horizontal).
     """
-    if direction == "RL":
-        return PortSide.RIGHT, PortSide.LEFT
-    return PortSide.LEFT, PortSide.RIGHT
+    section = graph.sections[sec_id]
+    my_col = section.grid_col
+    my_row = section.grid_row
+
+    succ_cols: list[int] = []
+    succ_rows: list[int] = []
+    for tgt in successors.get(sec_id, set()):
+        tgt_sec = graph.sections.get(tgt)
+        if tgt_sec and tgt_sec.grid_col >= 0:
+            succ_cols.append(tgt_sec.grid_col)
+            succ_rows.append(tgt_sec.grid_row)
+
+    pred_cols: list[int] = []
+    pred_rows: list[int] = []
+    for src in predecessors.get(sec_id, set()):
+        src_sec = graph.sections.get(src)
+        if src_sec and src_sec.grid_col >= 0:
+            pred_cols.append(src_sec.grid_col)
+            pred_rows.append(src_sec.grid_row)
+
+    # RL: return row -- all successors to the left, unless they are all strictly
+    # below (a pure drop, better served as TB).  Below-fold sections stay RL
+    # even with successors below, since they route leftward along a return row.
+    if succ_cols and all(c < my_col for c in succ_cols):
+        if not all(r > my_row for r in succ_rows) or sec_id in below_fold_sections:
+            return "RL"
+
+    # RL: leaf section (no successors) fed only from the right/above, with at
+    # least one predecessor strictly to the right or above (return row).
+    if not succ_cols and pred_cols:
+        if all(c >= my_col for c in pred_cols) and (
+            any(r < my_row for r in pred_rows) or any(c > my_col for c in pred_cols)
+        ):
+            return "RL"
+
+    # TB: drop / serpentine turn -- every successor in the row directly below,
+    # within the forward column envelope (same column, one left, or one right).
+    my_bottom = my_row + section.grid_row_span - 1
+    if succ_rows and all(
+        sr == my_bottom + 1 and sc <= my_col + 1 for sc, sr in zip(succ_cols, succ_rows)
+    ):
+        return "TB"
+
+    # BT: climb / return-up turn -- the mirror of TB.  Every successor in the
+    # row directly above, within the return column envelope (same column or one
+    # left).  The RL branch above already claims the all-left case, so this
+    # fires on the same-column upward return it leaves behind.
+    if succ_rows and all(
+        sr == my_row - 1 and sc <= my_col for sc, sr in zip(succ_cols, succ_rows)
+    ):
+        return "BT"
+
+    return "LR"
 
 
 def _has_predecessor_above(
@@ -1366,6 +1371,53 @@ def _feeds_from_vertical_drop_above(
     )
 
 
+def _has_predecessor_below(
+    graph: MetroGraph,
+    sec_id: str,
+    my_row: int,
+    predecessors: dict[str, set[str]],
+    predicate: Callable[[str, Section], bool] | None = None,
+) -> bool:
+    """True when a predecessor's top row sits below ``my_row``.
+
+    The vertical mirror of :func:`_has_predecessor_above`.  ``predicate``
+    optionally restricts the test to predecessors it accepts, receiving each
+    ``(src_id, src_section)`` pair.
+    """
+    for src in predecessors.get(sec_id, set()):
+        src_sec = graph.sections.get(src)
+        if not src_sec:
+            continue
+        _src_col, src_row, _src_row_span, _src_col_span = _effective_grid_pos(
+            graph, src
+        )
+        if src_row > my_row and (predicate is None or predicate(src, src_sec)):
+            return True
+    return False
+
+
+def _feeds_from_vertical_climb_below(
+    graph: MetroGraph,
+    sec_id: str,
+    my_row: int,
+    predecessors: dict[str, set[str]],
+) -> bool:
+    """True when an upward-exiting predecessor (a BT section) sits below.
+
+    The mirror of :func:`_feeds_from_vertical_drop_above`.  A BT section exits
+    TOP and climbs straight up, so the section it feeds should accept that climb
+    on its BOTTOM edge; forcing a flow-aligned side there bends the vertical
+    climb into a diagonal or a wrap around to the leading edge.
+    """
+    return _has_predecessor_below(
+        graph,
+        sec_id,
+        my_row,
+        predecessors,
+        lambda src, src_sec: src_sec.direction == "BT",
+    )
+
+
 def _is_foldback_drop_corner(
     graph: MetroGraph,
     sec_id: str,
@@ -1385,7 +1437,7 @@ def _is_foldback_drop_corner(
     The caller gates this on the section being horizontal (LR/RL, non-fold).
     """
     section = graph.sections[sec_id]
-    entry_aligned, _exit_aligned = _flow_aligned_sides(section.direction)
+    entry_aligned, _exit_aligned = _flow_edge_sides(section.direction)
     if not any(side == entry_aligned for side, _lines in section.exit_hints):
         return False
     return _has_predecessor_above(graph, sec_id, my_row, predecessors)
@@ -1401,10 +1453,13 @@ def _infer_port_sides(
 ) -> None:
     """Infer entry/exit port sides from section flow and grid positions.
 
-    Horizontal-flow (LR/RL) sections present flow-aligned ports: entry on
-    the leading edge, exit on the trailing edge, regardless of neighbour
-    position.  A same-column stack of LR sections therefore connects via a
-    carriage-return wrap rather than a TOP/BOTTOM hop.
+    Flow-aligned sections present their ports on the flow-start/flow-end edges
+    regardless of neighbour position, letting the router carriage-return or
+    perpendicular-drop the connection.  Horizontal (LR/RL) sections are always
+    flow-aligned; an upward (BT) section is too, so its entry lands on the
+    flow-start BOTTOM edge and its exit on the flow-end TOP edge -- without this
+    a BT section's entry lands on the side facing its feeder and the line
+    backtracks down through the section's stations to reach the flow-start one.
 
     Fold sections (TB bridges) get entry LEFT, exit BOTTOM.
     Remaining TB sections use _relative_side to derive sides from grid
@@ -1416,18 +1471,31 @@ def _infer_port_sides(
     for sec_id, section in graph.sections.items():
         my_col, my_row, _row_span, my_col_span = _effective_grid_pos(graph, sec_id)
         horizontal = section.direction in ("LR", "RL") and sec_id not in fold_sections
-        entry_aligned, exit_aligned = _flow_aligned_sides(section.direction)
+        # A BT section flows up the Y axis; like LR/RL it presents flow-aligned
+        # ports (entry BOTTOM, exit TOP).  TB stays on the relative-side path,
+        # whose above-feeder TOP entry already matches its flow-start edge.
+        vertical_up = section.direction == "BT" and sec_id not in fold_sections
+        flow_axis_aligned = horizontal or vertical_up
+        entry_aligned, exit_aligned = _flow_edge_sides(section.direction)
 
-        # A horizontal section exits flow-aligned (LR -> RIGHT, RL -> LEFT)
-        # regardless of neighbour position; the router carriage-returns.
-        flow_aligned_exit = horizontal
+        # A flow-aligned section exits on its flow-end edge regardless of
+        # neighbour position; the router carriage-returns or drops.
+        flow_aligned_exit = flow_axis_aligned
 
-        # Entry is flow-aligned unless a vertically-exiting (TB/fold)
-        # predecessor sits above: that drops straight down, so the
-        # relative-side branch's TOP entry reads cleaner than a wrap.
-        flow_aligned_entry = horizontal and not _feeds_from_vertical_drop_above(
-            graph, sec_id, my_row, predecessors, fold_sections
-        )
+        # A horizontal section's entry is flow-aligned unless a perpendicular
+        # stacked neighbour reads cleaner: a vertically-exiting (TB/fold)
+        # predecessor above drops onto the TOP edge, or an upward-exiting (BT)
+        # predecessor below climbs into the BOTTOM edge.  Both are then handled
+        # by the relative-side branch.  A vertical (BT) section takes no such
+        # exception: its entry stays on the flow-start BOTTOM edge so the feed
+        # never backtracks through the section to reach the flow-start station.
+        flow_aligned_entry = flow_axis_aligned
+        if horizontal:
+            flow_aligned_entry = not _feeds_from_vertical_drop_above(
+                graph, sec_id, my_row, predecessors, fold_sections
+            ) and not _feeds_from_vertical_climb_below(
+                graph, sec_id, my_row, predecessors
+            )
 
         # Infer exit hints (only if section has no explicit exit_hints)
         if not section.exit_hints and sec_id in successors:

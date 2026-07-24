@@ -1,0 +1,21 @@
+%%metro title: BT Section With Inferred Ports
+%%metro style: dark
+%%metro line: a | A | #e63946
+%%metro grid: dst_sec | 0,0
+%%metro grid: work | 0,1
+
+graph LR
+    subgraph dst_sec [Output]
+        o1[Report]
+        o2[Archive]
+        o1 -->|a| o2
+    end
+
+    subgraph work [Work]
+        %%metro direction: BT
+        w1[Process]
+        w2[Collect]
+        w1 -->|a| w2
+    end
+
+    w2 -->|a| o1

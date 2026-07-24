@@ -548,6 +548,13 @@ gallery:
     description:
       A BT section's trailing TOP exit dropping up into the BOTTOM entry of an LR
       section stacked above it (#1044).
+  - id: bt_infer_ports
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      "A BT section whose ports are inferred rather than hand-declared: the entry
+      lands on the flow-start BOTTOM edge and the exit on the flow-end TOP edge, so
+      the feed climbs straight in without backtracking through the stations (#1442)."
   - id: bt_exit_top_above_2line
     source_dir: examples/topologies
     category: TB / BT Sections

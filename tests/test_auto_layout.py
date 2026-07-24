@@ -734,3 +734,150 @@ def test_perp_entry_run_stays_in_section_bbox(fixture):
             f"{station.section_id!r} bbox x-range "
             f"[{sec.bbox_x:.1f}, {sec.bbox_x + sec.bbox_w:.1f}]"
         )
+
+
+# --- BT direction & frame-symmetric port inference (#1442) ---
+
+
+def test_direction_inference_bt():
+    """A section whose sole successor sits directly above in the same column
+    gets BT (the mirror of the TB drop turn).
+
+    Auto-grid never stacks a successor same-column-above on its own, so the
+    grid position is forced here the way ``test_direction_inference_rl`` forces
+    a serpentine row.
+    """
+    graph = _make_graph_with_sections(
+        ["work", "above"],
+        [("work_s1", "work", "above_s1", "above", "main")],
+    )
+    successors, predecessors, _ = _build_section_dag(graph)
+    _assign_grid_positions(graph, successors, predecessors, max_station_columns=100)
+
+    graph.sections["work"].grid_col = 0
+    graph.sections["work"].grid_row = 1
+    graph.sections["above"].grid_col = 0
+    graph.sections["above"].grid_row = 0
+
+    _infer_directions(graph, successors, predecessors, set())
+    assert graph.sections["work"].direction == "BT"
+
+
+def test_bt_up_and_right_successor_stays_lr():
+    """An up-and-to-the-right successor is forward flow, not a BT climb.
+
+    BT's return column envelope excludes the forward (right) column, so a
+    section handing off one row up and one column right stays LR and reaches
+    its successor with an L-shaped exit.
+    """
+    graph = _make_graph_with_sections(
+        ["work", "above_right"],
+        [("work_s1", "work", "above_right_s1", "above_right", "main")],
+    )
+    successors, predecessors, _ = _build_section_dag(graph)
+    _assign_grid_positions(graph, successors, predecessors, max_station_columns=100)
+
+    graph.sections["work"].grid_col = 1
+    graph.sections["work"].grid_row = 1
+    graph.sections["above_right"].grid_col = 2
+    graph.sections["above_right"].grid_row = 0
+
+    _infer_directions(graph, successors, predecessors, set())
+    assert graph.sections["work"].direction == "LR"
+
+
+def test_bt_section_infers_bottom_entry_top_exit():
+    """A BT section presents flow-aligned ports: entry BOTTOM, exit TOP.
+
+    Without this the entry lands on the side facing the feeder and the line
+    backtracks down through the section's stations to reach the flow-start one.
+    """
+    graph = _make_graph_with_sections(
+        ["work", "feeder", "sink"],
+        [
+            ("feeder_s1", "feeder", "work_s1", "work", "main"),
+            ("work_s1", "work", "sink_s1", "sink", "main"),
+        ],
+    )
+    successors, predecessors, edge_lines = _build_section_dag(graph)
+    _assign_grid_positions(graph, successors, predecessors, max_station_columns=100)
+
+    graph.sections["work"].direction = "BT"
+    graph.sections["work"].grid_col = 1
+    graph.sections["work"].grid_row = 1
+    graph.sections["feeder"].grid_col = 2
+    graph.sections["feeder"].grid_row = 0
+    graph.sections["sink"].grid_col = 0
+    graph.sections["sink"].grid_row = 0
+
+    _infer_port_sides(graph, successors, predecessors, edge_lines, set())
+    assert graph.sections["work"].entry_hints[0][0] == PortSide.BOTTOM
+    assert graph.sections["work"].exit_hints[0][0] == PortSide.TOP
+
+
+def test_lr_fed_from_below_by_bt_infers_bottom_entry():
+    """An LR section fed from directly below by a BT section enters BOTTOM.
+
+    A BT predecessor exits TOP and climbs straight up, so the section it feeds
+    accepts that climb on its BOTTOM edge rather than wrapping the feed around
+    to the flow-aligned LEFT edge (the mirror of the TB-drop-onto-TOP rule).
+    """
+    graph = _make_graph_with_sections(
+        ["output", "work"],
+        [("work_s1", "work", "output_s1", "output", "main")],
+    )
+    successors, predecessors, edge_lines = _build_section_dag(graph)
+    _assign_grid_positions(graph, successors, predecessors, max_station_columns=100)
+
+    graph.sections["work"].direction = "BT"
+    # Port inference reads grid positions via grid_overrides, so stack the
+    # sections there: output at (0,0), work directly below at (0,1).
+    graph.grid_overrides["output"] = (0, 0, 1, 1)
+    graph.grid_overrides["work"] = (0, 1, 1, 1)
+
+    _infer_port_sides(graph, successors, predecessors, edge_lines, set())
+    assert graph.sections["output"].entry_hints[0][0] == PortSide.BOTTOM
+
+
+def _bt_section_with_entry(port_y: float) -> MetroGraph:
+    """A 3-station BT section (flow up) whose entry port sits at *port_y* and
+    feeds the flow-start (bottom) station w1."""
+    graph = MetroGraph()
+    graph.add_line(MetroLine(id="a", display_name="A", color="#e63946"))
+    graph.add_section(Section(id="work", name="Work"))
+    graph.sections["work"].direction = "BT"
+    for sid, y in [("w1", 300.0), ("w2", 260.0), ("w3", 220.0)]:
+        graph.add_station(Station(id=sid, label=sid, section_id="work"))
+        graph.stations[sid].x = 100.0
+        graph.stations[sid].y = y
+    graph.add_station(Station(id="p", label="", section_id="work", is_port=True))
+    graph.stations["p"].x = 100.0
+    graph.stations["p"].y = port_y
+    graph.add_edge(Edge(source="p", target="w1", line_id="a"))
+    return graph
+
+
+def test_entry_landing_backtrack_guard_detects():
+    """An entry port on a BT section's flow-end (TOP) edge, feeding the
+    flow-start station, reverses past the interior stations and is caught.
+    """
+    from nf_metro.layout.phases.guards import (
+        PhaseInvariantError,
+        _guard_entry_landing_no_station_backtrack,
+    )
+
+    graph = _bt_section_with_entry(port_y=200.0)
+    with pytest.raises(PhaseInvariantError, match="backtrack"):
+        _guard_entry_landing_no_station_backtrack(graph, "test")
+
+
+def test_entry_landing_flow_aligned_passes_guard():
+    """A flow-aligned (BOTTOM edge) entry landing passes no interior station
+    and does not trip the backtrack guard.
+    """
+    from nf_metro.layout.phases.guards import (
+        _guard_entry_landing_no_station_backtrack,
+    )
+
+    graph = _bt_section_with_entry(port_y=340.0)
+    _guard_entry_landing_no_station_backtrack(graph, "test")

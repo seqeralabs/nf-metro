@@ -503,6 +503,12 @@ def _layout_section_rails(
     section.bbox_y = bbox_y
     section.bbox_w = bbox_w
     section.bbox_h = bbox_h
+    if section.direction != "LR" and section.id in graph._explicit_directions:
+        raise ValueError(
+            f"rail-mode section {section.id!r} declares direction "
+            f"{section.direction!r}; rail mode lays rails left-to-right only. "
+            "Drop the %%metro direction: directive or the rail idiom."
+        )
     section.direction = "LR"
 
     return bbox_y + bbox_h
