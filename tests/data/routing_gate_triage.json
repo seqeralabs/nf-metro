@@ -379,10 +379,6 @@
     "note": "A bypass source section always resolves and has bbox_w>0 (the parser never emits an empty section); the None/zero-width arm never fires.",
     "status": "defensive"
   },
-  "inter_section_handlers.py::if sx >= (left_edge + right_edge) / 2:::#1": {
-    "note": "Defensive symmetry: a merge feeder junction sits in the inter-column gap downstream of its fork, i.e. right of its source section's centre, so the exit-right arm always fires in the corpus. The exit-left arm mirrors it for a junction sitting left of centre; no fixture places a merge feeder there.",
-    "status": "defensive"
-  },
   "inter_section_handlers.py::if tgt_col is not None:::#1": {
     "note": "tgt_col from _resolve_section_col on a valid LEFT entry port is always non-None (sections get grid_col>=0 after auto-layout).",
     "status": "defensive"
@@ -985,6 +981,10 @@
   },
   "offsets.py::if set(inherited) != set(graph.station_lines(port_id)):::#1": {
     "note": "_inherit_level_convergence_entry_offsets skips a convergence entry port when the lines it inherits from its immediate feeders do not cover every line the port carries. A convergence entry's lines are, by construction, exactly the union of its inbound edges' lines, and each inbound edge supplies that line's feeder offset, so the inherited set always equals the port's line set and the mismatch arm is never taken. Defensive against a port line with no inbound edge (a malformed graph).",
+    "status": "defensive"
+  },
+  "normalize.py::if not (COORD_TOLERANCE < abs(gap) <= radius) or overlap <= COORD_TOLERANCE:::#1": {
+    "note": "_separate_merge_trunk_opposite_arm fires only when a merge fan-out's down-trunk and an opposite up-arm of the same line settle within a curve radius while overlapping in Y -- the near-parallel doubled corner _guard_no_opposing_line_overlap forbids. The not(...) skip arm covers a pair that is already clear (coincident, or more than a curve radius apart): the normal no-op for well-separated arms. The corpus's one triggering fixture pairs the anchored up-arm only with in-range trunk descents, so this already-clear arm stays un-exercised.",
     "status": "defensive"
   }
 }
