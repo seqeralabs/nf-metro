@@ -1,0 +1,36 @@
+%%metro title: Out-of-section retag preserves in-section fan
+%%metro diamond_style: symmetric
+%%metro file: cov_out | BW | Coverage
+%%metro line: a | A | #e6007e
+%%metro line: b | B | #2db572
+%%metro line: c | C | #2b6cb0
+%%metro line: x | X | #f2a900
+%%metro line: y | Y | #7c3aed
+%%metro grid: input | 0,0
+%%metro grid: secA | 1,0
+%%metro grid: secB | 2,0
+
+graph LR
+    subgraph input [Align]
+        %%metro exit: right | a, b, c
+        dedup[Dedup]
+    end
+
+    subgraph secA [Quant]
+        %%metro entry: left | a, b, c
+        s_split[Split strand]
+        s_gc[Genome cov]
+        s_peel[Salmon]
+
+        s_split -->|a,b,c| s_gc
+        s_gc -->|a,b,c| cov_out
+    end
+
+    subgraph secB [TE]
+        te[TE]
+    end
+
+    dedup -->|a,b,c| s_split
+    dedup -->|a,b,c| s_peel
+    s_gc -->|a,b,c| te
+    s_peel -->|x,y| te

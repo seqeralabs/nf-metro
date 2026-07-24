@@ -14,7 +14,7 @@ from nf_metro.layout.phase_state import require_phase_field
 from nf_metro.layout.phases._common import (
     _fan_offsets,
     _grid_group_section_ids,
-    _section_bundle_lines,
+    _section_fan_trunk_lines,
     _section_lr_port_anchor_y,
     grow_section_bbox_max_edge,
     grow_section_bbox_min_edge,
@@ -194,8 +194,8 @@ def _redistribute_fanout_siblings(graph: MetroGraph, y_spacing: float) -> None:
             or section.bbox_h <= 0
         ):
             continue
-        bundle = _section_bundle_lines(graph, section)
-        if not bundle:
+        trunk = _section_fan_trunk_lines(graph, section)
+        if not trunk:
             continue
         port_ids = section.port_ids
 
@@ -213,8 +213,7 @@ def _redistribute_fanout_siblings(graph: MetroGraph, y_spacing: float) -> None:
             cols[round(st.x, 3)].append(sid)
 
         for sids in cols.values():
-            # Identify trunk station in this column: lines == bundle, unique.
-            trunks = [s for s in sids if set(graph.station_lines(s)) == bundle]
+            trunks = [s for s in sids if set(graph.station_lines(s)) >= trunk]
             if len(trunks) != 1:
                 continue
             trunk_sid = trunks[0]
@@ -236,7 +235,7 @@ def _redistribute_fanout_siblings(graph: MetroGraph, y_spacing: float) -> None:
                 for s in sids
                 if s != trunk_sid
                 and set(graph.station_lines(s))
-                and set(graph.station_lines(s)) < bundle
+                and set(graph.station_lines(s)) < trunk
                 and graph.edges_to(s)
             ]
             if not siblings:
@@ -482,8 +481,8 @@ def _section_has_symmetric_entry_fork(graph: MetroGraph, section: Section) -> bo
     """
     if graph.diamond_style != "symmetric" or section.direction not in ("LR", "RL"):
         return False
-    bundle = _section_bundle_lines(graph, section)
-    if not bundle:
+    trunk = _section_fan_trunk_lines(graph, section)
+    if not trunk:
         return False
     port_ids = section.port_ids
     cols: dict[float, list[str]] = defaultdict(list)
@@ -496,7 +495,7 @@ def _section_has_symmetric_entry_fork(graph: MetroGraph, section: Section) -> bo
         cols[round(st.x, 3)].append(sid)
     for sids in cols.values():
         if len(sids) != 2 or not all(
-            set(graph.station_lines(s)) == bundle for s in sids
+            set(graph.station_lines(s)) >= trunk for s in sids
         ):
             continue
         if not _branches_reconverge(graph, section, sids[0], sids[1]):
@@ -673,8 +672,8 @@ def _redistribute_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> No
             or section.bbox_h <= 0
         ):
             continue
-        bundle = _section_bundle_lines(graph, section)
-        if not bundle:
+        trunk = _section_fan_trunk_lines(graph, section)
+        if not trunk:
             continue
         port_ids = section.port_ids
 
@@ -694,7 +693,7 @@ def _redistribute_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> No
             return bool(graph.edges_to(sid))
 
         full_by_col = {
-            x: [s for s in sids if set(graph.station_lines(s)) == bundle]
+            x: [s for s in sids if set(graph.station_lines(s)) >= trunk]
             for x, sids in cols.items()
         }
         # Snapshot pre-fan Ys so iteration order of columns doesn't
@@ -733,7 +732,7 @@ def _redistribute_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> No
             non_full = [s for s in sids if s not in full]
             ok = bool(full) and all(
                 set(graph.station_lines(s))
-                and set(graph.station_lines(s)) < bundle
+                and set(graph.station_lines(s)) < trunk
                 and _has_pred(s)
                 for s in non_full
             )
@@ -857,8 +856,8 @@ def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
             graph, section
         ):
             continue
-        bundle = _section_bundle_lines(graph, section)
-        if not bundle:
+        trunk = _section_fan_trunk_lines(graph, section)
+        if not trunk:
             continue
         port_ids = section.port_ids
 
@@ -875,7 +874,7 @@ def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
             return bool(graph.edges_to(sid))
 
         full_by_col = {
-            x: [s for s in sids if set(graph.station_lines(s)) == bundle]
+            x: [s for s in sids if set(graph.station_lines(s)) >= trunk]
             for x, sids in cols.items()
         }
 
@@ -913,7 +912,7 @@ def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
                 and non_full
                 and all(
                     set(graph.station_lines(s))
-                    and set(graph.station_lines(s)) < bundle
+                    and set(graph.station_lines(s)) < trunk
                     and _has_pred(s)
                     for s in non_full
                 )

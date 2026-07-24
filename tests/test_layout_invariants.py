@@ -1290,11 +1290,13 @@ def _sole_port_y(graph: MetroGraph, port_ids) -> float:
 def test_shared_cell_fork_continuing_branch_holds_trunk():
     """A shared-cell row stays straight and the continuing branch holds the trunk.
 
-    ``shared_cell_fork_trunk_align`` packs three sections into grid cell 0,0.
-    ``prep`` is a tall symmetric fan, so its flow trunk sits below the row's top
-    edge; ``quant`` carries a full-bundle pass-through (``q_pass``, the branch
-    that continues to the exit) alongside a coverage dead-end chain
-    (``q_split`` -> ``q_depth``) that has no forward path out of the section.
+    Under ``diamond_style: straight`` a fan keeps the through-line straight and
+    peels its dead-ends, so this is the mode that must seat the continuing
+    pass-through on the trunk.  ``shared_cell_fork_trunk_align`` packs three
+    sections into grid cell 0,0; ``quant`` carries a full-bundle pass-through
+    (``q_pass``, the branch that continues to the exit) alongside a coverage
+    dead-end chain (``q_split`` -> ``q_depth``) that has no forward path out of
+    the section.
 
     The engine must (a) align the row so the through-bundle runs at one Y across
     ``prep`` -> ``mid`` -> ``quant`` -> ``report`` (no boundary kink), and (b)
@@ -1549,6 +1551,72 @@ def test_symfan_pairs_share_y(fixture):
                 f"mirrored around trunk cy={trunk_cy} "
                 f"(above_gap={above_gap}, below_gap={below_gap})"
             )
+
+
+@pytest.mark.parametrize("center_ports", [False, True])
+def test_out_of_section_retag_preserves_source_section_fan(center_ports):
+    """Retagging a station's outbound, out-of-section edges must not disturb
+    the source section's own internal layout (#1426).
+
+    A section's symmetric-fan eligibility keys off the lines that traverse
+    its trunk, not the raw union of every line crossing its ports.  A
+    peel-off line a station sends toward a downstream section inflates that
+    port bundle without changing the section's internal topology, so the
+    recolored map's ``secA`` must lay out identically to the base map's
+    under either ports mode.
+    """
+    recolor = (EXAMPLES / "topologies" / "out_of_section_retag_fan.mmd").read_text()
+    base = recolor.replace("s_peel -->|x,y| te", "s_peel -->|a| te")
+    assert base != recolor, "retag reversal did not alter the fixture text"
+
+    def source_section_ys(text: str) -> dict[str, float]:
+        graph = parse_metro_mermaid(text)
+        graph.center_ports = center_ports
+        compute_layout(graph)
+        sec = graph.sections["secA"]
+        return {
+            sid: round(graph.stations[sid].y, 3)
+            for sid in sec.station_ids
+            if not graph.stations[sid].is_port and not graph.stations[sid].off_track
+        }
+
+    assert source_section_ys(base) == source_section_ys(recolor)
+
+
+def test_out_of_section_retag_exit_lanes_ordered_by_source_height():
+    """An exit-port bundle orders its lanes by the height of each line's feeder.
+
+    In ``out_of_section_retag_fan`` the ``secA`` exit port gathers ``a,b,c``
+    (fed from ``s_gc``, below the port) and the retagged peel lines ``x,y``
+    (fed from ``s_peel``, above the port).  A line fed from a higher in-section
+    producer must take a higher lane (a smaller offset) than one fed from
+    below, so the peel bundle rides out over the top instead of diving across
+    the ``a,b,c`` trunk to the bottom lanes (#1426).
+    """
+    graph = parse_metro_mermaid(
+        (EXAMPLES / "topologies" / "out_of_section_retag_fan.mmd").read_text()
+    )
+    compute_layout(graph)
+    offsets = compute_station_offsets(graph)
+    port_id = "secA__exit_right_1"
+
+    feeder_y: dict[str, float] = {}
+    for edge in graph.edges_to(port_id):
+        src = graph.station_for_edge_source(edge)
+        if not src.is_port:
+            feeder_y[edge.line_id] = src.y
+
+    above = {lid for lid, y in feeder_y.items() if y < graph.stations[port_id].y}
+    below = {lid for lid, y in feeder_y.items() if y > graph.stations[port_id].y}
+    assert above and below, "fixture must feed the port from both above and below"
+
+    top_lane = max(offsets[(port_id, lid)] for lid in above)
+    bottom_lane = min(offsets[(port_id, lid)] for lid in below)
+    assert top_lane < bottom_lane, (
+        f"lines fed from above the port must lane above those fed from below; "
+        f"above={sorted(above)} below={sorted(below)} "
+        f"offsets={ {lid: offsets[(port_id, lid)] for lid in feeder_y} }"
+    )
 
 
 def _diamond_sibling_columns(graph: MetroGraph) -> list[list[str]]:
@@ -3486,16 +3554,27 @@ def test_diagonal_strike_guard_teeth_and_exemptions():
     _guard_no_diagonal_strikes_horizontal_label(bypass, "test")
 
 
-def test_multiline_ascent_to_exit_clears_sibling_label():
+@pytest.mark.parametrize(
+    "fixture",
+    [
+        "topologies/exit_fan_label_strike.mmd",
+        "topologies/side_branch_ascent_label_strike.mmd",
+    ],
+)
+def test_multiline_ascent_to_exit_clears_sibling_label(fixture):
     """A multi-line side branch ascending to an exit port clears sibling labels.
 
     A station carrying the full bundle sitting off the trunk and fed only from
     the section boundary is a genuine side branch: its ascent to the shared exit
     port must turn late (near the port) so it rides its own track rather than
     seating mid-section, where a trunk sibling's horizontal name label extends.
-    The ``exit_fan_label_strike`` fixture isolates the #1449 repro -- ``Salmon``
-    fans up to the exit past the wide ``BEDTools genomecov`` label; a midpoint
-    diagonal rakes that label.
+    ``exit_fan_label_strike`` uses the default (straight) diamond placement,
+    where the continuing branch holds the trunk outright, so it is a
+    clean-render check rather than a genuine ascent.
+    ``side_branch_ascent_label_strike`` sets ``%%metro diamond_style: symmetric``,
+    which keeps both fan branches off the trunk: ``Salmon`` fans up to the exit
+    past the wide ``BEDTools genomecov`` label, exercising the ascent-clearance
+    turn directly.
 
     Parsed the render way (no ``center_ports`` override that ``_layout`` applies
     to ``tests/fixtures/`` files) so the geometry matches what the runtime guard
@@ -3504,7 +3583,7 @@ def test_multiline_ascent_to_exit_clears_sibling_label():
     """
     from nf_metro.layout.phases.spacing import _struck_stations_and_collinear
 
-    path = _resolve_fixture("topologies/exit_fan_label_strike.mmd")
+    path = _resolve_fixture(fixture)
     graph = parse_metro_mermaid(path.read_text())
     compute_layout(graph)
     struck, collinear = _struck_stations_and_collinear(graph)

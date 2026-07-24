@@ -665,14 +665,26 @@ def _leads_only_to_off_track_output(
     A file-icon leaf is only flagged ``off_track`` on the engine's re-run pass;
     on the first pass it reads as a terminus, so both are treated as outputs
     here to catch the spur before any crossing forces that re-run.
+
+    Under ``diamond_style: straight`` a multi-hop dead-end chain (relay stations
+    feeding an output, e.g. ``split -> depth -> coverage``) also counts: only the
+    chain's sinks must be outputs, the on-track relays between are part of the
+    spur.  This lets the continuing pass-through hold the straight trunk while
+    the coverage chain peels off.  Symmetric mode keeps the stricter all-
+    descendants test, since its fork-straddle centering owns that placement.
     """
     descendants = nx.descendants(G, node)
     if not descendants:
         return False
-    return all(
-        (st := graph.stations.get(d)) is not None and (st.off_track or st.is_terminus)
-        for d in descendants
-    )
+
+    def _is_output(d: str) -> bool:
+        st = graph.stations.get(d)
+        return st is not None and (st.off_track or st.is_terminus)
+
+    if graph.diamond_style == "straight":
+        sinks = [d for d in descendants if G.out_degree(d) == 0]
+        return bool(sinks) and all(_is_output(d) for d in sinks)
+    return all(_is_output(d) for d in descendants)
 
 
 def split_output_spur_fan(
