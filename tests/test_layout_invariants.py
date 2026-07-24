@@ -1245,6 +1245,26 @@ def test_flow_exit_port_anchors_to_carrying_station(fixture):
         )
 
 
+def test_single_line_dual_source_exit_shares_feeder_row():
+    """A single line exiting from two chained source stations leaves on their row.
+
+    ``a -> b`` carry one line and both emit it onward to stacked downstream
+    sections, so the shared exit port is a feed-forward chain, not a bypass
+    bundle: the line runs ``a -> b -> port`` as one horizontal trunk and the
+    level change to the stacked rows falls on a riser in the inter-section gap.
+    Aligning the exit to the topmost downstream row instead drags both feeders
+    into a pair of near-parallel diagonals through the section's bottom corner.
+    """
+    graph = _layout("topologies/single_line_dual_source_stacked_exit.mmd")
+    exit_pid = "src__exit_right_0"
+    feeder_ys = [graph.stations[s].y for s in ("a", "b")]
+    port_y = graph.stations[exit_pid].y
+    assert all(abs(port_y - fy) <= _Y_TOL for fy in feeder_ys), (
+        f"exit port {exit_pid} y={port_y:.1f} is off the feeder row {feeder_ys}; "
+        f"the single-line chain exit dove to a downstream row"
+    )
+
+
 @pytest.mark.parametrize("fixture", ALL_FIXTURES)
 def test_port_station_and_port_records_share_coords(fixture):
     """A port's Station record and Port record must hold the same coordinates.

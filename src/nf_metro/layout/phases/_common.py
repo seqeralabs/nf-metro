@@ -1561,9 +1561,24 @@ def exit_run_corridor_clear(
         return False
     inner_x = max(carrier_xs) if section.direction == "LR" else min(carrier_xs)
     lo, hi = sorted((inner_x, port_st.x))
-    carrier_set = set(carrier_ids)
+    return _section_span_clear(graph, section, lo, hi, set(carrier_ids))
+
+
+def _section_span_clear(
+    graph: MetroGraph,
+    section: Section,
+    lo: float,
+    hi: float,
+    exclude: set[str],
+) -> bool:
+    """Whether no non-port station of *section* sits strictly within ``(lo, hi)``.
+
+    A run drawn along a row at some X span is ploughed through any internal
+    station seated inside it; ports (invisible) and the excluded stations (the
+    run's own endpoints) do not count.
+    """
     for sid in section.station_ids:
-        if sid == exit_port_id or sid in carrier_set:
+        if sid in exclude:
             continue
         st = graph.stations.get(sid)
         if st is None or st.is_port:
@@ -1666,10 +1681,12 @@ def flow_exit_carrier_anchor(
     run horizontal and moves the level change to a riser in the inter-section
     gap.
 
-    The carriers anchor when they are either a single internal station or a
-    *parallel bundle*: several stations sharing one row, one per distinct
-    carried line, so each line rides its own offset track to the port.  A
-    bypass bundle (several stations feeding one line) is excluded -- the
+    The carriers anchor when they are a single internal station, a *parallel
+    bundle* (several stations sharing one row, one per distinct carried line, so
+    each line rides its own offset track to the port), or a *single-line chain*
+    (several stations on one row carrying one line, connected feed-forward so
+    the line runs through every carrier to the port as one trunk).  A bypass
+    bundle -- several unconnected stations feeding one line -- is excluded: the
     farther feeder shares the nearer carrier's track and would run straight
     through it.  A fold section, a merge junction on the far side, or a
     corridor blocked by another station keep the downstream-aligned placement.
@@ -1688,12 +1705,41 @@ def flow_exit_carrier_anchor(
         }
         share_row = max(ys) - min(ys) <= SAME_COORD_TOLERANCE
         one_line_per_carrier = len(carriers) == len(exit_lines)
-        if not (share_row and one_line_per_carrier):
+        single_line_chain = len(exit_lines) == 1 and _carriers_form_flow_chain(
+            graph, section, list(carriers)
+        )
+        carriers_anchor = share_row and (one_line_per_carrier or single_line_chain)
+        if not carriers_anchor:
             return None
     carrier_ids = list(carriers)
     if not exit_run_corridor_clear(graph, exit_port_id, section, carrier_ids):
         return None
     return min(ys), carrier_ids
+
+
+def _carriers_form_flow_chain(
+    graph: MetroGraph, section: Section, carrier_ids: list[str]
+) -> bool:
+    """Whether same-line exit carriers form one feed-forward trunk to the port.
+
+    Several carriers on one row all carrying a *single* line are one trunk, not
+    a parallel bundle.  Ordered along the flow, each outer carrier must feed the
+    next by an in-section edge so the line genuinely runs through every carrier
+    marker, and no unrelated station may sit in the span between a consecutive
+    pair for the trunk to plough through.  When both hold, the outermost
+    carrier's straight run to the port rides the line's own trunk rather than
+    bypassing a station off the row.
+    """
+    flow = AxisFrame.flow_sign(section.direction)
+    ordered = sorted(carrier_ids, key=lambda c: flow * graph.stations[c].x)
+    carrier_set = set(carrier_ids)
+    for outer, inner in zip(ordered, ordered[1:]):
+        if not any(e.target == inner for e in graph.edges_from(outer)):
+            return False
+        lo, hi = sorted((graph.stations[outer].x, graph.stations[inner].x))
+        if not _section_span_clear(graph, section, lo, hi, carrier_set):
+            return False
+    return True
 
 
 def wrap_exit_carrier_anchor(
