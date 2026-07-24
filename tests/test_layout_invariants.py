@@ -1582,6 +1582,42 @@ def test_out_of_section_retag_preserves_source_section_fan(center_ports):
     assert source_section_ys(base) == source_section_ys(recolor)
 
 
+def test_out_of_section_retag_exit_lanes_ordered_by_source_height():
+    """An exit-port bundle orders its lanes by the height of each line's feeder.
+
+    In ``out_of_section_retag_fan`` the ``secA`` exit port gathers ``a,b,c``
+    (fed from ``s_gc``, below the port) and the retagged peel lines ``x,y``
+    (fed from ``s_peel``, above the port).  A line fed from a higher in-section
+    producer must take a higher lane (a smaller offset) than one fed from
+    below, so the peel bundle rides out over the top instead of diving across
+    the ``a,b,c`` trunk to the bottom lanes (#1426).
+    """
+    graph = parse_metro_mermaid(
+        (EXAMPLES / "topologies" / "out_of_section_retag_fan.mmd").read_text()
+    )
+    compute_layout(graph)
+    offsets = compute_station_offsets(graph)
+    port_id = "secA__exit_right_1"
+
+    feeder_y: dict[str, float] = {}
+    for edge in graph.edges_to(port_id):
+        src = graph.station_for_edge_source(edge)
+        if not src.is_port:
+            feeder_y[edge.line_id] = src.y
+
+    above = {lid for lid, y in feeder_y.items() if y < graph.stations[port_id].y}
+    below = {lid for lid, y in feeder_y.items() if y > graph.stations[port_id].y}
+    assert above and below, "fixture must feed the port from both above and below"
+
+    top_lane = max(offsets[(port_id, lid)] for lid in above)
+    bottom_lane = min(offsets[(port_id, lid)] for lid in below)
+    assert top_lane < bottom_lane, (
+        f"lines fed from above the port must lane above those fed from below; "
+        f"above={sorted(above)} below={sorted(below)} "
+        f"offsets={ {lid: offsets[(port_id, lid)] for lid in feeder_y} }"
+    )
+
+
 def _diamond_sibling_columns(graph: MetroGraph) -> list[list[str]]:
     """Same-column station groups sharing a fork predecessor and join successor.
 
