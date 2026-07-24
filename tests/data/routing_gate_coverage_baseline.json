@@ -140,7 +140,6 @@
   "inter_section_handlers.py::if geom is None:::#1",
   "inter_section_handlers.py::if js.is_port:::#1",
   "inter_section_handlers.py::if lead is Direction.R:::#1",
-  "inter_section_handlers.py::if left is None or right is None:::#1",
   "inter_section_handlers.py::if min(drop_xs) < _section_right_edge(graph, tgt) - COORD_TOLERANCE:::#1",
   "inter_section_handlers.py::if not _inter_row_band_fits(gap_top, gap_bottom):::#1",
   "inter_section_handlers.py::if not _inter_row_band_fits(gap_top, gap_bottom):::#2",

@@ -26,19 +26,26 @@ from nf_metro.layout.routing.invariants import (
     check_perp_entry_boundary_consistent,
     check_seam_segments_meet_at_port,
 )
+from nf_metro.parser.model import PortSide
 
 FIXTURES = [
     "examples/topologies/top_entry_bundle_offset_seam.mmd",
     "examples/topologies/fold_left_exit_right_entry.mmd",
     "examples/topologies/straight_drop_below.mmd",
+    "examples/topologies/peeloff_straight_drop_near_wall.mmd",
 ]
 
 REPRO = "examples/topologies/top_entry_bundle_offset_seam.mmd"
 
-# A junction feeding a TOP entry port directly below it, in a column that
-# clears both gap walls: the drop descends as one constant-X vertical into the
-# port, with no lateral lead-out-and-jog straddling the section boundary.
-STRAIGHT_DROP = "examples/topologies/straight_drop_below.mmd"
+# Junctions feeding a TOP entry port directly below them (shared X): the drop
+# descends as one constant-X vertical into the port, with no lateral
+# lead-out-and-jog straddling the section boundary.  ``straight_drop_below``
+# drops in a column open on one side; ``peeloff_straight_drop_near_wall`` drops
+# in a two-sided gap running one curve radius outside the flanking boxes' walls.
+STRAIGHT_DROPS = [
+    "examples/topologies/straight_drop_below.mmd",
+    "examples/topologies/peeloff_straight_drop_near_wall.mmd",
+]
 
 
 def _route(path: str):
@@ -79,22 +86,25 @@ def test_top_entry_descent_lands_on_port_x() -> None:
     assert landing_x == pytest.approx(port.x, abs=1.0)
 
 
-def test_straight_drop_below_is_one_vertical_run() -> None:
-    """A junction's drop into the port directly below is one vertical run.
+@pytest.mark.parametrize("path", STRAIGHT_DROPS)
+def test_junction_drop_below_is_one_vertical_run(path: str) -> None:
+    """A junction's drop into the TOP port directly below is one vertical run.
 
-    The branch reaches ``bottom__entry_top_1`` straight below its feeding
-    junction.  Every point from where the descent turns vertical down to the
-    port shares the port's X, so the line enters the TOP port from directly
-    above -- no lateral lead-out to a parallel channel and jog back onto the
-    port marker.
+    Every point from where the descent turns vertical down to the port shares
+    the port's X, so the line enters the TOP port from directly above -- no
+    lateral lead-out to a parallel channel and jog back onto the port marker.
     """
-    graph, routes, offsets = _route(STRAIGHT_DROP)
-    port = graph.ports["bottom__entry_top_1"]
+    graph, routes, offsets = _route(path)
     drop = next(
         r
         for r in routes
-        if r.line_id == "branch" and r.edge.target == "bottom__entry_top_1"
+        if r.is_inter_section
+        and (p := graph.ports.get(r.edge.target)) is not None
+        and p.side is PortSide.TOP
+        and r.edge.source in graph.junctions
+        and abs(graph.stations[r.edge.source].x - p.x) <= 1.0
     )
+    port = graph.ports[drop.edge.target]
     pts = apply_route_offsets(drop, offsets)
     assert pts[-1] == pytest.approx((port.x, port.y), abs=1.0)
     # From the first point on the port's column, the run stays on that column.
