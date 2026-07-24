@@ -509,9 +509,9 @@ def _reconcile_moved_gap_slot(ch: _VChannel, new_x: float, graph: MetroGraph) ->
     reads it: a leg whose declared gap column disagrees with the gap it occupies
     reads as an undeclared channel and aborts the render.  Point the leg's slot
     at the gap the fused X falls in so the declaration matches the geometry.  A
-    fused X that leaves every gap needs no action -- the backstop only checks
-    in-gap legs, so the now-legless stale slot is inert.  Coordinates are
-    untouched; only the symbolic declaration moves.
+    fused X outside every gap needs no action -- the backstop only checks in-gap
+    legs, so a stale slot describing no leg is inert.  Coordinates are untouched;
+    only the symbolic declaration moves.
     """
     new = gap_lo_for_x(graph, new_x, ch.y_lo, ch.y_hi)
     old = gap_lo_for_x(graph, ch.x, ch.y_lo, ch.y_hi)
@@ -519,7 +519,7 @@ def _reconcile_moved_gap_slot(ch: _VChannel, new_x: float, graph: MetroGraph) ->
         return
     down = ch.down
     new_lo, new_row = new
-    slots = [
+    ch.route.gap_slots = [
         s
         for s in ch.route.gap_slots
         if not (
@@ -528,17 +528,14 @@ def _reconcile_moved_gap_slot(ch: _VChannel, new_x: float, graph: MetroGraph) ->
             and (s.direction is Direction.D) == down
         )
     ]
-    slots.append(
-        GapSlot(
-            gap_lo_col=new_lo,
-            gap_hi_col=new_lo + 1,
-            row=new_row,
-            direction=Direction.D if down else Direction.U,
-            slot_index=0,
-            n_slots=1,
-        )
+    ch.route.declare_gap_slot(
+        lo_col=new_lo,
+        hi_col=new_lo + 1,
+        row=new_row,
+        direction=Direction.D if down else Direction.U,
+        slot_index=0,
+        n_slots=1,
     )
-    ch.route.gap_slots = slots
 
 
 def _snap_group(group: _Coincidence, graph: MetroGraph) -> None:
