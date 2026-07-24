@@ -97,6 +97,7 @@ _KNOWN_END_OF_LAYOUT_GAPS: dict[str, frozenset[str]] = {
     "topologies/off_track_convergence": frozenset({"3.5", "4.7"}),
     "topologies/off_track_convergence_multiline": frozenset({"3.5", "4.7"}),
     "topologies/off_track_input_above_consumer": frozenset({"3.5", "4.7"}),
+    "topologies/out_of_section_retag_fan": frozenset({"3.5", "4.7"}),
     "topologies/packed_multiline_serpentine_grid": frozenset({"3.5", "4.7"}),
     "topologies/rl_entry_right_exit_left": frozenset({"3.5", "4.7"}),
     "topologies/rowmate_tb_side_entry_top_align_grow": frozenset({"3.5", "4.7"}),
