@@ -1217,6 +1217,47 @@ def _exit_line_destination_y(
     return None
 
 
+def _exit_trunk_feeder(
+    graph: MetroGraph,
+    line_feeders: dict[str, list[tuple[str, float]]],
+    port_lines: set[str],
+) -> str | None:
+    """The feeder that carries the whole exit bundle out on one row, or None.
+
+    A trunk feeder anchors every port line to its Y.  ``station_lines`` counts a
+    line as present if it merely *arrives* at the feeder, even one the feeder
+    re-tags into a new line rather than forwarding here, so a station that
+    forwards just part of the port bundle can match every port line by that
+    test.  Such a feeder is a real trunk only when the port lines it does not
+    forward share its row: then pinning the bundle to its Y is harmless.  When
+    those lines are fed from a station on another row there are genuinely two
+    feeder heights, and the bundle must be ordered spatially so the higher-fed
+    lines do not dive across the lower trunk to the far lanes.
+    """
+    all_feeders = {fid for entries in line_feeders.values() for fid, _ in entries}
+    feeder_port_lines: dict[str, set[str]] = {}
+    for lid, entries in line_feeders.items():
+        for fid, _ in entries:
+            feeder_port_lines.setdefault(fid, set()).add(lid)
+    trunk_feeder_id = next(
+        (sid for sid in all_feeders if port_lines.issubset(graph.station_lines(sid))),
+        None,
+    )
+    if trunk_feeder_id is None or port_lines.issubset(
+        feeder_port_lines.get(trunk_feeder_id, set())
+    ):
+        return trunk_feeder_id
+    trunk_y = graph.stations[trunk_feeder_id].y
+    unforwarded_ys = {
+        y
+        for lid in port_lines - feeder_port_lines.get(trunk_feeder_id, set())
+        for _, y in line_feeders[lid]
+    }
+    if any(abs(y - trunk_y) > _SAME_Y_TOLERANCE for y in unforwarded_ys):
+        return None
+    return trunk_feeder_id
+
+
 def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
     """Compute exit port offsets for TB and LR/RL sections.
 
@@ -1317,15 +1358,7 @@ def _compute_exit_port_offsets(ctx: _OffsetCtx) -> None:
                 _propagate_exit_offsets_to_hubs(ctx, port_id, inherited)
                 continue
 
-        all_feeders = {fid for entries in line_feeders.values() for fid, _ in entries}
-        trunk_feeder_id = next(
-            (
-                sid
-                for sid in all_feeders
-                if port_lines.issubset(graph.station_lines(sid))
-            ),
-            None,
-        )
+        trunk_feeder_id = _exit_trunk_feeder(graph, line_feeders, port_lines)
         if trunk_feeder_id is not None:
             trunk_y = graph.stations[trunk_feeder_id].y
             line_avg_y = {lid: trunk_y for lid in line_feeders}

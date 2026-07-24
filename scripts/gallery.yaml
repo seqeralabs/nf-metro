@@ -324,6 +324,16 @@ gallery:
       earns a bridge gap (same-colour crossover, not a fan).
 
   # ── Fan-out and Fan-in ─────────────────────────────────────────────────────
+  - id: out_of_section_retag_fan
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      A section's symmetric dead-end fan (Salmon peels up, Split strand to
+      Genome cov runs straight, Coverage peels down) stays intact even though
+      Salmon sends two lines off to a downstream section on IDs used nowhere
+      inside the section. Fan eligibility keys off the lines that traverse the
+      section's own trunk, not the raw union crossing its ports, so a
+      downstream-only retag never disqualifies the fan.
   - id: fork_join_interior_label
     source_dir: examples/topologies
     category: Fan-out and Fan-in
@@ -380,6 +390,15 @@ gallery:
       "The same symmetric 2-way fan-out where one branch leaves the section via an exit
       port instead of dead-ending.  The dead-end coverage branch stays fanned to the end,
       while the exiting branch falls back to the trunk to meet its exit port (#1299)."
+  - id: side_branch_ascent_label_strike
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      A symmetric 2-way fan-out where a multi-line side branch (Salmon) ascends
+      from off the trunk to the section's shared exit port, passing a wide
+      trunk-sibling label (BEDTools genomecov) along the way. It rides its own
+      track and turns up late at the exit port, so its riser clears the label
+      rather than raking through it mid-section.
   - id: symmetric_diamond_odd_slot_entry
     source_dir: examples/topologies
     category: Fan-out and Fan-in

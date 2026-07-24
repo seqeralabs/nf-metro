@@ -823,10 +823,6 @@
     "note": "len(unique_ys) < 2 means every port line's feeder stations average to a single Y. Under track-per-line layout, distinct lines occupy distinct tracks, so a shared Y across >=2 lines implies one trunk feeder carrying all of them (trunk_feeder_id set); the no-trunk arm is therefore not reached by a track-separated topology.",
     "status": "defensive"
   },
-  "offsets.py::while stack:::#1": {
-    "note": "In the exit-only-line reorder / same-Y offset propagation; reachable only via a multi-line LR/RL section with a perpendicular (TOP/BOTTOM) exit port, which the engine lays out as a station-as-elbow + collinear overlay PhaseInvariantError (#706). Exercise with a clean fixture once #706 is fixed.",
-    "status": "needs-review"
-  },
   "perp.py::if entry_port is None or not entry_port.is_entry:::#1": {
     "note": "_aligned_horizontal_drop_entry only fires for a TOP/BOTTOM exit on a horizontal-flow section (the rest of _perp_riser_lateral's callers are caught earlier).  The return-None arm is taken when such an exit feeds a junction or several targets rather than one entry port; corpus instrumentation across every examples/ fixture finds no horizontal-flow perp exit feeding a non-single-entry, so the arm is never taken and the riser falls back to the perp reflection.",
     "status": "defensive"

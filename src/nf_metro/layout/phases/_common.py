@@ -1157,15 +1157,70 @@ def _classify_section_station_ys(
     return on_track, off_track, ports
 
 
+def _lr_port_lines(graph: MetroGraph, port_ids: Iterable[str]) -> set[str]:
+    """Union of the line IDs crossing the LEFT/RIGHT ports among ``port_ids``."""
+    lines: set[str] = set()
+    for pid in port_ids:
+        port = graph.ports.get(pid)
+        if port is not None and port.side in (PortSide.LEFT, PortSide.RIGHT):
+            lines.update(graph.station_lines(pid))
+    return lines
+
+
 def _section_bundle_lines(graph: MetroGraph, section: Section) -> set[str]:
     """Return the set of line IDs crossing a section's LEFT/RIGHT ports."""
-    bundle: set[str] = set()
-    for pid in list(section.entry_ports) + list(section.exit_ports):
-        port = graph.ports.get(pid)
-        if port is None or port.side not in (PortSide.LEFT, PortSide.RIGHT):
-            continue
-        bundle.update(graph.station_lines(pid))
-    return bundle
+    return _lr_port_lines(graph, list(section.entry_ports) + list(section.exit_ports))
+
+
+def _section_fan_trunk_lines(graph: MetroGraph, section: Section) -> set[str]:
+    """Lines that traverse the section's own horizontal trunk.
+
+    This is the fan classifiers' notion of the section bundle: a station
+    whose line set is a superset of it anchors the trunk, one whose set is a
+    strict subset is a fan branch.
+
+    Derived from :func:`_section_bundle_lines` (the lines crossing the LR
+    ports) with the exit-only peel-offs removed: a line present on an exit
+    port but on no entry port and no internal station-to-station edge only
+    leaves the section toward a downstream one and never runs along this
+    trunk.  Keeping it would let a retag on an outbound edge inflate the
+    bundle and disqualify an otherwise clean in-section symmetric fan
+    (#1426).  Falls back to the raw bundle when the filter would empty it.
+    """
+    bundle = _section_bundle_lines(graph, section)
+    if not bundle:
+        return bundle
+    internal_ids = set(section.station_ids) - section.port_ids
+    traversing = _lr_port_lines(graph, section.entry_ports)
+    for sid in internal_ids:
+        for edge in graph.edges_from(sid):
+            if edge.target in internal_ids:
+                traversing.add(edge.line_id)
+    trunk = {ln for ln in bundle if ln in traversing}
+    return trunk or bundle
+
+
+def _exit_reaching_nodes(graph: MetroGraph, section: Section) -> frozenset[str]:
+    """Internal stations with a forward path to one of *section*'s exit ports.
+
+    Walks backward from each exit port through in-section, non-port feeders, so
+    a station is included when the flow through it continues out of the section
+    (the section's through-line) rather than dead-ending inside it.  A terminal
+    section with no exit port yields the empty set.
+    """
+    sec_ids = set(section.station_ids)
+    reaching: set[str] = set()
+    stack = list(section.exit_ports)
+    while stack:
+        node = stack.pop()
+        for edge in graph.edges_to(node):
+            src = edge.source
+            st = graph.stations.get(src)
+            if src in reaching or src not in sec_ids or st is None or st.is_port:
+                continue
+            reaching.add(src)
+            stack.append(src)
+    return frozenset(reaching)
 
 
 def _section_row_through_lines(graph: MetroGraph, section: Section) -> set[str]:

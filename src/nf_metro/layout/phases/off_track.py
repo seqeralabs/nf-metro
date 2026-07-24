@@ -26,6 +26,7 @@ from nf_metro.layout.geometry import AxisFrame, lanes_run_along_x, quantize_coor
 from nf_metro.layout.labels import _label_text_height, label_text_width
 from nf_metro.layout.phases._common import (
     _content_station_ids,
+    _exit_reaching_nodes,
     _section_bundle_lines,
     _section_lr_port_anchor_y,
     dominant_value,
@@ -141,27 +142,32 @@ def _materialize_pass_through_lines(
 
     Narrow by construction to that trunk-theft shape: the pass-through must carry
     the full section bundle (it is the real trunk), and the section must contain a
-    competing *subset chain* -- an on-track station carrying a proper subset of
-    the bundle that has its own in-section edge, i.e. the dead-end run that would
-    otherwise seize the trunk.  Without a subset chain there is nothing stealing
-    the trunk, so materialising the pass-through would only reshuffle an already
-    sound fan (e.g. two equal full-bundle pass-throughs).
+    competing dead-end chain that would otherwise seize the trunk.  A competitor
+    is either an on-track *subset chain* (a proper subset of the bundle, any mode)
+    or -- under ``diamond_style: straight`` -- a full-bundle chain that never
+    reaches an exit port; straight mode must hold the through-line on the trunk,
+    whereas symmetric mode straddles and needs no materialised anchor.  Without a
+    competitor there is nothing stealing the trunk, so materialising the
+    pass-through would only reshuffle an already sound fan (e.g. two equal
+    full-bundle pass-throughs).
     """
     bundle = _section_bundle_lines(graph, section)
     if not bundle:
         return
 
-    def _is_subset_chain(sid: str, st: Station) -> bool:
+    exit_reaching = _exit_reaching_nodes(graph, section)
+
+    def _competes_for_trunk(sid: str, st: Station) -> bool:
         if st.is_hidden or st.is_port or st.off_track:
             return False
         lines = set(graph.station_lines(sid))
-        return (
-            bool(lines)
-            and lines < bundle
-            and bool(sub.edges_from(sid) or sub.edges_to(sid))
-        )
+        if not lines or not (sub.edges_from(sid) or sub.edges_to(sid)):
+            return False
+        if lines < bundle:
+            return True
+        return graph.diamond_style == "straight" and sid not in exit_reaching
 
-    if not any(_is_subset_chain(sid, st) for sid, st in sub.stations.items()):
+    if not any(_competes_for_trunk(sid, st) for sid, st in sub.stations.items()):
         return
 
     exit_port_ids = set(section.exit_ports)

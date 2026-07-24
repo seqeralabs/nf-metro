@@ -19,6 +19,7 @@ from nf_metro.layout.geometry import AxisFrame, lanes_run_along_x, lanes_run_alo
 from nf_metro.layout.layers import build_station_digraph
 from nf_metro.layout.ordering import split_output_spur_fan
 from nf_metro.layout.phases._common import (
+    _exit_reaching_nodes,
     _expand_bbox_for_y,
     _grid_group_section_ids,
     _is_fold_section,
@@ -38,7 +39,6 @@ from nf_metro.layout.phases.junctions import (
     _resolve_source_section_id,
     _resolve_source_xy,
 )
-from nf_metro.layout.phases.single_section import _exit_reaching_nodes
 from nf_metro.parser.model import Edge, MetroGraph, Port, PortSide, Section, Station
 
 
