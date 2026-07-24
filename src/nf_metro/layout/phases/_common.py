@@ -1561,9 +1561,24 @@ def exit_run_corridor_clear(
         return False
     inner_x = max(carrier_xs) if section.direction == "LR" else min(carrier_xs)
     lo, hi = sorted((inner_x, port_st.x))
-    carrier_set = set(carrier_ids)
+    return _section_span_clear(graph, section, lo, hi, set(carrier_ids))
+
+
+def _section_span_clear(
+    graph: MetroGraph,
+    section: Section,
+    lo: float,
+    hi: float,
+    exclude: set[str],
+) -> bool:
+    """Whether no non-port station of *section* sits strictly within ``(lo, hi)``.
+
+    A run drawn along a row at some X span is ploughed through any internal
+    station seated inside it; ports (invisible) and the excluded stations (the
+    run's own endpoints) do not count.
+    """
     for sid in section.station_ids:
-        if sid == exit_port_id or sid in carrier_set:
+        if sid in exclude:
             continue
         st = graph.stations.get(sid)
         if st is None or st.is_port:
@@ -1693,7 +1708,8 @@ def flow_exit_carrier_anchor(
         single_line_chain = len(exit_lines) == 1 and _carriers_form_flow_chain(
             graph, section, list(carriers)
         )
-        if not (share_row and (one_line_per_carrier or single_line_chain)):
+        carriers_anchor = share_row and (one_line_per_carrier or single_line_chain)
+        if not carriers_anchor:
             return None
     carrier_ids = list(carriers)
     if not exit_run_corridor_clear(graph, exit_port_id, section, carrier_ids):
@@ -1721,14 +1737,8 @@ def _carriers_form_flow_chain(
         if not any(e.target == inner for e in graph.edges_from(outer)):
             return False
         lo, hi = sorted((graph.stations[outer].x, graph.stations[inner].x))
-        for sid in section.station_ids:
-            if sid in carrier_set:
-                continue
-            st = graph.stations.get(sid)
-            if st is None or st.is_port:
-                continue
-            if lo + SAME_COORD_TOLERANCE < st.x < hi - SAME_COORD_TOLERANCE:
-                return False
+        if not _section_span_clear(graph, section, lo, hi, carrier_set):
+            return False
     return True
 
 
