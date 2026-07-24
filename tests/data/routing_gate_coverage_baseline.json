@@ -327,6 +327,7 @@
   "offsets.py::if other_lid == cur_lid:::#1",
   "offsets.py::if paired_off is not None:::#1",
   "offsets.py::if pending is None:::#2",
+  "offsets.py::if port.section_id is None:::#1",
   "offsets.py::if port_off is not None:::#1",
   "offsets.py::if port_st is None:::#1",
   "offsets.py::if pred is None:::#1",

@@ -1929,6 +1929,23 @@ def _recompact_fan_port_bordering_stations(
         if station.section_id is not None:
             candidates.add((station.section_id, station_id))
 
+    # A line reused on non-adjacent fan legs can also leave the shared port's
+    # own bundle non-contiguous (an unclaimed priority-rank slot), even once
+    # every bordering real station is individually fixed above: the port
+    # itself is never a compaction seed otherwise, since it borders no wider
+    # port of its own.
+    for port_id, port in graph.ports.items():
+        if port.section_id is None:
+            continue
+        lines = graph.station_lines(port_id)
+        if len(lines) < 2:
+            continue
+        levels = distinct_offset_levels(
+            ctx.offsets.get((port_id, lid), 0.0) for lid in lines
+        )
+        if max_interior_offset_gap(levels, ctx.offset_step) is not None:
+            candidates.add((port.section_id, port_id))
+
     for sec_id, station_id in sorted(candidates):
         section = graph.sections.get(sec_id)
         if section is None:
@@ -3022,7 +3039,12 @@ def compute_station_offsets(
        and entry port phases (5-7) settle a port's own spatial/inherited
        order, which can reopen a real station's gap phase 4 already closed
        against that same port; a final pass rechecks just the stations the
-       fan-port guard itself flags and recompacts those (non-compact only).
+       fan-port guard itself flags and recompacts those, plus any port whose
+       own bundle is left non-contiguous the same way (non-compact only).
+    13. **Final horizontal re-reconciliation** - phase 12 can change a port's
+       offset after phase 8 already snapped a same-section, same-Y real
+       station to that port's old value; re-running phase 8 catches any such
+       staleness (non-compact only).
 
     Returns dict mapping (station_id, line_id) -> y_offset.
     """
@@ -3060,6 +3082,7 @@ def compute_station_offsets(
     _recenter_partial_fan_branches(ctx)
     _reverse_near_vertical_junction_right_entry_offsets(ctx)
     _recompact_fan_port_bordering_stations(ctx, same_y_adj, sec_layer_stations)
+    _reconcile_horizontal_offsets(ctx)
     return ctx.offsets
 
 
