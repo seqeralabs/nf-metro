@@ -348,7 +348,9 @@ These go inside `subgraph` blocks.
 | `%%metro direction: <dir>`           | Internal flow direction: `LR`, `RL`, or `TB`             |
 | `%%metro number: <positive_integer>` | Override the section's number badge                      |
 
-Entry/exit hints tell the layout engine which side of the section box lines should enter or leave from. Most of the time you can **omit these entirely** and let the auto-layout engine figure it out. They are useful when you want lines to exit from different sides of the same section (e.g., right for some lines, bottom for others).
+Entry/exit hints tell the layout engine which side of the section box lines should enter or leave from. Most of the time you can **omit these entirely** and let the auto-layout engine figure it out.
+
+Exit hints can diverge per line - some lines can leave right, others bottom, in the same section. Entry can't: every line entering a section arrives from the same one side. That's deliberate, routing is complicated enough with a single entry side, without also handling lines approaching from different ones. `entry: <side> | <lines>` sets that one shared side for the section; it doesn't give the listed lines a side of their own.
 
 Automatic section numbers follow connected visual routes. Numbering prefers the nearest connected section on the current row, keeps parallel branch starts together, and completes independent inputs before a merge. A clear primary row can finish before numbering a secondary route that rejoins it. An explicit `number:` stays fixed, and automatic sections use the lowest positive numbers not already reserved. Duplicate or invalid overrides are ignored with a warning.
 
