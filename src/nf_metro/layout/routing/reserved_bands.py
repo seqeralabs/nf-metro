@@ -190,6 +190,9 @@ class ReservedCorridors:
     row_bands_by_edge: Mapping[EdgeKey, tuple[ReservedBand, ...]] = field(
         default_factory=dict
     )
+    column_bands_by_edge: Mapping[EdgeKey, tuple[ReservedBand, ...]] = field(
+        default_factory=dict
+    )
 
     def for_segment(
         self, source: str, target: str, line_id: str, rank: int
@@ -203,6 +206,12 @@ class ReservedCorridors:
         """The edge's row-gap band, when it claims exactly one row corridor."""
         bands = self.row_bands_by_edge.get((source, target, line_id), ())
         return bands[0] if len(bands) == 1 else None
+
+    def claimed_column_bands(
+        self, source: str, target: str, line_id: str
+    ) -> tuple[ReservedBand, ...]:
+        """Every distinct column-gap band claimed by one emitted edge."""
+        return self.column_bands_by_edge.get((source, target, line_id), ())
 
 
 def _measured_gap_bands(
@@ -293,6 +302,7 @@ class _ClaimViews:
 
     per_claim: dict[ClaimSegmentKey, ReservedBand]
     row_bands_by_edge: dict[EdgeKey, tuple[ReservedBand, ...]]
+    column_bands_by_edge: dict[EdgeKey, tuple[ReservedBand, ...]]
 
 
 def _claim_views(
@@ -312,15 +322,16 @@ def _claim_views(
     spans: dict[ClaimSegmentKey, tuple[float, float]] = {}
     # Keyed by the band quantised to the comparison tolerance, so two
     # reservations describing one corridor alike collapse to a single band.
-    by_edge: dict[EdgeKey, dict[tuple[int, int], tuple[float, float]]] = {}
+    row_by_edge: dict[EdgeKey, dict[tuple[int, int], tuple[float, float]]] = {}
+    column_by_edge: dict[EdgeKey, dict[tuple[int, int], tuple[float, float]]] = {}
     for reservation, lo, hi in measured:
         is_row = isinstance(reservation.region, RowGapRegion)
         band_key = (round(lo / COORD_TOLERANCE), round(hi / COORD_TOLERANCE))
         for claim in reservation.claims:
             edge = edge_by_member[claim.member_id]
             edge_key = (edge.source, edge.target, edge.line_id)
-            if is_row:
-                by_edge.setdefault(edge_key, {}).setdefault(band_key, (lo, hi))
+            bands_by_edge = row_by_edge if is_row else column_by_edge
+            bands_by_edge.setdefault(edge_key, {}).setdefault(band_key, (lo, hi))
             for rank in range(claim.segment_rank, claim.segment_end_rank + 1):
                 key = (*edge_key, rank)
                 held = spans.get(key)
@@ -338,9 +349,17 @@ def _claim_views(
             for lo, hi in bands.values()
             if (band := resolved_band(lo, hi)) is not None
         )
-        for edge_key, bands in by_edge.items()
+        for edge_key, bands in row_by_edge.items()
     }
-    return _ClaimViews(per_claim, row_bands)
+    column_bands = {
+        edge_key: tuple(
+            band
+            for lo, hi in bands.values()
+            if (band := resolved_band(lo, hi)) is not None
+        )
+        for edge_key, bands in column_by_edge.items()
+    }
+    return _ClaimViews(per_claim, row_bands, column_bands)
 
 
 def build_reserved_corridors(
@@ -375,4 +394,5 @@ def build_reserved_corridors(
         ),
         views.per_claim,
         views.row_bands_by_edge,
+        views.column_bands_by_edge,
     )

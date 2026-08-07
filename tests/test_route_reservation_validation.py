@@ -332,8 +332,8 @@ def test_reservation_rejects_direction_on_the_wrong_axis() -> None:
 @pytest.mark.parametrize(
     ("name", "side"),
     (
-        ("cross_col_top_entry.mmd", CanvasSide.TOP),
-        ("route_around_intervening.mmd", CanvasSide.BOTTOM),
+        ("lr_perp_top_exit_perp_entry_diverging.mmd", CanvasSide.TOP),
+        ("fan_in_merge.mmd", CanvasSide.BOTTOM),
     ),
 )
 def test_canvas_reservation_kind_follows_its_side(name: str, side: CanvasSide) -> None:

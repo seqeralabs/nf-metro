@@ -1,0 +1,164 @@
+---
+title: "Route emission inventory"
+description: Exhaustive ownership map for route handlers, construction passes, compatibility repairs, validators, and observers.
+sidebar:
+  order: 5
+---
+
+This inventory names every production stage that can create, move, suppress,
+validate, or observe routed geometry. Its boundary is `_route_edges`: section
+placement and reservation settlement happen before it, while SVG drawing reads
+its final `RoutedPath` values afterwards.
+
+## System execution
+
+| Stage                                      | Ownership                    | Contract                                                                                                                                                                                                                                                                                                                         |
+| ------------------------------------------ | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `build_exit_turn_execution`                | Planner                      | Freezes complete source seams, or records one exit-turn compatibility reason.                                                                                                                                                                                                                                                    |
+| `classify_inter_section_family`            | Planned classifier           | Evaluates `_INTER_SECTION_RULES` before emission and freezes the stable family ID on each planned inter-section member.                                                                                                                                                                                                          |
+| `build_convergence_plan_execution`         | System planner               | Classifies complete target-convergence candidates, including trunk, landings, and covered continuation, without reconstructing non-convergence members.                                                                                                                                                                          |
+| `classify_route_system_dispositions`       | Preliminary classifier       | Resolves compatibility already decided by exit, fan, or convergence planning without constructing emission members or publishing a route-system execution.                                                                                                                                                                       |
+| `settle_preliminary_convergence_execution` | Preliminary global allocator | Reconciles convergence-owned lanes for preliminarily planned systems and publishes exact fixed claims to member construction.                                                                                                                                                                                                    |
+| `build_member_geometry_execution`          | Member planner               | Calls each classified family in canonical member order for preliminarily planned systems, materializes its gap and trunk slots once against convergence claims and realised bands, and freezes the production seed, family identity, slots, owned gap channels, and plan attribution. The temporary mutable paths are discarded. |
+| `settle_global_convergence_execution`      | Final global allocator       | Reconciles convergence channels against exact immutable member channels and prior convergence claims, then treats any unresolved supported collision as an implementation invariant failure before disposition or emission.                                                                                                      |
+| `build_route_system_emission_execution`    | System owner                 | Runs once, after final settlement, and combines every successful planner and allocator result into canonical systems. Each system is wholly `PLANNED` or wholly `COMPATIBILITY`, and every planned member has exactly one geometry owner.                                                                                        |
+| `_route_edges` system loop                 | Emitter coordinator          | Emits every system once in scaffold order and every member once in canonical member order. Planned non-convergence members are fresh mutable copies of their frozen production seeds with declared channel ownership. It attaches system, member, disposition, plan, and reservation attribution to each emitted path.           |
+
+The lightweight `classify_route_system_dispositions` pass precedes member
+construction so a system already assigned to compatibility is emitted through
+one clean compatibility context. It does not build a provisional execution.
+Member templates are then built transactionally for the remaining systems.
+Preliminary convergence settlement exposes exact fixed claims while member
+paths are mutable, so the gap allocator can select compatible member channels
+before freezing them. Final convergence settlement then consumes those exact
+immutable channels before the single route-system execution is built and its
+atomic dispositions are frozen. It can move
+planner-owned convergence lanes, but it cannot reconstruct or mutate a member
+plan. Immutable claims from earlier planned convergences and provisional
+compatibility-context paths are the only ordered route context available to a
+later system.
+`RouteMemberGeometryPlan` is the immutable ownership boundary: its ID binds one
+system, one emission member, and one stable family to a pre-normalization point
+and radius seed, slot claims, offset regime, normalization policy, plan
+references, and member-exact consumed reservation IDs. Each vertical
+`RouteMemberGapChannel` records a segment rank and exact coordinates that
+remain fixed through normalization; seed geometry outside those declared ranks
+may take part in the listed global construction passes.
+
+Gap slots are materialized once while those templates are built. On the first
+observation pass there is no settled reservation ledger, so the templates use
+the ordinary gap allocator. On a settlement re-route the routing context is
+built from the supplied realised reservations, and the same template-building
+step consumes those bands. Production emission copies the resulting points; it
+does not allocate another planned channel or call the family again.
+
+The decisive compatibility owners are finite:
+
+| Owner                  | Deterministic reason source                                                                                                                                                  | Explicit permanent justification                                                                                                                                                                                                                            |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `convergence-plan`     | The exact `UnsupportedConvergenceError` or measured convergence conflict reason, for example `convergence landing conflicts with an upstream exit turn`.                     | The public router accepts custom offset spacing and hand-built geometry that can contradict the runway a complete convergence needs. Established templates emit the whole system in that case. No later pass may reconstruct a partial planned convergence. |
+| `fan-plan`             | The fan candidate's single `legacy_reason`, covering incomplete resolver membership, a foreign local owner, or a frame the planner cannot claim completely.                  | Hand-built graphs and overlapping local layout owners remain valid compatibility inputs. Claiming only part of their fan would be unsound, so established layout and routing own the whole fan.                                                             |
+| `exit-turn-plan`       | The exit group's single `legacy_reason`, covering missing or ambiguous source order, an unsupported production family, a transition inversion, or insufficient fixed runway. | The routing API permits explicit graphs and offset maps without complete semantic ordering. Base offsets and established templates remain the defined behaviour for those inputs.                                                                           |
+| `member-geometry-plan` | A classified member is missing from the emission graph, has no production family, or its canonical family declines to build a complete template.                             | A system cannot be planned when any non-convergence member lacks a complete production seed and explicit immutable channel ownership. The established first-match dispatcher emits the complete system instead.                                             |
+
+Each `RouteSystemCompatibilityReason` keeps the owner, the planner's exact
+deterministic reason, and this compatibility justification. An unfamiliar
+reason is not caught by a generic repair owner: it remains attributed to the
+planner that declined the system. These four owners are the complete
+compatibility map. Adding another owner or reason category requires updating
+this table and a test that pins the new deterministic reason; there is no
+open-ended “legacy” owner.
+
+## Emitters
+
+| Emitter                | Members                                                       | Dispatch rule                                                                                                                                                                                                                                                                                                                                                                          |
+| ---------------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `route_rail_edges`     | Whole-graph rail mode, plus internal members of rail sections | Dedicated fixed-rail emitter. It bypasses route-system inter-section dispatch for the members it owns.                                                                                                                                                                                                                                                                                 |
+| `fresh_member_route`   | Planned non-convergence members                               | Copies the `RouteMemberGeometryPlan` production seed, slots, family-derived metadata, and immutable owned segment ranks into a `RoutedPath`. It performs no classification or geometric construction.                                                                                                                                                                                  |
+| `_route_inter_section` | Port/junction to port/junction                                | During planning, the preclassified family builds the sole member template. During production, only compatibility systems use ordered first-match dispatch. Planned convergence families consume their convergence records through their system owner. The exhaustive 21-family table and standard fall-through are in [inter-section dispatch](/nf-metro/dev/inter_section_dispatch/). |
+| `_route_tb_section`    | Members touching a TB/BT section                              | Ordered centreline shapes: `_route_tb_internal`, `_route_tb_lr_exit`, `_route_tb_lr_entry`, `_route_perp_entry`, with `_route_perp_entry_from_corridor` as the perpendicular-entry corridor construction.                                                                                                                                                                              |
+| `_route_entry_runway`  | Flow-side entry port to a deep internal station               | Builds the compressed diagonal and internal runway when the inter-section and TB emitters decline the member.                                                                                                                                                                                                                                                                          |
+| `_route_intra_section` | General station, port, and junction members                   | Builds diagonal, fold, and straight paths. It is the final emitter fallback.                                                                                                                                                                                                                                                                                                           |
+
+All family handlers construct centrelines and feed the common bundle builders.
+They do not hand-assemble independent line geometry. A planned family may read
+its exit, fan, or convergence decision, but it may not select a replacement
+axis, member, trunk, or landing during emission.
+
+## Ordered construction passes
+
+These stages run in this exact order after emission. “Construction” means a
+whole-route geometric operation with an explicit input. It does not mean
+recovering semantic ownership from the paths.
+
+| #   | Pass                                       | Input and owned result                                                                                                                                                            |
+| --- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `_center_bubble_stations`                  | Reads flat route segments and emits station X move requests.                                                                                                                      |
+| 2   | `_spread_diagonal_bundles`                 | Spreads coincident diagonal bundle members without changing semantic membership.                                                                                                  |
+| 3   | `_materialize_gap_slots`                   | Allocates vertical channels that are not frozen in member templates. Planned member slots were materialized during template construction and their owned segment ranks are fixed. |
+| 4   | `_clear_compatibility_entry_wrap_leadouts` | Moves only compatibility entry-wrap leadouts clear of final sibling descents. Planned and reservation-backed segments are excluded.                                               |
+| 5   | `_materialize_trunk_slots`                 | Allocates unowned horizontal trunk bands. Planned member trunk slots were materialized before member freeze, and production skips trunks or flanks touching their owned segments. |
+| 6   | `_separate_opposing_inter_row_trunks`      | Separates counter-running unowned flows in one inter-row gap.                                                                                                                     |
+| 7   | `_reconcile_port_peeloff_risers`           | Re-seats unowned peel-off risers from their settled trunk depths.                                                                                                                 |
+| 8   | `_separate_declared_opposing_gap_bundles`  | Applies the declared opposing-fan channel construction after riser settlement.                                                                                                    |
+| 9   | `_coincide_merge_fanout_pivots`            | Gives compatible unowned branches one first pivot; a planned pivot is a fixed anchor.                                                                                             |
+| 10  | `_coincide_same_line_tracks`               | Joins compatible same-line tracks onto one settled reference, including a plan-owned reference that it does not move.                                                             |
+| 11  | `_coincide_fanout_opening_descents`        | Seats same-source opening descents on the source-nearest track and nests distinct lines. Planned channels are fixed anchors.                                                      |
+| 12  | `_coincide_same_line_fanout_traverses`     | Fuses same-source, same-line fan-out traverses onto one settled final-geometry reference. Planned channels are fixed anchors.                                                     |
+| 13  | `_bundle_divergent_distinct_traverses`     | Keeps distinct fan-out traverses at bundle spacing until peel-off.                                                                                                                |
+| 14  | `_round_junction_perp_peeloff`             | Adds curve runway to a perpendicular branch leaving a junction trunk.                                                                                                             |
+| 15  | `_stagger_convergent_distinct_lines`       | Separates distinct unowned final descents that share one channel.                                                                                                                 |
+| 16  | `_nest_bypass_above_over_top_wrap`         | Nests a long-haul bypass above a local over-top wrap in the same gap.                                                                                                             |
+| 17  | `_clear_bypass_v_label_strikes`            | Moves an unowned bypass riser clear of label ink.                                                                                                                                 |
+| 18  | `_clear_merge_trunk_opposite_arm`          | Separates an unowned down-trunk from an opposite merge arm over their shared span.                                                                                                |
+| 19  | `_separate_fused_cotravelling_runs`        | Restores lane clearance between movable tracks occupying one reserved band.                                                                                                       |
+| 20  | `_land_merge_feeders_on_trunk`             | Compatibility-only merge repair. It lands feeders after every pass that can move their channels. Planned convergence joins are excluded.                                          |
+| 21  | `_hold_runs_in_corridor_clearance`         | Holds each claimed segment inside its own realised reservation band; unclaimed runs use measured gap clearance.                                                                   |
+| 22  | `_unify_coincident_corner_radii`           | Gives coincident same-line turns one drawn arc radius.                                                                                                                            |
+| 23  | `_drop_covered_merge_entry_hops`           | Compatibility-only suppression. It removes a redundant emitted entry hop and records its exact carrier. Planned continuations are suppressed before dispatch.                     |
+
+The exit-turn snapshot ratchet runs after every stage above and rejects any
+change to planner-owned source segments. Convergence and fan ownership helpers
+similarly keep their owned segments out of general re-seating. Construction
+passes may seat an unowned member against a planned channel, but the planned
+channel remains the fixed input rather than geometry to rediscover.
+
+## Validators and observers
+
+| Stage                                                  | Classification                | Contract                                                                                                                                                                                                                                  |
+| ------------------------------------------------------ | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `validate_route_system_emission`                       | Runtime attribution validator | Requires exactly one emitted route or explicit valid coverage binding for every canonical member, rejects attributed unknown routes, and compares each path with its system, member, disposition, plan, and member-exact reservation IDs. |
+| `validate_exit_turn_plans`                             | Planner validator             | Checks exactly-once assignments, lanes, transitions, family, axis, handedness, and runway.                                                                                                                                                |
+| `validate_fan_route_emissions`                         | Planner validator             | Checks every dedicated fan emission and the realised complete fan frame.                                                                                                                                                                  |
+| `validate_convergence_plans`                           | Planner validator             | Checks trunk, flanks, feeder joins, terminal caps, continuation, and endpoint owner.                                                                                                                                                      |
+| `validate_member_geometry_emission`                    | Template validator            | Checks that every emitted planned non-convergence member retains ownership and exact coordinates for every frozen gap-channel segment. Other seed segments and radii remain available to the declared post-passes.                        |
+| `assert_render_curve_invariants` and layout validators | Render chokepoint             | Check bundle order, curve geometry, endpoints, containment, and other properties of the paths that SVG rendering will consume.                                                                                                            |
+| `RoutePlanObserver.finish`                             | Final observer                | Binds semantic emission members and their member-geometry plan IDs to the final route list and publishes reservations, realisations, diagnostics, and layout provenance. It does not choose or mutate geometry.                           |
+| `validate_published_route_attribution`                 | Publication validator         | Derives each route's exact reservation IDs from final reservation claimant members and compares them with the published path attribution. The route system separately retains the union of its members' reservations.                     |
+
+The three compatibility-only operations are therefore explicit:
+`_clear_compatibility_entry_wrap_leadouts`, `_land_merge_feeders_on_trunk`, and
+`_drop_covered_merge_entry_hops`. Everything else in the post-pass chain is
+constructive geometry, validation, or observation, with planner-owned segments
+excluded or treated as fixed anchors.
+
+## Retained whole-route scans
+
+The remaining broad scans all need facts that do not exist at semantic-plan
+construction time, or are compatibility-only:
+
+| Scan                                                                        | Classification                                | Why it remains                                                                                                                                                                                                                                                                                                                           |
+| --------------------------------------------------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `compute_bundle_info` and the gap/trunk collectors in `normalize.py`        | Final-geometry construction                   | They group actual coincident or overlapping segments after every member has emitted; authored bundle membership does not state those coordinates.                                                                                                                                                                                        |
+| Bypass, fan-corridor, label-strike, and reserved-band scans                 | Final-geometry construction                   | They compare routed spans with settled section boxes, headers, obstructions, and realised reservation bands.                                                                                                                                                                                                                             |
+| `_classify_merge_edges`                                                     | Compatibility measurement and structural hint | It supplies compatibility merge templates and a longest-bypass candidate. A planned convergence freezes the selected identity and geometry before emission.                                                                                                                                                                              |
+| Convergence-internal canonical trial templates                              | Planner construction                          | A convergence constructs only the trunk and feeder candidates it owns so it can freeze their complete shared geometry. Non-convergence members are never reconstructed here. Final global settlement receives their frozen `RouteMemberGapChannel` records, plus immutable prior-convergence claims, as its only planned channel inputs. |
+| `_clear_compatibility_entry_wrap_leadouts`                                  | Compatibility-only repair                     | It reads final sibling descents after gap-slot materialization and moves only compatibility entry-wrap leadouts without reservation or plan ownership.                                                                                                                                                                                   |
+| `_land_merge_feeders_on_trunk` and `_drop_covered_merge_entry_hops`         | Compatibility-only repair and suppression     | They are gated away from planned convergence systems and are the retained passes allowed to repair or suppress compatibility merge output.                                                                                                                                                                                               |
+| Planner validators, `assert_render_curve_invariants`, and layout validators | Final-geometry validation                     | They inspect exactly the paths and anchors the renderer will draw; replacing them with pre-emission inference would validate a different object.                                                                                                                                                                                         |
+| `RoutePlanObserver.finish` and reservation realisation                      | Final observation                             | They bind the final paths and measure their actual corridors without changing emission.                                                                                                                                                                                                                                                  |
+
+No retained scan selects a new plan owner, handler family, convergence trunk,
+or fan frame from final geometry. There is no `_unowned_gap_channels` trial
+scan: convergence planning receives non-convergence obstacles only through the
+frozen member-geometry execution.

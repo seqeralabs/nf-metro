@@ -35,6 +35,7 @@ from nf_metro.layout.route_plan import (
     RoutePlanDiagnostic,
     RoutePlanProvenance,
     RouteSemanticScaffold,
+    RouteSystemDisposition,
     RouteSystemId,
     SharedReference,
     SharedReferenceId,
@@ -168,6 +169,28 @@ class ExitTurnPlanQuery:
     ) -> _TransitionMembership | None:
         return self._transition_by_edge.get((edge.source, edge.target, edge.line_id))
 
+    def restrict_to_systems(
+        self, system_ids: frozenset[RouteSystemId]
+    ) -> ExitTurnPlanQuery:
+        plans = tuple(plan for plan in self.plans if plan.system_id in system_ids)
+        return ExitTurnPlanQuery(
+            plans,
+            MappingProxyType(
+                {
+                    key: membership
+                    for key, membership in self._by_edge.items()
+                    if membership.plan.system_id in system_ids
+                }
+            ),
+            MappingProxyType(
+                {
+                    key: membership
+                    for key, membership in self._transition_by_edge.items()
+                    if membership.plan.system_id in system_ids
+                }
+            ),
+        )
+
 
 def route_planned_lane_transition(
     edge: Edge,
@@ -209,6 +232,32 @@ class ExitTurnExecution:
     demands: tuple[SymbolicDemand, ...]
     diagnostics: tuple[RoutePlanDiagnostic, ...]
     query: ExitTurnPlanQuery
+
+    def restrict_to_systems(
+        self, system_ids: frozenset[RouteSystemId]
+    ) -> ExitTurnExecution:
+        plans = tuple(plan for plan in self.plans if plan.system_id in system_ids)
+        reference_ids = {
+            plan.reference_id for plan in plans if plan.reference_id is not None
+        }
+        demand_ids = {demand_id for plan in plans for demand_id in plan.demand_ids}
+        diagnostic_member_ids = {
+            plan.member_ids[0]
+            for plan in plans
+            if plan.member_ids and plan.legacy_reason is not None
+        }
+        return ExitTurnExecution(
+            self.scaffold,
+            plans,
+            tuple(item for item in self.references if item.id in reference_ids),
+            tuple(item for item in self.demands if item.id in demand_ids),
+            tuple(
+                item
+                for item in self.diagnostics
+                if item.member_id in diagnostic_member_ids
+            ),
+            self.query.restrict_to_systems(system_ids),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -2540,7 +2589,19 @@ def validate_exit_turn_plans(
     edge_by_key = {
         (edge.source, edge.target, edge.line_id): edge for edge in graph.edges
     }
-    exit_turn_plans = plan.exit_turn_plans if isinstance(plan, RoutePlan) else plan
+    if isinstance(plan, RoutePlan):
+        planned_system_ids = {
+            system.id
+            for system in plan.systems
+            if system.disposition is RouteSystemDisposition.PLANNED
+        }
+        exit_turn_plans = tuple(
+            item
+            for item in plan.exit_turn_plans
+            if item.system_id in planned_system_ids
+        )
+    else:
+        exit_turn_plans = plan
     for exit_turn_plan in exit_turn_plans:
         if exit_turn_plan.disposition is not ExitTurnDisposition.PLANNED:
             continue

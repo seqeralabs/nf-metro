@@ -12,7 +12,6 @@ import nf_metro.layout.fan_plans as fan_plans
 from nf_metro.api import prepare_graph
 from nf_metro.layout.constants import (
     INTER_ROW_EDGE_CLEARANCE,
-    SECTION_Y_PADDING,
     X_SPACING,
 )
 from nf_metro.layout.engine import compute_layout, compute_min_y_spacing
@@ -37,6 +36,7 @@ from nf_metro.layout.phases.planned_fans import (
     _apply_planned_fan_port_geometry,
     _snapshot_planned_fan_centrelines,
 )
+from nf_metro.layout.phases.row_align import _top_align_row_bboxes_only
 from nf_metro.layout.route_plan import (
     CoordinateRegime,
     DemandAxis,
@@ -330,7 +330,7 @@ def test_foreign_merge_frame_keeps_the_complete_fan_on_legacy_layout() -> None:
     )
 
 
-def test_straight_diamond_keeps_established_layout_ownership() -> None:
+def test_straight_diamond_records_established_layout_as_a_complete_plan() -> None:
     path = ROOT / "examples" / "topologies" / "shared_cell_fork_trunk_align.mmd"
     graph = parse_metro_mermaid(path.read_text())
     compute_layout(graph, validate=True)
@@ -340,9 +340,13 @@ def test_straight_diamond_keeps_established_layout_ownership() -> None:
     assert plan.authored_join_station_id == "p_merge"
     assert plan.join_station_id == "p_merge"
     assert plan.appearance_policy is FanAppearancePolicy.STRAIGHT
-    assert plan.disposition is FanPlanDisposition.LEGACY
-    assert plan.legacy_reason == "straight-diamond-layout-owns-geometry"
-    assert plan.layout_station_ids == ()
+    assert plan.disposition is FanPlanDisposition.PLANNED
+    assert plan.legacy_reason is None
+    assert plan.layout_station_ids
+    assert plan.appearance_centreline_branch_id == plan.branches[0].id
+    assert tuple(branch.lane_offset for branch in plan.branches) == pytest.approx(
+        (0.0, plan.appearance_lane_pitch, 2 * plan.appearance_lane_pitch)
+    )
 
 
 @pytest.mark.parametrize(
@@ -488,7 +492,7 @@ def test_runtime_guard_rejects_symmetric_straight_open_fan_plan() -> None:
 
     with pytest.raises(
         PhaseInvariantError,
-        match="straight planned fan .* does not keep its top branch on the centreline",
+        match="straight planned fan .* does not keep its appearance frame",
     ):
         _guard_planned_fan_frame_realised(
             graph,
@@ -1199,37 +1203,26 @@ def test_planned_geometry_requires_every_frozen_centreline() -> None:
         _apply_planned_fan_geometry(graph, {})
 
 
-def test_planned_straight_diamond_is_invalid_at_construction() -> None:
-    path = ROOT / "examples" / "topologies" / "port_fed_three_branch_diamond.mmd"
+def test_planned_straight_diamond_preserves_its_frozen_appearance() -> None:
+    path = ROOT / "examples" / "topologies" / "shared_cell_fork_trunk_align.mmd"
     graph = parse_metro_mermaid(path.read_text())
     compute_layout(graph, validate=True)
     plan = next(item for item in graph.fan_plans if item.join_station_id is not None)
 
-    with pytest.raises(
-        ValueError,
-        match="straight-diamond geometry requires established layout",
-    ):
-        replace(plan, appearance_policy=FanAppearancePolicy.STRAIGHT)
+    straight = replace(plan, appearance_policy=FanAppearancePolicy.STRAIGHT)
+
+    assert straight.disposition is FanPlanDisposition.PLANNED
+    assert straight.join_station_id == plan.join_station_id
+    assert straight.branches == plan.branches
 
 
-def test_runtime_guard_rejects_corrupted_straight_diamond_policy() -> None:
-    path = ROOT / "examples" / "topologies" / "port_fed_three_branch_diamond.mmd"
+def test_runtime_guard_accepts_a_planned_straight_diamond_policy() -> None:
+    path = ROOT / "examples" / "topologies" / "shared_cell_fork_trunk_align.mmd"
     graph = parse_metro_mermaid(path.read_text())
     compute_layout(graph, validate=True)
     offsets = compute_station_offsets(graph)
-    plan = next(item for item in graph.fan_plans if item.join_station_id is not None)
 
-    object.__setattr__(
-        plan,
-        "appearance_policy",
-        FanAppearancePolicy.STRAIGHT,
-    )
-
-    with pytest.raises(
-        PhaseInvariantError,
-        match="claims geometry for frozen appearance policy 'straight'",
-    ):
-        _guard_planned_fan_frame_realised(graph, "test", offsets=offsets)
+    _guard_planned_fan_frame_realised(graph, "test", offsets=offsets)
 
 
 def test_fan_appearance_policy_rejects_string_equivalents() -> None:
@@ -1362,6 +1355,59 @@ def test_runtime_guard_rejects_unowned_carrier_line() -> None:
 
     with pytest.raises(PhaseInvariantError, match="carries unowned lines"):
         _guard_planned_fan_frame_realised(graph, "test", offsets=offsets)
+
+
+def test_cross_direction_straight_fan_keeps_join_on_frozen_entry_boundary() -> None:
+    path = ROOT / "tests" / "fixtures" / "tb_right_exit_feeder_slots.mmd"
+    graph = parse_metro_mermaid(path.read_text())
+    compute_layout(graph, validate=True)
+
+    plan = next(item for item in graph.fan_plans if item.authored_join_station_id)
+    assert plan.owns_geometry
+    assert graph.stations["d1"].y == graph.stations["dst__entry_left_3"].y
+    assert {
+        section.bbox_y
+        for section in graph.sections.values()
+        if section.grid_row == graph.sections["dst"].grid_row
+    } == {graph.sections["dst"].bbox_y}
+
+
+def test_planned_fan_row_settlement_leaves_disconnected_group_unchanged() -> None:
+    graph = MetroGraph()
+    for section_id, col, top in (
+        ("fan", 0, 40.0),
+        ("fan_mate", 1, 70.0),
+        ("distant", 4, 90.0),
+        ("distant_mate", 5, 110.0),
+    ):
+        graph.add_section(
+            Section(
+                section_id,
+                section_id,
+                grid_col=col,
+                grid_row=0,
+                bbox_y=top,
+                bbox_h=100.0,
+            )
+        )
+
+    distant_before = {
+        section_id: (
+            graph.sections[section_id].bbox_y,
+            graph.sections[section_id].bbox_h,
+        )
+        for section_id in ("distant", "distant_mate")
+    }
+    _top_align_row_bboxes_only(graph, section_ids={"fan"})
+
+    assert graph.sections["fan_mate"].bbox_y == graph.sections["fan"].bbox_y
+    assert {
+        section_id: (
+            graph.sections[section_id].bbox_y,
+            graph.sections[section_id].bbox_h,
+        )
+        for section_id in distant_before
+    } == distant_before
 
 
 def test_port_only_fan_freezes_only_structurally_shared_offset_carriers() -> None:
@@ -1604,6 +1650,30 @@ def test_intra_section_fan_member_must_have_one_final_route() -> None:
         validate_fan_route_emissions(graph, routes, offsets)
     assert str(plan.id) in str(error.value)
     assert str(plan.system_id) in str(error.value)
+
+
+def test_compatibility_system_does_not_validate_a_planned_child_fan() -> None:
+    path = ROOT / "examples" / "topologies" / "port_fed_three_branch_diamond.mmd"
+    graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    plan = next(item for item in graph.fan_plans if item.owns_geometry)
+    expectation = next(
+        item for item in plan.route_expectations if item.member_id is None
+    )
+    routes = [
+        route
+        for route in routes
+        if ResolvedEdge(route.edge.source, route.edge.target, route.line_id)
+        != expectation.edge
+    ]
+
+    validate_fan_route_emissions(
+        graph,
+        routes,
+        offsets,
+        planned_system_ids=frozenset(),
+    )
 
 
 @pytest.mark.parametrize(
@@ -1941,20 +2011,16 @@ def test_runtime_guard_rejects_asymmetric_symmetric_fan_plan() -> None:
         )
 
 
-def test_planned_fan_does_not_level_unrelated_row_bbox_tops() -> None:
+def test_planned_fan_levels_its_contiguous_row_group_bbox_tops() -> None:
     path = (
         ROOT / "examples" / "topologies" / "ported_symmetric_fan_centreline_trunk.mmd"
     )
     graph = parse_metro_mermaid(path.read_text())
     compute_layout(graph)
 
-    assert graph.sections["input"].bbox_y == pytest.approx(
-        graph.stations["identify"].y - SECTION_Y_PADDING
-    )
-    assert graph.sections["report"].bbox_y == pytest.approx(
-        graph.stations["generate"].y - SECTION_Y_PADDING
-    )
-    assert graph.sections["fetch"].bbox_y < graph.sections["input"].bbox_y
+    assert {
+        graph.sections[section_id].bbox_y for section_id in ("input", "fetch", "report")
+    } == {graph.sections["fetch"].bbox_y}
 
 
 def test_planned_handoff_does_not_reslot_unrelated_same_line_stations() -> None:

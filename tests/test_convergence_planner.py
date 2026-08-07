@@ -23,6 +23,7 @@ from nf_metro.layout.route_plan import (
     DemandKind,
     KeepOutClass,
     RoutePlan,
+    RouteSystemDisposition,
     RouteSystemId,
     SharedReferenceId,
     SharedReferenceKind,
@@ -47,7 +48,7 @@ from nf_metro.layout.routing.invariants import (
     check_merge_feeders_land_on_trunk,
 )
 from nf_metro.parser.model import Edge, MetroGraph, PortSide, Station
-from nf_metro.parser.route_topology import build_route_topology_query
+from nf_metro.parser.route_topology import ResolvedEdge, build_route_topology_query
 
 ROOT = Path(__file__).parents[1]
 TOPOLOGIES = ROOT / "examples" / "topologies"
@@ -60,6 +61,10 @@ def _observe(path: Path):
     offsets = compute_station_offsets(graph)
     observed = observe_route_edges(graph, station_offsets=offsets)
     return graph, offsets, observed
+
+
+def _edge_order(observed) -> tuple[ResolvedEdge, ...]:
+    return tuple(member.edge for member in observed.plan.members)
 
 
 def _observe_text(text: str):
@@ -116,75 +121,41 @@ def test_three_column_merge_has_one_complete_planned_convergence() -> None:
 
 
 @pytest.mark.parametrize(
-    ("fixture", "reason"),
+    "fixture",
     (
-        (
-            "exit_run_three_drop_columns.mmd",
-            "planned convergence trunks require one shared channel decision",
-        ),
-        (
-            "funcprofiler_upstream.mmd",
-            "planned convergence corridor conflicts with unowned route-system members",
-        ),
-        (
-            "merge_trunk_out_of_range_section.mmd",
-            "planned convergence trunks require one shared channel decision",
-        ),
+        "exit_run_three_drop_columns.mmd",
+        "funcprofiler_upstream.mmd",
+        "merge_trunk_out_of_range_section.mmd",
     ),
 )
-def test_conflicting_route_systems_use_whole_system_compatibility(
-    fixture: str, reason: str
-) -> None:
+def test_shared_channel_route_systems_are_planned_as_a_whole(fixture: str) -> None:
     _graph, _offsets, observed = _observe(TOPOLOGIES / fixture)
 
     assert observed.plan.convergence_plans
     assert {item.disposition for item in observed.plan.convergence_plans} == {
-        ConvergenceDisposition.LEGACY
+        ConvergenceDisposition.PLANNED
     }
     assert len({item.system_id for item in observed.plan.convergence_plans}) == 1
-    assert {item.legacy_reason for item in observed.plan.convergence_plans} == {reason}
+    assert {item.legacy_reason for item in observed.plan.convergence_plans} == {None}
 
 
 @pytest.mark.parametrize(
-    ("path", "reason"),
+    "path",
     (
-        (
-            TOPOLOGIES / "merge_bottom_row_bypass.mmd",
-            "planned fan arms require opposing opening channels",
-        ),
-        (
-            TOPOLOGIES / "merge_feeder_shared_channel_gap.mmd",
-            "planned fan arms require opposing opening channels",
-        ),
-        (
-            TOPOLOGIES / "merge_right_entry.mmd",
-            "planned convergence corridor conflicts with unowned route-system member",
-        ),
-        (
-            ROOT / "examples" / "genomeassembly.mmd",
-            "chained same-line convergences require one shared system settlement",
-        ),
-        (
-            ROOT / "tests" / "fixtures" / "genomeassembly_organellar.mmd",
-            "chained same-line convergences require one shared system settlement",
-        ),
-        (
-            ROOT / "tests" / "fixtures" / "ambiguous_exit_continuation.mmd",
-            "planned convergence feeder approaches require one shared channel decision",
-        ),
+        TOPOLOGIES / "merge_bottom_row_bypass.mmd",
+        TOPOLOGIES / "merge_feeder_shared_channel_gap.mmd",
+        TOPOLOGIES / "merge_right_entry.mmd",
+        ROOT / "examples" / "genomeassembly.mmd",
+        ROOT / "tests" / "fixtures" / "genomeassembly_organellar.mmd",
+        ROOT / "tests" / "fixtures" / "ambiguous_exit_continuation.mmd",
     ),
 )
-def test_reviewed_conflicts_keep_the_complete_system_on_compatibility(
-    path: Path, reason: str
-) -> None:
+def test_reviewed_shared_channels_are_complete_planned_systems(path: Path) -> None:
     _graph, _offsets, observed = _observe(path)
 
     assert observed.plan.convergence_plans
-    assert all(
-        item.disposition is ConvergenceDisposition.LEGACY
-        for item in observed.plan.convergence_plans
-    )
-    assert {item.legacy_reason for item in observed.plan.convergence_plans} == {reason}
+    assert all(item.owns_geometry for item in observed.plan.convergence_plans)
+    assert {item.legacy_reason for item in observed.plan.convergence_plans} == {None}
 
 
 @pytest.mark.parametrize(
@@ -549,7 +520,7 @@ def test_runtime_guard_rejects_a_mutated_planned_opening_segment() -> None:
     execution = replace(
         convergence_routing.empty_convergence_plan_execution(),
         plans=(plan,),
-        query=convergence_routing._query((plan,)),
+        query=convergence_routing._query((plan,), _edge_order(observed)),
     )
 
     with pytest.raises(ConvergenceInvariantError, match="planned opening"):
@@ -779,7 +750,7 @@ def test_runtime_guard_rejects_reduced_planned_landing_runway() -> None:
     execution = replace(
         convergence_routing.empty_convergence_plan_execution(),
         plans=(plan,),
-        query=convergence_routing._query((plan,)),
+        query=convergence_routing._query((plan,), _edge_order(observed)),
     )
 
     with pytest.raises(ConvergenceInvariantError, match="runway"):
@@ -808,24 +779,18 @@ def test_direct_trunk_axis_rotates_and_reverses(
     assert trunk.direction.value == direction
 
 
-def test_one_planning_failure_rolls_back_the_whole_route_system(
+def test_unregistered_convergence_failure_cannot_open_compatibility(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def reject(*_args, **_kwargs):
-        raise UnsupportedConvergenceError("unsupported convergence shape")
+        raise UnsupportedConvergenceError("synthetic unregistered convergence failure")
 
     monkeypatch.setattr(convergence_routing, "_build_planned_convergence", reject)
-    _graph, _offsets, observed = _observe(FROZEN / "seed_15.mmd")
-    plans = observed.plan.convergence_plans
-
-    assert len(plans) > 1
-    assert {plan.disposition for plan in plans} == {ConvergenceDisposition.LEGACY}
-    assert all(plan.legacy_reason == "unsupported convergence shape" for plan in plans)
-    assert all(not plan.shared_reference_ids and not plan.demand_ids for plan in plans)
-    assert sum(
-        diagnostic.code == "convergence-plan-legacy"
-        for diagnostic in observed.plan.diagnostics
-    ) == len(plans)
+    with pytest.raises(
+        ValueError,
+        match="unregistered compatibility reason convergence-plan",
+    ):
+        _observe(FROZEN / "seed_15.mmd")
 
 
 @pytest.mark.parametrize("error", (AssertionError("bug"), TypeError("bug")))
@@ -853,7 +818,7 @@ def test_incomplete_semantic_membership_is_a_planning_error(
         _observe(FROZEN / "seed_15.mmd")
 
 
-def test_exit_turn_conflict_uses_whole_system_compatibility() -> None:
+def test_incompatible_custom_exit_spacing_uses_one_compatibility_system() -> None:
     path = TOPOLOGIES / "exit_run_three_drop_columns.mmd"
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
     offsets = compute_station_offsets(graph, offset_step=10.0)
@@ -866,10 +831,21 @@ def test_exit_turn_conflict_uses_whole_system_compatibility() -> None:
 
     assert plans
     assert {plan.disposition for plan in plans} == {ConvergenceDisposition.LEGACY}
-    assert all(
-        plan.legacy_reason == "convergence landing conflicts with an upstream exit turn"
-        for plan in plans
+    assert {plan.legacy_reason for plan in plans} == {
+        "convergence landing conflicts with an upstream exit turn"
+    }
+    system = next(
+        item for item in observed.plan.systems if item.id == plans[0].system_id
     )
+    assert system.disposition is RouteSystemDisposition.COMPATIBILITY
+    assert {
+        (reason.owner, reason.reason) for reason in system.compatibility_reasons
+    } == {
+        (
+            "convergence-plan",
+            "convergence landing conflicts with an upstream exit turn",
+        )
+    }
 
 
 def test_runtime_guard_names_the_plan_member_and_broken_join() -> None:
@@ -895,7 +871,7 @@ def test_runtime_guard_names_the_plan_member_and_broken_join() -> None:
     execution = replace(
         convergence_routing.empty_convergence_plan_execution(),
         plans=(plan,),
-        query=convergence_routing._query((plan,)),
+        query=convergence_routing._query((plan,), _edge_order(observed)),
     )
 
     with pytest.raises(ConvergenceInvariantError) as error:
@@ -937,7 +913,7 @@ def test_runtime_guard_rejects_a_disconnected_diagonal_trunk() -> None:
     execution = replace(
         convergence_routing.empty_convergence_plan_execution(),
         plans=(plan,),
-        query=convergence_routing._query((plan,)),
+        query=convergence_routing._query((plan,), _edge_order(observed)),
     )
 
     with pytest.raises(ConvergenceInvariantError, match="does not emit planned"):
@@ -970,7 +946,7 @@ def test_runtime_guard_rejects_a_missing_terminal_trunk_cap() -> None:
     execution = replace(
         convergence_routing.empty_convergence_plan_execution(),
         plans=(plan,),
-        query=convergence_routing._query((plan,)),
+        query=convergence_routing._query((plan,), _edge_order(observed)),
     )
 
     with pytest.raises(ConvergenceInvariantError, match="does not emit planned"):
@@ -1144,7 +1120,7 @@ def test_route_plan_rejects_duplicate_semantic_convergence_coverage(
         convergence_plans=(plan, duplicate),
     )
 
-    with pytest.raises(ValueError, match="coverage"):
+    with pytest.raises(ValueError, match="resource identities|coverage"):
         build_route_plan_query(route_plan)
 
 
@@ -1172,14 +1148,16 @@ def test_route_plan_rejects_incomplete_convergence_emission_membership(
         dict.fromkeys(edge for path in remaining_paths for edge in path)
     )
     member_by_edge = {item.edge: item.id for item in right_entry_route_plan.members}
-    mutated = replace(
-        plan,
-        member_ids=tuple(member_by_edge[edge] for edge in remaining_edges),
-        resolved_member_paths=remaining_paths,
-        resolved_member_edges=remaining_edges,
-    )
-
-    with pytest.raises(ValueError, match="membership is incomplete"):
-        build_route_plan_query(
-            replace(right_entry_route_plan, convergence_plans=(mutated,))
+    remaining_member_ids = tuple(member_by_edge[edge] for edge in remaining_edges)
+    with pytest.raises(ValueError, match="ownership"):
+        replace(
+            plan,
+            member_ids=remaining_member_ids,
+            resolved_member_paths=remaining_paths,
+            resolved_member_edges=remaining_edges,
+            endpoint_ownership=tuple(
+                item
+                for item in plan.endpoint_ownership
+                if item.member_id in remaining_member_ids
+            ),
         )

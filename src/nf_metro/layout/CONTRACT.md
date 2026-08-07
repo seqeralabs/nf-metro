@@ -1387,16 +1387,57 @@ in pipeline order.
   and turn axis matches the final routed paths, and every assignment is
   consumed exactly once at the render boundary.
 
+## Post-layout routing boundary: member geometry planning
+
+- **Purpose**: Give every preliminarily planned non-convergence emission member
+  one production seed with immutable declared channels before final route-system disposition and
+  global convergence settlement.
+- **Helpers**: `classify_inter_section_family` freezes one stable
+  `RouteFamilyId` per member. `build_member_geometry_execution` visits members
+  in scaffold order, calls only that family, materializes the candidate gap
+  slots once, and freezes `RouteMemberGeometryPlan` records.
+- **Precondition**: The semantic scaffold, exit-turn and fan decisions,
+  station offsets, layout coordinates, and any realised reservation bands for
+  this routing pass are settled. No production member has been emitted.
+- **Postcondition**: Each eligible member has a content-derived template ID,
+  pre-normalization points and radii, offset and normalization policy, gap and
+  trunk slots, semantic plan references, claimant-exact reservation IDs
+  consumed by this pass, and every owned vertical gap channel identified by
+  segment rank, exact coordinates, grid gap, row, and direction. Temporary
+  mutable routes used to build the templates have been removed from the routing
+  context.
+- **Invariants preserved**: The canonical family is classified once. Planned
+  production copies the seed and does not call its handler again. Declared gap
+  channels remain exact; other seed geometry may enter named global passes.
+  Convergence planning may construct candidates for members it owns. Final
+  global settlement consumes non-convergence channels only from these frozen
+  records. If one
+  eligible member cannot produce a complete template, the whole system uses
+  the registered `member-geometry-plan` compatibility reason and none of its
+  provisional templates reaches production.
+- **Related tests**: `tests/test_member_geometry.py`,
+  `tests/test_route_system_emission.py`, and `tests/test_route_plan.py`.
+- **Lifecycle:** invariant - `validate_member_geometry_emission` checks that
+  the final planned paths retain the owned segment ranks and exact coordinates
+  of every frozen gap channel after normalization.
+
 ## Post-layout routing boundary: convergence planning
 
 - **Purpose**: Give each complete semantic convergence one immutable target-side
   decision before route emission.
 - **Helpers**: `_route_edges` calls `build_convergence_plan_execution` after
-  exit-turn planning and before dispatch. Canonical inter-section templates
-  provide the planned trunk, approaches, joins, and continuation geometry.
+  exit-turn planning and before member construction. Canonical inter-section
+  templates provide the candidate trunk, approaches, joins, and continuation
+  geometry. Preliminary settlement publishes exact convergence claims to the
+  mutable member allocator. Before final route-system disposition,
+  `settle_global_convergence_execution` allocates preliminarily planned
+  convergence systems against frozen `RouteMemberGapChannel` records and
+  immutable prior convergence claims.
 - **Precondition**: The semantic route scaffold, exit-turn decisions, station
-  offsets, layout coordinates, topology resolution, and compatibility merge
-  classification are settled.
+  offsets, layout coordinates, topology resolution, compatibility merge
+  classification, and stable member family IDs are settled. Final global
+  settlement additionally requires preliminary system dispositions and
+  immutable planned member channels.
 - **Postcondition**: Every supported convergence records complete authored and
   resolved membership, its merge and entry bundle, primary trunk and structural
   reason, axis, extent, flanks and terminal caps, stable feeder and lane order,
@@ -1415,6 +1456,42 @@ in pipeline order.
   trunk retains its planned axis, flanks and terminal caps, every emitted
   continuation ends at its owned endpoint, and every covered continuation names
   its carrier.
+
+## Post-layout routing boundary: atomic route-system emission
+
+- **Purpose**: Emit one complete semantic route system under one ownership
+  disposition, in canonical system and member order.
+- **Helpers**: `_route_edges` calls `classify_route_system_dispositions` after
+  convergence classification to suppress member construction for known
+  compatibility systems. After member planning and convergence settlement it
+  calls `build_route_system_emission_execution` once to freeze the final atomic
+  dispositions. The system loop calls `fresh_member_route` for
+  each planned non-convergence member. Compatibility members alone enter
+  `_route_inter_section`'s ordered first-match dispatcher.
+  Whole-graph rail mode freezes a dedicated execution before its direct rail
+  emitter runs, then attributes and validates the returned rail paths against
+  those canonical identities without synthesizing member-geometry plans.
+- **Precondition**: The semantic scaffold, exit-turn, fan, member-geometry, and
+  convergence decisions are complete. Layout geometry and route reservations
+  are read-only.
+- **Postcondition**: Every system is wholly `PLANNED` or wholly
+  `COMPATIBILITY` and is emitted exactly once. Every canonical member has
+  exactly one emitted path or one explicit valid coverage binding. Every final
+  system path carries
+  its route-system ID, emission-member ID, disposition, plan IDs, and
+  claimant-exact reservation IDs. The system record carries their reservation
+  union. Compatibility systems carry explicit owner, reason, and
+  justification records and no plan IDs.
+- **Invariants preserved**: A planned family ID and its production seed are
+  canonical input to emission, not hints to the first-match table.
+  Compatibility routing cannot consume a planned exit-turn assignment or a
+  provisional member template. Post-passes may treat planned channels as fixed
+  anchors but cannot move or replace their owned segments.
+- **Related tests**: `tests/test_route_system_emission.py`,
+  `tests/test_route_plan.py`, and the planner-specific suites above.
+- **Lifecycle:** invariant - `validate_route_system_emission` checks the final
+  routed paths after normalization and reports the system, connectors, member,
+  plans, and reservations on any attribution mismatch.
 
 ## Post-layout render boundary: envelope settlement
 
@@ -1714,6 +1791,11 @@ They are design evidence, not part of this specification.
   invisible. It compares each corridor's description together with the width it
   asks for, since a boundary whose corridor survives at a different
   `minimum_width` is one the translations were sized wrongly for.
+  The decision freeze includes coordinate-independent system, member, family,
+  plan, coverage, and declared channel ownership. After the frozen ledger is
+  adopted, final routes are rebound to its claimant-exact reservation IDs and
+  validated against the published plan; reroute-ledger diagnostics cannot
+  leave routes attributed to the discarded provisional ledger.
 - **Consumed by**: the re-route. `_settle_render_geometry` hands the
   pre-settlement ledger back to `observe_route_edges_centred` whenever it holds
   any reservation, which builds `ReservedCorridors`
@@ -1811,19 +1893,16 @@ They are design evidence, not part of this specification.
   sibling stands in; `_shared_terminal_axis` then finds no feeder terminating
   where the hop does, and the plan falls back to `OUTGOING_CONTINUATION` with its
   trunk disagreeing with its own landings.
-  **A corridor shared with an unowned member is not contested.** The unowned
-  member is `annotation__exit_right_3 -> reporting__entry_top_7`: the same line,
-  landing on the plan's own entry port, which is the pair
-  `_convergent_port_groups` groups and `_coincide_same_line_tracks` fuses onto
-  one column. `UNOWNED_MEMBER_CORRIDOR` measures the planned trunk against a
-  `_trial_route` taken before that fusion, so `_fuses_onto_trunk` exempts exactly
-  the run the fusion seats on the trunk -- the route's own final approach into
-  the plan's port, within `EDGE_TO_BUNDLE_CLEARANCE` of it, landing where it
-  lands -- and nothing wider. A conflict anywhere else along the same route is a
-  second corridor the fusion never touches, which is why the check still fires
-  for `examples/genomic_pipeline.mmd`,
-  `tests/fixtures/regressions/stacked_collector_fanin.mmd` and
-  `examples/topologies/merge_right_entry.mmd`.
+  **A corridor shared with an unowned member is one system construction.** A
+  same-line member landing on the plan's entry port is grouped by
+  `_convergent_port_groups`; `_coincide_same_line_tracks` uses the planned
+  channel as its fixed reference and seats the unowned approach onto it. The
+  member-geometry planner freezes that approach's materialized gap channel.
+  Final convergence settlement consumes the frozen channel as an allocation
+  input instead of trial-routing the member and
+  rejecting a collision that the production coincidence pass removes. A member
+  with a genuinely separate corridor remains separate rather than being
+  inferred from overlap.
   **A plan claims the segments its axis describes, and no more.** A trunk axis
   collapses its flanks onto its own coordinate when the trunk turns straight into
   the port, and a zero-length flank must not be matched as a run: doing so claims
@@ -1840,23 +1919,16 @@ They are design evidence, not part of this specification.
   (`_bundled_sibling_owns_opening_column`): `_divergent_source_groups` draws its
   reference from the bundled members, and a lone feeder's own handler column is
   not the plan's to freeze.
-  A compatibility disposition carries evidence measured on the settled map.
-  `SettlementReach.SEPARATION_FIXED` states that no row or column offset owned by
-  settlement changes the distance between the conflicting runs.
-  `capacity_probe.probe_settlement_capacity` tests the stronger allocation
-  question by copying the settled graph, widening the system's claimed
-  boundaries, re-deriving dependent coordinates, and re-running convergence
-  planning on the copy.
-  `COMPATIBILITY_CORPUS` in `tests/test_capacity_probe.py` owns the live
-  population and each expected verdict. A fixture whose systems the planner owns
-  remains as a control, so the test fails if a compatibility system reappears.
+  `capacity_probe.probe_settlement_capacity` tests the allocation boundary by
+  copying the settled graph, widening the system's claimed boundaries,
+  re-deriving dependent coordinates, and re-running convergence planning on the
+  copy. `COMPATIBILITY_CORPUS` in `tests/test_capacity_probe.py` retains the
+  historically measured population as planned controls, so the test fails if a
+  compatibility system reappears.
   The probe is not on the render path: it plans the map fourteen more times
   per compatibility system, so it is diagnostic machinery that
-  `tests/test_capacity_probe.py` runs and no render pays for. Its result is only
-  meaningful against a reproduced baseline, so each system is first re-planned
-  untouched and one whose control does not come back on the compatibility path is
-  refused rather than measured; and its positive answer is reachable by
-  construction, which
+  `tests/test_capacity_probe.py` runs and no render pays for. Its positive answer
+  remains reachable by construction:
   `test_a_starved_system_is_handed_back_the_capacity_that_starved_it` shows by
   taking 10px out of `fan_in_merge`'s reserved boundaries until the planner drops
   it onto compatibility and watching the probe return 10.75px.
@@ -1993,9 +2065,11 @@ observation those stages can move.
   fan has exact structural ownership and complete relative geometry. A
   symmetric two-way fan uses mirrored lanes around one centreline; structural
   continuation identity does not convert that appearance into a trunk-plus-peel
-  frame. Its absolute centreline source is fixed by the planner, so later grid,
-  port, or topology mutations cannot select another anchor. A legacy fan claims
-  no layout geometry, offsets, anchor, or route emissions and records one
+  frame. A straight reconvergence consumes the established section tracks,
+  including phantom and collision-compacted slots, as its complete fixed frame.
+  Its absolute centreline source is fixed by the planner, so later grid, port,
+  or topology mutations cannot select another anchor. A legacy fan claims no
+  layout geometry, offsets, anchor, or route emissions and records one
   deterministic reason.
 - **Invariants preserved**: Planned materialisation reads frozen anchors and
   cannot move an unowned port or station. Structural membership is independent

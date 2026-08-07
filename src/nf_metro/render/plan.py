@@ -237,6 +237,12 @@ _RENDER_ROUTE_EXCLUDED_FIELDS = {
     "exit_lane_transition_plan_id",
     "fan_plan_id",
     "fan_route_emitter",
+    "route_system_id",
+    "emission_member_id",
+    "route_system_disposition",
+    "route_plan_ids",
+    "route_reservation_ids",
+    "route_system_owned_segment_ranks",
 }
 
 

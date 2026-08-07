@@ -54,6 +54,7 @@ from nf_metro.layout.route_plan import (
     ReservationDecisionRef,
     RoutePlan,
     RouteSystem,
+    RouteSystemDisposition,
     RouteSystemId,
     SharedReference,
     SharedReferenceId,
@@ -1489,6 +1490,11 @@ def _observe_route_geometry(
     claims: list[_ObservedClaim] = []
     unfiled: list[_UnfiledRun] = []
     for member in plan.members:
+        if (
+            system_by_id[member.system_id].disposition
+            is not RouteSystemDisposition.PLANNED
+        ):
+            continue
         binding = binding_by_member[member.id]
         if binding.kind is not BindingKind.EMITTED:
             continue
@@ -3749,6 +3755,33 @@ def _finalise_reservation_ledger(
     )
 
 
+def reservation_ids_by_claimant_member(
+    reservations: Iterable[RouteReservation],
+) -> dict[EmissionMemberId, tuple[str, ...]]:
+    """Index reservation IDs by claimant in their canonical ledger order."""
+    collected: defaultdict[EmissionMemberId, list[str]] = defaultdict(list)
+    for reservation in reservations:
+        for member_id in reservation.claimant_member_ids:
+            collected[member_id].append(str(reservation.id))
+    return {member_id: tuple(ids) for member_id, ids in collected.items()}
+
+
+def attach_reservation_ids_to_routes(
+    routes: Iterable[RoutedPath],
+    reservations: Iterable[RouteReservation],
+) -> None:
+    """Attach each claimant's reservation IDs in canonical ledger order."""
+    reservation_ids_by_member = reservation_ids_by_claimant_member(reservations)
+    for route in routes:
+        if route.emission_member_id is None:
+            continue
+        route.route_reservation_ids = tuple(
+            reservation_ids_by_member.get(
+                EmissionMemberId(route.emission_member_id), ()
+            )
+        )
+
+
 def attach_route_reservations(
     plan: RoutePlan,
     graph: MetroGraph,
@@ -3777,12 +3810,14 @@ def attach_route_reservations(
         demands=plan.demands + observed_demands,
         reservations=reservations,
     )
-    return _finalise_reservation_ledger(
+    finalised = _finalise_reservation_ledger(
         plan_with_corridors,
         graph,
         canvas_width=canvas_width,
         canvas_height=canvas_height,
     )
+    attach_reservation_ids_to_routes(routes, finalised.reservations)
+    return finalised
 
 
 def _project_shared_coordinate(

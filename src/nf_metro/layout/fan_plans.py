@@ -48,9 +48,10 @@ from nf_metro.layout.route_plan import (
     RouteSystemId,
     SharedReferenceId,
     build_route_semantic_scaffold,
+    fan_has_vacant_trunk,
 )
 from nf_metro.parser.commitments import FlowDirection, is_flow_direction
-from nf_metro.parser.model import MetroGraph, PortSide
+from nf_metro.parser.model import LineSpread, MetroGraph, PortSide
 from nf_metro.parser.route_topology import (
     AuthoredEdgeFact,
     BundleId,
@@ -65,6 +66,10 @@ from nf_metro.parser.route_topology import (
 
 if TYPE_CHECKING:
     from nf_metro.layout.routing.common import RoutedPath
+
+
+class FanRouteInvariantError(RuntimeError):
+    """A planned fan's emitted geometry drifted from its frozen frame."""
 
 
 @runtime_checkable
@@ -1453,8 +1458,6 @@ def _build_candidate(
     suffix = recognised.suffix
     join_id = recognised.join_id
 
-    appearance_policy = FanAppearancePolicy(graph.diamond_style)
-
     direction = _direction_for_fork(graph, fork_id, source_id, lead_fact_groups[0])
     if direction is None:
         reason = reason or "unsupported-fan-direction"
@@ -1465,6 +1468,11 @@ def _build_candidate(
     )
     offsets = symmetric_lane_offsets(len(branch_targets), lane_pitch)
     layout_section_id = _layout_section_id(graph, fork_id)
+    appearance_policy = (
+        FanAppearancePolicy.SYMMETRIC
+        if graph.section_line_spread(layout_section_id) is LineSpread.CENTERED
+        else FanAppearancePolicy(graph.diamond_style)
+    )
     if layout_section_id is not None and any(
         station_id != authored_join
         and graph.section_for_station(station_id) == layout_section_id
@@ -1618,10 +1626,21 @@ def _build_candidate(
             )
             for branch in branch_plans
         ]
-    appearance_centreline_branch_id = _appearance_centreline_branch_id(
-        branch_plans,
+    has_vacant_trunk = fan_has_vacant_trunk(
         appearance_policy,
-        structural_trunk_rank,
+        authored_join,
+        branch_plans,
+    )
+    if has_vacant_trunk:
+        lane_pitch *= 2.0
+    appearance_centreline_branch_id = (
+        None
+        if has_vacant_trunk
+        else _appearance_centreline_branch_id(
+            branch_plans,
+            appearance_policy,
+            structural_trunk_rank,
+        )
     )
     lane_offsets = fan_lane_offsets(
         tuple(branch.id for branch in branch_plans),
@@ -1915,12 +1934,6 @@ def _build_candidate(
         for carrier in offset_carriers
     ):
         reason = reason or "offset-carrier-has-unowned-line"
-    if (
-        reason is None
-        and authored_join is not None
-        and appearance_policy is FanAppearancePolicy.STRAIGHT
-    ):
-        reason = "straight-diamond-layout-owns-geometry"
     # Same-line terminal and boundary arms have no semantic trunk identity.
     # The section allocator must choose their tracks before it sizes the box.
     if (
@@ -2314,12 +2327,22 @@ def _validate_fan_runtime_frame(
     )
     for edge, route in bound_routes.items():
         if not route.points:
-            raise RuntimeError(f"{context} emitted an empty final route for {edge!r}")
+            raise FanRouteInvariantError(
+                f"{context} emitted an empty final route for {edge!r}"
+            )
         points = tuple(apply_route_offsets(route, station_offsets))
         endpoints[(edge.source, edge.line_id)].append((edge, points[0]))
         endpoints[(edge.target, edge.line_id)].append((edge, points[-1]))
 
-    if plan.frame is not None and plan.direction is not None:
+    uses_one_boundary_frame = not (
+        plan.appearance_policy is FanAppearancePolicy.STRAIGHT
+        and plan.authored_join_station_id is not None
+    )
+    if (
+        plan.frame is not None
+        and plan.direction is not None
+        and uses_one_boundary_frame
+    ):
         secondary_axis = 0 if plan.frame.secondary.name == "x" else 1
         perpendicular_sides = perpendicular_port_sides(plan.direction)
         for station_id in _fan_boundary_station_ids(plan):
@@ -2327,7 +2350,7 @@ def _validate_fan_runtime_frame(
                 continue
             station = graph.stations.get(station_id)
             if station is None:
-                raise RuntimeError(
+                raise FanRouteInvariantError(
                     f"{context} has no realised boundary station {station_id!r}"
                 )
             port = graph.ports.get(station_id)
@@ -2347,7 +2370,7 @@ def _validate_fan_runtime_frame(
                     abs(point[secondary_axis] - expected) > COORD_TOLERANCE_FINE
                     for _edge, point in incident
                 ):
-                    raise RuntimeError(
+                    raise FanRouteInvariantError(
                         f"{context} drifted from its planned boundary frame at "
                         f"{station_id!r} on {line_id!r}"
                     )
@@ -2366,7 +2389,7 @@ def _validate_fan_runtime_frame(
             for _edge, point in incident[1:]
             for axis in axes
         ):
-            raise RuntimeError(
+            raise FanRouteInvariantError(
                 f"{context} has a final route frame discontinuity at "
                 f"{station_id!r} on {line_id!r}"
             )
@@ -2377,7 +2400,7 @@ def _validate_fan_runtime_frame(
         return
     fork = graph.stations.get(plan.fork_station_id)
     if fork is None:
-        raise RuntimeError(f"{context} has no realised fork station")
+        raise FanRouteInvariantError(f"{context} has no realised fork station")
     secondary_axis = 0 if plan.frame.secondary.name == "x" else 1
     planned_base = plan.frame.secondary.get(fork)
     carrier = next(
@@ -2405,7 +2428,7 @@ def _validate_fan_runtime_frame(
                 abs(point[secondary_axis] - planned_base - external_offset)
                 > COORD_TOLERANCE_FINE
             ):
-                raise RuntimeError(
+                raise FanRouteInvariantError(
                     f"{context} drifted from its planned fork centreline"
                 )
         return
@@ -2417,15 +2440,25 @@ def _validate_fan_runtime_frame(
         if line_id in slots
     ]
     if any(abs(base - planned_base) > COORD_TOLERANCE_FINE for base in bases):
-        raise RuntimeError(f"{context} drifted from its planned fork frame")
+        raise FanRouteInvariantError(f"{context} drifted from its planned fork frame")
 
 
 def validate_fan_route_emissions(
     graph: MetroGraph,
     routes: Sequence[RoutedPath],
     station_offsets: Mapping[tuple[str, str], float] | None = None,
+    *,
+    planned_system_ids: frozenset[RouteSystemId] | None = None,
 ) -> None:
     """Bind every planned fan member and exclusive emitter exactly once."""
+
+    def emitted_plan(plan: FanPlan) -> bool:
+        return plan.owns_geometry and (
+            planned_system_ids is None
+            or plan.system_id is None
+            or plan.system_id in planned_system_ids
+        )
+
     routes_by_edge: dict[ResolvedEdge, list[RoutedPath]] = defaultdict(list)
     for route in routes:
         routes_by_edge[
@@ -2433,7 +2466,7 @@ def validate_fan_route_emissions(
         ].append(route)
     bound_routes_by_plan: list[tuple[FanPlan, dict[ResolvedEdge, RoutedPath]]] = []
     for plan in graph.fan_plans:
-        if not plan.owns_geometry:
+        if not emitted_plan(plan):
             continue
         bound_routes: dict[ResolvedEdge, RoutedPath] = {}
         for edge in _fan_runtime_edges(plan):
@@ -2450,7 +2483,7 @@ def validate_fan_route_emissions(
     expected = tuple(
         (plan, emission)
         for plan in graph.fan_plans
-        if plan.owns_geometry
+        if emitted_plan(plan)
         for emission in plan.route_emissions
     )
     query = graph.fan_plan_query
@@ -2466,6 +2499,11 @@ def validate_fan_route_emissions(
         if binding is None:
             raise RuntimeError(f"unclaimed fan route emission tagged {edge!r}")
         plan, _branch, emission = binding
+        if not emitted_plan(plan):
+            raise RuntimeError(
+                f"compatibility route system {plan.system_id!s} consumed planned "
+                f"fan emission {plan.id!s} for {edge!r}"
+            )
         if (
             route.fan_plan_id != plan.id
             or route.fan_route_emitter != emission.emitter.value

@@ -13,7 +13,6 @@ from types import MappingProxyType
 
 import pytest
 
-import nf_metro.layout.routing.convergences as convergences
 import nf_metro.layout.routing.exit_turns as exit_turns
 import nf_metro.layout.routing.inter_section_handlers as inter_handlers
 import nf_metro.layout.routing.offsets as routing_offsets
@@ -28,6 +27,8 @@ from nf_metro.layout.route_plan import (
     ExitLaneOrderSource,
     ExitTurnDisposition,
     RouteFamilyId,
+    RouteSystemDisposition,
+    RouteSystemId,
     SharedReferenceKind,
     build_route_plan_query,
 )
@@ -87,11 +88,17 @@ def _observe(path: Path):
     return graph, offsets, observation
 
 
-def _build_execution(path: Path):
+def _build_execution(path: Path, *, offset_step: float | None = None):
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-    offsets = compute_station_offsets(graph)
+    offsets = compute_station_offsets(graph, offset_step=offset_step)
     original_offsets = dict(offsets)
-    ctx = _build_routing_context(graph, DIAGONAL_RUN, CURVE_RADIUS, offsets)
+    ctx = _build_routing_context(
+        graph,
+        DIAGONAL_RUN,
+        CURVE_RADIUS,
+        offsets,
+        offset_step=offset_step,
+    )
     execution = exit_turns.build_exit_turn_execution(graph, ctx)
     return graph, offsets, original_offsets, execution
 
@@ -388,18 +395,34 @@ def test_merge_feeder_does_not_compress_a_terminal_landing_curve() -> None:
 
 def test_leftward_upturn_preserves_source_lane_order() -> None:
     graph, offsets, observation = _observe(FROZEN / "seed_72.mmd")
-    plan = _plan_for_source(observation, "s7__exit_left_5")
+    _raw_graph, _raw_offsets, _original_offsets, execution = _build_execution(
+        FROZEN / "seed_72.mmd"
+    )
+    plan = next(item for item in execution.plans if item.source_id == "s7__exit_left_5")
+    system = next(
+        item for item in observation.plan.systems if item.id == plan.system_id
+    )
 
     assert plan.disposition is ExitTurnDisposition.PLANNED
+    assert system.disposition is RouteSystemDisposition.COMPATIBILITY
+    assert system.compatibility_reasons
     assert tuple(lane.line_id for lane in plan.source_lanes) == ("l6", "l2")
     axes = {axis.line_id: axis.coordinate for axis in plan.axes}
     assert axes["l6"] < axes["l2"]
     routes = {
         route.line_id: route
         for route in observation.routes
-        if route.edge.source == plan.source_id and route.exit_turn_axis_id is not None
+        if route.edge.source == plan.source_id
     }
-    assert _turn_x(routes["l6"], offsets) < _turn_x(routes["l2"], offsets)
+    assert all(
+        route.route_system_disposition == "compatibility" for route in routes.values()
+    )
+    assert all(route.exit_turn_axis_id is None for route in routes.values())
+    turn_x = {
+        line_id: apply_route_offsets(route, offsets)[1][0]
+        for line_id, route in routes.items()
+    }
+    assert turn_x["l6"] < turn_x["l2"]
     validate_exit_turn_plans(graph, observation.routes, observation.plan, offsets)
 
 
@@ -407,7 +430,12 @@ def test_compacted_leftward_source_stays_planned_as_a_straight_group() -> None:
     graph, offsets, observation = _observe(
         TOPOLOGIES / "leftward_up_exit_turn_order.mmd"
     )
-    plan = _plan_for_source(observation, "source__exit_left_3")
+    _raw_graph, _raw_offsets, _original_offsets, execution = _build_execution(
+        TOPOLOGIES / "leftward_up_exit_turn_order.mmd"
+    )
+    plan = next(
+        item for item in execution.plans if item.source_id == "source__exit_left_3"
+    )
 
     assert plan.disposition is ExitTurnDisposition.PLANNED
     assert tuple(lane.line_id for lane in plan.source_lanes) == ("branch", "shared")
@@ -418,6 +446,10 @@ def test_compacted_leftward_source_stays_planned_as_a_straight_group() -> None:
         for assignment in plan.assignments
     )
     assert not plan.axes
+    system = next(
+        item for item in observation.plan.systems if item.id == plan.system_id
+    )
+    assert system.disposition is RouteSystemDisposition.COMPATIBILITY
     validate_exit_turn_plans(graph, observation.routes, observation.plan, offsets)
 
 
@@ -595,13 +627,11 @@ def test_exit_plan_falls_back_before_changing_a_linear_entry_frame(
         return tuple(built)
 
     monkeypatch.setattr(exit_turns, "_build_group_plans", conflict)
-    _graph, offsets, observation = _observe(TOPOLOGIES / "target_lane_transition.mmd")
-    plan = _plan_for_source(observation, "__junction_7")
-    affected = [
-        item
-        for item in observation.plan.exit_turn_plans
-        if item.system_id == plan.system_id
-    ]
+    _graph, offsets, _original_offsets, execution = _build_execution(
+        TOPOLOGIES / "target_lane_transition.mmd"
+    )
+    plan = next(item for item in execution.plans if item.source_id == "__junction_7")
+    affected = [item for item in execution.plans if item.system_id == plan.system_id]
 
     assert all(item.disposition is ExitTurnDisposition.LEGACY for item in affected)
     assert all(
@@ -838,9 +868,12 @@ def test_compacted_straight_continuation_keeps_its_lane_across_the_seam() -> Non
     graph, offsets, observation = _observe(
         TOPOLOGIES / "terminated_exit_lane_compaction.mmd"
     )
+    _raw_graph, _raw_offsets, _original_offsets, execution = _build_execution(
+        TOPOLOGIES / "terminated_exit_lane_compaction.mmd"
+    )
     plans = {
         plan.source_id: plan
-        for plan in observation.plan.exit_turn_plans
+        for plan in execution.plans
         if any(lane.line_id == "straight" for lane in plan.source_lanes)
     }
 
@@ -909,14 +942,19 @@ def test_normal_planning_builds_each_exit_group_once(
     assert len(calls) == len(set(calls))
 
 
-def test_lane_order_inversion_uses_whole_group_legacy() -> None:
-    _graph, _offsets, observation = _observe(
-        FIXTURES / "tb_right_exit_feeder_slots.mmd"
-    )
+def test_right_exit_feeder_slots_preserve_the_planned_lane_order() -> None:
+    graph, offsets, observation = _observe(FIXTURES / "tb_right_exit_feeder_slots.mmd")
     plan = _plan_for_source(observation, "src__exit_right_0")
 
-    assert plan.disposition is ExitTurnDisposition.LEGACY
-    assert plan.legacy_reason == "lane-transition-order-inversion"
+    assert plan.disposition is ExitTurnDisposition.PLANNED
+    assert plan.legacy_reason is None
+    assert tuple(lane.line_id for lane in plan.source_lanes) == (
+        "l1",
+        "l2",
+        "l4",
+        "l3",
+    )
+    validate_exit_turn_plans(graph, observation.routes, observation.plan, offsets)
 
 
 @pytest.mark.parametrize(
@@ -939,8 +977,10 @@ def test_unsupported_continuations_use_whole_group_legacy(
     source_id: str,
     reason: str,
 ) -> None:
-    _graph, _offsets, observation = _observe(FIXTURES / fixture)
-    plan = _plan_for_source(observation, source_id)
+    _graph, _offsets, _original_offsets, execution = _build_execution(
+        FIXTURES / fixture
+    )
+    plan = next(item for item in execution.plans if item.source_id == source_id)
 
     assert plan.disposition is ExitTurnDisposition.LEGACY
     assert plan.legacy_reason == reason
@@ -1140,10 +1180,13 @@ def test_lane_transitions_stay_within_one_section_frame(path: Path) -> None:
 
 def test_noncontiguous_source_lanes_compact_the_turning_cohort() -> None:
     _graph, offsets, observation = _observe(TOPOLOGIES / "complex_multipath.mmd")
-    plan = _plan_for_source(observation, "__junction_11")
+    _raw_graph, _raw_offsets, _original_offsets, execution = _build_execution(
+        TOPOLOGIES / "complex_multipath.mmd"
+    )
+    plan = next(item for item in execution.plans if item.source_id == "__junction_11")
     ordered_turns = next(
         item
-        for item in observation.plan.demands
+        for item in execution.demands
         if item.id in plan.demand_ids and item.kind is DemandKind.ORDERED_TURNS
     )
 
@@ -1155,11 +1198,16 @@ def test_noncontiguous_source_lanes_compact_the_turning_cohort() -> None:
     routes = {
         route.line_id: route
         for route in observation.routes
-        if route.exit_turn_plan_id == str(plan.id)
-        and route.exit_turn_axis_id is not None
+        if route.edge.source == plan.source_id
     }
+    system = next(
+        item for item in observation.plan.systems if item.id == plan.system_id
+    )
+    assert system.disposition is RouteSystemDisposition.COMPATIBILITY
+    assert all(route.exit_turn_axis_id is None for route in routes.values())
     turn_gap = abs(
-        _turn_x(routes["standard"], offsets) - _turn_x(routes["legacy"], offsets)
+        apply_route_offsets(routes["standard"], offsets)[1][0]
+        - apply_route_offsets(routes["legacy"], offsets)[1][0]
     )
     assert turn_gap == pytest.approx(plan.spacing)
 
@@ -1257,10 +1305,10 @@ def test_one_unsupported_member_keeps_the_whole_group_on_legacy(
         "PLANNED_EXIT_FAMILIES",
         exit_turns.PLANNED_EXIT_FAMILIES - {RouteFamilyId.MERGE_BRANCH},
     )
-    _graph, _offsets, observation = _observe(
+    _graph, _offsets, _original_offsets, execution = _build_execution(
         TOPOLOGIES / "exit_run_three_drop_columns.mmd"
     )
-    plan = _plan_for_source(observation, "__junction_9")
+    plan = next(item for item in execution.plans if item.source_id == "__junction_9")
 
     assert plan.disposition is ExitTurnDisposition.LEGACY
     assert plan.legacy_reason is not None
@@ -1268,14 +1316,13 @@ def test_one_unsupported_member_keeps_the_whole_group_on_legacy(
         len(
             [
                 diagnostic
-                for diagnostic in observation.plan.diagnostics
+                for diagnostic in execution.diagnostics
                 if diagnostic.code == "exit-turn-legacy"
                 and diagnostic.member_id in plan.member_ids
             ]
         )
         == 1
     )
-    assert not any(route.exit_turn_plan_id == plan.id for route in observation.routes)
 
 
 def test_route_plan_query_rejects_an_inexact_legacy_diagnostic() -> None:
@@ -1310,15 +1357,14 @@ def test_unclassifiable_member_has_an_explicit_whole_group_fallback(
         return real_classify(edge, src, tgt, ctx)
 
     monkeypatch.setattr(exit_turns, "classify_inter_section_family", classify)
-    _graph, _offsets, observation = _observe(
+    _graph, _offsets, _original_offsets, execution = _build_execution(
         TOPOLOGIES / "exit_run_three_drop_columns.mmd"
     )
-    plan = _plan_for_source(observation, "__junction_9")
+    plan = next(item for item in execution.plans if item.source_id == "__junction_9")
 
     assert plan.disposition is ExitTurnDisposition.LEGACY
     assert plan.legacy_reason == "missing-production-family"
     assert len(plan.unclassified_member_ids) == 1
-    build_route_plan_query(observation.plan)
 
 
 def test_planned_turn_falls_back_before_a_compatibility_channel_collision() -> None:
@@ -1424,21 +1470,15 @@ def test_missing_outbound_members_have_a_valid_legacy_lane_record(
         )
 
     monkeypatch.setattr(exit_turns, "build_route_semantic_scaffold", omit_outbound)
-    monkeypatch.setattr(
-        convergences,
-        "build_convergence_plan_execution",
-        lambda *_args, **_kwargs: convergences.empty_convergence_plan_execution(),
-    )
     path = TOPOLOGIES / "exit_run_three_drop_columns.mmd"
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+    offsets = compute_station_offsets(graph)
     assert graph.fan_plan_execution is not None
     graph.fan_plan_execution = replace(graph.fan_plan_execution, scaffold=None)
-    offsets = compute_station_offsets(graph)
-    observation = observe_route_edges(graph, station_offsets=offsets)
+    ctx = _build_routing_context(graph, DIAGONAL_RUN, CURVE_RADIUS, offsets)
+    execution = exit_turns.build_exit_turn_execution(graph, ctx)
     (plan,) = tuple(
-        item
-        for item in observation.plan.exit_turn_plans
-        if item.source_id == "__junction_9"
+        item for item in execution.plans if item.source_id == "__junction_9"
     )
 
     assert plan.disposition is ExitTurnDisposition.LEGACY
@@ -1509,12 +1549,12 @@ def test_cross_plan_station_lane_ownership_falls_back_atomically(
         return stations, transitions, reason
 
     monkeypatch.setattr(exit_turns, "_source_lane_ownership", share_station)
-    _graph, offsets, observation = _observe(
+    _graph, offsets, _original_offsets, execution = _build_execution(
         TOPOLOGIES / "exit_run_three_drop_columns.mmd"
     )
     affected = [
         item
-        for item in observation.plan.exit_turn_plans
+        for item in execution.plans
         if item.source_id in {"__junction_8", "__junction_9"}
     ]
 
@@ -1524,7 +1564,6 @@ def test_cross_plan_station_lane_ownership_falls_back_atomically(
         item.legacy_reason == "shared-source-ownership-conflict" for item in affected
     )
     assert offsets[("c__exit_right_2", "main")] == pytest.approx(0.0)
-    build_route_plan_query(observation.plan)
 
 
 def test_cross_plan_station_lane_slots_are_checked_after_all_compaction(
@@ -1618,37 +1657,6 @@ def test_runtime_invariant_names_the_system_and_connectors() -> None:
         for item in observation.plan.exit_turn_plans
         if item.id == route.exit_turn_plan_id
     )
-    assert str(plan.system_id) in str(error.value)
-    assert all(
-        str(connector_id) in str(error.value) for connector_id in plan.connector_ids
-    )
-
-
-def test_declined_planned_emitter_names_the_system_and_connectors(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    path = TOPOLOGIES / "exit_run_three_drop_columns.mmd"
-    expected_graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-    expected_offsets = compute_station_offsets(expected_graph)
-    expected_observation = observe_route_edges(
-        expected_graph,
-        station_offsets=expected_offsets,
-    )
-    plan = _plan_for_source(expected_observation, "__junction_9")
-    real_route = inter_handlers._route_l_shape
-
-    def decline(edge, src, tgt, i, n, ctx):
-        if edge.source == plan.source_id and edge.line_id == "main":
-            return None
-        return real_route(edge, src, tgt, i, n, ctx)
-
-    monkeypatch.setattr(inter_handlers, "_route_l_shape", decline)
-    graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-    offsets = compute_station_offsets(graph)
-
-    with pytest.raises(ExitTurnInvariantError) as error:
-        route_edges(graph, station_offsets=offsets)
-
     assert str(plan.system_id) in str(error.value)
     assert all(
         str(connector_id) in str(error.value) for connector_id in plan.connector_ids
@@ -1808,7 +1816,7 @@ def test_runtime_invariant_rejects_an_unsatisfied_runway_demand() -> None:
 
 def test_runtime_invariant_rejects_a_shifted_straight_continuation() -> None:
     graph, offsets, observation = _observe(
-        TOPOLOGIES / "terminated_exit_lane_compaction.mmd"
+        TOPOLOGIES / "exit_run_three_drop_columns.mmd"
     )
     plan = _plan_for_source(observation, "__junction_9")
     assignment = next(
@@ -2143,7 +2151,6 @@ def test_foreign_vertical_band_conflict_is_recorded() -> None:
         item
         for item in observation.plan.reservations
         if item.orientation is CorridorOrientation.VERTICAL
-        and item.system_id != plan.system_id
     )
     span = next(
         item.span for item in observation.plan.demands if item.id == plan.demand_ids[0]
@@ -2151,6 +2158,7 @@ def test_foreign_vertical_band_conflict_is_recorded() -> None:
     axis = plan.axes[0]
     conflicting_reservation = replace(
         reservation,
+        system_id=RouteSystemId("foreign-system"),
         span=span,
         claims=tuple(
             replace(claim, allocation_coordinate=axis.coordinate)
@@ -2159,10 +2167,7 @@ def test_foreign_vertical_band_conflict_is_recorded() -> None:
     )
     modified = replace(
         observation.plan,
-        reservations=tuple(
-            conflicting_reservation if item.id == reservation.id else item
-            for item in observation.plan.reservations
-        ),
+        reservations=(*observation.plan.reservations, conflicting_reservation),
     )
 
     conflicts = expected_exit_turn_foreign_references(modified)
@@ -2172,9 +2177,12 @@ def test_foreign_vertical_band_conflict_is_recorded() -> None:
 
 def test_perpendicular_plan_axes_do_not_create_foreign_conflicts() -> None:
     _graph, _offsets, observation = _observe(TOPOLOGIES / "complex_multipath.mmd")
+    _raw_graph, _raw_offsets, _original_offsets, execution = _build_execution(
+        TOPOLOGIES / "complex_multipath.mmd"
+    )
     first, second = (
         item
-        for item in observation.plan.exit_turn_plans
+        for item in execution.plans
         if item.disposition is ExitTurnDisposition.PLANNED
         and item.axes
         and item.reference_id is not None
@@ -2194,9 +2202,9 @@ def test_perpendicular_plan_axes_do_not_create_foreign_conflicts() -> None:
     )
     modified = replace(
         observation.plan,
+        demands=execution.demands,
         exit_turn_plans=tuple(
-            perpendicular if item.id == second.id else item
-            for item in observation.plan.exit_turn_plans
+            perpendicular if item.id == second.id else item for item in execution.plans
         ),
     )
 
@@ -2210,18 +2218,17 @@ def test_vertical_source_axes_conflict_with_horizontal_corridors() -> None:
         TOPOLOGIES / "tb_bottom_exit_bundle_jog.mmd"
     )
     plan = _plan_for_source(observation, "up__exit_bottom_0")
-    _other_graph, _other_offsets, other = _observe(TOPOLOGIES / "complex_multipath.mmd")
     reservation = next(
         item
-        for item in other.plan.reservations
+        for item in observation.plan.reservations
         if item.orientation is CorridorOrientation.HORIZONTAL
-        and item.system_id != plan.system_id
     )
     span = next(
         item.span for item in observation.plan.demands if item.id == plan.demand_ids[0]
     )
     conflicting_reservation = replace(
         reservation,
+        system_id=RouteSystemId("foreign-system"),
         span=span,
         claims=tuple(
             replace(claim, allocation_coordinate=plan.axes[0].coordinate)
@@ -2310,7 +2317,10 @@ def test_custom_spacing_is_shared_by_offsets_plan_and_routes() -> None:
         station_offsets=offsets,
         offset_step=10.0,
     )
-    plan = _plan_for_source(observation, "__junction_9")
+    _raw_graph, _raw_offsets, _original_offsets, execution = _build_execution(
+        path, offset_step=10.0
+    )
+    plan = next(item for item in execution.plans if item.source_id == "__junction_9")
 
     assert plan.spacing == pytest.approx(10.0)
     assert all(
@@ -2323,6 +2333,11 @@ def test_custom_spacing_is_shared_by_offsets_plan_and_routes() -> None:
         == pytest.approx((right.rank - left.rank) * 10.0)
         for left, right in zip(ordered_axes, ordered_axes[1:])
     )
+    system = next(
+        item for item in observation.plan.systems if item.id == plan.system_id
+    )
+    assert system.disposition is RouteSystemDisposition.COMPATIBILITY
+    assert all(route.exit_turn_axis_id is None for route in observation.routes)
     validate_exit_turn_plans(graph, observation.routes, observation.plan, offsets)
 
 

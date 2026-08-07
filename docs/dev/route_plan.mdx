@@ -32,13 +32,16 @@ flowchart TD
     T["RouteTopology, RouteResolution<br/>authored identity, resolved membership"]
     C["layout commitments<br/>grid, direction, span, fold, port sides"]
     L["local section layout<br/>station geometry, symbolic demands"]
-    P["route-system plans<br/>ExitTurnPlan, FanPlan, convergence plan"]
+    P["source and layout plans<br/>ExitTurnPlan, FanPlan"]
+    V["convergence candidates and preliminary lanes<br/>trunks, joins, fixed claims"]
+    M["member geometry plans<br/>canonical family, seed, owned channels"]
+    A["final convergence allocation<br/>against immutable member channels"]
     R["RouteReservation<br/>corridor claims"]
     S["envelope settlement<br/>realised bands, row and column offsets"]
     E["plan-driven emission<br/>points and radii from shared primitives"]
     D["RenderPlan"]
 
-    G --> T --> C --> L --> P --> R --> S --> E --> D
+    G --> T --> C --> L --> P --> V --> M --> A --> R --> S --> E --> D
 ```
 
 Names change; the boundaries do not. A stage never reaches back: emission does
@@ -48,19 +51,46 @@ pass restores something a plan owns.
 ## Observation boundary
 
 On the normal dispatcher path, the routing context and semantic scaffold are
-built before the first handler runs. Ordinary routing and
-`observe_route_edges` run the same exit-turn and convergence planners and
-consume the same decisions. Ordinary routing returns only the routes. It does not construct a
-`RoutePlanObserver`, emission bindings, corridor reservations, or the final
-`RoutePlan`. `observe_route_edges` collects and returns those additional
-records.
+built before the first production path is emitted. Ordinary routing and
+`observe_route_edges` run the same exit-turn, fan, convergence-classification,
+route-system, member-geometry, and final convergence-settlement stages. Each inter-section member is classified
+once, and each `RouteSystem` receives one emission disposition before any of
+its members are emitted. Ordinary routing returns only the routes. It does not
+construct a `RoutePlanObserver`, emission bindings, corridor reservations, or
+the final `RoutePlan`. `observe_route_edges` collects and returns those
+additional records.
 
-An emitted inter-section member records the stable family ID of the handler
-that won. Rail members record the rail family at the rail call. A member
-skipped before dispatch has no family ID. If a matched inter-section builder
-declines to emit, the later TB, entry-runway, or general fallback that emits
-the member owns its family ID. After all normalization passes, the observer
-binds every member to the final route list.
+`RouteSystemEmissionExecution` follows the scaffold's canonical system order.
+It emits a system once, in that system's canonical member order. After
+preliminary system disposition, a planned non-convergence member's frozen family builds
+one `RouteMemberGeometryPlan`. The plan stores the pre-normalization points and
+radii, gap and trunk slots, offset regime, normalization policy, semantic plan
+references, and the exact segment identity and coordinates of every gap channel
+it owns. Production copies that seed
+into a fresh mutable route; it neither calls the family nor runs the ordered
+matcher again. A compatibility system discards any provisional templates and
+uses the ordered matcher for every member. These modes are atomic, so planned
+and compatibility members cannot coexist in one emitted system.
+
+Every emitted system member carries its route-system ID, emission-member ID,
+system disposition, owning plan IDs, and claimant-exact reservation IDs on the
+final `RoutedPath`. Compatibility members carry no plan IDs and name one or more
+explicit `RouteSystemCompatibilityReason` records instead. Rail members record
+the rail family at the rail call. Whole-graph rail mode freezes the same
+canonical system/member execution before invoking the direct rail geometry
+owner, then attributes and validates each returned path against that execution.
+A member skipped before dispatch has no family ID. If a compatibility inter-section builder declines to emit, the
+later TB, entry-runway, or general fallback that emits the member owns its
+family ID. After all normalization passes, the observer binds every member to
+the final route list.
+
+Reservation publication closes the attribution loop. The observer first
+publishes member-geometry plan IDs with the system and member bindings, then
+`attach_route_reservations` finalizes each system's reservation union and writes
+onto each `RoutedPath` only reservations whose claimant list contains that
+member. The final publication guard derives the same exact set from the
+published `RoutePlan`, so the observation pass cannot leave a path referring to
+a provisional or sibling-only ledger entry.
 
 The plan is not stored on `MetroGraph`, and no global planning state exists.
 Observation is read-only: enabling it cannot select a different plan or route.
@@ -111,11 +141,51 @@ entire group uses legacy routing. The final runtime check uses the geometry
 that the renderer will draw, verifies structural anchors and runway, and
 confirms that each assignment was consumed once.
 
+## Complete member geometry plans
+
+Member geometry planning sits between preliminary route-system disposition and
+final convergence settlement. `classify_inter_section_family` first assigns every routable
+inter-section member one stable `RouteFamilyId`. The member planner then walks
+the scaffold's canonical edge order and calls exactly that family. It appends
+each provisional result to the planning context so later templates see the
+same already-built siblings that production order exposes. It materializes all
+candidate gap and trunk slots together, freezes the results, and removes the provisional
+paths from the context.
+
+Each `RouteMemberGeometryPlan` has a content-derived identity joining its route
+system, emission member, and family. It records the pre-normalization polyline
+and curve radii, gap and trunk slots, offset regime, normalization exemption,
+exit-turn and fan references, member-exact consumed reservation IDs, and every
+vertical gap channel by segment rank, grid gap, row, direction, and exact
+coordinates. The declared gap-channel segments are immutable ownership. Other
+seed points and radii may take part in the documented global normalization
+passes.
+
+The first observation pass builds templates against ordinary gap allocation.
+After corridor settlement, each re-route receives the realised reservation
+ledger and rebuilds its templates once against those fixed bands. This is
+reservation consumption, not a fixed-point search: one routing pass materializes
+one set of gap slots, then production reuses those exact coordinates.
+
+Convergence classification precedes this boundary and constructs canonical
+trial templates only for members owned by each convergence. Global settlement
+follows it and reads non-convergence obstacles only from frozen member gap
+channels. Neither stage trial-routes an "unowned" edge to rediscover where that
+edge might run. This distinction keeps valid convergence-internal construction
+while making the rest of the planned system a stable allocation input.
+
+If any non-convergence member is absent, has no classified production family,
+or its canonical family declines the template, the complete route system takes
+the registered `member-geometry-plan` compatibility disposition. Its
+provisional member templates are not production inputs. The compatibility
+system starts clean and uses the established first-match dispatcher for every
+member.
+
 ## Complete convergence plans
 
-The convergence planner runs after exit-turn planning and before the first
-route is emitted. It starts from each resolved convergence and its target entry
-group, then freezes:
+Convergence work has two explicit stages before the first route is emitted.
+After exit-turn and fan planning, classification starts from each resolved
+convergence and its target entry group, then freezes:
 
 - every authored connector, resolved path, and emission member in the
   convergence;
@@ -143,6 +213,14 @@ owns no geometry or resources, and records the same deterministic reason.
 Incomplete semantic membership and programming errors are invariant failures,
 not compatibility fallbacks. Planned and compatibility members cannot coexist
 in one system.
+
+After member geometry and before final system disposition, global settlement
+visits preliminarily planned systems. It allocates convergence lanes against exact member gap
+channels, immutable claims from earlier planned convergences, and ordered
+compatibility routes. Every channel carries its own line and claimant-member
+attribution. A final feasibility gate rejects unresolved same-line ambiguity,
+distinct-line crowding, or internal convergence conflict before production
+emission begins.
 
 The established route families remain the emitters. The planner exercises
 those templates before dispatch to freeze their exact decisions. During
@@ -184,10 +262,11 @@ geometry, offsets, or route emissions are claimed. The normal layout and
 routing paths then handle the complete fan. A non-blocking diagnostic records
 the reason so remaining fallback cases can be measured and removed.
 
-Straight reconvergences are recorded as one semantic fan but remain `LEGACY`.
-Their shape comes from the section track allocator, including its phantom
-tracks and collision compaction. #1658 will bring that allocator behind the
-plan boundary before the planner owns these cases.
+Straight reconvergences are planned as one semantic fan. Their established
+section tracks, including phantom tracks and collision-compacted slots, supply
+the fixed frame that the fan plan owns. The plan therefore records and
+validates the complete branch-and-join system without replacing the section
+track allocator.
 
 ## Identity and coverage
 
@@ -305,7 +384,10 @@ all frozen inputs.
 
 Settlement sits between two routing passes, and only coordinates move between
 them: `_assert_settlement_decisions_frozen` requires the second pass to reach
-the same decisions as the first.
+the same semantic system, member, plan, family, coverage, and declared channel
+ownership decisions as the first. Coordinate-bearing member seeds may follow
+the settled layout, so their fingerprint records structural ownership rather
+than absolute points.
 
 Settling twice is not an option. Re-routing publishes a different ledger, with
 corridors that appear, vanish, and change width, so settling against successive
@@ -313,6 +395,12 @@ ledgers would be a fixpoint search over a moving constraint set with no
 convergence argument. Where the re-routed ledger disagrees with the frozen one,
 `attach_reroute_ledger_delta` records the difference as a non-blocking
 diagnostic.
+
+The frozen reservation ledger remains the published authority. After it is
+adopted onto the settled plan, final routes are rebound to claimant-exact
+reservation IDs from that adopted ledger and validated against the published
+plan. Reroute ledger deltas may therefore be reported without leaving route
+attribution attached to the discarded provisional ledger.
 
 ```mermaid
 flowchart TD
@@ -490,38 +578,38 @@ The query layer rejects records whose claims disagree with final emission
 bindings or whose reference, demand, realisation, or diagnostic contradicts
 its reservation.
 
-## Planner roadmap
+## Planner and emission ownership
 
 Pre-routing planners and post-routing corridor observation publish into the
 same reference and demand ledger:
 
-| Owner                                                       | Status      | Demand it owns                                                                          |
-| ----------------------------------------------------------- | ----------- | --------------------------------------------------------------------------------------- |
-| Exit-turn planner                                           | Implemented | Shared exit-bundle turn axes, curve runways, and fixed perpendicular axes               |
-| [#1656](https://github.com/seqeralabs/nf-metro/issues/1656) | Implemented | Fan and diamond centrelines, branch transition runways, and hand-off space              |
-| [#1657](https://github.com/seqeralabs/nf-metro/issues/1657) | Implemented | Convergence trunk extent, feeder landing sequence, and approach space                   |
-| [#1660](https://github.com/seqeralabs/nf-metro/issues/1660) | Implemented | Final row and column allocation, realising demands through monotone envelope settlement |
-| [#1658](https://github.com/seqeralabs/nf-metro/issues/1658) | Planned     | Consolidate plan-driven emission and retire displaced compatibility logic               |
+| Owner                   | Status      | Decision it owns                                                                                                        |
+| ----------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Exit-turn planner       | Implemented | Shared exit-bundle turn axes, curve runways, fixed perpendicular axes, and transitions                                  |
+| Fan planner             | Implemented | Fan and diamond centrelines, established straight tracks, branch slots, and hand-offs                                   |
+| Convergence planner     | Implemented | Convergence trunk extent, feeder landing sequence, approach space, and terminal owner                                   |
+| Member geometry planner | Implemented | Immutable per-member production templates, family identity, materialized slots, and frozen non-convergence gap channels |
+| Route-system executor   | Implemented | One atomic disposition, canonical member order, exact planned template reuse, and attribution                           |
+| Envelope settlement     | Implemented | Final row and column allocation through monotone reservation settlement                                                 |
 
-Each planner migrates a complete semantic group. If one member is unsupported,
-the group remains on the explicit legacy path with a deterministic diagnostic.
-No planner may publish a partial demand and ask a later normalization pass to
-recover the missing ownership.
+Each planner migrates a complete semantic group. The route-system executor then
+chooses one decisive owner for the whole connected system. A planned
+convergence owns its complete system even when a lower-level exit or fan record
+describes geometry displaced by that convergence decision. Without a
+convergence, a completely planned fan owns the system; otherwise the exit-turn
+and fan dispositions decide it. No planner may publish a partial demand and ask
+a later normalization pass to recover missing ownership.
 
-The convergence compatibility path is bounded to allocation capabilities that
-the current planner cannot settle atomically: opposing fan openings, shared fan
-channels that require one cross-convergence decision, chained same-line trunks,
-and collisions with an unowned endpoint bundle in the same route system.
-
-Envelope settlement leaves every one of those systems' corridors at or above
-its required width, so what still holds them on the compatibility path is a
-channel decision inside an adequate corridor rather than a corridor that is too
-narrow. That is the evidence assigning them to
-[#1658](https://github.com/seqeralabs/nf-metro/issues/1658), which owns
-plan-driven emission and the removal of the displaced compatibility and repair
-machinery. A compatibility diagnostic therefore records a specific missing
-capability, rather than acting as an open-ended fallback for an unfamiliar
-topology.
+Compatibility is explicit and finite. Every compatibility system records the
+decisive planner (`exit-turn-plan`, `fan-plan`, `member-geometry-plan`, or
+`convergence-plan`), that
+planner's deterministic reason, and the justification that the established
+templates remain its emitter because no complete planned geometry exists. The
+reason is data, not a warning and not permission for a normalization pass to
+reconstruct plan-owned geometry. Adding support means extending the named
+planner until the whole system becomes planned. The complete production
+handler and pass ownership inventory is in
+[route emission inventory](/nf-metro/dev/route_emission_inventory/).
 
 ## Canonical order
 

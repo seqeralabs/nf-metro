@@ -707,7 +707,7 @@ def bundle_width(n_lines: int, offset_step: float = OFFSET_STEP) -> float:
     return max(0, n_lines - 1) * offset_step
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class GapSlot:
     """A symbolic position for a vertical channel run within a gap bundle.
 
@@ -735,7 +735,7 @@ class GapSlot:
     n_slots: int
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class TrunkSlot:
     """The inter-row gap a route's horizontal bypass trunk runs in.
 
@@ -798,12 +798,24 @@ class RoutedPath:
     """Immutable fan plan that exclusively owns this route, when applicable."""
     fan_route_emitter: str | None = None
     """Planned fan emitter that produced this route."""
+    route_system_id: str | None = None
+    """Canonical semantic system that owns this inter-section emission."""
+    emission_member_id: str | None = None
+    """Canonical physical member represented by this route."""
+    route_system_disposition: str | None = None
+    """Whole-system planned or compatibility disposition used for emission."""
+    route_plan_ids: tuple[str, ...] = ()
+    """Immutable child plans contributing to the route-system decision."""
+    route_reservation_ids: tuple[str, ...] = ()
+    """Realised reservation records claimed by this emission member."""
     convergence_plan_id: str | None = None
     """Immutable convergence plan that owns this route's terminal geometry."""
     convergence_member_id: str | None = None
     """Semantic emission member bound to the planned convergence."""
     convergence_owned_segment_ranks: tuple[int, ...] = ()
     """Segments whose final geometry is owned by the convergence plan."""
+    route_system_owned_segment_ranks: tuple[int, ...] = ()
+    """Gap-channel segments frozen by the route-system member plan."""
     exit_turn_segment_rank: int | None = None
     """Index of the owned turn segment's first waypoint."""
     exit_lane_transition_plan_id: str | None = None
@@ -2361,6 +2373,10 @@ def centre_inter_column_channel(
     return column_gap_midpoint(graph, col_a, col_b, row) + offset
 
 
+def _segment_set_owns_boundary(owned_ranks: Sequence[int], rank: int) -> bool:
+    return any(item in owned_ranks for item in (rank - 1, rank, rank + 1))
+
+
 def convergence_owns_segment_boundary(route: RoutedPath, rank: int) -> bool:
     """Whether a convergence plan owns the boundary at or beside *rank*.
 
@@ -2368,10 +2384,19 @@ def convergence_owns_segment_boundary(route: RoutedPath, rank: int) -> bool:
     either of the two segments meeting at it would contradict the plan the
     closing validators check the geometry against.
     """
-    return any(
-        item in route.convergence_owned_segment_ranks
-        for item in (rank - 1, rank, rank + 1)
-    )
+    return _segment_set_owns_boundary(route.convergence_owned_segment_ranks, rank)
+
+
+def member_plan_owns_segment_boundary(route: RoutedPath, rank: int) -> bool:
+    """Whether a member geometry plan owns the segment at or beside *rank*."""
+    return _segment_set_owns_boundary(route.route_system_owned_segment_ranks, rank)
+
+
+def route_system_owns_segment_boundary(route: RoutedPath, rank: int) -> bool:
+    """Whether convergence or member geometry owns this segment boundary."""
+    return convergence_owns_segment_boundary(
+        route, rank
+    ) or member_plan_owns_segment_boundary(route, rank)
 
 
 def planner_owns_segment(route: RoutedPath, rank: int) -> bool:
@@ -2389,6 +2414,7 @@ def planner_owns_segment(route: RoutedPath, rank: int) -> bool:
     return (
         convergence_owns_segment_boundary(route, rank)
         or route.fan_route_emitter is not None
+        or rank in route.route_system_owned_segment_ranks
         or (
             route.exit_turn_axis_id is not None and route.exit_turn_segment_rank == rank
         )

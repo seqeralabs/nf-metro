@@ -128,7 +128,6 @@ OBSERVER_GATES = [
     "core.py::if observer is not None:::#2",
     "core.py::if observer is not None:::#3",
     "inter_section_handlers.py::if observer is not None and route is not None:::#1",
-    "normalize.py::if coverage_records is not None:::#1",
 ]
 
 
@@ -138,6 +137,11 @@ def test_public_route_observation_gate_is_fully_covered(gates, key):
     gate = _gate(gates, key)
     assert gate is not None, f"no gate keyed {key!r}"
     assert gate.fully_covered, f"public route-observation gate has an open arm: {key}"
+
+
+def test_merge_hop_coverage_is_not_observer_gated(gates):
+    """Merge-hop ownership records are required by every emission validation."""
+    assert _gate(gates, "normalize.py::if coverage_records is not None:::#1") is None
 
 
 def test_static_type_checking_guards_are_not_topology_gates(gates):

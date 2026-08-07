@@ -570,7 +570,11 @@ def _distribute_stacked_rows_in_rowspan_band(graph: MetroGraph) -> None:
             cursor += section.bbox_h + gap
 
 
-def _top_align_row_bboxes_only(graph: MetroGraph, rows: set[int] | None = None) -> None:
+def _top_align_row_bboxes_only(
+    graph: MetroGraph,
+    rows: set[int] | None = None,
+    section_ids: set[str] | None = None,
+) -> None:
     """Align bbox tops within each row by growing bboxes upward.
 
     Unlike ``_top_align_row_sections`` (which shifts stations together
@@ -586,12 +590,22 @@ def _top_align_row_bboxes_only(graph: MetroGraph, rows: set[int] | None = None) 
     header badge -- text, which a rotation does not carry with it -- that rides
     the box top.
 
+    ``section_ids`` limits alignment to contiguous groups containing at least
+    one named section. It does not pull a disconnected group into alignment
+    merely because it shares the same grid row.
+
     Used after ``_lift_off_track_stations`` so off-track expansion in
     one section doesn't leave other row-mates with misaligned bbox
     tops.
     """
+    if section_ids is not None and not section_ids:
+        return
     for group in _row_contiguous_column_groups(graph):
         if rows is not None and group[0].grid_row not in rows:
+            continue
+        if section_ids is not None and not any(
+            section.id in section_ids for section in group
+        ):
             continue
         level_group_anchor_edges(graph, group, "y", 1.0)
 

@@ -51,6 +51,7 @@ from nf_metro.layout.routing.common import RoutedPath
 from nf_metro.layout.routing.corners import concentric_corner_radius_at
 from nf_metro.layout.routing.normalize import (
     _fan_opening_reference_radii,
+    _restack_channel,
     _set_vchannel_x,
     _VChannel,
 )
@@ -108,9 +109,10 @@ def _touched_corner_mismatches(
     each corner and derive the expected radius at that offset -- the corner's
     actual final bundle offset, not whichever pass touched it first.
 
-    Only corners on the *final* routes are checked; the intermediate route
-    objects an earlier layout pass discards are filtered out through their
-    identity, so a stale corner from a superseded pass cannot report a mismatch.
+    Only corners on the *final* routes are checked. A planned member is frozen
+    from its mutable seed into a fresh route, so touched seeds are resolved to
+    that final route by their unique edge identity. Superseded seeds whose edge
+    was not emitted cannot report a mismatch.
     Returns any disagreement between the stored radius and the central derivation
     as ``(line_id, radius_index, stored, expected)``.
     """
@@ -188,12 +190,16 @@ def _touched_corner_mismatches(
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
     shared = shared_same_line_turn_vertices(routes)
-    route_ids = {id(r) for r in routes}
+    routes_by_edge = {
+        (route.edge.source, route.edge.target, route.line_id): route for route in routes
+    }
 
     mismatches: list[tuple[str, int, float, float]] = []
-    for (rid, radius_idx), (rp, offset, reference) in touched.items():
-        if rid not in route_ids:
+    for (_rid, radius_idx), (rp, offset, reference) in touched.items():
+        final = routes_by_edge.get((rp.edge.source, rp.edge.target, rp.line_id))
+        if final is None:
             continue
+        rp = final
         radii = rp.curve_radii
         if radii is None or not 0 <= radius_idx < len(radii):
             continue
@@ -267,6 +273,60 @@ def test_terminal_fan_descent_derives_only_its_opening_corner() -> None:
         14.0,
         CURVE_RADIUS,
     )
+
+
+def test_leftward_up_channel_restack_preserves_concentric_radii() -> None:
+    routes = [
+        RoutedPath(
+            edge=Edge(source="s", target="t", line_id="inner"),
+            line_id="inner",
+            points=[
+                (250.0, 784.0),
+                (222.0, 784.0),
+                (222.0, 704.0),
+                (190.0, 704.0),
+            ],
+            is_inter_section=True,
+            offset_regime=OffsetRegime.BAKED,
+            curve_radii=[CURVE_RADIUS, CURVE_RADIUS + 4.0],
+        ),
+        RoutedPath(
+            edge=Edge(source="s", target="t", line_id="outer"),
+            line_id="outer",
+            points=[
+                (250.0, 788.0),
+                (218.0, 788.0),
+                (218.0, 708.0),
+                (190.0, 708.0),
+            ],
+            is_inter_section=True,
+            offset_regime=OffsetRegime.BAKED,
+            curve_radii=[CURVE_RADIUS + 4.0, CURVE_RADIUS],
+        ),
+    ]
+
+    for rank, route in enumerate(reversed(routes)):
+        channel = _VChannel(
+            route=route,
+            idx=1,
+            x=route.points[1][0],
+            y_lo=704.0,
+            y_hi=788.0,
+            down=False,
+        )
+        _restack_channel(
+            channel,
+            channel.x,
+            rank,
+            len(routes),
+            4.0,
+            CURVE_RADIUS,
+        )
+
+    assert [route.curve_radii for route in routes] == [
+        [CURVE_RADIUS, CURVE_RADIUS + 4.0],
+        [CURVE_RADIUS + 4.0, CURVE_RADIUS],
+    ]
 
 
 _XFAIL_COINCIDE_CENTRAL_DERIVATION: dict[str, str] = {}

@@ -109,6 +109,7 @@ from nf_metro.layout.phases.off_track import (
     _reanchor_off_track_to_consumer,
     _section_distinct_trunk_cross_coords,
 )
+from nf_metro.layout.phases.planned_fans import planned_fan_layout_section_ids
 from nf_metro.layout.phases.row_align import _packed_row_header_groups
 from nf_metro.layout.routing import (
     OffsetRegime,
@@ -7678,12 +7679,21 @@ def test_section_bbox_top_hugs_content(fixture):
     packed_header_ids = {
         section.id for group in packed_header_groups for section in group
     }
+    planned_fan_ids = planned_fan_layout_section_ids(graph)
+    planned_fan_rowmate_ids = {
+        section.id
+        for group in _row_contiguous_column_groups(graph)
+        if any(section.id in planned_fan_ids for section in group)
+        for section in group
+        if section.id not in planned_fan_ids
+    }
 
     offenders: list[str] = []
     for sec in graph.sections.values():
         if (
             sec.bbox_h <= 0
             or sec.id in packed_header_ids
+            or sec.id in planned_fan_rowmate_ids
             or not _section_band_is_empty(graph, sec)
         ):
             continue

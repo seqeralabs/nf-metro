@@ -11,6 +11,7 @@ from __future__ import annotations
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.layers import assign_layers
 from nf_metro.layout.ordering import assign_tracks
+from nf_metro.layout.route_plan import FanAppearancePolicy
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import LineSpread
 
@@ -345,6 +346,10 @@ def test_per_section_centered_override_balances_and_validates():
     the (now per-section-aware) balance guard under validate=True."""
     graph = parse_metro_mermaid(_SECTION_OVERRIDE_SRC)
     compute_layout(graph, validate=True)
+
+    assert len(graph.fan_plans) == 1
+    assert graph.fan_plans[0].owns_geometry
+    assert graph.fan_plans[0].appearance_policy is FanAppearancePolicy.SYMMETRIC
 
     trunk_y = {graph.stations[t].y for t in ("win", "wmid", "wout")}
     assert len(trunk_y) == 1, trunk_y

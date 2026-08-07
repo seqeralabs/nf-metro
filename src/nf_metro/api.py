@@ -424,6 +424,7 @@ def render_string(
     - At the map's natural (un-folded) width, a raw render-time self-check
       can fire directly:
       :class:`~nf_metro.layout.routing.invariants.CurveInvariantError`,
+      :class:`~nf_metro.layout.routing.convergences.ConvergenceInvariantError`,
       :class:`~nf_metro.render.section_header.SectionHeaderClashError`,
       :class:`~nf_metro.render.section_header.SectionHeaderOverflowError`,
       :class:`~nf_metro.render.section_header.SectionHeaderBandError`,

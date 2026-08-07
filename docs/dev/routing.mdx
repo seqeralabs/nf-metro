@@ -18,9 +18,12 @@ transitions; inter-section edges use L-shaped (horizontal + vertical)
 routing.
 
 The normal dispatcher path builds the semantic scaffold, complete exit-turn
-decisions, and complete convergence decisions described in
+and fan decisions, immutable member templates, complete convergence decisions,
+then one atomic emission decision per route system as described in
 [route planning and observation](/nf-metro/dev/route_plan/). Inter-section
-handlers consume those decisions during routing.
+handlers consume those decisions during routing. Planned systems use their
+preclassified handler families. Compatibility systems alone use the ordered
+first-match table.
 `observe_route_edges` returns the same decisions together with final emission
 bindings, corridor reservations, and settled layout provenance. Whole-graph
 rail mode takes the short circuit below.
@@ -50,12 +53,30 @@ as interchange pills bridging the rails.
 `route_edges` first builds a `_RoutingCtx` containing merge classification,
 fold X, bundle information, station offsets, fork stations, and other shared
 facts. Before dispatch, the exit-turn planner classifies every member in each
-complete exit group. The convergence planner then freezes the target-side
-trunk, landings, continuation, and endpoint owners for every complete route
-system. Either planner commits its complete ownership unit or leaves that unit
-on legacy routing. The dispatcher then tries a fixed sequence of handler
-functions. **The first handler that returns a `RoutedPath` wins**; handlers that
-do not apply return `None`.
+complete exit group, and every inter-section member is classified once against
+the stable family table. The convergence planner first builds complete
+target-side candidates without routing non-convergence members. A preliminary
+system decision removes systems already owned by compatibility, then
+preliminary convergence settlement exposes fixed channel claims to the mutable
+member allocator. In canonical order, the member-geometry planner calls each
+remaining member's family, materializes its gap slots around those claims, and
+materializes its trunk slot, and freezes its production seed and owned gap
+channels. Global convergence
+settlement allocates the target-side trunk, landings, continuation, and
+endpoint owners against those immutable member channels and prior convergence
+claims. The final system decision then freezes canonical order, one system-wide
+`PLANNED` or `COMPATIBILITY` disposition, plan and reservation owners, and
+exactly one geometry owner for each planned member.
+
+The edge loop encounters systems through graph order but emits each one exactly
+once in scaffold order. For a planned system, each non-convergence path is a
+fresh mutable copy of its `RouteMemberGeometryPlan`; its family is not called a
+second time. Planned convergence members consume their complete convergence
+plan. For a compatibility system, provisional templates are discarded and
+`_route_inter_section` runs the fixed rule sequence, where the first matching
+handler wins. Handlers that do not apply return
+`None`; the TB, entry-runway, and intra-section fallbacks remain available in
+both modes for members outside the inter-section family table.
 
 The order in `route_edges` is:
 
@@ -92,23 +113,30 @@ station-to-station edges within each horizontal section.
 
 After all edges are routed, `route_edges` runs a series of post-passes that
 adjust the assembled polylines as a set, including diagonal spreading, gap and
-trunk slot materialization, and same-line coincidence. Source-turn segments
-and convergence trunks and joins owned by the planners are immutable during
-these passes. A snapshot ratchet checks source turns after every relevant pass.
+trunk slot materialization, and same-line coincidence. Source-turn segments,
+member-template gap channels, and convergence trunks and joins owned by the
+planners are immutable during these passes. Member-template gap slots were
+already materialized once before final convergence settlement; the general gap pass
+only allocates channels that remain unowned. A snapshot ratchet checks source
+turns after every relevant pass.
 The final invariants check every source assignment, lane offset, route family,
 turn direction, turn axis, convergence landing, and endpoint owner.
+The ordered [route emission inventory](/nf-metro/dev/route_emission_inventory/)
+classifies every production handler and post-pass as emitter, construction,
+compatibility repair, validation, or observation.
 
 ## Authored identity and final geometry
 
 Routing answers two different kinds of question. Keeping them separate avoids
 trying to recover authored intent from helper nodes that the resolver inserted.
 
-| Question                                                                 | Source                                     |
-| ------------------------------------------------------------------------ | ------------------------------------------ |
-| Which authored connector, endpoint group, fan, or merge is this?         | `RouteTopology` and `RouteResolutionTrace` |
-| Which port or junction represents that group?                            | `RouteResolutionTrace`                     |
-| Which corridor is clear, or where did a route actually turn?             | The laid-out graph and routed polylines    |
-| Which feeder owns a convergence trunk and where do its siblings join it? | The immutable convergence plan             |
+| Question                                                                   | Source                                     |
+| -------------------------------------------------------------------------- | ------------------------------------------ |
+| Which authored connector, endpoint group, fan, or merge is this?           | `RouteTopology` and `RouteResolutionTrace` |
+| Which port or junction represents that group?                              | `RouteResolutionTrace`                     |
+| Which corridor is clear, or where did a route actually turn?               | The laid-out graph and routed polylines    |
+| Which exact non-convergence template and gap channel will production emit? | `RouteMemberGeometryPlan`                  |
+| Which feeder owns a convergence trunk and where do its siblings join it?   | The immutable convergence plan             |
 
 `RouteTopologyQuery` is the read-only bridge between the first two rows. It is
 built once for each routing or offset context. Its results follow authored
@@ -117,8 +145,11 @@ That reverse lookup is deliberately one-to-many: exact duplicate connectors
 and shared resolver legs can occupy the same final edge.
 
 The query selects the semantic candidates for fan and merge handling. The
-convergence planner combines that identity with settled coordinates and the
-canonical templates once, before emission. `_classify_merge_edges` supplies
+convergence planner first constructs its own canonical candidates. The
+member-geometry planner then combines semantic identity with settled
+coordinates and calls the canonical family once. Final convergence settlement
+consumes the frozen member channels as external obstacles.
+`_classify_merge_edges` supplies
 compatibility measurements and the structural longest-bypass candidate; the
 plan freezes the selected trunk, axis, feeder order, join points, continuation,
 and endpoint ownership. Templates and post-passes consume that record rather
@@ -205,6 +236,12 @@ every planned lane, transition, family, turn axis, and exactly-once assignment
 against the emitted routes, and attributes a failure to the route system and
 authored connectors.
 
+`validate_route_system_emission` runs after normalization and before the
+planner-specific validators. It checks the attribution carried by each final
+path against the canonical execution record. A failure names the route system,
+authored connectors, emission member, plan IDs, and reservation IDs, so a
+post-pass cannot silently detach geometry from its owner.
+
 `assert_render_curve_invariants` (in `routing/invariants.py`) runs a set of
 correctness checks on the final `route_edges` output every render -- the exact
 geometry the renderer is about to draw -- so a defective route aborts the
@@ -274,8 +311,10 @@ dispatcher handles those degenerate cases directly.
 
 | Module                      | Responsibility                                                                                                                                                                                                                            |
 | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `core.py`                   | `route_edges` dispatcher; re-exports handlers from sibling modules for backward-compatible imports                                                                                                                                        |
+| `core.py`                   | canonical route-system loop; handler fallbacks; ordered post-pass and validation pipeline; re-exports sibling handlers for backward-compatible imports                                                                                    |
 | `context.py`                | `_RoutingCtx` dataclass and `_build_routing_context`; per-station offset helpers; shared section-geometry helpers (`_resolve_section_col`, `_has_intervening_sections`, `compute_junction_fan_info`, …)                                   |
+| `system_emission.py`        | atomic system disposition, canonical members, frozen planned families, plan/reservation attribution, and the final attribution validator                                                                                                  |
+| `member_geometry.py`        | canonical-order member template construction, one-time gap-slot materialization, immutable gap-channel publication, exact planned production copies, and template/emission validation                                                     |
 | `inter_section_handlers.py` | handler 1 family: bypass, left/right entry wraps, around-section, inter-row corridors, stepped descent, L-shape                                                                                                                           |
 | `tb_handlers.py`            | TB section shapes dispatched by `_route_tb_section` over `_TB_SECTION_SHAPES` (`_route_tb_internal`, `_route_tb_lr_exit`, `_route_tb_lr_entry`, `_route_perp_entry`, `_route_perp_entry_from_corridor`) and `_compute_diagonal_placement` |
 | `intra_handlers.py`         | `_route_entry_runway` and `_route_intra_section` (the general intra-section fallback)                                                                                                                                                     |

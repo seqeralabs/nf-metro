@@ -4,7 +4,8 @@ error, never an internal routing self-check (#1088).
 A ``--fold-threshold`` / ``%%metro fold_threshold`` (equivalently
 ``max_station_columns``) below a map's natural width compresses the section
 grid.  On sufficiently compacted geometry the router cannot separate parallel
-bundles, size concentric corners, or seat a section header clear of a route.
+bundles, realise a planned convergence, size concentric corners, or seat a
+section header clear of a route.
 When the requested threshold compressed the section grid relative to its
 unbounded layout, the render chokepoint reframes such an abort as
 :class:`FoldThresholdError` (a ``ValueError`` the CLI surfaces cleanly), naming
@@ -21,6 +22,8 @@ import pytest
 
 from nf_metro.api import prepare_graph
 from nf_metro.layout import FoldThresholdError
+from nf_metro.layout.fan_plans import FanRouteInvariantError
+from nf_metro.layout.routing.convergences import ConvergenceInvariantError
 from nf_metro.layout.routing.invariants import CurveInvariantError
 from nf_metro.render import render_svg
 from nf_metro.render.section_header import SectionHeaderClashError
@@ -68,7 +71,15 @@ def test_aggressive_fold_raises_authoring_error_not_internal(
         _render_at(name, fold)
     assert "fold" in str(exc.value).lower()
     assert isinstance(exc.value, ValueError)
-    assert not isinstance(exc.value, (CurveInvariantError, SectionHeaderClashError))
+    assert not isinstance(
+        exc.value,
+        (
+            ConvergenceInvariantError,
+            CurveInvariantError,
+            FanRouteInvariantError,
+            SectionHeaderClashError,
+        ),
+    )
 
 
 @pytest.mark.parametrize("name, fold", COMPRESSED_ABORTS)

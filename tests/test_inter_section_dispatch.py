@@ -22,12 +22,80 @@ from types import SimpleNamespace
 import pytest
 
 from nf_metro.layout.engine import compute_layout
-from nf_metro.layout.routing import compute_station_offsets, route_edges
+from nf_metro.layout.routing import compute_station_offsets, dispatch, route_edges
 from nf_metro.layout.routing import inter_section_handlers as H
+from nf_metro.layout.routing.common import RoutedPath
+from nf_metro.layout.routing.families import RouteFamilyId
 from nf_metro.parser.mermaid import parse_metro_mermaid
-from nf_metro.parser.model import PortSide, UnresolvedEndpointError
+from nf_metro.parser.model import Edge, PortSide, UnresolvedEndpointError
 
 _ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.mark.parametrize(
+    ("winning_handler", "expected_family"),
+    (
+        ("inter", None),
+        ("tb", RouteFamilyId.TB_SECTION_FALLBACK),
+        ("entry", RouteFamilyId.ENTRY_RUNWAY_FALLBACK),
+        ("intra", RouteFamilyId.INTRA_SECTION_FALLBACK),
+    ),
+)
+def test_shared_handler_dispatch_preserves_priority_and_observation(
+    monkeypatch: pytest.MonkeyPatch,
+    winning_handler: str,
+    expected_family: RouteFamilyId | None,
+) -> None:
+    edge = Edge("source", "target", "line")
+    routed = RoutedPath(edge, edge.line_id, [(0.0, 0.0), (1.0, 0.0)])
+    calls: list[str] = []
+    recorded: list[tuple[tuple[str, str, str], RouteFamilyId]] = []
+    inter_options: list[tuple[object, RouteFamilyId | None]] = []
+    endpoints = (SimpleNamespace(is_port=True), SimpleNamespace(is_port=True))
+    ctx = SimpleNamespace(
+        graph=SimpleNamespace(edge_endpoints=lambda _edge: endpoints),
+        junction_ids=frozenset(),
+    )
+    observer = SimpleNamespace(
+        record_dispatch=lambda key, family: recorded.append((key, family))
+    )
+
+    def result(name: str) -> RoutedPath | None:
+        calls.append(name)
+        return routed if name == winning_handler else None
+
+    def route_inter(*_args, observer=None, planned_family_id=None):
+        inter_options.append((observer, planned_family_id))
+        return result("inter")
+
+    monkeypatch.setattr(
+        dispatch,
+        "_route_inter_section",
+        route_inter,
+    )
+    monkeypatch.setattr(dispatch, "_route_tb_section", lambda *_args: result("tb"))
+    monkeypatch.setattr(dispatch, "_route_entry_runway", lambda *_args: result("entry"))
+    monkeypatch.setattr(
+        dispatch, "_route_intra_section", lambda *_args: result("intra")
+    )
+
+    assert (
+        dispatch.route_edge_by_handler_priority(
+            edge,
+            ctx,
+            observer=observer,
+            planned_family_id=RouteFamilyId.BYPASS_FAMILY,
+        )
+        is routed
+    )
+    assert inter_options == [(observer, RouteFamilyId.BYPASS_FAMILY)]
+    expected_rank = ("inter", "tb", "entry", "intra").index(winning_handler)
+    assert calls == ["inter", "tb", "entry", "intra"][: expected_rank + 1]
+    assert recorded == (
+        []
+        if expected_family is None
+        else [(("source", "target", "line"), expected_family)]
+    )
 
 
 def _port(side: PortSide, *, is_entry: bool) -> SimpleNamespace:
@@ -340,6 +408,40 @@ def test_would_route_around_section_below(
     monkeypatch.setattr(H, "_merge_entry_route_kind", lambda f: kind)
 
     assert H._would_route_around_section_below(edge, ctx) is expected  # type: ignore[arg-type]
+
+
+def test_planned_family_dispatch_does_not_rematch_rules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    edge = SimpleNamespace(source="s", target="t", line_id="L")
+    station = SimpleNamespace(is_port=True)
+    ctx = SimpleNamespace(junction_ids=set(), exit_turns=None)
+    facts = object()
+    calls: list[object] = []
+    family_id = H._INTER_SECTION_RULES[0].family_id
+    rule = H._Rule(family_id, "planned", lambda _facts: False, calls.append)
+
+    monkeypatch.setattr(H, "_build_inter_facts", lambda *_args: facts)
+    monkeypatch.setattr(
+        H,
+        "_match_inter_section_rule",
+        lambda _facts: (_ for _ in ()).throw(
+            AssertionError("rematched planned family")
+        ),
+    )
+    monkeypatch.setattr(H, "_INTER_SECTION_RULES", [rule])
+
+    assert (
+        H._route_inter_section(
+            edge,
+            station,
+            station,
+            ctx,
+            planned_family_id=family_id,
+        )
+        is None
+    )
+    assert calls == [facts]
 
 
 def test_would_route_around_section_below_propagates_missing_endpoint(

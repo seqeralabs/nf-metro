@@ -334,7 +334,8 @@ The Stage and Pass labels line up cleanly:
 The numbered stages settle station, port, junction, and section coordinates.
 On the normal dispatcher path, routing then computes per-line station offsets,
 applies the exact slots owned by semantic fan plans, and builds complete
-exit-turn and convergence plans before emitting the first inter-section path.
+exit-turn and convergence plans before building one atomic emission decision
+per route system. It then emits systems once in canonical scaffold order.
 Whole-graph rail mode takes its documented short circuit instead.
 
 `compute_station_offsets` first produces the ordinary offset map. Immediately
@@ -344,14 +345,19 @@ scaffold and settled routing context. The exit-turn planner compacts each
 supported group onto its active lanes, commits the offsets it owns across the
 source seam, and assigns source-side turn axes from that same order. The
 convergence planner freezes target trunks, ordered feeder joins, continuations,
-and endpoint ownership. Ordinary and observed routing share this boundary.
-Always-on checks reject changes to a committed lane, axis, trunk, join, or
-endpoint and ensure every dedicated fan emission is consumed exactly once.
+and endpoint ownership. The route-system executor freezes one planned or
+compatibility disposition for the complete system and each planned
+inter-section family's stable ID. Ordinary and observed routing share this
+boundary. Always-on checks reject changes to a committed lane, axis, trunk,
+join, endpoint, or emission attribution and ensure every dedicated fan emission
+is consumed exactly once.
 
 This is a routing-boundary contract, not a numbered layout stage. It does not
 move stations, ports, junctions, or section boxes. See
 [route planning and observation](/nf-metro/dev/route_plan/) for the plan
-records and fallback rules.
+records and fallback rules, and
+[route emission inventory](/nf-metro/dev/route_emission_inventory/) for the
+complete handler and post-pass ownership map.
 
 ## When something breaks
 

@@ -62,7 +62,6 @@ REPORTED = [
 # separation pass is what puts them back on it.  Read off the corpus by routing
 # it with the pass disabled and collecting the fixtures the checker reports.
 FUSED_WITHOUT_THE_PASS = [
-    EXAMPLE_TOPOLOGIES / "convergence_fold_diamond.mmd",
     EXAMPLE_TOPOLOGIES / "packed_multiline_serpentine_grid.mmd",
     REGRESSIONS / "entry_trunk_row_bow.mmd",
 ]
@@ -107,27 +106,11 @@ EXEMPT_FUSED_PAIRS: frozenset[_ExemptPair] = frozenset(
         ),
         (
             "tests/fixtures/hash_seed_determinism/seed_41.mmd",
-            "X",
-            "l3",
-            "l4",
-            504.0,
-            504.0,
-        ),
-        (
-            "tests/fixtures/hash_seed_determinism/seed_41.mmd",
             "Y",
             "l0",
             "l2",
             840.0,
             840.0,
-        ),
-        (
-            "tests/fixtures/hash_seed_determinism/seed_77.mmd",
-            "X",
-            "l0",
-            "l4",
-            2706.0,
-            2706.0,
         ),
     }
 )

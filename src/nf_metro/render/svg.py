@@ -24,6 +24,7 @@ from typing import Any, Literal, NamedTuple
 import drawsvg as draw
 
 from nf_metro.layout.constants import (
+    COORD_TOLERANCE_FINE,
     OFFTRACK_TERMINUS_NUB_CLEARANCE,
     SAME_COORD_TOLERANCE,
     SECTION_Y_GAP,
@@ -34,6 +35,7 @@ from nf_metro.layout.envelope_settlement import (
     attach_settlement_diagnostics,
     settle_route_envelopes,
 )
+from nf_metro.layout.fan_plans import FanRouteInvariantError
 from nf_metro.layout.geometry import lanes_run_along_x, segment_intersects_bbox
 from nf_metro.layout.labels import (
     LabelPlacement,
@@ -62,9 +64,11 @@ from nf_metro.layout.phases.ports import (
 from nf_metro.layout.phases.spacing import _bypass_label_obstacles
 from nf_metro.layout.route_plan import (
     ConvergencePlan,
+    DemandAxis,
     ExitTurnPlan,
     GridSpan,
     RouteFamilyId,
+    RouteMemberGeometryPlan,
     RoutePlan,
     RouteSystem,
     grid_span_for_sections,
@@ -79,7 +83,9 @@ from nf_metro.layout.route_reservations import (
     ReservationCoordinateTranslation,
     RowGapRegion,
     adopt_route_reservation_ledger,
+    attach_reservation_ids_to_routes,
     gap_corridor_clearance_band,
+    project_reservation_coordinate,
     realise_route_reservations,
 )
 from nf_metro.layout.routing import (
@@ -88,6 +94,7 @@ from nf_metro.layout.routing import (
     compute_station_offsets,
     observe_route_edges_centred,
 )
+from nf_metro.layout.routing.convergences import ConvergenceInvariantError
 from nf_metro.layout.routing.corners import (
     curve_tangents,
     resolve_curve_radii,
@@ -98,6 +105,9 @@ from nf_metro.layout.routing.invariants import (
 )
 from nf_metro.layout.routing.reserved_bands import build_reserved_corridors
 from nf_metro.layout.routing.reversal import tb_positive_fan_sections
+from nf_metro.layout.routing.system_emission import (
+    validate_published_route_attribution,
+)
 from nf_metro.manifest import node_data_attrs
 from nf_metro.parser.model import (
     ICON_TYPE_DIR,
@@ -609,7 +619,12 @@ def _build_render_plan_result(
                 chrome_css=chrome_css,
                 bare=bare,
             )
-        except (CurveInvariantError, SectionHeaderClashError) as exc:
+        except (
+            ConvergenceInvariantError,
+            CurveInvariantError,
+            FanRouteInvariantError,
+            SectionHeaderClashError,
+        ) as exc:
             reframed = _fold_threshold_error(graph)
             if reframed is not None:
                 raise reframed from exc
@@ -802,7 +817,12 @@ def _route_decision_fingerprint(routes: list[RoutedPath]) -> tuple[object, ...]:
             route.offset_regime,
             route.normalize_exempt,
             tuple(route.gap_slots),
-            route.trunk_slot is not None,
+            (route.trunk_slot is not None, route.trunk_slot),
+            route.route_system_id,
+            route.emission_member_id,
+            route.route_system_disposition,
+            route.route_plan_ids,
+            route.route_system_owned_segment_ranks,
             route.exit_turn_plan_id,
             route.exit_turn_member_id,
             route.exit_turn_family_id,
@@ -816,6 +836,44 @@ def _route_decision_fingerprint(routes: list[RoutedPath]) -> tuple[object, ...]:
             route.exit_lane_transition_plan_id,
         )
         for route in routes
+    )
+
+
+def _member_geometry_decision(
+    plan: RouteMemberGeometryPlan,
+) -> tuple[object, ...]:
+    """Member-owned geometry without translated coordinates or resources."""
+    return (
+        plan.id,
+        plan.system_id,
+        plan.member_id,
+        plan.edge,
+        plan.connector_ids,
+        plan.family_id,
+        _route_segment_signature(list(plan.points)),
+        plan.offset_regime,
+        plan.normalize_exempt,
+        plan.gap_slots,
+        (plan.trunk_slot is not None, plan.trunk_slot),
+        tuple(
+            (
+                channel.segment_rank,
+                channel.gap_lo_col,
+                channel.row,
+                channel.direction,
+            )
+            for channel in plan.gap_channels
+        ),
+        plan.owned_segment_ranks,
+        plan.exit_turn_plan_id,
+        plan.exit_turn_member_id,
+        plan.exit_turn_family_id,
+        plan.exit_turn_axis_id,
+        plan.exit_turn_segment_rank,
+        plan.exit_lane_transition_plan_id,
+        plan.fan_plan_id,
+        plan.fan_route_emitter,
+        plan.coordinate_regime,
     )
 
 
@@ -1002,6 +1060,7 @@ def _plan_decision_fingerprint(plan: RoutePlan) -> tuple[object, ...]:
         tuple(_exit_turn_decision(item) for item in plan.exit_turn_plans),
         plan.fan_plans,
         tuple(_convergence_decision(item) for item in plan.convergence_plans),
+        tuple(_member_geometry_decision(item) for item in plan.member_geometry_plans),
         plan.bindings,
         plan.provenance,
     )
@@ -1034,8 +1093,19 @@ def _assert_settlement_decisions_frozen(
         )
 
 
+def _attach_published_reservation_attribution(
+    routes: list[RoutedPath], plan: RoutePlan
+) -> None:
+    """Attach the adopted ledger's claimant-exact reservations to each route."""
+    attach_reservation_ids_to_routes(routes, plan.reservations)
+    validate_published_route_attribution(routes, plan)
+
+
 def _ledger_changes_live_derived_band(
-    graph: MetroGraph, plan: RoutePlan, routes: list[RoutedPath]
+    graph: MetroGraph,
+    plan: RoutePlan,
+    routes: list[RoutedPath],
+    coordinate_translations: tuple[ReservationCoordinateTranslation, ...] = (),
 ) -> bool:
     """Whether consuming *plan* can change any route-system placement.
 
@@ -1120,11 +1190,22 @@ def _ledger_changes_live_derived_band(
                 ledger = corridors.for_segment(
                     route.edge.source, route.edge.target, route.line_id, rank
                 )
+                allocation_coordinate = project_reservation_coordinate(
+                    claim.allocation_coordinate,
+                    DemandAxis.Y
+                    if reservation.orientation is CorridorOrientation.HORIZONTAL
+                    else DemandAxis.X,
+                    claim.member_id,
+                    coordinate_translations,
+                )
                 if ledger is not None and (
                     derived is None
                     or derived.boundary != boundary
                     or derived.lo != ledger.lo
                     or derived.hi != ledger.hi
+                    or not ledger.lo - COORD_TOLERANCE_FINE
+                    <= allocation_coordinate
+                    <= ledger.hi + COORD_TOLERANCE_FINE
                 ):
                     return True
 
@@ -1357,7 +1438,10 @@ def _settle_render_geometry(
     )
     settlement = settle_route_envelopes(graph, frozen_plan, clearance=clearance)
     if settlement.translations or _ledger_changes_live_derived_band(
-        graph, frozen_plan, frozen_routes
+        graph,
+        frozen_plan,
+        frozen_routes,
+        settlement.coordinate_translations,
     ):
         station_offsets, routes, routed_plan = _resettle(
             frozen_plan, settlement.coordinate_translations
@@ -1394,6 +1478,7 @@ def _settle_render_geometry(
             route_plan = replace(
                 route_plan, diagnostics=route_plan.diagnostics + adopted_dispositions
             )
+        _attach_published_reservation_attribution(routes, route_plan)
     # Settlement measured its corridors against these box edges, so a label
     # pass behind it gives back whatever it grew them by: a port carried past
     # the run that lands on it, on an edge a realised reservation is measured

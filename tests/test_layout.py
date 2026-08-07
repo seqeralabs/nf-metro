@@ -1241,7 +1241,7 @@ def test_full_bundle_column_fans_around_trunk_with_center_ports():
     """Terminal section's full-bundle column fans symmetrically with --center-ports."""
     graph = parse_metro_mermaid(_terminal_full_bundle_text())
     graph.center_ports = True
-    compute_layout(graph, y_spacing=50.0)
+    compute_layout(graph, y_spacing=50.0, validate=True)
     ay = graph.stations["a"].y
     by = graph.stations["b"].y
     assert ay != by, "a and b should not share Y after fan"
@@ -1296,6 +1296,12 @@ def test_full_bundle_column_fans_non_terminal_section():
     # pair should flank a vacant trunk row.
     ay = graph.stations["a"].y
     by = graph.stations["b"].y
+    plan = next(plan for plan in graph.fan_plans if plan.authored_source_id == "u")
+    assert plan.owns_geometry
+    assert plan.appearance_centreline_branch_id is None
+    assert tuple(branch.lane_offset for branch in plan.branches) == pytest.approx(
+        (-50.0, 50.0)
+    )
     delta = abs(by - ay)
     assert delta == pytest.approx(100.0), (
         f"Non-terminal full-bundle column should flank trunk: delta={delta}"

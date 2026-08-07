@@ -12,9 +12,13 @@ Inter-section edges (port/junction to port/junction) are routed by
 `_route_inter_section` in
 [`routing/inter_section_handlers.py`](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/layout/routing/inter_section_handlers.py).
 It chooses the route's shape from a **declarative table**, `_INTER_SECTION_RULES`,
-rather than a hand-written if-ladder: one `_InterFacts` snapshot of the edge is
-matched against an ordered list of named rules, and the first whose predicate
-holds owns the route.
+rather than a hand-written if-ladder. Before emission, every inter-section
+member is classified from one `_InterFacts` snapshot. A planned route system
+freezes that family ID, calls it once to build an immutable
+`RouteMemberGeometryPlan`, and emits a fresh copy of that exact template. A
+compatibility system discards provisional templates, matches a fresh snapshot
+against the ordered rules at emission, and lets the first predicate that holds
+own the route.
 
 Every rule's handler builds its route from a centreline through the
 [bundle builder](/nf-metro/dev/routing/) (`build_concentric_bundle` /
@@ -41,39 +45,55 @@ mechanism that keeps the routes correct.
 ## The rules, in order
 
 The table is ordered: earlier rules shadow later ones, so the order encodes the
-precedence between overlapping cases. The first matching rule wins; if none
-match, the **standard L-shape** is the fall-through.
+precedence between overlapping cases. The first matching rule wins during
+compatibility classification; if none match, the **standard L-shape** is the
+fall-through. Planned template construction resolves its frozen family through
+the same table's stable rule ID without evaluating the predicates again.
+Production emission does not revisit the table or call the family.
 
-| #   | Rule                                 | Fires when                                                                              | Route                                                                                                                                                                                                                                                                          |
-| --- | ------------------------------------ | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1   | `perp-exit -> far-side entry wrap`   | TOP/BOTTOM source exit feeds a far-side LEFT/RIGHT entry across rows                    | `_route_perp_exit_farside_entry_wrap`. The route continues through the inter-row gap, descends outside the target, then enters from the port's outward side. This precedes the generic perpendicular-exit rule, which would descend on the near side and cross the target box. |
-| 2   | `perp-exit`                          | source is a TOP/BOTTOM exit on a horizontal-flow section                                | `_route_perp_exit` (column-aligned drop, else up-and-over). Before the same-Y rule: an exit and entry sharing an edge Y would graze both boxes on a straight run.                                                                                                              |
-| 3   | `TB perp-exit over`                  | BOTTOM exit on a TB/BT section feeding a side (LEFT/RIGHT) entry at or above the exit Y | `_route_perp_exit_over` (down-and-over). The exit sits on the section's bottom edge, so before the same-Y rule for the same graze reason as rule 2: a downward drop cannot reach a not-below side entry and a straight run rides the edge out through the corner.              |
-| 4   | `same-Y straight`                    | `same_y`, not `needs_bypass`, not a right-entry plough                                  | straight horizontal                                                                                                                                                                                                                                                            |
-| 5   | `TB bottom exit`                     | BOTTOM exit on a TB/BT section, with station offsets                                    | `_route_tb_bottom_exit` (drop / jog into a target below)                                                                                                                                                                                                                       |
-| 6   | `TOP entry L-shape`                  | `entry_side is TOP`                                                                     | `_route_top_entry_l_shape`. Before the same-X rule, which would drop straight in with no horizontal lead-in.                                                                                                                                                                   |
-| 7   | `BOTTOM entry L-shape`               | `entry_side is BOTTOM`                                                                  | `_route_bottom_entry_l_shape`, the mirror-image handler. Same reason as rule 6: the same-X rule would drop straight in with no horizontal lead-in.                                                                                                                             |
-| 8   | `same-X vertical drop`               | `same_x`                                                                                | straight vertical                                                                                                                                                                                                                                                              |
-| 9   | `bottom-exit junction`               | source is a bottom-exit junction                                                        | `_route_bottom_exit_junction`                                                                                                                                                                                                                                                  |
-| 10  | `bypass family`                      | `needs_bypass`                                                                          | `_route_bypass_family`: merge trunk/branch, LEFT-entry-one-row-below straight drop, RIGHT-entry wrap (gap-above or around-below), else the U-shaped bypass                                                                                                                     |
-| 11  | `near-vertical same-col junction`    | junction dropping almost straight into a same-column entry                              | `_route_near_vertical_junction`                                                                                                                                                                                                                                                |
-| 12  | `RIGHT entry wrap`                   | `entry_side is RIGHT` and travelling right                                              | `_route_right_entry_wrap` (over the top / around the right side)                                                                                                                                                                                                               |
-| 13  | `LEFT entry wrap family`             | `entry_side is LEFT`, `dx < 0`, `cross_row`                                             | `_route_left_entry_family`: inter-row gap wrap, or the corridor / around-below loop when that gap crosses a section                                                                                                                                                            |
-| 14  | `serpentine LEFT exit -> LEFT entry` | LEFT exit into a LEFT entry stacked in the same column                                  | `_route_left_exit_left_entry_drop`                                                                                                                                                                                                                                             |
-| 15  | `merge entry family`                 | `merge_ep is not None`                                                                  | `_route_merge_entry_family`: straight (near-collinear), corridor / around-below (LEFT entry crossing a section), else L-shape into the entry port                                                                                                                              |
-| 16  | `RIGHT entry plough -> bypass`       | a higher-row L-shape to a RIGHT entry that would plough an intervening same-row section | `_route_bypass`                                                                                                                                                                                                                                                                |
-| -   | _fall-through_                       | no rule matched                                                                         | `_route_l_shape`                                                                                                                                                                                                                                                               |
+| #   | Stable family                 | Rule                                    | Fires when                                                                            | Route                                                                                                        |
+| --- | ----------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| 1   | `PERP_EXIT_FAR_SIDE_WRAP`     | `perp-exit -> far-side entry wrap`      | A TOP/BOTTOM exit feeds a far-side LEFT/RIGHT entry.                                  | `_route_perp_exit_farside_entry_wrap` continues through the row gap and enters from the port's outward side. |
+| 2   | `PERP_EXIT`                   | `perp-exit`                             | The source is a TOP/BOTTOM exit on a horizontal section.                              | `_route_perp_exit` uses a column drop or up-and-over route.                                                  |
+| 3   | `TB_PERP_EXIT_OVER`           | `TB perp-exit over`                     | A TB/BT trailing exit feeds an entry against its flow.                                | `_route_perp_exit_over` uses the opposite-side corridor.                                                     |
+| 4   | `SAME_Y_STRAIGHT`             | `same-Y straight`                       | Endpoints share Y, need no bypass, and neither entry is approached from its far side. | `_route_straight_connector` emits a horizontal run.                                                          |
+| 5   | `TB_BOTTOM_EXIT_AROUND_STACK` | `TB bottom exit around stack`           | A TB bottom-exit drop crosses sections stacked between source and target.             | `_route_tb_bottom_exit_around_stack` diverts through a clear gap.                                            |
+| 6   | `TB_BOTTOM_EXIT`              | `TB bottom exit`                        | The source is a TB/BT bottom exit.                                                    | `_route_tb_bottom_exit` emits the ordinary drop or jog.                                                      |
+| 7   | `TOP_ENTRY_L_SHAPE`           | `TOP entry L-shape`                     | The target entry side is TOP.                                                         | `_route_top_entry_l_shape` supplies the required horizontal lead-in.                                         |
+| 8   | `BOTTOM_ENTRY_L_SHAPE`        | `BOTTOM entry L-shape`                  | The target entry side is BOTTOM.                                                      | `_route_bottom_entry_l_shape` supplies the mirrored lead-in.                                                 |
+| 9   | `SAME_X_VERTICAL_DROP`        | `same-X vertical drop`                  | Endpoints share X and are not stacked same-side exceptions.                           | `_route_straight_connector` emits a vertical run.                                                            |
+| 10  | `BOTTOM_EXIT_JUNCTION`        | `bottom-exit junction`                  | The source is registered as a bottom-exit junction.                                   | `_route_bottom_exit_junction` selects its planned fan, gap, or ordinary construction.                        |
+| 11  | `MERGE_TRUNK`                 | `merge trunk`                           | Merge classification names this feeder as the primary trunk.                          | `_route_merge_trunk_feeder` calls the trunk template.                                                        |
+| 12  | `MERGE_BRANCH`                | `merge branch`                          | Merge classification names this feeder as a non-trunk branch.                         | `_route_merge_branch_feeder` calls the feeder template.                                                      |
+| 13  | `BYPASS_FAMILY`               | `bypass family`                         | The member must clear an intervening section.                                         | `_route_bypass_family` selects its merge, side-entry, wrap, or U-shaped bypass construction.                 |
+| 14  | `NEAR_VERTICAL_JUNCTION`      | `near-vertical same-col junction`       | A junction drops almost straight into a same-column entry.                            | `_route_near_vertical_junction` preserves the near-vertical channel.                                         |
+| 15  | `RIGHT_ENTRY_WRAP`            | `RIGHT entry wrap`                      | A RIGHT entry is fed from the left, or a stacked RIGHT exit feeds it.                 | `_route_right_entry_wrap` travels over or around the target's right side.                                    |
+| 16  | `LEFT_ENTRY_WRAP`             | `LEFT entry wrap family`                | A LEFT entry is approached leftward across rows.                                      | `_route_left_entry_family` selects the row-gap, band-hop, or around-below construction.                      |
+| 17  | `SERPENTINE_LEFT`             | `serpentine LEFT exit -> LEFT entry`    | A LEFT exit feeds a stacked same-column LEFT entry.                                   | `_route_left_exit_left_entry_drop` leads out to a clear left channel.                                        |
+| 18  | `LEFT_EXIT_FAR_SIDE_WRAP`     | `LEFT exit -> far-side LEFT entry wrap` | A LEFT exit reaches a LEFT entry from its far side without a bypass obstacle.         | `_route_left_exit_around_below_left_entry` enters from the outward side.                                     |
+| 19  | `MERGE_ENTRY`                 | `merge entry family`                    | The target resolves through a merge entry port.                                       | `_route_merge_entry_family` selects straight, corridor, around-below, or L-shape entry.                      |
+| 20  | `RIGHT_ENTRY_PLOUGH_BYPASS`   | `RIGHT entry plough -> bypass`          | A higher-row route to a RIGHT entry would cross an intervening section.               | `_route_right_entry_plough_bypass` deflects through the bypass.                                              |
+| 21  | `RIGHT_ENTRY_CROSS_ROW_WRAP`  | `RIGHT entry cross-row wrap`            | A source above and right of a RIGHT entry travels left with no bypass obstacle.       | `_route_right_entry_cross_row` uses the target-side band or around-below route.                              |
+| -   | `STANDARD_L_SHAPE`            | _fall-through_                          | No rule matches.                                                                      | `_route_l_shape` emits the standard construction.                                                            |
 
-The three rules whose handlers carry their own residual decisions (9, 12, 14)
-own that logic inside the named handler, so the top-level table stays a single
-declarative pass.
+Handlers with residual geometric choices keep them inside the named family, so
+the top-level classifier remains one stable decision per member.
 
-Before this table runs, the convergence planner has frozen every supported
-merge trunk, feeder join, continuation, and endpoint owner. Rules 9 and 14 use
-their existing templates to consume those decisions. A continuation covered by
-a named feeder is suppressed before dispatch. Post-routing merge landing and
-covered-hop removal apply only to convergence systems on the compatibility
-path.
+The table first runs in classification mode, then its selected families build
+non-convergence member templates in canonical order. Their gap slots are
+materialized together and their occupied vertical channels are frozen before
+convergence planning. The convergence planner uses those channels as fixed
+external inputs while it freezes every supported merge trunk, feeder join,
+continuation, and endpoint owner. It may construct canonical trial routes for
+the convergence members it owns, but it does not route other members again.
+Rules 9 and 14 consume those convergence decisions. A continuation covered by
+a named feeder is suppressed before production dispatch. Post-routing merge
+landing and covered-hop removal apply only to convergence systems on the
+compatibility path.
+
+This page is the exhaustive inter-section handler inventory. The complete
+emission and post-pass ownership inventory, including fallbacks and validators,
+is [route emission inventory](/nf-metro/dev/route_emission_inventory/).
 
 ## The curve guard is a backstop
 

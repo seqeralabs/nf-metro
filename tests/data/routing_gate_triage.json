@@ -219,18 +219,6 @@
     "note": "Defensive: _fan_bypass_band skips a fan edge whose target has no resolvable grid column; every corpus fan target resolves a column, so the skip arm is unexercised.",
     "status": "needs-review"
   },
-  "core.py::if result is not None and observer is not None and observe_fallback:::#1": {
-    "note": "TB-section fallback reporting applies only to route-plan members, whose endpoints are both ports or junctions. The TB handler families that can claim an edge require an internal section endpoint, so no valid route-plan member can reach the reporting arm.",
-    "status": "candidate-dead"
-  },
-  "core.py::if result is not None and observer is not None and observe_fallback:::#2": {
-    "note": "Entry-runway fallback reporting applies only to route-plan members, whose endpoints are both ports or junctions. The runway handler requires an entry-port source and an internal-station target, so no valid route-plan member can reach the reporting arm.",
-    "status": "candidate-dead"
-  },
-  "core.py::if result is not None and observer is not None and observe_fallback:::#3": {
-    "note": "The general intra-section handler is the total fallback after the inter-section dispatcher. Reaching this reporting arm requires an inter-section handler to claim and then decline a route. test_declined_dispatch_records_the_actual_fallback_emitter forces that fault path and verifies the recorded family.",
-    "status": "defensive"
-  },
   "core.py::if result is not None:::#1": {
     "note": "Append-guard after the priority-ordered handler chain. The final handler _route_intra_section is total: its three early returns and its _route_diagonal fallback (annotated -> RoutedPath, single return statement) always yield a RoutedPath, so result is never None and every edge appends. The None arm is unreachable.",
     "status": "defensive"
@@ -591,10 +579,6 @@
     "note": "Bounds guard in _restack_htrunk: trunk index k >= 1 so k-1 >= 0 is always in range; the skip arm is defensive.",
     "status": "defensive"
   },
-  "normalize.py::if 0 <= k - 1 < len(rp.curve_radii):::#2": {
-    "note": "Bounds guard in _restack_channel: the skip arm fires only for k==0 (channel at the route start), which the restacked gap channels (interior verticals after a horizontal lead-in) never are.",
-    "status": "defensive"
-  },
   "normalize.py::if a_trunk is None or b_trunk is None:::#1": {
     "note": "A symmetric divergence is considered only for declared gap channels produced by a same-source branch opening. Those channels follow a horizontal opening run, so both opening trunks resolve; the missing-trunk arm defensively rejects a different route shape.",
     "status": "defensive"
@@ -625,10 +609,6 @@
   },
   "normalize.py::if anchor_section_id is not None and anchor_side is not None:::#1": {
     "note": "_gap_channel_base falls back to the column gap when passed a null anchor. All six call sites (in _route_bypass) pass the bypass source/target section id, which is None only when that endpoint has no resolvable section (src_sec_id/tgt_sec_id in _route_bypass); the corpus has no bypass with a sectionless endpoint, so the null-anchor arm is never taken. Defensive guard for a sectionless bypass endpoint.",
-    "status": "defensive"
-  },
-  "normalize.py::if any(::#13": {
-    "note": "Section-intrusion veto on a co-travelling separation move. Every corpus move lands in the corridor the two tracks already share, so no target is ever inside a section and the abandon arm never fires. Defensive: forcing the move would put a run through a section body, which the always-on _guard_no_route_through_section then aborts on.",
     "status": "defensive"
   },
   "normalize.py::if any(::#8": {
@@ -663,14 +643,6 @@
     "note": "Defensive guard in _convergence_line_order: a peel-off riser channel always resolves to a source-section column, so the unresolved-column early return is never taken on the corpus.",
     "status": "defensive"
   },
-  "normalize.py::if convergence_owns_segment_boundary(trunk.route, trunk.idx):::#1": {
-    "note": "Convergence-ownership skip in the destination-tail bundling pass. Every eligible destination tail the corpus produces is a compatibility route the convergence planner does not own, so the skip arm never fires. Defensive against moving a trunk whose corner a convergence plan states, which validate_convergence_plans then rejects.",
-    "status": "defensive"
-  },
-  "normalize.py::if down is None or len(up.points) < 2:::#1": {
-    "note": "Every line entering a fan-out junction also exits it to an entry port, so _fanout_route_maps always pairs a downstream route for each (jid, line_id) upstream; all handlers emit >=2-point routes. The skip arm in _join_fanout_upstream_tails is unreachable. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
-    "status": "defensive"
-  },
   "normalize.py::if down_ok and up_ok and (cross_down is None) != (cross_up is None):::#1": {
     "note": "Same-line dogleg side selection. The crossing-decided true arm (->1297, pick the side whose riser does not pierce the exempt run) is exercised by dogleg_exempt_sameline. The false fall-through (->1298) needs either an out-of-band side or a crossing-equal tie, neither reachable by a clean topology: the reachable dogleg regime rigidly fixes the inter-row band so down_room/up_room stay >= min_sep=6 (observed 14/26 across the corpus and every constructed variant; perturbing the grid loses the regime), and the only realizable tie is both-cross (a crossing-free tie needs degenerate zero-length exempt risers) which co-occurs with section-crossing / dogleg-crosses-exempt guard failures and is never a shippable render.",
     "status": "defensive"
@@ -689,10 +661,6 @@
   },
   "normalize.py::if k < len(rp.curve_radii) and k + 2 < len(pts):::#1": {
     "note": "Bounds guard in _restack_htrunk: for a real interior trunk k and k+2 are in range; the skip arm is defensive.",
-    "status": "defensive"
-  },
-  "normalize.py::if k < len(rp.curve_radii) and k + 2 < len(pts):::#2": {
-    "note": "Bounds guard in _restack_channel: the skip arm guards k or k+2 out of range for a real interior channel; defensive.",
     "status": "defensive"
   },
   "normalize.py::if k == desc.idx + 1:::#1": {

@@ -457,16 +457,21 @@ def _grant_outcome(
 ) -> GrantOutcome:
     """What the planner decides about *system_id* once those boundaries carry *amount*.
 
-    A re-plan that raises is left to propagate.  Folding it into "not planned"
-    would let a defect in the counterfactual geometry read as the one conclusion
-    this module asks to be trusted, so a probe that cannot run is a failure
-    rather than a verdict.  A re-plan that returns without describing the whole
-    system is the same hazard one step in: it is reported as ``DIVERGED`` and
-    read as neither answer.
+    An arbitrary re-plan failure propagates.  A final convergence feasibility
+    rejection is a valid planner finding that owns no complete system geometry,
+    so the grant is ``DIVERGED`` rather than compatible.  A re-plan that returns
+    without describing the whole system is read the same way.
     """
     probe_graph = copy.deepcopy(graph)
     translate_boundaries(probe_graph, rows, columns, amount)
-    replanned, _offset_step = _replan(probe_graph)
+    from nf_metro.layout.routing.convergences import (
+        FinalConvergenceFeasibilityError,
+    )
+
+    try:
+        replanned, _offset_step = _replan(probe_graph)
+    except FinalConvergenceFeasibilityError:
+        return GrantOutcome.DIVERGED
     return _replan_outcome(replanned, system_id)
 
 
@@ -513,34 +518,32 @@ def _widen(
 def _replan(
     graph: MetroGraph,
 ) -> tuple[dict[RouteSystemId, tuple[ConvergencePlan, ...]], float]:
-    """Run convergence planning over *graph* and group the result by system.
+    """Plan *graph* against its canonical member geometry and group decisions.
 
-    Imported here because the planner reaches back into layout: the probe is a
-    consumer of routing, not a dependency of it.
+    A capacity probe asks whether the route-system planner can own a changed
+    boundary.  Preliminary system classification first removes compatibility
+    systems from planning context.  Convergence claims then guide canonical
+    member allocation before final convergence feasibility and atomic system
+    classification decide ownership.
+
+    Imported here because the probe is a diagnostic consumer of routing, not a
+    dependency of it.
     """
     from nf_metro.layout.constants import DIAGONAL_RUN
     from nf_metro.layout.routing import compute_station_offsets
     from nf_metro.layout.routing.context import _build_routing_context
-    from nf_metro.layout.routing.convergences import build_convergence_plan_execution
-    from nf_metro.layout.routing.exit_turns import build_exit_turn_execution
+    from nf_metro.layout.routing.planning import prepare_route_system_planning
 
     context = _build_routing_context(
         graph, DIAGONAL_RUN, CURVE_RADIUS, compute_station_offsets(graph)
     )
-    exit_turns = build_exit_turn_execution(graph, context)
-    context.exit_turns = exit_turns.query
-    if exit_turns.scaffold is None:
-        return {}, context.offset_step
-    execution = build_convergence_plan_execution(
+    planning = prepare_route_system_planning(
         graph,
         context,
-        exit_turns.scaffold,
-        exit_turn_plans=exit_turns.plans,
-        fan_plans=graph.fan_plans,
-        include_resources=False,
+        include_convergence_resources=False,
     )
     by_system: dict[RouteSystemId, tuple[ConvergencePlan, ...]] = {}
-    for item in execution.plans:
+    for item in planning.convergences.plans:
         by_system[item.system_id] = (*by_system.get(item.system_id, ()), item)
     return by_system, context.offset_step
 

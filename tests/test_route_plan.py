@@ -21,6 +21,7 @@ import nf_metro.layout.routing.inter_section_handlers as inter_section_handlers
 from nf_metro.api import apply_layout_overrides, prepare_graph, resolve_theme
 from nf_metro.layout.route_plan import (
     BindingKind,
+    ConvergenceDisposition,
     CoordinateRegime,
     CoverageReason,
     DemandAxis,
@@ -29,6 +30,10 @@ from nf_metro.layout.route_plan import (
     EmissionRole,
     ExitTurnDisposition,
     RouteFamilyId,
+    RouteMemberGeometryPlan,
+    RouteMemberGeometryPlanId,
+    RouteSystemCompatibilityReason,
+    RouteSystemDisposition,
     SharedReferenceKind,
     build_route_plan_query,
     serialize_route_plan,
@@ -309,7 +314,182 @@ def test_whole_graph_rail_routes_bind_through_the_final_route_set() -> None:
         (binding,) = query.bindings_for(member.id)
         assert binding.kind is BindingKind.EMITTED
         assert binding.path_rank is not None
-        assert routes[binding.path_rank].line_id == member.line_id
+        emitted = routes[binding.path_rank]
+        assert emitted.line_id == member.line_id
+        assert emitted.route_system_id == str(member.system_id)
+        assert emitted.emission_member_id == str(member.id)
+        assert emitted.route_system_disposition == RouteSystemDisposition.PLANNED.value
+        assert emitted.route_plan_ids == ()
+        assert emitted.route_reservation_ids == tuple(
+            str(reservation.id)
+            for reservation in plan.reservations
+            if member.id in reservation.claimant_member_ids
+        )
+
+    member = rail_members[0]
+    (binding,) = query.bindings_for(member.id)
+    assert binding.path_rank is not None
+    route = routes[binding.path_rank]
+    fake_plan = RouteMemberGeometryPlan(
+        RouteMemberGeometryPlanId("fake-rail-member-plan"),
+        member.system_id,
+        member.id,
+        member.edge,
+        member.connector_ids,
+        RouteFamilyId.RAIL_INTER_SECTION,
+        tuple(route.points),
+        None if route.curve_radii is None else tuple(route.curve_radii),
+        route.offset_regime,
+        route.normalize_exempt,
+        tuple(route.gap_slots),
+        route.trunk_slot,
+        (),
+    )
+    systems = tuple(
+        dataclasses.replace(
+            system,
+            member_geometry_plan_ids=(fake_plan.id,),
+        )
+        if system.id == member.system_id
+        else system
+        for system in plan.systems
+    )
+    malformed = dataclasses.replace(
+        plan,
+        systems=systems,
+        member_geometry_plans=(fake_plan,),
+    )
+    with pytest.raises(ValueError, match="rail emitter cannot"):
+        build_route_plan_query(malformed)
+
+
+def test_route_system_records_require_exact_public_partitions() -> None:
+    _graph, _routes, plan = _observe(EXAMPLES / "genomeassembly.mmd")
+
+    with pytest.raises(ValueError, match="duplicate route-system"):
+        build_route_plan_query(
+            dataclasses.replace(
+                plan,
+                systems=(*plan.systems, plan.systems[0]),
+            )
+        )
+
+    owning_system = next(system for system in plan.systems if system.member_ids)
+    missing_member = dataclasses.replace(
+        owning_system, member_ids=owning_system.member_ids[1:]
+    )
+    with pytest.raises(ValueError, match="emission-member partition"):
+        build_route_plan_query(
+            dataclasses.replace(
+                plan,
+                systems=tuple(
+                    missing_member if system.id == owning_system.id else system
+                    for system in plan.systems
+                ),
+            )
+        )
+
+    missing_connector = dataclasses.replace(
+        owning_system, connector_ids=owning_system.connector_ids[1:]
+    )
+    with pytest.raises(ValueError, match="connector ownership"):
+        build_route_plan_query(
+            dataclasses.replace(
+                plan,
+                systems=tuple(
+                    missing_connector if system.id == owning_system.id else system
+                    for system in plan.systems
+                ),
+            )
+        )
+
+    reordered_connectors = dataclasses.replace(
+        owning_system, connector_ids=tuple(reversed(owning_system.connector_ids))
+    )
+    with pytest.raises(ValueError, match="connector index is not canonical"):
+        build_route_plan_query(
+            dataclasses.replace(
+                plan,
+                systems=tuple(
+                    reordered_connectors if system.id == owning_system.id else system
+                    for system in plan.systems
+                ),
+            )
+        )
+
+    missing_exit_group = dataclasses.replace(
+        owning_system, exit_group_ids=owning_system.exit_group_ids[1:]
+    )
+    with pytest.raises(ValueError, match="ownership indexes"):
+        build_route_plan_query(
+            dataclasses.replace(
+                plan,
+                systems=tuple(
+                    missing_exit_group if system.id == owning_system.id else system
+                    for system in plan.systems
+                ),
+            )
+        )
+
+    assert len(owning_system.bundle_ids) > 1
+    reordered_bundles = dataclasses.replace(
+        owning_system, bundle_ids=tuple(reversed(owning_system.bundle_ids))
+    )
+    with pytest.raises(ValueError, match="bundle index"):
+        build_route_plan_query(
+            dataclasses.replace(
+                plan,
+                systems=tuple(
+                    reordered_bundles if system.id == owning_system.id else system
+                    for system in plan.systems
+                ),
+            )
+        )
+
+    _fan_graph, _fan_routes, fan_plan = _observe(
+        EXAMPLES / "topologies" / "fan_in_merge.mmd"
+    )
+    for label, records, index_name, collection_name in (
+        ("branch", fan_plan.branches, "branch_ids", "branches"),
+        ("feeder", fan_plan.feeders, "feeder_ids", "feeders"),
+    ):
+        assert records
+        duplicate = records[0]
+        owner = next(
+            system for system in fan_plan.systems if system.id == duplicate.system_id
+        )
+        duplicated_owner = dataclasses.replace(
+            owner,
+            **{index_name: (*getattr(owner, index_name), duplicate.id)},
+        )
+        with pytest.raises(ValueError, match=f"duplicate route {label}"):
+            build_route_plan_query(
+                dataclasses.replace(
+                    fan_plan,
+                    systems=tuple(
+                        duplicated_owner if system.id == owner.id else system
+                        for system in fan_plan.systems
+                    ),
+                    **{collection_name: (*records, duplicate)},
+                )
+            )
+
+
+def test_route_system_compatibility_reason_registry_is_public_schema() -> None:
+    with pytest.raises(ValueError, match="unregistered compatibility reason"):
+        RouteSystemCompatibilityReason(
+            owner="member-geometry-plan",
+            reason="arbitrary-private-fallback",
+            justification="not registered",
+            follow_up="not applicable",
+        )
+    with pytest.raises(ValueError, match="metadata is not canonical"):
+        RouteSystemCompatibilityReason(
+            owner="member-geometry-plan",
+            reason="missing-emission-edge",
+            justification="custom explanation",
+            follow_up="custom follow-up",
+        )
 
 
 def test_route_families_and_roles_come_from_production_dispatch() -> None:
@@ -343,7 +523,7 @@ def test_route_families_and_roles_come_from_production_dispatch() -> None:
     )
 
 
-def test_declined_dispatch_records_the_actual_fallback_emitter(
+def test_declined_migrated_dispatch_cannot_open_a_compatibility_family(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     path = EXAMPLES / "topologies" / "fan_in_merge.mmd"
@@ -378,13 +558,73 @@ def test_declined_dispatch_records_the_actual_fallback_emitter(
     observation = observe_route_edges(
         graph, station_offsets=compute_station_offsets(graph)
     )
-    member = next(
-        member for member in observation.plan.members if member.edge == declined
+    (system,) = observation.plan.systems
+    assert system.disposition is RouteSystemDisposition.COMPATIBILITY
+    assert tuple(
+        (reason.owner, reason.reason) for reason in system.compatibility_reasons
+    ) == (("member-geometry-plan", "canonical-template-declined-member"),)
+    assert not system.member_geometry_plan_ids
+    assert not system.exit_turn_plan_ids
+    assert not system.shared_reference_ids
+    assert not system.demand_ids
+    assert not system.reservation_ids
+    assert not tuple(
+        plan for plan in observation.plan.exit_turn_plans if plan.system_id == system.id
     )
-    (binding,) = build_route_plan_query(observation.plan).bindings_for(member.id)
+    convergence_plans = tuple(
+        plan
+        for plan in observation.plan.convergence_plans
+        if plan.system_id == system.id
+    )
+    assert convergence_plans
+    assert system.convergence_plan_ids == tuple(plan.id for plan in convergence_plans)
+    assert all(
+        plan.disposition is ConvergenceDisposition.LEGACY
+        and not plan.shared_reference_ids
+        and not plan.demand_ids
+        and not plan.endpoint_ownership
+        for plan in convergence_plans
+    )
 
-    assert member.family_id is RouteFamilyId.INTRA_SECTION_FALLBACK
-    assert binding.kind is BindingKind.EMITTED
+    routes = tuple(
+        route for route in observation.routes if route.route_system_id == str(system.id)
+    )
+    assert routes
+    assert all(route.route_system_disposition == "compatibility" for route in routes)
+    assert all(
+        not route.route_plan_ids
+        and route.exit_turn_plan_id is None
+        and route.fan_plan_id is None
+        and route.convergence_plan_id is None
+        and not route.route_system_owned_segment_ranks
+        for route in routes
+    )
+
+    query = build_route_plan_query(observation.plan)
+    assert all(
+        not query.fan_plans_for_member(member_id) for member_id in system.member_ids
+    )
+    assert all(
+        not query.reservations_for_member(member_id) for member_id in system.member_ids
+    )
+    bindings = {
+        member_id: query.bindings_for(member_id) for member_id in system.member_ids
+    }
+    assert all(len(items) == 1 for items in bindings.values())
+    emitted_member_ids = {
+        member_id
+        for member_id, (binding,) in bindings.items()
+        if binding.kind is BindingKind.EMITTED
+    }
+    covered = tuple(
+        binding
+        for (binding,) in bindings.values()
+        if binding.kind is BindingKind.COVERED_MERGE_HOP
+    )
+    assert {
+        route.emission_member_id for route in routes if route.emission_member_id
+    } == {str(member_id) for member_id in emitted_member_ids}
+    assert all(binding.covering_member_id in emitted_member_ids for binding in covered)
 
 
 def test_schema_names_every_future_reference_and_demand_kind() -> None:

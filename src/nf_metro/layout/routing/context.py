@@ -65,6 +65,7 @@ if TYPE_CHECKING:
     from nf_metro.layout.route_plan import ExitTurnPlanId
     from nf_metro.layout.routing.convergences import ConvergencePlanExecutionQuery
     from nf_metro.layout.routing.exit_turns import ExitTurnPlanQuery
+    from nf_metro.layout.routing.system_emission import RouteSystemEmissionExecution
 
 _EdgeKey = tuple[str, str, str]
 
@@ -229,6 +230,7 @@ class _RoutingCtx:
     station_offsets: dict[tuple[str, str], float] | None
     diagonal_run: float
     curve_radius: float
+    validate_final_route_frames: bool = True
     reserved_bands: ReservedCorridors = field(default_factory=ReservedCorridors)
     prior_exit_turn_dispositions: Mapping[ExitTurnPlanId, str | None] | None = None
     """Frozen exit-turn dispositions a settlement re-route must redraw.
@@ -240,6 +242,8 @@ class _RoutingCtx:
     is the one that decides."""
     exit_turns: ExitTurnPlanQuery | None = None
     convergences: ConvergencePlanExecutionQuery | None = None
+    route_systems: RouteSystemEmissionExecution | None = None
+    compatibility_edges: frozenset[_EdgeKey] = frozenset()
     skip_edges: set[_EdgeKey] = field(default_factory=set)
     built_routes: list[RoutedPath] = field(default_factory=list)
     junction_fan_info: dict[_EdgeKey, tuple[int, int]] = field(default_factory=dict)
@@ -257,6 +261,10 @@ class _RoutingCtx:
             index_exclude=set(),
         )
     )
+
+    def is_compatibility_edge(self, edge: Edge) -> bool:
+        """Whether whole-system emission delegates *edge* to compatibility routing."""
+        return (edge.source, edge.target, edge.line_id) in self.compatibility_edges
 
 
 def _classify_merge_edges(
@@ -394,6 +402,7 @@ def _build_routing_context(
     offset_step: float | None = None,
     reserved_bands: ReservedCorridors | None = None,
     prior_exit_turn_dispositions: Mapping[ExitTurnPlanId, str | None] | None = None,
+    validate_final_route_frames: bool = True,
 ) -> _RoutingCtx:
     """Pre-compute all shared state for edge routing."""
     bands = ReservedCorridors() if reserved_bands is None else reserved_bands
@@ -488,6 +497,7 @@ def _build_routing_context(
         prior_exit_turn_dispositions=prior_exit_turn_dispositions,
         diagonal_run=diagonal_run,
         curve_radius=curve_radius,
+        validate_final_route_frames=validate_final_route_frames,
         junction_fan_info=junction_fan_info,
         fan_corridors=fan_corridors,
         skip_edges=merge.skip_edges,

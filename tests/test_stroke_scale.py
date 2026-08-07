@@ -189,9 +189,11 @@ def test_a_coarsened_canvas_margin_reads_back_outside_its_pass() -> None:
     the ledger's clearance for one is the only policy term a reader outside the
     measuring pass cannot re-derive.  A query is exactly such a reader.
     """
-    path = Path("examples/diagonal_labels.mmd")
+    path = Path("examples/topologies/around_section_below.mmd")
     graph = prepare_graph(
-        path.read_text(), source_dir="examples", layout_options={"stroke_scale": 2.0}
+        path.read_text(),
+        source_dir=str(path.parent),
+        layout_options={"stroke_scale": 2.0},
     )
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")

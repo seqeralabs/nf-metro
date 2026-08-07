@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
+from types import MappingProxyType
 from typing import TYPE_CHECKING, NamedTuple
 
 from nf_metro.layout.route_plan import FanRouteEmitter
@@ -1618,6 +1619,23 @@ _INTER_SECTION_RULES: list[_Rule] = [
     ),
 ]
 
+_INDEXED_INTER_SECTION_RULES = _INTER_SECTION_RULES
+_INTER_SECTION_RULE_BY_FAMILY = MappingProxyType(
+    {rule.family_id: rule for rule in _INDEXED_INTER_SECTION_RULES}
+)
+if len(_INTER_SECTION_RULE_BY_FAMILY) != len(_INDEXED_INTER_SECTION_RULES):
+    raise RuntimeError("inter-section route families are not unique")
+
+
+def _inter_section_rule_for_family(family_id: RouteFamilyId) -> _Rule | None:
+    """Resolve a frozen family without re-running dispatch predicates."""
+    if _INTER_SECTION_RULES is _INDEXED_INTER_SECTION_RULES:
+        return _INTER_SECTION_RULE_BY_FAMILY.get(family_id)
+    return next(
+        (rule for rule in _INTER_SECTION_RULES if rule.family_id is family_id),
+        None,
+    )
+
 
 def _route_inter_section(
     edge: Edge,
@@ -1626,6 +1644,7 @@ def _route_inter_section(
     ctx: _RoutingCtx,
     *,
     observer: RoutePlanObserver | None = None,
+    planned_family_id: RouteFamilyId | None = None,
 ) -> RoutedPath | None:
     """Route an edge between ports/junctions via the dispatch table.
 
@@ -1641,13 +1660,19 @@ def _route_inter_section(
         return None
 
     f = _build_inter_facts(edge, src, tgt, ctx)
-    rule = _match_inter_section_rule(f)
+    rule = (
+        _match_inter_section_rule(f)
+        if planned_family_id is None
+        else _inter_section_rule_for_family(planned_family_id)
+    )
     if rule is not None:
         family_id = rule.family_id
         route = rule.route(f)
     else:
         # Standard L-shape: the default when no rule above claims the edge.
-        family_id = RouteFamilyId.STANDARD_L_SHAPE
+        family_id = planned_family_id or RouteFamilyId.STANDARD_L_SHAPE
+        if family_id is not RouteFamilyId.STANDARD_L_SHAPE:
+            raise RuntimeError(f"planned route family {family_id.value!r} is unknown")
         route = _route_l_shape(edge, src, tgt, f.i, f.n, ctx)
     from nf_metro.layout.route_plan import ExitTurnDisposition
     from nf_metro.layout.routing.exit_turns import (
@@ -2098,6 +2123,8 @@ def _route_planned_bottom_exit_right_landings(
     exit_x_offset: Callable[[str], float],
     target_y: float,
 ) -> RoutedPath | None:
+    if ctx.is_compatibility_edge(edge):
+        return None
     query = ctx.graph.fan_plan_query
     if query is None:
         return None
@@ -4605,7 +4632,7 @@ def _route_left_entry_wrap(
                 ctx.reserved_bands.rows.at(src_sec.grid_row + 1),
             )
     else:
-        hy = inter_row_channel_y(
+        channel_y = inter_row_channel_y(
             ctx.graph,
             src,
             tgt,
@@ -4616,7 +4643,12 @@ def _route_left_entry_wrap(
             delta,
             reserved=ctx.reserved_bands.rows,
         )
-        hy -= delta
+        claimed_band = ctx.reserved_bands.claimed_row_band(
+            edge.source, edge.target, edge.line_id
+        )
+        if claimed_band is not None:
+            channel_y = claimed_band.hold(channel_y)
+        hy = channel_y - delta
 
     # V2 descent channel centre, left of the target section.
     vx = _left_entry_descent_x(ctx, tgt.x, pos_n)
@@ -5239,6 +5271,15 @@ def _leadout_self_meets_sibling_descent(
                 continue
             if min(hi, seg_hi) - max(lo, seg_lo) > COORD_TOLERANCE:
                 return True
+    if ctx.convergences is None:
+        return False
+    for claim in ctx.convergences.prior_vertical_channels_for_edge(edge):
+        if claim.line_id != edge.line_id or claim.owner_source == edge.source:
+            continue
+        if not (corner_x - COORD_TOLERANCE <= claim.x <= gap_right + COORD_TOLERANCE):
+            continue
+        if min(hi, claim.y_hi) - max(lo, claim.y_lo) > COORD_TOLERANCE:
+            return True
     return False
 
 

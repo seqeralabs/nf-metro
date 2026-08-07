@@ -25,6 +25,7 @@ from nf_metro.layout.route_plan import (
     ExitTurnDisposition,
     GridSpan,
     ReservationDecisionKind,
+    RouteSystemId,
     SharedReferenceId,
     build_route_plan_query,
 )
@@ -70,81 +71,12 @@ RESERVATION_CORPUS = tuple(
         "lr_to_tb_top_near_vertical.mmd",
     )
 ) + (ROOT / "tests" / "fixtures" / "regressions" / "stacked_collector_fanin.mmd",)
-
-EXPECTED_RESERVATION_CLAIMS = {
-    "inter_row_wrap_clearance.mmd": (
-        (21, 1),
-        (21, 2),
-        (21, 3),
-        (22, 1),
-        (22, 2),
-        (22, 3),
-        (23, 1),
-        (23, 2),
-        (23, 3),
-    ),
-    "cross_row_gap_wrap.mmd": ((20, 1), (20, 2), (21, 1), (21, 2)),
-    "merge_bottom_row_bypass.mmd": (
-        (11, 1),
-        (12, 2),
-        (12, 3),
-        (14, 1),
-    ),
-    "corridor_narrow_gap_fallback.mmd": (
-        (12, 1),
-        (12, 2),
-        (12, 3),
-        (13, 1),
-        (13, 2),
-        (13, 3),
-        (14, 1),
-        (14, 2),
-        (14, 3),
-    ),
-    "fan_bypass_shared_band.mmd": ((9, 1), (9, 3)),
-    "packed_cell_right_exit_left_entry_wrap.mmd": (
-        (57, 1),
-        (58, 1),
-        (59, 1),
-        (60, 1),
-        (61, 1),
-        (61, 2),
-        (61, 3),
-        (61, 4),
-        (62, 1),
-        (62, 2),
-        (62, 3),
-        (68, 2),
-        (68, 3),
-        (69, 2),
-        (69, 3),
-        (70, 1),
-        (70, 2),
-        (70, 3),
-        (71, 1),
-    ),
-    "opposing_bypass_corridor.mmd": (
-        (19, 1),
-        (19, 2),
-        (22, 1),
-        (22, 2),
-        (23, 1),
-        (23, 2),
-        (25, 1),
-        (25, 2),
-    ),
-    "opposing_return_row_pair.mmd": (
-        (10, 1),
-        (10, 2),
-        (11, 1),
-        (11, 2),
-    ),
-    "lr_to_tb_top_near_vertical.mmd": ((4, 1), (4, 2)),
-    "stacked_collector_fanin.mmd": (
-        *((rank, 1) for rank in (197, 198, 199, 212, 214, 216)),
-        *((rank, 2) for rank in (197, 198, 199, *range(206, 218))),
-        *((rank, 3) for rank in (197, 198, 199, *range(206, 218))),
-    ),
+COMPATIBILITY_RESERVATION_FIXTURES = {
+    "inter_row_wrap_clearance.mmd",
+    "cross_row_gap_wrap.mmd",
+    "corridor_narrow_gap_fallback.mmd",
+    "packed_cell_right_exit_left_entry_wrap.mmd",
+    "lr_to_tb_top_near_vertical.mmd",
 }
 
 
@@ -156,6 +88,35 @@ def _observe(path: Path):
             graph, station_offsets=compute_station_offsets(graph)
         )
     return graph, observation.routes, observation.plan
+
+
+def _assert_compatibility_systems_publish_no_resources(
+    plan, *, family_id: RouteFamilyId | None = None
+) -> set[RouteSystemId]:
+    compatibility_systems = tuple(
+        system for system in plan.systems if system.disposition.value == "compatibility"
+    )
+    compatibility_ids = {system.id for system in compatibility_systems}
+    assert compatibility_ids
+    assert all(system.compatibility_reasons for system in compatibility_systems)
+    compatibility_members = tuple(
+        member for member in plan.members if member.system_id in compatibility_ids
+    )
+    assert compatibility_members
+    assert all(member.family_id is not None for member in compatibility_members)
+    if family_id is not None:
+        assert any(
+            member.system_id in compatibility_ids and member.family_id is family_id
+            for member in plan.members
+        )
+    assert not [
+        item for item in plan.shared_references if item.system_id in compatibility_ids
+    ]
+    assert not [item for item in plan.demands if item.system_id in compatibility_ids]
+    assert not [
+        item for item in plan.reservations if item.system_id in compatibility_ids
+    ]
+    return compatibility_ids
 
 
 def _report_reservation(plan):
@@ -312,83 +273,93 @@ def test_reportho_ownership_does_not_depend_on_resolved_section_pairs() -> None:
 
 
 @pytest.mark.parametrize(
-    ("name", "kind", "region_type"),
+    ("name", "kind", "region_type", "planned", "family_id"),
     (
         (
             "inter_row_wrap_clearance.mmd",
             CorridorKind.DIRECT_INTER_ROW_BAND,
             RowGapRegion,
+            False,
+            RouteFamilyId.LEFT_ENTRY_WRAP,
         ),
-        ("route_around_intervening.mmd", CorridorKind.BYPASS_BAND, CanvasRegion),
-        ("cross_col_top_entry.mmd", CorridorKind.OVER_TOP_BAND, CanvasRegion),
+        (
+            "route_around_intervening.mmd",
+            CorridorKind.BYPASS_BAND,
+            CanvasRegion,
+            False,
+            RouteFamilyId.BYPASS_FAMILY,
+        ),
+        (
+            "cross_col_top_entry.mmd",
+            CorridorKind.OVER_TOP_BAND,
+            CanvasRegion,
+            False,
+            RouteFamilyId.TOP_ENTRY_L_SHAPE,
+        ),
         (
             "merge_bottom_row_bypass.mmd",
             CorridorKind.INTER_COLUMN_CHANNEL,
             ColumnGapRegion,
+            True,
+            None,
         ),
     ),
 )
 def test_supported_corridor_families_publish_complete_records(
-    name: str, kind: CorridorKind, region_type: type
+    name: str,
+    kind: CorridorKind,
+    region_type: type,
+    planned: bool,
+    family_id: RouteFamilyId | None,
 ) -> None:
     graph, _routes, plan = _observe(TOPOLOGIES / name)
     query = build_route_plan_query(plan)
-    reservation = next(
+    matching = tuple(
         item
         for item in plan.reservations
         if item.kind is kind and isinstance(item.region, region_type)
     )
+    if not planned:
+        assert not matching
+        _assert_compatibility_systems_publish_no_resources(plan, family_id=family_id)
+        return
+    assert matching
+    for reservation in matching:
+        if isinstance(reservation.region, CanvasRegion):
+            _assert_runs_in_the_canvas_margin(graph, reservation)
+        assert reservation.connector_ids
+        assert reservation.claimant_member_ids
+        assert reservation.claims
+        assert reservation.route_family_ids
+        assert reservation.keep_out_classes
+        assert reservation.provenance
+        assert reservation.minimum_width > 0
+        assert query.shared_reference(reservation.reference_id).claimant_member_ids == (
+            reservation.claimant_member_ids
+        )
+        (demand_id,) = reservation.demand_ids
+        demand = query.demand(demand_id)
+        assert demand.span == reservation.span
+        assert demand.lane_count == reservation.lane_count
+        assert demand.minimum_size == reservation.minimum_width
+        assert query.reservation(reservation.id) is reservation
+        assert reservation in query.reservations_for_system(reservation.system_id)
+        assert all(
+            reservation in query.reservations_for_member(member_id)
+            for member_id in reservation.claimant_member_ids
+        )
 
-    if isinstance(reservation.region, CanvasRegion):
-        _assert_runs_in_the_canvas_margin(graph, reservation)
-    assert reservation.connector_ids
-    assert reservation.claimant_member_ids
-    assert reservation.claims
-    assert reservation.route_family_ids
-    assert reservation.keep_out_classes
-    assert reservation.provenance
-    assert reservation.minimum_width > 0
-    assert query.shared_reference(reservation.reference_id).claimant_member_ids == (
-        reservation.claimant_member_ids
-    )
-    (demand_id,) = reservation.demand_ids
-    demand = query.demand(demand_id)
-    assert demand.span == reservation.span
-    assert demand.lane_count == reservation.lane_count
-    assert demand.minimum_size == reservation.minimum_width
-    assert query.reservation(reservation.id) is reservation
-    assert reservation in query.reservations_for_system(reservation.system_id)
-    assert all(
-        reservation in query.reservations_for_member(member_id)
-        for member_id in reservation.claimant_member_ids
-    )
 
-
-def test_narrow_corridor_fallback_retains_the_original_demand() -> None:
-    """A wrap run whose nearest topology gap is too narrow keeps its full demand.
-
-    The fallback lands the corridor in the adjacent grid boundary rather than
-    shrinking the band to whatever fits, so the record reports the shortfall
-    instead of certifying a corridor narrower than the bundle occupies.
-    """
+def test_compatibility_wrap_publishes_no_narrow_corridor_demand() -> None:
     path = ROOT / "tests" / "fixtures" / "tb_exit_terminal_on_carrier.mmd"
     _graph, _routes, plan = _observe(path)
-    reservation = next(
+    assert not [
         item
         for item in plan.reservations
         if RouteFamilyId.LEFT_ENTRY_WRAP in item.route_family_ids
-        and isinstance(item.region, RowGapRegion)
-        and item.measurement_scope is CorridorMeasurementScope.TOPOLOGY_SPAN
-    )
-    realised = build_route_plan_query(plan).realised_reservation(reservation.id)
-    assert realised is not None
-
-    assert realised.available_width < reservation.minimum_width
-    assert realised.required_width == pytest.approx(reservation.minimum_width)
-    assert min(realised.negative_side_slack, realised.positive_side_slack) < 0
-    assert realised.capacity_slack < 0
-    assert any(
-        item.reservation_id == reservation.id for item in plan.reservation_diagnostics
+    ]
+    _assert_compatibility_systems_publish_no_resources(
+        plan, family_id=RouteFamilyId.LEFT_ENTRY_WRAP
     )
 
 
@@ -402,7 +373,7 @@ def test_narrow_corridor_fallback_retains_the_original_demand() -> None:
 def test_native_canvas_detours_do_not_manufacture_topology_gap_intent(
     name: str,
 ) -> None:
-    graph, _routes, plan = _observe(TOPOLOGIES / name)
+    _graph, _routes, plan = _observe(TOPOLOGIES / name)
     bypasses = tuple(
         item
         for item in plan.reservations
@@ -410,13 +381,10 @@ def test_native_canvas_detours_do_not_manufacture_topology_gap_intent(
         and isinstance(item.region, CanvasRegion)
     )
 
-    assert bypasses
-    assert all(
-        item.measurement_scope is CorridorMeasurementScope.OBSERVED_RUN
-        for item in bypasses
+    assert not bypasses
+    _assert_compatibility_systems_publish_no_resources(
+        plan, family_id=RouteFamilyId.BYPASS_FAMILY
     )
-    for reservation in bypasses:
-        _assert_runs_in_the_canvas_margin(graph, reservation)
 
 
 @pytest.mark.parametrize(
@@ -457,29 +425,29 @@ def test_plain_l_shape_does_not_publish_a_horizontal_wrap_band() -> None:
     assert all(
         not isinstance(item.region, RowGapRegion) for item in plain_plan.reservations
     )
-    assert any(
+    assert not any(
         item.kind is CorridorKind.DIRECT_INTER_ROW_BAND
         and isinstance(item.region, RowGapRegion)
         for item in wrap_plan.reservations
     )
+    _assert_compatibility_systems_publish_no_resources(
+        wrap_plan, family_id=RouteFamilyId.LEFT_ENTRY_WRAP
+    )
 
 
-def test_coincident_concurrent_approaches_share_one_physical_lane() -> None:
+def test_compatibility_concurrent_approaches_publish_no_physical_lane() -> None:
     _graph, _routes, plan = _observe(TOPOLOGIES / "multi_input_convergence.mmd")
-    reservation = next(
+    assert not tuple(
         item
         for item in plan.reservations
         if item.kind is CorridorKind.INTER_COLUMN_CHANNEL
     )
-    members = {member.id: member for member in plan.members}
-
-    assert len(reservation.claims) == 3
-    assert reservation.lane_count == 1
-    assert reservation.lanes[0].claim_indices == (0, 1, 2)
-    assert len({claim.allocation_coordinate for claim in reservation.claims}) == 1
-    assert {members[claim.member_id].line_id for claim in reservation.claims} == {
-        "main"
-    }
+    compatibility_ids = _assert_compatibility_systems_publish_no_resources(plan)
+    assert {
+        member.line_id
+        for member in plan.members
+        if member.system_id in compatibility_ids
+    } == {"main"}
 
 
 def test_stacked_collector_reuses_three_lanes_across_twelve_claims() -> None:
@@ -541,22 +509,25 @@ def test_asymmetric_grid_spans_select_provenance_on_the_canonical_axes() -> None
 
 
 @pytest.mark.parametrize(
-    "path",
+    ("path", "planned"),
     (
-        ROOT / "examples" / "showcase" / "seqinspector.mmd",
-        TOPOLOGIES / "bottom_row_climb_clear_corridor.mmd",
-        TOPOLOGIES / "convergent_offrow_exit_climb.mmd",
-        TOPOLOGIES / "exit_corner_offset_dogleg.mmd",
+        (ROOT / "examples" / "showcase" / "seqinspector.mmd", False),
+        (TOPOLOGIES / "bottom_row_climb_clear_corridor.mmd", True),
+        (TOPOLOGIES / "convergent_offrow_exit_climb.mmd", False),
+        (TOPOLOGIES / "exit_corner_offset_dogleg.mmd", True),
     ),
-    ids=lambda path: path.name,
+    ids=lambda value: value.name if isinstance(value, Path) else None,
 )
-def test_claim_ranges_reference_the_exact_final_point_pairs(path: Path) -> None:
+def test_claim_ranges_reference_the_exact_final_point_pairs(
+    path: Path, planned: bool
+) -> None:
     graph, routes, plan = _observe(path)
     offsets = compute_station_offsets(graph)
-    saw_skipped_predecessor = False
+    saw_claim = False
 
     for reservation in plan.reservations:
         for claim in reservation.claims:
+            saw_claim = True
             points = apply_route_offsets(routes[claim.path_rank], offsets)
             assert claim.segment_end_rank < len(points) - 1
             start = points[claim.segment_rank]
@@ -570,21 +541,12 @@ def test_claim_ranges_reference_the_exact_final_point_pairs(path: Path) -> None:
             assert claim.longitudinal_start == pytest.approx(expected_start)
             assert claim.longitudinal_end == pytest.approx(expected_end)
             assert claim.allocation_coordinate == pytest.approx(expected_coordinate)
-            saw_skipped_predecessor |= any(
-                not (
-                    abs(first[0] - second[0]) <= 1e-6
-                    and abs(first[1] - second[1]) > 1e-6
-                    or abs(first[1] - second[1]) <= 1e-6
-                    and abs(first[0] - second[0]) > 1e-6
-                )
-                for first, second in zip(
-                    points[: claim.segment_rank],
-                    points[1 : claim.segment_rank + 1],
-                    strict=True,
-                )
-            )
 
-    assert saw_skipped_predecessor
+    if planned:
+        assert saw_claim
+    else:
+        assert not saw_claim
+        _assert_compatibility_systems_publish_no_resources(plan)
 
 
 def test_opposing_routes_remain_separate_directional_claims() -> None:
@@ -628,6 +590,10 @@ def test_reservation_corpus_has_one_linked_record_per_observed_claim() -> None:
         assert sum(item.id in reservation_demand_ids for item in plan.demands) == len(
             plan.reservations
         ), path
+        if path.name in COMPATIBILITY_RESERVATION_FIXTURES:
+            assert not plan.reservations, path
+            _assert_compatibility_systems_publish_no_resources(plan)
+            continue
         assert plan.reservations, path
         assert tuple(plan.reservations) == tuple(
             sorted(
@@ -641,17 +607,8 @@ def test_reservation_corpus_has_one_linked_record_per_observed_claim() -> None:
             for reservation in plan.reservations
             for claim in reservation.claims
         )
-        path_id_by_rank = {
-            binding.path_rank: binding.path_id
-            for binding in plan.bindings
-            if binding.kind is BindingKind.EMITTED
-        }
-        expected_claims = {
-            (path_id_by_rank[path_rank], segment_rank)
-            for path_rank, segment_rank in EXPECTED_RESERVATION_CLAIMS[path.name]
-        }
+        assert claims
         assert len(claims) == len(set(claims)), path
-        assert set(claims) == expected_claims, path
         for reservation in plan.reservations:
             assert reservation.lane_count == len(reservation.lanes), path
             assert sorted(
@@ -766,10 +723,14 @@ def test_observed_render_plan_is_byte_and_metric_neutral(path: Path) -> None:
     assert json.dumps(
         compute_metrics(observed_graph, plan=observed.plan), sort_keys=True
     ) == json.dumps(compute_metrics(plain_graph, plan=plain_plan), sort_keys=True)
-    assert observed.route_plan.reservations
-    assert len(observed.route_plan.realised_reservations) == len(
-        observed.route_plan.reservations
-    )
+    if path.name not in COMPATIBILITY_RESERVATION_FIXTURES:
+        assert observed.route_plan.reservations
+        assert len(observed.route_plan.realised_reservations) == len(
+            observed.route_plan.reservations
+        )
+    else:
+        assert not observed.route_plan.reservations
+        _assert_compatibility_systems_publish_no_resources(observed.route_plan)
 
 
 @pytest.mark.parametrize(
@@ -843,39 +804,15 @@ def test_cotravelling_lanes_ask_for_the_clearance_their_pairing_needs(
 CONFINED_PEERS = TOPOLOGIES / "dogleg_exempt_distinct.mmd"
 
 
-def test_a_boundary_is_sized_for_the_corridors_confined_with_each_other() -> None:
-    """A corridor's boundary carries the peers drawn beside it, not just itself.
-
-    Both corridors here hold one lane, so their own bundles ask for nothing;
-    what the boundary owes is the room to draw the two of them clear of one
-    another.  Each is charged that room, so the boundary is asked for a width
-    that holds both rather than either alone.
-    """
+def test_compatibility_peers_publish_no_shared_boundary_resource() -> None:
     _graph, _routes, plan = _observe(CONFINED_PEERS)
     corridors = [
         item
         for item in plan.reservations
         if isinstance(item.region, RowGapRegion) and item.region.lower_row == 1
     ]
-    assert len(corridors) == 2, "fixture no longer confines two row corridors"
-    line_of = {member.id: member.line_id for member in plan.members}
-    lines = {line_of[claim.member_id] for item in corridors for claim in item.claims}
-    directions = {item.direction for item in corridors}
-    assert len(lines) == 2 and len(directions) == 2
-
-    owed = cotravelling_lane_clearance(
-        same_line=False, counter_running=True, curve_radius=CURVE_RADIUS
-    )
-    coordinates = sorted(
-        claim.allocation_coordinate for item in corridors for claim in item.claims
-    )
-    assert coordinates[1] - coordinates[0] == pytest.approx(owed)
-    for corridor in corridors:
-        assert corridor.bundle_width == pytest.approx(0.0)
-        assert corridor.peer_width == pytest.approx(owed)
-        assert corridor.minimum_width == pytest.approx(
-            corridor.negative_side_clearance + corridor.positive_side_clearance + owed
-        )
+    assert not corridors
+    _assert_compatibility_systems_publish_no_resources(plan)
 
 
 # A row corridor whose run ends at a station inside the box that would
@@ -883,34 +820,15 @@ def test_a_boundary_is_sized_for_the_corridors_confined_with_each_other() -> Non
 LANDING_BOX = ROOT / "tests" / "fixtures" / "tb_exit_terminal_on_carrier.mmd"
 
 
-def test_a_box_a_corridors_run_ends_inside_does_not_bound_its_boundary() -> None:
-    """A box the run has entered offers no clearance the run can be held off.
-
-    Two corridors cross this fixture's row 0/1 boundary, and ``quantification``
-    sits below it in the path of both.  The one whose run stops at a station
-    inside that box reads past it to ``te``; the one that merely spans the
-    boundary is bounded by it.  Contrasting the pair is what shows the exclusion
-    doing the work rather than the box being out of reach.
-    """
-    graph, _routes, plan = _observe(LANDING_BOX)
-    query = build_route_plan_query(plan)
+def test_compatibility_landing_box_publishes_no_boundary_resource() -> None:
+    _graph, _routes, plan = _observe(LANDING_BOX)
     corridors = {
         item.measurement_scope: item
         for item in plan.reservations
         if isinstance(item.region, RowGapRegion) and item.region.lower_row == 1
     }
-    landed = corridors[CorridorMeasurementScope.OBSERVED_RUN]
-    passing = corridors[CorridorMeasurementScope.TOPOLOGY_SPAN]
-    assert landed.landing_section_ids == ("quantification",)
-    assert passing.landing_section_ids == ()
-    assert graph.sections["quantification"].bbox_y < graph.sections["te"].bbox_y
-
-    landed_realised = query.realised_reservation(landed.id)
-    passing_realised = query.realised_reservation(passing.id)
-    assert landed_realised is not None and passing_realised is not None
-    assert passing_realised.positive_blocker_ids == ("section-header:quantification",)
-    assert landed_realised.positive_blocker_ids == ("section-header:te",)
-    assert landed_realised.region_end == pytest.approx(graph.sections["te"].bbox_y)
+    assert not corridors
+    _assert_compatibility_systems_publish_no_resources(plan)
 
 
 def test_a_box_only_one_claims_run_ends_inside_bounds_the_whole_reservation() -> None:

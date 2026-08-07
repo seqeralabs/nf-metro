@@ -43,20 +43,14 @@ from nf_metro.render.svg import build_observed_render_plan
 
 ROOT = Path(__file__).parents[1]
 
-# A row-spanning section bounds the corridor between grid rows 1 and 2 from
-# above, while the row-1 box that the raw row edges name stops 63.6px higher.
-# Settlement widens that boundary for the corridor, so the re-route consumes
-# the ledger.
-SPANNING_BLOCKER_FIXTURE = (
-    ROOT / "tests" / "fixtures" / "tb_exit_terminal_on_carrier.mmd"
-)
-SPANNING_BLOCKER_BOUNDARY = 2
+# A planned fold publishes row corridors on both boundaries crossed by its
+# descending branch. The router must consume those ledger bands directly.
+ROW_CORRIDOR_FIXTURE = ROOT / "examples" / "topologies" / "convergence_fold_diamond.mmd"
+ROW_CORRIDOR_BOUNDARY = 2
 
-# The boxes bounding each of that fixture's row boundaries from above and from
-# below, over the spans its corridors are measured on.
-SPANNING_BLOCKER_BOUNDING_BOXES = {
-    1: (("alignment", "orf_calling"), ("quantification", "te")),
-    2: (("psite_id",), ("te",)),
+ROW_CORRIDOR_BOUNDING_BOXES = {
+    1: (("branch_left",), ("branch_right",)),
+    2: (("branch_right",), ("finish",)),
 }
 
 # A same-row bypass trunk whose gap the ledger sizes to exactly the bundle it
@@ -113,8 +107,8 @@ def _row_gap_realisations(route_plan, lower_row: int):
 
 
 def test_reserved_row_corridor_lands_on_the_band_its_reservation_realises() -> None:
-    observed = _rendered(SPANNING_BLOCKER_FIXTURE)
-    found = list(_row_gap_realisations(observed.route_plan, SPANNING_BLOCKER_BOUNDARY))
+    observed = _rendered(ROW_CORRIDOR_FIXTURE)
+    found = list(_row_gap_realisations(observed.route_plan, ROW_CORRIDOR_BOUNDARY))
     assert found, "fixture no longer reserves the corridor under test"
     for reservation, realised in found:
         drawn = _containment(observed, reservation, realised)
@@ -131,9 +125,9 @@ def test_reserved_row_corridor_keeps_both_of_its_declared_clearances() -> None:
     to that section than the reservation permits even while the corridor's
     total capacity is ample.
     """
-    observed = _rendered(SPANNING_BLOCKER_FIXTURE)
+    observed = _rendered(ROW_CORRIDOR_FIXTURE)
     for reservation, realised in _row_gap_realisations(
-        observed.route_plan, SPANNING_BLOCKER_BOUNDARY
+        observed.route_plan, ROW_CORRIDOR_BOUNDARY
     ):
         drawn = _containment(observed, reservation, realised)
         assert drawn.negative_side_slack >= -0.01
@@ -203,19 +197,16 @@ def test_an_unclaimed_boundary_reports_no_band() -> None:
 def test_published_bands_are_the_reservation_clearances_at_the_boundary() -> None:
     """What the router reads back is the clearance the bounding boxes leave.
 
-    Several corridors can claim one boundary, so the band is the intersection of
-    what each leaves clear.  The boxes that bound each of this fixture's two row
-    boundaries are named here and the band derived from their drawn edges, so
-    the expectation is the arrangement on the page rather than a second run of
-    the ledger's own arithmetic.  ``psite_id`` spans rows 0 to 1, which is why
-    the row 1/2 boundary is bounded from above by a box the row 1/2 rows do not
-    contain.
+    The boxes that bound each of this fixture's two row boundaries are named
+    here and the band is derived from their drawn edges, so the expectation is
+    the arrangement on the page rather than a second run of the ledger's own
+    arithmetic.
     """
-    observed = _rendered(SPANNING_BLOCKER_FIXTURE)
+    observed = _rendered(ROW_CORRIDOR_FIXTURE)
     graph = observed.plan.graph
     bands = build_reserved_corridors(graph, observed.route_plan).rows
-    assert set(bands.bands) == set(SPANNING_BLOCKER_BOUNDING_BOXES)
-    for lower_row, (above, below) in SPANNING_BLOCKER_BOUNDING_BOXES.items():
+    assert set(bands.bands) == set(ROW_CORRIDOR_BOUNDING_BOXES)
+    for lower_row, (above, below) in ROW_CORRIDOR_BOUNDING_BOXES.items():
         band = bands.bands[lower_row]
         expected_lo = (
             max(
@@ -234,9 +225,9 @@ def test_published_bands_are_the_reservation_clearances_at_the_boundary() -> Non
 
 def test_row_gap_clearances_are_the_ones_the_raw_derivation_uses() -> None:
     """The reservation and the raw derivation differ only in their blockers."""
-    observed = _rendered(SPANNING_BLOCKER_FIXTURE)
+    observed = _rendered(ROW_CORRIDOR_FIXTURE)
     for reservation, _realised in _row_gap_realisations(
-        observed.route_plan, SPANNING_BLOCKER_BOUNDARY
+        observed.route_plan, ROW_CORRIDOR_BOUNDARY
     ):
         assert reservation.negative_side_clearance == INTER_ROW_EDGE_CLEARANCE
         assert reservation.positive_side_clearance == INTER_ROW_HEADER_CLEARANCE
