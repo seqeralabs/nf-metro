@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="nf-metro-render-run" content="34101928989">
+<title>Render diff - PR #1950</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: light-dark(#f5f5f7, #1e1e2e);
+    --surface: light-dark(#eaeaef, #2a2a3c);
+    --border: light-dark(#c9c9d4, #3a3a4c);
+    --text: light-dark(#1e1e2e, #e0e0e0);
+    --muted: light-dark(#666, #888);
+    --accent: light-dark(#1a8575, #4ec9b0);
+    --added: light-dark(rgba(46,160,67,.25), rgba(46,160,67,.44));
+    --removed: light-dark(rgba(218,54,52,.25), rgba(218,54,52,.44));
+  }
+  [data-scheme="dark"] { color-scheme: dark; }
+  [data-scheme="light"] { color-scheme: light; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 2rem;
+    line-height: 1.5;
+  }
+  .page-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+  }
+  h1 {
+    font-size: 1.5rem;
+    color: var(--accent);
+  }
+  .scheme-btn {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 0.35rem 0.75rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
+  .scheme-btn:hover { background: var(--border); }
+  .summary {
+    color: var(--muted);
+    margin-bottom: 2rem;
+    font-size: 0.95rem;
+  }
+  .toc {
+    margin-bottom: 2rem;
+    padding: 1rem 1.5rem;
+    background: var(--surface);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  .toc h2 {
+    font-size: 1rem;
+    margin-bottom: 0.5rem;
+    color: var(--accent);
+  }
+  .toc h3 {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-top: 0.5rem;
+    margin-bottom: 0.25rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .toc ul {
+    list-style: none;
+    columns: 2;
+    column-gap: 2rem;
+  }
+  .toc li {
+    margin-bottom: 0.25rem;
+  }
+  .toc a {
+    color: var(--text);
+    text-decoration: none;
+  }
+  .toc a:hover {
+    color: var(--accent);
+    text-decoration: underline;
+  }
+  .badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    margin-left: 0.4rem;
+    vertical-align: middle;
+  }
+  .badge-changed { background: var(--border); }
+  .badge-added { background: var(--added); }
+  .badge-removed { background: var(--removed); }
+  .section-header {
+    font-size: 1.3rem;
+    color: var(--accent);
+    margin-top: 2.5rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid var(--border);
+  }
+  .diff-entry {
+    margin-bottom: 3rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .diff-entry h3 {
+    font-size: 1.1rem;
+    padding: 0.75rem 1rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .comparison {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+  }
+  .side {
+    padding: 1rem;
+    overflow-x: auto;
+  }
+  .side:first-child {
+    border-right: 1px solid var(--border);
+  }
+  .side h4 {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-bottom: 0.5rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .svg-wrapper { overflow-x: auto; }
+  .svg-wrapper svg, .side img, .side-only img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    border-radius: 4px;
+  }
+  .side-only {
+    padding: 1rem;
+  }
+  .empty {
+    color: var(--muted);
+    font-style: italic;
+    padding: 2rem;
+    text-align: center;
+  }
+  .toggle-bar {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .toggle-bar button {
+    background: var(--border);
+    color: var(--text);
+    border: none;
+    padding: 0.3rem 0.8rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+  .toggle-bar button.active {
+    background: var(--accent);
+    color: var(--bg);
+  }
+  .intro {
+    margin-bottom: 2rem;
+    padding: 1rem 1.5rem;
+    background: var(--surface);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    font-size: 0.9rem;
+    line-height: 1.6;
+  }
+  .intro summary {
+    cursor: pointer;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .intro p {
+    margin-top: 0.75rem;
+  }
+  .intro ul {
+    margin-top: 0.5rem;
+    padding-left: 1.5rem;
+  }
+  .intro li {
+    margin-bottom: 0.25rem;
+  }
+  .intro code {
+    background: var(--border);
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    font-size: 0.85em;
+  }
+  .intro a {
+    color: var(--accent);
+  }
+  .metrics {
+    margin-bottom: 2rem;
+    padding: 1rem 1.5rem;
+    background: var(--surface);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  .metrics h2 {
+    font-size: 1rem;
+    margin-bottom: 0.25rem;
+    color: var(--accent);
+  }
+  .metrics .caption {
+    color: var(--muted);
+    font-size: 0.8rem;
+    margin-bottom: 0.75rem;
+  }
+  .metrics table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.82rem;
+  }
+  .metrics th, .metrics td {
+    padding: 0.3rem 0.6rem;
+    text-align: right;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .metrics th:first-child, .metrics td:first-child {
+    text-align: left;
+  }
+  .metrics th {
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.7rem;
+  }
+  .metrics td a { color: var(--text); text-decoration: none; }
+  .metrics td a:hover { color: var(--accent); }
+  .m-flat { color: var(--muted); }
+  .m-better { color: light-dark(#1a8575, #4ec9b0); font-weight: 600; }
+  .m-worse { color: light-dark(#c0392b, #f38ba8); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="page-header">
+  <h1>Render diff - PR #1950</h1>
+  <button id="scheme-toggle" class="scheme-btn">System</button>
+</div>
+<p class="summary">1 added out of 341 total renders. Generated 2026-09-07 08:43 UTC.</p>
+<details class="intro">
+<summary>What is this page?</summary>
+<p>
+<a href="https://github.com/seqeralabs/nf-metro">nf-metro</a>
+generates metro-map-style SVG diagrams from Mermaid graph definitions.
+This page is automatically generated for every pull request and shows
+<strong>only the renders that changed</strong> compared to the
+<code>main</code> branch.
+</p>
+<p>
+Use it to check that code changes produce the intended visual result
+without unexpected side-effects on other diagrams. Each entry shows
+the <strong>base</strong> (main) render on the left and the
+<strong>PR</strong> render on the right. Use the toggle buttons to
+switch between side-by-side, base-only, and PR-only views.
+</p>
+<p><strong>What to look for:</strong></p>
+<ul>
+<li>Intended improvements in the PR column</li>
+<li>Unintended regressions (overlapping lines, shifted labels,
+    broken routing) in diagrams you did not mean to change</li>
+<li>New renders (green <em>added</em> badge) or removed renders
+    (red <em>removed</em> badge)</li>
+</ul>
+</details>
+<div class="metrics">
+<h2>Layout-quality metrics</h2>
+<p class="caption">Advisory only &mdash; nothing gates on these. <span class="m-better">green</span> improved, <span class="m-worse">red</span> regressed. Lower is better except in the &uarr; column.</p>
+<table>
+<tr><th>Render</th><th>Crossings</th><th>Near-horiz.</th><th>Lone diag.</th><th>Bends/route</th><th>Corners</th><th>Turn/route (rad)</th><th>Label strikes</th><th>Marker gap ↑</th><th>Excess gaps</th><th>Wasted canvas</th></tr>
+<tr><td><a href="#convergence_handedness_repro">convergence_handedness_repro</a></td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;1.0</td><td class="m-flat">&ndash;&rarr;12</td><td class="m-flat">&ndash;&rarr;1.5</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;n/a</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;47%</td></tr>
+</table>
+</div>
+<div class="toc">
+<h2>Changed renders</h2>
+<h3><a href="#section-test-fixtures">Test Fixtures</a></h3>
+<ul>
+<li><a href="#convergence_handedness_repro">convergence_handedness_repro</a><span class="badge badge-added">added</span></li>
+</ul>
+</div>
+<h2 class="section-header" id="section-test-fixtures">Test Fixtures</h2>
+
+<div class="diff-entry" id="convergence_handedness_repro">
+<h3>Convergence Handedness Repro <span class="badge badge-added">added</span></h3>
+<div class="side-only"><h4>New in PR</h4><div class="svg-wrapper"><?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="462" height="538" viewBox="0 0 462 538">
+<defs>
+</defs>
+<style>.nf-metro-bg--convergence_handedness_repro-pr { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }
+.nf-metro-title--convergence_handedness_repro-pr { fill: var(--nfm-map-title-color, light-dark(#111111, #ffffff)); }
+.nf-metro-station-label--convergence_handedness_repro-pr { fill: var(--nfm-map-label-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-section-box--convergence_handedness_repro-pr { fill: var(--nfm-map-section-fill, light-dark(#ededed, #373737)); stroke: var(--nfm-map-section-stroke, light-dark(#e6e6e6, #595959)); }
+.nf-metro-section-label--convergence_handedness_repro-pr { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-label--convergence_handedness_repro-pr { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-underline--convergence_handedness_repro-pr { stroke: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-legend-bg--convergence_handedness_repro-pr { fill: var(--nfm-map-legend-bg, light-dark(rgba(255, 255, 255, 0.8), rgba(0, 0, 0, 0.3))); }
+.nf-metro-legend-text--convergence_handedness_repro-pr { fill: var(--nfm-map-legend-text-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-marker-stroke--convergence_handedness_repro-pr { stroke: var(--nfm-map-marker-stroke, light-dark(#333333, #f0f0f0)); }
+.nf-metro-label-halo--convergence_handedness_repro-pr { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); stroke: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }</style>
+<rect x="0" y="0" width="462" height="538" fill="#2b2b2b" class="nf-metro-bg--convergence_handedness_repro-pr" />
+<text x="60.0" y="30.0" font-size="24.0" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" class="nf-metro-title--convergence_handedness_repro-pr">Convergence handedness repro</text>
+<rect x="60.0" y="70.0" width="136.0" height="140.0" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box--convergence_handedness_repro-pr" data-section-id="s1" data-section-lines="a" />
+<circle cx="71.0" cy="55.0" r="11" fill="#333333" class="nf-metro-section-num-circle--convergence_handedness_repro-pr" data-section-id="s1" />
+<text x="71.0" y="55.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="s1">1</text>
+<text x="87.0" y="55.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label--convergence_handedness_repro-pr" data-section-id="s1">One</text>
+<rect x="276.0" y="70.0" width="100.0" height="140.0" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box--convergence_handedness_repro-pr" data-section-id="s2" data-section-lines="a" />
+<circle cx="287.0" cy="55.0" r="11" fill="#333333" class="nf-metro-section-num-circle--convergence_handedness_repro-pr" data-section-id="s2" />
+<text x="287.0" y="55.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="s2">2</text>
+<text x="303.0" y="55.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label--convergence_handedness_repro-pr" data-section-id="s2">Two</text>
+<rect x="60.0" y="310.0" width="100.0" height="100.0" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box--convergence_handedness_repro-pr" data-section-id="s3" data-section-lines="a" />
+<circle cx="71.0" cy="295.0" r="11" fill="#333333" class="nf-metro-section-num-circle--convergence_handedness_repro-pr" data-section-id="s3" />
+<text x="71.0" y="295.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="s3">3</text>
+<text x="87.0" y="295.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label--convergence_handedness_repro-pr" data-section-id="s3">Three</text>
+<rect x="240.0" y="310.0" width="100.0" height="100.0" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box--convergence_handedness_repro-pr" data-section-id="s4" data-section-lines="a" />
+<circle cx="251.0" cy="295.0" r="11" fill="#333333" class="nf-metro-section-num-circle--convergence_handedness_repro-pr" data-section-id="s4" />
+<text x="251.0" y="295.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="s4">4</text>
+<text x="267.0" y="295.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label--convergence_handedness_repro-pr" data-section-id="s4">Four</text>
+<path d="M128.0,160.0 L141.0,160.0 Q151.0,160.0,157.0,152.0 L175.0,128.0 Q181.0,120.0,191.0,120.0 L196.0,120.0" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-a--convergence_handedness_repro-pr" data-line-id="a" />
+<path d="M276.0,120.0 L326.0,120.0" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-a--convergence_handedness_repro-pr" data-line-id="a" />
+<path d="M326.0,160.0 L376.0,160.0" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-a--convergence_handedness_repro-pr" data-line-id="a" />
+<path d="M60.0,360.0 L110.0,360.0" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-a--convergence_handedness_repro-pr" data-line-id="a" />
+<path d="M128.0,120.0 L196.0,120.0" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-a--convergence_handedness_repro-pr" data-line-id="a" />
+<path d="M240.0,360.0 L290.0,360.0" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-a--convergence_handedness_repro-pr" data-line-id="a" />
+<path d="M196.0,120.0 L206.0,120.0" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-a--convergence_handedness_repro-pr" data-line-id="a" />
+<path d="M206.0,120.0 L276.0,120.0" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-a--convergence_handedness_repro-pr" data-line-id="a" />
+<path d="M376.0,160.0 L386.0,160.0" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" class="metro-line-a--convergence_handedness_repro-pr" data-line-id="a" />
+<path d="M386.0,160.0 L392.0,160.0 Q402.0,160.0,402.0,170.0 L402.0,237.0 Q402.0,247.0,392.0,247.0 L226.0,247.0 M214.0,247.0 L54.0,247.0 Q44.0,247.0,44.0,257.0 L44.0,350.0 Q44.0,360.0,54.0,360.0 L60.0,360.0" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-a--convergence_handedness_repro-pr" data-line-id="a" />
+<path d="M206.0,120.0 L210.0,120.0 Q220.0,120.0,220.0,130.0 L220.0,350.0 Q220.0,360.0,230.0,360.0 L240.0,360.0" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-a--convergence_handedness_repro-pr" data-line-id="a" />
+<path d="M386.0,160.0 L392.0,160.0 Q402.0,160.0,402.0,170.0 L402.0,426.0 Q402.0,436.0,392.0,436.0 L234.0,436.0 Q224.0,436.0,224.0,426.0 L224.0,370.0 Q224.0,360.0,234.0,360.0 L240.0,360.0" stroke="#e6007e" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-a--convergence_handedness_repro-pr" data-line-id="a" />
+<rect x="123.0" y="115.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--convergence_handedness_repro-pr" data-station-id="n1" data-station-lines="a" data-station-label="N1" data-section-id="s1" data-section-name="One" />
+<rect x="123.0" y="155.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--convergence_handedness_repro-pr" data-station-id="n2" data-station-lines="a" data-station-label="N2" data-section-id="s1" data-section-name="One" />
+<rect x="321.0" y="115.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--convergence_handedness_repro-pr" data-station-id="n3" data-station-lines="a" data-station-label="N3" data-section-id="s2" data-section-name="Two" />
+<rect x="321.0" y="155.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--convergence_handedness_repro-pr" data-station-id="n4" data-station-lines="a" data-station-label="N4" data-section-id="s2" data-section-name="Two" />
+<rect x="105.0" y="355.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--convergence_handedness_repro-pr" data-station-id="n5" data-station-lines="a" data-station-label="N5" data-section-id="s3" data-section-name="Three" />
+<rect x="285.0" y="355.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--convergence_handedness_repro-pr" data-station-id="n6" data-station-lines="a" data-station-label="N6" data-section-id="s4" data-section-name="Four" />
+<text x="128.0" y="106.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--convergence_handedness_repro-pr" text-anchor="middle" dominant-baseline="auto">N1</text>
+<text x="128.0" y="106.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="n1" class="nf-metro-station-label--convergence_handedness_repro-pr">N1</text>
+<text x="326.0" y="106.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--convergence_handedness_repro-pr" text-anchor="middle" dominant-baseline="auto">N3</text>
+<text x="326.0" y="106.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="n3" class="nf-metro-station-label--convergence_handedness_repro-pr">N3</text>
+<text x="110.0" y="371.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--convergence_handedness_repro-pr" text-anchor="middle" dominant-baseline="hanging">N5</text>
+<text x="110.0" y="371.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="n5" class="nf-metro-station-label--convergence_handedness_repro-pr">N5</text>
+<text x="290.0" y="371.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--convergence_handedness_repro-pr" text-anchor="middle" dominant-baseline="hanging">N6</text>
+<text x="290.0" y="371.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="n6" class="nf-metro-station-label--convergence_handedness_repro-pr">N6</text>
+<text x="128.0" y="171.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--convergence_handedness_repro-pr" text-anchor="middle" dominant-baseline="hanging">N2</text>
+<text x="128.0" y="171.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="n2" class="nf-metro-station-label--convergence_handedness_repro-pr">N2</text>
+<text x="326.0" y="171.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--convergence_handedness_repro-pr" text-anchor="middle" dominant-baseline="hanging">N4</text>
+<text x="326.0" y="171.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="n4" class="nf-metro-station-label--convergence_handedness_repro-pr">N4</text>
+<circle cx="151.0" cy="160.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="181.0" cy="120.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="402.0" cy="160.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="402.0" cy="247.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="44.0" cy="247.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="44.0" cy="360.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="220.0" cy="120.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="220.0" cy="360.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="402.0" cy="160.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="402.0" cy="436.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="224.0" cy="436.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="224.0" cy="360.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<path d="M196.0,115.0 L201.0,120.0 L196.0,125.0 L191.0,120.0 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
+<text x="196.0" y="112.0" font-size="7" fill="rgba(80, 180, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">s1__exit_right_0 (right)</text>
+<path d="M376.0,155.0 L381.0,160.0 L376.0,165.0 L371.0,160.0 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
+<text x="376.0" y="152.0" font-size="7" fill="rgba(80, 180, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">s2__exit_right_1 (right)</text>
+<path d="M276.0,115.0 L281.0,120.0 L276.0,125.0 L271.0,120.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="276.0" y="112.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">s2__entry_left_2 (left)</text>
+<path d="M60.0,355.0 L65.0,360.0 L60.0,365.0 L55.0,360.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="60.0" y="352.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">s3__entry_left_3 (left)</text>
+<path d="M240.0,355.0 L245.0,360.0 L240.0,365.0 L235.0,360.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="240.0" y="352.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">s4__entry_left_4 (left)</text>
+<path d="M206.0,115.0 L211.0,120.0 L206.0,125.0 L201.0,120.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="206.0" y="112.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">__junction_5 (?)</text>
+<path d="M386.0,155.0 L391.0,160.0 L386.0,165.0 L381.0,160.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="386.0" y="152.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">__junction_6 (?)</text>
+<path d="M230.0,355.0 L235.0,360.0 L230.0,365.0 L225.0,360.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="230.0" y="352.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">__merge_2 (?)</text>
+<path d="M40.0,260.0 L396.0,260.0" stroke="rgba(255, 255, 0, 0.5)" stroke-width="1" stroke-dasharray="6,4" />
+<text x="36.0" y="260.0" font-size="7" fill="rgba(255, 255, 0, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0|1</text>
+<path d="M50.0,120.0 L386.0,120.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="46.0" y="120.0" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0 grid</text>
+<path d="M50.0,160.0 L386.0,160.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<path d="M50.0,360.0 L170.0,360.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="46.0" y="360.0" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 1 grid</text>
+<path d="M230.0,360.0 L350.0,360.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="226.0" y="360.0" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 1 grid</text>
+<rect x="44.0" y="466.0" width="67.7" height="48.0" rx="6" ry="6" fill="rgba(0, 0, 0, 0.3)" class="nf-metro-legend-bg--convergence_handedness_repro-pr" />
+<path d="M56.0,490.0 L80.0,490.0" stroke="#e6007e" stroke-width="3.0" stroke-linecap="round" />
+<text x="92.0" y="490.0" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--convergence_handedness_repro-pr">A</text>
+<text x="432.0" y="530.0" font-size="8" fill="rgba(150, 150, 150, 0.6)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">created with nf-metro v2.0.0+dev</text>
+</svg></div></div>
+</div>
+<script>
+(function() {
+  const root = document.documentElement;
+  const btn = document.getElementById('scheme-toggle');
+  const schemes = ['auto', 'dark', 'light'];
+  const labels = {'auto': 'System', 'dark': 'Dark', 'light': 'Light'};
+  let idx = 0;
+  function apply() {
+    const s = schemes[idx];
+    if (s === 'auto') {
+      root.removeAttribute('data-scheme');
+    } else {
+      root.setAttribute('data-scheme', s);
+    }
+    btn.textContent = labels[s];
+  }
+  apply();
+  btn.addEventListener('click', function() {
+    idx = (idx + 1) % schemes.length;
+    apply();
+  });
+})();
+document.querySelectorAll('.toggle-bar button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const entry = btn.closest('.diff-entry');
+    const mode = btn.dataset.mode;
+    const buttons = entry.querySelectorAll('.toggle-bar button');
+    buttons.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const comp = entry.querySelector('.comparison');
+    const sideBase = comp.querySelector('.side-base');
+    const sidePr = comp.querySelector('.side-pr');
+    if (mode === 'side-by-side') {
+      comp.style.gridTemplateColumns = '1fr 1fr';
+      sideBase.style.display = '';
+      sidePr.style.display = '';
+    } else if (mode === 'base') {
+      comp.style.gridTemplateColumns = '1fr';
+      sideBase.style.display = '';
+      sidePr.style.display = 'none';
+    } else if (mode === 'pr') {
+      comp.style.gridTemplateColumns = '1fr';
+      sideBase.style.display = 'none';
+      sidePr.style.display = '';
+    }
+  });
+});
+</script>
+</body>
+</html>
