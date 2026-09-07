@@ -2570,13 +2570,12 @@ def _stack_distinct_port_descents(
     else:
         inner = by_line[ordered[-1]][0].x
         base = inner - (n - 1) * step if left else inner + (n - 1) * step
-    # The innermost lane (rank n-1) is the concentric reference, anchored at the
-    # base radius; every other lane's corner is sized by its signed X offset from
-    # it, so the outer lanes take the wider radius and the convergent arcs hold a
-    # constant gap rather than pinching where equal-radius corners a step apart
-    # would.  The offset is signed by the seating direction (a LEFT entry seats
-    # outward in -X, a RIGHT entry in +X), which the corner helper needs to widen
-    # the outer side rather than tighten it.
+    # Lanes seat one step apart from the innermost (rank n-1) outward; each
+    # corner is sized by its signed X offset from that innermost lane, so the
+    # convergent arcs hold a constant gap rather than pinching where equal-radius
+    # corners a step apart would.  The offset is signed by the seating direction
+    # (a LEFT entry seats outward in -X, a RIGHT entry in +X), which the corner
+    # helper needs to widen the outer side rather than tighten it.
     x_inner = base + (n - 1) * step if left else base - (n - 1) * step
     target_x_by_line = {
         lid: base + rank * step if left else base - rank * step
@@ -2588,11 +2587,30 @@ def _stack_distinct_port_descents(
         for channel in channels
     ):
         return
-    for rank, lid in enumerate(ordered):
+    offset_by_line = {lid: target_x_by_line[lid] - x_inner for lid in ordered}
+    # A descent's two flanking corners turn in opposite senses (one right->down,
+    # one down->right), so a lane inside one turn is outside the other and needs
+    # a distinct reference at each to seat that turn's innermost lane at the base
+    # radius; one shared reference floors only one corner and shrinks the other
+    # below it.  Derive both the way the sibling descent bundlers do.
+    base_radius, base_radius_out = _flanking_reference_radii(
+        (
+            (ch.route, ch.idx, target_x_by_line[lid], 0, (offset_by_line[lid],) * 2)
+            for lid in ordered
+            for ch in by_line[lid]
+        ),
+        ctx.curve_radius,
+    )
+    for lid in ordered:
         x = target_x_by_line[lid]
-        offset = x - x_inner
         for ch in by_line[lid]:
-            _set_vchannel_x(ch, x, offset)
+            _set_vchannel_x(
+                ch,
+                x,
+                offset_by_line[lid],
+                base_radius=base_radius,
+                base_radius_out=base_radius_out,
+            )
 
 
 def _bypass_nesting_leg_is_movable(route: RoutedPath, rank: int) -> bool:

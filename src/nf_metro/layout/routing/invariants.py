@@ -4325,6 +4325,116 @@ def check_concentric_bundle_corners(
 
 
 @dataclass(frozen=True)
+class SubFloorBundleCorner:
+    """A concentric bundle corner seats a line below the ``CURVE_RADIUS`` floor.
+
+    A bundle of ``n`` lines nesting one lane-step apart draws one radius set at
+    every 90-degree turn it makes together -- ``CURVE_RADIUS`` for the innermost
+    line of that turn, one step wider for each line further out -- and only
+    reassigns which line is innermost as the turn direction flips.  The floor is
+    the first corollary: rank 0 always takes ``CURVE_RADIUS``, so no line ever
+    seats below it.  A corner that anchors its *reference* line rather than its
+    *tightest* line at the floor drives the inner lines below it -- the pinch
+    issue #1958 describes.
+
+    Runway-clamped corners (the resolved radius falls short of the route's
+    declared radius because a short leg cannot fit it) are excluded: that shrink
+    is a geometric necessity, not a sizing defect.
+    """
+
+    edge_source: str
+    edge_target: str
+    corner_index: int
+    radii: tuple[float, ...]
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        below = [r for r in self.radii if r < CURVE_RADIUS - COORD_TOLERANCE]
+        return (
+            f"bundle {self.edge_source!r}->{self.edge_target!r} corner "
+            f"{self.corner_index} draws radii {list(self.radii)}, seating "
+            f"{below} below CURVE_RADIUS={CURVE_RADIUS:.0f}"
+        )
+
+
+def check_bundle_corner_radius_floor(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[SubFloorBundleCorner]:
+    """Return concentric bundle corners seating a line below ``CURVE_RADIUS``.
+
+    A corpus oracle over bundle radius sizing rather than a render guard: a
+    sub-floor arc renders without aborting (a pinch, not undrawable geometry),
+    so promoting it to an always-on render abort would fail maps that are
+    imperfect rather than broken.
+
+    Scoped to a bundle running together from one source to one target: its
+    members share an edge, carry distinct lines, keep one waypoint count, and
+    turn together (same incoming/outgoing direction, wholesale-translated legs)
+    at each corner counted.  Every such corner must seat its innermost line at
+    ``CURVE_RADIUS`` and none below it.
+    """
+    from nf_metro.layout.routing.corners import wholesale_corner_translation
+
+    by_edge: dict[tuple[str, str], list[RoutedPath]] = defaultdict(list)
+    for route in routes:
+        by_edge[(route.edge.source, route.edge.target)].append(route)
+
+    violations: list[SubFloorBundleCorner] = []
+    for (source, target), members in by_edge.items():
+        if len({route.line_id for route in members}) < 2:
+            continue
+        if any(route.curve_radii is None for route in members):
+            continue
+        points = [apply_route_offsets(route, offsets) for route in members]
+        if len({len(pts) for pts in points}) != 1:
+            continue
+        resolved = [
+            _resolved_corner_radii(route, pts) for route, pts in zip(members, points)
+        ]
+        declared = [route.curve_radii for route in members]
+        for k in range(1, len(points[0]) - 1):
+            turns = [
+                (_segment_unit(pts[k - 1], pts[k]), _segment_unit(pts[k], pts[k + 1]))
+                for pts in points
+            ]
+            if any(
+                incoming is None
+                or outgoing is None
+                or not is_orthogonal_turn(pts[k - 1], pts[k], pts[k + 1])
+                for (incoming, outgoing), pts in zip(turns, points)
+            ):
+                continue
+            if any(turn != turns[0] for turn in turns):
+                continue
+            incoming, outgoing = turns[0]
+            assert incoming is not None and outgoing is not None
+            if any(
+                not wholesale_corner_translation(
+                    points[0][k], pts[k], incoming, outgoing, _WHOLESALE_LEG_TOLERANCE
+                )
+                for pts in points[1:]
+            ):
+                continue
+            if any(k - 1 >= len(radii) for radii in resolved):
+                continue
+            # A corner drawing short of its declared radius is runway-clamped, a
+            # geometric limit rather than a sizing choice this oracle governs.
+            if any(
+                des is not None
+                and k - 1 < len(des)
+                and res[k - 1] < des[k - 1] - COORD_TOLERANCE
+                for res, des in zip(resolved, declared)
+            ):
+                continue
+            radii = tuple(sorted(round(res[k - 1], 1) for res in resolved))
+            if any(r < CURVE_RADIUS - COORD_TOLERANCE for r in radii):
+                violations.append(SubFloorBundleCorner(source, target, k, radii))
+    return violations
+
+
+@dataclass(frozen=True)
 class NonStandardSourceCornerViolation:
     """A bundled planned source corner lacks reproducible standard inputs."""
 
@@ -7097,6 +7207,24 @@ CHECK_REGISTRY: tuple[GuardSpec, ...] = (
         ),
     ),
     _check_spec(
+        check_bundle_corner_radius_floor,
+        "C",
+        issue_pin=("#1958",),
+        narrow_reason=(
+            "A corpus oracle over bundle radius sizing rather than a render "
+            "guard: a sub-floor arc renders without aborting, so a novel map "
+            "whose bundle sizes tightly for a reason nothing here models would "
+            "abort rather than render imperfectly. Restricted to a bundle "
+            "running one source to one target with a constant waypoint count "
+            "that turns together at each counted corner, runway-clamped corners "
+            "excluded -- the set whose turns belong to one concentric family "
+            "and so must seat their innermost line at the floor. The wider "
+            "shared-vocabulary property this floor is a corollary of does not "
+            "yet hold corpus-wide (other passes size a bundle's reference per "
+            "corner); establishing it is the remainder of #1958."
+        ),
+    ),
+    _check_spec(
         check_merge_confluence_band_order,
         "C",
         issue_pin=("#1835",),
@@ -7121,6 +7249,7 @@ __all__ = [
     "ExitRowEarlyUpStep",
     "RaggedFanInDivergence",
     "BundleOrderViolation",
+    "SubFloorBundleCorner",
     "CoincidentCornerRadiusViolation",
     "CollinearOverlapViolation",
     "DiagonalOverlapViolation",
@@ -7167,6 +7296,7 @@ __all__ = [
     "check_same_destination_approach_bundle",
     "check_trunks_declared",
     "check_concentric_bundle_corners",
+    "check_bundle_corner_radius_floor",
     "check_standard_source_bundle_corner_inputs",
     "check_coincident_corner_radii",
     "check_deferred_offsets_apply_laterally",
