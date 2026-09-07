@@ -4334,8 +4334,7 @@ class SubFloorBundleCorner:
     reassigns which line is innermost as the turn direction flips.  The floor is
     the first corollary: rank 0 always takes ``CURVE_RADIUS``, so no line ever
     seats below it.  A corner that anchors its *reference* line rather than its
-    *tightest* line at the floor drives the inner lines below it -- the pinch
-    issue #1958 describes.
+    *tightest* line at the floor drives the inner lines below it.
 
     Runway-clamped corners (the resolved radius falls short of the route's
     declared radius because a short leg cannot fit it) are excluded: that shrink
@@ -7220,8 +7219,8 @@ CHECK_REGISTRY: tuple[GuardSpec, ...] = (
             "excluded -- the set whose turns belong to one concentric family "
             "and so must seat their innermost line at the floor. The wider "
             "shared-vocabulary property this floor is a corollary of does not "
-            "yet hold corpus-wide (other passes size a bundle's reference per "
-            "corner); establishing it is the remainder of #1958."
+            "yet hold corpus-wide (other passes still size a bundle's reference "
+            "per corner); adopting it corpus-wide is separate follow-up work."
         ),
     ),
     _check_spec(

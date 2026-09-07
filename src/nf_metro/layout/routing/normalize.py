@@ -2588,29 +2588,25 @@ def _stack_distinct_port_descents(
     ):
         return
     offset_by_line = {lid: target_x_by_line[lid] - x_inner for lid in ordered}
+    moves = [
+        (ch, target_x_by_line[lid], offset_by_line[lid])
+        for lid in ordered
+        for ch in by_line[lid]
+    ]
     # A descent's two flanking corners turn in opposite senses (one right->down,
     # one down->right), so a lane inside one turn is outside the other and needs
     # a distinct reference at each to seat that turn's innermost lane at the base
     # radius; one shared reference floors only one corner and shrinks the other
-    # below it.  Derive both the way the sibling descent bundlers do.
-    base_radius, base_radius_out = _flanking_reference_radii(
-        (
-            (ch.route, ch.idx, target_x_by_line[lid], 0, (offset_by_line[lid],) * 2)
-            for lid in ordered
-            for ch in by_line[lid]
-        ),
-        ctx.curve_radius,
-    )
-    for lid in ordered:
-        x = target_x_by_line[lid]
-        for ch in by_line[lid]:
-            _set_vchannel_x(
-                ch,
-                x,
-                offset_by_line[lid],
-                base_radius=base_radius,
-                base_radius_out=base_radius_out,
-            )
+    # below it.
+    base_radius, base_radius_out = _fan_opening_reference_radii(moves, ctx.curve_radius)
+    for ch, x, offset in moves:
+        _set_vchannel_x(
+            ch,
+            x,
+            offset,
+            base_radius=base_radius,
+            base_radius_out=base_radius_out,
+        )
 
 
 def _bypass_nesting_leg_is_movable(route: RoutedPath, rank: int) -> bool:
