@@ -99,275 +99,180 @@
 			scroller.scrollTop = window._starlightScrollRestore;
 			delete window._starlightScrollRestore;
 		})();
-	</script></sl-sidebar-state-persist><div class="md:sl-hidden"><div class="mobile-preferences sl-flex astro-b5gddk54"><div class="social-icons astro-b5gddk54"><a href="https://github.com/seqeralabs/nf-metro" rel="me" class="sl-flex astro-cg55etiy"><span class="sr-only astro-cg55etiy">GitHub</span><svg aria-hidden="true" class="astro-cg55etiy astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg></a></div><nfm-theme-toggle><button class="nfm-theme-toggle" type="button" aria-label="Toggle dark mode" title="Toggle dark mode"><svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg><svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"></path></svg></button></nfm-theme-toggle><script type="module">var e=class extends HTMLElement{constructor(){super();let e=this.querySelector(`select`);e&&(e.addEventListener(`change`,e=>{e.currentTarget instanceof HTMLSelectElement&&(window.location.pathname=e.currentTarget.value)}),window.addEventListener(`pageshow`,t=>{if(!t.persisted)return;let n=e.querySelector(`option[selected]`)?.index;n!==e.selectedIndex&&(e.selectedIndex=n??0)}))}};customElements.define(`starlight-lang-select`,e);</script></div></div></div></div></nav><div class="main-frame astro-7pllvep4"><script type="module">var e=document.getElementById(`starlight__sidebar`),t=e?.querySelector(`sl-sidebar-state-persist`),n=`sl-sidebar-state`,r=()=>{let r=[],i=t?.dataset.hash||``;try{let e=sessionStorage.getItem(n),t=JSON.parse(e||`{}`);Array.isArray(t.open)&&t.hash===i&&(r=t.open)}catch{}return{hash:i,open:r,scroll:e?.scrollTop||0}},i=e=>{try{sessionStorage.setItem(n,JSON.stringify(e))}catch{}},a=()=>i(r()),o=(e,t)=>{let n=r();n.open[t]=e,i(n)};t?.addEventListener(`click`,e=>{if(!(e.target instanceof Element))return;let t=e.target.closest(`summary`)?.closest(`details`);if(!t)return;let n=t.querySelector(`sl-sidebar-restore`),r=parseInt(n?.dataset.index||``);isNaN(r)||o(!t.open,r)}),addEventListener(`visibilitychange`,()=>{document.visibilityState===`hidden`&&a()}),addEventListener(`pageHide`,a);</script><div class="lg:sl-flex astro-abfeecmu"><aside class="right-sidebar-container print:hidden astro-abfeecmu"><div class="right-sidebar astro-abfeecmu"><div class="lg:sl-hidden astro-q5mffni3"><mobile-starlight-toc data-min-h="2" data-max-h="3" class="astro-5ulgm6bh"><nav aria-labelledby="starlight__on-this-page--mobile" class="astro-5ulgm6bh"><details id="starlight__mobile-toc" class="astro-5ulgm6bh"><summary id="starlight__on-this-page--mobile" class="sl-flex astro-5ulgm6bh"><span class="toggle sl-flex astro-5ulgm6bh">On this page<svg aria-hidden="true" class="caret astro-5ulgm6bh astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></span><span class="display-current astro-5ulgm6bh"></span></summary><div class="dropdown astro-5ulgm6bh"><ul class="isMobile astro-cxyftcne" style="--depth: 0;"><li style="--depth: 0;" class="astro-cxyftcne"><a href="#_top" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Overview</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#what-layout-means-here" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">What “layout” means here</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#the-anchor--content-placement-split" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">The anchor / content-placement split</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#semantic-fan-plans" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Semantic fan plans</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#the-six-stages" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">The six stages</span></a><ul class="isMobile astro-cxyftcne" style="--depth: 1;"><li style="--depth: 1;" class="astro-cxyftcne"><a href="#stage-1---section-construction-local-coords" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Stage 1 - Section construction (local coords)</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#stage-2---globalise-local---global-coords" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Stage 2 - Globalise (local -&gt; global coords)</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#stage-3---pass-a-port-initialisation--section-geometry" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Stage 3 - Pass A: port initialisation &amp; section geometry</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#stage-4---pass-b-downstream-alignment--trunk-y-consolidation" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Stage 4 - Pass B: downstream alignment &amp; trunk-Y consolidation</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#stage-5---pass-c-junctions--off-track-lift" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Stage 5 - Pass C: junctions &amp; off-track lift</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#stage-6---pass-c-vertical-settling--finishing" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Stage 6 - Pass C: vertical settling &amp; finishing</span></a></li></ul></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#passes-vs-stages" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Passes vs stages</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#post-layout-routing-boundary" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Post-layout routing boundary</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#when-something-breaks" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">When something breaks</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#why-so-many-sub-stages" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Why so many sub-stages</span></a></li></ul></div></details></nav></mobile-starlight-toc><script type="module" src="/nf-metro/dev/_astro/MobileTableOfContents.astro_astro_type_script_index_0_lang.BcSo_yiZ.js"></script></div><div class="right-sidebar-panel sl-hidden lg:sl-block astro-q5mffni3"><div class="sl-container astro-q5mffni3"><starlight-toc data-min-h="2" data-max-h="3"><nav aria-labelledby="starlight__on-this-page"><h2 id="starlight__on-this-page">On this page</h2><ul class="astro-cxyftcne" style="--depth: 0;"><li style="--depth: 0;" class="astro-cxyftcne"><a href="#_top" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Overview</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#what-layout-means-here" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">What “layout” means here</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#the-anchor--content-placement-split" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">The anchor / content-placement split</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#semantic-fan-plans" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Semantic fan plans</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#the-six-stages" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">The six stages</span></a><ul class="astro-cxyftcne" style="--depth: 1;"><li style="--depth: 1;" class="astro-cxyftcne"><a href="#stage-1---section-construction-local-coords" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Stage 1 - Section construction (local coords)</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#stage-2---globalise-local---global-coords" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Stage 2 - Globalise (local -&gt; global coords)</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#stage-3---pass-a-port-initialisation--section-geometry" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Stage 3 - Pass A: port initialisation &amp; section geometry</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#stage-4---pass-b-downstream-alignment--trunk-y-consolidation" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Stage 4 - Pass B: downstream alignment &amp; trunk-Y consolidation</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#stage-5---pass-c-junctions--off-track-lift" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Stage 5 - Pass C: junctions &amp; off-track lift</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#stage-6---pass-c-vertical-settling--finishing" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Stage 6 - Pass C: vertical settling &amp; finishing</span></a></li></ul></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#passes-vs-stages" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Passes vs stages</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#post-layout-routing-boundary" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Post-layout routing boundary</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#when-something-breaks" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">When something breaks</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#why-so-many-sub-stages" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Why so many sub-stages</span></a></li></ul></nav></starlight-toc><script type="module" src="/nf-metro/dev/_astro/TableOfContents.astro_astro_type_script_index_0_lang.Csloo1VZ.js"></script></div></div></div></aside><div class="main-pane astro-abfeecmu"><main data-pagefind-body class="astro-vdxcvpsm" lang="en" dir="ltr"><div class="content-panel astro-oil7k7jf"><div class="sl-container astro-oil7k7jf"><h1 id="_top" class="astro-u72m6wot">Layout pipeline</h1></div></div><div class="content-panel astro-oil7k7jf"><div class="sl-container astro-oil7k7jf"><div class="sl-markdown-content"><p>This page walks through how nf-metro turns a parsed metro graph into placed
-coordinates. Start here if you are hunting a layout bug, fixing a visual
-regression or adding a new transformation pass.</p>
-<p>For the rigorous per-sub-stage contract, covering preconditions,
-postconditions, invariants preserved and related tests, see
-<a href="https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/layout/CONTRACT.md"><code dir="auto">src/nf_metro/layout/CONTRACT.md</code></a>.
-In the source itself, the orchestrator is <code dir="auto">_compute_section_layout</code> in
-<code dir="auto">src/nf_metro/layout/engine.py</code>.</p>
-<p>The parser also attaches typed layout provenance to the graph before this
-pipeline starts. Layout passes use its effective decisions to tell an authored
-choice from an engine choice, and to tell whether a choice may be inferred
-again. The
-<a href="/nf-metro/dev/dev/parser/#layout-decision-provenance">parser guide’s provenance section</a>
-describes the snapshot, the decision states and the connector endpoint keys.</p>
-<div class="sl-heading-wrapper level-h2"><h2 id="what-layout-means-here">What “layout” means here</h2><a class="sl-anchor-link" href="#what-layout-means-here"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “What “layout” means here”</span></a></div>
-<p>Parsing produces a <code dir="auto">MetroGraph</code> with sections, stations, edges, lines and ports,
-but with no coordinates yet beyond the optional <code dir="auto">%%metro grid:</code> directives. The
-layout pipeline assigns an <code dir="auto">(x, y)</code> on the canvas to every station, port,
-junction and section bbox, subject to these constraints:</p>
+	</script></sl-sidebar-state-persist><div class="md:sl-hidden"><div class="mobile-preferences sl-flex astro-b5gddk54"><div class="social-icons astro-b5gddk54"><a href="https://github.com/seqeralabs/nf-metro" rel="me" class="sl-flex astro-cg55etiy"><span class="sr-only astro-cg55etiy">GitHub</span><svg aria-hidden="true" class="astro-cg55etiy astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg></a></div><nfm-theme-toggle><button class="nfm-theme-toggle" type="button" aria-label="Toggle dark mode" title="Toggle dark mode"><svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg><svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"></path></svg></button></nfm-theme-toggle><script type="module">var e=class extends HTMLElement{constructor(){super();let e=this.querySelector(`select`);e&&(e.addEventListener(`change`,e=>{e.currentTarget instanceof HTMLSelectElement&&(window.location.pathname=e.currentTarget.value)}),window.addEventListener(`pageshow`,t=>{if(!t.persisted)return;let n=e.querySelector(`option[selected]`)?.index;n!==e.selectedIndex&&(e.selectedIndex=n??0)}))}};customElements.define(`starlight-lang-select`,e);</script></div></div></div></div></nav><div class="main-frame astro-7pllvep4"><script type="module">var e=document.getElementById(`starlight__sidebar`),t=e?.querySelector(`sl-sidebar-state-persist`),n=`sl-sidebar-state`,r=()=>{let r=[],i=t?.dataset.hash||``;try{let e=sessionStorage.getItem(n),t=JSON.parse(e||`{}`);Array.isArray(t.open)&&t.hash===i&&(r=t.open)}catch{}return{hash:i,open:r,scroll:e?.scrollTop||0}},i=e=>{try{sessionStorage.setItem(n,JSON.stringify(e))}catch{}},a=()=>i(r()),o=(e,t)=>{let n=r();n.open[t]=e,i(n)};t?.addEventListener(`click`,e=>{if(!(e.target instanceof Element))return;let t=e.target.closest(`summary`)?.closest(`details`);if(!t)return;let n=t.querySelector(`sl-sidebar-restore`),r=parseInt(n?.dataset.index||``);isNaN(r)||o(!t.open,r)}),addEventListener(`visibilitychange`,()=>{document.visibilityState===`hidden`&&a()}),addEventListener(`pageHide`,a);</script><div class="lg:sl-flex astro-abfeecmu"><aside class="right-sidebar-container print:hidden astro-abfeecmu"><div class="right-sidebar astro-abfeecmu"><div class="lg:sl-hidden astro-q5mffni3"><mobile-starlight-toc data-min-h="2" data-max-h="3" class="astro-5ulgm6bh"><nav aria-labelledby="starlight__on-this-page--mobile" class="astro-5ulgm6bh"><details id="starlight__mobile-toc" class="astro-5ulgm6bh"><summary id="starlight__on-this-page--mobile" class="sl-flex astro-5ulgm6bh"><span class="toggle sl-flex astro-5ulgm6bh">On this page<svg aria-hidden="true" class="caret astro-5ulgm6bh astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></span><span class="display-current astro-5ulgm6bh"></span></summary><div class="dropdown astro-5ulgm6bh"><ul class="isMobile astro-cxyftcne" style="--depth: 0;"><li style="--depth: 0;" class="astro-cxyftcne"><a href="#_top" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Overview</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#scope-of-layout" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Scope of layout</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#the-anchor--content-placement-split" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">The anchor / content-placement split</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#semantic-fan-plans" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Semantic fan plans</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#the-six-stages" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">The six stages</span></a><ul class="isMobile astro-cxyftcne" style="--depth: 1;"><li style="--depth: 1;" class="astro-cxyftcne"><a href="#stage-1---section-construction-local-coords" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Stage 1 - Section construction (local coords)</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#stage-2---globalize-local---global-coords" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Stage 2 - Globalize (local -&gt; global coords)</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#stage-3---pass-a-port-initialization--section-geometry" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Stage 3 - Pass A: port initialization &amp; section geometry</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#stage-4---pass-b-downstream-alignment--trunk-y-consolidation" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Stage 4 - Pass B: downstream alignment &amp; trunk-Y consolidation</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#stage-5---pass-c-junctions--off-track-lift" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Stage 5 - Pass C: junctions &amp; off-track lift</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#stage-6---pass-c-vertical-settling--finishing" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Stage 6 - Pass C: vertical settling &amp; finishing</span></a></li></ul></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#passes-vs-stages" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Passes vs stages</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#post-layout-routing-boundary" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Post-layout routing boundary</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#when-something-breaks" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">When something breaks</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#why-so-many-sub-stages" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Why so many sub-stages</span></a></li></ul></div></details></nav></mobile-starlight-toc><script type="module" src="/nf-metro/dev/_astro/MobileTableOfContents.astro_astro_type_script_index_0_lang.BcSo_yiZ.js"></script></div><div class="right-sidebar-panel sl-hidden lg:sl-block astro-q5mffni3"><div class="sl-container astro-q5mffni3"><starlight-toc data-min-h="2" data-max-h="3"><nav aria-labelledby="starlight__on-this-page"><h2 id="starlight__on-this-page">On this page</h2><ul class="astro-cxyftcne" style="--depth: 0;"><li style="--depth: 0;" class="astro-cxyftcne"><a href="#_top" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Overview</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#scope-of-layout" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Scope of layout</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#the-anchor--content-placement-split" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">The anchor / content-placement split</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#semantic-fan-plans" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Semantic fan plans</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#the-six-stages" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">The six stages</span></a><ul class="astro-cxyftcne" style="--depth: 1;"><li style="--depth: 1;" class="astro-cxyftcne"><a href="#stage-1---section-construction-local-coords" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Stage 1 - Section construction (local coords)</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#stage-2---globalize-local---global-coords" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Stage 2 - Globalize (local -&gt; global coords)</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#stage-3---pass-a-port-initialization--section-geometry" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Stage 3 - Pass A: port initialization &amp; section geometry</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#stage-4---pass-b-downstream-alignment--trunk-y-consolidation" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Stage 4 - Pass B: downstream alignment &amp; trunk-Y consolidation</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#stage-5---pass-c-junctions--off-track-lift" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Stage 5 - Pass C: junctions &amp; off-track lift</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#stage-6---pass-c-vertical-settling--finishing" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Stage 6 - Pass C: vertical settling &amp; finishing</span></a></li></ul></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#passes-vs-stages" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Passes vs stages</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#post-layout-routing-boundary" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Post-layout routing boundary</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#when-something-breaks" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">When something breaks</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#why-so-many-sub-stages" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Why so many sub-stages</span></a></li></ul></nav></starlight-toc><script type="module" src="/nf-metro/dev/_astro/TableOfContents.astro_astro_type_script_index_0_lang.Csloo1VZ.js"></script></div></div></div></aside><div class="main-pane astro-abfeecmu"><main data-pagefind-body class="astro-vdxcvpsm" lang="en" dir="ltr"><div class="content-panel astro-oil7k7jf"><div class="sl-container astro-oil7k7jf"><h1 id="_top" class="astro-u72m6wot">Layout pipeline</h1></div></div><div class="content-panel astro-oil7k7jf"><div class="sl-container astro-oil7k7jf"><div class="sl-markdown-content"><p>The layout pipeline turns a parsed metro graph into placed coordinates.
+Start here to hunt a layout bug, fix a visual regression or add a new transformation pass.</p>
+<p>For the rigorous per-sub-stage contract, covering preconditions, postconditions, invariants preserved and related tests, see <a href="https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/layout/CONTRACT.md"><code dir="auto">src/nf_metro/layout/CONTRACT.md</code></a>.
+In the source itself, the orchestrator is <code dir="auto">_compute_section_layout</code> in <code dir="auto">src/nf_metro/layout/engine.py</code>.</p>
+<p>The parser also attaches typed layout provenance to the graph before this pipeline starts.
+Layout passes use its effective decisions to tell an authored choice from an engine choice, and to tell whether a choice may be inferred again.
+The <a href="/nf-metro/dev/dev/parser/#layout-decision-provenance">parser guide’s provenance section</a> describes the snapshot, the decision states and the connector endpoint keys.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="scope-of-layout">Scope of layout</h2><a class="sl-anchor-link" href="#scope-of-layout"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Scope of layout”</span></a></div>
+<p>Parsing produces a <code dir="auto">MetroGraph</code> with sections, stations, edges, lines and ports, but with no coordinates yet beyond the optional <code dir="auto">%%metro grid:</code> directives.
+The layout pipeline assigns an <code dir="auto">(x, y)</code> on the canvas to every station, port, junction and section bbox, subject to these constraints:</p>
 <ul>
-<li>Sections don’t overlap each other.</li>
+<li>Sections do not overlap each other.</li>
 <li>Stations sit inside their section’s bbox.</li>
 <li>Ports sit on their section’s bbox edge.</li>
-<li>Lines route between connected stations without crossing unrelated
-station markers.</li>
-<li>Same-row sections share a trunk Y so the inter-section bundle stays
-horizontal across boundaries.</li>
-<li>A bunch of other invariants documented in
-<code dir="auto">tests/test_layout_invariants.py</code>.</li>
+<li>Lines route between connected stations without crossing unrelated station markers.</li>
+<li>Same-row sections share a trunk Y so the inter-section bundle stays horizontal across boundaries.</li>
+<li>The other invariants documented in <code dir="auto">tests/test_layout_invariants.py</code>.</li>
 </ul>
-<p>Achieving all of this in one pass is intractable. Some constraints are naturally
-local, such as each section’s internal layout, and some are global, such as
-trunk Y alignment across an entire row. The pipeline instead chains many small
-passes, each of which mutates the graph and preserves the invariants of the
-passes before it.</p>
+<p>Achieving all of this in one pass is intractable.
+Some constraints are local, such as each section’s internal layout, and some are global, such as trunk Y alignment across an entire row.
+The pipeline instead chains many small passes, each of which mutates the graph and preserves the invariants of the passes before it.</p>
 <div class="sl-heading-wrapper level-h2"><h2 id="the-anchor--content-placement-split">The anchor / content-placement split</h2><a class="sl-anchor-link" href="#the-anchor--content-placement-split"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “The anchor / content-placement split”</span></a></div>
-<p>The passes divide into two kinds, and that division is the organizing principle
-of the whole pipeline:</p>
+<p>The passes divide into two kinds, and that division is the organizing principle of the whole pipeline:</p>
 <ul>
-<li><strong>Structural, or anchor-setting, phases</strong> decide where the inter-section line
-bundle runs. A section’s <strong>anchors</strong> are its port stations, the synthetic
-points on the section boundary where the bundle crosses. Only port
-positioning, the row trunk alignment at Stage 4.8, grid snapping, the
-inter-row cascade and uniform canvas or row translation may move an anchor.</li>
-<li><strong>Content-placement phases</strong> position everything else <em>around</em> the resolved
-anchors: fan-out and full-bundle redistribution (4.9, 4.10), band-fill (6.1,
-6.2), the symfan half-grid (6.3), full-bundle recenter (6.7),
-balance-around-trunk (6.11) and loop-side recenter (6.12). A content phase
-must <strong>never</strong> move an anchor.</li>
+<li><strong>Structural, or anchor-setting, phases</strong> decide where the inter-section line bundle runs.
+A section’s <strong>anchors</strong> are its port stations, the synthetic points on the section boundary where the bundle crosses.
+Only port positioning, the row trunk alignment at Stage 4.8, grid snapping, the inter-row cascade and uniform canvas or row translation may move an anchor.</li>
+<li><strong>Content-placement phases</strong> position everything else <em>around</em> the resolved anchors: fan-out and full-bundle redistribution (4.9, 4.10), band-fill (6.1, 6.2), the symfan half-grid (6.3), full-bundle recenter (6.7), balance-around-trunk (6.11) and loop-side recenter (6.12).
+A content phase must <strong>never</strong> move an anchor.</li>
 </ul>
-<aside aria-label="Anchor invariant" class="starlight-aside starlight-aside--caution"><p class="starlight-aside__title" aria-hidden="true"><svg aria-hidden="true" class="starlight-aside__icon astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 16a1 1 0 1 0 0 2 1 1 0 0 0 0-2Zm10.67 1.47-8.05-14a3 3 0 0 0-5.24 0l-8 14A3 3 0 0 0 3.94 22h16.12a3 3 0 0 0 2.61-4.53Zm-1.73 2a1 1 0 0 1-.88.51H3.94a1 1 0 0 1-.88-.51 1 1 0 0 1 0-1l8-14a1 1 0 0 1 1.78 0l8.05 14a1 1 0 0 1 .05 1.02v-.02ZM12 8a1 1 0 0 0-1 1v4a1 1 0 0 0 2 0V9a1 1 0 0 0-1-1Z"/></svg>Anchor invariant</p><div class="starlight-aside__content"><p>Content-placement phases must never move an anchor, meaning a port station on
-a section boundary. Only the structural phases may do so: port positioning,
-trunk-Y alignment (Stage 4.8), grid snapping, the inter-row cascade and canvas
-translation. A content phase that moves an anchor breaks the
-forward-resolvability guarantee and fires
-<code dir="auto">_guard_anchors_frozen_during_placement</code> under <code dir="auto">validate=True</code>.</p></div></aside>
-<p>This split is what makes the layout <strong>forward-resolvable</strong>. Once the structural
-phases have frozen the anchors, every content-placement phase is a <em>pure
-function of the frozen anchors plus the section structure</em>. Its output depends
-only on the anchors and the section’s tracks, edges and columns, never on the
-mutable intermediate Y or bbox state an earlier phase happened to leave behind.
-That is stronger than idempotence: re-running, re-ordering or perturbing the
-non-anchor state cannot change a content phase’s result. Both properties are
-machine-checked, by <code dir="auto">_guard_anchors_frozen_during_placement</code> at runtime through
-the <code dir="auto">_run_placement</code> wrapper under <code dir="auto">validate=True</code>, plus
-<code dir="auto">test_placement_phase_is_idempotent</code> (#488) and <code dir="auto">test_content_placement_pure.py</code>
-(#491).</p>
-<p>When reading the stage walkthrough below, keep the two kinds apart. A structural
-phase that looks as though it moved content is really moving an anchor and
-letting content follow, and a content phase that looks order-dependent is, by
-construction, not. The rigorous treatment covers which phases set which anchors,
-and how the frozen <em>placement reference</em> lets a content phase read an
-intermediate quantity without breaking purity. It is in CONTRACT.md’s
-<a href="https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/layout/CONTRACT.md"><code dir="auto">## Anchor invariant</code></a>
-and <code dir="auto">### Content-placement purity</code> sections.</p>
+<aside aria-label="Anchor invariant" class="starlight-aside starlight-aside--caution"><p class="starlight-aside__title" aria-hidden="true"><svg aria-hidden="true" class="starlight-aside__icon astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 16a1 1 0 1 0 0 2 1 1 0 0 0 0-2Zm10.67 1.47-8.05-14a3 3 0 0 0-5.24 0l-8 14A3 3 0 0 0 3.94 22h16.12a3 3 0 0 0 2.61-4.53Zm-1.73 2a1 1 0 0 1-.88.51H3.94a1 1 0 0 1-.88-.51 1 1 0 0 1 0-1l8-14a1 1 0 0 1 1.78 0l8.05 14a1 1 0 0 1 .05 1.02v-.02ZM12 8a1 1 0 0 0-1 1v4a1 1 0 0 0 2 0V9a1 1 0 0 0-1-1Z"/></svg>Anchor invariant</p><div class="starlight-aside__content"><p>Content-placement phases must never move an anchor, meaning a port station on a section boundary.
+Only the structural phases may do so: port positioning, trunk-Y alignment (Stage 4.8), grid snapping, the inter-row cascade and canvas translation.
+A content phase that moves an anchor breaks the forward-resolvability guarantee and fires <code dir="auto">_guard_anchors_frozen_during_placement</code> under <code dir="auto">validate=True</code>.</p></div></aside>
+<p>This split is what makes the layout <strong>forward-resolvable</strong>.
+Once the structural phases have frozen the anchors, every content-placement phase is a <em>pure function of the frozen anchors plus the section structure</em>.
+Its output depends only on the anchors and the section’s tracks, edges and columns, never on the mutable intermediate Y or bbox state an earlier phase happened to leave behind.
+That is stronger than idempotence.
+Re-running, re-ordering or perturbing the non-anchor state cannot change a content phase’s result.
+Both properties are machine-checked, by <code dir="auto">_guard_anchors_frozen_during_placement</code> at runtime through the <code dir="auto">_run_placement</code> wrapper under <code dir="auto">validate=True</code>, plus <code dir="auto">test_placement_phase_is_idempotent</code> (#488) and <code dir="auto">test_content_placement_pure.py</code> (#491).</p>
+<p>When reading the stage walkthrough, keep the two kinds apart.
+A structural phase that looks as though it moved content is really moving an anchor and letting content follow, and a content phase that looks order-dependent is, by construction, not.
+The rigorous treatment covers which phases set which anchors, and how the frozen <em>placement reference</em> lets a content phase read an intermediate quantity without breaking purity.
+It is in CONTRACT.md’s <a href="https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/layout/CONTRACT.md"><code dir="auto">## Anchor invariant</code></a> and <code dir="auto">### Content-placement purity</code> sections.</p>
 <div class="sl-heading-wrapper level-h2"><h2 id="semantic-fan-plans">Semantic fan plans</h2><a class="sl-anchor-link" href="#semantic-fan-plans"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Semantic fan plans”</span></a></div>
-<p>Before Stage 1, the engine recognises complete authored fans and diamonds from
-connector identity and resolver lineage. Each supported fan gets one immutable
-relative plan covering its branches, opening and landing order, centreline,
-lanes, runways, offset carriers and any dedicated route emissions. The authored
-straight or symmetric appearance is frozen separately from the structural
-question of whether the branches reconverge.</p>
-<p>The plan also names the station or port that supplies its absolute centreline.
-Stages 4.9 and 6.17 read that fixed source after structural anchors settle. They
-do not search the live grid or port topology for a different source, and the
-placement phase never derives its frame from a station it is about to move.</p>
+<p>Before Stage 1, the engine recognizes complete authored fans and diamonds from connector identity and resolver lineage.
+Each supported fan gets one immutable relative plan covering its branches, opening and landing order, centerline, lanes, runways, offset carriers and any dedicated route emissions.
+The authored straight or symmetric appearance is frozen separately from the structural question of whether the branches reconverge.</p>
+<p>The plan also names the station or port that supplies its absolute centerline.
+Stages 4.9 and 6.17 read that fixed source after structural anchors settle.
+They do not search the live grid or port topology for a different source, and the placement phase never derives its frame from a station it is about to move.</p>
 <p>The plan freezes station-track handedness separately from line-offset chirality.
-All four flow directions use the same positive secondary-axis track progression,
-and a feeder on that axis mirrors the frame so the hub occupies the nearest
-track. That keeps LR/RL and TB/BT geometry axis-consistent without making a
-short entry detour across the section.</p>
-<p>Ownership is all-or-nothing. If a fan overlaps a local merge frame owned by
-another topology, or its membership is ambiguous, the whole fan uses the ordinary
-layout and routing path. The planner never mixes planned branches with fallback
-branches. The legacy disposition carries a deterministic diagnostic, so
-unsupported cases stay visible.</p>
+All four flow directions use the same positive secondary-axis track progression, and a feeder on that axis mirrors the frame so the hub occupies the nearest track.
+That keeps LR/RL and TB/BT geometry axis-consistent without making a short entry detour across the section.</p>
+<p>Ownership is all-or-nothing.
+If a fan overlaps a local merge frame owned by another topology, or its membership is ambiguous, the whole fan uses the ordinary layout and routing path.
+The planner never mixes planned branches with fallback branches.
+The legacy disposition carries a deterministic diagnostic.
+Unsupported cases therefore stay visible.</p>
 <div class="sl-heading-wrapper level-h2"><h2 id="the-six-stages">The six stages</h2><a class="sl-anchor-link" href="#the-six-stages"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “The six stages”</span></a></div>
-<p>The pipeline groups into six stages. Stage boundaries align with coord-regime
-transitions, meaning the points where station coordinates become global and
-where ports become positioned, and with the Pass A, Pass B and Pass C divisions
-referenced throughout the codebase.</p>
+<p>The pipeline groups into six stages.
+Stage boundaries align with coord-regime transitions, meaning the points where station coordinates become global and where ports become positioned.
+They also align with the Pass A, Pass B and Pass C divisions referenced throughout the codebase.</p>
 <div class="sl-heading-wrapper level-h3"><h3 id="stage-1---section-construction-local-coords">Stage 1 - Section construction (local coords)</h3><a class="sl-anchor-link" href="#stage-1---section-construction-local-coords"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Stage 1 - Section construction (local coords)”</span></a></div>
-<p>Lay out each section’s internal stations on its own private coordinate
-system, then place the sections on the global grid (still local-coord).</p>
+<p>Lay out each section’s internal stations on its own private coordinate system, then place the sections on the global grid (still local-coord).</p>
 <ul>
-<li><strong>Stage 1.1</strong>: Lay out each section independently through layer and track
-assignment. This covers real stations only, and ports and junctions stay
-unpositioned.</li>
-<li><strong>Stage 1.2</strong>: Snap same-row, same-direction sections to a shared Y
-grid so they agree on pitch and slot count.</li>
-<li><strong>Stage 1.3</strong>: Place sections on the canvas grid by topological
-layering of the section DAG. When a stacked same-side half-turn feeds a
-split, on either side, reflect the consumer’s branch tracks so its in-section
-order matches the reversed bundle delivered at the entry.</li>
-<li><strong>Stage 1.4</strong>: Renumber sections by connected route continuity. Prefer the
-nearest connected section on the current visual lane, keep parallel branch
-starts together, and complete independent merge inputs before their join. A
-dominant row may finish before a secondary route rejoins it. Preserve any
-authored <code dir="auto">%%metro number:</code> values and fill automatic sections with the lowest
-unused positive numbers.</li>
-<li><strong>Stage 1.5</strong>: Grow <code dir="auto">x_offset</code> / <code dir="auto">y_offset</code> if section local extents
-overshoot the canvas origin.</li>
+<li><strong>Stage 1.1</strong>: Lay out each section independently through layer and track assignment.
+This covers real stations only, and ports and junctions stay unpositioned.</li>
+<li><strong>Stage 1.2</strong>: Snap same-row, same-direction sections to a shared Y grid so they agree on pitch and slot count.</li>
+<li><strong>Stage 1.3</strong>: Place sections on the canvas grid by topological layering of the section DAG.
+When a stacked same-side half-turn feeds a split, on either side, reflect the consumer’s branch tracks so its in-section order matches the reversed bundle delivered at the entry.</li>
+<li><strong>Stage 1.4</strong>: Renumber sections by connected route continuity.
+Prefer the nearest connected section on the current visual lane, keep parallel branch starts together, and complete independent merge inputs before their join.
+A dominant row may finish before a secondary route rejoins it.
+Preserve any authored <code dir="auto">%%metro number:</code> values and fill automatic sections with the lowest unused positive numbers.</li>
+<li><strong>Stage 1.5</strong>: Grow <code dir="auto">x_offset</code> / <code dir="auto">y_offset</code> if section local extents overshoot the canvas origin.</li>
 </ul>
-<p>At the end of Stage 1, every section has a <code dir="auto">(local_x, local_y, w, h)</code>
-bbox and an <code dir="auto">(offset_x, offset_y)</code> placement. No global coords yet.</p>
-<div class="sl-heading-wrapper level-h3"><h3 id="stage-2---globalise-local---global-coords">Stage 2 - Globalise (local -> global coords)</h3><a class="sl-anchor-link" href="#stage-2---globalise-local---global-coords"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Stage 2 - Globalise (local -> global coords)”</span></a></div>
+<p>At the end of Stage 1, every section has a <code dir="auto">(local_x, local_y, w, h)</code> bbox and an <code dir="auto">(offset_x, offset_y)</code> placement.
+No global coords yet.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="stage-2---globalize-local---global-coords">Stage 2 - Globalize (local -> global coords)</h3><a class="sl-anchor-link" href="#stage-2---globalize-local---global-coords"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Stage 2 - Globalize (local -> global coords)”</span></a></div>
 <p>A single-step coord-regime transition.</p>
 <ul>
-<li><strong>Stage 2.1</strong>: Translate every real station’s <code dir="auto">(x, y)</code> and every
-section’s bbox into global canvas coordinates.</li>
+<li><strong>Stage 2.1</strong>: Translate every real station’s <code dir="auto">(x, y)</code> and every section’s bbox into global canvas coordinates.</li>
 </ul>
-<p>After this, all subsequent stages operate in global coords. Ports and
-junctions still have no positions.</p>
-<div class="sl-heading-wrapper level-h3"><h3 id="stage-3---pass-a-port-initialisation--section-geometry">Stage 3 - Pass A: port initialisation &#x26; section geometry</h3><a class="sl-anchor-link" href="#stage-3---pass-a-port-initialisation--section-geometry"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Stage 3 - Pass A: port initialisation &#x26; section geometry”</span></a></div>
-<p>Ports first appear on bbox edges, then get aligned with their incoming /
-outgoing connections, then the section layout is adjusted to accommodate
-them.</p>
+<p>After this, all subsequent stages operate in global coords.
+Ports and junctions still have no positions.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="stage-3---pass-a-port-initialization--section-geometry">Stage 3 - Pass A: port initialization &#x26; section geometry</h3><a class="sl-anchor-link" href="#stage-3---pass-a-port-initialization--section-geometry"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Stage 3 - Pass A: port initialization &#x26; section geometry”</span></a></div>
+<p>Ports first appear on bbox edges, then get aligned with their incoming / outgoing connections, then the section layout is adjusted to accommodate them.</p>
 <ul>
-<li><strong>Stage 3.1</strong>: Position every port on its section’s bbox edge at the
-edge midpoint.</li>
-<li><strong>Stage 3.2</strong>: Align LEFT / RIGHT entry ports to the incoming source
-Y so the inter-section horizontal run is straight; align TOP / BOTTOM
-entry ports analogously.</li>
-<li><strong>Stage 3.3</strong>: For LR / RL sections with perpendicular (TOP / BOTTOM)
-entry, shift internal stations’ X so the entry port has runway
-before stations begin.</li>
-<li><strong>Stage 3.4</strong>: Align LEFT and RIGHT exit ports on row-spanning fold sections
-with the target section’s Y. Pushing a target down drops its bbox top below
-its row-mates’, so the move finishes by top-aligning the rows it disturbed,
-meaning the contiguous column groups that share their bbox tops.</li>
-<li><strong>Stage 3.5</strong>: Grow an LR or RL section’s left and right bbox edges so its
-perpendicular TOP and BOTTOM ports keep the designed inset from them. This is
-the X-axis rotation of the clearance the Y sizing keeps for a TB or BT
-section’s LEFT and RIGHT ports. A grow can widen a section into its column
-neighbour, so the inter-column gaps are re-enforced.</li>
-<li><strong>Stage 3.6</strong>: Level the bbox left edges of column mates that start their
-content at one X, growing the narrower boxes leftward. This mirrors the row
-top-align at Stage 5.3 on the X axis, restricted to boxes whose left band is
-the same runway. A grid row’s sections share a trunk Y, so their tops always
-frame the same thing. A grid column’s sections do not share a trunk X, so
-levelling boxes whose content starts at different X buys an aligned edge at
-the price of an empty band. Stations and the right edge stay put, while LEFT
-ports ride the edge out to the column line. A box stops short where a left
-neighbour in its own row band needs the inter-column corridor.</li>
+<li><strong>Stage 3.1</strong>: Position every port on its section’s bbox edge at the edge midpoint.</li>
+<li><strong>Stage 3.2</strong>: Align LEFT / RIGHT entry ports to the incoming source Y so the inter-section horizontal run is straight, and align TOP / BOTTOM entry ports analogously.</li>
+<li><strong>Stage 3.3</strong>: For LR / RL sections with perpendicular (TOP / BOTTOM) entry, shift internal stations’ X so the entry port has runway before stations begin.</li>
+<li><strong>Stage 3.4</strong>: Align LEFT and RIGHT exit ports on row-spanning fold sections with the target section’s Y. Pushing a target down drops its bbox top below its row-mates’.
+The move therefore finishes by top-aligning the rows it disturbed, meaning the contiguous column groups that share their bbox tops.</li>
+<li><strong>Stage 3.5</strong>: Grow an LR or RL section’s left and right bbox edges so its perpendicular TOP and BOTTOM ports keep the designed inset from them.
+This is the X-axis rotation of the clearance the Y sizing keeps for a TB or BT section’s LEFT and RIGHT ports.
+A grow can widen a section into its column neighbor, which is why the stage re-enforces the inter-column gaps.</li>
+<li><strong>Stage 3.6</strong>: Level the bbox left edges of column mates that start their content at one X, growing the narrower boxes leftward.
+This mirrors the row top-align at Stage 5.3 on the X axis, restricted to boxes whose left band is the same runway.
+A grid row’s sections share a trunk Y, and their tops therefore always frame the same thing.
+A grid column’s sections do not share a trunk X. Leveling boxes whose content starts at different X therefore buys an aligned edge at the price of an empty band.
+Stations and the right edge stay put, while LEFT ports ride the edge out to the column line.
+A box stops short where a left neighbor in its own row band needs the inter-column corridor.</li>
 </ul>
 <p>Pass A leaves ports on bbox edges with first-approximation alignment.
 Subsequent passes refine.</p>
 <div class="sl-heading-wrapper level-h3"><h3 id="stage-4---pass-b-downstream-alignment--trunk-y-consolidation">Stage 4 - Pass B: downstream alignment &#x26; trunk-Y consolidation</h3><a class="sl-anchor-link" href="#stage-4---pass-b-downstream-alignment--trunk-y-consolidation"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Stage 4 - Pass B: downstream alignment &#x26; trunk-Y consolidation”</span></a></div>
-<p>Pull ports toward downstream stations to remove unnecessary detours;
-consolidate the inter-section trunk Y across each row; redistribute
-fan-out and full-bundle columns around the trunk.</p>
+<p>Pull ports toward downstream stations to remove unnecessary detours.
+Consolidate the inter-section trunk Y across each row, then redistribute fan-out and full-bundle columns around the trunk.</p>
 <ul>
-<li><strong>Stage 4.1</strong>: For non-fold LR and RL sections, pull exit-entry port pairs
-toward the downstream section’s connected station Y.</li>
-<li><strong>Stages 4.2 to 4.4</strong>: Snap port pairs to grid-group and sole-layer station Ys
-so port-to-station connections are horizontal.</li>
-<li><strong>Stage 4.5</strong>: Keep ports at least <code dir="auto">y_spacing</code> from terminus stations so file
-icons don’t overlap routed lines. This may expand bboxes.</li>
-<li><strong>Stages 4.6 to 4.7</strong>: Recompute grid-group bboxes; re-run row
-top-align after the Stage 4.5 expansions.</li>
-<li><strong>Stage 4.8</strong>: Align trunk Ys across same-row sections. Shifts
-shallower sections’ content down so the inter-section bundle passes
-through at a single Y per row, then restores carrier-owned exits to
-their internal row while leaving downstream entries on their consumer
-row. Any level change therefore happens in the inter-section corridor.</li>
-<li><strong>Stages 4.9 to 4.10</strong>: Redistribute fan-out siblings and full-bundle columns
-around the trunk. Stage 4.9 first materialises complete semantic fan plans,
-then applies the ordinary redistribution to legacy fans. Stage 4.10 handles
-full-bundle columns. Both placements are gated on <code dir="auto">center_ports</code>.</li>
+<li><strong>Stage 4.1</strong>: For non-fold LR and RL sections, pull exit-entry port pairs toward the downstream section’s connected station Y.</li>
+<li><strong>Stages 4.2 to 4.4</strong>: Snap port pairs to grid-group and sole-layer station Ys so port-to-station connections are horizontal.</li>
+<li><strong>Stage 4.5</strong>: Keep ports at least <code dir="auto">y_spacing</code> from terminus stations so file icons do not overlap routed lines.
+This may expand bboxes.</li>
+<li><strong>Stages 4.6 to 4.7</strong>: Recompute grid-group bboxes, then re-run row top-align after the Stage 4.5 expansions.</li>
+<li><strong>Stage 4.8</strong>: Align trunk Ys across same-row sections.
+Shifts shallower sections’ content down so the inter-section bundle passes through at a single Y per row, then restores carrier-owned exits to their internal row while leaving downstream entries on their consumer row.
+Any level change therefore happens in the inter-section corridor.</li>
+<li><strong>Stages 4.9 to 4.10</strong>: Redistribute fan-out siblings and full-bundle columns around the trunk.
+Stage 4.9 first materializes complete semantic fan plans, then applies the ordinary redistribution to legacy fans.
+Stage 4.10 handles full-bundle columns.
+Both placements are gated on <code dir="auto">center_ports</code>.</li>
 </ul>
 <p>By the end of Pass B, all port Ys are final.</p>
 <div class="sl-heading-wrapper level-h3"><h3 id="stage-5---pass-c-junctions--off-track-lift">Stage 5 - Pass C: junctions &#x26; off-track lift</h3><a class="sl-anchor-link" href="#stage-5---pass-c-junctions--off-track-lift"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Stage 5 - Pass C: junctions &#x26; off-track lift”</span></a></div>
-<p>Position junctions for the first time, lift off-track file inputs above
-their consumers, then a few post-lift fixups.</p>
+<p>Position junctions for the first time, lift off-track file inputs above their consumers, then a few post-lift fixups.</p>
 <ul>
-<li><strong>Stage 5.1</strong>: Position every junction station in the inter-section
-gap. Fan-out junctions sit at the exit port’s Y; merge junctions sit
-near the entry port.</li>
-<li><strong>Stage 5.2</strong>: Lift off-track stations, meaning file inputs that should sit
-above the trunk rather than on it, to the row above their consumer, growing
-bboxes upward.</li>
-<li><strong>Stages 5.3 to 5.4</strong>: Re-align row bbox tops to match the lifted
-sections, then compact each row’s content to its bbox top.</li>
-<li><strong>Stage 5.5</strong>: Snap inter-section LR and RL port pairs back to a shared Y,
-since the compaction in Stage 5.4 may have drifted them, then re-position
-junctions to follow.</li>
+<li><strong>Stage 5.1</strong>: Position every junction station in the inter-section gap.
+Fan-out junctions sit at the exit port’s Y, and merge junctions sit near the entry port.</li>
+<li><strong>Stage 5.2</strong>: Lift off-track stations, meaning file inputs that should sit above the trunk rather than on it, to the row above their consumer, growing bboxes upward.</li>
+<li><strong>Stages 5.3 to 5.4</strong>: Re-align row bbox tops to match the lifted sections, then compact each row’s content to its bbox top.</li>
+<li><strong>Stage 5.5</strong>: Snap inter-section LR and RL port pairs back to a shared Y, because the compaction in Stage 5.4 may have drifted them, then re-position junctions to follow.</li>
 </ul>
 <div class="sl-heading-wrapper level-h3"><h3 id="stage-6---pass-c-vertical-settling--finishing">Stage 6 - Pass C: vertical settling &#x26; finishing</h3><a class="sl-anchor-link" href="#stage-6---pass-c-vertical-settling--finishing"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Stage 6 - Pass C: vertical settling &#x26; finishing”</span></a></div>
-<p>The long settle. Its sub-stages clean up the consequences of Stages 1 through 5,
-snap everything to the grid, restore invariants broken by each cleanup pass,
-then handle the final geometric details: loop-side X recenter, bbox shrink and
-grow, canvas snap and port re-align.</p>
+<p>The long settle.
+Its sub-stages clean up the consequences of Stages 1 through 5, snap everything to the grid, then restore the invariants each cleanup pass breaks.
+The remaining geometric details follow: loop-side X recenter, bbox shrink and grow, canvas snap and port re-align.</p>
 <ul>
-<li><strong>Stages 6.1 to 6.3</strong>: Fan free content and source inputs upward into empty top
-bands, then collapse two-branch symmetric fans onto half-grid offsets, gated
-on <code dir="auto">center_ports</code>.</li>
-<li><strong>Stage 6.4</strong>: Snap every station and port Y to the row’s grid
-pitch, removing fractional drift from earlier passes.</li>
-<li><strong>Stages 6.5 to 6.6</strong>: Grow TB-section bbox bottoms to match downstream LR and
-RL targets, then re-anchor off-track inputs to their consumers’ post-snap Y.</li>
-<li><strong>Stages 6.7 to 6.9</strong>: Re-center full-bundle columns around the row’s final
-trunk Y, then restore the off-track-above-consumer and row top-align
-invariants that the recenter breaks. All are gated on <code dir="auto">center_ports</code>.</li>
-<li><strong>Stages 6.10 to 6.12</strong>: Pin single-station downstream columns to their unique
-upstream Y, auto-balance content around the trunk, then re-center loop-side
-stations on their loop midpoint in an X-axis pass.</li>
-<li><strong>Stages 6.13 to 6.14</strong>: Shrink bbox bottoms to content and close vertical
-slack between rows in one two-phase helper, then shift sparse loop-side
-stations onto half-pitch Ys to clear bundle pass-throughs. The same helper
-pushes lower rows down internally when a shift grew a bbox.</li>
-<li><strong>Stage 6.15a</strong>: Fit bbox tops to content, symmetric with the bottom shrink in
-Stage 6.13. It grows a bbox top to a full <code dir="auto">section_y_padding</code> above its
-highest marker when fan re-distribution lifted a branch above the line the box
-was sized for (#406), and shrinks an empty band that the transient row-top
-flush left above content. The upward growth re-fits the graph into the canvas.</li>
-<li><strong>Stage 6.15</strong>: Snap the whole canvas back onto the <code dir="auto">y_spacing</code> grid. Stage 6.4
-snapped per-row, but the Stage 6.15a re-fit can shift everything by a non-grid
-amount. When every station shares one residue, shift back to integer multiples.</li>
-<li><strong>Stage 6.16</strong>: Re-align LEFT and RIGHT entry ports on TB and BT sections with
-their feeders. The late vertical settling drags a perpendicular entry port off
-the feeder Y it was snapped to in Stage 3.2, which re-introduces an
-inter-section S-kink. Re-run the alignment, for TB and BT only, and re-anchor
-junctions to the settled port Ys.</li>
-<li><strong>Stage 6.17</strong>: Re-materialise complete semantic fan frames on their settled
-centrelines without resizing their sections or row mates. Two-way plans under
-<code dir="auto">diamond_style='symmetric'</code> keep mirrored half-pitch lanes even when one
-branch is the topology’s unique continuation. Unsupported symmetric diamonds
-then receive the legacy half-pitch compaction.</li>
-<li><strong>Stage 6.18</strong>: Expand a half-pitch branch to a full row when its mirrored
-partner has gone, so an isolated branch does not remain between grid rows.</li>
-<li><strong>Stage 6.18a</strong>: Refit the top of each planned fan section after its final
-content placement. The refit only removes empty space. It leaves intact any
-top band used by a port or bypass route, and never aligns unrelated sections.</li>
+<li><strong>Stages 6.1 to 6.3</strong>: Fan free content and source inputs upward into empty top bands, then collapse two-branch symmetric fans onto half-grid offsets, gated on <code dir="auto">center_ports</code>.</li>
+<li><strong>Stage 6.4</strong>: Snap every station and port Y to the row’s grid pitch, removing fractional drift from earlier passes.</li>
+<li><strong>Stages 6.5 to 6.6</strong>: Grow TB-section bbox bottoms to match downstream LR and RL targets, then re-anchor off-track inputs to their consumers’ post-snap Y.</li>
+<li><strong>Stages 6.7 to 6.9</strong>: Re-center full-bundle columns around the row’s final trunk Y, then restore the off-track-above-consumer and row top-align invariants that the recenter breaks.
+All are gated on <code dir="auto">center_ports</code>.</li>
+<li><strong>Stages 6.10 to 6.12</strong>: Pin single-station downstream columns to their unique upstream Y, auto-balance content around the trunk, then re-center loop-side stations on their loop midpoint in an X-axis pass.</li>
+<li><strong>Stages 6.13 to 6.14</strong>: Shrink bbox bottoms to content and close vertical slack between rows in one two-phase helper, then shift sparse loop-side stations onto half-pitch Ys to clear bundle pass-throughs.
+The same helper pushes lower rows down internally when a shift grew a bbox.</li>
+<li><strong>Stage 6.15a</strong>: Fit bbox tops to content, symmetric with the bottom shrink in Stage 6.13.
+It grows a bbox top to a full <code dir="auto">section_y_padding</code> above its highest marker when fan re-distribution lifted a branch above the line the box was sized for (#406).
+It also shrinks an empty band that the transient row-top flush left above content.
+The upward growth re-fits the graph into the canvas.</li>
+<li><strong>Stage 6.15</strong>: Snap the whole canvas back onto the <code dir="auto">y_spacing</code> grid.
+Stage 6.4 snapped per-row, but the Stage 6.15a re-fit can shift everything by a non-grid amount.
+When every station shares one residue, shift back to integer multiples.</li>
+<li><strong>Stage 6.16</strong>: Re-align LEFT and RIGHT entry ports on TB and BT sections with their feeders.
+The late vertical settling drags a perpendicular entry port off the feeder Y it was snapped to in Stage 3.2, which re-introduces an inter-section S-kink.
+Re-run the alignment, for TB and BT only, and re-anchor junctions to the settled port Ys.</li>
+<li><strong>Stage 6.17</strong>: Re-materialize complete semantic fan frames on their settled centerlines without resizing their sections or row mates.
+Two-way plans under <code dir="auto">diamond_style='symmetric'</code> keep mirrored half-pitch lanes even when one branch is the topology’s unique continuation.
+Unsupported symmetric diamonds then receive the legacy half-pitch compaction.</li>
+<li><strong>Stage 6.18</strong>: Expand a half-pitch branch to a full row when its mirrored partner has gone, which keeps an isolated branch from sitting between grid rows.</li>
+<li><strong>Stage 6.18a</strong>: Refit the top of each planned fan section after its final content placement.
+The refit only removes empty space.
+It leaves intact any top band used by a port or bypass route, and never aligns unrelated sections.</li>
 </ul>
-<p>Stage 6 is where most of the historical organic-suffix sprawl lived, under the
-old names 13d, 13d2, 13h.1 and 13k2. The flat Stage.N scheme makes the sequence
-walkable, and the per-sub-stage CONTRACT.md entries explain why each one is
-necessary.</p>
+<p>Stage 6 is where most of the historical organic-suffix sprawl lived, under the old names 13d, 13d2, 13h.1 and 13k2.
+The flat Stage.N scheme makes the sequence walkable, and the per-sub-stage CONTRACT.md entries explain why each one is necessary.</p>
 <div class="sl-heading-wrapper level-h2"><h2 id="passes-vs-stages">Passes vs stages</h2><a class="sl-anchor-link" href="#passes-vs-stages"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Passes vs stages”</span></a></div>
-<p>The codebase has two overlapping group labels. They are not redundant, because
-they encode different axes of the structure:</p>
+<p>The codebase has two overlapping group labels.
+They are not redundant, because they encode different axes of the structure:</p>
 <ul>
-<li><strong>Stage</strong> (1-6) groups by <strong>what kind of mutation</strong> the pass performs: section
-construction, globalisation, port positioning, port refinement, junctions and
-off-track lift, and vertical settling.</li>
-<li><strong>Pass</strong> (A, B or C) groups by <strong>how much of the layout is final</strong> when the
-pass runs. Pass A operates on a fresh station layout to position ports. Pass B
-refines ports on a fixed station layout. Pass C operates on finalised stations
-and ports.</li>
+<li><strong>Stage</strong> (1-6) groups by <strong>what kind of mutation</strong> the pass performs: section construction, globalization, port positioning, port refinement, junctions and off-track lift, and vertical settling.</li>
+<li><strong>Pass</strong> (A, B or C) groups by <strong>how much of the layout is final</strong> when the pass runs.
+Pass A operates on a fresh station layout to position ports.
+Pass B refines ports on a fixed station layout.
+Pass C operates on finalized stations and ports.</li>
 </ul>
 <p>The Stage and Pass labels line up cleanly:</p>
 
@@ -397,73 +302,48 @@ and ports.</li>
 
 <table><thead><tr><th>Pass</th><th>Stages</th></tr></thead><tbody><tr><td>Pre-pass setup</td><td>1, 2</td></tr><tr><td>Pass A</td><td>3</td></tr><tr><td>Pass B</td><td>4</td></tr><tr><td>Pass C</td><td>5, 6</td></tr></tbody></table>
 <div class="sl-heading-wrapper level-h2"><h2 id="post-layout-routing-boundary">Post-layout routing boundary</h2><a class="sl-anchor-link" href="#post-layout-routing-boundary"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Post-layout routing boundary”</span></a></div>
-<p>The numbered stages settle station, port, junction and section coordinates. The
-routing pipeline then computes per-line station offsets, applies the exact slots
-owned by semantic fan plans, and builds complete exit-turn and convergence plans
-before building one atomic emission decision per route system. It then emits
-systems once, in canonical scaffold order. Whole-graph rail mode takes its
-documented short circuit instead.</p>
-<p><code dir="auto">compute_station_offsets</code> first produces the ordinary offset map. Immediately
-before emission, <code dir="auto">_route_edges</code> applies planned fan carriers and builds the
-exit-turn plan once, then builds convergence plans from the same semantic
-scaffold and settled routing context. The exit-turn planner compacts each
-supported group onto its active lanes, commits the offsets it owns across the
-source seam, and assigns source-side turn axes from that same order. The
-convergence planner freezes target trunks, ordered feeder joins, continuations
-and endpoint ownership. The route-system executor freezes one planned
-disposition for the complete system, and each planned inter-section family’s
-stable ID. Ordinary and observed routing share this boundary. Always-on checks
-reject changes to a committed lane, axis, trunk, join, endpoint or emission
-attribution, and ensure every dedicated fan emission is consumed exactly once.</p>
-<p>This is a routing-boundary contract rather than a numbered layout stage. It moves
-no stations, ports, junctions or section boxes. See
-<a href="/nf-metro/dev/dev/route_plan/">route planning and observation</a> for the plan
-records and execution rules, and
-<a href="/nf-metro/dev/dev/route_emission_inventory/">route emission inventory</a> for the
-complete handler and post-pass ownership map.</p>
+<p>The numbered stages settle station, port, junction and section coordinates.
+The routing pipeline then computes per-line station offsets, applies the exact slots owned by semantic fan plans, and builds complete exit-turn and convergence plans before building one atomic emission decision per route system.
+It then emits systems once, in canonical scaffold order.
+Whole-graph rail mode takes its documented short circuit instead.</p>
+<p><code dir="auto">compute_station_offsets</code> first produces the ordinary offset map.
+Immediately before emission, <code dir="auto">_route_edges</code> applies planned fan carriers and builds the exit-turn plan once, then builds convergence plans from the same semantic scaffold and settled routing context.
+The exit-turn planner compacts each supported group onto its active lanes, commits the offsets it owns across the source seam, and assigns source-side turn axes from that same order.
+The convergence planner freezes target trunks, ordered feeder joins, continuations and endpoint ownership.
+The route-system executor freezes one planned disposition for the complete system, and each planned inter-section family’s stable ID.
+Ordinary and observed routing share this boundary.
+Always-on checks reject changes to a committed lane, axis, trunk, join, endpoint or emission attribution, and ensure every dedicated fan emission is consumed exactly once.</p>
+<p>This is a routing-boundary contract rather than a numbered layout stage.
+It moves no stations, ports, junctions or section boxes.
+See <a href="/nf-metro/dev/dev/route_plan/">route planning and observation</a> for the plan records and execution rules, and <a href="/nf-metro/dev/dev/route_emission_inventory/">route emission inventory</a> for the complete handler and post-pass ownership map.</p>
 <div class="sl-heading-wrapper level-h2"><h2 id="when-something-breaks">When something breaks</h2><a class="sl-anchor-link" href="#when-something-breaks"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “When something breaks”</span></a></div>
 <p>Common scenarios and where to start looking:</p>
 <ul>
-<li><strong>A station moved when it shouldn’t have.</strong> Work out which stage’s
-postcondition it violates. Run <code dir="auto">pytest tests/test_layout_invariants.py</code>, then
-read the failing invariant’s “related tests” entry in CONTRACT.md, which names
-the stage that establishes the relevant property.</li>
-<li><strong>A guard fired with <code dir="auto">after Stage X.Y: ...</code> at <code dir="auto">validate=True</code>.</strong> Stage X.Y is
-the <em>latest</em> sub-stage where the invariant could still have been broken.
+<li><strong>A station moved when it should not have.</strong> Work out which stage’s postcondition it violates.
+Run <code dir="auto">pytest tests/test_layout_invariants.py</code>, then read the failing invariant’s “related tests” entry in CONTRACT.md, which names the stage that establishes the relevant property.</li>
+<li><strong>A guard fired with <code dir="auto">after Stage X.Y: ...</code> at <code dir="auto">validate=True</code>.</strong> Stage X.Y is the <em>latest</em> sub-stage where the invariant could still have been broken.
 Bisect by toggling the preceding sub-stages.</li>
-<li><strong>A guard fired with <code dir="auto">after final: ...</code>.</strong> The invariant only holds at the very
-end, so the regression could be anywhere in Pass C. Run with <code dir="auto">validate=True</code>
-and use the per-checkpoint bisection in <code dir="auto">_run_pass_c_guards</code> to localise it.</li>
-<li><strong>A new fixture lays out badly.</strong> Render it with <code dir="auto">nf-metro render</code>, inspect the
-SVG against the stage descriptions above to guess which stage handles the
-problem area, then read the corresponding sub-stage entry in CONTRACT.md.</li>
+<li><strong>A guard fired with <code dir="auto">after final: ...</code>.</strong> The invariant holds only at the end, which puts the regression anywhere in Pass C. Run with <code dir="auto">validate=True</code> and use the per-checkpoint bisection in <code dir="auto">_run_pass_c_guards</code> to localize it.</li>
+<li><strong>A new fixture lays out badly.</strong> Render it with <code dir="auto">nf-metro render</code>, then inspect the SVG against the stage descriptions earlier on this page to work out which stage handles the problem area.
+Read that sub-stage’s entry in CONTRACT.md.</li>
 </ul>
 <div class="sl-heading-wrapper level-h2"><h2 id="why-so-many-sub-stages">Why so many sub-stages</h2><a class="sl-anchor-link" href="#why-so-many-sub-stages"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Why so many sub-stages”</span></a></div>
-<p>The Pass C tail, Stages 6.1 to 6.18a, looks excessive at first glance. Each
-sub-stage exists because:</p>
+<p>The Pass C tail, Stages 6.1 to 6.18a, looks excessive.
+Each sub-stage exists because:</p>
 <ol>
-<li>A bug was found in some real-world fixture.</li>
-<li>A targeted helper was written to fix it.</li>
-<li>The helper was placed at the point in the pipeline where it has
-the inputs it needs and won’t disrupt earlier-established
-invariants.</li>
+<li>A real-world fixture exposed a bug.</li>
+<li>A targeted helper fixed it.</li>
+<li>The helper sits at the point in the pipeline where it has the inputs it needs and does not disrupt earlier-established invariants.</li>
 </ol>
-<p>Some sub-stages exist purely to <strong>restore</strong> an invariant that an earlier
-sub-stage broke. Stages 6.8 and 6.9, for instance, restore the
-off-track-above-consumer and row-top-align invariants that Stage 6.7’s
-full-bundle recenter breaks. These repair-only sub-stages are a residue of the
-pre-declarative structure, where a content phase that broke a sibling’s
-placement needed an explicit fix-up afterwards. The anchor and content-placement
-split now bounds that, because the anchor-frozen guard guarantees a content
-phase cannot move an anchor. The only repairs that remain are between two
-content phases that touch the same non-anchor stations. Each is a candidate for
-folding back into the breaking stage, but every fold needs its own investigation
-and risks regressing other pipelines.</p>
-<p>The flat Stage.N numbering replaces an earlier organic suffix tree of
-<code dir="auto">Phase 13</code>, <code dir="auto">13a</code>, <code dir="auto">13d2</code>, <code dir="auto">13h.1</code>, <code dir="auto">13k2</code> and so on, which grew a suffix each
-time a sub-stage was inserted between two existing ones. The new scheme keeps
-the same ordering but makes the sequence walkable. The historical context lives
-in the git log and in the “Adding a new stage” section of CONTRACT.md.</p></div><footer class="sl-flex astro-xhxjzfa7"><div class="meta sl-flex astro-xhxjzfa7"><a href="https://github.com/seqeralabs/nf-metro/edit/main/docs/dev/layout_pipeline.mdx" class="sl-flex print:hidden astro-xk5gmzsg"><svg aria-hidden="true" class="astro-xk5gmzsg astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.2em;"><path d="M22 7.24a1 1 0 0 0-.29-.71l-4.24-4.24a1 1 0 0 0-1.1-.22 1 1 0 0 0-.32.22l-2.83 2.83L2.29 16.05a1 1 0 0 0-.29.71V21a1 1 0 0 0 1 1h4.24a1 1 0 0 0 .76-.29l10.87-10.93L21.71 8c.1-.1.17-.2.22-.33a1 1 0 0 0 0-.24v-.14l.07-.05ZM6.83 20H4v-2.83l9.93-9.93 2.83 2.83L6.83 20ZM18.17 8.66l-2.83-2.83 1.42-1.41 2.82 2.82-1.41 1.42Z"/></svg>Edit page</a><p>Last updated: <time datetime="2026-09-04T18:05:49.000Z">Sep 4, 2026</time></p></div><div class="pagination-links print:hidden astro-jgq3vlii" dir="ltr"><a href="/nf-metro/dev/dev/architecture/" rel="prev" class="astro-jgq3vlii"><svg aria-hidden="true" class="astro-jgq3vlii astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17 11H9.41l3.3-3.29a1.004 1.004 0 1 0-1.42-1.42l-5 5a1 1 0 0 0-.21.33 1 1 0 0 0 0 .76 1 1 0 0 0 .21.33l5 5a1.002 1.002 0 0 0 1.639-.325 1 1 0 0 0-.219-1.095L9.41 13H17a1 1 0 0 0 0-2Z"/></svg><span class="astro-jgq3vlii">Previous<br class="astro-jgq3vlii"><span class="link-title astro-jgq3vlii">Architecture</span></span></a><a href="/nf-metro/dev/dev/routing/" rel="next" class="astro-jgq3vlii"><svg aria-hidden="true" class="astro-jgq3vlii astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17.92 11.62a1.001 1.001 0 0 0-.21-.33l-5-5a1.003 1.003 0 1 0-1.42 1.42l3.3 3.29H7a1 1 0 0 0 0 2h7.59l-3.3 3.29a1.002 1.002 0 0 0 .325 1.639 1 1 0 0 0 1.095-.219l5-5a1 1 0 0 0 .21-.33 1 1 0 0 0 0-.76Z"/></svg><span class="astro-jgq3vlii">Next<br class="astro-jgq3vlii"><span class="link-title astro-jgq3vlii">Routing</span></span></a></div></footer></div></div></main></div></div></div><footer class="nfm-site-footer print:hidden astro-7pllvep4"><div class="nfm-footer-top astro-7pllvep4"><a href="https://seqera.io" class="seqera-logo astro-7pllvep4" aria-label="Seqera"><svg width="387" height="79" viewBox="0 0 387 79" fill="none" xmlns="http://www.w3.org/2000/svg">
+<p>Some sub-stages exist purely to <strong>restore</strong> an invariant that an earlier sub-stage broke.
+Stages 6.8 and 6.9, for instance, restore the off-track-above-consumer and row-top-align invariants that Stage 6.7’s full-bundle recenter breaks.
+These repair-only sub-stages are a residue of the pre-declarative structure, where a content phase that broke a sibling’s placement needed an explicit fix-up afterwards.
+The anchor and content-placement split now bounds that, because the anchor-frozen guard guarantees a content phase cannot move an anchor.
+The only repairs that remain are between two content phases that touch the same non-anchor stations.
+Each is a candidate for folding back into the breaking stage, but every fold needs its own investigation and risks regressing other pipelines.</p>
+<p>The flat Stage.N numbering replaces an earlier organic suffix tree of <code dir="auto">Phase 13</code>, <code dir="auto">13a</code>, <code dir="auto">13d2</code>, <code dir="auto">13h.1</code> and <code dir="auto">13k2</code>, which grew a suffix each time a sub-stage was inserted between two existing ones.
+The new scheme keeps the same ordering but makes the sequence walkable.
+The historical context lives in the git log and in the “Adding a new stage” section of CONTRACT.md.</p></div><footer class="sl-flex astro-xhxjzfa7"><div class="meta sl-flex astro-xhxjzfa7"><a href="https://github.com/seqeralabs/nf-metro/edit/main/docs/dev/layout_pipeline.mdx" class="sl-flex print:hidden astro-xk5gmzsg"><svg aria-hidden="true" class="astro-xk5gmzsg astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.2em;"><path d="M22 7.24a1 1 0 0 0-.29-.71l-4.24-4.24a1 1 0 0 0-1.1-.22 1 1 0 0 0-.32.22l-2.83 2.83L2.29 16.05a1 1 0 0 0-.29.71V21a1 1 0 0 0 1 1h4.24a1 1 0 0 0 .76-.29l10.87-10.93L21.71 8c.1-.1.17-.2.22-.33a1 1 0 0 0 0-.24v-.14l.07-.05ZM6.83 20H4v-2.83l9.93-9.93 2.83 2.83L6.83 20ZM18.17 8.66l-2.83-2.83 1.42-1.41 2.82 2.82-1.41 1.42Z"/></svg>Edit page</a><p>Last updated: <time datetime="2026-09-06T22:34:48.000Z">Sep 6, 2026</time></p></div><div class="pagination-links print:hidden astro-jgq3vlii" dir="ltr"><a href="/nf-metro/dev/dev/architecture/" rel="prev" class="astro-jgq3vlii"><svg aria-hidden="true" class="astro-jgq3vlii astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17 11H9.41l3.3-3.29a1.004 1.004 0 1 0-1.42-1.42l-5 5a1 1 0 0 0-.21.33 1 1 0 0 0 0 .76 1 1 0 0 0 .21.33l5 5a1.002 1.002 0 0 0 1.639-.325 1 1 0 0 0-.219-1.095L9.41 13H17a1 1 0 0 0 0-2Z"/></svg><span class="astro-jgq3vlii">Previous<br class="astro-jgq3vlii"><span class="link-title astro-jgq3vlii">Architecture</span></span></a><a href="/nf-metro/dev/dev/routing/" rel="next" class="astro-jgq3vlii"><svg aria-hidden="true" class="astro-jgq3vlii astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17.92 11.62a1.001 1.001 0 0 0-.21-.33l-5-5a1.003 1.003 0 1 0-1.42 1.42l3.3 3.29H7a1 1 0 0 0 0 2h7.59l-3.3 3.29a1.002 1.002 0 0 0 .325 1.639 1 1 0 0 0 1.095-.219l5-5a1 1 0 0 0 .21-.33 1 1 0 0 0 0-.76Z"/></svg><span class="astro-jgq3vlii">Next<br class="astro-jgq3vlii"><span class="link-title astro-jgq3vlii">Routing</span></span></a></div></footer></div></div></main></div></div></div><footer class="nfm-site-footer print:hidden astro-7pllvep4"><div class="nfm-footer-top astro-7pllvep4"><a href="https://seqera.io" class="seqera-logo astro-7pllvep4" aria-label="Seqera"><svg width="387" height="79" viewBox="0 0 387 79" fill="none" xmlns="http://www.w3.org/2000/svg">
 <g clip-path="url(#clip0_1371_4818)">
 <path d="M66.8223 40.8993L66.9325 40.9436L67.0428 40.9878L67.1467 41.0383L67.2507 41.0952L67.3514 41.1521L67.4522 41.2153L67.5467 41.288L67.6381 41.3575L67.7231 41.4365L67.8113 41.5155L67.8932 41.6039L67.9688 41.6893L68.0444 41.784L68.1105 41.8788L68.1766 41.98L68.2333 42.0779L68.2869 42.1853L68.3373 42.2896L68.3814 42.397L68.4255 42.5076L68.457 42.6214L68.4884 42.732L68.5105 42.852L68.5325 42.9658L68.5451 43.0859L68.5514 43.1996L68.5546 43.3165L68.5514 43.4366L68.5451 43.5535L68.5325 43.6704L68.5105 43.7873L68.4884 43.9011L68.457 44.018L68.4255 44.1286L68.3814 44.2423L68.3373 44.3498L68.2869 44.454L68.2333 44.5583L68.1766 44.6594L68.1105 44.7605L68.0444 44.8553L67.9688 44.9438L67.8932 45.0354L67.8113 45.1176L67.7231 45.2029L67.6381 45.2819L67.5467 45.3514L67.4522 45.4178L67.3514 45.4873L67.2507 45.5441L67.1467 45.601L67.0428 45.6484L66.9325 45.6958L66.8223 45.7337L66.7121 45.7716L66.5987 45.7969L66.4853 45.8254L66.3656 45.8412L66.2522 45.8538L66.1325 45.8664H66.1136L66.2333 45.8633L66.4475 45.8538L66.6617 45.8412L66.8759 45.8222L67.0869 45.7938L67.301 45.7622L67.5121 45.7274L67.7231 45.6832L67.931 45.6358L68.142 45.5821L68.3499 45.522L68.5546 45.4557L68.7562 45.3862L68.9577 45.3103L69.1562 45.2282L69.3546 45.1429L69.5499 45.0512L69.742 44.9533L69.931 44.8522L70.1168 44.7447L70.2995 44.631L70.4822 44.5172L70.6585 44.3972L70.8349 44.2676L71.005 44.1349L71.1719 44.0022L71.3357 43.86L71.4963 43.7147L71.6507 43.5693L71.805 43.4145L71.953 43.2596L72.0948 43.0985L72.2333 42.9342L72.3688 42.7667L72.5011 42.5929L72.627 42.4192L72.7467 42.2422L72.8664 42.0589L72.9766 41.8757L73.0837 41.6861L73.1877 41.4965L73.2822 41.3069L73.3735 41.111L73.4585 40.912L73.5404 40.7129L73.616 40.5107L73.6885 40.3053L73.7514 40.0999L73.8113 39.8914L73.8648 39.6828L73.9121 39.4743L73.9562 39.2594L73.994 39.0477L74.0255 38.836L74.0475 38.6211L74.0696 38.4063L74.0853 38.1883L74.0916 37.9734L74.0948 37.7585L74.0916 37.5437L74.0853 37.3256L74.0696 37.1108L74.0475 36.8959L74.0255 36.6842L73.994 36.4694L73.9562 36.2545L73.9121 36.0459L73.8648 35.8342L73.8239 35.6731H66.1672L66.016 35.6763H47.9058L66.69 40.8614L66.8223 40.8993Z" fill="currentColor"/>
 <path d="M78.6993 42.7799L78.6835 42.5081L78.6646 42.2395L78.6394 41.9678L78.6079 41.6992L78.5733 41.4338L78.5292 41.1652L78.4788 40.8998L78.4284 40.6344L78.3686 40.3721L78.3024 40.1099L78.2331 39.8476L78.1544 39.5885L78.0725 39.3326L77.9875 39.0735L77.893 38.8207L77.7953 38.5711L77.6914 38.3183L77.5843 38.0718L77.4709 37.8254L77.3544 37.5821L77.2284 37.3451L77.0993 37.1049L76.9638 36.8711L76.8252 36.6373L76.6835 36.4098L76.5323 36.1823L76.3812 35.9611L76.2237 35.7431L76.1701 35.6736H73.8237L73.8646 35.8347L73.9119 36.0464L73.956 36.255L73.9937 36.4698L74.0252 36.6847L74.0473 36.8964L74.0693 37.1113L74.0851 37.3261L74.0914 37.5442L74.0945 37.759L74.0914 37.9739L74.0851 38.1887L74.0693 38.4068L74.0473 38.6216L74.0252 38.8365L73.9937 39.0482L73.956 39.2599L73.9119 39.4748L73.8646 39.6833L73.8111 39.8918L73.7512 40.1004L73.6882 40.3058L73.6158 40.5112L73.5402 40.7134L73.4583 40.9124L73.3733 41.1115L73.2819 41.3074L73.1874 41.497L73.0835 41.6866L72.9764 41.8762L72.8662 42.0594L72.7465 42.2427L72.6268 42.4196L72.5008 42.5934L72.3686 42.7672L72.2331 42.9347L72.0945 43.099L71.9528 43.2601L71.8048 43.415L71.6504 43.5698L71.4961 43.7151L71.3355 43.8605L71.1717 44.0027L71.0048 44.1354L70.8347 44.2681L70.6583 44.3976L70.4819 44.5177L70.2993 44.6315L70.1166 44.7452L69.9308 44.8526L69.7418 44.9538L69.5497 45.0517L69.3544 45.1433L69.156 45.2287L68.9575 45.3108L68.756 45.3866L68.5544 45.4562L68.3496 45.5225L68.1418 45.5825L67.9308 45.6363L67.7229 45.6837L67.5119 45.7279L67.3008 45.7627L67.0867 45.7943L66.8756 45.8227L66.6615 45.8417L66.4473 45.8543L66.2331 45.8638L66.0158 45.8669H0V56.0603H66.0158L66.2867 56.0571L66.5544 56.0508L66.8252 56.035L67.093 56.0129L67.3607 55.9876L67.6284 55.9592L67.8961 55.9181L68.1607 55.877L68.4252 55.8296L68.6898 55.7727L68.9544 55.7127L69.2126 55.6495L69.4741 55.5768L69.7355 55.501L69.9906 55.422L70.2457 55.3304L70.4977 55.2387L70.7497 55.1408L70.9985 55.0397L71.2441 54.9322L71.4898 54.8153L71.7323 54.6953L71.9717 54.572L72.2079 54.4425L72.441 54.3098L72.6741 54.1676L72.8977 54.0254L73.1245 53.8769L73.3481 53.7221L73.5654 53.5641L73.7796 53.3998L73.9906 53.2323L74.2016 53.0585L74.4063 52.8816L74.6048 52.7046L74.8001 52.5182L74.9922 52.3286L75.1812 52.1359L75.3638 51.9368L75.5465 51.7377L75.7229 51.5324L75.893 51.3238L76.0599 51.1121L76.2237 50.8941L76.3812 50.6761L76.5323 50.4549L76.6835 50.2274L76.8252 49.9999L76.9638 49.7661L77.0993 49.5322L77.2284 49.2953L77.3544 49.0551L77.4709 48.8118L77.5843 48.5685L77.6914 48.3189L77.7953 48.0693L77.893 47.8197L77.9875 47.5637L78.0725 47.3078L78.1544 47.0518L78.2331 46.7896L78.3024 46.5305L78.3686 46.2682L78.4284 46.0028L78.4788 45.7405L78.5292 45.4751L78.5733 45.2065L78.6079 44.938L78.6394 44.6694L78.6646 44.4008L78.6835 44.1291L78.6993 43.8605L78.7087 43.5919L78.7119 43.3202L78.7087 43.0484L78.6993 42.7799Z" fill="#0DC09D"/>
