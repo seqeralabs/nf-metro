@@ -679,6 +679,10 @@
         "mmd": "%%metro title: Sectionless express skip\n%%metro style: dark\n%%metro line: main | Main | #e63946\n%%metro line: alt | Alt | #1d4e89\ngraph LR\n    a[A]\n    b[B]\n    c[C]\n    d[D]\n    e[E]\n    a -->|main| b\n    b -->|main| c\n    c -->|main| d\n    d -->|main| e\n    a -->|alt| c\n    c -->|alt| e\n"
       },
       {
+        "name": "sectionless_skip_over_two_markers",
+        "mmd": "%%metro title: Sectionless skip over two markers\n%%metro line: generic | Analysis | #79706E\n%%metro line: align | Alignment | #54A24B\ngraph LR\n    a[A] -->|generic| hub[Hub]\n    hub -->|generic| m0[M0]\n    m0 -->|generic| m1[M1]\n    m1 -->|generic| m2[M2]\n    m2 -->|generic| z[Z]\n    hub -->|align| m2\n"
+      },
+      {
         "name": "interchange_label_clears_bridge",
         "mmd": "%%metro title: In-section express skip\n%%metro style: dark\n%%metro line: main | Main | #e63946\n%%metro line: alt | Alt | #1d4e89\ngraph LR\n    subgraph sec [Section]\n        a[A]\n        b[B]\n        c[C]\n        d[D]\n        e[E]\n        a -->|main| b\n        b -->|main| c\n        c -->|main| d\n        d -->|main| e\n        a -->|alt| c\n        c -->|alt| e\n    end\n"
       },
