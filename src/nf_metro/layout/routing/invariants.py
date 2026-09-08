@@ -4334,17 +4334,14 @@ def check_concentric_bundle_corners(
 def _fan_corner_observations(
     route: RoutedPath, points: list[tuple[float, float]]
 ) -> list[_CornerObservation]:
-    """Interior orthogonal-turn corners of *points*, minus the exit-turn corners.
+    """Interior orthogonal-turn corners of *points*, minus the exit-turn corner.
 
-    ``_settled_exit_turns`` anchors a route's own exit-turn segment, and that
-    segment plan-owns BOTH corners flanking it -- the waypoints at
-    ``exit_turn_segment_rank`` and ``exit_turn_segment_rank + 1``.
-    ``_reseat_concentric_flanking`` already seats both to the plan, so neither is
-    a re-derivable member of any concentric fan and both are left out here.
+    ``_settled_exit_turns`` anchors a route's own exit-turn corner, so it is not
+    a re-derivable member of any concentric fan and is left out here.
     """
     corners: list[_CornerObservation] = []
     for rank in range(1, len(points) - 1):
-        if route.exit_turn_segment_rank in (rank - 1, rank):
+        if route.exit_turn_segment_rank == rank:
             continue
         if not is_orthogonal_turn(points[rank - 1], points[rank], points[rank + 1]):
             continue
