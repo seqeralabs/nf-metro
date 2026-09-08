@@ -1,60 +1,51 @@
 ---
 title: "Architecture"
-description: "High-level architecture of nf-metro: the parse, layout, and render pipeline, and how the subsystems fit together."
+description: "The parse, layout, and render stages of nf-metro, and how its subsystems fit together."
 sidebar:
   order: 1
 ---
 
 import { LinkCard, CardGrid } from "@astrojs/starlight/components";
 
-nf-metro turns a Mermaid `graph LR` definition, augmented with `%%metro`
-directives, into a metro-map-style SVG. The pipeline has three stages:
+nf-metro turns a Mermaid `graph LR` definition, augmented with `%%metro` directives, into a metro-map-style SVG.
+The pipeline has three stages:
 
 ```text
 Parse  ->  Layout  ->  Render
 ```
 
-Each stage hands a single `MetroGraph`, defined in
-[`src/nf_metro/parser/model.py`](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/parser/model.py),
-to the next. The graph is mutated in place. Parsing fills in stations, edges,
-lines, sections and ports. Layout writes coordinates onto those objects, and
-rendering reads them.
+Each stage hands a single `MetroGraph`, defined in [`src/nf_metro/parser/model.py`](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/parser/model.py), to the next.
+Each stage mutates it in place.
+Parsing fills in stations, edges, lines, sections, and ports.
+Layout writes coordinates onto those objects, and rendering reads them.
 
 ## Stages
 
 ### Parse (`src/nf_metro/parser/`)
 
-`parse_metro_mermaid` in `parser/mermaid.py` is a line-by-line regex
-parser. It reads Mermaid subgraphs as sections, nodes as stations, and edges,
-plus the `%%metro` directive extensions. After the line scan it runs a
-post-parse pass that infers layout, then rewrites inter-section edges into
-port and junction chains through `_resolve_sections`.
+`parse_metro_mermaid` in `parser/mermaid.py` is the driver.
+The Lark grammar in `parser/grammar.py` turns source text into typed statements, which the driver applies in source order.
+Mermaid subgraphs become sections, nodes become stations, arrows become edges, and `%%metro` directives supply the extensions.
+A post-parse pass then infers layout and rewrites inter-section edges into port and junction chains through `_resolve_sections`.
 
-See [Parser](/nf-metro/dev/parser/) for the directive model and the
-parse-then-resolve flow.
+See [Parser](/nf-metro/dev/parser/) for the directive model and the parse-then-resolve flow.
 
 ### Layout (`src/nf_metro/layout/`)
 
-`compute_layout` in `layout/engine.py` assigns an `(x, y)` to every station,
-port, junction and section bbox. It chains many small phases, split into a
-structural anchor-setting layer and a content-placement layer. The phase
-implementations live in `layout/phases/`, and the per-phase preconditions,
-postconditions and invariants are documented in
-[`src/nf_metro/layout/CONTRACT.md`](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/layout/CONTRACT.md).
+`compute_layout` in `layout/engine.py` assigns an `(x, y)` to every station, port, junction, and section bbox.
+It chains a numbered sequence of phases, split into a structural anchor-setting layer and a content-placement layer.
+The phase implementations live in `layout/phases/`, and the per-phase preconditions, postconditions, and invariants are documented in [`src/nf_metro/layout/CONTRACT.md`](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/layout/CONTRACT.md).
 
-Edge routing lives in `layout/routing/`. It uses horizontal runs plus
-45-degree diagonal transitions, with L-shaped inter-section routing.
+Edge routing lives in `layout/routing/`.
+It uses horizontal runs plus 45-degree diagonal transitions, with L-shaped inter-section routing.
 
-See [Layout pipeline](/nf-metro/dev/layout_pipeline/) for the full phase-by-phase
-walkthrough and [Routing](/nf-metro/dev/routing/) for the route families.
+See [Layout pipeline](/nf-metro/dev/layout_pipeline/) for the full phase-by-phase walkthrough and [Routing](/nf-metro/dev/routing/) for the route families.
 
 ### Render (`src/nf_metro/render/`)
 
-`render_svg` in `render/svg.py` uses the `drawsvg` library to draw section
-boxes, routed edges with curved corners, pill-shaped station markers, labels
-and the legend. Visual properties come from a `Theme` in `render/style.py`, and
-themes are registered in `themes/__init__.py`. `render/animate.py` adds
-travelling balls along the routed paths, behind the `--animate` CLI flag.
+`render_svg` in `render/svg.py` uses the `drawsvg` library to draw section boxes, routed edges with curved corners, pill-shaped station markers, labels, and the legend.
+Visual properties come from a `Theme` in `render/style.py`, and themes are registered in `themes/__init__.py`.
+`render/animate.py` adds traveling balls along the routed paths, behind the `--animate` CLI flag.
 
 ## Reference docs
 
@@ -101,19 +92,16 @@ travelling balls along the routed paths, behind the `--animate` CLI flag.
   />
 </CardGrid>
 
-The per-phase preconditions, postconditions and invariants are in [`CONTRACT.md`](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/layout/CONTRACT.md). The topology stress fixture inventory is in [`examples/topologies/README.md`](https://github.com/seqeralabs/nf-metro/blob/main/examples/topologies/README.md).
+The topology stress fixture inventory is in [`examples/topologies/README.md`](https://github.com/seqeralabs/nf-metro/blob/main/examples/topologies/README.md).
 
 ## Data model
 
 The central structure is `MetroGraph` (`parser/model.py`), holding:
 
-- `lines` (`MetroLine`): coloured routes, with an optional `style` of `solid`,
-  `dashed` or `dotted`.
-- `stations` (`Station`): mutable dataclasses. Layout writes `x`, `y`, `layer`
-  and `track` directly onto them. `is_port` stations take part in layout but
-  are invisible at render time.
+- `lines` (`MetroLine`): colored routes, with an optional `style` of `solid`, `dashed`, or `dotted`.
+- `stations` (`Station`): mutable dataclasses.
+  Layout writes `x`, `y`, `layer`, and `track` directly onto them.
+  `is_port` stations take part in layout but are invisible at render time.
 - `edges` (`Edge`): directed, each tagged with a `line_id`.
-- `sections` (`Section`): subgraph groupings with a `direction` of `LR`, `RL`
-  or `TB`, plus a grid position and a bbox.
-- `ports` (`Port`): synthetic entry and exit points on section boundaries,
-  created during `_resolve_sections`.
+- `sections` (`Section`): subgraph groupings with a `direction` of `LR`, `RL`, or `TB`, plus a grid position and a bbox.
+- `ports` (`Port`): synthetic entry and exit points on section boundaries, created during `_resolve_sections`.

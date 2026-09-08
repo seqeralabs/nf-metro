@@ -5,44 +5,77 @@ description: "Engineering decisions behind nf-metro: the layout engine, validati
 
 import { Steps } from "@astrojs/starlight/components";
 
-nf-metro is a layout engine, a rendering pipeline, and a test harness, built up over several months. This page covers the engineering decisions behind it: why the validation layers exist, how the visual review loop works, and what the "ratchet" discipline means in practice. Read it before working on the codebase.
+nf-metro is a layout engine, a rendering pipeline, and a test harness.
+Four validation layers guard the output, a CI render diff carries the visual review, and every check that lands stays in.
+Read this before working on the codebase.
 
 ## What the engine does
 
-Taking a text description of a pipeline graph and producing a metro-map SVG sounds simple. The difficulty is that "metro map" is an aesthetic standard rather than a mathematical one. It is not a graph layout in the academic sense: there is no force-directed placement and no crossing minimisation. It is a set of constraints that a human recognises as "right". Stations sit on straight track, never on corners. Bundles of lines sweep round curves together. Sections do not overlap, and labels do not collide with routes. None of those constraints come for free.
+The hard part of turning a text description of a pipeline graph into a metro-map SVG is that "metro map" is an aesthetic standard rather than a mathematical one.
+This is not graph layout in the academic sense.
+The engine uses no force-directed placement and no crossing minimization.
+It is a set of constraints that a human recognizes as "right".
+Stations sit on straight track, never on corners.
+Bundles of lines sweep round curves together.
+Sections do not overlap, and labels do not collide with routes.
+None of those constraints come for free.
 
-The engine solves this through a [sequence of ~40 numbered phases](https://github.com/seqeralabs/nf-metro/tree/main/src/nf_metro/layout/phases), each responsible for a specific piece of the coordinate assignment problem. The phases run in strict order, and each one reads the state left by the previous one and writes into it. The contract for each phase, meaning what it requires on entry and what it guarantees on exit, is documented in [`src/nf_metro/layout/CONTRACT.md`](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/layout/CONTRACT.md).
+The engine solves this through a [sequence of ~40 numbered phases](https://github.com/seqeralabs/nf-metro/tree/main/src/nf_metro/layout/phases), each responsible for a specific piece of the coordinate assignment problem.
+The phases run in strict order, and each one reads the state left by the previous one and writes into it.
+[`src/nf_metro/layout/CONTRACT.md`](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/layout/CONTRACT.md) records each phase contract: what it requires on entry and what it guarantees on exit.
 
-The phases share mutable state and everything depends on everything else. Moving a station for label clearance can compress a diagonal to an ugly angle, and widening a section can push a neighbouring section out of its column. Correctness is therefore only verifiable at the end of the pipeline, never from reading a single phase.
+The phases share mutable state and everything depends on everything else.
+Moving a station for label clearance can compress a diagonal to an ugly angle, and widening a section can push a neighboring section out of its column.
+You can therefore only verify correctness at the end of the pipeline, never from reading a single phase.
 
 ## The four validation layers
 
-The codebase has four validation layers, and each one catches bugs the others cannot see. The [Testing docs](/nf-metro/dev/testing/#the-four-validation-layers) describe them in detail. In summary:
+The codebase has four validation layers, and each one catches bugs the others cannot see.
+The [Testing docs](/nf-metro/dev/testing/#the-four-validation-layers) describe them in detail:
 
 | Layer                  | What it checks                             | When                         |
 | ---------------------- | ------------------------------------------ | ---------------------------- |
 | **Layout oracle**      | Graph geometry after layout                | Every topology test          |
 | **Routing invariants** | Edge waypoints as each route is computed   | Always-on                    |
 | **Phase guards**       | Pre/post-conditions at each phase boundary | Always-on                    |
-| **Render oracle**      | Finished SVG geometry                      | Opt-in CLI flag; corpus gate |
+| **Render oracle**      | Finished SVG geometry                      | Opt-in CLI flag, corpus gate |
 
-One design principle runs through all four layers: **checks only accumulate, and the bar only moves up**. Once a check is in, it stays in. A regression is a red build rather than something a human notices later.
+One design principle runs through all four layers.
+**Checks only accumulate, and the bar only moves up.** Once a check is in, it stays in.
+A regression is a red build rather than something a human notices later.
 
-Known bugs follow a related pattern. Write the test for the correct behaviour, then mark it `xfail`. The build stays green while the bug is present. When someone fixes it, the test flips to `XPASS` and CI turns red, which forces the developer to retire the old expectation and lock in the correct behaviour. [Here is an example of that pattern in `tests/test_layout_invariants.py`](https://github.com/seqeralabs/nf-metro/blob/main/tests/test_layout_invariants.py#L446-L456).
+Known bugs follow a related pattern.
+Write the test for the correct behavior, then mark it `xfail`.
+The build stays green while the bug is present.
+When someone fixes it, the test flips to `XPASS` and CI turns red, which forces the developer to retire the old expectation and lock in the correct behavior.
+[Here is an example of that pattern in `tests/test_layout_invariants.py`](https://github.com/seqeralabs/nf-metro/blob/main/tests/test_layout_invariants.py#L446-L456).
 
 ## Checks that remove a whole class of bug
 
-The strongest checks eliminate a category of mistake rather than catching one instance of it. Two examples:
+The strongest checks eliminate a category of mistake rather than catching one instance of it.
+Two examples:
 
-**Station-as-elbow.** Metro maps don't put stations on corners; stations sit on straight track, with the curves in between. Early versions of the engine used station nodes as inflection points because it was convenient. After correcting this many times, [`check_station_as_elbow`](https://github.com/seqeralabs/nf-metro/blob/main/tests/layout_validator.py) was added to the layout oracle. It fires as an `ERROR` on any fixture where a station sits at a bend. The mistake is still possible to write, but it fails CI immediately.
+**Station-as-elbow.** Metro maps do not put stations on corners.
+Stations sit on straight track, with the curves in between.
+Early versions of the engine used station nodes as inflection points because it was convenient.
+After correcting this many times, the layout oracle gained [`check_station_as_elbow`](https://github.com/seqeralabs/nf-metro/blob/main/tests/layout_validator.py), which fires as an `ERROR` on any fixture where a station sits at a bend.
+The mistake is still possible to write, but it fails CI immediately.
 
-**Concentric bundle corners.** For a long time every bend in the routing had its radius computed by hand where the curve was drawn, with direction, sign and magnitude all chosen locally. Get the sign wrong and the bundle fans apart or crosses itself. The fix was to pull all of it into one place: a route now describes the [centreline it wants to follow](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/layout/routing/bundle.py#L66-L109), and a single builder fans the individual lines out as parallel offsets, working out every corner from the geometry. Nobody writes a radius by hand any more, and there is no longer any code in which a pinching or crossing bug can be written.
+**Concentric bundle corners.** For a long time every bend in the routing had its radius computed by hand where the curve was drawn, with direction, sign, and magnitude all chosen locally.
+Get the sign wrong and the bundle fans apart or crosses itself.
+The fix pulled all of it into one place.
+A route now describes the [centerline it wants to follow](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/layout/routing/bundle.py#L66-L109), and a single builder fans the individual lines out as parallel offsets, deriving every corner from the geometry.
+Nobody writes a radius by hand any more, and no code remains where a pinching or crossing bug could be written.
 
 ## The topology fixture library
 
-Most layout bugs only appear in specific topologies, which is what makes a layout engine hard to test. A suite that exercises one shape of graph will pass indefinitely while the engine fails on every other shape.
+Most layout bugs only appear in specific topologies.
+That is what makes a layout engine hard to test.
+A suite that exercises one shape of graph passes indefinitely while the engine fails on every other shape.
 
-[`examples/topologies/`](https://github.com/seqeralabs/nf-metro/tree/main/examples/topologies) answers that: a library of ~38 `.mmd` fixtures, each isolating a specific graph topology such as a fan-out, fan-in, diamond, fold, mixed port sides, or cross-column entries. `tests/test_topology_validation.py` parametrizes over every fixture in that directory and runs the full layout oracle against each one. Adding a `.mmd` to that directory enrolls it in the suite with no further wiring.
+[`examples/topologies/`](https://github.com/seqeralabs/nf-metro/tree/main/examples/topologies) answers that with a library of ~285 `.mmd` fixtures, each isolating a specific graph topology such as a fan-out, fan-in, diamond, fold, mixed port sides, or cross-column entries.
+`tests/test_topology_validation.py` parametrizes over every fixture in that directory and runs the full layout oracle against each one.
+Adding a `.mmd` to that directory enrolls it in the suite with no further wiring.
 
 When a new topology case produces bad output, the workflow is:
 
@@ -55,11 +88,13 @@ When a new topology case produces bad output, the workflow is:
 
 </Steps>
 
-The topology library also feeds the visual review CI described below.
+The topology library also feeds the visual review CI described later.
 
 ## Visual review via CI render diffs
 
-Automated geometry checks verify that coordinates are correct. They cannot verify that the result looks right, so the project uses a rendered diff in CI.
+Automated geometry checks verify that coordinates are correct.
+They cannot verify that the result looks right.
+A rendered diff in CI covers that.
 
 Every pull request triggers `.github/workflows/pr-renders.yml`, which:
 
@@ -72,27 +107,35 @@ Every pull request triggers `.github/workflows/pr-renders.yml`, which:
 
 </Steps>
 
-Reading the diff page is quick: scroll through the before/afters, look for anything that regressed, then file an issue or iterate on the fix. Some bugs only show up this way, because a layout that passes every geometric check can still look wrong to a human eye. A fan of routes that comes out lopsided, or a label that clips against a route, passes the oracle and still needs fixing. The render diff puts that judgment back in the loop.
+Scroll through the before/afters, look for anything that regressed, then file an issue or iterate on the fix.
+Some bugs only show up this way, because a layout that passes every geometric check can still look wrong to a human eye.
+A fan of routes that comes out lopsided, or a label that clips against a route, passes the oracle and still needs fixing.
+The render diff puts that judgment back in the loop.
 
-The script exits `2` when there is no visual difference, so a PR that intends to be neutral should produce a byte-identical gallery. Layout changes are expected to differ. Refactors are expected to be byte-identical.
+The script exits `2` when the render shows no visual difference.
+A PR that intends to be neutral should therefore produce a byte-identical gallery.
+Layout changes are expected to differ.
+Refactors are expected to be byte-identical.
 
 ## The guard tier system
 
 Phase guards fall into three tiers:
 
-- **Tier A (always-on)**: structural invariants that must hold in all valid graphs. A failure here is a hard bug.
-- **Tier B (defensive)**: guards that protect against known fragile transitions. Enabled but annotated.
-- **Issue-pinned**: guards that track a known defect against the corpus, marked `xfail`. When the issue is fixed, the test flips to `XPASS` and prompts removal of the pin.
+- **Tier A (always-on)**: structural invariants that must hold in all valid graphs.
+  A failure here is a hard bug.
+- **Tier B (defensive)**: guards that protect against known fragile transitions.
+  Enabled but annotated.
+- **Issue-pinned**: guards that track a known defect against the corpus, marked `xfail`.
+  When the issue is fixed, the test flips to `XPASS` and prompts removal of the pin.
 
-The full tier taxonomy and rationale is in [`docs/dev/guard_tiers.md`](/nf-metro/dev/guard_tiers/).
+The full tier taxonomy and rationale are in [`docs/dev/guard_tiers.md`](/nf-metro/dev/guard_tiers/).
 
 ## Routing classification
 
 The routing module classifies each inter-section member once during planning.
-The selected family builds a frozen production path, and emission copies that
-path without trying another handler. Each family covers one combination of
-section orientation, entry and exit direction, and flow type. The family table
-and full inventory are documented in [`docs/dev/inter_section_dispatch.mdx`](/nf-metro/dev/inter_section_dispatch/) and [`docs/dev/routing_gate_coverage.md`](/nf-metro/dev/routing_gate_coverage/).
+The selected family builds a frozen production path, and emission copies that path without trying another handler.
+Each family covers one combination of section orientation, entry and exit direction, and flow type.
+The family table and full inventory are documented in [`docs/dev/inter_section_dispatch.mdx`](/nf-metro/dev/inter_section_dispatch/) and [`docs/dev/routing_gate_coverage.md`](/nf-metro/dev/routing_gate_coverage/).
 
 To add a new routing case:
 
@@ -105,13 +148,13 @@ To add a new routing case:
 
 </Steps>
 
-## What the docs cover
+## Further reading
 
-The `docs/dev/` tree documents the internals in detail:
+The internals docs cover each subsystem in detail:
 
 - [`architecture.mdx`](/nf-metro/dev/architecture/) - system overview and data flow
 - [`layout_pipeline.mdx`](/nf-metro/dev/layout_pipeline/) - the phase sequence with entry/exit contracts
-- [`routing.mdx`](/nf-metro/dev/routing/) - edge routing mechanics and the centreline/offset model
+- [`routing.mdx`](/nf-metro/dev/routing/) - edge routing mechanics and the centerline/offset model
 - [`inter_section_dispatch.mdx`](/nf-metro/dev/inter_section_dispatch/) - the dispatch table for inter-section routes
 - [`routing_gate_coverage.md`](/nf-metro/dev/routing_gate_coverage/) - which handler arms are covered by corpus tests
 - [`parser.mdx`](/nf-metro/dev/parser/) - the Lark grammar and post-parse rewrites

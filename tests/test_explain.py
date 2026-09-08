@@ -207,11 +207,16 @@ graph LR
     assert entries[0]["provenance_reason"] == "shared-connector-entry-side"
 
 
-def test_explain_no_decisions_single_section(tmp_path):
-    """Single-section graph with no inferences produces an empty decisions list."""
+def test_explain_no_decisions_for_sectionless_graph(tmp_path):
+    """A sectionless graph with nothing to infer produces an empty decisions list.
+
+    Centered line-spread keeps the graph flat (no implicit section), so there is
+    no section-direction inference to record.
+    """
     mmd = tmp_path / "simple.mmd"
     mmd.write_text(
         "%%metro title: Simple\n"
+        "%%metro line_spread: centered\n"
         "%%metro line: a | A | #ff0000\n"
         "graph LR\n"
         "    x[X] -->|a| y[Y]\n"
@@ -295,7 +300,8 @@ def test_format_explain_text_empty_graph(tmp_path):
     """Empty decisions list renders as 'no decisions' message."""
     mmd = tmp_path / "s.mmd"
     mmd.write_text(
-        "%%metro title: Simple\n%%metro line: a | A | #ff0000\n"
+        "%%metro title: Simple\n%%metro line_spread: centered\n"
+        "%%metro line: a | A | #ff0000\n"
         "graph LR\n    x[X] -->|a| y[Y]\n"
     )
     graph = parse_metro_mermaid(mmd.read_text())

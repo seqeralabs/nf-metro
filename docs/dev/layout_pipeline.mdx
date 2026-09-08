@@ -7,305 +7,212 @@ sidebar:
 
 import { Aside } from "@astrojs/starlight/components";
 
-This page walks through how nf-metro turns a parsed metro graph into placed
-coordinates. Start here if you are hunting a layout bug, fixing a visual
-regression or adding a new transformation pass.
+The layout pipeline turns a parsed metro graph into placed coordinates.
+Start here to hunt a layout bug, fix a visual regression or add a new transformation pass.
 
-For the rigorous per-sub-stage contract, covering preconditions,
-postconditions, invariants preserved and related tests, see
-[`src/nf_metro/layout/CONTRACT.md`](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/layout/CONTRACT.md).
-In the source itself, the orchestrator is `_compute_section_layout` in
-`src/nf_metro/layout/engine.py`.
+For the rigorous per-sub-stage contract, covering preconditions, postconditions, invariants preserved and related tests, see [`src/nf_metro/layout/CONTRACT.md`](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/layout/CONTRACT.md).
+In the source itself, the orchestrator is `_compute_section_layout` in `src/nf_metro/layout/engine.py`.
 
-The parser also attaches typed layout provenance to the graph before this
-pipeline starts. Layout passes use its effective decisions to tell an authored
-choice from an engine choice, and to tell whether a choice may be inferred
-again. The
-[parser guide's provenance section](/nf-metro/dev/parser/#layout-decision-provenance)
-describes the snapshot, the decision states and the connector endpoint keys.
+The parser also attaches typed layout provenance to the graph before this pipeline starts.
+Layout passes use its effective decisions to tell an authored choice from an engine choice, and to tell whether a choice may be inferred again.
+The [parser guide's provenance section](/nf-metro/dev/parser/#layout-decision-provenance) describes the snapshot, the decision states and the connector endpoint keys.
 
-## What "layout" means here
+## Scope of layout
 
-Parsing produces a `MetroGraph` with sections, stations, edges, lines and ports,
-but with no coordinates yet beyond the optional `%%metro grid:` directives. The
-layout pipeline assigns an `(x, y)` on the canvas to every station, port,
-junction and section bbox, subject to these constraints:
+Parsing produces a `MetroGraph` with sections, stations, edges, lines and ports, but with no coordinates yet beyond the optional `%%metro grid:` directives.
+The layout pipeline assigns an `(x, y)` on the canvas to every station, port, junction and section bbox, subject to these constraints:
 
-- Sections don't overlap each other.
+- Sections do not overlap each other.
 - Stations sit inside their section's bbox.
 - Ports sit on their section's bbox edge.
-- Lines route between connected stations without crossing unrelated
-  station markers.
-- Same-row sections share a trunk Y so the inter-section bundle stays
-  horizontal across boundaries.
-- A bunch of other invariants documented in
-  `tests/test_layout_invariants.py`.
+- Lines route between connected stations without crossing unrelated station markers.
+- Same-row sections share a trunk Y so the inter-section bundle stays horizontal across boundaries.
+- The other invariants documented in `tests/test_layout_invariants.py`.
 
-Achieving all of this in one pass is intractable. Some constraints are naturally
-local, such as each section's internal layout, and some are global, such as
-trunk Y alignment across an entire row. The pipeline instead chains many small
-passes, each of which mutates the graph and preserves the invariants of the
-passes before it.
+Achieving all of this in one pass is intractable.
+Some constraints are local, such as each section's internal layout, and some are global, such as trunk Y alignment across an entire row.
+The pipeline instead chains many small passes, each of which mutates the graph and preserves the invariants of the passes before it.
 
 ## The anchor / content-placement split
 
-The passes divide into two kinds, and that division is the organizing principle
-of the whole pipeline:
+The passes divide into two kinds, and that division is the organizing principle of the whole pipeline:
 
-- **Structural, or anchor-setting, phases** decide where the inter-section line
-  bundle runs. A section's **anchors** are its port stations, the synthetic
-  points on the section boundary where the bundle crosses. Only port
-  positioning, the row trunk alignment at Stage 4.8, grid snapping, the
-  inter-row cascade and uniform canvas or row translation may move an anchor.
-- **Content-placement phases** position everything else _around_ the resolved
-  anchors: fan-out and full-bundle redistribution (4.9, 4.10), band-fill (6.1,
-  6.2), the symfan half-grid (6.3), full-bundle recenter (6.7),
-  balance-around-trunk (6.11) and loop-side recenter (6.12). A content phase
-  must **never** move an anchor.
+- **Structural, or anchor-setting, phases** decide where the inter-section line bundle runs.
+  A section's **anchors** are its port stations, the synthetic points on the section boundary where the bundle crosses.
+  Only port positioning, the row trunk alignment at Stage 4.8, grid snapping, the inter-row cascade and uniform canvas or row translation may move an anchor.
+- **Content-placement phases** position everything else _around_ the resolved anchors: fan-out and full-bundle redistribution (4.9, 4.10), band-fill (6.1, 6.2), the symfan half-grid (6.3), full-bundle recenter (6.7), balance-around-trunk (6.11) and loop-side recenter (6.12).
+  A content phase must **never** move an anchor.
 
 <Aside type="caution" title="Anchor invariant">
-  Content-placement phases must never move an anchor, meaning a port station on
-  a section boundary. Only the structural phases may do so: port positioning,
-  trunk-Y alignment (Stage 4.8), grid snapping, the inter-row cascade and canvas
-  translation. A content phase that moves an anchor breaks the
-  forward-resolvability guarantee and fires
-  `_guard_anchors_frozen_during_placement` under `validate=True`.
+
+Content-placement phases must never move an anchor, meaning a port station on a section boundary.
+Only the structural phases may do so: port positioning, trunk-Y alignment (Stage 4.8), grid snapping, the inter-row cascade and canvas translation.
+A content phase that moves an anchor breaks the forward-resolvability guarantee and fires `_guard_anchors_frozen_during_placement` under `validate=True`.
+
 </Aside>
 
-This split is what makes the layout **forward-resolvable**. Once the structural
-phases have frozen the anchors, every content-placement phase is a _pure
-function of the frozen anchors plus the section structure_. Its output depends
-only on the anchors and the section's tracks, edges and columns, never on the
-mutable intermediate Y or bbox state an earlier phase happened to leave behind.
-That is stronger than idempotence: re-running, re-ordering or perturbing the
-non-anchor state cannot change a content phase's result. Both properties are
-machine-checked, by `_guard_anchors_frozen_during_placement` at runtime through
-the `_run_placement` wrapper under `validate=True`, plus
-`test_placement_phase_is_idempotent` (#488) and `test_content_placement_pure.py`
-(#491).
+This split is what makes the layout **forward-resolvable**.
+Once the structural phases have frozen the anchors, every content-placement phase is a _pure function of the frozen anchors plus the section structure_.
+Its output depends only on the anchors and the section's tracks, edges and columns, never on the mutable intermediate Y or bbox state an earlier phase happened to leave behind.
+That is stronger than idempotence.
+Re-running, re-ordering or perturbing the non-anchor state cannot change a content phase's result.
+Both properties are machine-checked, by `_guard_anchors_frozen_during_placement` at runtime through the `_run_placement` wrapper under `validate=True`, plus `test_placement_phase_is_idempotent` (#488) and `test_content_placement_pure.py` (#491).
 
-When reading the stage walkthrough below, keep the two kinds apart. A structural
-phase that looks as though it moved content is really moving an anchor and
-letting content follow, and a content phase that looks order-dependent is, by
-construction, not. The rigorous treatment covers which phases set which anchors,
-and how the frozen _placement reference_ lets a content phase read an
-intermediate quantity without breaking purity. It is in CONTRACT.md's
-[`## Anchor invariant`](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/layout/CONTRACT.md)
-and `### Content-placement purity` sections.
+When reading the stage walkthrough, keep the two kinds apart.
+A structural phase that looks as though it moved content is really moving an anchor and letting content follow, and a content phase that looks order-dependent is, by construction, not.
+The rigorous treatment covers which phases set which anchors, and how the frozen _placement reference_ lets a content phase read an intermediate quantity without breaking purity.
+It is in CONTRACT.md's [`## Anchor invariant`](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/layout/CONTRACT.md) and `### Content-placement purity` sections.
 
 ## Semantic fan plans
 
-Before Stage 1, the engine recognises complete authored fans and diamonds from
-connector identity and resolver lineage. Each supported fan gets one immutable
-relative plan covering its branches, opening and landing order, centreline,
-lanes, runways, offset carriers and any dedicated route emissions. The authored
-straight or symmetric appearance is frozen separately from the structural
-question of whether the branches reconverge.
+Before Stage 1, the engine recognizes complete authored fans and diamonds from connector identity and resolver lineage.
+Each supported fan gets one immutable relative plan covering its branches, opening and landing order, centerline, lanes, runways, offset carriers and any dedicated route emissions.
+The authored straight or symmetric appearance is frozen separately from the structural question of whether the branches reconverge.
 
-The plan also names the station or port that supplies its absolute centreline.
-Stages 4.9 and 6.17 read that fixed source after structural anchors settle. They
-do not search the live grid or port topology for a different source, and the
-placement phase never derives its frame from a station it is about to move.
+The plan also names the station or port that supplies its absolute centerline.
+Stages 4.9 and 6.17 read that fixed source after structural anchors settle.
+They do not search the live grid or port topology for a different source, and the placement phase never derives its frame from a station it is about to move.
 
 The plan freezes station-track handedness separately from line-offset chirality.
-All four flow directions use the same positive secondary-axis track progression,
-and a feeder on that axis mirrors the frame so the hub occupies the nearest
-track. That keeps LR/RL and TB/BT geometry axis-consistent without making a
-short entry detour across the section.
+All four flow directions use the same positive secondary-axis track progression, and a feeder on that axis mirrors the frame so the hub occupies the nearest track.
+That keeps LR/RL and TB/BT geometry axis-consistent without making a short entry detour across the section.
 
-Ownership is all-or-nothing. If a fan overlaps a local merge frame owned by
-another topology, or its membership is ambiguous, the whole fan uses the ordinary
-layout and routing path. The planner never mixes planned branches with fallback
-branches. The legacy disposition carries a deterministic diagnostic, so
-unsupported cases stay visible.
+Ownership is all-or-nothing.
+If a fan overlaps a local merge frame owned by another topology, or its membership is ambiguous, the whole fan uses the ordinary layout and routing path.
+The planner never mixes planned branches with fallback branches.
+The legacy disposition carries a deterministic diagnostic.
+Unsupported cases therefore stay visible.
 
 ## The six stages
 
-The pipeline groups into six stages. Stage boundaries align with coord-regime
-transitions, meaning the points where station coordinates become global and
-where ports become positioned, and with the Pass A, Pass B and Pass C divisions
-referenced throughout the codebase.
+The pipeline groups into six stages.
+Stage boundaries align with coord-regime transitions, meaning the points where station coordinates become global and where ports become positioned.
+They also align with the Pass A, Pass B and Pass C divisions referenced throughout the codebase.
 
 ### Stage 1 - Section construction (local coords)
 
-Lay out each section's internal stations on its own private coordinate
-system, then place the sections on the global grid (still local-coord).
+Lay out each section's internal stations on its own private coordinate system, then place the sections on the global grid (still local-coord).
 
-- **Stage 1.1**: Lay out each section independently through layer and track
-  assignment. This covers real stations only, and ports and junctions stay
-  unpositioned.
-- **Stage 1.2**: Snap same-row, same-direction sections to a shared Y
-  grid so they agree on pitch and slot count.
-- **Stage 1.3**: Place sections on the canvas grid by topological
-  layering of the section DAG. When a stacked same-side half-turn feeds a
-  split, on either side, reflect the consumer's branch tracks so its in-section
-  order matches the reversed bundle delivered at the entry.
-- **Stage 1.4**: Renumber sections by connected route continuity. Prefer the
-  nearest connected section on the current visual lane, keep parallel branch
-  starts together, and complete independent merge inputs before their join. A
-  dominant row may finish before a secondary route rejoins it. Preserve any
-  authored `%%metro number:` values and fill automatic sections with the lowest
-  unused positive numbers.
-- **Stage 1.5**: Grow `x_offset` / `y_offset` if section local extents
-  overshoot the canvas origin.
+- **Stage 1.1**: Lay out each section independently through layer and track assignment.
+  This covers real stations only, and ports and junctions stay unpositioned.
+- **Stage 1.2**: Snap same-row, same-direction sections to a shared Y grid so they agree on pitch and slot count.
+- **Stage 1.3**: Place sections on the canvas grid by topological layering of the section DAG.
+  When a stacked same-side half-turn feeds a split, on either side, reflect the consumer's branch tracks so its in-section order matches the reversed bundle delivered at the entry.
+- **Stage 1.4**: Renumber sections by connected route continuity.
+  Prefer the nearest connected section on the current visual lane, keep parallel branch starts together, and complete independent merge inputs before their join.
+  A dominant row may finish before a secondary route rejoins it.
+  Preserve any authored `%%metro number:` values and fill automatic sections with the lowest unused positive numbers.
+- **Stage 1.5**: Grow `x_offset` / `y_offset` if section local extents overshoot the canvas origin.
 
-At the end of Stage 1, every section has a `(local_x, local_y, w, h)`
-bbox and an `(offset_x, offset_y)` placement. No global coords yet.
+At the end of Stage 1, every section has a `(local_x, local_y, w, h)` bbox and an `(offset_x, offset_y)` placement.
+No global coords yet.
 
-### Stage 2 - Globalise (local -> global coords)
+### Stage 2 - Globalize (local -> global coords)
 
 A single-step coord-regime transition.
 
-- **Stage 2.1**: Translate every real station's `(x, y)` and every
-  section's bbox into global canvas coordinates.
+- **Stage 2.1**: Translate every real station's `(x, y)` and every section's bbox into global canvas coordinates.
 
-After this, all subsequent stages operate in global coords. Ports and
-junctions still have no positions.
+After this, all subsequent stages operate in global coords.
+Ports and junctions still have no positions.
 
-### Stage 3 - Pass A: port initialisation & section geometry
+### Stage 3 - Pass A: port initialization & section geometry
 
-Ports first appear on bbox edges, then get aligned with their incoming /
-outgoing connections, then the section layout is adjusted to accommodate
-them.
+Ports first appear on bbox edges, then get aligned with their incoming / outgoing connections, then the section layout is adjusted to accommodate them.
 
-- **Stage 3.1**: Position every port on its section's bbox edge at the
-  edge midpoint.
-- **Stage 3.2**: Align LEFT / RIGHT entry ports to the incoming source
-  Y so the inter-section horizontal run is straight; align TOP / BOTTOM
-  entry ports analogously.
-- **Stage 3.3**: For LR / RL sections with perpendicular (TOP / BOTTOM)
-  entry, shift internal stations' X so the entry port has runway
-  before stations begin.
-- **Stage 3.4**: Align LEFT and RIGHT exit ports on row-spanning fold sections
-  with the target section's Y. Pushing a target down drops its bbox top below
-  its row-mates', so the move finishes by top-aligning the rows it disturbed,
-  meaning the contiguous column groups that share their bbox tops.
-- **Stage 3.5**: Grow an LR or RL section's left and right bbox edges so its
-  perpendicular TOP and BOTTOM ports keep the designed inset from them. This is
-  the X-axis rotation of the clearance the Y sizing keeps for a TB or BT
-  section's LEFT and RIGHT ports. A grow can widen a section into its column
-  neighbour, so the inter-column gaps are re-enforced.
-- **Stage 3.6**: Level the bbox left edges of column mates that start their
-  content at one X, growing the narrower boxes leftward. This mirrors the row
-  top-align at Stage 5.3 on the X axis, restricted to boxes whose left band is
-  the same runway. A grid row's sections share a trunk Y, so their tops always
-  frame the same thing. A grid column's sections do not share a trunk X, so
-  levelling boxes whose content starts at different X buys an aligned edge at
-  the price of an empty band. Stations and the right edge stay put, while LEFT
-  ports ride the edge out to the column line. A box stops short where a left
-  neighbour in its own row band needs the inter-column corridor.
+- **Stage 3.1**: Position every port on its section's bbox edge at the edge midpoint.
+- **Stage 3.2**: Align LEFT / RIGHT entry ports to the incoming source Y so the inter-section horizontal run is straight, and align TOP / BOTTOM entry ports analogously.
+- **Stage 3.3**: For LR / RL sections with perpendicular (TOP / BOTTOM) entry, shift internal stations' X so the entry port has runway before stations begin.
+- **Stage 3.4**: Align LEFT and RIGHT exit ports on row-spanning fold sections with the target section's Y. Pushing a target down drops its bbox top below its row-mates'.
+  The move therefore finishes by top-aligning the rows it disturbed, meaning the contiguous column groups that share their bbox tops.
+- **Stage 3.5**: Grow an LR or RL section's left and right bbox edges so its perpendicular TOP and BOTTOM ports keep the designed inset from them.
+  This is the X-axis rotation of the clearance the Y sizing keeps for a TB or BT section's LEFT and RIGHT ports.
+  A grow can widen a section into its column neighbor, which is why the stage re-enforces the inter-column gaps.
+- **Stage 3.6**: Level the bbox left edges of column mates that start their content at one X, growing the narrower boxes leftward.
+  This mirrors the row top-align at Stage 5.3 on the X axis, restricted to boxes whose left band is the same runway.
+  A grid row's sections share a trunk Y, and their tops therefore always frame the same thing.
+  A grid column's sections do not share a trunk X. Leveling boxes whose content starts at different X therefore buys an aligned edge at the price of an empty band.
+  Stations and the right edge stay put, while LEFT ports ride the edge out to the column line.
+  A box stops short where a left neighbor in its own row band needs the inter-column corridor.
 
 Pass A leaves ports on bbox edges with first-approximation alignment.
 Subsequent passes refine.
 
 ### Stage 4 - Pass B: downstream alignment & trunk-Y consolidation
 
-Pull ports toward downstream stations to remove unnecessary detours;
-consolidate the inter-section trunk Y across each row; redistribute
-fan-out and full-bundle columns around the trunk.
+Pull ports toward downstream stations to remove unnecessary detours.
+Consolidate the inter-section trunk Y across each row, then redistribute fan-out and full-bundle columns around the trunk.
 
-- **Stage 4.1**: For non-fold LR and RL sections, pull exit-entry port pairs
-  toward the downstream section's connected station Y.
-- **Stages 4.2 to 4.4**: Snap port pairs to grid-group and sole-layer station Ys
-  so port-to-station connections are horizontal.
-- **Stage 4.5**: Keep ports at least `y_spacing` from terminus stations so file
-  icons don't overlap routed lines. This may expand bboxes.
-- **Stages 4.6 to 4.7**: Recompute grid-group bboxes; re-run row
-  top-align after the Stage 4.5 expansions.
-- **Stage 4.8**: Align trunk Ys across same-row sections. Shifts
-  shallower sections' content down so the inter-section bundle passes
-  through at a single Y per row, then restores carrier-owned exits to
-  their internal row while leaving downstream entries on their consumer
-  row. Any level change therefore happens in the inter-section corridor.
-- **Stages 4.9 to 4.10**: Redistribute fan-out siblings and full-bundle columns
-  around the trunk. Stage 4.9 first materialises complete semantic fan plans,
-  then applies the ordinary redistribution to legacy fans. Stage 4.10 handles
-  full-bundle columns. Both placements are gated on `center_ports`.
+- **Stage 4.1**: For non-fold LR and RL sections, pull exit-entry port pairs toward the downstream section's connected station Y.
+- **Stages 4.2 to 4.4**: Snap port pairs to grid-group and sole-layer station Ys so port-to-station connections are horizontal.
+- **Stage 4.5**: Keep ports at least `y_spacing` from terminus stations so file icons do not overlap routed lines.
+  This may expand bboxes.
+- **Stages 4.6 to 4.7**: Recompute grid-group bboxes, then re-run row top-align after the Stage 4.5 expansions.
+- **Stage 4.8**: Align trunk Ys across same-row sections.
+  Shifts shallower sections' content down so the inter-section bundle passes through at a single Y per row, then restores carrier-owned exits to their internal row while leaving downstream entries on their consumer row.
+  Any level change therefore happens in the inter-section corridor.
+- **Stages 4.9 to 4.10**: Redistribute fan-out siblings and full-bundle columns around the trunk.
+  Stage 4.9 first materializes complete semantic fan plans, then applies the ordinary redistribution to legacy fans.
+  Stage 4.10 handles full-bundle columns.
+  Both placements are gated on `center_ports`.
 
 By the end of Pass B, all port Ys are final.
 
 ### Stage 5 - Pass C: junctions & off-track lift
 
-Position junctions for the first time, lift off-track file inputs above
-their consumers, then a few post-lift fixups.
+Position junctions for the first time, lift off-track file inputs above their consumers, then a few post-lift fixups.
 
-- **Stage 5.1**: Position every junction station in the inter-section
-  gap. Fan-out junctions sit at the exit port's Y; merge junctions sit
-  near the entry port.
-- **Stage 5.2**: Lift off-track stations, meaning file inputs that should sit
-  above the trunk rather than on it, to the row above their consumer, growing
-  bboxes upward.
-- **Stages 5.3 to 5.4**: Re-align row bbox tops to match the lifted
-  sections, then compact each row's content to its bbox top.
-- **Stage 5.5**: Snap inter-section LR and RL port pairs back to a shared Y,
-  since the compaction in Stage 5.4 may have drifted them, then re-position
-  junctions to follow.
+- **Stage 5.1**: Position every junction station in the inter-section gap.
+  Fan-out junctions sit at the exit port's Y, and merge junctions sit near the entry port.
+- **Stage 5.2**: Lift off-track stations, meaning file inputs that should sit above the trunk rather than on it, to the row above their consumer, growing bboxes upward.
+- **Stages 5.3 to 5.4**: Re-align row bbox tops to match the lifted sections, then compact each row's content to its bbox top.
+- **Stage 5.5**: Snap inter-section LR and RL port pairs back to a shared Y, because the compaction in Stage 5.4 may have drifted them, then re-position junctions to follow.
 
 ### Stage 6 - Pass C: vertical settling & finishing
 
-The long settle. Its sub-stages clean up the consequences of Stages 1 through 5,
-snap everything to the grid, restore invariants broken by each cleanup pass,
-then handle the final geometric details: loop-side X recenter, bbox shrink and
-grow, canvas snap and port re-align.
+The long settle.
+Its sub-stages clean up the consequences of Stages 1 through 5, snap everything to the grid, then restore the invariants each cleanup pass breaks.
+The remaining geometric details follow: loop-side X recenter, bbox shrink and grow, canvas snap and port re-align.
 
-- **Stages 6.1 to 6.3**: Fan free content and source inputs upward into empty top
-  bands, then collapse two-branch symmetric fans onto half-grid offsets, gated
-  on `center_ports`.
-- **Stage 6.4**: Snap every station and port Y to the row's grid
-  pitch, removing fractional drift from earlier passes.
-- **Stages 6.5 to 6.6**: Grow TB-section bbox bottoms to match downstream LR and
-  RL targets, then re-anchor off-track inputs to their consumers' post-snap Y.
-- **Stages 6.7 to 6.9**: Re-center full-bundle columns around the row's final
-  trunk Y, then restore the off-track-above-consumer and row top-align
-  invariants that the recenter breaks. All are gated on `center_ports`.
-- **Stages 6.10 to 6.12**: Pin single-station downstream columns to their unique
-  upstream Y, auto-balance content around the trunk, then re-center loop-side
-  stations on their loop midpoint in an X-axis pass.
-- **Stages 6.13 to 6.14**: Shrink bbox bottoms to content and close vertical
-  slack between rows in one two-phase helper, then shift sparse loop-side
-  stations onto half-pitch Ys to clear bundle pass-throughs. The same helper
-  pushes lower rows down internally when a shift grew a bbox.
-- **Stage 6.15a**: Fit bbox tops to content, symmetric with the bottom shrink in
-  Stage 6.13. It grows a bbox top to a full `section_y_padding` above its
-  highest marker when fan re-distribution lifted a branch above the line the box
-  was sized for (#406), and shrinks an empty band that the transient row-top
-  flush left above content. The upward growth re-fits the graph into the canvas.
-- **Stage 6.15**: Snap the whole canvas back onto the `y_spacing` grid. Stage 6.4
-  snapped per-row, but the Stage 6.15a re-fit can shift everything by a non-grid
-  amount. When every station shares one residue, shift back to integer multiples.
-- **Stage 6.16**: Re-align LEFT and RIGHT entry ports on TB and BT sections with
-  their feeders. The late vertical settling drags a perpendicular entry port off
-  the feeder Y it was snapped to in Stage 3.2, which re-introduces an
-  inter-section S-kink. Re-run the alignment, for TB and BT only, and re-anchor
-  junctions to the settled port Ys.
-- **Stage 6.17**: Re-materialise complete semantic fan frames on their settled
-  centrelines without resizing their sections or row mates. Two-way plans under
-  `diamond_style='symmetric'` keep mirrored half-pitch lanes even when one
-  branch is the topology's unique continuation. Unsupported symmetric diamonds
-  then receive the legacy half-pitch compaction.
-- **Stage 6.18**: Expand a half-pitch branch to a full row when its mirrored
-  partner has gone, so an isolated branch does not remain between grid rows.
-- **Stage 6.18a**: Refit the top of each planned fan section after its final
-  content placement. The refit only removes empty space. It leaves intact any
-  top band used by a port or bypass route, and never aligns unrelated sections.
+- **Stages 6.1 to 6.3**: Fan free content and source inputs upward into empty top bands, then collapse two-branch symmetric fans onto half-grid offsets, gated on `center_ports`.
+- **Stage 6.4**: Snap every station and port Y to the row's grid pitch, removing fractional drift from earlier passes.
+- **Stages 6.5 to 6.6**: Grow TB-section bbox bottoms to match downstream LR and RL targets, then re-anchor off-track inputs to their consumers' post-snap Y.
+- **Stages 6.7 to 6.9**: Re-center full-bundle columns around the row's final trunk Y, then restore the off-track-above-consumer and row top-align invariants that the recenter breaks.
+  All are gated on `center_ports`.
+- **Stages 6.10 to 6.12**: Pin single-station downstream columns to their unique upstream Y, auto-balance content around the trunk, then re-center loop-side stations on their loop midpoint in an X-axis pass.
+- **Stages 6.13 to 6.14**: Shrink bbox bottoms to content and close vertical slack between rows in one two-phase helper, then shift sparse loop-side stations onto half-pitch Ys to clear bundle pass-throughs.
+  The same helper pushes lower rows down internally when a shift grew a bbox.
+- **Stage 6.15a**: Fit bbox tops to content, symmetric with the bottom shrink in Stage 6.13.
+  It grows a bbox top to a full `section_y_padding` above its highest marker when fan re-distribution lifted a branch above the line the box was sized for (#406).
+  It also shrinks an empty band that the transient row-top flush left above content.
+  The upward growth re-fits the graph into the canvas.
+- **Stage 6.15**: Snap the whole canvas back onto the `y_spacing` grid.
+  Stage 6.4 snapped per-row, but the Stage 6.15a re-fit can shift everything by a non-grid amount.
+  When every station shares one residue, shift back to integer multiples.
+- **Stage 6.16**: Re-align LEFT and RIGHT entry ports on TB and BT sections with their feeders.
+  The late vertical settling drags a perpendicular entry port off the feeder Y it was snapped to in Stage 3.2, which re-introduces an inter-section S-kink.
+  Re-run the alignment, for TB and BT only, and re-anchor junctions to the settled port Ys.
+- **Stage 6.17**: Re-materialize complete semantic fan frames on their settled centerlines without resizing their sections or row mates.
+  Two-way plans under `diamond_style='symmetric'` keep mirrored half-pitch lanes even when one branch is the topology's unique continuation.
+  Unsupported symmetric diamonds then receive the legacy half-pitch compaction.
+- **Stage 6.18**: Expand a half-pitch branch to a full row when its mirrored partner has gone, which keeps an isolated branch from sitting between grid rows.
+- **Stage 6.18a**: Refit the top of each planned fan section after its final content placement.
+  The refit only removes empty space.
+  It leaves intact any top band used by a port or bypass route, and never aligns unrelated sections.
 
-Stage 6 is where most of the historical organic-suffix sprawl lived, under the
-old names 13d, 13d2, 13h.1 and 13k2. The flat Stage.N scheme makes the sequence
-walkable, and the per-sub-stage CONTRACT.md entries explain why each one is
-necessary.
+Stage 6 is where most of the historical organic-suffix sprawl lived, under the old names 13d, 13d2, 13h.1 and 13k2.
+The flat Stage.N scheme makes the sequence walkable, and the per-sub-stage CONTRACT.md entries explain why each one is necessary.
 
 ## Passes vs stages
 
-The codebase has two overlapping group labels. They are not redundant, because
-they encode different axes of the structure:
+The codebase has two overlapping group labels.
+They are not redundant, because they encode different axes of the structure:
 
-- **Stage** (1-6) groups by **what kind of mutation** the pass performs: section
-  construction, globalisation, port positioning, port refinement, junctions and
-  off-track lift, and vertical settling.
-- **Pass** (A, B or C) groups by **how much of the layout is final** when the
-  pass runs. Pass A operates on a fresh station layout to position ports. Pass B
-  refines ports on a fixed station layout. Pass C operates on finalised stations
-  and ports.
+- **Stage** (1-6) groups by **what kind of mutation** the pass performs: section construction, globalization, port positioning, port refinement, junctions and off-track lift, and vertical settling.
+- **Pass** (A, B or C) groups by **how much of the layout is final** when the pass runs.
+  Pass A operates on a fresh station layout to position ports.
+  Pass B refines ports on a fixed station layout.
+  Pass C operates on finalized stations and ports.
 
 The Stage and Pass labels line up cleanly:
 
@@ -318,76 +225,51 @@ The Stage and Pass labels line up cleanly:
 
 ## Post-layout routing boundary
 
-The numbered stages settle station, port, junction and section coordinates. The
-routing pipeline then computes per-line station offsets, applies the exact slots
-owned by semantic fan plans, and builds complete exit-turn and convergence plans
-before building one atomic emission decision per route system. It then emits
-systems once, in canonical scaffold order. Whole-graph rail mode takes its
-documented short circuit instead.
+The numbered stages settle station, port, junction and section coordinates.
+The routing pipeline then computes per-line station offsets, applies the exact slots owned by semantic fan plans, and builds complete exit-turn and convergence plans before building one atomic emission decision per route system.
+It then emits systems once, in canonical scaffold order.
+Whole-graph rail mode takes its documented short circuit instead.
 
-`compute_station_offsets` first produces the ordinary offset map. Immediately
-before emission, `_route_edges` applies planned fan carriers and builds the
-exit-turn plan once, then builds convergence plans from the same semantic
-scaffold and settled routing context. The exit-turn planner compacts each
-supported group onto its active lanes, commits the offsets it owns across the
-source seam, and assigns source-side turn axes from that same order. The
-convergence planner freezes target trunks, ordered feeder joins, continuations
-and endpoint ownership. The route-system executor freezes one planned
-disposition for the complete system, and each planned inter-section family's
-stable ID. Ordinary and observed routing share this boundary. Always-on checks
-reject changes to a committed lane, axis, trunk, join, endpoint or emission
-attribution, and ensure every dedicated fan emission is consumed exactly once.
+`compute_station_offsets` first produces the ordinary offset map.
+Immediately before emission, `_route_edges` applies planned fan carriers and builds the exit-turn plan once, then builds convergence plans from the same semantic scaffold and settled routing context.
+The exit-turn planner compacts each supported group onto its active lanes, commits the offsets it owns across the source seam, and assigns source-side turn axes from that same order.
+The convergence planner freezes target trunks, ordered feeder joins, continuations and endpoint ownership.
+The route-system executor freezes one planned disposition for the complete system, and each planned inter-section family's stable ID.
+Ordinary and observed routing share this boundary.
+Always-on checks reject changes to a committed lane, axis, trunk, join, endpoint or emission attribution, and ensure every dedicated fan emission is consumed exactly once.
 
-This is a routing-boundary contract rather than a numbered layout stage. It moves
-no stations, ports, junctions or section boxes. See
-[route planning and observation](/nf-metro/dev/route_plan/) for the plan
-records and execution rules, and
-[route emission inventory](/nf-metro/dev/route_emission_inventory/) for the
-complete handler and post-pass ownership map.
+This is a routing-boundary contract rather than a numbered layout stage.
+It moves no stations, ports, junctions or section boxes.
+See [route planning and observation](/nf-metro/dev/route_plan/) for the plan records and execution rules, and [route emission inventory](/nf-metro/dev/route_emission_inventory/) for the complete handler and post-pass ownership map.
 
 ## When something breaks
 
 Common scenarios and where to start looking:
 
-- **A station moved when it shouldn't have.** Work out which stage's
-  postcondition it violates. Run `pytest tests/test_layout_invariants.py`, then
-  read the failing invariant's "related tests" entry in CONTRACT.md, which names
-  the stage that establishes the relevant property.
-- **A guard fired with `after Stage X.Y: ...` at `validate=True`.** Stage X.Y is
-  the _latest_ sub-stage where the invariant could still have been broken.
+- **A station moved when it should not have.** Work out which stage's postcondition it violates.
+  Run `pytest tests/test_layout_invariants.py`, then read the failing invariant's "related tests" entry in CONTRACT.md, which names the stage that establishes the relevant property.
+- **A guard fired with `after Stage X.Y: ...` at `validate=True`.** Stage X.Y is the _latest_ sub-stage where the invariant could still have been broken.
   Bisect by toggling the preceding sub-stages.
-- **A guard fired with `after final: ...`.** The invariant only holds at the very
-  end, so the regression could be anywhere in Pass C. Run with `validate=True`
-  and use the per-checkpoint bisection in `_run_pass_c_guards` to localise it.
-- **A new fixture lays out badly.** Render it with `nf-metro render`, inspect the
-  SVG against the stage descriptions above to guess which stage handles the
-  problem area, then read the corresponding sub-stage entry in CONTRACT.md.
+- **A guard fired with `after final: ...`.** The invariant holds only at the end, which puts the regression anywhere in Pass C. Run with `validate=True` and use the per-checkpoint bisection in `_run_pass_c_guards` to localize it.
+- **A new fixture lays out badly.** Render it with `nf-metro render`, then inspect the SVG against the stage descriptions earlier on this page to work out which stage handles the problem area.
+  Read that sub-stage's entry in CONTRACT.md.
 
 ## Why so many sub-stages
 
-The Pass C tail, Stages 6.1 to 6.18a, looks excessive at first glance. Each
-sub-stage exists because:
+The Pass C tail, Stages 6.1 to 6.18a, looks excessive.
+Each sub-stage exists because:
 
-1. A bug was found in some real-world fixture.
-2. A targeted helper was written to fix it.
-3. The helper was placed at the point in the pipeline where it has
-   the inputs it needs and won't disrupt earlier-established
-   invariants.
+1. A real-world fixture exposed a bug.
+2. A targeted helper fixed it.
+3. The helper sits at the point in the pipeline where it has the inputs it needs and does not disrupt earlier-established invariants.
 
-Some sub-stages exist purely to **restore** an invariant that an earlier
-sub-stage broke. Stages 6.8 and 6.9, for instance, restore the
-off-track-above-consumer and row-top-align invariants that Stage 6.7's
-full-bundle recenter breaks. These repair-only sub-stages are a residue of the
-pre-declarative structure, where a content phase that broke a sibling's
-placement needed an explicit fix-up afterwards. The anchor and content-placement
-split now bounds that, because the anchor-frozen guard guarantees a content
-phase cannot move an anchor. The only repairs that remain are between two
-content phases that touch the same non-anchor stations. Each is a candidate for
-folding back into the breaking stage, but every fold needs its own investigation
-and risks regressing other pipelines.
+Some sub-stages exist purely to **restore** an invariant that an earlier sub-stage broke.
+Stages 6.8 and 6.9, for instance, restore the off-track-above-consumer and row-top-align invariants that Stage 6.7's full-bundle recenter breaks.
+These repair-only sub-stages are a residue of the pre-declarative structure, where a content phase that broke a sibling's placement needed an explicit fix-up afterwards.
+The anchor and content-placement split now bounds that, because the anchor-frozen guard guarantees a content phase cannot move an anchor.
+The only repairs that remain are between two content phases that touch the same non-anchor stations.
+Each is a candidate for folding back into the breaking stage, but every fold needs its own investigation and risks regressing other pipelines.
 
-The flat Stage.N numbering replaces an earlier organic suffix tree of
-`Phase 13`, `13a`, `13d2`, `13h.1`, `13k2` and so on, which grew a suffix each
-time a sub-stage was inserted between two existing ones. The new scheme keeps
-the same ordering but makes the sequence walkable. The historical context lives
-in the git log and in the "Adding a new stage" section of CONTRACT.md.
+The flat Stage.N numbering replaces an earlier organic suffix tree of `Phase 13`, `13a`, `13d2`, `13h.1` and `13k2`, which grew a suffix each time a sub-stage was inserted between two existing ones.
+The new scheme keeps the same ordering but makes the sequence walkable.
+The historical context lives in the git log and in the "Adding a new stage" section of CONTRACT.md.

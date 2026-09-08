@@ -546,17 +546,17 @@ def test_empty_section_removed():
         assert "blah" in str(w[0].message)
         assert "no node definitions" in str(w[0].message)
 
-    # Empty section should be removed
+    # The empty authored section is dropped, leaving a flat graph that is then
+    # given a single implicit section to host bypass detours.
     assert "blah" not in graph.sections
-    assert len(graph.sections) == 0
+    assert list(graph.sections) == ["__implicit__"]
 
-    # All stations should still exist and be unsectioned
+    # Every station survives, hosted by the implicit section.
     assert "cat" in graph.stations
     assert "kraken2" in graph.stations
     assert "centrifuge" in graph.stations
-    assert all(s.section_id is None for s in graph.stations.values())
+    assert all(s.section_id == "__implicit__" for s in graph.stations.values())
 
-    # Edges should still exist
     assert len(graph.edges) == 2
 
 

@@ -8,300 +8,217 @@ sidebar:
 import Metro from "@components/Metro.astro";
 import { Aside } from "@astrojs/starlight/components";
 
-Routing turns the laid-out `MetroGraph`, meaning stations, ports and junctions
-with coordinates, into a list of `RoutedPath` polylines, one per edge.
-The entry point is `route_edges` in
-[`src/nf_metro/layout/routing/core.py`](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/layout/routing/core.py).
+Routing turns the laid-out `MetroGraph`, meaning stations, ports and junctions with coordinates, into a list of `RoutedPath` polylines, one per edge.
+The entry point is `route_edges` in [`src/nf_metro/layout/routing/core.py`](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/layout/routing/core.py).
 
 Lines are drawn as horizontal runs joined by 45-degree diagonal transitions.
-Inter-section edges use L-shaped routing, meaning a horizontal leg and a
-vertical one.
+Inter-section edges use L-shaped routing, meaning a horizontal leg and a vertical one.
 
-The routing pipeline builds the semantic scaffold, complete exit-turn and fan
-decisions, immutable member templates and complete convergence decisions, then
-one atomic emission decision per route system, as described in
-[route planning and observation](/nf-metro/dev/route_plan/). Inter-section edges
-are classified exactly once during planning. Production either copies a frozen
-member template or consumes a complete convergence plan, and it never reruns a
-fallback dispatcher during emission.
+The routing pipeline builds the semantic scaffold, complete exit-turn and fan decisions, immutable member templates and complete convergence decisions.
+It then builds one atomic emission decision per route system, as described in [route planning and observation](/nf-metro/dev/route_plan/).
+Inter-section edges are classified exactly once during planning.
+Production either copies a frozen member template or consumes a complete convergence plan, and it never reruns a fallback dispatcher during emission.
 
-`observe_route_edges` returns the same decisions together with final emission
-bindings, corridor reservations and settled layout provenance. Whole-graph rail
-mode takes the short circuit below.
+`observe_route_edges` returns the same decisions together with final emission bindings, corridor reservations and settled layout provenance.
+Whole-graph rail mode short-circuits that pipeline.
 
 ## Rail mode short-circuit
 
-Before the normal dispatch, `route_edges` checks the graph's `line_spread`, a
-`LineSpread` of `BUNDLE`, `CENTERED` or `RAILS`:
+Before the normal dispatch, `route_edges` checks the graph's `line_spread`, a `LineSpread` of `BUNDLE`, `CENTERED` or `RAILS`:
 
-- When `line_spread is LineSpread.RAILS`, the whole graph is routed by
-  `route_rail_edges` in
-  [`routing/rail.py`](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/layout/routing/rail.py)
-  and `route_edges` returns early.
-- When only some sections opt into rails (`has_rail_sections`), the edges
-  internal to those rail sections are routed by `route_rail_edges` up front, and
-  the rest fall through to the normal handler chain below.
+- When `line_spread is LineSpread.RAILS`, the whole graph is routed by `route_rail_edges` in [`routing/rail.py`](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/layout/routing/rail.py) and `route_edges` returns early.
+- When only some sections opt into rails (`has_rail_sections`), the edges internal to those rail sections are routed by `route_rail_edges` up front, and the rest fall through to the normal handler chain.
 
-Rail routing does not bundle. Each line runs along a single fixed horizontal
-rail Y, assigned in `layout/rail_mode.py`, so each edge is a straight horizontal
-run at its line's rail Y, and shared stations render as interchange pills
-bridging the rails.
+Rail routing does not bundle.
+Each line runs along a single fixed horizontal rail Y, assigned in `layout/rail_mode.py`.
+Each edge is therefore a straight horizontal run at its line's rail Y, and shared stations render as interchange pills bridging the rails.
 
 <Metro src="examples/rail_mode.mmd" purpose="reference" />
 
 ## Planning and emission order
 
-`route_edges` first builds a `_RoutingCtx` holding merge classification, fold X,
-bundle information, station offsets, fork stations and other shared facts.
+`route_edges` first builds a `_RoutingCtx` holding merge classification, fold X, bundle information, station offsets, fork stations and other shared facts.
 
-Before emission, the exit-turn planner classifies every member in each complete
-exit group, and every inter-section member is classified once against the stable
-family table. Exit turns that share a row or column gap with other routes enter
-the member allocator as movable claims. The allocator settles all resident
-channels together, then the exit-turn planner publishes the resulting axis, lane
-assignment and corner offsets.
+Before emission, the exit-turn planner classifies every member in each complete exit group, and every inter-section member is classified once against the stable family table.
+Exit turns that share a row or column gap with other routes enter the member allocator as movable claims.
+The allocator settles all resident channels together, then the exit-turn planner publishes the resulting axis, lane assignment and corner offsets.
 
-The convergence planner then builds complete target-side candidates without
-routing non-convergence members. A preliminary system decision assigns a
-complete geometry owner, after which preliminary convergence settlement exposes
-fixed channel claims to the mutable member allocator. In canonical order, the
-member-geometry planner calls each remaining member's family, materializes its
-gap slots around those claims and its trunk slot, then freezes its production
-seed and owned gap channels. Global convergence settlement allocates the
-target-side trunk, landings, continuation and endpoint owners against those
-immutable member channels and prior convergence claims.
+The convergence planner then builds complete target-side candidates without routing non-convergence members.
+A preliminary system decision assigns a complete geometry owner, after which preliminary convergence settlement exposes fixed channel claims to the mutable member allocator.
+In canonical order, the member-geometry planner calls each remaining member's family, materializes its gap slots around those claims and its trunk slot, then freezes its production seed and owned gap channels.
+Global convergence settlement allocates the target-side trunk, landings, continuation and endpoint owners against those immutable member channels and prior convergence claims.
 
-The final system decision freezes canonical order, a `PLANNED` disposition, plan
-and reservation owners, and exactly one geometry owner for every member. An
-unsupported planning result fails closed rather than selecting an alternate
-emitter.
+The final system decision freezes canonical order, a `PLANNED` disposition, plan and reservation owners, and exactly one geometry owner for every member.
+An unsupported planning result fails closed rather than selecting an alternate emitter.
 
-The edge loop encounters systems in graph order but emits each one exactly once
-in scaffold order. Each non-convergence path is a fresh mutable copy of its
-`RouteMemberGeometryPlan`, and its family is not called a second time.
-Convergence members consume their complete convergence plan. TB, entry-runway
-and intra-section handlers remain for local edges outside the inter-section
-route-system pipeline.
+The edge loop encounters systems in graph order but emits each one exactly once in scaffold order.
+Each non-convergence path is a fresh mutable copy of its `RouteMemberGeometryPlan`, and its family is not called a second time.
+Convergence members consume their complete convergence plan.
+TB, entry-runway and intra-section handlers remain for local edges outside the inter-section route-system pipeline.
 
 The order in `route_edges` is:
 
-1. Inter-section planning. Edges crossing a section boundary, running port or
-   junction to port or junction, are classified into a family such as L-shape,
-   top-entry L-shape, left- or right-entry wrap, TB bottom-exit, merge trunk or
-   branch, bypass, stepped descent, inter-row corridor, or around-section-below.
-2. `_route_tb_section` handles edges touching a `TB` section. It dispatches over
-   the ordered `_TB_SECTION_SHAPES` tuple, first match winning, across internal
-   vertical drops (`_route_tb_internal`), internal station to a LEFT or RIGHT
-   exit port (`_route_tb_lr_exit`), LEFT or RIGHT entry port to an internal
-   station (`_route_tb_lr_entry`), and TOP or BOTTOM port to an internal station
-   (`_route_perp_entry`). Each shape describes a centreline and fans it through
-   the bundle builder, `build_tapered_bundle` or `build_offset_bundle`, so no
-   handler hand-assembles per-line points or curve radii. The
-   perpendicular-entry corridor variant, `_route_perp_entry_from_corridor`,
-   routes the same way.
-3. `_route_entry_runway` handles a flow-side entry port reaching a deep internal
-   station. It compresses the diagonal into the entry region and runs a
-   horizontal runway past the bypassed early-layer stations.
-4. `_route_intra_section` handles the general local case: diagonals, cross-row
-   fold routing and straight lines.
+1. Inter-section planning.
+   Edges crossing a section boundary, running port or junction to port or junction, are classified into a family such as L-shape, top-entry L-shape, left- or right-entry wrap, TB bottom-exit, merge trunk or branch, bypass, stepped descent, inter-row corridor, or around-section-below.
+2. `_route_tb_section` handles edges touching a `TB` section.
+   It dispatches over the ordered `_TB_SECTION_SHAPES` tuple, first match winning, across internal vertical drops (`_route_tb_internal`), internal station to a LEFT or RIGHT exit port (`_route_tb_lr_exit`), LEFT or RIGHT entry port to an internal station (`_route_tb_lr_entry`), and TOP or BOTTOM port to an internal station (`_route_perp_entry`).
+   Each shape describes a centerline and fans it through the bundle builder, `build_tapered_bundle` or `build_offset_bundle`.
+   No handler hand-assembles per-line points or curve radii.
+   The perpendicular-entry corridor variant, `_route_perp_entry_from_corridor`, routes the same way.
+3. `_route_entry_runway` handles a flow-side entry port reaching a deep internal station.
+   It compresses the diagonal into the entry region and runs a horizontal runway past the bypassed early-layer stations.
+4. `_route_intra_section` handles the general local case: diagonals, cross-row fold routing and straight lines.
 
-The fan-out below illustrates all four handler families at once:
-inter-section L-shapes connect the sections, TB-section routing applies
-inside the vertical connector, entry runways compress the diagonal at
-each section's input port, and intra-section diagonals handle the
-station-to-station edges within each horizontal section.
+This fan-out exercises all four handler families at once.
+Inter-section L-shapes connect the sections, TB-section routing applies inside the vertical connector, entry runways compress the diagonal at each section's input port, and intra-section diagonals handle the station-to-station edges within each horizontal section.
 
 <Metro src="examples/guide/04_directions.mmd" purpose="reference" />
 
-After all edges are routed, `route_edges` runs a series of post-passes that
-adjust the assembled polylines as a set, covering diagonal spreading, gap and
-trunk slot materialization, and same-line coincidence. Source-turn segments,
-member-template gap channels, and the convergence trunks and joins the planners
-own are immutable during these passes. Member-template gap slots were already
-materialized once before final convergence settlement, so the general gap pass
-only allocates channels that remain unowned. For a gap-allocated planned turn,
-that pass validates the planned column or row and recomputes its expected corner
-radius rather than choosing a new seat. A snapshot ratchet checks source turns
-after every relevant pass.
+After all edges are routed, `route_edges` runs a series of post-passes that adjust the assembled polylines as a set, covering diagonal spreading, gap and trunk slot materialization, and same-line coincidence.
+Source-turn segments, member-template gap channels, and the convergence trunks and joins the planners own are immutable during these passes.
+Member-template gap slots were already materialized once before final convergence settlement.
+The general gap pass therefore allocates only the channels that remain unowned.
+For a gap-allocated planned turn, that pass validates the planned column or row and recomputes its expected corner radius rather than choosing a new seat.
+A snapshot ratchet checks source turns after every relevant pass.
 
-The final invariants check every source assignment, lane offset, route family,
-turn direction, turn axis, convergence landing and endpoint owner. The ordered
-[route emission inventory](/nf-metro/dev/route_emission_inventory/) names every
-production emitter and classifies system execution, settlement, compatibility
-records, validation and observation. It describes the post-emission pass chain
-as a whole rather than naming each pass.
+The final invariants check every source assignment, lane offset, route family, turn direction, turn axis, convergence landing and endpoint owner.
+The ordered [route emission inventory](/nf-metro/dev/route_emission_inventory/) names every production emitter and classifies system execution, settlement, compatibility records, validation and observation.
+It describes the post-emission pass chain as a whole rather than naming each pass.
 
 ## Authored identity and final geometry
 
-Routing answers two different kinds of question. Keeping them separate avoids
-trying to recover authored intent from helper nodes that the resolver inserted.
+Routing answers two kinds of question.
+Keeping them separate avoids recovering authored intent from helper nodes that the resolver inserted.
 
 | Question                                                                   | Source                                     |
 | -------------------------------------------------------------------------- | ------------------------------------------ |
 | Which authored connector, endpoint group, fan, or merge is this?           | `RouteTopology` and `RouteResolutionTrace` |
 | Which port or junction represents that group?                              | `RouteResolutionTrace`                     |
 | Which corridor is clear, or where did a route actually turn?               | The laid-out graph and routed polylines    |
-| Which exact non-convergence template and gap channel will production emit? | `RouteMemberGeometryPlan`                  |
+| Which exact non-convergence template and gap channel does production emit? | `RouteMemberGeometryPlan`                  |
 | Which feeder owns a convergence trunk and where do its siblings join it?   | The immutable convergence plan             |
 
-`RouteTopologyQuery` is the read-only bridge between the first two rows, built
-once for each routing or offset context. Its results follow authored topology
-order, and its reverse edge lookup returns every owning connector. That reverse
-lookup is deliberately one-to-many, because exact duplicate connectors and
-shared resolver legs can occupy the same final edge.
+`RouteTopologyQuery` is the read-only bridge between the first two rows, built once for each routing or offset context.
+Its results follow authored topology order, and its reverse edge lookup returns every owning connector.
+That reverse lookup is deliberately one-to-many, because exact duplicate connectors and shared resolver legs can occupy the same final edge.
 
-The query selects the semantic candidates for fan and merge handling. The
-convergence planner first constructs its own canonical candidates. The
-member-geometry planner then combines semantic identity with settled coordinates
-and calls the canonical family once. Final convergence settlement consumes the
-frozen member channels as external obstacles. `_classify_merge_edges` supplies
-geometric measurements and the structural longest-bypass candidate, and the plan
-freezes the selected trunk, axis, feeder order, join points, continuation and
-endpoint ownership. Templates and post-passes consume that record rather than
-selecting another trunk or landing.
+The query selects the semantic candidates for fan and merge handling.
+The convergence planner first constructs its own canonical candidates.
+The member-geometry planner then combines semantic identity with settled coordinates and calls the canonical family once.
+Final convergence settlement consumes the frozen member channels as external obstacles.
+`_classify_merge_edges` supplies geometric measurements and the structural longest-bypass candidate, and the plan freezes the selected trunk, axis, feeder order, join points, continuation and endpoint ownership.
+Templates and post-passes consume that record rather than selecting another trunk or landing.
 
 Several broad edge scans therefore remain by design:
 
-- `compute_bundle_info` groups final edges that share a routing corridor. An
-  authored `BundleRun` only means that connectors share exact authored
-  endpoints.
+- `compute_bundle_info` groups final edges that share a routing corridor.
+  An authored `BundleRun` means only that connectors share exact authored endpoints.
 - Bypass-gap and fan-corridor passes inspect section positions and obstructions.
 - Merge trunk and branch selection compares final spans and bypass channels.
-- Exit-port alignment follows immediate resolved successors, because a branch
-  feeding a merge can have a different geometric anchor from its authored
-  destination.
-- Normalization groups settled unowned vertical channels, trunks and route
-  endpoints, while plan-owned convergence geometry is validation-only.
-- Runtime invariants inspect the geometry that will actually be drawn.
+- Exit-port alignment follows immediate resolved successors, because a branch feeding a merge can have a different geometric anchor from its authored destination.
+- Normalization groups settled unowned vertical channels, trunks and route endpoints, while plan-owned convergence geometry is validation-only.
+- Runtime invariants inspect the geometry the renderer draws.
 
-Graphs parsed from Mermaid always carry both topology records. Hand-built
-`MetroGraph` objects may carry neither, and classify their explicit junctions
-from final graph structure. Supplying only one record is invalid, because it
-would mix authored identity with an incomplete resolver mapping.
+Graphs parsed from Mermaid always carry both topology records.
+Hand-built `MetroGraph` objects may carry neither, and classify their explicit junctions from final graph structure.
+Supplying only one record is invalid, because it would mix authored identity with an incomplete resolver mapping.
 
 ## Two plan-ownership rules
 
-A pass asking whether it may move a coordinate reads one of two predicates in
-`common.py`, and neither contains the other:
+A pass asking whether it may move a coordinate reads one of two predicates in `common.py`, and neither contains the other:
 
 - `planner_owns_segment(route, rank)` asks whether a plan states _that_ segment.
-  A member plan's arms and an exit turn's arms match the rank exactly. Only the
-  convergence arm reaches a rank either side, because a trunk axis states a run
-  whose two corners it fixes as well.
-- `route_system_owns_segment_boundary(route, rank)` asks whether a convergence or
-  member plan owns a corner at either end of the segment, which is what a pass
-  translating the segment re-forms.
+  A member plan's arms and an exit turn's arms match the rank exactly.
+  Only the convergence arm reaches a rank either side, because a trunk axis states a run whose two corners it fixes as well.
+- `route_system_owns_segment_boundary(route, rank)` asks whether a convergence or member plan owns a corner at either end of the segment, which is what a pass translating the segment re-forms.
 
-A pass that moves a whole segment reads both, and the guards that close on the
-result read them the same way. `check_no_fused_cotravelling_lines` attributes a
-lane to exactly the plan kinds `planner_owns_segment` names. A caller that wants
-the widening on one side only says which side, as `_corridor_run_band` does for
-the leg whose length a planned turn's runway fixes.
+A pass that moves a whole segment reads both, and the guards that close on the result read them the same way.
+`check_no_fused_cotravelling_lines` attributes a lane to exactly the plan kinds `planner_owns_segment` names.
+A caller that wants the widening on one side only says which side, as `_corridor_run_band` does for the leg whose length a planned turn's runway fixes.
 
 ## Bundles and offsets
 
-When several lines travel between the same pair of endpoints they form a
-**bundle**. Per-line offsets, computed by `compute_station_offsets` and applied
-through `_RoutingCtx.station_offsets`, fan the bundle out into parallel tracks so
-individual lines stay visually distinct. Handedness-aware offset propagation at
-each corner preserves bundle ordering across multi-corner paths, and the
-corner-radius helpers live in `routing/corners.py`. The runtime guard
-`check_bundle_order_preserved`, in `routing/invariants.py`, catches any
-regression where a line crosses over its bundle-mates.
+When several lines travel between the same pair of endpoints they form a **bundle**.
+Per-line offsets, computed by `compute_station_offsets` and applied through `_RoutingCtx.station_offsets`, fan the bundle out into parallel tracks so individual lines stay visually distinct.
+Handedness-aware offset propagation at each corner preserves bundle ordering across multi-corner paths, and the corner-radius helpers live in `routing/corners.py`.
+The runtime guard `check_bundle_order_preserved`, in `routing/invariants.py`, catches any regression where a line crosses over its bundle-mates.
 
-Immediately before emission, the exit-turn planner removes slots for lines that
-do not leave a supported exit group. It owns the exit port, any divergence and
-compatible continuation stations across the source seam. A mismatched incoming
-feeder keeps its original lane and receives an explicit transition into the
-compacted seam. Every transition must preserve pairwise lane order at both ends.
-If one cannot, the child plan declines and another complete geometry owner has
-to cover the route system.
+Immediately before emission, the exit-turn planner removes slots for lines that do not leave a supported exit group.
+It owns the exit port, any divergence and compatible continuation stations across the source seam.
+A mismatched incoming feeder keeps its original lane and receives an explicit transition into the compacted seam.
+Every transition must preserve pairwise lane order at both ends.
+If one cannot, the child plan declines and another complete geometry owner has to cover the route system.
 
-The debug overlay below makes the offset geometry visible: each line's
-parallel track and the station markers it must pass through.
+This debug overlay makes the offset geometry visible, showing each line's parallel track and the station markers it must pass through.
 
 <Metro src="examples/guide/03_fan_out.mmd" debug mmd={false} />
 
 ## Reserved inter-row corridors
 
-The gap between two stacked grid rows holds horizontal channels. A channel placed
-there normally derives its band from the two rows' bbox edges, keeping
-`INTER_ROW_EDGE_CLEARANCE` below the box above and `INTER_ROW_HEADER_CLEARANCE`
-above the next row's header badge, in `_center_inter_row_channel`. Those edges
-are only a proxy for the real obstruction: a section spanning the boundary, or
-one whose box sits outside the run's own reach, moves an edge without bounding
-the corridor.
+The gap between two stacked grid rows holds horizontal channels.
+A channel placed there normally derives its band from the two rows' bbox edges, keeping `INTER_ROW_EDGE_CLEARANCE` below the box above and `INTER_ROW_HEADER_CLEARANCE` above the next row's header badge, in `_center_inter_row_channel`.
+Those edges are only a proxy for the real obstruction.
+A section spanning the boundary, or one whose box sits outside the run's own reach, moves an edge without bounding the corridor.
 
 Where the corridor carries a `RouteReservation`, that proxy is not used.
-`_RoutingCtx.reserved_bands` maps a grid-row boundary to the clear span the
-reservation realises, measured against the blockers over the corridor's own
-declared span, and the channel is placed inside that. The lookup exists only on
-a re-route driven by an existing ledger, namely envelope settlement's, which has
-just widened these boundaries, so the pass that publishes the ledger is
-unaffected. See the router contract in
-[route_plan](/nf-metro/dev/route_plan/#the-routers-side-of-the-contract).
+`_RoutingCtx.reserved_bands` maps a grid-row boundary to the clear span the reservation realizes, measured against the blockers over the corridor's own declared span, and the channel is placed inside that.
+The lookup exists only on a re-route driven by an existing ledger, namely envelope settlement's, which has just widened these boundaries.
+The pass that publishes the ledger is therefore unaffected.
+See the router contract in [route_plan](/nf-metro/dev/route_plan/#the-routers-side-of-the-contract).
 
-A band says how much room a corridor is left, not which lane inside it the
-corridor takes. Every claim crossing one boundary realises the same band, so
-several independently placed corridors can each be put in it without any of them
-seeing the others. Two can then settle less than one `OFFSET_STEP` apart, close
-enough that two distinct lines paint a single two-tone stripe and one of them
-cannot be read at all. `_separate_fused_cotravelling_runs` is the closing pass
-that sees every corridor at once and restores the step. The unit it moves is a
-_track_, meaning every run of one line drawn on one lane through one corridor,
-so re-seating cannot split a fused fan-out into two parallel same-colour runs.
-`check_no_fused_cotravelling_lines` is its postcondition on the render
-chokepoint. Plans seat distinct co-travelling trunks against frozen member
-corridors before ownership begins. The final check includes immutable tracks and
-attributes a violation to its route system and exact owning plans.
+A band says how much room a corridor is left, not which lane inside it the corridor takes.
+Every claim crossing one boundary realizes the same band.
+Several independently placed corridors can therefore each be put in it without any of them seeing the others.
+Two can then settle less than one `OFFSET_STEP` apart, close enough that two distinct lines paint a single two-tone stripe and one of them cannot be read at all.
+`_separate_fused_cotravelling_runs` is the closing pass that sees every corridor at once and restores the step.
+The unit it moves is a _track_, meaning every run of one line drawn on one lane through one corridor.
+Re-seating therefore cannot split a fused fan-out into two parallel same-color runs.
+`check_no_fused_cotravelling_lines` is that pass's postcondition on the render chokepoint.
+
+Plans seat distinct co-traveling trunks against frozen member corridors before ownership begins.
+The final check includes immutable tracks and attributes a violation to its route system and exact owning plans.
 
 ## Render-time guards
 
-`validate_exit_turn_plans` runs before the generic render guards. It checks every
-planned lane, transition, family, turn axis and exactly-once assignment against
-the emitted routes, and attributes a failure to the route system and authored
-connectors.
+`validate_exit_turn_plans` runs before the generic render guards.
+It checks every planned lane, transition, family, turn axis and exactly-once assignment against the emitted routes, and attributes a failure to the route system and authored connectors.
 
-`validate_route_system_emission` runs after normalization and before the
-planner-specific validators. It checks the attribution carried by each final path
-against the canonical execution record. A failure names the route system,
-authored connectors, emission member, plan IDs and reservation IDs, so a
-post-pass cannot silently detach geometry from its owner.
+`validate_route_system_emission` runs after normalization and before the planner-specific validators.
+It checks the attribution carried by each final path against the canonical execution record.
+A failure names the route system, authored connectors, emission member, plan IDs and reservation IDs.
+A post-pass therefore cannot silently detach geometry from its owner.
 
-`assert_render_curve_invariants`, in `routing/invariants.py`, runs a set of
-correctness checks on the final `route_edges` output on every render, against
-the exact geometry the renderer is about to draw. A defective route therefore
-aborts the render with a message naming the offending edge rather than being
-shipped. It is always on, independent of `compute_layout`'s `validate` flag.
+`assert_render_curve_invariants`, in `routing/invariants.py`, runs a set of correctness checks on the final `route_edges` output on every render, against the exact geometry the renderer is about to draw.
+A defective route aborts the render with a message naming the offending edge, rather than shipping a broken diagram.
+The check is always on, independent of `compute_layout`'s `validate` flag.
 
-Among these are the **endpoint guards**, which assert that a routed segment
-terminates at a real anchor rather than hanging in open space:
+Among these are the **endpoint guards**, which assert that a routed segment terminates at a real anchor rather than hanging in open space:
 
-- `check_merge_branches_meet_trunk` requires a merge feeder to land on its
-  trunk's channel. It applies to merge junctions only.
-- `check_no_hanging_routes` is the general backstop. **Every** route's two
-  endpoints must each lie within `2 * CURVE_RADIUS` of a station, port or
-  junction marker, or of another route it joins, such as a bundle mate, a branch
-  onto a trunk or a peel-off. Rail-mode endpoints are skipped, because a rail
-  stub terminates on its rail. This generalises the merge-only check to any
-  route family, and the family-specific checks remain as sharper diagnostics.
+- `check_merge_branches_meet_trunk` requires a merge feeder to land on its trunk's channel.
+  It applies to merge junctions only.
+- `check_no_hanging_routes` is the general backstop.
+  **Every** route's two endpoints must each lie within `2 * CURVE_RADIUS` of a station, port or junction marker, or of another route it joins, such as a bundle mate, a branch onto a trunk or a peel-off.
+  Rail-mode endpoints are skipped, because a rail stub terminates on its rail.
+  This generalizes the merge-only check to any route family, and the family-specific checks remain as sharper diagnostics.
 
-Both checks allow `2 * CURVE_RADIUS` of slack, because they look for paths that
-end in open space. A smaller gap can still draw a visible stub.
-`check_merge_feeders_land_on_trunk` therefore applies the tighter
-`COORD_TOLERANCE` limit in Tier C. Planned feeders consume their exact join
-during emission, and the corpus oracle holds every emitted path to the same
-final endpoint constraint.
+Both checks allow `2 * CURVE_RADIUS` of slack, because they look for paths that end in open space.
+A smaller gap can still draw a visible stub.
+`check_merge_feeders_land_on_trunk` therefore applies the tighter `COORD_TOLERANCE` limit in Tier C. Planned feeders consume their exact join during emission, and the corpus oracle holds every emitted path to the same final endpoint constraint.
 
 <Aside type="danger" title="Station-as-elbow constraint">
+
 Never position a port at the same coordinate as an internal station, within the 10 px tolerance that `check_station_as_elbow` in `tests/layout_validator.py` checks:
 
 - TOP and BOTTOM ports on horizontal-flow (LR or RL) sections must not share X with any internal station.
 - LEFT and RIGHT ports on vertical-flow (TB or BT) sections must not share Y with any internal station.
 
-In both cases the port is perpendicular to its section's flow, so the line has to turn 90 degrees to reach it, and the offset is what gives that turn its runway. `check_exit_port_feeder_alignment` therefore exempts perpendicular ports rather than asking them to line up with their feeder, because the two rules would demand opposite geometry.
+In both cases the port is perpendicular to its section's flow.
+The line therefore has to turn 90 degrees to reach it, and the offset is what gives that turn its runway.
+`check_exit_port_feeder_alignment` exempts perpendicular ports rather than asking them to line up with their feeder, because the two rules would demand opposite geometry.
 
-When fixing a routing kink, **do not** move a port onto a station's coordinate to make the line appear straight. That creates a station-as-elbow violation where the routed line visually passes through the station marker. Accept a small offset between port and station instead, and handle the geometry through routing, using near-vertical drops or gentle curves.
+When fixing a routing kink, **do not** move a port onto a station's coordinate to make the line appear straight.
+That creates a station-as-elbow violation where the routed line visually passes through the station marker.
+Accept a small offset between port and station instead, and handle the geometry through routing, using near-vertical drops or gentle curves.
 
 </Aside>
 
@@ -316,8 +233,8 @@ When fixing a routing kink, **do not** move a port onto a station's coordinate t
 | `inter_section_handlers.py` | handler 1 family: bypass, left/right entry wraps, around-section, inter-row corridors, stepped descent, L-shape                                                                                                                           |
 | `tb_handlers.py`            | TB section shapes dispatched by `_route_tb_section` over `_TB_SECTION_SHAPES` (`_route_tb_internal`, `_route_tb_lr_exit`, `_route_tb_lr_entry`, `_route_perp_entry`, `_route_perp_entry_from_corridor`) and `_compute_diagonal_placement` |
 | `intra_handlers.py`         | `_route_entry_runway` and `_route_intra_section` (the general intra-section fallback)                                                                                                                                                     |
-| `bundle.py`                 | constructive bundle-curve builders (`build_concentric_bundle`, `build_tapered_bundle`, `build_offset_bundle`); fans a centreline into per-line offset paths with concentric corners                                                       |
-| `centrelines.py`            | centreline templates and bundle-gathering helpers (`gather_member_edges`, `route_along`, `route_tapered`, …) layered over `bundle.py`                                                                                                     |
+| `bundle.py`                 | constructive bundle-curve builders (`build_concentric_bundle`, `build_tapered_bundle`, `build_offset_bundle`); fans a centerline into per-line offset paths with concentric corners                                                       |
+| `centrelines.py`            | centerline templates and bundle-gathering helpers (`gather_member_edges`, `route_along`, `route_tapered`, …) layered over `bundle.py`                                                                                                     |
 | `exit_turns.py`             | complete pre-routing exit-group plans, active-lane compaction, handler consumption, and planner-owned geometry invariants                                                                                                                 |
 | `postprocess.py`            | post-routing passes: diagonal bundle spread and bubble-station centring                                                                                                                                                                   |
 | `normalize.py`              | channel and trunk normalization passes (`_materialize_gap_slots`, htrunk restacking, riser/port-approach alignment, …)                                                                                                                    |
@@ -327,4 +244,4 @@ When fixing a routing kink, **do not** move a port onto a station's coordinate t
 | `reversal.py`               | fold/reversal (serpentine row) routing                                                                                                                                                                                                    |
 | `invariants.py`             | runtime routing guards (`check_bundle_order_preserved`)                                                                                                                                                                                   |
 | `rail.py`                   | `route_rail_edges` straight-rail router for rail mode                                                                                                                                                                                     |
-| `reserved_bands.py`         | realised row- and column-gap corridor bands read off a `RouteReservation` ledger (`build_reserved_corridors`, `ReservedCorridors`)                                                                                                        |
+| `reserved_bands.py`         | realized row- and column-gap corridor bands read off a `RouteReservation` ledger (`build_reserved_corridors`, `ReservedCorridors`)                                                                                                        |

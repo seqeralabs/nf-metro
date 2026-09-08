@@ -5,79 +5,60 @@ sidebar:
   order: 9
 ---
 
-nf-metro treats output ordering as part of its render contract. The same source,
-options and dependency versions must produce the same settled graph, render
-plan, SVG bytes, exception and ordered validation findings in fresh Python
-processes. `PYTHONHASHSEED` must not affect any of those results.
+nf-metro treats output ordering as part of its render contract.
+The same source, options and dependency versions must produce the same settled graph, render plan, SVG bytes, exception, and ordered validation findings in fresh Python processes.
+`PYTHONHASHSEED` must not affect any of those results.
 
 ## Semantic ranks
 
-When several graph elements are equally valid candidates, code must resolve the
-tie with a rank owned by the model or by geometry:
+When several graph elements are equally valid candidates, code must resolve the tie with a rank owned by the model or by geometry:
 
 - Sections use declaration order from `MetroGraph.sections`.
-- Stations use declaration order from `MetroGraph.stations`, or the local
-  `Section.station_ids` order when a decision is section-local.
-- Edges use `MetroGraph.edges` order unless the decision has a more specific
-  spatial key.
-- Lines use declaration order from `MetroGraph.lines` when lane priority
-  matters. Lexical line order is suitable only for stable presentation or set
-  identity, not lane preference.
-- Ports and junctions use their ordered model collections. Their construction
-  order follows the ordered connector rewrite that created them.
-- Spatial decisions sort by the relevant coordinates first and append the
-  matching semantic rank as the final tie-breaker.
+- Stations use declaration order from `MetroGraph.stations`, or the local `Section.station_ids` order when a decision is section-local.
+- Edges use `MetroGraph.edges` order unless the decision has a more specific spatial key.
+- Lines use declaration order from `MetroGraph.lines` when lane priority matters.
+  Lexical line order is suitable only for stable presentation or set identity, not lane preference.
+- Ports and junctions use their ordered model collections.
+  Their construction order follows the ordered connector rewrite that created them.
+- Spatial decisions sort by the relevant coordinates first and append the matching semantic rank as the final tie-breaker.
 
-NetworkX insertion order and Python set iteration order are implementation
-details rather than semantic ranks. Graph views therefore receive ordered node
-and edge sequences, and topological traversals use the applicable model rank
-whenever the traversal can affect coordinates.
+NetworkX insertion order and Python set iteration order are implementation details rather than semantic ranks.
+Graph views therefore receive ordered node and edge sequences, and topological traversals use the applicable model rank whenever the traversal can affect coordinates.
 
 ## Safe unordered values
 
-Sets and frozensets remain useful for membership, equality, aggregation and
-mathematically commutative reductions. Iteration over a multi-member unordered
-value must not choose a branch, assign a position, overwrite an earlier result
-or determine which invariant is reported first.
+Sets and frozensets remain useful for membership, equality, aggregation, and mathematically commutative reductions.
+Iteration over a multi-member unordered value must not choose a branch, assign a position, overwrite an earlier result, or determine which invariant is reported first.
 
-`next(iter(value))` is valid only after a cardinality check proves that `value`
-has exactly one member. Otherwise, traverse an ordered model collection or sort
-with an explicit semantic key.
+`next(iter(value))` is valid only after a cardinality check proves that `value` has exactly one member.
+Otherwise, traverse an ordered model collection or sort with an explicit semantic key.
 
-These rules apply across parser rewrites, auto-layout, section and station
-placement, route dispatch, lane offsets, normalization, validation and bridge
-placement. Bridge crossing graphs use ordered route indices and sort component
-members explicitly before choosing bridge geometry.
+These rules apply across parser rewrites, auto-layout, section and station placement, route dispatch, lane offsets, normalization, validation, and bridge placement.
+Bridge crossing graphs use ordered route indices and sort component members explicitly before choosing bridge geometry.
 
-Route-plan observations use the same rule. Systems follow connector order.
+Route-plan observations use the same rule.
+Systems follow connector order.
 Resolved endpoint groups, divergences and convergences follow topology order.
-Physical members follow connector, resolved-path and leg order. Branches and
-feeders follow topology order, and bindings follow member order. IDs derive
-from that semantic content rather than from hash iteration. The plan serializer
-preserves canonical tuple order and sorts object keys only for representation.
+Physical members follow connector, resolved-path and leg order.
+Branches and feeders follow topology order, and bindings follow member order.
+IDs derive from that semantic content rather than from hash iteration.
+The plan serializer preserves canonical tuple order and sorts object keys only for representation.
 
 ## Cross-process oracle
 
-`tests/hash_seed_oracle.py` launches a fresh interpreter for each hash seed. It
-compares the complete semantic state of the settled `MetroGraph`, including its
-route topology and resolution trace, and excludes only lazy lookup caches. It
-also compares the complete `RenderPlan`, the exact emitted SVG bytes, the
-exception phase (`prepare`, `plan`, `emit` or `validate`), the exception class
-and message, and the ordered validation findings. The oracle does not normalize
-SVG or discard ordered fields.
+`tests/hash_seed_oracle.py` launches a fresh interpreter for each hash seed.
+It compares the complete semantic state of the settled `MetroGraph`, including its route topology and resolution trace, and excludes only lazy lookup caches.
+It also compares the complete `RenderPlan`, the exact emitted SVG bytes, the exception phase (`prepare`, `plan`, `emit`, or `validate`), the exception class and message, and the ordered validation findings.
+The oracle does not normalize SVG or discard ordered fields.
 
-The regression suite freezes the generated issue fixtures by source SHA-256 and
-runs them under hash seeds `0`, `1`, `2`, `5`, `43` and a literal random seed.
-The fixed seeds make failures reproducible, and the random run checks one more
-interpreter-selected ordering. A representative corpus test covers production
-pipelines and difficult topology families. A reproducible full-corpus check is
-also available for broader investigations:
+The regression suite freezes the generated issue fixtures by source SHA-256 and runs them under hash seeds `0`, `1`, `2`, `5`, `43`, and a literal random seed.
+The fixed seeds make failures reproducible, and the random run checks one more interpreter-selected ordering.
+A representative corpus test covers production pipelines and difficult topology families.
+A reproducible full-corpus check is also available for broader investigations:
 
 ```bash
 PYTHONPATH=src:tests python tests/hash_seed_oracle.py --check-example-corpus
 ```
 
-Candidate execution has a separate cross-process oracle described in the
-[candidate executor guide](/nf-metro/dev/candidate_execution/). It hashes the
-complete accepted result at several hash seeds, without freezing any
-intermediate layout stage as the expected answer.
+Candidate execution has a separate cross-process oracle described in the [candidate execution](/nf-metro/dev/candidate_execution/).
+It hashes the complete accepted result at several hash seeds, without freezing any intermediate layout stage as the expected answer.

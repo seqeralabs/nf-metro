@@ -1287,6 +1287,16 @@ gallery:
       skipping the stops between them. Interchange inference detects the
       parallel-lane hub and the detour routes around the skipped markers
       instead of through them (#1229).
+  - id: sectionless_skip_over_two_markers
+    source_dir: examples/topologies
+    category: Bypass Routing
+    description:
+      The Alignment line originates at Hub and skips over M0 and M1 to reach M2,
+      while the Analysis line runs Hub through every marker. Hub only originates
+      the skip-line, so no parallel-lane interchange exists to infer; the flat
+      graph previously got no implicit section and drew the skip straight through
+      M0 and M1. Sectioning every flat graph regardless of interchange detection
+      now bows the skip around the intermediate markers (#1953).
   - id: interchange_label_clears_bridge
     source_dir: examples/topologies
     category: Bypass Routing

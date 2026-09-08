@@ -5,88 +5,74 @@ sidebar:
   order: 6
 ---
 
-Candidate execution is an internal safety boundary for layout recovery. It
-answers one question: what would this exact set of layout commitments produce?
-It does not generate candidates, rank them, choose one or retry a normal
-render.
+Candidate execution is an internal safety boundary for layout recovery.
+It reports what one exact set of layout commitments produces.
+It does not generate candidates, rank them, choose one, or retry a normal render.
 
 The normal CLI and Python rendering APIs never call the executor.
 
-The executor module is not shipped in the nf-metro wheel. Drive it from a
-source checkout.
+The executor module is not shipped in the nf-metro wheel.
+Drive it from a source checkout.
 
-## What a candidate contains
+## Candidate contents
 
-A candidate is an immutable set of typed commitments. It may pin section grid
-cells, section directions, a fold threshold, exact connector entry or exit
-sides, and line ordering. The request records caller-owned layout options and
-pins separately.
+A candidate is an immutable set of typed commitments.
+It may pin section grid cells, section directions, a fold threshold, exact connector entry or exit sides, and line ordering.
+The request records caller-owned layout options and pins separately.
 
 The parser captures authored and caller provenance before it sees a candidate.
-It then validates the complete overlay at one pre-inference boundary. A
-candidate cannot replace an authored or caller-owned value. Duplicate,
-contradictory, malformed, partial, and unknown commitments are rejected before
-layout.
+It then validates the complete overlay at one pre-inference boundary.
+A candidate cannot replace an authored or caller-owned value.
+The parser rejects duplicate, contradictory, malformed, partial, and unknown commitments before layout.
 
-Accepted candidate values are recorded as inferred, locked decisions. After
-layout, the executor checks the effective provenance and the settled graph
-again, which catches a commitment that inference accepted but failed to honour.
+Accepted candidate values are recorded as inferred, locked decisions.
+After layout, the executor checks the effective provenance and the settled graph again, which catches a commitment that inference accepted but failed to honor.
 
-## What one attempt runs
+## Stages in one attempt
 
-Every baseline and candidate attempt starts a new Python process using the
-`spawn` start method. The worker runs these stages in order:
+Every baseline and candidate attempt starts a new Python process using the `spawn` start method.
+The worker runs these stages in order:
 
-1. The shared production preparation cascade parses the source, applies caller
-   options, resolves relative logos, and reserves the title band.
+1. The shared production preparation cascade parses the source, applies caller options, resolves relative logos, and reserves the title band.
 2. Structured graph validation runs.
 3. Layout runs with stage-boundary validation enabled.
 4. The accepted commitments are checked against the settled graph.
 5. Production routing produces immutable route-system evidence.
-6. Render planning observes the final centred routing invocation used by the
-   plan.
-7. The plan is emitted with the requested theme, mode, baked mode, and SVG
-   configuration.
-8. Plan-aware artifact validation checks label strikes, marker crossings, and
-   collapsed offsets.
+6. Render planning observes the final centered routing invocation used by the plan.
+7. The plan is emitted with the requested theme, mode, baked mode, and SVG configuration.
+8. Plan-aware artifact validation checks label strikes, marker crossings, and collapsed offsets.
 
-The result keeps every completed piece of evidence, so an SVG emission failure
-still carries the settled graph, route plan and RenderPlan. Route-plan
-diagnostics and artifact findings are structured rejection data rather than
-text parsed from an exception.
+The result keeps every completed piece of evidence.
+An SVG emission failure still carries the settled graph, route plan, and RenderPlan.
+Route-plan diagnostics and artifact findings are structured rejection data rather than text parsed from an exception.
 
 ## Warnings
 
-Ordinary parser and adjustment warnings remain ordered diagnostics. Typed
-`LayoutGeometryWarning` warnings reject an attempt because they identify known
-visual damage. `PermissiveGuardWarning` inherits from that category, so a
-permissive render cannot turn a failed engine guard into an accepted candidate.
+Ordinary parser and adjustment warnings remain ordered diagnostics.
+Typed `LayoutGeometryWarning` warnings reject an attempt because they identify known visual damage.
+Because `PermissiveGuardWarning` inherits from that category, a permissive render cannot turn a failed engine guard into an accepted candidate.
 Warning messages do not decide policy.
 
 ## Limits and cleanup
 
-The coordinator enforces three independent limits: a maximum attempt count, a
-deadline for each worker, and one deadline for the complete request. The
-baseline always runs first. Candidates that cannot start because of a limit are
-returned explicitly as unattempted rather than reported as timeouts.
+The coordinator enforces three independent limits: a maximum attempt count, a deadline for each worker, and one deadline for the complete request.
+The baseline always runs first.
+The coordinator reports candidates that cannot start because of a limit explicitly as unattempted rather than as timeouts.
 
-Workers send versioned, sequenced frames over a one-way pipe. Large evidence is
-split into small atomic frames, so a receive cannot block indefinitely after
-only part of a message arrives. The parent receives and verifies the complete
-payload before joining a successful worker. It joins before reading the exit
-code, and it terminates or kills and reaps every timed-out worker.
+Workers send versioned, sequenced frames over a one-way pipe and split large evidence into small atomic frames.
+A receive therefore cannot block indefinitely after only part of a message arrives.
+The parent receives and verifies the complete payload before joining a successful worker.
+It joins before reading the exit code, and it terminates or kills and reaps every timed-out worker.
 
-The outcome distinguishes accepted execution, validation rejection, engine
-failure, timeout, worker crash, and communication or infrastructure failure.
+The outcome distinguishes accepted execution, validation rejection, engine failure, timeout, worker crash, and communication or infrastructure failure.
 It records no elapsed times, process IDs, or temporary paths.
 
 ## Determinism
 
-General mapping keys are sorted by their canonical encoded key. Semantic tuples
-and lists keep their order, and sets are sorted by canonical value. Route plans
-use their own canonical serializer. The settled graph, route plan, RenderPlan,
-SVG, findings, diagnostics and failure details must match across fresh
-interpreters with different `PYTHONHASHSEED` values.
+General mapping keys are sorted by their canonical encoded key.
+Semantic tuples and lists keep their order, and sets are sorted by canonical value.
+Route plans use their own canonical serializer.
+The settled graph, route plan, RenderPlan, SVG, findings, diagnostics, and failure details must match across fresh interpreters with different `PYTHONHASHSEED` values.
 
-The frozen fuzz sources are determinism inputs only. Their current success or
-failure stage is not part of the executor contract.
+The frozen fuzz sources are determinism inputs only.
+Their current success or failure stage is not part of the executor contract.

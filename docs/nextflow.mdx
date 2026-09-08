@@ -1,33 +1,37 @@
 ---
-title: "Importing from Nextflow"
-description: Convert Nextflow's built-in DAG output into an nf-metro map using nf-metro convert.
+title: "Convert a Nextflow DAG into a metro map"
+description: Convert the built-in DAG output from Nextflow into an nf-metro map with nf-metro convert.
 ---
 
 import Metro from "@components/Metro.astro";
 
-nf-metro can convert Nextflow's built-in DAG output into a metro map.
+nf-metro converts the built-in directed acyclic graph (DAG) output from Nextflow into a metro map.
 
 :::caution[Complex pipelines need hand-editing]
-Direct conversion works well for simple pipelines with a handful of subworkflows. For complex pipelines like those in nf-core, it is unlikely to produce a good diagram, and you will need to hand-write or heavily edit the `.mmd` file. Improving this is an active area of development.
+Direct conversion works well for pipelines with a few subworkflows.
+For complex pipelines such as those in nf-core, it is unlikely to produce a good diagram, and you need to hand-write or heavily edit the `.mmd` file.
+This is an active area of development.
 :::
 
-## Generating a Nextflow DAG
+## Generate a Nextflow DAG
 
-Nextflow can export its pipeline DAG in mermaid format:
+Nextflow exports its pipeline DAG in Mermaid format:
 
 ```bash
 nextflow run my_pipeline.nf -preview -with-dag dag.mmd
 ```
 
-The `-preview` flag skips execution and generates only the DAG. The resulting file uses Nextflow's `flowchart TB` mermaid syntax, which nf-metro cannot render directly but can convert.
+The `-preview` flag skips execution and generates only the DAG.
+The resulting file uses the Nextflow `flowchart TB` Mermaid syntax, which nf-metro cannot render directly but can convert.
 
 ## Direct rendering
 
-The quickest way to get a metro map is to convert and render in one step with the `--from-nextflow` flag. The examples below show the unedited output.
+The quickest way to get a metro map is to convert and render in one step with the `--from-nextflow` flag.
+The examples that follow show the unedited output.
 
 ### Flat pipeline (no subworkflows)
 
-A simple five-process pipeline with no subworkflows:
+A five-process pipeline with no subworkflows:
 
 ```groovy
 workflow {
@@ -53,7 +57,8 @@ nf-metro render dag.mmd -o pipeline.svg --from-nextflow
   mmd={false}
 />
 
-With no subworkflows, everything lands in a single section and the converter assigns one "main" line following the longest path. Output rarely comes out tidier than this.
+With no subworkflows, everything lands in a single section and the converter assigns one `main` line following the longest path.
+Output rarely comes out tidier than this.
 
 ### Pipeline with subworkflows
 
@@ -110,7 +115,9 @@ nf-metro render dag.mmd -o pipeline.svg --from-nextflow
   mmd={false}
 />
 
-The converter maps each subworkflow to a section and creates a "Reporting" section for the standalone MultiQC. It detects bypass lines, meaning edges that skip sections such as QC metrics going from Preprocess straight to Reporting, and spur lines for dead-end processes such as Samtools Index.
+The converter maps each subworkflow to a section and creates a Reporting section for the standalone MultiQC.
+It also detects bypass lines, meaning edges that skip sections, such as QC metrics going from Preprocess straight to Reporting.
+Dead-end processes such as Samtools Index get spur lines.
 
 ### Variant calling pipeline (diamond pattern)
 
@@ -149,9 +156,10 @@ nf-metro render dag.mmd -o pipeline.svg --from-nextflow
 
 The Variant Calling section fans out to the two callers and back in again without further editing.
 
-## Hand-tuning the output
+## Hand-tune the output
 
-For anything beyond a toy pipeline, the two-step workflow gives better results. Convert, edit the `.mmd`, then render:
+For anything beyond a toy pipeline, the two-step process gives better results.
+Convert, edit the `.mmd`, then render:
 
 ```bash
 nf-metro convert dag.mmd -o pipeline.mmd --title "My Pipeline"
@@ -208,17 +216,20 @@ graph LR
     fastp -->|preprocess_reporting| multiqc
 ```
 
-Cleaning up the labels, renaming the bypass line and adding a proper title gives this:
+Cleaning up the labels, renaming the bypass line, and adding a proper title gives this:
 
 <Metro src="examples/variant_calling.mmd" />
 
-The changes are small, but the diagram reads better for them: proper casing on labels (BWA-MEM, SAMtools, GATK HaplotypeCaller), a meaningful line name ("QC Reporting" rather than "Preprocess - Reporting"), and a clearer title. See the [Guide](/nf-metro/guide/) for the full `.mmd` format reference.
+The changes are small, but the diagram reads better for them: proper casing on labels (BWA-MEM, SAMtools, GATK HaplotypeCaller), a meaningful line name ("QC Reporting" rather than "Preprocess - Reporting"), and a clearer title.
+See the [Guide](/nf-metro/guide/) for the full `.mmd` format reference.
 
-## Adding file icons
+## Add file icons
 
-Marking input and output files with document icons is one of the most useful things you can do to a Nextflow pipeline diagram. The `%%metro file:` directive pairs a station ID with a label, and when that station has a blank label (`[ ]`) it renders as a document icon instead of a pill-shaped station marker.
+Document icons mark where data enters and leaves a Nextflow pipeline diagram.
+The `%%metro file:` directive pairs a station ID with a label.
+When that station has a blank label (`[ ]`), it renders as a document icon instead of a pill-shaped station marker.
 
-Starting from the hand-tuned variant calling example above, three things change:
+Starting from the hand-tuned variant calling example earlier, three things change:
 
 1. Add `%%metro file:` directives at the top of the file, one per file terminus:
 
@@ -229,7 +240,8 @@ Starting from the hand-tuned variant calling example above, three things change:
    %%metro file: report_out | HTML
    ```
 
-2. Add blank terminus stations (`[ ]`) at the input and output points of your pipeline. The station ID must match the `%%metro file:` directive:
+2. Add blank terminus stations (`[ ]`) at the input and output points of your pipeline.
+   The station ID must match the `%%metro file:` directive:
 
    ```text
    fastq_in[ ]
@@ -245,7 +257,9 @@ The full `.mmd` with file icons added:
 
 <Metro src="examples/variant_calling_tuned.mmd" />
 
-The FASTQ icon at the start of Pre-processing and the FASTA icon at the start of Alignment show where data enters the pipeline. The VCF icon at the end of Variant Calling and the HTML icon in Reporting show where results are written. A reader who has never seen the pipeline can now tell at a glance what goes in and what comes out.
+The FASTQ icon at the start of Pre-processing and the FASTA icon at the start of Alignment show where data enters the pipeline.
+The VCF icon at the end of Variant Calling and the HTML icon in Reporting show where the pipeline writes results.
+A reader who has never seen the pipeline can now tell what goes in and what comes out.
 
 For a more complex example with multiple file icons, see the nf-core/rnaseq diagram at [`examples/rnaseq_sections.mmd`](https://github.com/seqeralabs/nf-metro/blob/main/examples/rnaseq_sections.mmd), which uses FASTQ input icons and HTML report output icons across several sections.
 
@@ -254,11 +268,13 @@ Two more icon variants cover common Nextflow patterns:
 - `%%metro files:` renders a stacked-documents icon for paired-end reads or multi-file inputs, as in `%%metro files: reads_in | FASTQ`.
 - `%%metro dir:` renders a folder icon for directory outputs such as `publishDir` results, as in `%%metro dir: results_out | Results`.
 
-Add `banner` as a fourth field to a `file:` or `files:` directive to draw the format label on a dark strip across the icon, for when the format should stand out: `%%metro files: aln_out | BAM | Alignments | banner`.
+Add `banner` as a fourth field to a `file:` or `files:` directive to draw the format label on a dark strip across the icon.
+Use it when the format should stand out, as in `%%metro files: aln_out | BAM | Alignments | banner`.
 
-## How the converter works
+## Converter internals
 
-Nextflow's `-with-dag` output contains three types of node: processes (the pipeline steps), channels and values (data plumbing), and operators (Nextflow internals such as `mix` and `collect`). The raw DAG for the flat pipeline example looks like this:
+The `-with-dag` output from Nextflow contains three types of node: processes (the pipeline steps), channels and values (data plumbing), and operators (Nextflow internals such as `mix` and `collect`).
+The raw DAG for the flat pipeline example looks like this:
 
 ```metro
 flowchart TB
@@ -286,16 +302,16 @@ flowchart TB
 
 The converter:
 
-1. **Drops non-process nodes.** Channel nodes (`v0["Channel.of"]`), value nodes (`v1["Channel.of"]`) and operator nodes (`v5(( ))`, `v8(( ))`) are removed. Only stadium-shaped process nodes such as `v2(["FASTQC"])` are kept.
+1. **Drops non-process nodes.** It removes channel nodes (`v0["Channel.of"]`), value nodes (`v1["Channel.of"]`), and operator nodes (`v5(( ))`, `v8(( ))`).
+   It keeps only stadium-shaped process nodes such as `v2(["FASTQC"])`.
 
-2. **Reconnects edges.** Edges that ran through a dropped node are stitched back together, so `SORT_BAM --> v8 --> MULTIQC` becomes `SORT_BAM --> MULTIQC` and `FASTQC --> v8 --> MULTIQC` becomes `FASTQC --> MULTIQC`.
+2. **Reconnects edges.** It stitches edges that ran through a dropped node back together, turning `SORT_BAM --> v8 --> MULTIQC` into `SORT_BAM --> MULTIQC` and `FASTQC --> v8 --> MULTIQC` into `FASTQC --> MULTIQC`.
 
-3. **Breaks cycles.** nf-metro's layout engine requires a DAG, so a process
-   graph that loops cannot be drawn edge for edge. The converter removes a
-   deterministic set of back edges, including any process that reaches itself.
-   It reports every removed connection on stderr and lists them in a `%%`
-   comment block at the end of the output, so a loop can be redrawn by hand
-   rather than vanishing.
+3. **Breaks cycles.** The nf-metro layout engine requires a DAG.
+   A process graph that loops therefore cannot be drawn edge for edge.
+   The converter removes a deterministic set of back edges, including any process that reaches itself.
+   It reports every removed connection on stderr and lists them in a `%%` comment block at the end of the output.
+   You can then redraw a loop by hand rather than lose it silently.
 
    ```
    %% Feedback removed: the process graph loops back here, and nf-metro's
@@ -305,11 +321,13 @@ The converter:
    %%   polish (Polish) -> assemble (Assemble)
    ```
 
-4. **Maps subworkflows to sections.** Nextflow subworkflows become nf-metro `subgraph` sections. Processes that belong to no subworkflow are grouped into generated sections.
+4. **Maps subworkflows to sections.** Nextflow subworkflows become nf-metro `subgraph` sections.
+   The converter groups processes that belong to no subworkflow into generated sections.
 
-5. **Assigns metro lines.** The longest path gets the "main" line. Edges that skip sections get their own bypass lines, and dead-end processes get spur lines.
+5. **Assigns metro lines.** The longest path gets the `main` line.
+   Edges that skip sections get their own bypass lines, and dead-end processes get spur lines.
 
-6. **Cleans up labels.** `SCREAMING_SNAKE_CASE` becomes `Title Case`, and long names are abbreviated.
+6. **Cleans up labels.** `SCREAMING_SNAKE_CASE` becomes `Title Case`, and the converter abbreviates long names.
 
 For this example, the result is:
 

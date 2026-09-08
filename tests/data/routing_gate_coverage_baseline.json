@@ -554,6 +554,7 @@
   "intra_handlers.py::if segment_intersects_bbox(x1, y1, x2, y2, bbox):::#1",
   "intra_handlers.py::if sibling is None:::#1",
   "intra_handlers.py::if st.id in blocker_ids:::#1",
+  "intra_handlers.py::if tgt.is_terminus and edge.target in ctx.join_stations:::#1",
   "member_geometry.py::and assignment.run_direction in {Direction.R, Direction.L}::#1",
   "member_geometry.py::and assignment.turn_direction in {Direction.U, Direction.D}::#1",
   "member_geometry.py::and membership.assignment is not None::#1",

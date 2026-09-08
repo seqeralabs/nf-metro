@@ -7,41 +7,34 @@ sidebar:
 
 import { Aside } from "@astrojs/starlight/components";
 
-This page walks through how nf-metro turns `.mmd` text into a `MetroGraph`.
-Start here if you are adding a node shape, a `%%metro` directive or a new
-statement form, or if you just want to understand the grammar.
+The parser turns `.mmd` text into a `MetroGraph`.
+Start here to add a node shape, a `%%metro` directive or a new statement form, or to understand the grammar.
 
-The entry point is `parse_metro_mermaid` in
-[`src/nf_metro/parser/mermaid.py`](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/parser/mermaid.py);
-the data model it builds is in
-[`src/nf_metro/parser/model.py`](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/parser/model.py).
-The parser package is split by job. `grammar.py` holds the grammar, statement
-types and transformer; `directives.py` handles directive parsing and dispatch;
-`resolve.py` holds the post-parse graph rewrites; and `mermaid.py` is the public
-entry point and statement-application driver.
-Parsing is the first of the three stages, **Parse -> Layout -> Render**. The
-[layout pipeline](/nf-metro/dev/layout_pipeline/) takes over from the
-`MetroGraph` this stage produces.
+The entry point is `parse_metro_mermaid` in [`src/nf_metro/parser/mermaid.py`](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/parser/mermaid.py).
+The data model it builds is in [`src/nf_metro/parser/model.py`](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/parser/model.py).
+The parser package is split by job:
 
-## What "parsing" means here
+- `grammar.py` holds the grammar, statement types and transformer.
+- `directives.py` handles directive parsing and dispatch.
+- `resolve.py` holds the post-parse graph rewrites.
+- `mermaid.py` is the public entry point and statement-application driver.
+
+Parsing is the first of the three stages, **Parse -> Layout -> Render**.
+The [layout pipeline](/nf-metro/dev/layout_pipeline/) takes over from the `MetroGraph` this stage produces.
+
+## Scope of parsing
 
 The input is a subset of Mermaid `graph LR` syntax plus `%%metro` directives.
-Parsing reads that text and produces a `MetroGraph` of sections, stations,
-edges, lines and ports. It assigns no coordinates, which is the layout stage's
-job.
+Parsing reads that text and produces a `MetroGraph` of sections, stations, edges, lines and ports.
+It assigns no coordinates, which is the layout stage's job.
 
 The work splits in two:
 
-1. **Front-end.** Recognise each line's shape, whether it is a node, an edge or
-   a directive, and pull out its pieces. The grammar recognises statement
-   _shapes and boundaries_, while Python handles directive _payloads_ and graph
-   _semantics_ (see [Directives](#directives) and
-   [Parse-then-resolve flow](#parse-then-resolve-flow)).
-2. **Post-parse.** Rewrite the raw graph into the form layout expects: resolve
-   inter-section edges into ports and junctions, insert bypass and convergence
-   stations, and create the implicit section for loose nodes. These are plain
-   functions operating on the model, covered in
-   [Parse-then-resolve flow](#parse-then-resolve-flow) below.
+1. **Front-end.** Recognize each line's shape, whether it is a node, an edge or a directive, and pull out its pieces.
+   The grammar recognizes statement _shapes and boundaries_.
+   Python handles directive _payloads_ and graph _semantics_ (see [Directives](#directives) and [Parse-then-resolve flow](#parse-then-resolve-flow)).
+2. **Post-parse.** Rewrite the raw graph into the form layout expects: resolve inter-section edges into ports and junctions, insert bypass and convergence stations, and create the implicit section for loose nodes.
+   These are plain functions operating on the model, covered in [Parse-then-resolve flow](#parse-then-resolve-flow).
 
 ## Input format
 
@@ -64,31 +57,23 @@ graph LR
 
 - A Mermaid `subgraph` becomes a `Section`.
 - A node (`node_id[Label]`) becomes a `Station`.
-- An edge (`a -->|line1,line2| b`) becomes one `Edge` per line id. The
-  pipe-delimited label lists the lines the edge carries. An endpoint may also be
-  written with an inline shape (`a[A] -->|line1| b[B]`), which declares that
-  node's label as well as the edge.
-- Lines must be declared with `%%metro line:` before use. An edge with no line
-  annotation, or one naming an undeclared line, is rejected as a semantic error
-  (see [Leniency and error policy](#leniency-and-error-policy)).
-- A primary graph direction other than `LR` produces a warning from
-  `_warn_if_non_lr_primary`. Per-section flow is controlled by
-  `%%metro direction:` and is independent of the header.
+- An edge (`a -->|line1,line2| b`) becomes one `Edge` per line id.
+  The pipe-delimited label lists the lines the edge carries.
+  An endpoint may also be written with an inline shape (`a[A] -->|line1| b[B]`), which declares that node's label as well as the edge.
+- Lines must be declared with `%%metro line:` before use.
+  An edge with no line annotation, or one naming an undeclared line, is rejected as a semantic error (see [Leniency and error policy](#leniency-and-error-policy)).
+- A primary graph direction other than `LR` produces a warning from `_warn_if_non_lr_primary`.
+  Per-section flow is controlled by `%%metro direction:` and is independent of the header.
 
 ## Why the parser uses a grammar
 
-One way to read a line-oriented format is to write the _instructions_ for
-recognising each line: does this line start with `graph`? Failing that, is it a
-`subgraph`? Does it contain an arrow? Should we try these six node-shape
-patterns in this exact order? That works, but the order of the checks becomes
-load-bearing, and every new shape or directive means finding the right slot in
-the chain.
+One way to read a line-oriented format is to write the _instructions_ for recognizing each line: check for a `graph` header, then for a `subgraph`, then for an arrow, then try six node-shape patterns in a fixed order.
+That works, but the order of the checks becomes load-bearing, and every new shape or directive means finding the right slot in the chain.
 
-A **grammar** works the other way round. Instead of the recognising
-instructions, you write down _the rules of what a valid line is_ and let a
-library do the recognising. nf-metro uses
-[`lark`](https://lark-parser.readthedocs.io/) for this. The grammar lives as a
-string in `grammar.py` (`_GRAMMAR`), and reads roughly:
+A **grammar** works the other way round.
+Instead of the recognizing instructions, you write down _the rules of what a valid line is_ and a library does the recognizing.
+nf-metro uses [`lark`](https://lark-parser.readthedocs.io/) for this.
+The grammar lives as a string in `grammar.py` (`_GRAMMAR`), and reads roughly:
 
 ```lark title="src/nf_metro/parser/grammar.py"
 node:  NAME SHAPE?
@@ -99,105 +84,69 @@ ARROW: /-->|---|==>/
 NAME:  /[a-zA-Z_][a-zA-Z0-9_]*/
 ```
 
-An edge endpoint may carry an inline shape. `x[X] -->|a| y[Y]` declares node `x`
-with label "X", node `y` with label "Y", and the edge between them, all in one
-line. The `SHAPE` terminal's inner pattern, `_SHAPE_INNER`, excludes the arrow
-sequences, so a source shape like `[X]` stops at the arrow rather than greedily
-swallowing it.
+An edge endpoint may carry an inline shape.
+`x[X] -->|a| y[Y]` declares node `x` with label "X", node `y` with label "Y", and the edge between them, all in one line.
+The `SHAPE` terminal's inner pattern, `_SHAPE_INNER`, excludes the arrow sequences.
+A source shape like `[X]` therefore stops at the arrow rather than swallowing it.
 
-You describe the shapes and lark works out how to match them. Adding a node
-shape is one more alternative in the `SHAPE` rule rather than a new regex
-slotted into a hand-ordered chain, and the order of the rules stops mattering
-for correctness. It is closer to describing the structure of a sentence, as in
-"a sentence is a subject, a verb, then an object", than to writing out character
-by character how to scan one.
+You describe the shapes and lark works out how to match them.
+Adding a node shape is one more alternative in the `SHAPE` rule rather than a new regex slotted into a hand-ordered chain, and the order of the rules stops mattering for correctness.
 
 ## From text to `MetroGraph`
 
 Three steps:
 
-1. **Parse.** `_PARSER.parse(text)` turns the whole document into a parse tree
-   using the grammar.
-2. **Transform.** `_StatementTransformer` walks that tree and flattens it into
-   an ordered list of **typed statements**, one small dataclass per source line,
-   from a fixed union of `_GraphHeader`, `_Subgraph`, `_Directive`, `_Node`,
-   `_Edge`, `_End`, `_Comment` and `_Junk`. The transformer normalises as it
-   goes, so each statement carries structured fields rather than raw tokens.
-   `_Subgraph` already splits the section id from its display name, `_Directive`
-   splits the body on the first colon into `key` and `value`, and `_Edge`
-   carries its line ids as a list plus any inline endpoint labels.
-3. **Drive.** `parse_metro_mermaid` iterates those statements _in source order_
-   and dispatches each by `isinstance`, applying it to the graph while tracking
-   which `subgraph` it is currently inside through `current_section_id`. A
-   `_Subgraph` opens a section, an `_End` closes it, and the nodes, edges and
-   directives in between are attached to it.
+1. **Parse.** `_PARSER.parse(text)` turns the whole document into a parse tree using the grammar.
+2. **Transform.** `_StatementTransformer` walks that tree and flattens it into an ordered list of **typed statements**, one small dataclass per source line, from a fixed union of `_GraphHeader`, `_Subgraph`, `_Directive`, `_Node`, `_Edge`, `_End`, `_Comment` and `_Junk`.
+   The transformer normalizes as it goes.
+   Each statement carries structured fields rather than raw tokens.
+   `_Subgraph` already splits the section id from its display name, `_Directive` splits the body on the first colon into `key` and `value`, and `_Edge` carries its line ids as a list plus any inline endpoint labels.
+3. **Drive.** `parse_metro_mermaid` iterates those statements _in source order_ and dispatches each by `isinstance`, applying it to the graph while tracking which `subgraph` it is currently inside through `current_section_id`.
+   A `_Subgraph` opens a section, an `_End` closes it, and the nodes, edges and directives in between are attached to it.
 
-Before auto-layout or resolver rewrites begin, the parser freezes the accepted
-layout input in `graph.layout_provenance.authored`. This snapshot contains the
-authored grid cells, section directions, entry and exit hints, connector-side
-choices, both possible fold-threshold inputs, and line-order inputs. The
-line-order record distinguishes a directive, a caller override, and the default,
-and also keeps line definition order. The effective decision records the chosen
-policy and source. A caller override is captured before inference but remains
-applied at the established API override stage, preserving current layout
-behaviour. The snapshot is immutable, so later inference cannot make an
-authored value look inferred or make an inferred value look authored.
+Before auto-layout or resolver rewrites begin, the parser freezes the accepted layout input in `graph.layout_provenance.authored`.
+This snapshot contains the authored grid cells, section directions, entry and exit hints, connector-side choices, both possible fold-threshold inputs, and line-order inputs.
+The line-order record distinguishes a directive, a caller override, and the default, and also keeps line definition order.
+The effective decision records the chosen policy and source.
+A caller override is captured before inference but remains applied at the established API override stage, preserving current layout behavior.
+Because the snapshot is immutable, later inference cannot make an authored value look inferred or make an inferred value look authored.
 
-The internal
-[candidate executor](/nf-metro/dev/candidate_execution/) applies prospective
-layout commitments through one typed overlay at this boundary. It rejects
-malformed, duplicate, unknown, or conflicting commitments before inference,
-then verifies the settled graph against the same commitments.
+The internal [candidate executor](/nf-metro/dev/candidate_execution/) applies prospective layout commitments through one typed overlay at this boundary.
+It rejects malformed, duplicate, unknown, or conflicting commitments before inference, then verifies the settled graph against the same commitments.
 
-Because the appliers receive structured fields, the driver stays a thin
-dispatch. A `_Node` registers a station, an `_Edge` registers one edge per line
-id and declares any inline-shaped endpoints, a `_Directive` is routed to a
-handler, and so on.
+Because the appliers receive structured fields, the driver stays a thin dispatch.
+A `_Node` registers a station, an `_Edge` registers one edge per line id and declares any inline-shaped endpoints, and a `_Directive` is routed to a handler.
 
-The driver is a simple in-order loop by design. Source order matters, since the
-dictionary insertion order of stations affects downstream layout, so the grammar
-handles _recognising_ lines while the driver handles _applying_ them in
-sequence.
+The driver is an in-order loop by design.
+Source order matters because the dictionary insertion order of stations affects downstream layout.
+The grammar handles _recognising_ lines while the driver handles _applying_ them in sequence.
 
 ### Node shapes collapse to an id and a label
 
-The model records only a node's **id and label**, never which shape it was drawn
-as. All six Mermaid shapes therefore collapse to a single `SHAPE` terminal plus
-a small helper, `_shape_label`, that strips the delimiters, instead of six
-separate regexes that each had to be tried in the right order.
+The model records only a node's **id and label**, never which shape it was drawn as.
+All six Mermaid shapes therefore collapse to a single `SHAPE` terminal plus a small helper, `_shape_label`, that strips the delimiters, instead of six separate regexes that each had to be tried in the right order.
 
 ## Directives
 
-The grammar does not describe `%%metro` directive _bodies_. They keep their own
-handler functions, because a grammar cannot express behaviour like "warn about
-this and ignore it", which several directives need. The grammar gives us the
-directive line as a unit, and the transformer splits its body once on the first
-colon into a **key** and a **value**. A `%%metro` line with no colon becomes a
-`_Comment` and is ignored.
+The grammar does not describe `%%metro` directive _bodies_.
+They keep their own handler functions, because a grammar cannot express behavior like "warn about this and ignore it", which several directives need.
+The grammar delivers the directive line as a unit, and the transformer splits its body once on the first colon into a **key** and a **value**.
+A `%%metro` line with no colon becomes a `_Comment` and is ignored.
 
-Dispatch on the key happens in `_apply_directive`. Most directives are graph-wide
-and live in the `_GLOBAL_DIRECTIVE_HANDLERS` dict, keyed by **exact name** and
-mapping to a `(value, graph) -> None` handler. Exact-key lookup means handler
-order is irrelevant, and a key that is a prefix of another, such as `legend`
-beside `legend_combo` or `logo` beside `logo_scale`, cannot shadow it. Two
-families are dispatched separately because they need more than the value alone:
-`entry`, `exit`, `direction` and `number` need the enclosing section, and the
-icon keys `file`, `files` and `dir` need the key itself to choose the icon type.
+Dispatch on the key happens in `_apply_directive`.
+Most directives are graph-wide and live in the `_GLOBAL_DIRECTIVE_HANDLERS` dict, keyed by **exact name** and mapping to a `(value, graph) -> None` handler.
+Exact-key lookup means handler order is irrelevant, and a key that is a prefix of another, such as `legend` beside `legend_combo` or `logo` beside `logo_scale`, cannot shadow it.
+Two families are dispatched separately because they need more than the value alone: `entry`, `exit`, `direction` and `number` need the enclosing section, and the icon keys `file`, `files` and `dir` need the key itself to choose the icon type.
 A key matching none of these is ignored with a `UserWarning`.
 
-The simple scalar, bool and enum settings that also have a CLI flag, such as
-spacing, gaps, `diamond_style`, the scales, `width`, `height` and `animate`, are
-not hand-written handlers. They are declared once in `nf_metro.options`, as
-`LayoutOption` entries in `LAYOUT_OPTIONS`. `_make_layout_option_handler`
-generates a directive handler from each entry, parsing through `coerce` and
-writing the named `MetroGraph` field, and `nf_metro.cli` generates the matching
-`click` flag from the same registry. Adding such an option means one registry
-entry rather than a handler plus a flag plus a docs row.
-`tests/test_options_parity.py` guards that every registry option exists in both
-planes. The bespoke handlers below carry grammar, meaning fields, sections and
-coordinates, that the generic registry cannot express.
+The simple scalar, bool and enum settings that also have a CLI flag, such as spacing, gaps, `diamond_style`, the scales, `width`, `height` and `animate`, are not hand-written handlers.
+They are declared once in `nf_metro.options`, as `LayoutOption` entries in `LAYOUT_OPTIONS`.
+`_make_layout_option_handler` generates a directive handler from each entry, parsing through `coerce` and writing the named `MetroGraph` field, and `nf_metro.cli` generates the matching `click` flag from the same registry.
+Adding such an option means one registry entry rather than a handler plus a flag plus a docs row.
+`tests/test_options_parity.py` guards that every registry option exists in both planes.
+The bespoke handlers in the table carry grammar, meaning fields, sections and coordinates, that the generic registry cannot express.
 
-The directives `_apply_directive` recognises:
+The directives `_apply_directive` recognizes:
 
 | Directive                                                               | Effect                                                                                          |
 | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
@@ -225,212 +174,162 @@ The directives `_apply_directive` recognises:
 | `file:` / `files:` / `dir:`                                             | terminus file-icon designation                                                                  |
 
 `entry:` and `exit:` do **not** create `Port` objects at parse time.
-`_parse_port_hint` records them on the `Section` as `entry_hints` and
-`exit_hints`, each a `(side, [line_ids])` list. The actual ports are created
-later, driven by real inter-section edges.
+`_parse_port_hint` records them on the `Section` as `entry_hints` and `exit_hints`, each a `(side, [line_ids])` list.
+Real inter-section edges drive port creation later.
 
 ## Leniency and error policy
 
-The split is deliberate. The **grammar and parse layer is lenient** about syntax
-it does not recognise, warning rather than crashing, while **semantic validity
-is a separate, stricter phase**. A typo in a node line should not abort a render
-of an otherwise-fine diagram, but an edge that names no metro line is a real
-modelling error.
+The split is deliberate.
+The **grammar and parse layer is lenient** about syntax it does not recognize and warns rather than crashing.
+**Semantic validity is a separate, stricter phase**.
+A typo in a node line should not abort a render of an otherwise-fine diagram, but an edge that names no metro line is a modeling error.
 
 | Input                                                                                                                            | Outcome                                                                                    |
 | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | Blank line, `%%` comment, or `%%metro` line with no colon                                                                        | ignored silently                                                                           |
-| Unrecognised non-blank line (the grammar `junk` rule)                                                                            | dropped, with a `UserWarning` ("Ignored unrecognised line: ...")                           |
+| Unrecognized non-blank line (the grammar `junk` rule)                                                                            | dropped, with a `UserWarning` ("Ignored unrecognised line: ...")                           |
 | Unknown `%%metro` directive key                                                                                                  | ignored, with a `UserWarning` (`"%%metro <key>: unknown directive; ignoring"`)             |
 | Malformed directive _payload_ (too few `\|` fields, an unusable enum/number/bool, a section-scoped directive outside a subgraph) | warned about and ignored, uniformly across handlers (`_warn_directive`)                    |
 | Foreign/unsupported syntax (Mermaid `flowchart`)                                                                                 | raises `ValueError` with guidance, via `_check_unsupported_input`, before the grammar runs |
 | Edge with no line annotation, or an undeclared line id                                                                           | raised by `_validate_edge_annotations` after parsing                                       |
 | Directive naming a station, section, or line the map never declares                                                              | warned about and ignored by `_warn_unresolved_references` after the statement scan         |
 
-Graph-semantic checks beyond edge annotations live in the separate `validate`
-phase, `nf_metro.parser.validate.validate_graph`.
+Graph-semantic checks beyond edge annotations live in the separate `validate` phase, `nf_metro.parser.validate.validate_graph`.
 
-Both phases read one shared piece: `find_undeclared_line_edges`, which sits next
-to `validate_graph` and covers the undeclared-line half of the edge check. That
-is what keeps `nf-metro validate` and `nf-metro render` accepting the same maps.
-A map declaring no `%%metro line:` directive at all is no exception, since every
-annotated edge in it names an undeclared line.
+Both phases read one shared piece: `find_undeclared_line_edges`, which sits next to `validate_graph` and covers the undeclared-line half of the edge check.
+That is what keeps `nf-metro validate` and `nf-metro render` accepting the same maps.
+A map declaring no `%%metro line:` directive at all is no exception, since every annotated edge in it names an undeclared line.
 
-A directive may name a node or subgraph that appears further down the file, so
-the ids a directive references cannot be resolved in its handler. A handler that
-resolved an id itself would report a false unknown for every forward reference.
+A directive may name a node or subgraph that appears further down the file, so the ids a directive references cannot be resolved in its handler.
+A handler that resolved an id itself would report a false unknown for every forward reference.
 Handlers therefore check only payload shape and buffer the ids.
-`_warn_unresolved_references` and `_resolve_legend_combos` resolve them in
-`_finalize_graph`, once the whole source has been applied.
+`_warn_unresolved_references` and `_resolve_legend_combos` resolve them in `_finalize_graph`, once the whole source has been applied.
 
-The unrecognised-line case is handled in the grammar by a low-priority
-catch-all:
+The unrecognized-line case is handled in the grammar by a low-priority catch-all:
 
 ```lark title="src/nf_metro/parser/grammar.py"
 JUNK.-10: /[^\n]+/
 ```
 
-`JUNK` matches any line, but its negative priority means it only wins when
-nothing more specific does. The transformer turns the match into a `_Junk`
-statement, and the driver warns when it applies one.
+`JUNK` matches any line, but its negative priority means it wins only when nothing more specific does.
+The transformer turns the match into a `_Junk` statement, and the driver warns when it applies one.
 
-This `junk` fallback is why the parser is configured as
-`Lark(..., parser="earley", lexer="dynamic")` rather than the faster `lalr`. A
-line that _begins_ like a valid statement but then hits an unexpected token must
-be able to fall back to `junk` and be dropped. An Earley parser can explore that
-fallback. A committing `lalr` parser cannot backtrack a partly-matched line, so
-it would turn such a line into a fatal error instead.
+This `junk` fallback is why the parser is configured as `Lark(..., parser="earley", lexer="dynamic")` rather than the faster `lalr`.
+A line that _begins_ like a valid statement but then hits an unexpected token must be able to fall back to `junk` and be dropped.
+An Earley parser can explore that fallback.
+A committing `lalr` parser cannot backtrack a partly-matched line and would turn it into a fatal error instead.
 
 <Aside type="danger" title="Do not switch the parser to lalr">
-  Switching to `lalr` would turn any partly-matched unrecognised line into a
-  fatal parse error instead of a dropped `junk` statement. The leniency policy
-  of warning rather than crashing depends on Earley's ability to backtrack. The
-  parse runs once per render, so Earley's extra cost over `lalr` is not worth
-  trading away for this behaviour change.
+
+Switching to `lalr` would turn any partly-matched unrecognized line into a fatal parse error instead of a dropped `junk` statement.
+The leniency policy of warning rather than crashing depends on Earley's ability to backtrack.
+The parse runs once per render, and Earley's extra cost over `lalr` is small next to the leniency it buys.
+
 </Aside>
 
 ## Parse-then-resolve flow
 
-After the grammar parse and statement application, `parse_metro_mermaid` runs a
-post-parse sequence, but only when the graph has sections:
+After the grammar parse and statement application, `parse_metro_mermaid` runs a post-parse sequence, but only when the graph has sections:
 
 1. `_validate_edge_annotations` rejects malformed edges.
-2. `_remove_empty_sections` and `_create_implicit_section` drop empty subgraphs
-   and wrap loose, section-less stations in an implicit, invisible section.
-3. Capture authored route facts and their parser-local edge lineage, then
-   expand interchanges.
-4. `infer_section_layout`, from `layout/auto_layout.py`, infers missing grid
-   positions, section directions and port sides from the section DAG,
-   preserving anything set explicitly by directives.
-5. `_insert_terminus_convergence_stations`, propagating authored lineage
-   through each synthetic convergence edge.
-6. `resolve_section_endpoints` classifies connectors and settles their entry and
-   exit sides once, before ports exist.
-7. Build the immutable `RouteTopology` described below.
-8. `_resolve_sections` creates ports and junctions from that topology, using the
-   endpoint result for current edge endpoints and compatibility order.
-9. `_insert_bypass_stations` splits any required exit legs and updates their
-   connector traces.
+2. `_remove_empty_sections` and `_create_implicit_section` drop empty subgraphs and wrap loose, section-less stations in an implicit, invisible section.
+3. Capture authored route facts and their parser-local edge lineage, then expand interchanges.
+4. `infer_section_layout`, from `layout/auto_layout.py`, infers missing grid positions, section directions and port sides from the section DAG, preserving anything set explicitly by directives.
+5. `_insert_terminus_convergence_stations`, propagating authored lineage through each synthetic convergence edge.
+6. `resolve_section_endpoints` classifies connectors and settles their entry and exit sides once, before ports exist.
+7. Build the immutable `RouteTopology` described in [Authored route topology](#authored-route-topology).
+8. `_resolve_sections` creates ports and junctions from that topology, using the endpoint result for current edge endpoints and compatibility order.
+9. `_insert_bypass_stations` splits any required exit legs and updates their connector traces.
 
-Finally the parser applies the pending terminus icons, `off_track` marks and
-per-station markers that were buffered during the statement scan.
+Finally the parser applies the pending terminus icons, `off_track` marks and per-station markers that were buffered during the statement scan.
 
 ### `_resolve_sections`
 
 `_resolve_sections` rewrites inter-section edges into port and junction chains.
 It is split into three helpers:
 
-- `_build_entry_side_mapping` builds a per-line entry-side lookup from the
-  `entry_hints`. A section gets **one** entry side. If all hints agree, that side
-  is used; otherwise they collapse to the natural entry for the section
-  direction, which is LEFT for LR, RIGHT for RL and TOP for TB.
-- `_classify_edges` splits edges into internal ones, with both endpoints in one
-  section, and inter-section ones, and populates each section's
-  `internal_edges`.
-- `_create_ports_and_junctions` creates `Port` objects from topology endpoint
-  groups and rewrites each inter-section edge into the chain
-  `source -> exit_port -> entry_port -> target`. The design rule is **one exit
-  port per source section and side** and **one entry port per target section and
-  side**. Lines sharing a boundary leave together for consistent ordering, and
-  topology divergence groups decide where fan-out junctions are required.
+- `_build_entry_side_mapping` builds a per-line entry-side lookup from the `entry_hints`.
+  A section gets **one** entry side.
+  If all hints agree, that side is used.
+  Otherwise they collapse to the natural entry for the section direction, which is LEFT for LR, RIGHT for RL and TOP for TB.
+- `_classify_edges` splits edges into internal ones, with both endpoints in one section, and inter-section ones, and populates each section's `internal_edges`.
+- `_create_ports_and_junctions` creates `Port` objects from topology endpoint groups and rewrites each inter-section edge into the chain `source -> exit_port -> entry_port -> target`.
+  The design rule is **one exit port per source section and side** and **one entry port per target section and side**.
+  Lines sharing a boundary leave together for consistent ordering, and topology divergence groups decide where fan-out junctions are required.
 
-After ports and fan junctions exist, topology convergence groups decide where
-merge junctions are required. `_assign_section_numbers` then numbers any
-unnumbered sections.
+After ports and fan junctions exist, topology convergence groups decide where merge junctions are required.
+`_assign_section_numbers` then numbers any unnumbered sections.
 
-The result is a `MetroGraph` whose edges all live within a section or run
-port-to-port, ready for the layout stage.
+The result is a `MetroGraph` whose edges all live within a section or run port-to-port, ready for the layout stage.
 
 ### Authored route topology
 
-`RouteTopology` captures route meaning before the resolver replaces authored
-cross-section connectors with port and junction chains. Authored facts are
-captured before interchange expansion. A parser-local sidecar follows each
-authored connector through interchange and terminus-convergence rewrites, but
-is never stored on `MetroGraph` or `Edge`.
+`RouteTopology` captures route meaning before the resolver replaces authored cross-section connectors with port and junction chains.
+Authored facts are captured before interchange expansion.
+A parser-local sidecar follows each authored connector through interchange and terminus-convergence rewrites, but is never stored on `MetroGraph` or `Edge`.
 
-After terminus convergence, `resolve_section_endpoints` settles every boundary
-side on the production graph. It retains the current edge endpoints and their
-encounter order. The topology builder uses those boundary facts to describe
-the semantic groups. `_resolve_sections` then creates ports and junctions from
-the topology, while the boundary result preserves the current edge endpoints
-and output order.
+After terminus convergence, `resolve_section_endpoints` settles every boundary side on the production graph.
+It retains the current edge endpoints and their encounter order.
+The topology builder uses those boundary facts to describe the semantic groups.
+`_resolve_sections` then creates ports and junctions from the topology, while the boundary result preserves the current edge endpoints and output order.
 
-The topology contains one connected `LineNetwork` per line component, exact
-endpoint `BundleRun`s, cross-section connectors, resolved endpoint groups,
-divergences and resolver-shaped convergences. Connector identities derive from
-source, target, line and an occurrence number among exact duplicates. Network,
-bundle, divergence and convergence identities derive from their defining
-content. An unrelated edge or component cannot renumber existing identities.
+The topology contains one connected `LineNetwork` per line component, exact endpoint `BundleRun`s, cross-section connectors, resolved endpoint groups, divergences and resolver-shaped convergences.
+Connector identities derive from source, target, line and an occurrence number among exact duplicates.
+Network, bundle, divergence and convergence identities derive from their defining content.
+An unrelated edge or component cannot renumber existing identities.
 
-All records are frozen and contain only scalar values, `PortSide` values and
-tuples. They retain no `MetroGraph`, station, section, edge, mutable container
-or NetworkX object. Top-level and nested collections have explicit canonical
-ordering, so the same input produces the same topology under every hash seed.
-The resolver also records a `RouteResolutionTrace`. It maps endpoint groups to
-ports, fan and merge groups to junctions, and each authored connector to its
-ordered final edge paths. Most connectors have one path. A connector can have
-several when one exit leg needs parallel bypass helpers. The records use scalar
-ids and tuples, so duplicate authored connectors can safely share paths. Bypass
-insertion updates the affected paths when it splits an exit leg.
+All records are frozen and contain only scalar values, `PortSide` values and tuples.
+They retain no `MetroGraph`, station, section, edge, mutable container or NetworkX object.
+Top-level and nested collections have explicit canonical ordering.
+The same input therefore produces the same topology under every hash seed.
+The resolver also records a `RouteResolutionTrace`.
+It maps endpoint groups to ports, fan and merge groups to junctions, and each authored connector to its ordered final edge paths.
+Most connectors have one path.
+A connector can have several when one exit leg needs parallel bypass helpers.
+Because the records use scalar ids and tuples, duplicate authored connectors can share paths.
+Bypass insertion updates the affected paths when it splits an exit leg.
 
-`RouteTopology` and `RouteResolutionTrace` stay on `MetroGraph` while layout and
-routing run. They identify the authored fan, merge and endpoint group behind
-each resolver-created port or junction. They are excluded from `RenderPlan`,
-because that plan is created only after geometry has settled and needs no parser
-provenance to render SVG, HTML or a manifest. `LayoutProvenance` is excluded for
-the same reason.
+`RouteTopology` and `RouteResolutionTrace` stay on `MetroGraph` while layout and routing run.
+They identify the authored fan, merge and endpoint group behind each resolver-created port or junction.
+They are excluded from `RenderPlan`, because that plan is created only after geometry has settled and needs no parser provenance to render SVG, HTML or a manifest.
+`LayoutProvenance` is excluded for the same reason.
 
 ### Layout decision provenance
 
 `LayoutProvenance` keeps two views of layout intent:
 
-- `authored` is the frozen pre-inference snapshot described above.
-- `grids`, `directions`, `connector_sides` and `fold_threshold_decision`
-  describe the effective values the engine uses.
+- `authored` is the frozen pre-inference snapshot described in [From text to `MetroGraph`](#from-text-to-metrograph).
+- `grids`, `directions`, `connector_sides` and `fold_threshold_decision` describe the effective values the engine uses.
 
-Each effective decision answers three separate questions: who selected the
-value, whether another inference pass may replace it, and why it was selected.
-The compact states shown by `nf-metro info --verbose` and `nf-metro explain` are
-`authored`, `inferred` and `inferred-then-pinned`. A value can therefore be
-engine-selected and locked without being misreported as authored.
+Each effective decision answers three separate questions: who selected the value, whether another inference pass may replace it, and why it was selected.
+The compact states shown by `nf-metro info --verbose` and `nf-metro explain` are `authored`, `inferred` and `inferred-then-pinned`.
+A value can therefore be engine-selected and locked without being misreported as authored.
 
-Grid and direction decisions are keyed by section id. Port-side decisions are
-keyed by the semantic `ConnectorId` plus `entry` or `exit`, so two lines sharing
-one visible port can retain different histories. If resolution changes an
-authored side, the effective decision records the new side and retains the
-original authored options.
+Grid and direction decisions are keyed by section id.
+Port-side decisions are keyed by the semantic `ConnectorId` plus `entry` or `exit`.
+Two lines sharing one visible port can therefore retain different histories.
+If resolution changes an authored side, the effective decision records the new side and retains the original authored options.
 
-The fold threshold follows caller, directive, then default precedence. The
-snapshot retains the caller and directive values separately, while the
-effective decision records the selected source. Rendering reads this typed
-decision when it reports an unsafe fold threshold.
+The fold threshold follows caller, directive, then default precedence.
+The snapshot retains the caller and directive values separately, while the effective decision records the selected source.
+Rendering reads this typed decision when it reports an unsafe fold threshold.
 
-## Adding a shape, directive or statement form
+## Add a shape, directive or statement form
 
 - **A node shape.** Add one alternative to the `SHAPE` terminal in `_GRAMMAR`.
-  If its delimiters are two characters per side, add the opener to
-  `two_char_opens` in `_shape_label`.
-- **A `%%metro` directive.** Write a `(value, graph) -> None` handler and add an
-  entry to the `_GLOBAL_DIRECTIVE_HANDLERS` dict, keyed by the exact directive
-  name. Ordering does not matter. A directive that needs the enclosing section
-  or the key itself is dispatched in `_apply_directive` instead of the dict. On
-  an unusable payload, call `_warn_malformed`, or `_warn_directive` for a more
-  specific message, and return rather than failing silently, per the leniency
-  policy above. A directive that names a station, section or line id must buffer
-  it and add a case to `_directive_references`, so the id resolves against the
-  whole file rather than only what precedes the directive.
-- **A new statement form.** Add a rule and its terminal to `_GRAMMAR`, a typed
-  statement dataclass added to the `_Statement` union, a method to
-  `_StatementTransformer` returning that dataclass, and an `isinstance` branch
-  to the driver loop in `parse_metro_mermaid`.
+  If its delimiters are two characters per side, add the opener to `two_char_opens` in `_shape_label`.
+- **A `%%metro` directive.** Write a `(value, graph) -> None` handler and add an entry to the `_GLOBAL_DIRECTIVE_HANDLERS` dict, keyed by the exact directive name.
+  Ordering does not matter.
+  A directive that needs the enclosing section or the key itself is dispatched in `_apply_directive` instead of the dict.
+  On an unusable payload, call `_warn_malformed`, or `_warn_directive` for a more specific message, and return rather than failing silently, per the [leniency policy](#leniency-and-error-policy).
+  A directive that names a station, section or line id must buffer it and add a case to `_directive_references`.
+  The id then resolves against the whole file rather than only the text before the directive.
+- **A new statement form.** Add a rule and its terminal to `_GRAMMAR`, a typed statement dataclass in the `_Statement` union, a method to `_StatementTransformer` returning that dataclass, and an `isinstance` branch to the driver loop in `parse_metro_mermaid`.
 
-## How equivalence is verified
+## Equivalence checks
 
-The grammar must produce exactly the `MetroGraph` the input implies, so changes
-here are checked by **comparing parsed model objects** rather than rendered
-SVGs. The check parses every fixture in `tests/fixtures/`, `examples/` and
-`examples/topologies/` and asserts that the model matches. Identical models
-render identically, so this keeps the gallery byte-identical without chasing
-sub-pixel render drift. The grammar's coverage and behaviour are pinned by
-`tests/test_parser_grammar.py`.
+The grammar must produce exactly the `MetroGraph` the input implies.
+Changes here are therefore checked by **comparing parsed model objects** rather than rendered SVGs.
+The check parses every fixture in `tests/fixtures/`, `examples/` and `examples/topologies/` and asserts that the model matches.
+Identical models render identically, which keeps the gallery byte-identical without chasing sub-pixel render drift.
+The grammar's coverage and behavior are pinned by `tests/test_parser_grammar.py`.

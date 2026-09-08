@@ -5,26 +5,24 @@ sidebar:
   order: 5
 ---
 
-This inventory names every production stage that can create, move, suppress,
-validate or observe routed geometry. Its boundary is `_route_edges`. Section
-placement and reservation settlement happen before it, and SVG drawing reads its
-final `RoutedPath` values afterwards.
+Route emission covers every production stage that can create, move, suppress, validate, or observe routed geometry.
+The boundary is `_route_edges`.
+Section placement and reservation settlement happen before it, and SVG drawing reads its final `RoutedPath` values afterwards.
 
 ## One classification per member
 
-Every inter-section member is classified once during planning. Planning then
-does one of two things:
+Every inter-section member is classified once during planning.
+Planning then does one of two things:
 
-- a convergence plan owns the member geometry; or
-- a member-geometry plan builds and freezes the classified family’s complete
-  production path.
+- a convergence plan owns the member geometry
+- a member-geometry plan builds and freezes the classified family's complete production path
 
-Production emission consumes that decision. It does not run an ordered handler
-chain, retry another family or reconstruct a legacy route. There is therefore one
-inter-section dispatch surface: the planned family classification.
+Production emission consumes that decision.
+It does not run an ordered handler chain, retry another family, or reconstruct a legacy route.
+The planned family classification is therefore the single inter-section dispatch surface.
 
-TB-section, entry-runway and intra-section handlers remain for local edges. They
-are not an alternative inter-section routing system.
+TB-section, entry-runway, and intra-section handlers remain for local edges.
+They are not an alternative inter-section routing system.
 
 ## System execution
 
@@ -33,16 +31,15 @@ are not an alternative inter-section routing system.
 | `build_exit_turn_execution`             | Planner          | States source-turn axes and seams, or records a diagnostic verdict for the system owner.                                                                                                |
 | `classify_inter_section_family`         | Classifier       | Selects one stable family ID for each inter-section member.                                                                                                                             |
 | `build_convergence_plan_execution`      | Planner          | Plans supported convergence trunks, landings, continuations, and coverage.                                                                                                              |
-| `classify_route_system_dispositions`    | System owner     | Chooses the geometry owner. A complete convergence plan wins; otherwise complete member geometry owns the system. Subordinate declined verdicts are recorded as superseded diagnostics. |
+| `classify_route_system_dispositions`    | System owner     | Chooses the geometry owner. A complete convergence plan wins. Otherwise complete member geometry owns the system. Subordinate declined verdicts are recorded as superseded diagnostics. |
 | `build_member_geometry_execution`       | Member planner   | Builds classified members in canonical order, settles their shared channels, and freezes production paths.                                                                              |
 | `settle_global_convergence_execution`   | Global allocator | Reconciles planned convergence lanes against immutable member channels.                                                                                                                 |
 | `build_route_system_emission_execution` | System owner     | Verifies that every emitted or explicitly covered member has exactly one geometry decision. Production rejects any remaining compatibility disposition.                                 |
 | `_route_edges` system loop              | Emitter          | Copies member plans or consumes convergence plans once, in canonical system and member order.                                                                                           |
 
-`RouteMemberGeometryPlan.owns_complete_path` marks systems whose subordinate
-exit, fan, or convergence planner could not own the shared frame. The member
-planner settles that frame before freezing it, so post-emission normalization
-cannot recreate the former compatibility route by moving the copied path.
+`RouteMemberGeometryPlan.owns_complete_path` marks systems whose subordinate exit, fan, or convergence planner could not own the shared frame.
+The member planner settles that frame before freezing it.
+Post-emission normalization therefore cannot recreate the former compatibility route by moving the copied path.
 
 ## Emitters
 
@@ -57,48 +54,38 @@ cannot recreate the former compatibility route by moving the copied path.
 
 ## Settlement
 
-Shared channel settlement runs while member paths are mutable. Gap slots, trunk
-slots, opposing flows, peel-off risers, same-line coincidence, fan traverses,
-convergent descents, destination-tail bundles and corridor-clearance bands are
-all resolved before the owning plan freezes them.
+Shared channel settlement runs while member paths are mutable.
+Gap slots, trunk slots, opposing flows, peel-off risers, same-line coincidence, fan traverses, convergent descents, destination-tail bundles, and corridor-clearance bands all settle before the owning plan freezes them.
 
-Destination-tail settlement returns the exact horizontal segment identities it
-owns. Corridor holding treats only those segments as fixed, so perpendicular
-channels remain free to settle. That keeps ownership narrow and avoids freezing
-an entire route just because one tail band is planned.
+Destination-tail settlement returns the exact horizontal segment identities it owns.
+Corridor holding treats only those segments as fixed.
+Perpendicular channels therefore remain free to settle.
+That keeps ownership narrow and avoids freezing an entire route because one tail band is planned.
 
 The post-emission pass chain remains for local edges and unowned coordinates.
-Its ownership predicates prevent it from moving a frozen convergence or member
-path. The old compatibility-only wrap repair, merge-feeder landing and
-covered-hop deletion machinery has been removed.
+Its ownership predicates prevent it from moving a frozen convergence or member path.
+The old compatibility-only wrap repair, merge-feeder landing, and covered-hop deletion machinery has been removed.
 
 ## Compatibility records
 
-Planner reason registries remain as diagnostics and as a fail-closed boundary
-for hand-built or unsupported inputs. They do not select a production emitter.
-On the routable corpus, every system reaches emission as `PLANNED`, and every
-diagnostic reason is owned by its named planner.
+Planner reason registries remain as diagnostics and as a fail-closed boundary for hand-built or unsupported inputs.
+They do not select a production emitter.
+On the routable corpus, every system reaches emission as `PLANNED`, and its named planner owns every diagnostic reason.
 
-`RouteSystem.superseded_verdicts` explains cases where a child planner declined
-a local ownership claim but the system’s actual geometry owner still planned the
-complete path. An unregistered reason, a missing member template or a production
-compatibility disposition aborts routing.
+`RouteSystem.superseded_verdicts` explains cases where a child planner declined a local ownership claim but the system's actual geometry owner still planned the complete path.
+An unregistered reason, a missing member template, or a production compatibility disposition aborts routing.
 
 ## Validation and observation
 
 The closing checks require:
 
-- one emitted or explicitly covered binding per canonical member;
-- one geometry owner per emitted member;
-- immutable planned coordinates at every owned segment;
-- exact route-system, member, plan and reservation attribution;
-- valid fan, exit-turn, convergence and curve geometry.
+- one emitted or explicitly covered binding per canonical member
+- one geometry owner per emitted member
+- immutable planned coordinates at every owned segment
+- exact route-system, member, plan, and reservation attribution
+- valid fan, exit-turn, convergence, and curve geometry
 
-Observation uses the same planning and emission path as ordinary routing. It adds
-`RoutePlan` records and bindings, but it cannot select another family or change
-the rendered geometry.
+Observation uses the same planning and emission path as ordinary routing.
+It adds `RoutePlan` records and bindings, but it cannot select another family or change the rendered geometry.
 
-The family table is documented in
-[inter-section dispatch](/nf-metro/dev/inter_section_dispatch/), and gate-arm
-coverage is published in
-[routing gate coverage](/nf-metro/dev/routing_gate_coverage/).
+[Inter-section dispatch](/nf-metro/dev/inter_section_dispatch/) documents the family table, and [routing gate coverage](/nf-metro/dev/routing_gate_coverage/) publishes the gate-arm coverage.

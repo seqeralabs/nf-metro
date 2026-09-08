@@ -274,11 +274,15 @@ def test_later_separate_declaration_overrides_inline_label():
     assert graph.stations["x"].label == "X"
 
 
-def test_bare_subgraph_header_warns_and_makes_no_section():
-    """A 'subgraph' line with no id is unrecognised and creates no section."""
+def test_bare_subgraph_header_warns_and_makes_no_named_section():
+    """A 'subgraph' line with no id is unrecognised and creates no named section.
+
+    The stations form a flat graph, so they are gathered into the single
+    implicit section every sectionless graph receives.
+    """
     text = (
         "graph LR\n%%metro line: a | A | #fff\nsubgraph\nx[X]\nend\ny[Y]\nx -->|a| y\n"
     )
     with pytest.warns(UserWarning, match="unrecognised line"):
         graph = parse_metro_mermaid(text)
-    assert graph.sections == {}
+    assert list(graph.sections) == ["__implicit__"]

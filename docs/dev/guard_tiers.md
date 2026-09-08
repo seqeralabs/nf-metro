@@ -1,119 +1,94 @@
 ---
 title: "Guard tiers"
-description: "The layered guard system in nf-metro: pre/post invariant checks, ratchets, and how violations surface during development."
+description: "The two runtime invariant families in nf-metro, their Tier A/B/C classification, registries, and measured cost."
 sidebar:
   order: 7
 ---
 
 nf-metro defends its layout output with two families of runtime invariant:
 
-- **`_guard_*` functions** in `src/nf_metro/layout/phases/guards.py` raise
-  `PhaseInvariantError` on a violation.
-- **`check_*` functions** in `src/nf_metro/layout/routing/invariants.py` return
-  a list of violation objects, and the caller decides whether to raise.
+- **`_guard_*` functions** in `src/nf_metro/layout/phases/guards.py` raise `PhaseInvariantError` on a violation.
+- **`check_*` functions** in `src/nf_metro/layout/routing/invariants.py` return a list of violation objects, and the caller decides whether to raise.
 
-The render path runs the cheap **Tier-A** subset of both families on the settled
-geometry, so a layout defect reaches the end user as a warning, or as a
-`--strict` error, instead of a silently broken SVG:
+The render path runs the cheap **Tier-A** subset of both families on the settled geometry.
+A layout defect therefore reaches the end user as a warning, or as a `--strict` error, instead of a silently broken SVG:
 
-- `assert_render_layout_invariants` (`phases/guards.py`) runs the Tier-A
-  `_guard_*` postconditions, and
-- `assert_render_curve_invariants` (`routing/invariants.py`) runs the Tier-A
-  routing `check_*` invariants.
+- `assert_render_layout_invariants` (`phases/guards.py`) runs the Tier-A `_guard_*` postconditions, and
+- `assert_render_curve_invariants` (`routing/invariants.py`) runs the Tier-A routing `check_*` invariants.
 
-The **Tier-B** remainder of the `_guard_*` suite is gated behind
-`compute_layout(validate=True)`, which the `nf-metro render` path never sets.
+The **Tier-B** remainder of the `_guard_*` suite is gated behind `compute_layout(validate=True)`, which the `nf-metro render` path never sets.
 Tier-B members are costlier, or they depend on a mid-pipeline reroute.
-
-Tier A is the always-on render-path set. Tier B is the `validate=True` set.
 
 ## Tiers
 
 | Tier  | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Promotion intent                                                                 |
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
 | **A** | Cheap, observational structural checks: placement (finite coords, bbox containment with marker overhang, station overlap, ports on boundaries) **plus** `_guard_stations_within_bbox`, the inter-section backtrack/wrap guards (`_guard_inter_section_route_no_backtrack`, `_guard_inter_section_route_no_full_width_backtrack`, `_guard_serpentine_no_backtrack`, `_guard_inter_section_route_clears_own_section_interior`), the non-consumer-section breeze-through guards (`_guard_no_route_through_section`, `_guard_no_line_crosses_non_consumer`), and the routing `check_*` invariants already always-on via the render chokepoint. | Run on the default render path, warning by default with a `--strict` escalation. |
-| **B** | The remaining `validate=True` set: route-shape, bundle-order, label, rail, and merge-port geometry. Correct but either costlier or dependent on a mid-pipeline reroute (they consume `route_edges` output), so not cheap-always-on.                                                                                                                                                                                                                                                                                                                                                                                                        | Stay behind `validate=True` / `--strict`.                                        |
+| **B** | The remaining `validate=True` set: route-shape, bundle-order, label, rail, and merge-port geometry. Correct but either costlier or dependent on a mid-pipeline reroute (they consume `route_edges` output). Not cheap-always-on.                                                                                                                                                                                                                                                                                                                                                                                                           | Stay behind `validate=True` / `--strict`.                                        |
 | **C** | Test-only oracles: too slow, too fixture-specific, or non-observational.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Live in the test suite, not the runtime suite.                                   |
 
-Tier A is mostly the cheap observational set that the cost audit confirms runs
-in low tens of microseconds. It also holds a handful of routed-geometry sweeps
-in the ~10-90 us range whose visibility matters more than their cost: the
-inter-section backtrack and wrap guards, of which the dearest is ~11 us, and the
-non-consumer-section breeze-through guards (`_guard_no_route_through_section`
-at ~86 us and `_guard_no_line_crosses_non_consumer` at ~75 us). A line plotted
-over a section or station it never touches is at least as visibly broken as a
-backtracking bundle, so those stay on the always-on path despite the cost.
+Tier A is mostly the cheap observational set that the cost audit confirms runs in low tens of microseconds.
+It also holds a handful of routed-geometry sweeps in the ~10-90 us range whose visibility matters more than their cost.
+Those are the inter-section backtrack and wrap guards, of which the costliest is ~11 us, and the non-consumer-section breeze-through guards (`_guard_no_route_through_section` at ~86 us and `_guard_no_line_crosses_non_consumer` at ~75 us).
+A line plotted over a section or station it never touches is at least as visibly broken as a backtracking bundle.
+Those guards stay on the always-on path despite the cost.
 
-Tier B holds everything else that is materially more expensive or depends on a
-mid-pipeline reroute. Its most expensive members,
-`_guard_no_opposing_line_overlap` at ~86 us and
-`_guard_trunk_bands_crossing_optimal` at ~57 us, are routed-geometry sweeps. The
-always-on `check_*` routing invariants in `routing/invariants.py` run through a
-separate chokepoint and include members up to `check_no_hanging_routes` at
-~470 us. Cost alone does not gate Tier-A membership in either family. The
-visibility of the defect does.
+Tier B holds everything else that is materially more expensive or depends on a mid-pipeline reroute.
+Its most expensive members, `_guard_no_opposing_line_overlap` at ~86 us and `_guard_trunk_bands_crossing_optimal` at ~57 us, are routed-geometry sweeps.
+The always-on `check_*` routing invariants in `routing/invariants.py` run through a separate chokepoint and include members up to `check_no_hanging_routes` at ~470 us.
+Cost alone does not gate Tier-A membership in either family.
+The visibility of the defect does.
 
-**Tier C** contains checks that run only against the test corpus. Two of them
-check section seams: `check_seam_approach_equals_departure` and
-`check_seam_segments_meet_at_port` verify that each inter-section approach uses
-the lane assigned by `lane_x`. They live in `tests/test_seam_lane_x.py`.
+Tier C contains checks that run only against the test corpus.
+Two of them check section seams.
+`check_seam_approach_equals_departure` and `check_seam_segments_meet_at_port` verify that each inter-section approach uses the lane assigned by `lane_x`.
+They live in `tests/test_seam_lane_x.py`.
 
-The third is `check_merge_feeders_land_on_trunk`, in
-`tests/test_merge_branch_trunk_invariant.py`. It requires exact contact between
-a feeder and its trunk. Its Tier-A counterpart allows a small tolerance, because
-an alternate routing handler can produce a valid map without exact contact.
+The third is `check_merge_feeders_land_on_trunk`, in `tests/test_merge_branch_trunk_invariant.py`.
+It requires exact contact between a feeder and its trunk.
+Its Tier-A counterpart allows a small tolerance, because an alternate routing handler can produce a valid map without exact contact.
 Every other guard and check is reachable from `compute_layout` or rendering.
 
 ## Registries
 
 The classification is data rather than prose:
 
-- **`GUARD_REGISTRY`** (`phases/guards.py`) is the single ordered source of
-  truth for the `validate=True` guard call sequence. Its order _is_ the call
-  order, and `run_validate_guards` iterates it. Each entry is a `GuardSpec`
-  from `layout/phase_state.py`, carrying `tier`, the `needs` set naming which
-  of `offsets`, `routes` and `section_y_*` the guard takes, whether it is
-  `bisection_safe` (running at every Pass C checkpoint, gated by
-  `first_valid_stage`) or final-only, and the `_BISECTION_FIRST_VALID` data
-  derived back out for the engine re-export.
-- **`INLINE_GUARD_REGISTRY`** (`phases/guards.py`) applies the same `GuardSpec`
-  schema to the guards `engine.py` invokes directly at a specific pipeline stage
-  rather than through the Pass C or final runner. Like `CHECK_REGISTRY` it is
-  _classification_ only, with no `needs` or `bisection_safe` dispatch data. Every
-  defined `_guard_*` therefore lives in exactly one of the two guard registries,
-  and none escapes tier and issue-pin classification.
+- **`GUARD_REGISTRY`** (`phases/guards.py`) is the single ordered source of truth for the `validate=True` guard call sequence.
+  Its order _is_ the call order, and `run_validate_guards` iterates it.
+  Each entry is a `GuardSpec` from `layout/phase_state.py`, carrying:
+  - `tier`
+  - the `needs` set, naming which of `offsets`, `routes`, and `section_y_*` the guard takes
+  - whether it is `bisection_safe` (running at every Pass C checkpoint, gated by `first_valid_stage`) or final-only
+  - the `_BISECTION_FIRST_VALID` data derived back out for the engine re-export
+- **`INLINE_GUARD_REGISTRY`** (`phases/guards.py`) applies the same `GuardSpec` schema to the guards `engine.py` invokes directly at a specific pipeline stage rather than through the Pass C or final runner.
+  Like `CHECK_REGISTRY` it is _classification_ only, with no `needs` or `bisection_safe` dispatch data.
+  Every defined `_guard_*` therefore lives in exactly one of the two guard registries, and none escapes tier and issue-pin classification.
+- **`CHECK_REGISTRY`** (`routing/invariants.py`) applies the same `GuardSpec` schema to the routing checks.
+  Checks return lists rather than raising.
+  This is therefore a _classification_ registry rather than a dispatcher, and the runtime chokepoint stays `assert_render_curve_invariants`.
+  The registries are unified through the shared schema and this page, **not** by merging the raise-against-return error protocols.
 
-The Tier-A `_guard_*` postconditions across both registries run on the render
-path through `assert_render_layout_invariants`, the sibling of the routing
-chokepoint. `render_layout_invariant_specs` selects them: every Tier-A guard
-except `_RENDER_CHOKEPOINT_AUTHORING_GUARDS`. That exception holds the two
-authoring-error guards, `_guard_no_same_row_backward_feed` and
-`_guard_no_mixed_entry_directions`, which raise a `ValueError` on un-renderable
-input and stay always-on hard fails in the engine rather than joining the
-warn-by-default chokepoint.
+The Tier-A `_guard_*` postconditions across both registries run on the render path through `assert_render_layout_invariants`, the sibling of the routing chokepoint.
+`render_layout_invariant_specs` selects them: every Tier-A guard except `_RENDER_CHOKEPOINT_AUTHORING_GUARDS`.
+That exception holds the two authoring-error guards, `_guard_no_same_row_backward_feed` and `_guard_no_mixed_entry_directions`.
+Both raise a `ValueError` on un-renderable input and stay always-on hard fails in the engine, rather than joining the warn-by-default chokepoint.
 
-- **`CHECK_REGISTRY`** (`routing/invariants.py`) applies the same `GuardSpec`
-  schema to the routing checks. Checks return lists rather than raising, so this
-  is a _classification_ registry rather than a dispatcher, and the runtime
-  chokepoint stays `assert_render_curve_invariants`. The registries are unified
-  through the shared schema and this page, **not** by merging the raise-against-
-  return error protocols.
+Each `GuardSpec` also carries `issue_pin` and `narrow_reason`.
+`issue_pin` holds the `#NNN` issues a guard was born from, kept as data so consolidation cannot lose the regression trail.
+`narrow_reason` says why an issue-pinned guard stays scoped to its case rather than stating a general property.
+`tests/test_guard_registry.py` keeps these honest.
+It asserts that:
 
-Each `GuardSpec` also carries `issue_pin` and `narrow_reason`. `issue_pin` holds
-the `#NNN` issues a guard was born from, kept as data so consolidation cannot
-lose the regression trail. `narrow_reason` says why an issue-pinned guard stays
-scoped to its case rather than stating a general property.
-`tests/test_guard_registry.py` keeps these honest: every guard and check is
-registered exactly once, the Tier-A check set equals the curve render chokepoint
-exactly, the render-layout chokepoint equals the Tier-A guard set minus the
-authoring guards, no validate-only guard duplicates an always-on check, and
-every issue-pinned guard records its issue and a `narrow_reason`.
+- every guard and check is registered exactly once
+- the Tier-A check set equals the curve render chokepoint exactly
+- the render-layout chokepoint equals the Tier-A guard set minus the authoring guards
+- no validate-only guard duplicates an always-on check
+- every issue-pinned guard records its issue and a `narrow_reason`
 
 ## Cost audit
 
-`scripts/guard_cost_audit.py` lays out every fixture under `examples/` and
-`examples/topologies/` once, then times each registered guard and check against
-the final geometry. The mean microseconds per fixture below come from that run.
+`scripts/guard_cost_audit.py` lays out every fixture under `examples/` and `examples/topologies/` once, then times each registered guard and check against the final geometry.
+The mean microseconds per fixture in the following tables come from that run.
 Regenerate them with:
 
 ```bash frame="terminal"
@@ -209,21 +184,18 @@ python scripts/guard_cost_audit.py --json /tmp/guard_cost.json
 
 ### Inline guards (`INLINE_GUARD_REGISTRY`)
 
-These `_guard_*` functions are invoked directly at specific pipeline stages
-rather than through the Pass C or final dispatch, so they carry no `needs` or
-`bisection_safe` dispatch data, only their tier and any `issue_pin` and
-`narrow_reason`. Their costs are not measured separately, since each is a single
-structural pass.
+`engine.py` invokes these `_guard_*` functions directly at specific pipeline stages rather than through the Pass C or final dispatch.
+They therefore carry no `needs` or `bisection_safe` dispatch data, only their tier and any `issue_pin` and `narrow_reason`.
+Their costs are not measured separately, because each is a single structural pass.
 
-`_guard_canvas_margin_settled` is the one inline guard whose tier does not
-describe its gating. The render's canvas-margin move loop calls it on every
-render, not only under `validate=True`. Its input is the shortfall a move left
-behind, which exists nowhere else, so it cannot join the dispatched Tier-A set
-the render chokepoint runs.
+`_guard_canvas_margin_settled` is the one inline guard whose tier does not describe its gating.
+The render's canvas-margin move loop calls it on every render, not only under `validate=True`.
+Its input is the shortfall a move left behind, which exists nowhere else.
+It cannot join the dispatched Tier-A set the render chokepoint runs.
 
 | guard                                         | tier | role                                                                        |
 | --------------------------------------------- | ---- | --------------------------------------------------------------------------- |
-| `_guard_stations_within_bbox`                 | A    | Always-on postcondition: every station centre lies within its section bbox. |
+| `_guard_stations_within_bbox`                 | A    | Always-on postcondition: every station center lies within its section bbox. |
 | `_guard_no_negative_grid_columns`             | A    | No section sits at a negative grid column.                                  |
 | `_guard_explicit_grid_directions`             | A    | Explicit-grid sections retain direction unless resolution reverses it.      |
 | `_guard_no_mixed_entry_directions`            | A    | A section's incoming lines approach from a single side.                     |
@@ -252,26 +224,13 @@ the render chokepoint runs.
 
 ## Consolidation
 
-The consolidation pass (#922) removed the validate-only `_guard_*` wrappers that
-only raised around a check already in the always-on render chokepoint:
-`_guard_bundle_order_preserved`, `_guard_concentric_bundle_corners`,
-`_guard_no_collinear_distinct_lines`,
-`_guard_no_intra_section_collinear_distinct_lines` and
-`_guard_no_same_line_parallel_descents`. Each check is the single authority and
-runs on every render through `assert_render_curve_invariants`, so the wrapper
-was pure duplication. `test_no_registry_guard_duplicates_an_always_on_check`
-keeps the duplication from returning.
+The consolidation pass (#922) removed the validate-only `_guard_*` wrappers that only raised around a check already in the always-on render chokepoint: `_guard_bundle_order_preserved`, `_guard_concentric_bundle_corners`, `_guard_no_collinear_distinct_lines`, `_guard_no_intra_section_collinear_distinct_lines`, and `_guard_no_same_line_parallel_descents`.
+Each check is the single authority and runs on every render through `assert_render_curve_invariants`, which made the wrapper pure duplication.
+`test_no_registry_guard_duplicates_an_always_on_check` keeps the duplication from returning.
 
-The remaining issue-pinned guards each express a distinct geometric property,
-and their docstrings distinguish them from one another explicitly. Rather than
-force-merging their bodies, the pass records each guard's originating issue in
-`issue_pin` and documents its scope in `narrow_reason`. The two genuinely general
-inline guards, `_guard_no_negative_grid_columns` and
-`_guard_explicit_grid_directions`, carry no pin, because they state a general
-structural property rather than a special case.
+The remaining issue-pinned guards each express a distinct geometric property, and their docstrings distinguish them from one another.
+Rather than force-merging their bodies, the pass records each guard's originating issue in `issue_pin` and documents its scope in `narrow_reason`.
+The two general inline guards, `_guard_no_negative_grid_columns` and `_guard_explicit_grid_directions`, carry no pin, because they state a general structural property rather than a special case.
 
-The collinear-distinct overlay checks are unified as one always-on
-`check_collinear_distinct_lines`, whose `scopes` argument selects the
-inter-section, intra-section and diagonal scans. The render chokepoint runs every
-scope, while callers that need a subset, such as the strike-clearance probe and
-the per-scope unit tests, pass the scopes they want.
+The collinear-distinct overlay checks are unified as one always-on `check_collinear_distinct_lines`, whose `scopes` argument selects the inter-section, intra-section, and diagonal scans.
+The render chokepoint runs every scope, while callers that need a subset, such as the strike-clearance probe and the per-scope unit tests, pass the scopes they want.

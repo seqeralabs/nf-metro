@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from nf_metro.layout.constants import LABEL_OFFSET, LABEL_OVERLAP_TOL
+from nf_metro.layout.constants import (
+    DESCENDER_CLEARANCE,
+    LABEL_OFFSET,
+    LABEL_OVERLAP_TOL,
+)
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.geometry import segment_intersects_bbox as _segment_intersects_bbox
 from nf_metro.layout.labels import (
@@ -17,10 +21,13 @@ from nf_metro.layout.labels import (
     _find_clear_reflow_candidate,
     _intrusion,
     _label_bbox,
+    _lift_wrapped_labels_off_foreign_trunks,
     _make_obstacle_placements,
     _places_label_beside_pill,
     _station_marker_boxes,
     _wrap_text_to_chars,
+    find_wrapped_label_trunk_strikes,
+    label_glyph_ink_bbox,
     place_labels,
 )
 from nf_metro.layout.phases.spacing import (
@@ -240,6 +247,51 @@ class TestAvoidDiagonalRoutes:
         _avoid_diagonal_routes([placement], g, [route], None)
         assert placement.above is True
         assert placement.y == 195
+
+
+class TestWrappedLabelTrunkLift:
+    """The wrapped-label lift pulls a two-line name off a foreign trunk.
+
+    A wrapped label pushed out toward a neighbouring track can grow its ink
+    block across a metro line the station does not serve.
+    :func:`_lift_wrapped_labels_off_foreign_trunks` restores it to its
+    un-pushed anchor beside its own pill, clearing the line off the name. This
+    exercises both halves of that guarantee on constructed geometry,
+    independent of any parsed fixture's settled coordinates.
+    """
+
+    def _struck_wrapped_setup(self):
+        """A two-line 'sort' label pushed above its pill onto a foreign 'qc'
+        trunk, plus the strike's trunk Y taken from the pushed ink block."""
+        graph = MetroGraph()
+        graph.add_station(Station(id="sort", label="Samtools sort", x=100, y=200))
+        graph.add_station(Station(id="star", label="STAR", x=40, y=200))
+        graph.add_edge(Edge(source="star", target="sort", line_id="align"))
+
+        base_y = 200 - LABEL_OFFSET - DESCENDER_CLEARANCE
+        placement = LabelPlacement(
+            station_id="sort", text="Samtools\nsort", x=100, y=base_y - 40, above=True
+        )
+        x0, ytop, x1, ybot = label_glyph_ink_bbox(placement)
+        trunk_y = (ytop + ybot) / 2
+        route = _FakeRoute(
+            line_id="qc", points=[(x0 - 20, trunk_y), (x1 + 20, trunk_y)]
+        )
+        return graph, placement, route, base_y
+
+    def test_pushed_wrapped_label_strikes_foreign_trunk(self):
+        graph, placement, route, _ = self._struck_wrapped_setup()
+        strikes = find_wrapped_label_trunk_strikes(graph, [placement], [route], None)
+        assert [sid for sid, _y, _lid in strikes] == ["sort"]
+        assert strikes[0][2] == "qc"
+
+    def test_lift_clears_the_foreign_trunk_strike(self):
+        graph, placement, route, base_y = self._struck_wrapped_setup()
+        _lift_wrapped_labels_off_foreign_trunks(
+            [placement], graph, [route], None, {}, LABEL_OFFSET
+        )
+        assert placement.y == base_y
+        assert not find_wrapped_label_trunk_strikes(graph, [placement], [route], None)
 
 
 # A wide-label section beside a narrow one, so the narrow section's labels are

@@ -5,12 +5,14 @@ description: The people behind nf-metro.
 
 ## Creator
 
-nf-metro is created and maintained by **[Jonathan Manning](https://github.com/pinin4fjords)**. The design and direction are his: what a pipeline metro map should be, how the layout engine should reason about it, and which problems are worth solving. Most of the implementation was written with AI assistance (Claude Code), following that direction.
+**[Jonathan Manning](https://github.com/pinin4fjords)** created and maintains nf-metro.
+He sets the design and direction, deciding what a pipeline metro map should be, how the layout engine should reason about it, and which problems are worth solving.
+Most of the implementation was written with AI assistance (Claude Code) under that direction.
 
 ## Design
 
-The documentation site and visual identity are the work of **[Phil Ewels](https://github.com/ewels)**: the web design of this site, the nf-metro logo, and the overall look and feel.
+**[Phil Ewels](https://github.com/ewels)** designed the documentation site, the nf-metro logo, and the overall look and feel.
 
-## Home
+## Development
 
 nf-metro is developed at **[Seqera](https://seqera.io)**.

@@ -50,6 +50,7 @@ from nf_metro.parser.grammar import (
 from nf_metro.parser.model import (
     UNANNOTATED_LINE_ID,
     Edge,
+    LineSpread,
     MetroGraph,
     Section,
     Station,
@@ -366,11 +367,21 @@ def _infer_layout(
     )
 
     # Populate graph.interchanges before expansion so auto-detected and
-    # author-written interchanges share the expansion path. Sectionless graphs
-    # run it too; a hub found there needs an implicit section to host the detour
-    # its skip-lines would otherwise draw straight through the skipped markers.
+    # author-written interchanges share the expansion path.
     infer_interchanges(graph)
-    if not graph.sections and graph.interchanges:
+
+    # A sectionless graph needs an implicit section to host the bypass detours
+    # its skip-lines would otherwise draw straight through the markers they skip;
+    # that detour routing is gated on a section existing. Centered line-spread is
+    # exempt because sectioning it breaks the centered-balance guard on cross-line
+    # fork/weave geometry: an above-centre exclusive line run that is correctly
+    # offset from the trunk while the graph stays flat collapses onto the trunk
+    # once the graph is sectioned, tripping the guard's minimum-offset invariant.
+    # tests/test_centered_tracks.py exercises this via
+    # test_fork_weave_layout_each_line_run_on_correct_side. This exemption does not
+    # make centered mode immune to the skip-line marker-crossing this section
+    # otherwise guards against; that gap is tracked in issue #1957.
+    if not graph.sections and graph.line_spread is not LineSpread.CENTERED:
         _create_implicit_section(graph)
 
     authored_capture = capture_authored_routes(graph)

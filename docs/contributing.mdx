@@ -1,13 +1,13 @@
 ---
 title: "Contributing"
-description: How to set up nf-metro for development, run the test suite and linters, and get a change merged.
+description: Set up nf-metro for development, run the test suite and linters, and get a change merged.
 ---
 
 import { Steps } from "@astrojs/starlight/components";
 
-How to set up nf-metro for development, run the same checks CI runs, and get a change merged.
+nf-metro accepts contributions as pull requests against `main`.
 
-## Setup
+## Set up the environment
 
 ```bash frame="terminal"
 git clone https://github.com/seqeralabs/nf-metro
@@ -15,15 +15,19 @@ cd nf-metro
 pip install -e ".[dev]"
 ```
 
-Required Python: 3.11+. Dependencies: `click`, `drawsvg`, `lark`, `networkx`, `pillow`. Dev extras add `pytest`, `ruff`, `mypy`.
+Required Python: 3.11+.
+Dependencies: `click`, `drawsvg`, `lark`, `networkx`, `pillow`.
+Dev extras add `pytest`, `ruff`, `mypy`.
 
-A plain clone also fetches `gh-pages`, an orphan branch carrying the built docs site and every open PR's render preview. Work only ever happens on `main`, so clone single-branch if you don't need that history:
+A plain clone also fetches `gh-pages`, an orphan branch carrying the built docs site and every open PR's render preview.
+Work only ever happens on `main`.
+Clone single-branch if you don't need that history:
 
 ```bash frame="terminal"
 git clone --single-branch --branch main https://github.com/seqeralabs/nf-metro
 ```
 
-## Running checks
+## Run the checks
 
 ```bash frame="terminal"
 # All tests
@@ -39,38 +43,49 @@ ruff format --check src/ tests/
 mypy src/
 ```
 
-The topology suite parametrizes over every `.mmd` in `examples/topologies/` and runs the full layout oracle against each one. It is the most sensitive regression check, so run it after any layout change.
+The topology suite parametrizes over every `.mmd` in `examples/topologies/` and runs the full layout oracle against each one.
+It is the most sensitive regression check.
+Run it after any layout change.
 
-CI balances its three test shards from the committed `.test_durations` file and reports the 25 slowest tests in each shard. If you change the test count or runtime substantially, refresh the timings, then review and commit the updated file:
+CI balances its three test shards from the committed `.test_durations` file and reports the 25 slowest tests in each shard.
+If you change the test count or runtime, refresh the timings, then review and commit the updated file:
 
 ```bash frame="terminal"
 pytest --store-durations --clean-durations
 ```
 
-## Before opening a PR
+## Before you open a PR
 
 <Steps>
-  1. Run `pytest` and `ruff format --check` - CI runs both and will fail on
-  either. 2. For any layout or rendering change, do a [visual
-  review](#visual-review) - the automated checks confirm the geometry is valid,
-  not that it looks right. 3. If you added behaviour, add a topology fixture
-  that covers it (see below). 4. If you fixed a bug that had an `xfail` marker,
-  remove the marker so the fix is locked in.
+
+1. Run `pytest` and `ruff format --check`.
+   CI runs both and fails on either.
+2. For any layout or rendering change, do a [visual review](#visual-review).
+   The automated checks confirm the geometry is valid, not that it looks right.
+3. If you added behavior, add a topology fixture that covers it (see [Add a topology test](#add-a-topology-test)).
+4. If you fixed a bug that had an `xfail` marker, remove the marker so the fix is locked in.
+
 </Steps>
 
-## Adding a topology test
+## Add a topology test
 
-`examples/topologies/` holds `.mmd` fixtures, each isolating a specific graph shape such as a fan-out, fan-in, diamond or fold. Adding a fixture is the main way to extend test coverage. No wiring is needed, because the suite picks up every file in the directory automatically.
+`examples/topologies/` holds `.mmd` fixtures, each isolating a specific graph shape such as a fan-out, fan-in, diamond, or fold.
+Adding a fixture is the main way to extend test coverage.
+You need no wiring, because the suite picks up every file in the directory automatically.
 
 <Steps>
-  1. Write a minimal `.mmd` that exercises the topology. 2. Drop it in
-  `examples/topologies/`. 3. Run `pytest tests/test_topology_validation.py` to
-  confirm it passes (or fails, if you are pinning a known issue).
+
+1. Write a minimal `.mmd` that exercises the topology.
+2. Save it in `examples/topologies/`.
+3. Run `pytest tests/test_topology_validation.py` to confirm it passes (or fails, if you are pinning a known issue).
+
 </Steps>
 
-## Adding a map to a docs page
+## Add a map to a docs page
 
-Docs pages render metro maps live from their committed `.mmd` source with the `<Metro>` component, so there is nothing to pre-render or commit. In an `.mdx` page, import it once and point `src` at a repo-relative path:
+Docs pages render metro maps live from their committed `.mmd` source with the `<Metro>` component.
+You pre-render and commit nothing.
+In an `.mdx` page, import it once and point `src` at a repo-relative path:
 
 ```mdx title="docs/mypage.mdx"
 import Metro from "@components/Metro.astro";
@@ -78,7 +93,8 @@ import Metro from "@components/Metro.astro";
 <Metro src="examples/guide/01_minimal.mmd" />
 ```
 
-That shows the Mermaid source, the CLI command and the rendered map as three toggle sections. Pick the mix with `purpose`, or override a single section by setting `mmd`, `command` or `render` to `"open"`, `"collapsed"` or `false`:
+That shows the Mermaid source, the CLI command, and the rendered map as three toggle sections.
+Pick the mix with `purpose`, or override a single section by setting `mmd`, `command`, or `render` to `"open"`, `"collapsed"`, or `false`:
 
 | `purpose`         | source    | command   | map  |
 | ----------------- | --------- | --------- | ---- |
@@ -104,11 +120,15 @@ That shows the Mermaid source, the CLI command and the rendered map as three tog
 />
 ```
 
-The page must be `.mdx`, not `.md`. Plain ` ```metro ` fences are left untouched, so use them for highlight-only snippets that don't need a render. The Gallery and nf-core pipelines pages emit `<Metro>` automatically from `scripts/build_gallery.py`, so you don't hand-author those.
+The page must be `.mdx`, not `.md`.
+nf-metro leaves plain ` ```metro ` fences untouched.
+Use them for highlight-only snippets that don't need a render.
+The Gallery and nf-core pipelines pages emit `<Metro>` automatically from `scripts/build_gallery.py`.
+Do not hand-author those.
 
-## Bugs you can't fix yet
+## Defer a bug you cannot fix yet
 
-When you find a bug that will take time to fix, write a test for the _correct_ behaviour and mark it `xfail`:
+When you find a bug that takes time to fix, write a test for the _correct_ behavior and mark it `xfail`:
 
 ```python title="tests/test_example.py"
 @pytest.mark.xfail(strict=True, reason="issue #NNN: what should happen")
@@ -116,15 +136,24 @@ def test_something():
     ...
 ```
 
-While the bug is present, `xfail` keeps CI green and the test documents what is wrong. When someone fixes it, the test flips to `XPASS` and CI turns red, prompting them to drop the marker and lock the correct behaviour in. The floor cannot slip backwards by accident.
+While the bug is present, `xfail` keeps CI green and the test documents what is wrong.
+When someone fixes it, the test flips to `XPASS` and CI turns red, prompting them to drop the marker and lock the correct behavior in.
+The floor cannot slip backwards by accident.
 
-It follows that once a check is in, it stays in. If a check fires incorrectly, fix the check or the code. Never delete a check to make CI pass.
+Once a check is in, it stays in.
+If a check fires incorrectly, fix the check or the code.
+Never delete a check to make CI pass.
 
 ## Visual review
 
-Automated geometry checks verify that the coordinates are correct. They cannot verify that the result _looks_ right, so review layout and rendering changes by eye.
+Automated geometry checks verify that the coordinates are correct.
+They cannot verify that the result _looks_ right.
+Review layout and rendering changes by eye.
 
-**Via CI (preferred):** push to a PR. Once lint and format pass, CI invokes `.github/workflows/pr-renders.yml`, which renders the gallery on both the PR branch and the base, builds a side-by-side before/after for every SVG that changed, and publishes the diff. The comment on your PR links to it. Scroll through and confirm nothing regressed.
+**Via CI (preferred):** push to a PR.
+Once lint and format pass, CI invokes `.github/workflows/pr-renders.yml`, which renders the gallery on both the PR branch and the base, builds a side-by-side before/after for every SVG that changed, and publishes the diff.
+The comment on your PR links to it.
+Scroll through and confirm nothing regressed.
 
 **Locally:** render individual examples directly:
 
@@ -132,7 +161,7 @@ Automated geometry checks verify that the coordinates are correct. They cannot v
 # Activate the nf-metro dev environment if using micromamba
 source ~/.local/bin/mm-activate nf-metro
 
-# Render an SVG (--no-chrome-css bakes concrete colours for cairosvg)
+# Render an SVG (--no-chrome-css bakes concrete colors for cairosvg)
 python -m nf_metro render examples/rnaseq_sections.mmd -o /tmp/out.svg --no-chrome-css
 
 # Convert to PNG for easier review
@@ -144,21 +173,40 @@ Batch-render the whole topology library with `python scripts/render_topologies.p
 
 ## Commit and CI conventions
 
-- Append `[skip ci]` to the commit subject for work-in-progress pushes. Omit it for the final commit before requesting review, and for any commit that fixes a CI failure.
-- Don't write the literal `[skip ci]` marker in the commit body. GitHub Actions scans the whole message, not just the subject.
+- Append `[skip ci]` to the commit subject for work-in-progress pushes.
+  Omit it for the final commit before requesting review, and for any commit that fixes a CI failure.
+- Do not write the literal `[skip ci]` marker in the commit body.
+  GitHub Actions scans the whole message, not only the subject.
 
-## Filing issues
+## File an issue
 
-When you trip over a bug mid-task, file a detailed issue rather than trying to fix it on the spot. Include a minimal `.mmd` that reproduces it, what the output looks like against what you expected, and the topology category if you know it. Someone with no context on your original task can then pick the bug up.
+When you find a bug mid-task, file a detailed issue rather than trying to fix it on the spot.
+Include a minimal `.mmd` that reproduces it, what the output looks like against what you expected, and the topology category if you know it.
+Someone with no context on your original task can then pick the bug up.
 
-## Changing the layout engine
+## Change the layout engine
 
-The engine assigns coordinates through a sequence of ~40 ordered phases and then routes the edges, so a change in one place often has effects elsewhere. Before modifying it, read the relevant Internals page ([Architecture](/nf-metro/dev/architecture/), [Layout pipeline](/nf-metro/dev/layout_pipeline/) or [Routing](/nf-metro/dev/routing/)) along with the per-phase contracts in [`CONTRACT.md`](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/layout/CONTRACT.md).
+The engine assigns coordinates through a sequence of ~40 ordered phases and then routes the edges.
+A change in one place often has effects elsewhere.
+Before modifying it, read the relevant Internals page ([Architecture](/nf-metro/dev/architecture/), [Layout pipeline](/nf-metro/dev/layout_pipeline/), or [Routing](/nf-metro/dev/routing/)) along with the per-phase contracts in [`CONTRACT.md`](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/layout/CONTRACT.md).
 
-Invariants are enforced in two places, and new ones belong there rather than in one-off assertions: **phase guards** (`src/nf_metro/layout/phases/guards.py`, which name the failing phase so a regression localises immediately) and the **layout oracle** (the `check_*` functions in `tests/layout_validator.py`). Some are hard rules the oracle will not let you break, such as the rule that a station must never sit on the corner of a curve. Don't work around a failing check by relaxing it. Fix the cause.
+nf-metro enforces invariants in two places, and new ones belong there rather than in one-off assertions: **phase guards** (`src/nf_metro/layout/phases/guards.py`, which name the failing phase so a regression localizes immediately) and the **layout oracle** (the `check_*` functions in `tests/layout_validator.py`).
+Some are hard rules the oracle does not let you break, such as the rule that a station must never sit on the corner of a curve.
+Do not work around a failing check by relaxing it.
+Fix the cause.
 
 ## Repository size (`gh-pages`)
 
-Every docs deploy (`dev/`, `latest/`, versioned releases, and each open PR's render-diff preview under `_pr/<N>/`) commits the full built page to the `gh-pages` branch, gallery SVGs and all, inlined directly into the HTML. The inlining is deliberate. `<Metro>` and `ZoomableSVG.astro` inline the SVG rather than reference it as an `<img>` because that is what keeps the map's `light-dark()` theming and the zoom/pan lightbox working. Read the comments in those two components before "fixing" this by switching to external file references.
+Every docs deploy (`dev/`, `latest/`, versioned releases, and each open PR's render-diff preview under `_pr/<N>/`) commits the full built page to the `gh-pages` branch, gallery SVGs and all, inlined directly into the HTML.
+The inlining is deliberate.
+`<Metro>` and `ZoomableSVG.astro` inline the SVG rather than reference it as an `<img>` because that is what keeps the map's `light-dark()` theming and the zoom/pan lightbox working.
+Read the comments in those two components before "fixing" this by switching to external file references.
 
-Most of a gallery page is unchanged between any two deploys, but git's delta compression across a multi-MB blob is inconsistent. `gh-pages` history therefore grew to ~1,450 commits (~82 MB) before a one-time cleanup squashed it to a single commit ([#1240](https://github.com/seqeralabs/nf-metro/issues/1240)). That squash was manual. Squashing on every deploy would require every `gh-pages` writer to combine a history-discarding push with preserving every other writer's directories, and a force-push is what the publish, cleanup and docs jobs are built to avoid: each resolves a rejected push by re-deriving its own commit on the new tip, which a squash would defeat. PR previews matter too much to day-to-day layout work to risk that. If the branch balloons again, repeat the manual squash (see #1240 for the procedure) rather than wiring up continuous squashing without testing it in isolation first.
+Most of a gallery page does not change between any two deploys, but delta compression in git across a multi-MB blob is inconsistent.
+`gh-pages` history therefore grew to ~1,450 commits (~82 MB) before a one-time cleanup squashed it to a single commit ([#1240](https://github.com/seqeralabs/nf-metro/issues/1240)).
+That squash was manual.
+Squashing on every deploy would require every `gh-pages` writer to combine a history-discarding push with preserving every other writer's directories.
+The publish, cleanup, and docs jobs are built to avoid exactly that force-push.
+Each resolves a rejected push by re-deriving its own commit on the new tip, which a squash would defeat.
+PR previews matter too much to day-to-day layout work to risk that.
+If the branch grows again, repeat the manual squash (see #1240 for the procedure) rather than adding continuous squashing without testing it in isolation first.

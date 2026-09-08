@@ -1,57 +1,75 @@
 ---
-title: "Writing metro maps"
-description: "Step-by-step guide to the nf-metro input format: lines, stations, sections, and directives."
+title: "Write a metro map"
+description: "The nf-metro input format: lines, stations, sections, and directives."
 ---
 
 import Metro from "@components/Metro.astro";
 
-nf-metro turns text descriptions of pipelines into metro-map-style diagrams. Input files use a subset of [Mermaid](https://mermaid.js.org/) `graph LR` syntax, extended with `%%metro` directives for colors, sections, and layout control.
+nf-metro turns text descriptions of pipelines into metro-map-style diagrams.
+Input files use a subset of [Mermaid](https://mermaid.js.org/) `graph LR` syntax, extended with `%%metro` directives for colors, sections, and layout control.
 
-This guide builds the format up step by step, starting from a flat list of stations and finishing with a multi-section pipeline that fans out, changes direction and reconverges.
+The sections that follow add one feature at a time, from a flat list of stations to a multi-section pipeline that fans out, changes direction, and reconverges.
 
 ## 1. Stations, lines, and edges
 
-The simplest metro map needs three things: **lines**, which are coloured routes; **stations**, which are pipeline steps; and **edges**, which carry lines between stations.
+The simplest metro map needs three things.
+**Lines** are colored routes, **stations** are pipeline steps, and **edges** carry lines between stations.
 
 <Metro src="examples/guide/01_minimal.mmd" />
 
-Four things are worth noting:
+The example uses four constructs:
 
-- **`%%metro line:`** defines a route as `id | Display Name | #hexcolor` with an optional fourth field for style (`solid`, `dashed`, or `dotted`) and an optional fifth field `inactive` to grey the line out by default. Every edge must reference one of these IDs.
-- **`graph LR`** starts the Mermaid graph. nf-metro always uses left-to-right flow at the top level.
+- **`%%metro line:`** defines a route as `id | Display Name | #hexcolor` with an optional fourth field for style (`solid`, `dashed`, or `dotted`) and an optional fifth field `inactive` to gray the line out by default.
+  Every edge must reference one of these IDs.
+- **`graph LR`** starts the Mermaid graph.
+  nf-metro always uses left-to-right flow at the top level.
 - **Stations** use Mermaid node syntax: `node_id[Label]`.
-- **Edges** carry a line ID: `source -->|line_id| target`. An edge can carry multiple lines at once: `a -->|line1,line2| b`.
+- **Edges** carry a line ID: `source -->|line_id| target`.
+  An edge can carry multiple lines at once: `a -->|line1,line2| b`.
 
 :::tip[Declare each station on its own line]
-Give every station one labelled line of its own (`fastqc[FastQC]`) and use **bare ids** in edges (`fastqc -->|qc| multiqc`). Most stations are shared by several edges, so this keeps each label in exactly one place, and it gives `%%metro` directives such as `file:`, `marker:` and `off_track:` a clear node to anchor to. nf-metro also accepts inline-shaped endpoints (`fastqc[FastQC] -->|qc| multiqc[MultiQC]`) for Mermaid compatibility, but avoid them in committed maps. A station can only carry its inline label on one of its edges, so mixing the two styles scatters where a label lives.
+Give every station one labeled line of its own (`fastqc[FastQC]`) and use **bare ids** in edges (`fastqc -->|qc| multiqc`).
+Because several edges usually share a station, this keeps each label in exactly one place.
+It also gives `%%metro` directives such as `file:`, `marker:` and `off_track:` a clear node to anchor to.
+nf-metro also accepts inline-shaped endpoints (`fastqc[FastQC] -->|qc| multiqc[MultiQC]`) for Mermaid compatibility, but avoid them in committed maps.
+A station carries its inline label on only one of its edges, and mixing the two styles scatters where a label lives.
 :::
 
-Without sections, every station sits on a single track. That works for simple pipelines, but real workflows have logical groupings.
+Without sections, every station sits on a single track.
+That works for simple pipelines, but real workflows have logical groupings.
 
-## 2. Grouping stations into sections
+## 2. Group stations into sections
 
-Sections wrap related stations in visual boxes using Mermaid `subgraph` blocks. That makes the diagram easier to read and lets the layout engine route lines between groups automatically.
+Sections wrap related stations in visual boxes using Mermaid `subgraph` blocks.
+That makes the diagram easier to read and lets the layout engine route lines between groups automatically.
 
 <Metro src="examples/guide/02_sections.mmd" />
 
-One rule matters here: **edges between stations in different sections must go outside all `subgraph`/`end` blocks.** The three inter-section edges at the bottom of the file connect Pre-processing to Analysis and Reporting.
+**Edges between stations in different sections must go outside all `subgraph`/`end` blocks.** The three inter-section edges at the bottom of the file connect Pre-processing to Analysis and Reporting.
 
-nf-metro places sections on a grid automatically, based on their dependencies. It also creates port connections at section boundaries, and junction stations where lines diverge.
+nf-metro places sections on a grid automatically, based on their dependencies.
+It also creates port connections at section boundaries, and junction stations where lines diverge.
 
-### Packing sections into a shared column
+### Pack sections into a shared column
 
-When you place sections by hand with `%%metro grid: <section> | <col>,<row>`, each cell normally holds one section, and every cell in a column is as wide as the column's widest section. To pack two short sections into the horizontal space a single wide section would take, name several comma-separated sections in one cell:
+When you place sections by hand with `%%metro grid: <section> | <col>,<row>`, each cell normally holds one section.
+Every cell in a column is as wide as the column's widest section.
+To pack two short sections into the horizontal space a single wide section would take, name several comma-separated sections in one cell:
 
 ```
 %%metro grid: gatk, variant_calling | 1,0
 %%metro grid: realign, reporting     | 1,1
 ```
 
-The named sections share that cell and pack side by side along the flow axis, which runs right-to-left for an `RL` row. The cell is as wide as its members combined, and the column is as wide as its widest cell, so a short-then-long pair in one row lines up top-to-bottom with a long-then-short pair packed into the same column below it:
+The named sections share that cell and pack side by side along the flow axis, which runs right-to-left for an `RL` row.
+The cell is as wide as its members combined, and the column is as wide as its widest cell.
+A short-then-long pair in one row therefore lines up top-to-bottom with a long-then-short pair packed into the same column below it:
 
 <Metro src="examples/topologies/multi_section_cell.mmd" mmd={false} />
 
-This keeps a folded pipeline compact and frees the cleared corner, here the bottom-left, for the legend. Each member keeps its own direction, ports and internal layout. Only their placement is shared.
+This keeps a folded pipeline compact and frees the cleared corner, here the bottom-left, for the legend.
+Each member keeps its own direction, ports, and internal layout.
+They share only their placement.
 
 ## 3. Fan-out and fan-in
 
@@ -59,35 +77,44 @@ When lines diverge from a shared section into separate analysis paths and then r
 
 <Metro src="examples/guide/03_fan_out.mmd" />
 
-Each line takes a different route through its own analysis section, and all three reconverge at annotation. The layout engine handles junction creation, vertical stacking and routing automatically, so you specify no positions or port sides.
+Each line takes a different route through its own analysis section, and all three reconverge at annotation.
+The layout engine handles junction creation, vertical stacking, and routing automatically.
+You specify no positions or port sides.
 
 ### Same-line convergence (fan-in merge)
 
-When optional processing steps mean the **same line** can reach a destination from several sources, nf-metro consolidates the overlapping routes. One bypass carries the full path, called the trunk, and closer sources drop down to join it:
+When optional processing steps mean the **same line** can reach a destination from several sources, nf-metro consolidates the overlapping routes.
+One bypass carries the full path, called the trunk, and closer sources drop down to join it:
 
 <Metro src="examples/guide/03b_fan_in_merge.mmd" />
 
-The pattern behind this is that every section sends `main` to **all** subsequent sections, not only to the next step. That creates convergent same-line edges at the sink's entry port. The layout engine detects them and routes a single trunk bypass from the farthest source, with branches dropping down to join it from intermediate sections.
+The pattern behind this is that every section sends `main` to **all** subsequent sections, not only to the next step.
+That creates convergent same-line edges at the sink's entry port.
+The layout engine detects them and routes a single trunk bypass from the farthest source, with branches dropping down to join it from intermediate sections.
 
 ## 4. Section directions
 
-By default every section flows left-to-right (`LR`). Change a section's internal flow direction with `%%metro direction:` for a more compact or more interesting layout.
+By default every section flows left-to-right (`LR`).
+Change a section's internal flow direction with `%%metro direction:` for a more compact layout.
 
-This example adds a top-to-bottom (`TB`) section that acts as a vertical connector between the fan-out analysis paths and the final reporting section:
+This example adds a top-to-bottom (`TB`) section as a vertical connector between the fan-out analysis paths and the final reporting section:
 
 <Metro src="examples/guide/04_directions.mmd" />
 
-The Post-processing section flows top-to-bottom, collecting the RNA and DNA lines from the sections above and below and handing them off horizontally to Reporting. The only change from a normal section is the single `%%metro direction: TB` directive.
+The Post-processing section flows top-to-bottom, collecting the RNA and DNA lines from the sections above and below and handing them off horizontally to Reporting.
+The only change from a normal section is the single `%%metro direction: TB` directive.
 
 The available directions are:
 
 - **`LR`**, the default, runs left to right.
 - **`TB`** runs top to bottom, which suits vertical connector sections.
-- **`RL`** runs right to left. The layout engine uses it automatically for serpentine folds in long pipelines.
+- **`RL`** runs right to left.
+  The layout engine uses it automatically for serpentine folds in long pipelines.
 
 ## 5. File input and output icons
 
-A pipeline diagram reads better when it shows where data enters and leaves. The `%%metro file:` directive marks a station as a file terminus, rendering it as a document icon instead of a regular station marker.
+A pipeline diagram reads better when it shows where data enters and leaves.
+The `%%metro file:` directive marks a station as a file terminus, rendering it as a document icon instead of a regular station marker.
 
 It takes two pieces:
 
@@ -104,17 +131,20 @@ It takes two pieces:
    reads_in[ ]
    ```
 
-The blank label tells nf-metro to render the document icon, carrying the label from the directive, instead of a pill-shaped station. Connect it to the pipeline with normal edges like any other station.
+The blank label tells nf-metro to render the document icon, carrying the label from the directive, instead of a pill-shaped station.
+Connect it to the pipeline with normal edges like any other station.
 
 <Metro src="examples/guide/05_file_icons.mmd" />
 
-The FASTQ icon at the start of the Analysis section shows the pipeline input, and the HTML icon at the end of Reporting shows where the QC report is written. Common labels include FASTQ, BAM, VCF, HTML and CSV, but any short string works.
+The FASTQ icon at the start of the Analysis section shows the pipeline input, and the HTML icon at the end of Reporting shows where the QC report is written.
+Common labels include FASTQ, BAM, VCF, HTML, and CSV, but any short string works.
 
 For a complex real-world example using file icons, see [`examples/rnaseq_sections.mmd`](https://github.com/seqeralabs/nf-metro/blob/main/examples/rnaseq_sections.mmd).
 
-### Paired/multiple files
+### Paired and multiple files
 
-When a station represents paired input files, such as paired-end FASTQ reads, use `%%metro files:` instead of `%%metro file:`. It renders a stacked-documents icon, which distinguishes it from a single file:
+When a station represents paired input files, such as paired-end FASTQ reads, use `%%metro files:` instead of `%%metro file:`.
+It renders a stacked-documents icon, which distinguishes it from a single file:
 
 ```metro
 %%metro files: reads_in | FASTQ
@@ -132,22 +162,27 @@ For stations that represent a directory of output files rather than a single fil
 
 <Metro src="examples/guide/05d_folder_icon.mmd" mmd={false} />
 
-All three directives, `file:`, `files:` and `dir:`, work the same way: pair a station ID with a label, give the station a blank label (`[ ]`), and connect it with normal edges. Only the rendered icon shape differs.
+All three directives, `file:`, `files:`, and `dir:`, work the same way: pair a station ID with a label, give the station a blank label (`[ ]`), and connect it with normal edges.
+Only the rendered icon shape differs.
 
-### Naming an icon
+### Name an icon
 
-The label inside an icon is meant to be a short type chip such as `CSV` or `FASTQ`. To attach a human-readable name without overlapping the chip, add an optional third field to the directive:
+The label inside an icon is meant to be a short type chip such as `CSV` or `FASTQ`.
+To attach a human-readable name without overlapping the chip, add an optional third field to the directive:
 
 ```metro
 %%metro file: samples_in | CSV | Samples
 %%metro file: contrasts_in | YAML | Contrasts
 ```
 
-The name renders as a caption directly below the icon. If several labels are listed, as in `FASTQ, BAM`, the same name applies to all of them.
+The name renders as a caption directly below the icon.
+If the directive lists several labels, as in `FASTQ, BAM`, the same name applies to all of them.
 
 ### Banner labels
 
-To make a format stand out, add `banner` as a fourth field to a `file:` or `files:` directive. The format label then renders as bold white text on a dark strip across the lower part of the icon, in the style of a transit-map format chip, while the white document stays visible:
+To make a format stand out, add `banner` as a fourth field to a `file:` or `files:` directive.
+The format label then renders as bold white text on a dark strip across the lower part of the icon, in the style of a transit-map format chip.
+The white document stays visible:
 
 ```metro
 %%metro files: aln_out | BAM | Alignments | banner
@@ -155,20 +190,27 @@ To make a format stand out, add `banner` as a fourth field to a `file:` or `file
 
 <Metro src="examples/guide/05f_banner_labels.mmd" mmd={false} />
 
-Any `name` caption in the third field still renders below the icon, so `| <name> | banner` keeps the caption and `| | banner` applies the strip with no caption. `banner` is not supported on `dir:` folder icons.
+Any `name` caption in the third field still renders below the icon.
+`| <name> | banner` keeps the caption, and `| | banner` applies the strip with no caption.
+`banner` is not supported on `dir:` folder icons.
 
 ## 6. Per-station markers
 
-By default every station is drawn as a uniform pill. The `%%metro marker:` directive overrides one station's marker, so its shape and fill can encode a tool attribute such as mandatory against optional, hardware-accelerated, or expanded in another diagram:
+By default nf-metro draws every station as a uniform pill.
+The `%%metro marker:` directive overrides one station's marker.
+Its shape and fill can then encode a tool attribute such as mandatory against optional, hardware-accelerated, or expanded in another diagram:
 
 ```metro
 %%metro marker: node_id | shape, fill
 ```
 
-- **`shape`** is `circle` for fully rounded, `square` for sharp corners, or `pill` for a flat-edged capsule running along the line. A pill is handy for flagging a step whose detail is shown in a separate diagram. Every shape still spans the line bundle, so it covers all the lines passing through the station.
-- **`fill`** is `open` for a hollow marker in the background colour, `solid` for the default station fill, or any literal colour, given as a name (`red`) or hex (`#4CAF50`).
+- **`shape`** is `circle` for fully rounded, `square` for sharp corners, or `pill` for a flat-edged capsule running along the line.
+  Use a pill to flag a step whose detail appears in a separate diagram.
+  Every shape spans the line bundle, covering all the lines passing through the station.
+- **`fill`** is `open` for a hollow marker in the background color, `solid` for the default station fill, or any literal color, given as a name (`red`) or hex (`#4CAF50`).
 
-`shape` defaults to `circle` and `fill` to `solid`, so `%%metro marker: node_id |` gives a solid circle. The directive may appear before or after the node is defined.
+`shape` defaults to `circle` and `fill` to `solid`, and `%%metro marker: node_id |` therefore gives a solid circle.
+The directive may appear before or after the node definition.
 
 To explain the markers, add a key below the line legend with `%%metro marker_legend:`, one row per shape and fill combination:
 
@@ -176,23 +218,26 @@ To explain the markers, add a key below the line legend with `%%metro marker_leg
 %%metro marker_legend: shape, fill | Caption
 ```
 
-This two-line variant-calling pipeline uses square markers for mandatory steps, open circles for optional ones, pills for steps expanded elsewhere and coloured squares for hardware-accelerated steps, with a matching key:
+This two-line variant-calling pipeline uses square markers for mandatory steps, open circles for optional ones, pills for steps expanded elsewhere, and colored squares for hardware-accelerated steps, with a matching key:
 
 <Metro src="examples/marker_styles.mmd" />
 
-Stations with no `%%metro marker:` keep the default pill, so the feature is entirely opt-in.
+Stations with no `%%metro marker:` keep the default pill.
+The feature is opt-in.
 
 ## 7. Hidden stations
 
-A graph sometimes needs a branching or merging point that does not represent a real pipeline step, for instance where lines diverge but no tool runs. A visible station there clutters the diagram with a meaningless marker.
+A graph sometimes needs a branching or merging point that does not represent a real pipeline step, for instance where lines diverge but no tool runs.
+A visible station there clutters the diagram with a meaningless marker.
 
-**Any station whose ID starts with `_` (underscore) is hidden.** It participates in layout and routing (lines pass through it), but no marker or label is rendered.
+**Any station whose ID starts with `_` (underscore) is hidden.** It participates in layout and routing (lines pass through it), but nf-metro renders no marker or label.
 
-This pipeline has a visible `branch` station that serves only as a fork point:
+This pipeline has a visible `branch` station that is only a fork point:
 
 <Metro src="examples/guide/06a_without_hidden.mmd" />
 
-The "Branch" station is real in the graph but meaningless in the pipeline. Renaming it to `_branch` hides it:
+The "Branch" station is real in the graph but meaningless in the pipeline.
+Renaming it to `_branch` hides it:
 
 ```metro ins={2,5,6,9}
     subgraph processing [Processing]
@@ -208,15 +253,20 @@ The "Branch" station is real in the graph but meaningless in the pipeline. Renam
 
 <Metro src="examples/guide/06b_with_hidden.mmd" mmd={false} />
 
-The lines still fork at the same point, but there is no marker or label. That gives fine control over where splits happen without adding a fake step to the diagram.
+The lines still fork at the same point, with no marker or label.
+That gives fine control over where splits happen without adding a fake step to the diagram.
 
 Use `--debug` to see hidden stations as dashed circles: `nf-metro render --debug pipeline.mmd -o debug.svg`
 
-## 8. Highlighting the active path
+## 8. Highlight the active path
 
-A single map defines every line a pipeline _can_ run, but a given Nextflow run usually exercises only a subset, because some subworkflows are optional or parameter-dependent. Rather than hand-editing the map to show what actually ran, mark the lines that did not run as **inactive**. They render in a muted grey, as does any station, label or legend swatch touched only by inactive lines, so the active path stands out.
+A single map defines every line a pipeline _can_ run.
+A given Nextflow run usually exercises only a subset, because some subworkflows are optional or parameter-dependent.
+Rather than hand-editing the map to show what ran, mark the lines that did not run as **inactive**.
+They render in a muted gray, as does any station, label, or legend swatch touched only by inactive lines.
+The active path then stands out.
 
-Add a fifth field, the literal `inactive`, to a `%%metro line:` directive to grey it out by default:
+Add a fifth field, the literal `inactive`, to a `%%metro line:` directive to gray it out by default:
 
 ```metro
 %%metro line: star   | STAR alignment (default)          | #2db572
@@ -226,27 +276,32 @@ Add a fifth field, the literal `inactive`, to a `%%metro line:` directive to gre
 
 <Metro src="examples/inactive_lines.mmd" mmd={false} />
 
-The `salmon` and `sv` lines above are declared `inactive`, so they and their exclusive stations, `Salmon` and `Manta`, render grey, while the default `star` path keeps full colour. Stations that both an active and an inactive line touch, here `Reads`, `QC`, `STAR`, `tximport` and `MultiQC`, stay full-strength.
+The `salmon` and `sv` lines declared earlier are `inactive`.
+They and their exclusive stations, `Salmon` and `Manta`, render gray, while the default `star` path keeps full color.
+Stations that both an active and an inactive line touch, here `Reads`, `QC`, `STAR`, `tximport`, and `MultiQC`, stay full-strength.
 
-To decide the inactive set per-render instead of in the map, pass `--inactive-lines` a comma-separated list of line IDs. This replaces any `inactive`-marked lines outright, so an empty value forces every line active:
+To decide the inactive set per-render instead of in the map, pass `--inactive-lines` a comma-separated list of line IDs.
+This replaces any `inactive`-marked lines outright, and an empty value forces every line active:
 
 ```bash frame="terminal"
-# Grey out just the pseudo-alignment line for this render
+# Gray out just the pseudo-alignment line for this render
 nf-metro render pipeline.mmd -o run.svg --inactive-lines salmon
 
-# Show every line at full colour, ignoring the map's own inactive defaults
+# Show every line at full color, ignoring the map's own inactive defaults
 nf-metro render pipeline.mmd -o run.svg --inactive-lines ""
 ```
 
-## 9. Putting it all together
+## 9. Complete examples
 
 The nf-core/rnaseq example at [`examples/rnaseq_auto.mmd`](https://github.com/seqeralabs/nf-metro/blob/main/examples/rnaseq_auto.mmd) combines all of these patterns in a real-world pipeline:
 
 <Metro src="examples/rnaseq_auto.mmd" mmd={false} />
 
-Five analysis routes share preprocessing, fan out to different aligners, reconverge at post-processing (a `TB` section), then fold back through QC (an `RL` section that creates a serpentine return path). The layout engine infers section directions, grid positions and port sides automatically from the graph topology.
+Five analysis routes share preprocessing, fan out to different aligners, reconverge at post-processing (a `TB` section), then fold back through QC (an `RL` section that creates a serpentine return path).
+The layout engine infers section directions, grid positions, and port sides automatically from the graph topology.
 
-The nf-core/variantbenchmarking example at [`examples/variantbenchmarking_auto.mmd`](https://github.com/seqeralabs/nf-metro/blob/main/examples/variantbenchmarking_auto.mmd) shows a different topology: seven lines converging at a benchmarking section, with the layout engine splitting it into two rows automatically.
+The nf-core/variantbenchmarking example at [`examples/variantbenchmarking_auto.mmd`](https://github.com/seqeralabs/nf-metro/blob/main/examples/variantbenchmarking_auto.mmd) shows a different topology.
+Seven lines converge at a benchmarking section, and the layout engine splits it into two rows automatically.
 
 <Metro src="examples/variantbenchmarking_auto.mmd" mmd={false} />
 
@@ -263,18 +318,18 @@ These go at the top of the file, before `graph LR`.
 | Directive                                                                  | Description                                                                                                                                                                                                                                                                                                                                                                                            |
 | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `%%metro title: <text>`                                                    | Map title                                                                                                                                                                                                                                                                                                                                                                                              |
-| `%%metro caption: <text>`                                                  | Free-text caption or attribution line rendered bottom-left of the map (e.g. `Adapted from Author et al., Journal (Year)`).                                                                                                                                                                                                                                                                             |
-| `%%metro logo: <path>` or `%%metro logo: <light> \| <dark>`                | Logo image, bundled into the legend (or top-left if there is no legend). A single path is used in every display mode; the two-path form supplies a light-mode and a dark-mode asset (see below). Paths resolve relative to the `.mmd` file's directory; an unresolvable path is an error.                                                                                                              |
+| `%%metro caption: <text>`                                                  | Free-text caption or attribution line rendered bottom-left of the map (for example, `Adapted from Author et al., Journal (Year)`).                                                                                                                                                                                                                                                                     |
+| `%%metro logo: <path>` or `%%metro logo: <light> \| <dark>`                | Logo image, bundled into the legend (or top-left if there is no legend). A single path is used in every display mode. The two-path form supplies a light-mode and a dark-mode asset (see the logo notes that follow). Paths resolve relative to the `.mmd` file's directory, and an unresolvable path is an error.                                                                                     |
 | `%%metro logo_scale: <factor>`                                             | Scale the logo within the legend block (`1.0` = default auto-size). Values above 1 grow the legend box to contain the logo.                                                                                                                                                                                                                                                                            |
-| `%%metro style: <name>`                                                    | Brand theme: `nfcore` (default; `dark` is an accepted alias), `seqera`, or `light` (the transparent embed theme). The brand names also take a `-light`/`-dark` suffix to pin a mode. Selects the render theme unless `--theme` is passed.                                                                                                                                                              |
-| `%%metro mode: <light\|dark>`                                              | Display mode, an axis independent of the brand. An SVG carries both palettes via CSS `light-dark()` and adapts to the viewer's `color-scheme`, so this only needs setting to bake a concrete palette (a PNG export, say). CLI equivalent `--mode`.                                                                                                                                                     |
-| `%%metro line: <id> \| <name> \| <color> [\| <style> [\| inactive]]`       | Define a metro line. Optional style: `solid` (default), `dashed`, or `dotted`. Optional fifth field `inactive` greys the line out by default (override per-render with `--inactive-lines`)                                                                                                                                                                                                             |
-| `%%metro grid: <sections> \| <col>,<row>[,<rowspan>[,<colspan>]]`          | Pin a section to a grid position. The first field may name several comma-separated sections; they share one cell and pack side-by-side along the flow axis, so a short+long pair aligns top-to-bottom with a long+short pair in the same column below it.                                                                                                                                              |
-| `%%metro legend: <position>`                                               | Position the legend (and its embedded logo). Keyword: `tl`, `tr`, `bl`, `br`, `bottom`, `right`, or `none` (a bare keyword auto-relocates if it would overlap a section or route). Add `\| canvas` to anchor the keyword to the canvas margin, or `\| <dx>,<dy>` to nudge it; both pin the block exactly (warning on overlap rather than relocating). Use `<x>,<y>` for absolute top-left coordinates. |
+| `%%metro style: <name>`                                                    | Brand theme: `nfcore` (default, with `dark` as an accepted alias), `seqera`, or `light` (the transparent embed theme). The brand names also take a `-light`/`-dark` suffix to pin a mode. Selects the render theme unless `--theme` is passed.                                                                                                                                                         |
+| `%%metro mode: <light\|dark>`                                              | Display mode, an axis independent of the brand. An SVG carries both palettes via CSS `light-dark()` and adapts to the viewer's `color-scheme`. Set this only to bake a concrete palette (a PNG export, say). CLI equivalent `--mode`.                                                                                                                                                                  |
+| `%%metro line: <id> \| <name> \| <color> [\| <style> [\| inactive]]`       | Define a metro line. Optional style: `solid` (default), `dashed`, or `dotted`. Optional fifth field `inactive` grays the line out by default (override per-render with `--inactive-lines`)                                                                                                                                                                                                             |
+| `%%metro grid: <sections> \| <col>,<row>[,<rowspan>[,<colspan>]]`          | Pin a section to a grid position. The first field may name several comma-separated sections. They share one cell and pack side-by-side along the flow axis. A short+long pair then aligns top-to-bottom with a long+short pair in the same column below it.                                                                                                                                            |
+| `%%metro legend: <position>`                                               | Position the legend (and its embedded logo). Keyword: `tl`, `tr`, `bl`, `br`, `bottom`, `right`, or `none` (a bare keyword auto-relocates if it would overlap a section or route). Add `\| canvas` to anchor the keyword to the canvas margin, or `\| <dx>,<dy>` to nudge it. Both pin the block exactly (warning on overlap rather than relocating). Use `<x>,<y>` for absolute top-left coordinates. |
 | `%%metro line_order: <strategy>`                                           | Line ordering for track assignment: `definition` (default, preserves `.mmd` order) or `span` (longest-spanning lines get inner tracks)                                                                                                                                                                                                                                                                 |
-| `%%metro diamond_style: <mode>`                                            | Fork-join (diamond) layout: `straight` (default) keeps the top branch on the main track; `symmetric` fans the branches evenly                                                                                                                                                                                                                                                                          |
+| `%%metro diamond_style: <mode>`                                            | Fork-join (diamond) layout: `straight` (default) keeps the top branch on the main track. `symmetric` fans the branches evenly                                                                                                                                                                                                                                                                          |
 | `%%metro fold_threshold: <columns>`                                        | Max station-columns a section row may reach before the auto-layout wraps it onto the next row (default 15). Raise it to keep a long horizontal trunk of sections on a single row.                                                                                                                                                                                                                      |
-| `%%metro track_gap: <pixels>`                                              | Visual gap between adjacent line strokes in a bundle (0–3 px, edge to edge). `0` means lines touch with no gap between them; default is 1 px (the built-in 4 px centre-to-centre minus the 3 px stroke). CLI equivalent `--track-gap`.                                                                                                                                                                 |
+| `%%metro track_gap: <pixels>`                                              | Visual gap between adjacent line strokes in a bundle (0–3 px, edge to edge). `0` means lines touch with no gap between them. The default is 1 px (the built-in 4 px center-to-center minus the 3 px stroke). CLI equivalent `--track-gap`.                                                                                                                                                             |
 | `%%metro x_spacing: <pixels>`                                              | Horizontal spacing between layers (default: auto - widened from 60 only when wide labels would collide)                                                                                                                                                                                                                                                                                                |
 | `%%metro y_spacing: <pixels>`                                              | Vertical spacing between tracks (default: auto - derived from the map's content)                                                                                                                                                                                                                                                                                                                       |
 | `%%metro section_x_gap: <pixels>`                                          | Horizontal gap between sections (default: 50)                                                                                                                                                                                                                                                                                                                                                          |
@@ -287,40 +342,57 @@ These go at the top of the file, before `graph LR`.
 | `%%metro width: <pixels>`                                                  | Output width in pixels (default: auto from content)                                                                                                                                                                                                                                                                                                                                                    |
 | `%%metro height: <pixels>`                                                 | Output height in pixels (default: auto from content)                                                                                                                                                                                                                                                                                                                                                   |
 | `%%metro animate: true`                                                    | Add animated balls traveling along the metro lines                                                                                                                                                                                                                                                                                                                                                     |
-| `%%metro directional: true`                                                | Draw static chevrons along each route pointing in the flow direction (source to target). Off by default; CLI equivalent `--directional`. Marker size, spacing, opacity, and colour are theme knobs (`directional_marker_*`).                                                                                                                                                                           |
-| `%%metro strict: true`                                                     | Treat a layout-invariant violation on the rendered geometry (e.g. a station pushed outside its section box) as an error that aborts the render, instead of a warning. Off by default; CLI equivalent `--strict`. See [When a layout is broken](#when-a-layout-is-broken).                                                                                                                              |
-| `%%metro permissive: true`                                                 | Downgrade layout and render guard failures to warnings and render best-effort on whatever geometry was computed, instead of aborting with no output. Overrides `strict:`. Off by default; CLI equivalent `--permissive`. See [When a layout is broken](#when-a-layout-is-broken).                                                                                                                      |
-| `%%metro marker: <station> \| <shape>, <fill>`                             | Override one station's marker so its shape and fill encode a tool attribute (see above). `shape` defaults to `circle` and `fill` to `solid`.                                                                                                                                                                                                                                                           |
-| `%%metro marker_legend: <shape>, <fill> \| <caption>`                      | Add a marker key below the line legend, one row per shape/fill combination (see above).                                                                                                                                                                                                                                                                                                                |
-| `%%metro legend_combo: <lineA>, <lineB>[, ...] \| <label>`                 | Render the named lines as a single combined legend row under `<label>`, for lines that always run together. In `rails` mode they also share one rail slot. Needs at least two known line IDs; unknown members are dropped with a warning.                                                                                                                                                              |
+| `%%metro directional: true`                                                | Draw static chevrons along each route pointing in the flow direction (source to target). Off by default. CLI equivalent `--directional`. Marker size, spacing, opacity, and color are theme knobs (`directional_marker_*`).                                                                                                                                                                            |
+| `%%metro strict: true`                                                     | Treat a layout-invariant violation on the rendered geometry (for example, a station pushed outside its section box) as an error that aborts the render, instead of a warning. Off by default. CLI equivalent `--strict`. See [When a layout is broken](#when-a-layout-is-broken).                                                                                                                      |
+| `%%metro permissive: true`                                                 | Downgrade layout and render guard failures to warnings and render best-effort on whatever geometry was computed, instead of aborting with no output. Overrides `strict:`. Off by default. CLI equivalent `--permissive`. See [When a layout is broken](#when-a-layout-is-broken).                                                                                                                      |
+| `%%metro marker: <station> \| <shape>, <fill>`                             | Override one station's marker so its shape and fill encode a tool attribute (see [Per-station markers](#6-per-station-markers)). `shape` defaults to `circle` and `fill` to `solid`.                                                                                                                                                                                                                   |
+| `%%metro marker_legend: <shape>, <fill> \| <caption>`                      | Add a marker key below the line legend, one row per shape/fill combination (see [Per-station markers](#6-per-station-markers)).                                                                                                                                                                                                                                                                        |
+| `%%metro legend_combo: <lineA>, <lineB>[, ...] \| <label>`                 | Render the named lines as a single combined legend row under `<label>`, for lines that always run together. In `rails` mode they also share one rail slot. Needs at least two known line IDs. Unknown members are dropped with a warning.                                                                                                                                                              |
 | `%%metro group: <label> \| <station>[, <station>...] [\| above\|below]`    | Draw an annotative caption spanning the listed stations, `below` them by default or `above` with the third field. It never moves a station, but a `below` band claims room inside its section's box.                                                                                                                                                                                                   |
-| `%%metro file: <station> \| <label> [\| <name>] [\| banner]`               | Mark a station as a file terminus with a document icon. Optional `name` renders as a caption below the icon; optional `banner` draws the label on a dark strip across the icon.                                                                                                                                                                                                                        |
-| `%%metro files: <station> \| <label> [\| <name>] [\| banner]`              | Mark a station with a stacked-documents icon (e.g. paired files). Optional `name` caption; optional `banner` strip.                                                                                                                                                                                                                                                                                    |
-| `%%metro dir: <station> \| <label> [\| <name>]`                            | Mark a station with a folder icon (e.g. output directory). Optional `name` caption.                                                                                                                                                                                                                                                                                                                    |
-| `%%metro off_track: <station>[, <station>...]`                             | Lift the listed stations above the section's main track, anchored to their consumer (inputs) or producer (output artefacts) (see below)                                                                                                                                                                                                                                                                |
-| `%%metro compact_offsets: true`                                            | Compact line offsets within stations (see below)                                                                                                                                                                                                                                                                                                                                                       |
-| `%%metro center_ports: true`                                               | Centre inter-section ports on the shorter of the two connected sections, so lines enter/exit at the visual midpoint.                                                                                                                                                                                                                                                                                   |
-| `%%metro line_spread: <mode>[ \| <id>...]`                                 | How lines sharing a station relate vertically (see below). `<mode>` is `bundle` (default), `centered`, or `rails`. The bare form sets the graph default; `<mode> \| sectionA, sectionB` overrides those sections.                                                                                                                                                                                      |
-| `%%metro interchange: <node> \| <rail-1 lines> \| <rail-2 lines> [\| ...]` | Render a shared step as a cross-track interchange instead of a convergence point (see below). Each pipe-group is one rail (comma-separated lines bundle on it). Auto-layout infers this for fully-parallel lanes, so the directive is only needed to pin a grouping.                                                                                                                                   |
+| `%%metro file: <station> \| <label> [\| <name>] [\| banner]`               | Mark a station as a file terminus with a document icon. Optional `name` renders as a caption below the icon. Optional `banner` draws the label on a dark strip across the icon.                                                                                                                                                                                                                        |
+| `%%metro files: <station> \| <label> [\| <name>] [\| banner]`              | Mark a station with a stacked-documents icon (for example, paired files). Optional `name` caption, optional `banner` strip.                                                                                                                                                                                                                                                                            |
+| `%%metro dir: <station> \| <label> [\| <name>]`                            | Mark a station with a folder icon (for example, an output directory). Optional `name` caption.                                                                                                                                                                                                                                                                                                         |
+| `%%metro off_track: <station>[, <station>...]`                             | Lift the listed stations above the section's main track, anchored to their consumer (inputs) or producer (output artifacts) (see the off-track notes that follow)                                                                                                                                                                                                                                      |
+| `%%metro compact_offsets: true`                                            | Compact line offsets within stations (see the compact-offsets note that follows)                                                                                                                                                                                                                                                                                                                       |
+| `%%metro center_ports: true`                                               | Center inter-section ports on the shorter of the two connected sections. Lines then enter and exit at the visual midpoint.                                                                                                                                                                                                                                                                             |
+| `%%metro line_spread: <mode>[ \| <id>...]`                                 | How lines sharing a station relate vertically (see the line-spread note that follows). `<mode>` is `bundle` (default), `centered`, or `rails`. The bare form sets the graph default. `<mode> \| sectionA, sectionB` overrides those sections.                                                                                                                                                          |
+| `%%metro interchange: <node> \| <rail-1 lines> \| <rail-2 lines> [\| ...]` | Render a shared step as a cross-track interchange instead of a convergence point (see the interchange note that follows). Each pipe-group is one rail (comma-separated lines bundle on it). Auto-layout infers this for fully-parallel lanes. Use the directive only to pin a grouping.                                                                                                                |
 | `%%metro legend_min_height: <pixels>`                                      | Minimum legend content height in pixels (useful for single-line maps where the logo would otherwise be tiny)                                                                                                                                                                                                                                                                                           |
-| `%%metro process: <station> \| <regex>`                                    | Tie a station to the Nextflow process(es) it represents, for live progress (see [Live progress](/nf-metro/live/)). The regex matches the fully-qualified process name; repeat the directive to attach several patterns to one station. Pure metadata - it never affects the rendered map.                                                                                                              |
-| `%%metro auto_process: <bool>`                                             | Give every station with no explicit `process:` directive its own id as a default process pattern, so a map whose station ids already name their processes lights up live with no per-station mapping (see [Live progress](/nf-metro/live/)). Off by default; CLI equivalent `--auto-process`.                                                                                                          |
-| `%%metro process_scope: <prefix>`                                          | Common fully-qualified-name prefix shared by the pipeline's processes (e.g. `NFCORE_RNASEQ:RNASEQ`). Each `process:` value is then the tail under this scope, matched literally and tolerant of intermediate subworkflow nesting (see [Live progress](/nf-metro/live/)). CLI equivalent `--process-scope`.                                                                                             |
-| `%%metro manifest: <bool>`                                                 | Embed the machine-readable data manifest (the `<metadata>` block and per-node `data-node-*` attributes) in the SVG. On by default; `%%metro manifest: false` emits the drawn map only.                                                                                                                                                                                                                 |
+| `%%metro process: <station> \| <regex>`                                    | Tie a station to the Nextflow process(es) it represents, for live progress (see [Live progress](/nf-metro/live/)). The regex matches the fully-qualified process name. Repeat the directive to attach several patterns to one station. Pure metadata. It never affects the rendered map.                                                                                                               |
+| `%%metro auto_process: <bool>`                                             | Give every station with no explicit `process:` directive its own id as a default process pattern. A map whose station ids already name their processes then lights up live with no per-station mapping (see [Live progress](/nf-metro/live/)). Off by default. CLI equivalent `--auto-process`.                                                                                                        |
+| `%%metro process_scope: <prefix>`                                          | Common fully-qualified-name prefix shared by the pipeline's processes (for example, `NFCORE_RNASEQ:RNASEQ`). Each `process:` value is then the tail under this scope, matched literally and tolerant of intermediate subworkflow nesting (see [Live progress](/nf-metro/live/)). CLI equivalent `--process-scope`.                                                                                     |
+| `%%metro manifest: <bool>`                                                 | Embed the machine-readable data manifest (the `<metadata>` block and per-node `data-node-*` attributes) in the SVG. On by default. `%%metro manifest: false` emits the drawn map only.                                                                                                                                                                                                                 |
 
-**Logos.** `%%metro logo: <path>` bundles one image into the legend, and that image is used whatever the display mode. `%%metro logo: <light-path> | <dark-path>` supplies a pair instead. Both assets are embedded, each behind a CSS `light-dark()` mask, so one rendered SVG shows the light asset to a viewer whose `color-scheme` is light and the dark asset to one whose scheme is dark. This is the same adaptation the palette gets, with no second render:
+**Logos.** `%%metro logo: <path>` bundles one image into the legend, and nf-metro uses that image in every display mode.
+`%%metro logo: <light-path> | <dark-path>` supplies a pair instead.
+nf-metro embeds both assets, each behind a CSS `light-dark()` mask.
+One rendered SVG then shows the light asset to a viewer whose `color-scheme` is light and the dark asset to one whose scheme is dark.
+This is the same adaptation the palette gets, with no second render:
 
 ```metro
 %%metro logo: nf-core-rnaseq_logo_light.png | nf-core-rnaseq_logo_dark.png
 ```
 
-`--mode` on its own still ships both assets and pins the SVG's own `color-scheme`, so the matching one shows. Baking a concrete palette with `--no-chrome-css`, which a PNG export needs, drops the masks instead and keeps only the asset for the resolved mode, so `--mode dark` bakes the dark logo and `--mode light` the light one. Either side of the pair may be left empty, as in `%%metro logo: light.png |`, for an asset that appears in one mode only. The other mode then shows no logo at all. Both paths resolve relative to the `.mmd` file, and either one failing to resolve is an error. `--logo` sets the single-path form only, does not replace a pair declared in the file, and takes a path from the working directory rather than from the `.mmd`.
+`--mode` on its own still ships both assets and pins the SVG's own `color-scheme`, and the matching one shows.
+Baking a concrete palette with `--no-chrome-css`, which a PNG export needs, drops the masks instead and keeps only the asset for the resolved mode.
+`--mode dark` therefore bakes the dark logo and `--mode light` the light one.
+Leave either side of the pair empty, as in `%%metro logo: light.png |`, for an asset that appears in one mode only.
+The other mode then shows no logo.
+Both paths resolve relative to the `.mmd` file, and either one failing to resolve is an error.
+`--logo` sets the single-path form only, does not replace a pair declared in the file, and takes a path from the working directory rather than from the `.mmd`.
 
-**Compact offsets.** By default each line reserves a fixed vertical slot across the whole map, based on its declaration order. Define three lines and every station carrying even one of them is sized to fit all three. That keeps bundles visually consistent, but wastes space when most stations carry only one or two lines.
+**Compact offsets.** By default each line reserves a fixed vertical slot across the whole map, based on its declaration order.
+Define three lines and every station carrying even one of them grows to fit all three.
+That keeps bundles visually consistent, but wastes space when most stations carry only one or two lines.
 
-With `%%metro compact_offsets: true`, stations are only as wide as the lines actually passing through them. A station where one line enters and a different line exits renders as a dot at zero offset rather than a pill. This suits maps with few lines but many stations, such as the [variantbenchmarking](https://github.com/seqeralabs/nf-metro/blob/main/examples/variantbenchmarking.mmd) example.
+With `%%metro compact_offsets: true`, stations are only as wide as the lines passing through them.
+A station where one line enters and a different line exits renders as a dot at zero offset rather than a pill.
+This suits maps with few lines but many stations, such as the [variantbenchmarking](https://github.com/seqeralabs/nf-metro/blob/main/examples/variantbenchmarking.mmd) example.
 
-**Off-track inputs.** Pipelines often have reference or auxiliary inputs, such as a FASTA, a GTF or a known-variants VCF, that feed _into_ a processing step partway through a section rather than flowing along the main route. By default such an input station claims a line-track slot on the trunk, pushing the layout around. List its station ID in `%%metro off_track:` and nf-metro lifts it above the section's main track, then drops it down into its consumer:
+**Off-track inputs.** Pipelines often have reference or auxiliary inputs, such as a FASTA, a GTF, or a known-variants VCF.
+These feed _into_ a processing step partway through a section rather than flowing along the main route.
+By default such an input station claims a line-track slot on the trunk, pushing the layout around.
+List its station ID in `%%metro off_track:` and nf-metro lifts it above the section's main track, then drops it down into its consumer:
 
 ```metro {3}
 %%metro file: ref_in | FASTA | Reference
@@ -328,28 +400,44 @@ With `%%metro compact_offsets: true`, stations are only as wide as the lines act
 %%metro off_track: ref_in, gtf_in
 ```
 
-This pairs naturally with the `file:`, `files:` and `dir:` icon directives, because the lifted stations are usually file terminals. The [`off_track_convergence`](https://github.com/seqeralabs/nf-metro/blob/main/examples/topologies/off_track_convergence.mmd) topology and the [differentialabundance](https://github.com/seqeralabs/nf-metro/blob/main/examples/differentialabundance.mmd) example both use it.
+This pairs naturally with the `file:`, `files:`, and `dir:` icon directives, because the lifted stations are usually file terminals.
+The [`off_track_convergence`](https://github.com/seqeralabs/nf-metro/blob/main/examples/topologies/off_track_convergence.mmd) topology and the [differentialabundance](https://github.com/seqeralabs/nf-metro/blob/main/examples/differentialabundance.mmd) example both use it.
 
-**Off-track outputs.** The same directive works for file _artefacts_ written part-way through a section, such as a `bam` or `cram` dumped after a mapping step. A producer-fed sink, meaning a station with an incoming edge from an on-track step and no on-track consumer, is anchored above its **producer** rather than the section top, so the artefact hangs off the trunk right where it is written:
+**Off-track outputs.** The same directive works for file _artefacts_ written part-way through a section, such as a `bam` or `cram` dumped after a mapping step.
+A producer-fed sink is a station with an incoming edge from an on-track step and no on-track consumer.
+nf-metro anchors it above its **producer** rather than the section top.
+The artifact then hangs off the trunk right where the pipeline writes it:
 
 ```metro {2}
 %%metro file: bam_mapped | BAM
 %%metro off_track: bam_mapped
 ```
 
-The [off_track_outputs](https://github.com/seqeralabs/nf-metro/blob/main/examples/off_track_outputs.mmd) example hangs several such artefacts above a pre-processing trunk.
+The [off_track_outputs](https://github.com/seqeralabs/nf-metro/blob/main/examples/off_track_outputs.mmd) example hangs several such artifacts above a pre-processing trunk.
 
-**Track gap.** `%%metro track_gap: <px>` sets the visual gap between adjacent line strokes in a bundle, meaning the empty space between their edges rather than their centres. The default is 1 px, which is the built-in 4 px centre-to-centre spacing minus the 3 px nfcore stroke. Set it to `0` to bring the strokes flush against each other, or increase it for more breathing room between co-running lines:
+**Track gap.** `%%metro track_gap: <px>` sets the visual gap between adjacent line strokes in a bundle, meaning the empty space between their edges rather than their centers.
+The default is 1 px, which is the built-in 4 px center-to-center spacing minus the 3 px nfcore stroke.
+Set it to `0` to bring the strokes flush against each other, or increase it for more space between co-running lines:
 
 <Metro src="examples/guide/07_track_gap.mmd" />
 
-The valid range is 0–3. Values above 3 cause routing problems on complex maps and are rejected.
+The valid range is 0–3.
+nf-metro rejects values above 3, which cause routing problems on complex maps.
 
-**Line spread.** `%%metro line_spread:` controls how lines that share a station relate to each other vertically. It has three modes:
+**Line spread.** `%%metro line_spread:` controls how lines that share a station relate to each other vertically.
+It has three modes:
 
-- **`bundle`**, the default, merges every line sharing a station onto a single trunk track. A line that detours to its own station dips off the trunk and back. Line base-tracks stack downward from the first line, so the shared trunk sits at the top and detours cascade below it.
-- **`centered`** also merges lines onto one trunk, but balances that bundle about the midline. The shared trunk sits on the vertical centre and each line's exclusive stations distribute symmetrically above and below it, rather than in a top-anchored downward cascade.
-- **`rails`** keeps co-travelling lines on separate parallel rails rather than bundling them onto a trunk. Each line gets a fixed, evenly-spaced horizontal rail, and a station that several lines _pass through_ renders as the classic metro interchange: a white circle on each rail the station uses, joined by a straight connector segment. This is the idiom used in nf-core/sarek's "Example analysis pathways". Lines converge only at a genuine single-node fan-in or fan-out, such as a file terminus every line reaches, where the rails ease together with 45-degree diagonals. Station labels alternate above and below the rails so dense runs stay readable.
+- **`bundle`**, the default, merges every line sharing a station onto a single trunk track.
+  A line that detours to its own station dips off the trunk and back.
+  Line base-tracks stack downward from the first line.
+  The shared trunk therefore sits at the top, and detours cascade below it.
+- **`centered`** also merges lines onto one trunk, but balances that bundle about the midline.
+  The shared trunk sits on the vertical center and each line's exclusive stations distribute symmetrically above and below it, rather than in a top-anchored downward cascade.
+- **`rails`** keeps co-traveling lines on separate parallel rails rather than bundling them onto a trunk.
+  Each line gets a fixed, evenly-spaced horizontal rail, and a station that several lines _pass through_ renders as the classic metro interchange: a white circle on each rail the station uses, joined by a straight connector segment.
+  nf-core/sarek uses this idiom in "Example analysis pathways".
+  Lines converge only at a genuine single-node fan-in or fan-out, such as a file terminus every line reaches, where the rails ease together with 45-degree diagonals.
+  Station labels alternate above and below the rails so dense runs stay readable.
 
 The bare directive sets the graph-wide default:
 
@@ -357,26 +445,49 @@ The bare directive sets the graph-wide default:
 %%metro line_spread: rails
 ```
 
-Append `| <section>, ...` to override individual sections, so one map can mix modes: a `bundle` trunk feeding a `rails` analysis panel, for instance:
+Append `| <section>, ...` to override individual sections.
+One map can then mix modes, such as a `bundle` trunk feeding a `rails` analysis panel:
 
 ```metro {2}
 %%metro line_spread: centered
 %%metro line_spread: rails | pathways
 ```
 
-Here every section defaults to `centered` while `pathways` is laid out as parallel rails, and ordinary section placement positions both. The [`line_spread`](https://github.com/seqeralabs/nf-metro/blob/main/examples/line_spread.mmd) example shows all three modes in one map through per-section overrides. Inter-section edges into or out of a `rails` section are not yet supported, so a rail section should be self-contained.
+Here every section defaults to `centered` while `pathways` uses parallel rails, and ordinary section placement positions both.
+The [`line_spread`](https://github.com/seqeralabs/nf-metro/blob/main/examples/line_spread.mmd) example shows all three modes in one map through per-section overrides.
+nf-metro does not yet support inter-section edges into or out of a `rails` section.
+Keep a rail section self-contained.
 
-**Cross-track interchanges.** A single step is sometimes shared by lines that otherwise run as separate parallel lanes, such as a tumour lane and a normal lane both running MarkDuplicates, without the lanes ever merging. In `bundle` mode each lane has to dip off its track to touch that shared node and dip back, pinching the lines together at a point that is not really a join. An _interchange_ renders the shared step the way a real metro map would: each lane stays straight on its own track, and the step is drawn as a connector spanning them, with a knob on each rail joined by a link bar.
+**Cross-track interchanges.** Lines that otherwise run as separate parallel lanes sometimes share a single step, such as a tumour lane and a normal lane both running MarkDuplicates, without the lanes ever merging.
+In `bundle` mode each lane has to dip off its track to touch that shared node and dip back, pinching the lines together at a point that is not a join.
+An _interchange_ renders the shared step the way a real metro map would.
+Each lane stays straight on its own track, and nf-metro draws the step as a connector spanning them, with a knob on each rail joined by a link bar.
 
-Unlike `line_spread: rails`, this works per node and in ordinary `bundle` or `centered` layout. Only the one shared step becomes an interchange, and everything else stays as it was. Internally the node is expanded into one ordinary sub-station per rail, so the normal layout engine keeps each lane straight and routes it. Only the glyph is special.
+Unlike `line_spread: rails`, this works per node and in ordinary `bundle` or `centered` layout.
+Only the one shared step becomes an interchange, and everything else stays as it was.
+Internally nf-metro expands the node into one ordinary sub-station per rail, and the normal layout engine keeps each lane straight and routes it.
+Only the glyph is special.
 
-Auto-layout infers an interchange wherever the lanes are _fully parallel_, meaning every line through the node has its own predecessor and its own successor, so converging them buys nothing. You only need the directive to pin a specific rail grouping, such as bundling two lines onto one rail, or to force an interchange where lines share a neighbour:
+Auto-layout infers an interchange wherever the lanes are _fully parallel_, meaning every line through the node has its own predecessor and its own successor.
+Converging them would gain nothing.
+Use the directive only to pin a specific rail grouping, such as bundling two lines onto one rail, or to force an interchange where lines share a neighbor:
 
 ```metro
 %%metro interchange: markduplicates | tumor | normal
 ```
 
-The lanes are listed one rail per pipe-group, and commas bundle several lines onto the same rail. A rail may name a line the node does not carry, so one directive can serve a family of maps: such a line is not placed, and a rail left with no line the node carries drops out. A node left with fewer than two live rails is not an interchange, and that is reported. Auto-detection abstains when two lines share a predecessor or successor, as when two callers feed one merge, because there the convergence is doing real work. It also abstains when another lane's rail would fall between the interchange's rails, since the connector bar would then cut across that lane's stations. Interchanges are skipped inside `rails` sections, which already lay every line on its own rail. The [cross_track_interchange](https://github.com/seqeralabs/nf-metro/blob/main/examples/cross_track_interchange.mmd) example shows a shared MarkDuplicates step across parallel tumour and normal lanes.
+List the lanes one rail per pipe-group, and use commas to bundle several lines onto the same rail.
+A rail may name a line the node does not carry, and one directive can therefore serve a family of maps.
+nf-metro does not place such a line, and a rail left with no line the node carries drops out.
+A node left with fewer than two live rails is not an interchange, and nf-metro reports that.
+
+Three further cases produce no interchange:
+
+- Auto-detection abstains when two lines share a predecessor or successor, as when two callers feed one merge, because there the convergence is doing real work.
+- It also abstains when another lane's rail would fall between the interchange's rails, because the connector bar would then cut across that lane's stations.
+- nf-metro skips interchanges inside `rails` sections, which already lay every line on its own rail.
+
+The [cross_track_interchange](https://github.com/seqeralabs/nf-metro/blob/main/examples/cross_track_interchange.mmd) example shows a shared MarkDuplicates step across parallel tumour and normal lanes.
 
 ### Section directives
 
@@ -389,15 +500,20 @@ These go inside `subgraph` blocks.
 | `%%metro direction: <dir>`           | Internal flow direction: `LR`, `RL`, or `TB`             |
 | `%%metro number: <positive_integer>` | Override the section's number badge                      |
 
-Entry and exit hints tell the layout engine which side of the section box lines should enter or leave from. Most of the time you can **omit them entirely** and let the auto-layout engine work it out. They earn their place when you want lines to exit from different sides of the same section, such as right for some lines and bottom for others.
+Entry and exit hints tell the layout engine which side of the section box lines should enter or leave from.
+Usually you can **omit them** and let the auto-layout engine work it out.
+They earn their place when you want lines to exit from different sides of the same section, such as right for some lines and bottom for others.
 
-Automatic section numbers follow connected visual routes. Numbering prefers the nearest connected section on the current row, keeps parallel branch starts together and completes independent inputs before a merge. A clear primary row can finish before numbering a secondary route that rejoins it. An explicit `number:` stays fixed, and automatic sections take the lowest positive numbers not already reserved. Duplicate or invalid overrides are ignored with a warning.
+Automatic section numbers follow connected visual routes.
+Numbering prefers the nearest connected section on the current row, keeps parallel branch starts together, and completes independent inputs before a merge.
+A clear primary row can finish before numbering a secondary route that rejoins it.
+An explicit `number:` stays fixed, and automatic sections take the lowest positive numbers not already reserved.
+nf-metro ignores duplicate or invalid overrides with a warning.
 
 ### Typos and duplicate declarations
 
-A directive can name a station, section or line that the file defines further
-down, so ids are resolved once the whole file has been read. An id that appears
-nowhere, usually a typo, is reported and its directive dropped:
+Because a directive can name a station, section, or line that the file defines further down, nf-metro resolves ids once it has read the whole file.
+An id that appears nowhere, usually a typo, is reported and its directive dropped:
 
 ```console
 $ nf-metro validate map.mmd
@@ -406,28 +522,33 @@ Validation warnings:
 Valid: 24 stations, 26 edges, 3 lines, 5 sections
 ```
 
-A value outside a directive's accepted set, whether for `style:`, `mode:`,
-`line_order:`, a port side or anything else, is reported the same way, leaving
-the default or the inferred value in place.
+A value outside a directive's accepted set is reported the same way, whether for `style:`, `mode:`, `line_order:`, a port side or anything else.
+The default or the inferred value stays in place.
 
 `%%metro line:` has three rules of its own:
 
-- A second declaration of an already-declared id is dropped, so the first one
-  wins.
-- A declaration missing its id, name or colour is dropped whole. Any edge
-  annotated with a line the map only tried to declare is then a hard error,
-  rather than a map that renders with no lines.
-- A colour that is neither a hex value, a CSS colour name nor a functional
-  notation like `rgb(...)` is reported but kept, so a colour syntax nf-metro
-  does not model reaches the SVG as written.
+- A second declaration of an already-declared id is dropped.
+  The first one wins.
+- A declaration missing its id, name, or color is dropped whole.
+  Any edge annotated with a line the map only tried to declare is then a hard error, rather than a map that renders with no lines.
+- A color that is neither a hex value, a CSS color name, nor a functional notation like `rgb(...)` is reported but kept.
+  A color syntax nf-metro does not model therefore reaches the SVG as written.
 
 ## CLI flags and directive precedence
 
-Every layout and render option can be set two ways: as a `%%metro` directive in the file, or as the matching `nf-metro render` CLI flag. They share one precedence rule:
+Set every layout and render option in one of two ways: as a `%%metro` directive in the file, or as the matching `nf-metro render` CLI flag.
+They share one precedence rule:
 
 > **CLI flag (when passed) → `%%metro` directive → built-in default.**
 
-Set the directive in your committed `.mmd` so the map reproduces from the file alone, and use the flag only to tweak a single render without editing the file. Most pairs are generated from one registry, so the flag is the kebab-cased directive and neither plane can gain an option the other lacks. The table below is the authority on the exceptions. `style:` is spelled `--theme` on the command line, and `manifest:` has no flag you should reach for: it writes a graph field named `embed_manifest`, and its flag is an internal escape hatch kept out of `--help`. A pair takes the same values, though a flag takes them exactly as documented. An unknown or wrong-case value exits with an error, where the directive warns and keeps the default.
+Set the directive in your committed `.mmd` so the map reproduces from the file alone, and use the flag only to change a single render without editing the file.
+One registry generates most pairs.
+The flag is therefore the kebab-cased directive, and neither plane can gain an option the other lacks.
+The following table is the authority on the exceptions.
+`style:` is spelled `--theme` on the command line.
+`manifest:` has no flag you should reach for, because it writes a graph field named `embed_manifest` and its flag is an internal escape hatch kept out of `--help`.
+A pair takes the same values, though a flag takes them exactly as documented.
+An unknown or wrong-case value exits with an error, where the directive warns and keeps the default.
 
 | Directive            | CLI flag                                     | Default           |
 | -------------------- | -------------------------------------------- | ----------------- |
@@ -465,18 +586,19 @@ Set the directive in your committed `.mmd` so the map reproduces from the file a
 | `process_scope:`     | `--process-scope`                            | (none)            |
 | `manifest:`          | (internal escape hatch, not in `--help`)     | on                |
 
-`--output`, `--format`, `--from-nextflow`, `--debug`, `--validate` and the embedding flags (`--responsive`, `--embed-font`, `--text-to-paths`, `--svg-class-prefix`, `--bare`, `--no-self-color-scheme`, `--no-dark-mode-css`, `--no-chrome-css`) have no directive. They select the output target, a diagnostic overlay, or how the SVG is packaged for a host, rather than describing the diagram. `--inactive-lines` is the per-render counterpart to the `inactive` field on `%%metro line:`, and replaces that set outright.
+Three groups fall outside that pairing:
 
-The remaining directives have no CLI flag, because they describe the diagram's content rather than a render setting: `line:`, `grid:`, `off_track:`, `process:`, `interchange:`, `legend_combo:`, `group:`, `marker:`, `marker_legend:`, the `file:`/`files:`/`dir:` icons, and the section-scoped `entry:`/`exit:`/`direction:`/`number:`.
+- `--output`, `--format`, `--from-nextflow`, `--debug`, `--validate`, and the embedding flags (`--responsive`, `--embed-font`, `--text-to-paths`, `--svg-class-prefix`, `--bare`, `--no-self-color-scheme`, `--no-dark-mode-css`, `--no-chrome-css`) have no directive.
+  They select the output target, a diagnostic overlay, or how the SVG is packaged for a host, rather than describing the diagram.
+- `--inactive-lines` is the per-render counterpart to the `inactive` field on `%%metro line:`, and replaces that set outright.
+- The remaining directives have no CLI flag, because they describe the diagram's content rather than a render setting: `line:`, `grid:`, `off_track:`, `process:`, `interchange:`, `legend_combo:`, `group:`, `marker:`, `marker_legend:`, the `file:`/`files:`/`dir:` icons, and the section-scoped `entry:`/`exit:`/`direction:`/`number:`.
 
 ## When a layout is broken
 
 Some directive combinations leave the layout engine no clean way to place a map.
-An internally left-to-right section whose only ports are on the top and bottom
-edges, for example, has no flow-aligned edge to anchor its row, so its stations
-end up outside their own section box. nf-metro renders such a map
-**best-effort and prints a warning to stderr** naming the problem, rather than
-refusing to produce anything:
+An internally left-to-right section whose only ports are on the top and bottom edges, for example, has no flow-aligned edge to anchor its row.
+Its stations then end up outside their own section box.
+nf-metro renders such a map **best-effort and prints a warning to stderr** naming the problem, rather than refusing to produce anything:
 
 ```console
 $ nf-metro render broken.mmd -o broken.svg
@@ -484,36 +606,32 @@ $ nf-metro render broken.mmd -o broken.svg
 Rendered 12 stations, 11 edges, 1 lines -> broken.svg
 ```
 
-Pass `--strict` (or add `%%metro strict: true`) to turn that warning into a
-hard error with a non-zero exit, so a broken map fails your build instead of
-shipping a visibly-wrong diagram:
+Pass `--strict` (or add `%%metro strict: true`) to turn that warning into a hard error with a non-zero exit.
+A broken map then fails your build instead of shipping a visibly-wrong diagram:
 
 ```console
 $ nf-metro render broken.mmd -o broken.svg --strict
 Error: the settled layout violates Tier-A invariants ...
 ```
 
-`--strict` has the same meaning for `nf-metro validate --with-layout`, which
-checks a map without rendering it.
+`--strict` has the same meaning for `nf-metro validate --with-layout`, which checks a map without rendering it.
 
 ## Bridge glyphs
 
-When two distinct lines cross at a point that is neither a shared station nor a
-merge or junction, nf-metro draws a **bridge glyph**: a short gap in the
-under-route where it passes beneath the over-route. That tells a crossing apart
-from an interchange, where a gap would mean the lines genuinely share a node.
+When two distinct lines cross at a point that is neither a shared station nor a merge or junction, nf-metro draws a **bridge glyph**: a short gap in the under-route where it passes beneath the over-route.
+That tells a crossing apart from an interchange, where a gap would mean the lines genuinely share a node.
 
-Bridge glyphs are computed automatically, and no directive enables them. If your
-diagram has a visual crossing you did not expect, check whether the two lines
-genuinely share an endpoint. If they should converge, connect them with a shared
-station. If the layout makes the crossing unavoidable, the bridge glyph is the
-correct rendering.
+nf-metro computes bridge glyphs automatically, and no directive turns them on.
+If your diagram has a visual crossing you did not expect, check whether the two lines genuinely share an endpoint.
+If they should converge, connect them with a shared station.
+If the layout makes the crossing unavoidable, the bridge glyph is the correct rendering.
 
-:::tip[Tips]
+:::tip[Authoring tips]
 
 - **Start without sections.** Get your stations and line routing right first, then wrap groups in `subgraph` blocks.
-- **Omit entry and exit hints.** The auto-layout engine infers them correctly in most cases. Add hints only when you need multi-side exits or want to override the default.
-- **Use `--debug`** to see the layout internals (see below).
+- **Omit entry and exit hints.** The auto-layout engine infers them correctly in most cases.
+  Add hints only when you need multi-side exits or want to override the default.
+- **Use `--debug`** to see the layout internals (see [Debug mode](#debug-mode)).
 - **Use `nf-metro validate`** to catch errors before rendering.
 - **Use `nf-metro info`** to inspect the parsed structure (sections, lines, stations, edges).
 
@@ -535,7 +653,7 @@ The overlay shows:
 | ------------------- | -------------------- | ------------------------------------------------------------------------- |
 | **Entry ports**     | Green diamonds       | Where lines enter a section, with port ID and side                        |
 | **Exit ports**      | Red diamonds         | Where lines leave a section, with port ID and side                        |
-| **Hidden stations** | Dashed circles       | Branch points created with `[hidden]` - invisible in normal rendering     |
+| **Hidden stations** | Dashed circles       | Stations whose ID starts with `_`, invisible in normal rendering          |
 | **Edge waypoints**  | Small filled circles | Intermediate routing points along each edge path                          |
 | **Grid lines**      | Yellow dashed lines  | Boundaries between grid columns and rows, labeled with column/row indices |
 

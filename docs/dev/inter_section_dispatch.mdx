@@ -8,51 +8,35 @@ sidebar:
 
 import { Aside } from "@astrojs/starlight/components";
 
-Inter-section edges, running port or junction to port or junction, are routed by
-`_route_inter_section` in
-[`routing/inter_section_handlers.py`](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/layout/routing/inter_section_handlers.py).
-It chooses the route's shape from a **declarative table**,
-`_INTER_SECTION_RULES`, rather than from a hand-written if-ladder. Before
-emission, every inter-section member is classified from one `_InterFacts`
-snapshot. The route system freezes that family ID, calls it once to build an
-immutable `RouteMemberGeometryPlan`, then emits a fresh copy of that exact
-template. Production never takes a second pass through this table.
+Inter-section edges, running port or junction to port or junction, are routed by `_route_inter_section` in [`routing/inter_section_handlers.py`](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/layout/routing/inter_section_handlers.py).
+It chooses the route's shape from a **declarative table**, `_INTER_SECTION_RULES`, rather than from a hand-written if-ladder.
+Before emission, every inter-section member is classified from one `_InterFacts` snapshot.
+The route system freezes that family ID, calls the family once to build an immutable `RouteMemberGeometryPlan`, then emits a fresh copy of that exact template.
+Production never takes a second pass through this table.
 
-Every rule's handler builds its route from a centreline through the
-[bundle builder](/nf-metro/dev/routing/), meaning `build_concentric_bundle` or
-`build_tapered_bundle`, so no handler assembles per-line points or corner radii
-by hand. The runtime curve guard described below is a backstop rather than the
-mechanism that keeps the routes correct.
+Every rule's handler builds its route from a centerline through the [bundle builder](/nf-metro/dev/routing/), meaning `build_concentric_bundle` or `build_tapered_bundle`.
+No handler assembles per-line points or corner radii by hand.
+The runtime curve guard is a backstop rather than the mechanism that keeps the routes correct.
 
 ## The fact space
 
 `_InterFacts` resolves the geometry and topology each rule keys on:
 
-- **Relative position**: the source and target grid columns and rows
-  (`src_col/row`, `tgt_col/row`), plus the derived `same_y`, `same_x`,
-  `same_col`, `cross_row` and `needs_bypass`. The last of these means a
-  multi-column hop with an intervening section in the source _or_ target row.
-- **Exit side**: whether the source is a LEFT or RIGHT exit port, a TOP or
-  BOTTOM perpendicular exit (`is_perp_exit`), a TB BOTTOM exit
-  (`is_tb_bottom_exit`, or `is_tb_perp_exit_against_flow` when it feeds an entry
-  the flow-direction drop cannot reach), or a junction.
-- **Entry side**: `entry_side` is the target entry port's side, one of LEFT,
-  RIGHT, TOP or BOTTOM, or `None` when the target is a junction. `merge_ep` is
-  the resolved entry-port station when the target is a merge junction.
-- **Spatial queries**: section coordinates and horizontal and vertical crossing
-  checks are resolved through the snapshot, which keeps every predicate and
-  route builder on the same endpoint facts.
+- **Relative position**: the source and target grid columns and rows (`src_col/row`, `tgt_col/row`), plus the derived `same_y`, `same_x`, `same_col`, `cross_row`, and `needs_bypass`.
+  The last of these means a multi-column hop with an intervening section in the source _or_ target row.
+- **Exit side**: whether the source is a LEFT or RIGHT exit port, a TOP or BOTTOM perpendicular exit (`is_perp_exit`), a TB BOTTOM exit (`is_tb_bottom_exit`, or `is_tb_perp_exit_against_flow` when it feeds an entry the flow-direction drop cannot reach), or a junction.
+- **Entry side**: `entry_side` is the target entry port's side, one of LEFT, RIGHT, TOP, or BOTTOM, or `None` when the target is a junction.
+  `merge_ep` is the resolved entry-port station when the target is a merge junction.
+- **Spatial queries**: section coordinates and horizontal and vertical crossing checks are resolved through the snapshot, which keeps every predicate and route builder on the same endpoint facts.
 
 ## The rules
 
-The source claims are listed below in their canonical classification order.
-Construction subtracts every earlier claim from each later predicate, which
-gives every row an exclusive region of the fact space. The runtime rule table is
-therefore pairwise disjoint and can be reordered without changing which family
-owns an edge. If no predicate matches, the **standard L-shape** is the
-fall-through. Planned template construction resolves its frozen family through
-the same table's stable rule ID without evaluating the predicates again, and
-production emission does not revisit the table or call the family.
+The source claims appear in their canonical classification order.
+Construction subtracts every earlier claim from each later predicate.
+Every row therefore owns an exclusive region of the fact space.
+The runtime rule table is therefore pairwise disjoint and can be reordered without changing which family owns an edge.
+If no predicate matches, the **standard L-shape** is the fall-through.
+Planned template construction resolves its frozen family through the same table's stable rule ID without evaluating the predicates again, and production emission does not revisit the table or call the family.
 
 | #   | Stable family                         | Rule                                    | Fires when                                                                            | Route                                                                                                        |
 | --- | ------------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
@@ -93,41 +77,29 @@ production emission does not revisit the table or call the family.
 | 35  | `RIGHT_ENTRY_CROSS_ROW_WRAP`          | `RIGHT entry cross-row wrap`            | A source above and right of a RIGHT entry travels left with no bypass obstacle.       | `_route_right_entry_cross_row` uses the target-side band or around-below route.                              |
 | -   | `STANDARD_L_SHAPE`                    | _fall-through_                          | No rule matches.                                                                      | `_route_l_shape` emits the standard construction.                                                            |
 
-The promoted bottom-exit, bypass and merge-entry leaves each have a stable
-family ID, so classification, source-turn planning and production emission all
-name the same geometry.
+The promoted bottom-exit, bypass, and merge-entry leaves each have a stable family ID.
+Classification, source-turn planning, and production emission therefore all name the same geometry.
 
-The table first runs in classification mode, then its selected families build
-non-convergence member templates in canonical order. Their gap slots are
-materialized together, and their occupied vertical channels are frozen before
-convergence planning. The convergence planner uses those channels as fixed
-external inputs while it freezes every supported merge trunk, feeder join,
-continuation and endpoint owner. It may construct canonical trial routes for the
-convergence members it owns, but it does not route other members again. Rules 9
-and 14 consume those convergence decisions. A continuation covered by a named
-feeder is suppressed before production emission, with the carrier recorded in the
-route-system binding. Merge landing and covered-hop cleanup are therefore
-unnecessary.
+The table first runs in classification mode, then its selected families build non-convergence member templates in canonical order.
+Their gap slots are materialized together, and their occupied vertical channels are frozen before convergence planning.
+The convergence planner uses those channels as fixed external inputs while it freezes every supported merge trunk, feeder join, continuation, and endpoint owner.
+It may construct canonical trial routes for the convergence members it owns, but it does not route other members again.
+Rules 9 and 14 consume those convergence decisions.
+A continuation covered by a named feeder is suppressed before production emission, with the carrier recorded in the route-system binding.
+Merge landing and covered-hop cleanup are therefore unnecessary.
 
-This page is the complete inter-section handler inventory. The emission
-ownership inventory, covering emitters, fallbacks and validators, is
-[route emission inventory](/nf-metro/dev/route_emission_inventory/).
+The table is the complete inter-section handler inventory.
+The emission ownership inventory, covering emitters, fallbacks, and validators, is [route emission inventory](/nf-metro/dev/route_emission_inventory/).
 
 ## The curve guard as a backstop
 
-`assert_render_curve_invariants`
-([`routing/invariants.py`](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/layout/routing/invariants.py))
-runs on every render, and the stage-boundary checks run under `validate=True`.
-Every rule above builds its route through the centreline bundle builder, which
-makes a flipped, pinched or collinear bundle impossible by construction, so
-these checks are a thin safety net. They never fire in normal operation. A
-failure means a genuinely new, un-tabled shape reached the renderer built some
-other way, and the fix is to route it through the builder too rather than to
-relax the guard.
+`assert_render_curve_invariants` ([`routing/invariants.py`](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/layout/routing/invariants.py)) runs on every render, and the stage-boundary checks run under `validate=True`.
+Every rule in the table builds its route through the centerline bundle builder, which makes a flipped, pinched, or collinear bundle impossible by construction.
+These checks are therefore a thin safety net, and they never fire in normal operation.
 
 <Aside type="note">
-  If `assert_render_curve_invariants` fires, the fix is always to route the new
-  shape through the centreline bundle builder, never to widen tolerances or add
-  exceptions to the guard. A guard failure means a route was assembled outside
-  the builder, bypassing the construction that keeps bundles correct by design.
+
+If `assert_render_curve_invariants` fires, the fix is always to route the new shape through the centerline bundle builder, never to widen tolerances or add exceptions to the guard.
+A guard failure means a route was assembled outside the builder, bypassing the construction that keeps bundles correct by design.
+
 </Aside>
