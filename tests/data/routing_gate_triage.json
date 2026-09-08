@@ -791,6 +791,14 @@
   "note": "Trunk-row entry bow (#1315). No-room return: the flat run over the blocker(s) is shorter than two corner radii, so the bump's corners would overlap. The blocker-span-plus-clearance always exceeds 2*CURVE_RADIUS for corpus fixtures; defensive.",
   "status": "defensive"
  },
+ "intra_handlers.py::if port is None or not port.is_entry:::#1": {
+  "note": "_source_needs_fused_opening_seat only reaches this lookup when the source is a port that forks (src.is_port and edge.source in ctx.fork_stations, i.e. 2+ distinct outgoing edges). An exit port never carries multiple downstream edges directly: genuine divergence is routed through an inserted junction station instead, so a forking port source is always an entry port. graph.ports also cannot miss, because MetroGraph.add_port registers graph.ports[port.id] in the same call it sets is_port, so every is_port source resolves to a port. Both the None and the non-entry arm are therefore un-taken for a forking port source.",
+  "status": "defensive"
+ },
+ "intra_handlers.py::if section is None:::#1": {
+  "note": "Reached only after the guard above confirms a real entry port. A port's section_id is set from an already-present Section id when the port is constructed (resolve.py::_create_port_stations), and no later pass deletes a Section while leaving its ports behind, so graph.sections.get(port.section_id) always resolves; the return-False arm only protects a malformed graph.",
+  "status": "defensive"
+ },
  "intra_handlers.py::if section.direction not in (\"LR\", \"RL\"):::#1": {
   "note": "No TB/BT entry reaches _route_entry_runway: TB LEFT/RIGHT entries are consumed by _route_tb_lr_entry and TB/BT TOP/BOTTOM entries by _route_perp_entry (both earlier in the dispatch chain), and a BT section is never produced (the direction directive accepts only LR/RL/TB; 0/391 corpus sections are BT). Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
   "status": "defensive"

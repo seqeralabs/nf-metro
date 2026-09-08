@@ -1,0 +1,52 @@
+%%metro title: entry-port fork peel runway (target row blocked)
+%% Locks the fused-opening peel-delay seat in _route_entry_runway's
+%% target-row-blocked branch (issue #1831 / #1965). The LEFT entry port fans
+%% one line down to a stack of column-0 targets plus one column-1 leg (s)
+%% whose own target row carries a non-consuming blocker (X). That shallow leg
+%% inherits a peel-delay from its many deeper fused siblings large enough that
+%% the port-to-target span no longer clears it, so the descent seat is left
+%% un-widened.
+%%metro line: l | L | #ff00aa
+%%metro line: k | K | #00aaff
+%%metro track_gap: 3
+%%metro x_spacing: 5
+%%metro grid: src, sink | 0,0
+
+graph LR
+    subgraph src [Source]
+        seed[ ]
+    end
+    subgraph sink [Sink]
+        bt[ ]
+        top[ ]
+        bs[X]
+        s[ ]
+        t2[ ]
+        t3[ ]
+        t4[ ]
+        t5[ ]
+        t6[ ]
+        t7[ ]
+        t8[ ]
+        t9[ ]
+        t10[ ]
+        t11[ ]
+        t12[ ]
+        t13[ ]
+        bt -->|l| top
+        bs -->|k| s
+    end
+    seed -->|l| top
+    seed -->|l| s
+    seed -->|l| t2
+    seed -->|l| t3
+    seed -->|l| t4
+    seed -->|l| t5
+    seed -->|l| t6
+    seed -->|l| t7
+    seed -->|l| t8
+    seed -->|l| t9
+    seed -->|l| t10
+    seed -->|l| t11
+    seed -->|l| t12
+    seed -->|l| t13

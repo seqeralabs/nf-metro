@@ -1,0 +1,33 @@
+%%metro title: entry-port fork peel runway (target row clear)
+%% Locks the fused-opening peel-delay seat in _route_entry_runway's
+%% target-row-clear branch (issue #1831 / #1965). The LEFT entry port fans one
+%% line to five stacked column-1 targets; the shallowest leg fuses with enough
+%% deeper siblings that its peel-delay overruns the nearest bypassed station's
+%% source-side runway, so the seat is left un-widened rather than added.
+%%metro line: l | L | #ff00aa
+%%metro track_gap: 3
+%%metro x_spacing: 20
+%%metro grid: src, sink | 0,0
+
+graph LR
+    subgraph src [Source]
+        seed[ ]
+    end
+    subgraph sink [Sink]
+        g0[G0]
+        t1[ ]
+        t2[ ]
+        t3[ ]
+        t4[ ]
+        t5[ ]
+        g0 -->|l| t1
+        g0 -->|l| t2
+        g0 -->|l| t3
+        g0 -->|l| t4
+        g0 -->|l| t5
+    end
+    seed -->|l| t1
+    seed -->|l| t2
+    seed -->|l| t3
+    seed -->|l| t4
+    seed -->|l| t5

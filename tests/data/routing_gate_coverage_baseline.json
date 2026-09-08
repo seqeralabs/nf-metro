@@ -549,6 +549,8 @@
   "intra_handlers.py::if not section:::#1",
   "intra_handlers.py::if not st or st.is_port:::#1",
   "intra_handlers.py::if over_end - over_start < 2 * ctx.curve_radius:::#1",
+  "intra_handlers.py::if port is None or not port.is_entry:::#1",
+  "intra_handlers.py::if section is None:::#1",
   "intra_handlers.py::if section.direction == \"RL\" and port.side != PortSide.RIGHT:::#1",
   "intra_handlers.py::if section.direction not in (\"LR\", \"RL\"):::#1",
   "intra_handlers.py::if segment_intersects_bbox(x1, y1, x2, y2, bbox):::#1",
