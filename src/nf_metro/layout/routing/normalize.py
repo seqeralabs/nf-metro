@@ -92,6 +92,7 @@ from nf_metro.layout.routing.context import (
 )
 from nf_metro.layout.routing.corners import (
     _corner_travel_units,
+    concentric_corner_radius,
     concentric_corner_radius_at,
     concentric_reference_radius_at,
     corner_radius,
@@ -5635,8 +5636,17 @@ def _reanchor_concentric_corner_fans(
     """
     from nf_metro.layout.routing.invariants import concentric_corner_fans
 
-    for fan in concentric_corner_fans(list(population), dict(offsets)):
-        members: list[tuple[_CornerObservation, int, float, float]] = []
+    for fan in concentric_corner_fans(population, offsets):
+        members: list[
+            tuple[
+                _CornerObservation,
+                int,
+                float,
+                float,
+                tuple[float, float],
+                tuple[float, float],
+            ]
+        ] = []
         for observation in fan:
             route = observation.route
             if route.curve_radii is None:
@@ -5644,31 +5654,28 @@ def _reanchor_concentric_corner_fans(
                 break
             index = observation.rank - 1
             resolved = resolve_curve_radii(observation.points, route.curve_radii)
-            if index >= len(resolved):
-                members = []
-                break
             turn_in, turn_out = _corner_travel_units(
                 observation.points[observation.rank - 1],
                 observation.points[observation.rank],
                 observation.points[observation.rank + 1],
             )
             term = observation.points[observation.rank][0] * (turn_out[0] - turn_in[0])
-            members.append((observation, index, resolved[index], term))
+            members.append(
+                (observation, index, resolved[index], term, turn_in, turn_out)
+            )
         if not members:
             continue
-        if abs(min(radius for _o, _i, radius, _t in members) - curve_radius) <= (
-            COORD_TOLERANCE
-        ):
+        floor_radius = min(radius for _o, _i, radius, _t, _ti, _to in members)
+        if abs(floor_radius - curve_radius) <= COORD_TOLERANCE:
             continue
         innermost = max(members, key=lambda member: member[3])[0]
         innermost_x = innermost.points[innermost.rank][0]
-        for observation, index, _resolved, _term in members:
+        for observation, index, _resolved, _term, turn_in, turn_out in members:
             corner = observation.points[observation.rank]
             displacement = corner[0] - innermost_x
-            radius = concentric_corner_radius_at(
-                observation.points[observation.rank - 1],
-                corner,
-                observation.points[observation.rank + 1],
+            radius = concentric_corner_radius(
+                turn_in,
+                turn_out,
                 displacement,
                 curve_radius,
             )

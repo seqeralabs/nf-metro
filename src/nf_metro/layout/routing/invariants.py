@@ -24,7 +24,14 @@ import inspect
 import math
 import warnings
 from collections import defaultdict, deque
-from collections.abc import Callable, Collection, Iterable, Iterator, Sequence
+from collections.abc import (
+    Callable,
+    Collection,
+    Iterable,
+    Iterator,
+    Mapping,
+    Sequence,
+)
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Literal, NamedTuple, Protocol
@@ -4347,7 +4354,7 @@ def _fan_corner_observations(
 
 def concentric_corner_fans(
     routes: list[RoutedPath],
-    offsets: dict[tuple[str, str], float],
+    offsets: Mapping[tuple[str, str], float],
 ) -> list[list[_CornerObservation]]:
     """Group concentric bundle corners into fans by shared arc centre.
 
