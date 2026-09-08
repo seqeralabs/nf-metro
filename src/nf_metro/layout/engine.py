@@ -19,6 +19,7 @@ import warnings
 from collections.abc import Callable
 from copy import deepcopy
 from functools import partial
+from typing import TYPE_CHECKING
 
 from nf_metro.layout.constants import (
     CURVE_RADIUS,
@@ -42,6 +43,9 @@ from nf_metro.layout.constants import (
     graph_offset_step,
 )
 from nf_metro.layout.geometry import lanes_run_along_x, perpendicular_port_sides
+
+if TYPE_CHECKING:
+    from nf_metro.render.style import Theme
 from nf_metro.layout.layers import assign_layers
 from nf_metro.layout.ordering import assign_tracks
 from nf_metro.layout.phases._common import (  # noqa: F401
@@ -482,6 +486,7 @@ def compute_layout(
     section_x_gap: float | None = None,
     section_y_gap: float | None = None,
     validate: bool = _VALIDATE_DEFAULT,
+    validation_theme: Theme | None = None,
 ) -> None:
     """Compute layout positions for all stations in the graph.
 
@@ -594,7 +599,7 @@ def compute_layout(
             from nf_metro.themes import resolve_theme
 
             try:
-                build_render_plan(graph, resolve_theme(None, graph))
+                build_render_plan(graph, validation_theme or resolve_theme(None, graph))
             except (
                 CurveInvariantError,
                 FanRouteInvariantError,
