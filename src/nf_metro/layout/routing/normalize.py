@@ -8,7 +8,7 @@ from collections import defaultdict, deque
 from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from math import inf, isfinite
-from typing import AbstractSet, NamedTuple, TypeVar
+from typing import TYPE_CHECKING, AbstractSet, NamedTuple, TypeVar
 
 from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
@@ -91,9 +91,12 @@ from nf_metro.layout.routing.context import (
     _RoutingCtx,
 )
 from nf_metro.layout.routing.corners import (
+    _corner_travel_units,
+    concentric_corner_radius,
     concentric_corner_radius_at,
     concentric_reference_radius_at,
     corner_radius,
+    resolve_curve_radii,
     resolve_curve_radius_at,
     wholesale_corner_translation,
     widest_coincident_radius,
@@ -109,6 +112,9 @@ from nf_metro.layout.routing.reserved_bands import (
     resolved_band,
 )
 from nf_metro.parser.model import MetroGraph, Port, PortSide
+
+if TYPE_CHECKING:
+    from nf_metro.layout.routing.invariants import _CornerObservation
 
 
 @dataclass
@@ -992,6 +998,20 @@ def _bundle_same_destination_tails(
     return frozenset(settled_segments)
 
 
+def _largest_feasible_reference(
+    floor: float, ceiling: float, fits: Callable[[float], bool], *, iterations: int = 32
+) -> float | None:
+    if not fits(ceiling):
+        if not fits(floor):
+            return None
+        lower, upper = floor, ceiling
+        for _ in range(iterations):
+            midpoint = (lower + upper) / 2
+            lower, upper = (midpoint, upper) if fits(midpoint) else (lower, midpoint)
+        return lower
+    return ceiling
+
+
 class _SemanticEndCorner(NamedTuple):
     route: RoutedPath
     rank: int
@@ -1119,27 +1139,22 @@ def _rederive_semantic_end_corners(
                         return False
                 return True
 
-            if not reference_fits(reference_radius):
-                lower = max(
-                    concentric_reference_radius_at(
-                        member.points[member.rank - 1],
-                        member.points[member.rank],
-                        member.points[member.rank + 1],
-                        offset,
-                        COORD_TOLERANCE_FINE,
-                    )
-                    for member, _radius_index, offset, _desired in prepared
+            floor = max(
+                concentric_reference_radius_at(
+                    member.points[member.rank - 1],
+                    member.points[member.rank],
+                    member.points[member.rank + 1],
+                    offset,
+                    COORD_TOLERANCE_FINE,
                 )
-                if not reference_fits(lower):
-                    continue
-                upper = reference_radius
-                for _ in range(32):
-                    midpoint = (lower + upper) / 2
-                    if reference_fits(midpoint):
-                        lower = midpoint
-                    else:
-                        upper = midpoint
-                reference_radius = lower
+                for member, _radius_index, offset, _desired in prepared
+            )
+            reference = _largest_feasible_reference(
+                floor, reference_radius, reference_fits
+            )
+            if reference is None:
+                continue
+            reference_radius = reference
             for member, radius_index, offset, _desired in prepared:
                 radii = member.route.curve_radii
                 assert radii is not None
@@ -2570,13 +2585,12 @@ def _stack_distinct_port_descents(
     else:
         inner = by_line[ordered[-1]][0].x
         base = inner - (n - 1) * step if left else inner + (n - 1) * step
-    # The innermost lane (rank n-1) is the concentric reference, anchored at the
-    # base radius; every other lane's corner is sized by its signed X offset from
-    # it, so the outer lanes take the wider radius and the convergent arcs hold a
-    # constant gap rather than pinching where equal-radius corners a step apart
-    # would.  The offset is signed by the seating direction (a LEFT entry seats
-    # outward in -X, a RIGHT entry in +X), which the corner helper needs to widen
-    # the outer side rather than tighten it.
+    # Lanes seat one step apart from the innermost (rank n-1) outward; each
+    # corner is sized by its signed X offset from that innermost lane, so the
+    # convergent arcs hold a constant gap rather than pinching where equal-radius
+    # corners a step apart would.  The offset is signed by the seating direction
+    # (a LEFT entry seats outward in -X, a RIGHT entry in +X), which the corner
+    # helper needs to widen the outer side rather than tighten it.
     x_inner = base + (n - 1) * step if left else base - (n - 1) * step
     target_x_by_line = {
         lid: base + rank * step if left else base - rank * step
@@ -2588,11 +2602,26 @@ def _stack_distinct_port_descents(
         for channel in channels
     ):
         return
-    for rank, lid in enumerate(ordered):
-        x = target_x_by_line[lid]
-        offset = x - x_inner
-        for ch in by_line[lid]:
-            _set_vchannel_x(ch, x, offset)
+    offset_by_line = {lid: target_x_by_line[lid] - x_inner for lid in ordered}
+    moves = [
+        (ch, target_x_by_line[lid], offset_by_line[lid])
+        for lid in ordered
+        for ch in by_line[lid]
+    ]
+    # A descent's two flanking corners turn in opposite senses (one right->down,
+    # one down->right), so a lane inside one turn is outside the other and needs
+    # a distinct reference at each to seat that turn's innermost lane at the base
+    # radius; one shared reference floors only one corner and shrinks the other
+    # below it.
+    base_radius, base_radius_out = _fan_opening_reference_radii(moves, ctx.curve_radius)
+    for ch, x, offset in moves:
+        _set_vchannel_x(
+            ch,
+            x,
+            offset,
+            base_radius=base_radius,
+            base_radius_out=base_radius_out,
+        )
 
 
 def _bypass_nesting_leg_is_movable(route: RoutedPath, rank: int) -> bool:
@@ -5590,3 +5619,139 @@ def _held_corner_radius(
 ) -> float:
     """The radius already drawn at *index*, or *fallback* where there is none."""
     return radii[index] if radii and 0 <= index < len(radii) else fallback
+
+
+def _reanchor_concentric_corner_fans(
+    population: list[RoutedPath],
+    offsets: Mapping[tuple[str, str], float],
+    curve_radius: float,
+) -> None:
+    """Reseat every off-floor concentric fan's innermost lane at *curve_radius*.
+
+    A concentric fan (see :func:`concentric_corner_fans`) is a set of bundle
+    corners that turn together and share an arc centre across edges.  Sizing a
+    corner's reference from the wrong cohort -- the global packed-band index or
+    the max across all bundle members rather than the lines co-turning at that
+    corner -- shifts the whole fan uniformly, so it stays concentric but seats
+    its innermost lane off *curve_radius* (above it when the reference line is
+    interior to the fan, below it when the anchor is an outside lane).
+
+    For each such fan re-derive every member's radius from the fan's own X
+    displacements with the innermost lane (the one that reaches the smallest
+    radius at this turn) pinned at *curve_radius*, preserving each lane's step
+    spacing.  The corrected value is written to both ``curve_radii`` and the
+    stored concentric-corner description so any exit-turn-adjacent reseat
+    downstream reads a consistent reference.
+
+    Pinning the innermost lane at *curve_radius* is only committed when every
+    member's segment budget can honour it; raising a lane above a runway too
+    short for it would draw a hard corner where a curve was asked for.  When
+    *curve_radius* does not fit, the largest feasible reference in
+    ``[floor_radius, curve_radius]`` is found by the same downward binary search
+    :func:`_rederive_semantic_end_corners` uses.  A fan whose runway cannot even
+    reach its own floor is left unraised, which
+    :func:`check_orthogonal_turns_form_curves` reads as a deliberately tight
+    inner arc.
+    """
+    from nf_metro.layout.routing.invariants import concentric_corner_fans
+
+    for fan in concentric_corner_fans(population, offsets):
+        members: list[
+            tuple[
+                _CornerObservation,
+                int,
+                float,
+                float,
+                tuple[float, float],
+                tuple[float, float],
+            ]
+        ] = []
+        for observation in fan:
+            route = observation.route
+            if route.curve_radii is None:
+                members = []
+                break
+            index = observation.rank - 1
+            resolved = resolve_curve_radii(observation.points, route.curve_radii)
+            turn_in, turn_out = _corner_travel_units(
+                observation.points[observation.rank - 1],
+                observation.points[observation.rank],
+                observation.points[observation.rank + 1],
+            )
+            term = observation.points[observation.rank][0] * (turn_out[0] - turn_in[0])
+            members.append(
+                (observation, index, resolved[index], term, turn_in, turn_out)
+            )
+        if not members:
+            continue
+        floor_radius = min(radius for _o, _i, radius, _t, _ti, _to in members)
+        if abs(floor_radius - curve_radius) <= COORD_TOLERANCE:
+            continue
+        innermost = max(members, key=lambda member: member[3])[0]
+        innermost_x = innermost.points[innermost.rank][0]
+
+        prepared: list[
+            tuple[
+                _CornerObservation,
+                int,
+                float,
+                tuple[float, float],
+                tuple[float, float],
+                list[float],
+            ]
+        ] = []
+        for observation, index, _resolved, _term, turn_in, turn_out in members:
+            corner = observation.points[observation.rank]
+            displacement = corner[0] - innermost_x
+            prepared.append(
+                (
+                    observation,
+                    index,
+                    displacement,
+                    turn_in,
+                    turn_out,
+                    list(observation.route.curve_radii or ()),
+                )
+            )
+
+        def reference_fits(candidate: float) -> bool:
+            for (
+                observation,
+                index,
+                displacement,
+                turn_in,
+                turn_out,
+                desired,
+            ) in prepared:
+                radius = concentric_corner_radius(
+                    turn_in, turn_out, displacement, candidate
+                )
+                desired[index] = radius
+                if (
+                    radius < COORD_TOLERANCE_FINE
+                    or abs(
+                        resolve_curve_radius_at(observation.points, desired, index)
+                        - radius
+                    )
+                    > COORD_TOLERANCE_FINE
+                ):
+                    return False
+            return True
+
+        reference = _largest_feasible_reference(
+            floor_radius, curve_radius, reference_fits
+        )
+        if reference is None:
+            continue
+
+        for observation, index, displacement, turn_in, turn_out, _desired in prepared:
+            radius = concentric_corner_radius(
+                turn_in,
+                turn_out,
+                displacement,
+                reference,
+            )
+            radii = list(observation.route.curve_radii or ())
+            radii[index] = radius
+            observation.route.curve_radii = radii
+            observation.route.record_concentric_corner(index, displacement, reference)
