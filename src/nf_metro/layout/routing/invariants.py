@@ -4324,17 +4324,138 @@ def check_concentric_bundle_corners(
     return violations
 
 
+def _fan_corner_observations(
+    route: RoutedPath, points: list[tuple[float, float]]
+) -> list[_CornerObservation]:
+    """Interior orthogonal-turn corners of *points*, minus the exit-turn corner.
+
+    ``_settled_exit_turns`` anchors a route's own exit-turn corner, so it is not
+    a re-derivable member of any concentric fan and is left out here.
+    """
+    corners: list[_CornerObservation] = []
+    for rank in range(1, len(points) - 1):
+        if route.exit_turn_segment_rank == rank:
+            continue
+        if not is_orthogonal_turn(points[rank - 1], points[rank], points[rank + 1]):
+            continue
+        incoming = _segment_unit(points[rank - 1], points[rank])
+        outgoing = _segment_unit(points[rank], points[rank + 1])
+        assert incoming is not None and outgoing is not None
+        corners.append(_CornerObservation(route, points, rank, incoming, outgoing))
+    return corners
+
+
+def concentric_corner_fans(
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[list[_CornerObservation]]:
+    """Group concentric bundle corners into fans by shared arc centre.
+
+    A *fan* is a maximal set of interior corners that turn the same way and share
+    one arc centre.  Because a 90-degree corner's arc centre is ``corner +
+    radius * (turn_out - turn_in)``, two corners coincide there only when they
+    translate the whole corner together along the turn diagonal and nest one
+    concentric family -- a transition corner (one leg pinned) lands on its own
+    centre and drops out.  Grouping on the centre alone unifies a fan across any
+    number of edges, so a bundle converging on a shared junction from sibling
+    edges reads as one fan at every corner it turns together, not just its first
+    and last.  Each route's own exit-turn corner is excluded (anchored
+    separately).  Only fans spanning two or more distinct lines -- the ones whose
+    innermost lane the ``CURVE_RADIUS`` floor governs -- are returned.
+
+    This is the single definition of "one concentric fan" shared by the
+    re-anchoring pass that seats each innermost lane at the floor and the oracle
+    that checks it did.
+    """
+    observations: list[_CornerObservation] = []
+    centres: list[tuple[float, float]] = []
+    for route in routes:
+        points = apply_route_offsets(route, offsets)
+        resolved: list[float] | None = None
+        for observation in _fan_corner_observations(route, points):
+            if resolved is None:
+                resolved = _resolved_corner_radii(route, points)
+            index = observation.rank - 1
+            if index >= len(resolved):
+                continue
+            observations.append(observation)
+            centres.append(
+                _arc_centre(
+                    observation.points[observation.rank],
+                    resolved[index],
+                    observation.incoming,
+                    observation.outgoing,
+                )
+            )
+
+    cells: dict[
+        tuple[tuple[float, float], tuple[float, float], int, int], list[int]
+    ] = defaultdict(list)
+    for i, (observation, centre) in enumerate(zip(observations, centres)):
+        cells[
+            (
+                observation.incoming,
+                observation.outgoing,
+                round(centre[0]),
+                round(centre[1]),
+            )
+        ].append(i)
+
+    parent = list(range(len(observations)))
+
+    def find(node: int) -> int:
+        root = node
+        while parent[root] != root:
+            root = parent[root]
+        while parent[node] != root:
+            parent[node], node = root, parent[node]
+        return root
+
+    def union(a: int, b: int) -> None:
+        parent[find(a)] = find(b)
+
+    for (incoming, outgoing, ix, iy), indices in cells.items():
+        for other in indices[1:]:
+            union(indices[0], other)
+        # A centre rounded to the cell boundary can land one cell over from a
+        # concentric mate, so bridge the eight neighbours within tolerance.
+        for offset_x in (-1, 0, 1):
+            for offset_y in (-1, 0, 1):
+                if offset_x == 0 and offset_y == 0:
+                    continue
+                neighbour = cells.get(
+                    (incoming, outgoing, ix + offset_x, iy + offset_y)
+                )
+                if not neighbour:
+                    continue
+                base = centres[indices[0]]
+                for other in neighbour:
+                    if math.dist(base, centres[other]) <= _CONCENTRIC_CENTRE_TOLERANCE:
+                        union(indices[0], other)
+
+    components: dict[int, list[_CornerObservation]] = defaultdict(list)
+    for i, observation in enumerate(observations):
+        components[find(i)].append(observation)
+
+    return [
+        component
+        for component in components.values()
+        if len({observation.route.line_id for observation in component}) >= 2
+    ]
+
+
 @dataclass(frozen=True)
 class SubFloorBundleCorner:
-    """A concentric bundle corner seats a line below the ``CURVE_RADIUS`` floor.
+    """A concentric bundle fan seats its innermost lane off ``CURVE_RADIUS``.
 
     A bundle of ``n`` lines nesting one lane-step apart draws one radius set at
     every 90-degree turn it makes together -- ``CURVE_RADIUS`` for the innermost
     line of that turn, one step wider for each line further out -- and only
-    reassigns which line is innermost as the turn direction flips.  The floor is
-    the first corollary: rank 0 always takes ``CURVE_RADIUS``, so no line ever
-    seats below it.  A corner that anchors its *reference* line rather than its
-    *tightest* line at the floor drives the inner lines below it.
+    reassigns which line is innermost as the turn direction flips.  Anchoring the
+    fan's *reference* line rather than its *tightest* line at the floor shifts the
+    whole nest uniformly, seating the innermost lane off ``CURVE_RADIUS`` -- above
+    it when the reference line is interior, below it when the anchor is an inside
+    lane.  The innermost resolved radius must equal ``CURVE_RADIUS`` exactly.
 
     Runway-clamped corners (the resolved radius falls short of the route's
     declared radius because a short leg cannot fit it) are excluded: that shrink
@@ -4348,11 +4469,11 @@ class SubFloorBundleCorner:
 
     def message(self) -> str:
         """Human-readable summary suitable for the engine error message."""
-        below = [r for r in self.radii if r < CURVE_RADIUS - COORD_TOLERANCE]
         return (
-            f"bundle {self.edge_source!r}->{self.edge_target!r} corner "
-            f"{self.corner_index} draws radii {list(self.radii)}, seating "
-            f"{below} below CURVE_RADIUS={CURVE_RADIUS:.0f}"
+            f"concentric fan {self.edge_source!r}->{self.edge_target!r} corner "
+            f"{self.corner_index} draws radii {list(self.radii)}, seating its "
+            f"innermost lane at {min(self.radii):.0f} rather than "
+            f"CURVE_RADIUS={CURVE_RADIUS:.0f}"
         )
 
 
@@ -4361,75 +4482,56 @@ def check_bundle_corner_radius_floor(
     routes: list[RoutedPath],
     offsets: dict[tuple[str, str], float],
 ) -> list[SubFloorBundleCorner]:
-    """Return concentric bundle corners seating a line below ``CURVE_RADIUS``.
+    """Return concentric bundle fans whose innermost lane is off ``CURVE_RADIUS``.
 
-    A corpus oracle over bundle radius sizing rather than a render guard: a
-    sub-floor arc renders without aborting (a pinch, not undrawable geometry),
-    so promoting it to an always-on render abort would fail maps that are
-    imperfect rather than broken.
+    A corpus oracle over bundle radius sizing rather than a render guard: an
+    off-floor arc renders without aborting (a pinch or slack, not undrawable
+    geometry), so promoting it to an always-on render abort would fail maps that
+    are imperfect rather than broken.
 
-    Scoped to a bundle running together from one source to one target: its
-    members share an edge, carry distinct lines, keep one waypoint count, and
-    turn together (same incoming/outgoing direction, wholesale-translated legs)
-    at each corner counted.  Every such corner must seat its innermost line at
-    ``CURVE_RADIUS`` and none below it.
+    Each fan is the full cross-edge set of corners that turn together and share
+    an arc centre (see :func:`concentric_corner_fans`), so a bundle whose true
+    innermost lane lives on a sibling edge is judged whole rather than as a
+    per-edge fragment.  Every such fan must seat its innermost lane at
+    ``CURVE_RADIUS`` exactly.
     """
-    from nf_metro.layout.routing.corners import wholesale_corner_translation
-
-    by_edge: dict[tuple[str, str], list[RoutedPath]] = defaultdict(list)
-    for route in routes:
-        by_edge[(route.edge.source, route.edge.target)].append(route)
-
     violations: list[SubFloorBundleCorner] = []
-    for (source, target), members in by_edge.items():
-        if len({route.line_id for route in members}) < 2:
-            continue
-        if any(route.curve_radii is None for route in members):
-            continue
-        points = [apply_route_offsets(route, offsets) for route in members]
-        if len({len(pts) for pts in points}) != 1:
-            continue
-        resolved = [
-            _resolved_corner_radii(route, pts) for route, pts in zip(members, points)
-        ]
-        declared = [route.curve_radii for route in members]
-        for k in range(1, len(points[0]) - 1):
-            turns = [
-                (_segment_unit(pts[k - 1], pts[k]), _segment_unit(pts[k], pts[k + 1]))
-                for pts in points
-            ]
-            if any(
-                incoming is None
-                or outgoing is None
-                or not is_orthogonal_turn(pts[k - 1], pts[k], pts[k + 1])
-                for (incoming, outgoing), pts in zip(turns, points)
-            ):
-                continue
-            if any(turn != turns[0] for turn in turns):
-                continue
-            incoming, outgoing = turns[0]
-            assert incoming is not None and outgoing is not None
-            if any(
-                not wholesale_corner_translation(
-                    points[0][k], pts[k], incoming, outgoing, _WHOLESALE_LEG_TOLERANCE
-                )
-                for pts in points[1:]
-            ):
-                continue
-            if any(k - 1 >= len(radii) for radii in resolved):
-                continue
+    for fan in concentric_corner_fans(routes, offsets):
+        members: list[tuple[_CornerObservation, float]] = []
+        runway_clamped = False
+        for observation in fan:
+            resolved = _resolved_corner_radii(observation.route, observation.points)
+            index = observation.rank - 1
+            if index >= len(resolved):
+                runway_clamped = True
+                break
+            declared = observation.route.curve_radii
+            declared_radius = (
+                declared[index]
+                if declared is not None and index < len(declared)
+                else CURVE_RADIUS
+            )
             # A corner drawing short of its declared radius is runway-clamped, a
             # geometric limit rather than a sizing choice this oracle governs.
-            if any(
-                des is not None
-                and k - 1 < len(des)
-                and res[k - 1] < des[k - 1] - COORD_TOLERANCE
-                for res, des in zip(resolved, declared)
-            ):
-                continue
-            radii = tuple(sorted(round(res[k - 1], 1) for res in resolved))
-            if any(r < CURVE_RADIUS - COORD_TOLERANCE for r in radii):
-                violations.append(SubFloorBundleCorner(source, target, k, radii))
+            if resolved[index] < declared_radius - COORD_TOLERANCE:
+                runway_clamped = True
+                break
+            members.append((observation, resolved[index]))
+        if runway_clamped or not members:
+            continue
+        innermost = min(radius for _observation, radius in members)
+        if abs(innermost - CURVE_RADIUS) <= COORD_TOLERANCE:
+            continue
+        witness = min(members, key=lambda member: member[1])[0]
+        radii = tuple(sorted(round(radius, 1) for _observation, radius in members))
+        violations.append(
+            SubFloorBundleCorner(
+                witness.route.edge.source,
+                witness.route.edge.target,
+                witness.rank,
+                radii,
+            )
+        )
     return violations
 
 
@@ -7208,19 +7310,15 @@ CHECK_REGISTRY: tuple[GuardSpec, ...] = (
     _check_spec(
         check_bundle_corner_radius_floor,
         "C",
-        issue_pin=("#1958",),
+        issue_pin=("#1958", "#1961"),
         narrow_reason=(
             "A corpus oracle over bundle radius sizing rather than a render "
-            "guard: a sub-floor arc renders without aborting, so a novel map "
+            "guard: an off-floor arc renders without aborting, so a novel map "
             "whose bundle sizes tightly for a reason nothing here models would "
-            "abort rather than render imperfectly. Restricted to a bundle "
-            "running one source to one target with a constant waypoint count "
-            "that turns together at each counted corner, runway-clamped corners "
-            "excluded -- the set whose turns belong to one concentric family "
-            "and so must seat their innermost line at the floor. The wider "
-            "shared-vocabulary property this floor is a corollary of does not "
-            "yet hold corpus-wide (other passes still size a bundle's reference "
-            "per corner); adopting it corpus-wide is separate follow-up work."
+            "abort rather than render imperfectly. Restricted to the cross-edge "
+            "fans of corners that turn together and share an arc centre -- the "
+            "sets whose innermost lane must seat at CURVE_RADIUS -- with "
+            "runway-clamped corners excluded."
         ),
     ),
     _check_spec(

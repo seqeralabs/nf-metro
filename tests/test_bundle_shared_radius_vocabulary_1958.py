@@ -12,8 +12,7 @@ draw genuinely different radius sets rather than one set permuted between them.
 The repro is a 3-line bundle (riboseq/rnaseq/tiseq) descending into MultiQC's
 LEFT entry port.  The targeted tests pin both properties on that bundle;
 ``check_bundle_corner_radius_floor`` enforces the floor corollary corpus-wide
-(the shared-vocabulary property itself does not yet hold corpus-wide -- other
-passes still size a bundle's reference per corner, the remainder of #1958).
+against every concentric fan's innermost lane.
 """
 
 from __future__ import annotations

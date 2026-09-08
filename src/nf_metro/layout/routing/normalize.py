@@ -8,7 +8,7 @@ from collections import defaultdict, deque
 from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from math import inf, isfinite
-from typing import AbstractSet, NamedTuple, TypeVar
+from typing import TYPE_CHECKING, AbstractSet, NamedTuple, TypeVar
 
 from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
@@ -91,9 +91,11 @@ from nf_metro.layout.routing.context import (
     _RoutingCtx,
 )
 from nf_metro.layout.routing.corners import (
+    _corner_travel_units,
     concentric_corner_radius_at,
     concentric_reference_radius_at,
     corner_radius,
+    resolve_curve_radii,
     resolve_curve_radius_at,
     wholesale_corner_translation,
     widest_coincident_radius,
@@ -109,6 +111,9 @@ from nf_metro.layout.routing.reserved_bands import (
     resolved_band,
 )
 from nf_metro.parser.model import MetroGraph, Port, PortSide
+
+if TYPE_CHECKING:
+    from nf_metro.layout.routing.invariants import _CornerObservation
 
 
 @dataclass
@@ -5604,3 +5609,72 @@ def _held_corner_radius(
 ) -> float:
     """The radius already drawn at *index*, or *fallback* where there is none."""
     return radii[index] if radii and 0 <= index < len(radii) else fallback
+
+
+def _reanchor_concentric_corner_fans(
+    population: list[RoutedPath],
+    offsets: Mapping[tuple[str, str], float],
+    curve_radius: float,
+) -> None:
+    """Reseat every off-floor concentric fan's innermost lane at *curve_radius*.
+
+    A concentric fan (see :func:`concentric_corner_fans`) is a set of bundle
+    corners that turn together and share an arc centre across edges.  Sizing a
+    corner's reference from the wrong cohort -- the global packed-band index or
+    the max across all bundle members rather than the lines co-turning at that
+    corner -- shifts the whole fan uniformly, so it stays concentric but seats
+    its innermost lane off *curve_radius* (above it when the reference line is
+    interior to the fan, below it when the anchor is an outside lane).
+
+    For each such fan re-derive every member's radius from the fan's own X
+    displacements with the innermost lane (the one that reaches the smallest
+    radius at this turn) pinned at *curve_radius*, preserving each lane's step
+    spacing.  The corrected value is written to both ``curve_radii`` and the
+    stored concentric-corner description so any exit-turn-adjacent reseat
+    downstream reads a consistent reference.
+    """
+    from nf_metro.layout.routing.invariants import concentric_corner_fans
+
+    for fan in concentric_corner_fans(list(population), dict(offsets)):
+        members: list[tuple[_CornerObservation, int, float, float]] = []
+        for observation in fan:
+            route = observation.route
+            if route.curve_radii is None:
+                members = []
+                break
+            index = observation.rank - 1
+            resolved = resolve_curve_radii(observation.points, route.curve_radii)
+            if index >= len(resolved):
+                members = []
+                break
+            turn_in, turn_out = _corner_travel_units(
+                observation.points[observation.rank - 1],
+                observation.points[observation.rank],
+                observation.points[observation.rank + 1],
+            )
+            term = observation.points[observation.rank][0] * (turn_out[0] - turn_in[0])
+            members.append((observation, index, resolved[index], term))
+        if not members:
+            continue
+        if abs(min(radius for _o, _i, radius, _t in members) - curve_radius) <= (
+            COORD_TOLERANCE
+        ):
+            continue
+        innermost = max(members, key=lambda member: member[3])[0]
+        innermost_x = innermost.points[innermost.rank][0]
+        for observation, index, _resolved, _term in members:
+            corner = observation.points[observation.rank]
+            displacement = corner[0] - innermost_x
+            radius = concentric_corner_radius_at(
+                observation.points[observation.rank - 1],
+                corner,
+                observation.points[observation.rank + 1],
+                displacement,
+                curve_radius,
+            )
+            radii = list(observation.route.curve_radii or ())
+            radii[index] = radius
+            observation.route.curve_radii = radii
+            observation.route.record_concentric_corner(
+                index, displacement, curve_radius
+            )
