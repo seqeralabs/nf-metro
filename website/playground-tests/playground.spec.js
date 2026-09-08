@@ -117,16 +117,16 @@ test("layout options are disclosed in their dedicated control panel", async () =
   await expect(page.locator("#opt-line-spread")).toBeVisible();
 });
 
-test("directional toggle re-renders the map", async () => {
-  const before = await page.locator("#preview").innerHTML();
+test("directional toggle adds direction markers", async () => {
+  const markers = page.locator('#preview [class*="metro-direction-"]');
+  await expect(markers).toHaveCount(0);
 
   await page.locator("#opt-directional").check();
-  await expect
-    .poll(async () => page.locator("#preview").innerHTML())
-    .not.toBe(before);
+  await expect.poll(async () => markers.count()).toBeGreaterThan(0);
   await expect(page.locator("#error")).toBeHidden();
 
   await page.locator("#opt-directional").uncheck();
+  await expect(markers).toHaveCount(0);
 });
 
 test("brand dropdown writes the %%metro style directive and re-renders", async () => {
