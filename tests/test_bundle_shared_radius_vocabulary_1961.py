@@ -20,11 +20,16 @@ from pathlib import Path
 
 import pytest
 
+from nf_metro.layout.constants import CURVE_RADIUS
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.common import apply_route_offsets
 from nf_metro.layout.routing.corners import resolve_curve_radii
-from nf_metro.layout.routing.invariants import check_bundle_corner_radius_floor
+from nf_metro.layout.routing.invariants import (
+    _fan_corner_observations,
+    check_bundle_corner_radius_floor,
+)
+from nf_metro.layout.routing.normalize import _reanchor_concentric_corner_fans
 from nf_metro.parser.mermaid import parse_metro_mermaid
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -66,7 +71,7 @@ def _resolved_by_line(path: Path, source: str, target: str) -> dict[str, list[fl
             "examples/topologies/disjoint_sameline_trunks.mmd",
             "secC__exit_right_2",
             "secE__entry_left_7",
-            {"a": [14.0, 10.0, 10.0, 14.0], "b": [10.0, 14.0, 14.0, 10.0]},
+            {"a": [14.0, 18.0, 10.0, 14.0], "b": [10.0, 22.0, 14.0, 10.0]},
             id="disjoint_sameline_trunks",
         ),
         pytest.param(
@@ -74,9 +79,9 @@ def _resolved_by_line(path: Path, source: str, target: str) -> dict[str, list[fl
             "__junction_4",
             "branch__entry_left_1",
             {
-                "a": [18.0, 18.0, 10.0, 10.0],
-                "b": [14.0, 14.0, 14.0, 14.0],
-                "c": [10.0, 10.0, 18.0, 18.0],
+                "a": [18.0, 22.0, 10.0, 10.0],
+                "b": [14.0, 18.0, 14.0, 14.0],
+                "c": [10.0, 14.0, 18.0, 18.0],
             },
             id="fanout_bundle_plus_spurs",
         ),
@@ -93,6 +98,54 @@ def test_concentric_fan_anchors_innermost_at_curve_radius(
     """
     resolved = _resolved_by_line(REPO_ROOT / fixture, source, target)
     assert resolved == expected
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    [
+        "examples/topologies/disjoint_sameline_trunks.mmd",
+        "examples/topologies/fanout_bundle_plus_spurs.mmd",
+        "examples/topologies/packed_multiline_serpentine_grid.mmd",
+    ],
+)
+def test_reanchor_leaves_both_exit_turn_flanking_corners_to_the_plan(
+    fixture: str,
+) -> None:
+    """The re-anchor pass never re-derives a plan-owned exit-turn corner.
+
+    ``_settled_exit_turns`` seats both waypoints flanking the exit-turn segment
+    -- ``exit_turn_segment_rank`` and ``exit_turn_segment_rank + 1``.  Neither may
+    appear as a fan observation, and a second re-anchoring pass must not move
+    either radius.
+    """
+    _graph, routes, offsets = _route(REPO_ROOT / fixture)
+    settled = [
+        route
+        for route in routes
+        if route.exit_turn_segment_rank is not None and route.curve_radii is not None
+    ]
+    assert settled, "fixture exercises no settled exit turn"
+
+    for route in settled:
+        rank = route.exit_turn_segment_rank
+        observed = {
+            obs.rank
+            for obs in _fan_corner_observations(
+                route, apply_route_offsets(route, offsets)
+            )
+        }
+        assert rank not in observed and rank + 1 not in observed
+
+    before = {
+        id(route): route.curve_radii[
+            route.exit_turn_segment_rank - 1 : route.exit_turn_segment_rank + 1
+        ]
+        for route in settled
+    }
+    _reanchor_concentric_corner_fans(routes, offsets, CURVE_RADIUS)
+    for route in settled:
+        rank = route.exit_turn_segment_rank
+        assert route.curve_radii[rank - 1 : rank + 1] == before[id(route)]
 
 
 def _corpus_fixtures() -> list[Path]:
