@@ -5633,6 +5633,16 @@ def _reanchor_concentric_corner_fans(
     spacing.  The corrected value is written to both ``curve_radii`` and the
     stored concentric-corner description so any exit-turn-adjacent reseat
     downstream reads a consistent reference.
+
+    Pinning the innermost lane at *curve_radius* is only committed when every
+    member's segment budget can honour it; raising a lane above a runway too
+    short for it would draw a hard corner where a curve was asked for.  When
+    *curve_radius* does not fit, the largest feasible reference in
+    ``[floor_radius, curve_radius]`` is found by the same downward binary search
+    :func:`_rederive_semantic_end_corners` uses.  A fan whose runway cannot even
+    reach its own floor is left unraised, which
+    :func:`check_orthogonal_turns_form_curves` reads as a deliberately tight
+    inner arc.
     """
     from nf_metro.layout.routing.invariants import concentric_corner_fans
 
@@ -5670,18 +5680,76 @@ def _reanchor_concentric_corner_fans(
             continue
         innermost = max(members, key=lambda member: member[3])[0]
         innermost_x = innermost.points[innermost.rank][0]
+
+        prepared: list[
+            tuple[
+                _CornerObservation,
+                int,
+                float,
+                tuple[float, float],
+                tuple[float, float],
+                list[float],
+            ]
+        ] = []
         for observation, index, _resolved, _term, turn_in, turn_out in members:
             corner = observation.points[observation.rank]
             displacement = corner[0] - innermost_x
+            prepared.append(
+                (
+                    observation,
+                    index,
+                    displacement,
+                    turn_in,
+                    turn_out,
+                    list(observation.route.curve_radii or ()),
+                )
+            )
+
+        def reference_fits(candidate: float) -> bool:
+            for (
+                observation,
+                index,
+                displacement,
+                turn_in,
+                turn_out,
+                desired,
+            ) in prepared:
+                radius = concentric_corner_radius(
+                    turn_in, turn_out, displacement, candidate
+                )
+                desired[index] = radius
+                if (
+                    radius < COORD_TOLERANCE_FINE
+                    or abs(
+                        resolve_curve_radius_at(observation.points, desired, index)
+                        - radius
+                    )
+                    > COORD_TOLERANCE_FINE
+                ):
+                    return False
+            return True
+
+        reference = curve_radius
+        if not reference_fits(curve_radius):
+            if not reference_fits(floor_radius):
+                continue
+            lower, upper = floor_radius, curve_radius
+            for _ in range(32):
+                midpoint = (lower + upper) / 2
+                if reference_fits(midpoint):
+                    lower = midpoint
+                else:
+                    upper = midpoint
+            reference = lower
+
+        for observation, index, displacement, turn_in, turn_out, _desired in prepared:
             radius = concentric_corner_radius(
                 turn_in,
                 turn_out,
                 displacement,
-                curve_radius,
+                reference,
             )
             radii = list(observation.route.curve_radii or ())
             radii[index] = radius
             observation.route.curve_radii = radii
-            observation.route.record_concentric_corner(
-                index, displacement, curve_radius
-            )
+            observation.route.record_concentric_corner(index, displacement, reference)
