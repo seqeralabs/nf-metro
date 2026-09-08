@@ -1,0 +1,23 @@
+%%metro title: Reflow-avoidance widened pitch
+%%metro diamond_style: symmetric
+%%metro line: l1 | Line 1 | #e63946
+%%metro line: l2 | Line 2 | #2db572
+%%metro line: l3 | Line 3 | #0570b0
+%%metro line: l4 | Line 4 | #f5c542
+%%metro line: l5 | Line 5 | #ff8c00
+%%metro line: l6 | Line 6 | #7b2d3b
+
+graph LR
+    subgraph sec [Sec]
+        a[Input]
+        top[Alignment]
+        mid[Variant calling]
+        bot[Coverage]
+        z[Report]
+        a -->|l1,l2,l3,l4,l5,l6| top
+        a -->|l1,l2,l3,l4,l5,l6| mid
+        a -->|l1,l2,l3,l4,l5,l6| bot
+        top -->|l1,l2,l3,l4,l5,l6| z
+        mid -->|l1,l2,l3,l4,l5,l6| z
+        bot -->|l1,l2,l3,l4,l5,l6| z
+    end
