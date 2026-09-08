@@ -5352,10 +5352,14 @@ def _guard_planned_fan_frame_realised(
             fan_lane_seat_keys(plan.branches),
         )
         if plan.appearance_policy is FanAppearancePolicy.SYMMETRIC:
-            if any(
-                actual is None or abs(actual - target) > COORD_TOLERANCE_FINE
+            # Symmetric branches seat the slot set by line rail, so the offsets
+            # are a permutation of the canonical set around one centreline.
+            if any(offset is None for offset in lane_offsets) or any(
+                abs(actual - target) > COORD_TOLERANCE_FINE
                 for actual, target in zip(
-                    lane_offsets, expected_lane_offsets, strict=True
+                    sorted(o for o in lane_offsets if o is not None),
+                    sorted(expected_lane_offsets),
+                    strict=True,
                 )
             ):
                 raise PhaseInvariantError(

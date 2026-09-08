@@ -109,6 +109,64 @@ def _fork_weave_graph(centered: bool):
     return parse_metro_mermaid(src)
 
 
+# The same fork weave wrapped in an author-written subgraph.  Routing the
+# weave through the single-section path exercises the planned-fan apply step
+# that seats each branch from its plan's symmetric lane offsets -- the path
+# that collapsed the above-centre run onto the trunk when the symmetric slots
+# were seated in branch-discovery order instead of line-rail order.
+_SECTION_FORK_WEAVE_SRC = """\
+%%metro line_spread: centered
+%%metro line: top | Top | #4CAF50
+%%metro line: mid | Mid | #2196F3
+%%metro line: bot | Bot | #E91E63
+
+graph LR
+    subgraph weave [Weave]
+        cram[Cram]
+        fb[Freebayes]
+        st[Strelka]
+        out[Out]
+
+        tA[TopA]
+        tB[TopB]
+        bA[BotA]
+        bB[BotB]
+
+        cram -->|top,mid,bot| fb
+        fb -->|top,mid,bot| st
+
+        st -->|mid| out
+
+        st -->|top| tA
+        tA -->|top| tB
+        tB -->|top| out
+
+        st -->|bot| bA
+        bA -->|bot| bB
+        bB -->|bot| out
+    end
+"""
+
+
+# A flat centered graph whose middle "generic" line skips m0 -> m1 while the
+# align line runs hub -> m2 straight through m0's column.  An implicit section
+# must host a bypass detour so align never rakes across the non-consumer m0
+# marker, matching the bypass hosting every other line-spread mode receives.
+_FLAT_SKIP_SRC = """\
+%%metro line_spread: centered
+%%metro line: align | Alignment | #54A24B
+%%metro line: generic | Analysis | #79706E
+%%metro line: qc | QC | #4C78A8
+graph LR
+    hub["hub"] -->|align| m2["m2"]
+    hub -->|generic| m0["m0"]
+    m0 -->|generic| m1["m1"]
+    m1 -->|generic| m2
+    hub -->|qc| m2b["m2b"]
+    m2b -->|qc| m2
+"""
+
+
 def test_flag_off_default():
     """Absent the directive the graph defaults to uncentered tracks."""
     graph = _weave_graph(centered=False)
@@ -262,6 +320,55 @@ def test_fork_weave_layout_each_line_run_on_correct_side():
                 assert dy > 1.0, (sid, lid, graph.stations[sid].y, ty)
             else:
                 assert abs(dy) < 1.0, (sid, lid, graph.stations[sid].y, ty)
+
+
+def test_fork_weave_sectioned_each_line_run_on_correct_side():
+    """A subgraph-wrapped fork weave must balance like the flat one.
+
+    Routing the weave through the single-section planned-fan path must seat
+    each branch on its line's symmetric rail: the top run above the trunk,
+    the bottom run below, the middle run on the centre.  Seating the symmetric
+    lane offsets in branch order instead collapses the above-centre run onto
+    the trunk, which ``_guard_centered_line_spread_balanced`` catches under
+    ``validate=True``.
+    """
+    graph = parse_metro_mermaid(_SECTION_FORK_WEAVE_SRC)
+    assert graph.sections, "the subgraph must survive as a section"
+    compute_layout(graph, validate=True)
+
+    trunk_y = {graph.stations[t].y for t in ("cram", "fb", "st", "out")}
+    assert len(trunk_y) == 1, trunk_y
+    ty = next(iter(trunk_y))
+
+    runs = {"top": ("tA", "tB"), "bot": ("bA", "bB")}
+    for lid, members in runs.items():
+        sign = _line_base_sign(graph, lid)
+        for sid in members:
+            dy = graph.stations[sid].y - ty
+            if sign < 0:
+                assert dy < -1.0, (sid, lid, graph.stations[sid].y, ty)
+            elif sign > 0:
+                assert dy > 1.0, (sid, lid, graph.stations[sid].y, ty)
+            else:
+                assert abs(dy) < 1.0, (sid, lid, graph.stations[sid].y, ty)
+
+
+def test_flat_centered_skip_line_hosts_bypass():
+    """A centered flat graph must host a bypass so a skip-line never crosses a
+    non-consumer marker.
+
+    The align line runs hub -> m2 straight through the generic-only station m0.
+    An implicit section must host a bypass detour; without one the align
+    segment rakes across m0's marker bbox, which the render-time Tier-A guard
+    ``_guard_no_line_crosses_non_consumer`` reports.
+    """
+    from nf_metro.layout.phases.guards import _guard_no_line_crosses_non_consumer
+
+    graph = parse_metro_mermaid(_FLAT_SKIP_SRC)
+    compute_layout(graph, validate=True)
+    assert graph.sections, "a centered flat graph must gain an implicit section"
+
+    _guard_no_line_crosses_non_consumer(graph, "test")
 
 
 def test_guard_flags_collapsed_exclusive_run():

@@ -208,19 +208,13 @@ graph LR
 
 
 def test_explain_no_decisions_for_sectionless_graph(tmp_path):
-    """A sectionless graph with nothing to infer produces an empty decisions list.
+    """A graph with no stations has no section to infer, so decisions are empty.
 
-    Centered line-spread keeps the graph flat (no implicit section), so there is
-    no section-direction inference to record.
+    Every graph carrying stations gains at least an implicit section (whose
+    inferred direction is one decision); a station-less graph carries none.
     """
     mmd = tmp_path / "simple.mmd"
-    mmd.write_text(
-        "%%metro title: Simple\n"
-        "%%metro line_spread: centered\n"
-        "%%metro line: a | A | #ff0000\n"
-        "graph LR\n"
-        "    x[X] -->|a| y[Y]\n"
-    )
+    mmd.write_text("%%metro title: Simple\n%%metro line: a | A | #ff0000\ngraph LR\n")
     graph = parse_metro_mermaid(mmd.read_text())
     data = build_explain(graph)
     assert data["decisions"] == []
@@ -299,11 +293,7 @@ def test_format_explain_text_structure():
 def test_format_explain_text_empty_graph(tmp_path):
     """Empty decisions list renders as 'no decisions' message."""
     mmd = tmp_path / "s.mmd"
-    mmd.write_text(
-        "%%metro title: Simple\n%%metro line_spread: centered\n"
-        "%%metro line: a | A | #ff0000\n"
-        "graph LR\n    x[X] -->|a| y[Y]\n"
-    )
+    mmd.write_text("%%metro title: Simple\n%%metro line: a | A | #ff0000\ngraph LR\n")
     graph = parse_metro_mermaid(mmd.read_text())
     data = build_explain(graph)
     text = format_explain_text(data)

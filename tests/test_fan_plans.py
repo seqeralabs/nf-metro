@@ -2484,7 +2484,7 @@ def test_planned_fan_resources_resolve_through_final_route_plan() -> None:
 
 
 def test_legacy_fans_publish_no_relative_route_plan_resources() -> None:
-    path = ROOT / "examples" / "centered_tracks.mmd"
+    path = ROOT / "examples" / "topologies" / "tb_passthrough_continuation.mmd"
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
     observation = observe_route_edges(
         graph, station_offsets=compute_station_offsets(graph)
