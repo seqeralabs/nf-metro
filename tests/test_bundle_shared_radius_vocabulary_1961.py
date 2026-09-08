@@ -16,15 +16,20 @@ corpus-wide oracle to the tightened ``== CURVE_RADIUS`` property.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
 
+from nf_metro.layout.constants import CURVE_RADIUS
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.common import apply_route_offsets
 from nf_metro.layout.routing.corners import resolve_curve_radii
-from nf_metro.layout.routing.invariants import check_bundle_corner_radius_floor
+from nf_metro.layout.routing.invariants import (
+    check_bundle_corner_radius_floor,
+    concentric_corner_fans,
+)
 from nf_metro.parser.mermaid import parse_metro_mermaid
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -93,6 +98,91 @@ def test_concentric_fan_anchors_innermost_at_curve_radius(
     """
     resolved = _resolved_by_line(REPO_ROOT / fixture, source, target)
     assert resolved == expected
+
+
+def _resolved(route, offsets: Mapping[tuple[str, str], float]) -> list[float]:
+    return [
+        round(r, 1)
+        for r in resolve_curve_radii(
+            apply_route_offsets(route, offsets), route.curve_radii
+        )
+    ]
+
+
+def test_exit_turn_corner_is_anchored_apart_while_its_neighbour_re_anchors() -> None:
+    """An exit-turn corner is excluded from the fan; the corner beside it belongs to it.
+
+    On ``secC__exit_right_2 -> secE__entry_left_7`` lines ``a`` and ``b`` each own
+    an exit turn at their first corner (``exit_turn_segment_rank == 1``), seated by
+    ``_settled_exit_turns``.  That corner is excluded from every concentric fan and
+    keeps its plan radius (``a`` 14, ``b`` 10).  The neighbouring corner owns no
+    exit turn, so it is a fan member and re-anchors to seat the fan's innermost lane
+    at ``CURVE_RADIUS`` (``a`` 10, ``b`` 14).  An exclusion wide enough to also drop
+    that neighbour -- matching ``rank in (etsr - 1, etsr)`` rather than
+    ``rank == etsr`` -- would strand it above the floor.
+    """
+    path = REPO_ROOT / "examples/topologies/disjoint_sameline_trunks.mmd"
+    _graph, routes, offsets = _route(path)
+    owners = [
+        route
+        for route in routes
+        if route.edge.source == "secC__exit_right_2"
+        and route.edge.target == "secE__entry_left_7"
+    ]
+    assert {route.line_id for route in owners} == {"a", "b"}
+    assert all(route.exit_turn_segment_rank == 1 for route in owners)
+
+    fans = concentric_corner_fans(routes, offsets)
+    owner_ids = {id(route) for route in owners}
+    observed = [
+        (obs.route.line_id, obs.rank)
+        for fan in fans
+        for obs in fan
+        if id(obs.route) in owner_ids
+    ]
+    assert all(rank != 1 for _line, rank in observed), (
+        f"exit-turn corner joined a fan: {sorted(observed)}"
+    )
+    assert any(rank == 2 for _line, rank in observed), (
+        f"exit-turn neighbour dropped from its fan: {sorted(observed)}"
+    )
+
+    resolved = {route.line_id: _resolved(route, offsets) for route in owners}
+    assert resolved["a"][0] == 14.0 and resolved["b"][0] == 10.0
+    assert resolved["a"][1] == 10.0 and resolved["b"][1] == 14.0
+    assert min(resolved["a"][1], resolved["b"][1]) == CURVE_RADIUS
+
+
+def test_mixed_exit_turn_owner_and_plain_sibling_share_one_re_anchored_fan() -> None:
+    """A fan mixing an exit-turn owner with a plain sibling floors its inner lane.
+
+    On ``longread_variant_calling`` concentric fans group ``bam``/``svvcf`` (each of
+    which owns an exit turn elsewhere on its own route) with ``snvvcf``/``other`` (no
+    exit turn) at corners none of them own.  Every such shared fan re-anchors so its
+    innermost lane sits exactly at ``CURVE_RADIUS``, and no route's own exit-turn
+    corner is ever a fan member.
+    """
+    _graph, routes, offsets = _route(
+        REPO_ROOT / "examples/longread_variant_calling.mmd"
+    )
+    fans = concentric_corner_fans(routes, offsets)
+
+    mixed = [
+        fan
+        for fan in fans
+        if {obs.route.exit_turn_segment_rank is None for obs in fan} == {True, False}
+    ]
+    assert mixed, "expected a fan mixing an exit-turn owner with a plain sibling"
+
+    for fan in mixed:
+        innermost = min(
+            round(_resolved(obs.route, offsets)[obs.rank - 1], 1) for obs in fan
+        )
+        assert innermost == CURVE_RADIUS
+
+    assert not any(
+        obs.rank == obs.route.exit_turn_segment_rank for fan in fans for obs in fan
+    ), "an exit-turn corner joined a concentric fan"
 
 
 def _corpus_fixtures() -> list[Path]:
