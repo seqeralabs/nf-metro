@@ -95,6 +95,7 @@ def _route_entry_runway(
 
     sx, sy = src.x, src.y
     tx, ty = tgt.x, tgt.y
+    peel_delay = _fused_opening_legs(edge, src, tgt, ctx) * ctx.offset_step
 
     # Same Y means target is on the trunk track: a plain straight run suffices,
     # unless a same-row non-consumer sits between the port and the target, which
@@ -136,6 +137,8 @@ def _route_entry_runway(
         # run the flat runway along the target Y past the bypassed stations.
         nearest_src = min(between_xs, key=lambda x: abs(x - sx))
         src_min = ctx.curve_radius + MIN_STRAIGHT_PORT
+        if abs(nearest_src - sx) >= src_min + peel_delay + ctx.diagonal_run:
+            src_min += peel_delay
         if abs(nearest_src - sx) < src_min + ctx.diagonal_run:
             return None  # Too tight -- fall through to default handler.
         diag_start_x, diag_end_x = _compute_diagonal_placement(
@@ -155,8 +158,11 @@ def _route_entry_runway(
         # only after the last bypassed station, so the descent clears its
         # marker.
         tgt_min = ctx.curve_radius + MIN_STRAIGHT_PORT
+        src_min = 0.0
+        if abs(tx - sx) >= peel_delay + tgt_min + ctx.diagonal_run:
+            src_min = peel_delay
         diag_start_x, diag_end_x = _compute_diagonal_placement(
-            sx, tx, ctx.diagonal_run, 0.0, tgt_min, is_fork=False, is_join=True
+            sx, tx, ctx.diagonal_run, src_min, tgt_min, is_fork=False, is_join=True
         )
         last_blocker = max(ty_blocker_xs, key=lambda x: abs(x - sx))
         if abs(diag_start_x - sx) <= abs(last_blocker - sx):
@@ -630,6 +636,30 @@ def _fan_plan_seats_the_fork(ctx: _RoutingCtx, fork_id: str) -> bool:
     )
 
 
+def _source_needs_fused_opening_seat(
+    edge: Edge, src: Station, ctx: _RoutingCtx
+) -> bool:
+    """Whether ``_route_diagonal`` itself must stagger this fork's opening legs.
+
+    Planned in-section station fans already state their lane seating through the
+    live fan-plan execution.  A flow-side LR/RL entry port reaching
+    ``_route_diagonal`` has no separate local staircase builder: ``_route_entry_runway``
+    already claimed the deeper-bypass cases, and the remaining diagonal siblings
+    would otherwise all pivot from the same source-side X.
+    """
+    if not src.is_port:
+        return _fan_plan_seats_the_fork(ctx, edge.source)
+    port = ctx.graph.ports.get(edge.source)
+    if port is None or not port.is_entry:
+        return False
+    section = ctx.graph.sections.get(port.section_id)
+    if section is None:
+        return False
+    return (section.direction == "LR" and port.side is PortSide.LEFT) or (
+        section.direction == "RL" and port.side is PortSide.RIGHT
+    )
+
+
 def _fused_opening_legs(
     edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
 ) -> int:
@@ -644,14 +674,14 @@ def _fused_opening_legs(
     openings nest in the order the fan seats them rather than stacking on one
     point.
 
-    A port fork is excluded: it is the boundary a section's trunk arrives at
-    rather than a station a fan opens from, and the entry machinery seats the
-    spread of the legs it feeds.
+    A flow-side LR/RL entry port is included when this fallback diagonal owns the
+    fan opening: the entry-runway handler already seats deeper bypasses, but the
+    remaining diagonal siblings otherwise still ray from one source-side X.
     """
     drop = tgt.y - src.y
     if abs(drop) <= COORD_TOLERANCE_FINE or edge.source not in ctx.fork_stations:
         return 0
-    if src.is_port or not _fan_plan_seats_the_fork(ctx, edge.source):
+    if not _source_needs_fused_opening_seat(edge, src, ctx):
         return 0
     heading = math.atan2(abs(drop), ctx.diagonal_run)
     fused = 0
