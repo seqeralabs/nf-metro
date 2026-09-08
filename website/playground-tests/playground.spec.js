@@ -33,7 +33,9 @@ async function suppressNextPopup() {
 
 async function replaceEditorText(source) {
   await page.locator(".CodeMirror").click();
-  await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
+  await page.keyboard.press(
+    process.platform === "darwin" ? "Meta+A" : "Control+A",
+  );
   await page.keyboard.insertText(source);
 }
 
