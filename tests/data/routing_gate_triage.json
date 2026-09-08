@@ -1119,7 +1119,7 @@
   "note": "In _tighten_overwide_movable_lanes: the tighter slot is abandoned when it enters a section or overruns a claim band. The corpus's one tightening move (riboseq_inter_row_corridor's rnaseq) is grounded, so the not-grounded abandon arm is never taken. Defensive against a bundle whose inner slot is blocked by a section or reservation.",
   "status": "defensive"
  },
- "normalize.py::if not reference_fits(lower):::#2": {
+ "normalize.py::if not reference_fits(lower):::#1": {
   "note": "The lower bound is constructed from each member's minimum resolvable concentric radius, so at least that bound fits valid route geometry. Failure denotes contradictory synthetic corner inputs.",
   "status": "defensive"
  },

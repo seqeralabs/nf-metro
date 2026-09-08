@@ -998,6 +998,20 @@ def _bundle_same_destination_tails(
     return frozenset(settled_segments)
 
 
+def _largest_feasible_reference(
+    floor: float, ceiling: float, fits: Callable[[float], bool], *, iterations: int = 32
+) -> float | None:
+    if not fits(ceiling):
+        if not fits(floor):
+            return None
+        lower, upper = floor, ceiling
+        for _ in range(iterations):
+            midpoint = (lower + upper) / 2
+            lower, upper = (midpoint, upper) if fits(midpoint) else (lower, midpoint)
+        return lower
+    return ceiling
+
+
 class _SemanticEndCorner(NamedTuple):
     route: RoutedPath
     rank: int
@@ -1125,27 +1139,22 @@ def _rederive_semantic_end_corners(
                         return False
                 return True
 
-            if not reference_fits(reference_radius):
-                lower = max(
-                    concentric_reference_radius_at(
-                        member.points[member.rank - 1],
-                        member.points[member.rank],
-                        member.points[member.rank + 1],
-                        offset,
-                        COORD_TOLERANCE_FINE,
-                    )
-                    for member, _radius_index, offset, _desired in prepared
+            floor = max(
+                concentric_reference_radius_at(
+                    member.points[member.rank - 1],
+                    member.points[member.rank],
+                    member.points[member.rank + 1],
+                    offset,
+                    COORD_TOLERANCE_FINE,
                 )
-                if not reference_fits(lower):
-                    continue
-                upper = reference_radius
-                for _ in range(32):
-                    midpoint = (lower + upper) / 2
-                    if reference_fits(midpoint):
-                        lower = midpoint
-                    else:
-                        upper = midpoint
-                reference_radius = lower
+                for member, _radius_index, offset, _desired in prepared
+            )
+            reference = _largest_feasible_reference(
+                floor, reference_radius, reference_fits
+            )
+            if reference is None:
+                continue
+            reference_radius = reference
             for member, radius_index, offset, _desired in prepared:
                 radii = member.route.curve_radii
                 assert radii is not None
@@ -5729,18 +5738,11 @@ def _reanchor_concentric_corner_fans(
                     return False
             return True
 
-        reference = curve_radius
-        if not reference_fits(curve_radius):
-            if not reference_fits(floor_radius):
-                continue
-            lower, upper = floor_radius, curve_radius
-            for _ in range(32):
-                midpoint = (lower + upper) / 2
-                if reference_fits(midpoint):
-                    lower = midpoint
-                else:
-                    upper = midpoint
-            reference = lower
+        reference = _largest_feasible_reference(
+            floor_radius, curve_radius, reference_fits
+        )
+        if reference is None:
+            continue
 
         for observation, index, displacement, turn_in, turn_out, _desired in prepared:
             radius = concentric_corner_radius(
