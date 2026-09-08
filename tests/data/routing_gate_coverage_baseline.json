@@ -685,7 +685,6 @@
   "normalize.py::if has_planned_channel and any(::#1",
   "normalize.py::if i in relocated:::#1",
   "normalize.py::if i in relocated:::#2",
-  "normalize.py::if index >= len(resolved):::#1",
   "normalize.py::if k + 2 != len(pts) - 1 or y_hi - y_lo < radius:::#1",
   "normalize.py::if k < len(rp.curve_radii) and k + 2 < len(pts):::#1",
   "normalize.py::if k == desc.idx + 1:::#1",

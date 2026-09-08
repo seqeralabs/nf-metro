@@ -963,18 +963,6 @@
   "note": "_restore_clear_planned_landing_radii only has work for a member whose landing corner was sized below the standard curve radius. Instrumenting the pass across the whole corpus: 2294 multi-line exit-turn members reach this operand and every one already carries the full radius at its exit_turn_segment_rank (a further 5880 short-circuit on the rank/radii operands ahead of it), so the operand always short-circuits to continue. The arm wants a settled multi-line exit-turn plan in which a clearance-limited concentric sizing shrank one member's landing corner. Per the triage doc's correction-pass rule this is a missing witness, not a guard a valid graph cannot violate.",
   "status": "needs-review"
  },
- "normalize.py::and crossed[0] < span[1]::#1": {
-  "note": "Second half of the crossed-axis overlap test in _run_enters_section, reached only once the first half holds. No corpus separation target reaches it, so its short-circuit arm never fires.",
-  "status": "defensive"
- },
- "normalize.py::and span[0] < crossed[1]::#1": {
-  "note": "Crossed-axis overlap test in _run_enters_section, reached only for a target already bracketed on the held axis. No corpus separation target is, so this operand's short-circuit arm never fires.",
-  "status": "defensive"
- },
- "normalize.py::dx is None::#1": {
-  "note": "Every validation-eligible settled exit-turn corner must retain its allocated or planned offset. An absent value is incomplete engine ownership, exercised by test_gap_plan_radius_validator_rejects_incomplete_ownership.",
-  "status": "defensive"
- },
  "normalize.py::elif above_ok:::#1": {
   "note": "Distinct-line dogleg move-up/skip branch: unreachable because the below branch is always taken (t.y == hit.y, below_ok true); covers both the move-up and the gap-too-tight continue.",
   "status": "defensive"
@@ -1185,18 +1173,6 @@
  },
  "normalize.py::if up.route.line_id != descent.route.line_id:::#1": {
   "note": "_clear_merge_trunk_opposite_arm skips an up-arm carrying a different line from the down-trunk, since only a same-line opposite arm folds the line back over itself. The corpus's one fork sends a single line both ways, so the different-line skip arm stays un-exercised. Defensive against a fork whose opposite arms carry distinct lines.",
-  "status": "defensive"
- },
- "normalize.py::or base_radius is None::#1": {
-  "note": "Every validation-eligible exit-turn corner must retain the base radius paired with its offset. An absent base is incomplete engine ownership, exercised by test_gap_plan_radius_validator_rejects_incomplete_ownership.",
-  "status": "defensive"
- },
- "normalize.py::or not 0 <= radius_index < len(route.curve_radii)::#1": {
-  "note": "A settled channel rank identifies the two flanking radii on its emitted route. An out-of-range index is malformed ownership metadata, exercised by test_gap_plan_radius_validator_rejects_incomplete_ownership.",
-  "status": "defensive"
- },
- "normalize.py::or radius_index + 2 >= len(route.points)::#1": {
-  "note": "A settled exit-turn radius must retain all three defining points. Production routes have point-derived radius counts; the point-index case in test_gap_plan_radius_validator_rejects_incomplete_ownership exercises the attributed failure.",
   "status": "defensive"
  },
  "normalize.py::if cleared is None:::#1": {
