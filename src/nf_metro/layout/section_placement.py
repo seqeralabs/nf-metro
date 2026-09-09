@@ -767,23 +767,21 @@ def _wrap_bundle_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]
         # from the port.  A LEFT entry reached from a source on the port
         # side is a plain L-shape drop -- straight down then in, clearing
         # nothing on the way -- and needs no widening (e.g. preprocessing ->
-        # a column-1 section below it).  It is a bypass, though, when a
-        # section stands in a cell strictly between the source and the
-        # target on both axes: the two-legged route must descend past that
-        # section's bottom edge, and a too-tight gap forces its horizontal
-        # leg up into the section's box.  That case needs the band reserved
-        # like any other wrap.  Mirror for RIGHT.
-        if (
-            port.side == PortSide.LEFT
-            and _section_precedes(graph, src_sec, tgt_sec)
-            and not _bypass_has_intervening_section(graph, src_sec, tgt_sec)
-        ):
-            continue
-        if (
-            port.side == PortSide.RIGHT
-            and _section_precedes(graph, tgt_sec, src_sec)
-            and not _bypass_has_intervening_section(graph, src_sec, tgt_sec)
-        ):
+        # a column-1 section below it).  It becomes a two-legged bypass only
+        # when the column left of the target is on the grid yet absent from
+        # the target's row: the descent then seats against the target's own
+        # edge (:func:`row_local_gap_bundle_midpoint`), lengthening the leg
+        # until it reaches an intervening box, and a too-tight gap forces the
+        # leg up into that box.  A RIGHT entry's descent seats against the
+        # target column itself, never a row-absent neighbour, so it keeps the
+        # plain-drop reading.
+        if port.side == PortSide.LEFT and _section_precedes(graph, src_sec, tgt_sec):
+            if not (
+                _left_entry_descent_hugs_absent_neighbour(graph, tgt_sec)
+                and _bypass_has_intervening_section(graph, src_sec, tgt_sec)
+            ):
+                continue
+        elif port.side == PortSide.RIGHT and _section_precedes(graph, tgt_sec, src_sec):
             continue
         src_row, tgt_row = src_sec.grid_row, tgt_sec.grid_row
         if abs(src_row - tgt_row) == 1:
@@ -1018,6 +1016,33 @@ def _bypass_has_intervening_section(
         ):
             return True
     return False
+
+
+def _left_entry_descent_hugs_absent_neighbour(
+    graph: MetroGraph, tgt_sec: Section
+) -> bool:
+    """Whether a LEFT-entry target-side descent seats against the target's own
+    left edge rather than centring in a bounded gap.
+
+    That happens when the column left of the target carries a section on the
+    grid but none in the target's row: :func:`row_local_gap_bundle_midpoint`
+    then anchors the descent on the target's edge, reaching past that column.
+    With a section in the target's row the descent centres in the real gap left
+    of it and the wrap leg stops there.
+    """
+    left_col = tgt_sec.grid_col - 1
+    neighbours = [
+        section
+        for section in graph.sections.values()
+        if section.grid_col == left_col and section.bbox_w > 0
+    ]
+    if not neighbours:
+        return False
+    row = tgt_sec.grid_row
+    return not any(
+        section.grid_row <= row <= section.grid_row + section.grid_row_span - 1
+        for section in neighbours
+    )
 
 
 def _bundles_in_gap(

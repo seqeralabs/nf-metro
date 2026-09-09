@@ -4967,6 +4967,7 @@ def _gap_channel_base(
     offset_step: float,
     anchor_section_id: str | None = None,
     anchor_side: PortSide | None = None,
+    anchor_is_target: bool = False,
 ) -> float:
     """Centred midline x for a bundle of *n* lines in gap ``(lo, lo+1)``.
 
@@ -4987,6 +4988,13 @@ def _gap_channel_base(
     stricter ``require_both_columns`` reading, which reports such a gap as
     degenerate and passes over it, so what this returns for one is the
     channel's final position rather than an initial placement.
+
+    *anchor_is_target* marks the descent that enters the target column
+    ``lo + 1``; only there does :func:`row_local_gap_bundle_midpoint` seat the
+    channel against that column's real edge when the intervening column ``lo``
+    is absent from *row*.  A source-side descent keeps the plain reading, whose
+    origin-defaulted lower edge is the province of the convergence and fan
+    planners that own that geometry.
     """
     width = max(0, n - 1) * offset_step
     edges = None
@@ -4996,9 +5004,10 @@ def _gap_channel_base(
         off_grid = off_grid_gap_bundle_midpoint(graph, lo, row, width)
         if off_grid is not None:
             return off_grid
-        row_local = row_local_gap_bundle_midpoint(graph, lo, row, width)
-        if row_local is not None:
-            return row_local
+        if anchor_is_target:
+            row_local = row_local_gap_bundle_midpoint(graph, lo, row, width)
+            if row_local is not None:
+                return row_local
         edges = column_gap_edges(graph, lo, lo + 1, row=row, require_both_columns=False)
     return symmetric_bundle_midpoint(*edges, [width], 0)
 
