@@ -764,13 +764,26 @@ def _wrap_bundle_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]
             continue
         # A horizontal-side entry only WRAPS (placing a flush run in the
         # inter-row gap) when the source is on the far side of the target
-        # from the port.  A LEFT entry reached from a source in the same or
-        # a righthand column wraps; one reached from the left is a plain
-        # L-shape drop and needs no widening (e.g. preprocessing -> a
-        # column-1 section below it).  Mirror for RIGHT.
-        if port.side == PortSide.LEFT and _section_precedes(graph, src_sec, tgt_sec):
+        # from the port.  A LEFT entry reached from a source on the port
+        # side is a plain L-shape drop -- straight down then in, clearing
+        # nothing on the way -- and needs no widening (e.g. preprocessing ->
+        # a column-1 section below it).  It is a bypass, though, when a
+        # section stands in a cell strictly between the source and the
+        # target on both axes: the two-legged route must descend past that
+        # section's bottom edge, and a too-tight gap forces its horizontal
+        # leg up into the section's box.  That case needs the band reserved
+        # like any other wrap.  Mirror for RIGHT.
+        if (
+            port.side == PortSide.LEFT
+            and _section_precedes(graph, src_sec, tgt_sec)
+            and not _bypass_has_intervening_section(graph, src_sec, tgt_sec)
+        ):
             continue
-        if port.side == PortSide.RIGHT and _section_precedes(graph, tgt_sec, src_sec):
+        if (
+            port.side == PortSide.RIGHT
+            and _section_precedes(graph, tgt_sec, src_sec)
+            and not _bypass_has_intervening_section(graph, src_sec, tgt_sec)
+        ):
             continue
         src_row, tgt_row = src_sec.grid_row, tgt_sec.grid_row
         if abs(src_row - tgt_row) == 1:
@@ -976,6 +989,34 @@ def _section_precedes(graph: MetroGraph, a: Section, b: Section) -> bool:
     )
     if a.id in members and b.id in members:
         return members.index(a.id) < members.index(b.id)
+    return False
+
+
+def _bypass_has_intervening_section(
+    graph: MetroGraph, src_sec: Section, tgt_sec: Section
+) -> bool:
+    """Whether a section stands strictly between *src_sec* and *tgt_sec* on both
+    grid axes.
+
+    Such a section is one the two-legged bypass route between the two must clear
+    the bottom edge of on its way down: the descent passes its column and its
+    row falls between the source's and the target's, so a too-tight inter-row
+    gap forces the horizontal leg up into its box.  A source and target with no
+    section boxed in between drop straight in as a plain L-shape and clear
+    nothing, so no band need be reserved for them.
+    """
+    lo_col, hi_col = sorted((src_sec.grid_col, tgt_sec.grid_col))
+    lo_row, hi_row = sorted((src_sec.grid_row, tgt_sec.grid_row))
+    for section in graph.sections.values():
+        if section.bbox_w <= 0 or section is src_sec or section is tgt_sec:
+            continue
+        section_bottom_row = section.grid_row + section.grid_row_span - 1
+        if (
+            lo_col < section.grid_col < hi_col
+            and section.grid_row < hi_row
+            and section_bottom_row > lo_row
+        ):
+            return True
     return False
 
 

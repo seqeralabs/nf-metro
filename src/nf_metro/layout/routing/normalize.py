@@ -74,6 +74,7 @@ from nf_metro.layout.routing.common import (
     planner_owns_segment_or_boundary,
     port_peeloff_tail,
     route_system_owns_segment_boundary,
+    row_local_gap_bundle_midpoint,
     same_destination_approach_slots,
     seat_peeloff_port_y,
     section_ids_of_stations,
@@ -4995,6 +4996,9 @@ def _gap_channel_base(
         off_grid = off_grid_gap_bundle_midpoint(graph, lo, row, width)
         if off_grid is not None:
             return off_grid
+        row_local = row_local_gap_bundle_midpoint(graph, lo, row, width)
+        if row_local is not None:
+            return row_local
         edges = column_gap_edges(graph, lo, lo + 1, row=row, require_both_columns=False)
     return symmetric_bundle_midpoint(*edges, [width], 0)
 
