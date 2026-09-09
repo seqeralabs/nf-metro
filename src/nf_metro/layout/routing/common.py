@@ -532,23 +532,20 @@ def row_local_gap_bundle_midpoint(
     """X midline of a bundle in gap ``(lo, lo + 1)`` when the lower column is on
     the grid but has no section in *row* while the upper column does.
 
-    ``None`` outside that one case.  :func:`column_gap_edges` bounds a gap by
-    computing the lower column's right edge first and passing it as the upper
-    column's default, so a gap whose *upper* column is missing from *row* hugs
-    the lower column's real edge.  The mirror is where the defect lives:
-    when the *lower* column is absent from *row*, its :func:`col_right_edge`
-    lookup finds nothing and falls to ``0.0``, and the bundle centres against
-    the coordinate origin instead of real geometry -- a midline the map's
-    overall size sets rather than the box the channel hugs.
+    ``None`` outside that one case.  There, the lower column's
+    :func:`col_right_edge` finds no section in *row* and returns its ``0.0``
+    default, so measuring the gap against that edge centres the bundle on the
+    coordinate origin -- a midline the map's overall size sets rather than the
+    box the channel hugs.  The upper column carries a real edge in *row*, so the
+    bundle seats :data:`EDGE_TO_BUNDLE_CLEARANCE` off it, exactly the
+    ``hi``-on-grid branch of :func:`off_grid_gap_bundle_midpoint`.
 
-    The upper column carries a real edge in *row*, so the bundle seats
-    :data:`EDGE_TO_BUNDLE_CLEARANCE` off it, exactly the ``hi``-on-grid branch
-    of :func:`off_grid_gap_bundle_midpoint`.  A lower column absent from the
-    whole grid is that function's job, not this one.
+    Reached only after that function has handled a column absent from the whole
+    grid, so here both columns are on the grid and only *row* leaves one empty.
     """
     lo_absent = not _sections_in_col(graph, lo, row)
     hi_present = bool(_sections_in_col(graph, lo + 1, row))
-    if not (lo_absent and hi_present and _sections_in_col(graph, lo)):
+    if not (lo_absent and hi_present):
         return None
     reach = EDGE_TO_BUNDLE_CLEARANCE + bundle_width / 2
     return col_left_edge(graph, lo + 1, row=row) - reach
