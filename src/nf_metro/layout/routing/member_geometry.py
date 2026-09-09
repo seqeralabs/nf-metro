@@ -70,6 +70,7 @@ from nf_metro.layout.routing.normalize import (
     _locate_slot_channel_with_slot,
     _materialize_gap_slots,
     _materialize_trunk_slots,
+    _reanchor_concentric_corner_fans,
     _reconcile_port_peeloff_risers,
     _rederive_semantic_end_corners,
     _reseat_concentric_flanking,
@@ -2242,6 +2243,15 @@ def build_member_geometry_execution(
             respect_owned_corners=False,
         )
         _plan_source_turnouts(normalization_population, graph, ctx.curve_radius)
+        # The freeze is the last word on an owned route's radii, and a
+        # post-emission pass skips a frozen or owned route, so the concentric
+        # fans a per-corner reference seated off the floor have to be
+        # re-anchored to CURVE_RADIUS here, before the plan captures them.
+        _reanchor_concentric_corner_fans(
+            normalization_population,
+            ctx.station_offsets or {},
+            ctx.curve_radius,
+        )
         semantic_corner_templates = {
             ResolvedEdge(
                 route.edge.source,
