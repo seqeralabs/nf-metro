@@ -1025,10 +1025,12 @@ def _left_entry_descent_hugs_absent_neighbour(
     left edge rather than centring in a bounded gap.
 
     That happens when the column left of the target carries a section on the
-    grid but none in the target's row: :func:`row_local_gap_bundle_midpoint`
-    then anchors the descent on the target's edge, reaching past that column.
-    With a section in the target's row the descent centres in the real gap left
-    of it and the wrap leg stops there.
+    grid but none overlapping the target's grid rows:
+    :func:`row_local_gap_bundle_midpoint` then anchors the descent on the
+    target's edge, reaching past that column.  With a section overlapping the
+    target's rows the descent centres in the real gap left of it and the wrap
+    leg stops there.  A row-spanning target only needs one such neighbour
+    anywhere in its span, so the whole span is tested, not just its top row.
     """
     left_col = tgt_sec.grid_col - 1
     neighbours = [
@@ -1038,11 +1040,7 @@ def _left_entry_descent_hugs_absent_neighbour(
     ]
     if not neighbours:
         return False
-    row = tgt_sec.grid_row
-    return not any(
-        section.grid_row <= row <= section.grid_row + section.grid_row_span - 1
-        for section in neighbours
-    )
+    return not any(_rows_overlap(tgt_sec, section) for section in neighbours)
 
 
 def _bundles_in_gap(
