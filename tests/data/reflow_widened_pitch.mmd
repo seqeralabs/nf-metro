@@ -1,23 +1,37 @@
 %%metro title: Reflow-avoidance widened pitch
-%%metro diamond_style: symmetric
-%%metro line: l1 | Line 1 | #e63946
-%%metro line: l2 | Line 2 | #2db572
-%%metro line: l3 | Line 3 | #0570b0
-%%metro line: l4 | Line 4 | #f5c542
-%%metro line: l5 | Line 5 | #ff8c00
-%%metro line: l6 | Line 6 | #7b2d3b
+%%metro style: nfcore
+%%metro line_spread: centered
+%%metro line: dna | DNA samples | #4CAF50
+%%metro line: rna | RNA samples | #2196F3
+%%metro line: cfdna | cfDNA samples | #E91E63
+%%metro line: prot | Protein samples | #FF9800
 
 graph LR
-    subgraph sec [Sec]
-        a[Input]
-        top[Alignment]
-        mid[Variant calling]
-        bot[Coverage]
-        z[Report]
-        a -->|l1,l2,l3,l4,l5,l6| top
-        a -->|l1,l2,l3,l4,l5,l6| mid
-        a -->|l1,l2,l3,l4,l5,l6| bot
-        top -->|l1,l2,l3,l4,l5,l6| z
-        mid -->|l1,l2,l3,l4,l5,l6| z
-        bot -->|l1,l2,l3,l4,l5,l6| z
-    end
+    fastqc[FastQC]
+    align[Alignment]
+    markdup[MarkDuplicates]
+    summary[Summary]
+
+    cnv[CNV call]
+    sv[SV call]
+    splice[Splice call]
+    fusion[Fusion call]
+    pileup[Pileup call]
+    prota[Proteomics call]
+
+    fastqc -->|dna,rna,cfdna,prot| align
+    align -->|dna,rna,cfdna,prot| markdup
+
+    markdup -->|dna| cnv
+    cnv -->|dna| sv
+    sv -->|dna| summary
+
+    markdup -->|rna| splice
+    splice -->|rna| fusion
+    fusion -->|rna| summary
+
+    markdup -->|cfdna| pileup
+    pileup -->|cfdna| summary
+
+    markdup -->|prot| prota
+    prota -->|prot| summary

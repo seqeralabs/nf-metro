@@ -651,16 +651,10 @@ class TestReflowEarnsItsRowPitch:
             f"overlap left over"
         )
 
-    def test_the_locked_case_is_a_widened_pitch(self) -> None:
-        """A fixture whose label crowding actually widens the row pitch.
-
-        Anchors the parametrised invariant on a case that reaches the widened
-        branch: a thick multi-line symmetric diamond whose interior branch
-        labels crowd, so the spacing search widens the row pitch to clear them.
-        The widen buys back every wrap (no label ships re-flowed), which is the
-        outcome the invariant permits.
-        """
+    def test_the_locked_case_is_a_widened_pitch_that_also_wrapped(self) -> None:
+        """The parametrised invariant has a fixture that actually reaches it."""
         graph = _laid_out("tests/data/reflow_widened_pitch.mmd")
+        assert _reflowed_label_station_ids(graph)
         assert graph._resolved_y_spacing > graph._base_y_spacing
 
     def test_short_two_word_names_stay_on_one_line(self) -> None:
