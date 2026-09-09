@@ -167,6 +167,35 @@ graph LR
 """
 
 
+# A sectioned centered fork whose middle branch carries two lines (b, c) while
+# its flanking branches carry one each (a above, d below).  The shared branch's
+# rail is the mean of its lines' rails, which lands it on the trunk centre --
+# exercising the multi-line arm of the fan's rail-order seating, not just the
+# single-line case.
+_MULTILINE_BRANCH_FAN_SRC = """\
+%%metro line_spread: centered
+%%metro line: a | A | #e6194b
+%%metro line: b | B | #3cb44b
+%%metro line: c | C | #4363d8
+%%metro line: d | D | #f58231
+
+graph LR
+    subgraph sec [Sec]
+        src[Src]
+        ba[A only]
+        bbc[BC shared]
+        bd[D only]
+        dst[Dst]
+        src -->|a| ba
+        src -->|b,c| bbc
+        src -->|d| bd
+        ba -->|a| dst
+        bbc -->|b,c| dst
+        bd -->|d| dst
+    end
+"""
+
+
 def test_flag_off_default():
     """Absent the directive the graph defaults to uncentered tracks."""
     graph = _weave_graph(centered=False)
@@ -369,6 +398,46 @@ def test_flat_centered_skip_line_hosts_bypass():
     assert graph.sections, "a centered flat graph must gain an implicit section"
 
     _guard_no_line_crosses_non_consumer(graph, "test")
+
+    # The detour is real geometry, not just a passing guard: the align route
+    # (hub -> m2) leaves the m0/m1 trunk row via a bypass waypoint offset off it,
+    # while hub, m0, m1 and m2 all share that row.
+    trunk_y = graph.stations["m0"].y
+    assert graph.stations["m1"].y == trunk_y
+    align_station_ids = {
+        sid
+        for edge in graph.edges
+        if edge.line_id == "align"
+        for sid in (edge.source, edge.target)
+        if sid in graph.stations
+    }
+    align_offsets = [abs(graph.stations[s].y - trunk_y) for s in align_station_ids]
+    assert any(off > 5.0 for off in align_offsets), sorted(
+        (s, graph.stations[s].y) for s in align_station_ids
+    )
+
+
+def test_multiline_branch_fan_seats_on_mean_rail():
+    """A fan branch carrying two lines seats on the mean of their rails.
+
+    The shared middle branch (lines b, c) has a mean rail of zero, so it rides
+    the trunk centre between the single-line branches (a above, d below) with no
+    swap or crossing -- the multi-line arm of the rail-order seating.
+    """
+    graph = parse_metro_mermaid(_MULTILINE_BRANCH_FAN_SRC)
+    compute_layout(graph, validate=True)
+
+    plans = [p for p in graph.fan_plans if p.owns_geometry]
+    assert len(plans) == 1
+    assert plans[0].appearance_policy is FanAppearancePolicy.SYMMETRIC
+
+    trunk_y = graph.stations["src"].y
+    assert graph.stations["dst"].y == trunk_y
+    ya, ybc, yd = (graph.stations[s].y for s in ("ba", "bbc", "bd"))
+    assert ya < ybc < yd, (ya, ybc, yd)
+    assert ya - trunk_y < -1.0
+    assert abs(ybc - trunk_y) < 1.0
+    assert yd - trunk_y > 1.0
 
 
 def test_guard_flags_collapsed_exclusive_run():

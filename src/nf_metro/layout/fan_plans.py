@@ -2280,6 +2280,8 @@ def _seat_centered_symmetric_branches_by_line_rail(
     ):
         return branch_plans
 
+    # Same canonical rail order the flat-graph track allocator uses
+    # (ordering.assign_tracks), so a sectioned fan seats its lines identically.
     line_index = {lid: rank for rank, lid in enumerate(graph.lines)}
     n_lines = len(line_index)
 
