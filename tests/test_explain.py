@@ -207,11 +207,13 @@ graph LR
     assert entries[0]["provenance_reason"] == "shared-connector-entry-side"
 
 
-def test_explain_no_decisions_for_sectionless_graph(tmp_path):
-    """A sectionless graph with nothing to infer produces an empty decisions list.
+def test_explain_sectionless_graph_reports_implicit_section_decision(tmp_path):
+    """A flat graph carrying stations gains one implicit-section decision.
 
-    Centered line-spread keeps the graph flat (no implicit section), so there is
-    no section-direction inference to record.
+    A graph with no author-written subgraph is wrapped in an implicit section
+    so its skip-lines can host bypass detours; that section's inferred flow
+    direction is the single decision explain records. Centered line-spread is
+    no exception -- it is sectioned like every other mode.
     """
     mmd = tmp_path / "simple.mmd"
     mmd.write_text(
@@ -222,6 +224,18 @@ def test_explain_no_decisions_for_sectionless_graph(tmp_path):
         "    x[X] -->|a| y[Y]\n"
     )
     graph = parse_metro_mermaid(mmd.read_text())
+    assert graph.sections
+    data = build_explain(graph)
+    assert len(data["decisions"]) == 1
+    assert data["decisions"][0]["aspect"] == "direction"
+
+
+def test_explain_empty_graph_has_no_section_decision(tmp_path):
+    """A station-less graph has no section to infer, so decisions are empty."""
+    mmd = tmp_path / "simple.mmd"
+    mmd.write_text("%%metro title: Simple\n%%metro line: a | A | #ff0000\ngraph LR\n")
+    graph = parse_metro_mermaid(mmd.read_text())
+    assert not graph.sections
     data = build_explain(graph)
     assert data["decisions"] == []
     assert data["summary"]["inferred"] == 0
@@ -299,11 +313,7 @@ def test_format_explain_text_structure():
 def test_format_explain_text_empty_graph(tmp_path):
     """Empty decisions list renders as 'no decisions' message."""
     mmd = tmp_path / "s.mmd"
-    mmd.write_text(
-        "%%metro title: Simple\n%%metro line_spread: centered\n"
-        "%%metro line: a | A | #ff0000\n"
-        "graph LR\n    x[X] -->|a| y[Y]\n"
-    )
+    mmd.write_text("%%metro title: Simple\n%%metro line: a | A | #ff0000\ngraph LR\n")
     graph = parse_metro_mermaid(mmd.read_text())
     data = build_explain(graph)
     text = format_explain_text(data)

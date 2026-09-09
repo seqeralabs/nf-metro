@@ -1,0 +1,11 @@
+%%metro line_spread: centered
+%%metro line: align | Alignment | #54A24B
+%%metro line: generic | Analysis | #79706E
+%%metro line: qc | QC | #4C78A8
+graph LR
+    hub["hub"] -->|align| m2["m2"]
+    hub -->|generic| m0["m0"]
+    m0 -->|generic| m1["m1"]
+    m1 -->|generic| m2
+    hub -->|qc| m2b["m2b"]
+    m2b -->|qc| m2

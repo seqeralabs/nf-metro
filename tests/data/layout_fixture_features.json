@@ -40,7 +40,8 @@
     "guide/05d_folder_icon.mmd",
     "guide/05f_banner_labels.mmd",
     "guide/06a_without_hidden.mmd",
-    "guide/06b_with_hidden.mmd"
+    "guide/06b_with_hidden.mmd",
+    "topologies/centered_flat_skip_over_marker.mmd"
   ],
   "corridor_solo": [
     "target_entry_runway_bypass.mmd",
@@ -486,7 +487,9 @@
     "topologies/junction_entry_lane_step.mmd",
     "topologies/reversed_section_junction_reseat.mmd",
     "topologies/novel_transcripts_repro.mmd",
-    "guide/07_track_gap.mmd"
+    "guide/07_track_gap.mmd",
+    "centered_tracks.mmd",
+    "topologies/centered_flat_skip_over_marker.mmd"
   ],
   "vertical_passthrough": [
     "planned_compatibility_channel_collision.mmd",

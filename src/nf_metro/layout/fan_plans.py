@@ -2253,6 +2253,69 @@ def _recognise_fan(
     )
 
 
+def _seat_centered_symmetric_branches_by_line_rail(
+    graph: MetroGraph,
+    branch_plans: list[FanBranchPlan],
+    appearance_policy: FanAppearancePolicy,
+    appearance_lane_sign: float | None,
+    layout_section_id: str | None,
+    minimum_runway: float,
+) -> list[FanBranchPlan]:
+    """Seat a centered symmetric fan's slots on each branch's line rail.
+
+    A centered section's exclusive run rides its line's symmetric base rail --
+    the line's index above, on, or below the trunk midline -- exactly as the
+    flat-graph track assignment seats it.  ``symmetric_lane_offsets`` yields the
+    slots ascending; branch-discovery order need not agree with line order, so
+    map the ascending slots onto the branches sorted by the screen side their
+    lines want (line rail scaled by the frame's lane sign).
+
+    Only a centered section is reseated; a ``diamond_style: symmetric`` fan keeps
+    its discovery-order seating.
+    """
+    if (
+        appearance_policy is not FanAppearancePolicy.SYMMETRIC
+        or appearance_lane_sign is None
+        or graph.section_line_spread(layout_section_id) is not LineSpread.CENTERED
+    ):
+        return branch_plans
+
+    # Same canonical rail order the flat-graph track allocator uses
+    # (ordering.assign_tracks), so a sectioned fan seats its lines identically.
+    line_index = {lid: rank for rank, lid in enumerate(graph.lines)}
+    n_lines = len(line_index)
+
+    def screen_key(branch: FanBranchPlan) -> tuple[float, int]:
+        rails = [
+            line_index[lid] - (n_lines - 1) / 2
+            for lid in branch.line_ids
+            if lid in line_index
+        ]
+        mean_rail = sum(rails) / len(rails) if rails else 0.0
+        return (mean_rail * appearance_lane_sign, branch.rank)
+
+    offsets = sorted(
+        branch.lane_offset if branch.lane_offset is not None else 0.0
+        for branch in branch_plans
+    )
+    order = sorted(range(len(branch_plans)), key=lambda i: screen_key(branch_plans[i]))
+    seated = [0.0] * len(branch_plans)
+    for slot, index in zip(offsets, order, strict=True):
+        seated[index] = slot
+    return [
+        replace(
+            branch,
+            lane_offset=lane_offset,
+            diagonal_runway=max(
+                minimum_runway,
+                branch.diagonal_runway or 0.0,
+                abs(lane_offset),
+            ),
+        )
+        for branch, lane_offset in zip(branch_plans, seated, strict=True)
+    ]
+
+
 def _build_candidate(
     ctx: _FanPlanningContext,
     source_id: str,
@@ -2532,6 +2595,14 @@ def _build_candidate(
         )
         if frame is not None and reason is None
         else None
+    )
+    branch_plans = _seat_centered_symmetric_branches_by_line_rail(
+        graph,
+        branch_plans,
+        appearance_policy,
+        appearance_lane_sign,
+        layout_section_id,
+        minimum_runway,
     )
     if frame is not None and appearance_lane_sign is not None:
         layout_section = graph.sections.get(layout_section_id or "")

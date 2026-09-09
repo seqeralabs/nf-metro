@@ -1786,10 +1786,21 @@ class FanPlan:
                 self.appearance_centreline_branch_id,
                 fan_lane_seat_keys(self.branches),
             )
+            if any(offset is None for offset in lane_offsets):
+                raise ValueError("fan lane offsets disagree with appearance pitch")
+            actual_offsets = [offset for offset in lane_offsets if offset is not None]
+            if self.appearance_policy is FanAppearancePolicy.SYMMETRIC:
+                # Symmetric branches seat the slot set by line rail, so the
+                # offsets are a permutation of the canonical set, not in branch
+                # order.
+                actual_offsets = sorted(actual_offsets)
+                expected_offsets = sorted(expected_lane_offsets)
+            else:
+                expected_offsets = list(expected_lane_offsets)
             if any(
-                actual is None or abs(actual - expected) > 1e-9
+                abs(actual - expected) > 1e-9
                 for actual, expected in zip(
-                    lane_offsets, expected_lane_offsets, strict=True
+                    actual_offsets, expected_offsets, strict=True
                 )
             ):
                 raise ValueError("fan lane offsets disagree with appearance pitch")

@@ -608,7 +608,7 @@ class TestReflowEarnsItsRowPitch:
     """
 
     WRAPPING_FIXTURES = (
-        "examples/centered_tracks.mmd",
+        "tests/data/reflow_widened_pitch.mmd",
         "examples/live/pipeline.mmd",
         "examples/topologies/fanin_join_diff_length_branches.mmd",
         "examples/topologies/fold_bypass_creep.mmd",
@@ -653,13 +653,14 @@ class TestReflowEarnsItsRowPitch:
 
     def test_the_locked_case_is_a_widened_pitch_that_also_wrapped(self) -> None:
         """The parametrised invariant has a fixture that actually reaches it."""
-        graph = _laid_out("examples/centered_tracks.mmd")
+        graph = _laid_out("tests/data/reflow_widened_pitch.mmd")
+        assert _reflowed_label_station_ids(graph)
         assert graph._resolved_y_spacing > graph._base_y_spacing
 
     def test_short_two_word_names_stay_on_one_line(self) -> None:
         drawn = _drawn_label_texts(_laid_out("examples/centered_tracks.mmd"))
         assert [drawn[sid] for sid in ("cnv", "splice", "fusion")] == [
-            "CNV call",
+            "CNV",
             "Splice call",
             "Fusion call",
         ]

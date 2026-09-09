@@ -1297,6 +1297,14 @@ gallery:
       graph previously got no implicit section and drew the skip straight through
       M0 and M1. Sectioning every flat graph regardless of interchange detection
       now bows the skip around the intermediate markers (#1953).
+  - id: centered_flat_skip_over_marker
+    source_dir: examples/topologies
+    category: Bypass Routing
+    description:
+      A centered line-spread flat graph where the Alignment line skips the
+      generic-only station M0 to reach M2. Centered flat graphs gain the same
+      implicit section as every other line-spread mode, so the skip-line bows
+      around the non-consumer marker instead of raking across it (#1957).
   - id: interchange_label_clears_bridge
     source_dir: examples/topologies
     category: Bypass Routing
