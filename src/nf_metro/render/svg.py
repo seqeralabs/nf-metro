@@ -4033,7 +4033,7 @@ def _station_group_attrs(
     }
 
 
-def _muted_line_theme(theme: Theme) -> Theme:
+def _muted_line_theme(theme: FrozenRecord) -> FrozenRecord:
     """Return *theme* with every line-identity stroke/text set to the muted grey.
 
     Station stroke, marker outline, terminus icon stroke, and label/terminus
@@ -4042,9 +4042,7 @@ def _muted_line_theme(theme: Theme) -> Theme:
     background, not line identity).
 
     A render plan carries its theme as a :class:`FrozenRecord`, which cannot be
-    :func:`dataclasses.replace`-d, so that case rebuilds the record directly.
-    Both branches read the same override map, so neither representation can be
-    left behind when a field joins the muted set.
+    :func:`dataclasses.replace`-d, so rebuild the record with the muted fields.
     """
     muted = theme.muted_line_color
     overrides: dict[str, Any] = {
@@ -4054,16 +4052,16 @@ def _muted_line_theme(theme: Theme) -> Theme:
         "terminus_font_color": muted,
         "label_color": muted,
     }
-    if isinstance(theme, FrozenRecord):
-        entries = tuple((k, overrides.get(k, v)) for k, v in theme.values.entries)
-        return cast(Theme, FrozenRecord(kind=theme.kind, values=FrozenMap(entries)))
-    return replace(theme, **overrides)
+    entries = tuple(
+        (key, overrides.get(key, value)) for key, value in theme.values.entries
+    )
+    return FrozenRecord(kind=theme.kind, values=FrozenMap(entries))
 
 
 def _render_stations(
     d: draw.Drawing,
     graph: MetroGraph,
-    theme: Theme,
+    theme: FrozenRecord,
     station_offsets: dict[tuple[str, str], float] | None = None,
     positive_fan: set[str] | None = None,
     inactive_line_ids: frozenset[str] = frozenset(),
@@ -4082,15 +4080,16 @@ def _render_stations(
     """
     if positive_fan is None:
         positive_fan = tb_positive_fan_sections(graph)
-    muted_theme = _muted_line_theme(theme)
+    theme_view = cast(Theme, theme)
+    muted_theme = cast(Theme, _muted_line_theme(theme))
     for station in graph.stations.values():
         if station.is_port or station.is_hidden:
             continue
         muted = station_is_muted(graph, station.id, inactive_line_ids)
-        station_theme = muted_theme if muted else theme
+        station_theme = muted_theme if muted else theme_view
         if graph.embed_manifest:
             attrs = _station_group_attrs(
-                graph, theme, station, station_offsets, positive_fan
+                graph, theme_view, station, station_offsets, positive_fan
             )
             g = draw.Group(**attrs)
             _render_station_into(

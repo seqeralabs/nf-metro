@@ -18,7 +18,7 @@ from nf_metro.render.constants import (
     effective_line_color,
     station_is_muted,
 )
-from nf_metro.render.plan import FrozenRecord
+from nf_metro.render.plan import FrozenRecord, freeze_render_value
 from nf_metro.render.svg import _muted_line_theme, render_svg
 from nf_metro.themes import NFCORE_DARK_THEME, resolve_theme
 
@@ -563,11 +563,10 @@ def test_render_svg_unknown_inactive_line_raises():
     assert "nope" in str(exc.value)
 
 
-def test_muted_theme_overrides_every_field_on_a_plain_theme():
-    # A render always passes the plan's FrozenRecord theme; a dataclass Theme
-    # takes the dataclasses.replace path instead.
-    muted = _muted_line_theme(NFCORE_DARK_THEME)
-    assert not isinstance(muted, FrozenRecord)
+def test_muted_theme_overrides_every_field_on_a_frozen_theme():
+    frozen = freeze_render_value(NFCORE_DARK_THEME)
+    assert isinstance(frozen, FrozenRecord)
+    muted = _muted_line_theme(frozen)
     assert muted.station_stroke == MUTED
     assert muted.marker_stroke == MUTED
     assert muted.terminus_stroke == MUTED
