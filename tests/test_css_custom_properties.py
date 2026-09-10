@@ -219,7 +219,7 @@ def test_icon_caption_uses_adaptive_label_color():
 
 
 # ---------------------------------------------------------------------------
-# chrome_css=False: concrete colors for raster export (cairosvg)
+# chrome_css=False: concrete colors for raster export
 # ---------------------------------------------------------------------------
 
 
@@ -243,12 +243,12 @@ def test_chrome_css_default_emits_var_block():
     assert "var(--nfm-map-bg" in svg
 
 
-def test_chrome_css_false_rasterizes_with_cairosvg():
-    """chrome_css=False output is consumable by cairosvg, which cannot parse var()."""
-    cairosvg = pytest.importorskip("cairosvg")
+def test_chrome_css_false_rasterizes():
+    """chrome_css=False output is consumable by a renderer that cannot parse var()."""
+    from nf_metro.render.raster import svg_to_png
+
     svg = render_svg(_make_graph(), NFCORE_DARK_THEME, chrome_css=False)
-    png = cairosvg.svg2png(bytestring=svg.encode())
-    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+    assert svg_to_png(svg)[:8] == b"\x89PNG\r\n\x1a\n"
 
 
 # ---------------------------------------------------------------------------
@@ -286,7 +286,7 @@ def test_marker_stroke_css_property_declared():
 def test_marker_stroke_class_on_marker_elements():
     """Marker glyphs carry the ``nf-metro-marker-stroke`` class so the CSS var applies.
 
-    The baked hex remains as a presentation-attribute fallback for cairosvg; the CSS
+    The baked hex remains as a presentation-attribute fallback for rasterizers; the CSS
     class rule overrides it in-browser (CSS stylesheet > presentation attributes).
     """
     svg = render_svg(_make_marker_graph(), NFCORE_DARK_THEME)

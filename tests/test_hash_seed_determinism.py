@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import sys
 import tomllib
 from pathlib import Path
 
@@ -19,6 +18,7 @@ from hash_seed_oracle import (
 from nf_metro.api import prepare_graph, resolve_theme
 from nf_metro.parser.model import MetroGraph
 from nf_metro.render import svg as svg_module
+from nf_metro.render.raster import svg_to_png
 from nf_metro.render.svg import render_svg
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -149,27 +149,30 @@ def test_seed_render_outcomes_are_stable_across_hash_seeds() -> None:
             assert digest == EXPECTED_EXCEPTION_SHA256[name]
 
 
-def _pinned_cairosvg_version() -> str:
-    """The cairosvg version pyproject pins, which the frozen PNG hash assumes."""
+def _pinned_resvg_version() -> str:
+    """The resvg-py version pyproject pins, which the frozen PNG hash assumes."""
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
     pinned = {
-        requirement.removeprefix("cairosvg==")
+        requirement.removeprefix("resvg-py==")
         for group in pyproject["project"]["optional-dependencies"].values()
         for requirement in group
-        if requirement.startswith("cairosvg==")
+        if requirement.startswith("resvg-py==")
     }
-    assert len(pinned) == 1, f"cairosvg is pinned to several versions: {pinned}"
+    assert len(pinned) == 1, f"resvg-py is pinned to several versions: {pinned}"
     return pinned.pop()
 
 
-def test_seed_72_linux_cairosvg_png_is_frozen(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    if sys.platform != "linux":
-        pytest.skip("authoritative PNG lock runs on Linux")
-    import cairosvg
+def test_seed_72_png_is_frozen(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The rendered PNG is byte-stable, and stable across platforms.
 
-    assert cairosvg.__version__ == _pinned_cairosvg_version()
+    The cairosvg lock this replaces could only run on Linux, because cairo drew
+    the labels with whichever fonts the machine had. ``svg_to_png`` skips system
+    fonts for the bundled Inter, so the same bytes come out of macOS arm64,
+    Linux aarch64 and Linux x86_64 alike and the lock holds everywhere.
+    """
+    import resvg_py
+
+    assert resvg_py.__version__ == _pinned_resvg_version()
 
     # The attribution watermark is rasterised into the PNG, so the lock pins its
     # text rather than letting the hash track the package version.
@@ -177,15 +180,18 @@ def test_seed_72_linux_cairosvg_png_is_frozen(
 
     path = REGRESSIONS / "seed_72.mmd"
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+    # Mirrors what `nf-metro render -o x.png` forces, so the lock tracks the
+    # bytes a user actually gets.
     svg = render_svg(
         graph,
         resolve_theme(None, graph),
         chrome_css=False,
+        font_portability="embed",
     )
-    png = cairosvg.svg2png(bytestring=svg.encode(), scale=2)
+    png = svg_to_png(svg, scale=2.0)
 
     assert hashlib.sha256(png).hexdigest() == (
-        "c951485a7fe6338db39691c68116eb104312c1d9e545bd049c986dbc0b9083b9"
+        "dcdb00337f2d8e9a4531d2bd6ea084f437f429d5da3b33c879bccfceaa964b6d"
     )
 
 

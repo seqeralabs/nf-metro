@@ -31,6 +31,7 @@ from nf_metro.layout import (  # noqa: E402
     PhaseInvariantError,
 )
 from nf_metro.parser import CyclicGraphError  # noqa: E402
+from nf_metro.render.raster import svg_to_png  # noqa: E402
 
 NEXTFLOW_DIR = project_root / "tests" / "fixtures" / "nextflow"
 
@@ -99,8 +100,8 @@ def render_file(
     theme = resolve_theme(None, graph)
 
     try:
-        # chrome_css=False bakes concrete colors so the cairosvg PNG step below
-        # works (cairosvg cannot parse the var() chrome custom properties).
+        # chrome_css=False bakes concrete colors for the PNG step below: a
+        # rasteriser cannot parse the var() chrome custom properties.
         svg_str = render_graph(
             graph, theme, RenderConfig(debug=debug, chrome_css=False)
         )
@@ -110,14 +111,8 @@ def render_file(
     svg_path = output_dir / f"{name}.svg"
     svg_path.write_text(svg_str)
 
-    # Try PNG conversion via cairosvg (optional)
     try:
-        import cairosvg
-
-        png_path = output_dir / f"{name}.png"
-        cairosvg.svg2png(bytestring=svg_str.encode(), write_to=str(png_path), scale=2)
-    except ImportError:
-        issues.append("cairosvg not available, skipping PNG")
+        (output_dir / f"{name}.png").write_bytes(svg_to_png(svg_str))
     except Exception as e:
         issues.append(f"PNG conversion error: {e}")
 

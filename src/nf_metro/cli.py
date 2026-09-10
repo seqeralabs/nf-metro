@@ -39,7 +39,7 @@ from nf_metro.parser.model import (
     split_guard_warnings,
 )
 from nf_metro.render import validate_render
-from nf_metro.themes import STYLE_NAMES, THEMES, resolve_style
+from nf_metro.themes import DEFAULT_MODE, STYLE_NAMES, THEMES, resolve_style
 
 
 @click.group()
@@ -65,6 +65,20 @@ def _parse_inactive_lines(value: object) -> frozenset[str] | None:
     if not isinstance(items, Iterable):
         raise ValueError("inactive_lines must be a string or list of line IDs")
     return frozenset(s for s in (str(i).strip() for i in items) if s)
+
+
+def _format_from_output(output: Path | None) -> Literal["svg", "html", "png"]:
+    """Infer the output format from *output*'s extension, defaulting to SVG.
+
+    Lets ``-o map.png`` stand on its own, so the common case needs no
+    ``--format``. An explicit ``--format`` is resolved before this is called
+    and wins, including over a mismatched extension.
+    """
+    suffix = output.suffix.lower().lstrip(".") if output is not None else ""
+    return cast(
+        'Literal["svg", "html", "png"]',
+        suffix if suffix in ("svg", "html", "png") else "svg",
+    )
 
 
 class _FiniteFloatRange(click.FloatRange):
@@ -290,10 +304,19 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
 @click.option(
     "--format",
     "format_",
-    type=click.Choice(["svg", "html"]),
-    default="svg",
-    help="Output format: 'svg' (default) or 'html' for an interactive "
-    "self-contained page with pan/zoom and per-line filtering.",
+    type=click.Choice(["svg", "html", "png"]),
+    default=None,
+    help="Output format: 'svg' (default), 'png', or 'html' for an interactive "
+    "self-contained page with pan/zoom and per-line filtering. Inferred from "
+    "the --output extension when not given.",
+)
+@click.option(
+    "--scale",
+    type=float,
+    default=2.0,
+    show_default=True,
+    help="PNG only: multiply the rendered pixel dimensions by this factor. "
+    "Pair with --width for an exact PNG width (--width 2265 --scale 1).",
 )
 @click.option(
     "--theme",
@@ -411,8 +434,9 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
     help=(
         "Omit the chrome --nfm-* CSS custom-property <style> block. Colors "
         "still render (they are baked as presentation attributes); only live "
-        "host recoloring is dropped. Use for raster export: cairosvg and "
-        "similar rasterizers cannot parse var() and fail without this."
+        "host recoloring is dropped. --format png applies it for you; pass "
+        "it when handing the SVG to an external rasterizer, since many "
+        "cannot parse var() and fail without it."
     ),
 )
 @click.option(
@@ -456,7 +480,8 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
 def render(
     input_files: tuple[Path, ...],
     output: Path | None,
-    format_: Literal["svg", "html"],
+    format_: Literal["svg", "html", "png"] | None,
+    scale: float,
     theme: str | None,
     mode: str | None,
     debug: bool,
@@ -477,7 +502,7 @@ def render(
     inactive_lines: str | None,
     **layout_opts: object,
 ) -> None:
-    """Render one or more Mermaid metro map definitions to SVG or interactive HTML.
+    """Render Mermaid metro map definitions to SVG, PNG, or interactive HTML.
 
     Given more than one INPUT_FILE, all render within the same process
     (amortising interpreter/import startup across the batch) and each write
@@ -492,6 +517,7 @@ def render(
     if len(input_files) > 1 and output is not None:
         raise click.UsageError("-o/--output can only be used with a single INPUT_FILE.")
 
+    format_ = format_ or _format_from_output(output)
     inactive_line_ids = _parse_inactive_lines(inactive_lines)
 
     def _job(input_file: Path, *, quiet: bool) -> Callable[[], None]:
@@ -502,6 +528,7 @@ def render(
             input_file,
             out_path,
             format_=format_,
+            scale=scale,
             theme=theme,
             mode=mode,
             debug=debug,
@@ -535,7 +562,8 @@ def _render_one(
     input_file: Path,
     output: Path,
     *,
-    format_: Literal["svg", "html"],
+    format_: Literal["svg", "html", "png"],
+    scale: float,
     theme: str | None,
     mode: str | None,
     debug: bool,
@@ -570,6 +598,7 @@ def _render_one(
                 input_file,
                 output,
                 format_=format_,
+                scale=scale,
                 theme=theme,
                 mode=mode,
                 debug=debug,
@@ -607,7 +636,8 @@ def _render_one_unsafe(
     input_file: Path,
     output: Path,
     *,
-    format_: Literal["svg", "html"],
+    format_: Literal["svg", "html", "png"],
+    scale: float,
     theme: str | None,
     mode: str | None,
     debug: bool,
@@ -631,6 +661,9 @@ def _render_one_unsafe(
 ) -> None:
     text = input_file.read_text()
     error_prefix = _error_prefix(input_file, quiet)
+    # PNG is rasterised from the SVG, so every render-plane decision below
+    # follows the SVG path; only the final write differs.
+    svg_format: Literal["svg", "html"] = "html" if format_ == "html" else "svg"
 
     try:
         graph = prepare_graph(
@@ -643,7 +676,7 @@ def _render_one_unsafe(
             layout_options=layout_opts,
             source_dir=str(input_file.resolve().parent),
             bare=bare,
-            output_format=format_,
+            output_format=svg_format,
         )
     except (
         ValueError,
@@ -653,6 +686,18 @@ def _render_one_unsafe(
         PhaseInvariantError,
     ) as e:
         _clean_error(e, error_prefix)
+
+    if format_ == "png":
+        # A rasteriser has no CSS cascade and no viewer colour-scheme to
+        # consult, so the picture has to be fully decided here rather than
+        # left to the flags a caller remembered to pass (#863, #1205):
+        #  - chrome_css off, or the var() chrome colours reach resvg unresolved
+        #  - a concrete baked mode, or light-dark() has nothing to resolve to
+        #  - embedded Inter, so the layout is measured against the same face
+        #    svg_to_png hands the rasteriser
+        no_chrome_css = True
+        embed_font = not text_to_paths
+        mode = (mode or graph.mode).strip().lower() or DEFAULT_MODE
 
     theme_obj = resolve_theme(theme, graph, mode=mode)
 
@@ -686,7 +731,7 @@ def _render_one_unsafe(
             graph,
             theme_obj,
             RenderConfig(
-                output_format=format_,
+                output_format=svg_format,
                 debug=debug,
                 responsive=responsive,
                 embed_font=embed_font,
@@ -722,7 +767,12 @@ def _render_one_unsafe(
             )
 
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(content if content.endswith("\n") else content + "\n")
+    if format_ == "png":
+        from nf_metro.render.raster import svg_to_png
+
+        output.write_bytes(svg_to_png(content, scale=scale))
+    else:
+        output.write_text(content if content.endswith("\n") else content + "\n")
     if not quiet:
         click.echo(
             f"Rendered {len(graph.stations)} stations, "
@@ -743,7 +793,8 @@ def render_many(manifest_file: Path) -> None:
     \b
       input                 Path to the source .mmd file (required).
       output                Path for the output file (required).
-      format                "svg" (default) or "html".
+      format                "svg" (default), "png", or "html".
+      scale                 PNG only: pixel multiplier (default: 2.0).
       theme                 Theme name (nfcore, light, seqera, …).
       mode                  "light" or "dark" — bakes a concrete palette.
       debug                 Show debug overlay (default: false).
@@ -812,7 +863,10 @@ def render_many(manifest_file: Path) -> None:
             _render_one(
                 Path(raw_input),
                 Path(raw_output),
-                format_=cast(Literal["svg", "html"], str(job.get("format", "svg"))),
+                format_=cast(
+                    Literal["svg", "html", "png"], str(job.get("format", "svg"))
+                ),
+                scale=float(cast(float, job.get("scale", 2.0))),
                 theme=_str_or_none("theme"),
                 mode=_str_or_none("mode"),
                 debug=bool(job.get("debug", False)),

@@ -39,6 +39,7 @@ dependencies = [
     "lark>=1.1",
     "networkx>=3.0",
     "pillow>=9.0",
+    "resvg-py>=0.5",
 ]
 
 [project.urls]
@@ -61,13 +62,13 @@ dev = [
     "types-networkx",
     "numpy<2.5",
     "nf-metro[validate]",
-    "cairosvg==2.9.0",
+    # Pinned so the frozen PNG hash in tests/test_hash_seed_determinism.py has
+    # one rasteriser build to lock against; runtime accepts any >=0.5.
+    "resvg-py==0.5.0",
 ]
-# Docs site is Astro/Starlight (see website/package.json). This extra only provides
-# cairosvg, used by scripts/build_render_diff.py and the PR render-diff workflow
-# to rasterise gallery SVGs to PNG.
+# Docs site is Astro/Starlight (see website/package.json). This extra only
+# provides pyyaml, for the gallery corpus map.
 docs = [
-    "cairosvg==2.9.0",
     "pyyaml>=6.0",
 ]
 font = [

@@ -51,7 +51,7 @@ See the [precedence table](/nf-metro/guide/#cli-flags-and-directive-precedence) 
 | Option                 | Default            | Description                                                            |
 | ---------------------- | ------------------ | ---------------------------------------------------------------------- |
 | `-o`, `--output PATH`  | `<input>.<format>` | Output file path (only valid with a single `INPUT_FILE`)               |
-| `--format [svg\|html]` | `svg`              | Output format: `svg`, or `html` for an interactive self-contained page |
+| `--format [svg\|html\|png]` | inferred from `--output`, else `svg` | Output format: `svg`, `png`, or `html` for an interactive self-contained page. `-o map.png` selects PNG on its own |
 | `--from-nextflow`      | off                | Convert Nextflow `-with-dag` Mermaid input before rendering            |
 | `--debug / --no-debug` | off                | Show the debug overlay (ports, hidden stations, edge waypoints)        |
 
@@ -96,6 +96,7 @@ Because it has no light/dark pair, `--mode` does not apply to it.
 | `--label-angle FLOAT`                      | theme default (0) | Angle in degrees for station labels (0 = horizontal). Useful for dense trunks where horizontal labels collide                                                                                                                                                                       |
 | `--font-scale FLOAT`                       | 1.0               | Scale every text size and the label-width metrics that drive layout spacing                                                                                                                                                                                                         |
 | `--stroke-scale FLOAT`                     | 1.0               | Scale track stroke weight and station pill size, widening bundle spacing, marker clearance, and rail pitch to match                                                                                                                                                                 |
+| `--scale FLOAT`                            | `2.0`             | PNG only: multiply the rendered pixel dimensions. Pair with `--width` for an exact PNG width (`--width 2265 --scale 1`)                                                                                                                                                              |
 | `--width INTEGER`                          | auto              | Output width in pixels                                                                                                                                                                                                                                                              |
 | `--height INTEGER`                         | auto              | Output height in pixels                                                                                                                                                                                                                                                             |
 
@@ -155,7 +156,7 @@ The [Embedding guide](/nf-metro/embedding/) explains when to use each.
 | `--svg-class-prefix TEXT`              | none    | Prefix every SVG presentation class with this string (for example, `myapp` produces `myapp-nf-metro-station`). Use distinct prefixes for each map on a shared page. No effect on the interactive HTML output, which already scopes each map                 |
 | `--no-self-color-scheme`               | off     | Omit `color-scheme: light dark` from the root `<svg>`. Use when inlining into a host page that owns the theme. The SVG then inherits the page's `color-scheme`, and a manual toggle drives `light-dark()` resolution rather than the viewer's OS preference |
 | `--no-dark-mode-css`                   | off     | Suppress the `prefers-color-scheme: dark` `<style>` block when a host page manages its own theme and the injected media query would conflict                                                                                                                |
-| `--no-chrome-css`                      | off     | Omit the chrome `--nfm-*` CSS custom-property `<style>` block. Colors still render, baked as presentation attributes, and only live host recoloring is dropped. Needed for raster export, because cairosvg and similar rasterizers cannot parse `var()`     |
+| `--no-chrome-css`                      | off     | Omit the chrome `--nfm-*` CSS custom-property `<style>` block. Colors still render, baked as presentation attributes, and only live host recoloring is dropped. Needed when rasterizing the SVG with an external tool that cannot parse `var()`. `--format png` applies it for you     |
 
 Every SVG carries the machine-readable [data manifest](/nf-metro/manifest/), meaning the `<metadata>` block and the per-node `data-node-*` attributes.
 Opt out per map with `%%metro manifest: false`.

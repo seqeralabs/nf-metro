@@ -172,22 +172,38 @@ This block is a separate, coarser fallback from the `--nfm-*` custom properties 
 It exists because a transparent background has no color of its own to carry a `light-dark()` pair.
 See [Theming](/nf-metro/theming/) for why the two mechanisms differ.
 
-### Raster export (PNG) - `--mode` and `--no-chrome-css`
+### Raster export (PNG)
 
-Two independent settings control correct PNG output:
+`nf-metro` writes PNG itself. A `.png` output path is enough, or pass `--format png`:
 
-**Palette (`--mode`).** Always pass `--mode light` or `--mode dark` explicitly.
-Without it you get the default palette, which may not match your intent.
-The flag also pins `color-scheme` on the SVG root.
-CSS-aware rasterizers therefore resolve `light-dark()` to the right values regardless of the host OS color scheme.
+```bash
+nf-metro render pipeline.mmd -o pipeline.png --mode light
+```
 
-**CSS variables (`--no-chrome-css`).** The `--nfm-*` properties use CSS `var()`, which many rasterizers, **cairosvg** among them, cannot parse and abort on.
-Add `--no-chrome-css` to bake the concrete theme colors instead.
+The PNG path settles everything a rasterizer cannot work out for itself, so none of the SVG-side flags below are needed for it.
+It bakes the concrete palette (a rasterizer has no viewer color-scheme to resolve `light-dark()` against), drops the `--nfm-*` custom properties (it has no CSS cascade to resolve `var()` through), and draws the labels with the bundled Inter rather than whatever fonts the machine has installed.
+That last point makes the output reproducible: the same map renders to the same bytes on any machine.
+
+Pass `--mode light` or `--mode dark` to choose the palette; without it the map's own `%%metro mode:` applies, then the global default.
+
+`--scale` multiplies the pixel dimensions (default `2`, for retina).
+For an exact width, set the SVG width and turn the multiplier off:
+
+```bash
+nf-metro render pipeline.mmd -o pipeline.png --mode light --width 2265 --scale 1
+```
+
+#### Rasterizing an SVG yourself
+
+If you rasterize an nf-metro SVG with an external tool instead, two settings matter.
+Pass `--mode` to bake the palette, as above.
+Then check whether your rasterizer parses CSS custom properties: the `--nfm-*` chrome colors use `var()`, and a tool that cannot read it will either mis-render or abort.
+`--no-chrome-css` bakes those colors as presentation attributes instead.
 The map looks identical, and you lose only live host recoloring:
 
 ```bash
 nf-metro render pipeline.mmd -o pipeline.svg --no-chrome-css --mode light
-python -c "import cairosvg; cairosvg.svg2png(url='pipeline.svg', write_to='pipeline.png', scale=2)"
+rsvg-convert pipeline.svg -o pipeline.png
 ```
 
 A rasterizer that understands CSS custom properties, such as `resvg`, `rsvg-convert`, or headless Chromium, resolves `var()` and `light-dark()` natively.
