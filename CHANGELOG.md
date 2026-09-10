@@ -18,9 +18,11 @@ history.
 ### Added
 
 - `nf-metro render` writes PNG directly. A `.png` output path selects it, or pass
-  `--format png`; `--scale` sets the pixel multiplier (default 2). The PNG path
-  bakes the palette, drops the `var()` chrome, and draws with the bundled Inter,
-  so a map rasterises to the same bytes on any machine ([#1969](https://github.com/seqeralabs/nf-metro/issues/1969)).
+  `--format png`; `--scale` sets the pixel multiplier (default 2) and `--png-width`
+  pins an exact width. The PNG path bakes the palette, drops the `var()` chrome,
+  and draws with the bundled Inter, so a map rasterises to the same bytes on any
+  machine ([#1969](https://github.com/seqeralabs/nf-metro/issues/1969)).
+- `-o` repeats, so one run writes several formats: `-o map.svg -o map.png`.
 
 ### Changed
 

@@ -317,8 +317,15 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
     type=float,
     default=2.0,
     show_default=True,
-    help="PNG only: multiply the rendered pixel dimensions by this factor. "
-    "Pair with --width for an exact PNG width (--width 2265 --scale 1).",
+    help="PNG only: multiply the rendered pixel dimensions by this factor.",
+)
+@click.option(
+    "--png-width",
+    type=int,
+    default=None,
+    help="PNG only: output width in pixels, height scaled with it. Overrides "
+    "--scale. Distinct from --width, which grows the SVG canvas around a map "
+    "drawn at its natural size rather than resizing the picture.",
 )
 @click.option(
     "--theme",
@@ -484,6 +491,7 @@ def render(
     outputs: tuple[Path, ...],
     format_: Literal["svg", "html", "png"] | None,
     scale: float,
+    png_width: int | None,
     theme: str | None,
     mode: str | None,
     debug: bool,
@@ -537,6 +545,7 @@ def render(
             out_path,
             format_=out_format,
             scale=scale,
+            png_width=png_width,
             theme=theme,
             mode=mode,
             debug=debug,
@@ -589,6 +598,7 @@ def _render_one(
     *,
     format_: Literal["svg", "html", "png"],
     scale: float,
+    png_width: int | None,
     theme: str | None,
     mode: str | None,
     debug: bool,
@@ -624,6 +634,7 @@ def _render_one(
                 output,
                 format_=format_,
                 scale=scale,
+                png_width=png_width,
                 theme=theme,
                 mode=mode,
                 debug=debug,
@@ -663,6 +674,7 @@ def _render_one_unsafe(
     *,
     format_: Literal["svg", "html", "png"],
     scale: float,
+    png_width: int | None,
     theme: str | None,
     mode: str | None,
     debug: bool,
@@ -795,7 +807,7 @@ def _render_one_unsafe(
     if format_ == "png":
         from nf_metro.render.raster import svg_to_png
 
-        output.write_bytes(svg_to_png(content, scale=scale))
+        output.write_bytes(svg_to_png(content, scale=scale, width=png_width))
     else:
         output.write_text(content if content.endswith("\n") else content + "\n")
     if not quiet:
@@ -820,6 +832,7 @@ def render_many(manifest_file: Path) -> None:
       output                Path for the output file (required).
       format                "svg" (default), "png", or "html".
       scale                 PNG only: pixel multiplier (default: 2.0).
+      png_width             PNG only: output width in pixels; overrides scale.
       theme                 Theme name (nfcore, light, seqera, …).
       mode                  "light" or "dark" — bakes a concrete palette.
       debug                 Show debug overlay (default: false).
@@ -892,6 +905,9 @@ def render_many(manifest_file: Path) -> None:
                     Literal["svg", "html", "png"], str(job.get("format", "svg"))
                 ),
                 scale=float(cast(float, job.get("scale", 2.0))),
+                png_width=(
+                    int(cast(int, job["png_width"])) if job.get("png_width") else None
+                ),
                 theme=_str_or_none("theme"),
                 mode=_str_or_none("mode"),
                 debug=bool(job.get("debug", False)),

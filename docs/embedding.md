@@ -187,11 +187,13 @@ That last point makes the output reproducible: the same map renders to the same 
 Pass `--mode light` or `--mode dark` to choose the palette; without it the map's own `%%metro mode:` applies, then the global default.
 
 `--scale` multiplies the pixel dimensions (default `2`, for retina).
-For an exact width, set the SVG width and turn the multiplier off:
+For an exact width, use `--png-width`, which scales the height with it:
 
 ```bash
-nf-metro render pipeline.mmd -o pipeline.png --mode light --width 2265 --scale 1
+nf-metro render pipeline.mmd -o pipeline.png --mode light --png-width 2265
 ```
+
+Do not reach for `--width` here. That grows the SVG canvas around a map drawn at its natural size, padding the extra space; it does not resize the picture.
 
 #### Rasterizing an SVG yourself
 

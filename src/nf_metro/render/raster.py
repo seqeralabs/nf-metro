@@ -28,13 +28,20 @@ _FONT_FILES = [
 ]
 
 
-def svg_to_png(svg: str, *, scale: float = 2.0) -> bytes:
-    """Rasterise *svg* to PNG bytes, at *scale* times its own pixel size."""
+def svg_to_png(svg: str, *, scale: float = 2.0, width: int | None = None) -> bytes:
+    """Rasterise *svg* to PNG bytes.
+
+    ``scale`` multiplies the SVG's own pixel size.  ``width`` instead pins the
+    output width and scales the height with it, overriding ``scale``.  Both
+    resize the picture; the SVG's own ``--width`` grows the canvas around a
+    map drawn at its natural size, which is a different thing entirely.
+    """
+    sizing = {"width": width} if width is not None else {"zoom": scale}
     return bytes(
         resvg_py.svg_to_bytes(
             svg_string=svg,
             skip_system_fonts=True,
             font_files=_FONT_FILES,
-            zoom=scale,
+            **sizing,
         )
     )
