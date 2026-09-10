@@ -88,3 +88,53 @@ def test_png_bakes_the_requested_mode(
     image = _image(_render(tmp_path, f"{mode}.png", "--mode", mode, "--scale", "1"))
     red, green, blue = image.convert("RGB").getpixel((2, 2))
     assert ((red + green + blue) / 3 > 128) is expect_light
+
+
+def test_repeated_output_writes_every_format_from_one_run(tmp_path: Path) -> None:
+    """`-o map.svg -o map.png` is the whole point: one command, both assets."""
+    svg, png = tmp_path / "map.svg", tmp_path / "map.png"
+    result = CliRunner().invoke(
+        cli, ["render", str(STANDALONE_MMD), "-o", str(svg), "-o", str(png)]
+    )
+    assert result.exit_code == 0, result.output
+    assert "<svg" in svg.read_text()
+    assert _image(png).format == "PNG"
+
+
+def test_explicit_format_overrides_every_repeated_output(tmp_path: Path) -> None:
+    """--format pins one format for all outputs, extensions notwithstanding."""
+    first, second = tmp_path / "a.svg", tmp_path / "b.png"
+    result = CliRunner().invoke(
+        cli,
+        [
+            "render",
+            str(STANDALONE_MMD),
+            "-o",
+            str(first),
+            "-o",
+            str(second),
+            "--format",
+            "svg",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "<svg" in first.read_text()
+    assert "<svg" in second.read_text()
+
+
+def test_repeated_output_still_refuses_several_inputs(tmp_path: Path) -> None:
+    other = EXAMPLES_DIR / "rnaseq_sections.mmd"
+    result = CliRunner().invoke(
+        cli,
+        [
+            "render",
+            str(STANDALONE_MMD),
+            str(other),
+            "-o",
+            str(tmp_path / "a.svg"),
+            "-o",
+            str(tmp_path / "b.png"),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "single INPUT_FILE" in result.output

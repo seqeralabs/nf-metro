@@ -296,10 +296,12 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
 @click.option(
     "-o",
     "--output",
+    "outputs",
     type=click.Path(path_type=Path),
-    default=None,
+    multiple=True,
     help="Output file path. Defaults to <input>.<format>. Only valid with a "
-    "single INPUT_FILE.",
+    "single INPUT_FILE. Repeat it to write several formats from one layout "
+    "run: -o map.svg -o map.png.",
 )
 @click.option(
     "--format",
@@ -479,7 +481,7 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
 @layout_cli_options
 def render(
     input_files: tuple[Path, ...],
-    output: Path | None,
+    outputs: tuple[Path, ...],
     format_: Literal["svg", "html", "png"] | None,
     scale: float,
     theme: str | None,
@@ -510,24 +512,30 @@ def render(
     earlier one fails, successful outputs are kept, and a non-zero exit is
     returned if any failed.
 
+    Repeating -o writes one INPUT_FILE to several outputs in the same run,
+    taking each output's format from its extension: -o map.svg -o map.png.
+    An explicit --format overrides every extension.
+
     A rejected input, and any other failure, surfaces as a plain error
     message rather than a traceback; set NF_METRO_DEBUG=1 to re-raise the
     original exception instead.
     """
-    if len(input_files) > 1 and output is not None:
+    if len(input_files) > 1 and outputs:
         raise click.UsageError("-o/--output can only be used with a single INPUT_FILE.")
 
-    format_ = format_ or _format_from_output(output)
     inactive_line_ids = _parse_inactive_lines(inactive_lines)
 
-    def _job(input_file: Path, *, quiet: bool) -> Callable[[], None]:
-        out_path = (
-            output if output is not None else input_file.with_suffix(f".{format_}")
-        )
+    def _job(
+        input_file: Path,
+        out_path: Path,
+        out_format: Literal["svg", "html", "png"],
+        *,
+        quiet: bool,
+    ) -> Callable[[], None]:
         return lambda: _render_one(
             input_file,
             out_path,
-            format_=format_,
+            format_=out_format,
             scale=scale,
             theme=theme,
             mode=mode,
@@ -551,11 +559,28 @@ def render(
             quiet=quiet,
         )
 
-    if len(input_files) == 1:
-        _job(input_files[0], quiet=False)()
+    # One job per output when -o is given (each output carries its own format,
+    # unless --format pins one for all), else one per input file.
+    if outputs:
+        jobs = [
+            (out.name, input_files[0], out, format_ or _format_from_output(out))
+            for out in outputs
+        ]
+    else:
+        fmt = format_ or "svg"
+        jobs = [(f.name, f, f.with_suffix(f".{fmt}"), fmt) for f in input_files]
+
+    if len(jobs) == 1:
+        _, source, out_path, out_format = jobs[0]
+        _job(source, out_path, out_format, quiet=False)()
         return
 
-    _run_batch([(f.name, _job(f, quiet=True)) for f in input_files])
+    _run_batch(
+        [
+            (label, _job(source, out_path, out_format, quiet=True))
+            for label, source, out_path, out_format in jobs
+        ]
+    )
 
 
 def _render_one(

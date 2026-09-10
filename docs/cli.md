@@ -48,12 +48,12 @@ See the [precedence table](/nf-metro/guide/#cli-flags-and-directive-precedence) 
 
 ### Output and source
 
-| Option                      | Default                              | Description                                                                                                        |
-| --------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| `-o`, `--output PATH`       | `<input>.<format>`                   | Output file path (only valid with a single `INPUT_FILE`)                                                           |
-| `--format [svg\|html\|png]` | inferred from `--output`, else `svg` | Output format: `svg`, `png`, or `html` for an interactive self-contained page. `-o map.png` selects PNG on its own |
-| `--from-nextflow`           | off                                  | Convert Nextflow `-with-dag` Mermaid input before rendering                                                        |
-| `--debug / --no-debug`      | off                                  | Show the debug overlay (ports, hidden stations, edge waypoints)                                                    |
+| Option                      | Default                              | Description                                                                                                                        |
+| --------------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `-o`, `--output PATH`       | `<input>.<format>`                   | Output file path (only valid with a single `INPUT_FILE`). Repeat it to write several formats from one run: `-o map.svg -o map.png` |
+| `--format [svg\|html\|png]` | inferred from `--output`, else `svg` | Output format: `svg`, `png`, or `html` for an interactive self-contained page. `-o map.png` selects PNG on its own                 |
+| `--from-nextflow`           | off                                  | Convert Nextflow `-with-dag` Mermaid input before rendering                                                                        |
+| `--debug / --no-debug`      | off                                  | Show the debug overlay (ports, hidden stations, edge waypoints)                                                                    |
 
 ### Theme and branding
 
