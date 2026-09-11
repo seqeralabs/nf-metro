@@ -514,6 +514,17 @@ def _position_legend(
     return legend_x, legend_y, legend_w, legend_h, show_legend
 
 
+def _terminus_stacked_pad(theme: Theme, has_stacked: bool) -> float:
+    """Extent a stacked-files icon's back sheet peeks past the nominal edge.
+
+    ``render_files_icon`` offsets the back sheet by ``terminus_width *
+    FILES_ICON_OFFSET_RATIO`` along each axis; anything reserving space around
+    the drawn icon adds this so the back sheet is covered. Zero for a
+    single-sheet icon.
+    """
+    return theme.terminus_width * FILES_ICON_OFFSET_RATIO if has_stacked else 0.0
+
+
 def _icon_obstacles_by_station(
     graph: MetroGraph,
     theme: Theme,
@@ -540,6 +551,7 @@ def _icon_obstacles_by_station(
         # box that always assumed a horizontal row sat beside the wrong
         # axis on a vertical-flow terminus (a line could rake the real
         # icon while the box reported clear).
+        section = graph.sections.get(station.section_id) if station.section_id else None
         line_offs = [
             station_offsets.get((station.id, lid), 0.0)
             for lid in graph.station_lines(station.id)
@@ -552,9 +564,7 @@ def _icon_obstacles_by_station(
 
         # Stacked-files icons extend beyond nominal size by the offset.
         has_stacked = ICON_TYPE_FILES in (station.terminus_icon_types or [])
-        stacked_pad = (
-            theme.terminus_width * FILES_ICON_OFFSET_RATIO if has_stacked else 0.0
-        )
+        stacked_pad = _terminus_stacked_pad(theme, has_stacked)
         icon_half_w = theme.terminus_width / 2 + stacked_pad
         icon_half_h = theme.terminus_height / 2 + stacked_pad
 
@@ -563,14 +573,23 @@ def _icon_obstacles_by_station(
         y_min = min(cy for _, cy in centers) - icon_half_h
         y_max = max(cy for _, cy in centers) + icon_half_h
 
-        # Captions render below the icon row, so extend the box downward to
-        # cover them and keep neighbouring labels at a distance.
+        # Captions render on whichever flow side the renderer draws them, so
+        # extend the box that way to cover them and keep neighbouring labels
+        # at a distance. Vertical-flow sources (and flow-reversed sinks) hang
+        # the caption above the icon; everything else hangs it below.
         caption_line_count = station.terminus_caption_line_count
         if caption_line_count:
-            caption_height = (
+            section_dir = section.direction if section else "LR"
+            is_vertical_flow = lanes_run_along_x(section_dir)
+            is_source = not graph.edges_to(station.id)
+            flow_sign = _terminus_icon_flow_sign(section_dir, is_source)
+            caption_extent = ICON_NAME_GAP + (
                 caption_line_count * theme.label_font_size * ICON_NAME_FONT_SCALE
             )
-            y_max += ICON_NAME_GAP + caption_height
+            if _terminus_caption_hangs_down(is_vertical_flow, flow_sign):
+                y_max += caption_extent
+            else:
+                y_min -= caption_extent
 
         obstacles[station.id] = (
             x_min - margin,
@@ -4399,6 +4418,16 @@ def _terminus_icon_flow_sign(section_dir: str, is_source: bool) -> float:
     return 1.0 if extends_forward else -1.0
 
 
+def _terminus_caption_hangs_down(is_vertical_flow: bool, flow_sign: float) -> bool:
+    """Whether a terminus caption hangs below its icon rather than above.
+
+    Vertical-flow sources and flow-reversed sinks draw the icon above the
+    station, so the caption hangs above it too; every other flow hangs it
+    below.
+    """
+    return not is_vertical_flow or flow_sign > 0
+
+
 def _terminus_icon_centers(
     station: Station,
     section_dir: str,
@@ -4553,16 +4582,37 @@ def _render_terminus_icons(
                 banner_text_color=banner_text_color,
             )
 
-        # Optional caption rendered below the icon so the type chip
+        # Optional caption rendered clear of the icon so the type chip
         # inside the icon stays readable.
         if name:
-            caption_y = icon_cy + theme.terminus_height / 2 + ICON_NAME_GAP
+            caption_hangs_down = _terminus_caption_hangs_down(
+                is_vertical_flow, flow_sign
+            )
+            # A stacked-files icon's back sheet peeks past the nominal edge
+            # along the flow axis -- toward the caption for a vertical flow, but
+            # off-axis (away from it) for a horizontal flow -- so only a
+            # vertical flow needs the extra clearance to keep the caption off
+            # the drawn icon.
+            stacked_pad = _terminus_stacked_pad(
+                theme, is_vertical_flow and icon_type == ICON_TYPE_FILES
+            )
+            icon_edge_gap = theme.terminus_height / 2 + stacked_pad + ICON_NAME_GAP
+            stagger_step = caption_font_size * 1.4
             # When adjacent icon captions would overlap horizontally
             # (their estimated width exceeds the per-icon X step), drop
-            # odd-indexed captions to a second row so each name is
-            # legible.
-            if stagger_captions and i % 2 == 1:
-                caption_y += caption_font_size * 1.4
+            # odd-indexed captions to a further row so each name is legible.
+            staggered = stagger_captions and i % 2 == 1
+            if caption_hangs_down:
+                caption_y = icon_cy + icon_edge_gap
+                if staggered:
+                    caption_y += stagger_step
+            else:
+                # The hanging baseline anchors the text's top edge, so drop
+                # the caption height to seat the whole glyph box above the icon.
+                caption_height = (name.count("\n") + 1) * caption_font_size
+                caption_y = icon_cy - icon_edge_gap - caption_height
+                if staggered:
+                    caption_y -= stagger_step
             caption_cx = icon_cx
             if section and section.bbox_w > 0:
                 # Estimate caption width and clamp so it stays inside the

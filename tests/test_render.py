@@ -4,14 +4,15 @@ import pathlib
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import replace
+from functools import lru_cache
 
 import pytest
 
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.geometry import lanes_run_along_x
 from nf_metro.parser.mermaid import parse_metro_mermaid
-from nf_metro.parser.model import Station
-from nf_metro.render.constants import FILES_ICON_OFFSET_RATIO
+from nf_metro.parser.model import ICON_TYPE_FILES, Station
+from nf_metro.render.constants import FILES_ICON_OFFSET_RATIO, ICON_NAME_GAP
 from nf_metro.render.svg import (
     _label_halo_color,
     _terminus_icon_centers,
@@ -704,15 +705,20 @@ def test_multiline_icon_caption_fits_render_obstacle(direction):
     )
     obstacle = _icon_obstacles_by_station(graph, NFCORE_DARK_THEME, offsets)[station.id]
     caption_height = 2 * NFCORE_DARK_THEME.label_font_size * ICON_NAME_FONT_SCALE
-    expected_bottom = (
-        max(cy for _, cy in centers)
-        + NFCORE_DARK_THEME.terminus_height / 2
+    caption_reach = (
+        NFCORE_DARK_THEME.terminus_height / 2
         + ICON_NAME_GAP
         + caption_height
         + ICON_CLEARANCE_MARGIN
     )
-
-    assert obstacle[3] >= expected_bottom
+    is_vertical_flow = lanes_run_along_x(direction)
+    flow_sign = _terminus_icon_flow_sign(direction, is_source=True)
+    if is_vertical_flow and flow_sign < 0:
+        # TB/BT source draws its icon above the station, so the caption and
+        # its clearance grow the obstacle's top edge, not the bottom.
+        assert obstacle[1] <= min(cy for _, cy in centers) - caption_reach
+    else:
+        assert obstacle[3] >= max(cy for _, cy in centers) + caption_reach
 
 
 @pytest.mark.parametrize("direction", ["TB", "BT"])
@@ -1431,3 +1437,221 @@ def test_default_render_retains_fixed_dimensions():
     root = ET.fromstring(svg)
     assert root.get("width") is not None, "default SVG must carry a fixed width"
     assert root.get("height") is not None, "default SVG must carry a fixed height"
+
+
+# ---------------------------------------------------------------------------
+# Terminus caption placement vs its own station marker (issue #1972)
+# ---------------------------------------------------------------------------
+
+# Each case is a single captioned file terminus in one section, spanning the
+# four flow directions plus the horizontal-flow control. The negative-flow
+# cases (TB source, BT sink) draw the icon above the station, where a caption
+# hung below lands on the marker; the others draw it below.
+_CAPTION_MARKER_CASES = {
+    "tb_source": (
+        "Short reads",
+        "input_reads",
+        "%%metro files: input_reads | fastq | Short reads | banner\n"
+        "graph LR\n"
+        "    subgraph input[Input]\n"
+        "        %%metro direction: TB\n"
+        "        input_reads([Short reads])\n"
+        "    end\n",
+    ),
+    "tb_source_multiline": (
+        "Short\nreads",
+        "input_reads",
+        "%%metro files: input_reads | fastq | Short\\nreads | banner\n"
+        "graph LR\n"
+        "    subgraph input[Input]\n"
+        "        %%metro direction: TB\n"
+        "        input_reads([Short reads])\n"
+        "    end\n",
+    ),
+    "bt_sink": (
+        "Result",
+        "out",
+        "%%metro line: x | X | #1f9e89\n"
+        "%%metro file: out | fastq | Result\n"
+        "graph LR\n"
+        "    subgraph s[Sec]\n"
+        "        %%metro direction: BT\n"
+        "        proc[Process]\n"
+        "        out[ ]\n"
+        "        proc -->|x| out\n"
+        "    end\n",
+    ),
+    "tb_sink": (
+        "Result",
+        "out",
+        "%%metro line: x | X | #1f9e89\n"
+        "%%metro file: out | fastq | Result\n"
+        "graph LR\n"
+        "    subgraph s[Sec]\n"
+        "        %%metro direction: TB\n"
+        "        proc[Process]\n"
+        "        out[ ]\n"
+        "        proc -->|x| out\n"
+        "    end\n",
+    ),
+    "bt_source": (
+        "Input",
+        "inp",
+        "%%metro line: x | X | #1f9e89\n"
+        "%%metro file: inp | fastq | Input\n"
+        "graph LR\n"
+        "    subgraph s[Sec]\n"
+        "        %%metro direction: BT\n"
+        "        inp[ ]\n"
+        "        proc[Process]\n"
+        "        inp -->|x| proc\n"
+        "    end\n",
+    ),
+    "lr_sink": (
+        "Result",
+        "out",
+        "%%metro line: x | X | #1f9e89\n"
+        "%%metro file: out | fastq | Result\n"
+        "graph LR\n"
+        "    subgraph s[Sec]\n"
+        "        proc[Process]\n"
+        "        out[ ]\n"
+        "        proc -->|x| out\n"
+        "    end\n",
+    ),
+}
+
+
+def _caption_and_marker_boxes(svg, caption, station_id):
+    """Return (caption_y_box, marker_y_box) as (top, bottom) pairs from *svg*.
+
+    An icon caption and a station name label share the ``nf-metro-station-label``
+    class and can carry identical text, so text alone cannot tell them apart.
+    The renderer tags a station name label with ``data-station-id`` and a
+    terminus caption with none, so the caption is the station-label text that
+    lacks that attribute. Its box hangs from the baseline top down one em per
+    rendered line (one ``tspan`` per line for a multi-line caption). The marker
+    is the ``nf-metro-station`` rect for *station_id*.
+    """
+    ns = {"svg": "http://www.w3.org/2000/svg"}
+    root = ET.fromstring(svg)
+    wanted = caption.replace("\n", "")
+    caption_box = None
+    for text in root.findall(".//svg:text", ns):
+        if "nf-metro-station-label" not in (text.get("class") or ""):
+            continue
+        if text.get("data-station-id") is not None:
+            continue
+        if "".join(text.itertext()).strip() != wanted:
+            continue
+        top = float(text.get("y"))
+        line_count = len(text.findall("svg:tspan", ns)) or 1
+        caption_box = (top, top + line_count * float(text.get("font-size")))
+    marker_box = None
+    for rect in root.findall(".//svg:rect", ns):
+        if rect.get("data-station-id") != station_id:
+            continue
+        top = float(rect.get("y"))
+        marker_box = (top, top + float(rect.get("height")))
+    return caption_box, marker_box
+
+
+@lru_cache(maxsize=None)
+def _rendered_caption_case(case):
+    """Parse, lay out, and render one ``_CAPTION_MARKER_CASES`` entry, once.
+
+    Shared by the two tests below so each case pays for one parse+layout+
+    render pass rather than two.
+    """
+    _, _, source = _CAPTION_MARKER_CASES[case]
+    graph = parse_metro_mermaid(source)
+    compute_layout(graph)
+    svg = render_svg(graph, NFCORE_DARK_THEME)
+    return graph, svg
+
+
+@pytest.mark.parametrize("case", sorted(_CAPTION_MARKER_CASES))
+def test_terminus_caption_clears_its_station_marker(case):
+    """A terminus caption never overlaps its own station marker (#1972)."""
+    caption, station_id, _ = _CAPTION_MARKER_CASES[case]
+    _, svg = _rendered_caption_case(case)
+
+    caption_box, marker_box = _caption_and_marker_boxes(svg, caption, station_id)
+    assert caption_box is not None, f"{case}: caption {caption!r} not rendered"
+    assert marker_box is not None, f"{case}: marker for {station_id!r} not rendered"
+
+    overlaps = caption_box[1] > marker_box[0] and caption_box[0] < marker_box[1]
+    assert not overlaps, (
+        f"{case}: caption y={caption_box} struck by marker y={marker_box}"
+    )
+
+
+@pytest.mark.parametrize("case", sorted(_CAPTION_MARKER_CASES))
+def test_terminus_caption_sits_outboard_of_its_icon(case):
+    """The caption seats on the icon's far side from the station (#1972).
+
+    Placing it between icon and station is what let the marker strike it, so
+    the whole caption box must lie beyond the icon's outward flow edge.
+    """
+    caption, station_id, _ = _CAPTION_MARKER_CASES[case]
+    graph, svg = _rendered_caption_case(case)
+    theme = NFCORE_DARK_THEME
+
+    station = graph.stations[station_id]
+    icon_cx, icon_cy = _terminus_icon_centers_for(station, graph, theme, 0.0, 0.0)[0]
+    icon_half_h = theme.terminus_height / 2
+    caption_box, _ = _caption_and_marker_boxes(svg, caption, station_id)
+    assert caption_box is not None, f"{case}: caption {caption!r} not rendered"
+
+    # Outward is the direction the icon is offset from the station; when the
+    # icon shares the station's Y (horizontal flow) the caption hangs below.
+    outward = -1.0 if icon_cy < station.y else 1.0
+    if outward < 0:
+        assert caption_box[1] <= icon_cy - icon_half_h, (
+            f"{case}: caption y={caption_box} not clear above icon_cy={icon_cy}"
+        )
+    else:
+        assert caption_box[0] >= icon_cy + icon_half_h, (
+            f"{case}: caption y={caption_box} not clear below icon_cy={icon_cy}"
+        )
+
+
+@pytest.mark.parametrize("case", sorted(_CAPTION_MARKER_CASES))
+def test_terminus_caption_gap_equals_icon_name_gap(case):
+    """The caption clears the *drawn* icon edge by exactly ``ICON_NAME_GAP``.
+
+    A stacked-files icon's back sheet peeks ``terminus_width *
+    FILES_ICON_OFFSET_RATIO`` past the nominal edge toward the caption on a
+    vertical flow, so the reserved gap must be measured from that drawn edge,
+    not the nominal box. Ignoring it collapsed the real gap to ~0 (#1972).
+    """
+    caption, station_id, _ = _CAPTION_MARKER_CASES[case]
+    graph, svg = _rendered_caption_case(case)
+    theme = NFCORE_DARK_THEME
+
+    station = graph.stations[station_id]
+    _, icon_cy = _terminus_icon_centers_for(station, graph, theme, 0.0, 0.0)[0]
+    section = graph.sections[station.section_id]
+    is_vertical_flow = lanes_run_along_x(section.direction)
+    flow_sign = _terminus_icon_flow_sign(
+        section.direction, is_source=not graph.edges_to(station_id)
+    )
+    stacked = ICON_TYPE_FILES in (station.terminus_icon_types or [])
+    back_dy = flow_sign if is_vertical_flow else -1.0
+    off = theme.terminus_width * FILES_ICON_OFFSET_RATIO if stacked else 0.0
+    half_h = theme.terminus_height / 2
+
+    caption_box, _ = _caption_and_marker_boxes(svg, caption, station_id)
+    assert caption_box is not None, f"{case}: caption {caption!r} not rendered"
+
+    caption_hangs_down = not is_vertical_flow or flow_sign > 0
+    if caption_hangs_down:
+        drawn_edge = max(icon_cy + half_h, icon_cy + back_dy * off + half_h)
+        gap = caption_box[0] - drawn_edge
+    else:
+        drawn_edge = min(icon_cy - half_h, icon_cy + back_dy * off - half_h)
+        gap = drawn_edge - caption_box[1]
+
+    assert gap == pytest.approx(ICON_NAME_GAP), (
+        f"{case}: caption gap {gap:.2f} != ICON_NAME_GAP {ICON_NAME_GAP}"
+    )

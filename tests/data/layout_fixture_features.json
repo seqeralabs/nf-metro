@@ -44,6 +44,7 @@
     "topologies/centered_flat_skip_over_marker.mmd"
   ],
   "corridor_solo": [
+    "metagenomics_input.mmd",
     "target_entry_runway_bypass.mmd",
     "topologies/exit_lane_swap_shared_exit_port.mmd",
     "topologies/inter_row_exempt_band_order.mmd",
@@ -244,6 +245,7 @@
     "group_labels.mmd",
     "inactive_lines.mmd",
     "legend_combo.mmd",
+    "metagenomics_input.mmd",
     "simple_pipeline.mmd",
     "uneven_diamond.mmd",
     "topologies/bypass_left_entry_colspan_intervener.mmd",
@@ -494,6 +496,7 @@
     "topologies/centered_flat_skip_over_marker.mmd"
   ],
   "vertical_passthrough": [
+    "metagenomics_input.mmd",
     "planned_compatibility_channel_collision.mmd",
     "rnaseq_sections.mmd",
     "tb_exit_terminal_on_carrier.mmd",
