@@ -448,6 +448,29 @@ def section_exists_above_row(graph: MetroGraph, row: int) -> bool:
     return any(s.grid_row + s.grid_row_span - 1 < row for s in graph.sections.values())
 
 
+def flanked_cross_row_riser_neighbour_col(
+    src_col: int,
+    src_row: int,
+    tgt_col: int,
+    tgt_row: int,
+    *,
+    exit_is_right: bool,
+) -> int | None:
+    """Neighbour column a same-column cross-row perpendicular-entry riser flanks.
+
+    A LEFT/RIGHT exit feeding a TOP/BOTTOM entry in its own grid column but a
+    different row runs a vertical riser in the inter-column gap on its exit side.
+    Returns the column on that side -- whose occupancy at *src_row* decides
+    whether the riser is walled on both sides -- or ``None`` when the two boxes
+    are not a same-column cross-row pair.  Shared so the gap-sizing and the
+    riser-seating call sites read one definition of the shape rather than two
+    that can drift.
+    """
+    if src_col != tgt_col or src_row == tgt_row:
+        return None
+    return src_col + (1 if exit_is_right else -1)
+
+
 def column_gap_midpoint(
     graph: MetroGraph, col_a: int, col_b: int, row: int | None = None
 ) -> float:

@@ -2313,6 +2313,21 @@ gallery:
       "A vertical section's perpendicular exit reaching back to a section in the
       row behind it, the seam shape with the fewest corpus instances. Fully
       explicit for the orientation-equivalence oracle."
+  - id: stacked_top_entry_flanked_riser
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "A row-2 section entered from the section above it, with a second line running
+      past to a neighbouring column. The riser dropping into the top entry runs in
+      the inter-column gap that the neighbouring section flanks, so the gap widens to
+      seat it a clearance off both walls (issue #1568)."
+  - id: stacked_top_entry_flanked_riser_crossline
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "The flanked top-entry riser of issue #1568 with a distinct line climbing the
+      same inter-column gap and overlapping it in Y, so the two counter-running
+      centrelines settle a bundle clearance apart."
 pipelines:
   - id: rnaseq_auto
     title: nf-core/rnaseq

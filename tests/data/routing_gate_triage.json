@@ -543,10 +543,6 @@
   "note": "Reachable only via a defective render (inter-row corridor on a <78px gap); see #722.",
   "status": "needs-review"
  },
- "inter_section_handlers.py::if (lo, matched_row, direction) in declared:::#1": {
-  "note": "The un-exercised arm is the fresh declaration, not the dedupe skip: declared is seeded from the slots the handler's targeted _declare_channel calls already made, and on the corpus every gap-landing leg of a frozen frame is one of those, so the sweep only ever skips. The declaration fires where two targeted declarations collapse onto one gap and direction, leaving a third leg holding a gap nothing named -- the case the left-entry corridor and U-bypass call sites are commented for.",
-  "status": "needs-review"
- },
  "inter_section_handlers.py::if _corridor_is_viable(ctx, src, ep):::#1": {
   "note": "Reachable only via a defective render (route skirts/crosses section boundary); see #724.",
   "status": "needs-review"
@@ -673,6 +669,10 @@
  },
  "inter_section_handlers.py::if src_row is None or tgt_row is None or src_col is None or tgt_col is None:::#1": {
   "note": "_is_row_level_bottom_row_climb's null guard; neither swept caller can pass a None coordinate. _bypass_geometry asserts src_col/tgt_col non-None and only calls it under cross_row, and cross_row is True only when both rows are set: merge_trunk_force_cross_row returns False unless src_row is not None and tgt_row == src_row, and the other disjunct requires both rows non-None. _fan_bypass_band passes non-None src_col/src_row and a checked tgt_col, and any placed target entry-port section resolves a non-negative grid_row. No fixture in the render corpus reaches the None arm.",
+  "status": "defensive"
+ },
+ "inter_section_handlers.py::if src_sec is None or tgt_sec is None:::#1": {
+  "note": "_flanked_cross_row_riser_seat_x's type-narrowing guard before it reads both sections' grid columns. The corpus reaches this seat only for exit-port sources whose section resolves, and every perpendicular-entry target owns a section, so no swept fixture hits the None arm; it stays as a defensive narrow.",
   "status": "defensive"
  },
  "inter_section_handlers.py::if src_sec is not None and src_sec.bbox_w > 0:::#1": {

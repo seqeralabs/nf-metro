@@ -2,7 +2,7 @@
 
 Example `.mmd` files demonstrating a range of pipeline topologies and the layout patterns they produce. Each example exercises different aspects of the auto-layout engine.
 
-This directory holds 286 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
+This directory holds 290 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
 
 To render one example:
 
@@ -335,7 +335,7 @@ A single-row long-read variant-calling map. The annotation section carries only 
 
 ## Regression Catalogue
 
-The 207 fixtures below are targeted regression guards: each was added to pin a
+The 209 fixtures below are targeted regression guards: each was added to pin a
 specific routing or layout fix and is not individually gallery-illustrated.
 They participate in the full topology validation suite (`pytest
 tests/test_topology_validation.py`) alongside the illustrated fixtures
@@ -404,6 +404,8 @@ python scripts/list_topology_fixtures.py
 | `bottom_exit_stacked_right_entry_multiline_branch.mmd` | Multi-line branch member of the bottom-exit stacked RIGHT-entry fan - stacked fan grid origins are normalised                                                                                                                                 |
 | `bottom_entry_same_row_boundary.mmd`                   | A section whose BOTTOM entry carries both lines from a same-row source to its left, exercising the BOTTOM-entry L-shape rule                                                                                                                  |
 | `entry_hint_shared_edge.mmd`                           | The same section with `entry: bottom` hinted for only one of the two lines on the shared edge, so conflicting hints collapse to one hinted side                                                                                               |
+| `stacked_top_entry_flanked_riser.mmd`                  | A row-2 section entered from above with a line running past to a neighbour - the TOP-entry riser runs in the flanking inter-column gap, widened to clear both walls (#1568)                                                                   |
+| `stacked_top_entry_flanked_riser_crossline.mmd`        | The flanked TOP-entry riser with a distinct line overlapping it in Y - counter-running centrelines settle at bundle-clearance separation (#1568)                                                                                              |
 
 ### LR-to-TB top-entry routing
 

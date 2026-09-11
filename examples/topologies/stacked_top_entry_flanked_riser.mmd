@@ -1,0 +1,44 @@
+%%metro title: Stacked top-entry section fed from above past a flanking column
+%%metro directional: true
+%%metro line: main | Main | #e6007e
+%%metro line: side | Side | #2db572
+%%metro grid: a | 0,0
+%%metro grid: b | 0,1
+%%metro grid: c | 0,2
+%%metro grid: d | 1,1
+
+graph LR
+    subgraph a [Alpha]
+        %%metro exit: right | main, side
+        a1[A one]
+        a2[A two]
+        a1 -->|main,side| a2
+    end
+
+    subgraph b [Beta]
+        %%metro entry: top | side
+        b1[B one]
+        b2[B two]
+        b1 -->|side| b2
+    end
+
+    subgraph c [Gamma]
+        %%metro entry: top | side
+        c1[C one]
+        c2[C two]
+        c3[C three]
+        c1 -->|side| c2
+        c2 -->|side| c3
+    end
+
+    subgraph d [Delta]
+        %%metro entry: left | main, side
+        d1[D one]
+        d2[D two]
+        d1 -->|main,side| d2
+    end
+
+    a2 -->|side| b1
+    a2 -->|main| d1
+    b2 -->|side| c1
+    c3 -->|side| d1

@@ -457,6 +457,8 @@
     "topologies/stacked_right_ports_coincident.mmd",
     "topologies/stacked_split_left_entry_drop.mmd",
     "topologies/stacked_split_right_entry_drop.mmd",
+    "topologies/stacked_top_entry_flanked_riser.mmd",
+    "topologies/stacked_top_entry_flanked_riser_crossline.mmd",
     "topologies/straddling_fanout_junction.mmd",
     "topologies/symmetric_join_exit_port_centre.mmd",
     "topologies/target_lane_transition.mmd",
