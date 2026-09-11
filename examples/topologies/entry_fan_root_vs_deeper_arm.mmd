@@ -1,0 +1,27 @@
+%%metro title: Entry fan: root line vs deeper-arm line
+%%metro line_order: span
+%%metro center_ports: true
+%%metro line_spread: centered
+%%metro line: main | main | #2DD4BF
+%%metro line: branch | branch | #C792EA
+%%metro grid: input | 0,0
+%%metro grid: relay | 1,0
+%%metro grid: work | 2,0
+
+graph LR
+    subgraph input [Input]
+        f0 [Source]
+    end
+    subgraph relay [Relay]
+        p1 [Relay]
+    end
+    subgraph work [Work]
+        root [Root]
+        arm1 [Arm 1]
+        arm2 [Arm 2]
+        root --> |main| arm1
+        root --> |main| arm2
+    end
+    f0 --> |branch| p1
+    p1 --> |branch| arm1
+    f0 --> |main| root
