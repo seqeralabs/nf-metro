@@ -90,7 +90,7 @@ def test_png_width_overrides_scale(tmp_path: Path) -> None:
 def test_png_bakes_the_requested_mode(
     tmp_path: Path, mode: str, expect_light: bool
 ) -> None:
-    """PNG output resolves the chrome colours itself (#863, #1205).
+    """PNG output resolves the chrome colours itself.
 
     A rasteriser has no CSS custom properties and no viewer colour-scheme, so
     the PNG path forces ``--no-chrome-css`` and a concrete mode. Without that

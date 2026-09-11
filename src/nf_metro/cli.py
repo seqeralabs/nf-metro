@@ -314,15 +314,17 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
 )
 @click.option(
     "--scale",
-    type=float,
+    type=_FiniteFloatRange(min=0, min_open=True),
     default=2.0,
     show_default=True,
+    metavar="FLOAT",
     help="PNG only: multiply the rendered pixel dimensions by this factor.",
 )
 @click.option(
     "--png-width",
-    type=int,
+    type=click.IntRange(min=0, min_open=True),
     default=None,
+    metavar="INTEGER",
     help="PNG only: output width in pixels, height scaled with it. Overrides "
     "--scale. Distinct from --width, which grows the SVG canvas around a map "
     "drawn at its natural size rather than resizing the picture.",
@@ -727,7 +729,7 @@ def _render_one_unsafe(
     if format_ == "png":
         # A rasteriser has no CSS cascade and no viewer colour-scheme to
         # consult, so the picture has to be fully decided here rather than
-        # left to the flags a caller remembered to pass (#863, #1205):
+        # left to the flags a caller remembered to pass:
         #  - chrome_css off, or the var() chrome colours reach resvg unresolved
         #  - a concrete baked mode, or light-dark() has nothing to resolve to
         #  - embedded Inter, so the layout is measured against the same face
@@ -906,7 +908,7 @@ def render_many(manifest_file: Path) -> None:
                 ),
                 scale=float(cast(float, job.get("scale", 2.0))),
                 png_width=(
-                    int(cast(int, job["png_width"])) if job.get("png_width") else None
+                    int(cast(int, job["png_width"])) if "png_width" in job else None
                 ),
                 theme=_str_or_none("theme"),
                 mode=_str_or_none("mode"),

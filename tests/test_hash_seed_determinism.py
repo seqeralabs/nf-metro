@@ -163,12 +163,10 @@ def _pinned_resvg_version() -> str:
 
 
 def test_seed_72_png_is_frozen(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The rendered PNG is byte-stable, and stable across platforms.
+    """The rendered PNG is byte-stable across platforms.
 
-    The cairosvg lock this replaces could only run on Linux, because cairo drew
-    the labels with whichever fonts the machine had. ``svg_to_png`` skips system
-    fonts for the bundled Inter, so the same bytes come out of macOS arm64,
-    Linux aarch64 and Linux x86_64 alike and the lock holds everywhere.
+    ``svg_to_png`` skips system fonts and draws only the bundled Inter files,
+    so the same bytes come out of macOS arm64, Linux aarch64, and Linux x86_64.
     """
     import resvg_py
 

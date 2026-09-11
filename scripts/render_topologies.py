@@ -100,10 +100,18 @@ def render_file(
     theme = resolve_theme(None, graph)
 
     try:
-        # chrome_css=False bakes concrete colors for the PNG step below: a
-        # rasteriser cannot parse the var() chrome custom properties.
+        # chrome_css=False bakes concrete colors for the PNG step below. embed_font
+        # and baked_mode keep the layout metrics in step with what svg_to_png draws
+        # (bundled Inter, forced palette); a rasteriser cannot parse var() either way.
         svg_str = render_graph(
-            graph, theme, RenderConfig(debug=debug, chrome_css=False)
+            graph,
+            theme,
+            RenderConfig(
+                debug=debug,
+                chrome_css=False,
+                embed_font=True,
+                baked_mode=graph.mode.strip() or None,
+            ),
         )
     except Exception as e:
         return name, [f"RENDER ERROR: {e}"]
