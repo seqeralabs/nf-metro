@@ -113,6 +113,44 @@ def test_repeated_output_writes_every_format_from_one_run(tmp_path: Path) -> Non
     assert _image(png).format == "PNG"
 
 
+def test_repeated_output_parses_the_input_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """svg+png share one parse/layout pass; a third, html output needs a second.
+
+    html's title-band reservation differs from svg/png's, so it cannot share
+    the first pass's graph - this pins that only a genuinely different
+    ``svg_format`` triggers a second ``prepare_graph`` call, not every output.
+    """
+    import nf_metro.cli as cli_module
+
+    calls: list[str] = []
+    original = cli_module.prepare_graph
+
+    def spy(*args: object, **kwargs: object) -> object:
+        calls.append(str(kwargs.get("output_format")))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cli_module, "prepare_graph", spy)
+
+    svg, png, html = tmp_path / "map.svg", tmp_path / "map.png", tmp_path / "map.html"
+    result = CliRunner().invoke(
+        cli,
+        [
+            "render",
+            str(STANDALONE_MMD),
+            "-o",
+            str(svg),
+            "-o",
+            str(png),
+            "-o",
+            str(html),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert calls == ["svg", "html"]
+
+
 def test_explicit_format_overrides_every_repeated_output(tmp_path: Path) -> None:
     """--format pins one format for all outputs, extensions notwithstanding."""
     first, second = tmp_path / "a.svg", tmp_path / "b.png"
@@ -150,3 +188,22 @@ def test_repeated_output_still_refuses_several_inputs(tmp_path: Path) -> None:
     )
     assert result.exit_code != 0
     assert "single INPUT_FILE" in result.output
+
+
+def test_repeated_output_reports_a_shared_parse_failure_once(tmp_path: Path) -> None:
+    """An input rejected during the shared parse fails the whole render cleanly."""
+    empty_mmd = tmp_path / "empty.mmd"
+    empty_mmd.write_text("graph LR")
+    result = CliRunner().invoke(
+        cli,
+        [
+            "render",
+            str(empty_mmd),
+            "-o",
+            str(tmp_path / "a.svg"),
+            "-o",
+            str(tmp_path / "b.png"),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "no stations" in result.output

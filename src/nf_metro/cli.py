@@ -565,6 +565,7 @@ def render(
         out_format: RenderFormat,
         *,
         quiet: bool,
+        graph: MetroGraph | None = None,
     ) -> Callable[[], None]:
         return lambda: _render_one(
             input_file,
@@ -592,6 +593,7 @@ def render(
             inactive_line_ids=inactive_line_ids,
             layout_opts=layout_opts,
             quiet=quiet,
+            graph=graph,
         )
 
     # One job per output when -o is given (each output carries its own format,
@@ -610,9 +612,41 @@ def render(
         _job(source, out_path, out_format, quiet=False)()
         return
 
+    # Repeated -o always shares one input file (validated above), so every job's
+    # svg_format ("svg" or "html"; png renders through "svg") shares a layout -
+    # parse and lay it out once per distinct svg_format instead of once per job.
+    graphs: dict[Literal["svg", "html"], MetroGraph] = {}
+    if outputs:
+        for _, source, _, out_format in jobs:
+            svg_format: Literal["svg", "html"] = (
+                "svg" if out_format == "png" else out_format
+            )
+            if svg_format not in graphs:
+                graphs[svg_format] = _prepare_graph_for_render(
+                    source,
+                    from_nextflow=from_nextflow,
+                    title=title,
+                    line_spread=line_spread,
+                    logo=logo,
+                    legend=legend,
+                    layout_opts=layout_opts,
+                    bare=bare,
+                    svg_format=svg_format,
+                    error_prefix="",
+                )
+
     _run_batch(
         [
-            (label, _job(source, out_path, out_format, quiet=True))
+            (
+                label,
+                _job(
+                    source,
+                    out_path,
+                    out_format,
+                    quiet=True,
+                    graph=graphs.get("svg" if out_format == "png" else out_format),
+                ),
+            )
             for label, source, out_path, out_format in jobs
         ]
     )
@@ -645,6 +679,7 @@ def _render_one(
     inactive_line_ids: frozenset[str] | None,
     layout_opts: dict[str, object],
     quiet: bool,
+    graph: MetroGraph | None = None,
 ) -> None:
     permissive = bool(layout_opts.get("permissive"))
 
@@ -681,6 +716,7 @@ def _render_one(
                 inactive_line_ids=inactive_line_ids,
                 layout_opts=layout_opts,
                 quiet=quiet,
+                graph=graph,
             )
         except click.ClickException:
             raise
@@ -692,6 +728,44 @@ def _render_one(
                 permissive=permissive,
                 source=input_file if quiet else None,
             )
+
+
+def _prepare_graph_for_render(
+    input_file: Path,
+    *,
+    from_nextflow: bool,
+    title: str | None,
+    line_spread: str | None,
+    logo: Path | None,
+    legend: str | None,
+    layout_opts: dict[str, object],
+    bare: bool,
+    svg_format: Literal["svg", "html"],
+    error_prefix: str,
+) -> MetroGraph:
+    """Parse and lay out *input_file*, reporting a typed failure via `_clean_error`."""
+    text = input_file.read_text()
+    try:
+        return prepare_graph(
+            text,
+            from_nextflow=from_nextflow,
+            title=title,
+            line_spread=line_spread,
+            logo=str(logo) if logo is not None else None,
+            legend=legend,
+            layout_options=layout_opts,
+            source_dir=str(input_file.resolve().parent),
+            bare=bare,
+            output_format=svg_format,
+        )
+    except (
+        ValueError,
+        CyclicGraphError,
+        BackwardFlowError,
+        MixedEntryDirectionError,
+        PhaseInvariantError,
+    ) as e:
+        _clean_error(e, error_prefix)
 
 
 def _render_one_unsafe(
@@ -721,34 +795,26 @@ def _render_one_unsafe(
     inactive_line_ids: frozenset[str] | None,
     layout_opts: dict[str, object],
     quiet: bool,
+    graph: MetroGraph | None = None,
 ) -> None:
-    text = input_file.read_text()
     error_prefix = _error_prefix(input_file, quiet)
     # PNG renders through the SVG backend and is rasterised afterward; every
     # render-plane decision below follows the SVG path regardless of format_.
     svg_format: Literal["svg", "html"] = "svg" if format_ == "png" else format_
 
-    try:
-        graph = prepare_graph(
-            text,
+    if graph is None:
+        graph = _prepare_graph_for_render(
+            input_file,
             from_nextflow=from_nextflow,
             title=title,
             line_spread=line_spread,
-            logo=str(logo) if logo is not None else None,
+            logo=logo,
             legend=legend,
-            layout_options=layout_opts,
-            source_dir=str(input_file.resolve().parent),
+            layout_opts=layout_opts,
             bare=bare,
-            output_format=svg_format,
+            svg_format=svg_format,
+            error_prefix=error_prefix,
         )
-    except (
-        ValueError,
-        CyclicGraphError,
-        BackwardFlowError,
-        MixedEntryDirectionError,
-        PhaseInvariantError,
-    ) as e:
-        _clean_error(e, error_prefix)
 
     if format_ == "png":
         # A rasteriser has no CSS cascade and no viewer colour-scheme to
