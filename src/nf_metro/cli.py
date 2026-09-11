@@ -7,7 +7,7 @@ import os
 import warnings
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Any, Literal, NoReturn, TypeVar, cast
+from typing import Any, Literal, NoReturn, TypeVar, cast, get_args
 
 import click
 
@@ -41,6 +41,9 @@ from nf_metro.parser.model import (
 from nf_metro.render import validate_render
 from nf_metro.themes import DEFAULT_MODE, STYLE_NAMES, THEMES, resolve_style
 
+RenderFormat = Literal["svg", "html", "png"]
+_RENDER_FORMATS: tuple[str, ...] = get_args(RenderFormat)
+
 
 @click.group()
 @click.version_option(version=__version__)
@@ -67,7 +70,7 @@ def _parse_inactive_lines(value: object) -> frozenset[str] | None:
     return frozenset(s for s in (str(i).strip() for i in items) if s)
 
 
-def _format_from_output(output: Path | None) -> Literal["svg", "html", "png"]:
+def _format_from_output(output: Path | None) -> RenderFormat:
     """Infer the output format from *output*'s extension, defaulting to SVG.
 
     Lets ``-o map.png`` stand on its own, so the common case needs no
@@ -76,8 +79,8 @@ def _format_from_output(output: Path | None) -> Literal["svg", "html", "png"]:
     """
     suffix = output.suffix.lower().lstrip(".") if output is not None else ""
     return cast(
-        'Literal["svg", "html", "png"]',
-        suffix if suffix in ("svg", "html", "png") else "svg",
+        RenderFormat,
+        suffix if suffix in _RENDER_FORMATS else "svg",
     )
 
 
@@ -127,7 +130,7 @@ def _numeric_cli_type(opt: LayoutOption) -> click.IntRange | _FiniteFloatRange:
 # same error there as it would from the flag.
 _SCALE_TYPE = _FiniteFloatRange(min=0, min_open=True)
 _PNG_WIDTH_TYPE = click.IntRange(min=0, min_open=True)
-_FORMAT_TYPE = click.Choice(["svg", "html", "png"])
+_FORMAT_TYPE = click.Choice(_RENDER_FORMATS)
 
 
 def _convert_manifest_number(
@@ -512,7 +515,7 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
 def render(
     input_files: tuple[Path, ...],
     outputs: tuple[Path, ...],
-    format_: Literal["svg", "html", "png"] | None,
+    format_: RenderFormat | None,
     scale: float,
     png_width: int | None,
     theme: str | None,
@@ -559,7 +562,7 @@ def render(
     def _job(
         input_file: Path,
         out_path: Path,
-        out_format: Literal["svg", "html", "png"],
+        out_format: RenderFormat,
         *,
         quiet: bool,
     ) -> Callable[[], None]:
@@ -619,7 +622,7 @@ def _render_one(
     input_file: Path,
     output: Path,
     *,
-    format_: Literal["svg", "html", "png"],
+    format_: RenderFormat,
     scale: float,
     png_width: int | None,
     theme: str | None,
@@ -695,7 +698,7 @@ def _render_one_unsafe(
     input_file: Path,
     output: Path,
     *,
-    format_: Literal["svg", "html", "png"],
+    format_: RenderFormat,
     scale: float,
     png_width: int | None,
     theme: str | None,
@@ -721,9 +724,9 @@ def _render_one_unsafe(
 ) -> None:
     text = input_file.read_text()
     error_prefix = _error_prefix(input_file, quiet)
-    # PNG is rasterised from the SVG, so every render-plane decision below
-    # follows the SVG path; only the final write differs.
-    svg_format: Literal["svg", "html"] = "html" if format_ == "html" else "svg"
+    # PNG renders through the SVG backend and is rasterised afterward; every
+    # render-plane decision below follows the SVG path regardless of format_.
+    svg_format: Literal["svg", "html"] = "svg" if format_ == "png" else format_
 
     try:
         graph = prepare_graph(
@@ -925,7 +928,7 @@ def render_many(manifest_file: Path) -> None:
                 Path(raw_input),
                 Path(raw_output),
                 format_=cast(
-                    Literal["svg", "html", "png"],
+                    RenderFormat,
                     _FORMAT_TYPE.convert(job.get("format", "svg"), None, None),
                 ),
                 scale=cast(
