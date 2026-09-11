@@ -68,8 +68,7 @@ def test_raster_width_pins_the_width_and_keeps_the_aspect_ratio(tmp_path: Path) 
     """--raster-width resizes the picture, where --width grows the SVG canvas.
 
     The distinction matters: --width leaves the map at its natural size and
-    pads the canvas around it, so it cannot stand in for the raster width the
-    old cairosvg recipe used.
+    pads the canvas around it, so it cannot stand in for a raster width.
     """
     natural = _image(_render(tmp_path, "nat.png", "--scale", "1"))
     pinned = _image(_render(tmp_path, "pinned.png", "--raster-width", "800"))
@@ -90,7 +89,7 @@ def test_raster_width_overrides_scale(tmp_path: Path) -> None:
 def test_png_bakes_the_requested_mode(
     tmp_path: Path, mode: str, expect_light: bool
 ) -> None:
-    """PNG output resolves the chrome colours itself (#863, #1205).
+    """PNG output resolves the chrome colours itself.
 
     A rasteriser has no CSS custom properties and no viewer colour-scheme, so
     the PNG path forces ``--no-chrome-css`` and a concrete mode. Without that
@@ -111,6 +110,44 @@ def test_repeated_output_writes_every_format_from_one_run(tmp_path: Path) -> Non
     assert result.exit_code == 0, result.output
     assert "<svg" in svg.read_text()
     assert _image(png).format == "PNG"
+
+
+def test_repeated_output_parses_the_input_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """svg+png share one parse/layout pass; a third, html output needs a second.
+
+    html's title-band reservation differs from svg/png's, so it cannot share
+    the first pass's graph - this pins that only a genuinely different
+    ``svg_format`` triggers a second ``prepare_graph`` call, not every output.
+    """
+    import nf_metro.cli as cli_module
+
+    calls: list[str] = []
+    original = cli_module.prepare_graph
+
+    def spy(*args: object, **kwargs: object) -> object:
+        calls.append(str(kwargs.get("output_format")))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cli_module, "prepare_graph", spy)
+
+    svg, png, html = tmp_path / "map.svg", tmp_path / "map.png", tmp_path / "map.html"
+    result = CliRunner().invoke(
+        cli,
+        [
+            "render",
+            str(STANDALONE_MMD),
+            "-o",
+            str(svg),
+            "-o",
+            str(png),
+            "-o",
+            str(html),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert calls == ["svg", "html"]
 
 
 def test_explicit_format_overrides_every_repeated_output(tmp_path: Path) -> None:
@@ -150,3 +187,22 @@ def test_repeated_output_still_refuses_several_inputs(tmp_path: Path) -> None:
     )
     assert result.exit_code != 0
     assert "single INPUT_FILE" in result.output
+
+
+def test_repeated_output_reports_a_shared_parse_failure_once(tmp_path: Path) -> None:
+    """An input rejected during the shared parse fails the whole render cleanly."""
+    empty_mmd = tmp_path / "empty.mmd"
+    empty_mmd.write_text("graph LR")
+    result = CliRunner().invoke(
+        cli,
+        [
+            "render",
+            str(empty_mmd),
+            "-o",
+            str(tmp_path / "a.svg"),
+            "-o",
+            str(tmp_path / "b.png"),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "no stations" in result.output

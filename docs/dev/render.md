@@ -195,7 +195,12 @@ To keep the picture identical, the SVG is emitted once with `animation_frame_slo
 The slot sits at the balls' place in the drawing order, so a frame stacks them behind the station markers exactly as the animation does, and the whole map is laid out and emitted once for the entire loop.
 
 The sequence covers `[0, 1)` of one cycle, stopping a frame short of repeating frame 0, so the loop wraps without a stutter.
-GIF and WebP are written by Pillow; MP4 and WebM stream the frames into `ffmpeg` over stdin.
+
+All four containers are muxed by PyAV, which ships FFmpeg in its own wheels, so no encoder has to be found on `PATH`.
+Frames reach the encoder one at a time, which is why a long loop never exists all at once.
+GIF frames are palette-indexed (`pal8`) with a shared palette Pillow quantises from the first frame, so the encoder writes the adaptive palette rather than picking a fixed one; the other three take RGB frames.
+The per-frame delay for GIF and WebP comes from the presentation timestamps in `_frame_ticks`, which round the running total rather than each frame, keeping the loop the length that was asked for.
+That tick time base has to be set on the stream's codec context: set on the stream instead, the muxer rescales from the nominal frame rate and an 8-second loop plays for 66.
 
 ## Theming (`style.py`)
 
@@ -235,7 +240,7 @@ It is then selectable through `%%metro style: <brand>` and `%%metro mode: <mode>
 | `manifest.py`       | nf-metro adapter for the embedded-manifest standard. `build_manifest`, `manifest_metadata_svg`                                        |
 | `validate.py`       | `validate_render` - render-geometry guards that read the drawn SVG (markers, route ink, label ink) as their own oracle                |
 | `animate.py`        | `render_animation` - animated balls via CSS `offset-path` + `@keyframes`; `build_animation_timeline` - the same paths, sampleable     |
-| `video.py`          | `write_animation` - a looping GIF/WebP/MP4/WebM of the animation, one rasterized frame per moment of the cycle                        |
+| `video.py`          | `write_animation` - a looping GIF/WebP/MP4/WebM of the animation, one rasterized frame per moment of the cycle, muxed through PyAV    |
 | `style.py`          | `Theme` dataclass                                                                                                                     |
 | `legend.py`         | `render_legend`, `compute_legend_dimensions`                                                                                          |
 | `icons.py`          | `render_file_icon`, `render_files_icon`, `render_folder_icon`                                                                         |

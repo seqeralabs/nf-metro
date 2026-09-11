@@ -65,7 +65,10 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        # The supported bounds only: requires-python's floor and the newest
+        # release. A break that hits 3.12 or 3.13 alone, and neither end, is
+        # rare enough not to be worth tripling the matrix for.
+        python-version: ["3.11", "3.14"]
         split: [1, 2, 3]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

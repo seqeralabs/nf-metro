@@ -14,15 +14,14 @@ a PNG without it would lay out against fallback metrics and draw in Inter.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import resvg_py
+
+from nf_metro.render.font_embed import _FONTS_DIR
 
 __all__ = ["svg_to_png"]
 
 # fontdb reads ttf/otf but not woff2, so these are the uncompressed twins of
-# the Inter-*.woff2 subsets beside them (tests/test_fonts.py keeps them in step).
-_FONTS_DIR = Path(__file__).parent.parent / "fonts"
+# the Inter-*.woff2 subsets beside them (tests/test_png_output.py keeps them in step).
 _FONT_FILES = [
     str(_FONTS_DIR / f"Inter-{weight}.ttf") for weight in ("Regular", "Bold")
 ]

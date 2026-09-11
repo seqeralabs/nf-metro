@@ -203,6 +203,54 @@ def test_video_containers_are_written_in_process(tmp_path: Path, suffix: str) ->
     )
 
 
+def test_render_many_exports_a_video_job(tmp_path: Path) -> None:
+    """A manifest job gets the same animation forcing a `render` job does.
+
+    The two reach `_render_one` by different routes, and a video job that
+    skipped the forcing would fail as a map with nothing to export.
+    """
+    import json
+
+    out = tmp_path / "map.gif"
+    manifest = tmp_path / "jobs.json"
+    manifest.write_text(
+        json.dumps(
+            [
+                {
+                    "input": str(STANDALONE_MMD),
+                    "output": str(out),
+                    "format": "gif",
+                    "duration": 1,
+                    "fps": 4,
+                }
+            ]
+        )
+    )
+    result = CliRunner().invoke(cli, ["render-many", str(manifest)])
+
+    assert result.exit_code == 0, result.output
+    with Image.open(out) as gif:
+        assert gif.n_frames == 4
+
+
+def test_a_video_beside_an_svg_leaves_the_svg_unanimated(tmp_path: Path) -> None:
+    """Repeated -o shares one prepared graph per backend, but not the animation.
+
+    `-o map.svg -o map.gif` asks for a still SVG and a moving loop. Handing
+    both the same graph would put balls on the SVG nobody asked to animate.
+    """
+    svg, gif = tmp_path / "map.svg", tmp_path / "map.gif"
+    result = CliRunner().invoke(
+        cli,
+        ["render", str(STANDALONE_MMD), "-o", str(svg), "-o", str(gif), *TINY],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "offset-path" not in svg.read_text()
+    with Image.open(gif) as loop:
+        assert loop.n_frames == 4
+
+
 # --- the refusals ----------------------------------------------------------
 
 

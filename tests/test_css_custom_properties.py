@@ -311,7 +311,7 @@ def test_marker_stroke_class_in_legend_swatches():
 
 
 def test_chrome_css_false_marker_stroke_is_concrete():
-    """chrome_css=False keeps the baked marker stroke for cairosvg rasterisation."""
+    """chrome_css=False keeps the baked marker stroke for raster export."""
     svg = render_svg(_make_marker_graph(), NFCORE_DARK_THEME, chrome_css=False)
     assert "var(--nfm-map-marker-stroke" not in svg
     assert 'stroke="' in svg

@@ -6,9 +6,9 @@ import math
 import os
 import sys
 import warnings
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
-from typing import Any, Literal, NoReturn, TypeVar, cast
+from typing import Any, Literal, NoReturn, TypeVar, cast, get_args
 
 import click
 
@@ -43,6 +43,16 @@ from nf_metro.render import validate_render
 from nf_metro.render.video import VIDEO_FORMATS, NotAnimatedError, VideoFormat
 from nf_metro.themes import DEFAULT_MODE, STYLE_NAMES, THEMES, resolve_style
 
+RenderFormat = Literal["svg", "html", "png", "gif", "webp", "mp4", "webm"]
+_RENDER_FORMATS: tuple[str, ...] = get_args(RenderFormat)
+
+#: Formats the rasteriser draws rather than ones written as text. All of them
+#: need the same picture-is-final decisions a PNG needs (see _render_one_unsafe).
+_RASTER_FORMATS: frozenset[str] = frozenset({"png", *VIDEO_FORMATS})
+
+#: Frames per second an exported loop runs at unless ``--fps`` says otherwise.
+DEFAULT_FPS = 12.0
+
 
 @click.group()
 @click.version_option(version=__version__)
@@ -69,20 +79,7 @@ def _parse_inactive_lines(value: object) -> frozenset[str] | None:
     return frozenset(s for s in (str(i).strip() for i in items) if s)
 
 
-OutputFormat = Literal["svg", "html", "png", "gif", "webp", "mp4", "webm"]
-
-#: Every format ``render`` writes, in the order ``--help`` lists them.
-OUTPUT_FORMATS: tuple[OutputFormat, ...] = ("svg", "html", "png", *VIDEO_FORMATS)
-
-#: Formats drawn by the rasteriser rather than written as text. All of them
-#: need the same picture-is-final decisions a PNG needs (see _render_one_unsafe).
-RASTER_FORMATS: frozenset[str] = frozenset({"png", *VIDEO_FORMATS})
-
-#: Frames per second an exported loop runs at unless ``--fps`` says otherwise.
-DEFAULT_FPS = 12.0
-
-
-def _format_from_output(output: Path | None) -> OutputFormat:
+def _format_from_output(output: Path | None) -> RenderFormat:
     """Infer the output format from *output*'s extension, defaulting to SVG.
 
     Lets ``-o map.png`` stand on its own, so the common case needs no
@@ -90,17 +87,61 @@ def _format_from_output(output: Path | None) -> OutputFormat:
     and wins, including over a mismatched extension.
     """
     suffix = output.suffix.lower().lstrip(".") if output is not None else ""
-    return cast(OutputFormat, suffix if suffix in OUTPUT_FORMATS else "svg")
+    return cast(
+        RenderFormat,
+        suffix if suffix in _RENDER_FORMATS else "svg",
+    )
+
+
+def _svg_format_for(out_format: RenderFormat) -> Literal["svg", "html"]:
+    """Return the format a graph is prepared/rendered under.
+
+    Only the interactive page has a backend of its own; PNG and the looping
+    video formats are all drawn from the SVG.
+    """
+    return "html" if out_format == "html" else "svg"
 
 
 def _default_scale(format_: str) -> float:
     """Return the raster scale to use when ``--scale`` is not given.
 
-    A PNG is usually a retina still, so it doubles by default. A loop is a
-    few hundred of those frames in one file, where doubling quadruples both
-    the bytes and the time for a picture that plays at screen size anyway.
+    A PNG is usually a retina still, so it doubles by default. A loop is a few
+    hundred of those frames in one file, where doubling quadruples both the
+    bytes and the time for a picture that plays at screen size anyway.
     """
     return 1.0 if format_ in VIDEO_FORMATS else 2.0
+
+
+def _forces_animation(
+    out_format: RenderFormat, layout_opts: Mapping[str, object]
+) -> bool:
+    """Whether *out_format* turns the animation on for a caller who did not.
+
+    A video of a map with no balls on it would be a still repeated a few
+    hundred times, so asking for one asks for the animation. An explicit
+    --animate/--no-animate still wins.
+    """
+    return out_format in VIDEO_FORMATS and layout_opts.get("animate") is None
+
+
+def _layout_opts_for(
+    out_format: RenderFormat, layout_opts: dict[str, object]
+) -> dict[str, object]:
+    """Return the layout options *out_format* is rendered under."""
+    if not _forces_animation(out_format, layout_opts):
+        return layout_opts
+    return {**layout_opts, "animate": True}
+
+
+def _graph_key(
+    out_format: RenderFormat, layout_opts: Mapping[str, object]
+) -> tuple[Literal["svg", "html"], bool]:
+    """Return the cache key for the graph *out_format* is rendered from.
+
+    Two outputs share a prepared graph only when they share both a backend and
+    an animation state.
+    """
+    return _svg_format_for(out_format), _forces_animation(out_format, layout_opts)
 
 
 class _FiniteFloatRange(click.FloatRange):
@@ -143,6 +184,29 @@ def _numeric_cli_type(opt: LayoutOption) -> click.IntRange | _FiniteFloatRange:
         hi = None if opt.max_val is None else int(opt.max_val)
         return click.IntRange(min=lo, max=hi, min_open=min_open)
     return _FiniteFloatRange(min=lo, max=opt.max_val, min_open=min_open)
+
+
+# Reused by the render-many manifest reader below, so a bad value gets the
+# same error there as it would from the flag.
+_SCALE_TYPE = _FiniteFloatRange(min=0, min_open=True)
+_FPS_TYPE = _FiniteFloatRange(min=0, min_open=True, max=60)
+_DURATION_TYPE = _FiniteFloatRange(min=0, min_open=True)
+_RASTER_WIDTH_TYPE = click.IntRange(min=0, min_open=True)
+_FORMAT_TYPE = click.Choice(_RENDER_FORMATS)
+
+
+def _convert_manifest_number(
+    param_type: click.ParamType[float | int], value: object, name: str
+) -> float | int:
+    """Run a manifest job's *value* through *param_type*, as the CLI flag would.
+
+    ``bool`` is an ``int`` subclass in Python, so a JSON ``true``/``false``
+    would otherwise pass ``_SCALE_TYPE``/``_RASTER_WIDTH_TYPE`` as ``1``/``0``; a
+    CLI flag can never receive a bool, so this refuses one here too.
+    """
+    if isinstance(value, bool):
+        raise ValueError(f"{name}: {value!r} is not a number")
+    return param_type.convert(value, None, None)
 
 
 def _layout_cli_option(opt: LayoutOption) -> Callable[..., Any]:
@@ -328,7 +392,7 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
 @click.option(
     "--format",
     "format_",
-    type=click.Choice(list(OUTPUT_FORMATS)),
+    type=_FORMAT_TYPE,
     default=None,
     help="Output format: 'svg' (default), 'png', 'html' for an interactive "
     "self-contained page with pan/zoom and per-line filtering, or one of "
@@ -337,22 +401,24 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
 )
 @click.option(
     "--scale",
-    type=float,
+    type=_SCALE_TYPE,
     default=None,
+    metavar="FLOAT",
     help="Raster formats only: multiply the rendered pixel dimensions by this "
     "factor.  [default: 2 for png, 1 for gif/webp/mp4/webm]",
 )
 @click.option(
     "--raster-width",
-    type=int,
+    type=_RASTER_WIDTH_TYPE,
     default=None,
+    metavar="INTEGER",
     help="Raster formats only: output width in pixels, height scaled with it. "
     "Overrides --scale. Distinct from --width, which grows the SVG canvas "
     "around a map drawn at its natural size rather than resizing the picture.",
 )
 @click.option(
     "--fps",
-    type=_FiniteFloatRange(min=0, min_open=True, max=60),
+    type=_FPS_TYPE,
     default=DEFAULT_FPS,
     show_default=True,
     metavar="FLOAT",
@@ -360,7 +426,7 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
 )
 @click.option(
     "--duration",
-    type=_FiniteFloatRange(min=0, min_open=True),
+    type=_DURATION_TYPE,
     default=None,
     metavar="FLOAT",
     help="Video formats only: length of one loop in seconds, compressing (or "
@@ -530,7 +596,7 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
 def render(
     input_files: tuple[Path, ...],
     outputs: tuple[Path, ...],
-    format_: OutputFormat | None,
+    format_: RenderFormat | None,
     scale: float | None,
     raster_width: int | None,
     fps: float,
@@ -579,9 +645,10 @@ def render(
     def _job(
         input_file: Path,
         out_path: Path,
-        out_format: OutputFormat,
+        out_format: RenderFormat,
         *,
         quiet: bool,
+        graph: MetroGraph | None = None,
     ) -> Callable[[], None]:
         return lambda: _render_one(
             input_file,
@@ -611,6 +678,7 @@ def render(
             inactive_line_ids=inactive_line_ids,
             layout_opts=layout_opts,
             quiet=quiet,
+            graph=graph,
         )
 
     # One job per output when -o is given (each output carries its own format,
@@ -629,36 +697,63 @@ def render(
         _job(source, out_path, out_format, quiet=False)()
         return
 
+    # Repeated -o always shares one input file (validated above), so every job's
+    # svg_format ("svg" or "html"; png renders through "svg") shares a layout -
+    # parse and lay it out once per distinct svg_format instead of once per job,
+    # capturing and reporting that shared step's warnings the same way a single
+    # job would (permissive downgrades included).
+    # A video output turns the animation on (see _layout_opts_for), which is a
+    # different layout from the one a plain .svg beside it wants, so the key
+    # carries that too rather than handing one graph to both.
+    graphs: dict[tuple[Literal["svg", "html"], bool], MetroGraph] = {}
+    if outputs:
+        permissive = bool(layout_opts.get("permissive"))
+        with warnings.catch_warnings(record=True) as caught:
+            if permissive:
+                warnings.filterwarnings("always", category=PermissiveGuardWarning)
+            try:
+                for _, source, _, out_format in jobs:
+                    key = _graph_key(out_format, layout_opts)
+                    if key not in graphs:
+                        graphs[key] = _prepare_graph_for_render(
+                            source,
+                            from_nextflow=from_nextflow,
+                            title=title,
+                            line_spread=line_spread,
+                            logo=logo,
+                            legend=legend,
+                            layout_opts=_layout_opts_for(out_format, layout_opts),
+                            bare=bare,
+                            svg_format=key[0],
+                            error_prefix=_error_prefix(source, quiet=True),
+                        )
+            finally:
+                _report_render_warnings(
+                    caught, permissive=permissive, source=input_files[0]
+                )
+
     _run_batch(
         [
-            (label, _job(source, out_path, out_format, quiet=True))
+            (
+                label,
+                _job(
+                    source,
+                    out_path,
+                    out_format,
+                    quiet=True,
+                    graph=graphs.get(_graph_key(out_format, layout_opts)),
+                ),
+            )
             for label, source, out_path, out_format in jobs
         ]
     )
-
-
-def _video_notice(message: str) -> None:
-    """Print what a large export is about to cost, before it starts."""
-    click.echo(f"Note: {message}", err=True)
-
-
-def _video_progress(frames: Iterable[bytes], count: int) -> Iterator[bytes]:
-    """Draw a progress bar over the frames as they rasterise.
-
-    An export runs for minutes, and click hides the bar when stderr is not a
-    terminal, so a piped or logged run stays as quiet as every other render.
-    """
-    with click.progressbar(
-        frames, length=count, label="Rendering frames", file=sys.stderr
-    ) as tracked:
-        yield from tracked
 
 
 def _render_one(
     input_file: Path,
     output: Path,
     *,
-    format_: OutputFormat,
+    format_: RenderFormat,
     scale: float,
     raster_width: int | None,
     fps: float,
@@ -683,7 +778,12 @@ def _render_one(
     inactive_line_ids: frozenset[str] | None,
     layout_opts: dict[str, object],
     quiet: bool,
+    graph: MetroGraph | None = None,
 ) -> None:
+    # Applied here rather than in either caller, so `render` and `render-many`
+    # both get it; `render`'s graph cache keys on the same predicate, so a
+    # shared graph it hands in was prepared under these same options.
+    layout_opts = _layout_opts_for(format_, layout_opts)
     permissive = bool(layout_opts.get("permissive"))
 
     # PermissiveGuardWarning's filter is forced to "always" so a downgraded
@@ -721,6 +821,7 @@ def _render_one(
                 inactive_line_ids=inactive_line_ids,
                 layout_opts=layout_opts,
                 quiet=quiet,
+                graph=graph,
             )
         except click.ClickException:
             raise
@@ -734,11 +835,49 @@ def _render_one(
             )
 
 
+def _prepare_graph_for_render(
+    input_file: Path,
+    *,
+    from_nextflow: bool,
+    title: str | None,
+    line_spread: str | None,
+    logo: Path | None,
+    legend: str | None,
+    layout_opts: dict[str, object],
+    bare: bool,
+    svg_format: Literal["svg", "html"],
+    error_prefix: str,
+) -> MetroGraph:
+    """Parse and lay out *input_file*, reporting a typed failure via `_clean_error`."""
+    text = input_file.read_text()
+    try:
+        return prepare_graph(
+            text,
+            from_nextflow=from_nextflow,
+            title=title,
+            line_spread=line_spread,
+            logo=str(logo) if logo is not None else None,
+            legend=legend,
+            layout_options=layout_opts,
+            source_dir=str(input_file.resolve().parent),
+            bare=bare,
+            output_format=svg_format,
+        )
+    except (
+        ValueError,
+        CyclicGraphError,
+        BackwardFlowError,
+        MixedEntryDirectionError,
+        PhaseInvariantError,
+    ) as e:
+        _clean_error(e, error_prefix)
+
+
 def _render_one_unsafe(
     input_file: Path,
     output: Path,
     *,
-    format_: OutputFormat,
+    format_: RenderFormat,
     scale: float,
     raster_width: int | None,
     fps: float,
@@ -763,47 +902,31 @@ def _render_one_unsafe(
     inactive_line_ids: frozenset[str] | None,
     layout_opts: dict[str, object],
     quiet: bool,
+    graph: MetroGraph | None = None,
 ) -> None:
-    text = input_file.read_text()
     error_prefix = _error_prefix(input_file, quiet)
-    # Every raster format is drawn from the SVG, so every render-plane
-    # decision below follows the SVG path; only the final write differs.
-    svg_format: Literal["svg", "html"] = "html" if format_ == "html" else "svg"
+    # PNG renders through the SVG backend and is rasterised afterward; every
+    # render-plane decision below follows the SVG path regardless of format_.
+    svg_format = _svg_format_for(format_)
 
-    if format_ in VIDEO_FORMATS:
-        # A video of a map with no balls on it would be a still repeated a
-        # few hundred times, so asking for one asks for the animation; an
-        # explicit --no-animate still wins, and fails with a message saying
-        # there is nothing to export.
-        if layout_opts.get("animate") is None:
-            layout_opts = {**layout_opts, "animate": True}
-
-    try:
-        graph = prepare_graph(
-            text,
+    if graph is None:
+        graph = _prepare_graph_for_render(
+            input_file,
             from_nextflow=from_nextflow,
             title=title,
             line_spread=line_spread,
-            logo=str(logo) if logo is not None else None,
+            logo=logo,
             legend=legend,
-            layout_options=layout_opts,
-            source_dir=str(input_file.resolve().parent),
+            layout_opts=layout_opts,
             bare=bare,
-            output_format=svg_format,
+            svg_format=svg_format,
+            error_prefix=error_prefix,
         )
-    except (
-        ValueError,
-        CyclicGraphError,
-        BackwardFlowError,
-        MixedEntryDirectionError,
-        PhaseInvariantError,
-    ) as e:
-        _clean_error(e, error_prefix)
 
-    if format_ in RASTER_FORMATS:
+    if format_ in _RASTER_FORMATS:
         # A rasteriser has no CSS cascade and no viewer colour-scheme to
         # consult, so the picture has to be fully decided here rather than
-        # left to the flags a caller remembered to pass (#863, #1205):
+        # left to the flags a caller remembered to pass:
         #  - chrome_css off, or the var() chrome colours reach resvg unresolved
         #  - a concrete baked mode, or light-dark() has nothing to resolve to
         #  - embedded Inter, so the layout is measured against the same face
@@ -918,6 +1041,23 @@ def _render_one_unsafe(
         )
 
 
+def _video_notice(message: str) -> None:
+    """Print what a large export is about to cost, before it starts."""
+    click.echo(f"Note: {message}", err=True)
+
+
+def _video_progress(frames: Iterable[bytes], count: int) -> Iterator[bytes]:
+    """Draw a progress bar over the frames as they rasterise.
+
+    An export runs for minutes, and click hides the bar when stderr is not a
+    terminal, so a piped or logged run stays as quiet as every other render.
+    """
+    with click.progressbar(
+        frames, length=count, label="Rendering frames", file=sys.stderr
+    ) as tracked:
+        yield from tracked
+
+
 @cli.command(name="render-many")
 @click.argument("manifest_file", type=click.Path(exists=True, path_type=Path))
 def render_many(manifest_file: Path) -> None:
@@ -1001,23 +1141,50 @@ def render_many(manifest_file: Path) -> None:
                 v = job.get(key)
                 return str(v) if v else None
 
+            job_format = cast(
+                RenderFormat,
+                _FORMAT_TYPE.convert(job.get("format", "svg"), None, None),
+            )
             logo_raw = job.get("logo")
             lo_raw = job.get("layout_options")
 
-            job_format = cast(OutputFormat, str(job.get("format", "svg")))
             _render_one(
                 Path(raw_input),
                 Path(raw_output),
                 format_=job_format,
-                scale=float(cast(float, job.get("scale", _default_scale(job_format)))),
-                raster_width=(
-                    int(cast(int, job["raster_width"]))
-                    if job.get("raster_width")
+                scale=cast(
+                    float,
+                    _convert_manifest_number(
+                        _SCALE_TYPE,
+                        job.get("scale", _default_scale(job_format)),
+                        "scale",
+                    ),
+                ),
+                fps=cast(
+                    float,
+                    _convert_manifest_number(
+                        _FPS_TYPE, job.get("fps", DEFAULT_FPS), "fps"
+                    ),
+                ),
+                duration=(
+                    cast(
+                        float,
+                        _convert_manifest_number(
+                            _DURATION_TYPE, job["duration"], "duration"
+                        ),
+                    )
+                    if "duration" in job
                     else None
                 ),
-                fps=float(cast(float, job.get("fps", DEFAULT_FPS))),
-                duration=(
-                    float(cast(float, job["duration"])) if job.get("duration") else None
+                raster_width=(
+                    cast(
+                        int,
+                        _convert_manifest_number(
+                            _RASTER_WIDTH_TYPE, job["raster_width"], "raster_width"
+                        ),
+                    )
+                    if "raster_width" in job
+                    else None
                 ),
                 theme=_str_or_none("theme"),
                 mode=_str_or_none("mode"),
