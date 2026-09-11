@@ -306,6 +306,129 @@ def _has_in_section_feeder(
     return False
 
 
+def _in_section_forward_reachable(
+    graph: MetroGraph, start_id: str, section: Section
+) -> set[str]:
+    """In-section, non-port stations forward-reachable from *start_id*.
+
+    ``start_id`` itself is excluded; the walk stops at ports and section
+    boundaries so it stays within *section*'s own flow.
+    """
+    seen: set[str] = set()
+    stack = [start_id]
+    while stack:
+        node = stack.pop()
+        for edge in graph.edges_from(node):
+            tgt = graph.stations.get(edge.target)
+            if (
+                tgt is None
+                or tgt.is_port
+                or tgt.section_id != section.id
+                or edge.target in seen
+            ):
+                continue
+            seen.add(edge.target)
+            stack.append(edge.target)
+    return seen
+
+
+def _entry_fan_root_trunk_station(
+    graph: MetroGraph, port_id: str, entry_section: Section
+) -> Station | None:
+    """The internal root of an entry fan the port also feeds a deeper arm of.
+
+    :func:`_entry_fan_trunk_station` handles a fan whose direct targets are all
+    section roots.  This covers the complementary shape: a port that feeds one
+    root station directly *and* directly feeds a deeper arm the root itself also
+    reaches (e.g. a root that fans internally, with the port carrying a separate
+    line straight to one of the fan's arms).  Here the ``roots`` test declines
+    -- only one target is a section root -- yet the flow plainly enters at that
+    root, so the port belongs on the root's row: its lead line runs straight
+    into the trunk and the deeper arm drops off it, instead of the port seating
+    on the deeper arm and dragging the root line through a boundary dogleg.
+
+    The root is the one direct target that is an in-section ancestor of every
+    other direct target.  Being their common ancestor, it reaches every exit
+    they reach and cannot itself be a dead-end output spur, so no separate
+    spur/through split is needed.
+
+    Returns ``None`` when the port feeds a single target or no direct target is
+    the common ancestor of the rest.
+    """
+    targets: list[str] = []
+    for edge in graph.edges_from(port_id):
+        st = graph.station_for_edge_target(edge)
+        if st.is_port or st.section_id != entry_section.id:
+            continue
+        if st.id not in targets:
+            targets.append(st.id)
+    if len(targets) < 2:
+        return None
+    target_set = set(targets)
+    for cand in targets:
+        reachable = _in_section_forward_reachable(graph, cand, entry_section)
+        if target_set - {cand} <= reachable:
+            return graph.stations.get(cand)
+    return None
+
+
+def _entry_fed_from_same_row(
+    graph: MetroGraph, port_id: str, entry_section: Section
+) -> bool:
+    """Whether the entry port carries a feed from a section in its own grid row.
+
+    A same-row feed is this section's share of the row's horizontal trunk, so
+    its lead line should run straight into the section root.  A purely cross-row
+    feed -- a fold or an inter-row drop -- enters perpendicular to the flow and
+    is seated by a different rule, so the horizontal root-trunk seat does not
+    apply to it.
+    """
+    seen: set[str] = set()
+    stack = [port_id]
+    while stack:
+        node = stack.pop()
+        for edge in graph.edges_to(node):
+            src = edge.source
+            if src in seen:
+                continue
+            seen.add(src)
+            if src in graph.junction_ids or graph.ports.get(src) is not None:
+                stack.append(src)
+                continue
+            st = graph.stations.get(src)
+            if st is None or st.is_port or st.section_id is None:
+                continue
+            if st.section_id == entry_section.id:
+                continue
+            fed_section = graph.sections.get(st.section_id)
+            if fed_section is not None and (
+                fed_section.grid_row == entry_section.grid_row
+            ):
+                return True
+    return False
+
+
+def _entry_port_fan_trunk(
+    graph: MetroGraph, port_id: str, entry_section: Section
+) -> Station | None:
+    """The trunk station an entry port's Y should follow, or ``None``.
+
+    Combines the two fan-trunk shapes: a fan whose direct targets are all
+    section roots (:func:`_entry_fan_trunk_station`) and a fan whose port feeds
+    one root plus a deeper arm the root reaches
+    (:func:`_entry_fan_root_trunk_station`).  The root-plus-arm shape is only
+    honoured for a same-row (horizontal-trunk) feed; a cross-row feed enters
+    perpendicular and keeps its own seating.  ``None`` when neither applies, so
+    callers fall back to their default seating.
+    """
+    trunk = _entry_fan_trunk_station(graph, port_id, entry_section)
+    if trunk is not None:
+        return trunk
+    if _entry_fed_from_same_row(graph, port_id, entry_section):
+        return _entry_fan_root_trunk_station(graph, port_id, entry_section)
+    return None
+
+
 def _align_lr_entry_port(
     graph: MetroGraph,
     port_id: str,
@@ -315,7 +438,7 @@ def _align_lr_entry_port(
 ) -> None:
     """Align a LEFT/RIGHT entry port's Y with its incoming source."""
     if lanes_run_along_y(entry_section.direction):
-        trunk_st = _entry_fan_trunk_station(graph, port_id, entry_section)
+        trunk_st = _entry_port_fan_trunk(graph, port_id, entry_section)
         if trunk_st is not None:
             _set_port_y(graph, port_id, trunk_st.y)
             return
@@ -1055,7 +1178,7 @@ def _snap_grid_group_entry_ports(graph: MetroGraph) -> None:
         # the first connected non-port station.  Picking the first target
         # arbitrarily can land the port on an output spur or a cross-fed
         # convergence arm rather than the main chain.
-        trunk_st = _entry_fan_trunk_station(graph, port_id, section)
+        trunk_st = _entry_port_fan_trunk(graph, port_id, section)
         if trunk_st is not None:
             target_y = trunk_st.y
         else:
