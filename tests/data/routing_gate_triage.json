@@ -671,6 +671,10 @@
   "note": "_is_row_level_bottom_row_climb's null guard; neither swept caller can pass a None coordinate. _bypass_geometry asserts src_col/tgt_col non-None and only calls it under cross_row, and cross_row is True only when both rows are set: merge_trunk_force_cross_row returns False unless src_row is not None and tgt_row == src_row, and the other disjunct requires both rows non-None. _fan_bypass_band passes non-None src_col/src_row and a checked tgt_col, and any placed target entry-port section resolves a non-negative grid_row. No fixture in the render corpus reaches the None arm.",
   "status": "defensive"
  },
+ "inter_section_handlers.py::if src_sec is None or tgt_sec is None:::#1": {
+  "note": "_flanked_cross_row_riser_seat_x's type-narrowing guard before it reads both sections' grid columns. The corpus reaches this seat only for exit-port sources whose section resolves, and every perpendicular-entry target owns a section, so no swept fixture hits the None arm; it stays as a defensive narrow.",
+  "status": "defensive"
+ },
  "inter_section_handlers.py::if src_sec is not None and src_sec.bbox_w > 0:::#1": {
   "note": "A bypass source section always resolves and has bbox_w>0 (the parser never emits an empty section); the None/zero-width arm never fires.",
   "status": "defensive"

@@ -28,6 +28,7 @@ import pytest
 from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
     COORD_TOLERANCE,
+    EDGE_TO_BUNDLE_CLEARANCE,
     MIN_CORRIDOR_Y_OVERLAP,
 )
 from nf_metro.layout.engine import compute_layout
@@ -39,7 +40,6 @@ from nf_metro.layout.routing.common import (
     gap_lo_for_x,
 )
 from nf_metro.layout.routing.invariants import (
-    _MIN_RISER_EDGE_CLEARANCE,
     check_gap_channels_materialized,
     check_no_riser_hugs_section_edge,
     check_opposing_gap_channel_clearance,
@@ -145,8 +145,8 @@ def test_flanked_riser_renders_without_curve_defect(stem: str) -> None:
 
     x, gap_lo, row = _flanked_gap_riser(graph, routes, offsets)
     left, right = column_gap_edges(graph, gap_lo, gap_lo + 1, row=row)
-    assert x - left >= _MIN_RISER_EDGE_CLEARANCE - COORD_TOLERANCE, (stem, x, left)
-    assert right - x >= _MIN_RISER_EDGE_CLEARANCE - COORD_TOLERANCE, (stem, x, right)
+    assert x - left >= EDGE_TO_BUNDLE_CLEARANCE - COORD_TOLERANCE, (stem, x, left)
+    assert right - x >= EDGE_TO_BUNDLE_CLEARANCE - COORD_TOLERANCE, (stem, x, right)
 
 
 def test_crossline_counter_running_lines_keep_bundle_clearance() -> None:
@@ -188,5 +188,5 @@ def test_left_exit_flanked_riser_clears_its_exit_wall() -> None:
 
     x, gap_lo, row = _flanked_gap_riser(graph, routes, offsets)
     left, right = column_gap_edges(graph, gap_lo, gap_lo + 1, row=row)
-    assert x - left >= _MIN_RISER_EDGE_CLEARANCE - COORD_TOLERANCE, (x, left)
-    assert right - x >= _MIN_RISER_EDGE_CLEARANCE - COORD_TOLERANCE, (x, right)
+    assert x - left >= EDGE_TO_BUNDLE_CLEARANCE - COORD_TOLERANCE, (x, left)
+    assert right - x >= EDGE_TO_BUNDLE_CLEARANCE - COORD_TOLERANCE, (x, right)

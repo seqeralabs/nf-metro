@@ -45,6 +45,7 @@ from nf_metro.layout.geometry import (
 )
 from nf_metro.layout.route_topology import divergence_junction_sources
 from nf_metro.layout.routing.common import (
+    flanked_cross_row_riser_neighbour_col,
     inter_row_wrap_band,
     max_grid_row_with_content,
     merge_junction_ids,
@@ -1078,13 +1079,18 @@ def _flanked_cross_row_riser_gap(
     if src_sec is None or tgt_sec is None:
         return None
     src_col = col_assign.get(src_sec.id)
-    if (
-        src_col is None
-        or src_col != col_assign.get(tgt_sec.id)
-        or src_sec.grid_row == tgt_sec.grid_row
-    ):
+    tgt_col = col_assign.get(tgt_sec.id)
+    if src_col is None or tgt_col is None:
         return None
-    neighbour = src_col + (1 if src_port.side is PortSide.RIGHT else -1)
+    neighbour = flanked_cross_row_riser_neighbour_col(
+        src_col,
+        src_sec.grid_row,
+        tgt_col,
+        tgt_sec.grid_row,
+        exit_is_right=src_port.side is PortSide.RIGHT,
+    )
+    if neighbour is None:
+        return None
     flanked = any(
         col_assign.get(other.id) == neighbour and other.grid_row == src_sec.grid_row
         for other in graph.sections.values()
@@ -1125,7 +1131,7 @@ def _bundles_in_gap(
     is the number of distinct lines in that bundle.
     """
     junction_ids = graph.junction_ids
-    bundles: dict[tuple[str, int], set[str]] = defaultdict(set)
+    bundles: dict[tuple[str | int, ...], set[str]] = defaultdict(set)
 
     lo, hi = min(col_a, col_b), max(col_a, col_b)
 
@@ -1168,7 +1174,7 @@ def _bundles_in_gap(
     # there.
     for edge in graph.edges:
         if _flanked_cross_row_riser_gap(graph, edge, col_assign) == (lo, hi):
-            bundles[(f"riser\0{edge.source}\0{edge.target}", 0)].add(edge.line_id)
+            bundles[("riser", edge.source, edge.target)].add(edge.line_id)
 
     # A same-line fan into two horizontal cell-mates can share its lead-in and
     # then split into opposing target-side channels. Endpoint-only inference

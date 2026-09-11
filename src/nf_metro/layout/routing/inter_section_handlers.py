@@ -70,6 +70,7 @@ from nf_metro.layout.routing.common import (
     col_right_edge,
     column_gap_edges,
     endpoint_port_xs,
+    flanked_cross_row_riser_neighbour_col,
     gap_lo_for_x,
     header_corridor_y,
     horizontal_direction,
@@ -4627,9 +4628,17 @@ def _flanked_cross_row_riser_seat_x(
     the neighbouring column is open at the source row (the unflanked riser keeps
     its minimal off-wall lead-in).
     """
-    if src_sec is None or tgt_sec is None or src_sec.grid_col != tgt_sec.grid_col:
+    if src_sec is None or tgt_sec is None:
         return None
-    neighbour = src_sec.grid_col + (1 if exit_side is Direction.R else -1)
+    neighbour = flanked_cross_row_riser_neighbour_col(
+        src_sec.grid_col,
+        src_sec.grid_row,
+        tgt_sec.grid_col,
+        tgt_sec.grid_row,
+        exit_is_right=exit_side is Direction.R,
+    )
+    if neighbour is None:
+        return None
     if not any(
         other.grid_col == neighbour and other.grid_row == src_sec.grid_row
         for other in ctx.graph.sections.values()

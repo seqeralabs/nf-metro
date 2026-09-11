@@ -502,6 +502,7 @@
   "inter_section_handlers.py::if src_row is None or ep_row is None or src_col is None or ep_col is None:::#1",
   "inter_section_handlers.py::if src_row is None or tgt_row is None or src_col is None or tgt_col is None:::#1",
   "inter_section_handlers.py::if src_sec is None or tgt_sec is None or src_sec.grid_row >= tgt_sec.grid_row:::#1",
+  "inter_section_handlers.py::if src_sec is None or tgt_sec is None:::#1",
   "inter_section_handlers.py::if src_sec is None:::#1",
   "inter_section_handlers.py::if src_sec is not None and src_sec.bbox_w > 0:::#1",
   "inter_section_handlers.py::if src_sec is not None:::#1",
