@@ -527,11 +527,11 @@ def _terminus_stacked_pad(theme: Theme, has_stacked: bool) -> float:
 
 @dataclass(frozen=True)
 class _TerminusFlowContext:
-    """Flow-axis facts shared by every terminus-icon placement computation.
+    """Flow-axis facts for placing a terminus station's icon(s).
 
-    ``section_dir``, ``is_vertical_flow``, ``is_source``, and ``flow_sign``
-    are all derived from ``section`` and ``is_source`` alone; bundling them
-    avoids re-deriving the same tuple at each call site.
+    ``section_dir`` derives from ``section``; ``is_vertical_flow`` from
+    ``section_dir``; ``is_source`` from the station's incoming edges; and
+    ``flow_sign`` from ``section_dir`` and ``is_source``.
     """
 
     section: Section | None

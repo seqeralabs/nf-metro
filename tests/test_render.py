@@ -444,93 +444,6 @@ def test_font_scale_rails_source_icon_fits_section_bbox():
     )
 
 
-_LR_TERMINUS_MMD = """%%metro line: main | Main | #4CAF50
-%%metro files: reads_in | FASTQ
-%%metro file: report_out | HTML
-graph LR
-    subgraph sec [Section]
-        reads_in[ ]
-        step[Step]
-        report_out[ ]
-        reads_in -->|main| step
-        step -->|main| report_out
-    end
-"""
-
-_TB_TERMINUS_MMD = """%%metro line: main | Main | #4CAF50
-%%metro files: reads_in | FASTQ
-%%metro file: report_out | HTML
-graph LR
-    subgraph sec [Section]
-        %%metro direction: TB
-        reads_in[ ]
-        step[Step]
-        report_out[ ]
-        reads_in -->|main| step
-        step -->|main| report_out
-    end
-"""
-
-_RL_TERMINUS_MMD = """%%metro line: main | Main | #4CAF50
-%%metro files: reads_in | FASTQ
-%%metro file: report_out | HTML
-graph LR
-    subgraph sec [Section]
-        %%metro direction: RL
-        reads_in[ ]
-        step[Step]
-        report_out[ ]
-        reads_in -->|main| step
-        step -->|main| report_out
-    end
-"""
-
-
-@pytest.mark.parametrize(
-    ("mmd", "section_dir", "is_vertical_flow"),
-    [
-        (_LR_TERMINUS_MMD, "LR", False),
-        (_TB_TERMINUS_MMD, "TB", True),
-        (_RL_TERMINUS_MMD, "RL", False),
-    ],
-)
-def test_terminus_flow_context_matches_hand_derivation(
-    mmd, section_dir, is_vertical_flow
-):
-    """``_terminus_flow_context`` must reproduce the tuple every call site once
-    derived by hand: ``(section, section_dir, is_vertical_flow, is_source,
-    flow_sign)``.
-
-    Covers a source and a sink terminus in each of a horizontal (LR), a
-    vertical (TB), and a reversed-horizontal (RL) section, since the sign
-    formula (``_terminus_icon_flow_sign``) branches on both axis and
-    direction.
-    """
-    from nf_metro.render.svg import _terminus_flow_context, _terminus_icon_flow_sign
-
-    graph = parse_metro_mermaid(mmd)
-    compute_layout(graph)
-
-    source_station = graph.stations["reads_in"]
-    sink_station = graph.stations["report_out"]
-
-    source_ctx = _terminus_flow_context(source_station, graph)
-    sink_ctx = _terminus_flow_context(sink_station, graph)
-
-    section = graph.sections[source_station.section_id]
-    assert source_ctx.section is section
-    assert sink_ctx.section is section
-    assert source_ctx.section_dir == section_dir
-    assert sink_ctx.section_dir == section_dir
-    assert source_ctx.is_vertical_flow is is_vertical_flow
-    assert sink_ctx.is_vertical_flow is is_vertical_flow
-    assert source_ctx.is_source is True
-    assert sink_ctx.is_source is False
-
-    assert source_ctx.flow_sign == _terminus_icon_flow_sign(section_dir, True)
-    assert sink_ctx.flow_sign == _terminus_icon_flow_sign(section_dir, False)
-
-
 def test_title_baseline_clears_its_own_ascent():
     """An enlarged title drops its baseline instead of ascending off-canvas."""
     from nf_metro.render.constants import (
@@ -1209,6 +1122,31 @@ def test_stacked_files_icon_back_page_does_not_crowd_marker(direction, role):
         f"{direction}/{role}: back page gap {back_gap:.1f} < front page gap "
         f"{front_gap:.1f} -- back page crowds the marker"
     )
+
+
+@pytest.mark.parametrize("direction", ["LR", "RL", "TB", "BT"])
+@pytest.mark.parametrize("role", ["source", "sink"])
+def test_terminus_flow_context_matches_hand_derivation(direction, role):
+    """``_terminus_flow_context`` produces ``(section, section_dir,
+    is_vertical_flow, is_source, flow_sign)`` consistent with the station's
+    section direction and edge topology, for a source and a sink terminus on
+    every flow axis (LR, RL, TB, BT).
+    """
+    from nf_metro.render.svg import _terminus_flow_context, _terminus_icon_flow_sign
+
+    graph = parse_metro_mermaid(_files_terminus_mmd(direction, role))
+    compute_layout(graph)
+    station = graph.stations["t"]
+    section = graph.sections["sec"]
+    is_source = role == "source"
+
+    ctx = _terminus_flow_context(station, graph)
+
+    assert ctx.section is section
+    assert ctx.section_dir == direction
+    assert ctx.is_vertical_flow == lanes_run_along_x(direction)
+    assert ctx.is_source is is_source
+    assert ctx.flow_sign == _terminus_icon_flow_sign(direction, is_source)
 
 
 def test_render_tb_section_file_icon_below_station():
