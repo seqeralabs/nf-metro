@@ -129,6 +129,20 @@ _SCALE_TYPE = _FiniteFloatRange(min=0, min_open=True)
 _PNG_WIDTH_TYPE = click.IntRange(min=0, min_open=True)
 
 
+def _convert_manifest_number(
+    param_type: click.ParamType[float | int], value: object, name: str
+) -> float | int:
+    """Run a manifest job's *value* through *param_type*, as the CLI flag would.
+
+    ``bool`` is an ``int`` subclass in Python, so a JSON ``true``/``false``
+    would otherwise pass ``_SCALE_TYPE``/``_PNG_WIDTH_TYPE`` as ``1``/``0``; a
+    CLI flag can never receive a bool, so this refuses one here too.
+    """
+    if isinstance(value, bool):
+        raise ValueError(f"{name}: {value!r} is not a number")
+    return param_type.convert(value, None, None)
+
+
 def _layout_cli_option(opt: LayoutOption) -> Callable[..., Any]:
     """Build the ``click.option`` decorator for a registry option.
 
@@ -913,10 +927,18 @@ def render_many(manifest_file: Path) -> None:
                     Literal["svg", "html", "png"], str(job.get("format", "svg"))
                 ),
                 scale=cast(
-                    float, _SCALE_TYPE.convert(job.get("scale", 2.0), None, None)
+                    float,
+                    _convert_manifest_number(
+                        _SCALE_TYPE, job.get("scale", 2.0), "scale"
+                    ),
                 ),
                 png_width=(
-                    cast(int, _PNG_WIDTH_TYPE.convert(job["png_width"], None, None))
+                    cast(
+                        int,
+                        _convert_manifest_number(
+                            _PNG_WIDTH_TYPE, job["png_width"], "png_width"
+                        ),
+                    )
                     if "png_width" in job
                     else None
                 ),

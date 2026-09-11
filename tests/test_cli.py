@@ -642,6 +642,25 @@ def test_render_many_rejects_non_positive_png_width(tmp_path):
     assert "not in the range" in result.output
 
 
+@pytest.mark.parametrize("key", ["scale", "png_width"])
+def test_render_many_rejects_boolean_numeric_values(tmp_path, key):
+    """A JSON true/false for scale/png_width is refused, not coerced to 1/0."""
+    manifest = _write_manifest(
+        tmp_path,
+        [
+            {
+                "input": str(RNASEQ_MMD),
+                "output": str(tmp_path / "out.png"),
+                "format": "png",
+                key: True,
+            }
+        ],
+    )
+    result = CliRunner().invoke(cli, ["render-many", str(manifest)])
+    assert result.exit_code != 0
+    assert "is not a number" in result.output
+
+
 def test_render_many_bad_manifest_json(tmp_path):
     """render-many fails cleanly on unparseable manifest JSON."""
     manifest = tmp_path / "bad.json"
