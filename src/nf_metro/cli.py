@@ -123,6 +123,12 @@ def _numeric_cli_type(opt: LayoutOption) -> click.IntRange | _FiniteFloatRange:
     return _FiniteFloatRange(min=lo, max=opt.max_val, min_open=min_open)
 
 
+# Reused by the render-many manifest reader below, so a bad value gets the
+# same error there as it would from the flag.
+_SCALE_TYPE = _FiniteFloatRange(min=0, min_open=True)
+_PNG_WIDTH_TYPE = click.IntRange(min=0, min_open=True)
+
+
 def _layout_cli_option(opt: LayoutOption) -> Callable[..., Any]:
     """Build the ``click.option`` decorator for a registry option.
 
@@ -314,7 +320,7 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
 )
 @click.option(
     "--scale",
-    type=_FiniteFloatRange(min=0, min_open=True),
+    type=_SCALE_TYPE,
     default=2.0,
     show_default=True,
     metavar="FLOAT",
@@ -322,7 +328,7 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
 )
 @click.option(
     "--png-width",
-    type=click.IntRange(min=0, min_open=True),
+    type=_PNG_WIDTH_TYPE,
     default=None,
     metavar="INTEGER",
     help="PNG only: output width in pixels, height scaled with it. Overrides "
@@ -906,9 +912,13 @@ def render_many(manifest_file: Path) -> None:
                 format_=cast(
                     Literal["svg", "html", "png"], str(job.get("format", "svg"))
                 ),
-                scale=float(cast(float, job.get("scale", 2.0))),
+                scale=cast(
+                    float, _SCALE_TYPE.convert(job.get("scale", 2.0), None, None)
+                ),
                 png_width=(
-                    int(cast(int, job["png_width"])) if "png_width" in job else None
+                    cast(int, _PNG_WIDTH_TYPE.convert(job["png_width"], None, None))
+                    if "png_width" in job
+                    else None
                 ),
                 theme=_str_or_none("theme"),
                 mode=_str_or_none("mode"),

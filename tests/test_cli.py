@@ -606,6 +606,42 @@ def test_render_many_partial_failure_continues(tmp_path):
     assert "1/2" in result.output
 
 
+def test_render_many_rejects_non_positive_scale(tmp_path):
+    """A manifest job's scale gets the same bound as --scale, not a raw resvg error."""
+    manifest = _write_manifest(
+        tmp_path,
+        [
+            {
+                "input": str(RNASEQ_MMD),
+                "output": str(tmp_path / "out.png"),
+                "format": "png",
+                "scale": 0,
+            }
+        ],
+    )
+    result = CliRunner().invoke(cli, ["render-many", str(manifest)])
+    assert result.exit_code != 0
+    assert "not in the range" in result.output
+
+
+def test_render_many_rejects_non_positive_png_width(tmp_path):
+    """A manifest job's png_width of 0 is rejected, not silently treated as unset."""
+    manifest = _write_manifest(
+        tmp_path,
+        [
+            {
+                "input": str(RNASEQ_MMD),
+                "output": str(tmp_path / "out.png"),
+                "format": "png",
+                "png_width": 0,
+            }
+        ],
+    )
+    result = CliRunner().invoke(cli, ["render-many", str(manifest)])
+    assert result.exit_code != 0
+    assert "not in the range" in result.output
+
+
 def test_render_many_bad_manifest_json(tmp_path):
     """render-many fails cleanly on unparseable manifest JSON."""
     manifest = tmp_path / "bad.json"
