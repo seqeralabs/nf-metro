@@ -102,7 +102,10 @@ from nf_metro.layout.routing.corners import (
     wholesale_corner_translation,
     widest_coincident_radius,
 )
-from nf_metro.layout.routing.families import RouteFamilyId
+from nf_metro.layout.routing.families import (
+    LANDING_POINT_SETTLED_LATER_FAMILY_VALUES,
+    RouteFamilyId,
+)
 from nf_metro.layout.routing.offsets import (
     cross_row_convergence_channel_order,
 )
@@ -823,17 +826,26 @@ def _validate_planned_exit_turn_radii(
                 f"settled exit-turn member {edge_key!r} has no recorded concentric "
                 "inputs"
             )
-        for radius_index, dx, base_radius in zip(
-            (channel_rank - 1, channel_rank),
-            (
-                allocated if allocated is not None else planned
-                for allocated, planned in zip(
-                    allocated_offsets, planned_offsets, strict=True
-                )
-            ),
-            allocated_bases,
-            strict=True,
-        ):
+        corner_inputs = tuple(
+            zip(
+                (channel_rank - 1, channel_rank),
+                (
+                    allocated if allocated is not None else planned
+                    for allocated, planned in zip(
+                        allocated_offsets, planned_offsets, strict=True
+                    )
+                ),
+                allocated_bases,
+                strict=True,
+            )
+        )
+        # These families settle the landing-side (channel_rank) corner after gap
+        # allocation, so only the entry-side (channel_rank - 1) corner exists to
+        # hold here. Every other family owns both corners at this point, so a
+        # missing landing corner in one of those is a genuine defect.
+        if route.exit_turn_family_id in LANDING_POINT_SETTLED_LATER_FAMILY_VALUES:
+            corner_inputs = corner_inputs[:1]
+        for radius_index, dx, base_radius in corner_inputs:
             if (
                 dx is None
                 or base_radius is None

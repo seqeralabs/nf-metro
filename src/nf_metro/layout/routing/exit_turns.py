@@ -70,7 +70,7 @@ from nf_metro.layout.routing.context import (
     slot_is_available,
 )
 from nf_metro.layout.routing.families import (
-    BYPASS_ROUTE_FAMILY_VALUES,
+    LANDING_POINT_SETTLED_LATER_FAMILY_VALUES,
     RouteFamilyId,
 )
 from nf_metro.layout.routing.inter_section_handlers import (
@@ -3649,15 +3649,9 @@ def snapshot_exit_turn_segments(
             # seats against geometry the plan does not state, so how far along
             # the axis it runs is not the planner's to hold; the axis it stands
             # on is, and :func:`validate_exit_turn_plans` holds that to the end.
-            landing_point_settled_later = route.exit_turn_family_id in {
-                RouteFamilyId.MERGE_BRANCH.value,
-                RouteFamilyId.LEFT_ENTRY_WRAP.value,
-                RouteFamilyId.RIGHT_ENTRY_CROSS_ROW_WRAP.value,
-                RouteFamilyId.RIGHT_ENTRY_WRAP.value,
-                RouteFamilyId.TOP_ENTRY_L_SHAPE.value,
-                RouteFamilyId.BOTTOM_ENTRY_L_SHAPE.value,
-                *BYPASS_ROUTE_FAMILY_VALUES,
-            }
+            landing_point_settled_later = (
+                route.exit_turn_family_id in LANDING_POINT_SETTLED_LATER_FAMILY_VALUES
+            )
             values[
                 (
                     "axis",
