@@ -237,8 +237,8 @@ def parse_metro_mermaid(
     auto_process: bool | None = None,
     process_scope: str | None = None,
     caller_line_order: LineOrder | None = None,
-    *,
     caller_line_spread: LineSpread | None = None,
+    *,
     _layout_commitments: LayoutCommitmentOverlay | None = None,
 ) -> MetroGraph:
     """Parse a Mermaid graph definition with %%metro directives.
@@ -312,8 +312,8 @@ def _finalize_graph(
     auto_process: bool | None = None,
     process_scope: str | None = None,
     caller_line_order: LineOrder | None = None,
-    *,
     caller_line_spread: LineSpread | None = None,
+    *,
     layout_commitments: LayoutCommitmentOverlay | None = None,
 ) -> None:
     """Validate, run the post-parse resolution, and apply buffered metadata."""
