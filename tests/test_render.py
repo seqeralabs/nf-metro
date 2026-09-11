@@ -1458,6 +1458,16 @@ _CAPTION_MARKER_CASES = {
         "        input_reads([Short reads])\n"
         "    end\n",
     ),
+    "tb_source_multiline": (
+        "Short\nreads",
+        "input_reads",
+        "%%metro files: input_reads | fastq | Short\\nreads | banner\n"
+        "graph LR\n"
+        "    subgraph input[Input]\n"
+        "        %%metro direction: TB\n"
+        "        input_reads([Short reads])\n"
+        "    end\n",
+    ),
     "bt_sink": (
         "Result",
         "out",
@@ -1515,18 +1525,28 @@ _CAPTION_MARKER_CASES = {
 def _caption_and_marker_boxes(svg, caption, station_id):
     """Return (caption_y_box, marker_y_box) as (top, bottom) pairs from *svg*.
 
-    The caption is the hanging-baseline text carrying *caption*; its box runs
-    from the baseline top down one font-size (the em box). The marker is the
-    ``nf-metro-station`` rect for *station_id*.
+    An icon caption and a station name label share the ``nf-metro-station-label``
+    class and can carry identical text, so text alone cannot tell them apart.
+    The renderer tags a station name label with ``data-station-id`` and a
+    terminus caption with none, so the caption is the station-label text that
+    lacks that attribute. Its box hangs from the baseline top down one em per
+    rendered line (one ``tspan`` per line for a multi-line caption). The marker
+    is the ``nf-metro-station`` rect for *station_id*.
     """
     ns = {"svg": "http://www.w3.org/2000/svg"}
     root = ET.fromstring(svg)
+    wanted = caption.replace("\n", "")
     caption_box = None
     for text in root.findall(".//svg:text", ns):
-        if "".join(text.itertext()).strip() != caption:
+        if "nf-metro-station-label" not in (text.get("class") or ""):
+            continue
+        if text.get("data-station-id") is not None:
+            continue
+        if "".join(text.itertext()).strip() != wanted:
             continue
         top = float(text.get("y"))
-        caption_box = (top, top + float(text.get("font-size")))
+        line_count = len(text.findall("svg:tspan", ns)) or 1
+        caption_box = (top, top + line_count * float(text.get("font-size")))
     marker_box = None
     for rect in root.findall(".//svg:rect", ns):
         if rect.get("data-station-id") != station_id:
