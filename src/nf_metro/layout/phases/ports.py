@@ -355,12 +355,14 @@ def _entry_fan_root_trunk_station(
     Returns ``None`` when the port feeds a single target or no direct target is
     the common ancestor of the rest.
     """
+    seen_targets: set[str] = set()
     targets: list[str] = []
     for edge in graph.edges_from(port_id):
         st = graph.station_for_edge_target(edge)
         if st.is_port or st.section_id != entry_section.id:
             continue
-        if st.id not in targets:
+        if st.id not in seen_targets:
+            seen_targets.add(st.id)
             targets.append(st.id)
     if len(targets) < 2:
         return None
