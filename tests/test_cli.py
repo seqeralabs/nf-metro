@@ -349,6 +349,46 @@ def test_render_permissive_flag_reports_downgraded_guards(tmp_path, monkeypatch)
     assert "synthetic guard trip for CLI test" in result.output
 
 
+def test_render_permissive_repeated_output_reports_shared_prepare_warning(
+    tmp_path, monkeypatch
+):
+    """A guard downgrade reported once for the shared parse/layout pass behind
+    repeated -o outputs, credited to --permissive like any other render."""
+    import warnings
+
+    from nf_metro.api import prepare_graph as real_prepare_graph
+    from nf_metro.parser.model import PermissiveGuardWarning
+
+    def _prepare_graph_with_warning(*args, **kwargs):
+        warnings.warn(
+            "synthetic guard trip for repeated-output CLI test",
+            category=PermissiveGuardWarning,
+            stacklevel=2,
+        )
+        return real_prepare_graph(*args, **kwargs)
+
+    monkeypatch.setattr("nf_metro.cli.prepare_graph", _prepare_graph_with_warning)
+    src = tmp_path / "a.mmd"
+    src.write_text(STANDALONE_MMD.read_text())
+    result = CliRunner().invoke(
+        cli,
+        [
+            "render",
+            "--permissive",
+            str(src),
+            "-o",
+            str(tmp_path / "out.svg"),
+            "-o",
+            str(tmp_path / "out.png"),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "out.svg").exists()
+    assert (tmp_path / "out.png").exists()
+    assert result.output.count("synthetic guard trip for repeated-output") == 1
+    assert "--permissive: 1 guard(s) downgraded" in result.output
+
+
 def test_render_multiple_files(tmp_path):
     """render accepts more than one INPUT_FILE, each to its own sibling output."""
     a = tmp_path / "a.mmd"

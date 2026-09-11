@@ -84,6 +84,11 @@ def _format_from_output(output: Path | None) -> RenderFormat:
     )
 
 
+def _svg_format_for(out_format: RenderFormat) -> Literal["svg", "html"]:
+    """Return the format a graph is prepared/rendered under: png renders through svg."""
+    return "svg" if out_format == "png" else out_format
+
+
 class _FiniteFloatRange(click.FloatRange):
     """A float range that also refuses a non-finite value.
 
@@ -614,25 +619,34 @@ def render(
 
     # Repeated -o always shares one input file (validated above), so every job's
     # svg_format ("svg" or "html"; png renders through "svg") shares a layout -
-    # parse and lay it out once per distinct svg_format instead of once per job.
+    # parse and lay it out once per distinct svg_format instead of once per job,
+    # capturing and reporting that shared step's warnings the same way a single
+    # job would (permissive downgrades included).
     graphs: dict[Literal["svg", "html"], MetroGraph] = {}
     if outputs:
-        for _, source, _, out_format in jobs:
-            svg_format: Literal["svg", "html"] = (
-                "svg" if out_format == "png" else out_format
-            )
-            if svg_format not in graphs:
-                graphs[svg_format] = _prepare_graph_for_render(
-                    source,
-                    from_nextflow=from_nextflow,
-                    title=title,
-                    line_spread=line_spread,
-                    logo=logo,
-                    legend=legend,
-                    layout_opts=layout_opts,
-                    bare=bare,
-                    svg_format=svg_format,
-                    error_prefix="",
+        permissive = bool(layout_opts.get("permissive"))
+        with warnings.catch_warnings(record=True) as caught:
+            if permissive:
+                warnings.filterwarnings("always", category=PermissiveGuardWarning)
+            try:
+                for _, source, _, out_format in jobs:
+                    svg_format = _svg_format_for(out_format)
+                    if svg_format not in graphs:
+                        graphs[svg_format] = _prepare_graph_for_render(
+                            source,
+                            from_nextflow=from_nextflow,
+                            title=title,
+                            line_spread=line_spread,
+                            logo=logo,
+                            legend=legend,
+                            layout_opts=layout_opts,
+                            bare=bare,
+                            svg_format=svg_format,
+                            error_prefix=_error_prefix(source, quiet=True),
+                        )
+            finally:
+                _report_render_warnings(
+                    caught, permissive=permissive, source=input_files[0]
                 )
 
     _run_batch(
@@ -644,7 +658,7 @@ def render(
                     out_path,
                     out_format,
                     quiet=True,
-                    graph=graphs.get("svg" if out_format == "png" else out_format),
+                    graph=graphs.get(_svg_format_for(out_format)),
                 ),
             )
             for label, source, out_path, out_format in jobs
@@ -800,7 +814,7 @@ def _render_one_unsafe(
     error_prefix = _error_prefix(input_file, quiet)
     # PNG renders through the SVG backend and is rasterised afterward; every
     # render-plane decision below follows the SVG path regardless of format_.
-    svg_format: Literal["svg", "html"] = "svg" if format_ == "png" else format_
+    svg_format = _svg_format_for(format_)
 
     if graph is None:
         graph = _prepare_graph_for_render(
