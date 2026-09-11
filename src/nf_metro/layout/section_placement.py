@@ -39,6 +39,8 @@ from nf_metro.layout.geometry import (
     lanes_run_along_x,
     lanes_run_along_y,
     packed_section_visual_order,
+    section_column_span,
+    section_row_span,
     shift_section,
 )
 from nf_metro.layout.route_topology import divergence_junction_sources
@@ -764,13 +766,24 @@ def _wrap_bundle_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]
             continue
         # A horizontal-side entry only WRAPS (placing a flush run in the
         # inter-row gap) when the source is on the far side of the target
-        # from the port.  A LEFT entry reached from a source in the same or
-        # a righthand column wraps; one reached from the left is a plain
-        # L-shape drop and needs no widening (e.g. preprocessing -> a
-        # column-1 section below it).  Mirror for RIGHT.
+        # from the port.  A LEFT entry reached from a source on the port
+        # side is a plain L-shape drop -- straight down then in, clearing
+        # nothing on the way -- and needs no widening (e.g. preprocessing ->
+        # a column-1 section below it).  It becomes a two-legged bypass only
+        # when the column left of the target is on the grid yet absent from
+        # the target's row: the descent then seats against the target's own
+        # edge (:func:`row_local_gap_bundle_midpoint`), lengthening the leg
+        # until it reaches an intervening box, and a too-tight gap forces the
+        # leg up into that box.  A RIGHT entry's descent seats against the
+        # target column itself, never a row-absent neighbour, so it keeps the
+        # plain-drop reading.
         if port.side == PortSide.LEFT and _section_precedes(graph, src_sec, tgt_sec):
-            continue
-        if port.side == PortSide.RIGHT and _section_precedes(graph, tgt_sec, src_sec):
+            if not (
+                _left_entry_descent_hugs_absent_neighbour(graph, tgt_sec)
+                and _bypass_has_intervening_section(graph, src_sec, tgt_sec)
+            ):
+                continue
+        elif port.side == PortSide.RIGHT and _section_precedes(graph, tgt_sec, src_sec):
             continue
         src_row, tgt_row = src_sec.grid_row, tgt_sec.grid_row
         if abs(src_row - tgt_row) == 1:
@@ -977,6 +990,61 @@ def _section_precedes(graph: MetroGraph, a: Section, b: Section) -> bool:
     if a.id in members and b.id in members:
         return members.index(a.id) < members.index(b.id)
     return False
+
+
+def _bypass_has_intervening_section(
+    graph: MetroGraph, src_sec: Section, tgt_sec: Section
+) -> bool:
+    """Whether a section stands strictly between *src_sec* and *tgt_sec* on both
+    grid axes.
+
+    Such a section is one the two-legged bypass route between the two must clear
+    the bottom edge of on its way down: the descent passes its column and its
+    row falls between the source's and the target's, so a too-tight inter-row
+    gap forces the horizontal leg up into its box.  A source and target with no
+    section boxed in between drop straight in as a plain L-shape and clear
+    nothing, so no band need be reserved for them.
+    """
+    lo_col, hi_col = sorted((src_sec.grid_col, tgt_sec.grid_col))
+    lo_row, hi_row = sorted((src_sec.grid_row, tgt_sec.grid_row))
+    for section in graph.sections.values():
+        if section.bbox_w <= 0 or section is src_sec or section is tgt_sec:
+            continue
+        section_bottom_row = section_row_span(section)[1]
+        section_right_col = section_column_span(section)[1]
+        if (
+            lo_col < section_right_col
+            and section.grid_col < hi_col
+            and section.grid_row < hi_row
+            and section_bottom_row > lo_row
+        ):
+            return True
+    return False
+
+
+def _left_entry_descent_hugs_absent_neighbour(
+    graph: MetroGraph, tgt_sec: Section
+) -> bool:
+    """Whether a LEFT-entry target-side descent seats against the target's own
+    left edge rather than centring in a bounded gap.
+
+    That happens when the column left of the target carries a section on the
+    grid but none overlapping the target's grid rows:
+    :func:`row_local_gap_bundle_midpoint` then anchors the descent on the
+    target's edge, reaching past that column.  With a section overlapping the
+    target's rows the descent centres in the real gap left of it and the wrap
+    leg stops there.  A row-spanning target only needs one such neighbour
+    anywhere in its span, so the whole span is tested, not just its top row.
+    """
+    left_col = tgt_sec.grid_col - 1
+    neighbours = [
+        section
+        for section in graph.sections.values()
+        if section.grid_col == left_col and section.bbox_w > 0
+    ]
+    if not neighbours:
+        return False
+    return not any(_rows_overlap(tgt_sec, section) for section in neighbours)
 
 
 def _bundles_in_gap(

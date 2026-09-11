@@ -70,6 +70,13 @@ _EXEMPTIONS = {
     "section_placement.py::_cols_overlap": (
         "column overlap has a paired row overlap primitive"
     ),
+    "section_placement.py::_left_entry_descent_hugs_absent_neighbour": (
+        "the Y-axis row-overlap comparison is delegated to the exempted "
+        "_rows_overlap primitive, which the classifier cannot see into; the "
+        "discriminator gates _wrap_bundle_row_minimums, an inherently row-scoped "
+        "pass reserving space to clear a section's top-edge header badge, and that "
+        "pass has no inter-column mirror, so no counterpart exists to write"
+    ),
     (
         "section_placement.py::_enforce_min_column_gaps.<locals>."
         "<lambda:keyword:right_extent>"
