@@ -68,8 +68,7 @@ def test_png_width_pins_the_width_and_keeps_the_aspect_ratio(tmp_path: Path) -> 
     """--png-width resizes the picture, where --width grows the SVG canvas.
 
     The distinction matters: --width leaves the map at its natural size and
-    pads the canvas around it, so it cannot stand in for the raster width the
-    old cairosvg recipe used.
+    pads the canvas around it, so it cannot stand in for a raster width.
     """
     natural = _image(_render(tmp_path, "nat.png", "--scale", "1"))
     pinned = _image(_render(tmp_path, "pinned.png", "--png-width", "800"))
