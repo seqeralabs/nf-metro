@@ -120,6 +120,13 @@ gallery:
       "A `%%metro direction: TB` reporting section whose file outputs are line termini.
       Regression fixture: terminus file icons orient to a vertical flow, with the connector
       entering from the top."
+  - id: metagenomics_input
+    source_dir: examples
+    category: Feature Showcase
+    description:
+      "A `%%metro direction: TB` input section whose `Short reads` FASTQ terminus is a
+      source, so its file icon sits above the station on the vertical flow. The caption
+      seats clear above the icon instead of striking the station marker."
   - id: disconnected_components
     source_dir: examples
     category: Feature Showcase
