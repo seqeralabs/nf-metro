@@ -1009,8 +1009,10 @@ def _bypass_has_intervening_section(
         if section.bbox_w <= 0 or section is src_sec or section is tgt_sec:
             continue
         section_bottom_row = section.grid_row + section.grid_row_span - 1
+        section_right_col = section.grid_col + section.grid_col_span - 1
         if (
-            lo_col < section.grid_col < hi_col
+            lo_col < section_right_col
+            and section.grid_col < hi_col
             and section.grid_row < hi_row
             and section_bottom_row > lo_row
         ):
