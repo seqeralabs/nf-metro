@@ -2541,6 +2541,7 @@ def emit_render_plan(
     plan: RenderPlan,
     *,
     animate: bool = False,
+    animation_frame_slot: bool = False,
     responsive: bool = False,
     inject_dark_mode_css: bool = True,
     self_color_scheme: bool = True,
@@ -2551,6 +2552,7 @@ def emit_render_plan(
         return _emit_render_plan(
             plan,
             animate=animate,
+            animation_frame_slot=animation_frame_slot,
             responsive=responsive,
             inject_dark_mode_css=inject_dark_mode_css,
             self_color_scheme=self_color_scheme,
@@ -2562,6 +2564,7 @@ def _emit_render_plan(
     plan: RenderPlan,
     *,
     animate: bool = False,
+    animation_frame_slot: bool = False,
     responsive: bool = False,
     inject_dark_mode_css: bool = True,
     self_color_scheme: bool = True,
@@ -2696,7 +2699,14 @@ def _emit_render_plan(
     if animate:
         from nf_metro.render.animate import render_animation
 
-        render_animation(d, graph, routes, station_offsets, theme)
+        render_animation(
+            d,
+            graph,
+            routes,
+            station_offsets,
+            theme,
+            frame_slot=animation_frame_slot,
+        )
 
     # Draw stations (all circles, skip ports)
     _render_stations(d, graph, theme, station_offsets, positive_fan, inactive_line_ids)

@@ -48,12 +48,12 @@ See the [precedence table](/nf-metro/guide/#cli-flags-and-directive-precedence) 
 
 ### Output and source
 
-| Option                      | Default                              | Description                                                                                                                        |
-| --------------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `-o`, `--output PATH`       | `<input>.<format>`                   | Output file path (only valid with a single `INPUT_FILE`). Repeat it to write several formats from one run: `-o map.svg -o map.png` |
-| `--format [svg\|html\|png]` | inferred from `--output`, else `svg` | Output format: `svg`, `png`, or `html` for an interactive self-contained page. `-o map.png` selects PNG on its own                 |
-| `--from-nextflow`           | off                                  | Convert Nextflow `-with-dag` Mermaid input before rendering                                                                        |
-| `--debug / --no-debug`      | off                                  | Show the debug overlay (ports, hidden stations, edge waypoints)                                                                    |
+| Option                                            | Default                              | Description                                                                                                                                                                                          |
+| ------------------------------------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `-o`, `--output PATH`                             | `<input>.<format>`                   | Output file path (only valid with a single `INPUT_FILE`). Repeat it to write several formats from one run: `-o map.svg -o map.png`                                                                   |
+| `--format [svg\|html\|png\|gif\|webp\|mp4\|webm]` | inferred from `--output`, else `svg` | Output format: `svg`, `png`, `html` for an interactive self-contained page, or `gif`/`webp`/`mp4`/`webm` for a [looping video](#looping-video-of-the-animation). `-o map.png` selects PNG on its own |
+| `--from-nextflow`                                 | off                                  | Convert Nextflow `-with-dag` Mermaid input before rendering                                                                                                                                          |
+| `--debug / --no-debug`                            | off                                  | Show the debug overlay (ports, hidden stations, edge waypoints)                                                                                                                                      |
 
 ### Theme and branding
 
@@ -79,27 +79,27 @@ Because it has no light/dark pair, `--mode` does not apply to it.
 
 ### Layout
 
-| Option                                     | Default           | Description                                                                                                                                                                                                                                                                         |
-| ------------------------------------------ | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--line-spread [bundle\|centered\|rails]`  | `bundle`          | How lines sharing a station relate vertically: `bundle` merges them onto one trunk, `centered` balances the bundle about the midline, `rails` draws parallel rails with interchange stations. Overrides the graph-wide directive. Per-section `%%metro line_spread:` overrides stay |
-| `--x-spacing FLOAT`                        | auto              | Horizontal spacing between layers (auto widens from 60 only when wide labels would otherwise collide)                                                                                                                                                                               |
-| `--y-spacing FLOAT`                        | auto              | Vertical spacing between tracks (auto is derived from the map's content so captioned icons and dense labels do not collide)                                                                                                                                                         |
-| `--section-x-gap FLOAT`                    | 50                | Horizontal gap between sections                                                                                                                                                                                                                                                     |
-| `--section-y-gap FLOAT`                    | 50                | Vertical gap between sections                                                                                                                                                                                                                                                       |
-| `--track-gap FLOAT`                        | 1                 | Visual gap in pixels (0 to 3) between adjacent line strokes in a bundle, edge to edge rather than center to center. 0 means the lines touch. Values above 3 are rejected                                                                                                            |
-| `--fold-threshold INTEGER`                 | 15                | Max station-columns a section row may reach before the auto-layout wraps it onto the next row. Raise it to keep a long horizontal trunk on one row                                                                                                                                  |
-| `--diamond-style [straight\|symmetric]`    | `straight`        | Fork-join (diamond) layout: `straight` keeps the top branch on the main track, `symmetric` fans the branches evenly                                                                                                                                                                 |
-| `--line-order [definition\|span]`          | `definition`      | Line ordering for track assignment: `definition` preserves `.mmd` order, `span` gives longest-spanning lines inner tracks                                                                                                                                                           |
-| `--row-align [content\|top]`               | `content`         | Section box vertical sizing within a shared grid row: `content` hugs each section's own content, `top` grows shorter row-mates upward so their box tops and header badges sit flush with the tallest section in the row                                                             |
-| `--center-ports / --no-center-ports`       | off               | Center inter-section ports on the shorter of the two connected sections. Lines then enter and exit at the visual midpoint                                                                                                                                                           |
-| `--compact-offsets / --no-compact-offsets` | off               | Size each station only for the lines actually passing through it, rather than reserving a slot for every declared line                                                                                                                                                              |
-| `--label-angle FLOAT`                      | theme default (0) | Angle in degrees for station labels (0 = horizontal). Useful for dense trunks where horizontal labels collide                                                                                                                                                                       |
-| `--font-scale FLOAT`                       | 1.0               | Scale every text size and the label-width metrics that drive layout spacing                                                                                                                                                                                                         |
-| `--stroke-scale FLOAT`                     | 1.0               | Scale track stroke weight and station pill size, widening bundle spacing, marker clearance, and rail pitch to match                                                                                                                                                                 |
-| `--scale FLOAT`                            | `2.0`             | PNG only: multiply the rendered pixel dimensions                                                                                                                                                                                                                                    |
-| `--png-width INTEGER`                      | auto              | PNG only: output width in pixels, height scaled with it. Overrides `--scale`. Resizes the picture, unlike `--width`                                                                                                                                                                 |
-| `--width INTEGER`                          | auto              | Output width in pixels. Grows the SVG canvas around a map drawn at its natural size; it does not scale the map                                                                                                                                                                      |
-| `--height INTEGER`                         | auto              | Output height in pixels                                                                                                                                                                                                                                                             |
+| Option                                     | Default                | Description                                                                                                                                                                                                                                                                         |
+| ------------------------------------------ | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--line-spread [bundle\|centered\|rails]`  | `bundle`               | How lines sharing a station relate vertically: `bundle` merges them onto one trunk, `centered` balances the bundle about the midline, `rails` draws parallel rails with interchange stations. Overrides the graph-wide directive. Per-section `%%metro line_spread:` overrides stay |
+| `--x-spacing FLOAT`                        | auto                   | Horizontal spacing between layers (auto widens from 60 only when wide labels would otherwise collide)                                                                                                                                                                               |
+| `--y-spacing FLOAT`                        | auto                   | Vertical spacing between tracks (auto is derived from the map's content so captioned icons and dense labels do not collide)                                                                                                                                                         |
+| `--section-x-gap FLOAT`                    | 50                     | Horizontal gap between sections                                                                                                                                                                                                                                                     |
+| `--section-y-gap FLOAT`                    | 50                     | Vertical gap between sections                                                                                                                                                                                                                                                       |
+| `--track-gap FLOAT`                        | 1                      | Visual gap in pixels (0 to 3) between adjacent line strokes in a bundle, edge to edge rather than center to center. 0 means the lines touch. Values above 3 are rejected                                                                                                            |
+| `--fold-threshold INTEGER`                 | 15                     | Max station-columns a section row may reach before the auto-layout wraps it onto the next row. Raise it to keep a long horizontal trunk on one row                                                                                                                                  |
+| `--diamond-style [straight\|symmetric]`    | `straight`             | Fork-join (diamond) layout: `straight` keeps the top branch on the main track, `symmetric` fans the branches evenly                                                                                                                                                                 |
+| `--line-order [definition\|span]`          | `definition`           | Line ordering for track assignment: `definition` preserves `.mmd` order, `span` gives longest-spanning lines inner tracks                                                                                                                                                           |
+| `--row-align [content\|top]`               | `content`              | Section box vertical sizing within a shared grid row: `content` hugs each section's own content, `top` grows shorter row-mates upward so their box tops and header badges sit flush with the tallest section in the row                                                             |
+| `--center-ports / --no-center-ports`       | off                    | Center inter-section ports on the shorter of the two connected sections. Lines then enter and exit at the visual midpoint                                                                                                                                                           |
+| `--compact-offsets / --no-compact-offsets` | off                    | Size each station only for the lines actually passing through it, rather than reserving a slot for every declared line                                                                                                                                                              |
+| `--label-angle FLOAT`                      | theme default (0)      | Angle in degrees for station labels (0 = horizontal). Useful for dense trunks where horizontal labels collide                                                                                                                                                                       |
+| `--font-scale FLOAT`                       | 1.0                    | Scale every text size and the label-width metrics that drive layout spacing                                                                                                                                                                                                         |
+| `--stroke-scale FLOAT`                     | 1.0                    | Scale track stroke weight and station pill size, widening bundle spacing, marker clearance, and rail pitch to match                                                                                                                                                                 |
+| `--scale FLOAT`                            | `2.0` png, `1.0` video | Raster formats only: multiply the rendered pixel dimensions                                                                                                                                                                                                                         |
+| `--png-width INTEGER`                      | auto                   | Raster formats only: output width in pixels, height scaled with it. Overrides `--scale`. Resizes the picture, unlike `--width`                                                                                                                                                      |
+| `--width INTEGER`                          | auto                   | Output width in pixels. Grows the SVG canvas around a map drawn at its natural size; it does not scale the map                                                                                                                                                                      |
+| `--height INTEGER`                         | auto                   | Output height in pixels                                                                                                                                                                                                                                                             |
 
 Numeric options are validated as follows:
 
@@ -114,7 +114,9 @@ A flag given an out-of-range value exits with an error, while the equivalent `%%
 | Option                             | Default                 | Description                                                                                                                                                                                                                                                                                                               |
 | ---------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--inactive-lines TEXT`            | from `line:` directives | Comma-separated line IDs to render inactive: their strokes, chevrons, and legend swatches gray out, as do the stations, labels, and terminus icons touched only by inactive lines. Unknown IDs error. Fully replaces the map's `inactive`-marked lines. An empty value forces every line active. Does not edit the `.mmd` |
-| `--animate / --no-animate`         | off                     | Add animated balls traveling along the metro lines                                                                                                                                                                                                                                                                        |
+| `--animate / --no-animate`         | off                     | Add animated balls traveling along the metro lines. A video output turns this on for you                                                                                                                                                                                                                                  |
+| `--fps FLOAT`                      | `12`                    | Video formats only: frames per second of the exported loop                                                                                                                                                                                                                                                                |
+| `--duration FLOAT`                 | the map's cycle         | Video formats only: length of one loop in seconds, compressing (or stretching) the map's own animation cycle into it                                                                                                                                                                                                      |
 | `--directional / --no-directional` | off                     | Draw static chevrons along each route pointing in the flow direction (source to target)                                                                                                                                                                                                                                   |
 
 ### Live-progress metadata
@@ -181,6 +183,55 @@ Click again, press `Esc`, or select **Reset** to restore the full view.
 
 The **Embed&hellip;** button opens a panel with copyable inline-HTML, iframe, and static-SVG snippets.
 The [Embedding guide](/nf-metro/embedding/) covers responsive sizing, font portability, host theming, and progress overlays.
+
+### Looping video of the animation
+
+`--animate` puts balls on the lines of an SVG, driven by CSS.
+A rasterizer has no CSS clock, so exporting that motion means drawing the frames instead.
+A `.gif`, `.webp`, `.mp4`, or `.webm` output path does exactly that, and turns the animation on for you:
+
+```bash frame="terminal"
+nf-metro render pipeline.mmd -o pipeline.gif
+```
+
+The exported loop runs one full animation cycle and stops a frame short of repeating it, so it wraps with no stutter.
+Each ball is sampled from the same motion path the animated SVG drives it along, at the moment of the cycle that frame represents, and drawn behind the station markers as it is there.
+
+A map's cycle is as long as its longest line takes to travel, which for a large pipeline can be half a minute.
+`--duration` compresses (or stretches) the whole cycle into a set number of seconds, and `--fps` sets the frame rate:
+
+```bash frame="terminal"
+nf-metro render pipeline.mmd -o pipeline.gif --duration 8 --fps 15
+```
+
+Leaving `--duration` off keeps the balls at exactly the speed the animated SVG moves them, which is the faithful export; a higher `--fps` is what makes the motion smooth.
+
+Resolution is the third handle, and works exactly as it does for a PNG: `--scale` multiplies the map's natural pixel size, and `--png-width` pins an exact width.
+A video defaults to `--scale 1`, where a still PNG doubles.
+
+Nothing here is capped.
+Every frame is a full rasterization, though, so a long smooth loop of a large map costs real time: nf-metro quotes the frame count, the frame size, and (for GIF and WebP) the memory it is about to hold before it starts, and draws a progress bar while it works.
+MP4 and WebM are an order of magnitude smaller than GIF for the same frames, and are the only two that stream to the encoder rather than buffering the whole loop.
+
+As a sense of scale, the rnaseq example below is 1799&times;696, and its own animation cycle is 39s:
+
+| Command                      | Frames | Time  | GIF    | MP4    | Peak memory (GIF) |
+| ---------------------------- | ------ | ----- | ------ | ------ | ----------------- |
+| `--duration 8 --fps 12`      | 96     | ~40s  | 515 KB | 127 KB | 0.2 GB            |
+| `--duration 20 --fps 30`     | 600    | ~2min | 2.6 MB | 390 KB | 0.8 GB            |
+| `--fps 30` (the SVG's speed) | 1173   | ~4min | 5.0 MB | 620 KB | 1.5 GB            |
+
+Nothing stops you going further; the numbers just keep scaling.
+
+| Format  | Encoder        | Notes                                                                            |
+| ------- | -------------- | -------------------------------------------------------------------------------- |
+| `.gif`  | Pillow         | Works in any `<img>`, and in a GitHub README. 256 colors, shared across the loop |
+| `.webp` | Pillow         | Also an `<img>`, with full color and smaller files. No Safari-before-14 support  |
+| `.mp4`  | ffmpeg (H.264) | Smallest by far. Needs `<video autoplay loop muted playsinline>` to play inline  |
+| `.webm` | ffmpeg (VP9)   | As MP4, and smaller again, but not decoded by every player                       |
+
+GIF and WebP need nothing beyond Pillow, already a dependency.
+MP4 and WebM shell out to `ffmpeg`: one on your `PATH` is used, otherwise install a prebuilt binary with `pip install "nf-metro[video]"`.
 
 ### Validate the rendered geometry
 

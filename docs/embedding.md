@@ -195,6 +195,17 @@ nf-metro render pipeline.mmd -o pipeline.png --mode light --png-width 2265
 
 Do not reach for `--width` here. That grows the SVG canvas around a map drawn at its natural size, padding the extra space; it does not resize the picture.
 
+#### Looping video (GIF, WebP, MP4, WebM)
+
+The same settings carry over to a looping export of the `--animate` balls, for a README or a slide where a CSS animation will not run:
+
+```bash
+nf-metro render pipeline.mmd -o pipeline.gif --mode light --duration 8
+```
+
+A `.gif` or `.webp` goes anywhere an `<img>` does; `.mp4` and `.webm` are far smaller but need a `<video autoplay loop muted playsinline>`.
+See [Looping video of the animation](/nf-metro/cli/#looping-video-of-the-animation) in the CLI reference for the frame-rate and loop-length flags, and what each format needs installed.
+
 #### Rasterizing an SVG yourself
 
 If you rasterize an nf-metro SVG with an external tool instead, two settings matter.

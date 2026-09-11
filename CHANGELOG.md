@@ -23,6 +23,17 @@ history.
   and draws with the bundled Inter, so a map rasterises to the same bytes on any
   machine ([#1969](https://github.com/seqeralabs/nf-metro/issues/1969)).
 - `-o` repeats, so one run writes several formats: `-o map.svg -o map.png`.
+- `nf-metro render` writes a looping video of the animation: `-o map.gif`,
+  `.webp`, `.mp4`, or `.webm` (or `--format`). The loop runs one animation cycle
+  and stops a frame short of repeating it, so it wraps seamlessly; `--fps` and
+  `--duration` set the frame rate and compress a long map's cycle into a shorter
+  loop. Frames are sampled from the same motion paths the animated SVG uses, so
+  a ball is where a browser would draw it. `--scale` and `--png-width` size the
+  frames as they size a PNG. Nothing is capped: a large export quotes its frame
+  count, frame size and (for GIF and WebP) the memory it will hold before it
+  starts, and shows a progress bar. GIF and WebP need nothing beyond Pillow;
+  MP4 and WebM use `ffmpeg` from `PATH`, else the build in the new
+  `nf-metro[video]` extra.
 
 ### Changed
 

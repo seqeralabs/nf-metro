@@ -66,6 +66,10 @@ class RenderConfig:
     baked_mode: str | None = None
     bare: bool = False
     embed_basename: str = "metro_map.html"
+    # SVG only: emit nf_metro.render.animate.FRAME_SLOT where the animated
+    # balls would go, leaving one SVG that a raster caller fills per frame
+    # (nf_metro.render.video). Ignored unless the map is animated.
+    animation_frame_slot: bool = False
     # ``None`` means "no caller override": the render uses whichever lines the
     # map itself marks inactive by directive. A concrete set (including the empty
     # set) replaces that default outright, so ``frozenset()`` forces every line
@@ -117,6 +121,7 @@ def _emit_svg_plan(graph: MetroGraph, plan: RenderPlan, cfg: RenderConfig) -> st
         content = emit_render_plan(
             plan,
             animate=graph.animate,
+            animation_frame_slot=cfg.animation_frame_slot,
             responsive=cfg.responsive,
             inject_dark_mode_css=cfg.inject_dark_mode_css,
             self_color_scheme=cfg.self_color_scheme,

@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
-__all__ = ["render_animation"]
+__all__ = [
+    "FRAME_SLOT",
+    "AnimationTimeline",
+    "BallTrack",
+    "animation_frame_markup",
+    "build_animation_timeline",
+    "render_animation",
+]
 
 import math
 import re
+from bisect import bisect_left
 from collections import deque
+from dataclasses import dataclass
 
 import drawsvg as draw
 
@@ -33,6 +42,96 @@ from nf_metro.render.style import Theme
 _FULL_CYCLE_EPSILON = 0.001
 
 
+def _fills_the_cycle(move_frac: float) -> bool:
+    """Return whether a track travels for (near enough) the whole cycle."""
+    return move_frac >= 1.0 - _FULL_CYCLE_EPSILON
+
+
+# Segments each quadratic corner is flattened into when sampling a ball's
+# position for a raster frame.  The corners are ~10px arcs, so eight chords
+# put the sampled point within a small fraction of a pixel of the drawn curve.
+_CURVE_FLATTEN_STEPS = 8
+
+# Marker emitted in place of the animated balls when a caller asks for a
+# frame slot: the SVG is rendered once, then each raster frame substitutes
+# this comment for that frame's static circles (see nf_metro.render.video).
+# A comment keeps the slot inert in any SVG that reaches a viewer unfilled.
+FRAME_SLOT = "<!--nf-metro-animation-frame-->"
+
+
+@dataclass(frozen=True)
+class BallTrack:
+    """One ball path: its drawn ``d``, cycle share, and flattened geometry.
+
+    ``move_frac`` is the fraction of the shared cycle this track's ball spends
+    travelling; past it the ball holds at the terminus (see
+    :func:`_travel_keyframes`).  ``points``/``distances`` are the polyline the
+    quadratic corners flatten to and its cumulative arc length, which
+    :meth:`point_at` samples the way a browser samples ``offset-distance``.
+    """
+
+    d_attr: str
+    move_frac: float
+    points: tuple[tuple[float, float], ...]
+    distances: tuple[float, ...]
+
+    def point_at(self, frac: float) -> tuple[float, float]:
+        """Return the point *frac* (0-1) of the way along the track."""
+        total = self.distances[-1]
+        if total <= 0:
+            return self.points[0]
+        target = min(max(frac, 0.0), 1.0) * total
+        index = bisect_left(self.distances, target)
+        if index <= 0:
+            return self.points[0]
+        span = self.distances[index] - self.distances[index - 1]
+        t = 1.0 if span <= 0 else (target - self.distances[index - 1]) / span
+        (x0, y0), (x1, y1) = self.points[index - 1], self.points[index]
+        return (x0 + (x1 - x0) * t, y0 + (y1 - y0) * t)
+
+    def distance_frac(self, progress: float) -> float:
+        """Map an animation *progress* (0-1) to a fraction of the track.
+
+        Reads the keyframes :func:`_travel_keyframes` writes for this track: a
+        linear ramp over ``move_frac`` of the cycle, then a hold at the
+        terminus for the remainder -- or, for a track that fills the cycle, a
+        ramp across the whole of it and no hold at all.
+        """
+        if _fills_the_cycle(self.move_frac):
+            return progress
+        if self.move_frac <= 0:
+            return 1.0
+        return min(progress / self.move_frac, 1.0)
+
+
+@dataclass(frozen=True)
+class AnimationTimeline:
+    """The ball geometry and timing one animated map cycles through.
+
+    Built from the same motion paths the CSS animation uses, so a frame
+    sampled here places every ball where a browser would draw it at that
+    moment of the cycle.
+    """
+
+    cycle: float
+    balls_per_line: int
+    tracks: tuple[BallTrack, ...]
+
+    def ball_positions(self, phase: float) -> list[tuple[float, float]]:
+        """Return every ball's centre *phase* (0-1) through one cycle.
+
+        The balls on a track are spread evenly across the cycle by the same
+        negative animation delays the CSS uses, so ``phase`` 0 and 1 give the
+        same picture and a frame sequence over ``[0, 1)`` loops seamlessly.
+        """
+        centres: list[tuple[float, float]] = []
+        for track in self.tracks:
+            for index in range(self.balls_per_line):
+                progress = (phase + index / self.balls_per_line) % 1.0
+                centres.append(track.point_at(track.distance_frac(progress)))
+        return centres
+
+
 def render_animation(
     d: draw.Drawing,
     graph: MetroGraph,
@@ -40,6 +139,8 @@ def render_animation(
     station_offsets: dict[tuple[str, str], float],
     theme: Theme,
     curve_radius: float = ANIMATION_CURVE_RADIUS,
+    *,
+    frame_slot: bool = False,
 ) -> None:
     """Add animated balls traveling along each metro line.
 
@@ -54,44 +155,33 @@ def render_animation(
     never sampled onto the element, freezing every ball at its path start.
     CSS ``offset-path`` animates reliably whether the SVG is opened
     standalone, referenced from ``<img>``, or inlined into a document.
+
+    With *frame_slot* set, :data:`FRAME_SLOT` is emitted here instead of the
+    balls and their keyframes, leaving one SVG a raster caller fills per frame
+    (see :mod:`nf_metro.render.video`).  The slot sits exactly where the
+    animated balls would, so a frame keeps the same stacking: behind the
+    station markers, in front of the lines.
     """
-    line_paths = _build_line_motion_paths(graph, routes, station_offsets, curve_radius)
+    if frame_slot:
+        # The caller fills this per frame; building the timeline is its job.
+        d.append(draw.Raw(FRAME_SLOT))
+        return
 
-    # All balls share one cycle (the longest line's at-speed duration) so they
-    # stay in sync; a shorter line covers its path in the first part of the
-    # cycle and holds at the terminus for the rest (see _travel_keyframes),
-    # rather than restarting mid-track while a longer line runs on.
-    durations = [
-        max(
-            _compute_path_length(d_attr) / theme.animation_speed, MIN_ANIMATION_DURATION
-        )
-        for _, d_attr in line_paths
-    ]
-    max_dur = max(durations, default=MIN_ANIMATION_DURATION)
-
-    stroke_attr = ""
-    if theme.animation_ball_stroke:
-        stroke_attr = (
-            f' stroke="{theme.animation_ball_stroke}"'
-            f' stroke-width="{theme.animation_ball_stroke_width}"'
-        )
-    ball_prefix = (
-        f'<circle r="{theme.animation_ball_radius}" '
-        f'fill="{theme.animation_ball_color}" '
-        f'opacity="{ANIMATION_BALL_OPACITY}"{stroke_attr} '
+    timeline = build_animation_timeline(
+        graph, routes, station_offsets, theme, curve_radius
     )
-
-    n_balls = theme.animation_balls_per_line
+    ball_prefix = _ball_prefix(theme)
+    max_dur = timeline.cycle
+    n_balls = timeline.balls_per_line
     keyframes: dict[str, str] = {}
     balls: list[str] = []
 
-    for (_, d_attr), natural_dur in zip(line_paths, durations):
-        move_frac = min(natural_dur / max_dur, 1.0) if max_dur > 0 else 1.0
-        kf_name = _travel_keyframes(move_frac, keyframes)
+    for track in timeline.tracks:
+        kf_name = _travel_keyframes(track.move_frac, keyframes)
         for i in range(n_balls):
             delay = -i * max_dur / n_balls
             motion = (
-                f"offset-path: path('{d_attr}'); offset-rotate: 0deg; "
+                f"offset-path: path('{track.d_attr}'); offset-rotate: 0deg; "
                 f"animation: {kf_name} {max_dur:.2f}s linear infinite; "
                 f"animation-delay: {delay:.2f}s;"
             )
@@ -104,6 +194,134 @@ def render_animation(
         d.append(draw.Raw(ball))
 
 
+def _ball_prefix(theme: Theme) -> str:
+    """Return the opening of a ball ``<circle>``, up to its placement attrs."""
+    stroke_attr = ""
+    if theme.animation_ball_stroke:
+        stroke_attr = (
+            f' stroke="{theme.animation_ball_stroke}"'
+            f' stroke-width="{theme.animation_ball_stroke_width}"'
+        )
+    return (
+        f'<circle r="{theme.animation_ball_radius}" '
+        f'fill="{theme.animation_ball_color}" '
+        f'opacity="{ANIMATION_BALL_OPACITY}"{stroke_attr} '
+    )
+
+
+def animation_frame_markup(
+    timeline: AnimationTimeline, theme: Theme, phase: float
+) -> str:
+    """Return the static balls to substitute for :data:`FRAME_SLOT` at *phase*.
+
+    Same circles the CSS animation drives, pinned at the centres they hold
+    *phase* (0-1) of the way through the cycle, so a rasterised frame matches
+    the moment a browser would draw.
+    """
+    ball_prefix = _ball_prefix(theme)
+    return "".join(
+        f'{ball_prefix}cx="{x:.2f}" cy="{y:.2f}"/>'
+        for x, y in timeline.ball_positions(phase)
+    )
+
+
+def build_animation_timeline(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    station_offsets: dict[tuple[str, str], float],
+    theme: Theme,
+    curve_radius: float = ANIMATION_CURVE_RADIUS,
+) -> AnimationTimeline:
+    """Build the ball paths and shared cycle for *graph*'s animation.
+
+    All balls share one cycle (the longest line's at-speed duration) so they
+    stay in sync; a shorter line covers its path in the first part of the
+    cycle and holds at the terminus for the rest (see :func:`_travel_keyframes`),
+    rather than restarting mid-track while a longer line runs on.
+    """
+    line_paths = _build_line_motion_paths(graph, routes, station_offsets, curve_radius)
+    durations = [
+        max(
+            _compute_path_length(d_attr) / theme.animation_speed, MIN_ANIMATION_DURATION
+        )
+        for _, d_attr in line_paths
+    ]
+    max_dur = max(durations, default=MIN_ANIMATION_DURATION)
+
+    tracks: list[BallTrack] = []
+    for (_, d_attr), natural_dur in zip(line_paths, durations):
+        points, distances = _flatten_path(d_attr)
+        tracks.append(
+            BallTrack(
+                d_attr=d_attr,
+                move_frac=min(natural_dur / max_dur, 1.0) if max_dur > 0 else 1.0,
+                points=points,
+                distances=distances,
+            )
+        )
+    return AnimationTimeline(
+        cycle=max_dur,
+        balls_per_line=theme.animation_balls_per_line,
+        tracks=tuple(tracks),
+    )
+
+
+def _flatten_path(
+    d_attr: str,
+) -> tuple[tuple[tuple[float, float], ...], tuple[float, ...]]:
+    """Flatten an M/L/Q path to a polyline and its cumulative arc lengths.
+
+    :func:`_compute_path_length` stays the authority on a track's *duration*
+    (changing it would retime every animated map); this is the geometry a
+    frame samples a ball's position from, where a curve has to be walked
+    rather than approximated by its chord.
+    """
+    tokens = re.findall(r"[MLQ]|[-+]?\d*\.?\d+", d_attr)
+    points: list[tuple[float, float]] = []
+
+    def push(point: tuple[float, float]) -> None:
+        # Repeated waypoints are common (a zero-length corner); a duplicate
+        # would add a zero-length segment for point_at to divide by.
+        if not points or points[-1] != point:
+            points.append(point)
+
+    cx, cy = 0.0, 0.0
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if token == "M":
+            cx, cy = float(tokens[i + 1]), float(tokens[i + 2])
+            push((cx, cy))
+            i += 3
+        elif token == "L":
+            cx, cy = float(tokens[i + 1]), float(tokens[i + 2])
+            push((cx, cy))
+            i += 3
+        elif token == "Q":
+            qcx, qcy = float(tokens[i + 1]), float(tokens[i + 2])
+            ex, ey = float(tokens[i + 3]), float(tokens[i + 4])
+            for step in range(1, _CURVE_FLATTEN_STEPS + 1):
+                t = step / _CURVE_FLATTEN_STEPS
+                u = 1.0 - t
+                push(
+                    (
+                        u * u * cx + 2 * u * t * qcx + t * t * ex,
+                        u * u * cy + 2 * u * t * qcy + t * t * ey,
+                    )
+                )
+            cx, cy = ex, ey
+            i += 5
+        else:
+            i += 1
+
+    if not points:
+        points.append((0.0, 0.0))
+    distances = [0.0]
+    for (x0, y0), (x1, y1) in zip(points, points[1:]):
+        distances.append(distances[-1] + math.hypot(x1 - x0, y1 - y0))
+    return tuple(points), tuple(distances)
+
+
 def _travel_keyframes(move_frac: float, registry: dict[str, str]) -> str:
     """Return the @keyframes name for a ball that travels for *move_frac* of
     the shared cycle then holds at the terminus, registering its CSS in
@@ -112,7 +330,7 @@ def _travel_keyframes(move_frac: float, registry: dict[str, str]) -> str:
     """
     name = ns("nfm-travel-" + f"{move_frac:.4f}".replace(".", "_"))
     if name not in registry:
-        if move_frac < 1.0 - _FULL_CYCLE_EPSILON:
+        if not _fills_the_cycle(move_frac):
             registry[name] = (
                 f"@keyframes {name}{{"
                 f"0%{{offset-distance:0%}}"

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import math
 import os
+import sys
 import warnings
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import Any, Literal, NoReturn, TypeVar, cast
 
@@ -39,6 +40,12 @@ from nf_metro.parser.model import (
     split_guard_warnings,
 )
 from nf_metro.render import validate_render
+from nf_metro.render.video import (
+    VIDEO_FORMATS,
+    FfmpegNotFoundError,
+    NotAnimatedError,
+    VideoFormat,
+)
 from nf_metro.themes import DEFAULT_MODE, STYLE_NAMES, THEMES, resolve_style
 
 
@@ -67,7 +74,20 @@ def _parse_inactive_lines(value: object) -> frozenset[str] | None:
     return frozenset(s for s in (str(i).strip() for i in items) if s)
 
 
-def _format_from_output(output: Path | None) -> Literal["svg", "html", "png"]:
+OutputFormat = Literal["svg", "html", "png", "gif", "webp", "mp4", "webm"]
+
+#: Every format ``render`` writes, in the order ``--help`` lists them.
+OUTPUT_FORMATS: tuple[OutputFormat, ...] = ("svg", "html", "png", *VIDEO_FORMATS)
+
+#: Formats drawn by the rasteriser rather than written as text. All of them
+#: need the same picture-is-final decisions a PNG needs (see _render_one_unsafe).
+RASTER_FORMATS: frozenset[str] = frozenset({"png", *VIDEO_FORMATS})
+
+#: Frames per second an exported loop runs at unless ``--fps`` says otherwise.
+DEFAULT_FPS = 12.0
+
+
+def _format_from_output(output: Path | None) -> OutputFormat:
     """Infer the output format from *output*'s extension, defaulting to SVG.
 
     Lets ``-o map.png`` stand on its own, so the common case needs no
@@ -75,10 +95,17 @@ def _format_from_output(output: Path | None) -> Literal["svg", "html", "png"]:
     and wins, including over a mismatched extension.
     """
     suffix = output.suffix.lower().lstrip(".") if output is not None else ""
-    return cast(
-        'Literal["svg", "html", "png"]',
-        suffix if suffix in ("svg", "html", "png") else "svg",
-    )
+    return cast(OutputFormat, suffix if suffix in OUTPUT_FORMATS else "svg")
+
+
+def _default_scale(format_: str) -> float:
+    """Return the raster scale to use when ``--scale`` is not given.
+
+    A PNG is usually a retina still, so it doubles by default. A loop is a
+    few hundred of those frames in one file, where doubling quadruples both
+    the bytes and the time for a picture that plays at screen size anyway.
+    """
+    return 1.0 if format_ in VIDEO_FORMATS else 2.0
 
 
 class _FiniteFloatRange(click.FloatRange):
@@ -306,26 +333,45 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
 @click.option(
     "--format",
     "format_",
-    type=click.Choice(["svg", "html", "png"]),
+    type=click.Choice(list(OUTPUT_FORMATS)),
     default=None,
-    help="Output format: 'svg' (default), 'png', or 'html' for an interactive "
-    "self-contained page with pan/zoom and per-line filtering. Inferred from "
-    "the --output extension when not given.",
+    help="Output format: 'svg' (default), 'png', 'html' for an interactive "
+    "self-contained page with pan/zoom and per-line filtering, or one of "
+    "'gif'/'webp'/'mp4'/'webm' for a looping video of the animation. Inferred "
+    "from the --output extension when not given.",
 )
 @click.option(
     "--scale",
     type=float,
-    default=2.0,
-    show_default=True,
-    help="PNG only: multiply the rendered pixel dimensions by this factor.",
+    default=None,
+    help="Raster formats only: multiply the rendered pixel dimensions by this "
+    "factor.  [default: 2 for png, 1 for gif/webp/mp4/webm]",
 )
 @click.option(
     "--png-width",
     type=int,
     default=None,
-    help="PNG only: output width in pixels, height scaled with it. Overrides "
-    "--scale. Distinct from --width, which grows the SVG canvas around a map "
-    "drawn at its natural size rather than resizing the picture.",
+    help="Raster formats only: output width in pixels, height scaled with it. "
+    "Overrides --scale. Distinct from --width, which grows the SVG canvas "
+    "around a map drawn at its natural size rather than resizing the picture.",
+)
+@click.option(
+    "--fps",
+    type=_FiniteFloatRange(min=0, min_open=True, max=60),
+    default=DEFAULT_FPS,
+    show_default=True,
+    metavar="FLOAT",
+    help="Video formats only: frames per second of the exported loop.",
+)
+@click.option(
+    "--duration",
+    type=_FiniteFloatRange(min=0, min_open=True),
+    default=None,
+    metavar="FLOAT",
+    help="Video formats only: length of one loop in seconds, compressing (or "
+    "stretching) the map's own animation cycle into it. Defaults to that "
+    "cycle, which keeps the balls at exactly the speed the animated SVG "
+    "moves them.",
 )
 @click.option(
     "--theme",
@@ -489,9 +535,11 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
 def render(
     input_files: tuple[Path, ...],
     outputs: tuple[Path, ...],
-    format_: Literal["svg", "html", "png"] | None,
-    scale: float,
+    format_: OutputFormat | None,
+    scale: float | None,
     png_width: int | None,
+    fps: float,
+    duration: float | None,
     theme: str | None,
     mode: str | None,
     debug: bool,
@@ -536,7 +584,7 @@ def render(
     def _job(
         input_file: Path,
         out_path: Path,
-        out_format: Literal["svg", "html", "png"],
+        out_format: OutputFormat,
         *,
         quiet: bool,
     ) -> Callable[[], None]:
@@ -544,8 +592,10 @@ def render(
             input_file,
             out_path,
             format_=out_format,
-            scale=scale,
+            scale=scale if scale is not None else _default_scale(out_format),
             png_width=png_width,
+            fps=fps,
+            duration=duration,
             theme=theme,
             mode=mode,
             debug=debug,
@@ -592,13 +642,32 @@ def render(
     )
 
 
+def _video_notice(message: str) -> None:
+    """Print what a large export is about to cost, before it starts."""
+    click.echo(f"Note: {message}", err=True)
+
+
+def _video_progress(frames: Iterable[bytes], count: int) -> Iterator[bytes]:
+    """Draw a progress bar over the frames as they rasterise.
+
+    An export runs for minutes, and click hides the bar when stderr is not a
+    terminal, so a piped or logged run stays as quiet as every other render.
+    """
+    with click.progressbar(
+        frames, length=count, label="Rendering frames", file=sys.stderr
+    ) as tracked:
+        yield from tracked
+
+
 def _render_one(
     input_file: Path,
     output: Path,
     *,
-    format_: Literal["svg", "html", "png"],
+    format_: OutputFormat,
     scale: float,
     png_width: int | None,
+    fps: float,
+    duration: float | None,
     theme: str | None,
     mode: str | None,
     debug: bool,
@@ -635,6 +704,8 @@ def _render_one(
                 format_=format_,
                 scale=scale,
                 png_width=png_width,
+                fps=fps,
+                duration=duration,
                 theme=theme,
                 mode=mode,
                 debug=debug,
@@ -672,9 +743,11 @@ def _render_one_unsafe(
     input_file: Path,
     output: Path,
     *,
-    format_: Literal["svg", "html", "png"],
+    format_: OutputFormat,
     scale: float,
     png_width: int | None,
+    fps: float,
+    duration: float | None,
     theme: str | None,
     mode: str | None,
     debug: bool,
@@ -698,9 +771,17 @@ def _render_one_unsafe(
 ) -> None:
     text = input_file.read_text()
     error_prefix = _error_prefix(input_file, quiet)
-    # PNG is rasterised from the SVG, so every render-plane decision below
-    # follows the SVG path; only the final write differs.
+    # Every raster format is drawn from the SVG, so every render-plane
+    # decision below follows the SVG path; only the final write differs.
     svg_format: Literal["svg", "html"] = "html" if format_ == "html" else "svg"
+
+    if format_ in VIDEO_FORMATS:
+        # A video of a map with no balls on it would be a still repeated a
+        # few hundred times, so asking for one asks for the animation; an
+        # explicit --no-animate still wins, and fails with a message saying
+        # there is nothing to export.
+        if layout_opts.get("animate") is None:
+            layout_opts = {**layout_opts, "animate": True}
 
     try:
         graph = prepare_graph(
@@ -724,7 +805,7 @@ def _render_one_unsafe(
     ) as e:
         _clean_error(e, error_prefix)
 
-    if format_ == "png":
+    if format_ in RASTER_FORMATS:
         # A rasteriser has no CSS cascade and no viewer colour-scheme to
         # consult, so the picture has to be fully decided here rather than
         # left to the flags a caller remembered to pass (#863, #1205):
@@ -781,6 +862,7 @@ def _render_one_unsafe(
                 bare=bare,
                 embed_basename=output.name,
                 inactive_line_ids=inactive_line_ids,
+                animation_frame_slot=format_ in VIDEO_FORMATS,
             ),
         )
         content = rendered.content
@@ -804,7 +886,30 @@ def _render_one_unsafe(
             )
 
     output.parent.mkdir(parents=True, exist_ok=True)
-    if format_ == "png":
+    detail = ""
+    if format_ in VIDEO_FORMATS:
+        from nf_metro.render.video import write_animation
+
+        try:
+            export = write_animation(
+                content,
+                rendered.plan,
+                output,
+                cast(VideoFormat, format_),
+                fps=fps,
+                duration=duration,
+                scale=scale,
+                width=png_width,
+                notify=None if quiet else _video_notice,
+                progress=None if quiet else _video_progress,
+            )
+        except (NotAnimatedError, FfmpegNotFoundError) as e:
+            raise click.ClickException(f"{error_prefix}{e}") from None
+        detail = (
+            f", {export.frames} frames over {export.duration:.1f}s "
+            f"at {export.fps:.1f}fps"
+        )
+    elif format_ == "png":
         from nf_metro.render.raster import svg_to_png
 
         output.write_bytes(svg_to_png(content, scale=scale, width=png_width))
@@ -814,7 +919,7 @@ def _render_one_unsafe(
         click.echo(
             f"Rendered {len(graph.stations)} stations, "
             f"{len(graph.edges)} edges, "
-            f"{len(graph.lines)} lines -> {output}"
+            f"{len(graph.lines)} lines -> {output}{detail}"
         )
 
 
@@ -830,9 +935,15 @@ def render_many(manifest_file: Path) -> None:
     \b
       input                 Path to the source .mmd file (required).
       output                Path for the output file (required).
-      format                "svg" (default), "png", or "html".
-      scale                 PNG only: pixel multiplier (default: 2.0).
-      png_width             PNG only: output width in pixels; overrides scale.
+      format                "svg" (default), "png", "html", or a looping
+                            video: "gif", "webp", "mp4", "webm".
+      scale                 Raster formats only: pixel multiplier (default:
+                            2.0 for png, 1.0 for a video).
+      png_width             Raster formats only: output width in pixels;
+                            overrides scale.
+      fps                   Video only: frames per second (default: 12).
+      duration              Video only: loop length in seconds; defaults to
+                            the map's own animation cycle.
       theme                 Theme name (nfcore, light, seqera, …).
       mode                  "light" or "dark" — bakes a concrete palette.
       debug                 Show debug overlay (default: false).
@@ -898,15 +1009,18 @@ def render_many(manifest_file: Path) -> None:
             logo_raw = job.get("logo")
             lo_raw = job.get("layout_options")
 
+            job_format = cast(OutputFormat, str(job.get("format", "svg")))
             _render_one(
                 Path(raw_input),
                 Path(raw_output),
-                format_=cast(
-                    Literal["svg", "html", "png"], str(job.get("format", "svg"))
-                ),
-                scale=float(cast(float, job.get("scale", 2.0))),
+                format_=job_format,
+                scale=float(cast(float, job.get("scale", _default_scale(job_format)))),
                 png_width=(
                     int(cast(int, job["png_width"])) if job.get("png_width") else None
+                ),
+                fps=float(cast(float, job.get("fps", DEFAULT_FPS))),
+                duration=(
+                    float(cast(float, job["duration"])) if job.get("duration") else None
                 ),
                 theme=_str_or_none("theme"),
                 mode=_str_or_none("mode"),

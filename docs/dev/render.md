@@ -182,6 +182,21 @@ Every ball is synchronized to the same cycle duration, `max_dur`, chosen so the 
 Through a three-stop `@keyframes`, a shorter line covers its path in the first `move_frac` of the cycle and holds at the terminus for the rest.
 No ball restarts while another is mid-track.
 
+### Raster frames of the animation (`video.py`)
+
+No rasterizer evaluates CSS, so a GIF or MP4 of the map cannot be "the animated SVG, rendered at time _t_": resvg would park every ball at its path start.
+`video.py` draws the frames instead.
+
+`build_animation_timeline` returns the same motion paths `render_animation` drives, each one flattened to a polyline with cumulative arc lengths, plus the cycle duration and the per-track `move_frac`.
+Sampling a ball at a moment of the cycle is then the browser's own arithmetic: `distance_frac` reads the keyframes the CSS would have written, and `point_at` walks the polyline by distance the way `offset-distance` does.
+
+To keep the picture identical, the SVG is emitted once with `animation_frame_slot` set.
+`render_animation` then writes `FRAME_SLOT`, a comment, where the balls and their `@keyframes` would go, and each frame substitutes that comment for its own static `<circle>` elements.
+The slot sits at the balls' place in the drawing order, so a frame stacks them behind the station markers exactly as the animation does, and the whole map is laid out and emitted once for the entire loop.
+
+The sequence covers `[0, 1)` of one cycle, stopping a frame short of repeating frame 0, so the loop wraps without a stutter.
+GIF and WebP are written by Pillow; MP4 and WebM stream the frames into `ffmpeg` over stdin.
+
 ## Theming (`style.py`)
 
 `Theme` is a keyword-only dataclass of visual properties: colors, font sizes, line widths, station radii, animation speed, and legend layout.
@@ -219,7 +234,8 @@ It is then selectable through `%%metro style: <brand>` and `%%metro mode: <mode>
 | `html.py`           | `render_html` - standalone HTML page and inline embed snippet around the SVG                                                          |
 | `manifest.py`       | nf-metro adapter for the embedded-manifest standard. `build_manifest`, `manifest_metadata_svg`                                        |
 | `validate.py`       | `validate_render` - render-geometry guards that read the drawn SVG (markers, route ink, label ink) as their own oracle                |
-| `animate.py`        | `render_animation` - animated balls via CSS `offset-path` + `@keyframes`                                                              |
+| `animate.py`        | `render_animation` - animated balls via CSS `offset-path` + `@keyframes`; `build_animation_timeline` - the same paths, sampleable     |
+| `video.py`          | `write_animation` - a looping GIF/WebP/MP4/WebM of the animation, one rasterized frame per moment of the cycle                        |
 | `style.py`          | `Theme` dataclass                                                                                                                     |
 | `legend.py`         | `render_legend`, `compute_legend_dimensions`                                                                                          |
 | `icons.py`          | `render_file_icon`, `render_files_icon`, `render_folder_icon`                                                                         |
