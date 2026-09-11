@@ -39,6 +39,8 @@ from nf_metro.layout.geometry import (
     lanes_run_along_x,
     lanes_run_along_y,
     packed_section_visual_order,
+    section_column_span,
+    section_row_span,
     shift_section,
 )
 from nf_metro.layout.route_topology import divergence_junction_sources
@@ -1008,8 +1010,8 @@ def _bypass_has_intervening_section(
     for section in graph.sections.values():
         if section.bbox_w <= 0 or section is src_sec or section is tgt_sec:
             continue
-        section_bottom_row = section.grid_row + section.grid_row_span - 1
-        section_right_col = section.grid_col + section.grid_col_span - 1
+        section_bottom_row = section_row_span(section)[1]
+        section_right_col = section_column_span(section)[1]
         if (
             lo_col < section_right_col
             and section.grid_col < hi_col

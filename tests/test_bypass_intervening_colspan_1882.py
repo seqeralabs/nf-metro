@@ -1,14 +1,14 @@
 """Column-span awareness of ``_bypass_has_intervening_section`` (#1882).
 
 The predicate decides whether a section boxes in the two-legged bypass between a
-source and a LEFT-entry target, so the inter-row wrap band gets reserved.  It is
-span-aware on the row axis but was start-only on the column axis: a section that
-begins at or left of the corridor yet whose ``grid_col_span`` reaches into it was
-missed, so no band was reserved and the wrap run squeezed flush against the
-intervening box.
+source and a LEFT-entry target, so the inter-row wrap band gets reserved.  A
+section intervenes when its full grid span - both axes, span-aware - overlaps the
+open corridor between source and target; a section anchored at or left of the
+corridor qualifies whenever its ``grid_col_span`` reaches into it.
 
-These tests drive the predicate directly with the proven-example grid, and drive
-the whole reservation through a real layout of the companion fixture.
+These tests drive the predicate directly with grids that isolate the column-span
+case, and drive the whole reservation through a real layout of the companion
+fixture.
 """
 
 from __future__ import annotations
