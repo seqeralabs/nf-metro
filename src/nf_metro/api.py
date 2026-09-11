@@ -221,6 +221,9 @@ def _prepare_graph_state(
         caller_line_order=(
             caller_line_order if is_line_order(caller_line_order) else None
         ),
+        caller_line_spread=(
+            LineSpread(line_spread) if line_spread is not None else None
+        ),
         _layout_commitments=layout_commitments,
     )
     if not graph.stations:
@@ -248,8 +251,6 @@ def _prepare_graph_state(
                 setattr(graph, attr, str(candidate))
             elif logo_is_resolvable(raw):
                 setattr(graph, attr, raw)
-    if line_spread is not None:
-        graph.line_spread = LineSpread(line_spread)
     if logo is not None:
         graph.logo_path = str(logo)
     if legend is not None:

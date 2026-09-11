@@ -50,6 +50,7 @@ from nf_metro.parser.grammar import (
 from nf_metro.parser.model import (
     UNANNOTATED_LINE_ID,
     Edge,
+    LineSpread,
     MetroGraph,
     Section,
     Station,
@@ -236,6 +237,7 @@ def parse_metro_mermaid(
     auto_process: bool | None = None,
     process_scope: str | None = None,
     caller_line_order: LineOrder | None = None,
+    caller_line_spread: LineSpread | None = None,
     *,
     _layout_commitments: LayoutCommitmentOverlay | None = None,
 ) -> MetroGraph:
@@ -256,6 +258,12 @@ def parse_metro_mermaid(
 
     ``caller_line_order`` is the validated caller policy whose provenance must
     be captured before layout inference.
+
+    ``caller_line_spread`` is the ``--line-spread`` CLI flag's graph-wide
+    default. When not ``None`` it overrides any ``%%metro line_spread:`` default
+    directive and, unlike a post-parse assignment, is visible to the parse-time
+    layout inference that reads ``graph.line_spread`` (interchange inference
+    skips rail sections). It never touches ``line_spread_overrides``.
     """
     if caller_line_order is not None and not is_line_order(caller_line_order):
         raise ValueError(f"unsupported caller line order {caller_line_order!r}")
@@ -268,6 +276,7 @@ def parse_metro_mermaid(
         auto_process,
         process_scope,
         caller_line_order,
+        caller_line_spread=caller_line_spread,
         layout_commitments=_layout_commitments,
     )
     return graph
@@ -303,6 +312,7 @@ def _finalize_graph(
     auto_process: bool | None = None,
     process_scope: str | None = None,
     caller_line_order: LineOrder | None = None,
+    caller_line_spread: LineSpread | None = None,
     *,
     layout_commitments: LayoutCommitmentOverlay | None = None,
 ) -> None:
@@ -331,6 +341,12 @@ def _finalize_graph(
         if layout_commitments is not None
         else AppliedLayoutCommitments()
     )
+
+    # The --line-spread flag's graph-wide default wins over the %%metro
+    # line_spread: default directive, and must land before inference so the
+    # rail-section check in interchange inference reads the caller's value.
+    if caller_line_spread is not None:
+        graph.line_spread = caller_line_spread
 
     # Layout inference (interchange expansion, section grids, port/junction
     # resolution) assumes the graph is a DAG. A cyclic graph is rejected at the
