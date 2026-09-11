@@ -192,6 +192,7 @@ from nf_metro.render.constants import (
     SVG_CURVE_RADIUS,
     TERMINUS_FONT_COLOR,
     TEXT_VCENTER_DY,
+    TITLE_CANVAS_SAFETY_MARGIN,
     WATERMARK_BARE_X_INSET,
     WATERMARK_FILL,
     WATERMARK_FONT_SIZE,
@@ -760,6 +761,7 @@ class _FinalPublishedGeometry(FinalCanvasGeometry):
     debug: bool
     chrome_css: bool
     bare: bool
+    draws_standalone_title: bool
 
 
 _FINAL_RENDER_PLAN_FINGERPRINT_SOURCES = {
@@ -800,6 +802,7 @@ _FINAL_RENDER_PLAN_FINGERPRINT_SOURCES = {
     "debug": "published.debug",
     "chrome_css": "published.chrome_css",
     "bare": "published.bare",
+    "draws_standalone_title": "published.draws_standalone_title",
     "inactive_line_ids": "inactive_line_ids",
 }
 
@@ -2353,6 +2356,13 @@ def _build_render_plan_scaled(
     logo_in_legend = show_logo and effective_legend_position != "none"
     legend_logo_size = (logo_w, logo_h) if logo_in_legend else None
 
+    # Whether this render draws the map title as standalone chrome: the one
+    # predicate that both the canvas-sizing term and the title-draw block read,
+    # so the two cannot drift and reintroduce a clipped or unmeasured title.
+    draws_standalone_title = (
+        not bare and bool(graph.title) and not logo_in_legend and not show_logo
+    )
+
     legend_x, legend_y, legend_w, legend_h, show_legend = _position_legend(
         graph,
         theme,
@@ -2387,6 +2397,19 @@ def _build_render_plan_scaled(
     # the watermark text.
     auto_width = max_x + (0.0 if bare else padding)
     auto_height = max_y + WATERMARK_Y_INSET * 2 + WATERMARK_FONT_SIZE
+
+    # The title is authored text drawn at x=padding but never folded into the
+    # content extent, so a title wider than the map is clipped at the right
+    # edge.  Grow the canvas to its true glyph advance plus a small margin.
+    if draws_standalone_title:
+        title_advance = DEFAULT_TEXT_METRICS.advance(
+            graph.title,
+            text_style(theme.title_font_size, "bold"),
+            TextRole.TITLE,
+        )
+        auto_width = max(
+            auto_width, padding + title_advance + TITLE_CANVAS_SAFETY_MARGIN
+        )
 
     # A relocated header may sit past the box; let it use the margins already
     # added above and only stretch the canvas for the part that overflows them,
@@ -2459,6 +2482,7 @@ def _build_render_plan_scaled(
         debug=debug,
         chrome_css=chrome_css,
         bare=bare,
+        draws_standalone_title=draws_standalone_title,
     )
     route_plan = realise_route_reservations(
         route_plan,
@@ -2542,6 +2566,7 @@ def _build_render_plan_scaled(
         debug=published_geometry.debug,
         chrome_css=published_geometry.chrome_css,
         bare=published_geometry.bare,
+        draws_standalone_title=published_geometry.draws_standalone_title,
         inactive_line_ids=inactive_line_ids,
     ), route_plan
 
@@ -2665,7 +2690,7 @@ def _emit_render_plan(
                 )
             else:
                 _render_logo(d, effective_logo, logo_x, logo_y, logo_w, logo_h)
-        elif graph.title and not logo_in_legend:
+        elif plan.draws_standalone_title:
             d.append(
                 draw.Text(
                     graph.title,

@@ -526,6 +526,31 @@ def off_grid_gap_bundle_midpoint(
     return col_left_edge(graph, lo + 1, default=anywhere, row=row) - reach
 
 
+def row_local_gap_bundle_midpoint(
+    graph: MetroGraph, lo: int, row: int | None, bundle_width: float
+) -> float | None:
+    """X midline of a bundle in gap ``(lo, lo + 1)`` when the lower column is on
+    the grid but has no section in *row* while the upper column does.
+
+    ``None`` outside that one case.  There, the lower column's
+    :func:`col_right_edge` finds no section in *row* and returns its ``0.0``
+    default, so measuring the gap against that edge centres the bundle on the
+    coordinate origin -- a midline the map's overall size sets rather than the
+    box the channel hugs.  The upper column carries a real edge in *row*, so the
+    bundle seats :data:`EDGE_TO_BUNDLE_CLEARANCE` off it, exactly the
+    ``hi``-on-grid branch of :func:`off_grid_gap_bundle_midpoint`.
+
+    Reached only after that function has handled a column absent from the whole
+    grid, so here both columns are on the grid and only *row* leaves one empty.
+    """
+    lo_absent = not _sections_in_col(graph, lo, row)
+    hi_present = bool(_sections_in_col(graph, lo + 1, row))
+    if not (lo_absent and hi_present):
+        return None
+    reach = EDGE_TO_BUNDLE_CLEARANCE + bundle_width / 2
+    return col_left_edge(graph, lo + 1, row=row) - reach
+
+
 def packed_cell_neighbor_edges(
     graph: MetroGraph, section_id: str, side: PortSide
 ) -> tuple[float, float] | None:

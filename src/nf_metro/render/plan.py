@@ -203,6 +203,7 @@ class RenderPlan:
     debug: bool
     chrome_css: bool
     bare: bool
+    draws_standalone_title: bool
     inactive_line_ids: frozenset[str] = frozenset()
 
     @property

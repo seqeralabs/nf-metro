@@ -3358,6 +3358,7 @@ def _bypass_geometry(
             ctx.offset_step,
             anchor_section_id=tgt_sec_id,
             anchor_side=PortSide.LEFT,
+            anchor_is_target=True,
         )
         gap2_limit = effective_tx - ctx.curve_radius
         if gap2_base + (g2_n - 1) * ctx.offset_step > gap2_limit:
@@ -3416,6 +3417,7 @@ def _bypass_geometry(
             ctx.offset_step,
             anchor_section_id=tgt_sec_id,
             anchor_side=PortSide.RIGHT,
+            anchor_is_target=True,
         )
         gap2_limit = effective_tx + ctx.curve_radius
         if gap2_base - (g2_n - 1) * ctx.offset_step < gap2_limit:

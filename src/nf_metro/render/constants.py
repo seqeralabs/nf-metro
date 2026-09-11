@@ -234,6 +234,15 @@ def title_baseline_y(title_font_size: float) -> float:
     return max(TITLE_Y_OFFSET, title_font_size * TITLE_ASCENT_RATIO)
 
 
+TITLE_CANVAS_SAFETY_MARGIN: float = 4.0
+"""Slack added past the title's true glyph advance when sizing the canvas.
+
+The canvas width is grown to hold the title using the deterministic fallback
+advance, which approximates the browser's real bold font metrics; this covers
+the small discrepancy so a title never touches the right edge.
+"""
+
+
 WATERMARK_FONT_SIZE: int = 8
 """Font size for the attribution watermark."""
 
