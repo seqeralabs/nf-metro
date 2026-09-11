@@ -1124,6 +1124,31 @@ def test_stacked_files_icon_back_page_does_not_crowd_marker(direction, role):
     )
 
 
+@pytest.mark.parametrize("direction", ["LR", "RL", "TB", "BT"])
+@pytest.mark.parametrize("role", ["source", "sink"])
+def test_terminus_flow_context_matches_hand_derivation(direction, role):
+    """``_terminus_flow_context`` produces ``(section, section_dir,
+    is_vertical_flow, is_source, flow_sign)`` consistent with the station's
+    section direction and edge topology, for a source and a sink terminus on
+    every flow axis (LR, RL, TB, BT).
+    """
+    from nf_metro.render.svg import _terminus_flow_context, _terminus_icon_flow_sign
+
+    graph = parse_metro_mermaid(_files_terminus_mmd(direction, role))
+    compute_layout(graph)
+    station = graph.stations["t"]
+    section = graph.sections["sec"]
+    is_source = role == "source"
+
+    ctx = _terminus_flow_context(station, graph)
+
+    assert ctx.section is section
+    assert ctx.section_dir == direction
+    assert ctx.is_vertical_flow == lanes_run_along_x(direction)
+    assert ctx.is_source is is_source
+    assert ctx.flow_sign == _terminus_icon_flow_sign(direction, is_source)
+
+
 def test_render_tb_section_file_icon_below_station():
     """A file terminus in a TB section renders its icon below the station."""
     graph = parse_metro_mermaid(

@@ -525,6 +525,38 @@ def _terminus_stacked_pad(theme: Theme, has_stacked: bool) -> float:
     return theme.terminus_width * FILES_ICON_OFFSET_RATIO if has_stacked else 0.0
 
 
+@dataclass(frozen=True)
+class _TerminusFlowContext:
+    """Flow-axis facts for placing a terminus station's icon(s).
+
+    ``section_dir`` derives from ``section``; ``is_vertical_flow`` from
+    ``section_dir``; ``is_source`` from the station's incoming edges; and
+    ``flow_sign`` from ``section_dir`` and ``is_source``.
+    """
+
+    section: Section | None
+    section_dir: str
+    is_vertical_flow: bool
+    is_source: bool
+    flow_sign: float
+
+
+def _terminus_flow_context(station: Station, graph: MetroGraph) -> _TerminusFlowContext:
+    """Build the flow-axis context for one of *station*'s terminus icons."""
+    section = graph.sections.get(station.section_id) if station.section_id else None
+    section_dir = section.direction if section else "LR"
+    is_vertical_flow = lanes_run_along_x(section_dir)
+    is_source = not graph.edges_to(station.id)
+    flow_sign = _terminus_icon_flow_sign(section_dir, is_source)
+    return _TerminusFlowContext(
+        section=section,
+        section_dir=section_dir,
+        is_vertical_flow=is_vertical_flow,
+        is_source=is_source,
+        flow_sign=flow_sign,
+    )
+
+
 def _icon_obstacles_by_station(
     graph: MetroGraph,
     theme: Theme,
@@ -551,7 +583,6 @@ def _icon_obstacles_by_station(
         # box that always assumed a horizontal row sat beside the wrong
         # axis on a vertical-flow terminus (a line could rake the real
         # icon while the box reported clear).
-        section = graph.sections.get(station.section_id) if station.section_id else None
         line_offs = [
             station_offsets.get((station.id, lid), 0.0)
             for lid in graph.station_lines(station.id)
@@ -579,14 +610,11 @@ def _icon_obstacles_by_station(
         # the caption above the icon; everything else hangs it below.
         caption_line_count = station.terminus_caption_line_count
         if caption_line_count:
-            section_dir = section.direction if section else "LR"
-            is_vertical_flow = lanes_run_along_x(section_dir)
-            is_source = not graph.edges_to(station.id)
-            flow_sign = _terminus_icon_flow_sign(section_dir, is_source)
+            ctx = _terminus_flow_context(station, graph)
             caption_extent = ICON_NAME_GAP + (
                 caption_line_count * theme.label_font_size * ICON_NAME_FONT_SCALE
             )
-            if _terminus_caption_hangs_down(is_vertical_flow, flow_sign):
+            if _terminus_caption_hangs_down(ctx.is_vertical_flow, ctx.flow_sign):
                 y_max += caption_extent
             else:
                 y_min -= caption_extent
@@ -4373,20 +4401,17 @@ def _terminus_icon_centers_for(
     if not station.is_terminus or not station.terminus_labels:
         return []
 
-    section = graph.sections.get(station.section_id) if station.section_id else None
-    is_source = not graph.edges_to(station.id)
-    section_dir = section.direction if section else "LR"
-    is_vertical_flow = lanes_run_along_x(section_dir)
+    ctx = _terminus_flow_context(station, graph)
 
     r = theme.station_radius
     icon_gap = r + ICON_STATION_GAP
     icon_half_w = theme.terminus_width / 2
     icon_half_h = theme.terminus_height / 2
-    icon_half_flow = icon_half_h if is_vertical_flow else icon_half_w
+    icon_half_flow = icon_half_h if ctx.is_vertical_flow else icon_half_w
 
     bundle_center = (min_off + max_off) / 2
 
-    icon_step, _ = _terminus_icon_marching(theme, station, is_vertical_flow)
+    icon_step, _ = _terminus_icon_marching(theme, station, ctx.is_vertical_flow)
 
     is_rail = graph.station_is_rail(station.id)
     offtrack_nub_lift = (
@@ -4397,8 +4422,8 @@ def _terminus_icon_centers_for(
 
     return _terminus_icon_centers(
         station,
-        section_dir,
-        is_source,
+        ctx.section_dir,
+        ctx.is_source,
         len(station.terminus_labels),
         icon_gap + icon_half_flow + offtrack_nub_lift,
         icon_step,
@@ -4481,13 +4506,8 @@ def _render_terminus_icons(
     axis (a horizontal row for LR/RL, a vertical stack for TB/BT), with
     the first icon closest to the station pill.
     """
-    section: Section | None = (
-        graph.sections.get(station.section_id) if station.section_id else None
-    )
-    section_dir = section.direction if section else "LR"
-    is_vertical_flow = lanes_run_along_x(section_dir)
-    is_source = not graph.edges_to(station.id)
-    flow_sign = _terminus_icon_flow_sign(section_dir, is_source)
+    ctx = _terminus_flow_context(station, graph)
+    section = ctx.section
     icon_half_w = theme.terminus_width / 2
     icon_half_h = theme.terminus_height / 2
 
@@ -4498,7 +4518,9 @@ def _render_terminus_icons(
     banners = station.terminus_icon_banners or [False] * len(station.terminus_labels)
 
     caption_font_size = theme.label_font_size * ICON_NAME_FONT_SCALE
-    icon_step, name_widths = _terminus_icon_marching(theme, station, is_vertical_flow)
+    icon_step, name_widths = _terminus_icon_marching(
+        theme, station, ctx.is_vertical_flow
+    )
 
     centers = _terminus_icon_centers_for(station, graph, theme, min_off, max_off)
 
@@ -4523,11 +4545,11 @@ def _render_terminus_icons(
 
         # Clamp to stay within the section bbox, on whichever axis the
         # icons march along.
-        if section and is_vertical_flow and section.bbox_h > 0:
+        if section and ctx.is_vertical_flow and section.bbox_h > 0:
             top = section.bbox_y + icon_half_h + ICON_BBOX_MARGIN
             bottom = section.bbox_y + section.bbox_h - icon_half_h - ICON_BBOX_MARGIN
             icon_cy = max(top, min(icon_cy, bottom))
-        elif section and not is_vertical_flow and section.bbox_w > 0:
+        elif section and not ctx.is_vertical_flow and section.bbox_w > 0:
             icon_right = (
                 section.bbox_x + section.bbox_w - icon_half_w - ICON_BBOX_MARGIN
             )
@@ -4560,7 +4582,7 @@ def _render_terminus_icons(
             render_folder_icon(d, **common)
         elif icon_type == ICON_TYPE_FILES:
             back_dx_sign, back_dy_sign = (
-                (1.0, flow_sign) if is_vertical_flow else (flow_sign, -1.0)
+                (1.0, ctx.flow_sign) if ctx.is_vertical_flow else (ctx.flow_sign, -1.0)
             )
             render_files_icon(
                 d,
@@ -4586,7 +4608,7 @@ def _render_terminus_icons(
         # inside the icon stays readable.
         if name:
             caption_hangs_down = _terminus_caption_hangs_down(
-                is_vertical_flow, flow_sign
+                ctx.is_vertical_flow, ctx.flow_sign
             )
             # A stacked-files icon's back sheet peeks past the nominal edge
             # along the flow axis -- toward the caption for a vertical flow, but
@@ -4594,7 +4616,7 @@ def _render_terminus_icons(
             # vertical flow needs the extra clearance to keep the caption off
             # the drawn icon.
             stacked_pad = _terminus_stacked_pad(
-                theme, is_vertical_flow and icon_type == ICON_TYPE_FILES
+                theme, ctx.is_vertical_flow and icon_type == ICON_TYPE_FILES
             )
             icon_edge_gap = theme.terminus_height / 2 + stacked_pad + ICON_NAME_GAP
             stagger_step = caption_font_size * 1.4
