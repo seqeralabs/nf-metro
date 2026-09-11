@@ -7,17 +7,13 @@ rename pipeline steps, update the `.mmd` source and regenerate the images:
 ```bash
 <install-line>
 
-# Static SVG
+# Static SVG + PNG (-o repeats to write both from the same layout run)
 nf-metro render assets/metro_map.mmd \
   -o docs/images/nf-core-<name>_metro_map.svg \
+  -o docs/images/nf-core-<name>_metro_map.png --png-width 2265 \
   --theme light --x-spacing <x-spacing> --y-spacing <y-spacing> \
   --no-straight-diamonds <extra-layout-flags> \
   --logo docs/images/nf-core-<name>_logo_light.png
-
-# PNG conversion (cairosvg)
-python -c "import cairosvg; cairosvg.svg2png(
-    url='docs/images/nf-core-<name>_metro_map.svg',
-    write_to='docs/images/nf-core-<name>_metro_map.png', output_width=2265)"
 
 # Animated SVG (used in README)
 nf-metro render assets/metro_map.mmd \
@@ -39,9 +35,9 @@ done
   `funcscan`). Drop the `nf-core-` prefix on non-nf-core pipelines but
   keep the rest of the path consistent.
 - `<install-line>` - one of:
-  - `pip install 'nf-metro>=X.Y.Z' cairosvg` once a release contains the
+  - `pip install 'nf-metro>=X.Y.Z'` once a release contains the
     fixes the pipeline needs (the steady state).
-  - `pip install 'git+https://github.com/<owner>/nf-metro.git@<pipeline-name>' cairosvg`
+  - `pip install 'git+https://github.com/<owner>/nf-metro.git@<pipeline-name>'`
     while a fix chain against nf-metro main is still in flight. The
     `<pipeline-name>` branch on the fork carries the savepoint state used
     to produce the shipped images.

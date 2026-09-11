@@ -25,7 +25,7 @@ The unit of work is **one rich render per run**, reviewed deeply - not a batch.
   read-mostly probing task; no worktree needed unless you end up promoting a
   fixture or the user asks you to also fix the bug.
 - Activate the env in the same command chain: `source ~/.local/bin/mm-activate nf-metro && ...`
-  (the env has nf-metro editable-installed plus cairosvg for PNG).
+  (the env has nf-metro editable-installed, PNG rendering included).
 - `gh` for issue dedup + filing.
 
 ## The loop
@@ -153,9 +153,9 @@ For each candidate:
    or "section too far down" (inter-row gap vs siblings). Cross-reference the
    probe's `validator` warnings (e.g. `route_segment_crossing`,
    `almost_horizontal_edge`) for the routing-level reports.
-2. **Zoom in.** Crop the affected region from the PNG (PIL/`cairosvg`; remember
-   the PNG is `scale=2` vs the SVG/inspector coordinates) and read it, so the
-   numbers and the picture agree.
+2. **Zoom in.** Crop the affected region from the PNG (PIL; remember the PNG
+   is `scale=2` vs the SVG/inspector coordinates) and read it, so the numbers
+   and the picture agree.
 3. **Understand the mechanism.** State *why* it happens in engine terms (which
    phase / which placement rule), not just *that* it looks wrong. The engine can
    explain itself: `nf-metro explain "$WS/layout.mmd"` reports the rule that
