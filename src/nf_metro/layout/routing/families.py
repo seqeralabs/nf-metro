@@ -56,9 +56,6 @@ BYPASS_ROUTE_FAMILIES = frozenset(
         RouteFamilyId.BYPASS_RIGHT_ENTRY_CROSS_ROW,
     }
 )
-BYPASS_ROUTE_FAMILY_VALUES = frozenset(
-    family_id.value for family_id in BYPASS_ROUTE_FAMILIES
-)
 
 LANDING_POINT_SETTLED_LATER_FAMILIES = frozenset(
     {
