@@ -127,6 +127,7 @@ def _numeric_cli_type(opt: LayoutOption) -> click.IntRange | _FiniteFloatRange:
 # same error there as it would from the flag.
 _SCALE_TYPE = _FiniteFloatRange(min=0, min_open=True)
 _PNG_WIDTH_TYPE = click.IntRange(min=0, min_open=True)
+_FORMAT_TYPE = click.Choice(["svg", "html", "png"])
 
 
 def _convert_manifest_number(
@@ -326,7 +327,7 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
 @click.option(
     "--format",
     "format_",
-    type=click.Choice(["svg", "html", "png"]),
+    type=_FORMAT_TYPE,
     default=None,
     help="Output format: 'svg' (default), 'png', or 'html' for an interactive "
     "self-contained page with pan/zoom and per-line filtering. Inferred from "
@@ -924,7 +925,8 @@ def render_many(manifest_file: Path) -> None:
                 Path(raw_input),
                 Path(raw_output),
                 format_=cast(
-                    Literal["svg", "html", "png"], str(job.get("format", "svg"))
+                    Literal["svg", "html", "png"],
+                    _FORMAT_TYPE.convert(job.get("format", "svg"), None, None),
                 ),
                 scale=cast(
                     float,

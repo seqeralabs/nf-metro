@@ -661,6 +661,19 @@ def test_render_many_rejects_boolean_numeric_values(tmp_path, key):
     assert "is not a number" in result.output
 
 
+def test_render_many_rejects_unknown_format(tmp_path):
+    """An unrecognised format is refused, not silently rendered as SVG."""
+    out = tmp_path / "out.jpeg"
+    manifest = _write_manifest(
+        tmp_path,
+        [{"input": str(RNASEQ_MMD), "output": str(out), "format": "jpeg"}],
+    )
+    result = CliRunner().invoke(cli, ["render-many", str(manifest)])
+    assert result.exit_code != 0
+    assert "not one of" in result.output
+    assert not out.exists()
+
+
 def test_render_many_bad_manifest_json(tmp_path):
     """render-many fails cleanly on unparseable manifest JSON."""
     manifest = tmp_path / "bad.json"
