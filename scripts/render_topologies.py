@@ -100,10 +100,22 @@ def render_file(
     theme = resolve_theme(None, graph)
 
     try:
-        # chrome_css=False bakes concrete colors for the PNG step below. embed_font
-        # and baked_mode keep the layout metrics in step with what svg_to_png draws
-        # (bundled Inter, forced palette); a rasteriser cannot parse var() either way.
+        # chrome_css=False bakes concrete colors: a rasteriser cannot parse the
+        # var() chrome custom properties.
         svg_str = render_graph(
+            graph, theme, RenderConfig(debug=debug, chrome_css=False)
+        )
+    except Exception as e:
+        return name, [f"RENDER ERROR: {e}"]
+
+    svg_path = output_dir / f"{name}.svg"
+    svg_path.write_text(svg_str)
+
+    try:
+        # A second, embed_font render just for the PNG: embed_font and baked_mode
+        # keep the layout metrics in step with what svg_to_png draws (bundled
+        # Inter, forced palette), without embedding a font the .svg never needs.
+        png_svg_str = render_graph(
             graph,
             theme,
             RenderConfig(
@@ -113,14 +125,7 @@ def render_file(
                 baked_mode=graph.mode.strip() or None,
             ),
         )
-    except Exception as e:
-        return name, [f"RENDER ERROR: {e}"]
-
-    svg_path = output_dir / f"{name}.svg"
-    svg_path.write_text(svg_str)
-
-    try:
-        (output_dir / f"{name}.png").write_bytes(svg_to_png(svg_str))
+        (output_dir / f"{name}.png").write_bytes(svg_to_png(png_svg_str))
     except Exception as e:
         issues.append(f"PNG conversion error: {e}")
 
