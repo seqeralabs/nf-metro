@@ -192,6 +192,7 @@ from nf_metro.render.constants import (
     SVG_CURVE_RADIUS,
     TERMINUS_FONT_COLOR,
     TEXT_VCENTER_DY,
+    TITLE_CANVAS_SAFETY_MARGIN,
     WATERMARK_BARE_X_INSET,
     WATERMARK_FILL,
     WATERMARK_FONT_SIZE,
@@ -2377,6 +2378,20 @@ def _build_render_plan_scaled(
     # the watermark text.
     auto_width = max_x + (0.0 if bare else padding)
     auto_height = max_y + WATERMARK_Y_INSET * 2 + WATERMARK_FONT_SIZE
+
+    # The title is authored text drawn at x=padding but never folded into the
+    # content extent, so a title wider than the map is clipped at the right
+    # edge.  Grow the canvas to its true glyph advance plus a small margin,
+    # under the same condition that draws it (see the Title/Logo block).
+    if not bare and graph.title and not logo_in_legend and not show_logo:
+        title_advance = DEFAULT_TEXT_METRICS.advance(
+            graph.title,
+            text_style(theme.title_font_size, "bold"),
+            TextRole.TITLE,
+        )
+        auto_width = max(
+            auto_width, padding + title_advance + TITLE_CANVAS_SAFETY_MARGIN
+        )
 
     # A relocated header may sit past the box; let it use the margins already
     # added above and only stretch the canvas for the part that overflows them,
