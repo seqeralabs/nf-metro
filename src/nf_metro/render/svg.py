@@ -514,6 +514,17 @@ def _position_legend(
     return legend_x, legend_y, legend_w, legend_h, show_legend
 
 
+def _terminus_stacked_pad(theme: Theme, has_stacked: bool) -> float:
+    """Extent a stacked-files icon's back sheet peeks past the nominal edge.
+
+    ``render_files_icon`` offsets the back sheet by ``terminus_width *
+    FILES_ICON_OFFSET_RATIO`` along each axis; anything reserving space around
+    the drawn icon adds this so the back sheet is covered. Zero for a
+    single-sheet icon.
+    """
+    return theme.terminus_width * FILES_ICON_OFFSET_RATIO if has_stacked else 0.0
+
+
 def _icon_obstacles_by_station(
     graph: MetroGraph,
     theme: Theme,
@@ -553,9 +564,7 @@ def _icon_obstacles_by_station(
 
         # Stacked-files icons extend beyond nominal size by the offset.
         has_stacked = ICON_TYPE_FILES in (station.terminus_icon_types or [])
-        stacked_pad = (
-            theme.terminus_width * FILES_ICON_OFFSET_RATIO if has_stacked else 0.0
-        )
+        stacked_pad = _terminus_stacked_pad(theme, has_stacked)
         icon_half_w = theme.terminus_width / 2 + stacked_pad
         icon_half_h = theme.terminus_height / 2 + stacked_pad
 
@@ -4579,7 +4588,15 @@ def _render_terminus_icons(
             caption_hangs_down = _terminus_caption_hangs_down(
                 is_vertical_flow, flow_sign
             )
-            icon_edge_gap = theme.terminus_height / 2 + ICON_NAME_GAP
+            # A stacked-files icon's back sheet peeks past the nominal edge
+            # along the flow axis -- toward the caption for a vertical flow, but
+            # off-axis (away from it) for a horizontal flow -- so only a
+            # vertical flow needs the extra clearance to keep the caption off
+            # the drawn icon.
+            stacked_pad = _terminus_stacked_pad(
+                theme, is_vertical_flow and icon_type == ICON_TYPE_FILES
+            )
+            icon_edge_gap = theme.terminus_height / 2 + stacked_pad + ICON_NAME_GAP
             stagger_step = caption_font_size * 1.4
             # When adjacent icon captions would overlap horizontally
             # (their estimated width exceeds the per-icon X step), drop

@@ -11,8 +11,8 @@ import pytest
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.geometry import lanes_run_along_x
 from nf_metro.parser.mermaid import parse_metro_mermaid
-from nf_metro.parser.model import Station
-from nf_metro.render.constants import FILES_ICON_OFFSET_RATIO
+from nf_metro.parser.model import ICON_TYPE_FILES, Station
+from nf_metro.render.constants import FILES_ICON_OFFSET_RATIO, ICON_NAME_GAP
 from nf_metro.render.svg import (
     _label_halo_color,
     _terminus_icon_centers,
@@ -1614,3 +1614,44 @@ def test_terminus_caption_sits_outboard_of_its_icon(case):
         assert caption_box[0] >= icon_cy + icon_half_h, (
             f"{case}: caption y={caption_box} not clear below icon_cy={icon_cy}"
         )
+
+
+@pytest.mark.parametrize("case", sorted(_CAPTION_MARKER_CASES))
+def test_terminus_caption_gap_equals_icon_name_gap(case):
+    """The caption clears the *drawn* icon edge by exactly ``ICON_NAME_GAP``.
+
+    A stacked-files icon's back sheet peeks ``terminus_width *
+    FILES_ICON_OFFSET_RATIO`` past the nominal edge toward the caption on a
+    vertical flow, so the reserved gap must be measured from that drawn edge,
+    not the nominal box. Ignoring it collapsed the real gap to ~0 (#1972).
+    """
+    caption, station_id, _ = _CAPTION_MARKER_CASES[case]
+    graph, svg = _rendered_caption_case(case)
+    theme = NFCORE_DARK_THEME
+
+    station = graph.stations[station_id]
+    _, icon_cy = _terminus_icon_centers_for(station, graph, theme, 0.0, 0.0)[0]
+    section = graph.sections[station.section_id]
+    is_vertical_flow = lanes_run_along_x(section.direction)
+    flow_sign = _terminus_icon_flow_sign(
+        section.direction, is_source=not graph.edges_to(station_id)
+    )
+    stacked = ICON_TYPE_FILES in (station.terminus_icon_types or [])
+    back_dy = flow_sign if is_vertical_flow else -1.0
+    off = theme.terminus_width * FILES_ICON_OFFSET_RATIO if stacked else 0.0
+    half_h = theme.terminus_height / 2
+
+    caption_box, _ = _caption_and_marker_boxes(svg, caption, station_id)
+    assert caption_box is not None, f"{case}: caption {caption!r} not rendered"
+
+    caption_hangs_down = not is_vertical_flow or flow_sign > 0
+    if caption_hangs_down:
+        drawn_edge = max(icon_cy + half_h, icon_cy + back_dy * off + half_h)
+        gap = caption_box[0] - drawn_edge
+    else:
+        drawn_edge = min(icon_cy - half_h, icon_cy + back_dy * off - half_h)
+        gap = drawn_edge - caption_box[1]
+
+    assert gap == pytest.approx(ICON_NAME_GAP), (
+        f"{case}: caption gap {gap:.2f} != ICON_NAME_GAP {ICON_NAME_GAP}"
+    )
