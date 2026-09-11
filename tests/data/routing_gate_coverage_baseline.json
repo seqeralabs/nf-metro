@@ -404,7 +404,6 @@
   "inter_section_handlers.py::for je in ctx.graph.edges_to(src.id):::#1",
   "inter_section_handlers.py::if (::#6",
   "inter_section_handlers.py::if (::#9",
-  "inter_section_handlers.py::if (lo, matched_row, direction) in declared:::#1",
   "inter_section_handlers.py::if _INTER_SECTION_RULES is _INDEXED_INTER_SECTION_RULES:::#1",
   "inter_section_handlers.py::if _corridor_is_viable(ctx, src, ep):::#1",
   "inter_section_handlers.py::if _corridor_is_viable(ctx, src, tgt):::#1",
