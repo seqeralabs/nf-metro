@@ -40,12 +40,7 @@ from nf_metro.parser.model import (
     split_guard_warnings,
 )
 from nf_metro.render import validate_render
-from nf_metro.render.video import (
-    VIDEO_FORMATS,
-    FfmpegNotFoundError,
-    NotAnimatedError,
-    VideoFormat,
-)
+from nf_metro.render.video import VIDEO_FORMATS, NotAnimatedError, VideoFormat
 from nf_metro.themes import DEFAULT_MODE, STYLE_NAMES, THEMES, resolve_style
 
 
@@ -348,7 +343,7 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
     "factor.  [default: 2 for png, 1 for gif/webp/mp4/webm]",
 )
 @click.option(
-    "--png-width",
+    "--raster-width",
     type=int,
     default=None,
     help="Raster formats only: output width in pixels, height scaled with it. "
@@ -537,7 +532,7 @@ def render(
     outputs: tuple[Path, ...],
     format_: OutputFormat | None,
     scale: float | None,
-    png_width: int | None,
+    raster_width: int | None,
     fps: float,
     duration: float | None,
     theme: str | None,
@@ -593,7 +588,7 @@ def render(
             out_path,
             format_=out_format,
             scale=scale if scale is not None else _default_scale(out_format),
-            png_width=png_width,
+            raster_width=raster_width,
             fps=fps,
             duration=duration,
             theme=theme,
@@ -665,7 +660,7 @@ def _render_one(
     *,
     format_: OutputFormat,
     scale: float,
-    png_width: int | None,
+    raster_width: int | None,
     fps: float,
     duration: float | None,
     theme: str | None,
@@ -703,7 +698,7 @@ def _render_one(
                 output,
                 format_=format_,
                 scale=scale,
-                png_width=png_width,
+                raster_width=raster_width,
                 fps=fps,
                 duration=duration,
                 theme=theme,
@@ -745,7 +740,7 @@ def _render_one_unsafe(
     *,
     format_: OutputFormat,
     scale: float,
-    png_width: int | None,
+    raster_width: int | None,
     fps: float,
     duration: float | None,
     theme: str | None,
@@ -899,11 +894,11 @@ def _render_one_unsafe(
                 fps=fps,
                 duration=duration,
                 scale=scale,
-                width=png_width,
+                width=raster_width,
                 notify=None if quiet else _video_notice,
                 progress=None if quiet else _video_progress,
             )
-        except (NotAnimatedError, FfmpegNotFoundError) as e:
+        except NotAnimatedError as e:
             raise click.ClickException(f"{error_prefix}{e}") from None
         detail = (
             f", {export.frames} frames over {export.duration:.1f}s "
@@ -912,7 +907,7 @@ def _render_one_unsafe(
     elif format_ == "png":
         from nf_metro.render.raster import svg_to_png
 
-        output.write_bytes(svg_to_png(content, scale=scale, width=png_width))
+        output.write_bytes(svg_to_png(content, scale=scale, width=raster_width))
     else:
         output.write_text(content if content.endswith("\n") else content + "\n")
     if not quiet:
@@ -939,7 +934,7 @@ def render_many(manifest_file: Path) -> None:
                             video: "gif", "webp", "mp4", "webm".
       scale                 Raster formats only: pixel multiplier (default:
                             2.0 for png, 1.0 for a video).
-      png_width             Raster formats only: output width in pixels;
+      raster_width          Raster formats only: output width in pixels;
                             overrides scale.
       fps                   Video only: frames per second (default: 12).
       duration              Video only: loop length in seconds; defaults to
@@ -1015,8 +1010,10 @@ def render_many(manifest_file: Path) -> None:
                 Path(raw_output),
                 format_=job_format,
                 scale=float(cast(float, job.get("scale", _default_scale(job_format)))),
-                png_width=(
-                    int(cast(int, job["png_width"])) if job.get("png_width") else None
+                raster_width=(
+                    int(cast(int, job["raster_width"]))
+                    if job.get("raster_width")
+                    else None
                 ),
                 fps=float(cast(float, job.get("fps", DEFAULT_FPS))),
                 duration=(

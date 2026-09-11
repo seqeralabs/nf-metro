@@ -13,9 +13,11 @@ The frame sequence spans exactly one animation cycle and stops one frame
 short of repeating it, so playback loops seamlessly in either direction of
 the wrap.
 
-GIF and WebP are written by Pillow, already a dependency.  MP4 and WebM need
-an encoder: ``ffmpeg`` on ``PATH``, else the binary the optional
-``imageio-ffmpeg`` package bundles (``pip install nf-metro[video]``).
+All four containers are muxed in-process through PyAV, which ships FFmpeg in
+its own wheels: nothing has to be found on ``PATH`` and no subprocess is
+spawned, the same way ``resvg-py`` gives the PNG path a rasteriser without a
+system library.  Frames reach the encoder one at a time, so a long loop never
+exists all at once.
 """
 
 from __future__ import annotations
@@ -24,21 +26,19 @@ __all__ = [
     "LARGE_LOOP_FRAMES",
     "VIDEO_FORMATS",
     "AnimationExport",
-    "FfmpegNotFoundError",
     "NotAnimatedError",
     "VideoFormat",
     "write_animation",
 ]
 
-import shutil
-import subprocess
+from array import array
 from collections.abc import Callable, Iterator
-from contextlib import suppress
 from dataclasses import dataclass
+from fractions import Fraction
 from io import BytesIO
 from itertools import chain
 from pathlib import Path
-from typing import Any, Literal, get_args
+from typing import TYPE_CHECKING, Any, Literal, cast, get_args
 
 from nf_metro.render.animate import (
     FRAME_SLOT,
@@ -48,36 +48,69 @@ from nf_metro.render.animate import (
 from nf_metro.render.plan import RenderPlan
 from nf_metro.render.raster import svg_to_png
 
+if TYPE_CHECKING:
+    import av
+    from PIL import Image
+
 VideoFormat = Literal["gif", "webp", "mp4", "webm"]
 VIDEO_FORMATS: tuple[VideoFormat, ...] = get_args(VideoFormat)
 
-#: Formats Pillow writes itself; the rest go through ffmpeg.
-_PILLOW_FORMATS: frozenset[str] = frozenset({"gif", "webp"})
-
-#: Past this many frames an export is minutes of work, and for GIF and WebP a
-#: gigabyte-scale buffer.  Nothing is refused -- a long, smooth, high-scale
-#: loop is a legitimate thing to want, and only the caller knows what it is
-#: worth -- but the cost is quoted up front, while there is still time to stop.
+#: Past this many frames an export is minutes of work.  Nothing is refused --
+#: a long, smooth, high-scale loop is a legitimate thing to want, and only the
+#: caller knows what it is worth -- but the cost is quoted up front, while
+#: there is still time to stop.
 LARGE_LOOP_FRAMES = 400
 
-#: Bytes Pillow holds per pixel of every frame until the file is written, by
-#: format: a GIF frame is palette-indexed, a WebP frame full colour.  ffmpeg
-#: takes the frames as a stream and holds none of them.
-_BYTES_PER_PIXEL = {"gif": 1, "webp": 3}
+#: Ticks a frame delay is quantised to, by container.  GIF stores a delay in
+#: hundredths of a second and WebP in thousandths, and a requested fps rarely
+#: divides evenly into either; :func:`_frame_ticks` carries the rounding error
+#: forward so the loop still comes out the length that was asked for.  MP4 and
+#: WebM are constant-rate and need no such thing.
+_TICKS_PER_SECOND = {"gif": 100, "webp": 1000}
 
-#: GIF stores a frame delay in hundredths of a second, so a requested fps
-#: rarely divides evenly.  Delays are rounded with the leftover carried into
-#: the next frame, which keeps the loop's total length right even though
-#: individual frames land a few milliseconds either side.
-_GIF_TICK_MS = 10
+
+@dataclass(frozen=True)
+class _Encoder:
+    """How one container is muxed: codec, pixel format, and their options."""
+
+    codec: str
+    pix_fmt: str
+    container_options: dict[str, str]
+    codec_options: dict[str, str]
+
+    @property
+    def needs_even_size(self) -> bool:
+        """Whether the pixel format's chroma subsampling requires even sides."""
+        return self.pix_fmt == "yuv420p"
+
+
+_ENCODERS: dict[str, _Encoder] = {
+    # pal8 takes the palette-indexed frames Pillow quantises, so the GIF keeps
+    # an adaptive palette rather than the fixed one the encoder would pick,
+    # and transdiff writes each later frame as its difference from the last.
+    "gif": _Encoder("gif", "pal8", {"loop": "0"}, {"gifflags": "+transdiff"}),
+    # Lossless is both the smaller and the better encode here: a map is flat
+    # colour and hard edges, which is what WebP's lossless mode is good at and
+    # what lossy DCT is worst at. On the rnaseq example a lossless loop is
+    # 190KB and pixel-exact, where quality=90 is 334KB and visibly rings
+    # around the labels.
+    "webp": _Encoder("libwebp_anim", "bgra", {"loop": "0"}, {"lossless": "1"}),
+    # faststart moves the index to the front so a <video> starts on the first
+    # bytes instead of waiting for the whole file.
+    "mp4": _Encoder(
+        "libx264",
+        "yuv420p",
+        {"movflags": "+faststart"},
+        {"crf": "23", "preset": "medium"},
+    ),
+    "webm": _Encoder(
+        "libvpx-vp9", "yuv420p", {}, {"crf": "32", "b": "0", "row-mt": "1"}
+    ),
+}
 
 
 class NotAnimatedError(ValueError):
     """Raised when the SVG to export carries no animation to sample."""
-
-
-class FfmpegNotFoundError(RuntimeError):
-    """Raised when an MP4/WebM export finds no ffmpeg to encode with."""
 
 
 @dataclass(frozen=True)
@@ -139,7 +172,7 @@ def write_animation(
     loop = duration if duration is not None else timeline.cycle
     count = max(1, round(loop * fps))
     if notify is not None and count > LARGE_LOOP_FRAMES:
-        notify(_cost_note(plan, fmt, count=count, scale=scale, width=width))
+        notify(_cost_note(plan, count=count, scale=scale, width=width))
 
     theme: Any = plan.theme
     frames: Iterator[bytes] = (
@@ -154,10 +187,7 @@ def write_animation(
         frames = progress(frames, count)
 
     output.parent.mkdir(parents=True, exist_ok=True)
-    if fmt in _PILLOW_FORMATS:
-        _write_with_pillow(frames, output, fmt, count=count, loop=loop)
-    else:
-        _write_with_ffmpeg(frames, output, fmt, fps=count / loop)
+    _encode(frames, output, fmt, count=count, loop=loop)
     return AnimationExport(output, frames=count, duration=loop, fps=count / loop)
 
 
@@ -170,199 +200,137 @@ def _frame_pixels(
     return max(1, round(plan.svg_width * scale)), max(1, round(plan.svg_height * scale))
 
 
-def _cost_note(
-    plan: RenderPlan, fmt: str, *, count: int, scale: float, width: int | None
-) -> str:
+def _cost_note(plan: RenderPlan, *, count: int, scale: float, width: int | None) -> str:
     """Describe what a large export is about to spend, before it spends it."""
     pixel_width, pixel_height = _frame_pixels(plan, scale=scale, width=width)
-    note = (
+    return (
         f"{count} frames to rasterise at {pixel_width}x{pixel_height}; "
         "this will take a while. --fps and --duration set the frame count, "
-        "--scale and --png-width the size."
-    )
-    per_pixel = _BYTES_PER_PIXEL.get(fmt)
-    if per_pixel is None:
-        return note
-    held = count * pixel_width * pixel_height * per_pixel / 1024**3
-    return (
-        f"{note} {fmt.upper()} also holds the whole loop in memory while it "
-        f"encodes (about {held:.1f} GB here); MP4 and WebM stream instead."
+        "--scale and --raster-width the size."
     )
 
 
-def _frame_delays_ms(count: int, loop: float) -> list[int]:
-    """Split *loop* seconds into *count* whole-tick GIF delays.
+def _frame_ticks(count: int, loop: float, ticks_per_second: int) -> list[int]:
+    """Split *loop* seconds into *count* cumulative presentation timestamps.
 
-    Rounding each delay independently would drift the loop by up to half a
-    tick per frame; carrying the remainder forward keeps the total within one
-    tick of *loop* however badly the fps divides.
+    A container that stores a whole-tick delay per frame would drift by up to
+    half a tick each time if every frame rounded on its own; rounding the
+    running total instead keeps the loop within one tick of *loop* however
+    badly the fps divides.
     """
-    delays: list[int] = []
-    written = 0.0
-    for i in range(1, count + 1):
-        target = loop * 1000.0 * i / count
-        tick = max(
-            _GIF_TICK_MS, round((target - written) / _GIF_TICK_MS) * _GIF_TICK_MS
+    return [round(loop * ticks_per_second * i / count) for i in range(count)]
+
+
+def _even(size: tuple[int, int]) -> tuple[int, int]:
+    """Round a frame size up to the even sides 4:2:0 chroma needs."""
+    width, height = size
+    return width + width % 2, height + height % 2
+
+
+def _prepare(
+    image: Image.Image,
+    spec: _Encoder,
+    canvas: tuple[int, int],
+    background: tuple[int, ...],
+    palette: Image.Image | None,
+) -> av.VideoFrame:
+    """Turn one decoded frame into the ``av.VideoFrame`` the encoder wants."""
+    import av
+    from PIL import Image as PILImage
+
+    if image.size != canvas:
+        # Pad rather than rescale, so the map keeps the size its frames were
+        # rasterised at; the map's own background colour makes the seam
+        # invisible where an odd dimension had to grow by a pixel.
+        padded = PILImage.new("RGB", canvas, background)
+        padded.paste(image, (0, 0))
+        image = padded
+    if palette is None:
+        return av.VideoFrame.from_image(image).reformat(format=spec.pix_fmt)
+    return _pal8_frame(image.quantize(palette=palette, dither=PILImage.Dither.NONE))
+
+
+def _pal8_frame(image: Image.Image) -> av.VideoFrame:
+    """Build a ``pal8`` frame from a palette-indexed image.
+
+    FFmpeg keeps the indices in plane 0 and the palette in plane 1, as 256
+    native-endian ``0xAARRGGBB`` words.  Plane 0 is stride-padded, so the rows
+    are copied into a buffer of the plane's own line size rather than handed
+    over as the image's tightly packed bytes.
+    """
+    import av
+
+    frame = av.VideoFrame(image.width, image.height, "pal8")
+    width, height = image.width, image.height
+    indices = image.tobytes()
+    stride = frame.planes[0].line_size
+    if stride != width:
+        pad = bytes(stride - width)
+        indices = b"".join(
+            indices[row * width : (row + 1) * width] + pad for row in range(height)
         )
-        delays.append(tick)
-        written += tick
-    return delays
+    frame.planes[0].update(indices)
 
-
-def _write_with_pillow(
-    frames: Iterator[bytes],
-    output: Path,
-    fmt: str,
-    *,
-    count: int,
-    loop: float,
-) -> None:
-    """Write *frames* as a looping GIF or animated WebP.
-
-    Frames are handed over as a generator, but Pillow materialises
-    ``append_images`` for both containers and holds the loop until it is
-    written -- see :data:`MAX_FRAMES`, which bounds that.  ffmpeg has no such
-    limit, so a very long loop is cheaper as MP4 or WebM.
-    """
-    from PIL import Image
-
-    delays = _frame_delays_ms(count, loop)
-    first = Image.open(BytesIO(next(frames))).convert("RGB")
-
-    if fmt == "gif":
-        # One palette for the whole loop, taken from the first frame: the map
-        # is static behind the balls, so a per-frame palette would only make
-        # the background shimmer between quantisations -- and a stable
-        # background is what lets Pillow write later frames as small deltas.
-        palette = first.quantize(colors=256)
-
-        def prepare(image: Image.Image) -> Image.Image:
-            return image.quantize(palette=palette, dither=Image.Dither.NONE)
-
-        options: dict[str, object] = {"optimize": False, "disposal": 1}
-    else:
-
-        def prepare(image: Image.Image) -> Image.Image:
-            return image
-
-        # minimize_size makes the encoder reuse what it can between frames
-        # rather than sizing each on its own; on a map that is static behind
-        # the balls it takes roughly a third off the file.
-        options = {"method": 4, "quality": 80, "minimize_size": True}
-
-    rest = (prepare(Image.open(BytesIO(data)).convert("RGB")) for data in frames)
-    prepare(first).save(
-        output,
-        save_all=True,
-        append_images=rest,
-        duration=delays,
-        loop=0,
-        **options,
+    table = list(image.getpalette() or [])
+    table += [0] * (768 - len(table))
+    words = array(
+        "I",
+        (
+            0xFF000000 | (table[i] << 16) | (table[i + 1] << 8) | table[i + 2]
+            for i in range(0, 768, 3)
+        ),
     )
+    # array("I") is native-endian, which is the order FFmpeg reads the palette
+    # in; it is also 4 bytes wide everywhere CPython builds.
+    frame.planes[1].update(words.tobytes())
+    return frame
 
 
-def _resolve_ffmpeg() -> str:
-    """Return an ffmpeg executable, preferring the one on ``PATH``."""
-    found = shutil.which("ffmpeg")
-    if found:
-        return found
-    try:
-        import imageio_ffmpeg
-    except ImportError:
-        raise FfmpegNotFoundError(
-            "MP4 and WebM need ffmpeg. Install it on your PATH, or run "
-            "`pip install nf-metro[video]` for a bundled build. GIF and "
-            "animated WebP need neither."
-        ) from None
-    return str(imageio_ffmpeg.get_ffmpeg_exe())
-
-
-def _edge_color(png: bytes) -> str:
-    """Return the frame's top-left pixel as an ffmpeg ``0xRRGGBB`` colour.
-
-    A map is drawn on its theme's background with padding around it, so the
-    corner pixel is that background -- the one colour a pad column can be
-    without showing as a stripe down the side of the video.
-    """
-    from PIL import Image
-
-    with Image.open(BytesIO(png)) as image:
-        r, g, b = image.convert("RGB").getpixel((0, 0))  # type: ignore[misc]
-    return f"0x{r:02x}{g:02x}{b:02x}"
-
-
-def _encoder_args(fmt: str, pad_color: str) -> list[str]:
-    """Return the codec arguments for *fmt*.
-
-    Both are 4:2:0 8-bit with even dimensions, the combination every browser
-    and every phone will play; an odd pixel dimension is padded in the
-    background colour rather than rescaled, so the map keeps the size its
-    frames were rasterised at and the seam is invisible.
-    """
-    common = [
-        "-vf",
-        f"pad=ceil(iw/2)*2:ceil(ih/2)*2:0:0:color={pad_color}",
-        "-pix_fmt",
-        "yuv420p",
-        "-an",
-    ]
-    if fmt == "mp4":
-        # faststart moves the index to the front so a <video> starts on the
-        # first bytes instead of waiting for the whole file.
-        return [
-            *common,
-            "-c:v",
-            "libx264",
-            "-crf",
-            "23",
-            "-preset",
-            "medium",
-            "-movflags",
-            "+faststart",
-        ]
-    return [*common, "-c:v", "libvpx-vp9", "-crf", "32", "-b:v", "0", "-row-mt", "1"]
-
-
-def _write_with_ffmpeg(
-    frames: Iterator[bytes], output: Path, fmt: str, *, fps: float
+def _encode(
+    frames: Iterator[bytes], output: Path, fmt: str, *, count: int, loop: float
 ) -> None:
-    """Pipe *frames* through ffmpeg into *output*.
+    """Mux *frames* into *output* as one loop of *fmt*.
 
-    The PNGs stream in over stdin, so a long loop never has to exist all at
-    once -- on disk or in memory.
+    The PNGs are decoded and encoded one at a time, so neither the raw frames
+    nor the encoded ones are ever all in memory at once.
     """
-    ffmpeg = _resolve_ffmpeg()
-    first = next(frames)
-    command = [
-        ffmpeg,
-        "-y",
-        "-loglevel",
-        "error",
-        "-f",
-        "image2pipe",
-        "-framerate",
-        f"{fps:.6f}",
-        "-i",
-        "-",
-        *_encoder_args(fmt, _edge_color(first)),
-        str(output),
-    ]
-    process = subprocess.Popen(command, stdin=subprocess.PIPE)
-    assert process.stdin is not None
-    try:
-        try:
-            for data in chain([first], frames):
-                process.stdin.write(data)
-        except BrokenPipeError:
-            pass  # ffmpeg died; its exit code below carries the real complaint.
-        finally:
-            # A pipe ffmpeg has already dropped refuses the close too, and
-            # that is not the failure worth reporting.
-            with suppress(BrokenPipeError):
-                process.stdin.close()
-    finally:
-        # Reached even when a frame failed to rasterise, so a half-written
-        # export never leaves an encoder behind waiting on a pipe.
-        status = process.wait()
-    if status != 0:
-        raise RuntimeError(f"ffmpeg failed writing {output} (exit {status})")
+    import av
+    from PIL import Image as PILImage
+
+    spec = _ENCODERS[fmt]
+    first = PILImage.open(BytesIO(next(frames))).convert("RGB")
+    canvas = _even(first.size) if spec.needs_even_size else first.size
+    # A map is drawn on its theme's background with padding around it, so the
+    # corner pixel is that background.
+    background = cast("tuple[int, ...]", first.getpixel((0, 0)))
+    # One palette for the whole loop, taken from the first frame: the map is
+    # static behind the balls, so a per-frame palette would only make the
+    # background shimmer between quantisations -- and a stable background is
+    # what lets the encoder write later frames as small differences.
+    palette = first.quantize(colors=256) if spec.pix_fmt == "pal8" else None
+
+    rate = Fraction(count / loop).limit_denominator(65535)
+    ticks = _TICKS_PER_SECOND.get(fmt)
+    timestamps: list[int] | range = (
+        _frame_ticks(count, loop, ticks) if ticks is not None else range(count)
+    )
+    with av.open(str(output), "w", options=spec.container_options) as container:
+        stream = container.add_stream(spec.codec, rate=rate)
+        stream.width, stream.height = canvas
+        stream.pix_fmt = spec.pix_fmt
+        stream.codec_context.options = spec.codec_options
+        if ticks is not None:
+            # The codec context is what the encoder reads timestamps against;
+            # setting it on the stream instead leaves the muxer to rescale
+            # from the nominal rate and the delays come out several times too
+            # long.
+            stream.codec_context.time_base = Fraction(1, ticks)
+
+        images = (PILImage.open(BytesIO(data)).convert("RGB") for data in frames)
+        for pts, image in zip(timestamps, chain([first], images)):
+            frame = _prepare(image, spec, canvas, background, palette)
+            frame.pts = pts
+            for packet in stream.encode(frame):
+                container.mux(packet)
+        for packet in stream.encode():
+            container.mux(packet)

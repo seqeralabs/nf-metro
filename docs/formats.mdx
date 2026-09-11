@@ -1,0 +1,137 @@
+---
+title: "Output formats"
+description: "Every format nf-metro render writes, what each one is good at, and which to reach for."
+---
+
+import Metro from "@components/Metro.astro";
+
+`nf-metro render` takes its format from the output extension.
+
+```bash frame="terminal"
+nf-metro render rnaseq.mmd -o rnaseq.svg
+nf-metro render rnaseq.mmd -o rnaseq.png
+nf-metro render rnaseq.mmd -o rnaseq.webm
+```
+
+`--format` overrides the extension when you need it to.
+`-o` repeats, so one command writes several files:
+
+```bash frame="terminal"
+nf-metro render rnaseq.mmd -o rnaseq.svg -o rnaseq.png -o rnaseq.mp4
+```
+
+Every measurement below comes from `examples/rnaseq_sections.mmd`, the nf-core/rnaseq map: 54 stations, 191 edges, 6 lines, 1799&times;696 at its natural size.
+
+<Metro src="examples/rnaseq_sections.mmd" mmd={false} />
+
+## SVG
+
+Start here, and only move if something downstream refuses it.
+
+An SVG is vector, so there is no resolution to pick. The same file is a thumbnail, a poster, and a zoomed-in inspection of one section.
+
+The labels are real `<text>`, which a reader can select, a browser can search, and a screen reader can announce.
+
+One file covers both colour schemes. The chrome colours emit as CSS `light-dark(<light>, <dark>)` and the root `<svg>` carries `color-scheme: light dark`, so the map follows whatever the reader's OS or host page is set to. You do not export twice. [Theming](/nf-metro/theming/) covers how to override that from a host page.
+
+Every SVG also carries its own [data manifest](/nf-metro/manifest/): a JSON block in `<metadata>` plus `data-node-*` attributes on the drawn elements. That is what lets a host page find the station called `STAR` and colour it, which is how [live progress](/nf-metro/live/) works.
+
+`--animate` puts balls on the lines, moved by CSS `offset-path`. They run when the SVG is opened directly, referenced from an `<img>`, or inlined into a page.
+
+Fonts are the one thing an SVG cannot settle by itself, because it names a family and the viewer supplies it. Two flags close that gap:
+
+- `--embed-font` inlines a WOFF2 subset of Inter as an `@font-face` block. Adds 28&nbsp;KB to this map, and the text stays selectable.
+- `--text-to-paths` converts every label to outlines, which removes the font question entirely at the cost of selectable text. Needs `pip install "nf-metro[font]"`.
+
+[Embedding](/nf-metro/embedding/) goes through the sizing, theming, and namespacing flags in full.
+
+## PNG
+
+A still raster, for anywhere an SVG is turned away: a journal submission, a slide, a chat window.
+
+```bash frame="terminal"
+nf-metro render rnaseq.mmd -o rnaseq.png --mode light --scale 2
+```
+
+A rasteriser has no CSS cascade and no viewer colour scheme to consult, so the PNG path settles the picture before drawing it. It bakes one concrete palette, drops the `var()` chrome properties, and draws the labels with the bundled Inter rather than whatever the machine has installed. The same map therefore rasterises to the same bytes anywhere, which is what makes a committed PNG reviewable in a diff.
+
+Pick the palette with `--mode light` or `--mode dark`. Without it the map's own `%%metro mode:` applies, then the global default.
+
+Size the output with `--scale` (default `2`, for retina) or `--raster-width` for an exact pixel width. Neither is `--width`, which pads the canvas around a map drawn at its natural size instead of resizing the picture.
+
+## Interactive HTML
+
+`--format html` writes one self-contained page: the SVG inlined, plus a small JS and CSS layer. No network, no build step.
+
+```bash frame="terminal"
+nf-metro render rnaseq.mmd -o rnaseq.html
+```
+
+Drag to pan, scroll to zoom, hover a station for a tooltip. Clicking a line in the legend isolates it, hides the stations and sections that line does not touch, and zooms to what is left. `Esc` or **Reset** restores the full view. An **Embed&hellip;** button hands you copyable inline-HTML, iframe, and static-SVG snippets.
+
+Reach for it when the map is the thing being explored rather than a picture beside some prose.
+
+## Looping video
+
+Four formats export the `--animate` motion as a loop, for the places a CSS animation will not run: a README, a slide, a conference talk.
+
+```bash frame="terminal"
+nf-metro render rnaseq.mmd -o rnaseq.gif --duration 12 --fps 20
+```
+
+<video
+  controls
+  autoplay
+  loop
+  muted
+  playsinline
+  style="width: 100%; max-width: 760px; border-radius: 6px"
+  src="../assets/formats_loop.mp4"
+>
+  Your browser can't play the embedded video.
+  <a href="../assets/formats_loop.mp4">Download it here</a>.
+</video>
+
+_The same map as MP4: one 12-second loop at 20fps._
+
+The frames are drawn, not screen-recorded. Each ball is sampled from the same motion path the animated SVG drives it along, at the moment of the cycle that frame represents, so a frame and the live SVG agree to the pixel. The loop runs one full animation cycle and stops a frame short of repeating it, so it wraps without a stutter.
+
+`--fps` sets the frame rate and `--duration` sets the loop length, compressing the map's own animation cycle into it. Leaving `--duration` off keeps the balls at exactly the speed the SVG moves them, which for a large pipeline can be a 40-second loop. `--scale` and `--raster-width` size the frames as they size a PNG, except that a video defaults to natural size where a still doubles.
+
+Nothing is capped. Every frame is a full rasterisation, so a long smooth loop of a large map costs real time; nf-metro quotes the frame count and frame size before it starts, then shows a progress bar. See [the CLI reference](/nf-metro/cli/#looping-video-of-the-animation) for the flags.
+
+### Which of the four
+
+The split that matters is what element the format needs to play in.
+
+GIF and WebP animate inside an `<img>`, which means they work in a GitHub README, a markdown file, and anywhere else that renders an image and gives you no `<video>` tag. Between them, WebP keeps full 24-bit colour and is pixel-exact, where GIF quantises the loop to one shared 256-colour palette. GIF plays in everything ever written; WebP wants Safari 14 or newer and trips up some older tooling.
+
+MP4 and WebM are both roughly half the size of the `<img>` formats, but need a real `<video autoplay loop muted playsinline>`. Which of the two wins on bytes depends on the clip: on the loop measured below MP4 comes out 10% smaller, while at 12fps over 8 seconds WebM was 20% smaller than MP4. MP4 decodes everywhere, so it is the safer default, and WebM is worth measuring when you know the audience can play VP9.
+
+:::note[No external encoder]
+All four are muxed in-process by [PyAV](https://github.com/PyAV-Org/PyAV), which ships FFmpeg in its own wheels. Nothing needs to be installed or found on `PATH`, the same way `resvg-py` gives the PNG path a rasteriser without a system library.
+:::
+
+## At a glance
+
+One loop of the rnaseq map, 12 seconds at 20fps, all at natural size:
+
+| Format  | Kind         | Size   | Plays in  | Good for                                  |
+| ------- | ------------ | ------ | --------- | ----------------------------------------- |
+| `.svg`  | vector       | 238 KB | anything  | the default: docs, READMEs, embedding     |
+| `.html` | vector + JS  | 520 KB | a browser | exploring a big map                       |
+| `.png`  | raster still | 138 KB | anything  | journals, slides, chat, byte-stable diffs |
+| `.gif`  | raster loop  | 337 KB | `<img>`   | a README loop that works everywhere       |
+| `.webp` | raster loop  | 395 KB | `<img>`   | a README loop, full colour, pixel-exact   |
+| `.mp4`  | raster loop  | 191 KB | `<video>` | slides, talks, a docs page                |
+| `.webm` | raster loop  | 213 KB | `<video>` | the same, where VP9 is known to decode    |
+
+The PNG is at `--scale 1` to match the video frames. At the default `--scale 2` it is 310 KB.
+
+## Picking one
+
+- Embedding a map in docs, a README, or an app: `.svg`.
+- Something refuses SVG: `.png`, with `--mode` set.
+- The map is large and the reader needs to dig into it: `.html`.
+- You want the animation in a README: `.gif`, or `.webp` if the colour matters more than reaching every viewer.
+- You want the animation in a page or a deck you control: `.mp4`.

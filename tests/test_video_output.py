@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 import pytest
@@ -12,7 +11,7 @@ from PIL import Image
 from nf_metro.cli import cli
 from nf_metro.render import video
 from nf_metro.render.animate import FRAME_SLOT, AnimationTimeline, BallTrack
-from nf_metro.render.video import _cost_note, _frame_delays_ms
+from nf_metro.render.video import _cost_note, _frame_ticks
 
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
 # Names no asset resolved relative to the map file, so it survives a copy into
@@ -39,21 +38,6 @@ def _frames(path: Path) -> list[Image.Image]:
             animation.seek(index) or animation.convert("RGB")  # type: ignore[func-returns-value]
             for index in range(animation.n_frames)
         ]
-
-
-def _has_ffmpeg() -> bool:
-    if shutil.which("ffmpeg"):
-        return True
-    try:
-        import imageio_ffmpeg  # noqa: F401
-    except ImportError:
-        return False
-    return True
-
-
-needs_ffmpeg = pytest.mark.skipif(
-    not _has_ffmpeg(), reason="needs ffmpeg on PATH or nf-metro[video]"
-)
 
 
 def _track(points: tuple[tuple[float, float], ...], move_frac: float) -> BallTrack:
@@ -116,12 +100,18 @@ def test_phase_one_is_phase_zero_again() -> None:
     assert timeline.ball_positions(1.0) == pytest.approx(timeline.ball_positions(0.0))
 
 
-def test_frame_delays_add_up_to_the_loop_length() -> None:
-    """GIF delays are whole centiseconds; the rounding must not drift the loop."""
-    delays = _frame_delays_ms(count=7, loop=1.0)
+def test_frame_timestamps_span_the_loop_without_drifting() -> None:
+    """GIF delays are whole centiseconds; the rounding must not shorten the loop.
 
-    assert sum(delays) == pytest.approx(1000, abs=10)
-    assert all(delay % 10 == 0 for delay in delays)
+    Seven frames over a second divide into 14.28 centiseconds each. Rounding
+    every frame down on its own would lose nearly a frame's worth by the wrap.
+    """
+    ticks = _frame_ticks(count=7, loop=1.0, ticks_per_second=100)
+
+    assert ticks[0] == 0
+    assert ticks == sorted(ticks)
+    # The last frame is shown for the remainder, so the loop closes on 100.
+    assert 100 - ticks[-1] == pytest.approx(100 / 7, abs=1)
 
 
 # --- the emitted SVG -------------------------------------------------------
@@ -200,9 +190,9 @@ def test_scale_still_resizes_a_video(tmp_path: Path) -> None:
         assert double.size == (natural[0] * 2, natural[1] * 2)
 
 
-@needs_ffmpeg
 @pytest.mark.parametrize("suffix", ["mp4", "webm"])
-def test_ffmpeg_formats_write_a_playable_file(tmp_path: Path, suffix: str) -> None:
+def test_video_containers_are_written_in_process(tmp_path: Path, suffix: str) -> None:
+    """PyAV muxes these, so they need nothing found on PATH."""
     out = _render(tmp_path, f"map.{suffix}", *TINY)
 
     assert out.stat().st_size > 0
@@ -244,11 +234,10 @@ class _Plan:
     svg_height = 400
 
 
-def test_the_cost_note_quotes_the_frame_size_and_the_memory_gif_will_hold() -> None:
+def test_the_cost_note_quotes_the_frame_count_and_size() -> None:
     """A caller deciding whether to wait needs both numbers, not just a wait."""
     note = _cost_note(
         _Plan(),  # type: ignore[arg-type]
-        "gif",
         count=1000,
         scale=2.0,
         width=None,
@@ -256,21 +245,6 @@ def test_the_cost_note_quotes_the_frame_size_and_the_memory_gif_will_hold() -> N
 
     assert "1000 frames" in note
     assert "2000x800" in note
-    # 1000 frames x 1.6M palette pixels.
-    assert "1.5 GB" in note
-
-
-def test_the_cost_note_leaves_the_memory_line_off_a_streaming_format() -> None:
-    note = _cost_note(
-        _Plan(),  # type: ignore[arg-type]
-        "mp4",
-        count=1000,
-        scale=1.0,
-        width=None,
-    )
-
-    assert "1000x400" in note
-    assert "memory" not in note
 
 
 def test_a_big_loop_is_quoted_rather_than_refused(

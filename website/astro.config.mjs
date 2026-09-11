@@ -148,11 +148,11 @@ export default defineConfig({
           // - gallery/ and pipelines/ are custom Astro routes, not Starlight
           //   content entries, so the validator can only see them as opaque
           //   custom pages.
-          // - live_demo.mp4 is a public/ static asset, not a navigable page.
+          // - ../assets/*.mp4 are public/ static media, not navigable pages.
           exclude: ({ link }) =>
             link.startsWith(`${base}gallery`) ||
             link.startsWith(`${base}pipelines`) ||
-            link === "../assets/live_demo.mp4",
+            /^\.\.\/assets\/.+\.mp4$/.test(link),
         }),
       ],
       title: "nf-metro",
@@ -192,6 +192,7 @@ export default defineConfig({
             // base-relative ("/" -> "/nf-metro/"); passing `base` here doubled it.
             { label: "Home", link: "/" },
             { label: "Guide", slug: "guide" },
+            { label: "Output formats", slug: "formats" },
             { label: "CLI reference", slug: "cli" },
             { label: "Gallery", link: "/gallery/" },
             { label: "nf-core pipelines", link: "/pipelines/" },

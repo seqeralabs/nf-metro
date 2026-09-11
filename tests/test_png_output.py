@@ -64,22 +64,22 @@ def test_scale_multiplies_the_pixel_dimensions(tmp_path: Path) -> None:
     assert double.size == (single.width * 2, single.height * 2)
 
 
-def test_png_width_pins_the_width_and_keeps_the_aspect_ratio(tmp_path: Path) -> None:
-    """--png-width resizes the picture, where --width grows the SVG canvas.
+def test_raster_width_pins_the_width_and_keeps_the_aspect_ratio(tmp_path: Path) -> None:
+    """--raster-width resizes the picture, where --width grows the SVG canvas.
 
     The distinction matters: --width leaves the map at its natural size and
     pads the canvas around it, so it cannot stand in for the raster width the
     old cairosvg recipe used.
     """
     natural = _image(_render(tmp_path, "nat.png", "--scale", "1"))
-    pinned = _image(_render(tmp_path, "pinned.png", "--png-width", "800"))
+    pinned = _image(_render(tmp_path, "pinned.png", "--raster-width", "800"))
 
     assert pinned.width == 800
     assert pinned.height == round(natural.height * 800 / natural.width)
 
 
-def test_png_width_overrides_scale(tmp_path: Path) -> None:
-    pinned = _image(_render(tmp_path, "p.png", "--png-width", "600", "--scale", "4"))
+def test_raster_width_overrides_scale(tmp_path: Path) -> None:
+    pinned = _image(_render(tmp_path, "p.png", "--raster-width", "600", "--scale", "4"))
     assert pinned.width == 600
 
 

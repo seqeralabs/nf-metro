@@ -34,6 +34,9 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Visualization",
 ]
 dependencies = [
+    # Ships FFmpeg in its own wheels, so a looping GIF/WebP/MP4/WebM export
+    # needs nothing on PATH -- the same self-contained deal resvg-py gives PNG.
+    "av>=13",
     "click>=8.0",
     "drawsvg>=2.0",
     "lark>=1.1",
@@ -62,7 +65,6 @@ dev = [
     "types-networkx",
     "numpy<2.5",
     "nf-metro[validate]",
-    "nf-metro[video]",
     # Pinned so the frozen PNG hash in tests/test_hash_seed_determinism.py has
     # one rasteriser build to lock against; runtime accepts any >=0.5.
     "resvg-py==0.5.0",
@@ -74,13 +76,6 @@ docs = [
 ]
 font = [
     "fonttools[woff]>=4.0",
-]
-# `nf-metro render -o map.mp4` (and .webm) encodes frames with ffmpeg. A system
-# ffmpeg on PATH is used in preference; this extra supplies a prebuilt one for
-# machines without it. GIF and animated WebP are written by Pillow and need
-# neither.
-video = [
-    "imageio-ffmpeg>=0.5",
 ]
 # `nf-metro validate-svg` validates an SVG's embedded manifest against a Draft
 # 2020-12 schema, which jsonschema only implements from 4.0.
@@ -166,12 +161,12 @@ ignore_missing_imports = false
 strict_optional = true
 disallow_any_generics = true
 
-# drawsvg ships no type information; jsonschema and imageio_ffmpeg are optional
-# dependencies (the `validate` and `video` extras) imported lazily by
-# `nf-metro validate-svg` and by an MP4/WebM export. Everything else (click,
-# Pillow, networkx via types-networkx) is typed once the package is installed.
+# drawsvg and av ship no type information; jsonschema is an optional dependency
+# (the `validate` extra) imported lazily by `nf-metro validate-svg`. Everything
+# else (click, Pillow, networkx via types-networkx) is typed once the package
+# is installed.
 [[tool.mypy.overrides]]
-module = ["drawsvg", "imageio_ffmpeg", "jsonschema"]
+module = ["av", "drawsvg", "jsonschema"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

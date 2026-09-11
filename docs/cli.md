@@ -97,7 +97,7 @@ Because it has no light/dark pair, `--mode` does not apply to it.
 | `--font-scale FLOAT`                       | 1.0                    | Scale every text size and the label-width metrics that drive layout spacing                                                                                                                                                                                                         |
 | `--stroke-scale FLOAT`                     | 1.0                    | Scale track stroke weight and station pill size, widening bundle spacing, marker clearance, and rail pitch to match                                                                                                                                                                 |
 | `--scale FLOAT`                            | `2.0` png, `1.0` video | Raster formats only: multiply the rendered pixel dimensions                                                                                                                                                                                                                         |
-| `--png-width INTEGER`                      | auto                   | Raster formats only: output width in pixels, height scaled with it. Overrides `--scale`. Resizes the picture, unlike `--width`                                                                                                                                                      |
+| `--raster-width INTEGER`                   | auto                   | Raster formats only: output width in pixels, height scaled with it. Overrides `--scale`. Resizes the picture, unlike `--width`                                                                                                                                                      |
 | `--width INTEGER`                          | auto                   | Output width in pixels. Grows the SVG canvas around a map drawn at its natural size; it does not scale the map                                                                                                                                                                      |
 | `--height INTEGER`                         | auto                   | Output height in pixels                                                                                                                                                                                                                                                             |
 
@@ -191,47 +191,22 @@ A rasterizer has no CSS clock, so exporting that motion means drawing the frames
 A `.gif`, `.webp`, `.mp4`, or `.webm` output path does exactly that, and turns the animation on for you:
 
 ```bash frame="terminal"
-nf-metro render pipeline.mmd -o pipeline.gif
+nf-metro render pipeline.mmd -o pipeline.gif --duration 12 --fps 20
 ```
 
-The exported loop runs one full animation cycle and stops a frame short of repeating it, so it wraps with no stutter.
+The loop runs one full animation cycle and stops a frame short of repeating it, so it wraps with no stutter.
 Each ball is sampled from the same motion path the animated SVG drives it along, at the moment of the cycle that frame represents, and drawn behind the station markers as it is there.
 
-A map's cycle is as long as its longest line takes to travel, which for a large pipeline can be half a minute.
-`--duration` compresses (or stretches) the whole cycle into a set number of seconds, and `--fps` sets the frame rate:
+`--duration` compresses (or stretches) the map's own cycle into a set number of seconds; leaving it off keeps the balls at exactly the speed the SVG moves them, which for a large pipeline can be a 40-second loop.
+`--fps` sets the frame rate.
+`--scale` and `--raster-width` size the frames as they size a PNG, except that a video defaults to natural size where a still doubles.
 
-```bash frame="terminal"
-nf-metro render pipeline.mmd -o pipeline.gif --duration 8 --fps 15
-```
+Nothing is capped.
+Every frame is a full rasterization, though, so a long smooth loop of a large map costs real time: nf-metro quotes the frame count and frame size before it starts, and draws a progress bar while it works.
 
-Leaving `--duration` off keeps the balls at exactly the speed the animated SVG moves them, which is the faithful export; a higher `--fps` is what makes the motion smooth.
+All four are muxed in-process by [PyAV](https://github.com/PyAV-Org/PyAV), which ships FFmpeg in its own wheels, so nothing has to be installed or found on `PATH`.
 
-Resolution is the third handle, and works exactly as it does for a PNG: `--scale` multiplies the map's natural pixel size, and `--png-width` pins an exact width.
-A video defaults to `--scale 1`, where a still PNG doubles.
-
-Nothing here is capped.
-Every frame is a full rasterization, though, so a long smooth loop of a large map costs real time: nf-metro quotes the frame count, the frame size, and (for GIF and WebP) the memory it is about to hold before it starts, and draws a progress bar while it works.
-MP4 and WebM are an order of magnitude smaller than GIF for the same frames, and are the only two that stream to the encoder rather than buffering the whole loop.
-
-As a sense of scale, the rnaseq example below is 1799&times;696, and its own animation cycle is 39s:
-
-| Command                      | Frames | Time  | GIF    | MP4    | Peak memory (GIF) |
-| ---------------------------- | ------ | ----- | ------ | ------ | ----------------- |
-| `--duration 8 --fps 12`      | 96     | ~40s  | 515 KB | 127 KB | 0.2 GB            |
-| `--duration 20 --fps 30`     | 600    | ~2min | 2.6 MB | 390 KB | 0.8 GB            |
-| `--fps 30` (the SVG's speed) | 1173   | ~4min | 5.0 MB | 620 KB | 1.5 GB            |
-
-Nothing stops you going further; the numbers just keep scaling.
-
-| Format  | Encoder        | Notes                                                                            |
-| ------- | -------------- | -------------------------------------------------------------------------------- |
-| `.gif`  | Pillow         | Works in any `<img>`, and in a GitHub README. 256 colors, shared across the loop |
-| `.webp` | Pillow         | Also an `<img>`, with full color and smaller files. No Safari-before-14 support  |
-| `.mp4`  | ffmpeg (H.264) | Smallest by far. Needs `<video autoplay loop muted playsinline>` to play inline  |
-| `.webm` | ffmpeg (VP9)   | As MP4, and smaller again, but not decoded by every player                       |
-
-GIF and WebP need nothing beyond Pillow, already a dependency.
-MP4 and WebM shell out to `ffmpeg`: one on your `PATH` is used, otherwise install a prebuilt binary with `pip install "nf-metro[video]"`.
+[Output formats](/nf-metro/formats/) compares the four on size, quality, and where each one plays.
 
 ### Validate the rendered geometry
 
