@@ -4,6 +4,7 @@ import pathlib
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import replace
+from functools import lru_cache
 
 import pytest
 
@@ -1535,13 +1536,25 @@ def _caption_and_marker_boxes(svg, caption, station_id):
     return caption_box, marker_box
 
 
-@pytest.mark.parametrize("case", sorted(_CAPTION_MARKER_CASES))
-def test_terminus_caption_clears_its_station_marker(case):
-    """A terminus caption never overlaps its own station marker (#1972)."""
-    caption, station_id, source = _CAPTION_MARKER_CASES[case]
+@lru_cache(maxsize=None)
+def _rendered_caption_case(case):
+    """Parse, lay out, and render one ``_CAPTION_MARKER_CASES`` entry, once.
+
+    Shared by the two tests below so each case pays for one parse+layout+
+    render pass rather than two.
+    """
+    _, _, source = _CAPTION_MARKER_CASES[case]
     graph = parse_metro_mermaid(source)
     compute_layout(graph)
     svg = render_svg(graph, NFCORE_DARK_THEME)
+    return graph, svg
+
+
+@pytest.mark.parametrize("case", sorted(_CAPTION_MARKER_CASES))
+def test_terminus_caption_clears_its_station_marker(case):
+    """A terminus caption never overlaps its own station marker (#1972)."""
+    caption, station_id, _ = _CAPTION_MARKER_CASES[case]
+    _, svg = _rendered_caption_case(case)
 
     caption_box, marker_box = _caption_and_marker_boxes(svg, caption, station_id)
     assert caption_box is not None, f"{case}: caption {caption!r} not rendered"
@@ -1560,11 +1573,9 @@ def test_terminus_caption_sits_outboard_of_its_icon(case):
     Placing it between icon and station is what let the marker strike it, so
     the whole caption box must lie beyond the icon's outward flow edge.
     """
-    caption, station_id, source = _CAPTION_MARKER_CASES[case]
-    graph = parse_metro_mermaid(source)
-    compute_layout(graph)
+    caption, station_id, _ = _CAPTION_MARKER_CASES[case]
+    graph, svg = _rendered_caption_case(case)
     theme = NFCORE_DARK_THEME
-    svg = render_svg(graph, theme)
 
     station = graph.stations[station_id]
     icon_cx, icon_cy = _terminus_icon_centers_for(station, graph, theme, 0.0, 0.0)[0]

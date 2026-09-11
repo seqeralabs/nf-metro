@@ -576,7 +576,7 @@ def _icon_obstacles_by_station(
             caption_extent = ICON_NAME_GAP + (
                 caption_line_count * theme.label_font_size * ICON_NAME_FONT_SCALE
             )
-            if not is_vertical_flow or flow_sign > 0:
+            if _terminus_caption_hangs_down(is_vertical_flow, flow_sign):
                 y_max += caption_extent
             else:
                 y_min -= caption_extent
@@ -4384,6 +4384,16 @@ def _terminus_icon_flow_sign(section_dir: str, is_source: bool) -> float:
     return 1.0 if extends_forward else -1.0
 
 
+def _terminus_caption_hangs_down(is_vertical_flow: bool, flow_sign: float) -> bool:
+    """Whether a terminus caption hangs below its icon rather than above.
+
+    Vertical-flow sources and flow-reversed sinks draw the icon above the
+    station, so the caption hangs above it too; every other flow hangs it
+    below.
+    """
+    return not is_vertical_flow or flow_sign > 0
+
+
 def _terminus_icon_centers(
     station: Station,
     section_dir: str,
@@ -4541,11 +4551,9 @@ def _render_terminus_icons(
         # Optional caption rendered clear of the icon so the type chip
         # inside the icon stays readable.
         if name:
-            # Icons on a vertical-flow source (or a sink whose flow reverses)
-            # sit above their station, so a caption hung below would land on
-            # the station marker; place it above the icon instead. Horizontal
-            # flow always hangs the caption below, beside the marching row.
-            caption_hangs_down = not is_vertical_flow or flow_sign > 0
+            caption_hangs_down = _terminus_caption_hangs_down(
+                is_vertical_flow, flow_sign
+            )
             icon_edge_gap = theme.terminus_height / 2 + ICON_NAME_GAP
             stagger_step = caption_font_size * 1.4
             # When adjacent icon captions would overlap horizontally
