@@ -110,6 +110,9 @@ EXPECTED_CLASSIFIER_ONLY_REVERSALS = frozenset(
             "target_secondary",
             "L->R",
         ),
+        # A LEFT-exit fan's side branch: line h leaves b's LEFT exit and arrives
+        # at d's RIGHT entry one row down, so the delivered bundle re-nests.
+        ("left_exit_fan_perp_entry_landing", "b", "d", "L->R"),
         # The RIGHT-facing mirror of that stacked LEFT half-turn: an LR row's
         # RIGHT exit descending into an RL row's RIGHT entry at or right of the
         # feeder's column.  Leaving rightward and arriving rightward is a net

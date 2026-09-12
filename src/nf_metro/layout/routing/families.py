@@ -56,6 +56,27 @@ BYPASS_ROUTE_FAMILIES = frozenset(
         RouteFamilyId.BYPASS_RIGHT_ENTRY_CROSS_ROW,
     }
 )
-BYPASS_ROUTE_FAMILY_VALUES = frozenset(
-    family_id.value for family_id in BYPASS_ROUTE_FAMILIES
+
+LANDING_POINT_SETTLED_LATER_FAMILIES = frozenset(
+    {
+        RouteFamilyId.MERGE_BRANCH,
+        RouteFamilyId.LEFT_ENTRY_WRAP,
+        RouteFamilyId.RIGHT_ENTRY_CROSS_ROW_WRAP,
+        RouteFamilyId.RIGHT_ENTRY_WRAP,
+        RouteFamilyId.TOP_ENTRY_L_SHAPE,
+        RouteFamilyId.BOTTOM_ENTRY_L_SHAPE,
+        *BYPASS_ROUTE_FAMILIES,
+    }
+)
+"""Families whose turn leg ends in a channel seated after gap allocation.
+
+The planner holds the axis the turn stands on but not how far along it the leg
+runs, so the landing-side (destination) corner is settled by a later pass. Any
+validator that inspects a settled turn's corner geometry can only hold the
+entry-side corner for these families; the landing-side corner does not yet
+exist.
+"""
+
+LANDING_POINT_SETTLED_LATER_FAMILY_VALUES = frozenset(
+    family_id.value for family_id in LANDING_POINT_SETTLED_LATER_FAMILIES
 )

@@ -1811,6 +1811,14 @@ gallery:
       "Two lines dropping together from a TB BOTTOM exit into the TOP entry of an
       LR section: the in-section line order follows the arrival order so the entry corner nests
       concentrically and the bundle neither pinches nor crosses through the bend (issue #1061)."
+  - id: rl_left_exit_top_entry_overflow
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "An RL section with a LEFT exit and a TOP entry whose port sits left of its
+      internal run: the drop is predicted to land right of the run, so the run shifts left to
+      meet the port and the section bbox grows left to keep the trailing station contained
+      (issue #1980)."
   - id: right_entry_wrap_no_fan
     source_dir: examples/topologies
     category: Inter-section Routing
@@ -2328,6 +2336,14 @@ gallery:
       "The flanked top-entry riser of issue #1568 with a distinct line climbing the
       same inter-column gap and overlapping it in Y, so the two counter-running
       centrelines settle a bundle clearance apart."
+  - id: left_exit_fan_perp_entry_landing
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "A LEFT-exit two-line bundle drops into a shared TOP entry whose settled exit-turn
+      axis differs from the per-line crossing lane the intra-section drop departs on. The
+      descent tapers onto the crossing lane in the last few px above the boundary so the
+      approach and departure cross at one consistent X (issue #1986)."
 pipelines:
   - id: rnaseq_auto
     title: nf-core/rnaseq
