@@ -110,6 +110,7 @@ from nf_metro.layout.routing.offsets import (
     cross_row_convergence_channel_order,
 )
 from nf_metro.layout.routing.orientation import direction_vector
+from nf_metro.layout.routing.perp import _perp_entry_crossing_x
 from nf_metro.layout.routing.reserved_bands import (
     ReservedBand,
     corridor_clearance_band,
@@ -2848,7 +2849,6 @@ def _taper_perp_entry_landing(
     route: RoutedPath,
     segment_rank: int,
     ctx: _RoutingCtx,
-    run_in: float = CURVE_RADIUS,
 ) -> None:
     """Bend a reseated descent's tail onto its target's perp-entry crossing lane.
 
@@ -2856,14 +2856,13 @@ def _taper_perp_entry_landing(
     ``points[segment_rank] -> points[segment_rank+1]`` on one X so the channel
     nests straight against the section it leaves.  When that outgoing endpoint is
     the route terminus dropping onto a TOP/BOTTOM section boundary whose per-line
-    crossing lane
-    (:func:`nf_metro.layout.routing.perp._perp_entry_crossing_x`) differs from
-    the nested channel, a straight descent to that X lands off the lane the
-    intra-section drop departs on and jogs the line across the boundary.
+    crossing lane (:func:`nf_metro.layout.routing.perp._perp_entry_crossing_x`)
+    differs from the nested channel, a straight descent to that X lands off the
+    lane the intra-section drop departs on and jogs the line across the boundary.
 
-    Insert a 45-degree crossover in the last ``|lane - nested| + run_in`` px of
-    the descent: hold the nested X, cross diagonally, then run straight into the
-    boundary on the crossing lane so the terminus meets its intra-section
+    Insert a 45-degree crossover in the last ``|lane - nested| + ctx.curve_radius``
+    px of the descent: hold the nested X, cross diagonally, then run straight into
+    the boundary on the crossing lane so the terminus meets its intra-section
     continuation collinearly.  A no-op unless the route terminates at a distinct
     perpendicular entry lane.
     """
@@ -2874,9 +2873,6 @@ def _taper_perp_entry_landing(
     if port is None or not port.is_entry or port.side not in _PERP_ENTRY_SIDES:
         return
     port_x = ctx.graph.stations[route.edge.target].x
-
-    from nf_metro.layout.routing.perp import _perp_entry_crossing_x
-
     landing = _perp_entry_crossing_x(ctx, route.edge.target, route.line_id, port_x)
     if landing is None:
         return
@@ -2886,7 +2882,7 @@ def _taper_perp_entry_landing(
     assert route.curve_radii is not None
     run_sign = 1.0 if boundary_y - pts[segment_rank][1] > 0 else -1.0
     span = abs(landing - nested_x)
-    diag_end_y = boundary_y - run_sign * run_in
+    diag_end_y = boundary_y - run_sign * ctx.curve_radius
     diag_start_y = diag_end_y - run_sign * span
     pts[segment_rank + 1] = (nested_x, diag_start_y)
     pts.insert(segment_rank + 2, (landing, diag_end_y))
@@ -2896,15 +2892,17 @@ def _taper_perp_entry_landing(
         pts[segment_rank + 1],
         pts[segment_rank + 2],
         0.0,
-        CURVE_RADIUS,
+        ctx.curve_radius,
     )
     run_radius = concentric_corner_radius_at(
         pts[segment_rank + 1],
         pts[segment_rank + 2],
         pts[segment_rank + 3],
         0.0,
-        CURVE_RADIUS,
+        ctx.curve_radius,
     )
+    for radius_idx in (segment_rank, segment_rank + 1):
+        route.record_concentric_corner(radius_idx, 0.0, ctx.curve_radius)
     route.curve_radii.insert(segment_rank, diag_radius)
     route.curve_radii.insert(segment_rank + 1, run_radius)
 
