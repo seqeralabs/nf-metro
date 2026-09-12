@@ -1366,16 +1366,19 @@ def _shift_lr_perp_entry_stations(
             else:
                 s.x -= shift
 
-        # Keep the trailing station inside the bbox after the shift.
+        # Keep the shifted run inside the bbox.
         # _adjust_lr_entry_inset reserves one `desired_gap` of width, enough for
         # a drop seated at the run's leading edge. A right-entry run shifts
-        # left, so extend the bbox left to match. A left-entry drop inside the
-        # span shifts the run right by the reserve *plus* the port's offset into
-        # the span, so the right edge absorbs the uncovered remainder. A drop
-        # beyond the trailing station (cross-column) needs the box re-wrapped.
+        # left; `run_lo - bbox_x` is its current left padding, so a shift larger
+        # than that padding would carry the run past the section's own left edge
+        # and the bbox must grow left to keep the run contained. A left-entry
+        # drop inside the span shifts the run right by the reserve *plus* the
+        # port's offset into the span, so the right edge absorbs the uncovered
+        # remainder. A drop beyond the trailing station (cross-column) needs the
+        # box re-wrapped.
         drop_in_span = run_lo <= port_x <= run_hi
         grew = True
-        if not entry_on_left and drop_in_span:
+        if not entry_on_left and (run_lo - section.bbox_x) < shift:
             section.bbox_x -= shift
             section.bbox_w += shift
         elif entry_on_left and port_x > run_hi:

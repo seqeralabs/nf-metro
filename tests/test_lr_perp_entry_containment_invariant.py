@@ -43,3 +43,60 @@ def test_perp_entry_run_stays_contained(stem: str) -> None:
         v for v in check_station_containment(graph) if v.severity == Severity.ERROR
     ]
     assert not errors, "\n".join(v.message for v in errors)
+
+
+# A RL section whose perp-entry drop is *predicted* to land right of the run
+# (perp_entry_lands_left() is False) but whose actual entry port sits left of
+# it: the run shifts left to meet the port and, without a matching bbox grow,
+# escapes into the neighbouring column.  validate=True is not used here because
+# an unrelated perp-entry offset-swap defect trips a routing guard on one line;
+# the containment invariant this test locks is checked directly.
+_RIGHT_PREDICTED_OVERFLOW_MMD = """\
+%%metro title: Left-exit fan riser
+%%metro line: g | Green | #2db572
+%%metro line: h | Blue | #3f7fdf
+%%metro grid: a | 1,0
+%%metro grid: b | 1,1
+%%metro grid: c | 1,2
+%%metro grid: d | 0,1
+
+graph LR
+    subgraph a [Alpha]
+        %%metro exit: left | g, h
+        a1[A one]
+        a2[A two]
+        a1 -->|g,h| a2
+    end
+    subgraph b [Beta]
+        %%metro entry: top | g, h
+        %%metro exit: left | g, h
+        b1[B one]
+        b2[B two]
+        b1 -->|g,h| b2
+    end
+    subgraph c [Gamma]
+        %%metro entry: top | g
+        c1[C one]
+        c2[C two]
+        c1 -->|g| c2
+    end
+    subgraph d [Delta]
+        %%metro entry: right | h
+        d1[D one]
+        d2[D two]
+        d1 -->|h| d2
+    end
+    a2 -->|g,h| b1
+    b2 -->|g| c1
+    b2 -->|h| d1
+"""
+
+
+def test_right_predicted_perp_entry_overflow_grows_bbox() -> None:
+    graph = parse_metro_mermaid(_RIGHT_PREDICTED_OVERFLOW_MMD)
+    compute_layout(graph, validate=False)
+
+    errors = [
+        v for v in check_station_containment(graph) if v.severity == Severity.ERROR
+    ]
+    assert not errors, "\n".join(v.message for v in errors)
