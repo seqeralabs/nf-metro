@@ -664,8 +664,8 @@ def test_render_many_rejects_non_positive_scale(tmp_path):
     assert "not in the range" in result.output
 
 
-def test_render_many_rejects_non_positive_png_width(tmp_path):
-    """A manifest job's png_width of 0 is rejected, not silently treated as unset."""
+def test_render_many_rejects_non_positive_raster_width(tmp_path):
+    """A manifest job's raster_width of 0 is rejected, not silently treated as unset."""
     manifest = _write_manifest(
         tmp_path,
         [
@@ -673,7 +673,7 @@ def test_render_many_rejects_non_positive_png_width(tmp_path):
                 "input": str(RNASEQ_MMD),
                 "output": str(tmp_path / "out.png"),
                 "format": "png",
-                "png_width": 0,
+                "raster_width": 0,
             }
         ],
     )
@@ -682,9 +682,9 @@ def test_render_many_rejects_non_positive_png_width(tmp_path):
     assert "not in the range" in result.output
 
 
-@pytest.mark.parametrize("key", ["scale", "png_width"])
+@pytest.mark.parametrize("key", ["scale", "raster_width"])
 def test_render_many_rejects_boolean_numeric_values(tmp_path, key):
-    """A JSON true/false for scale/png_width is refused, not coerced to 1/0."""
+    """A JSON true/false for scale/raster_width is refused, not coerced to 1/0."""
     manifest = _write_manifest(
         tmp_path,
         [

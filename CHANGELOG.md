@@ -18,17 +18,31 @@ history.
 ### Added
 
 - `nf-metro render` writes PNG directly. A `.png` output path selects it, or pass
-  `--format png`; `--scale` sets the pixel multiplier (default 2) and `--png-width`
-  pins an exact width. The PNG path bakes the palette, drops the `var()` chrome,
+  `--format png`; `--scale` sets the pixel multiplier (default 2) and
+  `--raster-width` pins an exact width. The PNG path bakes the palette, drops the `var()` chrome,
   and draws with the bundled Inter, so a map rasterises to the same bytes on any
   machine ([#1969](https://github.com/seqeralabs/nf-metro/issues/1969)).
 - `-o` repeats, so one run writes several formats: `-o map.svg -o map.png`.
+- `nf-metro render` writes a looping video of the animation: `-o map.gif`,
+  `.webp`, `.mp4`, or `.webm` (or `--format`). The loop runs one animation cycle
+  and stops a frame short of repeating it, so it wraps seamlessly; `--fps` and
+  `--duration` set the frame rate and compress a long map's cycle into a shorter
+  loop. Frames are sampled from the same motion paths the animated SVG uses, so
+  a ball is where a browser would draw it. `--scale` and `--raster-width` size
+  the frames as they size a PNG. Nothing is capped: a large export quotes its
+  frame count and frame size before it starts, then shows a progress bar.
+- New [Output formats](https://seqeralabs.github.io/nf-metro/latest/formats/)
+  docs page, comparing SVG, HTML, PNG and the four looping video formats on what
+  each is good at and where each one plays.
 
 ### Changed
 
 - Rasterisation moved from cairosvg to `resvg-py`, now a runtime dependency.
   cairosvg needed system libcairo, which is why PNG was never a first-class
   output; resvg-py ships self-contained wheels and needs no system libraries.
+- `av` (PyAV) joins the runtime dependencies, for the looping video formats.
+  It ships FFmpeg in its own wheels, so an MP4 or WebM export needs nothing
+  installed or found on `PATH`.
 
 ---
 

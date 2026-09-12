@@ -10,7 +10,7 @@ rename pipeline steps, update the `.mmd` source and regenerate the images:
 # Static SVG + PNG (-o repeats to write both from the same layout run)
 nf-metro render assets/metro_map.mmd \
   -o docs/images/nf-core-<name>_metro_map.svg \
-  -o docs/images/nf-core-<name>_metro_map.png --png-width 2265 \
+  -o docs/images/nf-core-<name>_metro_map.png --raster-width 2265 \
   --theme light --x-spacing <x-spacing> --y-spacing <y-spacing> \
   --no-straight-diamonds <extra-layout-flags> \
   --logo docs/images/nf-core-<name>_logo_light.png

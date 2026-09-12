@@ -187,13 +187,24 @@ That last point makes the output reproducible: the same map renders to the same 
 Pass `--mode light` or `--mode dark` to choose the palette; without it the map's own `%%metro mode:` applies, then the global default.
 
 `--scale` multiplies the pixel dimensions (default `2`, for retina).
-For an exact width, use `--png-width`, which scales the height with it:
+For an exact width, use `--raster-width`, which scales the height with it:
 
 ```bash
-nf-metro render pipeline.mmd -o pipeline.png --mode light --png-width 2265
+nf-metro render pipeline.mmd -o pipeline.png --mode light --raster-width 2265
 ```
 
 Do not reach for `--width` here. That grows the SVG canvas around a map drawn at its natural size, padding the extra space; it does not resize the picture.
+
+#### Looping video (GIF, WebP, MP4, WebM)
+
+The same settings carry over to a looping export of the `--animate` balls, for a README or a slide where a CSS animation will not run:
+
+```bash
+nf-metro render pipeline.mmd -o pipeline.gif --mode light --duration 8
+```
+
+A `.gif` or `.webp` goes anywhere an `<img>` does; `.mp4` and `.webm` are far smaller but need a `<video autoplay loop muted playsinline>`.
+See [Output formats](/nf-metro/formats/) for how the four compare, and [the CLI reference](/nf-metro/cli/#looping-video-of-the-animation) for the frame-rate and loop-length flags.
 
 #### Rasterizing an SVG yourself
 

@@ -46,6 +46,7 @@ See [Layout pipeline](/nf-metro/dev/layout_pipeline/) for the full phase-by-phas
 `render_svg` in `render/svg.py` uses the `drawsvg` library to draw section boxes, routed edges with curved corners, pill-shaped station markers, labels, and the legend.
 Visual properties come from a `Theme` in `render/style.py`, and themes are registered in `themes/__init__.py`.
 `render/animate.py` adds traveling balls along the routed paths, behind the `--animate` CLI flag.
+`render/video.py` exports that motion as a looping GIF, WebP, MP4, or WebM, sampling the same paths one frame at a time.
 
 ## Reference docs
 
