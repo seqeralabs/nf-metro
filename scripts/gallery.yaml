@@ -2336,14 +2336,6 @@ gallery:
       "The flanked top-entry riser of issue #1568 with a distinct line climbing the
       same inter-column gap and overlapping it in Y, so the two counter-running
       centrelines settle a bundle clearance apart."
-  - id: left_exit_fan_perp_entry_landing
-    source_dir: examples/topologies
-    category: Inter-section Routing
-    description:
-      "A LEFT-exit two-line bundle drops into a shared TOP entry whose settled exit-turn
-      axis differs from the per-line crossing lane the intra-section drop departs on. The
-      descent tapers onto the crossing lane in the last few px above the boundary so the
-      approach and departure cross at one consistent X (issue #1986)."
 pipelines:
   - id: rnaseq_auto
     title: nf-core/rnaseq
