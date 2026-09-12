@@ -358,6 +358,7 @@
     "topologies/junction_fanout_convergence.mmd",
     "topologies/left_entry_from_above_far.mmd",
     "topologies/left_entry_up_wrap.mmd",
+    "topologies/left_exit_fan_perp_entry_landing.mmd",
     "topologies/left_exit_sink_below.mmd",
     "topologies/leftward_up_exit_turn_order.mmd",
     "topologies/lr_bottom_exit_rl_top_entry_jog.mmd",

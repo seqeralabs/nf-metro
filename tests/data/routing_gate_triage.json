@@ -611,10 +611,6 @@
   "note": "The row-gap enforcer keeps stacked rows separated, so the inter-row band above a target row (row_bottom_edge(tgt_row-1) up to row_top_edge(tgt_row)) has positive height whenever a RIGHT entry is fed from a higher row; the degenerate-band arm guards an abutting-rows layout placement never produces.",
   "status": "defensive"
  },
- "inter_section_handlers.py::if lead is Direction.R:::#1": {
-  "note": "A top-entry fan branch leading LEFT out of the junction skips the _v1_corner_x right-edge clearance bump; the corpus's fan branches all lead right, so the left-lead arm is unexercised.",
-  "status": "needs-review"
- },
  "inter_section_handlers.py::if len(landing_sections) != len(plan.branches):::#1": {
   "note": "The planner emits this route family only when every branch lands in one distinct RIGHT-entry section. A count mismatch can arise only if the frozen emission and plan have drifted apart.",
   "status": "defensive"
@@ -1022,10 +1018,6 @@
  "normalize.py::if abs(delta) <= COORD_TOLERANCE:::#2": {
   "note": "_snap_merge_feeder_group skips a merge feeder whose opening descent already sits on the trunk's shared column (no shift needed). The corpus's merge feeders all reach the trunk from a distinct column, so the already-coincident skip arm stays un-exercised. Defensive and idempotent across the routing replays a render performs.",
   "status": "defensive"
- },
- "normalize.py::if abs(landing - nested_x) <= COORD_TOLERANCE:::#1": {
-  "note": "_taper_perp_entry_landing bends a reseated fan exit-turn descent onto its target's perp-entry crossing lane only when that lane differs from the nested corner axis; the equal-lane skip arm is the common aligned case. The taper-fires arm needs a LEFT-exit fan whose bundle lands a distinct-lane line on a shared TOP entry (issue #1986). The corpus form of that topology also trips the fan-junction full-radius clamp (issue #1988), so it is regression-locked by tests/test_fan_perp_entry_landing_taper_1986.py rather than added to the corpus; revisit once #1988 lands.",
-  "status": "needs-review"
  },
  "normalize.py::if abs(ly - pts[1][1]) < COORD_TOLERANCE:::#1": {
   "note": "A re-stacked gap channel at points-index 1 always has a horizontal lead-in (L-shape and bypass routes open with a horizontal segment); routes opening non-horizontally are normalize_exempt and skipped by the materialization. The non-horizontal-lead return in _restack_channel is unreachable. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
