@@ -1366,33 +1366,29 @@ def _shift_lr_perp_entry_stations(
             else:
                 s.x -= shift
 
-        # Keep the shifted run inside the bbox.
+        # Keep the shifted run inside the bbox. `left_pad` is the run's left
+        # clearance before the shift.
         left_pad = run_lo - section.bbox_x
-        # _adjust_lr_entry_inset reserves one `desired_gap` of width, enough for
-        # a drop seated at the run's leading edge. A right-entry run shifts
-        # left; `left_pad` is its current left padding, so a shift larger than
-        # that padding would carry the run past the section's own left edge
-        # and the bbox must grow left to keep the run contained, then re-wrap
-        # the right edge onto the rightmost content (the shifted run or the
-        # stationary entry port) so no dead space trails the shift. A left-entry
-        # drop inside the span shifts the run right by the reserve *plus* the
-        # port's offset into the span, so the right edge absorbs the uncovered
-        # remainder. A drop beyond the trailing station (cross-column) needs the
-        # box re-wrapped.
         drop_in_span = run_lo <= port_x <= run_hi
         grew = True
         if not entry_on_left and left_pad < shift:
+            # The run shifts left past the section's own left edge, so the box
+            # grows left by the shift to preserve `left_pad` there. The entry
+            # port is then the rightmost content, and its exit-side clearance
+            # mirrors the run's left padding.
             section.bbox_x -= shift
-            new_right = max(port_x, run_hi - shift) + left_pad
-            section.bbox_w = new_right - section.bbox_x
+            section.bbox_w = (port_x + left_pad) - section.bbox_x
         elif entry_on_left and port_x > run_hi:
-            # Re-wrap the bbox around the shifted run, keeping the run's
-            # padding and anchoring the left edge on the entry port (which
-            # sits left of the run once it shifts right of the drop).
+            # The run shifts right of the drop, leaving the entry port as the
+            # leftmost content. The left edge anchors on the port with the run's
+            # padding; the right edge keeps its pre-shift clearance past the run.
             right_pad = (section.bbox_x + section.bbox_w) - run_hi
             section.bbox_x = port_x - left_pad
             section.bbox_w = (run_hi + shift + right_pad) - section.bbox_x
         elif entry_on_left and drop_in_span and shift > desired_gap:
+            # The drop sits within the run; `_adjust_lr_entry_inset` reserves one
+            # `desired_gap` of width, so only the shift beyond that reserve adds
+            # width on the right.
             section.bbox_w += shift - desired_gap
         else:
             grew = False
