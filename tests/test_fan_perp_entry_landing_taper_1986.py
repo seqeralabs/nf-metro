@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import warnings
 
+from test_fan_left_exit_landing_settled_1980 import _TOP_ENTRY_FAN
+
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.invariants import check_perp_entry_boundary_consistent
 from nf_metro.parser.mermaid import parse_metro_mermaid
-from tests.test_fan_left_exit_landing_settled_1980 import _TOP_ENTRY_FAN
 
 
 def _route(source: str) -> tuple:
