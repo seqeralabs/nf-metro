@@ -4,6 +4,7 @@ description: "Every format nf-metro render writes, what each one is good at, and
 ---
 
 import Metro from "@components/Metro.astro";
+import { Tabs, TabItem } from "@astrojs/starlight/components";
 
 `nf-metro render` takes its format from the output extension.
 
@@ -38,6 +39,15 @@ Every SVG also carries its own [data manifest](/nf-metro/manifest/): a JSON bloc
 
 `--animate` puts balls on the lines, moved by CSS `offset-path`. They run when the SVG is opened directly, referenced from an `<img>`, or inlined into a page.
 
+<img
+  src="../assets/formats_animated.svg"
+  alt="The nf-core/rnaseq metro map as an animated SVG"
+  loading="lazy"
+  style="width: 100%; border-radius: 6px"
+/>
+
+_`--animate --embed-font`, in a plain `<img>`: 315&nbsp;KB. Its colours follow your system theme, where every raster below is baked to one._
+
 Fonts are the one thing an SVG cannot settle by itself, because it names a family and the viewer supplies it. Two flags close that gap:
 
 - `--embed-font` inlines a WOFF2 subset of Inter as an `@font-face` block. Adds 28&nbsp;KB to this map, and the text stays selectable.
@@ -59,6 +69,15 @@ Pick the palette with `--mode light` or `--mode dark`. Without it the map's own 
 
 Size the output with `--scale` (default `2`, for retina) or `--raster-width` for an exact pixel width. Neither is `--width`, which pads the canvas around a map drawn at its natural size instead of resizing the picture.
 
+<img
+  src="../assets/formats_still.png"
+  alt="The nf-core/rnaseq metro map as a PNG"
+  loading="lazy"
+  style="width: 100%; border-radius: 6px"
+/>
+
+_The same map at `--scale 1`: 1799&times;696, 138&nbsp;KB._
+
 ## Interactive HTML
 
 `--format html` writes one self-contained page: the SVG inlined, plus a small JS and CSS layer. No network, no build step.
@@ -79,20 +98,66 @@ Four formats export the `--animate` motion as a loop, for the places a CSS anima
 nf-metro render rnaseq.mmd -o rnaseq.gif --duration 12 --fps 20
 ```
 
-<video
-  controls
-  autoplay
-  loop
-  muted
-  playsinline
-  style="width: 100%; max-width: 760px; border-radius: 6px"
-  src="../assets/formats_loop.mp4"
->
-  Your browser can't play the embedded video.
-  <a href="../assets/formats_loop.mp4">Download it here</a>.
-</video>
+The same 12-second loop at 20fps, in each of the four containers:
 
-_The same map as MP4: one 12-second loop at 20fps._
+<Tabs>
+  <TabItem label="GIF">
+    <img
+      src="../assets/formats_loop.gif"
+      alt="The nf-core/rnaseq metro map as a looping GIF"
+      loading="lazy"
+      style="width: 100%; border-radius: 6px"
+    />
+
+    _256-colour palette, 337&nbsp;KB. Animates inside an `<img>`._
+
+  </TabItem>
+  <TabItem label="WebP">
+    <img
+      src="../assets/formats_loop.webp"
+      alt="The nf-core/rnaseq metro map as a looping WebP"
+      loading="lazy"
+      style="width: 100%; border-radius: 6px"
+    />
+
+    _Full 24-bit colour, 395&nbsp;KB. Animates inside an `<img>`._
+
+  </TabItem>
+  <TabItem label="MP4">
+    <video
+      controls
+      autoplay
+      loop
+      muted
+      playsinline
+      style="width: 100%; border-radius: 6px"
+      src="../assets/formats_loop.mp4"
+    >
+      Your browser can't play the embedded video.
+      <a href="../assets/formats_loop.mp4">Download it here</a>.
+    </video>
+
+    _H.264, 191&nbsp;KB. Needs a `<video>` element._
+
+  </TabItem>
+  <TabItem label="WebM">
+    <video
+      controls
+      autoplay
+      loop
+      muted
+      playsinline
+      style="width: 100%; border-radius: 6px"
+      src="../assets/formats_loop.webm"
+    >
+      Your browser can't play the embedded video.
+      <a href="../assets/formats_loop.webm">Download it here</a>.
+    </video>
+
+    _VP9, 213&nbsp;KB. Needs a `<video>` element._
+
+  </TabItem>
+</Tabs>
 
 The frames are drawn, not screen-recorded. Each ball is sampled from the same motion path the animated SVG drives it along, at the moment of the cycle that frame represents, so a frame and the live SVG agree to the pixel. The loop runs one full animation cycle and stops a frame short of repeating it, so it wraps without a stutter.
 
