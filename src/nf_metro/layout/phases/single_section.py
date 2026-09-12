@@ -1372,7 +1372,9 @@ def _shift_lr_perp_entry_stations(
         # a drop seated at the run's leading edge. A right-entry run shifts
         # left; `left_pad` is its current left padding, so a shift larger than
         # that padding would carry the run past the section's own left edge
-        # and the bbox must grow left to keep the run contained. A left-entry
+        # and the bbox must grow left to keep the run contained, then re-wrap
+        # the right edge onto the rightmost content (the shifted run or the
+        # stationary entry port) so no dead space trails the shift. A left-entry
         # drop inside the span shifts the run right by the reserve *plus* the
         # port's offset into the span, so the right edge absorbs the uncovered
         # remainder. A drop beyond the trailing station (cross-column) needs the
@@ -1381,7 +1383,8 @@ def _shift_lr_perp_entry_stations(
         grew = True
         if not entry_on_left and left_pad < shift:
             section.bbox_x -= shift
-            section.bbox_w += shift
+            new_right = max(port_x, run_hi - shift) + left_pad
+            section.bbox_w = new_right - section.bbox_x
         elif entry_on_left and port_x > run_hi:
             # Re-wrap the bbox around the shifted run, keeping the run's
             # padding and anchoring the left edge on the entry port (which
