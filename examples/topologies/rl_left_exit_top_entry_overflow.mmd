@@ -6,12 +6,14 @@
 
 graph LR
     subgraph a [Alpha]
+        %%metro direction: RL
         %%metro exit: left | g
         a1[A one]
         a2[A two]
         a1 -->|g| a2
     end
     subgraph b [Beta]
+        %%metro direction: RL
         %%metro entry: top | g
         %%metro exit: left | g
         b1[B one]
@@ -19,6 +21,7 @@ graph LR
         b1 -->|g| b2
     end
     subgraph e [Epsilon]
+        %%metro direction: RL
         %%metro entry: right | g
         e1[E one]
         e2[E two]
