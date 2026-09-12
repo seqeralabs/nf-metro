@@ -45,6 +45,7 @@ from nf_metro.layout.geometry import (
 )
 from nf_metro.layout.route_topology import divergence_junction_sources
 from nf_metro.layout.routing.common import (
+    flanked_cross_row_riser_neighbour_col,
     inter_row_wrap_band,
     max_grid_row_with_content,
     merge_junction_ids,
@@ -1047,6 +1048,58 @@ def _left_entry_descent_hugs_absent_neighbour(
     return not any(_rows_overlap(tgt_sec, section) for section in neighbours)
 
 
+def _flanked_cross_row_riser_gap(
+    graph: MetroGraph,
+    edge: Edge,
+    col_assign: dict[str, int],
+) -> tuple[int, int] | None:
+    """Gap ``(lo, hi)`` a same-column cross-row perpendicular-entry riser descends.
+
+    A LEFT/RIGHT exit feeding a TOP/BOTTOM entry in its own grid column but a
+    different row runs a vertical riser in the inter-column gap on its exit side.
+    When a section occupies that neighbouring column at the source's own row the
+    riser is flanked by a wall on both sides, so it must clear both -- which the
+    gap is only wide enough to allow once this riser is counted among the bundles
+    that size it.  Returns ``None`` for an unflanked riser (the neighbour column
+    open at the source row), whose descent legitimately sits a curve radius off
+    its single wall.
+    """
+    src_port = graph.ports.get(edge.source)
+    tgt_port = graph.ports.get(edge.target)
+    if src_port is None or tgt_port is None:
+        return None
+    if src_port.is_entry or not tgt_port.is_entry:
+        return None
+    if src_port.side not in (PortSide.LEFT, PortSide.RIGHT):
+        return None
+    if tgt_port.side not in (PortSide.TOP, PortSide.BOTTOM):
+        return None
+    src_sec = graph.sections.get(src_port.section_id)
+    tgt_sec = graph.sections.get(tgt_port.section_id)
+    if src_sec is None or tgt_sec is None:
+        return None
+    src_col = col_assign.get(src_sec.id)
+    tgt_col = col_assign.get(tgt_sec.id)
+    if src_col is None or tgt_col is None:
+        return None
+    neighbour = flanked_cross_row_riser_neighbour_col(
+        src_col,
+        src_sec.grid_row,
+        tgt_col,
+        tgt_sec.grid_row,
+        exit_is_right=src_port.side is PortSide.RIGHT,
+    )
+    if neighbour is None:
+        return None
+    flanked = any(
+        col_assign.get(other.id) == neighbour and other.grid_row == src_sec.grid_row
+        for other in graph.sections.values()
+    )
+    if not flanked:
+        return None
+    return (min(src_col, neighbour), max(src_col, neighbour))
+
+
 def _bundles_in_gap(
     graph: MetroGraph,
     col_assign: dict[str, int],
@@ -1078,7 +1131,7 @@ def _bundles_in_gap(
     is the number of distinct lines in that bundle.
     """
     junction_ids = graph.junction_ids
-    bundles: dict[tuple[str, int], set[str]] = defaultdict(set)
+    bundles: dict[tuple[str | int, ...], set[str]] = defaultdict(set)
 
     lo, hi = min(col_a, col_b), max(col_a, col_b)
 
@@ -1112,6 +1165,16 @@ def _bundles_in_gap(
                 bundles[("D", h_dir)].add(edge.line_id)
             if lo == edge_hi - 1 and hi == edge_hi:
                 bundles[("U", h_dir)].add(edge.line_id)
+
+    # A same-column cross-row riser descends in an inter-column gap it shares
+    # with the gap's other bundles but is not one of them: its endpoints sit in
+    # the same column, so the loop above (which keys bundles by the two columns
+    # an edge spans) never sees it.  Count each as its own bundle so the gap is
+    # sized to seat it clear of both flanking walls beside whatever else runs
+    # there.
+    for edge in graph.edges:
+        if _flanked_cross_row_riser_gap(graph, edge, col_assign) == (lo, hi):
+            bundles[("riser", edge.source, edge.target)].add(edge.line_id)
 
     # A same-line fan into two horizontal cell-mates can share its lead-in and
     # then split into opposing target-side channels. Endpoint-only inference

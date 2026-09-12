@@ -70,6 +70,7 @@ from nf_metro.layout.routing.common import (
     col_right_edge,
     column_gap_edges,
     endpoint_port_xs,
+    flanked_cross_row_riser_neighbour_col,
     gap_lo_for_x,
     header_corridor_y,
     horizontal_direction,
@@ -4602,6 +4603,65 @@ def _corridor_riser_x(
     )
 
 
+def _flanked_cross_row_riser_seat_x(
+    ctx: _RoutingCtx,
+    src: Station,
+    tgt: Station,
+    src_sec: Section | None,
+    tgt_sec: Section | None,
+    exit_side: Direction,
+    run_start: float,
+    run_end: float,
+) -> float | None:
+    """Riser X for a same-column cross-row perpendicular entry flanked on its exit side.
+
+    A LEFT/RIGHT exit dropping into a TOP/BOTTOM entry stacked in its own grid
+    column runs its riser in the inter-column gap on the exit side.  When a
+    section occupies that neighbouring column at the source's own row the gap is
+    walled on both sides, so the minimal lead-in -- a curve radius off the source
+    box -- climbs the outside of that box.  Seat the riser
+    :data:`EDGE_TO_BUNDLE_CLEARANCE` off the wall it exits instead, held inside
+    the clearance its corridor owes over the whole descent, which leaves the rest
+    of the (widened) gap for the counter-running bundles that share it.
+
+    Returns ``None`` when the two boxes are not a same-column cross-row pair or
+    the neighbouring column is open at the source row (the unflanked riser keeps
+    its minimal off-wall lead-in).
+    """
+    if src_sec is None or tgt_sec is None:
+        return None
+    neighbour = flanked_cross_row_riser_neighbour_col(
+        src_sec.grid_col,
+        src_sec.grid_row,
+        tgt_sec.grid_col,
+        tgt_sec.grid_row,
+        exit_is_right=exit_side is Direction.R,
+    )
+    if neighbour is None:
+        return None
+    if not any(
+        other.grid_col == neighbour and other.grid_row == src_sec.grid_row
+        for other in ctx.graph.sections.values()
+    ):
+        return None
+    left, right = column_gap_edges(
+        ctx.graph, src_sec.grid_col, neighbour, row=src_sec.grid_row
+    )
+    seat = (
+        left + EDGE_TO_BUNDLE_CLEARANCE
+        if exit_side is Direction.R
+        else right - EDGE_TO_BUNDLE_CLEARANCE
+    )
+    return seat_run_in_corridor_clearance(
+        ctx.graph,
+        axis=0,
+        section_ids=section_ids_of_stations(ctx.graph, src, tgt),
+        coordinate=seat,
+        run_start=run_start,
+        run_end=run_end,
+    )
+
+
 def _top_entry_above_channel_y(ctx: _RoutingCtx, tgt_sec: Section) -> float:
     """Y of the routing channel just above a TOP-entry target's header band.
 
@@ -4763,7 +4823,7 @@ def _perp_entry_finish_route(
         # re-centre the branch on the fan's mean, parting it from its trunk lane
         # by half a step at the junction.
         member = members[0]
-        return route_tapered_anchored(
+        route = route_tapered_anchored(
             member,
             centerline,
             transition_leg=geometry.transition_leg,
@@ -4772,6 +4832,9 @@ def _perp_entry_finish_route(
             tgt_bundle_offsets=[member[3]],
             normalize_exempt=True,
         )
+        if geometry.flanked_gap:
+            _declare_placed_channels(route, ctx)
+        return route
 
     routes = build_tapered_bundle(
         members,
@@ -4780,7 +4843,13 @@ def _perp_entry_finish_route(
         base_radius=ctx.curve_radius,
         normalize_exempt=True,
     )
-    return next(r for r in routes if r.line_id == edge.line_id)
+    route = next(r for r in routes if r.line_id == edge.line_id)
+    if geometry.flanked_gap:
+        # The riser descends a two-walled gap it counter-runs other bundles in.
+        # Declaring its channel makes the exempt frame a visible obstacle so the
+        # gap passes seat those movable bundles clear of it.
+        _declare_placed_channels(route, ctx)
+    return route
 
 
 def _perp_entry_lands_on_its_own_lane(tgt_sec: Section) -> bool:
@@ -4886,6 +4955,7 @@ class _PerpEntryLGeometry:
     transition_leg: int
     fan_source_offsets: tuple[float, ...] | None
     seam: _SourceSeam
+    flanked_gap: bool = False
 
 
 def _leg_direction(start: tuple[float, float], end: tuple[float, float]) -> Direction:
@@ -4913,6 +4983,7 @@ def _perp_entry_l_record(
     transition_leg: int,
     line_id: str,
     fan_source_offsets: tuple[float, ...] | None,
+    flanked_gap: bool = False,
 ) -> _PerpEntryLGeometry:
     """Complete a perpendicular-entry record from its centreline.
 
@@ -4932,6 +5003,7 @@ def _perp_entry_l_record(
             transition_leg,
             fan_source_offsets,
             _SourceSeam(_leg_direction(points[0], points[-1]), None, None, None),
+            flanked_gap,
         )
     source_offset, target_offset = next(
         (source, target)
@@ -4951,6 +5023,7 @@ def _perp_entry_l_record(
             points[0][0],
             points[1][0] + right_normal_axis_sign(turn_direction) * member_offset,
         ),
+        flanked_gap,
     )
 
 
@@ -5143,11 +5216,19 @@ def _perp_entry_l_geometry(
     lead_run = outer_lane_radius(n, ctx.curve_radius, ctx.offset_step)
     lx0 = sx if straight_drop else sx + lead.sign * lead_run
 
-    # A same-row horizontal exit whose minimal lead-in would seat the vertical
-    # trunk hard against the source box's exit edge runs the riser up that edge.
-    # Seat the riser midway in the clear inter-column corridor instead.
+    # A horizontal exit whose minimal lead-in would seat the vertical trunk hard
+    # against the source box's exit edge runs the riser up that edge.  A same-row
+    # pair centres the riser in the clear inter-column corridor; a same-column
+    # cross-row pair flanked on its exit side seats it a clearance off the exit
+    # wall, leaving the widened gap for the bundles it counter-runs.
+    flanked_gap = False
     if exit_side is not None and not straight_drop:
         corridor_x = _corridor_riser_x(ctx, src_sec, tgt_sec)
+        if corridor_x is None:
+            corridor_x = _flanked_cross_row_riser_seat_x(
+                ctx, src, tgt, src_sec, tgt_sec, exit_side, sy, mid_y
+            )
+            flanked_gap = corridor_x is not None
         if corridor_x is not None:
             lx0 = corridor_x
 
@@ -5292,7 +5373,12 @@ def _perp_entry_l_geometry(
         )
         transition_leg = 3
     return _perp_entry_l_record(
-        points, tuple(members), transition_leg, edge.line_id, fan_source_offsets
+        points,
+        tuple(members),
+        transition_leg,
+        edge.line_id,
+        fan_source_offsets,
+        flanked_gap,
     )
 
 
