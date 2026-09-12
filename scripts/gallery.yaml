@@ -1811,6 +1811,14 @@ gallery:
       "Two lines dropping together from a TB BOTTOM exit into the TOP entry of an
       LR section: the in-section line order follows the arrival order so the entry corner nests
       concentrically and the bundle neither pinches nor crosses through the bend (issue #1061)."
+  - id: rl_left_exit_top_entry_overflow
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "An RL section with a LEFT exit and a TOP entry whose port sits left of its
+      internal run: the drop is predicted to land right of the run, so the run shifts left to
+      meet the port and the section bbox grows left to keep the trailing station contained
+      (issue #1980)."
   - id: right_entry_wrap_no_fan
     source_dir: examples/topologies
     category: Inter-section Routing

@@ -1,0 +1,28 @@
+%%metro title: RL left-exit top-entry overflow
+%%metro line: g | Green | #2db572
+%%metro grid: a | 1,0
+%%metro grid: b | 1,1
+%%metro grid: e | 0,1
+
+graph LR
+    subgraph a [Alpha]
+        %%metro exit: left | g
+        a1[A one]
+        a2[A two]
+        a1 -->|g| a2
+    end
+    subgraph b [Beta]
+        %%metro entry: top | g
+        %%metro exit: left | g
+        b1[B one]
+        b2[B two]
+        b1 -->|g| b2
+    end
+    subgraph e [Epsilon]
+        %%metro entry: right | g
+        e1[E one]
+        e2[E two]
+        e1 -->|g| e2
+    end
+    a2 -->|g| b1
+    b2 -->|g| e1

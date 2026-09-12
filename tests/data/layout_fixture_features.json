@@ -495,7 +495,8 @@
     "topologies/novel_transcripts_repro.mmd",
     "guide/07_track_gap.mmd",
     "centered_tracks.mmd",
-    "topologies/centered_flat_skip_over_marker.mmd"
+    "topologies/centered_flat_skip_over_marker.mmd",
+    "topologies/rl_left_exit_top_entry_overflow.mmd"
   ],
   "vertical_passthrough": [
     "metagenomics_input.mmd",
