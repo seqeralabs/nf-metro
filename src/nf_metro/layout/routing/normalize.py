@@ -2841,6 +2841,74 @@ def _reseat_concentric_flanking(
             )
 
 
+_PERP_ENTRY_SIDES = (PortSide.TOP, PortSide.BOTTOM)
+
+
+def _taper_perp_entry_landing(
+    route: RoutedPath,
+    segment_rank: int,
+    ctx: _RoutingCtx,
+    run_in: float = CURVE_RADIUS,
+) -> None:
+    """Bend a reseated descent's tail onto its target's perp-entry crossing lane.
+
+    :func:`_reseat_concentric_flanking` seats both ends of the vertical descent
+    ``points[segment_rank] -> points[segment_rank+1]`` on one X so the channel
+    nests straight against the section it leaves.  When that outgoing endpoint is
+    the route terminus dropping onto a TOP/BOTTOM section boundary whose per-line
+    crossing lane
+    (:func:`nf_metro.layout.routing.perp._perp_entry_crossing_x`) differs from
+    the nested channel, a straight descent to that X lands off the lane the
+    intra-section drop departs on and jogs the line across the boundary.
+
+    Insert a 45-degree crossover in the last ``|lane - nested| + run_in`` px of
+    the descent: hold the nested X, cross diagonally, then run straight into the
+    boundary on the crossing lane so the terminus meets its intra-section
+    continuation collinearly.  A no-op unless the route terminates at a distinct
+    perpendicular entry lane.
+    """
+    pts = route.points
+    if segment_rank + 2 != len(pts):
+        return
+    port = ctx.graph.ports.get(route.edge.target)
+    if port is None or not port.is_entry or port.side not in _PERP_ENTRY_SIDES:
+        return
+    port_x = ctx.graph.stations[route.edge.target].x
+
+    from nf_metro.layout.routing.perp import _perp_entry_crossing_x
+
+    landing = _perp_entry_crossing_x(ctx, route.edge.target, route.line_id, port_x)
+    if landing is None:
+        return
+    nested_x, boundary_y = pts[segment_rank + 1]
+    if abs(landing - nested_x) <= COORD_TOLERANCE:
+        return
+    assert route.curve_radii is not None
+    run_sign = 1.0 if boundary_y - pts[segment_rank][1] > 0 else -1.0
+    span = abs(landing - nested_x)
+    diag_end_y = boundary_y - run_sign * run_in
+    diag_start_y = diag_end_y - run_sign * span
+    pts[segment_rank + 1] = (nested_x, diag_start_y)
+    pts.insert(segment_rank + 2, (landing, diag_end_y))
+    pts.insert(segment_rank + 3, (landing, boundary_y))
+    diag_radius = concentric_corner_radius_at(
+        pts[segment_rank],
+        pts[segment_rank + 1],
+        pts[segment_rank + 2],
+        0.0,
+        CURVE_RADIUS,
+    )
+    run_radius = concentric_corner_radius_at(
+        pts[segment_rank + 1],
+        pts[segment_rank + 2],
+        pts[segment_rank + 3],
+        0.0,
+        CURVE_RADIUS,
+    )
+    route.curve_radii.insert(segment_rank, diag_radius)
+    route.curve_radii.insert(segment_rank + 1, run_radius)
+
+
 def _set_vchannel_x(
     ch: _VChannel,
     new_x: float,

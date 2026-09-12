@@ -115,7 +115,10 @@ from nf_metro.layout.routing.inter_section_handlers import (
     seated_left_exit_under_target_descent,
     u_bypass_descent_geometry,
 )
-from nf_metro.layout.routing.normalize import _reseat_concentric_flanking
+from nf_metro.layout.routing.normalize import (
+    _reseat_concentric_flanking,
+    _taper_perp_entry_landing,
+)
 from nf_metro.layout.routing.offsets import (
     LinearEntryFrameOwnership,
     capture_linear_entry_frame_ownership,
@@ -3621,6 +3624,7 @@ def consume_exit_turn_route(
         )
     route.exit_turn_axis_id = str(membership.axis.id)
     route.exit_turn_segment_rank = segment_rank
+    _taper_perp_entry_landing(route, segment_rank, ctx)
 
 
 def exit_turn_failure(plan: ExitTurnPlan, detail: str) -> str:
