@@ -100,7 +100,7 @@ If the latest released nf-metro renders the pipeline cleanly, use a version
 pin in the dev doc:
 
 ```bash
-pip install 'nf-metro>=X.Y.Z' cairosvg
+pip install 'nf-metro>=X.Y.Z'
 ```
 
 This is the simpler path and the long-term steady state. Once your fix chain
@@ -127,11 +127,11 @@ common case while a fix chain is in flight against `seqeralabs/nf-metro`):
 2. Pin the install line in `docs/dev/metro_map.md`:
 
    ```bash
-   pip install 'git+https://github.com/<owner>/nf-metro.git@<pipeline-name>' cairosvg
+   pip install 'git+https://github.com/<owner>/nf-metro.git@<pipeline-name>'
    ```
 
 3. Once the fix chain merges to nf-metro `main` and a release is cut, swap
-   back to the version pin (`pip install 'nf-metro>=X.Y.Z' cairosvg`) and
+   back to the version pin (`pip install 'nf-metro>=X.Y.Z'`) and
    delete the named branch on your fork. The pipeline diagram should
    reproduce identically from the released version - if it doesn't, the fix
    chain didn't fully land.
@@ -152,13 +152,12 @@ in:
 - `<extra-layout-flags>` - the rest of the layout flags from Stage 1, or
   empty if using rnaseq defaults
 
-The template has three render blocks: static SVG, PNG conversion via
-cairosvg, and animated SVG. Plus a trailing-newline normalisation step
+The template has two render blocks: static SVG+PNG (one command, via a
+repeated `-o`) and animated SVG. Plus a trailing-newline normalisation step
 because nf-core pre-commit hooks reject SVGs without a final newline.
 
-Run the commands from the pipeline repo root, in order. The static SVG
-must exist before the PNG conversion. The animated SVG is independent and
-can run last.
+Run the commands from the pipeline repo root. The animated SVG is
+independent and can run in either order.
 
 ## Stage 4: README swap and cleanup
 

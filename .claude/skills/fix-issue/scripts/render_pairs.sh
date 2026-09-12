@@ -68,8 +68,6 @@ self_test() {
 : "${ART:=/tmp/nf-metro-visual-$CANDIDATE}"
 : "${STEMS:=$ART/stems.txt}"
 mkdir -p "$ART" || die "cannot create $ART"
-command -v cairosvg >/dev/null 2>&1 || python3 -c "import cairosvg" 2>/dev/null \
-  || die "cairosvg unavailable; activate the nf-metro-dev env first"
 
 corpus_map > "$ART/corpus.tsv" || die "corpus_map.py failed"
 if [ ! -s "$STEMS" ]; then
@@ -90,13 +88,11 @@ for side in base cand; do
     if [ -z "$rel" ]; then
       echo "UNRESOLVED: $stem" >&2; unresolved=$((unresolved + 1)); continue
     fi
-    # --no-chrome-css bakes concrete colours; without it cairosvg aborts on var().
     if ! PYTHONPATH="$wt/src" python3 -m nf_metro render "$wt/$rel" \
-           -o "$ART/$side-$stem.svg" --no-chrome-css 2>"$ART/$side-$stem.err"; then
+           -o "$ART/$side-$stem.svg" -o "$ART/$side-$stem.png" \
+           2>"$ART/$side-$stem.err"; then
       echo "RENDER-FAILED($side): $stem" >&2; failed=$((failed + 1)); continue
     fi
-    python3 -c 'import cairosvg,sys;cairosvg.svg2png(url=sys.argv[1],write_to=sys.argv[1][:-4]+".png",scale=2)' \
-      "$ART/$side-$stem.svg"
     rendered=$((rendered + 1))
   done < "$STEMS"
   git -C "$REPO" worktree remove --force "$wt" >/dev/null || true

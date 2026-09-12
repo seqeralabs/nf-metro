@@ -158,8 +158,8 @@ Choose it deliberately rather than by leaving `--theme` or `%%metro style:` unse
 
 ## Consumers that cannot parse `light-dark()` or `var()`
 
-Some SVG consumers, `cairosvg` among them, parse a restricted CSS subset and abort outright on `light-dark()` or `var()`.
-The nf-metro export flags map directly onto the ingredients described earlier:
+Some SVG consumers parse a restricted CSS subset and abort outright on `light-dark()` or `var()`.
+`--format png` handles this for you; when you hand the SVG to an external tool, the export flags map directly onto the ingredients described earlier:
 
 ```bash
 # bake one concrete palette; no var()/light-dark() left to choke on

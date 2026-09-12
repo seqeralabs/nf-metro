@@ -2,7 +2,7 @@
 
 ## Reuse one persistent env, don't create one per issue
 
-nf-metro is pure Python; the deps (`cairo`, drawsvg, networkx, pillow, cairosvg,
+nf-metro is pure Python; the deps (drawsvg, networkx, pillow, resvg-py,
 pytest, ruff, mypy, `types-networkx`) change rarely. Creating a fresh
 `micromamba` env per issue re-solves and re-downloads all of that every session
 for no benefit. Keep **one** long-lived deps env and point it at the worktree's
@@ -10,9 +10,9 @@ code per-command:
 
 ```bash
 # One-time, reused across all issues (skip if it already exists):
-ulimit -n 1000000 && export CONDA_OVERRIDE_OSX=15.0 && /opt/homebrew/bin/micromamba create -n nf-metro-dev python=3.11 cairo -y
+ulimit -n 1000000 && export CONDA_OVERRIDE_OSX=15.0 && /opt/homebrew/bin/micromamba create -n nf-metro-dev python=3.11 -y
 source ~/.local/bin/mm-activate nf-metro-dev
-cd ~/projects/nf-metro && pip install ".[dev,docs]"   # docs extra carries cairosvg
+cd ~/projects/nf-metro && pip install ".[dev,docs]"
 # Install from pyproject, never a hand-listed set: `lark` is a hard runtime
 # dependency and `coverage` is needed by the gate ratchet, and a hand-written
 # list drifts silently. Non-editable on purpose - PYTHONPATH shadows it below.
@@ -26,7 +26,7 @@ command - **do not** `pip install -e` the worktree into this env:
 source ~/.local/bin/mm-activate nf-metro-dev
 cd /tmp/nf-metro-fix-<N>
 export PYTHONPATH=/tmp/nf-metro-fix-<N>/src
-python -m nf_metro render <file.mmd> -o /tmp/out.svg --no-chrome-css
+python -m nf_metro render <file.mmd> -o /tmp/out.png
 python -m pytest -k <selector>
 ```
 
@@ -108,16 +108,12 @@ Both of these belong in a LIGHT read-only worker that returns the verdict and
 the artifact path, not the imagery, unless a genuine visual question needs the
 picture in front of a HIGH reviewer. Neither replaces the CI gallery review.
 
-`--no-chrome-css` is required on anything you intend to rasterise: without it
-cairosvg aborts on the `var()` chrome custom properties.
-
 Fast sanity check of one specific `.mmd` before pushing:
 
 ```bash
 source ~/.local/bin/mm-activate nf-metro-dev
 export PYTHONPATH=/tmp/nf-metro-fix-<N>/src
-cd /tmp/nf-metro-fix-<N> && python -m nf_metro render <file.mmd> -o /tmp/<name>.svg --no-chrome-css
-python -c "import cairosvg; cairosvg.svg2png(url='/tmp/<name>.svg', write_to='/tmp/<name>.png', scale=2)"
+cd /tmp/nf-metro-fix-<N> && python -m nf_metro render <file.mmd> -o /tmp/<name>.png
 open /tmp/<name>.png
 ```
 

@@ -7,7 +7,7 @@ import os
 import warnings
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Any, Literal, NoReturn, TypeVar, cast
+from typing import Any, Literal, NoReturn, TypeVar, cast, get_args
 
 import click
 
@@ -39,7 +39,10 @@ from nf_metro.parser.model import (
     split_guard_warnings,
 )
 from nf_metro.render import validate_render
-from nf_metro.themes import STYLE_NAMES, THEMES, resolve_style
+from nf_metro.themes import DEFAULT_MODE, STYLE_NAMES, THEMES, resolve_style
+
+RenderFormat = Literal["svg", "html", "png"]
+_RENDER_FORMATS: tuple[str, ...] = get_args(RenderFormat)
 
 
 @click.group()
@@ -65,6 +68,25 @@ def _parse_inactive_lines(value: object) -> frozenset[str] | None:
     if not isinstance(items, Iterable):
         raise ValueError("inactive_lines must be a string or list of line IDs")
     return frozenset(s for s in (str(i).strip() for i in items) if s)
+
+
+def _format_from_output(output: Path | None) -> RenderFormat:
+    """Infer the output format from *output*'s extension, defaulting to SVG.
+
+    Lets ``-o map.png`` stand on its own, so the common case needs no
+    ``--format``. An explicit ``--format`` is resolved before this is called
+    and wins, including over a mismatched extension.
+    """
+    suffix = output.suffix.lower().lstrip(".") if output is not None else ""
+    return cast(
+        RenderFormat,
+        suffix if suffix in _RENDER_FORMATS else "svg",
+    )
+
+
+def _svg_format_for(out_format: RenderFormat) -> Literal["svg", "html"]:
+    """Return the format a graph is prepared/rendered under: png renders through svg."""
+    return "svg" if out_format == "png" else out_format
 
 
 class _FiniteFloatRange(click.FloatRange):
@@ -107,6 +129,27 @@ def _numeric_cli_type(opt: LayoutOption) -> click.IntRange | _FiniteFloatRange:
         hi = None if opt.max_val is None else int(opt.max_val)
         return click.IntRange(min=lo, max=hi, min_open=min_open)
     return _FiniteFloatRange(min=lo, max=opt.max_val, min_open=min_open)
+
+
+# Reused by the render-many manifest reader below, so a bad value gets the
+# same error there as it would from the flag.
+_SCALE_TYPE = _FiniteFloatRange(min=0, min_open=True)
+_PNG_WIDTH_TYPE = click.IntRange(min=0, min_open=True)
+_FORMAT_TYPE = click.Choice(_RENDER_FORMATS)
+
+
+def _convert_manifest_number(
+    param_type: click.ParamType[float | int], value: object, name: str
+) -> float | int:
+    """Run a manifest job's *value* through *param_type*, as the CLI flag would.
+
+    ``bool`` is an ``int`` subclass in Python, so a JSON ``true``/``false``
+    would otherwise pass ``_SCALE_TYPE``/``_PNG_WIDTH_TYPE`` as ``1``/``0``; a
+    CLI flag can never receive a bool, so this refuses one here too.
+    """
+    if isinstance(value, bool):
+        raise ValueError(f"{name}: {value!r} is not a number")
+    return param_type.convert(value, None, None)
 
 
 def _layout_cli_option(opt: LayoutOption) -> Callable[..., Any]:
@@ -282,18 +325,38 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
 @click.option(
     "-o",
     "--output",
+    "outputs",
     type=click.Path(path_type=Path),
-    default=None,
+    multiple=True,
     help="Output file path. Defaults to <input>.<format>. Only valid with a "
-    "single INPUT_FILE.",
+    "single INPUT_FILE. Repeat it to write several formats from one layout "
+    "run: -o map.svg -o map.png.",
 )
 @click.option(
     "--format",
     "format_",
-    type=click.Choice(["svg", "html"]),
-    default="svg",
-    help="Output format: 'svg' (default) or 'html' for an interactive "
-    "self-contained page with pan/zoom and per-line filtering.",
+    type=_FORMAT_TYPE,
+    default=None,
+    help="Output format: 'svg' (default), 'png', or 'html' for an interactive "
+    "self-contained page with pan/zoom and per-line filtering. Inferred from "
+    "the --output extension when not given.",
+)
+@click.option(
+    "--scale",
+    type=_SCALE_TYPE,
+    default=2.0,
+    show_default=True,
+    metavar="FLOAT",
+    help="PNG only: multiply the rendered pixel dimensions by this factor.",
+)
+@click.option(
+    "--png-width",
+    type=_PNG_WIDTH_TYPE,
+    default=None,
+    metavar="INTEGER",
+    help="PNG only: output width in pixels, height scaled with it. Overrides "
+    "--scale. Distinct from --width, which grows the SVG canvas around a map "
+    "drawn at its natural size rather than resizing the picture.",
 )
 @click.option(
     "--theme",
@@ -411,8 +474,9 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
     help=(
         "Omit the chrome --nfm-* CSS custom-property <style> block. Colors "
         "still render (they are baked as presentation attributes); only live "
-        "host recoloring is dropped. Use for raster export: cairosvg and "
-        "similar rasterizers cannot parse var() and fail without this."
+        "host recoloring is dropped. --format png applies it for you; pass "
+        "it when handing the SVG to an external rasterizer, since many "
+        "cannot parse var() and fail without it."
     ),
 )
 @click.option(
@@ -455,8 +519,10 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
 @layout_cli_options
 def render(
     input_files: tuple[Path, ...],
-    output: Path | None,
-    format_: Literal["svg", "html"],
+    outputs: tuple[Path, ...],
+    format_: RenderFormat | None,
+    scale: float,
+    png_width: int | None,
     theme: str | None,
     mode: str | None,
     debug: bool,
@@ -477,7 +543,7 @@ def render(
     inactive_lines: str | None,
     **layout_opts: object,
 ) -> None:
-    """Render one or more Mermaid metro map definitions to SVG or interactive HTML.
+    """Render Mermaid metro map definitions to SVG, PNG, or interactive HTML.
 
     Given more than one INPUT_FILE, all render within the same process
     (amortising interpreter/import startup across the batch) and each write
@@ -485,23 +551,33 @@ def render(
     earlier one fails, successful outputs are kept, and a non-zero exit is
     returned if any failed.
 
+    Repeating -o writes one INPUT_FILE to several outputs in the same run,
+    taking each output's format from its extension: -o map.svg -o map.png.
+    An explicit --format overrides every extension.
+
     A rejected input, and any other failure, surfaces as a plain error
     message rather than a traceback; set NF_METRO_DEBUG=1 to re-raise the
     original exception instead.
     """
-    if len(input_files) > 1 and output is not None:
+    if len(input_files) > 1 and outputs:
         raise click.UsageError("-o/--output can only be used with a single INPUT_FILE.")
 
     inactive_line_ids = _parse_inactive_lines(inactive_lines)
 
-    def _job(input_file: Path, *, quiet: bool) -> Callable[[], None]:
-        out_path = (
-            output if output is not None else input_file.with_suffix(f".{format_}")
-        )
+    def _job(
+        input_file: Path,
+        out_path: Path,
+        out_format: RenderFormat,
+        *,
+        quiet: bool,
+        graph: MetroGraph | None = None,
+    ) -> Callable[[], None]:
         return lambda: _render_one(
             input_file,
             out_path,
-            format_=format_,
+            format_=out_format,
+            scale=scale,
+            png_width=png_width,
             theme=theme,
             mode=mode,
             debug=debug,
@@ -522,20 +598,81 @@ def render(
             inactive_line_ids=inactive_line_ids,
             layout_opts=layout_opts,
             quiet=quiet,
+            graph=graph,
         )
 
-    if len(input_files) == 1:
-        _job(input_files[0], quiet=False)()
+    # One job per output when -o is given (each output carries its own format,
+    # unless --format pins one for all), else one per input file.
+    if outputs:
+        jobs = [
+            (out.name, input_files[0], out, format_ or _format_from_output(out))
+            for out in outputs
+        ]
+    else:
+        fmt = format_ or "svg"
+        jobs = [(f.name, f, f.with_suffix(f".{fmt}"), fmt) for f in input_files]
+
+    if len(jobs) == 1:
+        _, source, out_path, out_format = jobs[0]
+        _job(source, out_path, out_format, quiet=False)()
         return
 
-    _run_batch([(f.name, _job(f, quiet=True)) for f in input_files])
+    # Repeated -o always shares one input file (validated above), so every job's
+    # svg_format ("svg" or "html"; png renders through "svg") shares a layout -
+    # parse and lay it out once per distinct svg_format instead of once per job,
+    # capturing and reporting that shared step's warnings the same way a single
+    # job would (permissive downgrades included).
+    graphs: dict[Literal["svg", "html"], MetroGraph] = {}
+    if outputs:
+        permissive = bool(layout_opts.get("permissive"))
+        with warnings.catch_warnings(record=True) as caught:
+            if permissive:
+                warnings.filterwarnings("always", category=PermissiveGuardWarning)
+            try:
+                for _, source, _, out_format in jobs:
+                    svg_format = _svg_format_for(out_format)
+                    if svg_format not in graphs:
+                        graphs[svg_format] = _prepare_graph_for_render(
+                            source,
+                            from_nextflow=from_nextflow,
+                            title=title,
+                            line_spread=line_spread,
+                            logo=logo,
+                            legend=legend,
+                            layout_opts=layout_opts,
+                            bare=bare,
+                            svg_format=svg_format,
+                            error_prefix=_error_prefix(source, quiet=True),
+                        )
+            finally:
+                _report_render_warnings(
+                    caught, permissive=permissive, source=input_files[0]
+                )
+
+    _run_batch(
+        [
+            (
+                label,
+                _job(
+                    source,
+                    out_path,
+                    out_format,
+                    quiet=True,
+                    graph=graphs.get(_svg_format_for(out_format)),
+                ),
+            )
+            for label, source, out_path, out_format in jobs
+        ]
+    )
 
 
 def _render_one(
     input_file: Path,
     output: Path,
     *,
-    format_: Literal["svg", "html"],
+    format_: RenderFormat,
+    scale: float,
+    png_width: int | None,
     theme: str | None,
     mode: str | None,
     debug: bool,
@@ -556,6 +693,7 @@ def _render_one(
     inactive_line_ids: frozenset[str] | None,
     layout_opts: dict[str, object],
     quiet: bool,
+    graph: MetroGraph | None = None,
 ) -> None:
     permissive = bool(layout_opts.get("permissive"))
 
@@ -570,6 +708,8 @@ def _render_one(
                 input_file,
                 output,
                 format_=format_,
+                scale=scale,
+                png_width=png_width,
                 theme=theme,
                 mode=mode,
                 debug=debug,
@@ -590,6 +730,7 @@ def _render_one(
                 inactive_line_ids=inactive_line_ids,
                 layout_opts=layout_opts,
                 quiet=quiet,
+                graph=graph,
             )
         except click.ClickException:
             raise
@@ -603,11 +744,51 @@ def _render_one(
             )
 
 
+def _prepare_graph_for_render(
+    input_file: Path,
+    *,
+    from_nextflow: bool,
+    title: str | None,
+    line_spread: str | None,
+    logo: Path | None,
+    legend: str | None,
+    layout_opts: dict[str, object],
+    bare: bool,
+    svg_format: Literal["svg", "html"],
+    error_prefix: str,
+) -> MetroGraph:
+    """Parse and lay out *input_file*, reporting a typed failure via `_clean_error`."""
+    text = input_file.read_text()
+    try:
+        return prepare_graph(
+            text,
+            from_nextflow=from_nextflow,
+            title=title,
+            line_spread=line_spread,
+            logo=str(logo) if logo is not None else None,
+            legend=legend,
+            layout_options=layout_opts,
+            source_dir=str(input_file.resolve().parent),
+            bare=bare,
+            output_format=svg_format,
+        )
+    except (
+        ValueError,
+        CyclicGraphError,
+        BackwardFlowError,
+        MixedEntryDirectionError,
+        PhaseInvariantError,
+    ) as e:
+        _clean_error(e, error_prefix)
+
+
 def _render_one_unsafe(
     input_file: Path,
     output: Path,
     *,
-    format_: Literal["svg", "html"],
+    format_: RenderFormat,
+    scale: float,
+    png_width: int | None,
     theme: str | None,
     mode: str | None,
     debug: bool,
@@ -628,31 +809,38 @@ def _render_one_unsafe(
     inactive_line_ids: frozenset[str] | None,
     layout_opts: dict[str, object],
     quiet: bool,
+    graph: MetroGraph | None = None,
 ) -> None:
-    text = input_file.read_text()
     error_prefix = _error_prefix(input_file, quiet)
+    # PNG renders through the SVG backend and is rasterised afterward; every
+    # render-plane decision below follows the SVG path regardless of format_.
+    svg_format = _svg_format_for(format_)
 
-    try:
-        graph = prepare_graph(
-            text,
+    if graph is None:
+        graph = _prepare_graph_for_render(
+            input_file,
             from_nextflow=from_nextflow,
             title=title,
             line_spread=line_spread,
-            logo=str(logo) if logo is not None else None,
+            logo=logo,
             legend=legend,
-            layout_options=layout_opts,
-            source_dir=str(input_file.resolve().parent),
+            layout_opts=layout_opts,
             bare=bare,
-            output_format=format_,
+            svg_format=svg_format,
+            error_prefix=error_prefix,
         )
-    except (
-        ValueError,
-        CyclicGraphError,
-        BackwardFlowError,
-        MixedEntryDirectionError,
-        PhaseInvariantError,
-    ) as e:
-        _clean_error(e, error_prefix)
+
+    if format_ == "png":
+        # A rasteriser has no CSS cascade and no viewer colour-scheme to
+        # consult, so the picture has to be fully decided here rather than
+        # left to the flags a caller remembered to pass:
+        #  - chrome_css off, or the var() chrome colours reach resvg unresolved
+        #  - a concrete baked mode, or light-dark() has nothing to resolve to
+        #  - embedded Inter, so the layout is measured against the same face
+        #    svg_to_png hands the rasteriser
+        no_chrome_css = True
+        embed_font = not text_to_paths
+        mode = (mode or graph.mode).strip().lower() or DEFAULT_MODE
 
     theme_obj = resolve_theme(theme, graph, mode=mode)
 
@@ -686,7 +874,7 @@ def _render_one_unsafe(
             graph,
             theme_obj,
             RenderConfig(
-                output_format=format_,
+                output_format=svg_format,
                 debug=debug,
                 responsive=responsive,
                 embed_font=embed_font,
@@ -722,7 +910,12 @@ def _render_one_unsafe(
             )
 
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(content if content.endswith("\n") else content + "\n")
+    if format_ == "png":
+        from nf_metro.render.raster import svg_to_png
+
+        output.write_bytes(svg_to_png(content, scale=scale, width=png_width))
+    else:
+        output.write_text(content if content.endswith("\n") else content + "\n")
     if not quiet:
         click.echo(
             f"Rendered {len(graph.stations)} stations, "
@@ -743,7 +936,9 @@ def render_many(manifest_file: Path) -> None:
     \b
       input                 Path to the source .mmd file (required).
       output                Path for the output file (required).
-      format                "svg" (default) or "html".
+      format                "svg" (default), "png", or "html".
+      scale                 PNG only: pixel multiplier (default: 2.0).
+      png_width             PNG only: output width in pixels; overrides scale.
       theme                 Theme name (nfcore, light, seqera, …).
       mode                  "light" or "dark" — bakes a concrete palette.
       debug                 Show debug overlay (default: false).
@@ -812,7 +1007,26 @@ def render_many(manifest_file: Path) -> None:
             _render_one(
                 Path(raw_input),
                 Path(raw_output),
-                format_=cast(Literal["svg", "html"], str(job.get("format", "svg"))),
+                format_=cast(
+                    RenderFormat,
+                    _FORMAT_TYPE.convert(job.get("format", "svg"), None, None),
+                ),
+                scale=cast(
+                    float,
+                    _convert_manifest_number(
+                        _SCALE_TYPE, job.get("scale", 2.0), "scale"
+                    ),
+                ),
+                png_width=(
+                    cast(
+                        int,
+                        _convert_manifest_number(
+                            _PNG_WIDTH_TYPE, job["png_width"], "png_width"
+                        ),
+                    )
+                    if "png_width" in job
+                    else None
+                ),
                 theme=_str_or_none("theme"),
                 mode=_str_or_none("mode"),
                 debug=bool(job.get("debug", False)),

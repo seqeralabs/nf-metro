@@ -15,6 +15,21 @@ history.
 
 ## [Unreleased]
 
+### Added
+
+- `nf-metro render` writes PNG directly. A `.png` output path selects it, or pass
+  `--format png`; `--scale` sets the pixel multiplier (default 2) and `--png-width`
+  pins an exact width. The PNG path bakes the palette, drops the `var()` chrome,
+  and draws with the bundled Inter, so a map rasterises to the same bytes on any
+  machine ([#1969](https://github.com/seqeralabs/nf-metro/issues/1969)).
+- `-o` repeats, so one run writes several formats: `-o map.svg -o map.png`.
+
+### Changed
+
+- Rasterisation moved from cairosvg to `resvg-py`, now a runtime dependency.
+  cairosvg needed system libcairo, which is why PNG was never a first-class
+  output; resvg-py ships self-contained wheels and needs no system libraries.
+
 ---
 
 ## [2.0.0] — 2026-09-05

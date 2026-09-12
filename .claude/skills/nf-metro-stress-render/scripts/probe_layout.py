@@ -165,10 +165,13 @@ def _render(mmd_path: Path, svg_out: Path | None, png_out: Path | None) -> dict:
 
     if png_out:
         try:
-            import cairosvg
-
-            cairosvg.svg2png(url=str(svg_target), write_to=str(png_out), scale=2)
-            out["png"] = str(png_out)
+            result = CliRunner().invoke(
+                cli, ["render", str(mmd_path), "-o", str(png_out)]
+            )
+            if result.exit_code != 0:
+                out["png_error"] = (result.output or str(result.exception)).strip()
+            else:
+                out["png"] = str(png_out)
         except Exception as exc:  # noqa: BLE001
             out["png_error"] = _short_tb(exc)
     return out
