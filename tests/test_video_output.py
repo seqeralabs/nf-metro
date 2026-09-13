@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import av
 import pytest
 from click.testing import CliRunner
 from PIL import Image
@@ -272,6 +273,46 @@ def test_a_map_with_the_animation_turned_off_cannot_be_exported(
     assert "no animation to export" in result.output
 
 
+# --- encoder failures --------------------------------------------------------
+
+
+def _break_encoding(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every mux raise, standing in for a PyAV/FFmpeg-side failure."""
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("synthetic encoder failure")
+
+    monkeypatch.setattr(av, "open", _boom)
+
+
+def test_a_failed_encode_leaves_no_file_at_the_requested_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`_encode` writes to a sibling temp file and renames it only on success."""
+    _break_encoding(monkeypatch)
+    out = tmp_path / "map.gif"
+
+    CliRunner().invoke(cli, ["render", str(STANDALONE_MMD), "-o", str(out), *TINY])
+
+    assert not out.exists()
+    assert not list(tmp_path.iterdir())
+
+
+def test_a_failed_encode_is_reported_as_a_clean_cli_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The CLI turns an encoder exception into a message, not a raw traceback."""
+    _break_encoding(monkeypatch)
+    out = tmp_path / "map.gif"
+
+    result = CliRunner().invoke(
+        cli, ["render", str(STANDALONE_MMD), "-o", str(out), *TINY]
+    )
+
+    assert result.exit_code != 0
+    assert "gif export failed" in result.output
+
+
 # --- the cost of a big loop -------------------------------------------------
 
 
@@ -312,3 +353,83 @@ def test_a_big_loop_is_quoted_rather_than_refused(
     assert result.exit_code == 0, result.output
     assert "frames to rasterise at" in result.output
     assert out.exists()
+
+
+# --- pixel correctness -------------------------------------------------------
+
+# Declared in variant_calling.mmd's `%%metro line:` directives.
+_LINE_COLORS = ("#2db572", "#0570b0")
+
+
+def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
+    return tuple(int(hex_color[i : i + 2], 16) for i in (1, 3, 5))  # type: ignore[return-value]
+
+
+def _close(a: tuple[int, ...], b: tuple[int, ...], tolerance: int = 6) -> bool:
+    """Whether two pixels match within palette-quantisation rounding.
+
+    A byte-order swap in ``_pal8_frame`` would move a channel's whole value
+    to a different position, producing a gap far past what 256-colour
+    quantisation rounding alone ever introduces.
+    """
+    return all(abs(x - y) <= tolerance for x, y in zip(a, b))
+
+
+def test_gif_palette_round_trips_the_map_colours(tmp_path: Path) -> None:
+    """`_pal8_frame`'s manual 0xAARRGGBB packing must not swap channels.
+
+    Cross-checks the GIF's palette-quantised decode against the same map
+    rendered straight to PNG, which never goes through a palette, at the
+    pixels where the map's background and declared line colours land.
+    """
+    png = Image.open(_render(tmp_path, "ref.png", "--scale", "1")).convert("RGB")
+    gif = Image.open(_render(tmp_path, "map.gif", *TINY)).convert("RGB")
+    assert gif.size == png.size
+
+    assert _close(gif.getpixel((0, 0)), png.getpixel((0, 0)))
+
+    reference = png.load()
+    for hex_color in _LINE_COLORS:
+        rgb = _hex_to_rgb(hex_color)
+        location = next(
+            (x, y)
+            for y in range(png.height)
+            for x in range(png.width)
+            if reference[x, y] == rgb
+        )
+        assert _close(gif.getpixel(location), rgb)
+
+
+def test_odd_dimensions_pad_up_to_even_with_the_background_colour(
+    tmp_path: Path,
+) -> None:
+    """mp4/webm need even sides for 4:2:0 chroma; `_even`/`_prepare` pad up.
+
+    A raster width of 999 lands this map on an odd pixel width and (given its
+    aspect ratio) an odd height too; the exported frame must grow each by
+    exactly one pixel, filled with the map's own background colour.
+    """
+    raw = Image.open(_render(tmp_path, "ref.png", "--raster-width", "999"))
+    raw_size = raw.size
+    assert raw_size[0] % 2 or raw_size[1] % 2, (
+        "fixture no longer lands on an odd side at this raster width"
+    )
+    even_size = (raw_size[0] + raw_size[0] % 2, raw_size[1] + raw_size[1] % 2)
+
+    out = _render(tmp_path, "map.mp4", *TINY, "--raster-width", "999")
+    with av.open(str(out)) as container:
+        frame = next(container.decode(container.streams.video[0]))
+        image = frame.to_image().convert("RGB")
+
+    assert image.size == even_size
+
+    background = image.getpixel((0, 0))
+    edges = []
+    if raw_size[0] % 2:
+        edges.append((even_size[0] - 1, 5))
+    if raw_size[1] % 2:
+        edges.append((5, even_size[1] - 1))
+    for point in edges:
+        pixel = image.getpixel(point)
+        # H.264 is lossy even on flat colour, so allow a small margin.
+        assert all(abs(a - b) <= 20 for a, b in zip(pixel, background))

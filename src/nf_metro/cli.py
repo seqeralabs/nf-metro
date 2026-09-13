@@ -189,7 +189,7 @@ def _numeric_cli_type(opt: LayoutOption) -> click.IntRange | _FiniteFloatRange:
 # Reused by the render-many manifest reader below, so a bad value gets the
 # same error there as it would from the flag.
 _SCALE_TYPE = _FiniteFloatRange(min=0, min_open=True)
-_FPS_TYPE = _FiniteFloatRange(min=0, min_open=True, max=60)
+_FPS_TYPE = _FiniteFloatRange(min=0, min_open=True)
 _DURATION_TYPE = _FiniteFloatRange(min=0, min_open=True)
 _RASTER_WIDTH_TYPE = click.IntRange(min=0, min_open=True)
 _FORMAT_TYPE = click.Choice(_RENDER_FORMATS)
@@ -1023,6 +1023,8 @@ def _render_one_unsafe(
             )
         except NotAnimatedError as e:
             raise click.ClickException(f"{error_prefix}{e}") from None
+        except Exception as e:
+            _clean_error(e, f"{error_prefix}{format_} export failed: ")
         detail = (
             f", {export.frames} frames over {export.duration:.1f}s "
             f"at {export.fps:.1f}fps"

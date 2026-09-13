@@ -109,8 +109,9 @@ class AnimationTimeline:
     """The ball geometry and timing one animated map cycles through.
 
     Built from the same motion paths the CSS animation uses, so a frame
-    sampled here places every ball where a browser would draw it at that
-    moment of the cycle.
+    sampled here places every ball within a small fraction of a pixel of
+    where a browser would draw it at that moment of the cycle (see the
+    corner-flattening note on ``_CURVE_FLATTEN_STEPS``).
     """
 
     cycle: float
@@ -215,8 +216,8 @@ def animation_frame_markup(
     """Return the static balls to substitute for :data:`FRAME_SLOT` at *phase*.
 
     Same circles the CSS animation drives, pinned at the centres they hold
-    *phase* (0-1) of the way through the cycle, so a rasterised frame matches
-    the moment a browser would draw.
+    *phase* (0-1) of the way through the cycle, so a rasterised frame closely
+    approximates the moment a browser would draw.
     """
     ball_prefix = _ball_prefix(theme)
     return "".join(

@@ -31,6 +31,8 @@ __all__ = [
     "write_animation",
 ]
 
+import os
+import tempfile
 from array import array
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -39,6 +41,8 @@ from io import BytesIO
 from itertools import chain
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast, get_args
+
+import av
 
 from nf_metro.render.animate import (
     FRAME_SLOT,
@@ -49,7 +53,6 @@ from nf_metro.render.plan import RenderPlan
 from nf_metro.render.raster import svg_to_png
 
 if TYPE_CHECKING:
-    import av
     from PIL import Image
 
 VideoFormat = Literal["gif", "webp", "mp4", "webm"]
@@ -235,7 +238,6 @@ def _prepare(
     palette: Image.Image | None,
 ) -> av.VideoFrame:
     """Turn one decoded frame into the ``av.VideoFrame`` the encoder wants."""
-    import av
     from PIL import Image as PILImage
 
     if image.size != canvas:
@@ -258,8 +260,6 @@ def _pal8_frame(image: Image.Image) -> av.VideoFrame:
     are copied into a buffer of the plane's own line size rather than handed
     over as the image's tightly packed bytes.
     """
-    import av
-
     frame = av.VideoFrame(image.width, image.height, "pal8")
     width, height = image.width, image.height
     indices = image.tobytes()
@@ -292,9 +292,10 @@ def _encode(
     """Mux *frames* into *output* as one loop of *fmt*.
 
     The PNGs are decoded and encoded one at a time, so neither the raw frames
-    nor the encoded ones are ever all in memory at once.
+    nor the encoded ones are ever all in memory at once. Encoding writes to a
+    temporary file beside *output* and only renames it into place once muxing
+    finishes, so a failed encode never leaves a broken file at *output*.
     """
-    import av
     from PIL import Image as PILImage
 
     spec = _ENCODERS[fmt]
@@ -314,23 +315,37 @@ def _encode(
     timestamps: list[int] | range = (
         _frame_ticks(count, loop, ticks) if ticks is not None else range(count)
     )
-    with av.open(str(output), "w", options=spec.container_options) as container:
-        stream = container.add_stream(spec.codec, rate=rate)
-        stream.width, stream.height = canvas
-        stream.pix_fmt = spec.pix_fmt
-        stream.codec_context.options = spec.codec_options
-        if ticks is not None:
-            # The codec context is what the encoder reads timestamps against;
-            # setting it on the stream instead leaves the muxer to rescale
-            # from the nominal rate and the delays come out several times too
-            # long.
-            stream.codec_context.time_base = Fraction(1, ticks)
 
-        images = (PILImage.open(BytesIO(data)).convert("RGB") for data in frames)
-        for pts, image in zip(timestamps, chain([first], images)):
-            frame = _prepare(image, spec, canvas, background, palette)
-            frame.pts = pts
-            for packet in stream.encode(frame):
+    # A same-directory, same-extension name keeps the rename below atomic
+    # (one filesystem) and keeps av.open's format autodetection, which reads
+    # the final extension, working the same as it does for *output* itself.
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f"{output.stem}.", suffix=output.suffix, dir=output.parent
+    )
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        with av.open(str(tmp_path), "w", options=spec.container_options) as container:
+            stream = cast("av.VideoStream", container.add_stream(spec.codec, rate=rate))
+            stream.width, stream.height = canvas
+            stream.pix_fmt = spec.pix_fmt
+            stream.codec_context.options = spec.codec_options
+            if ticks is not None:
+                # The codec context is what the encoder reads timestamps
+                # against; setting it on the stream instead leaves the muxer
+                # to rescale from the nominal rate and the delays come out
+                # several times too long.
+                stream.codec_context.time_base = Fraction(1, ticks)
+
+            images = (PILImage.open(BytesIO(data)).convert("RGB") for data in frames)
+            for pts, image in zip(timestamps, chain([first], images)):
+                frame = _prepare(image, spec, canvas, background, palette)
+                frame.pts = pts
+                for packet in stream.encode(frame):
+                    container.mux(packet)
+            for packet in stream.encode():
                 container.mux(packet)
-        for packet in stream.encode():
-            container.mux(packet)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
+    os.replace(tmp_path, output)
