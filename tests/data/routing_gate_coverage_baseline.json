@@ -845,7 +845,6 @@
   "offsets.py::if single_exit and feeding_exit is not None:::#1",
   "offsets.py::if slot is None:::#1",
   "offsets.py::if source_col is None:::#1",
-  "offsets.py::if src.section_id is not None:::#1",
   "offsets.py::if src_port and not src_port.is_entry:::#2",
   "offsets.py::if station.section_id is not None:::#1",
   "offsets.py::if succ not in affected:::#1",
