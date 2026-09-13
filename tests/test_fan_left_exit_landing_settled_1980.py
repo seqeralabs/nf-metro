@@ -15,6 +15,7 @@ import pytest
 
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
+from nf_metro.layout.routing.invariants import check_bundle_order_preserved
 from nf_metro.parser.mermaid import parse_metro_mermaid
 
 _TOP_ENTRY_FAN = """\
@@ -121,4 +122,37 @@ def test_left_exit_fan_to_perp_entry_routes(label: str) -> None:
     assert turn.exit_turn_segment_rank is not None
     assert turn.points[0] != turn.points[-1], (
         f"{label}: settled turn collapsed to a zero-length path"
+    )
+
+
+@pytest.mark.parametrize(
+    "label",
+    ("top-entry", "bottom-entry"),
+)
+def test_left_exit_fan_perp_entry_bundle_order_preserved(label: str) -> None:
+    """The bundle turning in from the shared perp-entry port must not cross itself.
+
+    The fan-out divergence in Beta peels ``g`` and ``h`` to different targets, so
+    the trunk carries them in peel order.  The bundle rises into Beta's entry
+    port and turns once into that trunk; unless the port is stacked as the mirror
+    of the trunk for its entry side, the two lines swap sides through the corner.
+    The bundle order into Beta (``b__entry_*_2`` -> ``b1``) must hold one sign on
+    both sides of the corner, for a TOP entry and its BOTTOM mirror alike.
+    """
+    source = _TOP_ENTRY_FAN if label == "top-entry" else _BOTTOM_ENTRY_FAN
+    graph = parse_metro_mermaid(source)
+    compute_layout(graph)
+    offsets = compute_station_offsets(graph)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        routes = route_edges(graph, station_offsets=offsets)
+
+    entry_bundle = [
+        v
+        for v in check_bundle_order_preserved(routes)
+        if v.edge_source.startswith("b__entry_") and v.edge_target == "b1"
+    ]
+    assert not entry_bundle, (
+        f"{label}: bundle crosses at Beta's perp entry: "
+        + "; ".join(v.message() for v in entry_bundle)
     )

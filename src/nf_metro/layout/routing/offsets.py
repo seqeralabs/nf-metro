@@ -1062,6 +1062,41 @@ def _free_perp_entry_feeder(
     return feeder_id
 
 
+def _perp_entry_port_carrying(
+    graph: MetroGraph, section: Section, bundle: set[str]
+) -> str | None:
+    """The section's perpendicular entry port the whole *bundle* arrives on."""
+    perp_sides = perpendicular_port_sides(section.direction)
+    for pid in section.entry_ports:
+        port = graph.ports.get(pid)
+        if port is None or port.side not in perp_sides:
+            continue
+        if bundle <= set(graph.station_lines(pid)):
+            return pid
+    return None
+
+
+def _perp_entry_arrival_order(
+    graph: MetroGraph, port_id: str, peel_order: Sequence[str]
+) -> tuple[str, ...]:
+    """The order a free feeder must deliver *peel_order* across *port_id*.
+
+    The bundle turns once from the feeder's vertical drop into the section's
+    trunk.  That concentric corner maps the drop's cross-flow order to the
+    trunk's peel order, and the mapping flips with two independent axes: the
+    entry side the bundle arrives on (a BOTTOM arrival mirrors a TOP one) and the
+    direction the run turns out of the port (:func:`_perp_entry_run_turns_right`;
+    a leftward turn mirrors a rightward one).  The two flips compose, so the
+    feeder inherits the peel order directly on one diagonal of that pair and
+    reversed on the other.
+    """
+    port = graph.ports.get(port_id)
+    bottom_entry = port is not None and port.side is PortSide.BOTTOM
+    if bottom_entry != _perp_entry_run_turns_right(graph, port_id):
+        return tuple(reversed(peel_order))
+    return tuple(peel_order)
+
+
 def _reorder_fanout_divergence(ctx: _OffsetCtx) -> None:
     """Order a section's bundle by where its lines peel off a shared exit fan.
 
@@ -1073,10 +1108,17 @@ def _reorder_fanout_divergence(ctx: _OffsetCtx) -> None:
     (:func:`fanout_divergence_peel_order`) before the exit/junction ports inherit
     their offsets.
 
-    The peel order also governs how the bundle must arrive: a free upstream
-    feeder delivering it across the section's perpendicular entry is re-slotted
-    to the same order (:func:`_free_perp_entry_feeder`), so the two descents run
-    straight into their lanes instead of crossing in the drop.
+    The peel order also governs how the bundle must arrive across the section's
+    perpendicular entry, through the two turns the bundle makes there: the entry
+    port turns the drop into the trunk, and the free upstream feeder
+    (:func:`_free_perp_entry_feeder`) turns its own run down onto the drop.  Both
+    inherit the peel order turned through the entry corner
+    (:func:`_perp_entry_arrival_order`), which mirrors with entry side and turn
+    direction: the port so the drop nests into the trunk without crossing, and
+    the feeder so the drop lands straight on the port rather than crossing in the
+    descent.  A trunk whose peel order matches plain priority skips its own
+    re-slot; a mirrored entry side nonetheless turns the port against that trunk,
+    so the arrival re-slot runs whenever the section receives such a feeder.
 
     Non-compact LR/RL sections only -- the divergence analog of
     :func:`_reorder_reconvergence`.
@@ -1101,22 +1143,27 @@ def _reorder_fanout_divergence(ctx: _OffsetCtx) -> None:
             determining=tuple(peel_order),
         )
         new_order = lane_order(config, ctx.line_priority)
-        if new_order is None:
-            continue
-
-        _apply_section_line_order(ctx, sec_id, new_order)
+        if new_order is not None:
+            _apply_section_line_order(ctx, sec_id, new_order)
 
         feeder_id = _free_perp_entry_feeder(ctx, section, set(peel_order))
         if feeder_id is None:
             continue
+        port_id = _perp_entry_port_carrying(graph, section, set(peel_order))
+        if port_id is None:
+            continue
+        arrival = _perp_entry_arrival_order(graph, port_id, peel_order)
+
+        for lid, off in _deal_slots_in_order(ctx, port_id, arrival).items():
+            ctx.offsets[(port_id, lid)] = off
+
         feeder_config = BoundaryConfig(
             present=tuple(_section_present_line_set(ctx, feeder_id)),
-            determining=tuple(peel_order),
+            determining=arrival,
         )
         feeder_order = lane_order(feeder_config, ctx.line_priority)
-        if feeder_order is None:
-            continue
-        _apply_section_line_order(ctx, feeder_id, feeder_order)
+        if feeder_order is not None:
+            _apply_section_line_order(ctx, feeder_id, feeder_order)
 
 
 def _lines_holding_offset(
