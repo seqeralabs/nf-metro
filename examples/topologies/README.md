@@ -2,7 +2,7 @@
 
 Example `.mmd` files demonstrating a range of pipeline topologies and the layout patterns they produce. Each example exercises different aspects of the auto-layout engine.
 
-This directory holds 291 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
+This directory holds 292 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
 
 To render one example:
 
@@ -52,6 +52,7 @@ The fixtures below are tagged with the layout class(es) they primarily exercise.
 | `leftward_up_exit_turn_order.mmd`            | two lines on one leftward exit run turn upward without transposing their source-lane order, including a repeated same-line arrival from another section                                                                               |
 | `terminated_exit_lane_compaction.mmd`        | three active lines close the lane slot left by a fourth line that terminates before their shared exit                                                                                                                                 |
 | `bottom_exit_stacked_right_entry_fan.mmd`    | bottom-exit bundle opening into stacked right-entry targets / planned landing order and exact offset slots                                                                                                                            |
+| `bottom_entry_fan_side_targets.mmd`          | two-line bundle at a BOTTOM perpendicular entry fanning out to side-entry targets; the entry port mirrors its trunk so the drop turns in without crossing or an S-cusp on the box edge (#1991, #1995)                                 |
 | `fan_branch_additional_outputs.mmd`          | six-way diamond whose branches also emit reporting outputs / complete branch membership beyond the join                                                                                                                               |
 | `port_fed_three_branch_diamond.mmd`          | three-line diamond fed directly through a section entry port / frozen centreline and branch lanes                                                                                                                                     |
 | `seed72_cross_family_fan.mmd`                | fan whose branches use different routing families / structural ownership separated from dedicated route emission                                                                                                                      |
