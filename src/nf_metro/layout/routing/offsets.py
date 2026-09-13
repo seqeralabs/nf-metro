@@ -1023,10 +1023,16 @@ def _free_perp_entry_feeder(
     when the feeder's own order is unconstrained -- otherwise the mismatch has
     to be resolved on *section*'s side instead.  Returns the feeder section id
     when one upstream section delivers the whole *bundle* into *section* through
-    a perpendicular entry port and is free: a horizontal-flow pure source with
-    *section* as its only consumer and no divergence junction of its own.  A
-    feeder with an entry port of its own is rejected without reasoning past one
-    hop, so an indirect upstream pin can never be missed.
+    a perpendicular entry port and is free: *section* is its only consumer and
+    it owns no divergence junction of its own.
+
+    Two scope limits are deliberate.  Only a horizontal-flow (LR/RL) feeder is
+    eligible: a vertical-flow feeder stacks its bundle along the flow axis and
+    is left to settle on its own.  And only the one direct feeder is inspected;
+    the check never recurses up a chain of feeders, so a feeder that itself has
+    an entry port is treated as constrained and left alone rather than followed
+    to discover whether its own source is free.  An indirect upstream pin can
+    therefore never be missed.
     """
     graph = ctx.graph
     perp_sides = perpendicular_port_sides(section.direction)
