@@ -692,7 +692,7 @@ def render_svg(
     concrete colors as presentation attributes regardless, so the map still
     renders; what False drops is the live ``var()`` recolor hook and the
     ``light-dark()`` mode adaptation.  Set this False for raster export (e.g.
-    cairosvg, which cannot parse ``var()``/``light-dark()``) or any consumer
+    an external rasterizer that cannot parse ``var()``/``light-dark()``) or any consumer
     without CSS custom-property support - pick the concrete mode via the theme.
 
     ``self_color_scheme``: when True the root ``<svg>`` declares a
@@ -706,9 +706,10 @@ def render_svg(
     ``baked_mode``: when ``"light"`` or ``"dark"``, the root ``<svg>`` declares
     ``color-scheme: <mode>`` instead of the adaptive ``color-scheme: light dark``.
     This ensures ``light-dark()`` in the chrome CSS resolves to the correct
-    palette in rasterizers that respect the OS color-scheme (e.g. cairosvg on
-    a dark-mode macOS session).  Set this to the explicit ``--mode`` value when
-    rendering for PNG export; leave ``None`` for browser-adaptive SVG output.
+    palette in rasterizers that respect the OS color-scheme (e.g. one running
+    in a dark-mode macOS session).  Set this to the explicit ``--mode`` value
+    when rendering for PNG export; leave ``None`` for browser-adaptive SVG
+    output.
 
     ``bare``: when True, omits the title and outer padding so the canvas
     hugs the diagram content.  The attribution watermark is kept.  Use for

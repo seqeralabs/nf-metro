@@ -135,20 +135,16 @@ This is the authoritative visual review and should be used for all layout or ren
 ```bash
 source ~/.local/bin/mm-activate nf-metro
 
-# Render SVG. --no-chrome-css bakes concrete colors so cairosvg can rasterize it;
-# without it cairosvg aborts on the var() chrome custom properties.
-python -m nf_metro render examples/rnaseq_sections.mmd -o /tmp/rnaseq_sections.svg --x-spacing 60 --y-spacing 40 --no-chrome-css
-
-# Convert SVG to PNG via cairosvg (scale=2 for retina)
-python -c "import cairosvg; cairosvg.svg2png(url='/tmp/rnaseq_sections.svg', write_to='/tmp/rnaseq_sections.png', scale=2)"
+# Render straight to PNG. --mode picks the palette; --scale 2 is retina.
+python -m nf_metro render examples/rnaseq_sections.mmd -o /tmp/rnaseq_sections.png --x-spacing 60 --y-spacing 40 --mode light
 
 # Open it
 open /tmp/rnaseq_sections.png
 ```
 
-Any env with the project importable and `cairosvg` available works. Prefer pointing `PYTHONPATH` at the worktree you mean to test rather than an editable install, which binds one env to one worktree path and breaks when that worktree is pruned.
+Any env with the project importable works. Prefer pointing `PYTHONPATH` at the worktree you mean to test rather than an editable install, which binds one env to one worktree path and breaks when that worktree is pruned.
 
-`--no-chrome-css` bakes concrete colors and omits the chrome `<style>` block entirely, so this PNG cannot show a chrome-CSS cascade defect (a rule that repaints an element the stylesheet is supposed to leave alone). Answer cascade questions with the CI render-diff or a targeted test, not this recipe.
+`--format png` bakes concrete colors and omits the chrome `<style>` block entirely, so this PNG cannot show a chrome-CSS cascade defect (a rule that repaints an element the stylesheet is supposed to leave alone). Answer cascade questions with the CI render-diff or a targeted test, not this recipe.
 
 ## Test Fixtures & Topology Stress Tests
 

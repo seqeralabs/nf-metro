@@ -349,6 +349,46 @@ def test_render_permissive_flag_reports_downgraded_guards(tmp_path, monkeypatch)
     assert "synthetic guard trip for CLI test" in result.output
 
 
+def test_render_permissive_repeated_output_reports_shared_prepare_warning(
+    tmp_path, monkeypatch
+):
+    """A guard downgrade reported once for the shared parse/layout pass behind
+    repeated -o outputs, credited to --permissive like any other render."""
+    import warnings
+
+    from nf_metro.api import prepare_graph as real_prepare_graph
+    from nf_metro.parser.model import PermissiveGuardWarning
+
+    def _prepare_graph_with_warning(*args, **kwargs):
+        warnings.warn(
+            "synthetic guard trip for repeated-output CLI test",
+            category=PermissiveGuardWarning,
+            stacklevel=2,
+        )
+        return real_prepare_graph(*args, **kwargs)
+
+    monkeypatch.setattr("nf_metro.cli.prepare_graph", _prepare_graph_with_warning)
+    src = tmp_path / "a.mmd"
+    src.write_text(STANDALONE_MMD.read_text())
+    result = CliRunner().invoke(
+        cli,
+        [
+            "render",
+            "--permissive",
+            str(src),
+            "-o",
+            str(tmp_path / "out.svg"),
+            "-o",
+            str(tmp_path / "out.png"),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "out.svg").exists()
+    assert (tmp_path / "out.png").exists()
+    assert result.output.count("synthetic guard trip for repeated-output") == 1
+    assert "--permissive: 1 guard(s) downgraded" in result.output
+
+
 def test_render_multiple_files(tmp_path):
     """render accepts more than one INPUT_FILE, each to its own sibling output."""
     a = tmp_path / "a.mmd"
@@ -604,6 +644,74 @@ def test_render_many_partial_failure_continues(tmp_path):
     assert result.exit_code != 0
     assert good_out.exists(), "successful job must still produce output"
     assert "1/2" in result.output
+
+
+def test_render_many_rejects_non_positive_scale(tmp_path):
+    """A manifest job's scale gets the same bound as --scale, not a raw resvg error."""
+    manifest = _write_manifest(
+        tmp_path,
+        [
+            {
+                "input": str(RNASEQ_MMD),
+                "output": str(tmp_path / "out.png"),
+                "format": "png",
+                "scale": 0,
+            }
+        ],
+    )
+    result = CliRunner().invoke(cli, ["render-many", str(manifest)])
+    assert result.exit_code != 0
+    assert "not in the range" in result.output
+
+
+def test_render_many_rejects_non_positive_png_width(tmp_path):
+    """A manifest job's png_width of 0 is rejected, not silently treated as unset."""
+    manifest = _write_manifest(
+        tmp_path,
+        [
+            {
+                "input": str(RNASEQ_MMD),
+                "output": str(tmp_path / "out.png"),
+                "format": "png",
+                "png_width": 0,
+            }
+        ],
+    )
+    result = CliRunner().invoke(cli, ["render-many", str(manifest)])
+    assert result.exit_code != 0
+    assert "not in the range" in result.output
+
+
+@pytest.mark.parametrize("key", ["scale", "png_width"])
+def test_render_many_rejects_boolean_numeric_values(tmp_path, key):
+    """A JSON true/false for scale/png_width is refused, not coerced to 1/0."""
+    manifest = _write_manifest(
+        tmp_path,
+        [
+            {
+                "input": str(RNASEQ_MMD),
+                "output": str(tmp_path / "out.png"),
+                "format": "png",
+                key: True,
+            }
+        ],
+    )
+    result = CliRunner().invoke(cli, ["render-many", str(manifest)])
+    assert result.exit_code != 0
+    assert "is not a number" in result.output
+
+
+def test_render_many_rejects_unknown_format(tmp_path):
+    """An unrecognised format is refused, not silently rendered as SVG."""
+    out = tmp_path / "out.jpeg"
+    manifest = _write_manifest(
+        tmp_path,
+        [{"input": str(RNASEQ_MMD), "output": str(out), "format": "jpeg"}],
+    )
+    result = CliRunner().invoke(cli, ["render-many", str(manifest)])
+    assert result.exit_code != 0
+    assert "not one of" in result.output
+    assert not out.exists()
 
 
 def test_render_many_bad_manifest_json(tmp_path):

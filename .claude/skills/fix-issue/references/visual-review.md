@@ -63,7 +63,7 @@ explicit `output`), so never resolve a stem by searching for a matching basename
 
 `Read` the `base-<stem>.png` / `cand-<stem>.png` pairs it reports. Never `Read`
 the preview page itself: it is one multi-megabyte inlined `index.html`, and its
-SVG carries `var()` and `light-dark()` that cairosvg cannot parse.
+SVG carries `var()` and `light-dark()` that resolve only in a live browser.
 
 Every stem owes an I/N/D verdict. Reconcile against the script's summary line:
 
