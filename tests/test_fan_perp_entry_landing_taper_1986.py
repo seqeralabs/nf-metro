@@ -139,9 +139,13 @@ def test_perp_entry_fan_lands_on_distinct_peel_lanes() -> None:
         )
         return apply_route_offsets(descent, offsets)[-1][0]
 
+    # Absolute landing x tracks section ``b``'s column, which #1988 seats a
+    # fan-perp-entry curve runway into the feeding gap of. The guarded invariant
+    # is the peel order: h on the port centreline, g one OFFSET_STEP (4px)
+    # outboard of it.
     landings = {line_id: _landing_x(line_id) for line_id in ("g", "h")}
-    assert landings["g"] == 374.0
-    assert landings["h"] == 370.0
+    assert landings["g"] == 376.0
+    assert landings["h"] == 372.0
 
 
 def test_constrained_feeder_keeps_its_own_order() -> None:
