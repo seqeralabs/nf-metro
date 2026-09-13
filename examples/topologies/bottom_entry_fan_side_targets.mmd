@@ -1,0 +1,37 @@
+%%metro title: Left-exit fan at bottom entry
+%%metro line: g | Green | #2db572
+%%metro line: h | Blue | #3f7fdf
+%%metro grid: ingest | 1,2
+%%metro grid: hub | 1,1
+%%metro grid: report | 0,0
+%%metro grid: export | 0,1
+
+graph LR
+    subgraph ingest [Ingest]
+        %%metro exit: left | g, h
+        in1[Read]
+        in2[Trim]
+        in1 -->|g,h| in2
+    end
+    subgraph hub [Analyse]
+        %%metro entry: bottom | g, h
+        %%metro exit: left | g, h
+        hub1[Align]
+        hub2[Split]
+        hub1 -->|g,h| hub2
+    end
+    subgraph report [Report]
+        %%metro entry: right | g
+        rep1[Summarise]
+        rep2[Publish]
+        rep1 -->|g| rep2
+    end
+    subgraph export [Export]
+        %%metro entry: right | h
+        exp1[Package]
+        exp2[Deliver]
+        exp1 -->|h| exp2
+    end
+    in2 -->|g,h| hub1
+    hub2 -->|g| rep1
+    hub2 -->|h| exp1

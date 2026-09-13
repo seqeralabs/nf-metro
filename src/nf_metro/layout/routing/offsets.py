@@ -1108,17 +1108,18 @@ def _reorder_fanout_divergence(ctx: _OffsetCtx) -> None:
     (:func:`fanout_divergence_peel_order`) before the exit/junction ports inherit
     their offsets.
 
-    The peel order also governs how the bundle must arrive across the section's
-    perpendicular entry, through the two turns the bundle makes there: the entry
-    port turns the drop into the trunk, and the free upstream feeder
-    (:func:`_free_perp_entry_feeder`) turns its own run down onto the drop.  Both
-    inherit the peel order turned through the entry corner
-    (:func:`_perp_entry_arrival_order`), which mirrors with entry side and turn
-    direction: the port so the drop nests into the trunk without crossing, and
-    the feeder so the drop lands straight on the port rather than crossing in the
-    descent.  A trunk whose peel order matches plain priority skips its own
-    re-slot; a mirrored entry side nonetheless turns the port against that trunk,
-    so the arrival re-slot runs whenever the section receives such a feeder.
+    The peel order also governs how the bundle arrives across the section's
+    perpendicular entry.  The entry port turns the drop into the trunk through a
+    concentric corner, so it re-slots onto the peel order turned through that
+    corner (:func:`_perp_entry_arrival_order`), which mirrors with entry side and
+    turn direction; that nests the drop into the trunk without crossing.  A trunk
+    whose peel order matches plain priority skips its own re-slot, yet a mirrored
+    entry side turns the port against that trunk regardless, so this arrival
+    re-slot runs whenever a free upstream feeder
+    (:func:`_free_perp_entry_feeder`) delivers the bundle.  The feeder itself
+    keeps the plain peel order: it sits on the far side of the same corner, where
+    its own exit turn already reflects its section order, so a second reflection
+    would cross the bundle in the descent.
 
     Non-compact LR/RL sections only -- the divergence analog of
     :func:`_reorder_reconvergence`.
@@ -1159,7 +1160,7 @@ def _reorder_fanout_divergence(ctx: _OffsetCtx) -> None:
 
         feeder_config = BoundaryConfig(
             present=tuple(_section_present_line_set(ctx, feeder_id)),
-            determining=arrival,
+            determining=tuple(peel_order),
         )
         feeder_order = lane_order(feeder_config, ctx.line_priority)
         if feeder_order is not None:

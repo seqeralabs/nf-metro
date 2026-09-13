@@ -526,6 +526,15 @@ gallery:
       A two-line BOTTOM-exit divergence feeding vertically stacked RIGHT-entry
       targets. The outgoing routes need distinct continuation columns and a
       clean shared junction hand-off, without overlapping or grazing elbows.
+  - id: bottom_entry_fan_side_targets
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      A two-line bundle rising into a section's BOTTOM perpendicular entry and
+      fanning out to two side-entry targets. The entry port is stacked as the
+      mirror of its trunk for the bottom side, so the drop turns into the trunk
+      and lands straight on the port without crossing its bundle-mate or leaving
+      an S-cusp on the box edge (#1991, #1995).
   - id: terminal_symmetric_fan
     source_dir: examples/topologies
     category: Fan-out and Fan-in
