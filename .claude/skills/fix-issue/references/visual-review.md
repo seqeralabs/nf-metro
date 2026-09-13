@@ -89,14 +89,10 @@ the writer's preferred interpretation, and do not downgrade this because the
 issue predicted no visual change - a delta nobody expected is the most important
 kind. Every changed render gets HIGH eyes.
 
-A clean I/N/D classification answers "does this render correctly", not "is this
-the right fix" - they are different questions, and this gate is the last chance
-to ask the second one before merge. A render that reconciles two disagreeing
-values after the fact (extra geometry inserted purely to make an approach and a
-departure meet) can look perfectly smooth and still be the wrong layer to fix
-it at. If the change reads as correcting a symptom rather than the assignment
-that produced it, say so even when every affected example otherwise classifies
-I or N - don't let a clean pixel diff stand in for that judgment.
+A clean I/N/D classification answers "does this render correctly", not "is
+this the right fix" (see the plan-time-vs-render-time rule in
+[`diagnosis.md`](diagnosis.md)) - this gate is the last chance to ask the
+second question before merge, and a smooth render is no evidence either way.
 
 The sticky comment ends in a verdict line. Gate the next step on it:
 
