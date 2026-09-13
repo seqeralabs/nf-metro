@@ -41,7 +41,15 @@ unasked, and never manufacture a defect because a fix was expected. A wrong
 the post-diagnosis gate unchanged.
 
 The post-diagnosis gate challenges **whether** there is a defect at all, not
-only which kind, plus the claim behind whichever verdict came back.
+only which kind, plus the claim behind whichever verdict came back. For an
+engine-bug (b) verdict, it also challenges the recommended fix **path**, not
+only the root-cause claim: a render-time correction that reconciles two
+already-computed, disagreeing values is not the same thing as fixing the
+assignment that made them disagree, and a diagnostician under pressure to
+produce *a* fix will reach for the former even when the stated "unavoidable"
+reason for skipping plan-time doesn't hold up. Passing invariants and a clean
+render are not evidence the path is right - re-derive whether the disagreement
+could have been prevented one step further upstream before accepting it.
 
 **When the issue already states its own root cause** (it names the function,
 the call site, and the acceptance bar), do not re-derive it from scratch at HIGH
@@ -101,7 +109,12 @@ Record which one it is - in numbers for (a), (b) and (d), in named call sites
 for (c) - before briefing the writer.
 
 **Default to a plan-time fix for (b); a render-time post-hoc correction needs
-a stated reason it's unavoidable, not just easier.** Before briefing the
+a stated reason it's unavoidable, not just easier.** This is not a one-time
+briefing note - it is the standard to hold every later decision point to as
+well: a writer choosing between two implementations, a `/simplify` pass, and
+both mandatory gates should all prefer whichever option fixes the value at the
+point it is first assigned over one that patches a downstream symptom, even
+when the patch is smaller or the symptom's fix already looks clean. Before briefing the
 writer, check for an active architecture programme covering this defect class
 (grep open issues, stale branches). Brief the writer for plan-time unless a
 concrete blocker rules it out this run (an unstarted dependency, a
