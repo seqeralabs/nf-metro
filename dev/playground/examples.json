@@ -951,6 +951,10 @@
         "mmd": "%%metro title: TB perp exit into LR top-entry, two lines\n%%metro line: a | A | #e63946\n%%metro line: b | B | #0570b0\n%%metro grid: work | 0,0\n%%metro grid: out_sec | 0,1\ngraph LR\n    subgraph work [Work]\n        %%metro direction: TB\n        %%metro exit: bottom | a,b\n        w1[Demux]\n        w2[Merge]\n        w1 -->|a,b| w2\n    end\n    subgraph out_sec [Output]\n        %%metro direction: LR\n        %%metro entry: top | a,b\n        o1[Publish]\n        o2[Notify]\n        o1 -->|a,b| o2\n    end\n    w2 -->|a,b| o1\n"
       },
       {
+        "name": "rl_left_exit_top_entry_overflow",
+        "mmd": "%%metro title: RL left-exit top-entry overflow\n%%metro line: g | Green | #2db572\n%%metro grid: a | 1,0\n%%metro grid: b | 1,1\n%%metro grid: e | 0,1\n\ngraph LR\n    subgraph a [Alpha]\n        %%metro direction: RL\n        %%metro exit: left | g\n        a1[A one]\n        a2[A two]\n        a1 -->|g| a2\n    end\n    subgraph b [Beta]\n        %%metro direction: RL\n        %%metro entry: top | g\n        %%metro exit: left | g\n        b1[B one]\n        b2[B two]\n        b1 -->|g| b2\n    end\n    subgraph e [Epsilon]\n        %%metro direction: RL\n        %%metro entry: right | g\n        e1[E one]\n        e2[E two]\n        e1 -->|g| e2\n    end\n    a2 -->|g| b1\n    b2 -->|g| e1\n"
+      },
+      {
         "name": "right_entry_wrap_no_fan",
         "mmd": "%%metro title: Right Entry Wrap No Fan\n%%metro style: dark\n%%metro line: a | A | #e63946\n%%metro grid: source | 0,0\n%%metro grid: target | 1,1\n\ngraph LR\n    subgraph source [Source]\n        s1[Start]\n        s2[Process]\n        s1 -->|a| s2\n    end\n\n    subgraph target [Target]\n        %%metro direction: RL\n        %%metro entry: right | a\n        t1[Step One]\n        t2[Step Two]\n        t1 -->|a| t2\n    end\n\n    s2 -->|a| t1\n"
       },
@@ -1205,6 +1209,10 @@
       {
         "name": "stacked_top_entry_flanked_riser_crossline",
         "mmd": "%%metro title: Flanked top-entry riser counter-running a distinct line\n%%metro directional: true\n%%metro line: main | Main | #e6007e\n%%metro line: side | Side | #2db572\n%%metro line: report | Report | #4b9fea\n%%metro grid: a | 0,0\n%%metro grid: b | 0,1\n%%metro grid: c | 0,2\n%%metro grid: d | 1,1\n\ngraph LR\n    subgraph a [Alpha]\n        %%metro exit: right | main, side\n        a1[A one]\n        a2[A two]\n        a1 -->|main,side| a2\n    end\n\n    subgraph b [Beta]\n        %%metro entry: top | side\n        b1[B one]\n        b2[B two]\n        b1 -->|side| b2\n    end\n\n    subgraph c [Gamma]\n        %%metro entry: top | side\n        c1[C one]\n        c2[C two]\n        c3[C three]\n        c1 -->|side| c2\n        c2 -->|side| c3\n    end\n\n    subgraph d [Delta]\n        %%metro entry: left | main, report\n        d1[D one]\n        d2[D two]\n        d1 -->|main,report| d2\n    end\n\n    a2 -->|side| b1\n    a2 -->|main| d1\n    b2 -->|side| c1\n    c3 -->|report| d1\n"
+      },
+      {
+        "name": "left_exit_fan_perp_entry_landing",
+        "mmd": "%%metro title: Left-exit fan perp-entry landing\n%%metro line: g | Green | #2db572\n%%metro line: h | Blue | #3f7fdf\n%%metro grid: a | 1,0\n%%metro grid: b | 1,1\n%%metro grid: c | 1,2\n%%metro grid: d | 0,1\n\ngraph LR\n    subgraph a [Alpha]\n        %%metro exit: left | g, h\n        a1[A one]\n        a2[A two]\n        a1 -->|g,h| a2\n    end\n    subgraph b [Beta]\n        %%metro entry: top | g, h\n        %%metro exit: left | g, h\n        b1[B one]\n        b2[B two]\n        b1 -->|g,h| b2\n    end\n    subgraph c [Gamma]\n        %%metro entry: top | g\n        c1[C one]\n        c2[C two]\n        c1 -->|g| c2\n    end\n    subgraph d [Delta]\n        %%metro entry: right | h\n        d1[D one]\n        d2[D two]\n        d1 -->|h| d2\n    end\n    a2 -->|g,h| b1\n    b2 -->|g| c1\n    b2 -->|h| d1\n"
       }
     ]
   },
