@@ -313,6 +313,35 @@ def test_a_failed_encode_is_reported_as_a_clean_cli_error(
     assert "gif export failed" in result.output
 
 
+def test_a_missing_encoder_is_caught_before_any_frame_is_rasterised(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`_check_encoder` fails the codec lookup before `_encode` pulls a frame."""
+    calls = 0
+    real_svg_to_png = video.svg_to_png
+
+    def _counting_svg_to_png(*args: object, **kwargs: object) -> bytes:
+        nonlocal calls
+        calls += 1
+        return real_svg_to_png(*args, **kwargs)  # type: ignore[arg-type]
+
+    def _no_such_codec(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("no such codec")
+
+    monkeypatch.setattr(video, "svg_to_png", _counting_svg_to_png)
+    monkeypatch.setattr(av.codec, "Codec", _no_such_codec)
+    out = tmp_path / "map.gif"
+
+    result = CliRunner().invoke(
+        cli, ["render", str(STANDALONE_MMD), "-o", str(out), *TINY]
+    )
+
+    assert result.exit_code != 0
+    assert "gif" in result.output and "encoder" in result.output
+    assert calls == 0
+    assert not out.exists()
+
+
 # --- the cost of a big loop -------------------------------------------------
 
 

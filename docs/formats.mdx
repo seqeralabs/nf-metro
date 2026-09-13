@@ -159,7 +159,7 @@ The same 12-second loop at 20fps, in each of the four containers:
   </TabItem>
 </Tabs>
 
-The frames are drawn, not screen-recorded. Each ball is sampled from the same motion path the animated SVG drives it along, at the moment of the cycle that frame represents, so a frame and the live SVG agree to the pixel. The loop runs one full animation cycle and stops a frame short of repeating it, so it wraps without a stutter.
+The frames are drawn, not screen-recorded. Each ball is sampled from the same motion path the animated SVG drives it along, at the moment of the cycle that frame represents, so the exported motion closely follows the live SVG. The loop runs one full animation cycle and stops a frame short of repeating it, so it wraps without a stutter.
 
 `--fps` sets the frame rate and `--duration` sets the loop length, compressing the map's own animation cycle into it. Leaving `--duration` off keeps the balls at exactly the speed the SVG moves them, which for a large pipeline can be a 40-second loop. `--scale` and `--raster-width` size the frames as they size a PNG, except that a video defaults to natural size where a still doubles.
 
@@ -169,7 +169,7 @@ Nothing is capped. Every frame is a full rasterisation, so a long smooth loop of
 
 The split that matters is what element the format needs to play in.
 
-GIF and WebP animate inside an `<img>`, which means they work in a GitHub README, a markdown file, and anywhere else that renders an image and gives you no `<video>` tag. Between them, WebP keeps full 24-bit colour and is pixel-exact, where GIF quantises the loop to one shared 256-colour palette. GIF plays in everything ever written; WebP wants Safari 14 or newer and trips up some older tooling.
+GIF and WebP animate inside an `<img>`, which means they work in a GitHub README, a markdown file, and anywhere else that renders an image and gives you no `<video>` tag. Between them, WebP keeps full 24-bit colour with a lossless encode, where GIF quantises the loop to one shared 256-colour palette. GIF plays in everything ever written; WebP wants Safari 14 or newer and trips up some older tooling.
 
 MP4 and WebM are both roughly half the size of the `<img>` formats, but need a real `<video autoplay loop muted playsinline>`. Which of the two wins on bytes depends on the clip: on the loop measured below MP4 comes out 10% smaller, while at 12fps over 8 seconds WebM was 20% smaller than MP4. MP4 decodes everywhere, so it is the safer default, and WebM is worth measuring when you know the audience can play VP9.
 
@@ -187,7 +187,7 @@ One loop of the rnaseq map, 12 seconds at 20fps, all at natural size:
 | `.html` | vector + JS  | 520 KB | a browser | exploring a big map                       |
 | `.png`  | raster still | 138 KB | anything  | journals, slides, chat, byte-stable diffs |
 | `.gif`  | raster loop  | 337 KB | `<img>`   | a README loop that works everywhere       |
-| `.webp` | raster loop  | 395 KB | `<img>`   | a README loop, full colour, pixel-exact   |
+| `.webp` | raster loop  | 395 KB | `<img>`   | a README loop, full colour, lossless      |
 | `.mp4`  | raster loop  | 191 KB | `<video>` | slides, talks, a docs page                |
 | `.webm` | raster loop  | 213 KB | `<video>` | the same, where VP9 is known to decode    |
 

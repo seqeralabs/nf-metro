@@ -286,6 +286,20 @@ def _pal8_frame(image: Image.Image) -> av.VideoFrame:
     return frame
 
 
+def _check_encoder(spec: _Encoder) -> None:
+    """Confirm *spec*'s codec is available before any frame is rasterised.
+
+    A PyAV build can omit an encoder (licensing, a stripped platform wheel);
+    failing here costs one codec lookup instead of a full frame render.
+    """
+    try:
+        av.codec.Codec(spec.codec, "w")
+    except Exception as exc:
+        raise RuntimeError(
+            f"the {spec.codec!r} encoder is unavailable in this PyAV/FFmpeg build"
+        ) from exc
+
+
 def _encode(
     frames: Iterator[bytes], output: Path, fmt: str, *, count: int, loop: float
 ) -> None:
@@ -299,6 +313,7 @@ def _encode(
     from PIL import Image as PILImage
 
     spec = _ENCODERS[fmt]
+    _check_encoder(spec)
     first = PILImage.open(BytesIO(next(frames))).convert("RGB")
     canvas = _even(first.size) if spec.needs_even_size else first.size
     # A map is drawn on its theme's background with padding around it, so the
