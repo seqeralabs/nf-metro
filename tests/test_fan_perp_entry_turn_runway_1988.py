@@ -79,7 +79,10 @@ def test_feeding_side_gap_is_recognised_for_a_runway_reservation() -> None:
     """
     graph = _laid_out()
     col_assign = {sid: section.grid_col for sid, section in graph.sections.items()}
-    assert _fan_perp_entry_turn_gap_pairs(graph, col_assign) == {(0, 1)}
+    col_sections: dict[int, list] = {}
+    for sid, section in graph.sections.items():
+        col_sections.setdefault(col_assign[sid], []).append(section)
+    assert _fan_perp_entry_turn_gap_pairs(graph, col_assign, col_sections) == {(0, 1)}
 
 
 def test_descent_column_clears_the_gap_occupant_by_a_full_radius() -> None:

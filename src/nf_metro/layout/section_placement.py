@@ -1344,6 +1344,7 @@ def _leftmost_merge_wrap_gap_pairs(
 def _fan_perp_entry_turn_gap_pairs(
     graph: MetroGraph,
     col_assign: dict[str, int],
+    col_sections: dict[int, list[Section]],
 ) -> set[tuple[int, int]]:
     """Gaps a side-exit fan needs widened to turn into a perpendicular entry.
 
@@ -1353,8 +1354,12 @@ def _fan_perp_entry_turn_gap_pairs(
     that gap anywhere across the branch's row span leaves the descent's turn a
     stub of runway short of its full radius.  Reserve one curve runway in the
     gap on the feeding side so the branch rounds fully.
+
+    Only a LEFT/RIGHT exit turns *into* an inter-column gap this way; a
+    TOP/BOTTOM exit turns into an inter-row gap, which the row-gap pass owns.
     """
     pairs: set[tuple[int, int]] = set()
+    junction_ids = graph.junction_ids
     for junction_id in graph.junctions:
         out_edges = graph.edges_from(junction_id)
         if len(out_edges) < 2:
@@ -1368,7 +1373,7 @@ def _fan_perp_entry_turn_gap_pairs(
             if port is None or port.is_entry:
                 continue
             feed_sides.add(port.side)
-            col = col_assign.get(port.section_id)
+            col = _station_column(graph, source, col_assign, junction_ids)
             if col is not None:
                 feed_cols.add(col)
             section = graph.sections.get(port.section_id)
@@ -1395,8 +1400,7 @@ def _fan_perp_entry_turn_gap_pairs(
             lo = min(exit_row, target_sec.grid_row)
             hi = max(exit_row, target_sec.grid_row)
             if any(
-                col_assign.get(sid) == opp and lo <= section.grid_row <= hi
-                for sid, section in graph.sections.items()
+                lo <= section.grid_row <= hi for section in col_sections.get(opp, [])
             ):
                 pairs.add((min(col_k, opp), max(col_k, opp)))
     return pairs
@@ -1408,8 +1412,7 @@ def _column_pair_min_gap(
     col: int,
     pack_for_section: dict[str, tuple[str, ...]],
     merge_routing_pairs: set[tuple[int, int]],
-    leftmost_merge_wrap_pairs: set[tuple[int, int]],
-    fan_perp_entry_turn_pairs: set[tuple[int, int]],
+    runway_reservation_pairs: set[tuple[int, int]],
     min_gap: float = MIN_INTER_SECTION_GAP,
 ) -> tuple[float, list[int]]:
     """Minimum inter-section gap needed between columns ``col`` and ``col+1``.
@@ -1433,20 +1436,13 @@ def _column_pair_min_gap(
     effective_min = max(min_gap, bundle_min)
     if gap in merge_routing_pairs:
         effective_min = max(effective_min, MERGE_GAP_MIN)
-    if gap in leftmost_merge_wrap_pairs:
-        # Merge-around handlers can own a fixed channel one curve runway
-        # farther into the gap than the symmetric A/B allocation. Reserve that
-        # runway in addition to the prospective bundle footprints so an
-        # opposing movable bundle has a feasible A-bounded position.
-        effective_min = max(
-            effective_min,
-            bundle_min + CURVE_RADIUS,
-        )
-    if gap in fan_perp_entry_turn_pairs:
-        # A side-exit fan's perpendicular-entry branch turns one curve runway
-        # into this gap on its feeding side; reserve that runway beyond the
-        # bundle footprint so a section occupying the gap does not clamp the
-        # descent's arc.
+    if gap in runway_reservation_pairs:
+        # A handler owning a fixed channel one curve runway farther into the gap
+        # than the symmetric A/B allocation -- a merge-around descent, or a
+        # side-exit fan's perpendicular-entry branch -- needs that runway
+        # reserved beyond the prospective bundle footprints so an opposing
+        # movable bundle keeps a feasible A-bounded position and the fixed turn
+        # rounds at full radius.
         effective_min = max(
             effective_min,
             bundle_min + CURVE_RADIUS,
@@ -1489,8 +1485,9 @@ def _apply_column_gap_deficits(
         for section_id in members
     }
     merge_routing_pairs = _merge_routing_gap_pairs(graph, col_assign)
-    leftmost_merge_wrap_pairs = _leftmost_merge_wrap_gap_pairs(graph, col_assign)
-    fan_perp_entry_turn_pairs = _fan_perp_entry_turn_gap_pairs(graph, col_assign)
+    runway_reservation_pairs = _leftmost_merge_wrap_gap_pairs(
+        graph, col_assign
+    ) | _fan_perp_entry_turn_gap_pairs(graph, col_assign, col_sections)
 
     for col in range(min_col, max_col):
         left_secs = col_sections.get(col, [])
@@ -1504,8 +1501,7 @@ def _apply_column_gap_deficits(
             col,
             pack_for_section,
             merge_routing_pairs,
-            leftmost_merge_wrap_pairs,
-            fan_perp_entry_turn_pairs,
+            runway_reservation_pairs,
             min_gap,
         )
 
