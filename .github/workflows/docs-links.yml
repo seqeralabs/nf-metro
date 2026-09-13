@@ -47,3 +47,13 @@ jobs:
       - name: Build site (runs starlight-links-validator)
         working-directory: website
         run: npm run build
+
+      - name: Check <Metro> raster/video exports landed in the build output
+        working-directory: website
+        run: |
+          for ext in png gif webp mp4 webm; do
+            if ! ls dist/_generated/metro/*."$ext" >/dev/null 2>&1; then
+              echo "::error::no .$ext file under dist/_generated/metro/ - a <Metro format=\"$ext\"> export didn't survive the build" >&2
+              exit 1
+            fi
+          done
