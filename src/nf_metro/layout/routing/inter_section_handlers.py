@@ -5276,7 +5276,9 @@ def _perp_entry_l_geometry(
             # wrap siblings turn at one Y rather than a few px apart.
             mid_y = corridor.band_y
         if not straight_drop:
-            lx0 = sx + lead.sign * _fan_corner_run(ctx, pos_n)
+            lx0 = sx + lead.sign * outer_lane_radius(
+                pos_n, ctx.curve_radius, ctx.offset_step
+            )
             if lead is Direction.R:
                 lx0 = _v1_corner_x(ctx, src, sx, lx0)
         fan_source_offsets = tuple(

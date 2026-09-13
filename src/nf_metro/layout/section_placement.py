@@ -1341,6 +1341,67 @@ def _leftmost_merge_wrap_gap_pairs(
     return pairs
 
 
+def _fan_perp_entry_turn_gap_pairs(
+    graph: MetroGraph,
+    col_assign: dict[str, int],
+) -> set[tuple[int, int]]:
+    """Gaps a side-exit fan needs widened to turn into a perpendicular entry.
+
+    A fan-out junction fed from one horizontal (LEFT/RIGHT) exit peels a branch
+    across the inter-column gap on the feeding side and down (or up) into a
+    TOP/BOTTOM entry port in a neighbouring row.  A section already occupying
+    that gap anywhere across the branch's row span leaves the descent's turn a
+    stub of runway short of its full radius.  Reserve one curve runway in the
+    gap on the feeding side so the branch rounds fully.
+    """
+    pairs: set[tuple[int, int]] = set()
+    for junction_id in graph.junctions:
+        out_edges = graph.edges_from(junction_id)
+        if len(out_edges) < 2:
+            continue
+        feed_sides: set[PortSide] = set()
+        feed_cols: set[int] = set()
+        feed_rows: set[int] = set()
+        for edge in graph.edges_to(junction_id):
+            source = graph.station_for_edge_source(edge)
+            port = graph.ports.get(source.id)
+            if port is None or port.is_entry:
+                continue
+            feed_sides.add(port.side)
+            col = col_assign.get(port.section_id)
+            if col is not None:
+                feed_cols.add(col)
+            section = graph.sections.get(port.section_id)
+            if section is not None:
+                feed_rows.add(section.grid_row)
+        if feed_sides not in ({PortSide.LEFT}, {PortSide.RIGHT}):
+            continue
+        if len(feed_cols) != 1 or len(feed_rows) != 1:
+            continue
+        (feed_side,) = feed_sides
+        (col_k,) = feed_cols
+        (exit_row,) = feed_rows
+        opp = col_k - 1 if feed_side is PortSide.LEFT else col_k + 1
+        for edge in out_edges:
+            target_port = graph.ports.get(edge.target)
+            if target_port is None or target_port.side not in (
+                PortSide.TOP,
+                PortSide.BOTTOM,
+            ):
+                continue
+            target_sec = graph.sections.get(target_port.section_id)
+            if target_sec is None:
+                continue
+            lo = min(exit_row, target_sec.grid_row)
+            hi = max(exit_row, target_sec.grid_row)
+            if any(
+                col_assign.get(sid) == opp and lo <= section.grid_row <= hi
+                for sid, section in graph.sections.items()
+            ):
+                pairs.add((min(col_k, opp), max(col_k, opp)))
+    return pairs
+
+
 def _column_pair_min_gap(
     graph: MetroGraph,
     col_assign: dict[str, int],
@@ -1348,6 +1409,7 @@ def _column_pair_min_gap(
     pack_for_section: dict[str, tuple[str, ...]],
     merge_routing_pairs: set[tuple[int, int]],
     leftmost_merge_wrap_pairs: set[tuple[int, int]],
+    fan_perp_entry_turn_pairs: set[tuple[int, int]],
     min_gap: float = MIN_INTER_SECTION_GAP,
 ) -> tuple[float, list[int]]:
     """Minimum inter-section gap needed between columns ``col`` and ``col+1``.
@@ -1376,6 +1438,15 @@ def _column_pair_min_gap(
         # farther into the gap than the symmetric A/B allocation. Reserve that
         # runway in addition to the prospective bundle footprints so an
         # opposing movable bundle has a feasible A-bounded position.
+        effective_min = max(
+            effective_min,
+            bundle_min + CURVE_RADIUS,
+        )
+    if gap in fan_perp_entry_turn_pairs:
+        # A side-exit fan's perpendicular-entry branch turns one curve runway
+        # into this gap on its feeding side; reserve that runway beyond the
+        # bundle footprint so a section occupying the gap does not clamp the
+        # descent's arc.
         effective_min = max(
             effective_min,
             bundle_min + CURVE_RADIUS,
@@ -1419,6 +1490,7 @@ def _apply_column_gap_deficits(
     }
     merge_routing_pairs = _merge_routing_gap_pairs(graph, col_assign)
     leftmost_merge_wrap_pairs = _leftmost_merge_wrap_gap_pairs(graph, col_assign)
+    fan_perp_entry_turn_pairs = _fan_perp_entry_turn_gap_pairs(graph, col_assign)
 
     for col in range(min_col, max_col):
         left_secs = col_sections.get(col, [])
@@ -1433,6 +1505,7 @@ def _apply_column_gap_deficits(
             pack_for_section,
             merge_routing_pairs,
             leftmost_merge_wrap_pairs,
+            fan_perp_entry_turn_pairs,
             min_gap,
         )
 
