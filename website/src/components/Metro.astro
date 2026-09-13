@@ -1,6 +1,9 @@
 ---
+import { join } from "node:path";
 import { Code } from "@astrojs/starlight/components";
 import ZoomableSVG from "@components/ZoomableSVG.astro";
+import { renderMetroBinary, REPO_ROOT } from "../lib/render-metro.mjs";
+import { base } from "../site";
 
 // One primitive for every nf-metro map in the docs. It renders up to three
 // uniformly-framed sections for a committed `.mmd` source - the Mermaid source,
@@ -11,16 +14,25 @@ import ZoomableSVG from "@components/ZoomableSVG.astro";
 // section state is "open" (shown, expanded), "collapsed" (shown, folded), or
 // false (hidden).
 //
-// `clean` bypasses all sections and outputs just the inline SVG wrapped in
-// ZoomableSVG - for embedding directly in a hero or other contexts that need
-// the map without any <details> chrome. Ignores purpose/mmd/command/render.
+// `clean` bypasses all sections and outputs just the rendered map - wrapped in
+// ZoomableSVG for the default `format="svg"`, or a bare <img>/<video> for one
+// of the raster/looping-video formats - for embedding directly in a hero or
+// other contexts that need the map without any <details> chrome. Ignores
+// purpose/mmd/command/render.
 //
 // The rendered SVG arrives through the `?metro` Vite plugin as an imported
 // module string. Importing it (rather than rendering to a runtime string and
 // using set:html) is what lets its `light-dark()` chrome follow the page theme
 // and keeps its embedded `<image>` logo through the production HTML build.
+//
+// A non-svg `format` instead calls `renderMetroBinary` directly: its output
+// can't be inlined, so it's written once to a static file and referenced by
+// URL - see that function's own doc comment for why this doesn't need the
+// Vite plugin's module-graph trick the inline SVG path relies on.
 
 type SectionState = "open" | "collapsed" | false;
+type MetroFormat = "svg" | "png" | "gif" | "webp" | "mp4" | "webm";
+const PLAYS_IN_VIDEO_TAG = new Set<MetroFormat>(["mp4", "webm"]);
 
 interface Props {
   // Repo-relative path to the source, e.g. "examples/guide/01_minimal.mmd".
@@ -38,10 +50,26 @@ interface Props {
   debug?: boolean;
   // Treat the source as a Nextflow DAG and convert it (--from-nextflow).
   fromNextflow?: boolean;
-  // <Code> title for the source block; defaults to the src path.
+  // Output format. "svg" (default) keeps the inline, theme-following render;
+  // "png" and the four looping-video formats render live via nf-metro and
+  // are embedded as a static <img>/<video>.
+  format?: MetroFormat;
+  // Add the --animate balls. Forced on regardless for a video format; set
+  // this alongside format="svg" for an animated (but not looping-exported) map.
+  animate?: boolean;
+  // Video formats only: --duration and --fps for the exported loop.
+  duration?: number;
+  fps?: number;
+  // Raster/video formats only: --scale / --raster-width, sizing the export
+  // the same way they size a PNG.
+  scale?: number;
+  rasterWidth?: number;
+  // <Code> title for the source block, and the alt text base for a raster/
+  // video render; defaults to the src path.
   title?: string;
-  // Output only the inline SVG (in a ZoomableSVG); no <details> chrome.
-  // Ignores purpose/mmd/command/render. For hero and embed contexts.
+  // Output only the rendered map - a ZoomableSVG for format="svg", or a bare
+  // <img>/<video> otherwise; no <details> chrome. Ignores
+  // purpose/mmd/command/render. For hero and embed contexts.
   clean?: boolean;
 }
 
@@ -62,9 +90,17 @@ const {
   render,
   debug = false,
   fromNextflow = false,
+  format = "svg",
+  animate = false,
+  duration,
+  fps,
+  scale,
+  rasterWidth,
   title,
   clean = false,
 } = Astro.props;
+
+const isBinary = format !== "svg";
 
 const preset = PURPOSES[purpose];
 const mmdState = clean ? false : (mmd ?? preset.mmd);
@@ -78,6 +114,12 @@ if (fromNextflow && debug) {
     `<Metro src="${src}">: \`debug\` and \`fromNextflow\` cannot be combined.`,
   );
 }
+if (animate && (debug || fromNextflow) && !isBinary) {
+  // Same reasoning: no combined `?metro&animate&{debug,nextflow}` glob exists.
+  throw new Error(
+    `<Metro src="${src}">: \`animate\` cannot be combined with \`debug\` or \`fromNextflow\`.`,
+  );
+}
 
 // Committed source files live one level above the Astro project. Each glob is
 // scoped to what its render mode can consume, so the build only shells out to
@@ -85,8 +127,14 @@ if (fromNextflow && debug) {
 //   - raw source: any committed .mmd (cheap, just text).
 //   - plain render: metro maps under examples/ and the top-level test fixtures
 //     (NOT tests/fixtures/nextflow, whose DAGs are not valid metro).
-//   - debug overlay: only the top-level examples that the guide demonstrates it on.
+//   - debug overlay: only examples/ and examples/guide/, never examples/topologies/.
+//   - animated: same scope as debug.
 //   - Nextflow conversion: only the DAG fixtures.
+//
+// A build resolves every module a glob can reach, whether or not any page's
+// `resolve()` call ever looks it up - so debug/animate deliberately exclude
+// examples/topologies/ (~280 fixtures) rather than reusing the "examples/**"
+// pattern the plain render uses.
 const rawSources = {
   ...import.meta.glob("../../../examples/**/*.mmd", { query: "?raw", import: "default" }),
   ...import.meta.glob("../../../tests/fixtures/**/*.mmd", { query: "?raw", import: "default" }),
@@ -95,10 +143,14 @@ const svgSources = {
   ...import.meta.glob("../../../examples/**/*.mmd", { query: "?metro", import: "default" }),
   ...import.meta.glob("../../../tests/fixtures/*.mmd", { query: "?metro", import: "default" }),
 };
-const svgDebugSources = import.meta.glob("../../../examples/**/*.mmd", {
-  query: "?metro&debug",
-  import: "default",
-});
+const svgDebugSources = {
+  ...import.meta.glob("../../../examples/*.mmd", { query: "?metro&debug", import: "default" }),
+  ...import.meta.glob("../../../examples/guide/*.mmd", { query: "?metro&debug", import: "default" }),
+};
+const svgAnimateSources = {
+  ...import.meta.glob("../../../examples/*.mmd", { query: "?metro&animate", import: "default" }),
+  ...import.meta.glob("../../../examples/guide/*.mmd", { query: "?metro&animate", import: "default" }),
+};
 const svgNextflowSources = import.meta.glob(
   "../../../tests/fixtures/nextflow/**/*.mmd",
   { query: "?metro&nextflow", import: "default" },
@@ -112,10 +164,11 @@ const RENDER_MODES: Record<string, { mods: Sources; scope: string }> = {
     mods: svgSources,
     scope: "examples/** and tests/fixtures/*.mmd (top level only)",
   },
-  debug: { mods: svgDebugSources, scope: "examples/**" },
+  debug: { mods: svgDebugSources, scope: "examples/*.mmd and examples/guide/*.mmd" },
+  animate: { mods: svgAnimateSources, scope: "examples/*.mmd and examples/guide/*.mmd" },
   nextflow: { mods: svgNextflowSources, scope: "tests/fixtures/nextflow/**" },
 };
-const renderMode = fromNextflow ? "nextflow" : debug ? "debug" : "plain";
+const renderMode = fromNextflow ? "nextflow" : debug ? "debug" : animate ? "animate" : "plain";
 
 const key = `../../../${src}`;
 
@@ -138,25 +191,61 @@ const source =
         "examples/** and tests/fixtures/**",
       )) as string)
     : null;
-const { mods: renderMods, scope: renderScope } = RENDER_MODES[renderMode];
-const svg =
-  renderState !== false
-    ? ((await resolve(renderMods, "render", renderScope)) as string)
-    : null;
+
+let svg: string | null = null;
+let mediaUrl: string | null = null;
+if (renderState !== false) {
+  if (isBinary) {
+    const { path } = renderMetroBinary(join(REPO_ROOT, src), {
+      format,
+      debug,
+      fromNextflow,
+      animate,
+      duration,
+      fps,
+      scale,
+      rasterWidth,
+    });
+    mediaUrl = `${base}${path}`;
+  } else {
+    const { mods: renderMods, scope: renderScope } = RENDER_MODES[renderMode];
+    svg = (await resolve(renderMods, "render", renderScope)) as string;
+  }
+}
 
 const stem = src.split("/").pop()?.replace(/\.mmd$/, "") ?? "map";
-const cliCommand =
-  `nf-metro render ${src} -o ${stem}.svg` +
-  (debug ? " --debug" : "") +
-  (fromNextflow ? " --from-nextflow" : "");
+let cliCommand = `nf-metro render ${src} -o ${stem}.${format}`;
+if (debug) cliCommand += " --debug";
+if (fromNextflow) cliCommand += " --from-nextflow";
+if (animate && !isBinary) cliCommand += " --animate";
+if (duration != null) cliCommand += ` --duration ${duration}`;
+if (fps != null) cliCommand += ` --fps ${fps}`;
+if (scale != null) cliCommand += ` --scale ${scale}`;
+if (rasterWidth != null) cliCommand += ` --raster-width ${rasterWidth}`;
 const codeTitle = title ?? src;
 ---
 
 {
   clean ? (
-    <ZoomableSVG>
-      <Fragment set:html={svg} />
-    </ZoomableSVG>
+    isBinary ? (
+      PLAYS_IN_VIDEO_TAG.has(format) ? (
+        <video controls autoplay loop muted playsinline class="metro-media" src={mediaUrl}>
+          Your browser can't play the embedded video.
+          <a href={mediaUrl}>Download it here</a>.
+        </video>
+      ) : (
+        <img
+          src={mediaUrl}
+          alt={`${codeTitle} rendered as ${format.toUpperCase()}`}
+          loading="lazy"
+          class="metro-media"
+        />
+      )
+    ) : (
+      <ZoomableSVG>
+        <Fragment set:html={svg} />
+      </ZoomableSVG>
+    )
   ) : (
     <div class="metro">
       {
@@ -179,9 +268,35 @@ const codeTitle = title ?? src;
         renderState !== false && (
           <details class="metro-part metro-render" open={renderState === "open"}>
             <summary>Rendered map</summary>
-            <ZoomableSVG>
-              <Fragment set:html={svg} />
-            </ZoomableSVG>
+            {
+              isBinary ? (
+                PLAYS_IN_VIDEO_TAG.has(format) ? (
+                  <video
+                    controls
+                    autoplay
+                    loop
+                    muted
+                    playsinline
+                    class="metro-media"
+                    src={mediaUrl}
+                  >
+                    Your browser can't play the embedded video.
+                    <a href={mediaUrl}>Download it here</a>.
+                  </video>
+                ) : (
+                  <img
+                    src={mediaUrl}
+                    alt={`${codeTitle} rendered as ${format.toUpperCase()}`}
+                    loading="lazy"
+                    class="metro-media"
+                  />
+                )
+              ) : (
+                <ZoomableSVG>
+                  <Fragment set:html={svg} />
+                </ZoomableSVG>
+              )
+            }
           </details>
         )
       }
@@ -199,5 +314,10 @@ const codeTitle = title ?? src;
     flex-direction: column;
     gap: 0.25rem;
     margin: 1rem 0;
+  }
+  .metro-media {
+    width: 100%;
+    display: block;
+    border-radius: 6px;
   }
 </style>

@@ -39,14 +39,9 @@ Every SVG also carries its own [data manifest](/nf-metro/manifest/): a JSON bloc
 
 `--animate` puts balls on the lines, moved by CSS `offset-path`. They run when the SVG is opened directly, referenced from an `<img>`, or inlined into a page.
 
-<img
-  src="../assets/formats_animated.svg"
-  alt="The nf-core/rnaseq metro map as an animated SVG"
-  loading="lazy"
-  style="width: 100%; border-radius: 6px"
-/>
+<Metro src="examples/rnaseq_sections.mmd" mmd={false} animate clean />
 
-_`--animate --embed-font`, in a plain `<img>`: 315&nbsp;KB. Its colours follow your system theme, where every raster below is baked to one._
+_`--animate`, inlined into the page. Its colours follow your system theme, where every raster below is baked to one._
 
 Fonts are the one thing an SVG cannot settle by itself, because it names a family and the viewer supplies it. Two flags close that gap:
 
@@ -69,14 +64,15 @@ Pick the palette with `--mode light` or `--mode dark`. Without it the map's own 
 
 Size the output with `--scale` (default `2`, for retina) or `--raster-width` for an exact pixel width. Neither is `--width`, which pads the canvas around a map drawn at its natural size instead of resizing the picture.
 
-<img
-  src="../assets/formats_still.png"
-  alt="The nf-core/rnaseq metro map as a PNG"
-  loading="lazy"
-  style="width: 100%; border-radius: 6px"
+<Metro
+  src="examples/rnaseq_sections.mmd"
+  mmd={false}
+  format="png"
+  scale={1}
+  clean
 />
 
-_The same map at `--scale 1`: 1799&times;696, 138&nbsp;KB._
+_The same map at `--scale 1`: 1799&times;696._
 
 ## Interactive HTML
 
@@ -102,59 +98,27 @@ The same 12-second loop at 20fps, in each of the four containers:
 
 <Tabs>
   <TabItem label="GIF">
-    <img
-      src="../assets/formats_loop.gif"
-      alt="The nf-core/rnaseq metro map as a looping GIF"
-      loading="lazy"
-      style="width: 100%; border-radius: 6px"
-    />
+    <Metro src="examples/rnaseq_sections.mmd" mmd={false} format="gif" duration={12} fps={20} clean />
 
-    _256-colour palette, 337&nbsp;KB. Animates inside an `<img>`._
+    _256-colour palette. Animates inside an `<img>`._
 
   </TabItem>
   <TabItem label="WebP">
-    <img
-      src="../assets/formats_loop.webp"
-      alt="The nf-core/rnaseq metro map as a looping WebP"
-      loading="lazy"
-      style="width: 100%; border-radius: 6px"
-    />
+    <Metro src="examples/rnaseq_sections.mmd" mmd={false} format="webp" duration={12} fps={20} clean />
 
-    _Full 24-bit colour, 395&nbsp;KB. Animates inside an `<img>`._
+    _Full 24-bit colour. Animates inside an `<img>`._
 
   </TabItem>
   <TabItem label="MP4">
-    <video
-      controls
-      autoplay
-      loop
-      muted
-      playsinline
-      style="width: 100%; border-radius: 6px"
-      src="../assets/formats_loop.mp4"
-    >
-      Your browser can't play the embedded video.
-      <a href="../assets/formats_loop.mp4">Download it here</a>.
-    </video>
+    <Metro src="examples/rnaseq_sections.mmd" mmd={false} format="mp4" duration={12} fps={20} clean />
 
-    _H.264, 191&nbsp;KB. Needs a `<video>` element._
+    _H.264. Needs a `<video>` element._
 
   </TabItem>
   <TabItem label="WebM">
-    <video
-      controls
-      autoplay
-      loop
-      muted
-      playsinline
-      style="width: 100%; border-radius: 6px"
-      src="../assets/formats_loop.webm"
-    >
-      Your browser can't play the embedded video.
-      <a href="../assets/formats_loop.webm">Download it here</a>.
-    </video>
+    <Metro src="examples/rnaseq_sections.mmd" mmd={false} format="webm" duration={12} fps={20} clean />
 
-    _VP9, 213&nbsp;KB. Needs a `<video>` element._
+    _VP9. Needs a `<video>` element._
 
   </TabItem>
 </Tabs>
