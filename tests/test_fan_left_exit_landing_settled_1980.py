@@ -19,6 +19,7 @@ from nf_metro.layout.routing.invariants import (
     check_bundle_order_preserved,
     check_perp_entry_boundary_consistent,
 )
+from nf_metro.layout.routing.offsets import _perp_entry_run_turns_right
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import PortSide
 
@@ -102,6 +103,93 @@ graph LR
     b2 -->|h| d1
 """
 
+_TOP_ENTRY_FAN_TURN_RIGHT = """\
+%%metro title: Right-exit fan riser
+%%metro line: g | Green | #2db572
+%%metro line: h | Blue | #3f7fdf
+%%metro grid: a | 1,0
+%%metro grid: b | 1,1
+%%metro grid: c | 1,2
+%%metro grid: d | 2,1
+
+graph LR
+    subgraph a [Alpha]
+        %%metro exit: right | g, h
+        a1[A one]
+        a2[A two]
+        a1 -->|g,h| a2
+    end
+    subgraph b [Beta]
+        %%metro entry: top | g, h
+        %%metro exit: right | g, h
+        b1[B one]
+        b2[B two]
+        b1 -->|g,h| b2
+    end
+    subgraph c [Gamma]
+        %%metro entry: top | g
+        c1[C one]
+        c2[C two]
+        c1 -->|g| c2
+    end
+    subgraph d [Delta]
+        %%metro entry: left | h
+        d1[D one]
+        d2[D two]
+        d1 -->|h| d2
+    end
+    a2 -->|g,h| b1
+    b2 -->|g| c1
+    b2 -->|h| d1
+"""
+
+_BOTTOM_ENTRY_FAN_TURN_RIGHT = """\
+%%metro title: Right-exit fan bottom
+%%metro line: g | Green | #2db572
+%%metro line: h | Blue | #3f7fdf
+%%metro grid: a | 1,2
+%%metro grid: b | 1,1
+%%metro grid: c | 1,0
+%%metro grid: d | 2,1
+
+graph LR
+    subgraph a [Alpha]
+        %%metro exit: right | g, h
+        a1[A one]
+        a2[A two]
+        a1 -->|g,h| a2
+    end
+    subgraph b [Beta]
+        %%metro entry: bottom | g, h
+        %%metro exit: right | g, h
+        b1[B one]
+        b2[B two]
+        b1 -->|g,h| b2
+    end
+    subgraph c [Gamma]
+        %%metro entry: bottom | g
+        c1[C one]
+        c2[C two]
+        c1 -->|g| c2
+    end
+    subgraph d [Delta]
+        %%metro entry: left | h
+        d1[D one]
+        d2[D two]
+        d1 -->|h| d2
+    end
+    a2 -->|g,h| b1
+    b2 -->|g| c1
+    b2 -->|h| d1
+"""
+
+_PERP_ENTRY_FAN_CASES = {
+    "top-entry-turn-left": (_TOP_ENTRY_FAN, False),
+    "bottom-entry-turn-left": (_BOTTOM_ENTRY_FAN, False),
+    "top-entry-turn-right": (_TOP_ENTRY_FAN_TURN_RIGHT, True),
+    "bottom-entry-turn-right": (_BOTTOM_ENTRY_FAN_TURN_RIGHT, True),
+}
+
 
 @pytest.mark.parametrize(
     "label",
@@ -131,21 +219,24 @@ def test_left_exit_fan_to_perp_entry_routes(label: str) -> None:
 
 @pytest.mark.parametrize(
     "label",
-    ("top-entry", "bottom-entry"),
+    tuple(_PERP_ENTRY_FAN_CASES),
 )
 def test_left_exit_fan_perp_entry_bundle_order_preserved(label: str) -> None:
     """The bundle turning in from the shared perp-entry port must not cross itself.
 
     The fan-out divergence in Beta peels ``g`` and ``h`` to different targets, so
-    the trunk carries them in peel order.  The bundle rises into Beta's entry
-    port and turns once into that trunk; unless the port is stacked as the mirror
-    of the trunk for its entry side, the two lines swap sides through the corner.
-    Two invariants pin this from both directions, for a TOP entry and its BOTTOM
-    mirror alike: the intra turn holds one bundle-order sign across the corner,
-    and the inter-section approach and the intra drop cross the port boundary at
-    one consistent per-line X (no S-cusp on the box edge).
+    the trunk carries them in peel order.  The bundle rises (or drops) into
+    Beta's entry port and turns once into that trunk; unless the port is stacked
+    as the mirror of the trunk for its entry side and turn direction, the two
+    lines swap sides through the corner.  The arrival order reverses on an XOR of
+    two independent axes -- the entry side (TOP versus BOTTOM) and the direction
+    the run turns out of the port (:func:`_perp_entry_run_turns_right`) -- so all
+    four combinations are pinned here.  Two invariants hold each: the intra turn
+    keeps one bundle-order sign across the corner, and the inter-section approach
+    and the intra drop cross the port boundary at one consistent per-line X (no
+    S-cusp on the box edge).
     """
-    source = _TOP_ENTRY_FAN if label == "top-entry" else _BOTTOM_ENTRY_FAN
+    source, expected_turns_right = _PERP_ENTRY_FAN_CASES[label]
     graph = parse_metro_mermaid(source)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
@@ -159,6 +250,9 @@ def test_left_exit_fan_perp_entry_bundle_order_preserved(label: str) -> None:
         if port.is_entry
         and port.section_id == "b"
         and port.side in (PortSide.TOP, PortSide.BOTTOM)
+    )
+    assert _perp_entry_run_turns_right(graph, entry_port_id) is expected_turns_right, (
+        f"{label}: fixture does not exercise the intended turn direction"
     )
     entry_bundle = [
         v
