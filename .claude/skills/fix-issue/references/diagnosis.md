@@ -41,7 +41,8 @@ unasked, and never manufacture a defect because a fix was expected. A wrong
 the post-diagnosis gate unchanged.
 
 The post-diagnosis gate challenges **whether** there is a defect at all, not
-only which kind, plus the claim behind whichever verdict came back.
+only which kind, plus the claim behind whichever verdict came back - and, for
+an engine bug, the recommended fix path against the plan-time rule below.
 
 **When the issue already states its own root cause** (it names the function,
 the call site, and the acceptance bar), do not re-derive it from scratch at HIGH
@@ -101,7 +102,11 @@ Record which one it is - in numbers for (a), (b) and (d), in named call sites
 for (c) - before briefing the writer.
 
 **Default to a plan-time fix for (b); a render-time post-hoc correction needs
-a stated reason it's unavoidable, not just easier.** Before briefing the
+a stated reason it's unavoidable, not just easier - and that reason binds every
+later decision point (a writer's implementation choice, `/simplify`, both
+gates), not just this brief.** A clean render or passing invariants are not
+that reason: they show the patch works, not that it belongs at this layer.
+Before briefing the
 writer, check for an active architecture programme covering this defect class
 (grep open issues, stale branches). Brief the writer for plan-time unless a
 concrete blocker rules it out this run (an unstarted dependency, a

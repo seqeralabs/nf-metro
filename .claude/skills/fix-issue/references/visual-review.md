@@ -89,6 +89,11 @@ the writer's preferred interpretation, and do not downgrade this because the
 issue predicted no visual change - a delta nobody expected is the most important
 kind. Every changed render gets HIGH eyes.
 
+A clean I/N/D classification answers "does this render correctly", not "is
+this the right fix" (see the plan-time-vs-render-time rule in
+[`diagnosis.md`](diagnosis.md)) - this gate is the last chance to ask the
+second question before merge, and a smooth render is no evidence either way.
+
 The sticky comment ends in a verdict line. Gate the next step on it:
 
 - **"no visual changes detected"** (lowercase, as emitted) -> a clean result, but **not** a
