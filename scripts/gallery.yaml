@@ -120,6 +120,13 @@ gallery:
       "A `%%metro direction: TB` reporting section whose file outputs are line termini.
       Regression fixture: terminus file icons orient to a vertical flow, with the connector
       entering from the top."
+  - id: metagenomics_input
+    source_dir: examples
+    category: Feature Showcase
+    description:
+      "A `%%metro direction: TB` input section whose `Short reads` FASTQ terminus is a
+      source, so its file icon sits above the station on the vertical flow. The caption
+      seats clear above the icon instead of striking the station marker."
   - id: disconnected_components
     source_dir: examples
     category: Feature Showcase
@@ -1804,6 +1811,14 @@ gallery:
       "Two lines dropping together from a TB BOTTOM exit into the TOP entry of an
       LR section: the in-section line order follows the arrival order so the entry corner nests
       concentrically and the bundle neither pinches nor crosses through the bend (issue #1061)."
+  - id: rl_left_exit_top_entry_overflow
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "An RL section with a LEFT exit and a TOP entry whose port sits left of its
+      internal run: the drop is predicted to land right of the run, so the run shifts left to
+      meet the port and the section bbox grows left to keep the trailing station contained
+      (issue #1980)."
   - id: right_entry_wrap_no_fan
     source_dir: examples/topologies
     category: Inter-section Routing
@@ -2306,6 +2321,29 @@ gallery:
       "A vertical section's perpendicular exit reaching back to a section in the
       row behind it, the seam shape with the fewest corpus instances. Fully
       explicit for the orientation-equivalence oracle."
+  - id: stacked_top_entry_flanked_riser
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "A row-2 section entered from the section above it, with a second line running
+      past to a neighbouring column. The riser dropping into the top entry runs in
+      the inter-column gap that the neighbouring section flanks, so the gap widens to
+      seat it a clearance off both walls (issue #1568)."
+  - id: stacked_top_entry_flanked_riser_crossline
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "The flanked top-entry riser of issue #1568 with a distinct line climbing the
+      same inter-column gap and overlapping it in Y, so the two counter-running
+      centrelines settle a bundle clearance apart."
+  - id: left_exit_fan_perp_entry_landing
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "A LEFT-exit two-line bundle drops into a shared TOP entry whose downstream fan
+      peels each line to a different target. The fan-out's peel order propagates one hop
+      upstream to its free source feeder, so both lines descend straight into their
+      landing lanes with no crossing (issue #1986)."
 pipelines:
   - id: rnaseq_auto
     title: nf-core/rnaseq

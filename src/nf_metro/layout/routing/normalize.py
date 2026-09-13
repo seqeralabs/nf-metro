@@ -74,6 +74,7 @@ from nf_metro.layout.routing.common import (
     planner_owns_segment_or_boundary,
     port_peeloff_tail,
     route_system_owns_segment_boundary,
+    row_local_gap_bundle_midpoint,
     same_destination_approach_slots,
     seat_peeloff_port_y,
     section_ids_of_stations,
@@ -101,7 +102,10 @@ from nf_metro.layout.routing.corners import (
     wholesale_corner_translation,
     widest_coincident_radius,
 )
-from nf_metro.layout.routing.families import RouteFamilyId
+from nf_metro.layout.routing.families import (
+    LANDING_POINT_SETTLED_LATER_FAMILY_VALUES,
+    RouteFamilyId,
+)
 from nf_metro.layout.routing.offsets import (
     cross_row_convergence_channel_order,
 )
@@ -822,17 +826,26 @@ def _validate_planned_exit_turn_radii(
                 f"settled exit-turn member {edge_key!r} has no recorded concentric "
                 "inputs"
             )
-        for radius_index, dx, base_radius in zip(
-            (channel_rank - 1, channel_rank),
-            (
-                allocated if allocated is not None else planned
-                for allocated, planned in zip(
-                    allocated_offsets, planned_offsets, strict=True
-                )
-            ),
-            allocated_bases,
-            strict=True,
-        ):
+        corner_inputs = tuple(
+            zip(
+                (channel_rank - 1, channel_rank),
+                (
+                    allocated if allocated is not None else planned
+                    for allocated, planned in zip(
+                        allocated_offsets, planned_offsets, strict=True
+                    )
+                ),
+                allocated_bases,
+                strict=True,
+            )
+        )
+        # These families settle the landing-side (channel_rank) corner after gap
+        # allocation, so only the entry-side (channel_rank - 1) corner exists to
+        # hold here. Every other family owns both corners at this point, so a
+        # missing landing corner in one of those is a genuine defect.
+        if route.exit_turn_family_id in LANDING_POINT_SETTLED_LATER_FAMILY_VALUES:
+            corner_inputs = corner_inputs[:1]
+        for radius_index, dx, base_radius in corner_inputs:
             if (
                 dx is None
                 or base_radius is None
@@ -4966,6 +4979,7 @@ def _gap_channel_base(
     offset_step: float,
     anchor_section_id: str | None = None,
     anchor_side: PortSide | None = None,
+    anchor_is_target: bool = False,
 ) -> float:
     """Centred midline x for a bundle of *n* lines in gap ``(lo, lo+1)``.
 
@@ -4986,6 +5000,13 @@ def _gap_channel_base(
     stricter ``require_both_columns`` reading, which reports such a gap as
     degenerate and passes over it, so what this returns for one is the
     channel's final position rather than an initial placement.
+
+    *anchor_is_target* marks the descent that enters the target column
+    ``lo + 1``; only there does :func:`row_local_gap_bundle_midpoint` seat the
+    channel against that column's real edge when the intervening column ``lo``
+    is absent from *row*.  A source-side descent keeps the plain reading, whose
+    origin-defaulted lower edge is the province of the convergence and fan
+    planners that own that geometry.
     """
     width = max(0, n - 1) * offset_step
     edges = None
@@ -4995,6 +5016,10 @@ def _gap_channel_base(
         off_grid = off_grid_gap_bundle_midpoint(graph, lo, row, width)
         if off_grid is not None:
             return off_grid
+        if anchor_is_target:
+            row_local = row_local_gap_bundle_midpoint(graph, lo, row, width)
+            if row_local is not None:
+                return row_local
         edges = column_gap_edges(graph, lo, lo + 1, row=row, require_both_columns=False)
     return symmetric_bundle_midpoint(*edges, [width], 0)
 

@@ -65,6 +65,10 @@ For each surviving candidate:
 
 - Prefer extending an existing section over adding a new heading; prefer
   merging two related candidates into one paragraph over two separate ones.
+- Write no more than the rule needs, not as much as would be thorough -
+  every word here is context every future run pays for, whether or not it
+  needed this particular lesson. Before shipping, re-read your own diff and
+  cut anything restating a point your edit already made elsewhere.
 - Prefer a worker-facing reference file (`diagnosis.md`, `tests-and-validators.md`,
   `writer-steps.md`, `environment.md`, `gate-ratchet.md`, `regression-locks.md`,
   `visual-review.md`) over a coordinator-facing one. A worker loads its file

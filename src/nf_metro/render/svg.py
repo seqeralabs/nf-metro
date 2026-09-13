@@ -192,6 +192,7 @@ from nf_metro.render.constants import (
     SVG_CURVE_RADIUS,
     TERMINUS_FONT_COLOR,
     TEXT_VCENTER_DY,
+    TITLE_CANVAS_SAFETY_MARGIN,
     WATERMARK_BARE_X_INSET,
     WATERMARK_FILL,
     WATERMARK_FONT_SIZE,
@@ -513,6 +514,49 @@ def _position_legend(
     return legend_x, legend_y, legend_w, legend_h, show_legend
 
 
+def _terminus_stacked_pad(theme: Theme, has_stacked: bool) -> float:
+    """Extent a stacked-files icon's back sheet peeks past the nominal edge.
+
+    ``render_files_icon`` offsets the back sheet by ``terminus_width *
+    FILES_ICON_OFFSET_RATIO`` along each axis; anything reserving space around
+    the drawn icon adds this so the back sheet is covered. Zero for a
+    single-sheet icon.
+    """
+    return theme.terminus_width * FILES_ICON_OFFSET_RATIO if has_stacked else 0.0
+
+
+@dataclass(frozen=True)
+class _TerminusFlowContext:
+    """Flow-axis facts for placing a terminus station's icon(s).
+
+    ``section_dir`` derives from ``section``; ``is_vertical_flow`` from
+    ``section_dir``; ``is_source`` from the station's incoming edges; and
+    ``flow_sign`` from ``section_dir`` and ``is_source``.
+    """
+
+    section: Section | None
+    section_dir: str
+    is_vertical_flow: bool
+    is_source: bool
+    flow_sign: float
+
+
+def _terminus_flow_context(station: Station, graph: MetroGraph) -> _TerminusFlowContext:
+    """Build the flow-axis context for one of *station*'s terminus icons."""
+    section = graph.sections.get(station.section_id) if station.section_id else None
+    section_dir = section.direction if section else "LR"
+    is_vertical_flow = lanes_run_along_x(section_dir)
+    is_source = not graph.edges_to(station.id)
+    flow_sign = _terminus_icon_flow_sign(section_dir, is_source)
+    return _TerminusFlowContext(
+        section=section,
+        section_dir=section_dir,
+        is_vertical_flow=is_vertical_flow,
+        is_source=is_source,
+        flow_sign=flow_sign,
+    )
+
+
 def _icon_obstacles_by_station(
     graph: MetroGraph,
     theme: Theme,
@@ -551,9 +595,7 @@ def _icon_obstacles_by_station(
 
         # Stacked-files icons extend beyond nominal size by the offset.
         has_stacked = ICON_TYPE_FILES in (station.terminus_icon_types or [])
-        stacked_pad = (
-            theme.terminus_width * FILES_ICON_OFFSET_RATIO if has_stacked else 0.0
-        )
+        stacked_pad = _terminus_stacked_pad(theme, has_stacked)
         icon_half_w = theme.terminus_width / 2 + stacked_pad
         icon_half_h = theme.terminus_height / 2 + stacked_pad
 
@@ -562,14 +604,20 @@ def _icon_obstacles_by_station(
         y_min = min(cy for _, cy in centers) - icon_half_h
         y_max = max(cy for _, cy in centers) + icon_half_h
 
-        # Captions render below the icon row, so extend the box downward to
-        # cover them and keep neighbouring labels at a distance.
+        # Captions render on whichever flow side the renderer draws them, so
+        # extend the box that way to cover them and keep neighbouring labels
+        # at a distance. Vertical-flow sources (and flow-reversed sinks) hang
+        # the caption above the icon; everything else hangs it below.
         caption_line_count = station.terminus_caption_line_count
         if caption_line_count:
-            caption_height = (
+            ctx = _terminus_flow_context(station, graph)
+            caption_extent = ICON_NAME_GAP + (
                 caption_line_count * theme.label_font_size * ICON_NAME_FONT_SCALE
             )
-            y_max += ICON_NAME_GAP + caption_height
+            if _terminus_caption_hangs_down(ctx.is_vertical_flow, ctx.flow_sign):
+                y_max += caption_extent
+            else:
+                y_min -= caption_extent
 
         obstacles[station.id] = (
             x_min - margin,
@@ -751,6 +799,7 @@ class _FinalPublishedGeometry(FinalCanvasGeometry):
     debug: bool
     chrome_css: bool
     bare: bool
+    draws_standalone_title: bool
 
 
 _FINAL_RENDER_PLAN_FINGERPRINT_SOURCES = {
@@ -791,6 +840,7 @@ _FINAL_RENDER_PLAN_FINGERPRINT_SOURCES = {
     "debug": "published.debug",
     "chrome_css": "published.chrome_css",
     "bare": "published.bare",
+    "draws_standalone_title": "published.draws_standalone_title",
     "inactive_line_ids": "inactive_line_ids",
 }
 
@@ -2344,6 +2394,13 @@ def _build_render_plan_scaled(
     logo_in_legend = show_logo and effective_legend_position != "none"
     legend_logo_size = (logo_w, logo_h) if logo_in_legend else None
 
+    # Whether this render draws the map title as standalone chrome: the one
+    # predicate that both the canvas-sizing term and the title-draw block read,
+    # so the two cannot drift and reintroduce a clipped or unmeasured title.
+    draws_standalone_title = (
+        not bare and bool(graph.title) and not logo_in_legend and not show_logo
+    )
+
     legend_x, legend_y, legend_w, legend_h, show_legend = _position_legend(
         graph,
         theme,
@@ -2378,6 +2435,19 @@ def _build_render_plan_scaled(
     # the watermark text.
     auto_width = max_x + (0.0 if bare else padding)
     auto_height = max_y + WATERMARK_Y_INSET * 2 + WATERMARK_FONT_SIZE
+
+    # The title is authored text drawn at x=padding but never folded into the
+    # content extent, so a title wider than the map is clipped at the right
+    # edge.  Grow the canvas to its true glyph advance plus a small margin.
+    if draws_standalone_title:
+        title_advance = DEFAULT_TEXT_METRICS.advance(
+            graph.title,
+            text_style(theme.title_font_size, "bold"),
+            TextRole.TITLE,
+        )
+        auto_width = max(
+            auto_width, padding + title_advance + TITLE_CANVAS_SAFETY_MARGIN
+        )
 
     # A relocated header may sit past the box; let it use the margins already
     # added above and only stretch the canvas for the part that overflows them,
@@ -2450,6 +2520,7 @@ def _build_render_plan_scaled(
         debug=debug,
         chrome_css=chrome_css,
         bare=bare,
+        draws_standalone_title=draws_standalone_title,
     )
     route_plan = realise_route_reservations(
         route_plan,
@@ -2533,6 +2604,7 @@ def _build_render_plan_scaled(
         debug=published_geometry.debug,
         chrome_css=published_geometry.chrome_css,
         bare=published_geometry.bare,
+        draws_standalone_title=published_geometry.draws_standalone_title,
         inactive_line_ids=inactive_line_ids,
     ), route_plan
 
@@ -2659,7 +2731,7 @@ def _emit_render_plan(
                 )
             else:
                 _render_logo(d, effective_logo, logo_x, logo_y, logo_w, logo_h)
-        elif graph.title and not logo_in_legend:
+        elif plan.draws_standalone_title:
             d.append(
                 draw.Text(
                     graph.title,
@@ -4340,20 +4412,17 @@ def _terminus_icon_centers_for(
     if not station.is_terminus or not station.terminus_labels:
         return []
 
-    section = graph.sections.get(station.section_id) if station.section_id else None
-    is_source = not graph.edges_to(station.id)
-    section_dir = section.direction if section else "LR"
-    is_vertical_flow = lanes_run_along_x(section_dir)
+    ctx = _terminus_flow_context(station, graph)
 
     r = theme.station_radius
     icon_gap = r + ICON_STATION_GAP
     icon_half_w = theme.terminus_width / 2
     icon_half_h = theme.terminus_height / 2
-    icon_half_flow = icon_half_h if is_vertical_flow else icon_half_w
+    icon_half_flow = icon_half_h if ctx.is_vertical_flow else icon_half_w
 
     bundle_center = (min_off + max_off) / 2
 
-    icon_step, _ = _terminus_icon_marching(theme, station, is_vertical_flow)
+    icon_step, _ = _terminus_icon_marching(theme, station, ctx.is_vertical_flow)
 
     is_rail = graph.station_is_rail(station.id)
     offtrack_nub_lift = (
@@ -4364,8 +4433,8 @@ def _terminus_icon_centers_for(
 
     return _terminus_icon_centers(
         station,
-        section_dir,
-        is_source,
+        ctx.section_dir,
+        ctx.is_source,
         len(station.terminus_labels),
         icon_gap + icon_half_flow + offtrack_nub_lift,
         icon_step,
@@ -4383,6 +4452,16 @@ def _terminus_icon_flow_sign(section_dir: str, is_source: bool) -> float:
     """
     extends_forward = is_source if section_dir in ("RL", "BT") else not is_source
     return 1.0 if extends_forward else -1.0
+
+
+def _terminus_caption_hangs_down(is_vertical_flow: bool, flow_sign: float) -> bool:
+    """Whether a terminus caption hangs below its icon rather than above.
+
+    Vertical-flow sources and flow-reversed sinks draw the icon above the
+    station, so the caption hangs above it too; every other flow hangs it
+    below.
+    """
+    return not is_vertical_flow or flow_sign > 0
 
 
 def _terminus_icon_centers(
@@ -4438,13 +4517,8 @@ def _render_terminus_icons(
     axis (a horizontal row for LR/RL, a vertical stack for TB/BT), with
     the first icon closest to the station pill.
     """
-    section: Section | None = (
-        graph.sections.get(station.section_id) if station.section_id else None
-    )
-    section_dir = section.direction if section else "LR"
-    is_vertical_flow = lanes_run_along_x(section_dir)
-    is_source = not graph.edges_to(station.id)
-    flow_sign = _terminus_icon_flow_sign(section_dir, is_source)
+    ctx = _terminus_flow_context(station, graph)
+    section = ctx.section
     icon_half_w = theme.terminus_width / 2
     icon_half_h = theme.terminus_height / 2
 
@@ -4455,7 +4529,9 @@ def _render_terminus_icons(
     banners = station.terminus_icon_banners or [False] * len(station.terminus_labels)
 
     caption_font_size = theme.label_font_size * ICON_NAME_FONT_SCALE
-    icon_step, name_widths = _terminus_icon_marching(theme, station, is_vertical_flow)
+    icon_step, name_widths = _terminus_icon_marching(
+        theme, station, ctx.is_vertical_flow
+    )
 
     centers = _terminus_icon_centers_for(station, graph, theme, min_off, max_off)
 
@@ -4480,11 +4556,11 @@ def _render_terminus_icons(
 
         # Clamp to stay within the section bbox, on whichever axis the
         # icons march along.
-        if section and is_vertical_flow and section.bbox_h > 0:
+        if section and ctx.is_vertical_flow and section.bbox_h > 0:
             top = section.bbox_y + icon_half_h + ICON_BBOX_MARGIN
             bottom = section.bbox_y + section.bbox_h - icon_half_h - ICON_BBOX_MARGIN
             icon_cy = max(top, min(icon_cy, bottom))
-        elif section and not is_vertical_flow and section.bbox_w > 0:
+        elif section and not ctx.is_vertical_flow and section.bbox_w > 0:
             icon_right = (
                 section.bbox_x + section.bbox_w - icon_half_w - ICON_BBOX_MARGIN
             )
@@ -4517,7 +4593,7 @@ def _render_terminus_icons(
             render_folder_icon(d, **common)
         elif icon_type == ICON_TYPE_FILES:
             back_dx_sign, back_dy_sign = (
-                (1.0, flow_sign) if is_vertical_flow else (flow_sign, -1.0)
+                (1.0, ctx.flow_sign) if ctx.is_vertical_flow else (ctx.flow_sign, -1.0)
             )
             render_files_icon(
                 d,
@@ -4539,16 +4615,37 @@ def _render_terminus_icons(
                 banner_text_color=banner_text_color,
             )
 
-        # Optional caption rendered below the icon so the type chip
+        # Optional caption rendered clear of the icon so the type chip
         # inside the icon stays readable.
         if name:
-            caption_y = icon_cy + theme.terminus_height / 2 + ICON_NAME_GAP
+            caption_hangs_down = _terminus_caption_hangs_down(
+                ctx.is_vertical_flow, ctx.flow_sign
+            )
+            # A stacked-files icon's back sheet peeks past the nominal edge
+            # along the flow axis -- toward the caption for a vertical flow, but
+            # off-axis (away from it) for a horizontal flow -- so only a
+            # vertical flow needs the extra clearance to keep the caption off
+            # the drawn icon.
+            stacked_pad = _terminus_stacked_pad(
+                theme, ctx.is_vertical_flow and icon_type == ICON_TYPE_FILES
+            )
+            icon_edge_gap = theme.terminus_height / 2 + stacked_pad + ICON_NAME_GAP
+            stagger_step = caption_font_size * 1.4
             # When adjacent icon captions would overlap horizontally
             # (their estimated width exceeds the per-icon X step), drop
-            # odd-indexed captions to a second row so each name is
-            # legible.
-            if stagger_captions and i % 2 == 1:
-                caption_y += caption_font_size * 1.4
+            # odd-indexed captions to a further row so each name is legible.
+            staggered = stagger_captions and i % 2 == 1
+            if caption_hangs_down:
+                caption_y = icon_cy + icon_edge_gap
+                if staggered:
+                    caption_y += stagger_step
+            else:
+                # The hanging baseline anchors the text's top edge, so drop
+                # the caption height to seat the whole glyph box above the icon.
+                caption_height = (name.count("\n") + 1) * caption_font_size
+                caption_y = icon_cy - icon_edge_gap - caption_height
+                if staggered:
+                    caption_y -= stagger_step
             caption_cx = icon_cx
             if section and section.bbox_w > 0:
                 # Estimate caption width and clamp so it stays inside the
