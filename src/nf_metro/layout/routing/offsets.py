@@ -1045,7 +1045,7 @@ def _free_perp_entry_feeder(
     feeder_id = next(iter(feeder_ids))
 
     feeder = graph.sections.get(feeder_id)
-    if feeder is None or feeder.direction not in ("LR", "RL"):
+    if feeder is None or not lanes_run_along_y(feeder.direction):
         return None
     if feeder.entry_ports:
         return None
