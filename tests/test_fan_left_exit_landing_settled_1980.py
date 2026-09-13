@@ -17,6 +17,7 @@ from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.invariants import check_bundle_order_preserved
 from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.model import PortSide
 
 _TOP_ENTRY_FAN = """\
 %%metro title: Left-exit fan riser
@@ -136,8 +137,8 @@ def test_left_exit_fan_perp_entry_bundle_order_preserved(label: str) -> None:
     the trunk carries them in peel order.  The bundle rises into Beta's entry
     port and turns once into that trunk; unless the port is stacked as the mirror
     of the trunk for its entry side, the two lines swap sides through the corner.
-    The bundle order into Beta (``b__entry_*_2`` -> ``b1``) must hold one sign on
-    both sides of the corner, for a TOP entry and its BOTTOM mirror alike.
+    The bundle order into Beta's perp entry port must hold one sign on both sides
+    of the corner, for a TOP entry and its BOTTOM mirror alike.
     """
     source = _TOP_ENTRY_FAN if label == "top-entry" else _BOTTOM_ENTRY_FAN
     graph = parse_metro_mermaid(source)
@@ -147,10 +148,17 @@ def test_left_exit_fan_perp_entry_bundle_order_preserved(label: str) -> None:
         warnings.simplefilter("ignore")
         routes = route_edges(graph, station_offsets=offsets)
 
+    entry_port_id = next(
+        pid
+        for pid, port in graph.ports.items()
+        if port.is_entry
+        and port.section_id == "b"
+        and port.side in (PortSide.TOP, PortSide.BOTTOM)
+    )
     entry_bundle = [
         v
         for v in check_bundle_order_preserved(routes)
-        if v.edge_source.startswith("b__entry_") and v.edge_target == "b1"
+        if v.edge_source == entry_port_id and v.edge_target == "b1"
     ]
     assert not entry_bundle, (
         f"{label}: bundle crosses at Beta's perp entry: "
