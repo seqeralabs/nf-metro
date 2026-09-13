@@ -729,11 +729,21 @@ def _reindex_local_priority_gaps(ctx: _OffsetCtx) -> dict[str, dict[str, int]]:
     return section_local
 
 
-def _section_line_feeders(ctx: _OffsetCtx, section: Section) -> dict[str, str]:
-    """Map each entering line to the upstream section that feeds it."""
+def _section_line_feeders(
+    ctx: _OffsetCtx, section: Section, sides: Container[PortSide] | None = None
+) -> dict[str, str]:
+    """Map each entering line to the upstream section that feeds it.
+
+    *sides* restricts the scan to entry ports on those boundary sides; ``None``
+    considers every entry port.
+    """
     graph = ctx.graph
     line_feeder: dict[str, str] = {}
     for pid in section.entry_ports:
+        if sides is not None:
+            port = graph.ports.get(pid)
+            if port is None or port.side not in sides:
+                continue
         for edge in graph.edges_to(pid):
             src = graph.station_for_edge_source(edge)
             feeder_sec = src.section_id
@@ -1020,15 +1030,7 @@ def _free_perp_entry_feeder(
     """
     graph = ctx.graph
     perp_sides = perpendicular_port_sides(section.direction)
-    line_feeder: dict[str, str] = {}
-    for pid in section.entry_ports:
-        port = graph.ports.get(pid)
-        if port is None or port.side not in perp_sides:
-            continue
-        for edge in graph.edges_to(pid):
-            src = graph.station_for_edge_source(edge)
-            if src.section_id is not None:
-                line_feeder[edge.line_id] = src.section_id
+    line_feeder = _section_line_feeders(ctx, section, perp_sides)
     if not bundle <= set(line_feeder):
         return None
     feeder_ids = {line_feeder[lid] for lid in bundle}
