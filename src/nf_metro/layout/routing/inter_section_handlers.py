@@ -5269,14 +5269,16 @@ def _perp_entry_l_geometry(
     fan_single = fan if fan is not None and len(line_ids) == 1 else None
     fan_source_offsets: tuple[float, ...] | None = None
     if fan_single is not None:
-        _pos_i, pos_n = fan_single
+        pos_i, pos_n = fan_single
         corridor = ctx.fan_corridors.get(edge.source)
         if channel_y is None and corridor is not None and corridor.band_y is not None:
             # Drop into the fan's shared traverse band, so this branch and its
             # wrap siblings turn at one Y rather than a few px apart.
             mid_y = corridor.band_y
         if not straight_drop:
-            lx0 = sx + lead.sign * _fan_corner_run(ctx, pos_n)
+            lx0 = sx + lead.sign * outer_lane_radius(
+                pos_i + 1, ctx.curve_radius, ctx.offset_step
+            )
             if lead is Direction.R:
                 lx0 = _v1_corner_x(ctx, src, sx, lx0)
         fan_source_offsets = tuple(

@@ -1,0 +1,37 @@
+%%metro title: Left-exit fan perp-entry landing
+%%metro line: g | Green | #2db572
+%%metro line: h | Blue | #3f7fdf
+%%metro grid: a | 1,0
+%%metro grid: b | 1,1
+%%metro grid: c | 1,2
+%%metro grid: d | 0,1
+
+graph LR
+    subgraph a [Alpha]
+        %%metro exit: left | g, h
+        a1[A one]
+        a2[A two]
+        a1 -->|g,h| a2
+    end
+    subgraph b [Beta]
+        %%metro entry: top | g, h
+        %%metro exit: left | g, h
+        b1[B one]
+        b2[B two]
+        b1 -->|g,h| b2
+    end
+    subgraph c [Gamma]
+        %%metro entry: top | g
+        c1[C one]
+        c2[C two]
+        c1 -->|g| c2
+    end
+    subgraph d [Delta]
+        %%metro entry: right | h
+        d1[D one]
+        d2[D two]
+        d1 -->|h| d2
+    end
+    a2 -->|g,h| b1
+    b2 -->|g| c1
+    b2 -->|h| d1
