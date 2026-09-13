@@ -99,6 +99,13 @@ async function boot() {
   progress("Installing nf-metro", "package");
   await pyodide.loadPackage("micropip");
   const micropip = pyodide.pyimport("micropip");
+  // resvg-py is a compiled Rust extension with no wasm wheel, so micropip
+  // cannot resolve it. The playground only ever renders SVG, and the module
+  // that imports it (nf_metro.render.raster) is loaded lazily by the PNG path
+  // alone, so a mock satisfies the resolver and is never touched.
+  // Keep this version at or above pyproject's resvg-py floor, or micropip
+  // rejects the mock as too old (the playground e2e run catches that).
+  micropip.add_mock_package("resvg-py", "0.5.0");
   await micropip.install(await resolveWheel());
   pyodide.runPython(PY_GLUE);
   pyRender = pyodide.globals.get("nfm_render");
