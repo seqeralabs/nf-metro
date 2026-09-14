@@ -61,15 +61,15 @@ Each step's detail is in the reference named beside it. Do not skip a step
 because its detail is not inline.
 
 0. **Select an issue, only when the user gave none.** A LIGHT investigator
-   ranks open issues that have no open PR or local worktree already against
+   ranks open issues with no open PR, worktree, or assignee already against
    them; user confirms before Step 1. [`coordinator.md`](references/coordinator.md)
 1. **Understand the issue.** A LIGHT investigator reads it and returns problem
    statement, scope, unknowns, and a proposed diagnostic brief. The issue body
    stays in the worker. Wait for user confirmation unless autonomous work is
    pre-authorised. [`coordinator.md`](references/coordinator.md)
-2. **Worktree and environment.** Coordinator creates the worktree off latest
-   `origin/main`, records the base SHA, assigns one writer.
-   [`coordinator.md`](references/coordinator.md)
+2. **Worktree and environment.** Coordinator claims the issue (assignee),
+   creates the worktree off latest `origin/main`, records the base SHA,
+   assigns one writer. [`coordinator.md`](references/coordinator.md)
 3. **Diagnose before fixing.** No fix proposed from a hypothesis. The defect
    becomes a numeric claim (geometry) or named call sites (structural), or the
    verdict is "not a bug" held to the same standard. Then the mandatory
