@@ -1033,7 +1033,11 @@ def _place_fan_out(
             split = split_output_spur_fan(
                 nodes, exit_reaching, G, graph, include_leaf_outputs=True
             )
-            if split is not None and len(split[0]) == 1:
+            if (
+                split is not None
+                and len(split[0]) == 1
+                and all(G.out_degree(spur) == 0 for spur in split[1])
+            ):
                 main = split[0][0]
                 main_station = graph.stations.get(main)
                 if (

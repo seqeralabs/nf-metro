@@ -37,19 +37,15 @@ RIBOSEQ_BAND_HOP = (
 def test_band_hop_drop_at_junction_column_no_bare_assert() -> None:
     """A zero-length band-hop seam leg resolves to a turn-less seam, no bare assert.
 
-    #1808 is scoped to seam construction only. The route-emission checks that
-    guard the final routes are downstream of it, so reaching one of them proves
-    the seam was built without the assert. Two such aborts are accepted passes:
-    the unrelated fan-overlay curve defect (#1806/#1809), and the member-geometry
-    emission consistency check that the #1772 trunk-fork fan reordering shifts
-    this frozen partition onto. What must never recur is the bare
-    ``AssertionError`` from reading a heading off the zero-length run leg.
+    #1808 is scoped to seam construction only. The curve invariant that guards
+    the final routes is downstream of it, so reaching that stage proves the seam
+    was built without the assert: an unrelated fan-overlay curve defect
+    (#1806/#1809) aborts this fixture there, and that abort is an accepted pass
+    for #1808. What must never recur is the bare ``AssertionError`` from reading
+    a heading off the zero-length run leg.
     """
     try:
         svg = render_string(RIBOSEQ_BAND_HOP)
     except CurveInvariantError:
-        return
-    except RuntimeError as exc:
-        assert "member geometry" in str(exc)
         return
     assert svg.startswith("<")
