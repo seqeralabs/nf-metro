@@ -1400,3 +1400,36 @@ class TestTailPeelAtThroughStation:
                     f"{dist:.1f}px from the genomecov marker "
                     f"({genomecov.x:.1f},{genomecov.y:.1f})"
                 )
+
+
+# --- #2001: a divergent-line dead-end tail also peels below the exit trunk ---
+
+ROWMATE_TOP_ALIGN_FILE = TOPOLOGIES_DIR / "rowmate_tb_side_entry_top_align.mmd"
+
+
+class TestDivergentTailPeelBelowExitTrunk:
+    """A dead-end tail carrying fewer lines than its carrier peels below (#2001).
+
+    In ``genome_align`` the aligner-QC dead end ``summarized_exp_ga ->
+    multiqc_bowtie2 -> report_bowtie2`` rides the ``bowtie2_salmon`` line, a
+    strict subset of its carrier's bundle, while the exit lines leave from
+    ``summarized_exp_ga``. The tail must hang below the exit lane rather than
+    stay level on it, so the exit run does not cross the MultiQC marker.
+    """
+
+    @pytest.fixture
+    def graph(self):
+        return _load_and_layout(ROWMATE_TOP_ALIGN_FILE)
+
+    def test_multiqc_dead_end_hangs_below_the_exit_lane(self, graph):
+        trunk = graph.stations["summarized_exp_ga"]
+        multiqc = graph.stations["multiqc_bowtie2"]
+        report = graph.stations["report_bowtie2"]
+        assert multiqc.y > trunk.y + 1.0, (
+            f"multiqc_bowtie2 (y={multiqc.y:.1f}) should hang below the exit "
+            f"lane (summarized_exp_ga y={trunk.y:.1f}), not stay level on it"
+        )
+        assert report.y > trunk.y + 1.0, (
+            f"report_bowtie2 (y={report.y:.1f}) should follow multiqc_bowtie2 "
+            f"below the exit lane (summarized_exp_ga y={trunk.y:.1f})"
+        )
