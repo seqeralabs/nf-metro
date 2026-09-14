@@ -243,6 +243,14 @@ gallery:
       "Dense long-read variant-calling pipeline (six lines, nine sections): exercises
       inter-section routing around non-connecting section boxes, cross-row feeds via the inter-row
       gap, same-line bundle coincidence, and a same-colour crossover bridge."
+  - id: rnaseq_metro
+    source_dir: examples
+    category: Realistic Pipelines
+    description:
+      "The real nf-core/rnaseq map (from the pipeline's own `manifest.diagram` PR),
+      covering five aligner/quantification routes, a `diamond_style: symmetric`
+      fork-join fan into STAR/Bowtie2/HISAT2, off-track FASTQ input and HTML report
+      termini, and a folded post-processing section."
   - id: sarek_metro
     source_dir: examples
     category: Realistic Pipelines
@@ -2363,12 +2371,12 @@ gallery:
       upstream to its free source feeder, so both lines descend straight into their
       landing lanes with no crossing (issue #1986)."
 pipelines:
-  - id: rnaseq_auto
+  - id: rnaseq_metro
     title: nf-core/rnaseq
     repo_url: https://github.com/nf-core/rnaseq
     description:
       RNA-seq analysis with multiple aligner and quantification routes (STAR/RSEM,
-      STAR/Salmon, HISAT2, Salmon pseudo-alignment, Kallisto).
+      STAR/Salmon, Bowtie2/Salmon, HISAT2, Salmon pseudo-alignment, Kallisto).
   - id: sarek_metro
     title: nf-core/sarek
     repo_url: https://github.com/nf-core/sarek
