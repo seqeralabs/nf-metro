@@ -193,6 +193,19 @@ PHASE_FIELD_REGISTRY: dict[str, PhaseFieldSpec] = {
             "consumer carries its own always-on guard on this field"
         ),
     ),
+    "_carrier_clearance_shifted": PhaseFieldSpec(
+        name="_carrier_clearance_shifted",
+        writer_stage="4.8",
+        reader_stages=("6.16",),
+        enforcement=FieldEnforcement.FALLBACK,
+        why=(
+            "section ids Stage 4.8a dropped to open a side-entered vertical "
+            "consumer's entry clearance, reassigned in full each pass (empty "
+            "when nothing shifted); Stage 6.16 unions them into its top-refit "
+            "set so their box tops hug the dropped content, reading the empty "
+            "default as a no-op"
+        ),
+    ),
     "_struct_height_below_top": PhaseFieldSpec(
         name="_struct_height_below_top",
         writer_stage="6.15a",

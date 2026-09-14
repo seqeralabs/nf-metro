@@ -684,6 +684,10 @@ class MetroGraph:
     _partial_trunk_descents: dict[str, PartialTrunkDescent] = field(
         default_factory=dict, repr=False
     )
+    # Sections whose content Stage 4.8a dropped to reserve a side-entered
+    # vertical consumer's entry clearance.  Their box top stayed put while the
+    # content moved, so Stage 6.16 folds them into its top-refit set.
+    _carrier_clearance_shifted: set[str] = field(default_factory=set, repr=False)
     # Precondition flag for the off-track reanchor: set True right after the
     # Stage 6.4 grid snap so on-track consumer Ys are final.  The reanchor
     # (``_reanchor_off_track_to_consumer``) refuses to run while False,

@@ -9,11 +9,13 @@ from typing import NamedTuple
 from nf_metro.layout.constants import (
     FONT_HEIGHT,
     LABEL_OFFSET,
+    MIN_PORT_STATION_GAP,
     PERP_PORT_EDGE_INSET,
     SAME_COORD_TOLERANCE,
     graph_offset_step,
 )
 from nf_metro.layout.geometry import (
+    AxisFrame,
     lanes_run_along_x,
     lanes_run_along_y,
     perpendicular_port_sides,
@@ -29,14 +31,16 @@ from nf_metro.layout.phases._common import (
     _row_through_and_carrier_lines,
     _section_bundle_lines,
     _section_trunk_y,
+    flow_exit_carrier_anchor,
     iter_stacked_rows_in_rowspan_band,
 )
 from nf_metro.layout.phases.bbox import level_group_anchor_edges
-from nf_metro.layout.phases.ports import _set_port_y
+from nf_metro.layout.phases.ports import _internal_station_ys, _set_port_y
 from nf_metro.layout.phases.single_section import (
     _multiline_label_padding,
     _terminus_y_overhang,
 )
+from nf_metro.layout.route_topology import divergence_junction_sources
 from nf_metro.parser.model import (
     MetroGraph,
     PartialTrunkDescent,
@@ -1004,6 +1008,106 @@ def _align_row_trunk_ys(graph: MetroGraph) -> None:
                         _set_port_y(graph, pid, sec_target)
 
     graph._partial_trunk_descents = descents
+
+
+def _perp_entered_consumer(
+    graph: MetroGraph, exit_pid: str, junction_ids: set[str]
+) -> Section | None:
+    """The vertical (TB/BT) section *exit_pid* feeds through a perpendicular
+    entry port, directly or through fan-out junctions; ``None`` if none.
+
+    Follows the edges out of the exit, hopping junctions, and returns the first
+    LEFT/RIGHT entry port's section whose flow runs down the X-lane axis.
+    """
+    seen: set[str] = set()
+    frontier = [edge.target for edge in graph.edges_from(exit_pid)]
+    while frontier:
+        nid = frontier.pop()
+        if nid in seen:
+            continue
+        seen.add(nid)
+        if nid in junction_ids:
+            frontier.extend(edge.target for edge in graph.edges_from(nid))
+            continue
+        port = graph.ports.get(nid)
+        if (
+            port is None
+            or not port.is_entry
+            or port.side not in (PortSide.LEFT, PortSide.RIGHT)
+        ):
+            continue
+        section = graph.sections.get(port.section_id)
+        if section is not None and lanes_run_along_x(section.direction):
+            return section
+    return None
+
+
+def _reserve_side_entry_carrier_clearance(graph: MetroGraph, y_spacing: float) -> None:
+    """Drop a side-entered vertical consumer clear of its feeder's carrier row.
+
+    A vertical (TB/BT) section entered through a LEFT/RIGHT port takes the
+    carrier trunk in horizontally at the port, then turns along its flow into
+    the first internal station, which must stay ``MIN_PORT_STATION_GAP`` past
+    the port for the turn to form.  ``_adjust_tb_entry_shifts`` reserves that gap
+    in the section's own frame, but :func:`_align_row_trunk_ys` can pull the
+    feeding carrier down onto the first station's row; the entry clamp then lifts
+    the shared exit/entry port off the carrier into a diagonal.
+
+    When the feeding exit anchors to a carrier row
+    (:func:`flow_exit_carrier_anchor`, the same predicate the exit-on-carrier
+    guard checks) and the first internal station sits within that gap of it,
+    shift the consumer's content whole grid steps along the flow to open the gap,
+    so the entry clamp early-returns and the port rides the carrier.
+
+    Records the shifted sections on ``graph`` so Stage 6.16 refits their tops:
+    the content drops but the box top does not, and the entry-port re-snap refit
+    that would hug it only fires for sections whose port moved.  A section here
+    holds its port on the carrier, so it needs flagging into that refit set
+    directly.
+    """
+    junction_ids = graph.junction_ids
+    divergence_sources = divergence_junction_sources(graph)
+    shifted: set[str] = set()
+    for pid, port in graph.ports.items():
+        if port.is_entry or port.side not in (PortSide.LEFT, PortSide.RIGHT):
+            continue
+        section = graph.sections.get(port.section_id)
+        if section is None:
+            continue
+        anchor = flow_exit_carrier_anchor(
+            graph, pid, section, junction_ids, divergence_sources=divergence_sources
+        )
+        if anchor is None:
+            continue
+        carrier_y, _ = anchor
+        consumer = _perp_entered_consumer(graph, pid, junction_ids)
+        # A fold consumer spans several rows and takes each feeder on its own
+        # row, so its first station never shares a single carrier row -- leave
+        # its row-spanning geometry to the fold path.
+        if consumer is None or consumer.grid_row_span != 1 or consumer.id in shifted:
+            continue
+        internal_ys = _internal_station_ys(graph, consumer)
+        if not internal_ys:
+            continue
+        flow = AxisFrame.flow_sign(consumer.direction)
+        first_y = min(internal_ys) if flow > 0 else max(internal_ys)
+        clearance = (first_y - carrier_y) * flow
+        if clearance >= MIN_PORT_STATION_GAP - SAME_COORD_TOLERANCE:
+            continue
+        steps = math.ceil((MIN_PORT_STATION_GAP - clearance) / y_spacing)
+        delta = steps * y_spacing * flow
+        port_ids = consumer.port_ids
+        for sid in consumer.station_ids:
+            if sid in port_ids:
+                continue
+            st = graph.stations.get(sid)
+            if st is not None and not st.is_port:
+                st.y += delta
+        consumer.bbox_h += abs(delta)
+        if delta < 0:
+            consumer.bbox_y += delta
+        shifted.add(consumer.id)
+    graph._carrier_clearance_shifted = shifted
 
 
 def _perp_port_lead_edge_reserve(
