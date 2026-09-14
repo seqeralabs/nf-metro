@@ -154,6 +154,7 @@ def assign_tracks(
                     continuation_predecessors=continuation_predecessors,
                     line_base=line_base,
                     terminal_nodes=terminal_nodes,
+                    exit_reaching=exit_reaching,
                 )
                 layer_occupancy[layer_idx][nodes[0]] = tracks[nodes[0]]
             else:
@@ -336,6 +337,7 @@ def _place_single_node(
     continuation_predecessors: dict[str, str] | None = None,
     line_base: dict[str, float] | None = None,
     terminal_nodes: frozenset[str] = frozenset(),
+    exit_reaching: frozenset[str] = frozenset(),
 ) -> float:
     """Place a single node, choosing between line base track and predecessor proximity.
 
@@ -470,6 +472,33 @@ def _place_single_node(
             median = _median_pred_track(preds, tracks)
             if median is not None:
                 return median
+
+        # Dead-end output tail at a through-station: this node carries a line
+        # that leaves the section (so a same-line exit route runs along its
+        # lane) yet its own forward path sinks only into off-track outputs, and
+        # a predecessor continues to an exit.  Inheriting that predecessor's
+        # trunk (below) would leave the exit route running flat across this
+        # station's marker, reading as if the tail feeds downstream.  Peel it one
+        # lane below the trunk instead -- its off-track leaf follows via its
+        # producer anchor -- stepping further down while that lane is taken at
+        # this layer.  A terminal tail (carrying only lines that never leave the
+        # section) has no such through-route and keeps the section's own trunk.
+        if (
+            node not in exit_reaching
+            and node not in terminal_nodes
+            and any(p in exit_reaching for p in preds)
+            and _leads_only_to_off_track_output(node, G, graph)
+        ):
+            trunk = next(
+                (tracks[p] for p in preds if p in exit_reaching and p in tracks),
+                pred_avg,
+            )
+            peel = trunk + line_gap
+            while layer_occupancy is not None and _is_track_occupied_at_layer(
+                peel, node_layer, layer_occupancy, node
+            ):
+                peel += line_gap
+            return peel
 
     # Direct single-predecessor alignment: when a node has exactly one
     # predecessor on the same line(s), snap to the predecessor's track
