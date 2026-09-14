@@ -36,6 +36,7 @@ def assign_tracks(
     continuation_predecessors: dict[str, str] | None = None,
     terminal_nodes: frozenset[str] = frozenset(),
     exit_reaching: frozenset[str] = frozenset(),
+    flow_horizontal: bool = True,
 ) -> dict[str, float]:
     """Assign each station a track using the track-per-line strategy.
 
@@ -56,6 +57,10 @@ def assign_tracks(
             the section's through-line. Supplied by the caller (the subgraph
             omits the exit-port edges), and used to keep the through-chain on
             the trunk when a short output spur shares its entry fan.
+        flow_horizontal: Whether the section flows along X (LR/RL), so its trunk
+            is a horizontal row a level exit run would cross. A dead-end output
+            tail peels below that row only then; a vertical (TB/BT) section's
+            exit leaves perpendicular and its tail continues along the flow.
 
     Returns a dict mapping station_id -> track (float).
     """
@@ -155,6 +160,7 @@ def assign_tracks(
                     line_base=line_base,
                     terminal_nodes=terminal_nodes,
                     exit_reaching=exit_reaching,
+                    flow_horizontal=flow_horizontal,
                 )
                 layer_occupancy[layer_idx][nodes[0]] = tracks[nodes[0]]
             else:
@@ -302,6 +308,27 @@ def _find_free_nearby_track(
     return None
 
 
+def _peel_below_trunk(
+    trunk: float,
+    line_gap: float,
+    layer: int,
+    layer_occupancy: dict[int, dict[str, float]] | None,
+    node: str,
+) -> float:
+    """Track one lane below *trunk*, stepping further down while occupied.
+
+    A dead-end output tail lands here so the through-route holding *trunk*
+    stays clear of its marker; the step keeps it off any station already
+    placed on the lane at this layer.
+    """
+    peel = trunk + line_gap
+    while layer_occupancy is not None and _is_track_occupied_at_layer(
+        peel, layer, layer_occupancy, node
+    ):
+        peel += line_gap
+    return peel
+
+
 def _predecessor_avg(
     node: str, G: nx.DiGraph[str], tracks: dict[str, float]
 ) -> float | None:
@@ -338,6 +365,7 @@ def _place_single_node(
     line_base: dict[str, float] | None = None,
     terminal_nodes: frozenset[str] = frozenset(),
     exit_reaching: frozenset[str] = frozenset(),
+    flow_horizontal: bool = True,
 ) -> float:
     """Place a single node, choosing between line base track and predecessor proximity.
 
@@ -397,6 +425,21 @@ def _place_single_node(
                 # A through-line diverging here continues to a section exit and
                 # keeps its own base lane, so it is excluded (terminal_nodes)
                 # and does not contend for the inner rows near the bundle.
+                #
+                # A dead-end tail that only feeds off-track outputs is not a
+                # genuine terminus: if its carrier continues to a section exit,
+                # landing it flat on the carrier's row would run that exit route
+                # across its marker.  Peel it one lane below the trunk instead
+                # (its off-track leaf follows via its producer anchor).
+                if (
+                    flow_horizontal
+                    and len(preds) == 1
+                    and preds[0] in exit_reaching
+                    and _leads_only_to_off_track_output(node, G, graph)
+                ):
+                    return _peel_below_trunk(
+                        pred_avg, line_gap, node_layer, layer_occupancy, node
+                    )
                 if (
                     len(preds) == 1
                     and node in terminal_nodes
@@ -484,7 +527,8 @@ def _place_single_node(
         # this layer.  A terminal tail (carrying only lines that never leave the
         # section) has no such through-route and keeps the section's own trunk.
         if (
-            node not in exit_reaching
+            flow_horizontal
+            and node not in exit_reaching
             and node not in terminal_nodes
             and any(p in exit_reaching for p in preds)
             and _leads_only_to_off_track_output(node, G, graph)
@@ -493,12 +537,7 @@ def _place_single_node(
                 (tracks[p] for p in preds if p in exit_reaching and p in tracks),
                 pred_avg,
             )
-            peel = trunk + line_gap
-            while layer_occupancy is not None and _is_track_occupied_at_layer(
-                peel, node_layer, layer_occupancy, node
-            ):
-                peel += line_gap
-            return peel
+            return _peel_below_trunk(trunk, line_gap, node_layer, layer_occupancy, node)
 
     # Direct single-predecessor alignment: when a node has exactly one
     # predecessor on the same line(s), snap to the predecessor's track
