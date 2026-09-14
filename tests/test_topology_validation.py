@@ -1478,3 +1478,44 @@ class TestSymmetricFanEntryOnCentroid:
             f"entry port y={port.y:.1f} should meet the incoming line "
             f"y={incoming_y:.1f} straight, no boundary dogleg"
         )
+
+
+# --- #2001: an off-trunk carrier's dead-end tail stays flat, not peeled ---
+
+RNASEQ_SECTIONS_MANUAL_FILE = EXAMPLES_DIR / "rnaseq_sections_manual.mmd"
+
+
+class TestOffTrunkCarrierTailStaysFlat:
+    """A dead-end tail is peeled below only when its carrier is on the trunk.
+
+    In ``rnaseq_sections`` (and its manual-grid twin) ``genome_align``'s
+    ``salmon_quant`` is a below-trunk fork whose ``star_salmon`` continuation
+    rises back to the trunk, so no same-row exit route runs flat past
+    ``multiqc_bowtie2``. Peeling the tail there would drop it into the
+    ``hisat2`` relay chain and cross the ``bowtie2_salmon`` and ``hisat2``
+    routes; it must stay flat on its carrier's row.
+    """
+
+    @pytest.mark.parametrize(
+        "path", [RNASEQ_FILE, RNASEQ_SECTIONS_MANUAL_FILE], ids=lambda p: p.stem
+    )
+    def test_offtrunk_carrier_tail_not_peeled(self, path):
+        graph = _load_and_layout(path)
+        carrier = graph.stations["salmon_quant"]
+        tail = graph.stations["multiqc_bowtie2"]
+        assert abs(tail.y - carrier.y) < 1.0, (
+            f"multiqc_bowtie2 (y={tail.y:.1f}) should stay flat on its "
+            f"off-trunk carrier salmon_quant (y={carrier.y:.1f}), not peel "
+            f"down into the hisat2 relay chain"
+        )
+
+    def test_no_bowtie2_hisat2_route_crossing(self):
+        graph = _load_and_layout(RNASEQ_FILE)
+        crossings = check_route_segment_crossings(graph)
+        pair = {"bowtie2_salmon", "hisat2"}
+        offenders = [
+            v.message
+            for v in crossings
+            if {v.context["line_a"], v.context["line_b"]} == pair
+        ]
+        assert not offenders, "\n".join(offenders)

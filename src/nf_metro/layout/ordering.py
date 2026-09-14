@@ -329,6 +329,52 @@ def _peel_below_trunk(
     return peel
 
 
+def _primary_line(graph: MetroGraph, node: str) -> str | None:
+    """The node's highest-priority (first-declared) line, or None."""
+    node_lines = set(graph.station_lines(node))
+    for lid in graph.lines:
+        if lid in node_lines:
+            return lid
+    return None
+
+
+def _carrier_exit_stays_on_row(
+    carrier: str,
+    G: nx.DiGraph[str],
+    graph: MetroGraph,
+    exit_reaching: frozenset[str],
+    line_base: dict[str, float] | None,
+) -> bool:
+    """Whether *carrier*'s exit-bound continuation stays on the carrier's row.
+
+    A dead-end tail is peeled off the carrier's row only when a same-row exit
+    route would otherwise run flat across its marker.  That route exists only
+    when the carrier's continuation toward the exit rides the carrier's own row:
+    if the exit-reaching successor sits on a different line base (the carrier is
+    a below-trunk fork whose continuation rises back to the trunk), the exit
+    route turns off the row before the tail's column and never crosses it, so the
+    tail is already clear where it is.  A carrier whose exit leaves through the
+    (subgraph-stripped) exit port has no in-section exit successor and rides its
+    own row straight out, so it stays on-row.  Compared via line base rather
+    than placed track so the answer does not depend on placement order.
+    """
+    if line_base is None:
+        return True
+    carrier_base = line_base.get(_primary_line(graph, carrier) or "")
+    if carrier_base is None:
+        return True
+    for succ in G.successors(carrier):
+        if succ not in exit_reaching:
+            continue
+        succ_base = line_base.get(_primary_line(graph, succ) or "")
+        if (
+            succ_base is not None
+            and abs(carrier_base - succ_base) > COORD_TOLERANCE_FINE
+        ):
+            return False
+    return True
+
+
 def _predecessor_avg(
     node: str, G: nx.DiGraph[str], tracks: dict[str, float]
 ) -> float | None:
@@ -427,14 +473,17 @@ def _place_single_node(
                 # and does not contend for the inner rows near the bundle.
                 #
                 # A dead-end tail that only feeds off-track outputs is not a
-                # genuine terminus: if its carrier continues to a section exit,
-                # landing it flat on the carrier's row would run that exit route
-                # across its marker.
+                # genuine terminus: if its carrier continues to a section exit
+                # along the carrier's own row, landing it flat there would run
+                # that exit route across its marker.
                 if (
                     flow_horizontal
                     and len(preds) == 1
                     and preds[0] in exit_reaching
                     and _leads_only_to_off_track_output(node, G, graph)
+                    and _carrier_exit_stays_on_row(
+                        preds[0], G, graph, exit_reaching, line_base
+                    )
                 ):
                     return _peel_below_trunk(
                         pred_avg, line_gap, node_layer, layer_occupancy, node
@@ -523,17 +572,16 @@ def _place_single_node(
         # marker, reading as if the tail feeds downstream.  A terminal tail
         # (carrying only lines that never leave the section) has no such
         # through-route and keeps the section's own trunk.
+        carrier = next((p for p in preds if p in exit_reaching), None)
         if (
             flow_horizontal
             and node not in exit_reaching
             and node not in terminal_nodes
-            and any(p in exit_reaching for p in preds)
+            and carrier is not None
             and _leads_only_to_off_track_output(node, G, graph)
+            and _carrier_exit_stays_on_row(carrier, G, graph, exit_reaching, line_base)
         ):
-            trunk = next(
-                (tracks[p] for p in preds if p in exit_reaching and p in tracks),
-                pred_avg,
-            )
+            trunk = tracks.get(carrier, pred_avg)
             return _peel_below_trunk(trunk, line_gap, node_layer, layer_occupancy, node)
 
     # Direct single-predecessor alignment: when a node has exactly one
