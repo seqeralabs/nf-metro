@@ -99,6 +99,7 @@ The fixtures below are tagged with the layout class(es) they primarily exercise.
 | `reversed_section_junction_reseat.mmd`       | reversed (RL) section entered near-vertically through a RIGHT port feeds a downstream reversed section whose exit-port divergence junction re-seats onto the reversed lane order (issue #1816)                                        |
 | `row_trunk_partial_through_line.mmd`         | packed row whose last member is entered by one line of the row bundle, that line also fanning to another grid row; the member's trunk stays on the row's trunk Y with its off-track output one lane above (issue #1844)               |
 | `packed_cell_cellmate_bypass_no_handoff.mmd` | packed cell whose far member and a following section are both entered over a cell-mate, with no sibling hop able to carry a shared descent, so no hand-over is taken (issue #1844)                                                    |
+| `tail_peel_at_through_station.mmd`           | a through-station whose successors are the section exit port and a dead-end tail sinking into an off-track output; the tail peels one lane below the trunk so the exit route runs clear of its marker (issue #2001)                   |
 
 ---
 

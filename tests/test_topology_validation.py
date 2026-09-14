@@ -1329,3 +1329,193 @@ class TestRowTrunkPartialThroughLine:
         assert not _is_fan_branch_leaf(
             graph, graph.sections["novel_transcripts"], full_carrier=False
         )
+
+
+# --- #2001: a dead-end off-track tail peels below the exit trunk ---
+
+TAIL_PEEL_FILE = TOPOLOGIES_DIR / "tail_peel_at_through_station.mmd"
+
+
+def _point_to_segment_distance(p, a, b) -> float:
+    """Shortest distance from point *p* to the segment *a*-*b*."""
+    px, py = p
+    ax, ay = a
+    bx, by = b
+    dx, dy = bx - ax, by - ay
+    seg_len_sq = dx * dx + dy * dy
+    if seg_len_sq == 0:
+        return ((px - ax) ** 2 + (py - ay) ** 2) ** 0.5
+    t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / seg_len_sq))
+    cx, cy = ax + t * dx, ay + t * dy
+    return ((px - cx) ** 2 + (py - cy) ** 2) ** 0.5
+
+
+class TestTailPeelAtThroughStation:
+    """A through-station's dead-end output tail peels off the exit trunk (#2001).
+
+    ``dedup`` fans to the section's exit port (continuing to ``quant``) and to
+    ``genomecov``, whose only path sinks into the off-track ``cov_out`` file.
+    ``genomecov`` reaches no exit, so it must not inherit ``dedup``'s trunk row;
+    otherwise the ``dedup`` -> exit through-route runs flat across the
+    ``genomecov`` marker and the map reads as if the tail feeds ``quant``.
+    """
+
+    @pytest.fixture
+    def graph(self):
+        return _load_and_layout(TAIL_PEEL_FILE)
+
+    def test_dead_end_tail_peels_below_the_trunk(self, graph):
+        dedup = graph.stations["dedup"]
+        genomecov = graph.stations["genomecov"]
+        cov_out = graph.stations["cov_out"]
+        assert genomecov.y > dedup.y + 1.0, (
+            f"genomecov (y={genomecov.y:.1f}) should peel below dedup "
+            f"(y={dedup.y:.1f}), not inherit the exit trunk"
+        )
+        assert cov_out.y > dedup.y + 1.0, (
+            f"cov_out (y={cov_out.y:.1f}) should ride below the trunk with its "
+            f"producer, not be lifted above it (dedup y={dedup.y:.1f})"
+        )
+        lane = _lane_step(graph, "align")
+        assert abs(cov_out.y - genomecov.y) <= lane + 1.0, (
+            f"cov_out (y={cov_out.y:.1f}) should sit with genomecov "
+            f"(y={genomecov.y:.1f}), no re-lift S-bend"
+        )
+
+    def test_exit_route_runs_clear_of_the_tail_marker(self, graph):
+        genomecov = graph.stations["genomecov"]
+        exit_ports = set(graph.sections["align"].exit_ports)
+        routes = _compute_routes(graph)
+        through = [
+            r
+            for r in routes
+            if r.edge.source == "dedup" and r.edge.target in exit_ports
+        ]
+        assert through, "expected a routed dedup -> exit-port through-run"
+        for r in through:
+            for a, b in zip(r.points, r.points[1:]):
+                dist = _point_to_segment_distance((genomecov.x, genomecov.y), a, b)
+                assert dist > 6.0, (
+                    f"through-route {r.edge.source}->{r.edge.target} passes "
+                    f"{dist:.1f}px from the genomecov marker "
+                    f"({genomecov.x:.1f},{genomecov.y:.1f})"
+                )
+
+
+# --- #2001: a divergent-line dead-end tail also peels below the exit trunk ---
+
+ROWMATE_TOP_ALIGN_FILE = TOPOLOGIES_DIR / "rowmate_tb_side_entry_top_align.mmd"
+
+
+class TestDivergentTailPeelBelowExitTrunk:
+    """A dead-end tail carrying fewer lines than its carrier peels below (#2001).
+
+    In ``genome_align`` the aligner-QC dead end ``summarized_exp_ga ->
+    multiqc_bowtie2 -> report_bowtie2`` rides the ``bowtie2_salmon`` line, a
+    strict subset of its carrier's bundle, while the exit lines leave from
+    ``summarized_exp_ga``. The tail must hang below the exit lane rather than
+    stay level on it, so the exit run does not cross the MultiQC marker.
+    """
+
+    @pytest.fixture
+    def graph(self):
+        return _load_and_layout(ROWMATE_TOP_ALIGN_FILE)
+
+    def test_multiqc_dead_end_hangs_below_the_exit_lane(self, graph):
+        trunk = graph.stations["summarized_exp_ga"]
+        multiqc = graph.stations["multiqc_bowtie2"]
+        report = graph.stations["report_bowtie2"]
+        assert multiqc.y > trunk.y + 1.0, (
+            f"multiqc_bowtie2 (y={multiqc.y:.1f}) should hang below the exit "
+            f"lane (summarized_exp_ga y={trunk.y:.1f}), not stay level on it"
+        )
+        assert report.y > trunk.y + 1.0, (
+            f"report_bowtie2 (y={report.y:.1f}) should follow multiqc_bowtie2 "
+            f"below the exit lane (summarized_exp_ga y={trunk.y:.1f})"
+        )
+
+
+class TestSymmetricFanEntryOnCentroid:
+    """A junction-fed symmetric multi-arm fork seats its entry on the fan
+    centroid (#2001).
+
+    ``genome_align`` is entered through a fan junction and forks
+    ``star``/``bowtie2_align``/``hisat2_align`` with no single through-trunk
+    (STAR and HISAT2 both reach an exit). Under ``diamond_style: symmetric`` the
+    entry port must sit at the centroid of the forked arms, so the inter-section
+    line crosses straight into it and the fan spreads symmetrically, rather than
+    pinning to the first arm and doglegging at the boundary.
+    """
+
+    @pytest.mark.parametrize("center_ports", [False, True])
+    def test_entry_seats_on_fan_centroid_for_straight_crossing(self, center_ports):
+        text = ROWMATE_TOP_ALIGN_FILE.read_text()
+        graph = parse_metro_mermaid(text)
+        graph.source_dir = str(ROWMATE_TOP_ALIGN_FILE.parent)
+        graph.center_ports = center_ports
+        compute_layout(graph)
+
+        pid = "genome_align__entry_left_2"
+        port = graph.stations[pid]
+        arm_ys = {
+            e.target: graph.station_for_edge_target(e).y
+            for e in graph.edges_from(pid)
+            if not graph.station_for_edge_target(e).is_port
+            and graph.station_for_edge_target(e).section_id == "genome_align"
+        }
+        assert len(arm_ys) >= 2, "expected a multi-arm entry fan to exercise this"
+        centroid = sum(arm_ys.values()) / len(arm_ys)
+
+        incoming = {graph.stations[e.source].y for e in graph.edges_to(pid)}
+        assert len(incoming) == 1, "entry port fed from a single junction Y"
+        incoming_y = incoming.pop()
+
+        assert abs(port.y - centroid) < 1.0, (
+            f"entry port y={port.y:.1f} should sit on the fan centroid "
+            f"{centroid:.1f} (arms {arm_ys}), not pin to one arm"
+        )
+        assert abs(port.y - incoming_y) < 1.0, (
+            f"entry port y={port.y:.1f} should meet the incoming line "
+            f"y={incoming_y:.1f} straight, no boundary dogleg"
+        )
+
+
+# --- #2001: an off-trunk carrier's dead-end tail stays flat, not peeled ---
+
+RNASEQ_SECTIONS_MANUAL_FILE = EXAMPLES_DIR / "rnaseq_sections_manual.mmd"
+
+
+class TestOffTrunkCarrierTailStaysFlat:
+    """A dead-end tail is peeled below only when its carrier is on the trunk.
+
+    In ``rnaseq_sections`` (and its manual-grid twin) ``genome_align``'s
+    ``salmon_quant`` is a below-trunk fork whose ``star_salmon`` continuation
+    rises back to the trunk, so no same-row exit route runs flat past
+    ``multiqc_bowtie2``. Peeling the tail there would drop it into the
+    ``hisat2`` relay chain and cross the ``bowtie2_salmon`` and ``hisat2``
+    routes; it must stay flat on its carrier's row.
+    """
+
+    @pytest.mark.parametrize(
+        "path", [RNASEQ_FILE, RNASEQ_SECTIONS_MANUAL_FILE], ids=lambda p: p.stem
+    )
+    def test_offtrunk_carrier_tail_not_peeled(self, path):
+        graph = _load_and_layout(path)
+        carrier = graph.stations["salmon_quant"]
+        tail = graph.stations["multiqc_bowtie2"]
+        assert abs(tail.y - carrier.y) < 1.0, (
+            f"multiqc_bowtie2 (y={tail.y:.1f}) should stay flat on its "
+            f"off-trunk carrier salmon_quant (y={carrier.y:.1f}), not peel "
+            f"down into the hisat2 relay chain"
+        )
+
+    def test_no_bowtie2_hisat2_route_crossing(self):
+        graph = _load_and_layout(RNASEQ_FILE)
+        crossings = check_route_segment_crossings(graph)
+        pair = {"bowtie2_salmon", "hisat2"}
+        offenders = [
+            v.message
+            for v in crossings
+            if {v.context["line_a"], v.context["line_b"]} == pair
+        ]
+        assert not offenders, "\n".join(offenders)
