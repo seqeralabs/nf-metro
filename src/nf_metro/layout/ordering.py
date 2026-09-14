@@ -809,7 +809,9 @@ def _leads_only_to_off_track_output(
 
 
 def _shared_trunk_pred(
-    nodes: list[str], G: nx.DiGraph[str], exit_reaching: frozenset[str]
+    nodes: list[str],
+    preds_by_node: dict[str, list[str]],
+    exit_reaching: frozenset[str],
 ) -> str | None:
     """Return the fork's sole trunk-riding predecessor, if it has one.
 
@@ -817,11 +819,11 @@ def _shared_trunk_pred(
     single predecessor and that predecessor reaches a section exit -- so it
     carries the trunk into the fork.  Returns that predecessor, or ``None``
     when the members have differing or multiple predecessors, or the shared
-    one does not reach an exit.
+    one does not reach an exit.  Predecessor membership is compared as a set, so
+    ordering in *preds_by_node* does not matter.
     """
-    pred_sets = [set(G.predecessors(node)) for node in nodes]
-    first = pred_sets[0]
-    if len(first) != 1 or any(ps != first for ps in pred_sets[1:]):
+    first = set(preds_by_node[nodes[0]])
+    if len(first) != 1 or any(set(preds_by_node[n]) != first for n in nodes[1:]):
         return None
     pred = next(iter(first))
     return pred if pred in exit_reaching else None
@@ -923,9 +925,11 @@ def _place_fan_out(
     # Predecessor-snapping: when each node has exactly one predecessor
     # at a distinct track, snap to the predecessor's track so single-line
     # connections stay horizontal instead of slanting.
+    preds_by_node = {node: list(G.predecessors(node)) for node in nodes}
+
     pred_snap: dict[str, float] = {}
     for node in nodes:
-        preds = list(G.predecessors(node))
+        preds = preds_by_node[node]
         if len(preds) == 1 and preds[0] in tracks:
             pred_snap[node] = tracks[preds[0]]
     if len(pred_snap) == n and len(set(pred_snap.values())) == n:
@@ -1024,7 +1028,7 @@ def _place_fan_out(
     # than opening a fresh lane below.  Its final off-trunk position is settled
     # by the off-track lift.
     if graph is not None and pred_avgs:
-        trunk_pred = _shared_trunk_pred(nodes, G, exit_reaching)
+        trunk_pred = _shared_trunk_pred(nodes, preds_by_node, exit_reaching)
         if trunk_pred is not None and trunk_pred in tracks:
             split = split_output_spur_fan(
                 nodes, exit_reaching, G, graph, include_leaf_outputs=True

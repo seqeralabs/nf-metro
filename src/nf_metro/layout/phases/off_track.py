@@ -1276,7 +1276,7 @@ def _off_track_output_below(graph: MetroGraph) -> set[str]:
     # A trunk-fork output has no producer-side reason to drop on its own; it is
     # dropped only to match a same-row peer, so it is deferred to a second pass
     # once the peers that drop unconditionally are known.
-    trunk_fork_outputs: list[tuple[str, str]] = []
+    trunk_fork_outputs: list[tuple[str, int, str]] = []
     for off_id, anchor_id in anchor_of.items():
         off_st = graph.stations.get(off_id)
         anchor_st = graph.stations.get(anchor_id)
@@ -1300,7 +1300,11 @@ def _off_track_output_below(graph: MetroGraph) -> set[str]:
         elif _is_trunk_fork_output(
             graph, anchor_id, off_id, cross, fan_sign, baseline_signed
         ):
-            trunk_fork_outputs.append((off_id, off_st.section_id))
+            off_section = graph.sections.get(off_st.section_id)
+            if off_section is not None:
+                trunk_fork_outputs.append(
+                    (off_id, off_section.grid_row, off_section.id)
+                )
 
     # A trunk-fork output drops only where a *different* section in its grid row
     # already peels an output below the trunk: the row has set that convention
@@ -1316,9 +1320,8 @@ def _off_track_output_below(graph: MetroGraph) -> set[str]:
             rows_with_below.setdefault(peer_section.grid_row, set()).add(
                 peer_section.id
             )
-    for off_id, section_id in trunk_fork_outputs:
-        row = graph.sections[section_id].grid_row
-        if rows_with_below.get(row, set()) - {section_id}:
+    for off_id, row, section_id in trunk_fork_outputs:
+        if any(peer != section_id for peer in rows_with_below.get(row, ())):
             below.add(off_id)
     return below
 
@@ -1434,7 +1437,10 @@ def _is_trunk_fork_output(
         offset = fan_sign * getattr(sib, cross) - baseline_signed
         if offset > _DOWNWARD_BRANCH_SLOP:
             return False
-        if abs(offset) > _DOWNWARD_BRANCH_SLOP:
+        # The fan-side veto above must see every sibling, so the loop cannot
+        # return on the first continuation; the exit-reaching DFS below, though,
+        # only needs to confirm one, so skip it once one is known.
+        if abs(offset) > _DOWNWARD_BRANCH_SLOP or has_continuation:
             continue
         if set(graph.station_lines(edge.target)) != producer_lines:
             continue
