@@ -5,6 +5,53 @@ do; do not read the worker references to "check their work" - that is what the
 independent gates are for, and reading them puts worker-facing bytes in the
 context that is re-read every turn.
 
+## Step 0: Select an issue (only when none was given)
+
+Run this before Step 1 whenever the user did not name an issue - "fix
+something", "find the most impactful thing you can do", "pick an issue and fix
+it" - or asked for a session's worth of autonomous work with no specific
+target. Skip it entirely when an issue number, URL, or unambiguous description
+was given; go straight to Step 1.
+
+Assign the same LIGHT `fix-issue-investigator` used in Step 1, briefed to
+gather facts, not to make the final call:
+
+```bash
+gh issue list --repo seqeralabs/nf-metro --state open \
+  --json number,title,labels,comments,createdAt --limit 200
+gh pr list --repo seqeralabs/nf-metro --state open --draft \
+  --json number,title,headRefName,body
+git worktree list
+```
+
+From that:
+
+1. **Build the exclusion set.** An issue already has ongoing work if its
+   number appears in an open (including draft) PR's `headRefName` (the
+   `fix/<N>-*` / `codex/<N>-*` branch-naming convention) or body (`Fixes #N`,
+   `Closes #N`, `Resolves #N`), or in a local worktree's branch name from
+   `git worktree list`. Exclude every match and say why for each.
+2. **Rank what's left** by simple, stated heuristics: a `bug` label over an
+   `enhancement`, a clear repro or render attached over a vague report,
+   comment or reaction volume, and any explicit maintainer priority signal in
+   the thread. Do not invent a scoring formula; state the reasoning per
+   candidate in one line.
+3. **Return a short list** (3-5 candidates) with the one-line rationale each,
+   plus the exclusion list. This is a survey, not a verdict: the investigator
+   proposes, it does not pick.
+
+**This signal is local-only and not authoritative.** `git worktree list` only
+sees worktrees on this machine, and a peer session on another machine or
+another agent can already be mid-fix on an issue with no visible PR or
+worktree yet. State that caveat alongside the shortlist rather than treating
+an empty exclusion set as proof nothing is in flight.
+
+Present the shortlist to the user and wait for them to confirm the top
+candidate or pick a different one, exactly as Step 1 waits for confirmation -
+unless autonomous work is pre-authorised, in which case take the top-ranked
+candidate, state which one and why in one line, and proceed. Once an issue
+number is settled, continue at Step 1 as normal.
+
 ## Step 1: Understand the Issue
 
 Assign a LIGHT read-only investigator to run
