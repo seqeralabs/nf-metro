@@ -1433,3 +1433,48 @@ class TestDivergentTailPeelBelowExitTrunk:
             f"report_bowtie2 (y={report.y:.1f}) should follow multiqc_bowtie2 "
             f"below the exit lane (summarized_exp_ga y={trunk.y:.1f})"
         )
+
+
+class TestSymmetricFanEntryOnCentroid:
+    """A junction-fed symmetric multi-arm fork seats its entry on the fan
+    centroid (#2001).
+
+    ``genome_align`` is entered through a fan junction and forks
+    ``star``/``bowtie2_align``/``hisat2_align`` with no single through-trunk
+    (STAR and HISAT2 both reach an exit). Under ``diamond_style: symmetric`` the
+    entry port must sit at the centroid of the forked arms, so the inter-section
+    line crosses straight into it and the fan spreads symmetrically, rather than
+    pinning to the first arm and doglegging at the boundary.
+    """
+
+    @pytest.mark.parametrize("center_ports", [False, True])
+    def test_entry_seats_on_fan_centroid_for_straight_crossing(self, center_ports):
+        text = ROWMATE_TOP_ALIGN_FILE.read_text()
+        graph = parse_metro_mermaid(text)
+        graph.source_dir = str(ROWMATE_TOP_ALIGN_FILE.parent)
+        graph.center_ports = center_ports
+        compute_layout(graph)
+
+        pid = "genome_align__entry_left_2"
+        port = graph.stations[pid]
+        arm_ys = {
+            e.target: graph.station_for_edge_target(e).y
+            for e in graph.edges_from(pid)
+            if not graph.station_for_edge_target(e).is_port
+            and graph.station_for_edge_target(e).section_id == "genome_align"
+        }
+        assert len(arm_ys) >= 2, "expected a multi-arm entry fan to exercise this"
+        centroid = sum(arm_ys.values()) / len(arm_ys)
+
+        incoming = {graph.stations[e.source].y for e in graph.edges_to(pid)}
+        assert len(incoming) == 1, "entry port fed from a single junction Y"
+        incoming_y = incoming.pop()
+
+        assert abs(port.y - centroid) < 1.0, (
+            f"entry port y={port.y:.1f} should sit on the fan centroid "
+            f"{centroid:.1f} (arms {arm_ys}), not pin to one arm"
+        )
+        assert abs(port.y - incoming_y) < 1.0, (
+            f"entry port y={port.y:.1f} should meet the incoming line "
+            f"y={incoming_y:.1f} straight, no boundary dogleg"
+        )
