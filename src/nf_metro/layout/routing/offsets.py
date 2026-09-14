@@ -729,11 +729,21 @@ def _reindex_local_priority_gaps(ctx: _OffsetCtx) -> dict[str, dict[str, int]]:
     return section_local
 
 
-def _section_line_feeders(ctx: _OffsetCtx, section: Section) -> dict[str, str]:
-    """Map each entering line to the upstream section that feeds it."""
+def _section_line_feeders(
+    ctx: _OffsetCtx, section: Section, sides: Container[PortSide] | None = None
+) -> dict[str, str]:
+    """Map each entering line to the upstream section that feeds it.
+
+    *sides* restricts the scan to entry ports on those boundary sides; ``None``
+    considers every entry port.
+    """
     graph = ctx.graph
     line_feeder: dict[str, str] = {}
     for pid in section.entry_ports:
+        if sides is not None:
+            port = graph.ports.get(pid)
+            if port is None or port.side not in sides:
+                continue
         for edge in graph.edges_to(pid):
             src = graph.station_for_edge_source(edge)
             feeder_sec = src.section_id
@@ -1001,6 +1011,92 @@ def _section_exit_fanout_junction(ctx: _OffsetCtx, section: Section) -> str | No
     return junction_ids[0] if len(junction_ids) == 1 else None
 
 
+def _free_perp_entry_feeder(
+    ctx: _OffsetCtx, section: Section, bundle: set[str]
+) -> str | None:
+    """The upstream feeder free to inherit *section*'s fan peel order.
+
+    *section* owns a fan-out divergence, so its bundle must reach it already
+    stacked in the order the fan peels off; a feeder delivering the same lines
+    in the opposite order across *section*'s perpendicular entry makes the two
+    descents cross in the drop.  Reslotting the feeder to match is only sound
+    when the feeder's own order is unconstrained -- otherwise the mismatch has
+    to be resolved on *section*'s side instead.  Returns the feeder section id
+    when one upstream section delivers the whole *bundle* into *section* through
+    a perpendicular entry port and is free: *section* is its only consumer and
+    it owns no divergence junction of its own.
+
+    Two scope limits are deliberate.  Only a horizontal-flow (LR/RL) feeder is
+    eligible: a vertical-flow feeder stacks its bundle along the flow axis and
+    is left to settle on its own.  And only the one direct feeder is inspected;
+    the check never recurses up a chain of feeders, so a feeder that itself has
+    an entry port is treated as constrained and left alone rather than followed
+    to discover whether its own source is free.  An indirect upstream pin can
+    therefore never be missed.
+    """
+    graph = ctx.graph
+    perp_sides = perpendicular_port_sides(section.direction)
+    line_feeder = _section_line_feeders(ctx, section, perp_sides)
+    if not bundle <= set(line_feeder):
+        return None
+    feeder_ids = {line_feeder[lid] for lid in bundle}
+    if len(feeder_ids) != 1:
+        return None
+    feeder_id = next(iter(feeder_ids))
+
+    feeder = graph.sections.get(feeder_id)
+    if feeder is None or not lanes_run_along_y(feeder.direction):
+        return None
+    if feeder.entry_ports:
+        return None
+    if _section_exit_fanout_junction(ctx, feeder) is not None:
+        return None
+    consumers = {
+        tgt.section_id
+        for pid in feeder.exit_ports
+        for edge in graph.edges_from(pid)
+        if (tgt := graph.station_for_edge_target(edge)).section_id is not None
+    }
+    if consumers != {section.id}:
+        return None
+    return feeder_id
+
+
+def _perp_entry_port_carrying(
+    graph: MetroGraph, section: Section, bundle: set[str]
+) -> str | None:
+    """The section's perpendicular entry port the whole *bundle* arrives on."""
+    perp_sides = perpendicular_port_sides(section.direction)
+    for pid in section.entry_ports:
+        port = graph.ports.get(pid)
+        if port is None or port.side not in perp_sides:
+            continue
+        if bundle <= set(graph.station_lines(pid)):
+            return pid
+    return None
+
+
+def _perp_entry_arrival_order(
+    graph: MetroGraph, port_id: str, peel_order: Sequence[str]
+) -> tuple[str, ...]:
+    """The order a free feeder must deliver *peel_order* across *port_id*.
+
+    The bundle turns once from the feeder's vertical drop into the section's
+    trunk.  That concentric corner maps the drop's cross-flow order to the
+    trunk's peel order, and the mapping flips with two independent axes: the
+    entry side the bundle arrives on (a BOTTOM arrival mirrors a TOP one) and the
+    direction the run turns out of the port (:func:`_perp_entry_run_turns_right`;
+    a leftward turn mirrors a rightward one).  The two flips compose, so the
+    feeder inherits the peel order directly on one diagonal of that pair and
+    reversed on the other.
+    """
+    port = graph.ports.get(port_id)
+    bottom_entry = port is not None and port.side is PortSide.BOTTOM
+    if bottom_entry != _perp_entry_run_turns_right(graph, port_id):
+        return tuple(reversed(peel_order))
+    return tuple(peel_order)
+
+
 def _reorder_fanout_divergence(ctx: _OffsetCtx) -> None:
     """Order a section's bundle by where its lines peel off a shared exit fan.
 
@@ -1011,6 +1107,19 @@ def _reorder_fanout_divergence(ctx: _OffsetCtx) -> None:
     assigns, so the source-section bundle is re-slotted into the same peel order
     (:func:`fanout_divergence_peel_order`) before the exit/junction ports inherit
     their offsets.
+
+    The peel order also governs how the bundle arrives across the section's
+    perpendicular entry.  The entry port turns the drop into the trunk through a
+    concentric corner, so it re-slots onto the peel order turned through that
+    corner (:func:`_perp_entry_arrival_order`), which mirrors with entry side and
+    turn direction; that nests the drop into the trunk without crossing.  A trunk
+    whose peel order matches plain priority skips its own re-slot, yet a mirrored
+    entry side turns the port against that trunk regardless, so this arrival
+    re-slot runs whenever a free upstream feeder
+    (:func:`_free_perp_entry_feeder`) delivers the bundle.  The feeder itself
+    keeps the plain peel order: it sits on the far side of the same corner, where
+    its own exit turn already reflects its section order, so a second reflection
+    would cross the bundle in the descent.
 
     Non-compact LR/RL sections only -- the divergence analog of
     :func:`_reorder_reconvergence`.
@@ -1035,10 +1144,27 @@ def _reorder_fanout_divergence(ctx: _OffsetCtx) -> None:
             determining=tuple(peel_order),
         )
         new_order = lane_order(config, ctx.line_priority)
-        if new_order is None:
-            continue
+        if new_order is not None:
+            _apply_section_line_order(ctx, sec_id, new_order)
 
-        _apply_section_line_order(ctx, sec_id, new_order)
+        feeder_id = _free_perp_entry_feeder(ctx, section, set(peel_order))
+        if feeder_id is None:
+            continue
+        port_id = _perp_entry_port_carrying(graph, section, set(peel_order))
+        if port_id is None:
+            continue
+        arrival = _perp_entry_arrival_order(graph, port_id, peel_order)
+
+        for lid, off in _deal_slots_in_order(ctx, port_id, arrival).items():
+            ctx.offsets[(port_id, lid)] = off
+
+        feeder_config = BoundaryConfig(
+            present=tuple(_section_present_line_set(ctx, feeder_id)),
+            determining=tuple(peel_order),
+        )
+        feeder_order = lane_order(feeder_config, ctx.line_priority)
+        if feeder_order is not None:
+            _apply_section_line_order(ctx, feeder_id, feeder_order)
 
 
 def _lines_holding_offset(

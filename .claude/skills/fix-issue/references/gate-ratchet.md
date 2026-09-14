@@ -42,6 +42,16 @@ exist, the phantom-arc trap) is in
 [`docs/dev/routing_gate_triage.md`](../../../../docs/dev/routing_gate_triage.md);
 for a dedicated triage campaign use the `nf-metro-gate-triage` skill.
 
+**This is not the only hand-maintained ratchet in `layout/routing/`.**
+`tests/test_direction_predicate_ratchet.py` caps the count of literal
+direction-subset checks (e.g. `direction in ("LR", "RL")`) across `layout/`,
+`parser/`, `render/` - each one duplicates an `AxisFrame` accessor
+(`layout/geometry.py`) that already expresses the same distinction. It reds on
+any new literal predicate, never on a raised ceiling; the fix is always to call
+the existing accessor, not to bump the baseline. Expect this whenever a change
+adds a new direction/orientation check anywhere in these directories, not only
+when a gate-coverage failure points at it.
+
 **`PYTHONPATH=src` is required on all three.** The prescribed env installs no
 `nf_metro`, so without it the first two raise `ModuleNotFoundError` and the third
 reports 27 subprocess errors that look like gate failures - which is exactly what

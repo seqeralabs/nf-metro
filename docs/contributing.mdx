@@ -161,11 +161,8 @@ Scroll through and confirm nothing regressed.
 # Activate the nf-metro dev environment if using micromamba
 source ~/.local/bin/mm-activate nf-metro
 
-# Render an SVG (--no-chrome-css bakes concrete colors for cairosvg)
-python -m nf_metro render examples/rnaseq_sections.mmd -o /tmp/out.svg --no-chrome-css
-
-# Convert to PNG for easier review
-python -c "import cairosvg; cairosvg.svg2png(url='/tmp/out.svg', write_to='/tmp/out.png', scale=2)"
+# Render straight to PNG for review
+python -m nf_metro render examples/rnaseq_sections.mmd -o /tmp/out.png
 open /tmp/out.png
 ```
 

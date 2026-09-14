@@ -1,0 +1,29 @@
+%%metro title: Left-entry bypass over a column-spanning intervener
+%%metro line: main | Main | #2db572
+%%metro line: block | Block | #a855f7
+%%metro grid: source | 0,0
+%%metro grid: neighbour | 2,0
+%%metro grid: spanner | 0,1,1,3
+%%metro grid: target | 3,2
+
+graph LR
+    subgraph source [Source]
+        source_step[Source step]
+    end
+
+    subgraph neighbour [Neighbour]
+        neighbour_step[Neighbour step]
+    end
+
+    subgraph spanner [Wide intervener]
+        spanner_start[Span start]
+        spanner_end[Span end]
+        spanner_start -->|block| spanner_end
+    end
+
+    subgraph target [Target]
+        %%metro entry: left | main
+        target_step[Target step]
+    end
+
+    source_step -->|main| target_step
