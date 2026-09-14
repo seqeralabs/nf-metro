@@ -1065,6 +1065,15 @@ gallery:
       section still carries part of the row's trunk, so its interior sits on the
       row's trunk Y and its hybrid-GTF output peels one lane above, rather than
       the whole trunk being recentred in the shorter box (issue #1844)."
+  - id: tail_peel_at_through_station
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "A station forks to its section's exit port and to a dead-end tail that
+      sinks into an off-track output file. The exit continuation owns the trunk
+      row and the tail (relay station and file) peels one lane below, so the
+      through-route to the exit runs clear rather than flat through the tail's
+      own marker (issue #2001)."
   - id: riboseq_fold_two_dir_entry_hintless
     source_dir: examples/topologies
     category: Serpentine Layout

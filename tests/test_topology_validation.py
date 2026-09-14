@@ -1329,3 +1329,74 @@ class TestRowTrunkPartialThroughLine:
         assert not _is_fan_branch_leaf(
             graph, graph.sections["novel_transcripts"], full_carrier=False
         )
+
+
+# --- #2001: a dead-end off-track tail peels below the exit trunk ---
+
+TAIL_PEEL_FILE = TOPOLOGIES_DIR / "tail_peel_at_through_station.mmd"
+
+
+def _point_to_segment_distance(p, a, b) -> float:
+    """Shortest distance from point *p* to the segment *a*-*b*."""
+    px, py = p
+    ax, ay = a
+    bx, by = b
+    dx, dy = bx - ax, by - ay
+    seg_len_sq = dx * dx + dy * dy
+    if seg_len_sq == 0:
+        return ((px - ax) ** 2 + (py - ay) ** 2) ** 0.5
+    t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / seg_len_sq))
+    cx, cy = ax + t * dx, ay + t * dy
+    return ((px - cx) ** 2 + (py - cy) ** 2) ** 0.5
+
+
+class TestTailPeelAtThroughStation:
+    """A through-station's dead-end output tail peels off the exit trunk (#2001).
+
+    ``dedup`` fans to the section's exit port (continuing to ``quant``) and to
+    ``genomecov``, whose only path sinks into the off-track ``cov_out`` file.
+    ``genomecov`` reaches no exit, so it must not inherit ``dedup``'s trunk row;
+    otherwise the ``dedup`` -> exit through-route runs flat across the
+    ``genomecov`` marker and the map reads as if the tail feeds ``quant``.
+    """
+
+    @pytest.fixture
+    def graph(self):
+        return _load_and_layout(TAIL_PEEL_FILE)
+
+    def test_dead_end_tail_peels_below_the_trunk(self, graph):
+        dedup = graph.stations["dedup"]
+        genomecov = graph.stations["genomecov"]
+        cov_out = graph.stations["cov_out"]
+        assert genomecov.y > dedup.y + 1.0, (
+            f"genomecov (y={genomecov.y:.1f}) should peel below dedup "
+            f"(y={dedup.y:.1f}), not inherit the exit trunk"
+        )
+        assert cov_out.y > dedup.y + 1.0, (
+            f"cov_out (y={cov_out.y:.1f}) should ride below the trunk with its "
+            f"producer, not be lifted above it (dedup y={dedup.y:.1f})"
+        )
+        lane = _lane_step(graph, "align")
+        assert abs(cov_out.y - genomecov.y) <= lane + 1.0, (
+            f"cov_out (y={cov_out.y:.1f}) should sit with genomecov "
+            f"(y={genomecov.y:.1f}), no re-lift S-bend"
+        )
+
+    def test_exit_route_runs_clear_of_the_tail_marker(self, graph):
+        genomecov = graph.stations["genomecov"]
+        exit_ports = set(graph.sections["align"].exit_ports)
+        routes = _compute_routes(graph)
+        through = [
+            r
+            for r in routes
+            if r.edge.source == "dedup" and r.edge.target in exit_ports
+        ]
+        assert through, "expected a routed dedup -> exit-port through-run"
+        for r in through:
+            for a, b in zip(r.points, r.points[1:]):
+                dist = _point_to_segment_distance((genomecov.x, genomecov.y), a, b)
+                assert dist > 6.0, (
+                    f"through-route {r.edge.source}->{r.edge.target} passes "
+                    f"{dist:.1f}px from the genomecov marker "
+                    f"({genomecov.x:.1f},{genomecov.y:.1f})"
+                )

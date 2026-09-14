@@ -1,0 +1,27 @@
+%%metro title: tail peel at through-station
+%%metro diamond_style: symmetric
+%%metro file: cov_out | BW | Coverage
+%%metro line: a | Line A | #e6007e
+%%metro line: b | Line B | #2db572
+
+graph LR
+    subgraph prep [Prep]
+        trim[Trim]
+        qc[QC]
+        trim -->|a,b| qc
+    end
+    subgraph align [Align]
+        star[STAR]
+        dedup[Dedup]
+        genomecov[genomecov]
+        star -->|a,b| dedup
+        dedup -->|a,b| genomecov
+        genomecov -->|a,b| cov_out
+    end
+    subgraph quant [Quant]
+        salmon[Salmon]
+        merge[Merge]
+        salmon -->|a,b| merge
+    end
+    qc -->|a,b| star
+    dedup -->|a,b| salmon
