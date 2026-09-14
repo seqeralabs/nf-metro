@@ -89,6 +89,15 @@ _CONDITIONAL_STAGES: dict[str, Callable[[MetroGraph], bool]] = {
 # unconditional ``_top_align_row_sections`` replays non-idempotently on that
 # settled top.  ``examples/riboseq_metro`` and the three packed topologies
 # below carry a "4.7" gap for that reason.
+#
+# ``topologies/exit_lane_rise_bundle_order`` carries a "4.7" gap of the
+# content-hug kind: levelling its row trunk to the deepest carrier (#1772)
+# seats ``mid`` a lane below its own ``mid_report`` output, so ``mid``'s box top
+# clears its content while the ``feed``/``dest`` row-mates hug theirs.  Stage
+# 6.15a hugs those two tops down; replaying 4.7's unconditional row flush pulls
+# them back up to ``mid``'s.  ``test_section_bbox_top_hugs_content`` covers the
+# requirement, and ``_align_row_trunk_ys`` (which runs after 4.7) is itself a
+# no-op on the settled graph, so the row's final trunk stays level.
 _KNOWN_END_OF_LAYOUT_GAPS: dict[str, frozenset[str]] = {
     "examples/differentialabundance": frozenset({"4.7"}),
     "examples/differentialabundance_default": frozenset({"4.7"}),
@@ -97,6 +106,7 @@ _KNOWN_END_OF_LAYOUT_GAPS: dict[str, frozenset[str]] = {
     "tests/da_pipeline": frozenset({"4.7"}),
     "tests/trunk_align_matching_bundle": frozenset({"4.7"}),
     "topologies/bt_perp_left_entry_right_exit": frozenset({"4.7"}),
+    "topologies/exit_lane_rise_bundle_order": frozenset({"4.7"}),
     "topologies/fan_branch_additional_outputs": frozenset({"4.7"}),
     "topologies/fanout_hub_two_line_trunk": frozenset({"4.7"}),
     "topologies/fanout_line_reused_nonadjacent_leg": frozenset({"4.7"}),
