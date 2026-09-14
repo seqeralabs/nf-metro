@@ -1289,8 +1289,14 @@ def _off_track_output_below(graph: MetroGraph) -> set[str]:
             fan_sign * getattr(anchor_st, cross) - baseline_signed
             > _DOWNWARD_BRANCH_SLOP
         )
-        if producer_on_branch or _lift_side_holds_fork_branch(
-            graph, anchor_id, off_id, cross, fan_sign, baseline_signed
+        if (
+            producer_on_branch
+            or _lift_side_holds_fork_branch(
+                graph, anchor_id, off_id, cross, fan_sign, baseline_signed
+            )
+            or _trunk_fork_stays_on_trunk(
+                graph, anchor_id, off_id, cross, fan_sign, baseline_signed
+            )
         ):
             below.add(off_id)
     return below
@@ -1330,6 +1336,112 @@ def _lift_side_holds_fork_branch(
         elif offset > _DOWNWARD_BRANCH_SLOP:
             fan_side = True
     return lift_side and not fan_side
+
+
+def _port_leads_to_lower_row(graph: MetroGraph, port_id: str, section: Section) -> bool:
+    """Whether *port_id* hands its trunk on to a section in a lower grid row."""
+    for edge in graph.edges_from(port_id):
+        target = graph.stations.get(edge.target)
+        if target is None or not target.section_id:
+            continue
+        other = graph.sections.get(target.section_id)
+        if other is not None and other.grid_row > section.grid_row:
+            return True
+    return False
+
+
+def _continuation_exits_to_lower_row(
+    graph: MetroGraph, start: str, section: Section
+) -> bool:
+    """Whether an on-track chain from *start* leaves *section* toward a lower row.
+
+    Following real on-track successors that stay inside the section, does the
+    trunk leave via a port that hands on to a lower grid row?  Only then is the
+    flow itself turning downward past the section, so a below-trunk output runs
+    with it rather than splitting off against it.  A chain reaching only
+    in-section outputs, or an exit that continues level in the same row, does not
+    qualify: the default lift keeps such an output clear of content below.
+    """
+    ports = section.port_ids
+    seen = {start}
+    stack = [start]
+    while stack:
+        for edge in graph.edges_from(stack.pop()):
+            target = edge.target
+            if target in ports:
+                if _port_leads_to_lower_row(graph, target, section):
+                    return True
+                continue
+            if target in seen:
+                continue
+            st = graph.stations.get(target)
+            if (
+                st is None
+                or st.section_id != section.id
+                or st.off_track
+                or st.is_terminus
+                or st.is_hidden
+            ):
+                continue
+            seen.add(target)
+            stack.append(target)
+    return False
+
+
+def _trunk_fork_stays_on_trunk(
+    graph: MetroGraph,
+    producer_id: str,
+    sink_id: str,
+    cross: str,
+    fan_sign: float,
+    baseline_signed: float,
+) -> bool:
+    """Whether the producer sits on the trunk and forks it out past the output.
+
+    A producer seated on the trunk baseline that forks into a through-station
+    carrying the producer's whole line bundle onward to a section exit and a
+    dead-end off-track output hands the trunk to that continuation.  Lifting the
+    output to the lift side then strands it above a producer that is itself on
+    the trunk; dropping it to the fan side keeps the continuation's trunk
+    straight and the output clear, matching a below-trunk relay producer feeding
+    the same shape.  The continuation must leave toward a lower row -- the flow
+    is then turning downward past the section, so the output runs with it; a
+    trunk continuing level in the same row (or a fork dead-ending inside the
+    section) keeps the default lift.  The fan side must also be empty: a sibling
+    branch already fanned there (a diamond's lower arm) would collide with an
+    output dropped onto it, so the output keeps its default lift.
+    """
+    producer_st = graph.stations.get(producer_id)
+    sink_section_id = graph.stations[sink_id].section_id
+    section = graph.sections.get(sink_section_id) if sink_section_id else None
+    if producer_st is None or section is None:
+        return False
+    if (
+        abs(fan_sign * getattr(producer_st, cross) - baseline_signed)
+        > _DOWNWARD_BRANCH_SLOP
+    ):
+        return False
+    junction_ids = graph.junction_ids
+    producer_lines = set(graph.station_lines(producer_id))
+    has_continuation = False
+    for edge in graph.edges_from(producer_id):
+        sib = graph.stations.get(edge.target)
+        if sib is None or edge.target in (sink_id, producer_id):
+            continue
+        if sib.is_port or sib.off_track or sib.is_hidden:
+            continue
+        if edge.target in junction_ids or sib.section_id != section.id:
+            continue
+        offset = fan_sign * getattr(sib, cross) - baseline_signed
+        if offset > _DOWNWARD_BRANCH_SLOP:
+            return False
+        if abs(offset) > _DOWNWARD_BRANCH_SLOP:
+            continue
+        if set(graph.station_lines(edge.target)) != producer_lines:
+            continue
+        if _continuation_exits_to_lower_row(graph, edge.target, section):
+            has_continuation = True
+    return has_continuation
 
 
 def _off_track_groups(

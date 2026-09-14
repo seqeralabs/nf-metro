@@ -125,7 +125,11 @@ from nf_metro.layout.phases.ports import (
     _reconcile_flow_exit_carrier_anchors,
     _set_port_y,
 )
-from nf_metro.layout.phases.row_align import _packed_row_header_groups
+from nf_metro.layout.phases.row_align import (
+    _carriers_share_one_trunk,
+    _packed_row_header_groups,
+    _row_trunk_alignment,
+)
 from nf_metro.layout.routing import (
     OffsetRegime,
     compute_station_offsets,
@@ -1592,6 +1596,150 @@ def test_row_trunk_subrun_holds_one_lane_past_a_differing_row_mate(
         f"{fixture}: {straddler}'s content sits at {trunk} while its boundary "
         f"lane runs at {lane['entry']}"
     )
+
+
+def test_discovery_output_spur_peels_below_a_trunk_continuation():
+    """A trunk station forking an output keeps its through-station on the trunk.
+
+    In ``inter_row_corridor_overflow`` the ``discovery`` section's ``step_c3``
+    forks into ``step_c4`` -- the through-continuation that carries the whole
+    bundle out to the next row -- and ``out_ref``, a dead-end file.  The
+    continuation must ride the row trunk (level with ``intake`` and ``primary``,
+    no kink at either section boundary) while the output peels off it; and since
+    the trunk descends to the row below past ``discovery``, the output peels
+    *downward*, matching ``primary``'s ``out_track`` rather than lifting against
+    the descent (issue #1772).
+    """
+    graph = _layout("curve_invariant_repros/inter_row_corridor_overflow.mmd")
+
+    row_trunk = _sole_port_y(graph, graph.sections["intake"].exit_ports)
+    c3 = graph.stations["step_c3"].y
+    c4 = graph.stations["step_c4"].y
+    assert abs(c3 - row_trunk) <= _Y_TOL, (
+        f"step_c3 y={c3:.1f} off the row trunk y={row_trunk:.1f}"
+    )
+    assert abs(c4 - row_trunk) <= _Y_TOL, (
+        f"through-continuation step_c4 y={c4:.1f} off the row trunk "
+        f"y={row_trunk:.1f}; it must not be stranded off the lane it carries out"
+    )
+
+    out_ref = graph.stations["out_ref"].y
+    assert out_ref - row_trunk > _Y_TOL, (
+        f"out_ref y={out_ref:.1f} did not peel below the trunk y={row_trunk:.1f}"
+    )
+    # Symmetric with the peer section's already-correct output.
+    out_track = graph.stations["out_track"].y
+    assert abs(out_ref - out_track) <= _Y_TOL, (
+        f"out_ref y={out_ref:.1f} peels to a different lane than the peer "
+        f"section's out_track y={out_track:.1f}"
+    )
+
+
+def _shift_section(graph: MetroGraph, section_id: str, delta: float) -> None:
+    """Move every station and port of one section by *delta* on Y."""
+    section = graph.sections[section_id]
+    for sid in section.station_ids:
+        st = graph.stations.get(sid)
+        if st is not None:
+            st.y += delta
+        port = graph.ports.get(sid)
+        if port is not None:
+            port.y += delta
+
+
+_DEEPEST_WINS_ROW = """%%metro line: x | X | #e6007e
+%%metro line: y | Y | #2db572
+%%metro grid: s1, s2, s3, s4 | 0,0
+graph LR
+  subgraph s1 [S1]
+{dir}    a1[A1]
+    a1 -->|x,y| a2[A2]
+  end
+  subgraph s2 [S2]
+{dir}    b1[B1]
+    b1 -->|x,y| b2[B2]
+  end
+  subgraph s3 [S3]
+{dir}    c1[C1]
+    c1 -->|x,y| c2[C2]
+  end
+  subgraph s4 [S4]
+{dir}    d1[D1]
+    d1 -->|x| d2[D2]
+  end
+  a2 -->|x,y| b1
+  b2 -->|x,y| c1
+  c2 -->|x| d1
+"""
+
+
+@pytest.mark.parametrize("flow", ["LR", "RL"])
+def test_row_trunk_levels_to_deepest_carrier_regardless_of_position(flow):
+    """The row trunk target is the deepest carrier's lane, whichever section it is.
+
+    A row of three full-bundle carriers (``s1``-``s3``) plus a partial (``s4``)
+    is perturbed so the *middle* carrier ``s2`` sits deepest and ``s3`` between:
+    the target must be ``s2``'s lane, not the first carrier's or the shallowest.
+    Run under both LR and per-section RL so the levelling is shown
+    flow-direction-agnostic -- it keys off LEFT/RIGHT ports and trunk Ys, which
+    both flows share.
+    """
+    directive = "    %%metro direction: RL\n" if flow == "RL" else ""
+    graph = parse_metro_mermaid(_DEEPEST_WINS_ROW.format(dir=directive))
+    compute_layout(graph)
+    if flow == "RL":
+        assert all(
+            graph.sections[s].direction == "RL" for s in ("s1", "s2", "s3", "s4")
+        ), "fixture precondition lost: sections are not RL"
+
+    _shift_section(graph, "s2", 120.0)
+    _shift_section(graph, "s3", 60.0)
+    group = [graph.sections[s] for s in ("s1", "s2", "s3", "s4")]
+
+    trunks = {s.id: _section_trunk_y(graph, s) for s in group}
+    carrier_ys = [trunks[c] for c in ("s1", "s2", "s3")]
+    alignment = _row_trunk_alignment(graph, group)
+    assert alignment is not None, f"{flow}: three contiguous carriers went unaligned"
+    target = alignment[0]
+    assert abs(target - max(carrier_ys)) <= _Y_TOL, (
+        f"{flow}: target {target:.1f} is not the deepest carrier lane "
+        f"{max(carrier_ys):.1f} (carrier lanes {[round(y, 1) for y in carrier_ys]})"
+    )
+    assert abs(target - trunks["s2"]) <= _Y_TOL, (
+        f"{flow}: deepest carrier is s2 at {trunks['s2']:.1f} but target is "
+        f"{target:.1f}"
+    )
+
+
+def test_row_trunk_alignment_declines_carriers_split_by_a_bypass():
+    """Carriers with a non-carrier between them are not force-levelled.
+
+    In ``variant_calling`` the ``qc`` line bypasses the middle sections, so the
+    two full-bundle carriers (``preprocess`` and ``reporting``) sit at either end
+    of the row with partials between them and ride independent lanes.  Levelling
+    them would drag a middle section off its own hand-over, so the row-trunk pass
+    must decline the run when the carriers do not form one unbroken bundle.
+    """
+    graph = _layout_example("variant_calling.mmd")
+    group = [
+        graph.sections[s]
+        for s in ("preprocess", "alignment", "variant_calling", "reporting")
+    ]
+    assert _row_trunk_alignment(graph, group) is None
+
+
+def test_carriers_share_one_trunk_requires_an_unbroken_run():
+    """The contiguity test is order-free and rejects a non-carrier in the gap."""
+    order = ["s1", "s2", "s3", "s4"]
+    group = [Section(id=sid, name=sid) for sid in order]
+
+    assert _carriers_share_one_trunk(group, {"s1", "s2", "s3"})
+    assert _carriers_share_one_trunk(group, {"s2", "s3"})
+    # Order of the carrier set does not matter.
+    assert _carriers_share_one_trunk(group, {"s3", "s1", "s2"})
+    # A non-carrier (s2) between two carriers breaks the run.
+    assert not _carriers_share_one_trunk(group, {"s1", "s3"})
+    assert not _carriers_share_one_trunk(group, {"s1", "s4"})
 
 
 def test_row_trunk_alignment_is_inert_on_an_interior_through_set_break(monkeypatch):

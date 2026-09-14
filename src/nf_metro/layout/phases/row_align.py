@@ -796,6 +796,17 @@ def _descent_of(
     return record.descent if record is not None else 0.0
 
 
+def _carriers_share_one_trunk(group: list[Section], carriers: set[str]) -> bool:
+    """Whether the group's carriers form one unbroken run of the full bundle.
+
+    *group* is in flow order.  The carriers share a single trunk only when every
+    section between the first and last of them is itself a carrier; a non-carrier
+    in the gap breaks the bundle, so the carriers ride independent lanes.
+    """
+    positions = [i for i, s in enumerate(group) if s.id in carriers]
+    return all(group[i].id in carriers for i in range(positions[0], positions[-1] + 1))
+
+
 def _row_trunk_alignment(
     graph: MetroGraph, group: list[Section]
 ) -> tuple[float, dict[str, float], dict[str, PartialTrunkDescent]] | None:
@@ -831,17 +842,26 @@ def _row_trunk_alignment(
         # A section carrying only part of the row trunk may be pulled onto it
         # but must not define where it sits: moving the full-bundle carriers to
         # suit such a section shifts the row down without straightening any line
-        # that reaches them.  So the carriers must already have settled on one Y,
-        # that Y is the target, and anything deeper than it stays put.  The trunk
-        # also has to actually arrive at each partial section: one of its
-        # through-lines must tie it to a carrier, else the alignment would jump a
-        # row-mate that is off the trunk and sits between them.
+        # that reaches them.  So the target is set by the carriers alone, and
+        # anything deeper than it stays put.  When full-bundle carriers disagree
+        # on their trunk Y that is a defect only if one trunk actually runs
+        # between them -- i.e. every section separating them also carries the
+        # whole bundle.  Then levelling to the deepest straightens that trunk
+        # without lifting a box past content, which only grows downward.  A
+        # non-carrier in the gap means a line bypasses it, so the carriers sit on
+        # independent lanes and levelling would drag one off its own hand-over;
+        # leave such a run for the per-stretch pass.  The trunk also has to
+        # actually arrive at each partial section: one of its through-lines must
+        # tie it to a carrier, else the alignment would jump a row-mate that is
+        # off the trunk and sits between them.
         carrier_ys = {trunks[sid] for sid in carriers if sid in trunks}
-        if len(carrier_ys) != 1:
+        if not carrier_ys:
+            return None
+        if len(carrier_ys) > 1 and not _carriers_share_one_trunk(group, carriers):
             return None
         if any(not carriers & set().union(*through[s.id].values()) for s in partial):
             return None
-        target_y = carrier_ys.pop()
+        target_y = max(carrier_ys)
         # A partial that hands a line straight to an adjacent carrier seats one
         # lane deeper so that connector runs level at the line's own lane rather
         # than jogging into it at the shared port.

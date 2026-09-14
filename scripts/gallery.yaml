@@ -2455,6 +2455,11 @@ render_only:
     - target_entry_runway_bypass
     - tb_exit_terminal_on_carrier
     - group_band_over_row_corridor
+    # Registered for the render-diff only: this fixture carries unrelated,
+    # still-open layout defects (#1771, #1820, #1822) in its lower row, so it is
+    # not in the validate=True corpus (conftest.content_corpus globs
+    # tests/fixtures/ non-recursively, skipping this subdir). A validator red
+    # here is one of those known defects, not a regression.
     - curve_invariant_repros/inter_row_corridor_overflow
     - regressions/tb_offtrack_fork_branch_collision_1390
     - topologies/convergence_handedness_repro
