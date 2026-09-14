@@ -2456,6 +2456,7 @@ render_only:
     - tb_exit_terminal_on_carrier
     - group_band_over_row_corridor
     - regressions/tb_offtrack_fork_branch_collision_1390
+    - topologies/lr_exit_into_tb_shared_carrier_row
     - topologies/convergence_handedness_repro
     - topologies/convergence_shared_terminal_exit_turn
     - topologies/novel_transcripts_repro

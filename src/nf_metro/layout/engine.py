@@ -298,6 +298,7 @@ from nf_metro.layout.phases.row_align import (  # noqa: F401
     _compact_row_content_to_bbox_top,
     _distribute_stacked_rows_in_rowspan_band,
     _recompute_grid_group_bboxes,
+    _reserve_side_entry_carrier_clearance,
     _top_align_packed_row_bboxes,
     _top_align_row_bboxes_only,
     _top_align_row_sections,
@@ -1777,6 +1778,11 @@ def _compute_section_layout(
     # content downward in shallower sections so the inter-section bundle
     # passes through at a single Y per row.  Bbox tops are preserved.
     _align_row_trunk_ys(graph)
+    # Stage 4.8a: A carrier trunk the alignment just pulled down can land on the
+    # first station of a vertical section it feeds through a perpendicular entry
+    # port.  Drop that consumer a grid step so the shared exit/entry port keeps
+    # its carrier row instead of being clamped off it into a diagonal.
+    _reserve_side_entry_carrier_clearance(graph, y_spacing)
     _apply_planned_fan_port_geometry(graph)
     # Carrier eligibility needs final boundary X coordinates for its corridor
     # check and final carrier Ys after row-trunk alignment.

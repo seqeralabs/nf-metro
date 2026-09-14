@@ -1,0 +1,38 @@
+%%metro title: LR exit into TB entry sharing the carrier row
+%%metro diamond_style: symmetric
+%%metro line: a | Line A | #e6007e
+%%metro line: b | Line B | #2db572
+
+graph LR
+    subgraph prep [Prep]
+        %%metro exit: right | a, b
+        trim[Trim]
+        split[Split]
+        f1[Filter 1]
+        f2[Filter 2]
+        f3[Filter 3]
+        strand[Strand]
+        trim -->|a,b| split
+        split -->|a,b| f1
+        split -->|a,b| f2
+        split -->|a,b| f3
+        f1 -->|a,b| strand
+        f2 -->|a,b| strand
+        f3 -->|a,b| strand
+    end
+    subgraph align [Align]
+        %%metro entry: left | a, b
+        %%metro exit: right | a, b
+        star[STAR]
+        dedup[Dedup]
+        star -->|a,b| dedup
+    end
+    subgraph post [Post]
+        %%metro direction: TB
+        %%metro entry: left | a, b
+        picard[Picard]
+        bedtools[BEDTools]
+        picard -->|a,b| bedtools
+    end
+    strand -->|a,b| star
+    dedup -->|a,b| picard
