@@ -2248,6 +2248,9 @@ def _finalize_layout(
         for pid, was in perp_entry_ys_before_resnap.items()
         if abs(graph.stations[pid].y - was) > SAME_COORD_TOLERANCE
     }
+    # Stage 4.8a dropped these consumers' content without lowering their box top,
+    # leaving the same top slack a re-snapped port would; hug them here too.
+    resnapped |= graph._carrier_clearance_shifted
     if resnapped:
         refit_tops_after_entry_resnap(graph, resnapped, section_y_padding)
     _apply_planned_fan_port_geometry(graph)

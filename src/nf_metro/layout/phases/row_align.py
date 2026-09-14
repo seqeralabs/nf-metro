@@ -1058,6 +1058,12 @@ def _reserve_side_entry_carrier_clearance(graph: MetroGraph, y_spacing: float) -
     guard checks) and the first internal station sits within that gap of it,
     shift the consumer's content whole grid steps along the flow to open the gap,
     so the entry clamp early-returns and the port rides the carrier.
+
+    Records the shifted sections on ``graph`` so Stage 6.16 refits their tops:
+    the content drops but the box top does not, and the entry-port re-snap refit
+    that would hug it only fires for sections whose port moved.  A section here
+    holds its port on the carrier, so it needs flagging into that refit set
+    directly.
     """
     junction_ids = graph.junction_ids
     divergence_sources = divergence_junction_sources(graph)
@@ -1101,6 +1107,7 @@ def _reserve_side_entry_carrier_clearance(graph: MetroGraph, y_spacing: float) -
         if delta < 0:
             consumer.bbox_y += delta
         shifted.add(consumer.id)
+    graph._carrier_clearance_shifted = shifted
 
 
 def _perp_port_lead_edge_reserve(
