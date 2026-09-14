@@ -35,6 +35,9 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Visualization",
 ]
 dependencies = [
+    # Ships FFmpeg in its own wheels, so a looping GIF/WebP/MP4/WebM export
+    # needs nothing on PATH -- the same self-contained deal resvg-py gives PNG.
+    "av>=13",
     "click>=8.0",
     "drawsvg>=2.0",
     "lark>=1.1",
@@ -159,12 +162,12 @@ ignore_missing_imports = false
 strict_optional = true
 disallow_any_generics = true
 
-# drawsvg ships no type information; jsonschema is an optional dependency (the
-# `validate` extra) imported lazily by `nf-metro validate-svg`. Everything else
-# (click, Pillow, networkx via types-networkx) is typed once the package is
-# installed.
+# drawsvg and av ship no type information; jsonschema is an optional dependency
+# (the `validate` extra) imported lazily by `nf-metro validate-svg`. Everything
+# else (click, Pillow, networkx via types-networkx) is typed once the package
+# is installed.
 [[tool.mypy.overrides]]
-module = ["drawsvg", "jsonschema"]
+module = ["av", "drawsvg", "jsonschema"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

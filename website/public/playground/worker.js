@@ -106,6 +106,9 @@ async function boot() {
   // Keep this version at or above pyproject's resvg-py floor, or micropip
   // rejects the mock as too old (the playground e2e run catches that).
   micropip.add_mock_package("resvg-py", "0.5.0");
+  // av (PyAV) bundles native FFmpeg with no wasm wheel either -- same fix
+  // as resvg-py above.
+  micropip.add_mock_package("av", "13.0.0");
   await micropip.install(await resolveWheel());
   pyodide.runPython(PY_GLUE);
   pyRender = pyodide.globals.get("nfm_render");
