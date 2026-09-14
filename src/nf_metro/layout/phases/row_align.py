@@ -1090,7 +1090,7 @@ def _reserve_side_entry_carrier_clearance(graph: MetroGraph, y_spacing: float) -
             continue
         steps = math.ceil((MIN_PORT_STATION_GAP - clearance) / y_spacing)
         delta = steps * y_spacing * flow
-        port_ids = set(consumer.entry_ports) | set(consumer.exit_ports)
+        port_ids = consumer.port_ids
         for sid in consumer.station_ids:
             if sid in port_ids:
                 continue
