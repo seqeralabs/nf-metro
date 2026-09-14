@@ -1273,6 +1273,10 @@ def _off_track_output_below(graph: MetroGraph) -> set[str]:
             section_baseline[section.id] = (cross, fan_sign, baseline_signed)
 
     below: set[str] = set()
+    # A trunk-fork output has no producer-side reason to drop on its own; it is
+    # dropped only to match a same-row peer, so it is deferred to a second pass
+    # once the peers that drop unconditionally are known.
+    trunk_fork_outputs: list[tuple[str, str]] = []
     for off_id, anchor_id in anchor_of.items():
         off_st = graph.stations.get(off_id)
         anchor_st = graph.stations.get(anchor_id)
@@ -1289,15 +1293,32 @@ def _off_track_output_below(graph: MetroGraph) -> set[str]:
             fan_sign * getattr(anchor_st, cross) - baseline_signed
             > _DOWNWARD_BRANCH_SLOP
         )
-        if (
-            producer_on_branch
-            or _lift_side_holds_fork_branch(
-                graph, anchor_id, off_id, cross, fan_sign, baseline_signed
-            )
-            or _trunk_fork_stays_on_trunk(
-                graph, anchor_id, off_id, cross, fan_sign, baseline_signed
-            )
+        if producer_on_branch or _lift_side_holds_fork_branch(
+            graph, anchor_id, off_id, cross, fan_sign, baseline_signed
         ):
+            below.add(off_id)
+        elif _is_trunk_fork_output(
+            graph, anchor_id, off_id, cross, fan_sign, baseline_signed
+        ):
+            trunk_fork_outputs.append((off_id, off_st.section_id))
+
+    # A trunk-fork output drops only where a *different* section in its grid row
+    # already peels an output below the trunk: the row has set that convention
+    # (e.g. a relay-fed output below the trunk), so a lone through-station's
+    # output joins it rather than lifting against it.  Absent such a peer the
+    # default lift is kept, so a section whose row peels nothing down is
+    # untouched.
+    rows_with_below: dict[int, set[str]] = {}
+    for dropped in below:
+        sec_id = graph.stations[dropped].section_id
+        peer_section = graph.sections.get(sec_id) if sec_id else None
+        if peer_section is not None:
+            rows_with_below.setdefault(peer_section.grid_row, set()).add(
+                peer_section.id
+            )
+    for off_id, section_id in trunk_fork_outputs:
+        row = graph.sections[section_id].grid_row
+        if rows_with_below.get(row, set()) - {section_id}:
             below.add(off_id)
     return below
 
@@ -1338,29 +1359,14 @@ def _lift_side_holds_fork_branch(
     return lift_side and not fan_side
 
 
-def _port_leads_to_lower_row(graph: MetroGraph, port_id: str, section: Section) -> bool:
-    """Whether *port_id* hands its trunk on to a section in a lower grid row."""
-    for edge in graph.edges_from(port_id):
-        target = graph.stations.get(edge.target)
-        if target is None or not target.section_id:
-            continue
-        other = graph.sections.get(target.section_id)
-        if other is not None and other.grid_row > section.grid_row:
-            return True
-    return False
-
-
-def _continuation_exits_to_lower_row(
+def _continuation_reaches_section_exit(
     graph: MetroGraph, start: str, section: Section
 ) -> bool:
-    """Whether an on-track chain from *start* leaves *section* toward a lower row.
+    """Whether an on-track chain from *start* reaches one of *section*'s ports.
 
     Following real on-track successors that stay inside the section, does the
-    trunk leave via a port that hands on to a lower grid row?  Only then is the
-    flow itself turning downward past the section, so a below-trunk output runs
-    with it rather than splitting off against it.  A chain reaching only
-    in-section outputs, or an exit that continues level in the same row, does not
-    qualify: the default lift keeps such an output clear of content below.
+    trunk leave via a port?  A chain reaching only in-section outputs never does,
+    so the section is a self-contained fan with no trunk running through it.
     """
     ports = section.port_ids
     seen = {start}
@@ -1369,9 +1375,7 @@ def _continuation_exits_to_lower_row(
         for edge in graph.edges_from(stack.pop()):
             target = edge.target
             if target in ports:
-                if _port_leads_to_lower_row(graph, target, section):
-                    return True
-                continue
+                return True
             if target in seen:
                 continue
             st = graph.stations.get(target)
@@ -1388,7 +1392,7 @@ def _continuation_exits_to_lower_row(
     return False
 
 
-def _trunk_fork_stays_on_trunk(
+def _is_trunk_fork_output(
     graph: MetroGraph,
     producer_id: str,
     sink_id: str,
@@ -1396,20 +1400,15 @@ def _trunk_fork_stays_on_trunk(
     fan_sign: float,
     baseline_signed: float,
 ) -> bool:
-    """Whether the producer sits on the trunk and forks it out past the output.
+    """Whether the output forks off a trunk station that carries on past it.
 
-    A producer seated on the trunk baseline that forks into a through-station
-    carrying the producer's whole line bundle onward to a section exit and a
-    dead-end off-track output hands the trunk to that continuation.  Lifting the
-    output to the lift side then strands it above a producer that is itself on
-    the trunk; dropping it to the fan side keeps the continuation's trunk
-    straight and the output clear, matching a below-trunk relay producer feeding
-    the same shape.  The continuation must leave toward a lower row -- the flow
-    is then turning downward past the section, so the output runs with it; a
-    trunk continuing level in the same row (or a fork dead-ending inside the
-    section) keeps the default lift.  The fan side must also be empty: a sibling
-    branch already fanned there (a diamond's lower arm) would collide with an
-    output dropped onto it, so the output keeps its default lift.
+    True when the producer sits on the trunk baseline and forks into a
+    through-station carrying its whole line bundle onward to a section exit plus
+    this dead-end output.  Such an output has no producer-side reason to drop --
+    its producer is on the trunk, not a branch -- so on its own it keeps the
+    default lift; the caller drops it only to match a same-row peer.  The fan
+    side must be empty: a sibling branch already fanned there (a diamond's lower
+    arm) would collide with an output dropped onto it.
     """
     producer_st = graph.stations.get(producer_id)
     sink_section_id = graph.stations[sink_id].section_id
@@ -1439,7 +1438,7 @@ def _trunk_fork_stays_on_trunk(
             continue
         if set(graph.station_lines(edge.target)) != producer_lines:
             continue
-        if _continuation_exits_to_lower_row(graph, edge.target, section):
+        if _continuation_reaches_section_exit(graph, edge.target, section):
             has_continuation = True
     return has_continuation
 

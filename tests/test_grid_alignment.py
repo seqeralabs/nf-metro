@@ -454,3 +454,46 @@ class TestInterSectionPortSnap:
         """The snap stays off for purely auto-layout pipelines."""
         g = _load("variant_calling_tuned")
         assert not g.layout_provenance.has_authored_grids()
+
+
+# ---------------------------------------------------------------------------
+# Issue 2002: an LR carrier trunk descending onto a TB consumer's first
+# station must not split the shared exit port off that carrier row
+# ---------------------------------------------------------------------------
+
+
+class TestTBConsumerEntryClearance:
+    """When a row's carrier trunk descends onto the first station of a TB
+    section it feeds through a perpendicular entry port, the section drops a
+    grid step so the exit/entry stays on the carrier row and its boundary run
+    renders as a riser, not a diagonal (#2002)."""
+
+    def _load_validated(self):
+        text = (
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "topologies"
+            / "lr_exit_into_tb_shared_carrier_row.mmd"
+        ).read_text()
+        g = parse_metro_mermaid(text)
+        compute_layout(g, validate=True)
+        return g
+
+    def test_exit_stays_on_carrier_row(self):
+        g = self._load_validated()
+        carrier_y = g.stations["dedup"].y
+        exit_y = g.stations["align__exit_right_1"].y
+        entry_y = g.stations["post__entry_left_3"].y
+        assert abs(exit_y - carrier_y) < 1.0, (
+            f"exit y={exit_y} off carrier dedup y={carrier_y}"
+        )
+        assert abs(entry_y - carrier_y) < 1.0, (
+            f"entry y={entry_y} off carrier dedup y={carrier_y}"
+        )
+
+    def test_first_station_clears_the_carrier(self):
+        g = self._load_validated()
+        carrier_y = g.stations["dedup"].y
+        assert g.stations["picard"].y > carrier_y + 1.0, (
+            f"picard y={g.stations['picard'].y} not below carrier y={carrier_y}"
+        )

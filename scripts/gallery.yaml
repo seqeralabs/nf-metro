@@ -2462,6 +2462,7 @@ render_only:
     # here is one of those known defects, not a regression.
     - curve_invariant_repros/inter_row_corridor_overflow
     - regressions/tb_offtrack_fork_branch_collision_1390
+    - topologies/lr_exit_into_tb_shared_carrier_row
     - topologies/convergence_handedness_repro
     - topologies/convergence_shared_terminal_exit_turn
     - topologies/novel_transcripts_repro
