@@ -960,11 +960,9 @@ def _row_trunk_alignment_stretches(
     sections, ordered by ``bbox_x`` because sections packed into one grid cell
     all share a ``grid_col``.  Two neighbours join a stretch only when they
     carry the same through-lines *and* their facing ports currently split that
-    lane, and a stretch levels only if one of its members straddles two lanes.
-    A partial stretch serves no trunk beyond its own boundaries: levelling one
-    whose members each already hold a single lane end to end trades their
-    straight runs for a bend somewhere else in the row, where the boundary the
-    ports disagree on is theirs to settle.
+    lane.  A stretch is returned only if one of its members straddles two
+    lanes; a stretch whose members already run single-lane end to end is left
+    alone.
     """
     through_by_id = {s.id: set(_section_row_through_lines(graph, s)) for s in group}
     non_empty = [t for t in through_by_id.values() if t]
@@ -1160,12 +1158,8 @@ def _align_stretch_trunk_ys(graph: MetroGraph, stretch: list[Section]) -> None:
         section.bbox_h += delta
         shifted.add(section.id)
 
-    # Re-snap each shifted section's LR ports to target_y when they
-    # have a single internal station at target_y.  A port fanning to
-    # 2+ distinct internal Ys is centred (fan-in) unless one neighbour
-    # is the section trunk (a full-bundle station at target_y), in which
-    # case the port rides that trunk while the others peel off and snaps
-    # to target_y.
+    # Re-snap each shifted section's LR ports onto target_y where the port's
+    # own internal neighbours support it landing there.
     for section in stretch:
         if section.id not in shifted:
             continue
@@ -1182,33 +1176,48 @@ def _align_stretch_trunk_ys(graph: MetroGraph, stretch: list[Section]) -> None:
                 or abs(port_st.y - target_y) < SAME_COORD_TOLERANCE
             ):
                 continue
-            connected_ys: set[float] = set()
-            target_aligned = False
-            trunk_at_target = False
-            neighbours: list[str] = []
-            for edge in graph.edges_from(pid):
-                if edge.target in internal_ids:
-                    neighbours.append(edge.target)
-            for edge in graph.edges_to(pid):
-                if edge.source in internal_ids:
-                    neighbours.append(edge.source)
-            for other_id in neighbours:
-                st = graph.stations.get(other_id)
-                if st and not st.is_port:
-                    connected_ys.add(round(st.y, 1))
-                    if abs(st.y - target_y) < SAME_COORD_TOLERANCE:
-                        target_aligned = True
-                        # A bypass-V helper carries the full bundle but
-                        # is a routing artefact, not the trunk (matching
-                        # _section_trunk_y's own exclusion).
-                        if (
-                            bundle
-                            and not is_bypass_v(other_id)
-                            and set(graph.station_lines(other_id)) == bundle
-                        ):
-                            trunk_at_target = True
-            if target_aligned and (len(connected_ys) < 2 or trunk_at_target):
+            if _port_should_snap_to_trunk(graph, pid, internal_ids, bundle, target_y):
                 _set_port_y(graph, pid, target_y)
+
+
+def _port_should_snap_to_trunk(
+    graph: MetroGraph,
+    pid: str,
+    internal_ids: set[str],
+    bundle: set[str],
+    target_y: float,
+) -> bool:
+    """True when the LR port *pid* should land on *target_y*.
+
+    A port fanning to 2+ distinct internal Ys is centred (fan-in) unless one
+    of them is the section trunk -- a full-bundle station at *target_y*,
+    excluding a bypass-V helper (which carries the full bundle but is a
+    routing artefact, not the trunk) -- in which case the port rides that
+    trunk while the others peel off.
+    """
+    connected_ys: set[float] = set()
+    target_aligned = False
+    trunk_at_target = False
+    neighbours: list[str] = []
+    for edge in graph.edges_from(pid):
+        if edge.target in internal_ids:
+            neighbours.append(edge.target)
+    for edge in graph.edges_to(pid):
+        if edge.source in internal_ids:
+            neighbours.append(edge.source)
+    for other_id in neighbours:
+        st = graph.stations.get(other_id)
+        if st and not st.is_port:
+            connected_ys.add(round(st.y, 1))
+            if abs(st.y - target_y) < SAME_COORD_TOLERANCE:
+                target_aligned = True
+                if (
+                    bundle
+                    and not is_bypass_v(other_id)
+                    and set(graph.station_lines(other_id)) == bundle
+                ):
+                    trunk_at_target = True
+    return target_aligned and (len(connected_ys) < 2 or trunk_at_target)
 
 
 def _perp_port_lead_edge_reserve(
