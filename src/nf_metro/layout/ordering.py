@@ -429,8 +429,7 @@ def _place_single_node(
                 # A dead-end tail that only feeds off-track outputs is not a
                 # genuine terminus: if its carrier continues to a section exit,
                 # landing it flat on the carrier's row would run that exit route
-                # across its marker.  Peel it one lane below the trunk instead
-                # (its off-track leaf follows via its producer anchor).
+                # across its marker.
                 if (
                     flow_horizontal
                     and len(preds) == 1
@@ -520,12 +519,10 @@ def _place_single_node(
         # that leaves the section (so a same-line exit route runs along its
         # lane) yet its own forward path sinks only into off-track outputs, and
         # a predecessor continues to an exit.  Inheriting that predecessor's
-        # trunk (below) would leave the exit route running flat across this
-        # station's marker, reading as if the tail feeds downstream.  Peel it one
-        # lane below the trunk instead -- its off-track leaf follows via its
-        # producer anchor -- stepping further down while that lane is taken at
-        # this layer.  A terminal tail (carrying only lines that never leave the
-        # section) has no such through-route and keeps the section's own trunk.
+        # trunk would leave the exit route running flat across this station's
+        # marker, reading as if the tail feeds downstream.  A terminal tail
+        # (carrying only lines that never leave the section) has no such
+        # through-route and keeps the section's own trunk.
         if (
             flow_horizontal
             and node not in exit_reaching

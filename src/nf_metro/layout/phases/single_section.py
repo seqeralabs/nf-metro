@@ -293,7 +293,7 @@ def _layout_single_section(
         continuation_predecessors=continuation_predecessors,
         terminal_nodes=terminal_nodes,
         exit_reaching=exit_reaching,
-        flow_horizontal=not lanes_run_along_x(section.direction),
+        flow_horizontal=lanes_run_along_y(section.direction),
     )
 
     if not layers:
