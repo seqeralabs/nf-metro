@@ -292,7 +292,7 @@ def _layout_section_rails(
     # on the station X, so a column needs roughly half the widest label of it
     # and of each neighbour to clear; using the per-column widest label as the
     # step keeps the rails evenly spaced while giving long names room.
-    x_spacing = _label_aware_x_spacing(graph, real_ids, layers, x_spacing)
+    x_spacing = _label_aware_x_spacing(graph, real_ids, x_spacing)
     # Off-track input stations sit ABOVE the top rail and feed in with an
     # S-curve (see routing/rail.py), so reserve a band above the rails for
     # them.  rails_top is shifted down by that band; the off-track band Y is
@@ -638,9 +638,7 @@ def rail_above_label_ids(graph: MetroGraph, section: Section) -> set[str]:
     return _rail_above_label_stations(graph, real_ids, per_line_y)
 
 
-def rail_above_label_top_pad(
-    graph: MetroGraph, section: Section, section_y_padding: float
-) -> dict[str, float]:
+def rail_above_label_top_pad(graph: MetroGraph, section: Section) -> dict[str, float]:
     """Padding reserved above *section*'s above-labelled top-rail stations.
 
     Mirrors the reservation :func:`_layout_section_rails` makes above a
@@ -673,10 +671,7 @@ def rail_above_label_top_pad(
 
 
 def _label_aware_x_spacing(
-    graph: MetroGraph,
-    real_ids: list[str],
-    layers: dict[str, int],
-    x_spacing: float,
+    graph: MetroGraph, real_ids: list[str], x_spacing: float
 ) -> float:
     """Return a column step wide enough that no column's label wraps.
 
@@ -725,8 +720,9 @@ def _rail_slot_offsets(
     are members of the same ``legend_combo`` instead share a SINGLE slot,
     drawn as a tight adjacent bundle: the slot's lines hug each other with a
     small sub-offset about the slot centre rather than spreading across full
-    rail pitches.  With no combos this is exactly ``i * y_spacing`` per line in
-    order, identical to the un-bundled layout.
+    rail pitches.  With no combos each line takes its own slot, its slot index
+    many rail pitches down from the top rail; the pitch is ``y_spacing`` scaled
+    by ``graph.stroke_scale``.
 
     Returns ``(per_line_offset, n_slots)`` where ``n_slots`` is the number of
     distinct rail slots (non-combo lines + one per combo with members present).

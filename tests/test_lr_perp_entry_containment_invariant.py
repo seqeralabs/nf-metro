@@ -31,6 +31,7 @@ PERP_ENTRY_FIXTURES = [
     "lr_perp_top_exit_perp_entry",
     "lr_perp_top_exit_perp_entry_diverging",
     "merge_trunk_out_of_range_section",
+    "rl_left_exit_top_entry_overflow",
 ]
 
 

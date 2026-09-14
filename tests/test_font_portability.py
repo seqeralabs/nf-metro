@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from nf_metro.layout import compute_layout
-from nf_metro.parser import parse_metro_mermaid
+from nf_metro.parser import parse_metro_mermaid_file
 from nf_metro.render.svg import render_svg
 from nf_metro.text_metrics import (
     DEFAULT_TEXT_METRICS,
@@ -23,13 +23,13 @@ from nf_metro.text_metrics import (
 )
 from nf_metro.themes import THEMES
 
-EXAMPLES = list((Path(__file__).parent.parent / "examples").glob("*.mmd"))
-FIXTURE_FILE = EXAMPLES[0] if EXAMPLES else None
+EXAMPLES = sorted((Path(__file__).parent.parent / "examples").glob("*.mmd"))
+assert EXAMPLES, "the examples corpus these render modes are exercised on is missing"
+FIXTURE_FILE = EXAMPLES[0]
 
 
 def _render(fixture: Path, font_portability: str | None = None) -> str:
-    text = fixture.read_text()
-    graph = parse_metro_mermaid(text)
+    graph = parse_metro_mermaid_file(fixture)
     compute_layout(graph)
     return render_svg(graph, THEMES["nfcore"], font_portability=font_portability)  # type: ignore[arg-type]
 
@@ -37,14 +37,12 @@ def _render(fixture: Path, font_portability: str | None = None) -> str:
 # ── embed ────────────────────────────────────────────────────────────────────
 
 
-@pytest.mark.skipif(FIXTURE_FILE is None, reason="no example fixtures found")
 def test_embed_font_injects_font_face_block() -> None:
     """SVG produced with font_portability='embed' contains an @font-face declaration."""
     svg = _render(FIXTURE_FILE, "embed")
     assert "@font-face" in svg, "Expected @font-face in embedded-font SVG"
 
 
-@pytest.mark.skipif(FIXTURE_FILE is None, reason="no example fixtures found")
 def test_embed_font_contains_base64_data_uri() -> None:
     """The @font-face src must use a data URI (base64-encoded WOFF2), not a URL."""
     svg = _render(FIXTURE_FILE, "embed")
@@ -53,7 +51,6 @@ def test_embed_font_contains_base64_data_uri() -> None:
     )
 
 
-@pytest.mark.skipif(FIXTURE_FILE is None, reason="no example fixtures found")
 @pytest.mark.parametrize("fixture", EXAMPLES, ids=lambda p: p.name)
 def test_embed_font_family_has_generic_fallback(fixture: Path) -> None:
     """Every embedded font-family must end in a generic family so a stripped
@@ -68,7 +65,6 @@ def test_embed_font_family_has_generic_fallback(fixture: Path) -> None:
         )
 
 
-@pytest.mark.skipif(FIXTURE_FILE is None, reason="no example fixtures found")
 def test_plain_render_uses_helvetica() -> None:
     """Default render (font_portability=None) uses the Helvetica font stack."""
     svg = _render(FIXTURE_FILE)
@@ -78,28 +74,24 @@ def test_plain_render_uses_helvetica() -> None:
 # ── paths ────────────────────────────────────────────────────────────────────
 
 
-@pytest.mark.skipif(FIXTURE_FILE is None, reason="no example fixtures found")
 def test_text_to_paths_removes_all_text_elements() -> None:
     """SVG produced with font_portability='paths' must contain no <text> elements."""
     svg = _render(FIXTURE_FILE, "paths")
     assert "<text" not in svg, "paths mode must not leave any <text> elements"
 
 
-@pytest.mark.skipif(FIXTURE_FILE is None, reason="no example fixtures found")
 def test_text_to_paths_produces_path_elements() -> None:
     """paths output must have <path> elements where text was."""
     svg = _render(FIXTURE_FILE, "paths")
     assert svg.count("<path ") > 0, "Expected <path> elements in paths output"
 
 
-@pytest.mark.skipif(FIXTURE_FILE is None, reason="no example fixtures found")
 def test_text_to_paths_no_font_family_attributes() -> None:
     """paths output must not reference any font family."""
     svg = _render(FIXTURE_FILE, "paths")
     assert "font-family" not in svg, "font-family must be absent in paths output"
 
 
-@pytest.mark.skipif(FIXTURE_FILE is None, reason="no example fixtures found")
 def test_text_to_paths_is_valid_svg() -> None:
     """paths output must be well-formed XML."""
     import xml.etree.ElementTree as ET
@@ -146,6 +138,7 @@ def test_portable_render_uses_inter_metrics_during_layout() -> None:
     from nf_metro.api import render_string
 
     source = (
+        "%%metro line: x | X | #0570b0\n"
         "graph LR\nsubgraph s [S]\n%%metro direction: TB\na[WWW] -->|x| b[Ill]\nend\n"
     )
     fallback = render_string(source)
@@ -164,5 +157,5 @@ def test_portable_render_uses_inter_metrics_during_layout() -> None:
 
     fallback_width = section_width(fallback)
     embedded_width = section_width(embedded)
-    assert fallback_width == pytest.approx(160.0)
-    assert embedded_width == pytest.approx(167.46630859375)
+    assert fallback_width == pytest.approx(100.0)
+    assert embedded_width == pytest.approx(107.46630859375)

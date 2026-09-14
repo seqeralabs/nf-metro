@@ -142,8 +142,9 @@ def test_expected_aborts_name_the_guard_each_fixture_trips(
     observed: dict[str, type[BaseException]] = {}
     for stem in build_gallery._render_only_stems():
         source = build_gallery.TEST_FIXTURES_DIR / f"{stem}.mmd"
-        if not source.exists():
-            continue
+        assert source.exists(), (
+            f"{stem} is registered for render-diff but its fixture is absent"
+        )
         try:
             build_gallery.render_mmd(source, tmp_path / f"{Path(stem).name}.svg")
         except Exception as exc:  # noqa: BLE001 - the guard's identity is the datum

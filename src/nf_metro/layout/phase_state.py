@@ -21,13 +21,21 @@ This module makes that protocol explicit data:
 The registry is kept in sync with the dataclass fields, the engine stage list,
 and ``CONTRACT.md`` by ``tests/test_phase_state_registry.py``, so a new bare
 poke or a drifted document reds CI rather than rotting silently.
+
+:class:`GuardSpec`, the schema for one ``validate=True`` guard, sits here too.
+The guard registries that use it (``phases/guards.py`` and
+``routing/invariants.py``) sit on opposite sides of the layout/routing boundary,
+so their shared schema belongs in a module with no module-level ``nf_metro``
+imports of its own; that also puts it beside the stage vocabulary its
+``first_valid_stage`` draws on.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from nf_metro.parser.model import MetroGraph
@@ -136,6 +144,19 @@ PHASE_FIELD_REGISTRY: dict[str, PhaseFieldSpec] = {
         ),
         run_condition_attr="center_ports",
     ),
+    "post_layout_half_grid_station_ids": PhaseFieldSpec(
+        name="post_layout_half_grid_station_ids",
+        writer_stage=POST_LAYOUT,
+        reader_stages=(POST_LAYOUT,),
+        enforcement=FieldEnforcement.FALLBACK,
+        why=(
+            "half-pitch spine branches a station-rooted reconvergence fan can "
+            "only be recognised on once layout has settled; separate from "
+            "half_grid_station_ids so a placement stage reading that channel "
+            "cannot see a mark written after it ran, and read only by the "
+            "grid-alignment invariants, which union the two"
+        ),
+    ),
     "symfan_trunk_station_ids": PhaseFieldSpec(
         name="symfan_trunk_station_ids",
         writer_stage="6.3",
@@ -147,6 +168,19 @@ PHASE_FIELD_REGISTRY: dict[str, PhaseFieldSpec] = {
             "drags them onto a rowspan neighbour's fractional row-grid origin"
         ),
         run_condition_attr="center_ports",
+    ),
+    "_partial_trunk_descents": PhaseFieldSpec(
+        name="_partial_trunk_descents",
+        writer_stage="4.8",
+        reader_stages=("6.4",),
+        enforcement=FieldEnforcement.REQUIRE_WRITER,
+        why=(
+            "per-section handover descents Stage 4.8's _align_row_trunk_ys seats "
+            "on a partial row-mate so its direct connector to the row carrier runs "
+            "flat; each record carries its two endpoint ports so Stage 6.4's grid "
+            "snap re-seats the partial from the carrier port's post-snap Y, right "
+            "whether the snap collapsed the sub-grid offset or preserved it"
+        ),
     ),
     "_consumers_grid_snapped": PhaseFieldSpec(
         name="_consumers_grid_snapped",
@@ -210,9 +244,12 @@ PHASE_FIELD_REGISTRY: dict[str, PhaseFieldSpec] = {
         reader_stages=("5.2", "6.6"),
         enforcement=FieldEnforcement.FALLBACK,
         why=(
-            "resolved column pitch recorded before layout; a vertical-flow (TB/BT) "
-            "section's off-track band is offset by this cross-axis pitch, read with "
-            "a None/getattr fallback to X_SPACING when it is unset"
+            "resolved column pitch, refreshed on every spread-loop pass so it "
+            "tracks the widened x_spacing that pass places branches on (unlike "
+            "_base_y_spacing, which is frozen once at the base value); a "
+            "vertical-flow (TB/BT) section's off-track band is offset by this "
+            "cross-axis pitch, read with a None/getattr fallback to X_SPACING "
+            "when it is unset"
         ),
     ),
     "_resolved_y_spacing": PhaseFieldSpec(
@@ -329,3 +366,42 @@ def require_phase_field(graph: "MetroGraph", name: str) -> None:
             f"{name} read before its writer Stage {spec.writer_stage} ran "
             f"(completed stages: {graph._stages_completed}); {spec.why}"
         )
+
+
+@dataclass(frozen=True)
+class GuardSpec:
+    """One ``validate=True`` guard, with the dispatch and classification data
+    the guard runner reads.  ``GUARD_REGISTRY`` is the single source: the
+    ``_BISECTION_FIRST_VALID`` thresholds are derived from these specs.
+
+    ``fn`` is the guard function; every guard takes ``(graph, phase)`` and the
+    optional keyword inputs named in ``needs`` (a subset of ``offsets``,
+    ``routes``, ``section_y_gap``, ``section_y_padding``).  The dispatcher
+    passes exactly those keywords, so heterogeneous signatures need no
+    wrapping.
+
+    ``bisection_safe`` guards run at every Pass C checkpoint (gated by
+    ``first_valid_stage``, the earliest checkpoint at which their invariant
+    holds) as well as at the closing ``after final`` boundary; the rest run
+    only at ``after final``.  ``tier`` is the cost-tier classification
+    (``docs/dev/guard_tiers.md``).
+
+    ``issue_pin`` is the tuple of ``#NNN`` issues a guard was born from; it
+    keeps the regression trail as data so consolidating or renaming a guard
+    cannot let the original bug be silently re-filed.  ``narrow_reason`` states
+    why a guard pinned to an issue stays scoped to its case rather than being
+    folded into a broader geometric property -- a required field for any
+    issue-pinned guard (``test_issue_pinned_guards_document_why_they_are_narrow``).
+    """
+
+    fn: Callable[..., Any]
+    tier: str
+    needs: frozenset[str] = field(default_factory=frozenset)
+    bisection_safe: bool = False
+    first_valid_stage: str | None = None
+    issue_pin: tuple[str, ...] = ()
+    narrow_reason: str | None = None
+
+    @property
+    def name(self) -> str:
+        return self.fn.__name__

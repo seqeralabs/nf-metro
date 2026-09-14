@@ -82,19 +82,23 @@ def _insert_phantom_pass_throughs(
         return
     min_layer = min(layers.values())
 
-    entry_port_ids = set(section.entry_ports)
-
-    # Find lines entering from entry ports to deep-layer internal stations.
-    entry_targets: dict[str, set[str]] = {}
-    for pid in entry_port_ids:
+    # Scan entry ports in section order so each line's targets follow port
+    # declaration order.
+    entry_targets: dict[str, list[str]] = {}
+    for pid in section.entry_ports:
         for edge in graph.edges_from(pid):
             if edge.target in sub.stations:
-                entry_targets.setdefault(edge.line_id, set()).add(edge.target)
+                targets = entry_targets.setdefault(edge.line_id, [])
+                if edge.target not in targets:
+                    targets.append(edge.target)
 
     for line_id, targets in entry_targets.items():
         target_layers = [layers.get(t, min_layer) for t in targets]
         if all(ly > min_layer for ly in target_layers):
-            earliest_target = min(targets, key=lambda t: layers.get(t, 0))
+            # Tie-break earliest layer by station id: for at least one real map
+            # the other candidate deterministically fails the routing
+            # curve-invariant check, so id order is the safe deterministic pick.
+            earliest_target = min(targets, key=lambda t: (layers.get(t, 0), t))
             phantom_id = f"_phantom_{section.id}_{line_id}"
 
             sub.add_station(
@@ -928,11 +932,28 @@ def _layer_gap_for(
             direction,
         )
 
+    # A layer that both forks and joins has this gap charged into the column on
+    # each side of it, once as its join gap and once as its fork gap.  Where the
+    # layer across each of those boundaries also contributes a gap there, the
+    # one-sided dip reservation is booked twice for room the neighbour already
+    # opens; without such a neighbour it is the only reservation the boundary
+    # gets and must stay.  The interior-branch floor is the two-sided term by
+    # design (equal divergence and reconvergence runs keep an interior branch
+    # centred), so a layer carrying that floor keeps the dip room as well.
+    double_counts_dip_reservation = (
+        layer in fork_layers
+        and layer in join_layers
+        and layer - 1 in fork_layers
+        and layer + 1 in join_layers
+        and interior_floor <= 0.0
+    )
+
     # The bare label-half over-reserves by x_spacing - routing_clearance; keep it
     # only where an off-track branch dips through the loop and needs that room.
     dip_label_half = (
         fj_label_half
-        if _off_track_branch_needs_loop_room(
+        if not double_counts_dip_reservation
+        and _off_track_branch_needs_loop_room(
             layer,
             fork_layers,
             join_layers,
@@ -990,6 +1011,8 @@ def _compute_fork_join_gaps(
     if not fork_layers and not join_layers:
         return {}
 
+    hub_layers = fork_layers & join_layers
+
     max_layer = max(layers.values()) if layers else 0
     base_gap = x_spacing * EXIT_GAP_MULTIPLIER
 
@@ -1024,12 +1047,29 @@ def _compute_fork_join_gaps(
 
     cumulative = 0.0
     layer_extra: dict[int, float] = {}
+    pending_fork_gap = 0.0
     for layer in range(max_layer + 1):
-        if layer in join_layers:
-            cumulative += layer_gap.get(layer, base_gap)
+        join_gap = layer_gap.get(layer, base_gap) if layer in join_layers else 0.0
+        # The boundary entering this layer reserves the previous layer's fork
+        # spread and this layer's join gather.  When one of them is a hub that
+        # both forks and joins, the fan across this boundary is that hub's single
+        # set of diagonals reserved from both sides at once, so its gap covers
+        # the whole column and summing books the same room twice, leaving dead
+        # flat track before the hub.  Where the fork and join are distinct
+        # single-role layers the two gaps reserve two separate diagonal sets - a
+        # divergence and a reconvergence - and must both stand, or an interior
+        # branch loses the reconvergence run that keeps it centred.
+        fork_side_is_hub = (layer - 1) in hub_layers
+        join_side_is_hub = layer in hub_layers
+        hub_spans_boundary = fork_side_is_hub or join_side_is_hub
+        if pending_fork_gap > 0.0 and join_gap > 0.0 and hub_spans_boundary:
+            cumulative += max(pending_fork_gap, join_gap)
+        else:
+            cumulative += pending_fork_gap + join_gap
         layer_extra[layer] = cumulative
-        if layer in fork_layers:
-            cumulative += layer_gap.get(layer, base_gap)
+        pending_fork_gap = (
+            layer_gap.get(layer, base_gap) if layer in fork_layers else 0.0
+        )
 
     return layer_extra
 
@@ -1245,12 +1285,51 @@ def _off_track_output_below(graph: MetroGraph) -> set[str]:
         if baseline is None:
             continue
         cross, fan_sign, baseline_signed = baseline
-        if (
+        producer_on_branch = (
             fan_sign * getattr(anchor_st, cross) - baseline_signed
             > _DOWNWARD_BRANCH_SLOP
+        )
+        if producer_on_branch or _lift_side_holds_fork_branch(
+            graph, anchor_id, off_id, cross, fan_sign, baseline_signed
         ):
             below.add(off_id)
     return below
+
+
+def _lift_side_holds_fork_branch(
+    graph: MetroGraph,
+    producer_id: str,
+    sink_id: str,
+    cross: str,
+    fan_sign: float,
+    baseline_signed: float,
+) -> bool:
+    """Whether a fork branch occupies the sink's default lift side.
+
+    A producer on the trunk baseline lifts its off-track output to the lift
+    side (opposite the lane fan, :func:`_off_track_lift_sign`).  When one of the
+    producer's on-track successors has itself fanned to that lift side while the
+    fan side stays clear, seating the output there wedges it between the trunk
+    and the branch column -- and under the branch's onward diagonal.  Dropping
+    the output to the clear fan side keeps it out of that gap.
+    """
+    junction_ids = graph.junction_ids
+    sink_section = graph.stations[sink_id].section_id
+    lift_side = fan_side = False
+    for edge in graph.edges_from(producer_id):
+        sib = graph.stations.get(edge.target)
+        if sib is None or edge.target in (sink_id, producer_id):
+            continue
+        if sib.is_port or sib.off_track or sib.is_hidden:
+            continue
+        if edge.target in junction_ids or sib.section_id != sink_section:
+            continue
+        offset = fan_sign * getattr(sib, cross) - baseline_signed
+        if offset < -_DOWNWARD_BRANCH_SLOP:
+            lift_side = True
+        elif offset > _DOWNWARD_BRANCH_SLOP:
+            fan_side = True
+    return lift_side and not fan_side
 
 
 def _off_track_groups(
@@ -1339,9 +1418,10 @@ def _off_track_lift_step(
     An off-track icon is offset from its anchor along the section's cross axis
     (:func:`section_cross_axis`): Y for an LR/RL trunk, X for a TB/BT one.
 
-    A vertical-flow (TB/BT) section offsets along X by the resolved column
-    pitch; a TB section suppresses diagonal labels, so that pitch is never
-    widened and needs no base-pitch reduction.
+    A vertical-flow (TB/BT) section offsets along X by the section's resolved
+    column pitch -- the same pitch the spread loop may have widened to clear
+    label overlaps and that the fan branches are placed on -- so the spur stays
+    symmetric with those branches.
 
     A horizontal-flow section offsets along Y by ``y_spacing``.  When it is a
     single horizontal trunk (no parallel tracks) the diagonal-label band that

@@ -37,7 +37,7 @@ def _plan(path: str) -> tuple[MetroGraph, RenderPlan]:
 @pytest.mark.parametrize(
     ("path", "station_count", "route_count", "dimensions"),
     [
-        ("examples/guide/01_minimal.mmd", 6, 7, (488, 286)),
+        ("examples/guide/01_minimal.mmd", 6, 7, (538, 336)),
         ("examples/topologies/divergent_fanout_split.mmd", 9, 8, (640, 422)),
         ("examples/guide/03b_fan_in_merge.mmd", 18, 24, (880, 326)),
         ("examples/topologies/fold_double.mmd", 55, 108, (1537, 716)),
@@ -45,7 +45,7 @@ def _plan(path: str) -> tuple[MetroGraph, RenderPlan]:
             "examples/topologies/lr_perp_top_entry_bottom_exit.mmd",
             9,
             8,
-            (373, 628),
+            (580, 628),
         ),
         ("examples/rail_mode.mmd", 11, 32, (531, 965)),
         ("examples/file_icons.mmd", 9, 8, (540, 419)),

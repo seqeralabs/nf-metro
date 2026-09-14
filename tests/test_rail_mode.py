@@ -7,7 +7,10 @@ from pathlib import Path
 import pytest
 
 from nf_metro.layout import compute_layout
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.mermaid import (
+    parse_metro_mermaid,
+    parse_metro_mermaid_file,
+)
 from nf_metro.parser.model import LineSpread, is_bypass_v
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
@@ -152,10 +155,10 @@ def test_diagonal_rail_section_packs_to_graph_pitch_not_label_width():
     assert widest > pitch, "fixture must carry a label wider than the pitch"
 
     # Angled: the graph pitch passes straight through, however wide the labels.
-    assert _label_aware_x_spacing(graph, real_ids, {}, pitch) == pitch
+    assert _label_aware_x_spacing(graph, real_ids, pitch) == pitch
     # Horizontal: the same panel widens to seat the full widest label.
     graph.label_angle = None
-    assert _label_aware_x_spacing(graph, real_ids, {}, pitch) > pitch
+    assert _label_aware_x_spacing(graph, real_ids, pitch) > pitch
 
 
 def test_spread_residual_drops_rail_section_overlaps(monkeypatch):
@@ -630,6 +633,7 @@ def test_angled_rail_labels_do_not_rake_lower_rail_markers():
     from nf_metro.layout.routing import compute_station_offsets, route_edges
 
     graph = parse_metro_mermaid((EXAMPLES / "sarek_metro.mmd").read_text())
+    graph.source_dir = str(EXAMPLES)
     assert graph.is_rail_section("calling"), "sarek_metro flags 'calling' as rails"
     assert graph.label_angle, "sarek_metro opts into 45-degree labels"
     compute_layout(graph)
@@ -700,9 +704,7 @@ def test_rail_mode_off_by_default_leaves_graph_unchanged():
     from nf_metro.render import render_svg
     from nf_metro.themes import THEMES
 
-    src = (EXAMPLES / "rnaseq_auto.mmd").read_text()
-
-    g1 = parse_metro_mermaid(src)
+    g1 = parse_metro_mermaid_file(EXAMPLES / "rnaseq_auto.mmd")
     assert g1.line_spread is LineSpread.BUNDLE
     compute_layout(g1)
     svg1 = render_svg(g1, THEMES["nfcore"])
@@ -712,7 +714,7 @@ def test_rail_mode_off_by_default_leaves_graph_unchanged():
         s.rail_top_y is None and s.rail_bottom_y is None for s in g1.stations.values()
     )
 
-    g2 = parse_metro_mermaid(src)
+    g2 = parse_metro_mermaid_file(EXAMPLES / "rnaseq_auto.mmd")
     g2.line_spread = LineSpread.BUNDLE  # explicit no-op
     compute_layout(g2)
     svg2 = render_svg(g2, THEMES["nfcore"])
@@ -841,8 +843,7 @@ def test_no_rail_directive_default_off_byte_identical():
     from nf_metro.render import render_svg
     from nf_metro.themes import THEMES
 
-    src = (EXAMPLES / "rnaseq_auto.mmd").read_text()
-    g = parse_metro_mermaid(src)
+    g = parse_metro_mermaid_file(EXAMPLES / "rnaseq_auto.mmd")
     assert g.has_rail_sections is False
     compute_layout(g)
     svg = render_svg(g, THEMES["nfcore"])
@@ -971,14 +972,12 @@ def test_angled_rail_labels_render_rotated():
 
 
 def test_label_angle_default_off_byte_identical():
-    """label_angle support must not change a render with no directive: a graph
-    without label_angle produces an identical SVG before and after this change
-    (label_angle is None -> no rotation, no spacing change)."""
+    """A graph with no ``label_angle`` directive renders unrotated: the SVG
+    carries no rotation transform at all."""
     from nf_metro.render import render_svg
     from nf_metro.themes import THEMES
 
-    src = (EXAMPLES / "rnaseq_auto.mmd").read_text()
-    g = parse_metro_mermaid(src)
+    g = parse_metro_mermaid_file(EXAMPLES / "rnaseq_auto.mmd")
     assert g.label_angle is None
     compute_layout(g)
     svg = render_svg(g, THEMES["nfcore"])
@@ -1124,13 +1123,12 @@ def test_legend_combo_default_off_byte_identical():
     from nf_metro.render import render_svg
     from nf_metro.themes import THEMES
 
-    src = (EXAMPLES / "rnaseq_auto.mmd").read_text()
-    g = parse_metro_mermaid(src)
+    g = parse_metro_mermaid_file(EXAMPLES / "rnaseq_auto.mmd")
     assert g.legend_combos == []
     compute_layout(g)
     svg1 = render_svg(g, THEMES["nfcore"])
 
-    g2 = parse_metro_mermaid(src)
+    g2 = parse_metro_mermaid_file(EXAMPLES / "rnaseq_auto.mmd")
     g2.legend_combos = []  # explicit no-op
     compute_layout(g2)
     svg2 = render_svg(g2, THEMES["nfcore"])
@@ -1647,6 +1645,7 @@ def test_rails_place_one_station_per_column_on_sarek():
     rail transient that the content corpus excludes for rails.
     """
     graph = parse_metro_mermaid(SAREK_MMD.read_text())
+    graph.source_dir = str(SAREK_MMD.parent)
     compute_layout(graph)
     section = graph.sections["calling"]
     xs: dict[int, str] = {}

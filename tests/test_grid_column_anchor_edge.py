@@ -138,20 +138,15 @@ def test_levelling_never_spreads_a_column_runway(
     worse: list[tuple[str, tuple[int, float], float, float]] = []
     for path in _gather_fixtures():
         text = path.read_text()
-        try:
-            with monkeypatch.context() as patched:
-                patched.setattr(
-                    "nf_metro.layout.engine._level_column_anchor_edges",
-                    lambda graph: None,
-                )
-                without = parse_metro_mermaid(text)
-                compute_layout(without)
-            graph = parse_metro_mermaid(text)
-            compute_layout(graph)
-        except CurveInvariantError:
-            # twoline_fanout_up is a known-bug fixture that aborts on the render
-            # path; every other abort is a regression this ratchet must surface.
-            continue
+        with monkeypatch.context() as patched:
+            patched.setattr(
+                "nf_metro.layout.engine._level_column_anchor_edges",
+                lambda graph: None,
+            )
+            without = parse_metro_mermaid(text)
+            compute_layout(without)
+        graph = parse_metro_mermaid(text)
+        compute_layout(graph)
         before = _column_runway_spreads(without)
         after = _column_runway_spreads(graph)
         for key, spread in after.items():

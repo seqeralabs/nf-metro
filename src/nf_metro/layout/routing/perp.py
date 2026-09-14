@@ -179,11 +179,7 @@ def _aligned_horizontal_drop_entry(ctx: _RoutingCtx, exit_port_id: str) -> str |
 
 
 def _perp_riser_lateral(
-    ctx: _RoutingCtx,
-    station_id: str,
-    line_id: str,
-    side: PortSide,
-    section_id: str | None,
+    ctx: _RoutingCtx, station_id: str, line_id: str, side: PortSide
 ) -> float:
     """Per-line lateral X continuing a perpendicular riser's convention.
 

@@ -1,0 +1,28 @@
+%%metro title: Convergence shared-terminal exit-turn repro
+%%metro line: a | A | #e6007e
+
+%%metro grid: s1 | 0,0
+%%metro grid: s2 | 2,0
+%%metro grid: s3 | 1,1
+%%metro grid: s4 | 2,1
+
+graph LR
+    subgraph s1 [One]
+        n1[N1]
+        n2[N2]
+    end
+    subgraph s2 [Two]
+        n3[N3]
+        n4[N4]
+    end
+    subgraph s3 [Three]
+        n5[N5]
+    end
+    subgraph s4 [Four]
+        n6[N6]
+    end
+
+    n2 -->|a| n3
+    n4 -->|a| n5
+    n1 -->|a| n6
+    n4 -->|a| n6

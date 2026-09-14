@@ -29,7 +29,7 @@ not the workflows.
 ```
 PR push -> "PR render preview" (pr-renders.yml, on: pull_request)
          -> "Publish render preview" (pr-render-publish.yml, on: workflow_run)
-              pushes _pr/<N>/ to the gh-pages branch (peaceiris)
+              pushes _pr/<N>/ to the gh-pages branch (git, retried)
          -> GitHub legacy Pages build (async, per gh-pages push)  <- STALLS HERE
          -> live at _pr/<N>/
 ```

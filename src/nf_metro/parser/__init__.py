@@ -1,6 +1,9 @@
 """Mermaid + metro directive parser."""
 
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.mermaid import (
+    parse_metro_mermaid,
+    parse_metro_mermaid_file,
+)
 from nf_metro.parser.model import UnresolvedEndpointError, UnresolvedPortSectionError
 from nf_metro.parser.validate import (
     ERROR,
@@ -20,6 +23,7 @@ __all__ = [
     "UnresolvedPortSectionError",
     "ValidationIssue",
     "parse_metro_mermaid",
+    "parse_metro_mermaid_file",
     "require_resolved_edge_endpoints",
     "require_resolved_port_sections",
     "validate_graph",

@@ -493,8 +493,6 @@ class FanPlanQuery:
 
     plans: tuple[FanPlan, ...]
     _by_id: Mapping[FanPlanId, FanPlan]
-    _by_system: Mapping[RouteSystemId, tuple[FanPlan, ...]]
-    _by_member: Mapping[EmissionMemberId, FanPlan]
     _by_fork: Mapping[str, FanPlan]
     _by_authored_edge: Mapping[ConnectorId, FanPlan]
     _structural_by_resolved_edge: Mapping[ResolvedEdge, FanPlan]
@@ -502,12 +500,10 @@ class FanPlanQuery:
     _route_emission_by_resolved_edge: Mapping[
         ResolvedEdge, tuple[FanPlan, FanBranchPlan, FanRouteEmission]
     ]
-    _by_station: Mapping[str, FanPlan]
 
     @classmethod
     def build(cls, plans: tuple[FanPlan, ...]) -> FanPlanQuery:
         by_id: dict[FanPlanId, FanPlan] = {}
-        by_system: dict[RouteSystemId, list[FanPlan]] = defaultdict(list)
         by_member: dict[EmissionMemberId, FanPlan] = {}
         by_fork: dict[str, FanPlan] = {}
         by_authored_edge: dict[ConnectorId, FanPlan] = {}
@@ -522,8 +518,6 @@ class FanPlanQuery:
             if plan.id in by_id:
                 raise ValueError(f"duplicate fan plan id {plan.id!r}")
             by_id[plan.id] = plan
-            if plan.system_id is not None:
-                by_system[plan.system_id].append(plan)
             if plan.disposition is not FanPlanDisposition.PLANNED:
                 continue
             for member_id in plan.member_ids:
@@ -571,10 +565,6 @@ class FanPlanQuery:
         return cls(
             plans=plans,
             _by_id=MappingProxyType(by_id),
-            _by_system=MappingProxyType(
-                {key: tuple(value) for key, value in by_system.items()}
-            ),
-            _by_member=MappingProxyType(by_member),
             _by_fork=MappingProxyType(by_fork),
             _by_authored_edge=MappingProxyType(by_authored_edge),
             _structural_by_resolved_edge=MappingProxyType(structural_by_resolved_edge),
@@ -584,17 +574,10 @@ class FanPlanQuery:
             _route_emission_by_resolved_edge=MappingProxyType(
                 route_emission_by_resolved_edge
             ),
-            _by_station=MappingProxyType(by_station),
         )
 
     def plan(self, plan_id: FanPlanId) -> FanPlan:
         return self._by_id[plan_id]
-
-    def plans_for_system(self, system_id: RouteSystemId) -> tuple[FanPlan, ...]:
-        return self._by_system.get(system_id, ())
-
-    def owner_for_member(self, member_id: EmissionMemberId) -> FanPlan | None:
-        return self._by_member.get(member_id)
 
     def __deepcopy__(self, memo: dict[int, object]) -> FanPlanQuery:
         del memo
@@ -618,9 +601,6 @@ class FanPlanQuery:
         self, edge: ResolvedEdge
     ) -> tuple[FanPlan, FanBranchPlan, FanRouteEmission] | None:
         return self._route_emission_by_resolved_edge.get(edge)
-
-    def owner_for_station(self, station_id: str) -> FanPlan | None:
-        return self._by_station.get(station_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1094,6 +1074,28 @@ def _grid_position(graph: MetroGraph, section_id: str) -> tuple[int, int]:
     return section.grid_col, section.grid_row
 
 
+def heads_its_own_fork(graph: MetroGraph, station_id: str) -> bool:
+    """Whether *station_id* stands at the head of a fan of its own.
+
+    Two or more on-track successors inside its own section make it the apex of
+    a fan ``assign_tracks`` has already centred it on, so its lane is settled
+    before any fan plan is built.  Ports, junctions, cross-section successors
+    and off-track outputs leave the apex free: none of them takes a lane out of
+    the section's own frame.
+    """
+    section_id = graph.section_for_station(station_id)
+    successors = {
+        edge.target
+        for edge in graph.edges_from(station_id)
+        if edge.target not in graph.ports
+        and edge.target not in graph.junction_ids
+        and graph.section_for_station(edge.target) == section_id
+        and (target := graph.stations.get(edge.target)) is not None
+        and not target.off_track
+    }
+    return len(successors) >= 2
+
+
 def _trunk_followers(
     graph: MetroGraph,
     fork_id: str,
@@ -1107,7 +1109,9 @@ def _trunk_followers(
     continues to after the join, and it stands on the fan's centreline.  Where a
     side reaches more than one station the trunk continues through none of them:
     those are the arms of a convergence or of a second fan, and putting them all
-    on one centreline would draw them in a single row.
+    on one centreline would draw them in a single row.  A station heading a fan
+    of its own is likewise no follower: it already holds the centre of that fan,
+    and this one's centreline is a branch lane away from it.
     """
 
     def _side(
@@ -1126,7 +1130,9 @@ def _trunk_followers(
                 if station_id not in found:
                     found.append(station_id)
                 break
-        return tuple(found) if len(found) == 1 else ()
+        if len(found) != 1 or heads_its_own_fork(graph, found[0]):
+            return ()
+        return tuple(found)
 
     return (
         *_side(fork_id, approach_paths, upstream=True),
@@ -2247,6 +2253,69 @@ def _recognise_fan(
     )
 
 
+def _seat_centered_symmetric_branches_by_line_rail(
+    graph: MetroGraph,
+    branch_plans: list[FanBranchPlan],
+    appearance_policy: FanAppearancePolicy,
+    appearance_lane_sign: float | None,
+    layout_section_id: str | None,
+    minimum_runway: float,
+) -> list[FanBranchPlan]:
+    """Seat a centered symmetric fan's slots on each branch's line rail.
+
+    A centered section's exclusive run rides its line's symmetric base rail --
+    the line's index above, on, or below the trunk midline -- exactly as the
+    flat-graph track assignment seats it.  ``symmetric_lane_offsets`` yields the
+    slots ascending; branch-discovery order need not agree with line order, so
+    map the ascending slots onto the branches sorted by the screen side their
+    lines want (line rail scaled by the frame's lane sign).
+
+    Only a centered section is reseated; a ``diamond_style: symmetric`` fan keeps
+    its discovery-order seating.
+    """
+    if (
+        appearance_policy is not FanAppearancePolicy.SYMMETRIC
+        or appearance_lane_sign is None
+        or graph.section_line_spread(layout_section_id) is not LineSpread.CENTERED
+    ):
+        return branch_plans
+
+    # Same canonical rail order the flat-graph track allocator uses
+    # (ordering.assign_tracks), so a sectioned fan seats its lines identically.
+    line_index = {lid: rank for rank, lid in enumerate(graph.lines)}
+    n_lines = len(line_index)
+
+    def screen_key(branch: FanBranchPlan) -> tuple[float, int]:
+        rails = [
+            line_index[lid] - (n_lines - 1) / 2
+            for lid in branch.line_ids
+            if lid in line_index
+        ]
+        mean_rail = sum(rails) / len(rails) if rails else 0.0
+        return (mean_rail * appearance_lane_sign, branch.rank)
+
+    offsets = sorted(
+        branch.lane_offset if branch.lane_offset is not None else 0.0
+        for branch in branch_plans
+    )
+    order = sorted(range(len(branch_plans)), key=lambda i: screen_key(branch_plans[i]))
+    seated = [0.0] * len(branch_plans)
+    for slot, index in zip(offsets, order, strict=True):
+        seated[index] = slot
+    return [
+        replace(
+            branch,
+            lane_offset=lane_offset,
+            diagonal_runway=max(
+                minimum_runway,
+                branch.diagonal_runway or 0.0,
+                abs(lane_offset),
+            ),
+        )
+        for branch, lane_offset in zip(branch_plans, seated, strict=True)
+    ]
+
+
 def _build_candidate(
     ctx: _FanPlanningContext,
     source_id: str,
@@ -2526,6 +2595,14 @@ def _build_candidate(
         )
         if frame is not None and reason is None
         else None
+    )
+    branch_plans = _seat_centered_symmetric_branches_by_line_rail(
+        graph,
+        branch_plans,
+        appearance_policy,
+        appearance_lane_sign,
+        layout_section_id,
+        minimum_runway,
     )
     if frame is not None and appearance_lane_sign is not None:
         layout_section = graph.sections.get(layout_section_id or "")

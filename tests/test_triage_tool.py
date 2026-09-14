@@ -22,8 +22,7 @@ _INVARIANTS_SRC = _REPO_ROOT / "tests" / "test_layout_invariants.py"
 
 
 def _load_build_review():
-    if not _BUILD_REVIEW.is_file():
-        pytest.skip(f"triage tool not present at {_BUILD_REVIEW}")
+    assert _BUILD_REVIEW.is_file(), f"triage tool missing at {_BUILD_REVIEW}"
     spec = importlib.util.spec_from_file_location("triage_build_review", _BUILD_REVIEW)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

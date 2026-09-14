@@ -23,7 +23,6 @@ from nf_metro.layout.constants import (
     MIN_CORRIDOR_Y_OVERLAP,
     OFFSET_STEP,
     SECTION_HEADER_PROTRUSION,
-    SECTION_ROUTE_CLEARANCE,
     graph_offset_step,
 )
 from nf_metro.layout.geometry import (
@@ -418,7 +417,7 @@ def header_corridor_y(
     full :data:`INTER_ROW_HEADER_CLEARANCE` applies only when a section
     occupies the gap above the row (contributing a header badge); the topmost
     row has only the canvas-top title band, so the smaller
-    :data:`SECTION_ROUTE_CLEARANCE` keeps the channel from overshooting it.
+    :data:`EDGE_TO_BUNDLE_CLEARANCE` keeps the channel from overshooting it.
 
     When *col* is given the channel clears only that grid column's sections, so
     a corridor leg confined to one column isn't pushed past a tall section
@@ -427,13 +426,13 @@ def header_corridor_y(
     if below:
         return (
             row_bottom_edge(graph, row, default=default, col=col)
-            + SECTION_ROUTE_CLEARANCE
+            + EDGE_TO_BUNDLE_CLEARANCE
             + base_radius
         )
     clearance = (
         INTER_ROW_HEADER_CLEARANCE
         if section_exists_above_row(graph, row)
-        else SECTION_ROUTE_CLEARANCE
+        else EDGE_TO_BUNDLE_CLEARANCE
     )
     return row_top_edge(graph, row, default=default, col=col) - clearance - base_radius
 
@@ -447,6 +446,29 @@ def section_exists_above_row(graph: MetroGraph, row: int) -> bool:
     the canvas-top padding above.
     """
     return any(s.grid_row + s.grid_row_span - 1 < row for s in graph.sections.values())
+
+
+def flanked_cross_row_riser_neighbour_col(
+    src_col: int,
+    src_row: int,
+    tgt_col: int,
+    tgt_row: int,
+    *,
+    exit_is_right: bool,
+) -> int | None:
+    """Neighbour column a same-column cross-row perpendicular-entry riser flanks.
+
+    A LEFT/RIGHT exit feeding a TOP/BOTTOM entry in its own grid column but a
+    different row runs a vertical riser in the inter-column gap on its exit side.
+    Returns the column on that side -- whose occupancy at *src_row* decides
+    whether the riser is walled on both sides -- or ``None`` when the two boxes
+    are not a same-column cross-row pair.  Shared so the gap-sizing and the
+    riser-seating call sites read one definition of the shape rather than two
+    that can drift.
+    """
+    if src_col != tgt_col or src_row == tgt_row:
+        return None
+    return src_col + (1 if exit_is_right else -1)
 
 
 def column_gap_midpoint(
@@ -494,6 +516,62 @@ def column_gap_edges(
     right = col_right_edge(graph, lo, row=row)
     left = col_left_edge(graph, hi, default=right, row=row)
     return right, left
+
+
+def off_grid_gap_bundle_midpoint(
+    graph: MetroGraph, lo: int, row: int | None, bundle_width: float
+) -> float | None:
+    """X midline of a bundle in gap ``(lo, lo + 1)`` when the grid has one side.
+
+    ``None`` unless exactly one of the two columns carries a section anywhere
+    on the grid, which is the case that leaves the gap with no facing edge to
+    measure at any row: the caller then reads :func:`column_gap_edges` and
+    centres the bundle between the two edges as usual.
+
+    The bundle sits :data:`EDGE_TO_BUNDLE_CLEARANCE` off that one real edge --
+    the floor :func:`symmetric_bundle_midpoint` holds against a bounded gap's
+    edges -- rather than centred across a span whose absent side
+    :func:`col_left_edge` and :func:`col_right_edge` report as the coordinate
+    origin, because a midpoint measured against the origin is set by the map's
+    overall size instead of by the box the bundle hugs.  *row* narrows the real
+    edge to the bundle's own row where the column reaches it, and the column's
+    full extent covers the rest.
+    """
+    lo_on_grid = bool(_sections_in_col(graph, lo))
+    hi_on_grid = bool(_sections_in_col(graph, lo + 1))
+    if lo_on_grid == hi_on_grid:
+        return None
+    reach = EDGE_TO_BUNDLE_CLEARANCE + bundle_width / 2
+    if lo_on_grid:
+        anywhere = col_right_edge(graph, lo)
+        return col_right_edge(graph, lo, default=anywhere, row=row) + reach
+    anywhere = col_left_edge(graph, lo + 1)
+    return col_left_edge(graph, lo + 1, default=anywhere, row=row) - reach
+
+
+def row_local_gap_bundle_midpoint(
+    graph: MetroGraph, lo: int, row: int | None, bundle_width: float
+) -> float | None:
+    """X midline of a bundle in gap ``(lo, lo + 1)`` when the lower column is on
+    the grid but has no section in *row* while the upper column does.
+
+    ``None`` outside that one case.  There, the lower column's
+    :func:`col_right_edge` finds no section in *row* and returns its ``0.0``
+    default, so measuring the gap against that edge centres the bundle on the
+    coordinate origin -- a midline the map's overall size sets rather than the
+    box the channel hugs.  The upper column carries a real edge in *row*, so the
+    bundle seats :data:`EDGE_TO_BUNDLE_CLEARANCE` off it, exactly the
+    ``hi``-on-grid branch of :func:`off_grid_gap_bundle_midpoint`.
+
+    Reached only after that function has handled a column absent from the whole
+    grid, so here both columns are on the grid and only *row* leaves one empty.
+    """
+    lo_absent = not _sections_in_col(graph, lo, row)
+    hi_present = bool(_sections_in_col(graph, lo + 1, row))
+    if not (lo_absent and hi_present):
+        return None
+    reach = EDGE_TO_BUNDLE_CLEARANCE + bundle_width / 2
+    return col_left_edge(graph, lo + 1, row=row) - reach
 
 
 def packed_cell_neighbor_edges(
@@ -1015,6 +1093,16 @@ class PeeloffTail(NamedTuple):
         return max(self.trunk_start_x, self.peel_x)
 
 
+def is_side_entry_port(graph: MetroGraph, port_id: str) -> bool:
+    """Whether *port_id* names a LEFT or RIGHT entry port."""
+    port = graph.ports.get(port_id)
+    return (
+        port is not None
+        and port.is_entry
+        and port.side in (PortSide.LEFT, PortSide.RIGHT)
+    )
+
+
 def port_peeloff_tail(rp: RoutedPath) -> PeeloffTail | None:
     """The peel-off tail ending at an entry port, or ``None``.
 
@@ -1043,6 +1131,23 @@ def port_peeloff_tail(rp: RoutedPath) -> PeeloffTail | None:
         trunk_sign=1 if x3 > x4 else -1,
         vertical_sign=1 if y2 > y3 else -1,
         port_lead_sign=1 if x1 > x2 else -1,
+    )
+
+
+def x_follows_trunk_direction(vertical_sign: int, trunk_sign: int) -> bool:
+    """Whether approach-X order follows (not reverses) trunk-depth order.
+
+    The first H-to-V turn decides this independently of the port-Y transpose: a
+    downward approach off a rightward trunk reverses the order, an upward one
+    keeps it.
+    """
+    return -vertical_sign == trunk_sign
+
+
+def tail_overlap(per_line: dict[str, PeeloffTail]) -> float:
+    """Length of the destination-facing horizontal corridor every tail shares."""
+    return min(t.x_hi for t in per_line.values()) - max(
+        t.x_lo for t in per_line.values()
     )
 
 
@@ -1323,12 +1428,10 @@ def same_destination_approach_slots(
     """Map destination lane order onto adjacent final vertical channels."""
     port = graph.ports[bundle.port_id]
     n = len(bundle.per_line)
-    realised_xs = [tail.peel_x for tail in bundle.per_line.values()]
-    inner_x = max(realised_xs) if port.side is PortSide.LEFT else min(realised_xs)
-    x_slots = (
-        [inner_x - (n - rank - 1) * step for rank in range(n)]
-        if port.side is PortSide.LEFT
-        else [inner_x + rank * step for rank in range(n)]
+    x_slots = port_approach_channel_xs(
+        (tail.peel_x for tail in bundle.per_line.values()),
+        step,
+        inner_is_max=port.side is PortSide.LEFT,
     )
     y_slots = sorted(tail.port_y for tail in bundle.per_line.values())
     port_order = sorted(
@@ -1778,6 +1881,24 @@ def iter_opposing_entry_confluences(
         )
 
 
+def port_approach_channel_xs(
+    realised_xs: Iterable[float], step: float, *, inner_is_max: bool
+) -> list[float]:
+    """Ascending *step*-pitch channel band for one port-approach bundle.
+
+    The band is anchored on the realised channel nearest the port, whose
+    standoff from the port's own box edge is what the emitting handler sized;
+    the remaining lanes pack in beside it at the bundle pitch.
+    """
+    xs = list(realised_xs)
+    n = len(xs)
+    if inner_is_max:
+        inner_x = max(xs)
+        return [inner_x - (n - rank - 1) * step for rank in range(n)]
+    inner_x = min(xs)
+    return [inner_x + rank * step for rank in range(n)]
+
+
 def opposing_entry_confluence_slots(
     bundle: OpposingEntryConfluence,
     graph: MetroGraph,
@@ -1786,12 +1907,10 @@ def opposing_entry_confluence_slots(
     """Map port lane order onto the bundle's preceding vertical channels."""
     port = graph.ports[bundle.port_id]
     n = len(bundle.per_line)
-    realised_xs = [tail.peel_x for tail in bundle.per_line.values()]
-    inner_x = max(realised_xs) if port.side is PortSide.LEFT else min(realised_xs)
-    x_slots = (
-        [inner_x - (n - rank - 1) * step for rank in range(n)]
-        if port.side is PortSide.LEFT
-        else [inner_x + rank * step for rank in range(n)]
+    x_slots = port_approach_channel_xs(
+        (tail.peel_x for tail in bundle.per_line.values()),
+        step,
+        inner_is_max=port.side is PortSide.LEFT,
     )
     y_slots = sorted(tail.port_y for tail in bundle.per_line.values())
     port_order = sorted(
@@ -1879,9 +1998,7 @@ def iter_port_peeloff_bundles(
         n = len(per_line)
         if n < 2:
             continue
-        overlap_lo = max(t.x_lo for t in per_line.values())
-        overlap_hi = min(t.x_hi for t in per_line.values())
-        if overlap_hi - overlap_lo < min_common_suffix - COORD_TOLERANCE:
+        if tail_overlap(per_line) < min_common_suffix - COORD_TOLERANCE:
             continue
         trunk_ys = sorted(t.trunk_y for t in per_line.values())
         if trunk_ys[-1] - trunk_ys[0] <= COORD_TOLERANCE:
@@ -1906,20 +2023,38 @@ def peeloff_trunk_line_order(bundle: PortPeeloffBundle) -> list[str]:
     return list(reversed(port_order))
 
 
-def peeloff_target_slots(bundle: PortPeeloffBundle) -> dict[str, PeeloffSlot]:
+def peeloff_target_slots(
+    bundle: PortPeeloffBundle, step: float
+) -> dict[str, PeeloffSlot]:
     """Map each line of *bundle* to the slot its trunk depth earns.
 
     Peel-X and port-Y use separate ranks.  A half-turn reverses the horizontal
     direction and therefore transposes port order relative to trunk order,
     while the first H-to-V turn independently decides whether approach X
     follows or reverses trunk order.
+
+    Risers spread wider than one bundle width close up onto the pitch rather
+    than merely permuting the Xs already realised: only this bundle's lines
+    descend the corridor, so a band sized by the wider fan that emitted them
+    holds lanes nothing runs in.  Closing up stays inside the bundle's own
+    corridor; opening a *narrower* band up needs room outboard of it, which the
+    separation stages own, so a fused band keeps its realised channels.  Port Y
+    is the destination port's own line stack rather than this bundle's to
+    choose, and stays as realised throughout.
     """
     per_line = bundle.per_line
     n = len(per_line)
-    x_slots = sorted(t.peel_x for t in per_line.values())
+    realised_xs = sorted(t.peel_x for t in per_line.values())
+    x_slots = (
+        port_approach_channel_xs(
+            realised_xs, step, inner_is_max=bundle.port_lead_sign > 0
+        )
+        if realised_xs[-1] - realised_xs[0] > (n - 1) * step + COORD_TOLERANCE
+        else realised_xs
+    )
     y_slots = sorted(t.port_y for t in per_line.values())
     ranked = sorted(per_line, key=lambda lid: per_line[lid].trunk_y)
-    x_follows_trunk = -bundle.vertical_sign == bundle.trunk_sign
+    x_follows_trunk = x_follows_trunk_direction(bundle.vertical_sign, bundle.trunk_sign)
     y_follows_trunk = bundle.port_lead_sign == bundle.trunk_sign
     return {
         lid: PeeloffSlot(
@@ -2140,6 +2275,77 @@ def trunk_segments_cross(a: HTrunkSeg, b: HTrunkSeg) -> tuple[float, float] | No
     return next(iter(trunk_segment_crossings(a, b)), None)
 
 
+def inter_row_gap_band(graph: MetroGraph, y: float) -> tuple[float, float] | None:
+    """Return the ``(top, bottom)`` Y envelope of the inter-row gap holding *y*.
+
+    Scans adjacent grid rows for the gap whose ``[row_bottom, next_row_top]``
+    band contains *y*; returns ``None`` when *y* does not fall in any gap.
+    """
+    for _upper, top, bottom in iter_inter_row_gaps(graph):
+        if top - COORD_TOLERANCE <= y <= bottom + COORD_TOLERANCE:
+            return top, bottom
+    return None
+
+
+class ExemptDoglegLanes(NamedTuple):
+    """The two candidate placements of a movable trunk off an exempt run.
+
+    A trunk fused onto a ``normalize_exempt`` run can seat one corridor
+    ``separation`` below or above it, each clamped to the inter-row gap band.
+    ``below_crossing``/``above_crossing`` hold that placement's first
+    riser/run crossing with the exempt run, or ``None`` when the placement is a
+    clean parallel bundle; ``below_ok``/``above_ok`` record whether the band
+    admits it.
+    """
+
+    below_y: float
+    above_y: float
+    below_ok: bool
+    above_ok: bool
+    below_crossing: tuple[float, float] | None
+    above_crossing: tuple[float, float] | None
+
+
+def exempt_dogleg_lanes(
+    movable: HTrunkSeg,
+    exempt: HTrunkSeg,
+    *,
+    separation: float,
+    band: tuple[float, float] | None,
+) -> ExemptDoglegLanes:
+    """Resolve the below/above lanes a movable trunk can take off an exempt run.
+
+    The two candidate placements sit one *separation* either side of the exempt
+    run at ``exempt.y``; *band* clamps each to the inter-row gap so a placement
+    that would foul the next row's header badge is marked infeasible.
+    ``_dogleg_off_exempt_trunks`` picks the crossing-free side from this, and the
+    dogleg-crossing invariant reads it to tell a forced transit (both sides
+    cross) from an avoidable wrong-side landing.
+    """
+    below = exempt.y + separation
+    above = exempt.y - separation
+    if band is not None:
+        top, bottom = band
+        below_ok = below <= bottom - SECTION_HEADER_PROTRUSION
+        above_ok = above >= top
+    else:
+        below_ok = above_ok = True
+    below_seg = HTrunkSeg(
+        below, movable.xa, movable.xb, movable.before_y, movable.after_y
+    )
+    above_seg = HTrunkSeg(
+        above, movable.xa, movable.xb, movable.before_y, movable.after_y
+    )
+    return ExemptDoglegLanes(
+        below_y=below,
+        above_y=above,
+        below_ok=below_ok,
+        above_ok=above_ok,
+        below_crossing=trunk_segments_cross(below_seg, exempt),
+        above_crossing=trunk_segments_cross(above_seg, exempt),
+    )
+
+
 def compute_bundle_info(
     graph: MetroGraph,
     junction_ids: set[str],
@@ -2281,7 +2487,6 @@ def inter_column_channel_x(
     src: Station,
     tgt: Station,
     sx: float,
-    tx: float,
     dx: float,
     max_r: float,
     offset_step: float,
@@ -3143,6 +3348,15 @@ def planner_owns_segment(route: RoutedPath, rank: int) -> bool:
     refuse the result both have to agree on which coordinates are theirs: a pass
     reading a wider rule than its guard would move geometry the guard then
     refuses, and a narrower one would leave a defect neither reports.
+
+    A pass that translates a whole segment wants
+    :func:`planner_owns_segment_or_boundary` instead, which is the reading the
+    normalisation passes and the closing guards share.  Only the convergence arm
+    here reaches a boundary beside *rank*, because a trunk axis states a run
+    whose two corners it fixes as well; a member plan and an exit turn each
+    enumerate the segments they own, so those arms match *rank* exactly.  A
+    caller wanting the widening on one side only says which side, as
+    ``_corridor_run_band`` does for the leg feeding a planned turn.
     """
     return (
         convergence_owns_segment_boundary(route, rank)
@@ -3151,6 +3365,19 @@ def planner_owns_segment(route: RoutedPath, rank: int) -> bool:
         or (
             route.exit_turn_axis_id is not None and route.exit_turn_segment_rank == rank
         )
+    )
+
+
+def planner_owns_segment_or_boundary(route: RoutedPath, rank: int) -> bool:
+    """Whether a plan fixes this segment or a corner at either end of it.
+
+    Translating a segment stretches its two flanking legs to meet it, so both
+    of its corners re-form: a segment beside a route-system-owned boundary is
+    as unavailable to a pass as an owned segment is.  The normalisation passes
+    and closing guards that read this wider rule read it from here.
+    """
+    return planner_owns_segment(route, rank) or route_system_owns_segment_boundary(
+        route, rank
     )
 
 
@@ -3253,6 +3480,24 @@ class CorridorLane:
         """
         return all(run.route.normalize_exempt for run in self.runs)
 
+    def _corridor_run_pairs(
+        self, other: CorridorLane
+    ) -> Iterator[tuple[CorridorRun, CorridorRun]]:
+        """Run pairs to compare when checking whether this lane co-travels ``other``.
+
+        Empty when the lanes cannot corridor-share at all: different axes or
+        travel directions, or the same line.
+        """
+        if (
+            self.axis != other.axis
+            or self.sign != other.sign
+            or self.line_id == other.line_id
+        ):
+            return
+        for mine in self.runs:
+            for theirs in other.runs:
+                yield mine, theirs
+
     def fused_span(
         self, other: CorridorLane, step: float
     ) -> tuple[float, float] | None:
@@ -3261,17 +3506,10 @@ class CorridorLane:
         ``None`` when they do not: different axes or travel directions, one
         line, or every shared stretch already carrying the full nesting step.
         """
-        if (
-            self.axis != other.axis
-            or self.sign != other.sign
-            or self.line_id == other.line_id
-        ):
-            return None
         return max(
             (
                 (max(mine.span[0], theirs.span[0]), min(mine.span[1], theirs.span[1]))
-                for mine in self.runs
-                for theirs in other.runs
+                for mine, theirs in self._corridor_run_pairs(other)
                 if cotravelling_lanes_fuse(
                     self.coord, other.coord, mine.span, theirs.span, step
                 )
@@ -3283,6 +3521,13 @@ class CorridorLane:
     def fuses_with(self, other: CorridorLane, step: float) -> bool:
         """Whether the two lanes' strokes close into one over a shared corridor."""
         return self.fused_span(other, step) is not None
+
+    def shares_corridor_with(self, other: CorridorLane) -> bool:
+        """Whether any run pair between the two lanes overlaps in the same corridor."""
+        return any(
+            spans_share_corridor(*mine.span, *theirs.span)
+            for mine, theirs in self._corridor_run_pairs(other)
+        )
 
 
 def corridor_lanes(runs: Iterable[CorridorRun]) -> list[CorridorLane]:

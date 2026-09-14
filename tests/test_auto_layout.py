@@ -300,9 +300,10 @@ def test_explicit_grid_section_keeps_lr_against_auto_successor_below():
     successor lands in a lower grid row.
 
     Regression lock for #446: during auto-layout an explicit-grid section
-    still reads grid_col == -1, so comparing it against an auto neighbour
-    (row >= 0) used to fire the "all successors below" TB branch and reorient
-    the section vertically.
+    reads grid_col == -1, so a naive comparison against an auto neighbour
+    (row >= 0) reads every successor as below and takes the "all successors
+    below" TB branch.  Direction inference must not draw that conclusion from
+    a placeholder column.
     """
     graph = _make_graph_with_sections(
         ["manual", "downstream"],
@@ -523,12 +524,13 @@ def test_rnaseq_auto_renders():
     """rnaseq_auto.mmd (no directives) parses and renders without errors."""
     from nf_metro.layout.engine import compute_layout
     from nf_metro.render.svg import render_svg
-    from nf_metro.themes.nfcore import NFCORE_THEME
+    from nf_metro.themes import NFCORE_DARK_THEME
 
     text = (EXAMPLES / "rnaseq_auto.mmd").read_text()
     graph = parse_metro_mermaid(text)
+    graph.source_dir = str(EXAMPLES)
     compute_layout(graph)
-    svg = render_svg(graph, NFCORE_THEME)
+    svg = render_svg(graph, NFCORE_DARK_THEME)
 
     # Should produce valid SVG with all sections
     assert "<svg" in svg
@@ -767,9 +769,9 @@ def test_perp_entry_run_stays_in_section_bbox(fixture):
     Opening the station-elbow gap shifts the run away from that port; the bbox
     must follow on the shift side.  Stripping ``sarek_metro``'s explicit
     ``grid:`` directives drives its ``annotation`` section into exactly this
-    state -- before the fix the leftmost station spilled past ``bbox_x`` and
-    the always-on bbox-containment guard aborted the render.  ``rnaseq_auto``
-    is a clean auto-layout that must keep passing.
+    state, where a leftmost station spilling past ``bbox_x`` aborts the render
+    on the always-on bbox-containment guard.  ``rnaseq_auto`` is a clean
+    auto-layout that takes the same shift without the spill.
     """
     from nf_metro.layout.constants import GUARD_TOLERANCE
     from nf_metro.layout.engine import compute_layout

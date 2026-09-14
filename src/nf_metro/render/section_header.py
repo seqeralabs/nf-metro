@@ -46,7 +46,7 @@ took rather than a fixed band above ``bbox_y``.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Literal, NamedTuple
 
@@ -128,6 +128,15 @@ def estimate_section_label_width(name: str, font_size: float) -> float:
     """Estimate the rendered width of a section title in pixels."""
     style = text_style(font_size, "bold")
     return DEFAULT_TEXT_METRICS.reserve_width(name, style, TextRole.SECTION_HEADER)
+
+
+def _widest_label_line(lines: Sequence[str], font_size: float) -> str:
+    """The wrapped title line with the greatest estimated width."""
+    return max(
+        lines,
+        key=lambda line: estimate_section_label_width(line, font_size),
+        default="",
+    )
 
 
 def _badge_span() -> float:
@@ -525,7 +534,9 @@ def _wrapped_header_geometry(
     lines, height_capped = _wrap_header_lines(
         name, font_size, available_width, max_lines
     )
-    text_width = max(estimate_section_label_width(line, font_size) for line in lines)
+    text_width = estimate_section_label_width(
+        _widest_label_line(lines, font_size), font_size
+    )
     extra_height = (len(lines) - 1) * header_line_height(font_size)
     return lines, badge_span + text_width, extra_height, height_capped
 
@@ -1033,12 +1044,21 @@ def check_section_headers_fit_box_width(
     was available (see :func:`_leftmost_clear_band_start`).  A rotated
     (``left``/``right``) header reads down the box height rather than across its
     width, so it is exempt too.  A ``height_capped`` header is exempt as well: it
-    traded extra
-    width for fewer lines to stay clear of whatever bounded its growth
-    direction (see :func:`_wrapped_header_geometry`).  A single line with no
-    space to break at (one word, or a word joined by an existing hyphen the
-    wrap already used) is exempt too: the title is never split mid-word (see
-    :func:`_pack_lines`), so a lone long word has no further way to narrow.
+    traded extra width for fewer lines to stay clear of whatever bounded its
+    growth direction (see :func:`_wrapped_header_geometry`).
+
+    A header whose widest wrapped line is a single unbreakable token is exempt:
+    :func:`_pack_lines` never splits mid-word, so such a line has no further way
+    to narrow, and it is the only shape :func:`_pack_lines` can leave wider than
+    the available width.  A line that carries an unused break point (a space, or
+    an unsplit hyphen) is reported, since a correct wrap would have used it.
+
+    This guard therefore does not verify that a permitted unbreakable-token
+    overhang stays clear of a neighbouring section's box or header: it only
+    measures against the section's own ``bbox_w``.  Lateral overlap with a
+    neighbour is not checked anywhere - only route crossings
+    (:func:`check_section_headers_clear_routes`) and the vertical reserved band
+    (:func:`check_section_headers_hold_the_reserved_band`) are.
     """
     overflowing: list[str] = []
     for section_id, placement in placements.items():
@@ -1046,7 +1066,11 @@ def check_section_headers_fit_box_width(
             continue
         if placement.height_capped:
             continue
-        if len(placement.label_lines) == 1 and " " not in placement.label_lines[0]:
+        # Header width is linear in font size, so any fixed size ranks the lines
+        # by relative width identically; the placement's own font size is not
+        # available here.
+        widest_line = _widest_label_line(placement.label_lines, 1.0)
+        if len(_header_wrap_tokens(widest_line)) <= 1:
             continue
         section = graph.sections.get(section_id)
         if section is None:

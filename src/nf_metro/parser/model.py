@@ -5,9 +5,9 @@ from __future__ import annotations
 import warnings
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Literal, TypedDict
+from typing import TYPE_CHECKING, Literal, NamedTuple, TypedDict
 
-from nf_metro.errors import NfMetroError
+from nf_metro.errors import NfMetroError, UnknownInactiveLineError
 from nf_metro.parser.provenance import LayoutProvenance
 
 if TYPE_CHECKING:
@@ -27,6 +27,19 @@ class RowGridInfo(TypedDict):
     slot_count: int
     slot_spacing: float
     max_y_pad: float
+
+
+class PartialTrunkDescent(NamedTuple):
+    """A partial row-mate's Stage 4.8 handover descent and its two endpoint ports.
+
+    Stage 6.4 re-seats the partial's handover port ``descent`` below the carrier
+    port it hands to; carrying both port IDs lets that restore work from the
+    carrier's post-snap Y instead of blindly re-adding the descent.
+    """
+
+    partial_port: str
+    carrier_port: str
+    descent: float
 
 
 class LayoutGeometryWarning(UserWarning):
@@ -50,8 +63,8 @@ def split_guard_warnings(
 
     Returns ``(guard_warnings, other_warnings)``: entries categorised
     :class:`PermissiveGuardWarning` (a guard downgrade), and everything else,
-    so a caller can report the former distinctly and replay the latter
-    through the normal warning printer (``warnings.showwarning``).
+    so a caller can report the former distinctly from a warning about
+    something the engine merely ignored or adjusted.
     """
     guard = [w for w in caught if issubclass(w.category, PermissiveGuardWarning)]
     other = [w for w in caught if not issubclass(w.category, PermissiveGuardWarning)]
@@ -106,6 +119,9 @@ class LineSpread(str, Enum):
 
 VALID_LINE_STYLES = ("solid", "dashed", "dotted")
 
+LINE_INACTIVE_KEYWORD = "inactive"
+"""Literal fifth ``%%metro line:`` field marking a line inactive by default."""
+
 FLOW_DIRECTIONS: tuple[str, ...] = ("LR", "RL", "TB", "BT")
 """Every flow direction a section may declare, paired by axis.
 
@@ -145,6 +161,11 @@ class MetroLine:
     display_name: str
     color: str
     style: str = "solid"
+    # Marked inactive by the ``%%metro line:`` directive's optional ``inactive``
+    # field. A render greys such lines unless a caller override (the
+    # ``--inactive-lines`` flag / ``inactive_line_ids`` config) supplies its own
+    # set, which replaces this default outright.
+    default_inactive: bool = False
 
 
 @dataclass(frozen=True)
@@ -282,6 +303,12 @@ class Station:
         )
 
 
+# ``Edge.line_id`` for an edge the source wrote without a ``|line_id|``
+# annotation. An unannotated edge and one naming an undeclared line are
+# separate authoring defects, so the sentinel keeps them apart.
+UNANNOTATED_LINE_ID = "default"
+
+
 @dataclass
 class Edge:
     """A directed edge between stations, belonging to a metro line."""
@@ -412,18 +439,6 @@ class Section:
     off_track_lead_extra: dict[str, int] = field(default_factory=dict)
 
 
-@dataclass
-class RouteSegment:
-    """A segment of a routed edge path (populated by routing engine)."""
-
-    x1: float
-    y1: float
-    x2: float
-    y2: float
-    line_id: str
-    edge: Edge | None = None
-
-
 class UnresolvedEndpointError(NfMetroError, ValueError):
     """Raised when an edge references a station id that is not in the graph.
 
@@ -499,6 +514,7 @@ class MetroGraph:
     cell_packs: dict[tuple[int, int], list[str]] = field(default_factory=dict)
     line_order: str = "definition"  # "definition" or "span"
     diamond_style: str = "straight"  # "straight" or "symmetric"
+    row_align: str = "content"  # "content" (hug) or "top" (flush row tops)
     compact_offsets: bool = False
     center_ports: bool = False
     # None = auto; compute_layout resolves spacing and section gaps.
@@ -568,6 +584,12 @@ class MetroGraph:
     )
     # %%metro legend_combo entries: (line_ids, label) pairs.
     legend_combos: list[tuple[tuple[str, ...], str]] = field(default_factory=list)
+    # Shape-checked %%metro legend_combo payloads as (line_ids, label) pairs,
+    # resolved into ``legend_combos`` after parse so a combo may precede the
+    # ``line:`` directives it names.
+    _pending_legend_combos: list[tuple[list[str], str]] = field(
+        default_factory=list, repr=False
+    )
     # Placement modifiers for the bundled legend+logo block. The corner/edge
     # keyword lives in legend_position; these refine where that block lands.
     legend_anchor: str = "content"  # "content" (section bbox) or "canvas"
@@ -637,6 +659,14 @@ class MetroGraph:
     # Stage 6.4 (``_snap_all_y_to_grid``) reads this set and skips those
     # stations so they keep their intentional half-grid Y.
     half_grid_station_ids: set[str] = field(default_factory=set, repr=False)
+    # Cross-phase channel: station IDs recorded as riding a half-pitch spine
+    # once the whole layout has settled, by
+    # ``_register_half_grid_reconvergence_branches``.  Kept apart from
+    # ``half_grid_station_ids`` because it is written after every reader of that
+    # channel has run: a placement classifier reading it would answer one way
+    # while a stage was placing content and the opposite way afterwards.  The
+    # grid-alignment invariants union the two.
+    post_layout_half_grid_station_ids: set[str] = field(default_factory=set, repr=False)
     # Cross-phase channel: on-track non-branch station IDs (the source/trunk
     # stations) of a 2-branch symfan section, recorded by Stage 6.3
     # (``_apply_half_grid_2branch_symfan``).  They sit on the section's local
@@ -644,6 +674,16 @@ class MetroGraph:
     # (``_snap_all_y_to_grid``) skips them rather than dragging them onto the row
     # group's grid origin, which a rowspan neighbour can leave fractional.
     symfan_trunk_station_ids: set[str] = field(default_factory=set, repr=False)
+    # Cross-phase channel: {section_id: PartialTrunkDescent} for a partial
+    # row-mate whose trunk Stage 4.8 (``_align_row_trunk_ys``) seats one handover
+    # lane below the row carrier so a direct port-to-port connector runs flat.
+    # Stage 6.4 (``_snap_all_y_to_grid``) may snap that sub-grid offset onto the
+    # carrier slot; the restore re-seats the partial's handover port from the
+    # carrier port's post-snap Y, so it lands right whether the snap collapsed the
+    # descent (shared row grid) or preserved it (explicit-grid solo section).
+    _partial_trunk_descents: dict[str, PartialTrunkDescent] = field(
+        default_factory=dict, repr=False
+    )
     # Precondition flag for the off-track reanchor: set True right after the
     # Stage 6.4 grid snap so on-track consumer Ys are final.  The reanchor
     # (``_reanchor_off_track_to_consumer``) refuses to run while False,
@@ -720,6 +760,36 @@ class MetroGraph:
 
     def add_line(self, line: MetroLine) -> None:
         self.lines[line.id] = line
+
+    def default_inactive_line_ids(self) -> frozenset[str]:
+        """Line IDs the map declares inactive via the ``line:`` directive.
+
+        The render-time default when no ``--inactive-lines`` / ``inactive_line_ids``
+        override is supplied; an override replaces this set outright.
+        """
+        return frozenset(
+            line_id for line_id, line in self.lines.items() if line.default_inactive
+        )
+
+    def resolve_inactive_line_ids(
+        self, override: frozenset[str] | None
+    ) -> frozenset[str]:
+        """Inactive-line set for a render: *override* if given, else the default.
+
+        ``None`` falls back to :meth:`default_inactive_line_ids`. A supplied set
+        replaces that default outright and is validated against the known lines,
+        raising :class:`~nf_metro.errors.UnknownInactiveLineError` on any ID the
+        map does not declare.
+        """
+        if override is None:
+            return self.default_inactive_line_ids()
+        bad = override - self.lines.keys()
+        if bad:
+            raise UnknownInactiveLineError(
+                f"unknown line ID(s) {sorted(bad)}; "
+                f"known lines are {sorted(self.lines)}"
+            )
+        return override
 
     def add_station(self, station: Station) -> None:
         self.stations[station.id] = station

@@ -9,7 +9,220 @@ nf-metro uses [semantic versioning](https://semver.org/spec/v2.0.0.html) from
 `DRIVER_CONTRACT_VERSION` and `MANIFEST_SCHEMA_VERSION`) are the public API. The
 Python modules are not a semver-stable public API.
 
-## [Unreleased] — 1.0.0
+The full notes for each release live in `docs/releases/` and on the docs site at
+<https://seqeralabs.github.io/nf-metro/>; this file carries the condensed
+history.
+
+## [Unreleased]
+
+### Added
+
+- `nf-metro render` writes PNG directly. A `.png` output path selects it, or pass
+  `--format png`; `--scale` sets the pixel multiplier (default 2) and
+  `--raster-width` pins an exact width. The PNG path bakes the palette, drops the `var()` chrome,
+  and draws with the bundled Inter, so a map rasterises to the same bytes on any
+  machine ([#1969](https://github.com/seqeralabs/nf-metro/issues/1969)).
+- `-o` repeats, so one run writes several formats: `-o map.svg -o map.png`.
+- `nf-metro render` writes a looping video of the animation: `-o map.gif`,
+  `.webp`, `.mp4`, or `.webm` (or `--format`). The loop runs one animation cycle
+  and stops a frame short of repeating it, so it wraps seamlessly; `--fps` and
+  `--duration` set the frame rate and compress a long map's cycle into a shorter
+  loop. Frames are sampled from the same motion paths the animated SVG uses, so
+  a ball is where a browser would draw it. `--scale` and `--raster-width` size
+  the frames as they size a PNG. Nothing is capped: a large export quotes its
+  frame count and frame size before it starts, then shows a progress bar.
+- New [Output formats](https://seqeralabs.github.io/nf-metro/latest/formats/)
+  docs page, comparing SVG, HTML, PNG and the four looping video formats on what
+  each is good at and where each one plays.
+
+### Changed
+
+- Rasterisation moved from cairosvg to `resvg-py`, now a runtime dependency.
+  cairosvg needed system libcairo, which is why PNG was never a first-class
+  output; resvg-py ships self-contained wheels and needs no system libraries.
+- `av` (PyAV) joins the runtime dependencies, for the looping video formats.
+  It ships FFmpeg in its own wheels, so an MP4 or WebM export needs nothing
+  installed or found on `PATH`.
+
+---
+
+## [2.0.0] — 2026-09-05
+
+A major release, roughly 300 pull requests after 1.1.0. Two changes to how
+invalid input is handled drive the version number; a map that renders cleanly
+under 1.1.0 keeps rendering, with section boxes now hugging their content. The
+full account is in `docs/releases/2.0.0.md`.
+
+### Added
+
+- **Inactive lines**: a fifth `inactive` field on `%%metro line:` and a
+  per-render `--inactive-lines <ids>` override grey out lines a run did not
+  exercise, along with any station, label, legend swatch or icon touched only
+  by inactive lines. `render_string` takes the same set as `inactive_line_ids`.
+- **`%%metro stroke_scale:` / `--stroke-scale`** thickens track strokes and
+  station pills, with bundle spacing, marker clearance and rail pitch scaling to
+  match, for large maps that are downscaled to fit a screen.
+- **`%%metro row_align: content|top` / `--row-align`** controls whether a
+  section box hugs its own content (the new default) or grows to share the
+  tallest row-mate's top edge.
+- **`%%metro number:`** pins a section's number badge.
+- **`--permissive` / `%%metro permissive:`** downgrades layout and render guard
+  failures to a labelled warning block and renders best-effort instead of
+  aborting with no output.
+- **`nf-metro render` takes several input files**, rendering each to its
+  sibling `.svg` in one process; `render-many` accepts the full render option
+  set.
+- **Composite GitHub Action** (`uses: seqeralabs/nf-metro@2.0.0`) and
+  **pre-commit hook** (`id: nf-metro`) that render a pipeline repository's map
+  and pin the nf-metro version they ship with.
+- `NfMetroError` base class for every input-authoring error `render_string`
+  raises; `py.typed` marker; `render_string`, `prepare_graph`, `render_graph`
+  and `RenderConfig` re-exported from the `nf_metro` root.
+- Versioned JSON Schema and normative description for the live progress
+  server's state snapshot.
+- `validate` extra installing `jsonschema` for `nf-metro validate-svg`.
+- nf-core/riboseq map in the gallery; Theming and CI & automation docs pages.
+
+### Changed
+
+- **Breaking: an edge annotated with a line no `%%metro line:` declares is now
+  rejected by `nf-metro render`, not just `nf-metro validate`.** A map that
+  declared no lines at all was exempt from the render-side check, so it rendered
+  every route in the placeholder grey the themes reserve for inactive lines,
+  with an empty legend and exit 0, while `validate` reported one error per edge
+  and exit 1. Both commands now read one detector and accept the same maps. A
+  map that relied on the exemption needs one `%%metro line:` directive per id
+  its edges name, and the error names the missing ids with the source line of
+  each.
+- **Breaking: a duplicate `%%metro line:` id now keeps the first declaration
+  rather than the last, and warns.** A map declaring the same id twice silently
+  took the later spelling, so redeclaring a line late in the file was a working
+  way to change its colour, style or `inactive` state. The redeclaration is now
+  reported and dropped. A map that relied on the old precedence needs its
+  intended values on the first declaration of each id.
+- Unknown values and unresolvable references in `%%metro` directives are
+  reported instead of ignored. `style:` validates against the theme names;
+  `off_track:`, `group:`, `marker:`, `grid:`, `line_spread:`, `file:`, `files:`,
+  `dir:`, `entry:`, `exit:` and `interchange:` warn on a station, section or
+  line id the map never defines; and a `line:` declaration missing its id, name
+  or colour is rejected whole rather than registering a partial line. Line ids
+  are constrained to the same identifier character set as station and section
+  ids.
+- Section boxes default to hugging their content (`row_align: content`); the
+  former forced top alignment is available as `row_align: top`.
+- Automatic section numbering follows connected visual routes rather than file
+  order.
+- Inter-section routing is planned once and emitted from the recorded plan: the
+  legacy first-match dispatcher and its compatibility repair passes are retired,
+  every inter-section turn is drawn at its full radius, and corridors are
+  reserved at plan time. A route no owner can plan stops with a diagnostic
+  instead of falling back.
+- `--theme` takes the same seven names as `%%metro style:` (`nfcore`, `seqera`,
+  their `-light`/`-dark` variants, `light`, and the `dark` alias); `serve` and
+  `serve-multi` take the same choice list.
+- A map with no stations is refused with a typed `EmptyGraphError`; numeric
+  flags enforce their declared bounds and refuse non-finite values; `render`
+  prints warnings as one labelled block on stderr.
+- `convert` and `render --from-nextflow` report the feedback edges they remove
+  to make the graph acyclic, and list them in a `%%` comment block in the
+  converted `.mmd`.
+- Theme constants are named by brand and mode: `NFCORE_THEME` and
+  `SEQERA_THEME` are removed in favour of `NFCORE_DARK_THEME` and
+  `SEQERA_DARK_THEME`.
+- Packaging: development status `Production/Stable`, project URLs point at the
+  seqeralabs organisation, the wheel omits the layout contract document and the
+  candidate-execution harness, and the sdist omits tests, examples, docs and CI
+  material.
+
+### Fixed
+
+- Symmetric fans centre their entry port, reconvergence join and fork hub on the
+  join hub's centreline; a diamond's fan-in seats off the join hub; fan
+  placement follows `diamond_style`.
+- Every merge feeder lands on the trunk it converges onto; a clear adjacent
+  feeder reaches the merge directly; confluence band and descent nesting order
+  agree.
+- Bypasses route around a packed cell-mate on the target entry row, keep steep
+  multi-line bundles on distinct slots, and minimise lane crossings.
+- Off-track outputs sit on their own row for a dead-end producer, beside the
+  trunk in `TB`/`BT` sections, and clear of the next divergence.
+- `BT` sections present flow-aligned ports, and an `LR` section fed from
+  directly below takes a `BOTTOM` entry instead of backtracking through its own
+  stations.
+- Station labels wrap on whitespace, never mid-word; the canvas grows for ink
+  drawn outside the section-box envelope; terminus icons scale with
+  `font_scale`; multi-line `%%metro file:` labels render.
+- Section-level cycles are rejected with a named diagnostic.
+- Text metrics are deterministic, so renders are byte-identical across runs,
+  platforms and hash seeds.
+- Inactive labels, captions, marker outlines and icon labels stay muted under
+  the chrome CSS.
+- Shipped examples render from any working directory: logo paths resolve
+  relative to the map file.
+- Playground bug-report links no longer exceed GitHub's URL limit.
+
+### Security
+
+- Directive-authored text is escaped at every SVG and HTML injection point:
+  `%%metro line:` colours and `marker:` fills can no longer break out of their
+  attribute, `%%metro logo:` `data:` URIs are escaped and malformed base64 is
+  rejected cleanly, the interactive HTML driver escapes line colours and labels
+  before DOM insertion, and embedded JSON cannot break out of its `<script>`
+  block.
+
+---
+
+## [1.1.0] — 2026-07-01
+
+A routing-focused follow-up to 1.0.0, plus a new spacing control and several
+playground fixes. Existing `.mmd` files render with no changes.
+
+### Added
+
+- **`%%metro track_gap: <pixels>`** / **`--track-gap`** — sets the visual gap
+  between adjacent line strokes in a bundle: the empty space between their
+  edges, not their centres. Defaults to 1 px; `0` brings strokes flush, and up
+  to 3 px gives co-running lines more breathing room.
+- **Packed grid cells** — hand-placed sections can share one cell
+  (`%%metro grid: gatk, variant_calling | 1,0`) instead of taking one each. The
+  named sections pack side by side along the flow axis and the cell sizes to fit
+  them; each keeps its own direction, ports, and internal layout.
+- Playground **"+ Logo"** button, reading a chosen image client-side and writing
+  it into `%%metro logo:` as a `data:` URI. The playground runs in-browser via
+  Pyodide, where a local file path cannot resolve.
+- nf-core/seqinspector on the pipelines gallery page, showing a `%%metro grid:`
+  stack of two single-row sections beside a rowspan-2 section.
+
+### Changed
+
+- Playground **Line gap** moved from Advanced options to the main toolbar, wired
+  to the new `track_gap` directive.
+- The playground shows its build's commit SHA beside **Report a bug** and
+  pre-fills it into the report.
+- Stacked single-row sections sharing a rowspan band distribute across the full
+  band rather than leaving the bottom rows empty.
+
+### Fixed
+
+- Fold-back routing: serpentine multi-line folds under `direction: RL`, fold
+  reversal through peel-off junctions, and a kink in the TB-exit-to-return-row
+  connector.
+- Bypass routing: same-row bypasses route around a packed cell-mate or an
+  intervening section rather than through it, and clear exit rows run straight.
+- Convergence sinks: entry lanes order by feeder approach direction, and
+  interchange labels clear their connector bridge and the enlarged end-knob.
+- Sectionless graphs: skip-lines with no subgraph detour around non-consumer
+  markers instead of breezing through them.
+- 2-way fans with an internal source centre on their equal siblings.
+- `--mode` baked output selects the correct logo variant and pins
+  `color-scheme`, keeping raster exports independent of the viewer's theme.
+- `--embed-font` output falls back to a generic font family after `Inter`.
+- The playground service worker served returning visitors a stale build after
+  every deploy, because the dev wheel's filename never changed between builds.
+
+---
+
+## [1.0.0] — 2026-06-30
 
 418 commits since 0.7.2, touching every layer of the stack. Existing `.mmd`
 files render with no changes unless you opt in to a new rendering feature.

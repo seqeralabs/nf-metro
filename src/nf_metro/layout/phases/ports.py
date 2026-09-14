@@ -1034,6 +1034,8 @@ def _snap_grid_group_entry_ports(graph: MetroGraph) -> None:
     if not grid_group_secs:
         return
 
+    junction_ids = graph.junction_ids
+
     for port_id, port in graph.ports.items():
         if not port.is_entry:
             continue
@@ -1051,20 +1053,45 @@ def _snap_grid_group_entry_ports(graph: MetroGraph) -> None:
             continue
 
         # Snap to the fan's through-chain trunk when the port feeds several
-        # arms (one reaching the exit, the rest short output spurs); otherwise
-        # the first connected non-port station.  Picking the first target
-        # arbitrarily can land the port on an output spur or a cross-fed
-        # convergence arm rather than the main chain.
+        # arms (one reaching the exit, the rest short output spurs).  Picking
+        # the first target arbitrarily can land the port on an output spur or a
+        # cross-fed convergence arm rather than the main chain.
         trunk_st = _entry_fan_trunk_station(graph, port_id, section)
+        target_y: float | None
         if trunk_st is not None:
             target_y = trunk_st.y
         else:
-            target_y = None
+            arm_ys: dict[str, float] = {}
             for edge in graph.edges_from(port_id):
                 tgt = graph.station_for_edge_target(edge)
                 if not tgt.is_port and tgt.section_id == section.id:
-                    target_y = tgt.y
-                    break
+                    arm_ys.setdefault(tgt.id, tgt.y)
+            fed_via_junction = any(
+                edge.source in junction_ids for edge in graph.edges_to(port_id)
+            )
+            centroid = sum(arm_ys.values()) / len(arm_ys) if arm_ys else None
+            centroid_on_arm = centroid is not None and any(
+                abs(centroid - y) < COORD_TOLERANCE for y in arm_ys.values()
+            )
+            if (
+                graph.diamond_style == "symmetric"
+                and len(arm_ys) > 1
+                and fed_via_junction
+                and centroid is not None
+                and centroid_on_arm
+                and abs(port_st.y - centroid) < COORD_TOLERANCE
+            ):
+                # An odd symmetric fork whose feeding junction already sits on
+                # the centre arm (the fan centroid coincides with a real arm's
+                # row): snapping to the first arm would pin the port to the top
+                # branch and dogleg the inter-section line, so keep it on the
+                # centre row for a straight crossing.  Restricting to a centroid
+                # that lands on an arm keeps this to the on-grid centre-arm case
+                # and off even fans, whose midpoint centroid would drag the
+                # section to a half-grid row.
+                target_y = port_st.y
+            else:
+                target_y = next(iter(arm_ys.values()), None)
 
         if target_y is not None and abs(port_st.y - target_y) >= COORD_TOLERANCE:
             _set_port_y(graph, port_id, target_y)

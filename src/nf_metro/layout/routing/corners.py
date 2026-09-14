@@ -26,7 +26,12 @@ import math
 from collections.abc import Iterable
 from typing import NamedTuple
 
-from nf_metro.layout.constants import COORD_TOLERANCE, CURVE_RADIUS, OFFSET_STEP
+from nf_metro.layout.constants import (
+    COORD_TOLERANCE,
+    COORD_TOLERANCE_FINE,
+    CURVE_RADIUS,
+    OFFSET_STEP,
+)
 from nf_metro.layout.routing.common import Direction, bundle_width
 
 # ---------------------------------------------------------------------------
@@ -152,6 +157,43 @@ def resolve_curve_radii(
         )
         for corner_idx in range(n_corners)
     ]
+
+
+def desired_curve_radii(
+    points: list[tuple[float, float]],
+    default_radius: float = CURVE_RADIUS,
+) -> list[float]:
+    """The radius each interior vertex of *points* asks for.
+
+    A vertex whose flanking legs continue in the same direction is not a
+    direction change and asks for no curve; every other interior vertex asks
+    for *default_radius*.  Feed the result to :func:`resolve_curve_radii` to
+    clamp it to the segment budgets.
+
+    Straightness is measured as the outgoing leg's perpendicular distance
+    from the incoming leg's line, so the :data:`COORD_TOLERANCE_FINE` band
+    means the same deviation on a short leg as on a long one.
+    """
+    desired: list[float] = []
+    for index in range(1, len(points) - 1):
+        incoming = (
+            points[index][0] - points[index - 1][0],
+            points[index][1] - points[index - 1][1],
+        )
+        outgoing = (
+            points[index + 1][0] - points[index][0],
+            points[index + 1][1] - points[index][1],
+        )
+        cross = incoming[0] * outgoing[1] - incoming[1] * outgoing[0]
+        dot = incoming[0] * outgoing[0] + incoming[1] * outgoing[1]
+        incoming_length = math.hypot(incoming[0], incoming[1])
+        straight_through = (
+            dot > 0.0
+            and incoming_length > 0.0
+            and abs(cross) / incoming_length <= COORD_TOLERANCE_FINE
+        )
+        desired.append(0.0 if straight_through else default_radius)
+    return desired
 
 
 class CornerTangent(NamedTuple):

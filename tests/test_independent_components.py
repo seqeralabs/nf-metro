@@ -40,8 +40,7 @@ def _left(section) -> float:
 
 
 # A connected 3-section trunk (A -> B -> C) plus a separate, very wide
-# disconnected section D.  In the old shared-grid placement D's width
-# inflated column 0 and flung B and C far to the right.
+# disconnected section D.
 _TRUNK_PLUS_WIDE = """%%metro title: Trunk Plus Wide
 %%metro line: main | Main | #e63946
 %%metro line: aux | Aux | #0570b0

@@ -110,6 +110,14 @@ EXPECTED_CLASSIFIER_ONLY_REVERSALS = frozenset(
             "target_secondary",
             "L->R",
         ),
+        # A LEFT-exit fan's side branch: line h leaves b's LEFT exit and arrives
+        # at d's RIGHT entry one row down, so the delivered bundle re-nests.
+        ("left_exit_fan_perp_entry_landing", "b", "d", "L->R"),
+        # The bottom-entry mirror of that side branch: hub's LEFT-exit fan lands
+        # g and h on report's and export's RIGHT entries a row up, each a net
+        # half-turn that re-nests the delivered bundle.
+        ("bottom_entry_fan_side_targets", "hub", "report", "L->R"),
+        ("bottom_entry_fan_side_targets", "hub", "export", "L->R"),
         # The RIGHT-facing mirror of that stacked LEFT half-turn: an LR row's
         # RIGHT exit descending into an RL row's RIGHT entry at or right of the
         # feeder's column.  Leaving rightward and arriving rightward is a net
@@ -228,6 +236,11 @@ EXPECTED_RESIDUALS = frozenset(
             "side_report",
             "L->R",
         ),
+        # A two-line bundle drops near-vertically from an LR row's RIGHT exit into
+        # the RIGHT entry of the RL row directly below: the machinery marks the
+        # receiver reversed off the near-vertical-junction-right-entry rule, while
+        # the classifier reads the descend->turn seam as a preserved continuation.
+        ("reversed_section_junction_reseat", "align", "quant", "R->R"),
     }
 )
 

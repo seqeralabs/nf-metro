@@ -119,6 +119,24 @@ def test_validated_layout_runs_deferred_route_guards_at_settled_chokepoint(
     assert graph._final_route_guards_deferred is False
 
 
+def test_validated_layout_uses_caller_selected_theme_for_deferred_route_guards(
+    monkeypatch,
+) -> None:
+    from nf_metro.themes import resolve_theme
+
+    seen: list[object] = []
+
+    def capture(_graph, theme) -> None:
+        seen.append(theme)
+
+    graph = _deferred_route_guard_harness(monkeypatch, render_plan=capture)
+    theme = resolve_theme("seqera", graph, mode="light")
+
+    engine.compute_layout(graph, validate=True, validation_theme=theme)
+
+    assert seen == [theme]
+
+
 def test_unvalidated_layout_does_not_run_deferred_route_guards(monkeypatch) -> None:
     def reject(*_args, **_kwargs) -> None:
         raise AssertionError("unvalidated layout entered route validation")

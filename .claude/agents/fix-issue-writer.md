@@ -1,7 +1,7 @@
 ---
 name: fix-issue-writer
 description: The single writer for a fix-issue worktree. Writes the failing invariant test first, then the fix, runs mutation-capable generators and hooks, and hands off an exact candidate SHA.
-model: opus
+model: claude-opus-4-8
 tools: Read, Edit, Write, Bash, Grep, Glob, TodoWrite
 effort: high
 ---

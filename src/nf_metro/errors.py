@@ -22,3 +22,15 @@ class NfMetroError(Exception):
     authoring/invariant problem subclasses this. See the ``prepare_graph``
     docstring for the exhaustive list and when each is raised.
     """
+
+
+class UnknownInactiveLineError(NfMetroError, ValueError):
+    """A render requested inactive lines that the map does not define.
+
+    Raised when an ID passed to the ``--inactive-lines`` option (or the
+    ``inactive_line_ids`` render config) names no ``%%metro line:`` in the graph.
+    """
+
+
+class EmptyGraphError(NfMetroError, ValueError):
+    """No station survived parsing, so there is nothing to lay out or draw."""

@@ -10,7 +10,7 @@ each line on the feed order at both ports.
 Two layers:
 
 * the always-on render-path guard :func:`assert_render_curve_invariants`
-  rejects the inverted bundle the old wrap/L-shape produced;
+  rejects an inverted bundle;
 * the ``tb_left_exit_step`` fixture lays out, routes, and renders with no curve
   defect, and the exit bundle keeps the same vertical order it is fed in.
 
@@ -56,9 +56,9 @@ def _baked(route, offsets):
 def test_fixture_renders_without_curve_defect():
     """The #671 lock: the folded-TB left-exit staircase has no flip or pinch.
 
-    The old wrap/L-shape inverted the bundle through the step's opposite
-    corners; ``assert_render_curve_invariants`` aborts the render on such a
-    bundle, so a clean pass means the staircase keeps every line in order.
+    A concentric bundle taken through the step's opposite-handed corners
+    inverts, and ``assert_render_curve_invariants`` aborts the render on such
+    a bundle, so a clean pass means the staircase keeps every line in order.
     """
     graph, offsets, routes = _laid_out()
     assert_render_curve_invariants(graph, routes, offsets)

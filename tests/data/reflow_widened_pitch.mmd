@@ -1,0 +1,37 @@
+%%metro title: Reflow-avoidance widened pitch
+%%metro style: nfcore
+%%metro line_spread: centered
+%%metro line: dna | DNA samples | #4CAF50
+%%metro line: rna | RNA samples | #2196F3
+%%metro line: cfdna | cfDNA samples | #E91E63
+%%metro line: prot | Protein samples | #FF9800
+
+graph LR
+    fastqc[FastQC]
+    align[Alignment]
+    markdup[MarkDuplicates]
+    summary[Summary]
+
+    cnv[CNV call]
+    sv[SV call]
+    splice[Splice call]
+    fusion[Fusion call]
+    pileup[Pileup call]
+    prota[Proteomics call]
+
+    fastqc -->|dna,rna,cfdna,prot| align
+    align -->|dna,rna,cfdna,prot| markdup
+
+    markdup -->|dna| cnv
+    cnv -->|dna| sv
+    sv -->|dna| summary
+
+    markdup -->|rna| splice
+    splice -->|rna| fusion
+    fusion -->|rna| summary
+
+    markdup -->|cfdna| pileup
+    pileup -->|cfdna| summary
+
+    markdup -->|prot| prota
+    prota -->|prot| summary

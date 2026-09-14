@@ -1,0 +1,21 @@
+%%metro title: Metagenomic profiling (input slice)
+%%metro style: nfcore
+%%metro line: prof | Functional profiling | #3f9e5c
+%%metro files: input_reads | FASTQ | Short reads | banner
+
+graph LR
+    subgraph input [Input]
+        %%metro direction: TB
+        input_reads[ ]
+        fastqc[FastQC]
+        input_reads -->|prof| fastqc
+    end
+
+    subgraph profiling [Profiling]
+        %%metro entry: left | prof
+        host_removal[Host removal]
+        profile[Profile pathways]
+        host_removal -->|prof| profile
+    end
+
+    fastqc -->|prof| host_removal

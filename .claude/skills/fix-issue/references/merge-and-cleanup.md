@@ -21,7 +21,17 @@ minutes, check that commit's message for a stray skip marker before assuming
 propagation delay - a commit whose prose even names or quotes the marker text
 can trip it (Actions scans the whole message), and a writer explaining an
 earlier skipped commit can reproduce this by accident. Recover with a new
-(never amended) commit that omits the marker.
+(never amended) commit that omits the marker. This applies even when several
+prior commits in the same push legitimately carried the marker as WIP
+snapshots - only the pushed HEAD commit's message needs to be clean, so close
+the round with one more real commit (a genuine small fix or doc clarification,
+never a no-op) rather than amending an earlier one.
+
+A fail-fast test matrix cancels every sibling shard the instant one fails - a
+cancelled shard carries no signal, it is not a pass. After any push, re-run
+each cancelled job individually (or the whole run's `--failed` set) before
+treating the round as settled, and expect to repeat this every round a
+mid-round failure occurs, not just once per PR.
 
 Read this at the push/merge/cleanup end of a run.
 

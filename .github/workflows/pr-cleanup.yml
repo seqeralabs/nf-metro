@@ -16,8 +16,11 @@ on:
 permissions:
   contents: write
 
+# A concurrency group holds at most one pending run, so a newer entrant cancels
+# the older pending one. Keyed per PR to keep an unrelated gh-pages writer from
+# discarding a queued cleanup and leaving its preview directory behind forever.
 concurrency:
-  group: gh-pages
+  group: gh-pages-cleanup-${{ github.event.inputs.pr_number || github.event.number }}
   cancel-in-progress: false
 
 jobs:
@@ -34,16 +37,30 @@ jobs:
         env:
           PR: ${{ github.event.inputs.pr_number || github.event.number }}
         run: |
+          set -euo pipefail
           if ! echo "$PR" | grep -qE '^[0-9]+$'; then
             echo "Refusing to act on non-numeric PR number '$PR'." >&2
             exit 1
           fi
-          if [ -d "_pr/$PR" ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # A rejected push means another gh-pages writer committed first. The
+          # commit is re-derived on the refetched tip rather than replayed as a
+          # diff, so a preview publish that rewrote this directory in between
+          # cannot leave a conflict behind.
+          for delay in 0 5 10 20 40; do
+            sleep "$delay"
+            git fetch --depth=1 origin gh-pages
+            git reset --hard FETCH_HEAD
+            if [ ! -d "_pr/$PR" ]; then
+              echo "No preview directory found for PR #$PR, nothing to clean up."
+              exit 0
+            fi
             git rm -rf "_pr/$PR"
             git commit -m "Clean up render preview for PR #$PR"
-            git push
-          else
-            echo "No preview directory found for PR #$PR, nothing to clean up."
-          fi
+            if git push origin HEAD:gh-pages; then
+              exit 0
+            fi
+          done
+          echo "Could not remove the preview for PR #$PR from gh-pages." >&2
+          exit 1

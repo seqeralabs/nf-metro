@@ -12,6 +12,7 @@ from nf_metro.layout.routing.common import (
     SourceTurnout,
     segment_direction,
 )
+from nf_metro.layout.routing.corners import desired_curve_radii
 
 Point = tuple[float, float]
 
@@ -152,19 +153,7 @@ def materialize_source_turnout(
             "source turnout directions disagree with drawable geometry"
         )
 
-    desired = []
-    for index in range(1, len(materialized) - 1):
-        incoming = (
-            materialized[index][0] - materialized[index - 1][0],
-            materialized[index][1] - materialized[index - 1][1],
-        )
-        outgoing = (
-            materialized[index + 1][0] - materialized[index][0],
-            materialized[index + 1][1] - materialized[index][1],
-        )
-        cross = incoming[0] * outgoing[1] - incoming[1] * outgoing[0]
-        dot = incoming[0] * outgoing[0] + incoming[1] * outgoing[1]
-        desired.append(0.0 if abs(cross) <= 1e-9 and dot > 0.0 else default_radius)
+    desired = desired_curve_radii(materialized, default_radius=default_radius)
     if curve_radii is not None:
         start = segment_shift
         if start + len(curve_radii) > len(desired):

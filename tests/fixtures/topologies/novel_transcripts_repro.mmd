@@ -1,0 +1,41 @@
+%%metro line: riboseq | Ribo-seq | #e6007e
+%%metro line: rnaseq | RNA-seq | #2db572
+%%metro file: bigwig_out | BW | Coverage
+%%metro grid: preprocessing, alignment, novel_transcripts, quantification | 0,0
+%%metro grid: orf_calling | 0,1
+
+graph LR
+    subgraph preprocessing [Pre-processing]
+        ribodetector[RiboDetector]
+        bowtie2_rrna[Bowtie2]
+        infer_strand[Infer strandedness]
+
+        ribodetector -->|riboseq,rnaseq| infer_strand
+        bowtie2_rrna -->|riboseq,rnaseq| infer_strand
+    end
+
+    subgraph alignment [Alignment]
+        star[STAR]
+        umi_dedup[Dedup]
+
+        star -->|riboseq,rnaseq| umi_dedup
+    end
+
+    subgraph novel_transcripts [Novel transcripts]
+        stringtie[StringTie]
+    end
+
+    subgraph quantification [Quantification]
+        genomecov[genomecov]
+
+        genomecov -->|riboseq,rnaseq| bigwig_out
+    end
+
+    subgraph orf_calling [ORF calling]
+        star_hybrid[STAR 2nd pass]
+    end
+
+    infer_strand -->|riboseq,rnaseq| star
+    umi_dedup -->|rnaseq| stringtie
+    umi_dedup -->|riboseq,rnaseq| genomecov
+    umi_dedup -->|riboseq| star_hybrid

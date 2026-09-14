@@ -3,7 +3,7 @@
 Validates that the SVG path rendering in svg.py correctly translates
 RoutedPath waypoints + curve_radii into well-formed SVG paths with:
 - Correct curve continuity (no gaps between adjacent curves)
-- Curve radii arrays matching the number of corners
+- One resolved curve radius per corner, formed at every direction change
 - Clamped radii that respect available segment budget
 - Concentric bundle lines maintaining distinct radii through curves
 """
@@ -11,6 +11,7 @@ RoutedPath waypoints + curve_radii into well-formed SVG paths with:
 import math
 import re
 import xml.etree.ElementTree as ET
+from collections import defaultdict
 from pathlib import Path
 
 import pytest
@@ -20,11 +21,15 @@ from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.common import RoutedPath
 from nf_metro.layout.routing.corners import curve_tangents, resolve_curve_radii
+from nf_metro.layout.routing.invariants import (
+    _ORTHOGONAL_TURN_FLOOR,
+    _ORTHOGONAL_TURN_TOL,
+)
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.render import build_render_plan, emit_render_plan
 from nf_metro.render.animate import _points_to_svg_path
 from nf_metro.render.svg import _curve_tangents, apply_route_offsets, render_svg
-from nf_metro.themes import NFCORE_THEME
+from nf_metro.themes import NFCORE_DARK_THEME
 
 EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
 TOPOLOGIES_DIR = EXAMPLES_DIR / "topologies"
@@ -76,37 +81,101 @@ def _parse_path_commands(d: str) -> list[tuple[str, list[float]]]:
     return commands
 
 
-def _layout_and_route(mmd_text: str) -> tuple:
+def _layout_and_route(mmd_text: str, source_dir: str = "") -> tuple:
     """Parse, layout, route, and render. Returns (graph, routes, offsets, svg)."""
     graph = parse_metro_mermaid(mmd_text)
+    graph.source_dir = source_dir
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
-    svg = render_svg(graph, NFCORE_THEME)
+    svg = render_svg(graph, NFCORE_DARK_THEME)
     return graph, routes, offsets, svg
 
 
 def _layout_and_route_file(path: Path) -> tuple:
     """Load a .mmd file and run the full pipeline."""
-    return _layout_and_route(path.read_text())
+    return _layout_and_route(path.read_text(), source_dir=str(path.parent))
 
 
 # ---------------------------------------------------------------------------
-# 1. Curve radii array length must match corner count
+# 1. One resolved radius per corner, and a formed curve at every turn
 # ---------------------------------------------------------------------------
+
+
+def _turning_corner_indices(points: list[tuple[float, float]]) -> list[int]:
+    """Corner indices at which the polyline changes direction.
+
+    Every interior waypoint is a corner by index, but a collinear one and one
+    flanked by a zero-length leg bend nothing, so neither is owed a curve.
+    """
+    turning = []
+    for i in range(1, len(points) - 1):
+        prev, corner, nxt = points[i - 1], points[i], points[i + 1]
+        incoming = (corner[0] - prev[0], corner[1] - prev[1])
+        outgoing = (nxt[0] - corner[0], nxt[1] - corner[1])
+        in_len = math.hypot(*incoming)
+        out_len = math.hypot(*outgoing)
+        if in_len == 0.0 or out_len == 0.0:
+            continue
+        cross = incoming[0] * outgoing[1] - incoming[1] * outgoing[0]
+        if abs(cross) / (in_len * out_len) > 1e-6:
+            turning.append(i - 1)
+    return turning
+
+
+def _requested_corner_radius(route: RoutedPath, corner_idx: int) -> float:
+    """The radius the route's handler asked for at *corner_idx*.
+
+    Mirrors :func:`check_orthogonal_turns_form_curves`: an unset entry means the
+    handler expressed no preference and takes the default.
+    """
+    desired = route.curve_radii
+    if desired and corner_idx < len(desired) and desired[corner_idx] is not None:
+        return desired[corner_idx]
+    return CURVE_RADIUS
 
 
 class TestCurveRadiiLength:
-    """curve_radii (when present) must have exactly len(points) - 2 entries."""
+    """Every routed edge carries one radius per corner, and reaches the engine's
+    own formed-curve floor at each corner that changes direction.
+
+    ``curve_radii`` is the per-corner request a handler may leave unset, so both
+    it and the budget-clamped resolution of it are held to the corner count.
+    The floor is :func:`check_orthogonal_turns_form_curves`'s, imported so the
+    two cannot drift: below it a turn draws as a hard corner.  That guard polices
+    orthogonal inter-section turns only, and the bound is applied here to every
+    route and to diagonal turns as well.
+    """
 
     def _check_routes(self, routes: list[RoutedPath]):
+        assert routes, "expected the fixture to produce at least one route"
         for route in routes:
+            n_corners = max(len(route.points) - 2, 0)
+            where = (
+                f"Route {route.edge.source}->{route.edge.target} (line={route.line_id})"
+            )
             if route.curve_radii is not None:
-                n_corners = len(route.points) - 2
                 assert len(route.curve_radii) == n_corners, (
-                    f"Route {route.edge.source}->{route.edge.target} "
-                    f"(line={route.line_id}): {len(route.curve_radii)} radii "
+                    f"{where}: {len(route.curve_radii)} radii "
                     f"for {n_corners} corners ({len(route.points)} points)"
+                )
+            resolved = resolve_curve_radii(
+                route.points, route.curve_radii, default_radius=CURVE_RADIUS
+            )
+            assert len(resolved) == n_corners, (
+                f"{where}: {len(resolved)} resolved radii for {n_corners} "
+                f"corners ({len(route.points)} points)"
+            )
+            for corner_idx in _turning_corner_indices(route.points):
+                requested = _requested_corner_radius(route, corner_idx)
+                # A corner asking for a tighter arc than the floor curves as
+                # designed, which is the exemption the guard itself makes.
+                floor = min(_ORTHOGONAL_TURN_FLOOR, requested) - _ORTHOGONAL_TURN_TOL
+                assert resolved[corner_idx] >= floor, (
+                    f"{where}: direction change at point "
+                    f"{route.points[corner_idx + 1]} resolves to radius "
+                    f"{resolved[corner_idx]:.3f}, below the {floor:.3f} floor "
+                    f"for a requested {requested:.3f}, so it draws as a hard corner"
                 )
 
     def test_simple_diamond(self):
@@ -309,11 +378,18 @@ class TestConcentricBundles:
     """Lines in the same bundle must have distinct curve_radii at shared corners."""
 
     def test_multi_line_bundle(self):
-        """Three lines sharing an L-shape must have 3 distinct radii."""
+        """Three lines sharing an L-shape must have 3 distinct radii.
+
+        The grid puts the target a row down as well as a column across, so the
+        bundle has to turn: sections side by side on one row route the bundle
+        straight and it carries no corner to be concentric about.
+        """
         mmd = (
             "%%metro line: l1 | Line1 | #ff0000\n"
             "%%metro line: l2 | Line2 | #00ff00\n"
             "%%metro line: l3 | Line3 | #0000ff\n"
+            "%%metro grid: s1 | 0,0\n"
+            "%%metro grid: s2 | 1,1\n"
             "graph LR\n"
             "    subgraph s1 [S1]\n"
             "        a[A]\n"
@@ -329,13 +405,11 @@ class TestConcentricBundles:
         offsets = compute_station_offsets(graph)
         routes = route_edges(graph, station_offsets=offsets)
 
-        # Find inter-section routes for the 3-line bundle
         inter = [r for r in routes if r.is_inter_section and r.curve_radii]
-        if not inter:
-            pytest.skip("No inter-section routes with curve_radii produced")
-
-        # Group by (source, target) to find co-routed bundles
-        from collections import defaultdict
+        assert len(inter) == 3, (
+            f"expected the 3-line bundle to turn out of s1, got {len(inter)} "
+            "inter-section routes carrying radii"
+        )
 
         bundles: dict[tuple[str, str], list[RoutedPath]] = defaultdict(list)
         for r in inter:
@@ -344,7 +418,6 @@ class TestConcentricBundles:
         for key, bundle in bundles.items():
             if len(bundle) < 2:
                 continue
-            # Each corner should have distinct radii across bundle lines
             for corner_idx in range(
                 min(len(r.curve_radii) for r in bundle if r.curve_radii)
             ):
@@ -357,41 +430,6 @@ class TestConcentricBundles:
                     assert len(set(radii)) == len(radii), (
                         f"Bundle {key} corner {corner_idx}: "
                         f"duplicate radii {radii} (lines would overlap)"
-                    )
-
-    def test_multi_line_bundle_fixture(self):
-        """The multi_line_bundle topology fixture should have distinct radii."""
-        fixture = TOPOLOGIES_DIR / "multi_line_bundle.mmd"
-        if not fixture.exists():
-            pytest.skip("multi_line_bundle.mmd not found")
-
-        graph = parse_metro_mermaid(fixture.read_text())
-        compute_layout(graph)
-        offsets = compute_station_offsets(graph)
-        routes = route_edges(graph, station_offsets=offsets)
-
-        inter = [r for r in routes if r.is_inter_section and r.curve_radii]
-        # Just verify no duplicate radii within any co-routed bundle
-        from collections import defaultdict
-
-        bundles: dict[tuple[str, str], list[RoutedPath]] = defaultdict(list)
-        for r in inter:
-            bundles[(r.edge.source, r.edge.target)].append(r)
-
-        for key, bundle in bundles.items():
-            if len(bundle) < 2:
-                continue
-            for corner_idx in range(
-                min(len(r.curve_radii) for r in bundle if r.curve_radii)
-            ):
-                radii = [
-                    r.curve_radii[corner_idx]
-                    for r in bundle
-                    if r.curve_radii and corner_idx < len(r.curve_radii)
-                ]
-                if len(radii) >= 2:
-                    assert len(set(radii)) == len(radii), (
-                        f"Bundle {key} corner {corner_idx}: duplicate radii {radii}"
                     )
 
 
@@ -413,7 +451,7 @@ class TestQCountMatchesCorners:
         """
         graph = parse_metro_mermaid(mmd_text)
         compute_layout(graph)
-        plan = build_render_plan(graph, NFCORE_THEME)
+        plan = build_render_plan(graph, NFCORE_DARK_THEME)
         expected_corners = sum(
             max(0, len(points) - 2) for points in plan.route_polylines
         )
@@ -534,8 +572,6 @@ class TestLineZOrderConsistent:
 
     def test_rnaseq_sections(self):
         fixture = EXAMPLES_DIR / "rnaseq_sections.mmd"
-        if not fixture.exists():
-            pytest.skip(f"fixture not available: {fixture}")
         _, _, _, svg = _layout_and_route_file(fixture)
         self._check(svg)
 
@@ -668,8 +704,6 @@ class TestConcentricArcCenters:
 
     def test_stacked_collector_corridor(self):
         fixture = EXAMPLES_DIR / "genomic_pipeline.mmd"
-        if not fixture.exists():
-            pytest.skip(f"fixture not available: {fixture}")
         _, routes, offsets, _ = _layout_and_route_file(fixture)
         self._check(routes, offsets)
 

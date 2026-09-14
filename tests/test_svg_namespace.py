@@ -5,7 +5,7 @@ import re
 from nf_metro.layout.engine import compute_layout
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.render.svg import render_svg
-from nf_metro.themes import LIGHT_THEME, NFCORE_THEME
+from nf_metro.themes import LIGHT_THEME, NFCORE_DARK_THEME
 
 _MMD = (
     "%%metro title: Test\n"
@@ -39,8 +39,8 @@ def test_dark_mode_css_present_for_transparent_theme_by_default():
 
 
 def test_dark_mode_css_absent_for_opaque_theme():
-    """NFCORE_THEME (opaque background) does not inject the dark-mode block."""
-    svg = render_svg(_make_graph(), NFCORE_THEME)
+    """NFCORE_DARK_THEME (opaque background) does not inject the dark-mode block."""
+    svg = render_svg(_make_graph(), NFCORE_DARK_THEME)
     assert "prefers-color-scheme" not in svg
 
 

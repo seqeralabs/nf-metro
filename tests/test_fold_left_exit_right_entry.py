@@ -26,6 +26,8 @@ multi-sub-row Binding Prediction -- is the motivating case.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from nf_metro import api
@@ -36,18 +38,20 @@ from nf_metro.layout.routing.invariants import (
     check_seam_segments_meet_at_port,
 )
 
-FIXTURE = "examples/topologies/fold_left_exit_right_entry.mmd"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+FIXTURE = REPO_ROOT / "examples/topologies/fold_left_exit_right_entry.mmd"
+EPITOPEPREDICTION = REPO_ROOT / "examples/epitopeprediction.mmd"
 
 
-def _route(text: str):
-    graph = api.prepare_graph(text)
+def _route(path: Path):
+    graph = api.prepare_graph(path.read_text(), source_dir=str(path.parent))
     offsets = compute_station_offsets(graph)
     routes = route_edges_centred(graph, station_offsets=offsets)
     return graph, routes, offsets
 
 
 def _route_fixture():
-    return _route(open(FIXTURE).read())
+    return _route(FIXTURE)
 
 
 def test_bundle_order_preserved() -> None:
@@ -92,8 +96,9 @@ def test_motivating_epitopeprediction_is_clean() -> None:
     one of its three sections renders its binding_prediction -> reporting run
     straight, in bundle order, with no curve defect."""
     graph = api.prepare_graph(
-        open("examples/epitopeprediction.mmd").read(),
+        EPITOPEPREDICTION.read_text(),
         layout_options={"fold_threshold": 7},
+        source_dir=str(EPITOPEPREDICTION.parent),
     )
     offsets = compute_station_offsets(graph)
     routes = route_edges_centred(graph, station_offsets=offsets)
@@ -122,14 +127,14 @@ def test_motivating_epitopeprediction_is_clean() -> None:
 # the connector by the same distance.
 _STRAIGHT_RUN_PAIRS = [
     pytest.param(
-        open(FIXTURE).read(),
+        FIXTURE,
         None,
         "middle",
         "report",
         id="fold_left_exit_right_entry",
     ),
     pytest.param(
-        open("examples/epitopeprediction.mmd").read(),
+        EPITOPEPREDICTION,
         {"fold_threshold": 7},
         "binding_prediction",
         "reporting",
@@ -138,9 +143,9 @@ _STRAIGHT_RUN_PAIRS = [
 ]
 
 
-@pytest.mark.parametrize("text, opts, exit_sec, target_sec", _STRAIGHT_RUN_PAIRS)
+@pytest.mark.parametrize("path, opts, exit_sec, target_sec", _STRAIGHT_RUN_PAIRS)
 def test_straight_run_sections_share_bbox_bottom(
-    text: str, opts: dict | None, exit_sec: str, target_sec: str
+    path: Path, opts: dict | None, exit_sec: str, target_sec: str
 ) -> None:
     """The two sections joined by the straight run clear it by the same amount.
 
@@ -150,10 +155,8 @@ def test_straight_run_sections_share_bbox_bottom(
     reads as lopsided even though the run itself is straight.  Their bottoms
     must line up so the clearance is balanced.
     """
-    graph = (
-        api.prepare_graph(text, layout_options=opts)
-        if opts
-        else api.prepare_graph(text)
+    graph = api.prepare_graph(
+        path.read_text(), layout_options=opts, source_dir=str(path.parent)
     )
     a = graph.sections[exit_sec]
     b = graph.sections[target_sec]

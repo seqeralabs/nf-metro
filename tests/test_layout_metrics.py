@@ -47,7 +47,7 @@ FIXTURES = [
 
 
 def _layout(path: Path):
-    return parse_and_layout(path.read_text())
+    return parse_and_layout(path.read_text(), source_dir=str(path.parent))
 
 
 @pytest.mark.parametrize("path", FIXTURES, ids=lambda p: p.stem)

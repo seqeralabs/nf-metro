@@ -150,6 +150,7 @@ def compute_corpus_layout(path: Path, is_nextflow: bool) -> MetroGraph:
     if is_nextflow:
         text = convert_nextflow_dag(text)
     graph = parse_metro_mermaid(text)
+    graph.source_dir = str(path.parent)
     compute_layout(graph, validate=True)
     return graph
 
@@ -226,12 +227,18 @@ def diff_station_coords(before: Coords, after: Coords, tol: float = 1e-6) -> lis
 # --- Parse/layout helpers ---
 
 
-def parse_and_layout(text: str, **kwargs) -> MetroGraph:
+def parse_and_layout(text: str, source_dir: str = "", **kwargs) -> MetroGraph:
     """Parse Mermaid text and run the full layout pipeline.
 
     Accepts keyword arguments passed to compute_layout (e.g. x_spacing, y_spacing).
+
+    *source_dir* is the directory the map came from, which is what a
+    ``%%metro logo:`` path resolves against: a caller that read the text off
+    disk must pass it or the asset only resolves when the process working
+    directory happens to match.
     """
     graph = parse_metro_mermaid(text)
+    graph.source_dir = source_dir
     compute_layout(graph, **kwargs)
     return graph
 

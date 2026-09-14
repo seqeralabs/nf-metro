@@ -1,0 +1,24 @@
+%%metro title: Continuation lane hand-over
+%%metro line: tables | Result tables | #7d3f98
+%%metro line: plots | Result plots | #2b6cb0
+%%metro line: counts | Counts | #f59e0b
+%%metro line: norm | Normalised counts | #e6007e
+%%metro line: qc | QC | #24b064
+%%metro line: logs | Run logs | #0dcaf0
+%%metro grid: quant | 0,0
+%%metro grid: diff | 1,0
+%%metro grid: report | 2,1
+
+graph LR
+    subgraph quant [Quantification]
+        salmon_index[Salmon index] -->|counts,norm,qc,logs| salmon_quant[Salmon quant]
+    end
+    subgraph diff [Differential abundance]
+        deseq2[DESeq2] -->|counts,norm| results_hub[Results hub]
+        results_hub -->|tables,plots| publish[Publish]
+    end
+    subgraph report [Reporting]
+        multiqc[MultiQC] -->|qc,logs| report_html[Report]
+    end
+    salmon_quant -->|counts,norm| deseq2
+    salmon_quant -->|qc,logs| multiqc

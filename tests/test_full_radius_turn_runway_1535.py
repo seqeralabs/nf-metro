@@ -13,7 +13,7 @@ layout-level spacing, and aborting a render over a merely-tight arc would be
 worse than drawing it.  Holding the corpus to the stricter bar keeps the engine
 from regressing where it already achieves it.
 
-The two seatings that starved the runway are pinned individually below, so a
+The seatings that starved the runway are pinned individually below, so a
 regression names its own cause rather than surfacing as a clamped corner
 somewhere downstream.
 """
@@ -128,6 +128,27 @@ def test_bypass_descent_keeps_its_runway_into_the_entry_port() -> None:
     assert port_x - descent_x >= CURVE_RADIUS - _RADIUS_TOL, (
         f"descent column at x={descent_x:.0f} is {port_x - descent_x:.0f}px "
         f"from the port at x={port_x:.0f}"
+    )
+
+
+def test_bypass_trunk_step_keeps_its_runway_off_the_source_leg() -> None:
+    """The step down onto ``reference``'s bypass trunk spans two full radii.
+
+    The junction at ``input``'s RIGHT exit sits only a little above the
+    clearance lane under ``assemble``, so the step onto that trunk is short.
+    Two formed corners need ``2 * CURVE_RADIUS`` of vertical run between them,
+    and a shorter step halves both radii to fit.
+    """
+    graph, routes = _route(TOPOLOGIES / "packed_cell_right_exit_left_entry_wrap.mmd")
+    bypass = next(
+        rp
+        for rp in routes
+        if rp.edge.source == "__junction_10" and rp.edge.target == "annot__entry_left_9"
+    )
+    source_leg_y, trunk_y = bypass.points[1][1], bypass.points[2][1]
+    assert trunk_y - source_leg_y >= 2 * CURVE_RADIUS - _RADIUS_TOL, (
+        f"trunk at y={trunk_y:.0f} steps only {trunk_y - source_leg_y:.0f}px "
+        f"off a source leg at y={source_leg_y:.0f}"
     )
 
 

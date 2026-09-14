@@ -187,6 +187,27 @@ def _record_metrics(graph, plan, svg_name: str, svg_str: str) -> None:
         print(f"    metrics FAIL for {svg_name}: {e}")
 
 
+# Every map that does not reach the render corpus, so the build can report a
+# count and exit nonzero. A silently dropped map shrinks the render-diff surface
+# without shrinking the manifest's credibility, which is how a whole class of
+# breakage stayed invisible while this script still exited 0.
+_dropped: list[str] = []
+
+
+def _drop(what: str, why: str) -> None:
+    _dropped.append(f"{what}: {why}")
+
+
+def report_dropped() -> int:
+    """Print the dropped-map summary and return the process exit status."""
+    if not _dropped:
+        return 0
+    print(f"\n{len(_dropped)} map(s) did not reach the render corpus:")
+    for line in _dropped:
+        print(f"  {line}")
+    return 1
+
+
 def render_mmd(
     mmd_path: Path,
     svg_path: Path,
@@ -208,10 +229,19 @@ def render_mmd(
     byte-for-byte.
     """
     text = mmd_path.read_text()
-    graph = prepare_graph(text, from_nextflow=from_nextflow)
+    graph = prepare_graph(
+        text,
+        from_nextflow=from_nextflow,
+        source_dir=str(mmd_path.resolve().parent),
+    )
     graph.embed_manifest = False
     theme = resolve_theme(None, graph)
-    plan = build_render_plan(graph, theme, debug=debug)
+    plan = build_render_plan(
+        graph,
+        theme,
+        debug=debug,
+        inactive_line_ids=graph.default_inactive_line_ids(),
+    )
     svg_str = emit_render_plan(
         plan,
         self_color_scheme=self_color_scheme,
@@ -240,6 +270,7 @@ def _render_registered_stem(stem: str, mmd_path: Path, svg_path: Path) -> bool:
             )
         else:
             print(f"  {stem}: FAIL - {e}")
+            _drop(stem, str(e))
         return False
     if expected_abort:
         print(
@@ -278,6 +309,7 @@ def build_gallery_manifest() -> None:
     for stem, source_dir, description in GALLERY_ENTRIES:
         mmd_path = source_dir / f"{stem}.mmd"
         if not mmd_path.exists():
+            _drop(stem, f"registered in gallery.yaml but {mmd_path} is absent")
             continue
         entries.append(
             {
@@ -302,6 +334,7 @@ def build_pipelines_manifest() -> None:
         source_dir = _GALLERY_SOURCE_DIRS.get(stem, EXAMPLES_DIR)
         mmd_path = source_dir / f"{stem}.mmd"
         if not mmd_path.exists():
+            _drop(stem, f"registered in gallery.yaml but {mmd_path} is absent")
             continue
         entries.append(
             {
@@ -339,10 +372,12 @@ def render_guide_examples() -> None:
             print(f"  {mmd_path.stem}: OK")
         except Exception as e:
             print(f"  {mmd_path.stem}: FAIL - {e}")
+            _drop(mmd_path.stem, str(e))
 
     for stem in _config["render_only"]["guide_examples"]:
         mmd_path = EXAMPLES_DIR / f"{stem}.mmd"
         if not mmd_path.exists():
+            _drop(str(stem), f"registered for render but {mmd_path} is absent")
             continue
         svg_path = RENDERS_DIR / f"{stem}.svg"
         if _skip_render(mmd_path):
@@ -387,6 +422,7 @@ def build_gallery() -> None:
             except Exception as e:
                 status = f"FAIL: {e}"
                 print(f"  {stem}: {status}")
+                _drop(stem, str(e))
                 continue
 
         _manifest[svg_path.name] = _GALLERY_CATEGORIES[stem]
@@ -411,10 +447,12 @@ def render_nextflow_examples() -> None:
             print(f"  nf_{mmd_path.stem}: OK")
         except Exception as e:
             print(f"  nf_{mmd_path.stem}: FAIL - {e}")
+            _drop(f"nf_{mmd_path.stem}", str(e))
 
     for entry in _config["render_only"]["nextflow_conversions"]:
         src_path = EXAMPLES_DIR / f"{entry['id']}.mmd"
         if not src_path.exists():
+            _drop(str(entry["id"]), f"registered for render but {src_path} is absent")
             continue
         svg_path = RENDERS_DIR / f"{entry['output']}.svg"
         if _skip_render(src_path):
@@ -457,6 +495,7 @@ def build_pipelines_page() -> None:
             except Exception as e:
                 status = f"FAIL: {e}"
                 print(f"  {stem}: {status}")
+                _drop(stem, str(e))
                 continue
 
         _manifest[svg_path.name] = section
@@ -473,6 +512,7 @@ def render_test_fixtures() -> None:
     for stem in _render_only_stems():
         mmd_path = TEST_FIXTURES_DIR / f"{stem}.mmd"
         if not mmd_path.exists():
+            _drop(str(stem), f"registered for render but {mmd_path} is absent")
             continue
         svg_path = RENDERS_DIR / f"{Path(stem).name}.svg"
         if _skip_render(mmd_path):
@@ -516,3 +556,4 @@ if __name__ == "__main__":
     build_pipelines_manifest()
     write_manifest()
     write_metrics()
+    sys.exit(report_dropped())

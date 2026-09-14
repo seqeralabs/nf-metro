@@ -346,6 +346,7 @@
     "_guard_entry_port_not_opposite_targets|after final",
     "_guard_entry_port_fed_only_by_ports|after final",
     "_guard_flow_exit_anchored_to_carrier|after final",
+    "_guard_partial_trunk_descent_seated|after final",
     "_guard_wrap_exit_anchored_to_carrier|after final",
     "_guard_fold_lr_exit_follows_target|after final",
     "_guard_fold_lr_exit_sections_share_bbox_bottom|after final",

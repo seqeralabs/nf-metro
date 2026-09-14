@@ -572,7 +572,8 @@ def _evaluate_attempt(
 
         try:
             begin(CandidateStage.LAYOUT)
-            compute_layout(graph, validate=True)
+            theme = resolve_theme(production.theme, graph, mode=production.mode)
+            compute_layout(graph, validate=True, validation_theme=theme)
             graph_evidence = _graph_evidence(graph, GraphState.SETTLED)
         except Exception as exc:  # noqa: BLE001
             graph_evidence = _graph_evidence(graph, GraphState.PARTIAL_LAYOUT)
@@ -657,7 +658,6 @@ def _evaluate_attempt(
 
         try:
             begin(CandidateStage.RENDER_PLAN)
-            theme = resolve_theme(production.theme, graph, mode=production.mode)
             observed = build_observed_render_plan(
                 graph,
                 theme,

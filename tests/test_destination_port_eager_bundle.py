@@ -161,37 +161,32 @@ def test_same_destination_port_tail_keeps_three_axis_order(port_id: str) -> None
     assert port_order == expected_port
 
 
-def test_destination_tail_runtime_guard_is_not_vacuous(monkeypatch) -> None:
-    """The guard reports loose tails once the passes that settle them are off.
+def test_destination_tail_guard_reports_a_depth_inverted_bundle() -> None:
+    """``check_peeloff_concentric`` names every line stacked against its order.
 
-    Disabled here: normalize's own same-destination tail bundling, and the
-    convergent-line stagger at both of its live call sites (``core`` runs it
-    over the whole population, ``member_geometry`` over a planned one).
-    Member-geometry's own tail bundling still runs, so the tails this leaves
-    loose are the ones normalize would otherwise have settled.
+    Two lines converge on ``qc__entry_left_6`` from below-row trunks at
+    different depths, and the settled routes put each on the depth its peel
+    order earns.  Exchanging the two trunk Ys constructs the inversion the
+    settling passes exist to prevent; the guard must then report both lines.
+
+    This is detector arithmetic over a hand-built input.  No corpus fixture
+    reaches the inversion through the routing pipeline, so the guard's ability
+    to see one is not otherwise exercised.
     """
-    from nf_metro.layout.routing import core, member_geometry, normalize
-
     graph = parse_metro_mermaid(FIXTURE.read_text())
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
-    monkeypatch.setattr(
-        normalize,
-        "_bundle_same_destination_tails",
-        lambda routes, ctx: None,
-    )
-    monkeypatch.setattr(
-        core,
-        "_stagger_convergent_distinct_lines",
-        lambda routes, ctx: None,
-    )
-    monkeypatch.setattr(
-        member_geometry,
-        "_stagger_convergent_distinct_lines",
-        lambda routes, ctx: None,
-    )
     routes = route_edges(graph, station_offsets=offsets)
+    assert not check_peeloff_concentric(graph, routes)
 
-    violations = check_peeloff_concentric(graph, routes)
-    messages = [violation.message() for violation in violations]
-    assert any("qc__entry_left_6" in message for message in messages)
+    tails = [route for route in routes if route.edge.target == "qc__entry_left_6"]
+    assert len(tails) == 2
+    trunk_ys = [list(iter_horizontal_trunks(route))[-1][1].y for route in tails]
+    for route, own_y, swapped_y in zip(tails, trunk_ys, reversed(trunk_ys)):
+        route.points[:] = [(x, swapped_y if y == own_y else y) for x, y in route.points]
+
+    messages = [
+        violation.message() for violation in check_peeloff_concentric(graph, routes)
+    ]
+    assert len(messages) == len(tails)
+    assert all("qc__entry_left_6" in message for message in messages)

@@ -725,13 +725,7 @@ def _assign_grid_positions(
         )
         if convergence_result is not None:
             return _place_with_convergence(
-                graph,
-                col_groups,
-                topo_col_width,
-                col_assign,
-                successors,
-                predecessors,
-                convergence_result,
+                graph, col_groups, col_assign, convergence_result
             )
 
     folded, fold_sections, below_fold_sections = _pack_topo_columns(
@@ -857,10 +851,7 @@ def _detect_convergence_split(
 def _place_with_convergence(
     graph: MetroGraph,
     col_groups: dict[int, list[str]],
-    topo_col_width: dict[int, int],
     col_assign: dict[str, int],
-    successors: dict[str, set[str]],
-    predecessors: dict[str, set[str]],
     return_set: set[str],
 ) -> tuple[set[str], set[str], set[str]]:
     """Place sections using convergence-based row split.

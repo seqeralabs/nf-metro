@@ -144,7 +144,8 @@ graph LR
 
 
 def test_hidden_merge_is_not_a_continuation_seed() -> None:
-    graph = prepare_graph((ROOT / "examples" / "hlatyping.mmd").read_text())
+    path = ROOT / "examples" / "hlatyping.mmd"
+    graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
 
     assert "fastqc" not in continuation_track_predecessors(graph)
 

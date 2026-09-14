@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import heapq
 from collections import Counter, defaultdict
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
@@ -294,9 +294,37 @@ def continuation_track_predecessors(graph: MetroGraph) -> dict[str, str]:
         if node not in visible:
             continue
         node_predecessors = predecessors[node]
-        if len(node_predecessors) != 1:
+        non_port_predecessors = {p for p in node_predecessors if p not in graph.ports}
+        if len(non_port_predecessors) != 1:
             continue
-        predecessor = next(iter(node_predecessors))
+        predecessor = next(iter(non_port_predecessors))
+        port_predecessors = node_predecessors - non_port_predecessors
+        # A node fed by a section-boundary port alongside its sole internal
+        # predecessor inherits that predecessor's track when the same port also
+        # feeds the predecessor: they share one boundary source, so the port
+        # imposes no independent Y constraint.  Confined to authored-grid
+        # layouts, where the inter-section port resnap re-anchors the shifted
+        # carrier's port; auto-layout freezes ports for routing stability, so a
+        # lifted continuation there would strand its port off the station.  A
+        # port sitting on the predecessor's own track is excluded: it feeds the
+        # node along that track straight through the predecessor (which lies
+        # between them), which would bow around the predecessor rather than run
+        # flat, so the track cannot be inherited.
+        if port_predecessors:
+            shares_port_with_predecessor = not (
+                port_predecessors - predecessors[predecessor]
+            )
+            predecessor_y = graph.stations[predecessor].y
+            port_off_predecessor_track = all(
+                abs(graph.stations[p].y - predecessor_y) >= SAME_COORD_TOLERANCE
+                for p in port_predecessors
+            )
+            if not (
+                graph.layout_provenance.has_authored_grids()
+                and shares_port_with_predecessor
+                and port_off_predecessor_track
+            ):
+                continue
         if predecessor not in visible:
             continue
         predecessor_station = graph.stations[predecessor]
@@ -415,15 +443,34 @@ def line_forks_within_section(
     return False
 
 
+def feeder_dys(graph: MetroGraph, port_id: str) -> list[float]:
+    """Signed Y distance of each feeder from *port_id*.
+
+    The raw material both the corridor filter (all feeders off the port's Y) and
+    the flat-seam filter (all feeders level with it) select on.
+    """
+    port_y = graph.stations[port_id].y
+    return [
+        graph.stations[e.source].y - port_y
+        for e in graph.edges_to(port_id)
+        if e.source in graph.stations
+    ]
+
+
+def seam_is_flat(dys: Sequence[float], tol: float) -> bool:
+    """Whether every feeder meets the port level with it, within *tol*.
+
+    A flat seam carries a feeder-to-port lane mismatch as a horizontal slope; a
+    corridor feeder (some ``dy`` past *tol*) absorbs it in a vertical leg.
+    """
+    return bool(dys) and all(abs(dy) <= tol for dy in dys)
+
+
 def _iter_solo_lr_entries(
     graph: MetroGraph,
 ) -> Iterator[tuple[str, str, str, list[float]]]:
     """Yield ``(section_id, entry_port_id, line_id, feeder_dys)`` for each
     LEFT/RIGHT entry port of an LR/RL section carrying a single present line.
-
-    ``feeder_dys`` is the signed Y distance of each feeder from the port -- the
-    raw material both the corridor filter (all feeders off the port's Y) and the
-    flat-seam filter (all feeders level with it) select on.
     """
     present: dict[str, set[str]] = defaultdict(set)
     for sid, st in graph.stations.items():
@@ -440,14 +487,9 @@ def _iter_solo_lr_entries(
             port = graph.ports.get(pid)
             if port is None or port.side not in (PortSide.LEFT, PortSide.RIGHT):
                 continue
-            port_y = graph.stations[pid].y
-            feeder_dys = [
-                graph.stations[e.source].y - port_y
-                for e in graph.edges_to(pid)
-                if e.source in graph.stations
-            ]
-            if feeder_dys:
-                yield sec_id, pid, line_id, feeder_dys
+            dys = feeder_dys(graph, pid)
+            if dys:
+                yield sec_id, pid, line_id, dys
 
 
 def iter_corridor_fed_solo_entries(
@@ -480,8 +522,8 @@ def iter_flat_seam_solo_entries(
     re-bases it to the trunk only when the feeder already rides the trunk, so
     the seam lands flat instead of tilting.
     """
-    for sec_id, pid, line_id, feeder_dys in _iter_solo_lr_entries(graph):
-        if all(abs(dy) <= tol for dy in feeder_dys):
+    for sec_id, pid, line_id, dys in _iter_solo_lr_entries(graph):
+        if seam_is_flat(dys, tol):
             yield sec_id, pid, line_id
 
 
@@ -829,7 +871,8 @@ def _linear_entry_pill_lines(
     if station is None or station.section_id is None or station.is_port:
         return None
     inherited = graph._linear_entry_pill_lines_cache.get(sid)
-    if inherited is None:
+    # Mirrors the >=2-lane guard in _cache_linear_entry_pill_lines (offsets.py).
+    if inherited is None or len(inherited) < 2:
         return None
     inherited_set = set(inherited)
     served = tuple(graph.station_lines(sid))
@@ -1579,25 +1622,30 @@ def _exit_reaching_nodes(graph: MetroGraph, section: Section) -> frozenset[str]:
     return frozenset(reaching)
 
 
-def _section_row_through_lines(graph: MetroGraph, section: Section) -> set[str]:
-    """Lines on a section's LEFT/RIGHT ports that connect to a same-row section.
+def _section_row_through_lines(
+    graph: MetroGraph, section: Section
+) -> dict[str, set[str]]:
+    """Same-row sections each of a section's LEFT/RIGHT port lines reaches.
 
-    A LEFT/RIGHT port line that only reaches sections in a *different* grid row
-    (a fork peeling off to another row via a junction) is excluded: it rides a
+    Keyed by line id, so the keys are the lines forming the section's share of
+    the row's through-trunk and each value names the row-mates that line ties it
+    to.  A LEFT/RIGHT port line that only reaches sections in a *different* grid
+    row (a fork peeling off to another row via a junction) is absent: it rides a
     perpendicular runway, not the section's horizontal trunk.  This isolates the
-    lines that form the row's through-trunk from downstream forks, so trunk
-    alignment can compare the horizontal flow rather than the raw port bundle.
+    horizontal flow along the row from downstream forks, so trunk alignment can
+    compare that rather than the raw port bundle.
     """
     junction_ids = graph.junction_ids
     row = section.grid_row
 
-    def reaches_same_row(start: str, line: str, forward: bool) -> bool:
+    def same_row_sections(start: str, line: str, forward: bool) -> set[str]:
         # Follow only edges carrying *line*, and only in the flow direction
         # away from this section (a junction fans several lines to different
         # rows, and a bidirectional walk would loop back to the origin), until
         # the line lands on another section's port in the same grid row.
         seen: set[str] = set()
         stack = [start]
+        found: set[str] = set()
         while stack:
             nid = stack.pop()
             if nid in seen:
@@ -1613,44 +1661,68 @@ def _section_row_through_lines(graph: MetroGraph, section: Section) -> set[str]:
             if nport is not None:
                 nsec = graph.sections.get(nport.section_id)
                 if nsec is not None and nsec.id != section.id and nsec.grid_row == row:
-                    return True
-        return False
-
-    def port_through_lines(pid: str, forward: bool) -> set[str]:
-        found: set[str] = set()
-        edges = graph.edges_from(pid) if forward else graph.edges_to(pid)
-        for line in graph.station_lines(pid):
-            hops = [
-                (e.target if forward else e.source) for e in edges if e.line_id == line
-            ]
-            if any(reaches_same_row(h, line, forward) for h in hops):
-                found.add(line)
+                    found.add(nsec.id)
         return found
 
-    lines: set[str] = set()
+    through: dict[str, set[str]] = {}
     # Entry ports walk backward toward their feeder; exit ports walk forward.
     for port_ids, forward in ((section.entry_ports, False), (section.exit_ports, True)):
         for pid in port_ids:
             port = graph.ports.get(pid)
-            if port is not None and port.side in (PortSide.LEFT, PortSide.RIGHT):
-                lines |= port_through_lines(pid, forward)
-    return lines
+            if port is None or port.side not in (PortSide.LEFT, PortSide.RIGHT):
+                continue
+            edges = graph.edges_from(pid) if forward else graph.edges_to(pid)
+            for line in graph.station_lines(pid):
+                reached: set[str] = set()
+                for e in edges:
+                    if e.line_id == line:
+                        hop = e.target if forward else e.source
+                        reached |= same_row_sections(hop, line, forward)
+                if reached:
+                    through.setdefault(line, set()).update(reached)
+    return through
 
 
-def _is_fan_branch_leaf(graph: MetroGraph, section: Section) -> bool:
+def _row_through_and_carrier_lines(
+    graph: MetroGraph, group: Sequence[Section]
+) -> tuple[dict[str, dict[str, set[str]]], set[str]]:
+    """Per-section through-lines for a row group, and the row's carrier line ids.
+
+    The second element is the union of every through-line id across the
+    group. A section whose own through-line ids equal this union carries the
+    row's entire trunk (see :func:`_is_fan_branch_leaf`'s ``full_carrier``);
+    one whose ids are a strict subset rides a partial lane of a richer trunk.
+    """
+    through = {s.id: _section_row_through_lines(graph, s) for s in group}
+    carried = [set(t) for t in through.values() if t]
+    carrier_lines = set().union(*carried) if carried else set()
+    return through, carrier_lines
+
+
+def _is_fan_branch_leaf(
+    graph: MetroGraph, section: Section, *, full_carrier: bool
+) -> bool:
     """True for a terminal section reached purely as a fan-out branch.
 
     Such a section continues nothing horizontally along its row (a leaf), and
     every line feeding it is also carried -- from the same feeding junction --
-    on to another section.  It therefore rides that continuing line's trunk
-    and fans off it through the junction, so leaving it compact costs
-    nothing: the shared line keeps the feeder's exit port on the trunk.
+    on to another section in the same row.  It therefore rides that continuing
+    line's trunk and fans off it through the junction, so leaving it compact
+    costs nothing: the shared line keeps the feeder's exit port on the trunk.
 
     A leaf fed by a *private* line (one that terminates only here) instead
     shares its feeder's exit port with a disjoint route to another section, so
     pulling it onto the trunk keeps that port there too; compacting it would
     drag the port off the trunk and lengthen the other route.  Such a leaf is
     not a fan branch and stays aligned.
+
+    ``full_carrier`` says the section carries the whole row trunk.  When it does,
+    a sibling branch that continues anywhere -- even off the row -- makes the
+    feeding line shared, because there is no richer trunk for the section to join
+    and pulling it on only wastes canvas.  A *partial* carrier rides a subset
+    lane of a richer trunk, so a sibling that leaves the row does not make the
+    line shared: the section is not a fan branch and aligns onto that trunk as a
+    follower.
     """
     row = section.grid_row
     junction_ids = graph.junction_ids
@@ -1676,15 +1748,23 @@ def _is_fan_branch_leaf(graph: MetroGraph, section: Section) -> bool:
                 others.add(osec)
         return others
 
+    def continues_in_row(start: str, line: str) -> bool:
+        return any(
+            graph.sections[s].grid_row == row for s in forward_sections(start, line)
+        )
+
+    def sibling_shares(start: str, line: str) -> bool:
+        # full_carrier semantics: see the docstring above.
+        if full_carrier:
+            return bool(forward_sections(start, line))
+        return continues_in_row(start, line)
+
     for pid in section.exit_ports:
         port = graph.ports.get(pid)
         if port is None or port.side not in (PortSide.LEFT, PortSide.RIGHT):
             continue
         for e in graph.edges_from(pid):
-            if any(
-                graph.sections[s].grid_row == row
-                for s in forward_sections(e.target, e.line_id)
-            ):
+            if continues_in_row(e.target, e.line_id):
                 return False
 
     feed: set[str] = set()
@@ -1699,7 +1779,7 @@ def _is_fan_branch_leaf(graph: MetroGraph, section: Section) -> bool:
                 if (
                     sibling.line_id == e.line_id
                     and sibling.target != pid
-                    and forward_sections(sibling.target, sibling.line_id)
+                    and sibling_shares(sibling.target, sibling.line_id)
                 ):
                     shared.add(e.line_id)
                     break

@@ -19,20 +19,19 @@ import warnings
 from collections.abc import Callable
 from copy import deepcopy
 from functools import partial
+from typing import TYPE_CHECKING
 
 from nf_metro.layout.constants import (
     CURVE_RADIUS,
     DESCENDER_CLEARANCE,
+    EDGE_TO_BUNDLE_CLEARANCE,
     FONT_HEIGHT,
     ICON_STACK_LABEL_CLEARANCE,
     INTER_ROW_EDGE_CLEARANCE,
     LABEL_OFFSET,
     LABEL_OVERLAP_TOL,
     MIN_Y_SPACING_FLOOR,
-    ROW_GAP,
     SAME_COORD_TOLERANCE,
-    SECTION_GAP,
-    SECTION_ROUTE_CLEARANCE,
     SECTION_X_GAP,
     SECTION_X_PADDING,
     SECTION_Y_GAP,
@@ -44,6 +43,9 @@ from nf_metro.layout.constants import (
     graph_offset_step,
 )
 from nf_metro.layout.geometry import lanes_run_along_x, perpendicular_port_sides
+
+if TYPE_CHECKING:
+    from nf_metro.render.style import Theme
 from nf_metro.layout.layers import assign_layers
 from nf_metro.layout.ordering import assign_tracks
 from nf_metro.layout.phases._common import (  # noqa: F401
@@ -124,6 +126,7 @@ from nf_metro.layout.phases.fan_bundles import (  # noqa: F401
     _section_symfan_uses_half_grid,
 )
 from nf_metro.layout.phases.grid_snap import (  # noqa: F401
+    _register_half_grid_reconvergence_branches,
     _snap_all_y_to_grid,
     _snap_canvas_y_to_grid,
 )
@@ -194,6 +197,7 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_off_track_not_hub,
     _guard_off_track_output_clears_non_producer,
     _guard_partial_branch_offset_gaps,
+    _guard_partial_trunk_descent_seated,
     _guard_perp_entry_boundary_consistent,
     _guard_perp_entry_feed_not_collinear,
     _guard_perp_exit_over_leadin_no_overdip,
@@ -450,7 +454,7 @@ def _far_side_wrap_left_clearances(graph: MetroGraph) -> dict[str, float]:
     a curve radius left of its box (see
     ``_route_left_exit_around_below_left_entry``).  Reserving that width as extra
     left extent lets the Stage 1.5 overshoot adjustment keep the wrap clear of
-    the canvas edge.  ``SECTION_ROUTE_CLEARANCE`` bounds the ascent channel's own
+    the canvas edge.  ``EDGE_TO_BUNDLE_CLEARANCE`` bounds the ascent channel's own
     edge clearance, so the sum is a safe upper bound on the wrap's reach.
     """
     clearances: dict[str, float] = {}
@@ -460,7 +464,10 @@ def _far_side_wrap_left_clearances(graph: MetroGraph) -> dict[str, float]:
         n = len({edge.line_id for edge in graph.edges_to(port.id)})
         offset_step = graph_offset_step(graph)
         clearance = (
-            (n - 1) * offset_step + CURVE_RADIUS + offset_step + SECTION_ROUTE_CLEARANCE
+            (n - 1) * offset_step
+            + CURVE_RADIUS
+            + offset_step
+            + EDGE_TO_BUNDLE_CLEARANCE
         )
         clearances[port.section_id] = max(
             clearances.get(port.section_id, 0.0), clearance
@@ -474,13 +481,12 @@ def compute_layout(
     y_spacing: float | None = None,
     x_offset: float = X_OFFSET,
     y_offset: float = Y_OFFSET,
-    row_gap: float = ROW_GAP,
-    section_gap: float = SECTION_GAP,
     section_x_padding: float = SECTION_X_PADDING,
     section_y_padding: float = SECTION_Y_PADDING,
     section_x_gap: float | None = None,
     section_y_gap: float | None = None,
     validate: bool = _VALIDATE_DEFAULT,
+    validation_theme: Theme | None = None,
 ) -> None:
     """Compute layout positions for all stations in the graph.
 
@@ -593,7 +599,7 @@ def compute_layout(
             from nf_metro.themes import resolve_theme
 
             try:
-                build_render_plan(graph, resolve_theme(None, graph))
+                build_render_plan(graph, validation_theme or resolve_theme(None, graph))
             except (
                 CurveInvariantError,
                 FanRouteInvariantError,
@@ -604,6 +610,12 @@ def compute_layout(
                 raise SettledRouteValidationError(str(exc)) from exc
             finally:
                 graph._final_route_guards_deferred = False
+
+        # Must run after every layout/re-layout pass has settled: it only marks
+        # half-grid station ids for post-layout invariants. Moving it earlier lets
+        # the mark feed a subsequent pass's placement decisions (Stage 6.4's grid
+        # snap, Stage 6.18's orphan expansion), corrupting their geometry.
+        _register_half_grid_reconvergence_branches(graph)
 
 
 def _compute_layout_scaled(
@@ -690,7 +702,6 @@ def _compute_layout_scaled(
             )
     if x_spacing is None:
         x_spacing = default_x_spacing
-    graph._resolved_x_spacing = x_spacing
 
     # Optionally reorder lines by section span before layout.
     # Must happen here (on the full graph) before section subgraphs are
@@ -710,6 +721,10 @@ def _compute_layout_scaled(
     # so a single pass runs.
     max_iters = _MAX_SPREAD_ITERS if (auto_x or auto_y) else 1
     for attempt in range(max_iters):
+        # Each pass may widen x_spacing to clear label overlaps; keep the
+        # recorded resolve in step so placement that reads it (off-track spurs)
+        # tracks the same widened pitch the fan branches are placed on.
+        graph._resolved_x_spacing = x_spacing
         _layout_once(
             graph,
             x_spacing=x_spacing,
@@ -1489,10 +1504,11 @@ def _compute_section_layout(
        stay local.
     2. **Globalise** (Stage 2.1).  Single-stage coord-regime
        transition: translate stations and bboxes to canvas coordinates.
-    3. **Pass A - port positioning** (Stages 3.1 to 3.4).  Place ports
+    3. **Pass A - port positioning** (Stages 3.1 to 3.6).  Place ports
        on bbox edges, align entry ports, shift LR/RL perp-entry
        stations, align fold-section exit ports (re-flushing the rows the
-       exit move pushes down).
+       exit move pushes down), reserve the perpendicular-port edge inset
+       on X, level a grid column's shared-runway edges.
     4. **Pass B - downstream alignment & trunk-Y consolidation**
        (Stages 4.1 to 4.10).  Pull ports toward downstream content,
        snap to grid-group stations, space from termini, recompute
@@ -1501,15 +1517,20 @@ def _compute_section_layout(
     5. **Pass C - junctions & off-track lift** (Stages 5.1 to 5.5).
        Position junctions, lift off-track stations, re-align row bbox
        tops, compact, snap inter-section port pairs.
-    6. **Pass C - vertical settling & finishing** (Stages 6.1 to 6.15).
-       Fan content upward, snap to grid, re-anchor off-track, recenter
-       full-bundle columns and restore their invariants, balance content
-       around trunk, loop-side X recenter, bbox shrink + row tighten /
-       push, captioned-icon pad.
+    6. **Pass C - vertical settling & finishing** (Stages 6.1 to
+       6.18a).  Fan content upward, snap to grid, re-anchor off-track,
+       recenter full-bundle columns and restore their invariants,
+       balance content around trunk, loop-side X recenter, bbox shrink +
+       row tighten / push, captioned-icon pad, fit bbox tops to content,
+       re-snap the canvas grid, re-align vertical-flow entry ports and
+       junctions with their settled feeders, settle semantic fans, seat
+       orphaned half-pitch stations.
 
     Inline ``# ---- Stage N - ... ----`` dividers below mark each
     stage's start; ``# Stage X.Y:`` comments above each helper call
-    name the sub-stage.
+    name the sub-stage.  Stage 6.15a runs *before* Stage 6.15, out of
+    label order: the content-top fit leaves a non-grid shift behind, and
+    the canvas snap is what closes it out, so the snap has to come last.
     """
     from nf_metro.layout.section_placement import (
         _reflect_stacked_split_consumer_tracks,

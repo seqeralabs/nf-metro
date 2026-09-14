@@ -8,7 +8,8 @@
  * `set:html` string does not.
  *
  * Query flags select the render mode: `?metro&debug` adds the layout overlay,
- * `?metro&nextflow` converts a Nextflow DAG first.
+ * `?metro&nextflow` converts a Nextflow DAG first, `?metro&animate` adds the
+ * `--animate` balls (still SVG - the CSS drives their motion).
  *
  * Rendered SVGs are cached by SHA-256 of the (mode, source) pair under
  * website/.metro-cache/ (git-ignored), so re-builds only shell out on the first
@@ -18,21 +19,34 @@
  * `nf-metro render-many` once with all corpus maps, amortising Python startup
  * across the full set rather than spawning one process per map.
  *
+ * `renderMetroBinary` (below) is a separate, simpler path for the raster and
+ * looping-video formats (png, gif, webp, mp4, webm): unlike an SVG, their
+ * bytes can't be inlined into the page, so they're written once under the
+ * git-ignored `website/public/_generated/metro/` and referenced by URL. It is
+ * called directly from `<Metro>`'s frontmatter rather than through this
+ * plugin's `load()` hook - a `.astro` component's frontmatter already runs
+ * server-side at build (and per-request in dev), so there's no need to route
+ * a URL-returning call through Vite's module graph the way the inlined-SVG
+ * string needs to be, to survive the production HTML build.
+ *
  * Requires `nf-metro` on PATH (activate the nf-core micromamba env).
  */
 
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import {
+  cpSync,
   existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   OG_GALLERY_MAP,
   OG_PIPELINES_MAP,
@@ -49,9 +63,14 @@ import {
 const CACHE_DIR = join(process.cwd(), ".metro-cache");
 mkdirSync(CACHE_DIR, { recursive: true });
 
-// Repo root (one level above the Astro project). nf-metro resolves a map's
-// relative asset paths (e.g. `%%metro logo: examples/...png`) against the
-// working directory, so renders must run from here or the logo is dropped.
+// Public output for renderMetroBinary: a normal static file under this
+// directory is served (and copied into the production build) like any other
+// public/ asset, so a <Metro format="gif" .../> URL needs no plugin support.
+const GENERATED_DIR = join(process.cwd(), "public", "_generated", "metro");
+mkdirSync(GENERATED_DIR, { recursive: true });
+
+// Repo root (one level above the Astro project): where the map corpus lives,
+// and the working directory the nf-metro CLI is invoked from.
 export const REPO_ROOT = join(process.cwd(), "..");
 
 // Part of the cache key, so a released layout change invalidates cached SVGs
@@ -151,10 +170,10 @@ function findOgSourceFiles() {
  * load() calls then hit the warm cache without spawning a new process.
  *
  * Mirror of Metro.astro's import.meta.glob patterns:
- *   examples/**\/*.mmd          → plain mode
- *   examples/*.mmd              → also debug mode
- *   tests/fixtures/*.mmd        → plain mode (top-level only)
- *   tests/fixtures/nextflow/**  → nextflow mode
+ *   examples/**\/*.mmd                  → plain mode
+ *   examples/*.mmd, examples/guide/*.mmd → also debug, animate
+ *   tests/fixtures/*.mmd                → plain mode (top-level only)
+ *   tests/fixtures/nextflow/**          → nextflow mode
  *
  * Also renders a chrome-less ("baked colour") copy of every OG-image source
  * map (see findOgSourceFiles), which og-image.mjs rasterizes into OG preview
@@ -170,7 +189,7 @@ function prewarmMetroCache() {
     return;
   }
 
-  /** @type {Array<{input:string, output:string, debug:boolean, from_nextflow:boolean, no_self_color_scheme:boolean, no_chrome_css:boolean, no_manifest:boolean}>} */
+  /** @type {Array<{input:string, output:string, debug:boolean, from_nextflow:boolean, no_self_color_scheme:boolean, no_chrome_css:boolean, layout_options:{manifest:boolean, animate?:boolean}}>} */
   const jobs = [];
 
   function addJob(file, mode) {
@@ -178,6 +197,8 @@ function prewarmMetroCache() {
     const hash = cacheHash(source, mode);
     const cacheFile = join(CACHE_DIR, `${hash}.svg`);
     if (!existsSync(cacheFile)) {
+      const layoutOptions = { manifest: false };
+      if (mode.includes("a")) layoutOptions.animate = true;
       jobs.push({
         input: file,
         output: cacheFile,
@@ -185,17 +206,19 @@ function prewarmMetroCache() {
         from_nextflow: mode.includes("n"),
         no_self_color_scheme: true,
         no_chrome_css: mode.includes("c"),
-        layout_options: { manifest: false },
+        layout_options: layoutOptions,
       });
     }
   }
 
-  // examples/**/*.mmd → plain; examples/*.mmd → also debug
+  // examples/**/*.mmd → plain; examples/ and examples/guide/ → also debug, animate
   const examplesDir = join(REPO_ROOT, "examples");
+  const examplesGuideDir = join(examplesDir, "guide");
   for (const file of findMmdFiles(examplesDir, true)) {
     addJob(file, "");
-    if (dirname(file) === examplesDir) {
+    if (dirname(file) === examplesDir || dirname(file) === examplesGuideDir) {
       addJob(file, "d");
+      addJob(file, "a");
     }
   }
 
@@ -245,18 +268,20 @@ function prewarmMetroCache() {
 /**
  * Render a committed `.mmd` file to inline SVG markup.
  * @param {string} file  Absolute path to the source `.mmd`.
- * @param {{ debug?: boolean, fromNextflow?: boolean, chromeCss?: boolean }} [opts]
+ * @param {{ debug?: boolean, fromNextflow?: boolean, chromeCss?: boolean, animate?: boolean }} [opts]
  *   `chromeCss: false` bakes concrete colours instead of the `--nfm-*` custom
  *   properties `<Metro>` relies on for live host recoloring - use this for
  *   standalone raster export (e.g. OG images), never for inline embeds.
+ *   `animate: true` adds the `--animate` balls (still plain SVG; their motion
+ *   is CSS, not baked frames - see `renderMetroBinary` for a looping export).
  * @returns {string} inline `<svg>` markup
  */
 export function renderMetroFile(
   file,
-  { debug = false, fromNextflow = false, chromeCss = true } = {},
+  { debug = false, fromNextflow = false, chromeCss = true, animate = false } = {},
 ) {
   const source = readFileSync(file, "utf-8");
-  const mode = `${debug ? "d" : ""}${fromNextflow ? "n" : ""}${chromeCss ? "" : "c"}`;
+  const mode = `${debug ? "d" : ""}${fromNextflow ? "n" : ""}${chromeCss ? "" : "c"}${animate ? "a" : ""}`;
   const hash = cacheHash(source, mode);
   const cacheFile = join(CACHE_DIR, `${hash}.svg`);
 
@@ -267,8 +292,8 @@ export function renderMetroFile(
   }
 
   const tmpOutput = join(tmpdir(), `metro-${hash}.svg`);
-  // Render the real file (not a temp copy) from the repo root so the map's
-  // relative asset paths resolve.
+  // Render the real file rather than a temp copy: the CLI resolves a map's
+  // asset paths against the directory the file itself sits in.
   const args = [
     "render",
     file,
@@ -280,6 +305,7 @@ export function renderMetroFile(
   if (debug) args.push("--debug");
   if (fromNextflow) args.push("--from-nextflow");
   if (!chromeCss) args.push("--no-chrome-css");
+  if (animate) args.push("--animate");
 
   try {
     execFileSync("nf-metro", args, {
@@ -304,6 +330,96 @@ export function renderMetroFile(
   return svg;
 }
 
+/** Output formats `renderMetroBinary` can produce. */
+export const BINARY_FORMATS = /** @type {const} */ (["png", "gif", "webp", "mp4", "webm"]);
+
+/**
+ * Render a committed `.mmd` file to a raster or looping-video format and
+ * publish it as a plain static file under `website/public/_generated/metro/`
+ * (git-ignored; present by the time a production build copies `public/` into
+ * its output). Content-addressed like `renderMetroFile`'s SVG cache, so a
+ * rebuild only re-invokes the CLI for a (source, options) pair it hasn't
+ * produced before.
+ * @param {string} file  Absolute path to the source `.mmd`.
+ * @param {{
+ *   format: "png"|"gif"|"webp"|"mp4"|"webm",
+ *   debug?: boolean,
+ *   fromNextflow?: boolean,
+ *   animate?: boolean,
+ *   duration?: number,
+ *   fps?: number,
+ *   scale?: number,
+ *   rasterWidth?: number,
+ * }} opts
+ * @returns {{ path: string, bytes: number }} `path` is relative to the site
+ *   root (no leading `base` - callers prefix it, e.g. with `site.ts`'s `base`).
+ */
+export function renderMetroBinary(file, opts) {
+  const {
+    format,
+    debug = false,
+    fromNextflow = false,
+    animate = false,
+    duration,
+    fps,
+    scale,
+    rasterWidth,
+  } = opts;
+  const source = readFileSync(file, "utf-8");
+  const key = [
+    NF_METRO_VERSION,
+    format,
+    debug ? "d" : "",
+    fromNextflow ? "n" : "",
+    animate ? "a" : "",
+    duration ?? "",
+    fps ?? "",
+    scale ?? "",
+    rasterWidth ?? "",
+    source,
+  ].join(" ");
+  const hash = createHash("sha256").update(key).digest("hex").slice(0, 16);
+  const fileName = `${hash}.${format}`;
+  const outPath = join(GENERATED_DIR, fileName);
+
+  if (!existsSync(outPath)) {
+    // Render the real file rather than a temp copy: the CLI resolves a map's
+    // asset paths against the directory the file itself sits in.
+    const args = [
+      "render",
+      file,
+      "-o",
+      outPath,
+      "--format",
+      format,
+      "--no-self-color-scheme",
+      "--no-manifest",
+    ];
+    if (debug) args.push("--debug");
+    if (fromNextflow) args.push("--from-nextflow");
+    if (animate) args.push("--animate");
+    if (duration != null) args.push("--duration", String(duration));
+    if (fps != null) args.push("--fps", String(fps));
+    if (scale != null) args.push("--scale", String(scale));
+    if (rasterWidth != null) args.push("--raster-width", String(rasterWidth));
+
+    try {
+      execFileSync("nf-metro", args, {
+        cwd: REPO_ROOT,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (err) {
+      const stderr = err.stderr?.toString().trim() || "";
+      throw new Error(
+        `nf-metro render failed for ${file} (format=${format}):\n${stderr}\n\n` +
+          `Make sure 'nf-metro' is on PATH (activate the nf-core micromamba env).`,
+      );
+    }
+  }
+
+  return { path: `_generated/metro/${fileName}`, bytes: statSync(outPath).size };
+}
+
 /** @returns {import('vite').Plugin} */
 export function metroVitePlugin() {
   return {
@@ -318,9 +434,31 @@ export function metroVitePlugin() {
       if (!params.has("metro")) return;
       const svg = renderMetroFile(file, {
         debug: params.has("debug"),
+        animate: params.has("animate"),
         fromNextflow: params.has("nextflow"),
       });
       return { code: `export default ${JSON.stringify(svg)};`, map: null };
+    },
+  };
+}
+
+/**
+ * Astro integration copying GENERATED_DIR into the build output at
+ * astro:build:done. Astro's own public/ -> dist/ copy runs before page
+ * rendering, so files renderMetroBinary writes during that render (this is
+ * the only time it's called) never reach dist/ on their own.
+ * @returns {import('astro').AstroIntegration}
+ */
+export function metroGeneratedAssetsIntegration() {
+  return {
+    name: "nf-metro-copy-generated",
+    hooks: {
+      "astro:build:done": ({ dir }) => {
+        if (!existsSync(GENERATED_DIR)) return;
+        const dest = fileURLToPath(new URL("_generated/metro/", dir));
+        mkdirSync(dest, { recursive: true });
+        cpSync(GENERATED_DIR, dest, { recursive: true });
+      },
     },
   };
 }

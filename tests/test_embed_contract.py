@@ -34,6 +34,7 @@ REQUIRED_API_METHODS = ["highlightLine", "clearHighlight", "getManifest", "selec
 def rendered_html() -> str:
     text = RNASEQ_MMD.read_text()
     graph = parse_metro_mermaid(text)
+    graph.source_dir = str(RNASEQ_MMD.parent)
     compute_layout(graph)
     return render_html(graph, THEMES["nfcore"])
 
@@ -42,6 +43,7 @@ def rendered_html() -> str:
 def rendered_svg() -> str:
     text = RNASEQ_MMD.read_text()
     graph = parse_metro_mermaid(text)
+    graph.source_dir = str(RNASEQ_MMD.parent)
     compute_layout(graph)
     return render_svg(graph, THEMES["nfcore"])
 

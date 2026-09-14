@@ -68,7 +68,7 @@ from nf_metro.parser.model import LineSpread, PortSide
 from nf_metro.parser.route_topology import build_route_topology_query
 from nf_metro.render.plan import freeze_render_value
 from nf_metro.render.svg import station_marker_box
-from nf_metro.themes import NFCORE_THEME
+from nf_metro.themes import NFCORE_DARK_THEME
 
 ROOT = Path(__file__).parents[1]
 TOPOLOGIES = ROOT / "examples" / "topologies"
@@ -622,7 +622,7 @@ graph LR
     ctx.offsets[("first", "line")] = 0.0
     calls = 0
 
-    def transient_frame(_ctx, section):
+    def transient_frame(_ctx, section, snapshot=None):
         nonlocal calls
         calls += 1
         if calls > 1:
@@ -836,9 +836,11 @@ def test_adjacent_local_terminator_does_not_inflate_entry_frame_pills() -> None:
 
     for station_id in ("before", "split"):
         _cx, _cy, _width, height, _radius = station_marker_box(
-            graph, NFCORE_THEME, graph.stations[station_id], offsets
+            graph, NFCORE_DARK_THEME, graph.stations[station_id], offsets
         )
-        assert height == pytest.approx(inherited_span + 2 * NFCORE_THEME.station_radius)
+        assert height == pytest.approx(
+            inherited_span + 2 * NFCORE_DARK_THEME.station_radius
+        )
 
 
 def test_station_offset_rebuild_clears_entry_pill_metadata_for_rail_mode() -> None:
@@ -1324,6 +1326,7 @@ def test_gap_plan_radius_validator_rejects_incomplete_ownership(
         edge=edge,
         line_id=edge.line_id,
         exit_turn_segment_rank=channel_rank,
+        exit_turn_family_id=RouteFamilyId.STANDARD_L_SHAPE.value,
         curve_radii=(
             None
             if failure == "radii"
@@ -1372,6 +1375,74 @@ def test_gap_plan_radius_validator_rejects_incomplete_ownership(
 
     with pytest.raises(ExitTurnInvariantError):
         normalize._validate_planned_exit_turn_radii([route], ctx)
+
+
+def _settled_turn_validation(
+    *,
+    family_value: str,
+    allocated_offsets: tuple[float | None, float | None],
+    allocated_bases: tuple[float | None, float | None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    channel_rank = 1
+    points = [(0.0, 0.0), (50.0, 0.0), (50.0, 100.0), (150.0, 100.0)]
+    entry_radius = concentric_corner_radius_at(
+        points[channel_rank - 1],
+        points[channel_rank],
+        points[channel_rank + 1],
+        allocated_offsets[0] or 0.0,
+        allocated_bases[0] or CURVE_RADIUS,
+    )
+    edge = SimpleNamespace(source="source", target="target", line_id="line")
+    route = SimpleNamespace(
+        edge=edge,
+        line_id=edge.line_id,
+        exit_turn_segment_rank=channel_rank,
+        exit_turn_family_id=family_value,
+        curve_radii=[entry_radius, CURVE_RADIUS],
+        points=points,
+        concentric_corner_offsets_by_segment={channel_rank: allocated_offsets},
+        concentric_corner_bases_by_segment={channel_rank: allocated_bases},
+    )
+    ctx = SimpleNamespace(
+        exit_turns=SimpleNamespace(membership_for_edge=lambda _edge: object()),
+        settled_exit_turns={
+            (edge.source, edge.target, edge.line_id): SimpleNamespace(
+                validate_corner_radii=True
+            )
+        },
+    )
+    monkeypatch.setattr(
+        exit_turns,
+        "planned_exit_turn_corner_offsets",
+        lambda _membership: (0.0, 0.0),
+    )
+    normalize._validate_planned_exit_turn_radii([route], ctx)
+
+
+def test_landing_settled_later_family_skips_the_absent_landing_corner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A settled turn whose landing corner is not yet seated validates cleanly."""
+    _settled_turn_validation(
+        family_value=RouteFamilyId.TOP_ENTRY_L_SHAPE.value,
+        allocated_offsets=(0.0, None),
+        allocated_bases=(CURVE_RADIUS, None),
+        monkeypatch=monkeypatch,
+    )
+
+
+def test_landing_settled_later_family_still_holds_the_entry_corner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Skipping the landing corner does not disable the entry-side corner check."""
+    with pytest.raises(ExitTurnInvariantError, match="radius index 0"):
+        _settled_turn_validation(
+            family_value=RouteFamilyId.TOP_ENTRY_L_SHAPE.value,
+            allocated_offsets=(0.0, None),
+            allocated_bases=(None, None),
+            monkeypatch=monkeypatch,
+        )
 
 
 @pytest.mark.parametrize(

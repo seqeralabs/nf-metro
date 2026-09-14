@@ -1,0 +1,32 @@
+%% Minimal off-track phantom pass-through repro: the `alt` line enters the
+%% `fan` section via a port and has two candidate phantom targets (stem and
+%% leaf_a) that tie on earliest layer.
+%%metro title: Off-track phantom tie-break
+%%metro line: main | Main | #0570b0
+%%metro line: alt | Alt | #e63946
+graph LR
+    subgraph inputs [Inputs]
+        source[Source]
+        gate[Gate]
+    end
+    subgraph fan [Fan]
+        hub[Hub]
+        leaf_a[Leaf A]
+        leaf_b[Leaf B]
+        leaf_c[Leaf C]
+        stem[Stem]
+        stem_tail[Stem tail]
+        sink[Sink]
+        hub -->|main| leaf_a
+        hub -->|main| leaf_b
+        hub -->|main| leaf_c
+        hub -->|main| stem
+        stem -->|main| stem_tail
+        leaf_a -->|main| sink
+        leaf_b -->|main| sink
+        leaf_c -->|main| sink
+        stem_tail -->|main| sink
+    end
+    source -->|main| hub
+    gate -->|alt| stem
+    gate -->|alt| leaf_a

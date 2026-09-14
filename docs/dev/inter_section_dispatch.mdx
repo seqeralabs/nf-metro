@@ -8,51 +8,35 @@ sidebar:
 
 import { Aside } from "@astrojs/starlight/components";
 
-Inter-section edges (port/junction to port/junction) are routed by
-`_route_inter_section` in
-[`routing/inter_section_handlers.py`](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/layout/routing/inter_section_handlers.py).
-It chooses the route's shape from a **declarative table**, `_INTER_SECTION_RULES`,
-rather than a hand-written if-ladder. Before emission, every inter-section
-member is classified from one `_InterFacts` snapshot. The route system freezes
-that family ID, calls it once to build an immutable
-`RouteMemberGeometryPlan`, and emits a fresh copy of that exact template.
+Inter-section edges, running port or junction to port or junction, are routed by `_route_inter_section` in [`routing/inter_section_handlers.py`](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/layout/routing/inter_section_handlers.py).
+It chooses the route's shape from a **declarative table**, `_INTER_SECTION_RULES`, rather than from a hand-written if-ladder.
+Before emission, every inter-section member is classified from one `_InterFacts` snapshot.
+The route system freezes that family ID, calls the family once to build an immutable `RouteMemberGeometryPlan`, then emits a fresh copy of that exact template.
 Production never takes a second pass through this table.
 
-Every rule's handler builds its route from a centreline through the
-[bundle builder](/nf-metro/dev/routing/) (`build_concentric_bundle` /
-`build_tapered_bundle`), so no handler assembles per-line points or corner
-radii by hand. The runtime curve guard (below) is a backstop, not the
-mechanism that keeps the routes correct.
+Every rule's handler builds its route from a centerline through the [bundle builder](/nf-metro/dev/routing/), meaning `build_concentric_bundle` or `build_tapered_bundle`.
+No handler assembles per-line points or corner radii by hand.
+The runtime curve guard is a backstop rather than the mechanism that keeps the routes correct.
 
 ## The fact space
 
 `_InterFacts` resolves the geometry and topology each rule keys on:
 
-- **Relative position** - the source and target grid columns and rows
-  (`src_col/row`, `tgt_col/row`), and the derived `same_y`, `same_x`,
-  `same_col`, `cross_row`, and `needs_bypass` (a multi-column hop with an
-  intervening section in the source _or_ target row).
-- **Exit side** - whether the source is a LEFT/RIGHT exit port, a TOP/BOTTOM
-  perpendicular exit (`is_perp_exit`), a TB BOTTOM exit (`is_tb_bottom_exit`,
-  or `is_tb_perp_exit_to_side` when it feeds a not-below side entry), or a
-  junction.
-- **Entry side** - `entry_side` is the target entry port's side
-  (LEFT/RIGHT/TOP/BOTTOM) or `None` when the target is a junction; `merge_ep`
-  is the resolved entry-port station when the target is a merge junction.
-- **Spatial queries** - section coordinates and horizontal/vertical crossing
-  checks are resolved through the snapshot. This keeps every predicate and
-  route builder on the same endpoint facts.
+- **Relative position**: the source and target grid columns and rows (`src_col/row`, `tgt_col/row`), plus the derived `same_y`, `same_x`, `same_col`, `cross_row`, and `needs_bypass`.
+  The last of these means a multi-column hop with an intervening section in the source _or_ target row.
+- **Exit side**: whether the source is a LEFT or RIGHT exit port, a TOP or BOTTOM perpendicular exit (`is_perp_exit`), a TB BOTTOM exit (`is_tb_bottom_exit`, or `is_tb_perp_exit_against_flow` when it feeds an entry the flow-direction drop cannot reach), or a junction.
+- **Entry side**: `entry_side` is the target entry port's side, one of LEFT, RIGHT, TOP, or BOTTOM, or `None` when the target is a junction.
+  `merge_ep` is the resolved entry-port station when the target is a merge junction.
+- **Spatial queries**: section coordinates and horizontal and vertical crossing checks are resolved through the snapshot, which keeps every predicate and route builder on the same endpoint facts.
 
 ## The rules
 
-The source claims are listed below in their canonical classification order.
-Construction subtracts every earlier claim from each later predicate, giving
-every row an exclusive region of the fact space. As a result, the runtime rule
-table is pairwise disjoint and can be reordered without changing which family
-owns an edge. If no predicate matches, the **standard L-shape** is the
-fall-through. Planned template construction resolves its frozen family through
-the same table's stable rule ID without evaluating the predicates again.
-Production emission does not revisit the table or call the family.
+The source claims appear in their canonical classification order.
+Construction subtracts every earlier claim from each later predicate.
+Every row therefore owns an exclusive region of the fact space.
+The runtime rule table is therefore pairwise disjoint and can be reordered without changing which family owns an edge.
+If no predicate matches, the **standard L-shape** is the fall-through.
+Planned template construction resolves its frozen family through the same table's stable rule ID without evaluating the predicates again, and production emission does not revisit the table or call the family.
 
 | #   | Stable family                         | Rule                                    | Fires when                                                                            | Route                                                                                                        |
 | --- | ------------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
@@ -68,16 +52,16 @@ Production emission does not revisit the table or call the family.
 | 10  | `BOTTOM_EXIT_JUNCTION_RIGHT_LANDINGS` | `bottom-exit junction right landings`   | A fan plan owns the junction's right-side landings.                                   | `_route_bottom_exit_junction_right_landings` emits the fan landing template.                                 |
 | 11  | `BOTTOM_EXIT_JUNCTION_VIA_GAP`        | `bottom-exit junction via gap`          | The plain junction route crosses a section and a gap detour is available.             | `_route_bottom_exit_junction_via_gap_leaf` emits the detour.                                                 |
 | 12  | `BOTTOM_EXIT_JUNCTION`                | `bottom-exit junction`                  | The source is a bottom-exit junction using the plain shape.                           | `_route_bottom_exit_junction` emits the drop-then-turn route.                                                |
-| 13  | `MERGE_TRUNK_AROUND_BELOW`            | `merge trunk around below`              | A primary merge trunk has no target-side channel.                                     | `_route_merge_trunk_around_below_feeder` loops under the target.                                             |
-| 14  | `MERGE_TRUNK`                         | `merge trunk`                           | Merge classification names this feeder as the primary trunk.                          | `_route_merge_trunk_feeder` emits the U-shaped trunk.                                                        |
+| 13  | `MERGE_TRUNK_AROUND_BELOW`            | `merge trunk around below`              | A primary merge trunk has no target-side channel.                                     | `_route_merge_trunk_around_below` loops under the target.                                                    |
+| 14  | `MERGE_TRUNK`                         | `merge trunk`                           | Merge classification names this feeder as the primary trunk.                          | `_route_merge_trunk` emits the U-shaped trunk.                                                               |
 | 15  | `MERGE_BRANCH`                        | `merge branch`                          | Merge classification names this feeder as a non-trunk branch.                         | `_route_merge_branch_feeder` joins the trunk channel.                                                        |
 | 16  | `LEFT_ENTRY_CORRIDOR`                 | `LEFT entry corridor`                   | A cross-row LEFT entry needs the clear corridor leaf.                                 | `_route_left_entry_corridor` emits the corridor route.                                                       |
 | 17  | `BYPASS_L_SHAPE`                      | `bypass L-shape`                        | A bypass-classified hop resolves to its L-shaped leaf.                                | `_route_l_shape` emits the leaf directly.                                                                    |
-| 18  | `BYPASS_LEFT_ENTRY`                   | `bypass LEFT entry`                     | A bypass reaches the ordinary LEFT-entry wrap leaf.                                   | `_route_bypass_left_entry` emits the wrap.                                                                   |
-| 19  | `BYPASS_LEFT_EXIT_AROUND_BELOW`       | `bypass LEFT exit around below`         | A bypassing LEFT exit must loop below a far-side LEFT entry.                          | `_route_bypass_left_exit_around_below` emits the loop.                                                       |
+| 18  | `BYPASS_LEFT_ENTRY`                   | `bypass LEFT entry`                     | A bypass reaches the ordinary LEFT-entry wrap leaf.                                   | `_route_left_entry_family` emits the wrap.                                                                   |
+| 19  | `BYPASS_LEFT_EXIT_AROUND_BELOW`       | `bypass LEFT exit around below`         | A bypassing LEFT exit must loop below a far-side LEFT entry.                          | `_route_left_exit_around_below_left_entry` emits the loop.                                                   |
 | 20  | `BYPASS_CELLMATE_GAP_DROP`            | `bypass cell-mate gap drop`             | A cell-mate blocks the source-row bypass.                                             | `_route_bypass_cellmate_gap_drop` uses the gap drop.                                                         |
 | 21  | `BYPASS_PACKED_CELL_SAME_ROW`         | `bypass packed-cell same row`           | A packed cell-mate stands on a same-row hop's source or target Y.                     | `_route_bypass_packed_cell_same_row` shares the sibling corridor, or takes the row-top one.                  |
-| 22  | `BYPASS_RIGHT_ENTRY_CROSS_ROW`        | `bypass RIGHT entry cross-row`          | A bypass reaches the cross-row RIGHT-entry leaf.                                      | `_route_bypass_right_entry_cross_row` emits the wrap.                                                        |
+| 22  | `BYPASS_RIGHT_ENTRY_CROSS_ROW`        | `bypass RIGHT entry cross-row`          | A bypass reaches the cross-row RIGHT-entry leaf.                                      | `_route_right_entry_cross_row` emits the wrap.                                                               |
 | 23  | `BYPASS_FAMILY`                       | `bypass family`                         | The member needs the ordinary U-shaped bypass.                                        | `_route_u_bypass_family` emits the U route.                                                                  |
 | 24  | `NEAR_VERTICAL_JUNCTION`              | `near-vertical same-col junction`       | A junction drops almost straight into a same-column entry.                            | `_route_near_vertical_junction` preserves the near-vertical channel.                                         |
 | 25  | `RIGHT_ENTRY_WRAP`                    | `RIGHT entry wrap`                      | A RIGHT entry is fed from the left, or a stacked RIGHT exit feeds it.                 | `_route_right_entry_wrap` travels over or around the target's right side.                                    |
@@ -93,42 +77,29 @@ Production emission does not revisit the table or call the family.
 | 35  | `RIGHT_ENTRY_CROSS_ROW_WRAP`          | `RIGHT entry cross-row wrap`            | A source above and right of a RIGHT entry travels left with no bypass obstacle.       | `_route_right_entry_cross_row` uses the target-side band or around-below route.                              |
 | -   | `STANDARD_L_SHAPE`                    | _fall-through_                          | No rule matches.                                                                      | `_route_l_shape` emits the standard construction.                                                            |
 
-The promoted bottom-exit, bypass, and merge-entry leaves each have a stable
-family ID, so classification, source-turn planning, and production emission
-name the same geometry.
+The promoted bottom-exit, bypass, and merge-entry leaves each have a stable family ID.
+Classification, source-turn planning, and production emission therefore all name the same geometry.
 
-The table first runs in classification mode, then its selected families build
-non-convergence member templates in canonical order. Their gap slots are
-materialized together and their occupied vertical channels are frozen before
-convergence planning. The convergence planner uses those channels as fixed
-external inputs while it freezes every supported merge trunk, feeder join,
-continuation, and endpoint owner. It may construct canonical trial routes for
-the convergence members it owns, but it does not route other members again.
-Rules 9 and 14 consume those convergence decisions. A continuation covered by
-a named feeder is suppressed before production emission, with the carrier
-recorded in the route-system binding. Merge landing and covered-hop cleanup are
-therefore unnecessary.
+The table first runs in classification mode, then its selected families build non-convergence member templates in canonical order.
+Their gap slots are materialized together, and their occupied vertical channels are frozen before convergence planning.
+The convergence planner uses those channels as fixed external inputs while it freezes every supported merge trunk, feeder join, continuation, and endpoint owner.
+It may construct canonical trial routes for the convergence members it owns, but it does not route other members again.
+Rules 9 and 14 consume those convergence decisions.
+A continuation covered by a named feeder is suppressed before production emission, with the carrier recorded in the route-system binding.
+Merge landing and covered-hop cleanup are therefore unnecessary.
 
-This page is the exhaustive inter-section handler inventory. The complete
-emission and post-pass ownership inventory, including fallbacks and validators,
-is [route emission inventory](/nf-metro/dev/route_emission_inventory/).
+The table is the complete inter-section handler inventory.
+The emission ownership inventory, covering emitters, fallbacks, and validators, is [route emission inventory](/nf-metro/dev/route_emission_inventory/).
 
-## The curve guard is a backstop
+## The curve guard as a backstop
 
-`assert_render_curve_invariants`
-([`routing/invariants.py`](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/layout/routing/invariants.py))
-runs on every render and the stage-boundary checks run under `validate=True`.
-Because every rule above builds its route through the centreline bundle builder
-
-- which makes a flipped, pinched, or collinear bundle impossible by
-  construction - these checks are a thin safety net. In normal operation they
-  never fire; a failure means a genuinely new, un-tabled shape reached the
-  renderer built some other way, and the fix is to route it through the builder
-  too, not to relax the guard.
+`assert_render_curve_invariants` ([`routing/invariants.py`](https://github.com/seqeralabs/nf-metro/blob/main/src/nf_metro/layout/routing/invariants.py)) runs on every render, and the stage-boundary checks run under `validate=True`.
+Every rule in the table builds its route through the centerline bundle builder, which makes a flipped, pinched, or collinear bundle impossible by construction.
+These checks are therefore a thin safety net, and they never fire in normal operation.
 
 <Aside type="note">
-  If `assert_render_curve_invariants` fires, the fix is always to route the new
-  shape through the centreline bundle builder — not to widen tolerances or add
-  exceptions to the guard. A guard failure means a route was assembled outside
-  the builder, bypassing the construction that keeps bundles correct by design.
+
+If `assert_render_curve_invariants` fires, the fix is always to route the new shape through the centerline bundle builder, never to widen tolerances or add exceptions to the guard.
+A guard failure means a route was assembled outside the builder, bypassing the construction that keeps bundles correct by design.
+
 </Aside>

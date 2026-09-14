@@ -6,13 +6,13 @@ import pytest
 
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges_centred
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.mermaid import parse_metro_mermaid_file
 from nf_metro.render.svg import (
     _chevron_samples,
     apply_route_offsets,
     render_svg,
 )
-from nf_metro.themes import NFCORE_THEME
+from nf_metro.themes import NFCORE_DARK_THEME
 
 EXAMPLES_DIR = pathlib.Path(__file__).parent.parent / "examples"
 
@@ -25,7 +25,7 @@ DIRECTION_FIXTURES = [
 
 
 def _laid_out(stem: str):
-    graph = parse_metro_mermaid((EXAMPLES_DIR / f"{stem}.mmd").read_text())
+    graph = parse_metro_mermaid_file(EXAMPLES_DIR / f"{stem}.mmd")
     compute_layout(graph)
     return graph
 
@@ -33,7 +33,7 @@ def _laid_out(stem: str):
 def _render(stem: str, *, directional: bool) -> str:
     graph = _laid_out(stem)
     graph.directional = directional
-    return render_svg(graph, NFCORE_THEME)
+    return render_svg(graph, NFCORE_DARK_THEME)
 
 
 def test_directional_off_by_default_emits_no_chevrons():
@@ -58,8 +58,8 @@ def test_chevron_headings_point_downstream(stem):
     station_offsets = compute_station_offsets(graph)
     routes = route_edges_centred(graph, station_offsets=station_offsets)
 
-    spacing = NFCORE_THEME.directional_marker_spacing
-    min_length = 2 * NFCORE_THEME.directional_marker_size
+    spacing = NFCORE_DARK_THEME.directional_marker_spacing
+    min_length = 2 * NFCORE_DARK_THEME.directional_marker_size
 
     checked = 0
     for route in routes:

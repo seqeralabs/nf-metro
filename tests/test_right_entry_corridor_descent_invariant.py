@@ -50,8 +50,6 @@ def _corridor_jog(mmd: str):
 @pytest.mark.parametrize("stem", _FIXTURES)
 def test_right_entry_corridor_descent_has_no_mid_run_jog(stem):
     path = TOPOLOGIES_DIR / f"{stem}.mmd"
-    if not path.exists():
-        pytest.skip(f"fixture {stem}.mmd not present")
     jog = _corridor_jog(path.read_text())
     assert jog is None, jog.message() if jog else ""
 

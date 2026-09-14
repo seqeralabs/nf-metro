@@ -51,6 +51,20 @@ def test_info_has_all_top_level_keys(fixture: str) -> None:
     }
 
 
+@pytest.mark.parametrize(
+    "style, expected",
+    [("", "nfcore"), ("dark", "nfcore"), ("seqera", "seqera"), ("nonesuch", "nfcore")],
+)
+def test_style_reports_the_resolved_theme(style: str, expected: str) -> None:
+    """The reported style is a name ``--theme`` accepts, whatever was authored."""
+    graph = parse_metro_mermaid(
+        (f"%%metro style: {style}\n" if style else "")
+        + "%%metro line: a | A | #ff0000\n"
+        + "graph LR\n  n1[N1] -->|a| n2[N2]\n"
+    )
+    assert build_info(graph)["style"] == expected
+
+
 @pytest.mark.parametrize("fixture", FIXTURES)
 def test_counts_match_graph(fixture: str) -> None:
     graph = _graph(fixture)

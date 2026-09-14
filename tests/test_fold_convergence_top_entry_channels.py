@@ -53,6 +53,7 @@ def _folded_text(fold: int) -> str:
 
 def _route_at_fold(fold: int):
     graph = parse_metro_mermaid(_folded_text(fold))
+    graph.source_dir = str(TOPOLOGIES_DIR)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     routes = route_edges_centred(graph, station_offsets=offsets)

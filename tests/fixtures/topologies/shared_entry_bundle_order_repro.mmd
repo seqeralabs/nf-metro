@@ -1,0 +1,43 @@
+%%metro title: Shared entry bundle order repro
+%%metro line: riboseq | Ribo-seq | #e6007e
+%%metro line: rnaseq | Matched RNA-seq | #2db572
+%%metro line: tiseq | TI-seq | #2b6cb0
+%%metro line: annotation | Hybrid annotation | #94a3b8 | dashed
+
+%%metro grid: preprocessing, alignment, novel_transcripts | 0,0
+%%metro grid: orf_calling, psite, te, reporting | 0,1
+%%metro center_ports: true
+%%metro x_spacing: 60
+
+graph LR
+    subgraph preprocessing [Read pre-processing]
+        equalise[Equalise read lengths]
+    end
+    subgraph alignment [Alignment]
+        star[STAR]
+        umi_dedup[UMI-tools dedup]
+        salmon[Salmon]
+    end
+    subgraph novel_transcripts [Transcript discovery]
+        hybrid_merge[Merge GTF]
+    end
+    subgraph orf_calling [ORF calling]
+        star_hybrid[STAR hybrid]
+    end
+    subgraph psite [P-site]
+        ribowaltz[riboWaltz]
+        plastid_psite[plastid P-site]
+    end
+    subgraph te [Translational efficiency]
+        te_prep_orf[ORF count matrix]
+    end
+    subgraph reporting [Reporting]
+        multiqc_final[MultiQC]
+    end
+
+    equalise -->|riboseq,rnaseq,tiseq| star
+    umi_dedup -->|riboseq| ribowaltz
+    umi_dedup -->|rnaseq| plastid_psite
+    hybrid_merge -->|annotation| star_hybrid
+    salmon -->|rnaseq| te_prep_orf
+    salmon -->|riboseq,rnaseq,tiseq| multiqc_final

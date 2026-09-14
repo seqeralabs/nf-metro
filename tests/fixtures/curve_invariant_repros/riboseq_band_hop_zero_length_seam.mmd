@@ -1,0 +1,156 @@
+%%metro title: nf-core/riboseq
+%%metro style: dark
+%%metro diamond_style: symmetric
+%%metro directional: true
+%%metro file: fastq_in | FASTQ
+%%metro file: hybrid_gtf_out | GTF | Hybrid GTF
+%%metro file: orf_catalogue | BED | ORF catalogue
+%%metro file: bigwig_out | BW | Coverage
+%%metro file: report_ribowaltz | HTML | riboWaltz
+%%metro file: te_gene_out | TSV | Gene TE
+%%metro file: te_orf_out | TSV | ORF DTE
+%%metro file: report_final | HTML | MultiQC
+%%metro line: riboseq | Ribo-seq | #e6007e
+%%metro line: rnaseq | Matched RNA-seq | #2db572
+%%metro line: tiseq | TI-seq | #2b6cb0
+%%metro line: annotation | Hybrid annotation | #94a3b8 | dashed
+
+%%metro grid: preprocessing, alignment | 0,0
+%%metro grid: novel_transcripts | 0,1
+%%metro grid: orf_calling, psite, te_gene | 0,2
+%%metro grid: te_orf, reporting | 0,3
+%%metro center_ports: true
+%%metro x_spacing: 70
+
+graph LR
+    subgraph preprocessing [Read pre-processing]
+        fastq_in[ ]
+        umi_extract[UMI-tools extract]
+        fastp[fastp]
+        trimgalore[Trim Galore!]
+        bbsplit[BBSplit]
+        sortmerna[SortMeRNA]
+        ribodetector[RiboDetector]
+        bowtie2_rrna[Bowtie2]
+        fastqc[FastQC]
+        infer_strand[Infer strandedness]
+        equalise[Equalise\nread lengths]
+
+        fastq_in -->|riboseq,rnaseq,tiseq| umi_extract
+        umi_extract -->|riboseq,rnaseq,tiseq| fastp
+        umi_extract -->|riboseq,rnaseq,tiseq| trimgalore
+        fastp -->|riboseq,rnaseq,tiseq| bbsplit
+        trimgalore -->|riboseq,rnaseq,tiseq| bbsplit
+        bbsplit -->|riboseq,rnaseq,tiseq| sortmerna
+        bbsplit -->|riboseq,rnaseq,tiseq| ribodetector
+        bbsplit -->|riboseq,rnaseq,tiseq| bowtie2_rrna
+        sortmerna -->|riboseq,rnaseq,tiseq| fastqc
+        ribodetector -->|riboseq,rnaseq,tiseq| fastqc
+        bowtie2_rrna -->|riboseq,rnaseq,tiseq| fastqc
+        fastqc -->|riboseq,rnaseq,tiseq| infer_strand
+        infer_strand -->|riboseq,rnaseq,tiseq| equalise
+    end
+
+    subgraph alignment [Alignment & quantification]
+        star[STAR]
+        umi_dedup[UMI-tools dedup]
+        salmon[Salmon]
+        genomecov[Coverage\ntracks]
+
+        star -->|riboseq,rnaseq,tiseq| umi_dedup
+        umi_dedup -->|riboseq,rnaseq,tiseq| salmon
+        umi_dedup -->|riboseq,rnaseq,tiseq| genomecov
+        genomecov -->|riboseq,rnaseq,tiseq| bigwig_out
+    end
+
+    subgraph novel_transcripts [Transcript discovery]
+        stringtie[StringTie]
+        gffcompare[gffcompare]
+        hybrid_merge[Merge &\nfilter GTF]
+
+        stringtie -->|rnaseq| gffcompare
+        gffcompare -->|rnaseq| hybrid_merge
+        hybrid_merge -->|rnaseq| hybrid_gtf_out
+    end
+
+    subgraph orf_calling [ORF discovery & calling]
+        ribo_bam[Ribo-seq\nalignments]
+        ribotish[Ribo-TISH]
+        ribotricer[Ribotricer]
+        rpbp[Rp-Bp]
+        price[PRICE]
+        star_hybrid[STAR:\nhybrid 2nd pass]
+        ribocode[RiboCode]
+        orf_merge[Merge ORF\ncatalogue]
+
+        ribo_bam -->|riboseq| ribotish
+        ribo_bam -->|riboseq| ribotricer
+        ribo_bam -->|riboseq| rpbp
+        ribo_bam -->|riboseq| price
+        ribo_bam -->|riboseq| star_hybrid
+        star_hybrid -->|riboseq| ribocode
+        ribotish -->|riboseq| orf_merge
+        ribotricer -->|riboseq| orf_merge
+        rpbp -->|riboseq| orf_merge
+        price -->|riboseq| orf_merge
+        ribocode -->|riboseq| orf_merge
+        orf_merge -->|riboseq| orf_catalogue
+    end
+
+    subgraph psite [P-site identification]
+        ribowaltz[riboWaltz]
+        plastid_psite[plastid P-site]
+        plastid_wiggle[plastid wiggle]
+        psite_counts_gene[Gene in-frame\nP-sites]
+        quantify_orf_psite[ORF in-frame\nP-sites]
+
+        ribowaltz -->|riboseq| report_ribowaltz
+        plastid_psite -->|riboseq| plastid_wiggle
+        plastid_wiggle -->|riboseq| psite_counts_gene
+        plastid_wiggle -->|riboseq| quantify_orf_psite
+    end
+
+    subgraph te_gene [Gene-level TE]
+        te_prep_gene[Gene count\nmatrix]
+        anota2seq[anota2seq]
+        deltate[DESeq2 deltaTE]
+
+        te_prep_gene -->|riboseq,rnaseq| anota2seq
+        te_prep_gene -->|riboseq,rnaseq| deltate
+        anota2seq -->|riboseq,rnaseq| te_gene_out
+        deltate -->|riboseq,rnaseq| te_gene_out
+    end
+
+    subgraph te_orf [ORF-level DTE]
+        te_prep_orf[ORF count\nmatrix]
+        anota2seq_orf[anota2seq]
+        deltate_orf[deltaTE]
+        dotseq[DOTSeq]
+
+        te_prep_orf -->|riboseq,rnaseq| anota2seq_orf
+        te_prep_orf -->|riboseq,rnaseq| deltate_orf
+        te_prep_orf -->|riboseq,rnaseq| dotseq
+        anota2seq_orf -->|riboseq,rnaseq| te_orf_out
+        deltate_orf -->|riboseq,rnaseq| te_orf_out
+        dotseq -->|riboseq,rnaseq| te_orf_out
+    end
+
+    subgraph reporting [Reporting]
+        multiqc_final[MultiQC]
+
+        multiqc_final -->|riboseq| report_final
+    end
+
+    equalise -->|riboseq,rnaseq,tiseq| star
+    umi_dedup -->|riboseq| ribo_bam
+    umi_dedup -->|rnaseq| stringtie
+    umi_dedup -->|riboseq| ribowaltz
+    umi_dedup -->|riboseq| plastid_psite
+    hybrid_merge -->|annotation| star_hybrid
+    hybrid_merge -->|annotation| ribotish
+    orf_merge -->|riboseq| quantify_orf_psite
+    psite_counts_gene -->|riboseq| te_prep_gene
+    salmon -->|rnaseq| te_prep_gene
+    quantify_orf_psite -->|riboseq| te_prep_orf
+    salmon -->|rnaseq| te_prep_orf
+    ribowaltz -->|riboseq| multiqc_final

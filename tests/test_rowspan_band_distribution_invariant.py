@@ -34,6 +34,7 @@ FIXTURES = [
 @pytest.mark.parametrize("stem", FIXTURES)
 def test_stacked_rows_fill_rowspan_band(stem: str) -> None:
     graph = parse_metro_mermaid((SHOWCASE_DIR / f"{stem}.mmd").read_text())
+    graph.source_dir = str(SHOWCASE_DIR)
     compute_layout(graph, validate=True)
 
     stacks = list(iter_stacked_rows_in_rowspan_band(graph, SAME_COORD_TOLERANCE))
@@ -79,6 +80,7 @@ def test_internal_source_2fan_source_centred(rel_path: str) -> None:
     fractional grid origin.
     """
     graph = parse_metro_mermaid((EXAMPLES_DIR / rel_path).read_text())
+    graph.source_dir = str((EXAMPLES_DIR / rel_path).parent)
     compute_layout(graph, validate=True)
 
     hub = graph.stations["rundir_in"]
@@ -98,6 +100,7 @@ def test_showcase_fixture_has_no_layout_errors(stem: str) -> None:
     error-level layout validation here (sub-pixel warnings from the center-ported
     fan are out of scope)."""
     graph = parse_metro_mermaid((SHOWCASE_DIR / f"{stem}.mmd").read_text())
+    graph.source_dir = str(SHOWCASE_DIR)
     compute_layout(graph, validate=True)
 
     errors = [v for v in validate_layout(graph) if v.severity == Severity.ERROR]

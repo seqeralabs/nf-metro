@@ -109,6 +109,7 @@ def _diagonal_exit_route(corner_x: float) -> RoutedPath:
 def _graph_with_right_exit_port():
     """Minimal graph exposing a single RIGHT exit port at x=100."""
     graph = parse_metro_mermaid(
+        "%%metro line: l1 | L1 | #0570b0\n"
         "graph LR\n    subgraph s [S]\n        a[A]\n    end\n    a -->|l1| b[B]\n"
     )
     compute_layout(graph)

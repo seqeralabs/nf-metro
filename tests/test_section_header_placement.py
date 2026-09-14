@@ -405,3 +405,78 @@ def test_narrow_section_header_wraps_onto_multiple_lines() -> None:
         assert section_header.estimate_section_label_width(line, font_size) <= (
             graph.sections["wide_name"].bbox_w
         )
+
+
+def _horizontal_placement(
+    label_lines: tuple[str, ...], font_size: float
+) -> section_header.SectionHeaderPlacement:
+    """A horizontal ``above`` header whose keepout width matches its widest line.
+
+    Mirrors :func:`section_header._wrapped_header_geometry`: the header spans the
+    badge plus the widest wrapped line, so the keepout width is what the
+    box-width guard measures against ``bbox_w``.
+    """
+    text_width = max(
+        section_header.estimate_section_label_width(line, font_size)
+        for line in label_lines
+    )
+    width = section_header._badge_span() + text_width
+    return section_header.SectionHeaderPlacement(
+        mode="above",
+        badge_cx=0.0,
+        badge_cy=0.0,
+        label_x=0.0,
+        label_y=0.0,
+        label_rotation=0.0,
+        label_lines=label_lines,
+        keepout=(0.0, -10.0, width, 0.0),
+    )
+
+
+def _single_station_section(section_id: str, bbox_w: float) -> Section:
+    section = Section(id=section_id, name="Novel transcripts")
+    section.bbox_x, section.bbox_y = 0.0, 100.0
+    section.bbox_w, section.bbox_h = bbox_w, 40.0
+    return section
+
+
+def test_wrapped_header_with_unbreakable_widest_line_is_exempt() -> None:
+    """A multi-line header whose widest line is a single unbreakable token is not
+    reported: no wrap could narrow that line, so the overhang is unavoidable.
+
+    "Novel transcripts" over a single-station box too narrow for "transcripts"
+    on its own line is such a shape.
+    """
+    font_size = 13.0
+    label_lines = ("Novel", "transcripts")
+    placement = _horizontal_placement(label_lines, font_size)
+    section = _single_station_section("novel_transcripts", bbox_w=100.0)
+    assert placement.keepout[2] - placement.keepout[0] > section.bbox_w, (
+        "test premise: the widest line must overhang the box"
+    )
+
+    graph = MetroGraph()
+    graph.sections["novel_transcripts"] = section
+    assert (
+        check_section_headers_fit_box_width(graph, {"novel_transcripts": placement})
+        == []
+    )
+
+
+def test_wrapped_header_with_breakable_widest_line_still_reported() -> None:
+    """A multi-line header whose widest line holds an unused break point is
+    reported: a correct wrap would have split it, so the overhang is fixable and
+    the exemption must not swallow it."""
+    font_size = 13.0
+    widest = "transcript variants"
+    assert len(section_header._header_wrap_tokens(widest)) > 1
+    placement = _horizontal_placement(("Novel", widest), font_size)
+    text_width = section_header.estimate_section_label_width(widest, font_size)
+    section = _single_station_section("wide_break", bbox_w=text_width * 0.6)
+    assert placement.keepout[2] - placement.keepout[0] > section.bbox_w
+
+    graph = MetroGraph()
+    graph.sections["wide_break"] = section
+    assert check_section_headers_fit_box_width(graph, {"wide_break": placement}) == [
+        "wide_break"
+    ]

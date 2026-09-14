@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "nf-metro"
-version = "1.1.0"
+version = "2.0.0"
 description = "Generate metro-map-style SVG diagrams from Mermaid graph definitions"
 readme = "README.md"
 license = "MIT"
@@ -24,27 +24,33 @@ keywords = [
     "diagram",
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Visualization",
 ]
 dependencies = [
+    # Ships FFmpeg in its own wheels, so a looping GIF/WebP/MP4/WebM export
+    # needs nothing on PATH -- the same self-contained deal resvg-py gives PNG.
+    "av>=13",
     "click>=8.0",
     "drawsvg>=2.0",
     "lark>=1.1",
     "networkx>=3.0",
     "pillow>=9.0",
+    "resvg-py>=0.5",
 ]
 
 [project.urls]
-Homepage = "https://github.com/pinin4fjords/nf-metro"
-Repository = "https://github.com/pinin4fjords/nf-metro"
-Issues = "https://github.com/pinin4fjords/nf-metro/issues"
+Homepage = "https://github.com/seqeralabs/nf-metro"
+Documentation = "https://seqeralabs.github.io/nf-metro/latest/"
+Repository = "https://github.com/seqeralabs/nf-metro"
+Issues = "https://github.com/seqeralabs/nf-metro/issues"
 
 [project.scripts]
 nf-metro = "nf_metro.cli:cli"
@@ -59,18 +65,23 @@ dev = [
     "mypy>=1.8",
     "types-networkx",
     "numpy<2.5",
-    "jsonschema>=4.0",
-    "cairosvg==2.8.2",
+    "nf-metro[validate]",
+    # Pinned so the frozen PNG hash in tests/test_hash_seed_determinism.py has
+    # one rasteriser build to lock against; runtime accepts any >=0.5.
+    "resvg-py==0.5.0",
 ]
-# Docs site is Astro/Starlight (see docs/package.json). This extra only provides
-# cairosvg, used by scripts/build_render_diff.py and the PR render-diff workflow
-# to rasterise gallery SVGs to PNG.
+# Docs site is Astro/Starlight (see website/package.json). This extra only
+# provides pyyaml, for the gallery corpus map.
 docs = [
-    "cairosvg==2.8.2",
     "pyyaml>=6.0",
 ]
 font = [
     "fonttools[woff]>=4.0",
+]
+# `nf-metro validate-svg` validates an SVG's embedded manifest against a Draft
+# 2020-12 schema, which jsonschema only implements from 4.0.
+validate = [
+    "jsonschema>=4.0",
 ]
 
 # The skill self-check needs pyyaml for the gallery corpus map, and a tokenizer to
@@ -85,6 +96,14 @@ skill-checks = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/nf_metro"]
+# Both live under the package directory but have no importer or reader at
+# runtime: the candidate executor is a harness driven from the test suite and a
+# source checkout, and CONTRACT.md is the layout pipeline's stage-by-stage
+# design record, cited only from comments and the test suite.
+exclude = [
+  "src/nf_metro/candidate_executor.py",
+  "src/nf_metro/layout/CONTRACT.md",
+]
 
 [tool.hatch.build.targets.sdist]
 # Ship what is needed to build and audit the package: src, packaging metadata,
@@ -143,11 +162,12 @@ ignore_missing_imports = false
 strict_optional = true
 disallow_any_generics = true
 
-# drawsvg ships no type information; jsonschema is an optional, test-only
-# dependency imported lazily by `nf-metro validate-svg`. Everything else (click,
-# Pillow, networkx via types-networkx) is typed once the package is installed.
+# drawsvg and av ship no type information; jsonschema is an optional dependency
+# (the `validate` extra) imported lazily by `nf-metro validate-svg`. Everything
+# else (click, Pillow, networkx via types-networkx) is typed once the package
+# is installed.
 [[tool.mypy.overrides]]
-module = ["drawsvg", "jsonschema"]
+module = ["av", "drawsvg", "jsonschema"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

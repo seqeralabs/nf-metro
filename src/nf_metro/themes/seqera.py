@@ -66,5 +66,3 @@ SEQERA_DARK_THEME = replace(
     legend_background="rgba(0, 0, 0, 0.4)",
     legend_text_color="#e0d9f7",
 )
-
-SEQERA_THEME = SEQERA_DARK_THEME

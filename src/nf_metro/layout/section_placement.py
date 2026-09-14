@@ -39,10 +39,13 @@ from nf_metro.layout.geometry import (
     lanes_run_along_x,
     lanes_run_along_y,
     packed_section_visual_order,
+    section_column_span,
+    section_row_span,
     shift_section,
 )
 from nf_metro.layout.route_topology import divergence_junction_sources
 from nf_metro.layout.routing.common import (
+    flanked_cross_row_riser_neighbour_col,
     inter_row_wrap_band,
     max_grid_row_with_content,
     merge_junction_ids,
@@ -764,13 +767,24 @@ def _wrap_bundle_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]
             continue
         # A horizontal-side entry only WRAPS (placing a flush run in the
         # inter-row gap) when the source is on the far side of the target
-        # from the port.  A LEFT entry reached from a source in the same or
-        # a righthand column wraps; one reached from the left is a plain
-        # L-shape drop and needs no widening (e.g. preprocessing -> a
-        # column-1 section below it).  Mirror for RIGHT.
+        # from the port.  A LEFT entry reached from a source on the port
+        # side is a plain L-shape drop -- straight down then in, clearing
+        # nothing on the way -- and needs no widening (e.g. preprocessing ->
+        # a column-1 section below it).  It becomes a two-legged bypass only
+        # when the column left of the target is on the grid yet absent from
+        # the target's row: the descent then seats against the target's own
+        # edge (:func:`row_local_gap_bundle_midpoint`), lengthening the leg
+        # until it reaches an intervening box, and a too-tight gap forces the
+        # leg up into that box.  A RIGHT entry's descent seats against the
+        # target column itself, never a row-absent neighbour, so it keeps the
+        # plain-drop reading.
         if port.side == PortSide.LEFT and _section_precedes(graph, src_sec, tgt_sec):
-            continue
-        if port.side == PortSide.RIGHT and _section_precedes(graph, tgt_sec, src_sec):
+            if not (
+                _left_entry_descent_hugs_absent_neighbour(graph, tgt_sec)
+                and _bypass_has_intervening_section(graph, src_sec, tgt_sec)
+            ):
+                continue
+        elif port.side == PortSide.RIGHT and _section_precedes(graph, tgt_sec, src_sec):
             continue
         src_row, tgt_row = src_sec.grid_row, tgt_sec.grid_row
         if abs(src_row - tgt_row) == 1:
@@ -979,6 +993,113 @@ def _section_precedes(graph: MetroGraph, a: Section, b: Section) -> bool:
     return False
 
 
+def _bypass_has_intervening_section(
+    graph: MetroGraph, src_sec: Section, tgt_sec: Section
+) -> bool:
+    """Whether a section stands strictly between *src_sec* and *tgt_sec* on both
+    grid axes.
+
+    Such a section is one the two-legged bypass route between the two must clear
+    the bottom edge of on its way down: the descent passes its column and its
+    row falls between the source's and the target's, so a too-tight inter-row
+    gap forces the horizontal leg up into its box.  A source and target with no
+    section boxed in between drop straight in as a plain L-shape and clear
+    nothing, so no band need be reserved for them.
+    """
+    lo_col, hi_col = sorted((src_sec.grid_col, tgt_sec.grid_col))
+    lo_row, hi_row = sorted((src_sec.grid_row, tgt_sec.grid_row))
+    for section in graph.sections.values():
+        if section.bbox_w <= 0 or section is src_sec or section is tgt_sec:
+            continue
+        section_bottom_row = section_row_span(section)[1]
+        section_right_col = section_column_span(section)[1]
+        if (
+            lo_col < section_right_col
+            and section.grid_col < hi_col
+            and section.grid_row < hi_row
+            and section_bottom_row > lo_row
+        ):
+            return True
+    return False
+
+
+def _left_entry_descent_hugs_absent_neighbour(
+    graph: MetroGraph, tgt_sec: Section
+) -> bool:
+    """Whether a LEFT-entry target-side descent seats against the target's own
+    left edge rather than centring in a bounded gap.
+
+    That happens when the column left of the target carries a section on the
+    grid but none overlapping the target's grid rows:
+    :func:`row_local_gap_bundle_midpoint` then anchors the descent on the
+    target's edge, reaching past that column.  With a section overlapping the
+    target's rows the descent centres in the real gap left of it and the wrap
+    leg stops there.  A row-spanning target only needs one such neighbour
+    anywhere in its span, so the whole span is tested, not just its top row.
+    """
+    left_col = tgt_sec.grid_col - 1
+    neighbours = [
+        section
+        for section in graph.sections.values()
+        if section.grid_col == left_col and section.bbox_w > 0
+    ]
+    if not neighbours:
+        return False
+    return not any(_rows_overlap(tgt_sec, section) for section in neighbours)
+
+
+def _flanked_cross_row_riser_gap(
+    graph: MetroGraph,
+    edge: Edge,
+    col_assign: dict[str, int],
+) -> tuple[int, int] | None:
+    """Gap ``(lo, hi)`` a same-column cross-row perpendicular-entry riser descends.
+
+    A LEFT/RIGHT exit feeding a TOP/BOTTOM entry in its own grid column but a
+    different row runs a vertical riser in the inter-column gap on its exit side.
+    When a section occupies that neighbouring column at the source's own row the
+    riser is flanked by a wall on both sides, so it must clear both -- which the
+    gap is only wide enough to allow once this riser is counted among the bundles
+    that size it.  Returns ``None`` for an unflanked riser (the neighbour column
+    open at the source row), whose descent legitimately sits a curve radius off
+    its single wall.
+    """
+    src_port = graph.ports.get(edge.source)
+    tgt_port = graph.ports.get(edge.target)
+    if src_port is None or tgt_port is None:
+        return None
+    if src_port.is_entry or not tgt_port.is_entry:
+        return None
+    if src_port.side not in (PortSide.LEFT, PortSide.RIGHT):
+        return None
+    if tgt_port.side not in (PortSide.TOP, PortSide.BOTTOM):
+        return None
+    src_sec = graph.sections.get(src_port.section_id)
+    tgt_sec = graph.sections.get(tgt_port.section_id)
+    if src_sec is None or tgt_sec is None:
+        return None
+    src_col = col_assign.get(src_sec.id)
+    tgt_col = col_assign.get(tgt_sec.id)
+    if src_col is None or tgt_col is None:
+        return None
+    neighbour = flanked_cross_row_riser_neighbour_col(
+        src_col,
+        src_sec.grid_row,
+        tgt_col,
+        tgt_sec.grid_row,
+        exit_is_right=src_port.side is PortSide.RIGHT,
+    )
+    if neighbour is None:
+        return None
+    flanked = any(
+        col_assign.get(other.id) == neighbour and other.grid_row == src_sec.grid_row
+        for other in graph.sections.values()
+    )
+    if not flanked:
+        return None
+    return (min(src_col, neighbour), max(src_col, neighbour))
+
+
 def _bundles_in_gap(
     graph: MetroGraph,
     col_assign: dict[str, int],
@@ -1010,7 +1131,7 @@ def _bundles_in_gap(
     is the number of distinct lines in that bundle.
     """
     junction_ids = graph.junction_ids
-    bundles: dict[tuple[str, int], set[str]] = defaultdict(set)
+    bundles: dict[tuple[str | int, ...], set[str]] = defaultdict(set)
 
     lo, hi = min(col_a, col_b), max(col_a, col_b)
 
@@ -1044,6 +1165,16 @@ def _bundles_in_gap(
                 bundles[("D", h_dir)].add(edge.line_id)
             if lo == edge_hi - 1 and hi == edge_hi:
                 bundles[("U", h_dir)].add(edge.line_id)
+
+    # A same-column cross-row riser descends in an inter-column gap it shares
+    # with the gap's other bundles but is not one of them: its endpoints sit in
+    # the same column, so the loop above (which keys bundles by the two columns
+    # an edge spans) never sees it.  Count each as its own bundle so the gap is
+    # sized to seat it clear of both flanking walls beside whatever else runs
+    # there.
+    for edge in graph.edges:
+        if _flanked_cross_row_riser_gap(graph, edge, col_assign) == (lo, hi):
+            bundles[("riser", edge.source, edge.target)].add(edge.line_id)
 
     # A same-line fan into two horizontal cell-mates can share its lead-in and
     # then split into opposing target-side channels. Endpoint-only inference
@@ -1210,13 +1341,78 @@ def _leftmost_merge_wrap_gap_pairs(
     return pairs
 
 
+def _fan_perp_entry_turn_gap_pairs(
+    graph: MetroGraph,
+    col_assign: dict[str, int],
+    col_sections: dict[int, list[Section]],
+) -> set[tuple[int, int]]:
+    """Gaps a side-exit fan needs widened to turn into a perpendicular entry.
+
+    A fan-out junction fed from one horizontal (LEFT/RIGHT) exit peels a branch
+    across the inter-column gap on the feeding side and down (or up) into a
+    TOP/BOTTOM entry port in a neighbouring row.  A section already occupying
+    that gap anywhere across the branch's row span leaves the descent's turn a
+    stub of runway short of its full radius.  Reserve one curve runway in the
+    gap on the feeding side so the branch rounds fully.
+
+    Only a LEFT/RIGHT exit turns *into* an inter-column gap this way; a
+    TOP/BOTTOM exit turns into an inter-row gap, which the row-gap pass owns.
+    """
+    pairs: set[tuple[int, int]] = set()
+    junction_ids = graph.junction_ids
+    for junction_id in graph.junctions:
+        out_edges = graph.edges_from(junction_id)
+        if len(out_edges) < 2:
+            continue
+        feed_sides: set[PortSide] = set()
+        feed_cols: set[int] = set()
+        feed_rows: set[int] = set()
+        for edge in graph.edges_to(junction_id):
+            source = graph.station_for_edge_source(edge)
+            port = graph.ports.get(source.id)
+            if port is None or port.is_entry:
+                continue
+            feed_sides.add(port.side)
+            col = _station_column(graph, source, col_assign, junction_ids)
+            if col is not None:
+                feed_cols.add(col)
+            section = graph.sections.get(port.section_id)
+            if section is not None:
+                feed_rows.add(section.grid_row)
+        if feed_sides not in ({PortSide.LEFT}, {PortSide.RIGHT}):
+            continue
+        if len(feed_cols) != 1 or len(feed_rows) != 1:
+            continue
+        (feed_side,) = feed_sides
+        (col_k,) = feed_cols
+        (exit_row,) = feed_rows
+        opp = col_k - 1 if feed_side is PortSide.LEFT else col_k + 1
+        for edge in out_edges:
+            target_port = graph.ports.get(edge.target)
+            if target_port is None or target_port.side not in (
+                PortSide.TOP,
+                PortSide.BOTTOM,
+            ):
+                continue
+            target_sec = graph.sections.get(target_port.section_id)
+            if target_sec is None:
+                continue
+            lo = min(exit_row, target_sec.grid_row)
+            hi = max(exit_row, target_sec.grid_row)
+            if any(
+                lo <= section.grid_row <= hi for section in col_sections.get(opp, [])
+            ):
+                pairs.add((min(col_k, opp), max(col_k, opp)))
+    return pairs
+
+
 def _column_pair_min_gap(
     graph: MetroGraph,
     col_assign: dict[str, int],
     col: int,
     pack_for_section: dict[str, tuple[str, ...]],
     merge_routing_pairs: set[tuple[int, int]],
-    leftmost_merge_wrap_pairs: set[tuple[int, int]],
+    runway_reservation_pairs: set[tuple[int, int]],
     min_gap: float = MIN_INTER_SECTION_GAP,
 ) -> tuple[float, list[int]]:
     """Minimum inter-section gap needed between columns ``col`` and ``col+1``.
@@ -1240,11 +1436,13 @@ def _column_pair_min_gap(
     effective_min = max(min_gap, bundle_min)
     if gap in merge_routing_pairs:
         effective_min = max(effective_min, MERGE_GAP_MIN)
-    if gap in leftmost_merge_wrap_pairs:
-        # Merge-around handlers can own a fixed channel one curve runway
-        # farther into the gap than the symmetric A/B allocation. Reserve that
-        # runway in addition to the prospective bundle footprints so an
-        # opposing movable bundle has a feasible A-bounded position.
+    if gap in runway_reservation_pairs:
+        # A handler owning a fixed channel one curve runway farther into the gap
+        # than the symmetric A/B allocation -- a merge-around descent, or a
+        # side-exit fan's perpendicular-entry branch -- needs that runway
+        # reserved beyond the prospective bundle footprints so an opposing
+        # movable bundle keeps a feasible A-bounded position and the fixed turn
+        # rounds at full radius.
         effective_min = max(
             effective_min,
             bundle_min + CURVE_RADIUS,
@@ -1287,7 +1485,9 @@ def _apply_column_gap_deficits(
         for section_id in members
     }
     merge_routing_pairs = _merge_routing_gap_pairs(graph, col_assign)
-    leftmost_merge_wrap_pairs = _leftmost_merge_wrap_gap_pairs(graph, col_assign)
+    runway_reservation_pairs = _leftmost_merge_wrap_gap_pairs(
+        graph, col_assign
+    ) | _fan_perp_entry_turn_gap_pairs(graph, col_assign, col_sections)
 
     for col in range(min_col, max_col):
         left_secs = col_sections.get(col, [])
@@ -1301,7 +1501,7 @@ def _apply_column_gap_deficits(
             col,
             pack_for_section,
             merge_routing_pairs,
-            leftmost_merge_wrap_pairs,
+            runway_reservation_pairs,
             min_gap,
         )
 

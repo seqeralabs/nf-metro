@@ -524,6 +524,7 @@ def _landing_across_both_flanks() -> tuple[
     landing = replace(
         landing_base.landings[0],
         corner_handedness=TurnHandedness.CLOCKWISE,
+        cross_run_start_coordinate=100.0,
         approach_axis=DemandAxis.X,
         approach_direction=Direction.R,
         join_point=(120.0, -20.0),
@@ -617,6 +618,7 @@ def _crossing_approach(
     plan: ConvergencePlan,
     *,
     source_junction_id: str,
+    source_row: float,
     direction: Direction,
     join_point: tuple[float, float],
     runway: float,
@@ -625,6 +627,7 @@ def _crossing_approach(
     """*plan*'s landing restated as an approach crossing a column along X.
 
     The crossing stands on the column the runway reaches back to from the join.
+    Its cross run begins on *source_row*, the row the feeder descends from.
     *opening_rows* states that column as an opening turn instead, spanning the
     two rows given, which is what makes the crossing follow a trunk flank.
     """
@@ -636,6 +639,7 @@ def _crossing_approach(
         approach_direction=direction,
         join_point=join_point,
         corner_handedness=TurnHandedness.CLOCKWISE,
+        cross_run_start_coordinate=source_row,
         minimum_runway=runway,
         opening_turn_coordinate=None if opening_rows is None else opening_column,
         opening_turn_segment=None
@@ -667,6 +671,7 @@ def _landing_moved_by_a_neighbour() -> tuple[
                 _crossing_approach(
                     obstacle_base,
                     source_junction_id="obstacle_source",
+                    source_row=60.0,
                     direction=Direction.R,
                     join_point=(120.0, 10.0),
                     runway=20.0,
@@ -693,6 +698,7 @@ def _landing_moved_by_a_neighbour() -> tuple[
             _crossing_approach(
                 shared_base,
                 source_junction_id="shared_source",
+                source_row=200.0,
                 direction=Direction.L,
                 join_point=(60.0, 120.0),
                 runway=40.0,
@@ -702,6 +708,7 @@ def _landing_moved_by_a_neighbour() -> tuple[
                 _crossing_approach(
                     shared_base,
                     source_junction_id="shared_trunk_source",
+                    source_row=0.0,
                     direction=Direction.L,
                     join_point=(70.0, 50.0),
                     runway=30.0,
@@ -731,6 +738,7 @@ def _landing_moved_by_a_neighbour() -> tuple[
             _crossing_approach(
                 arrival_base,
                 source_junction_id="arrival_source",
+                source_row=100.0,
                 direction=Direction.L,
                 join_point=(60.0, 180.0),
                 runway=32.0,

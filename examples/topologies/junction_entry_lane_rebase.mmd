@@ -1,0 +1,21 @@
+%%metro title: Junction entry lane re-base
+%%metro line: riboseq | Ribo-seq | #e6007e
+%%metro line: rnaseq | Matched RNA-seq | #2db572
+%%metro line: tiseq | TI-seq | #2b6cb0
+%%metro line: annotation | Hybrid annotation | #f2b407
+
+graph LR
+    subgraph novel_transcripts [Transcript discovery]
+        stringtie -->|rnaseq| hybrid_merge
+    end
+    subgraph orf_calling [ORF discovery & calling]
+        star_hybrid -->|riboseq,tiseq| ribocode
+        ribotricer -->|riboseq| orf_merge
+    end
+    subgraph reporting [Reporting]
+        multiqc_final -->|rnaseq| report_final
+    end
+    umi_dedup -->|rnaseq| stringtie
+    umi_dedup -->|riboseq| ribotricer
+    anota2seq -->|rnaseq| multiqc_final
+    hybrid_merge -->|annotation| ribocode

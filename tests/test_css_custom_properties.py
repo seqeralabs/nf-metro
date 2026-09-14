@@ -16,12 +16,7 @@ from nf_metro.api import render_string
 from nf_metro.layout.engine import compute_layout
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.render.svg import render_svg
-from nf_metro.themes import (
-    LIGHT_THEME,
-    NFCORE_DARK_THEME,
-    NFCORE_LIGHT_THEME,
-    NFCORE_THEME,
-)
+from nf_metro.themes import LIGHT_THEME, NFCORE_DARK_THEME, NFCORE_LIGHT_THEME
 
 _MMD = (
     "%%metro title: Test\n"
@@ -66,7 +61,7 @@ def _make_graph():
 )
 def test_svg_declares_chrome_property(prop):
     """Each recolorable chrome surface declares its ``--nfm-map-*`` property."""
-    svg = render_svg(_make_graph(), NFCORE_THEME)
+    svg = render_svg(_make_graph(), NFCORE_DARK_THEME)
     assert prop in svg
 
 
@@ -77,7 +72,7 @@ def test_svg_declares_chrome_property(prop):
 
 def test_chrome_css_fallbacks_are_light_dark_of_both_palettes():
     """Fallbacks pair the light and dark palette values via ``light-dark()``."""
-    svg = render_svg(_make_graph(), NFCORE_THEME)
+    svg = render_svg(_make_graph(), NFCORE_DARK_THEME)
     light, dark = NFCORE_LIGHT_THEME, NFCORE_DARK_THEME
     assert (
         f"--nfm-map-bg, light-dark({light.background_color}, {dark.background_color})"
@@ -103,13 +98,13 @@ def test_chrome_css_fallbacks_are_light_dark_of_both_palettes():
 
 def test_root_declares_color_scheme_for_mode_family():
     """A branded theme tags the root <svg> with ``color-scheme: light dark``."""
-    svg = render_svg(_make_graph(), NFCORE_THEME)
+    svg = render_svg(_make_graph(), NFCORE_DARK_THEME)
     assert "color-scheme: light dark" in svg
 
 
 def test_self_color_scheme_false_omits_root_color_scheme():
     """Inlined renders omit the root color-scheme so the page's choice wins."""
-    svg = render_svg(_make_graph(), NFCORE_THEME, self_color_scheme=False)
+    svg = render_svg(_make_graph(), NFCORE_DARK_THEME, self_color_scheme=False)
     assert "color-scheme" not in svg
 
 
@@ -129,7 +124,7 @@ def test_baked_mode_dark_narrows_color_scheme():
 
 def test_no_baked_mode_preserves_adaptive_color_scheme():
     """Without baked_mode the SVG stays adaptive (color-scheme: light dark)."""
-    svg = render_svg(_make_graph(), NFCORE_THEME)
+    svg = render_svg(_make_graph(), NFCORE_DARK_THEME)
     assert "color-scheme: light dark" in svg
 
 
@@ -172,7 +167,7 @@ def test_chrome_css_fallbacks_single_value_for_unfamilied_theme():
 def test_line_colors_not_in_chrome_css_vars():
     """Line colors must NOT appear inside CSS custom property declarations."""
     g = _make_graph()
-    svg = render_svg(g, NFCORE_THEME)
+    svg = render_svg(g, NFCORE_DARK_THEME)
     for line in g.lines.values():
         assert f"--nfm-map-line-{line.id}" not in svg
         assert line.color in svg
@@ -185,26 +180,26 @@ def test_line_colors_not_in_chrome_css_vars():
 
 def test_background_rect_has_nf_metro_bg_class():
     """The canvas background rect should carry the nf-metro-bg class."""
-    svg = render_svg(_make_graph(), NFCORE_THEME)
+    svg = render_svg(_make_graph(), NFCORE_DARK_THEME)
     assert "nf-metro-bg" in svg
 
 
 def test_chrome_css_uses_namespaced_class_selectors():
     """With svg_class_prefix, the chrome CSS selectors use the prefixed class names."""
-    svg = render_svg(_make_graph(), NFCORE_THEME, svg_class_prefix="mymap")
+    svg = render_svg(_make_graph(), NFCORE_DARK_THEME, svg_class_prefix="mymap")
     assert "mymap-nf-metro-bg" in svg
     assert ".nf-metro-bg" not in svg
 
 
 def test_legend_background_has_nf_metro_legend_bg_class():
     """The legend background rect should carry the nf-metro-legend-bg class."""
-    svg = render_svg(_make_graph(), NFCORE_THEME)
+    svg = render_svg(_make_graph(), NFCORE_DARK_THEME)
     assert "nf-metro-legend-bg" in svg
 
 
 def test_legend_text_has_nf_metro_legend_text_class():
     """Legend text entries should carry the nf-metro-legend-text class."""
-    svg = render_svg(_make_graph(), NFCORE_THEME)
+    svg = render_svg(_make_graph(), NFCORE_DARK_THEME)
     assert "nf-metro-legend-text" in svg
 
 
@@ -217,43 +212,43 @@ def test_icon_caption_uses_adaptive_label_color():
         "    source -->|main| node[Node]\n"
     )
     compute_layout(graph)
-    root = ET.fromstring(render_svg(graph, NFCORE_THEME))
+    root = ET.fromstring(render_svg(graph, NFCORE_DARK_THEME))
     caption = next(element for element in root.iter() if element.text == "Caption")
 
     assert "nf-metro-station-label" in caption.attrib.get("class", "").split()
 
 
 # ---------------------------------------------------------------------------
-# chrome_css=False: concrete colors for raster export (cairosvg)
+# chrome_css=False: concrete colors for raster export
 # ---------------------------------------------------------------------------
 
 
 def test_chrome_css_false_omits_var_references():
     """chrome_css=False emits no var() so non-CSS-custom-property renderers cope."""
-    svg = render_svg(_make_graph(), NFCORE_THEME, chrome_css=False)
+    svg = render_svg(_make_graph(), NFCORE_DARK_THEME, chrome_css=False)
     assert "var(--nfm" not in svg
     assert "light-dark(" not in svg
 
 
 def test_chrome_css_false_keeps_concrete_chrome_colors():
     """Dropping the var() block leaves the resolved mode's colors baked on chrome."""
-    svg = render_svg(_make_graph(), NFCORE_THEME, chrome_css=False)
-    assert f'fill="{NFCORE_THEME.background_color}"' in svg
-    assert f'fill="{NFCORE_THEME.section_fill}"' in svg
+    svg = render_svg(_make_graph(), NFCORE_DARK_THEME, chrome_css=False)
+    assert f'fill="{NFCORE_DARK_THEME.background_color}"' in svg
+    assert f'fill="{NFCORE_DARK_THEME.section_fill}"' in svg
 
 
 def test_chrome_css_default_emits_var_block():
     """The default keeps the var() block so a host can recolor the map live."""
-    svg = render_svg(_make_graph(), NFCORE_THEME)
+    svg = render_svg(_make_graph(), NFCORE_DARK_THEME)
     assert "var(--nfm-map-bg" in svg
 
 
-def test_chrome_css_false_rasterizes_with_cairosvg():
-    """chrome_css=False output is consumable by cairosvg, which cannot parse var()."""
-    cairosvg = pytest.importorskip("cairosvg")
-    svg = render_svg(_make_graph(), NFCORE_THEME, chrome_css=False)
-    png = cairosvg.svg2png(bytestring=svg.encode())
-    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+def test_chrome_css_false_rasterizes():
+    """chrome_css=False output is consumable by a renderer that cannot parse var()."""
+    from nf_metro.render.raster import svg_to_png
+
+    svg = render_svg(_make_graph(), NFCORE_DARK_THEME, chrome_css=False)
+    assert svg_to_png(svg)[:8] == b"\x89PNG\r\n\x1a\n"
 
 
 # ---------------------------------------------------------------------------
@@ -284,24 +279,24 @@ def _make_marker_graph():
 
 def test_marker_stroke_css_property_declared():
     """``--nfm-map-marker-stroke`` must appear in the chrome CSS block."""
-    svg = render_svg(_make_marker_graph(), NFCORE_THEME)
+    svg = render_svg(_make_marker_graph(), NFCORE_DARK_THEME)
     assert "--nfm-map-marker-stroke" in svg
 
 
 def test_marker_stroke_class_on_marker_elements():
     """Marker glyphs carry the ``nf-metro-marker-stroke`` class so the CSS var applies.
 
-    The baked hex remains as a presentation-attribute fallback for cairosvg; the CSS
+    The baked hex remains as a presentation-attribute fallback for rasterizers; the CSS
     class rule overrides it in-browser (CSS stylesheet > presentation attributes).
     """
-    svg = render_svg(_make_marker_graph(), NFCORE_THEME)
+    svg = render_svg(_make_marker_graph(), NFCORE_DARK_THEME)
     assert "nf-metro-marker-stroke" in svg
     assert "var(--nfm-map-marker-stroke" in svg
 
 
 def test_marker_stroke_fallback_is_light_dark_of_both_palettes():
     """The --nfm-map-marker-stroke fallback pairs light and dark values."""
-    svg = render_svg(_make_marker_graph(), NFCORE_THEME)
+    svg = render_svg(_make_marker_graph(), NFCORE_DARK_THEME)
     light_val = NFCORE_LIGHT_THEME.marker_stroke or NFCORE_LIGHT_THEME.station_stroke
     dark_val = NFCORE_DARK_THEME.marker_stroke or NFCORE_DARK_THEME.station_stroke
     assert f"--nfm-map-marker-stroke, light-dark({light_val}, {dark_val})" in svg
@@ -309,14 +304,14 @@ def test_marker_stroke_fallback_is_light_dark_of_both_palettes():
 
 def test_marker_stroke_class_in_legend_swatches():
     """Legend marker swatches carry the ``nf-metro-marker-stroke`` class too."""
-    svg = render_svg(_make_marker_graph(), NFCORE_THEME)
+    svg = render_svg(_make_marker_graph(), NFCORE_DARK_THEME)
     # CSS rule + at least one station marker + at least one legend swatch
     count = svg.count("nf-metro-marker-stroke")
     assert count >= 3, f"Expected ≥3 occurrences (rule + station + swatch), got {count}"
 
 
 def test_chrome_css_false_marker_stroke_is_concrete():
-    """chrome_css=False keeps the baked marker stroke for cairosvg rasterisation."""
-    svg = render_svg(_make_marker_graph(), NFCORE_THEME, chrome_css=False)
+    """chrome_css=False keeps the baked marker stroke for raster export."""
+    svg = render_svg(_make_marker_graph(), NFCORE_DARK_THEME, chrome_css=False)
     assert "var(--nfm-map-marker-stroke" not in svg
     assert 'stroke="' in svg

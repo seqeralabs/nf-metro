@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from nf_metro import NfMetroError, render_string
+from nf_metro import EmptyGraphError, NfMetroError, render_string
 from nf_metro.layout import (
     BackwardFlowError,
     FoldThresholdError,
@@ -47,6 +47,7 @@ NOT_VALUE_ERRORS = (
     SettledRouteValidationError,
 )
 AUTHORING_ERROR_TYPES = [
+    EmptyGraphError,
     CyclicGraphError,
     UnresolvedEndpointError,
     UnresolvedPortSectionError,
@@ -70,8 +71,9 @@ def test_authoring_error_is_nf_metro_error(error_type: type[Exception]) -> None:
 def test_authoring_error_keeps_its_value_error_base(
     error_type: type[Exception],
 ) -> None:
-    """Reparenting under NfMetroError must not drop the pre-existing base a
-    caller may already be catching (e.g. a bare ``except ValueError``)."""
+    """An authoring error stays a ``ValueError`` as well as an
+    ``NfMetroError``, so a caller's bare ``except ValueError`` keeps catching
+    it."""
     assert issubclass(error_type, ValueError)
 
 
@@ -88,6 +90,13 @@ def test_render_string_raises_plain_value_error_for_malformed_mmd() -> None:
     with pytest.raises(ValueError) as excinfo:
         render_string(src)
     assert not isinstance(excinfo.value, NfMetroError)
+
+
+def test_render_string_rejects_a_station_less_source() -> None:
+    """A source the parser finds no station in never reaches the layout."""
+    with pytest.raises(EmptyGraphError) as excinfo:
+        render_string("graph LR\n")
+    assert isinstance(excinfo.value, NfMetroError)
 
 
 @pytest.mark.parametrize(

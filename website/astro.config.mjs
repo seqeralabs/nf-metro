@@ -6,7 +6,10 @@ import starlight from "@astrojs/starlight";
 import starlightLinksValidator from "starlight-links-validator";
 import sitemap from "@astrojs/sitemap";
 import mermaid from "astro-mermaid";
-import { metroVitePlugin } from "./src/lib/render-metro.mjs";
+import {
+  metroVitePlugin,
+  metroGeneratedAssetsIntegration,
+} from "./src/lib/render-metro.mjs";
 import { starlightGitFix } from "./src/lib/starlight-git-fix.mjs";
 import { remarkRebaseLinks } from "./src/lib/rebase-links.mjs";
 import { ogImageMetaTags } from "./src/lib/og-meta-tags.mjs";
@@ -82,6 +85,13 @@ function buildReleasesSidebar() {
 export default defineConfig({
   site,
   base,
+  // theming.mdx moved from docs/dev/ (Internals) to docs/ (Embedding & data):
+  // its content is embedder-facing guidance, not an internals deep dive.
+  // Astro's `redirects` keys are base-relative like sidebar `slug`s, but the
+  // destination needs `base` prepended explicitly - it isn't applied for us.
+  redirects: {
+    "/dev/theming": `${base}theming`,
+  },
   markdown: {
     remarkPlugins: [[remarkRebaseLinks, { base }]],
   },
@@ -141,11 +151,14 @@ export default defineConfig({
           // - gallery/ and pipelines/ are custom Astro routes, not Starlight
           //   content entries, so the validator can only see them as opaque
           //   custom pages.
-          // - live_demo.mp4 is a public/ static asset, not a navigable page.
+          // - ../assets/*.mp4 are public/ static media, not navigable pages.
+          // - _generated/metro/ holds <Metro>'s build-time raster/video
+          //   exports (docs/formats.mdx), also static media rather than pages.
           exclude: ({ link }) =>
             link.startsWith(`${base}gallery`) ||
             link.startsWith(`${base}pipelines`) ||
-            link === "../assets/live_demo.mp4",
+            link.includes("_generated/metro/") ||
+            /^\.\.\/assets\/.+\.mp4$/.test(link),
         }),
       ],
       title: "nf-metro",
@@ -185,6 +198,7 @@ export default defineConfig({
             // base-relative ("/" -> "/nf-metro/"); passing `base` here doubled it.
             { label: "Home", link: "/" },
             { label: "Guide", slug: "guide" },
+            { label: "Output formats", slug: "formats" },
             { label: "CLI reference", slug: "cli" },
             { label: "Gallery", link: "/gallery/" },
             { label: "nf-core pipelines", link: "/pipelines/" },
@@ -204,6 +218,7 @@ export default defineConfig({
           items: [
             { label: "Embedding", slug: "embedding" },
             { label: "Embed contract", slug: "embed" },
+            { label: "Theming", slug: "theming" },
             { label: "Data manifest", slug: "manifest" },
             { label: "Live progress", slug: "live" },
             { label: "Nextflow import", slug: "nextflow" },
@@ -227,5 +242,6 @@ export default defineConfig({
         },
       ],
     }),
+    metroGeneratedAssetsIntegration(),
   ],
 });

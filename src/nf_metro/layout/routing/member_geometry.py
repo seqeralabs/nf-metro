@@ -70,6 +70,7 @@ from nf_metro.layout.routing.normalize import (
     _locate_slot_channel_with_slot,
     _materialize_gap_slots,
     _materialize_trunk_slots,
+    _reanchor_concentric_corner_fans,
     _reconcile_port_peeloff_risers,
     _rederive_semantic_end_corners,
     _reseat_concentric_flanking,
@@ -950,11 +951,29 @@ def _index_materialized_channels(
     )
 
 
-def _planner_owns_channel(
+def _upstream_plan_fixes_channel(
     route: RoutedPath,
     segment_rank: int,
     movable_exit_plan_ids: frozenset[ExitTurnPlanId] = frozenset(),
 ) -> bool:
+    """Whether a plan this allocator did not make already fixes the channel x.
+
+    Deliberately not :func:`planner_owns_segment_or_boundary`.  Three arms
+    differ, and each difference is a property of running before the member plan
+    is stamped:
+
+    * A fan or exit-lane transition membership resolved the whole corridor
+      rather than one segment of it, so it fixes the channel at whichever rank
+      the query names.
+    * The segments either side of a planned exit turn are fixed too, because
+      the turn's runway is measured along them -- the widening
+      :func:`convergence_owns_segment_boundary` already applies to a
+      convergence boundary.  A turn whose plan the caller listed as movable is
+      excluded: re-seating it is the caller's own right.
+    * ``route_system_owned_segment_ranks`` is this allocator's own output, and
+      every route reaching it is a handler template rather than a stamped
+      member route, so that field is empty here by construction.
+    """
     if route.exit_lane_transition_plan_id is not None:
         return True
     if route.fan_plan_id is not None or route.fan_route_emitter is not None:
@@ -1119,7 +1138,7 @@ def _align_packed_cell_handoffs(
             carrier_channels,
             key=lambda item: abs(item.channel.x - descent_x),
         )
-        assert not _planner_owns_channel(
+        assert not _upstream_plan_fixes_channel(
             route, handoff_channel.channel.idx, movable_exit_plan_ids
         ), "packed-cell handoff descent has a conflicting plan owner"
         bounds = _channel_bounds(handoff_channel, ctx)
@@ -1142,7 +1161,7 @@ def _align_same_line_channels(
     for item in materialized:
         route = item.candidate.route
         channel = item.channel
-        if item.key in seated or _planner_owns_channel(
+        if item.key in seated or _upstream_plan_fixes_channel(
             route, channel.idx, movable_exit_plan_ids
         ):
             continue
@@ -1390,7 +1409,7 @@ def _channel_bundles(
     ] = defaultdict(list)
     seen: set[tuple[RouteSystemId, ResolvedEdge, int]] = set()
     for item in materialized:
-        if item.key in seen or _planner_owns_channel(
+        if item.key in seen or _upstream_plan_fixes_channel(
             item.candidate.route, item.channel.idx, movable_exit_plan_ids
         ):
             continue
@@ -1469,7 +1488,7 @@ def _allocate_member_gap_channels(
         *(
             _claim_for_materialized_channel(item)
             for item in materialized
-            if _planner_owns_channel(
+            if _upstream_plan_fixes_channel(
                 item.candidate.route, item.channel.idx, movable_exit_plan_ids
             )
         ),
@@ -1513,13 +1532,27 @@ def _carry_seated_run(
 def _seat_claimed_segments_before_freeze(
     candidates: tuple[_MemberCandidate, ...], ctx: _RoutingCtx
 ) -> None:
-    """Seat reservation-owned interior runs before their member plan freezes."""
+    """Seat reservation-owned interior runs before their member plan freezes.
+
+    A member whose exit-turn plan pins its turn column has that column checked
+    against the plan by the closing validator; the clearance band a shared gap
+    corridor realises can be tighter than the nested ladder the plan seated
+    outside it, so seating such a member to the band would slide it off its
+    planned axis (and, where the corridor is shared with a bundle bound
+    elsewhere, onto that bundle's lane).  A pinned member is left where its plan
+    placed it.  The pin is read from the segment rank -- as
+    :func:`_upstream_plan_fixes_channel` reads it -- not the plan id: the settled
+    two-pass path clears a member's segment rank (restoring it after this pass)
+    to hand it to seating, and reads as unpinned here.
+    """
     grouped: defaultdict[
         tuple[RouteSystemId, str, int, int],
         list[tuple[RoutedPath, int, float, ReservedBand]],
     ] = defaultdict(list)
     for candidate in candidates:
         route = candidate.route
+        if route.exit_turn_segment_rank is not None:
+            continue
         for rank, (start, end) in enumerate(zip(route.points, route.points[1:])):
             if not 1 <= rank <= len(route.points) - 3:
                 continue
@@ -2210,6 +2243,15 @@ def build_member_geometry_execution(
             respect_owned_corners=False,
         )
         _plan_source_turnouts(normalization_population, graph, ctx.curve_radius)
+        # The freeze is the last word on an owned route's radii, and a
+        # post-emission pass skips a frozen or owned route, so the concentric
+        # fans a per-corner reference seated off the floor have to be
+        # re-anchored to CURVE_RADIUS here, before the plan captures them.
+        _reanchor_concentric_corner_fans(
+            normalization_population,
+            ctx.station_offsets or {},
+            ctx.curve_radius,
+        )
         semantic_corner_templates = {
             ResolvedEdge(
                 route.edge.source,

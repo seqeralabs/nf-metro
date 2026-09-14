@@ -246,12 +246,7 @@ def test_flow_exit_fed_junction_freezes_its_cross_member_source_turn() -> None:
 
 def test_source_turnout_animation_uses_the_same_concentric_radii() -> None:
     graph, offsets, routes = _routed("same_destination_short_overlap")
-    paths = _build_line_motion_paths(
-        graph,
-        routes,
-        offsets,
-        resolve_theme(None, graph),
-    )
+    paths = _build_line_motion_paths(graph, routes, offsets)
 
     assert any(
         line_id == "reads" and "L 192.00 124.00 Q 202.00 124.00 202.00 134.00" in path
@@ -286,7 +281,9 @@ def test_render_plan_reuses_one_materialized_turnout_geometry(
     captured = {}
     real_render_edges = render_svg._render_edges
 
-    def capture_edges(drawing, graph, routes, polylines, radii, breaks, theme, *args):
+    def capture_edges(
+        drawing, graph, routes, polylines, radii, breaks, theme, *args, **kwargs
+    ):
         captured["polylines"] = tuple(tuple(points) for points in polylines)
         captured["radii"] = tuple(
             None if route_radii is None else tuple(route_radii) for route_radii in radii
@@ -300,6 +297,7 @@ def test_render_plan_reuses_one_materialized_turnout_geometry(
             breaks,
             theme,
             *args,
+            **kwargs,
         )
 
     monkeypatch.setattr(render_svg, "_render_edges", capture_edges)
@@ -964,7 +962,8 @@ def test_following_gap_lever_is_reached_for_only_on_the_strike_retry() -> None:
     -- a column the first attempt's lever set provably does not name.
     """
     clear = parse_metro_mermaid(
-        """graph LR
+        """%%metro line: line | Line | #0570b0
+graph LR
 subgraph lane [Lane]
     source[Source] -->|line| target[Target]
     target -->|line| sink[Sink]

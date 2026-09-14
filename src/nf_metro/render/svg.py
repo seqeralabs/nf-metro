@@ -21,7 +21,7 @@ import warnings
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, fields, is_dataclass, replace
 from enum import Enum
-from typing import Any, Literal, NamedTuple
+from typing import Any, Literal, NamedTuple, cast
 
 import drawsvg as draw
 
@@ -159,7 +159,6 @@ from nf_metro.render.constants import (
     DEBUG_WAYPOINT_COLOR,
     DEBUG_WAYPOINT_COLOR_LIGHT,
     DEBUG_WAYPOINT_RADIUS,
-    FALLBACK_LINE_COLOR,
     FILES_ICON_OFFSET_RATIO,
     GROUP_LABEL_BAND_PADDING,
     GROUP_LABEL_FONT_SCALE,
@@ -169,6 +168,9 @@ from nf_metro.render.constants import (
     GROUP_LABEL_UNDERLINE_GAP,
     GROUP_LABEL_UNDERLINE_OPACITY,
     GROUP_LABEL_UNDERLINE_WIDTH,
+    ICON_BANNER_FILL,
+    ICON_BANNER_TEXT_COLOR,
+    ICON_BANNER_TEXT_COLOR_MUTED,
     ICON_BBOX_MARGIN,
     ICON_CLEARANCE_MARGIN,
     ICON_INTER_GAP,
@@ -190,12 +192,15 @@ from nf_metro.render.constants import (
     SVG_CURVE_RADIUS,
     TERMINUS_FONT_COLOR,
     TEXT_VCENTER_DY,
+    TITLE_CANVAS_SAFETY_MARGIN,
     WATERMARK_BARE_X_INSET,
     WATERMARK_FILL,
     WATERMARK_FONT_SIZE,
     WATERMARK_PADDING_RATIO,
     WATERMARK_Y_INSET,
+    effective_line_color,
     line_style_kwargs,
+    station_is_muted,
     title_baseline_y,
 )
 from nf_metro.render.icons import (
@@ -221,6 +226,7 @@ from nf_metro.render.path_geometry import materialize_source_turnout_paths
 from nf_metro.render.plan import (
     _RENDER_GRAPH_EXCLUDED_FIELDS,
     FrozenGraph,
+    FrozenMap,
     FrozenRecord,
     RenderPlan,
     freeze_render_value,
@@ -285,11 +291,11 @@ def _compute_canvas_bounds(
                 max_y = py
 
     if header_placements:
-        # Scoped to wrapped (multi-line) headers only: a single-line header
-        # that overhangs its section bbox is a separate, pre-existing
-        # condition, and folding it into the canvas size here would shift
-        # everything anchored to it (watermark, legend) for every such
-        # section, not just the ones a wrapped title actually reaches past.
+        # Scoped to wrapped (multi-line) headers only.  Folding a
+        # single-line header's overhang in as well would move everything
+        # anchored to the canvas bounds (watermark, legend) for every
+        # section carrying a header, not just the ones whose title
+        # actually reaches past the box.
         for placement in header_placements.values():
             if len(placement.label_lines) > 1:
                 max_x = max(max_x, placement.keepout[2])
@@ -508,6 +514,49 @@ def _position_legend(
     return legend_x, legend_y, legend_w, legend_h, show_legend
 
 
+def _terminus_stacked_pad(theme: Theme, has_stacked: bool) -> float:
+    """Extent a stacked-files icon's back sheet peeks past the nominal edge.
+
+    ``render_files_icon`` offsets the back sheet by ``terminus_width *
+    FILES_ICON_OFFSET_RATIO`` along each axis; anything reserving space around
+    the drawn icon adds this so the back sheet is covered. Zero for a
+    single-sheet icon.
+    """
+    return theme.terminus_width * FILES_ICON_OFFSET_RATIO if has_stacked else 0.0
+
+
+@dataclass(frozen=True)
+class _TerminusFlowContext:
+    """Flow-axis facts for placing a terminus station's icon(s).
+
+    ``section_dir`` derives from ``section``; ``is_vertical_flow`` from
+    ``section_dir``; ``is_source`` from the station's incoming edges; and
+    ``flow_sign`` from ``section_dir`` and ``is_source``.
+    """
+
+    section: Section | None
+    section_dir: str
+    is_vertical_flow: bool
+    is_source: bool
+    flow_sign: float
+
+
+def _terminus_flow_context(station: Station, graph: MetroGraph) -> _TerminusFlowContext:
+    """Build the flow-axis context for one of *station*'s terminus icons."""
+    section = graph.sections.get(station.section_id) if station.section_id else None
+    section_dir = section.direction if section else "LR"
+    is_vertical_flow = lanes_run_along_x(section_dir)
+    is_source = not graph.edges_to(station.id)
+    flow_sign = _terminus_icon_flow_sign(section_dir, is_source)
+    return _TerminusFlowContext(
+        section=section,
+        section_dir=section_dir,
+        is_vertical_flow=is_vertical_flow,
+        is_source=is_source,
+        flow_sign=flow_sign,
+    )
+
+
 def _icon_obstacles_by_station(
     graph: MetroGraph,
     theme: Theme,
@@ -546,9 +595,7 @@ def _icon_obstacles_by_station(
 
         # Stacked-files icons extend beyond nominal size by the offset.
         has_stacked = ICON_TYPE_FILES in (station.terminus_icon_types or [])
-        stacked_pad = (
-            theme.terminus_width * FILES_ICON_OFFSET_RATIO if has_stacked else 0.0
-        )
+        stacked_pad = _terminus_stacked_pad(theme, has_stacked)
         icon_half_w = theme.terminus_width / 2 + stacked_pad
         icon_half_h = theme.terminus_height / 2 + stacked_pad
 
@@ -557,14 +604,20 @@ def _icon_obstacles_by_station(
         y_min = min(cy for _, cy in centers) - icon_half_h
         y_max = max(cy for _, cy in centers) + icon_half_h
 
-        # Captions render below the icon row, so extend the box downward to
-        # cover them and keep neighbouring labels at a distance.
+        # Captions render on whichever flow side the renderer draws them, so
+        # extend the box that way to cover them and keep neighbouring labels
+        # at a distance. Vertical-flow sources (and flow-reversed sinks) hang
+        # the caption above the icon; everything else hangs it below.
         caption_line_count = station.terminus_caption_line_count
         if caption_line_count:
-            caption_height = (
+            ctx = _terminus_flow_context(station, graph)
+            caption_extent = ICON_NAME_GAP + (
                 caption_line_count * theme.label_font_size * ICON_NAME_FONT_SCALE
             )
-            y_max += ICON_NAME_GAP + caption_height
+            if _terminus_caption_hangs_down(ctx.is_vertical_flow, ctx.flow_sign):
+                y_max += caption_extent
+            else:
+                y_min -= caption_extent
 
         obstacles[station.id] = (
             x_min - margin,
@@ -602,6 +655,7 @@ def render_svg(
     self_color_scheme: bool = True,
     baked_mode: str | None = None,
     bare: bool = False,
+    inactive_line_ids: frozenset[str] | None = None,
 ) -> str:
     """Render a metro map graph to an SVG string.
 
@@ -638,7 +692,7 @@ def render_svg(
     concrete colors as presentation attributes regardless, so the map still
     renders; what False drops is the live ``var()`` recolor hook and the
     ``light-dark()`` mode adaptation.  Set this False for raster export (e.g.
-    cairosvg, which cannot parse ``var()``/``light-dark()``) or any consumer
+    an external rasterizer that cannot parse ``var()``/``light-dark()``) or any consumer
     without CSS custom-property support - pick the concrete mode via the theme.
 
     ``self_color_scheme``: when True the root ``<svg>`` declares a
@@ -652,20 +706,29 @@ def render_svg(
     ``baked_mode``: when ``"light"`` or ``"dark"``, the root ``<svg>`` declares
     ``color-scheme: <mode>`` instead of the adaptive ``color-scheme: light dark``.
     This ensures ``light-dark()`` in the chrome CSS resolves to the correct
-    palette in rasterizers that respect the OS color-scheme (e.g. cairosvg on
-    a dark-mode macOS session).  Set this to the explicit ``--mode`` value when
-    rendering for PNG export; leave ``None`` for browser-adaptive SVG output.
+    palette in rasterizers that respect the OS color-scheme (e.g. one running
+    in a dark-mode macOS session).  Set this to the explicit ``--mode`` value
+    when rendering for PNG export; leave ``None`` for browser-adaptive SVG
+    output.
 
     ``bare``: when True, omits the title and outer padding so the canvas
     hugs the diagram content.  The attribution watermark is kept.  Use for
     embedding the SVG inside a host page that supplies its own frame and
     heading.
+
+    ``inactive_line_ids``: the set of line IDs to render muted grey.  ``None``
+    (default) resolves the map's own declared-inactive set
+    (``graph.default_inactive_line_ids()``), so a ``%%metro line: ... inactive``
+    directive takes effect.  An explicit set overrides that declaration for this
+    render; an empty set forces every line active.
     """
     if not graph.stations:
         return '<svg xmlns="http://www.w3.org/2000/svg"></svg>'
 
     if animate is None:
         animate = graph.animate
+
+    effective_inactive = graph.resolve_inactive_line_ids(inactive_line_ids)
 
     metrics_face = metrics_face_for_portability(font_portability)
     with class_prefix_context(svg_class_prefix):
@@ -680,6 +743,7 @@ def render_svg(
             chrome_css=chrome_css,
             bare=bare,
             metrics_face=metrics_face,
+            inactive_line_ids=effective_inactive,
         )
         svg = emit_render_plan(
             plan,
@@ -735,6 +799,7 @@ class _FinalPublishedGeometry(FinalCanvasGeometry):
     debug: bool
     chrome_css: bool
     bare: bool
+    draws_standalone_title: bool
 
 
 _FINAL_RENDER_PLAN_FINGERPRINT_SOURCES = {
@@ -775,6 +840,8 @@ _FINAL_RENDER_PLAN_FINGERPRINT_SOURCES = {
     "debug": "published.debug",
     "chrome_css": "published.chrome_css",
     "bare": "published.bare",
+    "draws_standalone_title": "published.draws_standalone_title",
+    "inactive_line_ids": "inactive_line_ids",
 }
 
 
@@ -790,6 +857,7 @@ def _build_render_plan_result(
     chrome_css: bool = True,
     bare: bool = False,
     metrics_face: MetricsFace = MetricsFace.FALLBACK,
+    inactive_line_ids: frozenset[str] = frozenset(),
 ) -> tuple[RenderPlan, RoutePlan]:
     """Build a render plan alongside the routing observation that settled it."""
     scaled_theme = _scale_theme_strokes(
@@ -811,6 +879,7 @@ def _build_render_plan_result(
                 legend_position=legend_position,
                 chrome_css=chrome_css,
                 bare=bare,
+                inactive_line_ids=inactive_line_ids,
             )
         except (
             ConvergenceInvariantError,
@@ -844,6 +913,7 @@ def build_render_plan(
     chrome_css: bool = True,
     bare: bool = False,
     metrics_face: MetricsFace = MetricsFace.FALLBACK,
+    inactive_line_ids: frozenset[str] = frozenset(),
 ) -> RenderPlan:
     """Build an immutable render plan without changing the caller's graph."""
     plan, _route_plan = _build_render_plan_result(
@@ -857,6 +927,7 @@ def build_render_plan(
         chrome_css=chrome_css,
         bare=bare,
         metrics_face=metrics_face,
+        inactive_line_ids=inactive_line_ids,
     )
     return plan
 
@@ -1754,12 +1825,12 @@ def _settle_render_geometry(
     frozen ahead of.  The polylines are built here because the settlement guard
     scores the coordinate a viewer sees, so it and the renderer have to read one
     set of points rather than two derivations of them.
-    Label wrapping
-    needs the theme's font/icon metrics, so it runs here rather than in
-    ``compute_layout``; when it grows a section's bbox downward it can push the
-    lower section's header badge up into the box above.  Only that genuine
-    collision is reconciled -- re-settle so routes and labels track the shifted
-    sections.
+
+    Label wrapping needs the theme's font/icon metrics, so it runs here rather
+    than in ``compute_layout``; when it grows a section's bbox downward it can
+    push the lower section's header badge up into the box above.  Only that
+    genuine collision is reconciled -- re-settle so routes and labels track the
+    shifted sections.
 
     Routing is observed so its ``RouteReservation`` ledger can drive
     :func:`settle_route_envelopes`, which widens any row or column boundary that
@@ -2217,6 +2288,7 @@ def _build_render_plan_scaled(
     legend_position: str | None,
     chrome_css: bool = True,
     bare: bool = False,
+    inactive_line_ids: frozenset[str] = frozenset(),
 ) -> tuple[RenderPlan, RoutePlan]:
     """Finish render geometry on a private graph copy and freeze the result."""
     effective_legend_position = (
@@ -2322,6 +2394,13 @@ def _build_render_plan_scaled(
     logo_in_legend = show_logo and effective_legend_position != "none"
     legend_logo_size = (logo_w, logo_h) if logo_in_legend else None
 
+    # Whether this render draws the map title as standalone chrome: the one
+    # predicate that both the canvas-sizing term and the title-draw block read,
+    # so the two cannot drift and reintroduce a clipped or unmeasured title.
+    draws_standalone_title = (
+        not bare and bool(graph.title) and not logo_in_legend and not show_logo
+    )
+
     legend_x, legend_y, legend_w, legend_h, show_legend = _position_legend(
         graph,
         theme,
@@ -2356,6 +2435,19 @@ def _build_render_plan_scaled(
     # the watermark text.
     auto_width = max_x + (0.0 if bare else padding)
     auto_height = max_y + WATERMARK_Y_INSET * 2 + WATERMARK_FONT_SIZE
+
+    # The title is authored text drawn at x=padding but never folded into the
+    # content extent, so a title wider than the map is clipped at the right
+    # edge.  Grow the canvas to its true glyph advance plus a small margin.
+    if draws_standalone_title:
+        title_advance = DEFAULT_TEXT_METRICS.advance(
+            graph.title,
+            text_style(theme.title_font_size, "bold"),
+            TextRole.TITLE,
+        )
+        auto_width = max(
+            auto_width, padding + title_advance + TITLE_CANVAS_SAFETY_MARGIN
+        )
 
     # A relocated header may sit past the box; let it use the margins already
     # added above and only stretch the canvas for the part that overflows them,
@@ -2428,6 +2520,7 @@ def _build_render_plan_scaled(
         debug=debug,
         chrome_css=chrome_css,
         bare=bare,
+        draws_standalone_title=draws_standalone_title,
     )
     route_plan = realise_route_reservations(
         route_plan,
@@ -2511,6 +2604,8 @@ def _build_render_plan_scaled(
         debug=published_geometry.debug,
         chrome_css=published_geometry.chrome_css,
         bare=published_geometry.bare,
+        draws_standalone_title=published_geometry.draws_standalone_title,
+        inactive_line_ids=inactive_line_ids,
     ), route_plan
 
 
@@ -2518,6 +2613,7 @@ def emit_render_plan(
     plan: RenderPlan,
     *,
     animate: bool = False,
+    animation_frame_slot: bool = False,
     responsive: bool = False,
     inject_dark_mode_css: bool = True,
     self_color_scheme: bool = True,
@@ -2528,6 +2624,7 @@ def emit_render_plan(
         return _emit_render_plan(
             plan,
             animate=animate,
+            animation_frame_slot=animation_frame_slot,
             responsive=responsive,
             inject_dark_mode_css=inject_dark_mode_css,
             self_color_scheme=self_color_scheme,
@@ -2539,6 +2636,7 @@ def _emit_render_plan(
     plan: RenderPlan,
     *,
     animate: bool = False,
+    animation_frame_slot: bool = False,
     responsive: bool = False,
     inject_dark_mode_css: bool = True,
     self_color_scheme: bool = True,
@@ -2563,6 +2661,7 @@ def _emit_render_plan(
     header_placements: Any = plan.header_placements
     group_bands: Any = plan.group_bands
     positive_fan: Any = plan.positive_fan_sections
+    inactive_line_ids = plan.inactive_line_ids
     svg_width, svg_height = plan.svg_width, plan.svg_height
     padding = plan.padding
     legend_x, legend_y = plan.legend_x, plan.legend_y
@@ -2593,7 +2692,7 @@ def _emit_render_plan(
     # Chrome CSS: custom properties so hosts can recolor without re-rendering.
     # Injected before the background rect so browser parsing order is correct.
     if chrome_css:
-        _inject_chrome_css(d, theme)
+        _inject_chrome_css(d, theme, bool(inactive_line_ids))
 
     # Dark-mode CSS for transparent-background themes so that elements
     # rendered directly on the canvas (section labels, number badges,
@@ -2632,7 +2731,7 @@ def _emit_render_plan(
                 )
             else:
                 _render_logo(d, effective_logo, logo_x, logo_y, logo_w, logo_h)
-        elif graph.title and not logo_in_legend:
+        elif plan.draws_standalone_title:
             d.append(
                 draw.Text(
                     graph.title,
@@ -2659,23 +2758,33 @@ def _emit_render_plan(
         edge_radii,
         bridge_breaks,
         theme,
+        inactive_line_ids=inactive_line_ids,
     )
 
     # Directional chevrons ride on top of the lines but behind stations.
     if graph.directional:
-        _render_directional_markers(d, graph, routes, station_offsets, theme)
+        _render_directional_markers(
+            d, graph, routes, station_offsets, theme, inactive_line_ids
+        )
 
     # Animation (after edges, before stations so balls travel behind station markers)
     if animate:
         from nf_metro.render.animate import render_animation
 
-        render_animation(d, graph, routes, station_offsets, theme)
+        render_animation(
+            d,
+            graph,
+            routes,
+            station_offsets,
+            theme,
+            frame_slot=animation_frame_slot,
+        )
 
     # Draw stations (all circles, skip ports)
-    _render_stations(d, graph, theme, station_offsets, positive_fan)
+    _render_stations(d, graph, theme, station_offsets, positive_fan, inactive_line_ids)
 
     # Draw labels
-    _render_labels(d, labels, theme)
+    _render_labels(d, labels, theme, graph, inactive_line_ids)
 
     # Annotative intra-section group captions.
     if group_bands:
@@ -2694,6 +2803,7 @@ def _emit_render_plan(
             theme,
             legend_x,
             legend_y,
+            inactive_line_ids=inactive_line_ids,
             logo_path=effective_logo if (_in_legend and not adaptive_logo) else None,
             logo_path_light=(
                 resolved_logo_light if (adaptive_logo and _in_legend) else None
@@ -2797,8 +2907,8 @@ def _legend_overlaps_headers(
     A wrapped (multi-line) header can extend below its own section's box
     (``below`` mode) or above it (``above``/``nudge``), reaching outside the
     section bbox that :func:`_legend_overlaps_sections` checks.  A single-line
-    header is excluded: its own overhang is a separate, pre-existing
-    condition unrelated to wrapping (see :func:`_compute_canvas_bounds`).
+    header is excluded to match :func:`_compute_canvas_bounds`, which sizes the
+    canvas around wrapped headers alone.
     """
     for placement in header_placements.values():
         if len(placement.label_lines) <= 1:
@@ -2960,8 +3070,7 @@ def _render_adaptive_logo(
     color-scheme from the host document so logos follow a page's dark/light
     toggle, not only the OS media preference.
     """
-    key_path = dark_path or light_path
-    dark_mask_id, light_mask_id = _adaptive_logo_mask_ids(key_path)
+    dark_mask_id, light_mask_id = _adaptive_logo_mask_ids()
     defs_parts = []
     if dark_path:
         defs_parts.append(
@@ -3002,7 +3111,17 @@ def _render_adaptive_logo(
         )
 
 
-def _inject_chrome_css(d: draw.Drawing, theme: Theme) -> None:
+_MUTED_CLASS = "nf-metro-muted"
+"""Class marking an element greyed because every line touching it is inactive."""
+
+
+def _maybe_muted_class(name: str, muted: bool) -> str:
+    """Return *name*'s class attribute, carrying the muted marker when *muted*."""
+    cls = _ns(name)
+    return f"{cls} {_ns(_MUTED_CLASS)}" if muted else cls
+
+
+def _inject_chrome_css(d: draw.Drawing, theme: Theme, any_inactive: bool) -> None:
     """Inject CSS custom properties for chrome colors.
 
     Defines ``--nfm-map-*`` properties on the chrome element classes so a host
@@ -3013,6 +3132,9 @@ def _inject_chrome_css(d: draw.Drawing, theme: Theme) -> None:
     has no light/dark family), so the map follows the viewer's ``color-scheme``
     with no host intervention.  Line/route colors carry semantic meaning and
     remain as baked presentation attributes.
+
+    ``any_inactive`` adds the muted-state rules; a map with no inactive line
+    has nothing for them to match, so it ships without them.
     """
     from nf_metro.themes import mode_pair
 
@@ -3020,13 +3142,16 @@ def _inject_chrome_css(d: draw.Drawing, theme: Theme) -> None:
     light, dark = pair if pair is not None else (theme, theme)
 
     def _adapt(light_val: str, dark_val: str) -> str:
-        return light_val if light is dark else f"light-dark({light_val}, {dark_val})"
+        if light_val == dark_val:
+            return light_val
+        return f"light-dark({light_val}, {dark_val})"
 
     def _prop(var: str, attr: str) -> str:
         return f"var({var}, {_adapt(getattr(light, attr), getattr(dark, attr))})"
 
-    def _rule(cls: str, props: str) -> str:
-        return f".{_ns(cls)} {{ {props}; }}"
+    def _rule(cls: str, props: str, *also: str) -> str:
+        selector = "".join(f".{_ns(c)}" for c in (cls, *also))
+        return f"{selector} {{ {props}; }}"
 
     section_label = "--nfm-map-section-label-color"
     lines: list[str] = []
@@ -3087,6 +3212,16 @@ def _inject_chrome_css(d: draw.Drawing, theme: Theme) -> None:
         lines.append(
             _rule("nf-metro-label-halo", f"fill: {halo_val}; stroke: {halo_val}")
         )
+    # A muted element carries its grey as a presentation attribute, which any
+    # author rule outranks, so the full-strength rules above would repaint it.
+    # Each muted state therefore needs a selector that outranks its own plain
+    # rule, and its own property so a host can recolor the two states apart.
+    if any_inactive:
+        muted_val = _prop("--nfm-map-muted-color", "muted_line_color")
+        lines += [
+            _rule("nf-metro-station-label", f"fill: {muted_val}", _MUTED_CLASS),
+            _rule("nf-metro-marker-stroke", f"stroke: {muted_val}", _MUTED_CLASS),
+        ]
     d.append(draw.Raw(f"<style>{chr(10).join(lines)}</style>"))
 
 
@@ -3260,6 +3395,8 @@ def _render_edges(
     bridge_breaks: tuple[tuple[BridgeBreak, ...], ...],
     theme: Theme,
     curve_radius: float = SVG_CURVE_RADIUS,
+    *,
+    inactive_line_ids: frozenset[str] = frozenset(),
 ) -> None:
     """Render metro line edges with smooth curves at direction changes."""
 
@@ -3269,7 +3406,7 @@ def _render_edges(
         pts = list(pts)
         route_radii = None if route_radii is None else list(route_radii)
         line = graph.lines.get(route.line_id)
-        color = line.color if line else FALLBACK_LINE_COLOR
+        color = effective_line_color(line, theme, inactive_line_ids)
         style_kw = line_style_kwargs(line.style) if line else {}
         class_name = _ns(f"metro-line-{route.line_id}")
 
@@ -3336,6 +3473,7 @@ def _render_directional_markers(
     routes: list[RoutedPath],
     station_offsets: dict[tuple[str, str], float],
     theme: Theme,
+    inactive_line_ids: frozenset[str] = frozenset(),
 ) -> None:
     """Draw static chevrons along each route, pointing source to target.
 
@@ -3356,8 +3494,8 @@ def _render_directional_markers(
         if len(pts) < 2:
             continue
         line = graph.lines.get(route.line_id)
-        color = theme.directional_marker_color or (
-            line.color if line else FALLBACK_LINE_COLOR
+        color = effective_line_color(
+            line, theme, inactive_line_ids, theme.directional_marker_color
         )
         class_name = _ns(f"metro-direction-{route.line_id}")
         for point, heading in _chevron_samples(pts, spacing, min_length):
@@ -3622,10 +3760,13 @@ def _append_terminus_icons(
     r: float,
     min_off: float,
     max_off: float,
+    muted: bool,
 ) -> None:
     """Render a station's terminus icons into their own data-tagged group."""
     icon_group = draw.Group(**{"data-station-id": station.id})
-    _render_terminus_icons(icon_group, station, graph, theme, r, min_off, max_off)
+    _render_terminus_icons(
+        icon_group, station, graph, theme, r, min_off, max_off, muted
+    )
     d.append(icon_group)
 
 
@@ -3639,6 +3780,7 @@ def _render_marker_station(
     max_off: float,
     is_tb_vert: bool,
     station_data: dict[str, str],
+    muted: bool,
 ) -> None:
     """Draw a shape/fill marker glyph over the station's line bundle.
 
@@ -3654,7 +3796,8 @@ def _render_marker_station(
     rx = marker_corner_radius(marker.shape, r)
     marker_data = {
         **station_data,
-        "class_": f"{station_data['class_']} {_ns('nf-metro-marker-stroke')}",
+        "class_": f"{station_data['class_']} "
+        f"{_maybe_muted_class('nf-metro-marker-stroke', muted)}",
     }
     d.append(
         draw.Rectangle(
@@ -3702,6 +3845,21 @@ def _rail_marker_fill(marker: MarkerStyle | None, theme: Theme) -> str | None:
     if marker is None or marker.fill in (MARKER_FILL_OPEN, MARKER_FILL_SOLID):
         return None
     return marker_fill_color(marker.fill, theme)
+
+
+def _interchange_interior_fill(
+    fill_override: str | None, theme: Theme, muted: bool
+) -> str:
+    """Interior fill for an interchange glyph's link bar and knob cores.
+
+    An untinted interchange keeps the background ``station_fill`` (muted or not,
+    fills carry background rather than line identity). A marker tint is a line
+    identity, so when the station is muted it greys with the rest of the map,
+    overriding the marker-fill exemption; otherwise it keeps the declared tint.
+    """
+    if fill_override is None:
+        return theme.station_fill
+    return theme.muted_line_color if muted else fill_override
 
 
 def _draw_interchange_glyph(
@@ -3784,7 +3942,11 @@ def _draw_interchange_glyph(
             "data-station-id": data_station_id,
         },
     )
-    _link_bar(bar_half * 2, interior_fill)
+    _link_bar(
+        bar_half * 2,
+        interior_fill,
+        **{**station_data, "class_": _ns("nf-metro-rail-connector-interior")},
+    )
     _knobs(
         knob_r,
         interior_fill,
@@ -3799,15 +3961,18 @@ def _render_rail_pill(
     theme: Theme,
     r: float,
     fill_override: str | None = None,
+    muted: bool = False,
 ) -> None:
     """Render a rail-mode multi-rail station as the metro interchange glyph.
 
     ``fill_override`` tints the interior (link bar + knobs) with a marker fill
     colour while keeping the interchange shape, so a spanning rail station can
     carry its ``%%metro marker:`` colour; a tinted interchange takes the light
-    marker outline so the fill reads against the dark background.
+    marker outline so the fill reads against the dark background. When ``muted``
+    the marker tint greys to ``muted_line_color`` so the interior recedes with
+    the rest of the muted map rather than keeping its full-strength colour.
     """
-    interior_fill = fill_override if fill_override is not None else theme.station_fill
+    interior_fill = _interchange_interior_fill(fill_override, theme, muted)
     outline = (
         marker_stroke_color(theme)
         if fill_override is not None
@@ -3838,6 +4003,7 @@ def _render_interchange(
     theme: Theme,
     station_offsets: dict[tuple[str, str], float] | None,
     r: float,
+    muted: bool = False,
 ) -> None:
     """Draw a cross-track interchange as one glyph across its member stations.
 
@@ -3865,9 +4031,7 @@ def _render_interchange(
         knobs,
         theme,
         r,
-        interior_fill=fill_override
-        if fill_override is not None
-        else theme.station_fill,
+        interior_fill=_interchange_interior_fill(fill_override, theme, muted),
         outline=(
             marker_stroke_color(theme)
             if fill_override is not None
@@ -3952,12 +4116,38 @@ def _station_group_attrs(
     }
 
 
+def _muted_line_theme(theme: FrozenRecord) -> FrozenRecord:
+    """Return *theme* with every line-identity stroke/text set to the muted grey.
+
+    Station stroke, marker outline, terminus icon stroke, and label/terminus
+    text resolve to ``muted_line_color`` so a station touched only by inactive
+    lines reads as greyed; fills are deliberately untouched (they carry
+    background, not line identity).
+
+    A render plan carries its theme as a :class:`FrozenRecord`, which cannot be
+    :func:`dataclasses.replace`-d, so rebuild the record with the muted fields.
+    """
+    muted = theme.muted_line_color
+    overrides: dict[str, Any] = {
+        "station_stroke": muted,
+        "marker_stroke": muted,
+        "terminus_stroke": muted,
+        "terminus_font_color": muted,
+        "label_color": muted,
+    }
+    entries = tuple(
+        (key, overrides.get(key, value)) for key, value in theme.values.entries
+    )
+    return FrozenRecord(kind=theme.kind, values=FrozenMap(entries))
+
+
 def _render_stations(
     d: draw.Drawing,
     graph: MetroGraph,
-    theme: Theme,
+    theme: FrozenRecord,
     station_offsets: dict[tuple[str, str], float] | None = None,
     positive_fan: set[str] | None = None,
+    inactive_line_ids: frozenset[str] = frozenset(),
 ) -> None:
     """Render stations as pill shapes.
 
@@ -3973,21 +4163,25 @@ def _render_stations(
     """
     if positive_fan is None:
         positive_fan = tb_positive_fan_sections(graph)
+    theme_view = cast(Theme, theme)
+    muted_theme = cast(Theme, _muted_line_theme(theme))
     for station in graph.stations.values():
         if station.is_port or station.is_hidden:
             continue
+        muted = station_is_muted(graph, station.id, inactive_line_ids)
+        station_theme = muted_theme if muted else theme_view
         if graph.embed_manifest:
             attrs = _station_group_attrs(
-                graph, theme, station, station_offsets, positive_fan
+                graph, theme_view, station, station_offsets, positive_fan
             )
             g = draw.Group(**attrs)
             _render_station_into(
-                g, graph, theme, station, station_offsets, positive_fan
+                g, graph, station_theme, station, station_offsets, positive_fan, muted
             )
             d.append(g)
         else:
             _render_station_into(
-                d, graph, theme, station, station_offsets, positive_fan
+                d, graph, station_theme, station, station_offsets, positive_fan, muted
             )
 
 
@@ -3998,6 +4192,7 @@ def _render_station_into(
     station: Station,
     station_offsets: dict[tuple[str, str], float] | None,
     positive_fan: set[str],
+    muted: bool,
 ) -> None:
     """Draw one station's glyph and terminus icons into a container.
 
@@ -4018,7 +4213,7 @@ def _render_station_into(
                 None,
             )
             if ic is not None and ic.member_ids:
-                _render_interchange(d, graph, ic, theme, station_offsets, r)
+                _render_interchange(d, graph, ic, theme, station_offsets, r, muted)
         return
 
     # Rail mode: a blank terminus terminates its converged bundle exactly
@@ -4039,7 +4234,7 @@ def _render_station_into(
         _draw_blank_terminus_nub(
             d, station, r, t_min, t_max, _station_data_attrs(graph, station), theme
         )
-        _append_terminus_icons(d, station, graph, theme, r, t_min, t_max)
+        _append_terminus_icons(d, station, graph, theme, r, t_min, t_max, muted)
         return
 
     # Rail mode: a multi-rail station draws as a spanning interchange; a
@@ -4058,7 +4253,13 @@ def _render_station_into(
         return
     if station.rail_top_y is not None and station.rail_bottom_y is not None:
         _render_rail_pill(
-            d, graph, station, theme, r, _rail_marker_fill(station.marker, theme)
+            d,
+            graph,
+            station,
+            theme,
+            r,
+            _rail_marker_fill(station.marker, theme),
+            muted,
         )
         return
 
@@ -4099,9 +4300,10 @@ def _render_station_into(
             max_off,
             is_tb_vert,
             station_data,
+            muted,
         )
         if station.is_terminus:
-            _append_terminus_icons(d, station, graph, theme, r, min_off, max_off)
+            _append_terminus_icons(d, station, graph, theme, r, min_off, max_off, muted)
         return
 
     x, y, w, h = _pill_box(station, r, min_off, max_off, is_tb_vert)
@@ -4128,7 +4330,7 @@ def _render_station_into(
         )
 
     if station.is_terminus:
-        _append_terminus_icons(d, station, graph, theme, r, min_off, max_off)
+        _append_terminus_icons(d, station, graph, theme, r, min_off, max_off, muted)
 
 
 def caption_aware_icon_step(
@@ -4210,20 +4412,17 @@ def _terminus_icon_centers_for(
     if not station.is_terminus or not station.terminus_labels:
         return []
 
-    section = graph.sections.get(station.section_id) if station.section_id else None
-    is_source = not graph.edges_to(station.id)
-    section_dir = section.direction if section else "LR"
-    is_vertical_flow = lanes_run_along_x(section_dir)
+    ctx = _terminus_flow_context(station, graph)
 
     r = theme.station_radius
     icon_gap = r + ICON_STATION_GAP
     icon_half_w = theme.terminus_width / 2
     icon_half_h = theme.terminus_height / 2
-    icon_half_flow = icon_half_h if is_vertical_flow else icon_half_w
+    icon_half_flow = icon_half_h if ctx.is_vertical_flow else icon_half_w
 
     bundle_center = (min_off + max_off) / 2
 
-    icon_step, _ = _terminus_icon_marching(theme, station, is_vertical_flow)
+    icon_step, _ = _terminus_icon_marching(theme, station, ctx.is_vertical_flow)
 
     is_rail = graph.station_is_rail(station.id)
     offtrack_nub_lift = (
@@ -4234,8 +4433,8 @@ def _terminus_icon_centers_for(
 
     return _terminus_icon_centers(
         station,
-        section_dir,
-        is_source,
+        ctx.section_dir,
+        ctx.is_source,
         len(station.terminus_labels),
         icon_gap + icon_half_flow + offtrack_nub_lift,
         icon_step,
@@ -4253,6 +4452,16 @@ def _terminus_icon_flow_sign(section_dir: str, is_source: bool) -> float:
     """
     extends_forward = is_source if section_dir in ("RL", "BT") else not is_source
     return 1.0 if extends_forward else -1.0
+
+
+def _terminus_caption_hangs_down(is_vertical_flow: bool, flow_sign: float) -> bool:
+    """Whether a terminus caption hangs below its icon rather than above.
+
+    Vertical-flow sources and flow-reversed sinks draw the icon above the
+    station, so the caption hangs above it too; every other flow hangs it
+    below.
+    """
+    return not is_vertical_flow or flow_sign > 0
 
 
 def _terminus_icon_centers(
@@ -4300,6 +4509,7 @@ def _render_terminus_icons(
     r: float,
     min_off: float,
     max_off: float,
+    muted: bool,
 ) -> None:
     """Render file icon(s) adjacent to a terminus station.
 
@@ -4307,13 +4517,8 @@ def _render_terminus_icons(
     axis (a horizontal row for LR/RL, a vertical stack for TB/BT), with
     the first icon closest to the station pill.
     """
-    section: Section | None = (
-        graph.sections.get(station.section_id) if station.section_id else None
-    )
-    section_dir = section.direction if section else "LR"
-    is_vertical_flow = lanes_run_along_x(section_dir)
-    is_source = not graph.edges_to(station.id)
-    flow_sign = _terminus_icon_flow_sign(section_dir, is_source)
+    ctx = _terminus_flow_context(station, graph)
+    section = ctx.section
     icon_half_w = theme.terminus_width / 2
     icon_half_h = theme.terminus_height / 2
 
@@ -4324,7 +4529,9 @@ def _render_terminus_icons(
     banners = station.terminus_icon_banners or [False] * len(station.terminus_labels)
 
     caption_font_size = theme.label_font_size * ICON_NAME_FONT_SCALE
-    icon_step, name_widths = _terminus_icon_marching(theme, station, is_vertical_flow)
+    icon_step, name_widths = _terminus_icon_marching(
+        theme, station, ctx.is_vertical_flow
+    )
 
     centers = _terminus_icon_centers_for(station, graph, theme, min_off, max_off)
 
@@ -4349,11 +4556,11 @@ def _render_terminus_icons(
 
         # Clamp to stay within the section bbox, on whichever axis the
         # icons march along.
-        if section and is_vertical_flow and section.bbox_h > 0:
+        if section and ctx.is_vertical_flow and section.bbox_h > 0:
             top = section.bbox_y + icon_half_h + ICON_BBOX_MARGIN
             bottom = section.bbox_y + section.bbox_h - icon_half_h - ICON_BBOX_MARGIN
             icon_cy = max(top, min(icon_cy, bottom))
-        elif section and not is_vertical_flow and section.bbox_w > 0:
+        elif section and not ctx.is_vertical_flow and section.bbox_w > 0:
             icon_right = (
                 section.bbox_x + section.bbox_w - icon_half_w - ICON_BBOX_MARGIN
             )
@@ -4373,15 +4580,20 @@ def _render_terminus_icons(
             corner_radius=theme.terminus_corner_radius,
             label=label,
             font_size=theme.terminus_font_size,
-            font_color=TERMINUS_FONT_COLOR,
+            font_color=theme.terminus_font_color or TERMINUS_FONT_COLOR,
             font_family=theme.label_font_family,
+        )
+
+        banner_fill = theme.muted_line_color if muted else ICON_BANNER_FILL
+        banner_text_color = (
+            ICON_BANNER_TEXT_COLOR_MUTED if muted else ICON_BANNER_TEXT_COLOR
         )
 
         if icon_type == ICON_TYPE_DIR:
             render_folder_icon(d, **common)
         elif icon_type == ICON_TYPE_FILES:
             back_dx_sign, back_dy_sign = (
-                (1.0, flow_sign) if is_vertical_flow else (flow_sign, -1.0)
+                (1.0, ctx.flow_sign) if ctx.is_vertical_flow else (ctx.flow_sign, -1.0)
             )
             render_files_icon(
                 d,
@@ -4390,22 +4602,50 @@ def _render_terminus_icons(
                 banner=banner,
                 back_dx_sign=back_dx_sign,
                 back_dy_sign=back_dy_sign,
+                banner_fill=banner_fill,
+                banner_text_color=banner_text_color,
             )
         else:
             render_file_icon(
-                d, **common, fold_size=theme.terminus_fold_size, banner=banner
+                d,
+                **common,
+                fold_size=theme.terminus_fold_size,
+                banner=banner,
+                banner_fill=banner_fill,
+                banner_text_color=banner_text_color,
             )
 
-        # Optional caption rendered below the icon so the type chip
+        # Optional caption rendered clear of the icon so the type chip
         # inside the icon stays readable.
         if name:
-            caption_y = icon_cy + theme.terminus_height / 2 + ICON_NAME_GAP
+            caption_hangs_down = _terminus_caption_hangs_down(
+                ctx.is_vertical_flow, ctx.flow_sign
+            )
+            # A stacked-files icon's back sheet peeks past the nominal edge
+            # along the flow axis -- toward the caption for a vertical flow, but
+            # off-axis (away from it) for a horizontal flow -- so only a
+            # vertical flow needs the extra clearance to keep the caption off
+            # the drawn icon.
+            stacked_pad = _terminus_stacked_pad(
+                theme, ctx.is_vertical_flow and icon_type == ICON_TYPE_FILES
+            )
+            icon_edge_gap = theme.terminus_height / 2 + stacked_pad + ICON_NAME_GAP
+            stagger_step = caption_font_size * 1.4
             # When adjacent icon captions would overlap horizontally
             # (their estimated width exceeds the per-icon X step), drop
-            # odd-indexed captions to a second row so each name is
-            # legible.
-            if stagger_captions and i % 2 == 1:
-                caption_y += caption_font_size * 1.4
+            # odd-indexed captions to a further row so each name is legible.
+            staggered = stagger_captions and i % 2 == 1
+            if caption_hangs_down:
+                caption_y = icon_cy + icon_edge_gap
+                if staggered:
+                    caption_y += stagger_step
+            else:
+                # The hanging baseline anchors the text's top edge, so drop
+                # the caption height to seat the whole glyph box above the icon.
+                caption_height = (name.count("\n") + 1) * caption_font_size
+                caption_y = icon_cy - icon_edge_gap - caption_height
+                if staggered:
+                    caption_y -= stagger_step
             caption_cx = icon_cx
             if section and section.bbox_w > 0:
                 # Estimate caption width and clamp so it stays inside the
@@ -4428,7 +4668,7 @@ def _render_terminus_icons(
                     font_weight=theme.label_font_weight,
                     text_anchor="middle",
                     dominant_baseline="hanging",
-                    class_=_ns("nf-metro-station-label"),
+                    class_=_maybe_muted_class("nf-metro-station-label", muted),
                 )
             )
 
@@ -4454,6 +4694,8 @@ def _render_labels(
     d: draw.Drawing,
     labels: list[LabelPlacement],
     theme: Theme,
+    graph: MetroGraph,
+    inactive_line_ids: frozenset[str] = frozenset(),
 ) -> None:
     """Render station name labels."""
     halo_color = _label_halo_color(theme)
@@ -4463,7 +4705,7 @@ def _render_labels(
         / theme.label_font_size
     )
 
-    def emit(text: str, x: float, y: float, **style: object) -> None:
+    def emit(text: str, x: float, y: float, fill: str, **style: object) -> None:
         # The halo is a stroked copy drawn underneath the glyph fill. A second
         # paint pass (rather than paint-order on a single element) keeps the
         # knockout correct in renderers that ignore the paint-order property.
@@ -4492,7 +4734,7 @@ def _render_labels(
                 theme.label_font_size,
                 x,
                 y,
-                fill=theme.label_color,
+                fill=fill,
                 font_family=theme.label_font_family,
                 font_weight=theme.label_font_weight,
                 line_height=line_height_ratio,
@@ -4519,11 +4761,17 @@ def _render_labels(
                 # Keep the bottom line near the station
                 y -= (n_lines - 1) * line_spacing
 
+        muted = bool(label.station_id) and station_is_muted(
+            graph, label.station_id, inactive_line_ids
+        )
+
         # Skip emitting data-station-id for synthetic obstacle placements.
         label_data: dict[str, str] = {}
         if label.station_id and not label.station_id.startswith("__"):
             label_data["data-station-id"] = label.station_id
-            label_data["class_"] = _ns("nf-metro-station-label")
+            label_data["class_"] = _maybe_muted_class("nf-metro-station-label", muted)
+
+        label_fill = theme.muted_line_color if muted else theme.label_color
 
         if label.angle:
             # Diagonal labels: anchor at the pill and rotate about
@@ -4533,6 +4781,7 @@ def _render_labels(
                 text,
                 label.x,
                 label.y,
+                fill=label_fill,
                 text_anchor=label.text_anchor or "start",
                 dominant_baseline="auto",
                 transform=f"rotate({label.angle},{label.x},{label.y})",
@@ -4543,6 +4792,7 @@ def _render_labels(
                 text,
                 label.x,
                 y,
+                fill=label_fill,
                 text_anchor=label.text_anchor,
                 dominant_baseline=label.dominant_baseline,
             )
@@ -4552,6 +4802,7 @@ def _render_labels(
                 text,
                 label.x,
                 y,
+                fill=label_fill,
                 text_anchor="middle",
                 dominant_baseline=baseline,
             )

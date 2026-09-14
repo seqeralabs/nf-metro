@@ -31,7 +31,12 @@ from pathlib import Path
 import pytest
 
 from nf_metro.layout.engine import compute_layout
+from nf_metro.layout.phases.guards import (
+    PhaseInvariantError,
+    _guard_fork_join_hub_centreline_agree,
+)
 from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.model import MetroGraph
 
 
 def _bare_fan(n: int) -> str:
@@ -118,6 +123,100 @@ def test_ported_fan_centreline_reaches_ports_and_trunk(n: int) -> None:
         if abs(graph.stations[sid].y - centre) > 1.0
     }
     assert not off, f"off the hub centreline y={centre}: {off}"
+
+
+def _two_overlapping_fans() -> str:
+    return """%%metro title: overlapping fans
+%%metro diamond_style: symmetric
+%%metro line: x | X | #24b064
+graph LR
+    subgraph s [S]
+        wide[Wide fork]
+        narrow[Narrow fork]
+        a[A]
+        b[B]
+        c[C]
+        j[Join]
+        wide -->|x| a
+        wide -->|x| b
+        wide -->|x| c
+        narrow -->|x| a
+        narrow -->|x| b
+        a -->|x| j
+        b -->|x| j
+        c -->|x| j
+    end
+"""
+
+
+def _seat_diamond_hub_off_centre(
+    graph: MetroGraph,
+    hub_id: str,
+    branch_ids: tuple[str, str, str] = ("a", "b", "c"),
+    join_id: str = "j",
+) -> None:
+    """Seat the three branches at 0/40/80 with the join on their 40 midpoint and
+    ``hub_id`` a full 10px off it.
+
+    This is the exact eligibility the guard screens for - a divergence anchor
+    sitting strictly between evenly-spaced branches whose set matches the join's
+    sources - with the hub deliberately off the centreline so the guard reports
+    it unless the pair is exempt.
+    """
+    for sid, y in zip(branch_ids, (0.0, 40.0, 80.0), strict=True):
+        graph.stations[sid].y = y
+    graph.stations[join_id].y = 40.0
+    graph.stations[hub_id].y = 30.0
+
+
+def test_two_overlapping_fans_do_not_trip_centreline_guard() -> None:
+    """A join shared by two overlapping fans is not one diamond (issue #1874).
+
+    ``wide`` reaches every branch and ``narrow`` reaches a subset, so their
+    target and source sets coincide with the join without ``wide`` being the
+    sole apex: ``a`` and ``b`` carry ``narrow`` as a second fork.  The guard
+    must not demand ``wide`` sit on the shared join's centreline, because
+    ``wide`` is legitimately seated by the fan that actually owns it.
+    """
+    graph = parse_metro_mermaid(_two_overlapping_fans())
+    compute_layout(graph, validate=False)
+    _seat_diamond_hub_off_centre(graph, "wide")
+    _guard_fork_join_hub_centreline_agree(graph, "test")
+
+
+def test_centreline_guard_flags_broken_single_fork_diamond() -> None:
+    """The exemption is narrow: a genuine single-fork diamond whose fork hub
+    sits off the join centreline is still reported (issue #1595).
+
+    Every branch here has ``hub`` as its only fork, so the pair is a real
+    diamond; moving the hub off the join midpoint must still raise.
+    """
+    graph = parse_metro_mermaid(_bare_fan(3))
+    compute_layout(graph, validate=False)
+    _seat_diamond_hub_off_centre(graph, "hub", branch_ids=("b0", "b1", "b2"))
+    with pytest.raises(PhaseInvariantError, match="disagree on centreline"):
+        _guard_fork_join_hub_centreline_agree(graph, "test")
+
+
+def test_centreline_guard_defers_transient_disagreement_until_final() -> None:
+    """A hub caught mid-descent during a deferred pass is not reported; the same
+    disagreement at the final checkpoint is (issue #1874).
+
+    The pre-bypass and geometric-bypass passes settle a diamond's hubs onto
+    their shared centreline only by the closing stages, so a checkpoint reached
+    with ``_defer_final_guards`` set may see a transient disagreement that the
+    final geometry resolves.  The guard raises only once the geometry is settled.
+    """
+    graph = parse_metro_mermaid(_bare_fan(3))
+    compute_layout(graph, validate=False)
+    _seat_diamond_hub_off_centre(graph, "hub", branch_ids=("b0", "b1", "b2"))
+
+    graph._defer_final_guards = True
+    _guard_fork_join_hub_centreline_agree(graph, "test")
+
+    graph._defer_final_guards = False
+    with pytest.raises(PhaseInvariantError, match="disagree on centreline"):
+        _guard_fork_join_hub_centreline_agree(graph, "test")
 
 
 _RAIL_FAN = (

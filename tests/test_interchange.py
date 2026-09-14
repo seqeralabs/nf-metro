@@ -6,6 +6,7 @@ layout engine keeps each line straight, and the renderer joins the members into
 a single connector glyph instead of pinching the lines to a point.
 """
 
+import warnings
 from pathlib import Path
 
 import pytest
@@ -232,6 +233,41 @@ def test_directive_bundles_multiple_lines_on_one_rail():
     # One knob per (member, line) pair, so all three lines are knobbed.
     svg = render_svg(g, THEMES["nfcore"])
     assert svg.count('class="nf-metro-rail-knob"') >= 3
+
+
+def test_rail_naming_a_line_the_node_does_not_carry_is_tolerated():
+    """A rail may name a line that exists but never touches the node, so one
+    directive can serve a family of maps: that rail drops out and the rails
+    carrying a live line still expand."""
+    src = (
+        "%%metro line: a | A | #d62728\n"
+        "%%metro line: b | B | #2db572\n"
+        "%%metro line: c | C | #0570b0\n"
+        "%%metro interchange: dedup | a | b | c\n"
+        "graph LR\n"
+        "    subgraph s [S]\n"
+        "        a_in[ ]\n        b_in[ ]\n"
+        "        dedup[Dedup]\n"
+        "        a_out[ ]\n        b_out[ ]\n"
+        "        c_in[ ] -->|c| c_out[ ]\n"
+        "        a_in -->|a| dedup\n        b_in -->|b| dedup\n"
+        "        dedup -->|a| a_out\n        dedup -->|b| b_out\n"
+        "    end\n"
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        g = parse_metro_mermaid(src)
+    ic = next(i for i in g.interchanges if i.node_id == "dedup")
+    assert ic.member_ids == ["dedup", "dedup__rail1"]
+
+
+def test_directive_naming_an_undeclared_node_warns():
+    src = _THREE.format(directive="%%metro interchange: ghost | a | b\n")
+    with pytest.warns(
+        UserWarning, match=r"%%metro interchange: unknown station id 'ghost'"
+    ):
+        g = parse_metro_mermaid(src)
+    assert not next(c for c in g.interchanges if c.node_id == "ghost").member_ids
 
 
 def test_directive_skipped_when_under_two_live_rails():

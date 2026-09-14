@@ -6,6 +6,7 @@ for layout defects. Also includes topology-specific assertions.
 
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -30,9 +31,11 @@ from layout_validator import (
 
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.geometry import perpendicular_port_sides
+from nf_metro.layout.phases._common import _is_fan_branch_leaf
 from nf_metro.layout.routing.common import row_bottom_edge
 from nf_metro.layout.routing.context import _resolve_section_row
 from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.model import PortSide
 
 EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
 TOPOLOGIES_DIR = EXAMPLES_DIR / "topologies"
@@ -52,6 +55,7 @@ def _load_and_layout(path: Path, max_station_columns: int = 15):
     """Parse a .mmd file and run layout."""
     text = path.read_text()
     graph = parse_metro_mermaid(text, max_station_columns=max_station_columns)
+    graph.source_dir = str(path.parent)
     compute_layout(graph)
     return graph
 
@@ -66,11 +70,6 @@ def _compute_routes(graph):
 
 # --- Parametrized validation across all topologies ---
 
-
-_ALMOST_HORIZONTAL_XFAILS = {
-    "funcprofiler_upstream": "known almost-horizontal humann3 junction edge",
-    "bypass_fan_in_outer_slot": "meth slope 0.075 in minimum-width column gap",
-}
 
 _ERROR_VALIDATORS = (
     check_section_overlap,
@@ -97,12 +96,11 @@ def test_topology_validation(path: Path) -> None:
             for violation in validator(graph)
             if violation.severity == Severity.ERROR
         )
-    if path.stem not in _ALMOST_HORIZONTAL_XFAILS:
-        problems.extend(
-            f"{check_almost_horizontal_edges.__name__}: {violation.message}"
-            for violation in check_almost_horizontal_edges(graph)
-            if violation.severity == Severity.WARNING
-        )
+    problems.extend(
+        f"{check_almost_horizontal_edges.__name__}: {violation.message}"
+        for violation in check_almost_horizontal_edges(graph)
+        if violation.severity == Severity.WARNING
+    )
     problems.extend(
         f"station {sid!r} remains at the origin"
         for sid, station in graph.stations.items()
@@ -113,18 +111,6 @@ def test_topology_validation(path: Path) -> None:
         and station.y == 0
     )
     assert not problems, "\n".join(problems)
-
-
-@pytest.mark.parametrize(
-    ("stem", "reason"),
-    [
-        pytest.param(stem, reason, id=stem)
-        for stem, reason in _ALMOST_HORIZONTAL_XFAILS.items()
-    ],
-)
-def test_no_almost_horizontal_edges_known_defects(stem: str, reason: str) -> None:
-    """Document fixtures excluded from the almost-horizontal corpus check."""
-    pytest.xfail(f"{stem}: {reason}")
 
 
 # --- Serpentine stacked-section invariant (issue #421) ---
@@ -167,41 +153,6 @@ def test_stacked_sections_serpentine_no_backtrack(path):
     assert not errors, "\n".join(v.message for v in errors)
 
 
-# --- Layout-quality warning reporter ---
-#
-# The intra-section-chain and exit-port-feeder validators emit WARNING-level
-# violations because legitimate fork-join layouts also produce them. Tests
-# above gate CI on ERRORs only. This block prints the warning count per
-# fixture so CI logs surface candidates for layout improvement without
-# failing the build.
-
-
-def _layout_quality_warning_count(graph) -> tuple[int, int, int]:
-    chain = check_intra_section_chain_alignment(graph)
-    port = check_exit_port_feeder_alignment(graph)
-    diag = check_single_segment_diagonals(graph)
-    return (
-        sum(1 for v in chain if v.severity == Severity.WARNING),
-        sum(1 for v in port if v.severity == Severity.WARNING),
-        sum(1 for v in diag if v.severity == Severity.WARNING),
-    )
-
-
-@pytest.mark.parametrize("path", TOPOLOGY_FILES, ids=TOPOLOGY_IDS)
-def test_layout_quality_warnings_report(path, capsys):
-    """Report warning counts for each topology - never fails."""
-    graph = _load_and_layout(path)
-    chain_warns, port_warns, diag_warns = _layout_quality_warning_count(graph)
-    if chain_warns or port_warns or diag_warns:
-        with capsys.disabled():
-            print(
-                f"\n  {path.stem}: "
-                f"intra_section_chain_alignment={chain_warns}, "
-                f"exit_port_feeder_alignment={port_warns}, "
-                f"single_segment_diagonals={diag_warns}"
-            )
-
-
 # --- Regression guard: funcprofiler_upstream reporting line ---
 #
 # funcprofiler_upstream is a real upstream pipeline (11 lines, 7 parallel
@@ -214,9 +165,6 @@ def test_layout_quality_warnings_report(path, capsys):
 FUNCPROFILER_FIXTURE = TOPOLOGIES_DIR / "funcprofiler_upstream.mmd"
 
 
-@pytest.mark.skipif(
-    not FUNCPROFILER_FIXTURE.exists(), reason="funcprofiler_upstream fixture absent"
-)
 class TestFuncprofilerUpstreamReportingLine:
     """The reporting line rides the trunk through funcprofiler_upstream."""
 
@@ -248,10 +196,6 @@ class TestFuncprofilerUpstreamReportingLine:
 EXIT_RUN_THREE_DROP_FIXTURE = TOPOLOGIES_DIR / "exit_run_three_drop_columns.mmd"
 
 
-@pytest.mark.skipif(
-    not EXIT_RUN_THREE_DROP_FIXTURE.exists(),
-    reason="exit_run_three_drop_columns fixture absent",
-)
 class TestExitRunThreeDropColumnsMergeFeeder:
     """The adjacent merge feeder keeps its lane instead of sloping onto the trunk."""
 
@@ -271,41 +215,35 @@ class TestExitRunThreeDropColumnsMergeFeeder:
         assert not violations, "\n".join(v.message for v in violations)
 
 
-# --- Failing regression: variant_calling ---
+# --- variant_calling layout guards ---
 #
-# variant_calling.mmd had three confirmed visible defects (verified
-# manually with the user as part of validator development):
+# variant_calling.mmd pins three layout properties confirmed by eye with the
+# user during validator development:
 #
-# 1. Section 2 (Alignment) chain alignment - bwa_index, bwa_mem,
-#    samtools_sort, samtools_index alternated rows in a 4-station zigzag
-#    on the Main line. FIXED in #420: bwa_mem is a fan-in (the bwa_index
-#    branch plus the fastp entry both carry Main into it), so the entry
-#    phantom now anchors the through-trunk while bwa_index fans in above
+# 1. Section 2 (Alignment) chain alignment - bwa_mem is a fan-in (the
+#    bwa_index branch and the fastp entry both carry Main into it), so the
+#    entry phantom anchors the through-trunk while bwa_index fans in above
 #    it, keeping bwa_mem -> samtools_sort -> samtools_index straight.
-# 2. Section 3 (Variant Calling) excessive column gap - GATK
-#    HaplotypeCaller and DeepVariant share column x=772 but are 80px
-#    apart with one empty grid row between them. STILL OPEN (#453).
-# 3. Section 1 -> Section 2/4 inter-section line crossing - Main and
-#    QC Reporting both fanned out from junction __junction_6 and crossed
-#    on the way to their respective targets. FIXED as a side effect of
-#    #420 (the straight Alignment trunk removes the crossing).
-#
-# Defects 1 and 3 now pass; defect 2 remains xfail until the column-gap
-# layout is fixed.
+# 2. Section 3 (Variant Calling) column gaps - GATK HaplotypeCaller and
+#    DeepVariant share column x=772 but sit 80px apart with one empty grid
+#    row between them.  A live defect, held below as a strict xfail.
+# 3. Section 1 -> Section 2/4 inter-section crossings - Main and QC
+#    Reporting both fan out from junction __junction_6, and the straight
+#    Alignment trunk keeps them from crossing en route to their targets.
 
 VARIANT_CALLING_FILE = EXAMPLES_DIR / "variant_calling.mmd"
 
 
 _VARIANT_CALLING_XFAIL = pytest.mark.xfail(
     strict=True,
-    reason="known variant_calling layout defect; tracked in #453",
+    reason="known variant_calling layout defect; tracked in #1863",
 )
 
 
 class TestVariantCallingDefects:
     """Lock in known variant_calling layout defects via strict xfail.
 
-    Each remaining defect is currently present; when an engine fix lands
+    Each defect held here is currently present; when an engine fix lands
     the matching xfail flips to XPASS and reds CI, prompting the marker
     removal.
     """
@@ -1302,3 +1240,282 @@ def test_fan_bypass_no_fan_weave():
     graph = _load_and_layout(FAN_BYPASS_NESTING_FILE)
     weaves = _bypass_fan_weaves(graph)
     assert not weaves, "\n".join(weaves)
+
+
+# --- #1844: a row-mate carrying part of the row trunk stays on it ---
+
+ROW_TRUNK_PARTIAL_FILE = TOPOLOGIES_DIR / "row_trunk_partial_through_line.mmd"
+RIBOSEQ_CORRIDOR_FILE = (
+    Path(__file__).parent
+    / "fixtures"
+    / "curve_invariant_repros"
+    / "riboseq_inter_row_corridor.mmd"
+)
+
+_PARTIAL_TRUNK_FIXTURES = [
+    pytest.param(ROW_TRUNK_PARTIAL_FILE, id="row_trunk_partial_through_line"),
+    pytest.param(RIBOSEQ_CORRIDOR_FILE, id="riboseq_inter_row_corridor"),
+]
+
+
+def _modal_station_y(graph, section_id: str) -> float:
+    """The Y that most of a section's own on-trunk stations sit on."""
+    ys = [
+        graph.stations[sid].y
+        for sid in graph.sections[section_id].station_ids
+        if not graph.stations[sid].is_port and not graph.stations[sid].off_track
+    ]
+    return Counter(round(y, 1) for y in ys).most_common(1)[0][0]
+
+
+def _sole_lr_port_y(graph, section_id: str, side: PortSide) -> float:
+    """The Y of the section's only port on *side*."""
+    ys = {
+        round(port.y, 1)
+        for pid in graph.sections[section_id].port_ids
+        if (port := graph.ports.get(pid)) is not None and port.side is side
+    }
+    assert len(ys) == 1, f"{section_id} has {len(ys)} {side.name} ports, expected 1"
+    return ys.pop()
+
+
+def _lane_step(graph, section_id: str) -> float:
+    """The vertical pitch between adjacent lanes inside a section."""
+    ys = sorted(
+        {
+            round(graph.stations[sid].y, 1)
+            for sid in graph.sections[section_id].station_ids
+        }
+    )
+    return min(b - a for a, b in zip(ys, ys[1:]) if b > a)
+
+
+class TestRowTrunkPartialThroughLine:
+    """A row-mate fed by part of the row trunk keeps its interior on that trunk.
+
+    ``novel_transcripts`` is entered by a single line that the same junction
+    also fans into another grid row, so it carries only a subset of the lines
+    crossing its row.  The trunk still arrives at its boundary, so its interior
+    belongs on the row's trunk Y rather than centred in its own shorter box,
+    and its off-track output rides one lane above rather than being paid for by
+    dropping the trunk.
+    """
+
+    @pytest.mark.parametrize("path", _PARTIAL_TRUNK_FIXTURES)
+    def test_trunk_runs_unbroken_into_the_partial_row_mate(self, path):
+        graph = _load_and_layout(path)
+        chain = {
+            "alignment trunk": _modal_station_y(graph, "alignment"),
+            "alignment exit port": _sole_lr_port_y(graph, "alignment", PortSide.RIGHT),
+            "discovery entry port": _sole_lr_port_y(
+                graph, "novel_transcripts", PortSide.LEFT
+            ),
+            "discovery trunk": _modal_station_y(graph, "novel_transcripts"),
+        }
+        assert len(set(chain.values())) == 1, (
+            "the row trunk steps between alignment and novel_transcripts: "
+            + ", ".join(f"{name}={y}" for name, y in chain.items())
+        )
+
+    def test_off_track_output_rides_one_lane_above_the_trunk(self):
+        graph = _load_and_layout(ROW_TRUNK_PARTIAL_FILE)
+        trunk_y = _modal_station_y(graph, "novel_transcripts")
+        gtf_out = graph.stations["gtf_out"]
+        assert gtf_out.off_track
+        assert trunk_y - gtf_out.y == pytest.approx(_lane_step(graph, "alignment"))
+
+    def test_partial_row_mate_is_not_a_fan_branch_leaf(self):
+        graph = _load_and_layout(ROW_TRUNK_PARTIAL_FILE)
+        assert not _is_fan_branch_leaf(
+            graph, graph.sections["novel_transcripts"], full_carrier=False
+        )
+
+
+# --- #2001: a dead-end off-track tail peels below the exit trunk ---
+
+TAIL_PEEL_FILE = TOPOLOGIES_DIR / "tail_peel_at_through_station.mmd"
+
+
+def _point_to_segment_distance(p, a, b) -> float:
+    """Shortest distance from point *p* to the segment *a*-*b*."""
+    px, py = p
+    ax, ay = a
+    bx, by = b
+    dx, dy = bx - ax, by - ay
+    seg_len_sq = dx * dx + dy * dy
+    if seg_len_sq == 0:
+        return ((px - ax) ** 2 + (py - ay) ** 2) ** 0.5
+    t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / seg_len_sq))
+    cx, cy = ax + t * dx, ay + t * dy
+    return ((px - cx) ** 2 + (py - cy) ** 2) ** 0.5
+
+
+class TestTailPeelAtThroughStation:
+    """A through-station's dead-end output tail peels off the exit trunk (#2001).
+
+    ``dedup`` fans to the section's exit port (continuing to ``quant``) and to
+    ``genomecov``, whose only path sinks into the off-track ``cov_out`` file.
+    ``genomecov`` reaches no exit, so it must not inherit ``dedup``'s trunk row;
+    otherwise the ``dedup`` -> exit through-route runs flat across the
+    ``genomecov`` marker and the map reads as if the tail feeds ``quant``.
+    """
+
+    @pytest.fixture
+    def graph(self):
+        return _load_and_layout(TAIL_PEEL_FILE)
+
+    def test_dead_end_tail_peels_below_the_trunk(self, graph):
+        dedup = graph.stations["dedup"]
+        genomecov = graph.stations["genomecov"]
+        cov_out = graph.stations["cov_out"]
+        assert genomecov.y > dedup.y + 1.0, (
+            f"genomecov (y={genomecov.y:.1f}) should peel below dedup "
+            f"(y={dedup.y:.1f}), not inherit the exit trunk"
+        )
+        assert cov_out.y > dedup.y + 1.0, (
+            f"cov_out (y={cov_out.y:.1f}) should ride below the trunk with its "
+            f"producer, not be lifted above it (dedup y={dedup.y:.1f})"
+        )
+        lane = _lane_step(graph, "align")
+        assert abs(cov_out.y - genomecov.y) <= lane + 1.0, (
+            f"cov_out (y={cov_out.y:.1f}) should sit with genomecov "
+            f"(y={genomecov.y:.1f}), no re-lift S-bend"
+        )
+
+    def test_exit_route_runs_clear_of_the_tail_marker(self, graph):
+        genomecov = graph.stations["genomecov"]
+        exit_ports = set(graph.sections["align"].exit_ports)
+        routes = _compute_routes(graph)
+        through = [
+            r
+            for r in routes
+            if r.edge.source == "dedup" and r.edge.target in exit_ports
+        ]
+        assert through, "expected a routed dedup -> exit-port through-run"
+        for r in through:
+            for a, b in zip(r.points, r.points[1:]):
+                dist = _point_to_segment_distance((genomecov.x, genomecov.y), a, b)
+                assert dist > 6.0, (
+                    f"through-route {r.edge.source}->{r.edge.target} passes "
+                    f"{dist:.1f}px from the genomecov marker "
+                    f"({genomecov.x:.1f},{genomecov.y:.1f})"
+                )
+
+
+# --- #2001: a divergent-line dead-end tail also peels below the exit trunk ---
+
+ROWMATE_TOP_ALIGN_FILE = TOPOLOGIES_DIR / "rowmate_tb_side_entry_top_align.mmd"
+
+
+class TestDivergentTailPeelBelowExitTrunk:
+    """A dead-end tail carrying fewer lines than its carrier peels below (#2001).
+
+    In ``genome_align`` the aligner-QC dead end ``summarized_exp_ga ->
+    multiqc_bowtie2 -> report_bowtie2`` rides the ``bowtie2_salmon`` line, a
+    strict subset of its carrier's bundle, while the exit lines leave from
+    ``summarized_exp_ga``. The tail must hang below the exit lane rather than
+    stay level on it, so the exit run does not cross the MultiQC marker.
+    """
+
+    @pytest.fixture
+    def graph(self):
+        return _load_and_layout(ROWMATE_TOP_ALIGN_FILE)
+
+    def test_multiqc_dead_end_hangs_below_the_exit_lane(self, graph):
+        trunk = graph.stations["summarized_exp_ga"]
+        multiqc = graph.stations["multiqc_bowtie2"]
+        report = graph.stations["report_bowtie2"]
+        assert multiqc.y > trunk.y + 1.0, (
+            f"multiqc_bowtie2 (y={multiqc.y:.1f}) should hang below the exit "
+            f"lane (summarized_exp_ga y={trunk.y:.1f}), not stay level on it"
+        )
+        assert report.y > trunk.y + 1.0, (
+            f"report_bowtie2 (y={report.y:.1f}) should follow multiqc_bowtie2 "
+            f"below the exit lane (summarized_exp_ga y={trunk.y:.1f})"
+        )
+
+
+class TestSymmetricFanEntryOnCentroid:
+    """A junction-fed symmetric multi-arm fork seats its entry on the fan
+    centroid (#2001).
+
+    ``genome_align`` is entered through a fan junction and forks
+    ``star``/``bowtie2_align``/``hisat2_align`` with no single through-trunk
+    (STAR and HISAT2 both reach an exit). Under ``diamond_style: symmetric`` the
+    entry port must sit at the centroid of the forked arms, so the inter-section
+    line crosses straight into it and the fan spreads symmetrically, rather than
+    pinning to the first arm and doglegging at the boundary.
+    """
+
+    @pytest.mark.parametrize("center_ports", [False, True])
+    def test_entry_seats_on_fan_centroid_for_straight_crossing(self, center_ports):
+        text = ROWMATE_TOP_ALIGN_FILE.read_text()
+        graph = parse_metro_mermaid(text)
+        graph.source_dir = str(ROWMATE_TOP_ALIGN_FILE.parent)
+        graph.center_ports = center_ports
+        compute_layout(graph)
+
+        pid = "genome_align__entry_left_2"
+        port = graph.stations[pid]
+        arm_ys = {
+            e.target: graph.station_for_edge_target(e).y
+            for e in graph.edges_from(pid)
+            if not graph.station_for_edge_target(e).is_port
+            and graph.station_for_edge_target(e).section_id == "genome_align"
+        }
+        assert len(arm_ys) >= 2, "expected a multi-arm entry fan to exercise this"
+        centroid = sum(arm_ys.values()) / len(arm_ys)
+
+        incoming = {graph.stations[e.source].y for e in graph.edges_to(pid)}
+        assert len(incoming) == 1, "entry port fed from a single junction Y"
+        incoming_y = incoming.pop()
+
+        assert abs(port.y - centroid) < 1.0, (
+            f"entry port y={port.y:.1f} should sit on the fan centroid "
+            f"{centroid:.1f} (arms {arm_ys}), not pin to one arm"
+        )
+        assert abs(port.y - incoming_y) < 1.0, (
+            f"entry port y={port.y:.1f} should meet the incoming line "
+            f"y={incoming_y:.1f} straight, no boundary dogleg"
+        )
+
+
+# --- #2001: an off-trunk carrier's dead-end tail stays flat, not peeled ---
+
+RNASEQ_SECTIONS_MANUAL_FILE = EXAMPLES_DIR / "rnaseq_sections_manual.mmd"
+
+
+class TestOffTrunkCarrierTailStaysFlat:
+    """A dead-end tail is peeled below only when its carrier is on the trunk.
+
+    In ``rnaseq_sections`` (and its manual-grid twin) ``genome_align``'s
+    ``salmon_quant`` is a below-trunk fork whose ``star_salmon`` continuation
+    rises back to the trunk, so no same-row exit route runs flat past
+    ``multiqc_bowtie2``. Peeling the tail there would drop it into the
+    ``hisat2`` relay chain and cross the ``bowtie2_salmon`` and ``hisat2``
+    routes; it must stay flat on its carrier's row.
+    """
+
+    @pytest.mark.parametrize(
+        "path", [RNASEQ_FILE, RNASEQ_SECTIONS_MANUAL_FILE], ids=lambda p: p.stem
+    )
+    def test_offtrunk_carrier_tail_not_peeled(self, path):
+        graph = _load_and_layout(path)
+        carrier = graph.stations["salmon_quant"]
+        tail = graph.stations["multiqc_bowtie2"]
+        assert abs(tail.y - carrier.y) < 1.0, (
+            f"multiqc_bowtie2 (y={tail.y:.1f}) should stay flat on its "
+            f"off-trunk carrier salmon_quant (y={carrier.y:.1f}), not peel "
+            f"down into the hisat2 relay chain"
+        )
+
+    def test_no_bowtie2_hisat2_route_crossing(self):
+        graph = _load_and_layout(RNASEQ_FILE)
+        crossings = check_route_segment_crossings(graph)
+        pair = {"bowtie2_salmon", "hisat2"}
+        offenders = [
+            v.message
+            for v in crossings
+            if {v.context["line_a"], v.context["line_b"]} == pair
+        ]
+        assert not offenders, "\n".join(offenders)

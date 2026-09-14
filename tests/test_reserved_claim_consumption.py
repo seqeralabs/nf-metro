@@ -45,26 +45,38 @@ def _corpus() -> list[Path]:
 
 _CORPUS = _corpus()
 
-# Fixtures that never reach a route plan at all: fixtures under `invalid/`
-# and `nextflow/` are exercised by their own tests for the error they raise,
-# and the frozen determinism/topology fixtures abort on a routing invariant
-# tracked by other tests. None of them can be held to a claim-consumption
-# bound, so their failure to render is not itself a finding here.
+# Fixtures that never reach a route plan at all, so none of them can be held to
+# a claim-consumption bound. Their failure to render is not itself a finding
+# here, but only the first three groups are meant to stay that way: an entry
+# that is a defect rather than a category carries the issue tracking it, so the
+# allow-list cannot quietly absorb a new one.
 KNOWN_NOT_RENDERING = frozenset(
     {
+        # Frozen fuzz seeds: tests/test_hash_seed_determinism.py holds each one
+        # to its exact set of defect classes and to a hash of the exception it
+        # raises, so the abort is pinned there rather than unexamined.
         "tests/fixtures/hash_seed_determinism/seed_15.mmd",
         "tests/fixtures/hash_seed_determinism/seed_41.mmd",
         "tests/fixtures/hash_seed_determinism/seed_77.mmd",
+        # Deliberately invalid authoring, exercised by their own tests for the
+        # authoring error each one raises.
         "tests/fixtures/invalid/backward_feed_rl.mmd",
         "tests/fixtures/invalid/merge_trunk_rightward_source.mmd",
         "tests/fixtures/invalid/mixed_entry_opposing.mmd",
         "tests/fixtures/invalid/mixed_entry_perpendicular.mmd",
+        # Raw Nextflow DAG output, which needs convert_nextflow_dag before it
+        # is a metro source at all.
         "tests/fixtures/nextflow/duplicate_processes.mmd",
+        "tests/fixtures/nextflow/feedback_loop.mmd",
+        "tests/fixtures/nextflow/feedback_self_loop.mmd",
         "tests/fixtures/nextflow/flat_pipeline.mmd",
         "tests/fixtures/nextflow/unquoted_labels.mmd",
         "tests/fixtures/nextflow/variant_calling.mmd",
         "tests/fixtures/nextflow/with_subworkflows.mmd",
-        "tests/fixtures/topologies/twoline_fanout_up.mmd",
+        # A fan-overlay curve defect, not a category: the band-hop drop-at-junction
+        # seam this fixture pins for #1808 aborts downstream on the unrelated
+        # fan-overlay curve invariant (#1806/#1809).
+        "tests/fixtures/curve_invariant_repros/riboseq_band_hop_zero_length_seam.mmd",
     }
 )
 

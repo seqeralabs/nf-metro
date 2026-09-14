@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Iterator
 from typing import Literal
 
 from nf_metro.options import (
@@ -20,9 +20,15 @@ from nf_metro.options import (
     coerce,
     is_line_order,
 )
-from nf_metro.parser.grammar import _normalize_multiline_text, _split_csv, _unquote
+from nf_metro.parser.grammar import (
+    _IDENTIFIER_CHARSET,
+    _normalize_multiline_text,
+    _split_csv,
+    _unquote,
+)
 from nf_metro.parser.model import (
     FLOW_DIRECTIONS,
+    LINE_INACTIVE_KEYWORD,
     MARKER_FILL_OPEN,
     MARKER_FILL_SOLID,
     MARKER_SHAPE_CIRCLE,
@@ -64,6 +70,13 @@ def _dir_title(value: str, graph: MetroGraph) -> None:
 
 
 def _dir_style(value: str, graph: MetroGraph) -> None:
+    # Imported here because the theme registry reaches the render package,
+    # which imports the parser back.
+    from nf_metro.themes import STYLE_NAMES
+
+    if value.strip().lower() not in STYLE_NAMES:
+        _warn_malformed("style", value, "/".join(sorted(STYLE_NAMES)))
+        return
     graph.style = value
 
 
@@ -85,7 +98,11 @@ def _dir_logo(value: str, graph: MetroGraph) -> None:
 
 
 def _dir_off_track(value: str, graph: MetroGraph) -> None:
-    graph._pending_off_track.extend(_split_csv(value))
+    station_ids = _split_csv(value)
+    if not station_ids:
+        _warn_malformed("off_track", value, "'station1[, station2, ...]'")
+        return
+    graph._pending_off_track.extend(station_ids)
 
 
 def _dir_process(value: str, graph: MetroGraph) -> None:
@@ -111,11 +128,73 @@ def _dir_process(value: str, graph: MetroGraph) -> None:
     graph._pending_process.append((station_id, pattern))
 
 
+_COLOR_FUNCTION = re.compile(r"[A-Za-z-]+\(.*\)\Z")
+_COLOR_KEYWORDS = frozenset({"currentcolor", "transparent", "none"})
+
+_LINE_ID_PATTERN = re.compile(_IDENTIFIER_CHARSET)
+"""Built from the same charset as the ``NAME`` grammar token for node/section
+ids (:data:`nf_metro.parser.grammar._IDENTIFIER_CHARSET`).
+
+A declared line id lands in SVG ``class=``/``data-*`` attributes verbatim, so
+constraining it here (rather than escaping at every emission site) rules out
+attribute-injection through this vector entirely.
+"""
+
+
+def _is_color(value: str) -> bool:
+    """True when *value* is a colour an SVG stroke can resolve.
+
+    Any functional notation and the three CSS keywords are accepted on shape
+    alone, so a colour syntax this check does not model (``var()``,
+    ``light-dark()``, ``oklch()``) is never called wrong; hex forms and named
+    colours are resolved by Pillow. A caller warns on a False and keeps the
+    value, since being unmodelled is not the same as being invalid.
+    """
+    text = value.strip()
+    if text.lower() in _COLOR_KEYWORDS or _COLOR_FUNCTION.match(text):
+        return True
+    # Deferred so a parse-only command (``validate``, ``info``) loads Pillow
+    # only for a map that reaches this branch.
+    from PIL import ImageColor
+
+    try:
+        ImageColor.getrgb(text)
+    except ValueError:
+        return False
+    return True
+
+
 def _dir_line(value: str, graph: MetroGraph) -> None:
     parts = _split_fields(value)
-    if len(parts) < 3:
-        _warn_malformed("line", value, "'id | name | #color' [| style]")
+    line_id = parts[0]
+    if len(parts) < 3 or not all(parts[:3]):
+        _warn_malformed(
+            "line",
+            value,
+            f"'id | name | #color' [| style [| {LINE_INACTIVE_KEYWORD}]]",
+        )
         return
+    if not _LINE_ID_PATTERN.fullmatch(line_id):
+        _warn_directive(
+            "line",
+            f"id {line_id!r} is invalid; ignoring the declaration. Line ids "
+            "must match [a-zA-Z_][a-zA-Z0-9_]* (the same charset as node and "
+            "section ids), since they land in SVG class/data-* attributes "
+            "verbatim",
+        )
+        return
+    if line_id in graph.lines:
+        _warn_directive(
+            "line",
+            f"{line_id!r} is already declared; ignoring the redeclaration",
+        )
+        return
+    if not _is_color(parts[2]):
+        _warn_directive(
+            "line",
+            f"{line_id!r} colour {parts[2]!r} is not a recognised colour; "
+            "expected a hex value like '#4caf50'",
+        )
     style = "solid"
     if len(parts) >= 4 and parts[3]:
         raw_style = parts[3].lower()
@@ -123,12 +202,20 @@ def _dir_line(value: str, graph: MetroGraph) -> None:
             style = raw_style
         else:
             _warn_malformed("line style", parts[3], "/".join(VALID_LINE_STYLES))
+    default_inactive = False
+    if len(parts) >= 5 and parts[4]:
+        raw_state = parts[4].lower()
+        if raw_state == LINE_INACTIVE_KEYWORD:
+            default_inactive = True
+        else:
+            _warn_malformed("line state", parts[4], LINE_INACTIVE_KEYWORD)
     graph.add_line(
         MetroLine(
-            id=parts[0],
+            id=line_id,
             display_name=parts[1],
             color=parts[2],
             style=style,
+            default_inactive=default_inactive,
         )
     )
 
@@ -146,6 +233,9 @@ def _parse_icon_directive(icon_type: str, value: str, graph: MetroGraph) -> None
         return
     station_id = parts[0]
     labels = [_normalize_multiline_text(label) for label in _split_csv(parts[1])]
+    if not labels:
+        _warn_malformed(icon_type, value, "'station_id | labels [| name [| options]]'")
+        return
     name = _normalize_multiline_text(parts[2]) if len(parts) >= 3 else ""
     options = {o.lower() for o in _split_csv(parts[3])} if len(parts) >= 4 else set()
     banner = "banner" in options
@@ -367,11 +457,9 @@ def _parse_interchange_directive(value: str, graph: MetroGraph) -> None:
 def _parse_legend_combo_directive(value: str, graph: MetroGraph) -> None:
     """Parse %%metro legend_combo: lineA, lineB[, ...] | Display Label.
 
-    Stores a (line_ids, label) entry on ``graph.legend_combos``. The named
-    lines are rendered as a single combined legend row and (in rail mode)
-    share a single rail slot. A combo referencing unknown lines is warned
-    about and ignored; unknown members of an otherwise-valid combo are
-    dropped (with a warning) and the remaining members kept.
+    The named lines render as a single combined legend row and (in rail mode)
+    share a single rail slot. Only the payload's shape is checked here; the
+    member line ids are resolved by :func:`_resolve_legend_combos`.
     """
     parts = value.split("|", 1)
     if len(parts) != 2:
@@ -381,28 +469,20 @@ def _parse_legend_combo_directive(value: str, graph: MetroGraph) -> None:
         )
         return
     ids_raw, label = parts[0], parts[1].strip()
-    line_ids = _split_csv(ids_raw)
+    named = _split_csv(ids_raw)
+    line_ids = list(dict.fromkeys(named))
+    if len(line_ids) < len(named):
+        _warn_directive(
+            "legend_combo",
+            f"{value!r} names a line more than once; keeping one of each",
+        )
     if len(line_ids) < 2 or not label:
         _warn_directive(
             "legend_combo",
             f"invalid {value!r}; expected at least two line IDs and a non-empty label",
         )
         return
-    known = [lid for lid in line_ids if lid in graph.lines]
-    unknown = [lid for lid in line_ids if lid not in graph.lines]
-    if unknown:
-        _warn_directive(
-            "legend_combo",
-            f"{label!r} references unknown line(s) "
-            f"{', '.join(unknown)}; ignoring those",
-        )
-    if len(known) < 2:
-        _warn_directive(
-            "legend_combo",
-            f"{label!r} has fewer than two known lines; ignoring",
-        )
-        return
-    graph.legend_combos.append((tuple(known), label))
+    graph._pending_legend_combos.append((line_ids, label))
 
 
 def _parse_marker_style(key: str, spec: str) -> MarkerStyle | None:
@@ -433,6 +513,7 @@ def _parse_marker_directive(value: str, graph: MetroGraph) -> None:
     node_part, sep, style_part = value.partition("|")
     node_id = node_part.strip()
     if not node_id:
+        _warn_malformed("marker", value, "'node_id | shape, fill'")
         return
     style = _parse_marker_style("marker", style_part.strip() if sep else "")
     if style is not None:
@@ -441,16 +522,13 @@ def _parse_marker_directive(value: str, graph: MetroGraph) -> None:
 
 def _parse_marker_legend_directive(value: str, graph: MetroGraph) -> None:
     """Parse ``%%metro marker_legend: shape, fill | Caption``."""
-    style_part, sep, caption = value.partition("|")
-    if not sep:
-        _warn_directive(
-            "marker_legend",
-            "needs a caption: 'shape, fill | Caption'. Ignoring",
-        )
+    style_part, _, caption = value.partition("|")
+    caption = caption.strip()
+    if not caption:
+        _warn_malformed("marker_legend", value, "'shape, fill | Caption'")
         return
     style = _parse_marker_style("marker_legend", style_part.strip())
-    caption = caption.strip()
-    if style is not None and caption:
+    if style is not None:
         graph.marker_legend.append(MarkerLegendEntry(style=style, caption=caption))
 
 
@@ -463,7 +541,7 @@ def _parse_line_spread_directive(value: str, graph: MetroGraph) -> None:
     ``bundle`` / ``centered`` / ``rails``; an unrecognised mode is warned about
     and ignored.
     """
-    mode_raw, _, sids_raw = value.partition("|")
+    mode_raw, sep, sids_raw = value.partition("|")
     try:
         mode = LineSpread(mode_raw.strip().lower())
     except ValueError:
@@ -477,6 +555,8 @@ def _parse_line_spread_directive(value: str, graph: MetroGraph) -> None:
     if section_ids:
         for sid in section_ids:
             graph.line_spread_overrides[sid] = mode
+    elif sep:
+        _warn_malformed("line_spread", value, "'<mode> | section[, section...]'")
     else:
         graph.line_spread = mode
 
@@ -587,6 +667,84 @@ def _apply_directive(
         handler(value, graph)
     else:
         _warn_directive(key, "unknown directive; ignoring")
+
+
+IdKind = Literal["station", "section", "line"]
+
+
+def _directive_references(graph: MetroGraph) -> Iterator[tuple[str, IdKind, str]]:
+    """Yield ``(directive key, id kind, id)`` for every id a directive names.
+
+    Covers the directives whose payload points at something declared elsewhere
+    in the source. The ``interchange:`` node id is resolved by the expansion
+    that consumes it and the ``legend_combo:`` members by
+    :func:`_resolve_legend_combos`, both of which report their own unknowns.
+    """
+    for station_id in graph._pending_off_track:
+        yield "off_track", "station", station_id
+    for station_id in graph._pending_markers:
+        yield "marker", "station", station_id
+    for station_id, _pattern in graph._pending_process:
+        yield "process", "station", station_id
+    for station_id, entries in graph._pending_terminus.items():
+        for _label, icon_type, _name, _banner in entries:
+            yield icon_type, "station", station_id
+    for group in graph.groups:
+        for station_id in group.station_ids:
+            yield "group", "station", station_id
+    for section_id in graph.grid_overrides:
+        yield "grid", "section", section_id
+    for section_id in graph.line_spread_overrides:
+        yield "line_spread", "section", section_id
+    for interchange in graph.interchanges:
+        for rail in interchange.rails:
+            for line_id in rail:
+                yield "interchange", "line", line_id
+    for section in graph.sections.values():
+        hints = (("entry", section.entry_hints), ("exit", section.exit_hints))
+        for key, side_hints in hints:
+            for _side, line_ids in side_hints:
+                for line_id in line_ids:
+                    yield key, "line", line_id
+
+
+def _warn_unresolved_references(graph: MetroGraph) -> None:
+    """Warn about directives naming a station, section or line the map lacks.
+
+    Must run once the whole source has been applied, because a directive may
+    precede the node or subgraph it names.
+    """
+    known: dict[IdKind, Collection[str]] = {
+        "station": graph.stations.keys(),
+        "section": graph.sections.keys(),
+        "line": graph.lines.keys(),
+    }
+    for key, kind, ref_id in dict.fromkeys(_directive_references(graph)):
+        if ref_id not in known[kind]:
+            _warn_directive(key, f"unknown {kind} id {ref_id!r}; ignoring")
+
+
+def _resolve_legend_combos(graph: MetroGraph) -> None:
+    """Resolve buffered ``%%metro legend_combo:`` members into ``legend_combos``.
+
+    An unknown member is dropped with a warning and the rest kept; a combo left
+    with fewer than two known lines is dropped whole.
+    """
+    for line_ids, label in graph._pending_legend_combos:
+        known = [lid for lid in line_ids if lid in graph.lines]
+        if unknown := [lid for lid in line_ids if lid not in graph.lines]:
+            _warn_directive(
+                "legend_combo",
+                f"{label!r} references unknown line(s) "
+                f"{', '.join(unknown)}; ignoring those",
+            )
+        if len(known) < 2:
+            _warn_directive(
+                "legend_combo",
+                f"{label!r} has fewer than two known lines; ignoring",
+            )
+            continue
+        graph.legend_combos.append((tuple(known), label))
 
 
 def _deduplicate_section_number_overrides(graph: MetroGraph) -> None:

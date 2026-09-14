@@ -1,11 +1,11 @@
 """Invariants asserting non-consumer marker bypass across guide fixtures.
 
 Companion to ``test_layout_invariants.py``'s
-``test_lines_dont_cross_non_consumer_markers``, which only parametrizes
-over ``da_pipeline.mmd`` and ``rnaseq_sections.mmd``.  This file
-parametrizes the same invariant over the guide-family fixtures whose
-topology produces a non-consumer crossing that the differential-abundance
-trigger in ``_insert_bypass_stations`` historically did not catch.
+``test_lines_dont_cross_non_consumer_markers``.  That test asserts the
+invariant across the corpus; this file pins the guide-family fixtures whose
+topology produces the non-consumer crossing ``_insert_bypass_stations`` has
+to answer, and names the crossing each one carries, so a regression says
+which shape broke rather than only which fixture.
 
 The 5 fixtures are:
 

@@ -13,21 +13,15 @@ from typing import TYPE_CHECKING
 
 from nf_metro.render.style import Theme
 from nf_metro.themes.light import LIGHT_THEME
-from nf_metro.themes.nfcore import (
-    NFCORE_DARK_THEME,
-    NFCORE_LIGHT_THEME,
-    NFCORE_THEME,
-)
-from nf_metro.themes.seqera import (
-    SEQERA_DARK_THEME,
-    SEQERA_LIGHT_THEME,
-    SEQERA_THEME,
-)
+from nf_metro.themes.nfcore import NFCORE_DARK_THEME, NFCORE_LIGHT_THEME
+from nf_metro.themes.seqera import SEQERA_DARK_THEME, SEQERA_LIGHT_THEME
 
 if TYPE_CHECKING:
     from nf_metro.parser.model import MetroGraph
 
-# ``style: dark`` predates theme names; alias it onto the nfcore brand.
+# ``dark`` names a mode, not a brand, but it is both an accepted
+# ``%%metro style:`` value and ``MetroGraph.style``'s default, so every map
+# without a style directive arrives here; map it onto the nfcore brand.
 _STYLE_THEME_ALIASES = {"dark": "nfcore"}
 
 # Mode used when a single concrete palette must be baked and none was chosen
@@ -57,19 +51,33 @@ THEMES = {
 }
 
 
+# Accepted ``%%metro style:`` values.
+STYLE_NAMES = frozenset(THEMES) | frozenset(_STYLE_THEME_ALIASES)
+
+
+def resolve_style(style: str) -> str:
+    """Return the theme name a ``%%metro style:`` value selects.
+
+    Resolves the alias map and the fallback :func:`resolve_theme` applies to a
+    name no registered theme matches, so a caller can report the brand a map
+    will actually render with rather than the raw directive value.
+    """
+    name = style.strip().lower()
+    name = _STYLE_THEME_ALIASES.get(name, name)
+    return name if name in THEMES else "nfcore"
+
+
 def resolve_theme(
     theme: str | None, graph: MetroGraph, mode: str | None = None
 ) -> Theme:
     """Resolve a concrete theme from independent brand and mode axes.
 
-    Brand comes from the explicit ``theme`` name or the graph's style. Mode
-    comes from the explicit argument, the graph directive, or ``DEFAULT_MODE``.
+    Brand comes from the explicit ``theme`` name or the graph's style, and
+    both go through the same alias map, so a name works identically whichever
+    plane supplied it. Mode comes from the explicit argument, the graph
+    directive, or ``DEFAULT_MODE``.
     """
-    if theme is not None:
-        brand = theme
-    else:
-        name = graph.style.strip().lower()
-        brand = _STYLE_THEME_ALIASES.get(name, name)
+    brand = resolve_style(theme if theme is not None else graph.style)
 
     resolved_mode = (mode or graph.mode).strip().lower() or DEFAULT_MODE
     family = THEME_MODES.get(brand)
@@ -93,15 +101,15 @@ def mode_pair(theme: Theme) -> tuple[Theme, Theme] | None:
 
 __all__ = [
     "THEMES",
+    "STYLE_NAMES",
     "THEME_MODES",
     "DEFAULT_MODE",
+    "resolve_style",
     "resolve_theme",
     "mode_pair",
     "LIGHT_THEME",
-    "NFCORE_THEME",
-    "NFCORE_DARK_THEME",
     "NFCORE_LIGHT_THEME",
-    "SEQERA_THEME",
+    "NFCORE_DARK_THEME",
     "SEQERA_LIGHT_THEME",
     "SEQERA_DARK_THEME",
 ]

@@ -33,7 +33,7 @@ inputs:
     default: "true"
   version:
     description: >-
-      nf-metro version to install (e.g. 1.1.0). Leave empty to install the
+      nf-metro version to install (e.g. 2.0.0). Leave empty to install the
       version this action release was cut with, so `@X.Y.Z` installs
       nf-metro X.Y.Z for reproducible renders.
     required: false

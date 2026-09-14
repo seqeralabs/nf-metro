@@ -73,7 +73,11 @@ def _by_edge(routes: list[RoutedPath]) -> dict[tuple[str, str, str], RoutedPath]
 
 @pytest.mark.parametrize("fixture", _FIXTURES)
 def test_guard_and_render_routes_dispatch_identically(fixture: str) -> None:
-    graph = parse_and_layout((EXAMPLES / fixture).read_text(), validate=False)
+    graph = parse_and_layout(
+        (EXAMPLES / fixture).read_text(),
+        source_dir=str((EXAMPLES / fixture).parent),
+        validate=False,
+    )
 
     guard_routes = _by_edge(_ensure_routes(graph, None))
 

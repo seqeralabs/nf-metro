@@ -13,7 +13,7 @@ from nf_metro.layout.labels import find_label_overlaps, place_labels
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.render.svg import render_svg
-from nf_metro.themes.nfcore import NFCORE_THEME
+from nf_metro.themes import NFCORE_DARK_THEME
 
 _EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "diagonal_labels.mmd"
 
@@ -99,7 +99,7 @@ graph LR
         compute_layout(graph)
     assert graph.label_angle == 0.0
 
-    svg = render_svg(graph, NFCORE_THEME)
+    svg = render_svg(graph, NFCORE_DARK_THEME)
     assert "rotate(" not in svg
 
 
@@ -224,7 +224,7 @@ def test_feeder_exits_right_of_section_box_not_through_bottom():
     """
     graph = parse_metro_mermaid(_EXAMPLE.read_text())
     compute_layout(graph, validate=True)
-    svg = render_svg(graph, NFCORE_THEME)
+    svg = render_svg(graph, NFCORE_DARK_THEME)
 
     # Section 1 (Pre-processing) is the topmost wide section rect.  Exclude
     # the full-canvas background rect (anchored at the origin).

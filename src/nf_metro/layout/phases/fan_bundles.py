@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import math
-from collections import defaultdict
-from collections.abc import Iterator
+from collections import defaultdict, deque
+from collections.abc import Iterable, Iterator
 
 from nf_metro.layout.constants import (
     SAME_COORD_TOLERANCE,
@@ -31,7 +31,7 @@ from nf_metro.layout.phases.planned_fans import (
     planned_fan_layout_station_ids,
     planned_fan_port_ids,
 )
-from nf_metro.layout.phases.ports import _set_port_y
+from nf_metro.layout.phases.ports import _entry_fan_trunk_station, _set_port_y
 from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
 
 
@@ -107,6 +107,288 @@ def _convergence_source_ys(graph: MetroGraph) -> dict[str, list[str]]:
     return convergence
 
 
+def _trunkless_entry_fans(
+    graph: MetroGraph,
+) -> Iterator[tuple[str, Section, set[str]]]:
+    """Yield ``(port_id, section, direct_targets)`` for trunkless entry fans.
+
+    A qualifying entry port fans directly to three or more distinct in-section
+    targets and has no unique trunk arm (:func:`_entry_fan_trunk_station` is
+    ``None``).  A single-target port, or one whose targets carry a unique
+    trunk, has a 1:1 crossing to align against and no fan to centre, so it is
+    skipped.
+
+    A two-target fan is skipped too: it is a minimal diamond whose symmetric
+    layout the two-branch half-grid mechanism (``_section_symfan_uses_half_grid``)
+    already owns, and forcing its midpoint here pulls a branch that continues as
+    the section's on-grid inter-section trunk off that trunk.  The multi-target
+    spread this yields is the shape with no such canonical single-branch trunk.
+    """
+    for section in graph.sections.values():
+        for port_id in section.entry_ports:
+            if _entry_fan_trunk_station(graph, port_id, section) is not None:
+                continue
+            targets = {
+                st.id
+                for edge in graph.edges_from(port_id)
+                if not (st := graph.station_for_edge_target(edge)).is_port
+                and st.section_id == section.id
+            }
+            if len(targets) >= 3:
+                yield port_id, section, targets
+
+
+def _station_rooted_fans(
+    graph: MetroGraph,
+) -> Iterator[tuple[str, Section, set[str]]]:
+    """Yield ``(hub_id, section, direct_targets)`` for a station-rooted fan.
+
+    The internal-station analogue of :func:`_trunkless_entry_fans`: a non-port,
+    non-hidden station that fans directly to three or more distinct in-section
+    targets.  Its reconvergence join is found by
+    :func:`_fan_reconvergence_joins` exactly as an entry port's is, so a genuine
+    diverge-then-reconverge shape rooted at an internal station - not at a
+    section boundary port - is discovered too.  The three-target minimum matches
+    :func:`_trunkless_entry_fans` and rests on the same backing: a two-branch
+    fork, whichever kind of hub roots it, is compacted onto half-pitch offsets
+    by :func:`_recenter_full_bundle_columns`, so leaving it out here defers to
+    that mechanism rather than dropping it on the floor.  No trunk test is
+    applied: a hub arm that continued past the merge instead of reconverging
+    would leave the fan without a common join, which
+    :func:`_fan_reconvergence_joins` already rejects.
+    :func:`_symmetric_reconvergence_joins` keeps only the hidden-node joins
+    these fans reach; a visible internal join is left to the general placement
+    pipeline that already seats it.
+    """
+    for section in graph.sections.values():
+        for sid in section.station_ids:
+            if not _is_in_section_on_track(graph.stations.get(sid), section.id):
+                continue
+            targets = set(_in_section_ontrack_successors(graph, section, sid))
+            if len(targets) >= 3:
+                yield sid, section, targets
+
+
+def _symmetric_reconvergence_joins(graph: MetroGraph) -> dict[str, list[str]]:
+    """Return {join_id: [source_ids]} for a trunkless symmetric fan's reconvergence.
+
+    The join of a trunkless fan is the station where *every* arm reconverges -
+    reachable within the section from all of the fan's direct targets.  The
+    exact fork-hub/join-source-set detection in
+    :func:`_divergence_midpoint_targets` cannot see it because one arm reaches
+    it through an extra internal hop, so the fan's direct-target set never
+    equals the join's source set.  It is recorded here for
+    :func:`_restore_convergence_midpoints` to seat on the fan midpoint alongside
+    the ordinary convergences.  A local merge on only some of the arms is
+    deliberately excluded: it is not the whole fan's centreline and recentring
+    it perturbs the branches that do not pass through it.
+
+    An entry-port fan's join is seated whether it is visible or a hidden merge
+    node: the boundary crossing roots the fan off the section frame, not the
+    fan's own centreline, so nothing else places it.  A station-rooted fan
+    (:func:`_station_rooted_fans`) is only seated when its join is a hidden
+    merge node.  A visible internal join already sits on its midpoint by the
+    time the general placement pipeline settles, and re-seating it here from the
+    grid-snap's intermediate coordinates displaces it; a hidden node carries no
+    glyph and is skipped by every on-track placement mechanism, so it stays on
+    its raw topological row unless seated here.  The reconvergence traversal
+    keeps a hidden node in view to find it (see
+    :func:`_in_section_track_or_hidden_successors`).
+
+    Gated on ``graph.diamond_style == "symmetric"`` - the same author opt-in
+    that scopes every other centreline compaction in this module; an ungated
+    version would recentre unrelated joins across the corpus.  Line membership
+    is deliberately not part of the gate: the qualifying fans carry more than
+    one line, and a single-line gate would pass over them.
+    """
+    if graph.diamond_style != "symmetric":
+        return {}
+    joins: dict[str, list[str]] = {}
+    for _port_id, section, direct_targets in _trunkless_entry_fans(graph):
+        joins.update(_fan_reconvergence_joins(graph, section, direct_targets))
+    for _hub_id, section, direct_targets in _station_rooted_fans(graph):
+        joins.update(
+            _fan_reconvergence_joins(graph, section, direct_targets, hidden_only=True)
+        )
+    return joins
+
+
+def _fan_reconvergence_joins(
+    graph: MetroGraph,
+    section: Section,
+    direct_targets: set[str],
+    *,
+    hidden_only: bool = False,
+) -> dict[str, list[str]]:
+    """Return {join_id: [source_ids]} for one trunkless entry fan's reconvergence.
+
+    Shared by :func:`_symmetric_reconvergence_joins` (which seats the join on
+    the fan midpoint) and :func:`_entry_fan_centre_ports` (which only centres a
+    port whose fan reconverges on exactly one join).  Carries no
+    ``diamond_style`` gate: it is pure reconvergence detection, and each caller
+    applies its own opt-in.
+
+    ``hidden_only`` keeps only a join that is a hidden merge node; a
+    station-rooted fan passes it so a visible internal join, which the general
+    placement pipeline already seats, is left alone (see
+    :func:`_symmetric_reconvergence_joins`).
+    """
+    # Per-arm in-section descendant sets; their union bounds the fan and
+    # their intersection names the stations every arm reaches.  A genuine
+    # merge among those is one with two or more real predecessors - a
+    # position-independent test, unlike an off-track flag that only settles
+    # once the arms have been placed.  The fan's join is the terminal such
+    # merge (no further common merge downstream), so a parallel mid-fan
+    # branch flowing onward to the real join is not mistaken for it.
+    reach = {
+        tgt: _in_section_descendants(graph, tgt, section) for tgt in direct_targets
+    }
+    fan = set(direct_targets).union(*reach.values())
+    candidates = set.intersection(*reach.values())
+    preds_by_id = {cid: _nonport_real_predecessors(graph, cid) for cid in candidates}
+    common = {cid for cid in candidates if len(preds_by_id[cid]) >= 2}
+    joins: dict[str, list[str]] = {}
+    for cand in common:
+        if _in_section_descendants(graph, cand, section) & common:
+            continue
+        # An ancestor in ``common`` means the fan already fully reconverged
+        # upstream; this candidate is a later partial re-merge after the
+        # trunk re-diverged, not the fan's centreline.
+        if _in_section_ancestors(graph, cand, section) & common:
+            continue
+        if hidden_only and not graph.stations[cand].is_hidden:
+            continue
+        preds = preds_by_id[cand]
+        if cand not in preds and preds <= fan:
+            joins[cand] = sorted(preds)
+    return joins
+
+
+def _nonport_real_predecessors(graph: MetroGraph, node_id: str) -> set[str]:
+    """Real-station (non-port) predecessors of ``node_id``, seen through junctions.
+
+    Wraps :func:`_real_predecessors` for a single node and drops any port so the
+    count reflects merging branches rather than a boundary crossing.
+    """
+    return {
+        pred_id
+        for pred_id in _real_predecessors(graph, {node_id})
+        if (pred_st := graph.stations.get(pred_id)) is not None and not pred_st.is_port
+    }
+
+
+def _entry_fan_centre_ports(graph: MetroGraph) -> dict[str, list[str]]:
+    """Return {entry_port_id: [direct_target_ids]} for ``center_ports`` fan-in ports.
+
+    A section boundary entry port that fans directly to two or more distinct
+    internal targets with no unique trunk arm (:func:`_entry_fan_trunk_station`
+    is ``None``) has no 1:1 crossing for ``center_ports`` to align.  Recording it
+    here alongside the ordinary convergences seats it on the midpoint of the
+    targets it serves, through the same protect-and-restore the grid snap already
+    applies to a fan-in convergence.
+
+    Restricted to a fan that reconverges on exactly one in-section join
+    (:func:`_fan_reconvergence_joins`): only a genuine diverge-then-reconverge
+    shape has a single well-defined centreline to seat the port on.  A trunkless
+    fan whose arms never reconverge, or reconverge on several independent joins,
+    has no such centre, so centring its port would drag it off the row's shared
+    port lane for no geometric gain.
+
+    Gated on ``graph.center_ports``, the opt-in for boundary-port centring: a
+    map that only sets ``diamond_style`` keeps its entry ports where the
+    boundary seating put them.
+    """
+    if not graph.center_ports:
+        return {}
+    return {
+        port_id: sorted(direct_targets)
+        for port_id, section, direct_targets in _trunkless_entry_fans(graph)
+        if len(_fan_reconvergence_joins(graph, section, direct_targets)) == 1
+    }
+
+
+def _in_section_track_or_hidden_successors(
+    graph: MetroGraph, section: Section, sid: str
+) -> list[str]:
+    """Direct in-section successors of ``sid``, keeping hidden merge stations.
+
+    Like :func:`_in_section_ontrack_successors` but keeps a hidden station in
+    the result, so a fan that reconverges onto a ``_``-prefixed hidden merge
+    node (standing in for several converging arms, per the hidden-station
+    convention) is discovered.  Ports, off-track stations, and anything outside
+    ``section`` bound the walk.
+    """
+    return sorted(
+        {
+            e.target
+            for e in graph.edges_from(sid)
+            if _is_in_section_track_or_hidden(
+                graph.station_for_edge_target(e), section.id
+            )
+        }
+    )
+
+
+def _in_section_track_or_hidden_predecessors(
+    graph: MetroGraph, section: Section, sid: str
+) -> list[str]:
+    """Direct in-section predecessors of ``sid``, keeping hidden merge stations.
+
+    The reverse-direction twin of
+    :func:`_in_section_track_or_hidden_successors`.
+    """
+    return sorted(
+        {
+            e.source
+            for e in graph.edges_to(sid)
+            if _is_in_section_track_or_hidden(
+                graph.station_for_edge_source(e), section.id
+            )
+        }
+    )
+
+
+def _in_section_descendants(
+    graph: MetroGraph, start_id: str, section: Section
+) -> set[str]:
+    """In-section stations forward-reachable from ``start_id``.
+
+    ``start_id`` itself is excluded.  Traversal follows
+    :func:`_in_section_track_or_hidden_successors`, so ports, off-track
+    stations, and anything outside ``section`` bound the walk, while a hidden
+    merge node stays in it so a fan reconverging onto one is discovered.
+    """
+    seen: set[str] = set()
+    queue = deque([start_id])
+    while queue:
+        node = queue.popleft()
+        for succ in _in_section_track_or_hidden_successors(graph, section, node):
+            if succ not in seen:
+                seen.add(succ)
+                queue.append(succ)
+    return seen
+
+
+def _in_section_ancestors(
+    graph: MetroGraph, start_id: str, section: Section
+) -> set[str]:
+    """In-section stations backward-reachable from ``start_id``.
+
+    The reverse-direction twin of :func:`_in_section_descendants`, walking
+    :func:`_in_section_track_or_hidden_predecessors`; ``start_id`` itself is
+    excluded.
+    """
+    seen: set[str] = set()
+    queue = deque([start_id])
+    while queue:
+        node = queue.popleft()
+        for pred in _in_section_track_or_hidden_predecessors(graph, section, node):
+            if pred not in seen:
+                seen.add(pred)
+                queue.append(pred)
+    return seen
+
+
 def _divergence_target_successors(graph: MetroGraph) -> dict[str, list[str]]:
     """Return {hub_id: [target_station_ids]} for fan-out divergence anchors.
 
@@ -179,6 +461,25 @@ def _join_ids_by_branch_set(
     hub and reconverge on one join.
     """
     return {frozenset(srcs): join_id for join_id, srcs in convergence_sources.items()}
+
+
+def _branches_fork_only_from(
+    graph: MetroGraph, hub_id: str, branch_ids: Iterable[str]
+) -> bool:
+    """True when ``hub_id`` is the only non-port fork feeding every branch.
+
+    A fork whose target set equals a join's source set
+    (:func:`_join_ids_by_branch_set`) is one genuine diamond only when no branch
+    is also fed by a second fork.  Two overlapping fans can share a join - one
+    hub reaching every branch while another reaches a subset - so their target
+    and source sets coincide without either hub being the diamond's single apex.
+    Such a branch carries a non-port real-station predecessor besides ``hub_id``;
+    the shared join then has no single fork centreline to agree with.
+    """
+    return all(
+        _nonport_real_predecessors(graph, branch_id) <= {hub_id}
+        for branch_id in branch_ids
+    )
 
 
 def _evenly_spaced_ys(ys: list[float]) -> list[float] | None:
@@ -463,6 +764,21 @@ def _is_in_section_on_track(st: Station | None, section_id: str | None) -> bool:
     )
 
 
+def _is_in_section_track_or_hidden(st: Station | None, section_id: str | None) -> bool:
+    """True when ``st`` is an on-track or hidden member of ``section_id``.
+
+    A hidden merge node carries no glyph but is a real convergence point in the
+    topology, so reconvergence traversal counts it while the rest of the layout
+    (which keys off :func:`_is_in_section_on_track`) leaves it invisible.
+    """
+    return (
+        st is not None
+        and not st.is_port
+        and not st.off_track
+        and st.section_id == section_id
+    )
+
+
 def _symfan_branches_hub(
     graph: MetroGraph, section: Section
 ) -> tuple[list[Station], Station | None] | None:
@@ -704,9 +1020,61 @@ def _section_has_symmetric_entry_fork(graph: MetroGraph, section: Section) -> bo
             set(graph.station_lines(s)) >= trunk for s in sids
         ):
             continue
-        if not _branches_reconverge(graph, section, sids[0], sids[1]):
-            return True
+        if not _branches_share_fork_hub(graph, sids[0], sids[1]):
+            # Two column-mates fed by different stations (e.g. a producer's
+            # output file beside an unrelated one) are not a fork off a single
+            # hub, so the empty-trunk-row compaction has no hub centreline to
+            # mirror about.
+            continue
+        if _branches_reconverge(graph, section, sids[0], sids[1]):
+            continue
+        if _fork_hub_bypasses_trunk_to_exit(graph, section, sids[0], sids[1]):
+            continue
+        return True
     return False
+
+
+def _fork_hubs(graph: MetroGraph, a: str, b: str) -> set[str]:
+    """Direct predecessors shared by *a* and *b* - the fork hubs feeding both."""
+    return {e.source for e in graph.edges_to(a)} & {e.source for e in graph.edges_to(b)}
+
+
+def _branches_share_fork_hub(graph: MetroGraph, a: str, b: str) -> bool:
+    """True when *a* and *b* have a common direct predecessor - one fork hub."""
+    return bool(_fork_hubs(graph, a, b))
+
+
+def _fork_hub_bypasses_trunk_to_exit(
+    graph: MetroGraph, section: Section, a: str, b: str
+) -> bool:
+    """True when the branches' shared fork hub also runs a line straight down the
+    trunk row, past the branch column, to a boundary exit of the section.
+
+    The half-pitch compaction leaves the trunk row empty between the two branches
+    so the bubble is one grid unit tall.  When the fork hub instead carries a line
+    straight on down that trunk row to the section's LR exit -- an edge from the
+    hub to the exit port itself, bypassing both branches -- the row is occupied,
+    and compacting would crowd that bypass bundle between the branches.  Such a
+    fork keeps full pitch.
+
+    The signal is a *direct* hub-to-exit-port edge, which lands on the trunk row
+    by construction; a hub output that instead threads through a third off-trunk
+    fan branch on its way out is not trunk traffic and does not disqualify the
+    pair.
+    """
+    exit_ports = {
+        pid
+        for pid in section.exit_ports
+        if (port := graph.ports.get(pid)) is not None
+        and port.side in (PortSide.LEFT, PortSide.RIGHT)
+    }
+    if not exit_ports:
+        return False
+    return any(
+        edge.target in exit_ports
+        for hub in _fork_hubs(graph, a, b)
+        for edge in graph.edges_from(hub)
+    )
 
 
 def _branches_reconverge(graph: MetroGraph, section: Section, a: str, b: str) -> bool:
@@ -947,14 +1315,20 @@ def _redistribute_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> No
         for x, sids in col_eligible.items():
             full = full_by_col[x]
             non_full = [s for s in sids if s not in full]
-            # Strict all-full columns always fire (the original
-            # behaviour).  Mixed columns (full + non-source siblings)
-            # only fire when another column in the section is
-            # all-full, so we have a consistent trunk_y for the row
-            # and don't accidentally fan single trunk + 1 sibling
-            # cases that belong to ``_redistribute_fanout_siblings``.
+            # Strict all-full columns always fire.  A mixed column (full +
+            # non-source siblings) fires when it carries its own trunk anchor
+            # -- two or more full-bundle stations define the trunk locally --
+            # and its non-full siblings are homogeneous (one shared line-set),
+            # so the minor branch slots symmetrically without splitting the
+            # column's convergence into ambiguous per-line channels.  A mixed
+            # column with a single full-bundle station, or heterogeneous
+            # subset siblings, is left for ``_redistribute_fanout_siblings``
+            # unless a separate all-full column fixes the row anchor.
             all_full = not non_full
-            if not all_full and not any_all_full_col:
+            subset_line_sets = {frozenset(graph.station_lines(s)) for s in non_full}
+            own_trunk_anchor = len(full) >= 2 and len(subset_line_sets) <= 1
+            should_fire = all_full or own_trunk_anchor or any_all_full_col
+            if not should_fire:
                 continue
             participants = list(sids)
             # Trunk Y is the section's LR port Y when available (the
@@ -1115,8 +1489,18 @@ def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
             # A ``diamond_style: symmetric`` two-way fork compacts onto
             # half-pitch offsets (trunk +/- 0.5 pitch) so it consumes one grid
             # unit rather than straddling a full empty trunk row; the branches
-            # are marked so the grid snap leaves the half-offsets intact.
-            half = graph.diamond_style == "symmetric" and n == 2
+            # are marked so the grid snap leaves the half-offsets intact.  A fork
+            # whose hub runs a line straight down the trunk row to a section exit
+            # keeps full pitch: that bypass bundle occupies the row the
+            # compaction would empty, so squeezing the branches half a unit apart
+            # would crowd it (see :func:`_fork_hub_bypasses_trunk_to_exit`).
+            half = (
+                graph.diamond_style == "symmetric"
+                and n == 2
+                and not _fork_hub_bypasses_trunk_to_exit(
+                    graph, section, participants[0], participants[1]
+                )
+            )
             if half:
                 # Orient so a branch bearing an off-track file above the trunk
                 # fans to the bottom slot (and one below the trunk to the top).

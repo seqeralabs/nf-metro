@@ -10,8 +10,18 @@ on:
 permissions:
   contents: write
 
+# A concurrency group holds at most one pending run, so a newer entrant cancels
+# the older pending one. Release deploys therefore get a per-tag group, isolated
+# from each other and from dev deploys: a push (or another release) can never
+# cancel a pending release deploy, and the monotonic `latest` guard in
+# update_versions_manifest.py keeps two releases racing to gh-pages from
+# demoting `latest`. Dev deploys (push/workflow_dispatch) share one group so a
+# later push supersedes a stale queued dev rebuild.
 concurrency:
-  group: gh-pages
+  group: >-
+    ${{ github.event_name == 'release'
+        && format('gh-pages-docs-release-{0}', github.ref_name)
+        || 'gh-pages-docs-dev' }}
   cancel-in-progress: false
 
 jobs:
@@ -102,6 +112,8 @@ jobs:
             git worktree add --orphan -b gh-pages gh-pages
           fi
 
+          # Built outside the gh-pages worktree so the commit can be re-derived
+          # from the build output after a rejected push, without rebuilding.
           build_into() {
             (cd website && DOCS_BASE="$1" npm run build)
             rm -rf "$2"
@@ -110,18 +122,16 @@ jobs:
           }
 
           if [ "$IS_RELEASE" = "true" ]; then
-            build_into "/nf-metro/latest/"   "gh-pages/latest"
-            build_into "/nf-metro/$VERSION/" "gh-pages/$VERSION"
-            python scripts/update_versions_manifest.py \
-              --manifest gh-pages/versions.json --version "$VERSION" --latest
+            build_into "/nf-metro/latest/"   /tmp/site/latest
+            build_into "/nf-metro/$VERSION/" "/tmp/site/$VERSION"
+            targets="latest $VERSION"
           else
-            build_into "/nf-metro/dev/" "gh-pages/dev"
-            python scripts/update_versions_manifest.py \
-              --manifest gh-pages/versions.json --version dev
+            build_into "/nf-metro/dev/" /tmp/site/dev
+            targets="dev"
           fi
 
           # Root redirects to the latest stable release, not the in-progress dev build.
-          cat > gh-pages/index.html <<'HTML'
+          cat > /tmp/site/root-index.html <<'HTML'
           <!doctype html>
           <html>
             <head>
@@ -136,12 +146,45 @@ jobs:
           </html>
           HTML
 
-          touch gh-pages/.nojekyll
-          cd gh-pages
-          git add -A
-          if git diff --staged --quiet; then
-            echo "No changes to publish."
-          else
-            git commit -m "docs: deploy ${VERSION} (${GITHUB_SHA::8})"
-            git push origin HEAD:gh-pages
-          fi
+          derive() {
+            for target in $targets; do
+              rm -rf "gh-pages/$target"
+              mkdir -p "gh-pages/$target"
+              cp -a "/tmp/site/$target/." "gh-pages/$target/"
+            done
+            if [ "$IS_RELEASE" = "true" ]; then
+              python scripts/update_versions_manifest.py \
+                --manifest gh-pages/versions.json --version "$VERSION" --latest
+            else
+              python scripts/update_versions_manifest.py \
+                --manifest gh-pages/versions.json --version dev
+            fi
+            cp /tmp/site/root-index.html gh-pages/index.html
+            touch gh-pages/.nojekyll
+            git -C gh-pages add -A
+          }
+
+          # A rejected push means another gh-pages writer committed first. The
+          # commit is re-derived on the refetched tip rather than replayed as a
+          # diff, so a sibling writer that touched the same path cannot leave a
+          # conflict behind, and the number of local commits never matters.
+          for delay in 0 5 10 20 40; do
+            sleep "$delay"
+            if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+              git -C gh-pages fetch --depth=1 origin gh-pages
+              git -C gh-pages reset --hard FETCH_HEAD
+            fi
+            # Called as a plain command, not in a condition: a condition would
+            # suppress `set -e` for everything inside it.
+            derive
+            if git -C gh-pages diff --staged --quiet; then
+              echo "No changes to publish."
+              exit 0
+            fi
+            git -C gh-pages commit -m "docs: deploy ${VERSION} (${GITHUB_SHA::8})"
+            if git -C gh-pages push origin HEAD:gh-pages; then
+              exit 0
+            fi
+          done
+          echo "Could not push the ${VERSION} docs build to gh-pages." >&2
+          exit 1

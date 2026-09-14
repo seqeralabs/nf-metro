@@ -51,5 +51,3 @@ NFCORE_LIGHT_THEME = replace(
     legend_background="rgba(255, 255, 255, 0.8)",
     legend_text_color="#333333",
 )
-
-NFCORE_THEME = NFCORE_DARK_THEME

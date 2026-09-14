@@ -9,7 +9,8 @@ _2026-02-19_ · [GitHub release](https://github.com/pinin4fjords/nf-metro/releas
 
 ## Nextflow DAG import
 
-nf-metro can now import Mermaid files produced by Nextflow's `--with-dag` flag directly, without manual editing. The importer detects unsupported DAG constructs and reports them clearly.
+nf-metro can now import Mermaid files produced by Nextflow's `--with-dag` flag directly, without manual editing.
+The importer detects unsupported DAG constructs and reports them clearly.
 
 ```bash frame="terminal"
 nextflow run mypipeline.nf --with-dag dag.mmd
@@ -42,7 +43,8 @@ Lines that skip over one or more sections now route _below_ those sections rathe
 
 ## Hidden station prefix
 
-Stations prefixed with `_` are hidden during rendering but still participate in layout. Useful for routing control points that shouldn't appear as stations on the final map.
+Stations prefixed with `_` are hidden during rendering but still participate in layout.
+Useful for routing control points that shouldn't appear as stations on the final map.
 
 ## Other improvements
 

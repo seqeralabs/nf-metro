@@ -3,6 +3,8 @@
 Public API:
 - route_edges: Main edge routing coordinator (placement-pure)
 - route_edges_centred: route_edges + applied bubble-centring marker moves
+- observe_route_edges: route_edges + its context-local semantic observation
+- observe_route_edges_centred: route_edges_centred + that same observation
 - RoutedPath: Routed path dataclass
 - OffsetRegime: Which line-separation regime a route is in
 - apply_route_offsets: A route's final render geometry, separation applied

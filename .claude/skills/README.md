@@ -51,6 +51,7 @@ explicitly):
 | Skill | When to use |
 |---|---|
 | [`serve-docs`](serve-docs/SKILL.md) | Spin up the Astro / Starlight docs site locally for live preview. Wraps `scripts/serve_docs.sh`, which generates the git-ignored gallery / pipelines / playground content and then starts the dev server. |
+| [`live-demo-video`](live-demo-video/SKILL.md) | Re-record `website/public/assets/live_demo.mp4`, the live-progress clip embedded in `docs/live.mdx`, when it goes stale (old overlay style, old theme, a fix it predates). Playwright recording against a real `nf-metro serve` + Nextflow run, converted to mp4 without needing system ffmpeg. |
 
 ## How the skills relate
 

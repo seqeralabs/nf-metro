@@ -1,0 +1,21 @@
+flowchart TB
+    subgraph " "
+    v0["Channel.fromPath"]
+    end
+    subgraph "ASSEMBLY [ASSEMBLY]"
+    v1(["ASSEMBLE"])
+    v3(["POLISH"])
+    v2(( ))
+    v4(( ))
+    end
+    subgraph "REPORTING [REPORTING]"
+    v6(["QUAST"])
+    end
+    v5(( ))
+    v0 --> v1
+    v1 --> v2
+    v2 --> v3
+    v3 --> v4
+    v4 --> v1
+    v3 --> v5
+    v5 --> v6

@@ -17,8 +17,10 @@ from __future__ import annotations
 import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
+from nf_metro.errors import EmptyGraphError, UnknownInactiveLineError
 from nf_metro.layout import PhaseInvariantError, compute_layout
 from nf_metro.options import LAYOUT_OPTIONS, is_line_order
 from nf_metro.parser import parse_metro_mermaid
@@ -30,11 +32,7 @@ from nf_metro.parser.directives import apply_legend_directive
 from nf_metro.parser.model import LineSpread, MetroGraph, PermissiveGuardWarning
 from nf_metro.render.font_embed import apply_font_portability
 from nf_metro.render.html import emit_render_plan_html
-from nf_metro.render.legend import (
-    logo_certainly_shows,
-    logo_is_resolvable,
-    resolve_logo_file,
-)
+from nf_metro.render.legend import logo_certainly_shows, logo_is_resolvable
 from nf_metro.render.ns import class_prefix_context
 from nf_metro.render.plan import RenderPlan
 from nf_metro.render.style import Theme
@@ -68,6 +66,15 @@ class RenderConfig:
     baked_mode: str | None = None
     bare: bool = False
     embed_basename: str = "metro_map.html"
+    # SVG only: emit nf_metro.render.animate.FRAME_SLOT where the animated
+    # balls would go, leaving one SVG that a raster caller fills per frame
+    # (nf_metro.render.video). Ignored unless the map is animated.
+    animation_frame_slot: bool = False
+    # ``None`` means "no caller override": the render uses whichever lines the
+    # map itself marks inactive by directive. A concrete set (including the empty
+    # set) replaces that default outright, so ``frozenset()`` forces every line
+    # active regardless of the directive.
+    inactive_line_ids: frozenset[str] | None = None
 
     @property
     def font_portability(self) -> Literal["embed", "paths"] | None:
@@ -114,6 +121,7 @@ def _emit_svg_plan(graph: MetroGraph, plan: RenderPlan, cfg: RenderConfig) -> st
         content = emit_render_plan(
             plan,
             animate=graph.animate,
+            animation_frame_slot=cfg.animation_frame_slot,
             responsive=cfg.responsive,
             inject_dark_mode_css=cfg.inject_dark_mode_css,
             self_color_scheme=cfg.self_color_scheme,
@@ -126,6 +134,10 @@ def render_graph_result(
     graph: MetroGraph, theme_obj: Theme, cfg: RenderConfig
 ) -> RenderResult:
     """Render a laid-out graph and return its content and plan."""
+    try:
+        effective_inactive = graph.resolve_inactive_line_ids(cfg.inactive_line_ids)
+    except UnknownInactiveLineError as e:
+        raise UnknownInactiveLineError(f"--inactive-lines: {e}") from None
     if cfg.output_format == "html":
         plan = build_render_plan(
             graph,
@@ -133,6 +145,7 @@ def render_graph_result(
             debug=cfg.debug,
             legend_position="none",
             metrics_face=cfg.metrics_face,
+            inactive_line_ids=effective_inactive,
         )
         content = emit_render_plan_html(
             plan,
@@ -151,6 +164,7 @@ def render_graph_result(
         chrome_css=cfg.chrome_css,
         bare=cfg.bare,
         metrics_face=cfg.metrics_face,
+        inactive_line_ids=effective_inactive,
     )
     return RenderResult(_emit_svg_plan(graph, plan, cfg), plan)
 
@@ -212,8 +226,17 @@ def _prepare_graph_state(
         caller_line_order=(
             caller_line_order if is_line_order(caller_line_order) else None
         ),
+        caller_line_spread=(
+            LineSpread(line_spread) if line_spread is not None else None
+        ),
         _layout_commitments=layout_commitments,
     )
+    if not graph.stations:
+        raise EmptyGraphError(
+            "the map defines no stations, so there is nothing to lay out or "
+            "draw; the source declares no node or edge lines the parser "
+            "recognised"
+        )
 
     apply_layout_overrides(graph, opts)
 
@@ -221,11 +244,18 @@ def _prepare_graph_state(
         graph.source_dir = source_dir
         for attr in ("logo_path", "logo_path_light", "logo_path_dark"):
             raw: str = getattr(graph, attr)
-            resolved = resolve_logo_file(raw, source_dir) if raw else ""
-            if resolved:
-                setattr(graph, attr, resolved)
-    if line_spread is not None:
-        graph.line_spread = LineSpread(line_spread)
+            if not raw:
+                continue
+            # A %%metro logo: directive is a path the author wrote relative to
+            # their .mmd file, so it must win over a same-named file that
+            # happens to sit in the caller's cwd -- source_dir first, unlike
+            # resolve_logo_file's raw-first order (which suits `logo=`, below,
+            # a path the caller wrote relative to their own cwd).
+            candidate = Path(source_dir) / raw
+            if candidate.is_file():
+                setattr(graph, attr, str(candidate))
+            elif logo_is_resolvable(raw):
+                setattr(graph, attr, raw)
     if logo is not None:
         graph.logo_path = str(logo)
     if legend is not None:
@@ -236,7 +266,14 @@ def _prepare_graph_state(
     for attr in ("logo_path", "logo_path_light", "logo_path_dark"):
         raw = getattr(graph, attr)
         if raw and not logo_is_resolvable(raw):
-            raise ValueError(f"%%metro logo: path {raw!r} not found")
+            # `logo=` (the CLI's --logo) is applied after the source-directory
+            # pass above, so it is resolved against the working directory and
+            # naming the directive here would send the caller to the wrong
+            # place. Only an unresolved directive value can still be relative
+            # to *source_dir*.
+            from_parameter = logo is not None and attr == "logo_path"
+            origin = "logo=" if from_parameter else "%%metro logo:"
+            raise ValueError(f"{origin} path {raw!r} not found")
 
     logo_in_legend = logo_certainly_shows(graph) and graph.legend_position != "none"
     graph.reserve_title_band = output_format == "html" or (
@@ -281,6 +318,9 @@ def prepare_graph(
     not through a dedicated type); catch ``ValueError`` separately to cover
     that case too.
 
+    - A source that parses to no stations at all (an empty file, or one whose
+      ``graph`` block holds nothing the grammar recognises):
+      :class:`~nf_metro.errors.EmptyGraphError` (also a :class:`ValueError`).
     - A dangling edge or port reference that survived parsing:
       :class:`~nf_metro.parser.UnresolvedEndpointError` /
       :class:`~nf_metro.parser.UnresolvedPortSectionError` (both also
@@ -352,6 +392,7 @@ def render_string(
     logo: str | None = None,
     legend: str | None = None,
     layout_options: Mapping[str, object] | None = None,
+    source_dir: str = "",
     debug: bool = False,
     responsive: bool = False,
     embed_font: bool = False,
@@ -362,6 +403,7 @@ def render_string(
     self_color_scheme: bool = True,
     bare: bool = False,
     embed_basename: str = "metro_map.html",
+    inactive_line_ids: frozenset[str] | None = None,
 ) -> str:
     """Render *text* to an SVG (default) or interactive HTML string.
 
@@ -370,13 +412,17 @@ def render_string(
     :func:`nf_metro.render.validate_render` on the output) should call
     :func:`prepare_graph` and :func:`render_graph` directly.
 
+    *source_dir* is the directory the map's ``.mmd`` came from, against which
+    its ``%%metro logo:`` paths resolve; a caller rendering file text must pass
+    it or those paths only resolve when the process cwd happens to match.
+
     *config* groups all render-side options into a :class:`RenderConfig` bundle.
     When supplied, the individual render-side keyword arguments (``output_format``,
     ``debug``, ``responsive``, ``embed_font``, ``text_to_paths``,
     ``svg_class_prefix``, ``inject_dark_mode_css``, ``chrome_css``,
-    ``self_color_scheme``, ``bare``, ``embed_basename``) are ignored in favour of
-    *config*, and passing any of them with a non-default value alongside
-    *config* warns. Pass one or the other, not both.
+    ``self_color_scheme``, ``bare``, ``embed_basename``, ``inactive_line_ids``)
+    are ignored in favour of *config*, and passing any of them with a non-default
+    value alongside *config* warns. Pass one or the other, not both.
 
     *self_color_scheme* — when ``True`` (default) the root ``<svg>`` element
     declares ``color-scheme: light dark`` so ``light-dark()`` custom properties
@@ -429,6 +475,7 @@ def render_string(
         baked_mode=(mode or "").strip() or None,
         bare=bare,
         embed_basename=embed_basename,
+        inactive_line_ids=inactive_line_ids,
     )
     if config is not None:
         defaults = RenderConfig()
@@ -452,6 +499,7 @@ def render_string(
         logo=logo,
         legend=legend,
         layout_options=layout_options,
+        source_dir=source_dir,
         bare=effective_cfg.bare,
         output_format=effective_cfg.output_format,
         metrics_face=effective_cfg.metrics_face,

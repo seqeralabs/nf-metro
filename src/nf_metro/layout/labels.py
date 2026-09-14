@@ -1272,9 +1272,7 @@ def _trial_cost(
         if rail_side is not None:
             start_above = rail_side
 
-        candidate = _try_place(
-            station, label_offset, start_above, placements, min_off, max_off
-        )
+        candidate = _try_place(station, label_offset, start_above, min_off, max_off)
 
         if _has_collision(candidate, placements):
             # Try a small horizontal nudge before flipping sides.
@@ -1285,12 +1283,7 @@ def _trial_cost(
             else:
                 cost += 1
                 candidate = _try_place(
-                    station,
-                    label_offset,
-                    not start_above,
-                    placements,
-                    min_off,
-                    max_off,
+                    station, label_offset, not start_above, min_off, max_off
                 )
                 if _has_collision(candidate, placements):
                     cost += 2
@@ -1653,9 +1646,7 @@ def _place_alternating_candidate(
         station.id, (ctx.label_offset, ctx.label_offset)
     )
     eff_offset = safe_above if start_above else safe_below
-    candidate = _try_place(
-        station, eff_offset, start_above, placements, min_off, max_off
-    )
+    candidate = _try_place(station, eff_offset, start_above, min_off, max_off)
 
     if _has_collision(candidate, placements):
         # Try a small horizontal nudge before flipping sides.
@@ -1665,12 +1656,7 @@ def _place_alternating_candidate(
         else:
             alt_offset = safe_below if start_above else safe_above
             candidate = _try_place(
-                station,
-                alt_offset,
-                not start_above,
-                placements,
-                min_off,
-                max_off,
+                station, alt_offset, not start_above, min_off, max_off
             )
             if _has_collision(candidate, placements):
                 # Push further in the non-default direction.
@@ -1720,14 +1706,7 @@ def _clear_obstacle_overlap(
 
         flip_above = not candidate.above
         flip_off = safe_above if flip_above else safe_below
-        flipped = _try_place(
-            station,
-            flip_off,
-            flip_above,
-            placements,
-            min_off,
-            max_off,
-        )
+        flipped = _try_place(station, flip_off, flip_above, min_off, max_off)
         if not _has_collision(flipped, placements):
             return flipped
 
@@ -2007,7 +1986,6 @@ def _find_clear_reflow_candidate(
             station,
             safe_above if above else safe_below,
             above,
-            others,
             min_off,
             max_off,
             placement.text,
@@ -2255,9 +2233,7 @@ def _prefer_diamond_labels_outward(
         if placement.above == outward_above:
             continue
         min_off, max_off = _pill_offsets(graph, station, station_offsets)
-        candidate = _try_place(
-            station, label_offset, outward_above, [], min_off, max_off
-        )
+        candidate = _try_place(station, label_offset, outward_above, min_off, max_off)
         others = [p for p in placements if p is not placement]
         if _has_collision(candidate, others):
             continue
@@ -2668,7 +2644,6 @@ def _try_place(
     station: Station,
     label_offset: float,
     above: bool,
-    existing: list[LabelPlacement],
     min_off: float = 0.0,
     max_off: float = 0.0,
     text: str | None = None,

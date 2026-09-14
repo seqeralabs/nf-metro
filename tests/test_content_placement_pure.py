@@ -1,7 +1,7 @@
 """Content-placement phases are pure functions of (anchors + structure) (#491).
 
-Idempotence (``test_content_placement_idempotent``) only proves each phase
-reaches a fixed point: ``P(P(x)) == P(x)``.  That is strictly weaker than the
+Idempotence (``tests/test_content_placement_idempotent.py``) only proves each
+phase reaches a fixed point: ``P(P(x)) == P(x)``.  That is strictly weaker than the
 property the anchor layer enjoys (#487): *purity*.  A phase is pure when the Y
 it assigns to every station it governs is a function of the **frozen anchors**
 (port positions, and the trunk Y derived from them) plus **structure** (tracks,

@@ -1,0 +1,26 @@
+%%metro title: Convergence handedness repro
+%%metro line: a | A | #e6007e
+
+%%metro grid: s1, s2 | 0,0
+%%metro grid: s3, s4 | 0,1
+
+graph LR
+    subgraph s1 [One]
+        n1[N1]
+        n2[N2]
+    end
+    subgraph s2 [Two]
+        n3[N3]
+        n4[N4]
+    end
+    subgraph s3 [Three]
+        n5[N5]
+    end
+    subgraph s4 [Four]
+        n6[N6]
+    end
+
+    n2 -->|a| n3
+    n4 -->|a| n5
+    n1 -->|a| n6
+    n4 -->|a| n6

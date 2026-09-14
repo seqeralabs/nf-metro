@@ -25,7 +25,6 @@ from nf_metro.layout.pass_metrics import font_scale_context
 from nf_metro.manifest import read_manifest
 
 if TYPE_CHECKING:
-    from nf_metro.parser.model import MetroGraph
     from nf_metro.render.plan import RenderPlan
 from nf_metro.text_metrics import DEFAULT_TEXT_METRICS, TextRole, text_style
 
@@ -469,13 +468,12 @@ def validate_render(
     svg: str,
     *,
     plan: RenderPlan | None = None,
-    graph: MetroGraph | None = None,
 ) -> list[RenderFinding]:
     """Check a rendered SVG and return its geometry problems.
 
     The SVG alone supports label-strike and marker-cross checks. Pass the
     matching *plan* to also check whether separate lines collapsed onto one
-    track. The *graph* argument remains for API compatibility and is ignored.
+    track.
     """
     manifest = read_manifest(svg)
     if manifest is None:

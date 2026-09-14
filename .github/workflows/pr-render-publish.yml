@@ -9,10 +9,6 @@ permissions:
   contents: write
   pull-requests: write
 
-concurrency:
-  group: gh-pages
-  cancel-in-progress: false
-
 jobs:
   resolve:
     runs-on: ubuntu-latest
@@ -71,6 +67,15 @@ jobs:
     needs: resolve
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # A concurrency group holds at most ONE pending run: a newer entrant cancels
+    # the older pending one. A group spanning PRs therefore drops previews under
+    # a burst of pushes, so this one is keyed to the single PR whose head
+    # repository and branch it belongs to.
+    concurrency:
+      group: >-
+        gh-pages-preview-${{ github.event.workflow_run.head_repository.full_name
+        }}-${{ github.event.workflow_run.head_branch }}
+      cancel-in-progress: false
     if: >-
       github.event.workflow_run.event == 'pull_request' &&
       github.event.action == 'completed' &&
@@ -90,14 +95,53 @@ jobs:
           echo "pr=$(cat artifact/preview_meta/pr_number.txt)" >> "$GITHUB_OUTPUT"
           echo "has_changes=$(cat artifact/preview_meta/has_changes.txt)" >> "$GITHUB_OUTPUT"
 
-      - name: Deploy to GitHub Pages
+      # gh-pages must already exist; the docs deploy is what bootstraps it (and
+      # what keeps the root .nojekyll in place), so there is no orphan-branch
+      # fallback here.
+      - name: Check out gh-pages
         if: steps.meta.outputs.has_changes == 'true'
-        uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: artifact/diff_site
-          destination_dir: _pr/${{ steps.meta.outputs.pr }}
-          keep_files: true
+          ref: gh-pages
+          fetch-depth: 1
+          path: gh-pages
+
+      # A rejected push means another gh-pages writer committed first. The
+      # commit is re-derived on the refetched tip rather than replayed as a diff,
+      # so a cleanup that removed this directory in between cannot leave a
+      # conflict behind.
+      - name: Publish preview to gh-pages
+        if: steps.meta.outputs.has_changes == 'true'
+        working-directory: gh-pages
+        env:
+          PR: ${{ steps.meta.outputs.pr }}
+        run: |
+          set -euo pipefail
+          if ! echo "$PR" | grep -qE '^[0-9]+$'; then
+            echo "Refusing to publish to non-numeric preview directory '$PR'." >&2
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          for delay in 0 5 10 20 40; do
+            sleep "$delay"
+            git fetch --depth=1 origin gh-pages
+            git reset --hard FETCH_HEAD
+            rm -rf "_pr/$PR"
+            mkdir -p "_pr/$PR"
+            cp -a ../artifact/diff_site/. "_pr/$PR/"
+            git add -A "_pr/$PR"
+            if git diff --staged --quiet; then
+              echo "Preview for PR #$PR is already published verbatim."
+              exit 0
+            fi
+            git commit -m "Publish render preview for PR #$PR"
+            if git push origin HEAD:gh-pages; then
+              exit 0
+            fi
+          done
+          echo "Could not push the preview for PR #$PR to gh-pages." >&2
+          exit 1
 
       # A push to gh-pages only updates the branch; GitHub Pages then builds and
       # publishes it asynchronously. Poll until the URL serves the page carrying
@@ -153,6 +197,18 @@ jobs:
           number: ${{ steps.meta.outputs.pr }}
           message: |
             **Render preview**: no visual changes detected. All renders match `main`.
+
+      # Without this the PR keeps the "rendering in progress" marker and the only
+      # trace of the failure is a red run nobody is watching.
+      - name: Comment on PR (publish failed)
+        if: failure() && needs.resolve.outputs.pr != ''
+        uses: marocchino/sticky-pull-request-comment@773744901bac0e8cbb5a0dc842800d45e9b2b405 # v2
+        with:
+          header: render-preview
+          number: ${{ needs.resolve.outputs.pr }}
+          message: |
+            **Render preview** was rendered but could not be published.
+            Inspect the [publish run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details.
 
   failed:
     needs: resolve

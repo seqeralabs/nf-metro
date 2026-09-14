@@ -54,7 +54,7 @@ def test_flips_outward_when_nothing_else_is_there():
     on_trunk = _station("on_trunk", 190, 160, layer=0, label="Diamond Branch")
     off_trunk = _station("off_trunk", 190, 200, layer=0, label="Off Trunk")
     graph = _build_graph([on_trunk, off_trunk], [])
-    placement = _try_place(on_trunk, LABEL_OFFSET, False, [])
+    placement = _try_place(on_trunk, LABEL_OFFSET, False)
 
     _prefer_diamond_labels_outward(
         [placement], graph, {"on_trunk": off_trunk}, None, LABEL_OFFSET
@@ -69,8 +69,8 @@ def test_stays_put_when_outward_would_collide_with_a_neighbour():
     neighbour = _station("neighbour", 60, 160, layer=1, label="Neighbour")
     graph = _build_graph([on_trunk, off_trunk, neighbour], [])
 
-    on_trunk_placement = _try_place(on_trunk, LABEL_OFFSET, False, [])
-    neighbour_placement = _try_place(neighbour, LABEL_OFFSET, True, [])
+    on_trunk_placement = _try_place(on_trunk, LABEL_OFFSET, False)
+    neighbour_placement = _try_place(neighbour, LABEL_OFFSET, True)
     placements = [on_trunk_placement, neighbour_placement]
 
     _prefer_diamond_labels_outward(

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import contextlib
+import math
 import os
+import sys
 import warnings
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
-from typing import Any, Literal, TypeVar, cast
+from typing import Any, Literal, NoReturn, TypeVar, cast, get_args
 
 import click
 
@@ -34,11 +35,23 @@ from nf_metro.parser import (
 )
 from nf_metro.parser.model import (
     LineSpread,
+    MetroGraph,
     PermissiveGuardWarning,
     split_guard_warnings,
 )
 from nf_metro.render import validate_render
-from nf_metro.themes import THEMES
+from nf_metro.render.video import VIDEO_FORMATS, NotAnimatedError, VideoFormat
+from nf_metro.themes import DEFAULT_MODE, STYLE_NAMES, THEMES, resolve_style
+
+RenderFormat = Literal["svg", "html", "png", "gif", "webp", "mp4", "webm"]
+_RENDER_FORMATS: tuple[str, ...] = get_args(RenderFormat)
+
+#: Formats the rasteriser draws rather than ones written as text. All of them
+#: need the same picture-is-final decisions a PNG needs (see _render_one_unsafe).
+_RASTER_FORMATS: frozenset[str] = frozenset({"png", *VIDEO_FORMATS})
+
+#: Frames per second an exported loop runs at unless ``--fps`` says otherwise.
+DEFAULT_FPS = 12.0
 
 
 @click.group()
@@ -48,6 +61,152 @@ def cli() -> None:
 
 
 _F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def _parse_inactive_lines(value: object) -> frozenset[str] | None:
+    """Normalise an ``--inactive-lines`` value to a set of line IDs, or ``None``.
+
+    Accepts a comma-separated string (the CLI form) or a JSON list of strings
+    (the ``render-many`` manifest form). ``None`` (option absent) stays ``None``,
+    meaning "no override, use the map's own defaults"; an empty string or list
+    yields an empty set, forcing every line active for this render.
+    """
+    if value is None:
+        return None
+    items = value.split(",") if isinstance(value, str) else value
+    if not isinstance(items, Iterable):
+        raise ValueError("inactive_lines must be a string or list of line IDs")
+    return frozenset(s for s in (str(i).strip() for i in items) if s)
+
+
+def _format_from_output(output: Path | None) -> RenderFormat:
+    """Infer the output format from *output*'s extension, defaulting to SVG.
+
+    Lets ``-o map.png`` stand on its own, so the common case needs no
+    ``--format``. An explicit ``--format`` is resolved before this is called
+    and wins, including over a mismatched extension.
+    """
+    suffix = output.suffix.lower().lstrip(".") if output is not None else ""
+    return cast(
+        RenderFormat,
+        suffix if suffix in _RENDER_FORMATS else "svg",
+    )
+
+
+def _svg_format_for(out_format: RenderFormat) -> Literal["svg", "html"]:
+    """Return the format a graph is prepared/rendered under.
+
+    Only the interactive page has a backend of its own; PNG and the looping
+    video formats are all drawn from the SVG.
+    """
+    return "html" if out_format == "html" else "svg"
+
+
+def _default_scale(format_: str) -> float:
+    """Return the raster scale to use when ``--scale`` is not given.
+
+    A PNG is usually a retina still, so it doubles by default. A loop is a few
+    hundred of those frames in one file, where doubling quadruples both the
+    bytes and the time for a picture that plays at screen size anyway.
+    """
+    return 1.0 if format_ in VIDEO_FORMATS else 2.0
+
+
+def _forces_animation(
+    out_format: RenderFormat, layout_opts: Mapping[str, object]
+) -> bool:
+    """Whether *out_format* turns the animation on for a caller who did not.
+
+    A video of a map with no balls on it would be a still repeated a few
+    hundred times, so asking for one asks for the animation. An explicit
+    --animate/--no-animate still wins.
+    """
+    return out_format in VIDEO_FORMATS and layout_opts.get("animate") is None
+
+
+def _layout_opts_for(
+    out_format: RenderFormat, layout_opts: dict[str, object]
+) -> dict[str, object]:
+    """Return the layout options *out_format* is rendered under."""
+    if not _forces_animation(out_format, layout_opts):
+        return layout_opts
+    return {**layout_opts, "animate": True}
+
+
+def _graph_key(
+    out_format: RenderFormat, layout_opts: Mapping[str, object]
+) -> tuple[Literal["svg", "html"], bool]:
+    """Return the cache key for the graph *out_format* is rendered from.
+
+    Two outputs share a prepared graph only when they share both a backend and
+    an animation state.
+    """
+    return _svg_format_for(out_format), _forces_animation(out_format, layout_opts)
+
+
+class _FiniteFloatRange(click.FloatRange):
+    """A float range that also refuses a non-finite value.
+
+    A bound cannot catch these on its own: every comparison against ``nan`` is
+    false, and ``inf`` satisfies an option that declares no maximum. Either
+    reaches the drawn SVG as an unusable attribute value.
+    """
+
+    def _describe_range(self) -> str:
+        """Return the bound hint for ``--help``, empty when there is no bound.
+
+        click describes a range with no bounds at all as ``x<=None``.
+        """
+        if self.min is None and self.max is None:
+            return ""
+        return super()._describe_range()
+
+    def convert(
+        self, value: float, param: click.Parameter | None, ctx: click.Context | None
+    ) -> float:
+        converted = super().convert(value, param, ctx)
+        if not math.isfinite(converted):
+            self.fail(f"{value!r} is not a finite number", param, ctx)
+        return converted
+
+
+def _numeric_cli_type(opt: LayoutOption) -> click.IntRange | _FiniteFloatRange:
+    """Build the click type enforcing a numeric option's declared bounds.
+
+    The registry's ``sign`` and ``max_val`` gate the directive plane through
+    :func:`nf_metro.options.coerce`; mirroring them here keeps a flag from
+    admitting a value the same option refuses as a ``%%metro`` directive,
+    where a refusal warns and keeps the default rather than exiting.
+    """
+    lo = None if opt.sign == "any" else 0
+    min_open = opt.sign == "positive"
+    if opt.kind == "int":
+        hi = None if opt.max_val is None else int(opt.max_val)
+        return click.IntRange(min=lo, max=hi, min_open=min_open)
+    return _FiniteFloatRange(min=lo, max=opt.max_val, min_open=min_open)
+
+
+# Reused by the render-many manifest reader below, so a bad value gets the
+# same error there as it would from the flag.
+_SCALE_TYPE = _FiniteFloatRange(min=0, min_open=True)
+_FPS_TYPE = _FiniteFloatRange(min=0, min_open=True)
+_DURATION_TYPE = _FiniteFloatRange(min=0, min_open=True)
+_RASTER_WIDTH_TYPE = click.IntRange(min=0, min_open=True)
+_FORMAT_TYPE = click.Choice(_RENDER_FORMATS)
+
+
+def _convert_manifest_number(
+    param_type: click.ParamType[float | int], value: object, name: str
+) -> float | int:
+    """Run a manifest job's *value* through *param_type*, as the CLI flag would.
+
+    ``bool`` is an ``int`` subclass in Python, so a JSON ``true``/``false``
+    would otherwise pass ``_SCALE_TYPE``/``_RASTER_WIDTH_TYPE`` as ``1``/``0``; a
+    CLI flag can never receive a bool, so this refuses one here too.
+    """
+    if isinstance(value, bool):
+        raise ValueError(f"{name}: {value!r} is not a number")
+    return param_type.convert(value, None, None)
 
 
 def _layout_cli_option(opt: LayoutOption) -> Callable[..., Any]:
@@ -66,22 +225,24 @@ def _layout_cli_option(opt: LayoutOption) -> Callable[..., Any]:
             help=opt.help,
             hidden=opt.hidden,
         )
+    ctype: Any
+    metavar: str | None = None
     if opt.kind == "choice":
-        ctype: Any = click.Choice(opt.choices)
-    elif opt.kind == "float" and opt.max_val is not None:
-        lo = 0.0 if opt.sign in ("nonneg", "positive") else None
-        ctype = click.FloatRange(min=lo, max=opt.max_val)
-    elif opt.kind == "int" and opt.max_val is not None:
-        lo_i = 0 if opt.sign in ("nonneg", "positive") else None
-        ctype = click.IntRange(min=lo_i, max=int(opt.max_val))
+        ctype = click.Choice(opt.choices)
+    elif opt.kind in ("int", "float"):
+        ctype = _numeric_cli_type(opt)
+        # A bounded option's type name would otherwise read "FLOAT RANGE" in
+        # --help, where click already appends the bound itself as "[x>0]".
+        metavar = "INTEGER" if opt.kind == "int" else "FLOAT"
     else:
-        ctype = {"int": int, "float": float, "str": str}[opt.kind]
+        ctype = {"str": str}[opt.kind]
     return click.option(
         opt.cli_flag,
         opt.name,
         type=ctype,
         default=None,
         help=opt.help,
+        metavar=metavar,
         hidden=opt.hidden,
     )
 
@@ -93,13 +254,96 @@ def layout_cli_options(f: _F) -> _F:
     return f
 
 
+def _echo_block(label: str, entries: Iterable[str]) -> None:
+    """Print a labelled, bulleted block to stderr.
+
+    An entry spanning several lines keeps its continuation lines indented
+    under its own bullet, so a guard message carrying per-defect detail reads
+    as one item.
+    """
+    click.echo(f"{label}:", err=True)
+    for entry in entries:
+        head, *rest = entry.split("\n")
+        click.echo(f"  - {head}", err=True)
+        for line in rest:
+            click.echo(f"    {line.strip()}", err=True)
+
+
 def _echo_issues(
     label: str, issues: Iterable[ValidationIssue], path: Path | str
 ) -> None:
-    """Print a labelled, bulleted block of validation issues to stderr."""
-    click.echo(f"{label}:", err=True)
-    for issue in issues:
-        click.echo(f"  - {issue.format(path)}", err=True)
+    """Print a block of validation issues, each formatted against *path*."""
+    _echo_block(label, (issue.format(path) for issue in issues))
+
+
+def _error_prefix(input_file: Path, quiet: bool) -> str:
+    """Return the file prefix an error message needs, if any.
+
+    A batch run labels each job with its file already, so repeating it inside
+    the message names the same file twice.
+    """
+    return "" if quiet else f"{input_file}: "
+
+
+def _debug_reraise() -> bool:
+    """Return whether ``NF_METRO_DEBUG=1`` asks for tracebacks over messages."""
+    return os.environ.get("NF_METRO_DEBUG") == "1"
+
+
+def _clean_error(exc: Exception, prefix: str = "") -> NoReturn:
+    """Re-raise *exc* under ``NF_METRO_DEBUG=1``, else present it as one line."""
+    if _debug_reraise():
+        raise exc
+    raise click.ClickException(f"{prefix}{exc}")
+
+
+def _parse_reporting_warnings(
+    input_file: Path, text: str, *, label: str = "Warnings"
+) -> tuple[MetroGraph, list[str]]:
+    """Parse *text*, returning the graph and the warnings the parse raised.
+
+    A parse failure reports what was recorded before it under *label*: where a
+    malformed directive is the real fault, the warning names it and the error
+    names only the consequence.
+    """
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        try:
+            graph = parse_metro_mermaid(text)
+        except ValueError as e:
+            if caught:
+                _echo_block(label, [str(w.message) for w in caught])
+            _clean_error(e, f"{input_file}: ")
+    # A `%%metro logo:` path resolves against the directory the map came from,
+    # which only this function knows here.
+    graph.source_dir = str(input_file.resolve().parent)
+    return graph, [str(w.message) for w in caught]
+
+
+def _report_render_warnings(
+    caught: list[warnings.WarningMessage],
+    *,
+    permissive: bool,
+    source: Path | None = None,
+) -> None:
+    """Present a render's captured warnings as labelled stderr blocks.
+
+    Guard downgrades get their own block: each one names geometry that was
+    drawn anyway and may be defective there, unlike a warning about something
+    nf-metro ignored or adjusted. *source* labels the blocks for a batch
+    render, whose files would otherwise be indistinguishable.
+    """
+    guard_warnings, other_warnings = split_guard_warnings(caught)
+    suffix = f" ({source})" if source is not None else ""
+    if other_warnings:
+        _echo_block(f"Warnings{suffix}", (str(w.message) for w in other_warnings))
+    if guard_warnings:
+        flag = "--permissive: " if permissive else ""
+        _echo_block(
+            f"{flag}{len(guard_warnings)} guard(s) downgraded to warnings{suffix}; "
+            "the rendered geometry may be defective at these points",
+            (str(w.message) for w in guard_warnings),
+        )
 
 
 def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
@@ -118,6 +362,8 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
         try:
             job()
         except Exception as e:
+            if _debug_reraise():
+                raise
             failure_count += 1
             click.echo(f"[{idx}/{total}] FAIL  {label}: {e}", err=True)
         else:
@@ -136,22 +382,61 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
 @click.option(
     "-o",
     "--output",
+    "outputs",
     type=click.Path(path_type=Path),
-    default=None,
+    multiple=True,
     help="Output file path. Defaults to <input>.<format>. Only valid with a "
-    "single INPUT_FILE.",
+    "single INPUT_FILE. Repeat it to write several formats from one layout "
+    "run: -o map.svg -o map.png.",
 )
 @click.option(
     "--format",
     "format_",
-    type=click.Choice(["svg", "html"]),
-    default="svg",
-    help="Output format: 'svg' (default) or 'html' for an interactive "
-    "self-contained page with pan/zoom and per-line filtering.",
+    type=_FORMAT_TYPE,
+    default=None,
+    help="Output format: 'svg' (default), 'png', 'html' for an interactive "
+    "self-contained page with pan/zoom and per-line filtering, or one of "
+    "'gif'/'webp'/'mp4'/'webm' for a looping video of the animation. Inferred "
+    "from the --output extension when not given.",
+)
+@click.option(
+    "--scale",
+    type=_SCALE_TYPE,
+    default=None,
+    metavar="FLOAT",
+    help="Raster formats only: multiply the rendered pixel dimensions by this "
+    "factor.  [default: 2 for png, 1 for gif/webp/mp4/webm]",
+)
+@click.option(
+    "--raster-width",
+    type=_RASTER_WIDTH_TYPE,
+    default=None,
+    metavar="INTEGER",
+    help="Raster formats only: output width in pixels, height scaled with it. "
+    "Overrides --scale. Distinct from --width, which grows the SVG canvas "
+    "around a map drawn at its natural size rather than resizing the picture.",
+)
+@click.option(
+    "--fps",
+    type=_FPS_TYPE,
+    default=DEFAULT_FPS,
+    show_default=True,
+    metavar="FLOAT",
+    help="Video formats only: frames per second of the exported loop.",
+)
+@click.option(
+    "--duration",
+    type=_DURATION_TYPE,
+    default=None,
+    metavar="FLOAT",
+    help="Video formats only: length of one loop in seconds, compressing (or "
+    "stretching) the map's own animation cycle into it. Defaults to that "
+    "cycle, which keeps the balls at exactly the speed the animated SVG "
+    "moves them.",
 )
 @click.option(
     "--theme",
-    type=click.Choice(list(THEMES.keys())),
+    type=click.Choice(sorted(STYLE_NAMES)),
     default=None,
     help="Visual theme (default: from the %%metro style: directive, else nfcore).",
 )
@@ -222,7 +507,7 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
     default=False,
     help=(
         "Convert all text to vector paths, removing font dependencies entirely. "
-        "Loses selectable text. Requires fonttools[woff]."
+        'Loses selectable text. Needs pip install "nf-metro[font]".'
     ),
 )
 @click.option(
@@ -265,8 +550,9 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
     help=(
         "Omit the chrome --nfm-* CSS custom-property <style> block. Colors "
         "still render (they are baked as presentation attributes); only live "
-        "host recoloring is dropped. Use for raster export: cairosvg and "
-        "similar rasterizers cannot parse var() and fail without this."
+        "host recoloring is dropped. --format png applies it for you; pass "
+        "it when handing the SVG to an external rasterizer, since many "
+        "cannot parse var() and fail without it."
     ),
 )
 @click.option(
@@ -284,16 +570,37 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
     is_flag=True,
     default=False,
     help=(
-        "After rendering, run the render-geometry guards on the produced SVG "
-        "(the picture as drawn, including render-time offsets and label "
-        "lifts) and fail if any defect is found. SVG output only."
+        "After rendering, fail if the render-geometry guards find a defect in "
+        "the produced SVG: a route drawn through a station's label or marker, "
+        "or two lines collapsed onto one stroke. These read the picture as "
+        "drawn, including render-time offsets and label lifts. A Tier-A "
+        "layout-invariant violation stays a warning; use --strict to fail on "
+        "those. SVG output only, and only for a map that keeps its manifest, "
+        "which the guards read the drawn geometry through."
+    ),
+)
+@click.option(
+    "--inactive-lines",
+    "inactive_lines",
+    default=None,
+    help=(
+        "Comma-separated %%metro line: IDs to render inactive: their strokes, "
+        "chevrons, and legend swatches grey out, as do the stations, labels, and "
+        "terminus icons touched only by inactive lines. Unlisted lines stay "
+        "full-colour. Unknown IDs error. Fully replaces any lines the map marks "
+        "inactive by directive; pass an empty value to force every line active. "
+        "Does not edit the .mmd."
     ),
 )
 @layout_cli_options
 def render(
     input_files: tuple[Path, ...],
-    output: Path | None,
-    format_: Literal["svg", "html"],
+    outputs: tuple[Path, ...],
+    format_: RenderFormat | None,
+    scale: float | None,
+    raster_width: int | None,
+    fps: float,
+    duration: float | None,
     theme: str | None,
     mode: str | None,
     debug: bool,
@@ -311,9 +618,10 @@ def render(
     no_chrome_css: bool,
     bare: bool,
     validate_geometry: bool,
+    inactive_lines: str | None,
     **layout_opts: object,
 ) -> None:
-    """Render one or more Mermaid metro map definitions to SVG or interactive HTML.
+    """Render Mermaid metro map definitions to SVG, PNG, or interactive HTML.
 
     Given more than one INPUT_FILE, all render within the same process
     (amortising interpreter/import startup across the batch) and each write
@@ -321,21 +629,35 @@ def render(
     earlier one fails, successful outputs are kept, and a non-zero exit is
     returned if any failed.
 
-    Any exception not already recognised as a pipeline error surfaces as a
-    plain error message rather than a traceback; set NF_METRO_DEBUG=1 to
-    re-raise it instead.
+    Repeating -o writes one INPUT_FILE to several outputs in the same run,
+    taking each output's format from its extension: -o map.svg -o map.png.
+    An explicit --format overrides every extension.
+
+    A rejected input, and any other failure, surfaces as a plain error
+    message rather than a traceback; set NF_METRO_DEBUG=1 to re-raise the
+    original exception instead.
     """
-    if len(input_files) > 1 and output is not None:
+    if len(input_files) > 1 and outputs:
         raise click.UsageError("-o/--output can only be used with a single INPUT_FILE.")
 
-    def _job(input_file: Path, *, quiet: bool) -> Callable[[], None]:
-        out_path = (
-            output if output is not None else input_file.with_suffix(f".{format_}")
-        )
+    inactive_line_ids = _parse_inactive_lines(inactive_lines)
+
+    def _job(
+        input_file: Path,
+        out_path: Path,
+        out_format: RenderFormat,
+        *,
+        quiet: bool,
+        graph: MetroGraph | None = None,
+    ) -> Callable[[], None]:
         return lambda: _render_one(
             input_file,
             out_path,
-            format_=format_,
+            format_=out_format,
+            scale=scale if scale is not None else _default_scale(out_format),
+            raster_width=raster_width,
+            fps=fps,
+            duration=duration,
             theme=theme,
             mode=mode,
             debug=debug,
@@ -353,22 +675,89 @@ def render(
             no_chrome_css=no_chrome_css,
             bare=bare,
             validate_geometry=validate_geometry,
+            inactive_line_ids=inactive_line_ids,
             layout_opts=layout_opts,
             quiet=quiet,
+            graph=graph,
         )
 
-    if len(input_files) == 1:
-        _job(input_files[0], quiet=False)()
+    # One job per output when -o is given (each output carries its own format,
+    # unless --format pins one for all), else one per input file.
+    if outputs:
+        jobs = [
+            (out.name, input_files[0], out, format_ or _format_from_output(out))
+            for out in outputs
+        ]
+    else:
+        fmt = format_ or "svg"
+        jobs = [(f.name, f, f.with_suffix(f".{fmt}"), fmt) for f in input_files]
+
+    if len(jobs) == 1:
+        _, source, out_path, out_format = jobs[0]
+        _job(source, out_path, out_format, quiet=False)()
         return
 
-    _run_batch([(f.name, _job(f, quiet=True)) for f in input_files])
+    # Repeated -o always shares one input file (validated above), so every job's
+    # svg_format ("svg" or "html"; png renders through "svg") shares a layout -
+    # parse and lay it out once per distinct svg_format instead of once per job,
+    # capturing and reporting that shared step's warnings the same way a single
+    # job would (permissive downgrades included).
+    # A video output turns the animation on (see _layout_opts_for), which is a
+    # different layout from the one a plain .svg beside it wants, so the key
+    # carries that too rather than handing one graph to both.
+    graphs: dict[tuple[Literal["svg", "html"], bool], MetroGraph] = {}
+    if outputs:
+        permissive = bool(layout_opts.get("permissive"))
+        with warnings.catch_warnings(record=True) as caught:
+            if permissive:
+                warnings.filterwarnings("always", category=PermissiveGuardWarning)
+            try:
+                for _, source, _, out_format in jobs:
+                    key = _graph_key(out_format, layout_opts)
+                    if key not in graphs:
+                        graphs[key] = _prepare_graph_for_render(
+                            source,
+                            from_nextflow=from_nextflow,
+                            title=title,
+                            line_spread=line_spread,
+                            logo=logo,
+                            legend=legend,
+                            layout_opts=_layout_opts_for(out_format, layout_opts),
+                            bare=bare,
+                            svg_format=key[0],
+                            error_prefix=_error_prefix(source, quiet=True),
+                        )
+            finally:
+                _report_render_warnings(
+                    caught, permissive=permissive, source=input_files[0]
+                )
+
+    _run_batch(
+        [
+            (
+                label,
+                _job(
+                    source,
+                    out_path,
+                    out_format,
+                    quiet=True,
+                    graph=graphs.get(_graph_key(out_format, layout_opts)),
+                ),
+            )
+            for label, source, out_path, out_format in jobs
+        ]
+    )
 
 
 def _render_one(
     input_file: Path,
     output: Path,
     *,
-    format_: Literal["svg", "html"],
+    format_: RenderFormat,
+    scale: float,
+    raster_width: int | None,
+    fps: float,
+    duration: float | None,
     theme: str | None,
     mode: str | None,
     debug: bool,
@@ -386,47 +775,113 @@ def _render_one(
     no_chrome_css: bool,
     bare: bool,
     validate_geometry: bool,
+    inactive_line_ids: frozenset[str] | None,
     layout_opts: dict[str, object],
     quiet: bool,
+    graph: MetroGraph | None = None,
 ) -> None:
+    # Applied here rather than in either caller, so `render` and `render-many`
+    # both get it; `render`'s graph cache keys on the same predicate, so a
+    # shared graph it hands in was prepared under these same options.
+    layout_opts = _layout_opts_for(format_, layout_opts)
+    permissive = bool(layout_opts.get("permissive"))
+
+    # PermissiveGuardWarning's filter is forced to "always" so a downgraded
+    # guard is never lost to the default once-per-location dedup; other
+    # warnings keep that dedup.
+    with warnings.catch_warnings(record=True) as caught:
+        if permissive:
+            warnings.filterwarnings("always", category=PermissiveGuardWarning)
+        try:
+            _render_one_unsafe(
+                input_file,
+                output,
+                format_=format_,
+                scale=scale,
+                raster_width=raster_width,
+                fps=fps,
+                duration=duration,
+                theme=theme,
+                mode=mode,
+                debug=debug,
+                logo=logo,
+                line_spread=line_spread,
+                legend=legend,
+                from_nextflow=from_nextflow,
+                title=title,
+                responsive=responsive,
+                embed_font=embed_font,
+                text_to_paths=text_to_paths,
+                svg_class_prefix=svg_class_prefix,
+                no_self_color_scheme=no_self_color_scheme,
+                no_dark_mode_css=no_dark_mode_css,
+                no_chrome_css=no_chrome_css,
+                bare=bare,
+                validate_geometry=validate_geometry,
+                inactive_line_ids=inactive_line_ids,
+                layout_opts=layout_opts,
+                quiet=quiet,
+                graph=graph,
+            )
+        except click.ClickException:
+            raise
+        except Exception as e:
+            _clean_error(e, f"{_error_prefix(input_file, quiet)}unexpected error: ")
+        finally:
+            _report_render_warnings(
+                caught,
+                permissive=permissive,
+                source=input_file if quiet else None,
+            )
+
+
+def _prepare_graph_for_render(
+    input_file: Path,
+    *,
+    from_nextflow: bool,
+    title: str | None,
+    line_spread: str | None,
+    logo: Path | None,
+    legend: str | None,
+    layout_opts: dict[str, object],
+    bare: bool,
+    svg_format: Literal["svg", "html"],
+    error_prefix: str,
+) -> MetroGraph:
+    """Parse and lay out *input_file*, reporting a typed failure via `_clean_error`."""
+    text = input_file.read_text()
     try:
-        _render_one_unsafe(
-            input_file,
-            output,
-            format_=format_,
-            theme=theme,
-            mode=mode,
-            debug=debug,
-            logo=logo,
-            line_spread=line_spread,
-            legend=legend,
+        return prepare_graph(
+            text,
             from_nextflow=from_nextflow,
             title=title,
-            responsive=responsive,
-            embed_font=embed_font,
-            text_to_paths=text_to_paths,
-            svg_class_prefix=svg_class_prefix,
-            no_self_color_scheme=no_self_color_scheme,
-            no_dark_mode_css=no_dark_mode_css,
-            no_chrome_css=no_chrome_css,
+            line_spread=line_spread,
+            logo=str(logo) if logo is not None else None,
+            legend=legend,
+            layout_options=layout_opts,
+            source_dir=str(input_file.resolve().parent),
             bare=bare,
-            validate_geometry=validate_geometry,
-            layout_opts=layout_opts,
-            quiet=quiet,
+            output_format=svg_format,
         )
-    except click.ClickException:
-        raise
-    except Exception as e:
-        if os.environ.get("NF_METRO_DEBUG") == "1":
-            raise
-        raise click.ClickException(f"{input_file}: unexpected error: {e}")
+    except (
+        ValueError,
+        CyclicGraphError,
+        BackwardFlowError,
+        MixedEntryDirectionError,
+        PhaseInvariantError,
+    ) as e:
+        _clean_error(e, error_prefix)
 
 
 def _render_one_unsafe(
     input_file: Path,
     output: Path,
     *,
-    format_: Literal["svg", "html"],
+    format_: RenderFormat,
+    scale: float,
+    raster_width: int | None,
+    fps: float,
+    duration: float | None,
     theme: str | None,
     mode: str | None,
     debug: bool,
@@ -444,129 +899,165 @@ def _render_one_unsafe(
     no_chrome_css: bool,
     bare: bool,
     validate_geometry: bool,
+    inactive_line_ids: frozenset[str] | None,
     layout_opts: dict[str, object],
     quiet: bool,
+    graph: MetroGraph | None = None,
 ) -> None:
-    text = input_file.read_text()
-    permissive = bool(layout_opts.get("permissive"))
+    error_prefix = _error_prefix(input_file, quiet)
+    # PNG renders through the SVG backend and is rasterised afterward; every
+    # render-plane decision below follows the SVG path regardless of format_.
+    svg_format = _svg_format_for(format_)
 
-    # Under --permissive, every warning raised during the render is captured
-    # here rather than printed live. Only PermissiveGuardWarning's filter is
-    # forced to "always" (so a guard downgrade is never lost to the default
-    # once-per-location dedup); any other captured warning is replayed
-    # through the normal printer afterwards, deduped exactly as it would be
-    # without --permissive.
-    warn_ctx = (
-        warnings.catch_warnings(record=True) if permissive else contextlib.nullcontext()
-    )
-    with warn_ctx as caught:
-        if permissive:
-            warnings.filterwarnings("always", category=PermissiveGuardWarning)
+    if graph is None:
+        graph = _prepare_graph_for_render(
+            input_file,
+            from_nextflow=from_nextflow,
+            title=title,
+            line_spread=line_spread,
+            logo=logo,
+            legend=legend,
+            layout_opts=layout_opts,
+            bare=bare,
+            svg_format=svg_format,
+            error_prefix=error_prefix,
+        )
 
-        try:
-            graph = prepare_graph(
-                text,
-                from_nextflow=from_nextflow,
-                title=title,
-                line_spread=line_spread,
-                logo=str(logo) if logo is not None else None,
-                legend=legend,
-                layout_options=layout_opts,
-                source_dir=str(input_file.resolve().parent),
-                bare=bare,
-                output_format=format_,
+    if format_ in _RASTER_FORMATS:
+        # A rasteriser has no CSS cascade and no viewer colour-scheme to
+        # consult, so the picture has to be fully decided here rather than
+        # left to the flags a caller remembered to pass:
+        #  - chrome_css off, or the var() chrome colours reach resvg unresolved
+        #  - a concrete baked mode, or light-dark() has nothing to resolve to
+        #  - embedded Inter, so the layout is measured against the same face
+        #    svg_to_png hands the rasteriser
+        no_chrome_css = True
+        embed_font = not text_to_paths
+        mode = (mode or graph.mode).strip().lower() or DEFAULT_MODE
+
+    theme_obj = resolve_theme(theme, graph, mode=mode)
+
+    if format_ == "html":
+        # The interactive page supplies its own responsive frame, chrome, and
+        # per-map class scoping, so the SVG-only sizing/namespacing flags have
+        # nothing to act on. Font portability and the dark-mode block do reach
+        # the inlined SVG, so they are threaded through.
+        ignored = [
+            name
+            for name, enabled in (
+                ("--responsive", responsive),
+                ("--bare", bare),
+                ("--svg-class-prefix", bool(svg_class_prefix)),
             )
-        except (
-            ValueError,
-            CyclicGraphError,
-            BackwardFlowError,
-            MixedEntryDirectionError,
-            PhaseInvariantError,
-        ) as e:
-            raise click.ClickException(str(e))
-
-        theme_obj = resolve_theme(theme, graph, mode=mode)
-
-        if format_ == "html":
-            # The interactive page supplies its own responsive frame, chrome, and
-            # per-map class scoping, so the SVG-only sizing/namespacing flags have
-            # nothing to act on. Font portability and the dark-mode block do reach
-            # the inlined SVG, so they are threaded through.
-            ignored = [
-                name
-                for name, enabled in (
-                    ("--responsive", responsive),
-                    ("--bare", bare),
-                    ("--svg-class-prefix", bool(svg_class_prefix)),
-                )
-                if enabled
-            ]
-            if ignored:
-                click.echo(
-                    f"Note: {', '.join(ignored)} only affect --format svg and are "
-                    "ignored for --format html (the interactive page is already "
-                    "responsive and scopes each map independently).",
-                    err=True,
-                )
-
-        # Tier-A layout-invariant violations on the settled geometry surface here
-        # under --strict (LayoutInvariantError is a PhaseInvariantError); without
-        # --strict they are warnings the default handler prints to stderr.
-        try:
-            rendered = render_graph_result(
-                graph,
-                theme_obj,
-                RenderConfig(
-                    output_format=format_,
-                    debug=debug,
-                    responsive=responsive,
-                    embed_font=embed_font,
-                    text_to_paths=text_to_paths,
-                    svg_class_prefix=svg_class_prefix,
-                    inject_dark_mode_css=not no_dark_mode_css,
-                    chrome_css=not no_chrome_css,
-                    self_color_scheme=not no_self_color_scheme,
-                    baked_mode=(mode or graph.mode).strip() or None,
-                    bare=bare,
-                    embed_basename=output.name,
-                ),
-            )
-            content = rendered.content
-        except (ValueError, FoldThresholdError, PhaseInvariantError) as e:
-            raise click.ClickException(str(e))
-
-        if validate_geometry:
-            if format_ == "html":
-                raise click.ClickException("--validate applies to --format svg only.")
-            findings = validate_render(content, plan=rendered.plan)
-            if findings:
-                detail = "\n".join(f"  - {f.message}" for f in findings)
-                raise click.ClickException(
-                    f"render-geometry validation found {len(findings)} "
-                    f"defect(s) in the drawn SVG:\n{detail}"
-                )
-
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(content if content.endswith("\n") else content + "\n")
-        if not quiet:
+            if enabled
+        ]
+        if ignored:
             click.echo(
-                f"Rendered {len(graph.stations)} stations, "
-                f"{len(graph.edges)} edges, "
-                f"{len(graph.lines)} lines -> {output}"
-            )
-
-    if permissive and caught:
-        guard_warnings, other_warnings = split_guard_warnings(caught)
-        for w in other_warnings:
-            warnings.showwarning(w.message, w.category, w.filename, w.lineno)
-        if guard_warnings:
-            click.echo(
-                f"--permissive: {len(guard_warnings)} guard(s) downgraded to "
-                "warnings; the rendered geometry may be defective at these points:",
+                f"Note: {', '.join(ignored)} only affect --format svg and are "
+                "ignored for --format html (the interactive page is already "
+                "responsive and scopes each map independently).",
                 err=True,
             )
-            for w in guard_warnings:
-                click.echo(f"  - {w.message}", err=True)
+
+    # Tier-A layout-invariant violations on the settled geometry surface here
+    # under --strict (LayoutInvariantError is a PhaseInvariantError); without
+    # --strict they are warnings, reported by the caller's capture.
+    try:
+        rendered = render_graph_result(
+            graph,
+            theme_obj,
+            RenderConfig(
+                output_format=svg_format,
+                debug=debug,
+                responsive=responsive,
+                embed_font=embed_font,
+                text_to_paths=text_to_paths,
+                svg_class_prefix=svg_class_prefix,
+                inject_dark_mode_css=not no_dark_mode_css,
+                chrome_css=not no_chrome_css,
+                self_color_scheme=not no_self_color_scheme,
+                baked_mode=(mode or graph.mode).strip() or None,
+                bare=bare,
+                embed_basename=output.name,
+                inactive_line_ids=inactive_line_ids,
+                animation_frame_slot=format_ in VIDEO_FORMATS,
+            ),
+        )
+        content = rendered.content
+    except (ValueError, FoldThresholdError, PhaseInvariantError) as e:
+        _clean_error(e, error_prefix)
+
+    if validate_geometry:
+        if format_ == "html":
+            raise click.ClickException("--validate applies to --format svg only.")
+        if not graph.embed_manifest:
+            raise click.ClickException(
+                "--validate reads the drawn SVG through its embedded manifest, "
+                "which this map turns off with %%metro manifest: false."
+            )
+        findings = validate_render(content, plan=rendered.plan)
+        if findings:
+            detail = "\n".join(f"  - {f.message}" for f in findings)
+            raise click.ClickException(
+                f"render-geometry validation found {len(findings)} "
+                f"defect(s) in the drawn SVG:\n{detail}"
+            )
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    detail = ""
+    if format_ in VIDEO_FORMATS:
+        from nf_metro.render.video import write_animation
+
+        try:
+            export = write_animation(
+                content,
+                rendered.plan,
+                output,
+                cast(VideoFormat, format_),
+                fps=fps,
+                duration=duration,
+                scale=scale,
+                width=raster_width,
+                notify=None if quiet else _video_notice,
+                progress=None if quiet else _video_progress,
+            )
+        except NotAnimatedError as e:
+            raise click.ClickException(f"{error_prefix}{e}") from None
+        except Exception as e:
+            _clean_error(e, f"{error_prefix}{format_} export failed: ")
+        detail = (
+            f", {export.frames} frames over {export.duration:.1f}s "
+            f"at {export.fps:.1f}fps"
+        )
+    elif format_ == "png":
+        from nf_metro.render.raster import svg_to_png
+
+        output.write_bytes(svg_to_png(content, scale=scale, width=raster_width))
+    else:
+        output.write_text(content if content.endswith("\n") else content + "\n")
+    if not quiet:
+        click.echo(
+            f"Rendered {len(graph.stations)} stations, "
+            f"{len(graph.edges)} edges, "
+            f"{len(graph.lines)} lines -> {output}{detail}"
+        )
+
+
+def _video_notice(message: str) -> None:
+    """Print what a large export is about to cost, before it starts."""
+    click.echo(f"Note: {message}", err=True)
+
+
+def _video_progress(frames: Iterable[bytes], count: int) -> Iterator[bytes]:
+    """Draw a progress bar over the frames as they rasterise.
+
+    An export runs for minutes, and click hides the bar when stderr is not a
+    terminal, so a piped or logged run stays as quiet as every other render.
+    """
+    with click.progressbar(
+        frames, length=count, label="Rendering frames", file=sys.stderr
+    ) as tracked:
+        yield from tracked
 
 
 @cli.command(name="render-many")
@@ -581,7 +1072,15 @@ def render_many(manifest_file: Path) -> None:
     \b
       input                 Path to the source .mmd file (required).
       output                Path for the output file (required).
-      format                "svg" (default) or "html".
+      format                "svg" (default), "png", "html", or a looping
+                            video: "gif", "webp", "mp4", "webm".
+      scale                 Raster formats only: pixel multiplier (default:
+                            2.0 for png, 1.0 for a video).
+      raster_width          Raster formats only: output width in pixels;
+                            overrides scale.
+      fps                   Video only: frames per second (default: 12).
+      duration              Video only: loop length in seconds; defaults to
+                            the map's own animation cycle.
       theme                 Theme name (nfcore, light, seqera, …).
       mode                  "light" or "dark" — bakes a concrete palette.
       debug                 Show debug overlay (default: false).
@@ -599,6 +1098,10 @@ def render_many(manifest_file: Path) -> None:
       no_chrome_css         Omit chrome CSS custom-properties (default: false).
       bare                  Omit title and outer padding (default: false).
       validate              Run render-geometry guards (default: false).
+      inactive_lines        Line IDs to render inactive: a comma-separated
+                            string or JSON list.  Omit the key to use the map's
+                            own inactive-by-directive lines; give [] to force
+                            every line active.
       layout_options        Object of layout overrides, e.g.
                             {"manifest": false, "x_spacing": 60}.
 
@@ -640,13 +1143,51 @@ def render_many(manifest_file: Path) -> None:
                 v = job.get(key)
                 return str(v) if v else None
 
+            job_format = cast(
+                RenderFormat,
+                _FORMAT_TYPE.convert(job.get("format", "svg"), None, None),
+            )
             logo_raw = job.get("logo")
             lo_raw = job.get("layout_options")
 
             _render_one(
                 Path(raw_input),
                 Path(raw_output),
-                format_=cast(Literal["svg", "html"], str(job.get("format", "svg"))),
+                format_=job_format,
+                scale=cast(
+                    float,
+                    _convert_manifest_number(
+                        _SCALE_TYPE,
+                        job.get("scale", _default_scale(job_format)),
+                        "scale",
+                    ),
+                ),
+                fps=cast(
+                    float,
+                    _convert_manifest_number(
+                        _FPS_TYPE, job.get("fps", DEFAULT_FPS), "fps"
+                    ),
+                ),
+                duration=(
+                    cast(
+                        float,
+                        _convert_manifest_number(
+                            _DURATION_TYPE, job["duration"], "duration"
+                        ),
+                    )
+                    if "duration" in job
+                    else None
+                ),
+                raster_width=(
+                    cast(
+                        int,
+                        _convert_manifest_number(
+                            _RASTER_WIDTH_TYPE, job["raster_width"], "raster_width"
+                        ),
+                    )
+                    if "raster_width" in job
+                    else None
+                ),
                 theme=_str_or_none("theme"),
                 mode=_str_or_none("mode"),
                 debug=bool(job.get("debug", False)),
@@ -664,6 +1205,7 @@ def render_many(manifest_file: Path) -> None:
                 no_chrome_css=bool(job.get("no_chrome_css", False)),
                 bare=bool(job.get("bare", False)),
                 validate_geometry=bool(job.get("validate", False)),
+                inactive_line_ids=_parse_inactive_lines(job.get("inactive_lines")),
                 layout_opts=dict(lo_raw) if isinstance(lo_raw, dict) else {},
                 quiet=True,
             )
@@ -699,7 +1241,11 @@ def convert(
     it to nf-metro format. The output can then be rendered with `nf-metro render`
     or hand-tuned before rendering.
     """
-    from nf_metro.convert import convert_nextflow_dag, is_nextflow_dag
+    from nf_metro.convert import (
+        FeedbackEdgesDroppedWarning,
+        convert_nextflow_dag,
+        is_nextflow_dag,
+    )
 
     text = input_file.read_text()
 
@@ -710,7 +1256,18 @@ def convert(
             err=True,
         )
 
-    result = convert_nextflow_dag(text, title=title or "")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = convert_nextflow_dag(text, title=title or "")
+
+    if caught:
+        _echo_block("Warnings", [str(w.message) for w in caught])
+
+    dropped = sum(
+        len(w.message.connections)
+        for w in caught
+        if isinstance(w.message, FeedbackEdgesDroppedWarning)
+    )
 
     if output is None:
         click.echo(result, nl=False)
@@ -719,7 +1276,11 @@ def convert(
         # Count sections and processes in the output
         sections = result.count("subgraph ")
         processes = result.count("([")
-        click.echo(f"Converted {processes} processes, {sections} sections -> {output}")
+        summary = f"Converted {processes} processes, {sections} sections"
+        if dropped:
+            plural = "" if dropped == 1 else "s"
+            summary += f", {dropped} feedback connection{plural} removed"
+        click.echo(f"{summary} -> {output}")
 
 
 @cli.command()
@@ -746,14 +1307,13 @@ def validate(input_file: Path, with_layout: bool, strict: bool) -> None:
     """
     text = input_file.read_text()
 
-    issues: list[ValidationIssue] = []
+    graph, parse_warnings = _parse_reporting_warnings(
+        input_file, text, label="Validation warnings"
+    )
+
+    issues = [ValidationIssue(WARNING, message) for message in parse_warnings]
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        try:
-            graph = parse_metro_mermaid(text)
-        except ValueError as e:
-            raise click.ClickException(str(e))
-
         issues.extend(validate_graph(graph))
 
         if with_layout:
@@ -812,13 +1372,12 @@ def info(input_file: Path, as_json: bool, verbose: bool) -> None:
     emits the complete structure for scripting.
     """
     text = input_file.read_text()
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        try:
-            graph = parse_metro_mermaid(text)
-        except ValueError as e:
-            raise click.ClickException(str(e))
-    messages = [str(w.message) for w in caught]
+    graph, messages = _parse_reporting_warnings(input_file, text)
+
+    # The JSON and the verbose text report both carry the captured warnings;
+    # the default summary does not, so they surface on stderr instead.
+    if messages and not (as_json or verbose):
+        _echo_block("Warnings", messages)
 
     report = build_info(graph, messages)
     if as_json:
@@ -865,13 +1424,7 @@ def explain(
     output on decisions involving a specific element.
     """
     text = input_file.read_text()
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        try:
-            graph = parse_metro_mermaid(text)
-        except ValueError as e:
-            raise click.ClickException(str(e))
-    messages = [str(w.message) for w in caught]
+    graph, messages = _parse_reporting_warnings(input_file, text)
 
     report = build_explain(
         graph,
@@ -894,7 +1447,13 @@ def explain(
     help="Interface to bind. Default 127.0.0.1 (local only); "
     "use 0.0.0.0 to accept connections from other hosts.",
 )
-@click.option("--theme", type=str, default=None, help="Theme name (nfcore, light).")
+@click.option(
+    "--theme",
+    type=click.Choice(sorted(STYLE_NAMES)),
+    default=None,
+    help="Visual theme (default: from the %%metro style: directive, else nfcore). "
+    "Applies to a .mmd input; an SVG input is served as drawn.",
+)
 @click.option(
     "--overlay",
     type=click.Choice(OVERLAY_STYLES),
@@ -1027,7 +1586,13 @@ def serve(
     help="Interface to bind. Default 127.0.0.1 (local only); "
     "use 0.0.0.0 to accept connections from other hosts.",
 )
-@click.option("--theme", type=str, default="nfcore", help="Theme name (nfcore, light).")
+@click.option(
+    "--theme",
+    type=click.Choice(sorted(STYLE_NAMES)),
+    default="nfcore",
+    show_default=True,
+    help="Visual theme applied to every map registered with this server.",
+)
 @click.option(
     "--overlay",
     type=click.Choice(OVERLAY_STYLES),
@@ -1059,10 +1624,6 @@ def serve_multi_cmd(
     """
     from nf_metro.live.server import serve_multi
 
-    if theme not in THEMES:
-        raise click.ClickException(
-            f"unknown theme {theme!r}; choose from {list(THEMES)}"
-        )
     if host == "0.0.0.0":  # noqa: S104 - explicit opt-in, warned
         click.echo(
             "Binding 0.0.0.0: reachable from other hosts; "
@@ -1070,7 +1631,11 @@ def serve_multi_cmd(
             err=True,
         )
     httpd = serve_multi(
-        THEMES[theme], host=host, port=port, token=token, overlay=overlay
+        THEMES[resolve_style(theme)],
+        host=host,
+        port=port,
+        token=token,
+        overlay=overlay,
     )
     display_host = "localhost" if host == "127.0.0.1" else host
     click.echo("nf-metro live progress - persistent server")
@@ -1205,7 +1770,7 @@ def validate_svg_cmd(svg_file: Path, geometry: bool) -> None:
         import jsonschema
     except ImportError:
         raise click.ClickException(
-            "validate-svg needs the jsonschema package: pip install jsonschema"
+            'validate-svg needs jsonschema: pip install "nf-metro[validate]"'
         )
 
     svg = svg_file.read_text()

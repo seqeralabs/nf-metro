@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import sys
 import tomllib
 from pathlib import Path
 
@@ -18,6 +17,8 @@ from hash_seed_oracle import (
 
 from nf_metro.api import prepare_graph, resolve_theme
 from nf_metro.parser.model import MetroGraph
+from nf_metro.render import svg as svg_module
+from nf_metro.render.raster import svg_to_png
 from nf_metro.render.svg import render_svg
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,6 +40,10 @@ REPRESENTATIVE_CORPUS = (
     "examples/topologies/packed_cell_cellmate_bypass.mmd",
     "examples/topologies/u_turn_fold.mmd",
     "examples/topologies/wide_fan_out.mmd",
+    # Two of the `alt` line's phantom pass-through targets tie on earliest
+    # layer; the layout must pick the same one under every hash seed, so this
+    # map settles and renders identically here.
+    "tests/data/off_track_phantom_tiebreak.mmd",
 )
 
 
@@ -97,8 +102,8 @@ EXPECTED_DEFECT_CLASSES = {
 }
 
 EXPECTED_EXCEPTION_SHA256 = {
-    "seed_15.mmd": "e6f1c8e5faf9f11e2501ed47dd508e5d077ba9cb1812c32c6c3a96bc9e43979e",
-    "seed_41.mmd": "b8cab47b9ffb38a1e96961daf2dd21132eb8a4d1435122f194da294d7fdf397f",
+    "seed_15.mmd": "aa5528e40c467cd49e4383c8acf62497f2265e896d37181bb72feb9522726d91",
+    "seed_41.mmd": "119a52417bd9fdf02767feb6b41d7c32a4f7dcaba5095adf991886c4175c6ebe",
     "seed_77.mmd": "40597beab7da0cc311a70e6012896d1a493a854999499eea700c172aac652643",
 }
 
@@ -144,37 +149,47 @@ def test_seed_render_outcomes_are_stable_across_hash_seeds() -> None:
             assert digest == EXPECTED_EXCEPTION_SHA256[name]
 
 
-def _pinned_cairosvg_version() -> str:
-    """The cairosvg version pyproject pins, which the frozen PNG hash assumes."""
+def _pinned_resvg_version() -> str:
+    """The resvg-py version pyproject pins, which the frozen PNG hash assumes."""
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
     pinned = {
-        requirement.removeprefix("cairosvg==")
+        requirement.removeprefix("resvg-py==")
         for group in pyproject["project"]["optional-dependencies"].values()
         for requirement in group
-        if requirement.startswith("cairosvg==")
+        if requirement.startswith("resvg-py==")
     }
-    assert len(pinned) == 1, f"cairosvg is pinned to several versions: {pinned}"
+    assert len(pinned) == 1, f"resvg-py is pinned to several versions: {pinned}"
     return pinned.pop()
 
 
-def test_seed_72_linux_cairosvg_png_is_frozen() -> None:
-    if sys.platform != "linux":
-        pytest.skip("authoritative PNG lock runs on Linux")
-    import cairosvg
+def test_seed_72_png_is_frozen(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The rendered PNG is byte-stable across platforms.
 
-    assert cairosvg.__version__ == _pinned_cairosvg_version()
+    ``svg_to_png`` skips system fonts and draws only the bundled Inter files,
+    so the same bytes come out of macOS arm64, Linux aarch64, and Linux x86_64.
+    """
+    import resvg_py
+
+    assert resvg_py.__version__ == _pinned_resvg_version()
+
+    # The attribution watermark is rasterised into the PNG, so the lock pins its
+    # text rather than letting the hash track the package version.
+    monkeypatch.setattr(svg_module, "_version_string", lambda: "v1.1.0+dev")
 
     path = REGRESSIONS / "seed_72.mmd"
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+    # Mirrors what `nf-metro render -o x.png` forces, so the lock tracks the
+    # bytes a user actually gets.
     svg = render_svg(
         graph,
         resolve_theme(None, graph),
         chrome_css=False,
+        font_portability="embed",
     )
-    png = cairosvg.svg2png(bytestring=svg.encode(), scale=2)
+    png = svg_to_png(svg, scale=2.0)
 
     assert hashlib.sha256(png).hexdigest() == (
-        "c951485a7fe6338db39691c68116eb104312c1d9e545bd049c986dbc0b9083b9"
+        "dcdb00337f2d8e9a4531d2bd6ea084f437f429d5da3b33c879bccfceaa964b6d"
     )
 
 

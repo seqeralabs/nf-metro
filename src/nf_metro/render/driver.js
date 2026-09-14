@@ -1,3 +1,13 @@
+// Escapes untrusted text (directive-authored line colours/labels, and
+// station/section labels round-tripped through getAttribute(), which decodes
+// the SVG's own HTML-escaped entities) before it lands in an innerHTML
+// template literal.
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
 function attachMetroMap(opts) {
   const root = opts.root;
   const lines = opts.lines;
@@ -192,8 +202,8 @@ function attachMetroMap(opts) {
     chip.className = 'nf-metro-chip';
     chip.dataset.lineId = ln.id;
     chip.innerHTML =
-      `<div class="nf-metro-swatch" style="background:${ln.color}"></div>` +
-      `<span>${ln.label}</span>`;
+      `<div class="nf-metro-swatch" style="background:${escapeHtml(ln.color)}"></div>` +
+      `<span>${escapeHtml(ln.label)}</span>`;
     chip.addEventListener('click', () => setActiveLine(ln.id));
     legend.appendChild(chip);
   });
@@ -214,11 +224,11 @@ function attachMetroMap(opts) {
       const ln = linesById.get(id);
       if (!ln) return '';
       return `<div class="nf-metro-tt-line">` +
-        `<div class="nf-metro-swatch" style="background:${ln.color}"></div>` +
-        `${ln.label}</div>`;
+        `<div class="nf-metro-swatch" style="background:${escapeHtml(ln.color)}"></div>` +
+        `${escapeHtml(ln.label)}</div>`;
     }).join('');
-    return `<div class="nf-metro-tt-title">${label}</div>` +
-      (section ? `<div class="nf-metro-tt-section">${section}</div>` : '') +
+    return `<div class="nf-metro-tt-title">${escapeHtml(label)}</div>` +
+      (section ? `<div class="nf-metro-tt-section">${escapeHtml(section)}</div>` : '') +
       lineHtml;
   }
   function positionTip(e) {

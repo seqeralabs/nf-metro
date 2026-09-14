@@ -31,6 +31,14 @@ async function suppressNextPopup() {
   });
 }
 
+async function replaceEditorText(source) {
+  await page.locator(".CodeMirror").click();
+  await page.keyboard.press(
+    process.platform === "darwin" ? "Meta+A" : "Control+A",
+  );
+  await page.keyboard.insertText(source);
+}
+
 test.beforeAll(async ({ browser }) => {
   page = await browser.newPage();
   await page.goto("/harness.html");
@@ -59,12 +67,9 @@ test("service worker precaches pyodide.js during install", async () => {
 
 test("boots and renders the seed map", async () => {
   await expect(page.locator("#preview svg")).toHaveCount(1);
-  expect(await page.locator("#preview [data-line-id]").count()).toBeGreaterThan(
-    0,
-  );
-  expect(
-    await page.locator('#preview [data-station-id="reads"]').count(),
-  ).toBeGreaterThan(0);
+  await expect(page.locator("#preview")).toContainText("Reads");
+  await expect(page.locator("#preview")).toContainText("FastQC");
+  await expect(page.locator("#preview")).toContainText("BAM");
   await expect(page.locator("#error")).toBeHidden();
 });
 
@@ -86,18 +91,15 @@ test("renderer startup message does not show the obsolete download warning", asy
 });
 
 test("live edit re-renders with the new station", async () => {
-  await expect(
-    page.locator('#preview [data-station-id="brandnew"]'),
-  ).toHaveCount(0);
-  await page.evaluate(() => {
-    const v =
-      window.__nfMetro.getValue() +
-      "\n    align -->|main| brandnew[BrandNew]\n";
-    window.__nfMetro.setValue(v);
-  });
-  await expect(
-    page.locator('#preview [data-station-id="brandnew"]').first(),
-  ).toBeVisible();
+  const source =
+    "%%metro line: main | Main | #c792ea\n" +
+    "graph LR\n" +
+    "    align[Align] -->|main| brandnew[BrandNew]\n";
+
+  await replaceEditorText(source);
+
+  await expect(page.locator("#preview")).toContainText("BrandNew");
+  await expect(page.locator("#error")).toBeHidden();
 });
 
 test("animate toggle adds motion elements", async () => {
@@ -115,17 +117,16 @@ test("layout options are disclosed in their dedicated control panel", async () =
   await expect(page.locator("#opt-line-spread")).toBeVisible();
 });
 
-test("directional toggle adds chevron markers", async () => {
-  await expect(page.locator('#preview [class*="metro-direction"]')).toHaveCount(
-    0,
-  );
+test("directional toggle adds direction markers", async () => {
+  const markers = page.locator('#preview [class*="metro-direction-"]');
+  await expect(markers).toHaveCount(0);
+
   await page.locator("#opt-directional").check();
-  await expect
-    .poll(async () =>
-      page.locator('#preview [class*="metro-direction"]').count(),
-    )
-    .toBeGreaterThan(0);
+  await expect.poll(async () => markers.count()).toBeGreaterThan(0);
+  await expect(page.locator("#error")).toBeHidden();
+
   await page.locator("#opt-directional").uncheck();
+  await expect(markers).toHaveCount(0);
 });
 
 test("brand dropdown writes the %%metro style directive and re-renders", async () => {
@@ -301,13 +302,17 @@ test("line color swatch rewrites the hex in the editor", async () => {
 });
 
 test("syntax error surfaces inline and keeps the last good render", async () => {
+  const valid =
+    "%%metro line: a | A | #f00\n" +
+    "graph LR\n" +
+    "  stable[Stable Good] -->|a| n2[N2]\n";
+  await replaceEditorText(valid);
+  await expect(page.locator("#preview")).toContainText("Stable Good");
+  await expect(page.locator("#error")).toBeHidden();
   const good = await page.locator("#preview").innerHTML();
-  await page.evaluate(() => {
-    // A self-referential cycle the layout engine rejects.
-    window.__nfMetro.setValue(
-      "%%metro line: a | A | #f00\ngraph LR\n  n1[N1] -->|a| n2[N2]\n  n2 -->|a| n1\n",
-    );
-  });
+
+  // A self-referential cycle the layout engine rejects.
+  await replaceEditorText(valid + "  n2 -->|a| stable\n");
   await expect(page.locator("#error")).toBeVisible();
   await expect(page.locator("#error strong")).toHaveText("Source error");
   // Preview is untouched: the broken edit did not blank it.

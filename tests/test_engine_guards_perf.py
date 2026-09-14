@@ -14,7 +14,7 @@ import pytest
 from nf_metro.layout.engine import _station_marker_bbox, compute_layout
 from nf_metro.layout.geometry import segment_intersects_bbox as _segment_intersects_bbox
 from nf_metro.layout.routing import compute_station_offsets, route_edges
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.mermaid import parse_metro_mermaid_file
 from nf_metro.parser.model import MetroGraph
 from nf_metro.render.svg import apply_route_offsets
 
@@ -52,7 +52,7 @@ ALL_FIXTURES = _discover_fixtures()
 def _layout(path_str: str, **kwargs) -> MetroGraph:
     """Parse a fixture and run the full layout pipeline."""
     path = Path(path_str)
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     # Legacy fixtures under tests/fixtures/ preserve the implicit
     # center_ports=True default (parsed in-file for examples/).
     if path.is_relative_to(FIXTURES) and "center_ports" not in kwargs:

@@ -14,6 +14,9 @@ from nf_metro.themes import THEMES
 
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
 RNASEQ_MMD = EXAMPLES_DIR / "rnaseq_sections.mmd"
+# Copied into a temp directory below, so it must name no asset that resolves
+# relative to the map file.
+STANDALONE_MMD = EXAMPLES_DIR / "variant_calling.mmd"
 
 
 def _render_html_via_cli(tmp_path):
@@ -38,7 +41,7 @@ def test_render_html_exits_zero_and_writes_nonempty(tmp_path):
 def test_render_html_default_output_extension(tmp_path):
     """render --format html defaults the output filename to the input stem + .html."""
     mmd = tmp_path / "diagram.mmd"
-    mmd.write_text(RNASEQ_MMD.read_text())
+    mmd.write_text(STANDALONE_MMD.read_text())
     runner = CliRunner()
     result = runner.invoke(cli, ["render", str(mmd), "--format", "html"])
     assert result.exit_code == 0, result.output
@@ -116,16 +119,73 @@ def test_render_html_closing_script_tag_escaped(tmp_path):
     assert "<\\/script>" in content
 
 
+def test_render_html_lines_json_escapes_script_close_in_label():
+    """A line label containing a literal ``</script>`` must not terminate the
+    outer ``<script>`` block that embeds the ``lines`` JSON early.
+
+    The rendered SVG separately carries the manifest as ``<metadata>`` CDATA,
+    where the same raw text is inert (CDATA sections are immune to
+    ``</script>`` in SVG foreign content), so the assertion is scoped to the
+    ``lines: [...]`` JS literal rather than the whole page.
+    """
+    graph = parse_metro_mermaid(
+        "%%metro line: evil | </script><script>alert(1)</script> | #ff0000\n"
+        "graph LR\n    a[A] -->|evil| b[B]\n"
+    )
+    compute_layout(graph)
+    html_out = render_html(graph, THEMES["nfcore"])
+
+    match = re.search(r"lines: (\[.*?\]),\n  embed:", html_out)
+    assert match, "expected a `lines: [...]` JS literal in the standalone page"
+    lines_literal = match.group(1)
+    assert "</script>" not in lines_literal
+    assert "<\\/script>" in lines_literal
+
+
+DRIVER_JS = (
+    Path(__file__).resolve().parent.parent / "src" / "nf_metro" / "render" / "driver.js"
+)
+
+
+def test_driver_js_escapes_untrusted_values_at_every_dom_sink():
+    """driver.js re-reads ``getAttribute()``-sourced labels (which decode the
+    SVG's own HTML-escaped entities) and line colour/label from the embedded
+    ``lines`` JSON, then inserts both via ``innerHTML``; upstream Python-side
+    escaping cannot protect that path, so this checks the source directly for
+    the escaping helper being applied at each sink.
+
+    This repo has no JS test runner wired up, so a source-inspection
+    assertion is the fallback in place of an executed DOM test.
+    """
+    src = DRIVER_JS.read_text()
+    assert "function escapeHtml(" in src
+
+    chip_html = re.search(r"chip\.innerHTML =\n?(.*?);", src, re.DOTALL)
+    assert chip_html, "expected the legend chip's innerHTML assignment"
+    assert "escapeHtml(ln.color)" in chip_html.group(1)
+    assert "escapeHtml(ln.label)" in chip_html.group(1)
+
+    build_tip = re.search(r"function buildTip\(rect\) \{(.*?)\n  \}", src, re.DOTALL)
+    assert build_tip, "expected the tooltip-building function"
+    body = build_tip.group(1)
+    assert "escapeHtml(label)" in body
+    assert "escapeHtml(section)" in body
+    assert "escapeHtml(ln.color)" in body
+    assert "escapeHtml(ln.label)" in body
+
+
 def test_render_html_embedded_svg_matches_standalone_render():
     """Embedded SVG matches the canonical legend-less SVG render for the input."""
     text = RNASEQ_MMD.read_text()
     theme = THEMES["nfcore"]
 
     graph_html = parse_metro_mermaid(text)
+    graph_html.source_dir = str(EXAMPLES_DIR)
     compute_layout(graph_html)
     html_out = render_html(graph_html, theme)
 
     graph_svg = parse_metro_mermaid(text)
+    graph_svg.source_dir = str(EXAMPLES_DIR)
     compute_layout(graph_svg)
     expected_svg = render_svg(graph_svg, theme, legend_position="none")
 
@@ -136,6 +196,7 @@ def test_render_html_title_in_markup():
     """The graph title surfaces in the page header."""
     text = RNASEQ_MMD.read_text()
     graph = parse_metro_mermaid(text)
+    graph.source_dir = str(EXAMPLES_DIR)
     compute_layout(graph)
     html_out = render_html(graph, THEMES["nfcore"])
 
@@ -152,6 +213,7 @@ def test_render_html_forwards_font_portability_embed():
     """font_portability='embed' inlines the webfont into the page's SVG."""
     text = RNASEQ_MMD.read_text()
     graph = parse_metro_mermaid(text)
+    graph.source_dir = str(EXAMPLES_DIR)
     compute_layout(graph)
 
     plain = render_html(graph, THEMES["nfcore"])

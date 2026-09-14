@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://pinin4fjords.github.io/nf-metro/state.schema.json",
+  "$id": "https://seqeralabs.github.io/nf-metro/state.schema.json",
   "title": "Live state snapshot",
   "description": "The runtime progress snapshot served by nf-metro's live server (GET /state, and each Server-Sent Event on /stream) - the state half of the live-diagram contract, paired with the diagram manifest (nf_metro/manifest/schema.json). A node's key here is the manifest's node.id / data-node-id join key. Tool-neutral and experimental (pre-1.0): unlike the manifest, no version field travels inside the snapshot itself, since it is a live response rather than a durable artifact; this schema file is versioned 1.0 and evolves under the same rule as the manifest - consumers MUST ignore unknown fields, and additive fields keep the same major version.",
   "type": "object",

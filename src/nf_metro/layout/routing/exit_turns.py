@@ -64,9 +64,13 @@ from nf_metro.layout.routing.common import (
     segment_direction,
     vertical_direction,
 )
-from nf_metro.layout.routing.context import _RoutingCtx, _tb_x_offset
+from nf_metro.layout.routing.context import (
+    _RoutingCtx,
+    _tb_x_offset,
+    slot_is_available,
+)
 from nf_metro.layout.routing.families import (
-    BYPASS_ROUTE_FAMILY_VALUES,
+    LANDING_POINT_SETTLED_LATER_FAMILY_VALUES,
     RouteFamilyId,
 )
 from nf_metro.layout.routing.inter_section_handlers import (
@@ -111,7 +115,9 @@ from nf_metro.layout.routing.inter_section_handlers import (
     seated_left_exit_under_target_descent,
     u_bypass_descent_geometry,
 )
-from nf_metro.layout.routing.normalize import _reseat_concentric_flanking
+from nf_metro.layout.routing.normalize import (
+    _reseat_concentric_flanking,
+)
 from nf_metro.layout.routing.offsets import (
     LinearEntryFrameOwnership,
     capture_linear_entry_frame_ownership,
@@ -710,9 +716,7 @@ def _source_lane_order(
     def riser_lateral(line_id: str) -> float:
         if perpendicular_exit:
             assert exit_port is not None
-            return _perp_riser_lateral(
-                ctx, exit_port_id, line_id, exit_port.side, section_id
-            )
+            return _perp_riser_lateral(ctx, exit_port_id, line_id, exit_port.side)
         return _tb_x_offset(ctx, source_id, line_id, section_id)
 
     graph_rank = {line_id: rank for rank, line_id in enumerate(ctx.graph.lines)}
@@ -793,7 +797,7 @@ def _bottom_exit_junction_turn_requirement(
 
     members, _source_center, tgt_center = gather_tapered_bundle(ctx, edge)
     geometry = _bottom_exit_junction_geometry(
-        edge, src, tgt, ctx, exit_x_offset, members, tgt_center
+        edge, src, tgt, exit_x_offset, members, tgt_center
     )
     return _SourceTurnRequirement.from_seam(geometry.seam)
 
@@ -1418,20 +1422,6 @@ def _roles(
     return tuple(role for role in EmissionRole if role in roles)
 
 
-def _slot_is_available(
-    graph: MetroGraph,
-    offsets: Mapping[tuple[str, str], float],
-    station_id: str,
-    line_id: str,
-    desired: float,
-) -> bool:
-    return not any(
-        other_line != line_id
-        and abs(offsets.get((station_id, other_line), 0.0) - desired) <= COORD_TOLERANCE
-        for other_line in graph.station_lines(station_id)
-    )
-
-
 def _lane_transition(
     graph: MetroGraph,
     edge: ResolvedEdge,
@@ -1650,7 +1640,7 @@ def _continuation_lane_ownership(
 
     stations = []
     transitions = []
-    if not _slot_is_available(graph, offsets, entry_id, line_id, desired):
+    if not slot_is_available(graph, offsets, entry_id, line_id, desired):
         source_lane_offset = desired
         target_lane_offset = offsets.get((entry_id, line_id), 0.0)
         source_offset = source_lane_offset
@@ -1710,7 +1700,7 @@ def _continuation_lane_ownership(
         candidate_port = graph.ports.get(candidate)
         if candidate_port is not None and not candidate_port.is_entry:
             break
-        if not _slot_is_available(graph, offsets, candidate, line_id, desired):
+        if not slot_is_available(graph, offsets, candidate, line_id, desired):
             source_lane_offset = desired
             target_lane_offset = offsets.get((candidate, line_id), 0.0)
             source_offset = source_lane_offset
@@ -3103,7 +3093,6 @@ def _planned_axis_cross_range(
                     graph_edge,
                     source,
                     target,
-                    tentative_ctx,
                     bej_exit_x_offset,
                     bej_members,
                     bej_tgt_center,
@@ -3662,15 +3651,9 @@ def snapshot_exit_turn_segments(
             # seats against geometry the plan does not state, so how far along
             # the axis it runs is not the planner's to hold; the axis it stands
             # on is, and :func:`validate_exit_turn_plans` holds that to the end.
-            landing_point_settled_later = route.exit_turn_family_id in {
-                RouteFamilyId.MERGE_BRANCH.value,
-                RouteFamilyId.LEFT_ENTRY_WRAP.value,
-                RouteFamilyId.RIGHT_ENTRY_CROSS_ROW_WRAP.value,
-                RouteFamilyId.RIGHT_ENTRY_WRAP.value,
-                RouteFamilyId.TOP_ENTRY_L_SHAPE.value,
-                RouteFamilyId.BOTTOM_ENTRY_L_SHAPE.value,
-                *BYPASS_ROUTE_FAMILY_VALUES,
-            }
+            landing_point_settled_later = (
+                route.exit_turn_family_id in LANDING_POINT_SETTLED_LATER_FAMILY_VALUES
+            )
             values[
                 (
                     "axis",

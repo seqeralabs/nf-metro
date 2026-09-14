@@ -509,6 +509,29 @@ def _bundle_edge_padding(
     )
 
 
+def _bypass_v_lane_reach(
+    graph: MetroGraph,
+    sid: str,
+    offsets: dict[tuple[str, str], float],
+    is_horizontal: bool,
+) -> tuple[float, float]:
+    """How far above and below its anchor lane the curve drawn through
+    bypass-V helper ``sid`` reaches, as two non-negative distances.
+
+    A helper has no marker pill, but the diversion curve through it is drawn
+    on its line's offset lane (:func:`_station_bundle_offset_span`), which a
+    multi-line bundle can put a whole offset step off the anchor.  The
+    curve-clearance the section edge owes the helper is owed to that lane --
+    the bypass counterpart of what :func:`_bundle_edge_padding` does for a
+    marker's drawn pill.  A vertical-flow section separates its lines in X
+    instead, so both reaches are 0 there.
+    """
+    if not is_horizontal:
+        return 0.0, 0.0
+    min_off, max_off = _station_bundle_offset_span(graph, sid, offsets)
+    return max(0.0, -min_off), max(0.0, max_off)
+
+
 def _predict_section_content_bottom(
     graph: MetroGraph,
     section: Section,
@@ -528,6 +551,8 @@ def _predict_section_content_bottom(
     bottom-edge case of the bundle-span correction: how far a station's
     drawn bundle pill extends below its anchor lane
     (:func:`_station_bundle_offset_span`) folded into the padding target.
+    A bypass helper takes the same correction against its drawn curve
+    (:func:`_bypass_v_lane_reach`) under the smaller curve clearance.
     Pass a pre-computed ``offsets``
     (:func:`nf_metro.layout.routing.compute_station_offsets`) to avoid
     recomputing it once per section in a per-section caller's loop.
@@ -590,6 +615,7 @@ def _predict_section_content_bottom(
     content_bot = max(content_bots)
     bypass_max_ys = [
         graph.stations[sid].y
+        + _bypass_v_lane_reach(graph, sid, offsets, is_horizontal)[1]
         for sid in section.station_ids
         if sid in graph.stations and is_bypass_v(sid)
     ]
@@ -650,46 +676,37 @@ def _shrink_bboxes_to_content_bottom(
     still bisects to a meaningful intermediate state.
     """
 
-    def _row_mate_bottoms(section: Section) -> list[float]:
-        # Two policies depending on this section's direction:
+    def _shares_bottom_with_row_mate(section: Section) -> bool:
+        # A bottom edge shared with a row-mate is deliberate -- Stage 6.5
+        # bottom-aligns row-mates, a TB fold's bbox is grown by
+        # ``section_y_gap`` so it reaches its target's bottom, and a rowspan
+        # section meets the bottom of the row it spans into -- so the shrink
+        # must leave it intact.  A row-mate that is merely deeper shares no
+        # edge with this section and must not hold its bottom off its content.
         #
-        # TB sections (folds) get their bbox grown by ``section_y_gap``
-        # in section_placement so they visually span into the next row's
-        # target.  Their intended bottom is the target row-mate's bottom,
-        # which is in a different grid row but Y-overlapping.  Honour
-        # Y-overlap for these so the bottom-alignment from Stage 6.5 /
-        # the fold extension survives.
-        #
-        # LR/RL sections use ONLY their STARTING grid row to find
-        # row-mates.  Counting this section's rowspan would pull in
+        # Membership itself has two policies.  LR/RL sections use ONLY their
+        # STARTING grid row: counting this section's rowspan would pull in
         # sections from rows the rowspan claims but doesn't fill -- a
-        # rowspan=2 LR sidebar whose content fits in row 0 must not be
-        # pinned to a row-1 neighbour just because its declared span
-        # overlaps row 1.  Y-overlap is intentionally excluded for
-        # LR/RL: a stale pre-shrink bbox would otherwise be
-        # self-protecting (the overlap blocks the shrink that would
-        # remove the overlap).
+        # rowspan=2 LR sidebar whose content fits in row 0 must not be pinned
+        # to a row-1 neighbour just because its declared span overlaps row 1.
+        # TB sections (folds), and any section without grid coords, take any
+        # section at the shared bottom: a fold's partner is by design in the
+        # next grid row down.
         my_grid_row = section.grid_row if section.grid_row >= 0 else None
-        my_y_top = section.bbox_y
         my_y_bot = section.bbox_y + section.bbox_h
-        # LR/RL sections with grid coords match on starting row only;
-        # TB sections (and any unplaced section) fall back to bbox-Y
-        # overlap.  See block comment above for the why.
         use_grid = section.direction != "TB" and my_grid_row is not None
-        out: list[float] = []
         for other in graph.sections.values():
             if other.id == section.id or other.bbox_h <= 0:
                 continue
             o_y_bot = other.bbox_y + other.bbox_h
-            if use_grid and my_grid_row is not None and other.grid_row >= 0:
-                o_grid_top = other.grid_row
-                o_grid_bot = other.grid_row + max(1, other.grid_row_span)
-                mate = o_grid_top <= my_grid_row < o_grid_bot
-            else:
-                mate = other.bbox_y < my_y_bot and o_y_bot > my_y_top
-            if mate:
-                out.append(o_y_bot)
-        return out
+            if abs(o_y_bot - my_y_bot) > SAME_COORD_TOLERANCE:
+                continue
+            if not use_grid or my_grid_row is None or other.grid_row < 0:
+                return True
+            o_grid_bot = other.grid_row + max(1, other.grid_row_span)
+            if other.grid_row <= my_grid_row < o_grid_bot:
+                return True
+        return False
 
     from nf_metro.layout.routing import compute_station_offsets
 
@@ -709,11 +726,9 @@ def _shrink_bboxes_to_content_bottom(
                 graph, section, PortSide.BOTTOM, section.bbox_y + section.bbox_h
             )
             continue
-        desired_bot = content_bot
-        mate_bots = _row_mate_bottoms(section)
-        if mate_bots:
-            desired_bot = max(desired_bot, max(mate_bots))
-        new_h = desired_bot - section.bbox_y
+        if _shares_bottom_with_row_mate(section):
+            continue
+        new_h = content_bot - section.bbox_y
         if new_h < section.bbox_h - SAME_COORD_TOLERANCE:
             section.bbox_h = max(0.0, new_h)
             _pull_section_ports_to_edge(
@@ -784,7 +799,9 @@ def _section_content_hug_top(
     bundle-span correction (see :func:`_bundle_edge_padding`): how far a
     multi-line bundle's drawn pill extends above its anchor lane
     (:func:`_station_bundle_offset_span`), which can be nonzero even when
-    no fan-out lifted the station itself.  Pass a pre-computed ``offsets``
+    no fan-out lifted the station itself.  A bypass helper takes the same
+    correction against its drawn curve (:func:`_bypass_v_lane_reach`) under
+    the smaller curve clearance.  Pass a pre-computed ``offsets``
     (:func:`nf_metro.layout.routing.compute_station_offsets`) to avoid
     recomputing it once per section in a per-section caller's loop.
 
@@ -805,7 +822,7 @@ def _section_content_hug_top(
     # why, and why this must match rail_mode's own reservation exactly.
     from nf_metro.layout.rail_mode import rail_above_label_top_pad
 
-    rail_pad = rail_above_label_top_pad(graph, section, section_y_padding)
+    rail_pad = rail_above_label_top_pad(graph, section)
 
     def _content_min_y(sid: str) -> float:
         if sid in rail_pad:
@@ -829,6 +846,7 @@ def _section_content_hug_top(
     content_min_ys = [_content_min_y(sid) for sid in content_ids]
     bypass_min_ys = [
         graph.stations[sid].y
+        - _bypass_v_lane_reach(graph, sid, offsets, is_horizontal)[0]
         for sid in section.station_ids
         if sid in graph.stations and is_bypass_v(sid)
     ]
@@ -1322,7 +1340,12 @@ def _top_align_side_entered_vertical_to_feeder(graph: MetroGraph) -> None:
     disturbing routing.  Growth is upward only, so a section already at or
     above its feeder is untouched, and empty-band sections with no side entry
     keep their content-hug.
+
+    A no-op unless ``graph.row_align == "top"``: the default content-hugging
+    mode leaves a side-entered vertical section's badge at its own content top.
     """
+    if graph.row_align != "top":
+        return
     for section, neighbour in _side_entered_vertical_feeder_pairs(graph):
         if section.bbox_y - neighbour.bbox_y > SAME_COORD_TOLERANCE:
             grow_section_bbox_min_edge(graph, section, "y", neighbour.bbox_y)

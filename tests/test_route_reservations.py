@@ -108,7 +108,7 @@ EXPECTED_RESERVATION_CLAIMS = {
         (14, 2),
         (14, 3),
     ),
-    "fan_bypass_shared_band.mmd": ((9, 1), (9, 3)),
+    "fan_bypass_shared_band.mmd": ((9, 1), (9, 2), (9, 3)),
     "packed_cell_right_exit_left_entry_wrap.mmd": (
         (53, 1),
         (55, 1),

@@ -23,7 +23,7 @@ from nf_metro.render.svg import (
     render_svg,
     station_marker_box,
 )
-from nf_metro.themes import NFCORE_THEME
+from nf_metro.themes import NFCORE_DARK_THEME
 
 EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
 
@@ -44,6 +44,7 @@ EPS = 0.5
 
 def _laid_out(name: str):
     graph = parse_metro_mermaid((EXAMPLES_DIR / name).read_text())
+    graph.source_dir = str((EXAMPLES_DIR / name).parent)
     compute_layout(graph)
     return graph
 
@@ -68,7 +69,7 @@ def _anchor_ys(graph) -> set[float]:
     graph, so anchors read straight off the laid-out graph are the pre-render
     ones and would not line up with the drawn grid.
     """
-    settled = _settled_render_graph(graph, NFCORE_THEME)
+    settled = _settled_render_graph(graph, NFCORE_DARK_THEME)
     return {round(st.y, 1) for st in settled.stations.values() if not st.is_port}
 
 
@@ -77,7 +78,7 @@ def test_debug_row_grid_marks_placement_anchors(fixture):
     """Every occupied row has a grid line on its anchor, and no grid line sits
     where no station is placed."""
     graph = _laid_out(fixture)
-    svg = render_svg(graph, NFCORE_THEME, debug=True, chrome_css=False)
+    svg = render_svg(graph, NFCORE_DARK_THEME, debug=True, chrome_css=False)
     grid_ys = _row_grid_line_ys(svg)
     assert grid_ys, "debug render drew no row-grid lines"
     anchors = _anchor_ys(graph)
@@ -97,7 +98,7 @@ def test_debug_grid_sits_at_anchor_not_pill_centre():
     """The headline #589 case: the nine bundled qc_report stations share one
     anchor line at station.y, and their pills hang below it (centre != anchor)."""
     graph = _laid_out("rnaseq_sections_manual.mmd")
-    svg = render_svg(graph, NFCORE_THEME, debug=True, chrome_css=False)
+    svg = render_svg(graph, NFCORE_DARK_THEME, debug=True, chrome_css=False)
     grid_ys = _row_grid_line_ys(svg)
     offsets = compute_station_offsets(graph)
 
@@ -114,7 +115,7 @@ def test_debug_grid_sits_at_anchor_not_pill_centre():
     assert grid_at, f"no grid line at the qc_report anchor y={trunk_y}"
 
     for st in trunk:
-        _cx, cy, _w, _h, _r = station_marker_box(graph, NFCORE_THEME, st, offsets)
+        _cx, cy, _w, _h, _r = station_marker_box(graph, NFCORE_DARK_THEME, st, offsets)
         # The bundle offset puts the drawn pill centre below its anchor line.
         assert cy > trunk_y + EPS
         assert not any(abs(cy - g) <= EPS for g in grid_at)

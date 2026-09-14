@@ -1,6 +1,6 @@
 ---
 name: fix-issue
-description: Coordinator-led workflow for fixing GitHub issues on nf-metro: diagnostic-first, invariant-test-first, delegated to tiered workers. Use when the user references a GitHub issue (by number, URL, or description) and wants it fixed. Handles autonomous / net-negative requests. Trigger on "fix issue #N", "address #N", "work on issue N", or any request to fix a bug or implement a feature that references an issue. Use this whenever the work starts from a filed issue, including layout and routing bugs. For a bad render you are looking at with no issue filed, see `nf-metro-layout-fix`; for shepherding a chain of existing PRs back to main, see `pr-chain-vet`.
+description: Coordinator-led workflow for fixing GitHub issues on nf-metro: diagnostic-first, invariant-test-first, delegated to tiered workers. Use when the user references a GitHub issue (by number, URL, or description) and wants it fixed. Handles autonomous / net-negative requests. Trigger on "fix issue #N", "address #N", "work on issue N", or any request to fix a bug or implement a feature that references an issue - or with no issue number at all ("fix something impactful"), in which case the skill picks one itself. Use this whenever the work starts from a filed issue, including layout and routing bugs. For a bad render you are looking at with no issue filed, see `nf-metro-layout-fix`; for shepherding a chain of existing PRs back to main, see `pr-chain-vet`.
 ---
 
 # Fix Issue
@@ -31,7 +31,7 @@ its work" is what the gates are for.
 
 | File | Owner | Load when |
 | --- | --- | --- |
-| [`coordinator.md`](references/coordinator.md) | **coord** | always: briefing the issue, worktree setup, the push, origin check, pre-ready gate, cleanup |
+| [`coordinator.md`](references/coordinator.md) | **coord** | always: briefing the issue (or picking one), worktree setup, the push, origin check, pre-ready gate, cleanup |
 | [`agent-types.md`](references/agent-types.md) | **coord** | choosing an agent type, or checking the model resolution order |
 | [`scope-discipline.md`](references/scope-discipline.md) | **coord** | fallout appears and you are tempted to defer it |
 | [`merge-and-cleanup.md`](references/merge-and-cleanup.md) | **coord** | the PR body, pushing, merging, cleanup |
@@ -60,13 +60,16 @@ contract first for that reason; do not move the rationale above them.
 Each step's detail is in the reference named beside it. Do not skip a step
 because its detail is not inline.
 
+0. **Select an issue, only when the user gave none.** A LIGHT investigator
+   ranks open issues with no open PR, worktree, or assignee already against
+   them; user confirms before Step 1. [`coordinator.md`](references/coordinator.md)
 1. **Understand the issue.** A LIGHT investigator reads it and returns problem
    statement, scope, unknowns, and a proposed diagnostic brief. The issue body
    stays in the worker. Wait for user confirmation unless autonomous work is
    pre-authorised. [`coordinator.md`](references/coordinator.md)
-2. **Worktree and environment.** Coordinator creates the worktree off latest
-   `origin/main`, records the base SHA, assigns one writer.
-   [`coordinator.md`](references/coordinator.md)
+2. **Worktree and environment.** Coordinator claims the issue (assignee),
+   creates the worktree off latest `origin/main`, records the base SHA,
+   assigns one writer. [`coordinator.md`](references/coordinator.md)
 3. **Diagnose before fixing.** No fix proposed from a hypothesis. The defect
    becomes a numeric claim (geometry) or named call sites (structural), or the
    verdict is "not a bug" held to the same standard. Then the mandatory
@@ -120,7 +123,9 @@ nobody chose - and where it lands depends on the resolution order in
 that overrides every tier in this table. Never leave it to that.
 
 The tier is the contract, not the model name. On Claude Code that is
-`haiku`/`sonnet`/`opus`.
+`haiku`/`sonnet`/`claude-opus-4-8`. HIGH is pinned to that exact snapshot rather
+than the `opus` alias, so it does not silently follow Anthropic's newer Opus
+releases.
 
 **This skill is Claude Code specific and does not run elsewhere as written.** It
 leans on agent definitions, `Explore`/`Plan`, `effort`, `SendMessage` resumption,
@@ -137,6 +142,7 @@ the one it got: that call belongs at spawn time or not at all.
 
 | Step | Role | Agent type | Tier |
 | --- | --- | --- | --- |
+| 0 | issue selection (only when none given) | `fix-issue-investigator` | LIGHT |
 | 1 | issue investigator | `fix-issue-investigator` | LIGHT |
 | 3 | diagnosis | `fix-issue-diagnostician` | HIGH; MID when the issue already names its own single-site cause and the brief is confirm-or-refute |
 | 3, 11 | the two review gates | `fix-issue-reviewer` | HIGH |

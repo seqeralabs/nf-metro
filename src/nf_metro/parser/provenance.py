@@ -597,10 +597,6 @@ class LayoutProvenance:
         """Whether any effective grid commitment is author-owned."""
         return any(decision.is_author_owned for decision in self.grids.values())
 
-    def grid_is_locked(self, section_id: str) -> bool:
-        decision = self.grid_decision(section_id)
-        return decision is not None and decision.is_reinference_locked
-
     def author_owns_direction(self, section_id: str) -> bool:
         decision = self.direction_decision(section_id)
         return decision is not None and decision.is_author_owned

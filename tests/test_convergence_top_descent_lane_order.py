@@ -2,12 +2,12 @@
 take the topmost lane, not dive under a same-row left feeder (#1410).
 
 This is the non-compact counterpart of the compact convergence-sink ordering
-locked by ``test_convergence_sink_above_lane_order`` (#1204).  A section fed
-by two feeders at one LEFT entry port -- one arriving from a row above (a top
-descent) and one arriving level from the row to its left -- slots the bundle by
-line-declaration order by default.  When the descending line is declared last
-it lands on the bottom lane, so it crosses under the left feeder at the
-boundary and reads as the lower stroke through every internal branch.
+locked by ``tests/test_convergence_sink_above_lane_order.py`` (#1204).  A
+section fed by two feeders at one LEFT entry port -- one arriving from a row
+above (a top descent) and one arriving level from the row to its left -- slots
+the bundle by line-declaration order by default.  When the descending line is
+declared last it lands on the bottom lane, so it crosses under the left feeder
+at the boundary and reads as the lower stroke through every internal branch.
 
 The crossing-free lane order at such a convergence is by feeder source Y: the
 feeder whose source sits highest takes the topmost (smallest-offset) lane.  The

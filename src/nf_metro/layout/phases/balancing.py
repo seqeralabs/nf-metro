@@ -268,8 +268,88 @@ def _fan_free_content_upward(
             for sid in trunk_candidates[1 : 1 + slots]
             if not _lift_would_cause_uturn(graph, sid, section.id, anchor_y)
         ]
-        for i, sid in enumerate(to_lift, 1):
-            graph.stations[sid].y = anchor_y - i * y_spacing
+        proposed = {sid: anchor_y - i * y_spacing for i, sid in enumerate(to_lift, 1)}
+        if _lift_decentres_fan_in_join(graph, section, proposed, y_spacing, anchor_y):
+            continue
+        for sid, new_y in proposed.items():
+            graph.stations[sid].y = new_y
+
+
+def _in_section_join_sources(
+    graph: MetroGraph, join: str, section_id: str
+) -> list[str]:
+    """Distinct in-section, non-port stations feeding ``join``."""
+    sources: list[str] = []
+    for edge in graph.edges_to(join):
+        st = graph.station_for_edge_source(edge)
+        if st.is_port or st.section_id != section_id:
+            continue
+        if edge.source not in sources:
+            sources.append(edge.source)
+    return sources
+
+
+def _downstream_fan_in_join(graph: MetroGraph, sid: str, section_id: str) -> str | None:
+    """An in-section station downstream of ``sid`` that fans in.
+
+    Walks the forward chain within the section until it reaches a station with
+    two or more in-section sources (the reconvergence a lifted branch would
+    de-centre), or exhausts the reachable in-section frontier.  First found via
+    depth-first search, not necessarily the closest by hop count.
+    """
+    seen: set[str] = set()
+    frontier = [sid]
+    while frontier:
+        cur = frontier.pop()
+        for edge in graph.edges_from(cur):
+            st = graph.station_for_edge_target(edge)
+            if st.is_port or st.section_id != section_id or edge.target in seen:
+                continue
+            seen.add(edge.target)
+            if len(_in_section_join_sources(graph, edge.target, section_id)) >= 2:
+                return edge.target
+            frontier.append(edge.target)
+    return None
+
+
+def _lift_decentres_fan_in_join(
+    graph: MetroGraph,
+    section: Section,
+    proposed: dict[str, float],
+    y_spacing: float,
+    anchor_y: float,
+) -> bool:
+    """Whether committing ``proposed`` moves a fan-in join off the trunk grid.
+
+    A trunk candidate lifted into empty top slack that is really one branch of
+    a reconverging fan drags the join's centreline (the midpoint of its
+    branches) off ``anchor_y + k * y_spacing``, leaving the section's join a
+    half slot off the row trunk it should sit on (#1929).  Only a lift that
+    turns an on-grid join centre into an off-grid one is blocked.
+    """
+    if not proposed:
+        return False
+
+    def on_grid(y: float) -> bool:
+        slots = (y - anchor_y) / y_spacing
+        return abs(slots - round(slots)) * y_spacing <= SAME_COORD_TOLERANCE
+
+    checked: set[str] = set()
+    for sid in proposed:
+        join = _downstream_fan_in_join(graph, sid, section.id)
+        if join is None or join in checked:
+            continue
+        checked.add(join)
+        sources = _in_section_join_sources(graph, join, section.id)
+        if len(sources) < 2:
+            continue
+        current = [graph.stations[s].y for s in sources]
+        lifted = [proposed.get(s, graph.stations[s].y) for s in sources]
+        before = (min(current) + max(current)) / 2
+        after = (min(lifted) + max(lifted)) / 2
+        if on_grid(before) and not on_grid(after):
+            return True
+    return False
 
 
 def _shift_linear_consumer_chain(
@@ -610,9 +690,19 @@ def _balance_one_section(graph: MetroGraph, section: Section, y_spacing: float) 
     if below_count <= above_count:
         return
 
-    _lift_below_trunk_siblings(
-        graph, section, movable, trunk_y, y_spacing, internal_ids
-    )
+    # Lifting a below-trunk sibling into the top band only re-centres the fan
+    # when its content genuinely hangs lower below the trunk than it rises
+    # above.  Measure that from the trunk and the content span rather than the
+    # bbox top: a taller sibling in the same authored grid row grows this
+    # section's bbox above its content (Stage 4.7 top-alignment), which would
+    # otherwise read as room to lift and de-centre an already-symmetric fan.
+    section_bottom_y = max(graph.stations[s].y for s in internal_ids)
+    trunk_drop = section_bottom_y - trunk_y
+    trunk_rise = trunk_y - section_top_y
+    if trunk_drop - trunk_rise > SAME_COORD_TOLERANCE:
+        _lift_below_trunk_siblings(
+            graph, section, movable, trunk_y, y_spacing, internal_ids
+        )
 
     # Below-trunk compaction: when the first row below the trunk is empty but
     # content sits two or more slots below, lift all below-trunk stations up by

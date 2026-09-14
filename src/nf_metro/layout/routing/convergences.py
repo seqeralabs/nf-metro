@@ -67,6 +67,7 @@ from nf_metro.layout.routing.common import (
     HTrunkSeg,
     OffsetRegime,
     RoutedPath,
+    _points_coincide,
     _vert_horiz_cross,
     apply_route_offsets,
     column_gap_edges,
@@ -448,7 +449,13 @@ def _bake_route(route: RoutedPath, ctx: _RoutingCtx) -> None:
 
 def _landing_approach(
     route: RoutedPath, join_point: tuple[float, float]
-) -> tuple[Direction, TurnHandedness | None, float] | None:
+) -> tuple[Direction, TurnHandedness | None, float, float | None] | None:
+    """The approach onto *join_point*: its direction, corner, runway, cross run.
+
+    The fourth element is the perpendicular coordinate at which the approach's
+    cross run begins - the feeder's own turn toward the trunk.  It is ``None``
+    exactly when there is no orthogonal cross run and so no corner handedness.
+    """
     for rank, (start, end) in enumerate(zip(route.points, route.points[1:])):
         runway = abs(start[0] - join_point[0]) + abs(start[1] - join_point[1])
         if (
@@ -458,13 +465,15 @@ def _landing_approach(
             continue
         approach = _direction(start, join_point)
         handedness = None
+        cross_run_start: float | None = None
         if rank > 0:
             prior = route.points[rank - 1]
             if abs(prior[0] - start[0]) + abs(prior[1] - start[1]) > COORD_TOLERANCE:
                 incoming = _direction(prior, start)
                 if direction_axis(incoming) is not direction_axis(approach):
                     handedness = turn_handedness(incoming, approach)
-        return approach, handedness, runway
+                    cross_run_start = prior[1 - direction_axis(approach).point_index]
+        return approach, handedness, runway, cross_run_start
     return None
 
 
@@ -528,7 +537,7 @@ def _landing_from_trial(
     approach = _landing_approach(route, join_point)
     if approach is None:
         raise UnsupportedConvergenceError("convergence landing has no approach")
-    approach_direction, handedness, runway = approach
+    approach_direction, handedness, runway, cross_run_start = approach
     source_column, source_row = _resolve_section_colrow(ctx.graph, source)
     target_column, target_row = _resolve_section_colrow(ctx.graph, target)
     from nf_metro.layout.routing.normalize import _opening_fanout_descent
@@ -560,6 +569,7 @@ def _landing_from_trial(
         order=0,
         join_point=join_point,
         corner_handedness=handedness,
+        cross_run_start_coordinate=cross_run_start,
         minimum_runway=runway,
         opening_turn_coordinate=(opening_turn.x if opening_turn is not None else None),
         opening_turn_segment=opening_turn_segment,
@@ -687,6 +697,41 @@ def _shared_terminal_axis(
         ),
         rank,
     )
+
+
+def _shared_terminal_landing_drops_exit_turn(
+    primary_reason: ConvergenceTrunkReason,
+    trunk_axis: ConvergenceTrunkAxis,
+    primary_landing: ConvergenceLanding | None,
+) -> bool:
+    """Whether seating the shared-terminal carrier would strand its exit turn.
+
+    :func:`_settle_shared_source_openings` fuses the carrier's opening descent
+    onto the trunk source flank before emission.  When the carrier's source
+    endpoint lies between that flank and the opening column, the fusion flips
+    the lead-in into the descent, stranding the carrier's exit turn, so emission
+    draws it the wrong way off its section and the primary trunk member no
+    longer covers its planned axis.  The convergence declines ownership in that
+    case rather than emit that route.  Only the ``X`` axis is checked because
+    that settlement pass acts on ``X`` trunks alone.
+
+    The between-test reads the planned axis rather than the carrier's exit-turn
+    annotation so it holds on a re-routed, settled graph, where the emitted
+    dogleg survives but its exit-turn metadata does not.  ``primary_landing`` is
+    ``None`` when the trunk is an outgoing continuation rather than a landed
+    feeder, which only happens for reasons other than ``SHARED_TERMINAL_APPROACH``.
+    """
+    if primary_reason is not ConvergenceTrunkReason.SHARED_TERMINAL_APPROACH:
+        return False
+    if primary_landing is None or trunk_axis.axis is not DemandAxis.X:
+        return False
+    opening = primary_landing.opening_turn_coordinate
+    source_endpoint = trunk_axis.source_endpoint_coordinate
+    if opening is None or source_endpoint is None:
+        return False
+    source_flank_longitudinal = _trunk_segments(trunk_axis)[1][0][0]
+    low, high = sorted((source_flank_longitudinal, opening))
+    return low + COORD_TOLERANCE < source_endpoint < high - COORD_TOLERANCE
 
 
 def _required_shared_terminal_axis(
@@ -966,9 +1011,18 @@ def _build_planned_convergence(
     )
     landings = [replace(item, order=rank) for rank, item in enumerate(landings)]
 
+    landing_by_member = {item.member_id: item for item in landings}
+    if _shared_terminal_landing_drops_exit_turn(
+        primary_reason,
+        trunk_axis,
+        landing_by_member.get(primary_member_id),
+    ):
+        raise ConvergenceOwnershipConflict(
+            "convergence landing conflicts with an upstream exit turn"
+        )
+
     continuations: list[ConvergenceContinuation] = []
     ownership: list[ConvergenceEndpointOwnership] = []
-    landing_by_member = {item.member_id: item for item in landings}
     for edge_key, member_id in zip(edges, member_ids, strict=True):
         if edge_key.target == view.junction_id:
             landing = landing_by_member[member_id]
@@ -1002,7 +1056,7 @@ def _build_planned_convergence(
             edge = ctx.edge_by_key[(edge_key.source, edge_key.target, edge_key.line_id)]
             continuation_route = _trial_route(edge, ctx)
             trial_routes[edge_key] = continuation_route
-        start_point = (
+        axis_start_point = (
             _axis_source_point(trunk_axis)
             if primary_reason
             in {
@@ -1036,7 +1090,9 @@ def _build_planned_convergence(
             (
                 item
                 for item in endpoint_carriers
-                if point_to_polyline_distance(start_point, trial_routes[item].points)
+                if point_to_polyline_distance(
+                    axis_start_point, trial_routes[item].points
+                )
                 <= COORD_TOLERANCE
             ),
             (
@@ -1061,7 +1117,7 @@ def _build_planned_convergence(
             carrier_edge is not None
             and covered_by is not None
             and point_to_polyline_distance(
-                start_point, trial_routes[carrier_edge].points
+                axis_start_point, trial_routes[carrier_edge].points
             )
             > COORD_TOLERANCE
             and not (
@@ -1072,6 +1128,7 @@ def _build_planned_convergence(
             raise UnsupportedConvergenceError(
                 "covered continuation is absent from its carrier"
             )
+        start_point = axis_start_point if covered_by is not None else hop_start_point
         continuations.append(
             ConvergenceContinuation(
                 member_id,
@@ -1308,7 +1365,8 @@ def _landing_cross_segment(
 ) -> tuple[tuple[float, float], tuple[float, float]] | None:
     if landing.corner_handedness is None:
         return None
-    source = graph.stations[landing.source_junction_id]
+    cross_run_start = landing.cross_run_start_coordinate
+    assert cross_run_start is not None
     if landing.approach_axis is DemandAxis.X:
         runway_sign = 1.0 if landing.approach_direction is Direction.R else -1.0
         turn_coordinate = (
@@ -1317,14 +1375,14 @@ def _landing_cross_segment(
             else landing.join_point[0] - runway_sign * landing.minimum_runway
         )
         segment = (
-            (turn_coordinate, source.y),
+            (turn_coordinate, cross_run_start),
             (turn_coordinate, landing.join_point[1]),
         )
     else:
         runway_sign = 1.0 if landing.approach_direction is Direction.D else -1.0
         turn_coordinate = landing.join_point[1] - (runway_sign * landing.minimum_runway)
         segment = (
-            (source.x, turn_coordinate),
+            (cross_run_start, turn_coordinate),
             (landing.join_point[0], turn_coordinate),
         )
     if _points_coincide(*segment):
@@ -1370,26 +1428,29 @@ def _opposing_landing_approaches(
 
 
 def _reconcile_landing_handedness(
-    plans: tuple[ConvergencePlan, ...], graph: MetroGraph
+    plans: tuple[ConvergencePlan, ...],
 ) -> tuple[ConvergencePlan, ...]:
-    """Derive each planned corner from its settled cross-run and approach."""
+    """Derive each planned corner from its recorded cross run and settled join.
+
+    The cross run begins at the feeder's own turn toward the trunk, which
+    settlement leaves in place while it moves the join, so the corner is read
+    from that recorded start against wherever the join settled.
+    """
     reconciled: list[ConvergencePlan] = []
     for plan in plans:
         landings: list[ConvergenceLanding] = []
         for landing in plan.landings:
             handedness = landing.corner_handedness
             if handedness is not None:
-                source = graph.stations[landing.source_junction_id]
-                if landing.approach_axis is DemandAxis.X:
-                    start = (landing.join_point[0], source.y)
-                    end = landing.join_point
-                else:
-                    turn_y = (
-                        landing.join_point[1]
-                        - landing.minimum_runway * landing.approach_direction.sign
-                    )
-                    start = (source.x, turn_y)
-                    end = (landing.join_point[0], turn_y)
+                cross_run_start = landing.cross_run_start_coordinate
+                assert cross_run_start is not None
+                perp = 1 - landing.approach_axis.point_index
+                start = (
+                    (cross_run_start, landing.join_point[1])
+                    if perp == 0
+                    else (landing.join_point[0], cross_run_start)
+                )
+                end = landing.join_point
                 if (
                     abs(start[0] - end[0]) > COORD_TOLERANCE
                     or abs(start[1] - end[1]) > COORD_TOLERANCE
@@ -4302,7 +4363,7 @@ def build_convergence_plan_execution(
                 ),
             )
             system_plans = _reconcile_continuation_ownership(system_plans)
-            system_plans = _reconcile_landing_handedness(system_plans, graph)
+            system_plans = _reconcile_landing_handedness(system_plans)
         except ConvergenceOwnershipConflict as error:
             reason = str(error)
             system_plans = tuple(
@@ -4366,7 +4427,7 @@ def _settle_convergence_geometry(
         ),
     )
     settled = _reconcile_continuation_ownership(settled)
-    return _reconcile_landing_handedness(settled, graph)
+    return _reconcile_landing_handedness(settled)
 
 
 def _settle_eligible(
@@ -4688,13 +4749,6 @@ def _route_covers_trunk(route: RoutedPath, axis: ConvergenceTrunkAxis) -> bool:
     )
 
 
-def _points_coincide(first: tuple[float, float], second: tuple[float, float]) -> bool:
-    """Whether two points are the same point to within routing tolerance."""
-    return all(
-        abs(a - b) <= COORD_TOLERANCE for a, b in zip(first, second, strict=True)
-    )
-
-
 def _segments_overlap(
     first: tuple[tuple[float, float], tuple[float, float]],
     second: tuple[tuple[float, float], tuple[float, float]],
@@ -4894,7 +4948,7 @@ def _assert_landing_geometry(
             f"convergence system {plan.system_id} feeder {landing.member_id} "
             "has no emitted approach to its planned join"
         )
-    direction, handedness, runway = actual
+    direction, handedness, runway, _cross_run_start = actual
     if (
         direction is not landing.approach_direction
         or handedness is not landing.corner_handedness

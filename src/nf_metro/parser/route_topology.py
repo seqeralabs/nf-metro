@@ -464,7 +464,6 @@ class RouteTopologyQuery:
     divergences: tuple[ResolvedDivergenceView, ...]
     convergences: tuple[ResolvedConvergenceView, ...]
     _authored_edges_by_id: Mapping[ConnectorId, AuthoredEdgeFact]
-    _networks_by_id: Mapping[NetworkId, LineNetwork]
     _connectors_by_id: Mapping[ConnectorId, RouteConnector]
     _bundles_by_id: Mapping[BundleId, BundleRun]
     _resolved_authored_edges: Mapping[ConnectorId, ResolvedAuthoredEdge]
@@ -474,7 +473,6 @@ class RouteTopologyQuery:
     _entry_ports_by_group: Mapping[EndpointGroupId, str]
     _divergences_by_id: Mapping[DivergenceId, ResolvedDivergenceView]
     _divergences_by_junction: Mapping[str, ResolvedDivergenceView]
-    _convergences_by_id: Mapping[ConvergenceId, ResolvedConvergenceView]
     _convergences_by_junction: Mapping[str, ResolvedConvergenceView]
     _merge_fanout_junction_ids: tuple[str, ...]
     _source_topology: RouteTopology = field(repr=False, compare=False)
@@ -764,7 +762,6 @@ class RouteTopologyQuery:
             )
             for group in topology.convergences
         )
-        convergences_by_id = {view.group.id: view for view in convergence_views}
         convergences_by_junction = {
             view.junction_id: view for view in convergence_views
         }
@@ -801,7 +798,6 @@ class RouteTopologyQuery:
             divergences=divergence_views,
             convergences=convergence_views,
             _authored_edges_by_id=authored_edges_by_id,
-            _networks_by_id=networks_by_id,
             _connectors_by_id=connectors_by_id,
             _bundles_by_id=bundles_by_id,
             _resolved_authored_edges=resolved_authored_edges,
@@ -818,7 +814,6 @@ class RouteTopologyQuery:
             _entry_ports_by_group=MappingProxyType(entry_port_ids),
             _divergences_by_id=MappingProxyType(divergences_by_id),
             _divergences_by_junction=MappingProxyType(divergences_by_junction),
-            _convergences_by_id=MappingProxyType(convergences_by_id),
             _convergences_by_junction=MappingProxyType(convergences_by_junction),
             _merge_fanout_junction_ids=tuple(merge_fanout_junction_ids),
             _source_topology=topology,
@@ -838,10 +833,6 @@ class RouteTopologyQuery:
         return (
             self._source_topology is topology and self._source_resolution is resolution
         )
-
-    def line_network(self, network_id: NetworkId) -> LineNetwork:
-        """Return one authored line network by stable id."""
-        return self._networks_by_id[network_id]
 
     def authored_edge(self, authored_edge_id: ConnectorId) -> AuthoredEdgeFact:
         """Return one authored edge fact by stable id."""
@@ -899,10 +890,6 @@ class RouteTopologyQuery:
         """Return the authored divergence represented by a resolved junction."""
         return self._divergences_by_junction.get(junction_id)
 
-    def convergence_by_id(self, group_id: ConvergenceId) -> ResolvedConvergenceView:
-        """Return one resolved convergence by stable group id."""
-        return self._convergences_by_id[group_id]
-
     def convergence_for_junction(
         self, junction_id: str
     ) -> ResolvedConvergenceView | None:
@@ -916,24 +903,6 @@ class RouteTopologyQuery:
             return divergence.group.connector_ids
         convergence = self._convergences_by_junction.get(junction_id)
         return convergence.group.connector_ids if convergence is not None else ()
-
-    def connector_ids_for_divergence_branch(
-        self,
-        divergence_id: DivergenceId,
-        entry_group_id: EndpointGroupId,
-        line_id: str | None = None,
-    ) -> tuple[ConnectorId, ...]:
-        """Return ordered connector ids on one authored divergence branch."""
-        group = self._divergences_by_id[divergence_id].group
-        return tuple(
-            connector_id
-            for connector_id in group.connector_ids
-            if (
-                (connector := self._connectors_by_id[connector_id]).entry_group_id
-                == entry_group_id
-                and (line_id is None or connector.line_id == line_id)
-            )
-        )
 
     def merge_fanout_junction_ids(self) -> tuple[str, ...]:
         """Return divergence junctions feeding multiple same-line convergences."""

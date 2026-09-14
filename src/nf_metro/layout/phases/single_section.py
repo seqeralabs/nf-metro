@@ -293,6 +293,7 @@ def _layout_single_section(
         continuation_predecessors=continuation_predecessors,
         terminal_nodes=terminal_nodes,
         exit_reaching=exit_reaching,
+        flow_horizontal=lanes_run_along_y(section.direction),
     )
 
     if not layers:
@@ -412,7 +413,7 @@ def _layout_single_section(
 
     # Put each bypass V on the side its carried line is drawn, so the fork
     # from the bypassed station's feeder reaches it without crossing the trunk.
-    _align_bypass_v_to_lane_side(sub, section, graph, frame)
+    _align_bypass_v_to_lane_side(sub, section, graph)
 
     # Bypass V helpers (``__bypass_``) have no rendered marker.  Use
     # them to extend the bbox only when V sits beyond the real-station
@@ -504,7 +505,7 @@ def _layout_single_section(
     section.bbox_h = bbox_bot - bbox_top
 
     # Apply direction-specific bbox adjustments
-    _adjust_tb_labels(sub, section, graph)
+    _adjust_tb_labels(sub, section)
     _adjust_tb_entry_shifts(section, sub, graph, y_spacing)
     _adjust_lr_entry_inset(sub, section, graph, x_spacing)
     _adjust_lr_exit_gap(sub, section, graph, layers, x_spacing)
@@ -516,7 +517,7 @@ def _layout_single_section(
 
 
 def _align_bypass_v_to_lane_side(
-    sub: MetroGraph, section: Section, graph: MetroGraph, frame: AxisFrame
+    sub: MetroGraph, section: Section, graph: MetroGraph
 ) -> None:
     """Seat a bypass V on its section's lane side of the trunk.
 
@@ -777,11 +778,7 @@ def _enforce_min_extent(
             axis.set(station, axis.get(station) + shift)
 
 
-def _adjust_tb_labels(
-    sub: MetroGraph,
-    section: Section,
-    graph: MetroGraph,
-) -> None:
+def _adjust_tb_labels(sub: MetroGraph, section: Section) -> None:
     """Vertical-flow sections: expand bbox and shift stations along the lane
     axis so side-placed labels fit.
 
@@ -818,13 +815,17 @@ def _adjust_tb_entry_shifts(
 ) -> None:
     """Shift TB section stations down to clear a perpendicular entry port.
 
-    A TB TOP/BOTTOM entry port sits on the section trunk X
-    (``_assign_entry_port_position``), so its drop onto the first station is
-    a clean vertical continuation and the cross-column lead-in turns in the
-    header corridor above the box, never inside it -- no in-section room is
+    A TB TOP/BOTTOM entry port is flow-aligned, so :func:`position_ports`
+    (Stage 3.1) seats it on its connected station's X -- the section trunk X --
+    and nothing later pulls it off.  Its drop onto the first station is then a
+    clean vertical continuation and the cross-column lead-in turns in the
+    header corridor above the box, never inside it, so no in-section room is
     needed for it.  Only a perpendicular (LEFT/RIGHT) entry, whose port would
-    otherwise coincide with the first station, needs the stations nudged
-    down."""
+    otherwise coincide with the first station, needs the stations nudged down.
+    On a horizontal-flow section Stage 3.1 seats a perpendicular (TOP/BOTTOM)
+    port on a station's X the same way, but there the station-as-elbow
+    constraint forbids the coincidence surviving and Stage 3.2's entry-port
+    alignment moves it clear."""
     if section.direction != "TB":
         return
 
@@ -1366,27 +1367,29 @@ def _shift_lr_perp_entry_stations(
             else:
                 s.x -= shift
 
-        # Keep the trailing station inside the bbox after the shift.
-        # _adjust_lr_entry_inset reserves one `desired_gap` of width, enough for
-        # a drop seated at the run's leading edge. A right-entry run shifts
-        # left, so extend the bbox left to match. A left-entry drop inside the
-        # span shifts the run right by the reserve *plus* the port's offset into
-        # the span, so the right edge absorbs the uncovered remainder. A drop
-        # beyond the trailing station (cross-column) needs the box re-wrapped.
+        # Keep the shifted run inside the bbox. `left_pad` is the run's left
+        # clearance before the shift.
+        left_pad = run_lo - section.bbox_x
         drop_in_span = run_lo <= port_x <= run_hi
         grew = True
-        if not entry_on_left and drop_in_span:
+        if not entry_on_left and left_pad < shift:
+            # The run shifts left past the section's own left edge, so the box
+            # grows left by the shift to preserve `left_pad` there. The entry
+            # port is then the rightmost content, and its exit-side clearance
+            # mirrors the run's left padding.
             section.bbox_x -= shift
-            section.bbox_w += shift
+            section.bbox_w = (port_x + left_pad) - section.bbox_x
         elif entry_on_left and port_x > run_hi:
-            # Re-wrap the bbox around the shifted run, keeping the run's
-            # padding and anchoring the left edge on the entry port (which
-            # sits left of the run once it shifts right of the drop).
-            left_pad = run_lo - section.bbox_x
+            # The run shifts right of the drop, leaving the entry port as the
+            # leftmost content. The left edge anchors on the port with the run's
+            # padding; the right edge keeps its pre-shift clearance past the run.
             right_pad = (section.bbox_x + section.bbox_w) - run_hi
             section.bbox_x = port_x - left_pad
             section.bbox_w = (run_hi + shift + right_pad) - section.bbox_x
         elif entry_on_left and drop_in_span and shift > desired_gap:
+            # The drop sits within the run; `_adjust_lr_entry_inset` reserves one
+            # `desired_gap` of width, so only the shift beyond that reserve adds
+            # width on the right.
             section.bbox_w += shift - desired_gap
         else:
             grew = False

@@ -1,0 +1,27 @@
+%%metro title: Simplified sarek TB test
+%%metro style: nfcore
+%%metro fold_threshold: 12
+
+%%metro line: core | Core workflow | #2db572
+
+%%metro files: mapped_out | BAM/CRAM
+
+%%metro off_track: mapped_out
+
+graph LR
+    subgraph preprocessing [Pre-processing]
+        %%metro direction: TB
+        fastq_in[ ]
+        mapping[mapping]
+        bam_convert[convert]
+        markduplicates[markduplicates]
+        mosdepth[mosdepth]
+        mapped_out[ ]
+
+        fastq_in -->|core| mapping
+        mapping -->|core| bam_convert
+        mapping -->|core| markduplicates
+        bam_convert -->|core| mosdepth
+        markduplicates -->|core| mosdepth
+        mapping -->|core| mapped_out
+    end

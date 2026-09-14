@@ -11,12 +11,13 @@ from __future__ import annotations
 
 from collections import Counter
 
+import click
 import pytest
 
 from nf_metro.api import apply_layout_overrides, resolve_theme
 from nf_metro.cli import render
 from nf_metro.layout import compute_layout
-from nf_metro.options import LAYOUT_OPTIONS
+from nf_metro.options import INVALID, LAYOUT_OPTIONS, coerce
 from nf_metro.parser.directives import _GLOBAL_DIRECTIVE_HANDLERS
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import MetroGraph
@@ -47,6 +48,35 @@ def test_every_option_is_in_both_planes():
         assert opt.target_attr in fields, (
             f"{opt.name}: no graph field {opt.target_attr}"
         )
+
+
+def test_numeric_flags_and_directives_accept_the_same_values():
+    """Neither plane admits a number the other refuses.
+
+    ``sign`` and ``max_val`` gate a directive payload through
+    :func:`nf_metro.options.coerce`; the generated CLI flag has to draw the
+    line in the same place, or a value works one way and not the other.
+    """
+    params = {p.name: p for p in render.params}
+    for opt in LAYOUT_OPTIONS:
+        if opt.kind not in ("int", "float"):
+            continue
+        ceiling = 3 if opt.max_val is None else opt.max_val
+        numbers = [-1, 0, 1, ceiling, ceiling + 1]
+        texts = [str(int(n) if opt.kind == "int" else float(n)) for n in numbers]
+        texts += ["nan", "inf", "-inf", "1e400", " 5 ", "+5", "0x10"]
+        for text in texts:
+            directive_ok = coerce(opt, text)[0] is not INVALID
+            try:
+                params[opt.name].type.convert(text, None, None)
+            except click.BadParameter:
+                flag_ok = False
+            else:
+                flag_ok = True
+            assert flag_ok is directive_ok, (
+                f"{opt.name}: {text} accepted by the "
+                f"{'flag' if flag_ok else 'directive'} only"
+            )
 
 
 def test_no_duplicate_or_shadowed_options():

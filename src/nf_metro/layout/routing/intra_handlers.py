@@ -432,7 +432,7 @@ def _route_perp_exit_bundle(
             entry_id, tb_sec = tb_drop
             d = _tb_x_offset(ctx, entry_id, line_id, tb_sec)
         else:
-            d = _perp_riser_lateral(ctx, edge.target, line_id, side, src.section_id)
+            d = _perp_riser_lateral(ctx, edge.target, line_id, side)
         return d if is_top else -d
 
     routes = build_tapered_bundle(

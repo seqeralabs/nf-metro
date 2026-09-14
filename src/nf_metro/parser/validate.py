@@ -15,6 +15,7 @@ import networkx as nx
 
 from nf_metro.errors import NfMetroError
 from nf_metro.parser.model import (
+    UNANNOTATED_LINE_ID,
     Edge,
     MetroGraph,
     Port,
@@ -30,6 +31,26 @@ WARNING = "warning"
 
 class CyclicGraphError(NfMetroError, ValueError):
     """Raised when a graph the layout engine requires to be a DAG has a cycle."""
+
+
+def find_undeclared_line_edges(graph: MetroGraph) -> list[Edge]:
+    """Return each annotated edge naming a line no ``%%metro line:`` declares.
+
+    The single detector behind both the parse-boundary raise in
+    :mod:`nf_metro.parser.mermaid` and the soft ``validate_graph`` path, so the
+    ``validate`` and ``render`` commands cannot disagree about which maps carry
+    this defect. A map declaring no lines at all is no exception: every
+    annotated edge in it names an undeclared line, and a line the renderer
+    cannot resolve has no colour of its own and no legend entry.
+
+    An edge carrying :data:`~nf_metro.parser.model.UNANNOTATED_LINE_ID` is a
+    different defect and is left to the caller.
+    """
+    return [
+        edge
+        for edge in graph.edges
+        if edge.line_id != UNANNOTATED_LINE_ID and edge.line_id not in graph.lines
+    ]
 
 
 def find_unresolved_endpoints(graph: MetroGraph) -> list[tuple[Edge, list[str]]]:
@@ -157,6 +178,14 @@ def validate_graph(graph: MetroGraph) -> list[ValidationIssue]:
     """Return graph-semantic findings for ``graph`` as structured data."""
     issues: list[ValidationIssue] = []
 
+    if not graph.stations:
+        issues.append(
+            ValidationIssue(
+                ERROR,
+                "the map defines no stations, so there is nothing to draw",
+            )
+        )
+
     witness = find_cycle(graph)
     if witness is not None:
         issues.append(ValidationIssue(ERROR, format_cycle_error(witness)))
@@ -167,16 +196,15 @@ def validate_graph(graph: MetroGraph) -> list[ValidationIssue]:
             ValidationIssue(ERROR, format_section_cycle_error(section_witness))
         )
 
-    for edge in graph.edges:
-        if edge.line_id != "default" and edge.line_id not in graph.lines:
-            issues.append(
-                ValidationIssue(
-                    ERROR,
-                    f"Edge {edge.source} -> {edge.target} references "
-                    f"undefined line '{edge.line_id}'",
-                    line=edge.source_line,
-                )
+    for edge in find_undeclared_line_edges(graph):
+        issues.append(
+            ValidationIssue(
+                ERROR,
+                f"Edge {edge.source} -> {edge.target} references "
+                f"undefined line '{edge.line_id}'",
+                line=edge.source_line,
             )
+        )
 
     for edge, missing in find_unresolved_endpoints(graph):
         issues.append(

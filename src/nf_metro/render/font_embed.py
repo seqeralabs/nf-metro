@@ -12,7 +12,7 @@ Two opt-in strategies for making SVG output font-portable:
     Converts every ``<text>`` element to ``<path>`` elements using
     ``fontTools``.  The result has zero font dependency.  Loses selectable
     text and label-level ``data-*`` attributes.  Requires ``fontTools[woff]``
-    (``pip install "fonttools[woff]"``).
+    (``pip install "nf-metro[font]"``).
 """
 
 from __future__ import annotations
@@ -216,7 +216,7 @@ def text_to_paths(svg: str) -> str:
     except ImportError as exc:
         raise ImportError(
             "fontTools is required for --text-to-paths. "
-            'Install it with: pip install "fonttools[woff]"'
+            'Install it with: pip install "nf-metro[font]"'
         ) from exc
 
     regular, bold = _load_path_fonts(TTFont)

@@ -13,7 +13,7 @@ Covers:
   down to the RIGHT of both feeder descents that share its gap.
 * Corpus happy-path: no shipped fixture routes two same-line, different-edge
   vertical descents so close in one gap that they merge (bar the one
-  documented dogleg-exempt case), so the fix introduces no new merges.
+  documented dogleg-exempt case), so the rule under test adds no merge.
 """
 
 from __future__ import annotations

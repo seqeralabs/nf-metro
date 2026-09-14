@@ -1,7 +1,7 @@
 ---
 name: fix-issue-diagnostician
 description: Diagnoses a defect for the fix-issue workflow, pinning it to a numeric claim (geometry) or named call sites (structural) before any code is written. Open-ended judgment.
-model: opus
+model: claude-opus-4-8
 tools: Bash, Read, Grep, Glob
 effort: high
 ---

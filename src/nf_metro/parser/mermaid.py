@@ -19,6 +19,7 @@ import re
 import warnings
 from collections import defaultdict
 from collections.abc import Callable
+from pathlib import Path
 
 from nf_metro.options import LineOrder, is_line_order
 from nf_metro.parser.commitments import (
@@ -29,6 +30,8 @@ from nf_metro.parser.commitments import (
 from nf_metro.parser.directives import (
     _apply_directive,
     _deduplicate_section_number_overrides,
+    _resolve_legend_combos,
+    _warn_unresolved_references,
 )
 from nf_metro.parser.grammar import (
     _Comment,
@@ -44,7 +47,14 @@ from nf_metro.parser.grammar import (
     _unquote,
     parse_statements,
 )
-from nf_metro.parser.model import Edge, MetroGraph, Section, Station
+from nf_metro.parser.model import (
+    UNANNOTATED_LINE_ID,
+    Edge,
+    LineSpread,
+    MetroGraph,
+    Section,
+    Station,
+)
 from nf_metro.parser.resolve import (
     _create_implicit_section,
     _expand_interchanges,
@@ -62,7 +72,11 @@ from nf_metro.parser.route_topology import (
     capture_authored_routes,
     snapshot_resolved_authored_edges,
 )
-from nf_metro.parser.validate import find_cycle, find_section_cycle
+from nf_metro.parser.validate import (
+    find_cycle,
+    find_section_cycle,
+    find_undeclared_line_edges,
+)
 
 # A row-wrap width no real map reaches, so section packing never folds: the
 # layout it yields is the unbounded baseline a user-set threshold is judged
@@ -105,7 +119,7 @@ def _check_unsupported_input(text: str) -> None:
             "without %%metro directives). Use 'nf-metro convert' to "
             "convert it to nf-metro format first, or pass "
             "'--from-nextflow' to 'nf-metro render'.\n\n"
-            "See: https://pinin4fjords.github.io/nf-metro/latest/nextflow/"
+            "See: https://seqeralabs.github.io/nf-metro/latest/nextflow/"
         )
 
     if has_flowchart:
@@ -113,7 +127,7 @@ def _check_unsupported_input(text: str) -> None:
             "Mermaid 'flowchart' syntax is not supported. "
             "Use 'graph LR' with %%metro directives instead.\n\n"
             "See the guide: "
-            "https://pinin4fjords.github.io/nf-metro/latest/guide/"
+            "https://seqeralabs.github.io/nf-metro/latest/guide/"
         )
 
 
@@ -144,24 +158,24 @@ def _warn_if_non_lr_primary(graph_line: str) -> None:
 
 
 def _validate_edge_annotations(graph: MetroGraph) -> None:
-    """Validate that all edges have metro line annotations.
+    """Reject edges that carry no line annotation or name an undeclared line.
 
-    Raises ValueError with a helpful message if any edge uses the default
-    placeholder (meaning it had no |line_id| annotation in the source).
+    Raises ``ValueError`` with an authoring hint naming the offending edges.
+    The undeclared-line half comes from
+    :func:`~nf_metro.parser.validate.find_undeclared_line_edges`, the same
+    detector ``validate_graph`` reports through, so the ``render`` and
+    ``validate`` commands accept exactly the same maps.
     """
     if not graph.edges:
         return
 
-    bad_edges = []
+    bad_edges = [edge for edge in graph.edges if edge.line_id == UNANNOTATED_LINE_ID]
     undeclared_lines: defaultdict[str, set[int]] = defaultdict(set)
-    for edge in graph.edges:
-        if edge.line_id == "default":
-            bad_edges.append(edge)
-        elif graph.lines and edge.line_id not in graph.lines:
-            if edge.source_line is not None:
-                undeclared_lines[edge.line_id].add(edge.source_line)
-            else:
-                undeclared_lines.setdefault(edge.line_id, set())
+    for edge in find_undeclared_line_edges(graph):
+        if edge.source_line is not None:
+            undeclared_lines[edge.line_id].add(edge.source_line)
+        else:
+            undeclared_lines.setdefault(edge.line_id, set())
 
     if bad_edges:
         examples = []
@@ -200,12 +214,30 @@ def _validate_edge_annotations(graph: MetroGraph) -> None:
         )
 
 
+def parse_metro_mermaid_file(path: Path, **kwargs: object) -> MetroGraph:
+    """Parse the map at *path*, recording the directory it came from.
+
+    ``graph.source_dir`` is what a ``%%metro logo:`` path resolves against.
+    Reading a map's text and calling :func:`parse_metro_mermaid` directly drops
+    that, leaving the asset resolvable only while the process working directory
+    happens to sit where the path was written from; load from disk through here
+    instead so no caller has to remember. *path* is resolved to an absolute
+    path before its parent is recorded, so a later change to the process
+    working directory can't shift what ``source_dir`` means.
+    """
+    path = path.resolve()
+    graph = parse_metro_mermaid(path.read_text(), **kwargs)  # type: ignore[arg-type]
+    graph.source_dir = str(path.parent)
+    return graph
+
+
 def parse_metro_mermaid(
     text: str,
     max_station_columns: int | None = None,
     auto_process: bool | None = None,
     process_scope: str | None = None,
     caller_line_order: LineOrder | None = None,
+    caller_line_spread: LineSpread | None = None,
     *,
     _layout_commitments: LayoutCommitmentOverlay | None = None,
 ) -> MetroGraph:
@@ -226,6 +258,12 @@ def parse_metro_mermaid(
 
     ``caller_line_order`` is the validated caller policy whose provenance must
     be captured before layout inference.
+
+    ``caller_line_spread`` is the ``--line-spread`` CLI flag's graph-wide
+    default. When not ``None`` it overrides any ``%%metro line_spread:`` default
+    directive and, unlike a post-parse assignment, is visible to the parse-time
+    layout inference that reads ``graph.line_spread`` (interchange inference
+    skips rail sections). It never touches ``line_spread_overrides``.
     """
     if caller_line_order is not None and not is_line_order(caller_line_order):
         raise ValueError(f"unsupported caller line order {caller_line_order!r}")
@@ -238,6 +276,7 @@ def parse_metro_mermaid(
         auto_process,
         process_scope,
         caller_line_order,
+        caller_line_spread=caller_line_spread,
         layout_commitments=_layout_commitments,
     )
     return graph
@@ -273,11 +312,14 @@ def _finalize_graph(
     auto_process: bool | None = None,
     process_scope: str | None = None,
     caller_line_order: LineOrder | None = None,
+    caller_line_spread: LineSpread | None = None,
     *,
     layout_commitments: LayoutCommitmentOverlay | None = None,
 ) -> None:
     """Validate, run the post-parse resolution, and apply buffered metadata."""
     _validate_edge_annotations(graph)
+    _resolve_legend_combos(graph)
+    _warn_unresolved_references(graph)
     authored_routes = capture_authored_routes(graph)
     graph.layout_provenance.capture_authored_intent(
         graph,
@@ -299,6 +341,12 @@ def _finalize_graph(
         if layout_commitments is not None
         else AppliedLayoutCommitments()
     )
+
+    # The --line-spread flag's graph-wide default wins over the %%metro
+    # line_spread: default directive, and must land before inference so the
+    # rail-section check in interchange inference reads the caller's value.
+    if caller_line_spread is not None:
+        graph.line_spread = caller_line_spread
 
     # Layout inference (interchange expansion, section grids, port/junction
     # resolution) assumes the graph is a DAG. A cyclic graph is rejected at the
@@ -334,11 +382,13 @@ def _infer_layout(
     )
 
     # Populate graph.interchanges before expansion so auto-detected and
-    # author-written interchanges share the expansion path. Sectionless graphs
-    # run it too; a hub found there needs an implicit section to host the detour
-    # its skip-lines would otherwise draw straight through the skipped markers.
+    # author-written interchanges share the expansion path.
     infer_interchanges(graph)
-    if not graph.sections and graph.interchanges:
+
+    # A sectionless graph needs an implicit section to host the bypass detours
+    # its skip-lines would otherwise draw straight through the markers they skip;
+    # that detour routing is gated on a section existing.
+    if not graph.sections:
         _create_implicit_section(graph)
 
     authored_capture = capture_authored_routes(graph)
@@ -431,21 +481,17 @@ def _apply_pending_metadata(graph: MetroGraph) -> None:
 
     scope = graph.process_scope
     for station_id, pattern in graph._pending_process:
-        if station_id in graph.stations:
-            # Under a scope the prefix anchors the start and the literal tail
-            # anchors the final segment(s), tolerating intermediate subworkflow
-            # nesting between them; without a scope the value is a regex matched
-            # as-is (the legacy behaviour).
-            if scope:
-                effective = rf"(?:^|:){re.escape(scope)}:(?:.+:)?{re.escape(pattern)}$"
-            else:
-                effective = pattern
-            graph.process_mapping.setdefault(station_id, []).append(effective)
+        if station_id not in graph.stations:
+            continue
+        # Under a scope the prefix anchors the start and the literal tail
+        # anchors the final segment(s), tolerating intermediate subworkflow
+        # nesting between them; without a scope the value is a regex matched
+        # as-is.
+        if scope:
+            effective = rf"(?:^|:){re.escape(scope)}:(?:.+:)?{re.escape(pattern)}$"
         else:
-            warnings.warn(
-                f"%%metro process: unknown station id {station_id!r}; ignoring",
-                stacklevel=2,
-            )
+            effective = pattern
+        graph.process_mapping.setdefault(station_id, []).append(effective)
 
     if graph.auto_process:
         for station_id, station in graph.stations.items():

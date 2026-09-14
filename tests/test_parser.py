@@ -1,10 +1,12 @@
 """Tests for the Mermaid + metro directive parser."""
 
+import warnings
 from pathlib import Path
 
 import pytest
 
 from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.model import LineSpread
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -181,7 +183,10 @@ def test_parse_quoted_subgraph_title_strips_quotes():
 
 
 def test_parse_edges():
-    text = "graph LR\n    a[Input]\n    b[Output]\n    a -->|main| b\n"
+    text = (
+        "%%metro line: main | Main | #ff0000\n"
+        "graph LR\n    a[Input]\n    b[Output]\n    a -->|main| b\n"
+    )
     graph = parse_metro_mermaid(text)
     assert len(graph.edges) == 1
     assert graph.edges[0].source == "a"
@@ -516,7 +521,7 @@ def test_subgraph_without_display_name():
 def test_empty_section_removed():
     """Subgraphs with only edges (no node definitions) are removed.
 
-    Regression test for https://github.com/pinin4fjords/nf-metro/issues/51.
+    Regression test for https://github.com/seqeralabs/nf-metro/issues/51.
     When nodes are defined outside a subgraph but edges referencing them
     appear inside the subgraph, the section has no stations. The parser
     should remove it and fall back to flat layout instead of crashing.
@@ -541,17 +546,17 @@ def test_empty_section_removed():
         assert "blah" in str(w[0].message)
         assert "no node definitions" in str(w[0].message)
 
-    # Empty section should be removed
+    # The empty authored section is dropped, leaving a flat graph that is then
+    # given a single implicit section to host bypass detours.
     assert "blah" not in graph.sections
-    assert len(graph.sections) == 0
+    assert list(graph.sections) == ["__implicit__"]
 
-    # All stations should still exist and be unsectioned
+    # Every station survives, hosted by the implicit section.
     assert "cat" in graph.stations
     assert "kraken2" in graph.stations
     assert "centrifuge" in graph.stations
-    assert all(s.section_id is None for s in graph.stations.values())
+    assert all(s.section_id == "__implicit__" for s in graph.stations.values())
 
-    # Edges should still exist
     assert len(graph.edges) == 2
 
 
@@ -563,7 +568,7 @@ def test_empty_section_removed_render():
     """
     from nf_metro.layout.engine import compute_layout
     from nf_metro.render.svg import render_svg
-    from nf_metro.themes import NFCORE_THEME
+    from nf_metro.themes import NFCORE_DARK_THEME
 
     text = (
         "%%metro line: dna | DNA | #004b86\n"
@@ -584,7 +589,7 @@ def test_empty_section_removed_render():
         graph = parse_metro_mermaid(text)
 
     compute_layout(graph)
-    svg_str = render_svg(graph, NFCORE_THEME)
+    svg_str = render_svg(graph, NFCORE_DARK_THEME)
 
     # All station labels should appear in the SVG output
     assert "cat" in svg_str
@@ -605,7 +610,10 @@ def test_hidden_station_underscore_prefix():
 
 def test_hidden_station_auto_created_from_edge():
     """Stations with _ prefix are hidden even when auto-created from edges."""
-    text = "graph LR\n    a -->|main| _split\n    _split -->|main| b\n"
+    text = (
+        "%%metro line: main | Main | #ff0000\n"
+        "graph LR\n    a -->|main| _split\n    _split -->|main| b\n"
+    )
     graph = parse_metro_mermaid(text)
     assert graph.stations["_split"].is_hidden is True
     assert graph.stations["a"].is_hidden is False
@@ -615,6 +623,7 @@ def test_hidden_station_auto_created_from_edge():
 def test_hidden_station_edge_before_definition():
     """Hidden flag is set correctly when edge precedes node definition."""
     text = (
+        "%%metro line: main | Main | #ff0000\n"
         "graph LR\n    a -->|main| _split\n    _split[Split]\n    _split -->|main| b\n"
     )
     graph = parse_metro_mermaid(text)
@@ -625,6 +634,7 @@ def test_hidden_station_edge_before_definition():
 def test_hidden_station_definition_before_edge():
     """Hidden flag is set correctly when node definition precedes edge."""
     text = (
+        "%%metro line: main | Main | #ff0000\n"
         "graph LR\n    _split[Split]\n    a -->|main| _split\n    _split -->|main| b\n"
     )
     graph = parse_metro_mermaid(text)
@@ -1215,6 +1225,7 @@ def test_parse_group_directive():
         "%%metro group: SNPs & Indels | a, b, c\n"
         "%%metro group: SV & CNV | d, e | above\n"
         "graph LR\n"
+        "    a[A]\n    b[B]\n    c[C]\n    d[D]\n    e[E]\n"
     )
     graph = parse_metro_mermaid(text)
     assert len(graph.groups) == 2
@@ -1228,7 +1239,7 @@ def test_parse_group_directive():
 
 
 def test_parse_group_directive_quoted_label():
-    text = '%%metro group: "Callers (somatic)" | x\ngraph LR\n'
+    text = '%%metro group: "Callers (somatic)" | x\ngraph LR\n    x[X]\n'
     graph = parse_metro_mermaid(text)
     assert len(graph.groups) == 1
     assert graph.groups[0].label == "Callers (somatic)"
@@ -1242,7 +1253,7 @@ def test_parse_group_directive_invalid_ignored():
 
 
 def test_parse_group_directive_bad_position_defaults_below():
-    text = "%%metro group: G | a | sideways\ngraph LR\n"
+    text = "%%metro group: G | a | sideways\ngraph LR\n    a[A]\n"
     with pytest.warns(UserWarning):
         graph = parse_metro_mermaid(text)
     assert graph.groups[0].position == "below"
@@ -1323,3 +1334,206 @@ def test_max_station_columns_arg_overrides_fold_threshold():
     )
     rows = {s.grid_row for s in graph.sections.values() if s.station_ids}
     assert max(rows) > 0, "explicit max_station_columns=15 should force a wrap"
+
+
+# --- Directive value and reference validation tests ---
+
+_ONE_LINE_SECTION = """%%metro line: l1 | One | #ff0000
+graph LR
+    subgraph sec [Sec]
+        a[A] -->|l1| b[B]
+    end
+"""
+
+
+def test_parse_style_unknown_warns_and_keeps_default():
+    with pytest.warns(UserWarning, match=r"%%metro style: ignoring 'bogus'"):
+        graph = parse_metro_mermaid("%%metro style: bogus\ngraph LR\n")
+    assert graph.style == "dark"
+
+
+@pytest.mark.parametrize("name", ["dark", "seqera", "nfcore-light"])
+def test_parse_style_accepted_names_are_silent(name):
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        graph = parse_metro_mermaid(f"%%metro style: {name}\ngraph LR\n")
+    assert graph.style == name
+
+
+@pytest.mark.parametrize(
+    ("directive", "expected"),
+    [
+        ("%%metro off_track: ghost", "off_track: unknown station id 'ghost'"),
+        ("%%metro group: G | ghost", "group: unknown station id 'ghost'"),
+        ("%%metro marker: ghost | square", "marker: unknown station id 'ghost'"),
+        ("%%metro file: ghost | out.txt", "file: unknown station id 'ghost'"),
+        ("%%metro files: ghost | a.txt", "files: unknown station id 'ghost'"),
+        ("%%metro dir: ghost | results", "dir: unknown station id 'ghost'"),
+        ("%%metro grid: ghost | 0,0", "grid: unknown section id 'ghost'"),
+        ("%%metro line_spread: rails | ghost", "line_spread: unknown section id"),
+    ],
+)
+def test_directive_naming_unknown_id_warns(directive, expected):
+    with pytest.warns(UserWarning, match=expected):
+        parse_metro_mermaid(_ONE_LINE_SECTION + directive + "\n")
+
+
+def test_directive_naming_declared_id_is_silent():
+    """The reference audit resolves against the whole file, so a directive may
+    precede the station it names."""
+    src = "%%metro off_track: a\n%%metro marker: b | square\n" + _ONE_LINE_SECTION
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        graph = parse_metro_mermaid(src)
+    assert graph.stations["a"].off_track
+
+
+def test_repeated_unknown_id_warns_once():
+    src = _ONE_LINE_SECTION + "%%metro off_track: ghost, ghost\n"
+    with pytest.warns(UserWarning) as record:
+        parse_metro_mermaid(src)
+    matched = [w for w in record if "off_track: unknown station id" in str(w.message)]
+    assert len(matched) == 1
+
+
+@pytest.mark.parametrize("key", ["entry", "exit"])
+def test_port_hint_unknown_line_warns(key):
+    src = f"""%%metro line: l1 | One | #ff0000
+graph LR
+    subgraph sec [Sec]
+        %%metro {key}: left | l1, ghost
+        a[A] -->|l1| b[B]
+    end
+"""
+    with pytest.warns(UserWarning, match=rf"%%metro {key}: unknown line id 'ghost'"):
+        parse_metro_mermaid(src)
+
+
+def test_interchange_rail_unknown_line_warns():
+    src = _ONE_LINE_SECTION + "%%metro interchange: b | l1 | ghost\n"
+    with pytest.warns(
+        UserWarning, match=r"%%metro interchange: unknown line id 'ghost'"
+    ):
+        parse_metro_mermaid(src)
+
+
+def test_rejected_line_declaration_leaves_its_id_undeclared():
+    """A dropped declaration takes its id with it, so an edge annotated with
+    that id fails the undeclared-line check instead of rendering line-less."""
+    src = "%%metro line: l1\ngraph LR\n    a[A] -->|l1| b[B]\n"
+    with pytest.warns(UserWarning, match="expected 'id | name | #color'"):
+        with pytest.raises(ValueError, match="undeclared metro lines: 'l1'"):
+            parse_metro_mermaid(src)
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    ["| One | #ff0000", "l1 | One |", "l1 |  | #ff0000"],
+)
+def test_line_declaration_with_an_empty_field_is_rejected(declaration):
+    """An id, a name and a colour are all required, so a blank one is dropped
+    whole rather than reaching the SVG as an empty attribute."""
+    src = f"%%metro line: {declaration}\ngraph LR\n    a[A] -->|l1| b[B]\n"
+    with pytest.warns(UserWarning, match="expected 'id | name | #color'"):
+        with pytest.raises(ValueError, match="undeclared metro lines: 'l1'"):
+            parse_metro_mermaid(src)
+
+
+def test_icon_directive_without_labels_is_rejected():
+    src = _ONE_LINE_SECTION + "%%metro file: a |\n"
+    with pytest.warns(UserWarning, match=r"%%metro file: ignoring 'a \|'"):
+        graph = parse_metro_mermaid(src)
+    assert graph.stations["a"].terminus_labels == []
+
+
+def test_marker_legend_without_a_caption_is_rejected():
+    src = _ONE_LINE_SECTION + "%%metro marker_legend: square, solid |\n"
+    with pytest.warns(
+        UserWarning, match=r"%%metro marker_legend: ignoring 'square, solid \|'"
+    ):
+        graph = parse_metro_mermaid(src)
+    assert graph.marker_legend == []
+
+
+def test_line_spread_with_an_empty_section_list_is_rejected():
+    """A payload naming no section is ignored rather than silently taken as
+    the graph-wide default the pipe-less form sets."""
+    src = _ONE_LINE_SECTION + "%%metro line_spread: rails |\n"
+    with pytest.warns(UserWarning, match=r"%%metro line_spread: ignoring 'rails \|'"):
+        graph = parse_metro_mermaid(src)
+    assert graph.line_spread is LineSpread.BUNDLE
+    assert graph.line_spread_overrides == {}
+
+
+def test_line_unrecognised_colour_warns_and_keeps_the_value():
+    src = "%%metro line: l1 | One | notacolour\ngraph LR\n    a[A] -->|l1| b[B]\n"
+    with pytest.warns(UserWarning, match="'notacolour' is not a recognised colour"):
+        graph = parse_metro_mermaid(src)
+    assert graph.lines["l1"].color == "notacolour"
+
+
+@pytest.mark.parametrize("color", ["#f00", "#ff0000", "#ff000080", "red", "rgb(1,2,3)"])
+def test_line_accepted_colour_forms_are_silent(color):
+    src = f"%%metro line: l1 | One | {color}\ngraph LR\n    a[A] -->|l1| b[B]\n"
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        graph = parse_metro_mermaid(src)
+    assert graph.lines["l1"].color == color
+
+
+@pytest.mark.parametrize(
+    "color", ["light-dark(#fff, #000)", "var(--line)", "transparent", "currentColor"]
+)
+def test_line_unmodelled_colour_forms_are_silent(color):
+    src = f"%%metro line: l1 | One | {color}\ngraph LR\n    a[A] -->|l1| b[B]\n"
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        graph = parse_metro_mermaid(src)
+    assert graph.lines["l1"].color == color
+
+
+def test_redeclared_line_id_keeps_the_first_declaration():
+    src = (
+        "%%metro line: l1 | First | #ff0000\n"
+        "%%metro line: l1 | Second | #00ff00\n"
+        "graph LR\n    a[A] -->|l1| b[B]\n"
+    )
+    with pytest.warns(UserWarning, match="'l1' is already declared"):
+        graph = parse_metro_mermaid(src)
+    assert graph.lines["l1"].display_name == "First"
+    assert graph.lines["l1"].color == "#ff0000"
+
+
+@pytest.mark.parametrize(
+    "bad_id",
+    [
+        'evil" onload="alert(1)',
+        "has space",
+        "<script>",
+        "1starts-with-digit",
+    ],
+)
+def test_line_declaration_with_an_id_outside_the_identifier_charset_is_rejected(
+    bad_id,
+):
+    """A line id lands in SVG class/data-* attributes verbatim, so it is
+    constrained to the same charset as node/section ids at declaration time.
+    A rejected declaration is skipped (like every other malformed ``line:``
+    field), so the id is simply never declared; an edge that references it
+    is caught by the undeclared-line check instead."""
+    src = (
+        f"%%metro line: {bad_id} | Name | #ff0000\n"
+        f"graph LR\n    a[A] -->|{bad_id}| b[B]\n"
+    )
+    with pytest.warns(UserWarning, match=r"\[a-zA-Z_\]\[a-zA-Z0-9_\]\*"):
+        with pytest.raises(ValueError, match="undeclared metro lines"):
+            parse_metro_mermaid(src)
+
+
+def test_line_declaration_with_a_valid_identifier_id_is_accepted():
+    src = (
+        "%%metro line: valid_id1 | Name | #ff0000\n"
+        "graph LR\n    a[A] -->|valid_id1| b[B]\n"
+    )
+    graph = parse_metro_mermaid(src)
+    assert "valid_id1" in graph.lines

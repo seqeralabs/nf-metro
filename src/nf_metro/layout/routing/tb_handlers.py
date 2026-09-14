@@ -527,9 +527,7 @@ def _route_perp_entry_from_corridor(
     hd = _sign(tx - sx)
 
     def source_offset(line_id: str) -> float:
-        lateral = _perp_riser_lateral(
-            ctx, edge.source, line_id, feeder_side, tgt.section_id
-        )
+        lateral = _perp_riser_lateral(ctx, edge.source, line_id, feeder_side)
         return td * lateral
 
     def target_offset(line_id: str) -> float:

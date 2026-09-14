@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from nf_metro.parser.provenance import ConnectorEndpointRole, EffectiveDecision
 from nf_metro.parser.route_topology import build_route_topology_query
+from nf_metro.themes import resolve_style
 
 if TYPE_CHECKING:
     from nf_metro.parser.model import MetroGraph
@@ -117,6 +118,10 @@ def build_info(graph: MetroGraph, warnings: list[str] | None = None) -> dict[str
 
     *warnings* are parse-time warning messages captured by the caller (the
     parser emits these via :mod:`warnings`); pass ``None`` for none.
+
+    ``style`` reports the theme name the map resolves to, which is the name
+    ``--theme`` accepts: an alias or an unrecognised value is reported as the
+    brand the render will actually use, not as authored.
     """
     real_sections = graph.real_sections
     topology_query = build_route_topology_query(graph)
@@ -247,7 +252,7 @@ def build_info(graph: MetroGraph, warnings: list[str] | None = None) -> dict[str
     return {
         "title": graph.title or None,
         "caption": graph.caption or None,
-        "style": graph.style,
+        "style": resolve_style(graph.style),
         "warnings": list(warnings or []),
         "counts": {
             "stations": len(graph.stations),

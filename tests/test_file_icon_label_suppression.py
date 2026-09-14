@@ -36,6 +36,12 @@ _FILE_ICON_FIXTURES = [
     EXAMPLES / "topologies/file_node_with_outgoing_edge.mmd",
 ]
 
+# Every gallery-facing map that declares file icons, so a new one is enrolled
+# by being added rather than by being remembered here.
+_GALLERY_FILE_ICON_EXAMPLES = sorted(
+    p for p in EXAMPLES.glob("*.mmd") if "%%metro file:" in p.read_text()
+)
+
 
 @pytest.mark.parametrize("fixture", _FILE_ICON_FIXTURES, ids=lambda p: p.name)
 def test_file_icon_stations_have_no_name_label(fixture: Path) -> None:
@@ -49,6 +55,32 @@ def test_file_icon_stations_have_no_name_label(fixture: Path) -> None:
     assert not offenders, (
         f"{fixture.name}: file-icon stations also got a name label "
         f"(overlaps caption/tracks): {offenders}"
+    )
+
+
+@pytest.mark.parametrize("fixture", _GALLERY_FILE_ICON_EXAMPLES, ids=lambda p: p.name)
+def test_gallery_file_icon_stations_are_blank_termini(fixture: Path) -> None:
+    """A gallery map's file-icon station carries no label of its own.
+
+    Label *suppression* keeps a non-blank label off the canvas, but the marker
+    is chosen separately: ``svg.py`` draws the unrounded nub only for a station
+    ``is_blank_terminus`` reports on, and a rounded pill for everything else,
+    while the icons go on regardless.  So a file station that picks up a label -
+    including the implicit one a bare edge reference gives a node named only in
+    a ``%%metro file:`` directive, which is its own id - renders as a pill *and*
+    an icon, two markers for one station.  ``node[ ]`` is the idiom that avoids
+    it.
+
+    Pinned on the maps the docs render rather than the whole corpus: a topology
+    stress fixture exercises geometry, where a doubled marker costs nothing.
+    """
+    graph = parse_metro_mermaid(fixture.read_text())
+    termini = [s for s in graph.stations.values() if s.is_terminus]
+    assert termini, f"{fixture.name} has no file-icon stations to exercise"
+    offenders = sorted((s.id, s.label) for s in termini if not s.is_blank_terminus)
+    assert not offenders, (
+        f"{fixture.name}: file-icon stations carry a label, so each draws a "
+        f"station pill beside its icon; declare them as `id[ ]`: {offenders}"
     )
 
 

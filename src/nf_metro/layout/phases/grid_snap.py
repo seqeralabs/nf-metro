@@ -6,6 +6,7 @@ from collections import Counter
 
 from nf_metro.layout.constants import (
     CANVAS_GRID_SHIFT_THRESHOLD,
+    SAME_COORD_TOLERANCE,
 )
 from nf_metro.layout.geometry import lanes_run_along_y
 from nf_metro.layout.phase_state import require_phase_field
@@ -14,7 +15,11 @@ from nf_metro.layout.phases.fan_bundles import (
     _centreline_trunk_followers,
     _convergence_source_ys,
     _divergence_midpoint_targets,
+    _entry_fan_centre_ports,
     _evenly_spaced_ys,
+    _fan_reconvergence_joins,
+    _station_rooted_fans,
+    _symmetric_reconvergence_joins,
 )
 from nf_metro.layout.phases.junctions import _position_junctions
 from nf_metro.layout.phases.ports import _set_port_y
@@ -74,6 +79,16 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
     # converges (recorded pre-snap so the midpoint can be restored
     # after sources move).
     convergence_sources = _convergence_source_ys(graph)
+    # A trunkless symmetric entry fan's reconvergence join is a convergence the
+    # midpoint restore must also protect and recentre, even though one arm's
+    # extra hop keeps it out of the ordinary source-midpoint set above.
+    for join_id, src_ids in _symmetric_reconvergence_joins(graph).items():
+        convergence_sources.setdefault(join_id, src_ids)
+    # Under center_ports a trunkless fan-in entry port rides the same
+    # protect-and-restore onto the midpoint of the targets it serves.
+    entry_fan_ports = _entry_fan_centre_ports(graph)
+    for port_id, target_ids in entry_fan_ports.items():
+        convergence_sources.setdefault(port_id, target_ids)
     # Same idea for the diverging side: record each fork hub's target set
     # pre-snap so its midpoint can be restored once the targets have moved.
     # Narrowed to hubs already centred pre-snap (see
@@ -103,6 +118,95 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
 
     _restore_convergence_midpoints(graph, convergence_sources)
     _restore_divergence_midpoints(graph, divergence_targets, trunk_followers)
+    _restore_partial_trunk_descents(graph)
+    _register_half_grid_entry_fan_ports(graph, entry_fan_ports)
+
+
+def _register_half_grid_reconvergence_branches(graph: MetroGraph) -> None:
+    """Register a station-rooted reconvergence fan's half-pitch branch tracks.
+
+    A fan rooted at an internal station reconverges onto a hidden merge node
+    seated on the branch midpoint (:func:`_symmetric_reconvergence_joins`).
+    When the section's trunk anchor port itself rides a half-grid centreline,
+    that midpoint - and the whole branch column mirrored about it - sits half a
+    pitch off the trunk grid, the same genuine half-pitch a fork hub takes.  The
+    entry-port form of this fan records its centred port in
+    ``graph.half_grid_station_ids`` (see
+    :func:`_register_half_grid_entry_fan_ports`); the station-rooted form must
+    likewise record its branches, so the grid-alignment invariants read those
+    offsets as the fan's spine grid rather than stray off-grid placement.
+
+    Runs after the branches have settled onto their spine, so it only sets a
+    flag: a branch already at a half-pitch offset is recorded, none is moved.
+    That is also why the record goes to
+    ``graph.post_layout_half_grid_station_ids`` rather than the placement
+    channel: every reader of ``half_grid_station_ids`` has already run, and one
+    that keys a geometric decision off it - :func:`_off_track_output_below`
+    treats a section whose every trunk station is marked as having a vacated
+    trunk row - would give a different answer here than it gave while the
+    section's content was being placed.
+    """
+    for _hub, section, targets in _station_rooted_fans(graph):
+        anchor_id = next(
+            (
+                pid
+                for pid in section.entry_ports
+                if (p := graph.ports.get(pid)) is not None
+                and p.side in (PortSide.LEFT, PortSide.RIGHT)
+            ),
+            None,
+        )
+        anchor_st = graph.stations.get(anchor_id) if anchor_id is not None else None
+        if anchor_st is None:
+            continue
+        half_off_trunk = anchor_id in graph.half_grid_station_ids
+        joins = _fan_reconvergence_joins(graph, section, targets, hidden_only=True)
+        for src_ids in joins.values():
+            branch_ys = _evenly_spaced_ys(
+                [graph.stations[s].y for s in src_ids if s in graph.stations]
+            )
+            if branch_ys is None:
+                continue
+            pitch = branch_ys[1] - branch_ys[0]
+            trunk_y = anchor_st.y + (0.5 * pitch if half_off_trunk else 0.0)
+            for sid in src_ids:
+                st = graph.stations.get(sid)
+                if st is None:
+                    continue
+                if _off_grid_line(st.y, trunk_y, pitch):
+                    graph.post_layout_half_grid_station_ids.add(sid)
+
+
+def _register_half_grid_entry_fan_ports(
+    graph: MetroGraph, entry_fan_ports: dict[str, list[str]]
+) -> None:
+    """Register a centred entry port that lands on a half-pitch centreline.
+
+    An even branch count seats the port midway between two grid rows - the same
+    genuine half-pitch offset a fork hub takes (see
+    :func:`_restore_divergence_midpoints`).  Recording it in
+    ``graph.half_grid_station_ids`` tells the grid-alignment invariants the
+    section's real rows are the branches, half a slot from the port centreline
+    the reconvergence join and any pass-through legitimately ride.
+    """
+    for port_id, target_ids in entry_fan_ports.items():
+        port_st = graph.stations.get(port_id)
+        if port_st is None:
+            continue
+        branch_ys = _evenly_spaced_ys(
+            [graph.stations[t].y for t in target_ids if t in graph.stations]
+        )
+        if branch_ys is None:
+            continue
+        pitch = branch_ys[1] - branch_ys[0]
+        if _off_grid_line(port_st.y, branch_ys[0], pitch):
+            graph.half_grid_station_ids.add(port_id)
+
+
+def _off_grid_line(y: float, origin: float, pitch: float, tol: float = 1.0) -> bool:
+    """True when ``y`` sits more than ``tol`` from the nearest ``origin + k*pitch``."""
+    residue = (y - origin) % pitch
+    return min(residue, pitch - residue) > tol
 
 
 def _slot_snap(y: float, origin: float, pitch: float, half: float) -> float:
@@ -210,6 +314,43 @@ def _snap_group_to_grid(
             _set_port_y(graph, pid, _slot_snap(port_st.y, origin_r, pitch, half))
 
 
+def _restore_partial_trunk_descents(graph: MetroGraph) -> None:
+    """Re-seat each partial row-mate a handover lane below its carrier.
+
+    Stage 4.8 seats a partial row-mate one lane deeper than the row carrier so a
+    direct port-to-port connector runs flat.  When carrier and partial share a
+    row grid the group snap rounds that sub-grid offset onto the carrier's slot;
+    on an explicit-grid solo section it leaves it in place.  Either way the target
+    is the same: the partial's handover port sits ``descent`` below the carrier
+    port's post-snap Y.  Shifting the whole section by the gap to that target --
+    every internal station, every LR/RL port, the bbox growing downward -- lands
+    it right in both cases and is idempotent (a re-run finds zero gap), so a snap
+    that did not collapse the descent is not double-counted.
+    """
+    require_phase_field(graph, "_partial_trunk_descents")
+    for sec_id, record in graph._partial_trunk_descents.items():
+        section = graph.sections.get(sec_id)
+        partial_st = graph.stations.get(record.partial_port)
+        carrier_st = graph.stations.get(record.carrier_port)
+        if section is None or partial_st is None or carrier_st is None:
+            continue
+        delta = (carrier_st.y + record.descent) - partial_st.y
+        if delta < SAME_COORD_TOLERANCE:
+            continue
+        port_ids = section.port_ids
+        for pid in port_ids:
+            port_st = graph.stations.get(pid)
+            if port_st is not None:
+                _set_port_y(graph, pid, port_st.y + delta)
+        for sid in section.station_ids:
+            if sid in port_ids:
+                continue
+            st = graph.stations.get(sid)
+            if st is not None:
+                st.y += delta
+        section.bbox_h += delta
+
+
 def _restore_convergence_midpoints(
     graph: MetroGraph, convergence_sources: dict[str, list[str]]
 ) -> None:
@@ -309,6 +450,14 @@ def _snap_canvas_y_to_grid(
     require_phase_field(graph, "half_grid_station_ids")
     half_grid_ids = graph.half_grid_station_ids
     convergence_sources = _convergence_source_ys(graph)
+    # An entry-fan reconvergence join and a center_ports fan-in entry port are
+    # both held off the grid on the fan centreline; they must stay excluded from
+    # the residue vote on this second pass too, or the pass reads them as
+    # off-grid and pulls them back onto a slot.
+    for join_id, src_ids in _symmetric_reconvergence_joins(graph).items():
+        convergence_sources.setdefault(join_id, src_ids)
+    for port_id, target_ids in _entry_fan_centre_ports(graph).items():
+        convergence_sources.setdefault(port_id, target_ids)
     residues: Counter[float] = Counter()
     for st in graph.stations.values():
         if st.is_port or st.off_track:

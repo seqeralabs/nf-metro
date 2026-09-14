@@ -121,7 +121,7 @@ def test_cross_system_landing_corners_are_concentric_across_route_shapes() -> No
         corner_x, corner_y = route.points[-2]
         radius = route.curve_radii[-1]
         centres[line_id] = (corner_x + radius, corner_y - radius)
-    assert centres["other"] == pytest.approx((796.0, 372.0))
+    assert centres["other"] == pytest.approx((760.0, 372.0))
     assert centres["snvvcf"] == pytest.approx(centres["other"])
     assert {
         line_id: route.concentric_corner_offsets_by_segment[len(route.points) - 2][0]

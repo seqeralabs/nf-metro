@@ -1,0 +1,30 @@
+%%metro title: Inactive Lines
+%%metro style: nfcore
+%%metro line: star | STAR alignment (default) | #2db572
+%%metro line: salmon | Salmon pseudo-alignment (inactive) | #ff8c00 | solid | inactive
+%%metro line: sv | Structural variants (inactive) | #e63946 | dashed | inactive
+%%metro marker: sortmerge | square, #6a4c93
+%%metro interchange: sortmerge | salmon | sv
+%%metro files: sv_vcf | VCF | | banner
+
+graph LR
+    reads[Reads]
+    qc[QC]
+    star_align[STAR]
+    salmon_align[Salmon]
+    sortmerge[Samtools sort]
+    manta[Manta]
+    quant[tximport]
+    sv_vcf[ ]
+    report[MultiQC]
+
+    reads -->|star,salmon| qc
+    qc -->|star| star_align
+    qc -->|salmon| salmon_align
+    star_align -->|star| quant
+    star_align -->|sv| sortmerge
+    salmon_align -->|salmon| sortmerge
+    sortmerge -->|salmon| quant
+    sortmerge -->|sv| manta
+    manta -->|sv| sv_vcf
+    quant -->|star,salmon| report

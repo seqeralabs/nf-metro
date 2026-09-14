@@ -63,7 +63,7 @@ explicit `output`), so never resolve a stem by searching for a matching basename
 
 `Read` the `base-<stem>.png` / `cand-<stem>.png` pairs it reports. Never `Read`
 the preview page itself: it is one multi-megabyte inlined `index.html`, and its
-SVG carries `var()` and `light-dark()` that cairosvg cannot parse.
+SVG carries `var()` and `light-dark()` that resolve only in a live browser.
 
 Every stem owes an I/N/D verdict. Reconcile against the script's summary line:
 
@@ -88,6 +88,11 @@ identifies uncertainty, and returns an acceptance verdict. Do not seed it with
 the writer's preferred interpretation, and do not downgrade this because the
 issue predicted no visual change - a delta nobody expected is the most important
 kind. Every changed render gets HIGH eyes.
+
+A clean I/N/D classification answers "does this render correctly", not "is
+this the right fix" (see the plan-time-vs-render-time rule in
+[`diagnosis.md`](diagnosis.md)) - this gate is the last chance to ask the
+second question before merge, and a smooth render is no evidence either way.
 
 The sticky comment ends in a verdict line. Gate the next step on it:
 

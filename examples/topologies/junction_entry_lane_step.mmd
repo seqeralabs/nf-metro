@@ -1,0 +1,30 @@
+%%metro title: Junction entry lane step
+%%metro line: riboseq | Ribo-seq | #e6007e
+%%metro line: rnaseq | Matched RNA-seq | #2db572
+%%metro line: tiseq | TI-seq | #2b6cb0
+%%metro line: annotation | Hybrid annotation | #f2b407
+
+graph LR
+    subgraph preprocessing [Read pre-processing]
+        infer_strand -->|riboseq,rnaseq,tiseq| equalise
+    end
+    subgraph alignment [Alignment & quantification]
+        umi_dedup[UMI-tools dedup]
+        salmon_quant -->|riboseq,rnaseq,tiseq| counts_out
+    end
+    subgraph novel_transcripts [Transcript discovery]
+        stringtie -->|rnaseq| hybrid_merge
+    end
+    subgraph orf_calling [ORF discovery & calling]
+        star_hybrid -->|riboseq| ribocode
+        ribotish -->|riboseq| orf_merge
+    end
+    subgraph te [Translational efficiency]
+        te_prep_orf -->|rnaseq| anota2seq
+        anota2seq -->|riboseq| multiqc_final
+    end
+    equalise -->|riboseq| star_hybrid
+    umi_dedup -->|rnaseq| stringtie
+    umi_dedup -->|riboseq| ribotish
+    salmon_quant -->|rnaseq| te_prep_orf
+    hybrid_merge -->|annotation| star_hybrid

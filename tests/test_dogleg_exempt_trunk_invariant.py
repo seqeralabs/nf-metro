@@ -35,6 +35,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES = REPO_ROOT / "examples"
 EXAMPLE_TOPOLOGIES = EXAMPLES / "topologies"
 FIXTURE_TOPOLOGIES = REPO_ROOT / "tests" / "fixtures" / "topologies"
+CURVE_REPROS = REPO_ROOT / "tests" / "fixtures" / "curve_invariant_repros"
 
 # Named one by one rather than swept: the hash-seed corpus is a hundred fuzz
 # renders, several of which fail unrelated guards, so only the seeds whose
@@ -133,6 +134,73 @@ def test_checker_passes_parallel_dogleg() -> None:
     """The checker stays silent when the trunk clears to the parallel side."""
     violations = check_no_dogleg_crosses_exempt_trunk(None, _routes(_BYP_ABOVE), {})
     assert not violations, "parallel bundle above the exempt run must not flag"
+
+
+# A movable trunk that originates above the exempt run and terminates below it,
+# with both risers landing inside the run's X-span, cannot avoid the run: seated
+# below, its up-riser at x=200 pierces the run; seated above, its down-riser at
+# x=400 pierces it.  No parallel side is crossing-free, so the crossing is
+# topological rather than a wrong-side dogleg.
+_EXEMPT_TRANSIT = [
+    (80.0, 180.0),
+    (100.0, 180.0),
+    (100.0, 200.0),
+    (500.0, 200.0),
+    (500.0, 220.0),
+    (520.0, 220.0),
+]
+_TRANSIT_MOVABLE = [
+    (180.0, 150.0),
+    (200.0, 150.0),
+    (200.0, 204.0),
+    (400.0, 204.0),
+    (400.0, 260.0),
+    (420.0, 260.0),
+]
+
+
+def test_checker_allows_forced_transit_crossing() -> None:
+    """A trunk crossing an exempt run it cannot dogleg around is not flagged.
+
+    Both candidate placements (one corridor separation below and above the run)
+    cross it, so the crossing is forced and the checker stays silent."""
+    routes = [
+        RoutedPath(
+            edge=Edge("rs2", "lt1", "wrap"),
+            line_id="wrap",
+            points=_EXEMPT_TRANSIT,
+            is_inter_section=True,
+            normalize_exempt=True,
+        ),
+        RoutedPath(
+            edge=Edge("lt2", "bs1", "byp"),
+            line_id="byp",
+            points=_TRANSIT_MOVABLE,
+            is_inter_section=True,
+        ),
+    ]
+    assert not check_no_dogleg_crosses_exempt_trunk(None, routes, {})
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    [
+        "riboseq_inter_row_corridor.mmd",
+        "rl_return_row_convergence.mmd",
+    ],
+)
+def test_forced_transit_not_flagged(fixture: str) -> None:
+    """A distinct-line trunk transiting an exempt run's span is not flagged.
+
+    In ``riboseq_inter_row_corridor`` the pink ``riboseq`` trunk enters the
+    ``annotation`` run's channel from above and leaves below it; in
+    ``rl_return_row_convergence`` the ``bam`` trunk and the ``svvcf`` return run
+    interlock at a fold corner.  In each the movable trunk crosses the exempt
+    run from whichever side it takes, so no parallel lane clears it and the
+    checker must stay silent."""
+    graph, routes, offsets = _route(CURVE_REPROS / fixture)
+    violations = check_no_dogleg_crosses_exempt_trunk(graph, routes, offsets)
+    assert not violations, "\n".join(v.message() for v in violations)
 
 
 def _same_source_corner_routes(radius: float) -> list[RoutedPath]:

@@ -124,7 +124,7 @@ def table_tier_for(table: str, stem: str) -> str:
 
 def check_agent_definitions() -> None:
     """Definitions must parse, and their model must agree with the tier table."""
-    tier_model = {"LIGHT": "haiku", "MID": "sonnet", "HIGH": "opus"}
+    tier_model = {"LIGHT": "haiku", "MID": "sonnet", "HIGH": "claude-opus-4-8"}
     table = (SKILL / "SKILL.md").read_text()
     for a in sorted(AGENTS.glob("fix-issue-*.md")):
         head = a.read_text().split("---")[1]

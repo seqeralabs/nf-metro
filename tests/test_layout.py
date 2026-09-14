@@ -10,7 +10,7 @@ from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.labels import label_text_width
 from nf_metro.layout.layers import assign_layers
 from nf_metro.layout.ordering import assign_tracks
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.mermaid import parse_metro_mermaid, parse_metro_mermaid_file
 from nf_metro.parser.model import is_bypass_v
 
 
@@ -1389,11 +1389,10 @@ def test_off_track_convergence_keeps_consumer_on_trunk():
     consumed by one in-section station (`align`) must not pull `align` off
     the row trunk.
 
-    Locks in the fix for the displacement bug: prior to the off-track
-    exclusion in ``assign_tracks`` / ``_layout_single_section``, ``align``
-    sat ~230 px below the row trunk because the in-section track grouping
-    treated the four file inputs as ordinary on-track stations on the same
-    line and pushed the consumer off-track.
+    Without the off-track exclusion in ``assign_tracks`` /
+    ``_layout_single_section`` the in-section track grouping counts the four
+    file inputs as ordinary on-track stations on one line and pushes the
+    consumer off the trunk -- ``align`` lands ~230 px below it.
     """
     fixture = (
         Path(__file__).resolve().parent.parent
@@ -1625,8 +1624,6 @@ def test_port_terminus_spacing_no_station_as_elbow():
     from pathlib import Path
 
     example = Path(__file__).parent.parent / "examples" / "variant_calling_tuned.mmd"
-    if not example.exists():
-        return
     graph = parse_metro_mermaid(example.read_text())
     compute_layout(graph)
 
@@ -1821,21 +1818,23 @@ class TestPhaseGuards:
         graph = parse_metro_mermaid(mmd_text)
         compute_layout(graph, validate=True)
 
+    def _layout_validated_file(self, path: Path) -> None:
+        graph = parse_metro_mermaid_file(path)
+        compute_layout(graph, validate=True)
+
     @pytest.mark.parametrize(
         "fixture",
         sorted(TOPOLOGIES_DIR.glob("*.mmd")),
         ids=lambda p: p.stem,
     )
     def test_topology_fixtures(self, fixture):
-        self._layout_validated(fixture.read_text())
+        self._layout_validated_file(fixture)
 
     def test_rnaseq_sections(self):
-        self._layout_validated((EXAMPLES_DIR / "rnaseq_sections.mmd").read_text())
+        self._layout_validated_file(EXAMPLES_DIR / "rnaseq_sections.mmd")
 
     def test_rnaseq_auto(self):
-        path = EXAMPLES_DIR / "rnaseq_auto.mmd"
-        if path.exists():
-            self._layout_validated(path.read_text())
+        self._layout_validated_file(EXAMPLES_DIR / "rnaseq_auto.mmd")
 
     def test_differentialabundance(self):
         """``differentialabundance.mmd`` is the only gallery fixture that
@@ -1843,7 +1842,7 @@ class TestPhaseGuards:
         and a sparse loop-side station; exercises the bisection guard
         phase-gating policy.
         """
-        self._layout_validated((EXAMPLES_DIR / "differentialabundance.mmd").read_text())
+        self._layout_validated_file(EXAMPLES_DIR / "differentialabundance.mmd")
 
     def test_simple_two_sections(self):
         self._layout_validated(
@@ -2545,8 +2544,8 @@ def test_multi_path_gap_separates_by_b_and_centers():
     (A + w1 + B + w2 + A).
 
     03b_fan_in_merge's StepA|StepB gap carries a down-path (junction_7) and
-    an up-path (junction_6); they previously overlapped (~5px) and now
-    separate by B and straddle the gap centre.
+    an up-path (junction_6); the two must clear each other by B and straddle
+    the gap centre rather than overlapping.
     """
     from nf_metro.layout.constants import BUNDLE_TO_BUNDLE_CLEARANCE
     from nf_metro.layout.routing import route_edges

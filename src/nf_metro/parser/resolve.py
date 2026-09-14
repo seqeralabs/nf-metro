@@ -16,6 +16,7 @@ import networkx as nx
 
 from nf_metro.graph_views import directed_graph, longest_path_layers
 from nf_metro.parser.commitments import AppliedLayoutCommitments
+from nf_metro.parser.directives import _warn_directive
 from nf_metro.parser.model import (
     BYPASS_V_PREFIX,
     CONVERGE_PREFIX,
@@ -107,9 +108,8 @@ def _expand_interchanges(graph: MetroGraph, lineage: AuthoredEdgeLineage) -> Non
     for ic in graph.interchanges:
         orig = graph.stations.get(ic.node_id)
         if orig is None:
-            warnings.warn(
-                f"interchange: node {ic.node_id!r} is not a defined station; ignoring",
-                stacklevel=2,
+            _warn_directive(
+                "interchange", f"unknown station id {ic.node_id!r}; ignoring"
             )
             continue
         # Assign each of the node's lines to the first rail that names it; lines
@@ -123,10 +123,10 @@ def _expand_interchanges(graph: MetroGraph, lineage: AuthoredEdgeLineage) -> Non
                     line_rail[lid] = i
         surviving = sorted(set(line_rail.values()))
         if len(surviving) < 2:
-            warnings.warn(
-                f"interchange: node {ic.node_id!r} resolves to fewer than two "
-                "rails carrying its lines; ignoring",
-                stacklevel=2,
+            _warn_directive(
+                "interchange",
+                f"node {ic.node_id!r} resolves to fewer than two rails "
+                "carrying its lines; ignoring",
             )
             continue
         for lid in node_lines - set(line_rail):

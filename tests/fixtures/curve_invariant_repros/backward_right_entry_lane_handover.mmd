@@ -1,0 +1,26 @@
+%%metro title: Backward right-entry lane hand-off
+%%metro compact_offsets: true
+%%metro line: descend | Descending feeder | #ff9800
+%%metro line: level | Level backward feeder | #4CAF50
+%%metro grid: sink | 0,1
+%%metro grid: level_src | 1,1
+%%metro grid: descend_src | 1,0
+
+graph LR
+    subgraph sink [Sink]
+        %%metro entry: right | level, descend
+        merge[Merge]
+        consume[Consume]
+        merge -->|level| consume
+        merge -->|descend| consume
+    end
+    subgraph level_src [Level Source]
+        %%metro exit: left | level
+        level_stage[Stage]
+    end
+    subgraph descend_src [Descend Source]
+        %%metro exit: left | descend
+        descend_stage[Stage]
+    end
+    level_stage -->|level| merge
+    descend_stage -->|descend| merge

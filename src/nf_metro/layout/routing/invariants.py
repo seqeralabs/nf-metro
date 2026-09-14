@@ -22,10 +22,16 @@ from __future__ import annotations
 
 import inspect
 import math
-import os
 import warnings
 from collections import defaultdict, deque
-from collections.abc import Callable, Collection, Iterable, Iterator, Sequence
+from collections.abc import (
+    Callable,
+    Collection,
+    Iterable,
+    Iterator,
+    Mapping,
+    Sequence,
+)
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Literal, NamedTuple, Protocol
@@ -40,16 +46,18 @@ from nf_metro.layout.constants import (
     FLOW_ALIGNED_PORT_ADVICE,
     MIN_CORRIDOR_Y_OVERLAP,
     OFFSET_STEP,
+    SAME_COORD_TOLERANCE,
     SAME_Y_TOLERANCE,
     graph_offset_step,
 )
 from nf_metro.layout.geometry import (
     AxisFrame,
     axis_split,
+    cotravelling_lane_clearance,
     lanes_run_along_y,
     point_to_polyline_distance,
 )
-from nf_metro.layout.phases.guards import GuardSpec
+from nf_metro.layout.phase_state import GuardSpec
 from nf_metro.layout.route_plan import FanRouteEmitter
 from nf_metro.layout.route_topology import (
     convergence_entry_port_id,
@@ -62,18 +70,22 @@ from nf_metro.layout.routing.common import (
     Direction,
     HTrunkSeg,
     OffsetRegime,
+    PeeloffTail,
     RoutedPath,
     _vert_horiz_cross,
     apply_route_offsets,
     convergence_owns_segment_boundary,
     corridor_lanes,
     corridor_runs,
+    exempt_dogleg_lanes,
     feasible_same_destination_approach_proposals,
     gap_lo_for_x,
     gap_lookup_geometry,
     horizontal_direction,
     initial_fanout_descent_span,
+    inter_row_gap_band,
     is_orthogonal_turn,
+    is_side_entry_port,
     iter_eligible_destination_tail_bundles,
     iter_horizontal_trunks,
     iter_opposing_entry_confluences,
@@ -85,6 +97,8 @@ from nf_metro.layout.routing.common import (
     opposing_entry_confluence_slots,
     peeloff_target_slots,
     perp_entry_consumer,
+    planner_owns_segment_or_boundary,
+    port_peeloff_tail,
     resolve_section,
     same_destination_approach_slots,
     segments_properly_cross,
@@ -122,7 +136,6 @@ class Side(Enum):
 
     LEFT = "LEFT"
     RIGHT = "RIGHT"
-    COINCIDENT = "COINCIDENT"
 
 
 @dataclass(frozen=True)
@@ -177,7 +190,7 @@ def _side_sign(
     b_p1: tuple[float, float],
     perp: tuple[float, float],
 ) -> int:
-    """Sign of ``(A - B) . perp``: +1 LEFT, -1 RIGHT, 0 COINCIDENT."""
+    """Sign of ``(A - B) . perp``: +1 LEFT, -1 RIGHT, 0 for a coincident pair."""
     dxp = a_p1[0] - b_p1[0]
     dyp = a_p1[1] - b_p1[1]
     proj = dxp * perp[0] + dyp * perp[1]
@@ -331,12 +344,47 @@ class SharedRunTurnFlip:
 
 
 class _OpeningTurn(NamedTuple):
-    """A route's opening horizontal run and the vertical it turns onto."""
+    """A route's opening horizontal run and the vertical it turns onto.
+
+    ``corridor_y`` is the Y of a horizontal leg that immediately reverses the
+    run after the turn -- the bottom of a ``]``-shaped U-turn onto a corridor
+    running back against ``run_dir`` -- or ``None`` for a terminal turn or one
+    whose next leg continues in the run's own direction.
+    :func:`_shared_run_turn_flip` reads it to spot a translated fold, whose
+    reversal makes the pair's crossing structurally forced rather than a fixable
+    ordering bug; see that function for the geometric argument.
+    """
 
     run_y: float
     turn_x: float
     run_dir: Direction
     turn_dir: Direction
+    corridor_y: float | None
+
+
+def _reversed_corridor_y(
+    pts: Sequence[tuple[float, float]], run_dir: Direction
+) -> float | None:
+    """The Y of a corridor the route U-turns onto against ``run_dir``.
+
+    The leg right after the opening riser (``pts[2] -> pts[3]``): when it is
+    horizontal and travels opposite to ``run_dir`` the route has folded into a
+    ``]``-shape, and that leg's Y is the corridor the bundle re-forms on.  A
+    same-direction next leg is a staircase, not a U-turn, and yields ``None``.
+    """
+    if len(pts) < 4:
+        return None
+    (x2, y2), (x3, y3) = pts[2], pts[3]
+    if abs(y3 - y2) > COORD_TOLERANCE or abs(x3 - x2) <= COORD_TOLERANCE:
+        return None
+    if (x3 - x2 > 0) == (run_dir is Direction.R):
+        return None
+    return y2
+
+
+def _same_sign(a: float, b: float) -> bool:
+    """Whether two deltas point the same way -- one line on one side of another."""
+    return (a > 0) == (b > 0)
 
 
 def _opening_turn(pts: Sequence[tuple[float, float]]) -> _OpeningTurn | None:
@@ -345,11 +393,13 @@ def _opening_turn(pts: Sequence[tuple[float, float]]) -> _OpeningTurn | None:
     if opening is None:
         return None
     (x0, y0), (x1, y1), (_x2, y2) = opening
+    run_dir = horizontal_direction(x1 - x0)
     return _OpeningTurn(
         run_y=y0,
         turn_x=x1,
-        run_dir=horizontal_direction(x1 - x0),
+        run_dir=run_dir,
         turn_dir=vertical_direction(y2 - y1),
+        corridor_y=_reversed_corridor_y(pts, run_dir),
     )
 
 
@@ -361,12 +411,33 @@ def _shared_run_turn_flip(
     ``None`` also when either coordinate pair is within tolerance: two lines on
     one lane, or turning at one column, are a single track rather than a nesting
     to compare.
+
+    A ``]``-shaped U-turn folds the opening run down its turn column and back
+    onto a reversed corridor; each route's run->turn->corridor triple is one
+    bracket.  When both routes fold and their run-Y and corridor-Y order agree
+    -- concretely ``(a.run_y - b.run_y > 0) == (a.corridor_y - b.corridor_y > 0)``,
+    each line on the same side of the other on the run and on the corridor -- the
+    two brackets are congruent and translated the same way on both legs, so they
+    intersect wherever they are placed.  That crossing is inherent to the fold,
+    not a fixable bundle-order flip, so the pair is exempt.  A concentric fold
+    straddles a shared centre (the orders disagree), where the turn-column
+    comparison below reads the nesting correctly.
     """
+    if a.corridor_y is not None and b.corridor_y is not None:
+        run_dy = a.run_y - b.run_y
+        corridor_dy = a.corridor_y - b.corridor_y
+        is_forced_crossing = (
+            abs(run_dy) > COORD_TOLERANCE
+            and abs(corridor_dy) > COORD_TOLERANCE
+            and _same_sign(run_dy, corridor_dy)
+        )
+        if is_forced_crossing:
+            return None
     run_cmp = a.turn_dir.sign * (a.run_y - b.run_y)
     turn_cmp = a.run_dir.sign * (a.turn_x - b.turn_x)
     if abs(run_cmp) <= COORD_TOLERANCE or abs(turn_cmp) <= COORD_TOLERANCE:
         return None
-    if (run_cmp > 0) != (turn_cmp > 0):
+    if not _same_sign(run_cmp, turn_cmp):
         return None
     return SharedRunTurnFlip(
         source_id=source_id,
@@ -425,6 +496,136 @@ def check_shared_run_turn_preserves_bundle_order(
                 flip = _shared_run_turn_flip(source_id, la, lb, single[la], single[lb])
                 if flip is not None:
                     violations.append(flip)
+    return violations
+
+
+# ---------------------------------------------------------------------------
+# Merge-fed confluence band/descent order
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class MergeConfluenceBandCross:
+    """Two lines converging on one side port cross where the band turns down.
+
+    Distinct lines sharing one horizontal band into a common side entry port must
+    nest concentrically all the way in: the band's outer-to-inner Y order has to
+    agree with the descent's outer-to-inner X order.  When the band is reordered
+    downstream of the descent, or a merge-fed leg's descent is stacked against a
+    direct leg's on the opposite convention, the two swap sides and cross at the
+    corner where the shared band turns down.
+    """
+
+    port_id: str
+    line_a: str
+    line_b: str
+    crossing_xy: tuple[float, float]
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        x, y = self.crossing_xy
+        return (
+            f"lines {self.line_a!r} and {self.line_b!r} converging into port "
+            f"{self.port_id!r} cross at ({x:.1f}, {y:.1f}): their shared band and "
+            f"their descent into the port disagree on nesting order"
+        )
+
+
+def _descent_is_plan_owned(route: RoutedPath) -> bool:
+    """Whether a plan owns the final descent riser (``points[-3]``) of a tail."""
+    return planner_owns_segment_or_boundary(route, len(route.points) - 3)
+
+
+def _terminal_entry_port_id(graph: MetroGraph, route: RoutedPath) -> str | None:
+    """The side entry port a route reaches, resolving through merge junctions.
+
+    A merge-fed leg ends at a junction whose own edge carries it on into the
+    port; follow that chain to the port so the leg joins the port's confluence.
+    Returns ``None`` when the chain leaves no side entry port.
+    """
+    current = route.edge.target
+    seen: set[str] = set()
+    while current not in seen:
+        seen.add(current)
+        port = graph.ports.get(current)
+        if port is not None:
+            return current if port.is_entry else None
+        if current not in graph.junction_ids:
+            return None
+        onward = {
+            edge.target
+            for edge in graph.edges_from(current)
+            if edge.line_id == route.edge.line_id
+        }
+        if len(onward) != 1:
+            return None
+        current = next(iter(onward))
+    return None
+
+
+def check_merge_confluence_band_order(
+    routes: list[RoutedPath], graph: MetroGraph
+) -> list[MergeConfluenceBandCross]:
+    """Return each distinct-line pair that crosses converging into one side port.
+
+    :func:`check_bundle_order_preserved` compares routes sharing one
+    ``(source, target)`` edge, and :func:`check_peeloff_concentric` groups by the
+    route's literal target, so neither pairs a line entering a port directly with
+    one arriving through a merge junction -- the two land in different buckets.
+    A pass reordering their shared band into the port after the descent it feeds
+    is settled leaves the two on opposite nesting conventions.
+
+    Resolve each peel-off tail's port through the merge chain, group the tails by
+    their turn-direction triple so only concentric-family members compare, then
+    flag a distinct-line pair that co-travels one band into one descent corridor
+    yet ranks outer-to-inner one way on the band and the other on the descent: the
+    band's Y order and the descent's X order carry opposite signs across the turn,
+    so the two swap sides and cross where the band drops.  A pair on separate
+    bands or descents, or nesting correctly, is left alone.
+    """
+    violations: list[MergeConfluenceBandCross] = []
+    by_group: dict[tuple[str, int, int, int], list[tuple[RoutedPath, PeeloffTail]]] = (
+        defaultdict(list)
+    )
+    for rp in routes:
+        if not rp.is_inter_section:
+            continue
+        tail = port_peeloff_tail(rp)
+        if tail is None:
+            continue
+        port_id = _terminal_entry_port_id(graph, rp)
+        if port_id is None or not is_side_entry_port(graph, port_id):
+            continue
+        by_group[
+            (port_id, tail.trunk_sign, tail.vertical_sign, tail.port_lead_sign)
+        ].append((rp, tail))
+
+    for (port_id, trunk_sign, vertical_sign, _lead_sign), members in by_group.items():
+        for ai in range(len(members)):
+            for bi in range(ai + 1, len(members)):
+                (ra, ta), (rb, tb) = members[ai], members[bi]
+                if ra.line_id == rb.line_id:
+                    continue
+                if _descent_is_plan_owned(ra) and _descent_is_plan_owned(rb):
+                    continue  # a crossing both plans state is the plans' to fix
+                band_overlap = min(ta.x_hi, tb.x_hi) - max(ta.x_lo, tb.x_lo)
+                if band_overlap <= COORD_TOLERANCE:
+                    continue
+                if (
+                    abs(ta.trunk_y - tb.trunk_y) > EDGE_TO_BUNDLE_CLEARANCE
+                    or abs(ta.peel_x - tb.peel_x) > EDGE_TO_BUNDLE_CLEARANCE
+                ):
+                    continue
+                run_cmp = vertical_sign * (ta.trunk_y - tb.trunk_y)
+                turn_cmp = trunk_sign * (ta.peel_x - tb.peel_x)
+                if abs(run_cmp) <= COORD_TOLERANCE or abs(turn_cmp) <= COORD_TOLERANCE:
+                    continue
+                if (run_cmp > 0) == (turn_cmp > 0):
+                    violations.append(
+                        MergeConfluenceBandCross(
+                            port_id, ra.line_id, rb.line_id, (ta.peel_x, ta.trunk_y)
+                        )
+                    )
     return violations
 
 
@@ -764,9 +965,9 @@ def check_seam_segments_meet_at_port(
 
 # A gap ALONG the upstream travel direction reads as a visible "bite"
 # at the corner apex (the line stops short of its own bend); anything
-# larger than this is the seam / notch the fix closes.  A PERPENDICULAR
+# larger than this is the seam / notch the tail join closes.  A PERPENDICULAR
 # gap up to a stroke width is hidden under the line and tolerated.
-_TAIL_JOIN_TANGENT_TOLERANCE = 1.0
+_TAIL_JOIN_TANGENT_TOLERANCE = COORD_TOLERANCE
 
 
 @dataclass(frozen=True)
@@ -956,7 +1157,7 @@ def check_fanout_lane_continuity(
 # deliberately asked for a tighter arc.  Below this, a horizontal-to-vertical
 # turn reads as a hard corner rather than a formed curve.
 _ORTHOGONAL_TURN_FLOOR = 3.0
-_ORTHOGONAL_TURN_TOL = 0.5
+_ORTHOGONAL_TURN_TOL = SAME_COORD_TOLERANCE
 
 
 @dataclass(frozen=True)
@@ -1868,7 +2069,7 @@ class DiagonalOverlapViolation:
         )
 
 
-_COLLINEAR_LATERAL_TOL = 1.0
+_COLLINEAR_LATERAL_TOL = COORD_TOLERANCE
 _COLLINEAR_MIN_SPAN = 40.0
 
 # A diagonal bundle's lines must keep a true perpendicular separation, not a
@@ -2670,8 +2871,9 @@ def check_no_riser_hugs_section_edge(
     A junction feeding a TOP port directly below it (shared X) is exempt: its
     straight drop rides the junction's own lane, not a side-exit lead-in seated
     against a wall, so running a curve radius outside a flanking box is a clean
-    descent rather than a wall-hug.  This mirrors the straight-drop routing
-    decision in :func:`_straight_drop_column_clear`.
+    descent rather than a wall-hug.  This mirrors the routing decision in
+    :func:`_perp_entry_junction_straight_drop`, which takes that drop for the
+    same reason.
     """
     sections = [s for s in graph.sections.values() if s.bbox_w > 0 and s.bbox_h > 0]
     violations: list[RiserHugsSectionEdge] = []
@@ -3543,6 +3745,34 @@ class DoglegCrossesExemptTrunk:
         )
 
 
+def _exempt_dogleg_crossing_forced(
+    graph: MetroGraph | None, movable: HTrunkSeg, exempt: HTrunkSeg
+) -> bool:
+    """Whether no parallel lane clears *movable* off *exempt* crossing-free.
+
+    Asks the question ``_dogleg_off_exempt_trunks`` answers when it seats the
+    trunk: seated one corridor separation below or above the exempt run (each
+    clamped to the inter-row gap), does a candidate placement avoid the run?
+    When both candidates cross -- the movable trunk enters the run's span from
+    one side and leaves from the other -- the crossing is topological, not the
+    wrong-side #702 landing the check exists to catch, so it is not flagged.
+    """
+    counter_running = (movable.xb > movable.xa) != (exempt.xb > exempt.xa)
+    separation = cotravelling_lane_clearance(
+        # Callers reach this helper only for distinct-line pairs (the guard
+        # filters on edge.source, the remedy pass on line_id), so the movable
+        # and exempt run never share a line.
+        same_line=False,
+        counter_running=counter_running,
+        curve_radius=CURVE_RADIUS,
+    )
+    band = inter_row_gap_band(graph, movable.y) if graph is not None else None
+    lanes = exempt_dogleg_lanes(movable, exempt, separation=separation, band=band)
+    below_clear = lanes.below_ok and lanes.below_crossing is None
+    above_clear = lanes.above_ok and lanes.above_crossing is None
+    return not (below_clear or above_clear)
+
+
 def check_no_dogleg_crosses_exempt_trunk(
     graph: MetroGraph,
     routes: list[RoutedPath],
@@ -3555,7 +3785,9 @@ def check_no_dogleg_crosses_exempt_trunk(
     on the side whose riser pierces the exempt run trades one fused stroke for
     a double crossing (issue #702).  Only pairs sharing an inter-row channel
     (within ``2 * OFFSET_STEP`` in Y and overlapping in X) are considered, so a
-    legitimate bundle a full gap apart never flags.
+    legitimate bundle a full gap apart never flags.  A trunk that transits the
+    exempt run's span -- entering from one side and leaving on the other, so no
+    parallel lane is crossing-free -- crosses of necessity and is exempt.
     """
     exempt = [
         (rp, rank, seg)
@@ -3576,6 +3808,14 @@ def check_no_dogleg_crosses_exempt_trunk(
                 if abs(seg.y - eseg.y) >= 2 * OFFSET_STEP:
                     continue
                 if seg.x_lo >= eseg.x_hi or eseg.x_lo >= seg.x_hi:
+                    continue
+                # A crossing between two trunks off one junction is a
+                # shared-corner artifact, resolved per-crossing by the arc test
+                # below; the forced-transit exemption is its complement, for the
+                # distinct-source trunk that has to cross a run spanning it.
+                if rp.edge.source != erp.edge.source and _exempt_dogleg_crossing_forced(
+                    graph, seg, eseg
+                ):
                     continue
                 for pt in trunk_segment_crossings(seg, eseg):
                     if _same_source_corner_axis_contact(
@@ -3854,11 +4094,11 @@ def check_stacked_elbow_clearance(
 # ---------------------------------------------------------------------------
 
 # Arc-centre spread above this reads as a visible pinch/gap through the bend.
-_CONCENTRIC_CENTRE_TOLERANCE = 1.0
+_CONCENTRIC_CENTRE_TOLERANCE = COORD_TOLERANCE
 # A corner counts as wholesale-translated only when both flanking legs are
 # offset from the bundle-mate by the same amount; a difference above this means
 # one leg is pinned (a transition corner), where non-concentric is intended.
-_WHOLESALE_LEG_TOLERANCE = 1.0
+_WHOLESALE_LEG_TOLERANCE = COORD_TOLERANCE
 
 
 @dataclass(frozen=True)
@@ -4088,6 +4328,217 @@ def check_concentric_bundle_corners(
                     centre_spread=translated[2],
                 )
             )
+    return violations
+
+
+def _fan_corner_observations(
+    route: RoutedPath, points: list[tuple[float, float]]
+) -> list[_CornerObservation]:
+    """Interior orthogonal-turn corners of *points*, minus the exit-turn corner.
+
+    ``_settled_exit_turns`` anchors a route's own exit-turn corner, so it is not
+    a re-derivable member of any concentric fan and is left out here.
+    """
+    corners: list[_CornerObservation] = []
+    for rank in range(1, len(points) - 1):
+        if route.exit_turn_segment_rank == rank:
+            continue
+        if not is_orthogonal_turn(points[rank - 1], points[rank], points[rank + 1]):
+            continue
+        incoming = _segment_unit(points[rank - 1], points[rank])
+        outgoing = _segment_unit(points[rank], points[rank + 1])
+        assert incoming is not None and outgoing is not None
+        corners.append(_CornerObservation(route, points, rank, incoming, outgoing))
+    return corners
+
+
+def concentric_corner_fans(
+    routes: list[RoutedPath],
+    offsets: Mapping[tuple[str, str], float],
+) -> list[list[_CornerObservation]]:
+    """Group concentric bundle corners into fans by shared arc centre.
+
+    A *fan* is a maximal set of interior corners that turn the same way and share
+    one arc centre.  Because a 90-degree corner's arc centre is ``corner +
+    radius * (turn_out - turn_in)``, two corners coincide there only when they
+    translate the whole corner together along the turn diagonal and nest one
+    concentric family -- a transition corner (one leg pinned) lands on its own
+    centre and drops out.  Grouping on the centre alone unifies a fan across any
+    number of edges, so a bundle converging on a shared junction from sibling
+    edges reads as one fan at every corner it turns together, not just its first
+    and last.  Each route's own exit-turn corner is excluded (anchored
+    separately).  Only fans spanning two or more distinct lines -- the ones whose
+    innermost lane the ``CURVE_RADIUS`` floor governs -- are returned.
+
+    This is the single definition of "one concentric fan" shared by the
+    re-anchoring pass that seats each innermost lane at the floor and the oracle
+    that checks it did.
+    """
+    observations: list[_CornerObservation] = []
+    centres: list[tuple[float, float]] = []
+    for route in routes:
+        points = apply_route_offsets(route, offsets)
+        resolved: list[float] | None = None
+        for observation in _fan_corner_observations(route, points):
+            if resolved is None:
+                resolved = _resolved_corner_radii(route, points)
+            index = observation.rank - 1
+            if index >= len(resolved):
+                continue
+            observations.append(observation)
+            centres.append(
+                _arc_centre(
+                    observation.points[observation.rank],
+                    resolved[index],
+                    observation.incoming,
+                    observation.outgoing,
+                )
+            )
+
+    cells: dict[
+        tuple[tuple[float, float], tuple[float, float], int, int], list[int]
+    ] = defaultdict(list)
+    for i, (observation, centre) in enumerate(zip(observations, centres)):
+        cells[
+            (
+                observation.incoming,
+                observation.outgoing,
+                round(centre[0]),
+                round(centre[1]),
+            )
+        ].append(i)
+
+    parent = list(range(len(observations)))
+
+    def find(node: int) -> int:
+        root = node
+        while parent[root] != root:
+            root = parent[root]
+        while parent[node] != root:
+            parent[node], node = root, parent[node]
+        return root
+
+    def union(a: int, b: int) -> None:
+        parent[find(a)] = find(b)
+
+    for (incoming, outgoing, ix, iy), indices in cells.items():
+        for other in indices[1:]:
+            union(indices[0], other)
+        # A centre rounded to the cell boundary can land one cell over from a
+        # concentric mate, so bridge the eight neighbours within tolerance.
+        for offset_x in (-1, 0, 1):
+            for offset_y in (-1, 0, 1):
+                if offset_x == 0 and offset_y == 0:
+                    continue
+                neighbour = cells.get(
+                    (incoming, outgoing, ix + offset_x, iy + offset_y)
+                )
+                if not neighbour:
+                    continue
+                base = centres[indices[0]]
+                for other in neighbour:
+                    if math.dist(base, centres[other]) <= _CONCENTRIC_CENTRE_TOLERANCE:
+                        union(indices[0], other)
+
+    components: dict[int, list[_CornerObservation]] = defaultdict(list)
+    for i, observation in enumerate(observations):
+        components[find(i)].append(observation)
+
+    return [
+        component
+        for component in components.values()
+        if len({observation.route.line_id for observation in component}) >= 2
+    ]
+
+
+@dataclass(frozen=True)
+class SubFloorBundleCorner:
+    """A concentric bundle fan seats its innermost lane off ``CURVE_RADIUS``.
+
+    A bundle of ``n`` lines nesting one lane-step apart draws one radius set at
+    every 90-degree turn it makes together -- ``CURVE_RADIUS`` for the innermost
+    line of that turn, one step wider for each line further out -- and only
+    reassigns which line is innermost as the turn direction flips.  Anchoring the
+    fan's *reference* line rather than its *tightest* line at the floor shifts the
+    whole nest uniformly, seating the innermost lane off ``CURVE_RADIUS`` -- above
+    it when the reference line is interior, below it when the anchor is an inside
+    lane.  The innermost resolved radius must equal ``CURVE_RADIUS`` exactly.
+
+    Runway-clamped corners (the resolved radius falls short of the route's
+    declared radius because a short leg cannot fit it) are excluded: that shrink
+    is a geometric necessity, not a sizing defect.
+    """
+
+    edge_source: str
+    edge_target: str
+    corner_index: int
+    radii: tuple[float, ...]
+
+    def message(self) -> str:
+        """Human-readable summary suitable for the engine error message."""
+        return (
+            f"concentric fan {self.edge_source!r}->{self.edge_target!r} corner "
+            f"{self.corner_index} draws radii {list(self.radii)}, seating its "
+            f"innermost lane at {min(self.radii):.0f} rather than "
+            f"CURVE_RADIUS={CURVE_RADIUS:.0f}"
+        )
+
+
+def check_bundle_corner_radius_floor(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[SubFloorBundleCorner]:
+    """Return concentric bundle fans whose innermost lane is off ``CURVE_RADIUS``.
+
+    A corpus oracle over bundle radius sizing rather than a render guard: an
+    off-floor arc renders without aborting (a pinch or slack, not undrawable
+    geometry), so promoting it to an always-on render abort would fail maps that
+    are imperfect rather than broken.
+
+    Each fan is the full cross-edge set of corners that turn together and share
+    an arc centre (see :func:`concentric_corner_fans`), so a bundle whose true
+    innermost lane lives on a sibling edge is judged whole rather than as a
+    per-edge fragment.  Every such fan must seat its innermost lane at
+    ``CURVE_RADIUS`` exactly.
+    """
+    violations: list[SubFloorBundleCorner] = []
+    for fan in concentric_corner_fans(routes, offsets):
+        members: list[tuple[_CornerObservation, float]] = []
+        runway_clamped = False
+        for observation in fan:
+            resolved = _resolved_corner_radii(observation.route, observation.points)
+            index = observation.rank - 1
+            if index >= len(resolved):
+                runway_clamped = True
+                break
+            declared = observation.route.curve_radii
+            declared_radius = (
+                declared[index]
+                if declared is not None and index < len(declared)
+                else CURVE_RADIUS
+            )
+            # A corner drawing short of its declared radius is runway-clamped, a
+            # geometric limit rather than a sizing choice this oracle governs.
+            if resolved[index] < declared_radius - COORD_TOLERANCE:
+                runway_clamped = True
+                break
+            members.append((observation, resolved[index]))
+        if runway_clamped or not members:
+            continue
+        innermost = min(radius for _observation, radius in members)
+        if abs(innermost - CURVE_RADIUS) <= COORD_TOLERANCE:
+            continue
+        witness = min(members, key=lambda member: member[1])[0]
+        radii = tuple(sorted(round(radius, 1) for _observation, radius in members))
+        violations.append(
+            SubFloorBundleCorner(
+                witness.route.edge.source,
+                witness.route.edge.target,
+                witness.rank,
+                radii,
+            )
+        )
     return violations
 
 
@@ -4934,7 +5385,7 @@ def check_no_hanging_routes(
 # px: doubles as the floor below which an endpoint offset is negligible and the
 # slack within which a terminal segment counts as horizontal (so its Y-shift is
 # a lateral separation rather than an along-travel displacement).
-_LATERAL_OFFSET_TOL = 1.0
+_LATERAL_OFFSET_TOL = COORD_TOLERANCE
 
 
 @dataclass(frozen=True)
@@ -5791,17 +6242,11 @@ def _iter_bottom_row_climbs(
     gate.
     """
     from nf_metro.layout.routing.inter_section_handlers import (
-        _bottom_row_climb_corridor_clear,
+        _is_row_level_bottom_row_climb,
     )
 
     for r in routes:
         if not r.is_inter_section or len(r.points) < 2:
-            continue
-        tgt_port = graph.ports.get(r.edge.target)
-        if tgt_port is None or not tgt_port.is_entry:
-            # A merge/fan junction target collects feeders onto a shared trunk
-            # below the row; that channel is not the single-line dogleg these
-            # guards police, which always lands on a real section entry port.
             continue
         src_sec = resolve_section(graph, graph.stations.get(r.edge.source))
         tgt_sec = resolve_section(graph, graph.stations.get(r.edge.target))
@@ -5813,8 +6258,9 @@ def _iter_bottom_row_climbs(
             or src_sec.bbox_h <= 0
         ):
             continue
-        if not _bottom_row_climb_corridor_clear(
+        if not _is_row_level_bottom_row_climb(
             graph,
+            r.edge,
             src_sec.grid_row,
             tgt_sec.grid_row,
             src_sec.grid_col,
@@ -6189,13 +6635,15 @@ def check_trunks_declared(routes: list[RoutedPath]) -> list[UndeclaredTrunk]:
 
 @dataclass
 class PeeloffBundleCrossing:
-    """A peel-off bundle into a LEFT entry port braids instead of nesting.
+    """A peel-off bundle into a LEFT entry port misses its concentric band.
 
     Lines riding one shared bypass trunk that rise into a common LEFT entry port
-    must turn in concentrically: the riser peel-x (and the port-slot Y) ordered
-    by trunk depth.  A member whose realized peel-x is not the slot its trunk
-    depth earns rises across the lines stacked with it, crossing them just
-    before the port.
+    must turn in concentrically: one band of channels a bundle pitch apart, with
+    the riser peel-x (and the port-slot Y) ordered by trunk depth.  A member off
+    the slot its trunk depth earns rises across the lines stacked with it,
+    crossing them just before the port; a band spread wider than the bundle
+    holds lanes no line in the corridor runs in, and draws as a gap between
+    strokes that arrive together.
     """
 
     port_id: str
@@ -6208,7 +6656,8 @@ class PeeloffBundleCrossing:
         return (
             f"peel-off bundle into port {self.port_id!r}: line {self.line_id!r} "
             f"rises at peel-x {self.peel_x:.1f} but its trunk depth earns the "
-            f"slot at {self.expected_peel_x:.1f} (the bundle braids into the port)"
+            f"slot at {self.expected_peel_x:.1f} (the bundle does not nest into "
+            "one concentric band at the port)"
         )
 
 
@@ -6288,15 +6737,14 @@ def check_peeloff_concentric(
     routes: list[RoutedPath],
     curve_radius: float = CURVE_RADIUS,
 ) -> list[PeeloffBundleCrossing | LooseDestinationTail]:
-    """Return peel-off bundles that braid into a LEFT entry port.
+    """Return peel-off bundles that do not nest into one band at a LEFT entry port.
 
     Every contiguous concentric peel-off bundle - lines sharing one bypass trunk
-    rising into a common LEFT entry port - must have its riser peel-x and
-    port-slot Y ordered by trunk depth so the bundle nests crossing-free into the
-    port.  A member off its depth-earned slot rises across the lines stacked with
-    it, braiding the bundle just before the port.  The ordering is set up front by
-    ``_convergence_line_order`` (riser peel-x) and ``_order_convergence_entry_ports``
-    (port slots), so the bundle nests through the standard layout path.
+    rising into a common LEFT entry port - owes the band
+    :class:`PeeloffBundleCrossing` describes.  That band is set up front by
+    ``_convergence_line_order`` (riser peel-x) and
+    ``_order_convergence_entry_ports`` (port slots), so the bundle nests through
+    the standard layout path rather than by repair here.
     """
     step = graph_offset_step(graph)
     out: list[PeeloffBundleCrossing | LooseDestinationTail] = []
@@ -6328,7 +6776,7 @@ def check_peeloff_concentric(
             )
         if loose:
             continue
-        targets = peeloff_target_slots(bundle)
+        targets = peeloff_target_slots(bundle, step)
         for line_id, tail in bundle.per_line.items():
             slot = targets[line_id]
             if not tail_on_slot(tail, slot):
@@ -6350,7 +6798,7 @@ def check_peeloff_concentric(
         )
         if key in checked:
             continue
-        targets = peeloff_target_slots(bundle)
+        targets = peeloff_target_slots(bundle, step)
         for line_id, tail in bundle.per_line.items():
             slot = targets[line_id]
             if not tail_on_slot(tail, slot):
@@ -6528,10 +6976,8 @@ def assert_render_curve_invariants(
     reached the renderer built some other way, and the fix is to route it
     through the builder too -- not to relax the check.
 
-    Set ``NF_METRO_ALLOW_BAD_CURVES=1`` to downgrade to a warning (debugging a
-    work-in-progress handler only; not a supported render mode). ``graph.permissive``
-    (``--permissive`` / ``%%metro permissive:``) downgrades the same way, as a
-    supported best-effort render mode.
+    ``graph.permissive`` (``--permissive`` / ``%%metro permissive:``) downgrades
+    the abort to a warning, as a supported best-effort render mode.
 
     A layout that bridges a perpendicular connection across grid columns (a
     ``direction:`` override -- explicit or inferred -- that feeds a section's
@@ -6666,7 +7112,7 @@ def assert_render_curve_invariants(
         "concentric_corner_radius_at and fan every leg consistently.\n  "
         f"{detail}"
     )
-    if graph.permissive or os.environ.get("NF_METRO_ALLOW_BAD_CURVES"):
+    if graph.permissive:
         warnings.warn(msg, category=PermissiveGuardWarning, stacklevel=2)
         return
     bridged = sorted(graph._cross_column_perp_bridges)
@@ -6868,6 +7314,34 @@ CHECK_REGISTRY: tuple[GuardSpec, ...] = (
             "that covers the same structure at hang scale."
         ),
     ),
+    _check_spec(
+        check_bundle_corner_radius_floor,
+        "C",
+        issue_pin=("#1958", "#1961"),
+        narrow_reason=(
+            "A corpus oracle over bundle radius sizing rather than a render "
+            "guard: an off-floor arc renders without aborting, so a novel map "
+            "whose bundle sizes tightly for a reason nothing here models would "
+            "abort rather than render imperfectly. Restricted to the cross-edge "
+            "fans of corners that turn together and share an arc centre -- the "
+            "sets whose innermost lane must seat at CURVE_RADIUS -- with "
+            "runway-clamped corners excluded."
+        ),
+    ),
+    _check_spec(
+        check_merge_confluence_band_order,
+        "C",
+        issue_pin=("#1835",),
+        narrow_reason=(
+            "A corpus oracle over the confluence nesting rather than a render "
+            "guard: a crossed pair renders without aborting. Restricted to "
+            "distinct lines whose peel-off tails co-travel one band into one "
+            "descent corridor reaching a common side entry port, resolving merge "
+            "chains. A pair whose two descents are both plan-owned is excluded: "
+            "nothing on the render path may move either, so the crossing belongs "
+            "to the plan, exactly as `check_no_fused_cotravelling_lines` reasons."
+        ),
+    ),
 )
 
 
@@ -6879,6 +7353,7 @@ __all__ = [
     "ExitRowEarlyUpStep",
     "RaggedFanInDivergence",
     "BundleOrderViolation",
+    "SubFloorBundleCorner",
     "CoincidentCornerRadiusViolation",
     "CollinearOverlapViolation",
     "DiagonalOverlapViolation",
@@ -6907,6 +7382,7 @@ __all__ = [
     "RegimeOffsetMisapplied",
     "RightEntryNeedlessDive",
     "SameLineParallelRun",
+    "MergeConfluenceBandCross",
     "SeamApproachDepartureMismatch",
     "SharedRunTurnFlip",
     "SectionLineRecrossing",
@@ -6924,6 +7400,7 @@ __all__ = [
     "check_same_destination_approach_bundle",
     "check_trunks_declared",
     "check_concentric_bundle_corners",
+    "check_bundle_corner_radius_floor",
     "check_standard_source_bundle_corner_inputs",
     "check_coincident_corner_radii",
     "check_deferred_offsets_apply_laterally",
@@ -6935,6 +7412,7 @@ __all__ = [
     "check_no_distinct_line_fanout_crossing",
     "check_stacked_split_no_line_recrossing",
     "check_merge_branches_meet_trunk",
+    "check_merge_confluence_band_order",
     "check_merge_feeders_land_on_trunk",
     "check_merge_port_approach_side",
     "check_no_hanging_routes",

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://pinin4fjords.github.io/nf-metro/manifest.schema.json",
+  "$id": "https://seqeralabs.github.io/nf-metro/manifest.schema.json",
   "title": "Diagram manifest",
   "description": "A self-describing, addressable SVG diagram manifest, embedded in a <metadata id=\"diagram-manifest\"> element. Tool-neutral and experimental (pre-1.0): the schema may change without a version bump until declared stable. Consumers MUST ignore unknown fields, so additional properties are permitted everywhere.",
   "type": "object",

@@ -101,8 +101,6 @@ from nf_metro.layout.route_plan import (
 )
 from nf_metro.layout.route_reservations import (
     SECTION_BOTTOM_BLOCKER,
-    SECTION_HEADER_BLOCKER,
-    SECTION_LEFT_BLOCKER,
     ColumnGapRegion,
     ReservationCoordinateTranslation,
     RouteReservation,
@@ -348,7 +346,6 @@ class SettlementAxisGeometry:
     start_index: Callable[[Section], int]
     span: Callable[[Section], int]
     origin: Callable[[Section], float]
-    blocker_prefix: str
     shift: Callable[[MetroGraph, Section, float], None]
 
 
@@ -406,7 +403,6 @@ ROW_AXIS = SettlementAxisGeometry(
     lambda section: section.grid_row,
     lambda section: section.grid_row_span,
     lambda section: section.bbox_y,
-    SECTION_HEADER_BLOCKER,
     lambda graph, section, amount: shift_section(graph, section, dy=amount),
 )
 """Row settlement: boundaries between grid rows, translating y."""
@@ -417,7 +413,6 @@ COLUMN_AXIS = SettlementAxisGeometry(
     lambda section: section.grid_col,
     lambda section: section.grid_col_span,
     lambda section: section.bbox_x,
-    SECTION_LEFT_BLOCKER,
     lambda graph, section, amount: shift_section(graph, section, dx=amount),
 )
 """Column settlement: boundaries between grid columns, translating x."""

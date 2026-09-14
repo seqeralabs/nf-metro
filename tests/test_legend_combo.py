@@ -8,7 +8,7 @@ import drawsvg as draw
 
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.render.legend import render_legend
-from nf_metro.themes import NFCORE_THEME
+from nf_metro.themes import NFCORE_DARK_THEME
 
 _BASE = (
     "%%metro line: normal | Normal | #2196F3\n"
@@ -25,7 +25,7 @@ def _parse(directives: str = ""):
 def _render_swatches_and_texts(graph):
     """Return (stroke_colors, label_texts) from a rendered legend SVG."""
     d = draw.Drawing(400, 400)
-    render_legend(d, graph, NFCORE_THEME, 0.0, 0.0)
+    render_legend(d, graph, NFCORE_DARK_THEME, 0.0, 0.0)
     svg = d.as_svg()
     colors = [
         line.split('stroke="', 1)[1].split('"', 1)[0]
@@ -81,7 +81,7 @@ def test_default_off_byte_identical_legend():
     """With no legend_combo directive the legend SVG is byte-identical."""
     graph = _parse()
     d = draw.Drawing(400, 400)
-    render_legend(d, graph, NFCORE_THEME, 0.0, 0.0)
+    render_legend(d, graph, NFCORE_DARK_THEME, 0.0, 0.0)
     svg = d.as_svg()
     colors, texts = _render_swatches_and_texts(graph)
     assert texts == ["Normal", "Tumor", "Quality Control"]
@@ -103,6 +103,15 @@ def test_combo_drops_unknown_keeps_known_members():
     line_ids, label = graph.legend_combos[0]
     assert line_ids == ("normal", "tumor")
     assert label == "Trio"
+
+
+def test_combo_declared_before_its_lines_resolves():
+    """Members resolve against the whole file, so the directive may lead."""
+    src = "%%metro legend_combo: normal, tumor | Tumor-normal pair\n" + _BASE + _GRAPH
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        graph = parse_metro_mermaid(src)
+    assert graph.legend_combos == [(("normal", "tumor"), "Tumor-normal pair")]
 
 
 def test_combo_requires_two_lines_and_label():

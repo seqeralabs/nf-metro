@@ -74,6 +74,7 @@ from nf_metro.layout.routing.intra_handlers import (  # noqa: F401
     _route_intra_section,
 )
 from nf_metro.layout.routing.normalize import (  # noqa: F401
+    _align_merge_fed_confluence_to_band,
     _band_order_crossings,
     _bundle_divergent_distinct_descents,
     _bundle_divergent_distinct_traverses,
@@ -597,6 +598,11 @@ def _route_edges(  # noqa: C901
     # final reservation geometry.
     _separate_fused_cotravelling_runs(routes, ctx, station_offsets=ctx.station_offsets)
     assert_exit_turn_snapshot(routes, planned_segments, "co-travelling separation")
+    # The separation pass rewrites only the band Y, so a merge-fed convergence
+    # whose band it reorders is left with its flanking descent-X and port-Y on
+    # the old order; re-nest them onto the band so the bundle stays concentric.
+    _align_merge_fed_confluence_to_band(routes, ctx)
+    assert_exit_turn_snapshot(routes, planned_segments, "merge confluence alignment")
     # Planned same-line corner cohorts are immutable here.  This final pass is
     # limited to wholly unowned legacy cohorts.
     # Every pass above sizes a channel from the grid edges it has to hand, which

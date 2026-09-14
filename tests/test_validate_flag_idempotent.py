@@ -39,6 +39,7 @@ def _layout(path: Path, is_nextflow: bool, *, validate: bool) -> MetroGraph:
     if is_nextflow:
         text = convert_nextflow_dag(text)
     graph = parse_metro_mermaid(text)
+    graph.source_dir = str(path.parent)
     compute_layout(graph, validate=validate)
     return graph
 

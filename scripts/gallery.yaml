@@ -50,6 +50,16 @@ gallery:
       Per-station marker shapes & fills encoding tool attributes (mandatory/optional/accelerated/expanded-elsewhere)
       with a marker key alongside the line legend. Demonstrates `%%metro marker:` and `%%metro
       marker_legend:`.
+  - id: inactive_lines
+    source_dir: examples
+    category: Feature Showcase
+    description:
+      "Grey out optional routes to highlight what actually ran. The two optional
+      subworkflows carry the `inactive` fifth field on their `%%metro line:` directive, so they
+      (and the stations, labels, and legend swatches only they touch) render muted while the default
+      STAR path stays full colour. Muting reaches the interchange the two optional routes share and
+      the banner file icon they end at, both greyed to match. Override per-render with
+      `--inactive-lines` (an empty value forces every line active)."
   - id: diagonal_labels
     source_dir: examples
     category: Feature Showcase
@@ -110,6 +120,13 @@ gallery:
       "A `%%metro direction: TB` reporting section whose file outputs are line termini.
       Regression fixture: terminus file icons orient to a vertical flow, with the connector
       entering from the top."
+  - id: metagenomics_input
+    source_dir: examples
+    category: Feature Showcase
+    description:
+      "A `%%metro direction: TB` input section whose `Short reads` FASTQ terminus is a
+      source, so its file icon sits above the station on the vertical flow. The caption
+      seats clear above the icon instead of striking the station marker."
   - id: disconnected_components
     source_dir: examples
     category: Feature Showcase
@@ -226,6 +243,14 @@ gallery:
       "Dense long-read variant-calling pipeline (six lines, nine sections): exercises
       inter-section routing around non-connecting section boxes, cross-row feeds via the inter-row
       gap, same-line bundle coincidence, and a same-colour crossover bridge."
+  - id: rnaseq_metro
+    source_dir: examples
+    category: Realistic Pipelines
+    description:
+      "The real nf-core/rnaseq map (from the pipeline's own `manifest.diagram` PR),
+      covering five aligner/quantification routes, a `diamond_style: symmetric`
+      fork-join fan into STAR/Bowtie2/HISAT2, off-track FASTQ input and HTML report
+      termini, and a folded post-processing section."
   - id: sarek_metro
     source_dir: examples
     category: Realistic Pipelines
@@ -236,6 +261,12 @@ gallery:
       and shared stations render as interchanges. `%%metro stroke_scale: 1.6` coarsens the
       track weight and station pills together so the map survives the downscale it needs
       to fit a screen."
+  - id: riboseq_metro
+    source_dir: examples
+    category: Realistic Pipelines
+    description:
+      Ribosome profiling with matched RNA-seq and TI-seq, covering multi-tool ORF calling,
+      P-site identification, and translational efficiency analysis with cross-sample ORF merging.
   - id: differentialabundance
     source_dir: examples
     category: Realistic Pipelines
@@ -503,6 +534,15 @@ gallery:
       A two-line BOTTOM-exit divergence feeding vertically stacked RIGHT-entry
       targets. The outgoing routes need distinct continuation columns and a
       clean shared junction hand-off, without overlapping or grazing elbows.
+  - id: bottom_entry_fan_side_targets
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      A two-line bundle rising into a section's BOTTOM perpendicular entry and
+      fanning out to two side-entry targets. The entry port is stacked as the
+      mirror of its trunk for the bottom side, so the drop turns into the trunk
+      and lands straight on the port without crossing its bundle-mate or leaving
+      an S-cusp on the box edge (#1991, #1995).
   - id: terminal_symmetric_fan
     source_dir: examples/topologies
     category: Fan-out and Fan-in
@@ -1023,6 +1063,25 @@ gallery:
       the trunk in line with the preceding exit, and peels the coverage dead-end
       off below -- rather than letting the dead-end seize the trunk and kink the
       through-line at the boundary."
+  - id: row_trunk_partial_through_line
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "Three sections share one grid cell along a row. The last of them is
+      entered by a single line of the row's three-line bundle, and the junction
+      feeding it fans that same line into a section in the row below. The
+      section still carries part of the row's trunk, so its interior sits on the
+      row's trunk Y and its hybrid-GTF output peels one lane above, rather than
+      the whole trunk being recentred in the shorter box (issue #1844)."
+  - id: tail_peel_at_through_station
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "A station forks to its section's exit port and to a dead-end tail that
+      sinks into an off-track output file. The exit continuation owns the trunk
+      row and the tail (relay station and file) peels one lane below, so the
+      through-route to the exit runs clear rather than flat through the tail's
+      own marker (issue #2001)."
   - id: riboseq_fold_two_dir_entry_hintless
     source_dir: examples/topologies
     category: Serpentine Layout
@@ -1170,6 +1229,14 @@ gallery:
       cell-mate while its target entry Y runs straight through it. Both lines
       take the row-top corridor over the cell-mate; the one that also enters it
       shares that corridor before splitting off (issue #1766)."
+  - id: packed_cell_cellmate_bypass_no_handoff
+    source_dir: examples/topologies
+    category: Serpentine Layout
+    description:
+      "A packed cell's far member and the section past the pack are both entered
+      over an intervening cell-mate. Neither hop's sibling reaches its target
+      through a plain multi-column bypass, so no shared descent can be handed
+      over and each hop draws its own corridor (issue #1844)."
   - id: bypass_left_entry_from_right
     source_dir: examples/topologies
     category: Serpentine Layout
@@ -1253,6 +1320,24 @@ gallery:
       skipping the stops between them. Interchange inference detects the
       parallel-lane hub and the detour routes around the skipped markers
       instead of through them (#1229).
+  - id: sectionless_skip_over_two_markers
+    source_dir: examples/topologies
+    category: Bypass Routing
+    description:
+      The Alignment line originates at Hub and skips over M0 and M1 to reach M2,
+      while the Analysis line runs Hub through every marker. Hub only originates
+      the skip-line, so no parallel-lane interchange exists to infer; the flat
+      graph previously got no implicit section and drew the skip straight through
+      M0 and M1. Sectioning every flat graph regardless of interchange detection
+      now bows the skip around the intermediate markers (#1953).
+  - id: centered_flat_skip_over_marker
+    source_dir: examples/topologies
+    category: Bypass Routing
+    description:
+      A centered line-spread flat graph where the Alignment line skips the
+      generic-only station M0 to reach M2. Centered flat graphs gain the same
+      implicit section as every other line-spread mode, so the skip-line bows
+      around the non-consumer marker instead of raking across it (#1957).
   - id: interchange_label_clears_bridge
     source_dir: examples/topologies
     category: Bypass Routing
@@ -1438,6 +1523,14 @@ gallery:
       then fans out at a junction into two same-row destinations. The bundle order is carried
       concentrically through the reversal corners so the lines never cross at a station, and
       the fan-out peels off cleanly (issue #760)."
+  - id: reversed_section_junction_reseat
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      A two-line bundle drops near-vertically into a reversing section's RIGHT entry, so
+      the section carries the reversed lane order. It hands the bundle to a downstream
+      reversing section whose exit-port divergence junction re-seats onto that reversed order
+      before fanning the two lines out to separate report sections (issue #1816).
   - id: convergence_stacked_sink
     source_dir: examples/topologies
     category: Merge & Convergence
@@ -1495,6 +1588,31 @@ gallery:
       "A two-line bundle whose order is preserved across the junction-to-entry-port
       boundary, so the straight-through line stays horizontal instead of slanting to swap slots
       (issue #704)."
+  - id: junction_entry_lane_rebase
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      "A section carrying lines 2 and 4 of a four-line order sits beside one carrying
+      line 3, so its bundle compacts onto two lanes. It takes the lane pair that keeps its
+      feeder junction's line level across the entry port, rather than the topmost pair, which
+      would tip that straight run into a shallow slant (issue #1816)."
+  - id: junction_entry_lane_step
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      "A section already carrying the line above cannot also hand the line below it
+      the lane its feeder junction arrives on, so no lane assignment levels the run. The
+      connector draws the 4px difference as a step -- flat, a 45-degree diagonal, flat --
+      instead of smearing it across the whole gap as a shallow slant (issue #1816)."
+  - id: continuation_lane_step
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      "Two lines cross into a section and run to a hub two stations in. The hub ends them
+      and starts two lines of its own that carry on to the next station. The ending pair
+      keeps the lanes it arrives on and the starting pair takes its own lanes beside them,
+      so the approach into the hub and the departure out of it both draw flat, with no
+      mid-section step (issue #1816)."
   - id: merge_feeder_shared_channel_gap
     source_dir: examples/topologies
     category: Merge & Convergence
@@ -1698,15 +1816,6 @@ gallery:
       The same offset packed-section squeeze as inter_row_drop_section_clearance, with the wider
       section in the lower row so the drop would otherwise hug the row-1 section's edge; the
       channel is centred in the gap instead.
-  - id: inter_row_corridor_overflow
-    source_dir: examples/topologies
-    category: Inter-section Routing
-    description:
-      "A generic (non-pipeline-specific) reproducer for the row-trunk-alignment
-      defect class covered by issues #1771/#1772/#1820: two grid rows of sections
-      linked by inter-row corridors. Renders cleanly under default settings, but
-      fails `compute_layout(validate=True)` with a carrier-row `PhaseInvariantError`
-      pending #1771 and #1820."
   - id: cross_col_top_entry
     source_dir: examples/topologies
     category: Inter-section Routing
@@ -1728,6 +1837,14 @@ gallery:
       "Two lines dropping together from a TB BOTTOM exit into the TOP entry of an
       LR section: the in-section line order follows the arrival order so the entry corner nests
       concentrically and the bundle neither pinches nor crosses through the bend (issue #1061)."
+  - id: rl_left_exit_top_entry_overflow
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "An RL section with a LEFT exit and a TOP entry whose port sits left of its
+      internal run: the drop is predicted to land right of the run, so the run shifts left to
+      meet the port and the section bbox grows left to keep the trailing station contained
+      (issue #1980)."
   - id: right_entry_wrap_no_fan
     source_dir: examples/topologies
     category: Inter-section Routing
@@ -2230,19 +2347,48 @@ gallery:
       "A vertical section's perpendicular exit reaching back to a section in the
       row behind it, the seam shape with the fewest corpus instances. Fully
       explicit for the orientation-equivalence oracle."
+  - id: stacked_top_entry_flanked_riser
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "A row-2 section entered from the section above it, with a second line running
+      past to a neighbouring column. The riser dropping into the top entry runs in
+      the inter-column gap that the neighbouring section flanks, so the gap widens to
+      seat it a clearance off both walls (issue #1568)."
+  - id: stacked_top_entry_flanked_riser_crossline
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "The flanked top-entry riser of issue #1568 with a distinct line climbing the
+      same inter-column gap and overlapping it in Y, so the two counter-running
+      centrelines settle a bundle clearance apart."
+  - id: left_exit_fan_perp_entry_landing
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "A LEFT-exit two-line bundle drops into a shared TOP entry whose downstream fan
+      peels each line to a different target. The fan-out's peel order propagates one hop
+      upstream to its free source feeder, so both lines descend straight into their
+      landing lanes with no crossing (issue #1986)."
 pipelines:
-  - id: rnaseq_auto
+  - id: rnaseq_metro
     title: nf-core/rnaseq
     repo_url: https://github.com/nf-core/rnaseq
     description:
       RNA-seq analysis with multiple aligner and quantification routes (STAR/RSEM,
-      STAR/Salmon, HISAT2, Salmon pseudo-alignment, Kallisto).
+      STAR/Salmon, Bowtie2/Salmon, HISAT2, Salmon pseudo-alignment, Kallisto).
   - id: sarek_metro
     title: nf-core/sarek
     repo_url: https://github.com/nf-core/sarek
     description:
       Germline and somatic variant calling, covering germline, tumor-only, and tumor-normal
       paired analysis through SNP/indel, SV/CNV, and MSI callers with downstream variant annotation.
+  - id: riboseq_metro
+    title: nf-core/riboseq
+    repo_url: https://github.com/nf-core/riboseq
+    description:
+      Ribosome profiling analysis with ORF discovery across six calling tools, P-site
+      identification, and differential translational efficiency against matched RNA-seq.
   - id: epitopeprediction
     title: nf-core/epitopeprediction
     repo_url: https://github.com/nf-core/epitopeprediction
@@ -2309,6 +2455,13 @@ render_only:
     - target_entry_runway_bypass
     - tb_exit_terminal_on_carrier
     - group_band_over_row_corridor
+    - curve_invariant_repros/inter_row_corridor_overflow
+    - regressions/tb_offtrack_fork_branch_collision_1390
+    - topologies/convergence_handedness_repro
+    - topologies/convergence_shared_terminal_exit_turn
+    - topologies/novel_transcripts_repro
+    - topologies/shared_entry_bundle_order_repro
+    - topologies/twoline_fanout_up
     - hash_seed_determinism/seed_15
     - hash_seed_determinism/seed_41
     - hash_seed_determinism/seed_72

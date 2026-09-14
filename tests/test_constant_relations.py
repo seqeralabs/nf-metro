@@ -3,15 +3,14 @@
 ``constants._check_constant_relations`` runs at module import and turns a
 mis-tuned constant (one whose value is only correct relative to another)
 into an immediate, located failure rather than a silent layout regression.
+Importing ``constants`` below is therefore itself that check: a violated
+relation fails collection, so the tests here pin the individual orderings
+and that the checker rejects a violating set of values.
 """
 
 import pytest
 
 from nf_metro.layout import constants as c
-
-
-def test_relations_hold_on_current_values():
-    c._check_constant_relations()
 
 
 def test_coordinate_tolerance_tiers_strictly_ordered():

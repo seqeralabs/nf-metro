@@ -91,9 +91,6 @@ clear a spanning-interchange label off the enlarged end knob rather than only
 off the member centre.
 """
 
-SECTION_GAP: float = 3.0
-"""Spacing between stations within a section."""
-
 SECTION_X_PADDING: float = 50.0
 """Horizontal padding around section content."""
 
@@ -376,24 +373,11 @@ exceeds the curve radius by a meaningful amount so a visible flat is
 drawn through the station (matching how regular fork/join stations
 present a clear horizontal segment through their X coordinate)."""
 
-SECTION_ROUTE_CLEARANCE: float = 16.0
-"""Minimum gap between a section bbox edge and an external route channel.
-
-External routes (wrap channels, around routes, inter-row bypasses) choose
-their channel position relative to nearby section bboxes.  Without this
-floor the channel may sit one curve_radius + offset_step (~13 px) past
-the edge, which reads as flush against the section in renders.  This
-floor gives a small but visible breathing space.
-
-Kept as an alias of :data:`EDGE_TO_BUNDLE_CLEARANCE` (the principled
-"constant A" of the inter-section gap geometry) so legacy call sites
-continue to compile while the new geometry rolls out."""
-
 EDGE_TO_BUNDLE_CLEARANCE: float = 16.0
 """Constant A: minimum distance between a section bbox edge and the
-nearest line of an adjacent route bundle.
+nearest line of an adjacent route bundle or external route channel.
 
-Used as the single source of truth for two related clearances:
+Used as the single source of truth for three related clearances:
 
 - The leftmost (resp. rightmost) line of a bundle running vertically
   in an inter-section gap sits at least ``A`` from the right (resp.
@@ -403,9 +387,14 @@ Used as the single source of truth for two related clearances:
   the channel ever being pushed against a section edge.
 - Bypass / around-section routes maintain at least ``A`` from any
   intervening section's nearest edge.
+- An external route channel (a wrap channel, an around route, an
+  inter-row bypass) sits at least ``A`` beyond the bbox edge it runs
+  past.  Without the floor such a channel can land one curve radius
+  plus one offset step (~13 px) from the edge, which reads as flush
+  against the section."""
 
-Equal to :data:`SECTION_ROUTE_CLEARANCE` (the legacy name) so existing
-clearance code paths continue to honour the same physical distance."""
+SECTION_ROUTE_CLEARANCE: float = EDGE_TO_BUNDLE_CLEARANCE
+"""Alias of :data:`EDGE_TO_BUNDLE_CLEARANCE` for external-route call sites."""
 
 BUNDLE_TO_BUNDLE_CLEARANCE: float = 12.0
 """Constant B: minimum distance between two adjacent bundles sharing
@@ -517,9 +506,6 @@ TB_LINE_Y_OFFSET: float = 3.0
 
 ENTRY_SHIFT_TB: float = 1.0
 """Entry shift multiplier for TB sections with perpendicular entry."""
-
-ENTRY_INSET_LR: float = 0.3
-"""Entry inset multiplier for LR/RL sections with perpendicular entry."""
 
 ENTRY_SHIFT_LR: float = 0.5
 """Station shift multiplier for LR/RL sections with perpendicular entry.

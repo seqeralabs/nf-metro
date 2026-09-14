@@ -44,7 +44,10 @@ def _render_at(name: str, fold: int | None) -> None:
     # options, compute coordinates, then render.  The abort is geometry-driven,
     # so the full layout must run before render for it to surface.
     opts = {"fold_threshold": fold} if fold is not None else {}
-    graph = prepare_graph(_find(name).read_text(), layout_options=opts)
+    path = _find(name)
+    graph = prepare_graph(
+        path.read_text(), layout_options=opts, source_dir=str(path.parent)
+    )
     render_svg(graph, THEMES["nfcore"])
 
 

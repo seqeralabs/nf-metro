@@ -4,8 +4,9 @@ The golden-baseline oracle (``test_guard_registry_golden``) pins the *runtime*
 guard call sequence.  These tests pin the *classification* registries
 themselves: every guard and check is registered, the tiers are well-formed,
 and the Tier-A routing-check set provably equals the always-on render
-chokepoint, so the tier table in ``docs/dev/guard_tiers.md`` cannot drift from
-the code it documents.
+chokepoint.  The tier table in ``docs/dev/guard_tiers.md`` is hand-maintained
+prose that nothing here parses, so it can still fall behind the registries
+these tests pin.
 """
 
 from __future__ import annotations

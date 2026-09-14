@@ -20,13 +20,10 @@ def _required_junction_margin(n: int) -> float:
     clearance therefore depends only on the lead-in length immediately
     before the curve (``CURVE_RADIUS``), not on the fan width.
 
-    Returns ``JUNCTION_MARGIN`` directly - the baseline already exceeds
-    the curve-start clearance requirement for any reasonable ``n``.
-    The signature keeps a per-junction ``n`` so future routing layouts
-    that genuinely depend on fan width can override it without changing
-    every call site.
+    Returns ``JUNCTION_MARGIN`` directly: the baseline already exceeds the
+    curve-start clearance at any fan width.
     """
-    del n  # currently unused; see docstring
+    del n
     return JUNCTION_MARGIN
 
 

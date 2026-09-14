@@ -52,6 +52,7 @@ _PLANS = {}
 def _layout(rel_name: str) -> MetroGraph:
     path = EXAMPLES / rel_name
     graph = parse_metro_mermaid(path.read_text())
+    graph.source_dir = str(path.parent)
     compute_layout(graph)
     return graph
 

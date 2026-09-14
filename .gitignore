@@ -9,6 +9,9 @@ build/
 .env
 site/
 
+# This project builds with hatchling/pip; a uv.lock is a stray from a local uv run.
+uv.lock
+
 # Generated docs content (scripts/build_gallery.py): SVGs + content collection manifests.
 # docs/ holds the hand-written markdown; the Astro site in website/ symlinks it.
 docs/assets/renders/
@@ -17,6 +20,9 @@ website/src/content/pipelines.json
 
 # Build-time SVG render cache for the remark-metro docs plugin.
 website/.metro-cache/
+
+# Build-time raster/video exports for <Metro format="..."> (render-metro.mjs).
+website/public/_generated/
 
 # Root-level node_modules if prettier or other npm tools are run at repo root.
 node_modules/
@@ -31,3 +37,9 @@ package-lock.json
 # Intermediate per-revision geometry vectors (regenerate with datasets/layout_preferences/scripts/replay.py)
 datasets/layout_preferences/scripts/geometry/
 datasets/layout_preferences/geometry_vectors.tar.gz
+
+# Nextflow run state left behind by a local `examples/live/` demo run
+# (e.g. the live-demo-video skill)
+work/
+.nextflow/
+.nextflow.log

@@ -167,10 +167,10 @@ def test_process_scope_absent_keeps_regex_semantics():
 def test_process_directive_does_not_change_visual_render():
     """The directive must not perturb layout or the drawn SVG output.
 
-    It is no longer pure metadata at the byte level: the mapping is now
-    serialized into the embedded ``<metadata>`` manifest (so a committed SVG
-    carries it). But everything *drawn* must be byte-identical -- the directive
-    still never moves a station or changes a glyph.
+    It is not pure metadata at the byte level: the mapping is serialized into
+    the embedded ``<metadata>`` manifest, so a committed SVG carries it. But
+    everything *drawn* must be byte-identical -- the directive never moves a
+    station or changes a glyph.
     """
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")

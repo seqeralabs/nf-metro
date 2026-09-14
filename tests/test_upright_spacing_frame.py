@@ -43,7 +43,7 @@ def test_vertical_flow_reserves_lane_axis_for_side_labels(direction: str) -> Non
     width_before = section.bbox_w
     x_before = [s.x for s in graph.stations.values()]
 
-    _adjust_tb_labels(graph, section, graph)
+    _adjust_tb_labels(graph, section)
 
     assert section.bbox_w > width_before, (
         f"{direction} section reserved no X extent for its side-placed labels"
@@ -57,8 +57,8 @@ def test_tb_and_bt_reserve_identical_label_extent() -> None:
     tb_graph, tb_section = _vertical_section("TB")
     bt_graph, bt_section = _vertical_section("BT")
 
-    _adjust_tb_labels(tb_graph, tb_section, tb_graph)
-    _adjust_tb_labels(bt_graph, bt_section, bt_graph)
+    _adjust_tb_labels(tb_graph, tb_section)
+    _adjust_tb_labels(bt_graph, bt_section)
 
     assert tb_section.bbox_w == bt_section.bbox_w
     assert [s.x for s in tb_graph.stations.values()] == [

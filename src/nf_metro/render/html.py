@@ -100,25 +100,33 @@ def emit_render_plan_html(
     snippet_id = "m" + hashlib.sha1(svg.encode("utf-8")).hexdigest()[:8]
     inline_snippet = _build_inline_snippet(svg, lines, snippet_id)
 
-    # Browsers terminate the outer <script> the moment they see literal
-    # </script>, regardless of JS string context. JSON's optional `\/`
-    # escape decodes back to `/`, so the snippet survives round-trip.
-    inline_snippet_json = json.dumps(inline_snippet).replace("</", "<\\/")
-
     return _STANDALONE_TEMPLATE.substitute(
         title=html.escape(title),
         svg=svg,
-        lines_json=json.dumps(lines),
+        lines_json=_script_safe_json(lines),
         embed_basename=html.escape(embed_basename),
-        inline_snippet_json=inline_snippet_json,
+        inline_snippet_json=_script_safe_json(inline_snippet),
         shared_js=get_driver_js(),
     )
+
+
+def _script_safe_json(value: list[dict[str, str]] | str) -> str:
+    """JSON-encode *value* for embedding as a JS literal inside ``<script>``.
+
+    Browsers terminate the outer ``<script>`` the moment they see literal
+    ``</script>``, regardless of JS string context. JSON's optional ``\\/``
+    escape decodes back to ``/``, so the embedded literal survives round-trip.
+    This is the one chokepoint every ``<script>``-embedded JSON value in this
+    module goes through, since some of those values (line colours/labels,
+    the inline snippet's own SVG) carry directive-authored text.
+    """
+    return json.dumps(value).replace("</", "<\\/")
 
 
 def _build_inline_snippet(svg: str, lines: list[dict[str, str]], sid: str) -> str:
     return _INLINE_TEMPLATE.substitute(
         sid=sid,
         svg=svg,
-        lines_json=json.dumps(lines),
+        lines_json=_script_safe_json(lines),
         shared_js=get_driver_js(),
     )

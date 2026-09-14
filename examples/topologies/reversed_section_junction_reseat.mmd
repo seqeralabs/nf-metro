@@ -1,0 +1,56 @@
+%%metro title: Reversed Section Junction Re-seat
+%%metro style: nfcore
+%%metro line: main | Reference | #2db572
+%%metro line: a | Expression | #e63946
+%%metro line: b | Fusion | #7b2d3b
+%%metro grid: align | 3,0
+%%metro grid: genome | 4,0
+%%metro grid: quant | 3,1
+%%metro grid: collate | 2,1
+%%metro grid: report_a | 1,0
+%%metro grid: report_b | 1,2
+
+graph LR
+    subgraph align [Align]
+        s1[Trim]
+        s2[Map]
+        s3[Sort]
+        s1 -->|main,a,b| s2
+        s2 -->|main,a,b| s3
+    end
+
+    subgraph genome [Genome]
+        g1[Index]
+    end
+
+    subgraph quant [Quantify]
+        %%metro direction: RL
+        %%metro entry: right | a, b
+        %%metro exit: left | a, b
+        q1[Count]
+        q2[Filter]
+        q3[Split]
+        q1 -->|a,b| q2
+        q2 -->|a,b| q3
+    end
+
+    subgraph collate [Collate]
+        %%metro direction: RL
+        c1[Collect]
+    end
+
+    subgraph report_a [Expression Report]
+        %%metro entry: bottom | a
+        ra1[Summarise]
+    end
+
+    subgraph report_b [Fusion Report]
+        %%metro entry: top | b
+        rb1[Summarise]
+    end
+
+    s3 -->|main| g1
+    s3 -->|a,b| q1
+    q3 -->|a,b| c1
+    c1 -->|a| ra1
+    c1 -->|b| rb1

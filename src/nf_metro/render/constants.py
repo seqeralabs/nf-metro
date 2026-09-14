@@ -4,6 +4,11 @@ Centralizes magic numbers from svg.py, legend.py, animate.py, and icons.py.
 Theme-dependent values remain in style.py.
 """
 
+from __future__ import annotations
+
+import html
+from typing import TYPE_CHECKING
+
 from nf_metro.layout.constants import (
     CURVE_RADIUS,
     ICON_CAPTION_GAP,
@@ -19,6 +24,10 @@ from nf_metro.layout.constants import (
     RAIL_KNOB_RADIUS_RATIO as RAIL_KNOB_RADIUS_RATIO,  # re-export
 )
 from nf_metro.layout.constants import TERMINUS_WIDTH as TERMINUS_WIDTH  # re-export
+
+if TYPE_CHECKING:
+    from nf_metro.parser.model import MetroGraph, MetroLine
+    from nf_metro.render.style import Theme
 
 # ---------------------------------------------------------------------------
 # Canvas
@@ -52,9 +61,6 @@ LEGEND_ROUTE_CLEARANCE: float = 6.0
 
 LOGO_Y_STANDALONE: float = 5.0
 """Y offset for standalone logo (no legend)."""
-
-LOGO_HEIGHT_DEFAULT: float = 80.0
-"""Default logo display height."""
 
 # ---------------------------------------------------------------------------
 # Legend
@@ -106,11 +112,8 @@ SVG_CURVE_RADIUS: float = CURVE_RADIUS
 
 Derived from the layout CURVE_RADIUS so routing and rendering agree."""
 
-SECTION_NUM_CIRCLE_R: int = 8
-"""Radius of section number circle background (small variant)."""
-
 SECTION_NUM_CIRCLE_R_LARGE: int = 11
-"""Radius of section number circle background (large variant)."""
+"""Radius of the section number circle background."""
 
 SECTION_NUM_FONT_SIZE: int = 12
 """Font size for section number text inside the circle."""
@@ -181,12 +184,6 @@ EDGE_CONNECT_TOLERANCE: float = 1.0
 """Tolerance for detecting connected edge endpoints."""
 
 # ---------------------------------------------------------------------------
-# Icons
-# ---------------------------------------------------------------------------
-TRAIN_ICON_SIZE: float = 12.0
-"""Default size of train icon placeholder."""
-
-# ---------------------------------------------------------------------------
 # Debug overlay
 # ---------------------------------------------------------------------------
 DEBUG_FONT_SIZE: int = 7
@@ -237,6 +234,15 @@ def title_baseline_y(title_font_size: float) -> float:
     return max(TITLE_Y_OFFSET, title_font_size * TITLE_ASCENT_RATIO)
 
 
+TITLE_CANVAS_SAFETY_MARGIN: float = 4.0
+"""Slack added past the title's true glyph advance when sizing the canvas.
+
+The canvas width is grown to hold the title using the deterministic fallback
+advance, which approximates the browser's real bold font metrics; this covers
+the small discrepancy so a title never touches the right edge.
+"""
+
+
 WATERMARK_FONT_SIZE: int = 8
 """Font size for the attribution watermark."""
 
@@ -264,8 +270,52 @@ CAPTION_FILL: str = "rgba(200, 200, 200, 0.85)"
 FALLBACK_LINE_COLOR: str = "#888888"
 """Color used when a line has no explicit color defined."""
 
+
+def effective_line_color(
+    line: MetroLine | None,
+    theme: Theme,
+    inactive_line_ids: frozenset[str],
+    active_color: str | None = None,
+) -> str:
+    """Stroke colour for a line, muted to grey when the line is inactive.
+
+    An inactive line resolves to ``theme.muted_line_color`` at every stroke
+    site (edge, chevron, legend swatch); every other line keeps its own colour,
+    falling back to :data:`FALLBACK_LINE_COLOR` when it has none. *active_color*,
+    when given, is the colour for an *active* line, taking priority over the
+    line's own (the chevron site passes ``theme.directional_marker_color`` so a
+    themed marker colour wins); an inactive line mutes regardless.
+
+    The line's own colour is directive-authored text that lands verbatim in
+    an SVG attribute, so it is HTML-escaped here (a no-op on every legitimate
+    CSS colour form).
+    """
+    if line is not None and line.id in inactive_line_ids:
+        return theme.muted_line_color
+    if active_color:
+        return active_color
+    return html.escape(line.color) if line is not None else FALLBACK_LINE_COLOR
+
+
+def station_is_muted(
+    graph: MetroGraph, station_id: str, inactive_line_ids: frozenset[str]
+) -> bool:
+    """True when every line touching *station_id* is inactive.
+
+    A station carried by any active line stays full strength.
+    A station touched by no line at all (an isolated or connector-only node,
+    whose ``station_lines`` is empty) is never muted.
+    """
+    lines = graph.station_lines(station_id)
+    return bool(lines) and set(lines) <= inactive_line_ids
+
+
 TERMINUS_FONT_COLOR: str = "#000000"
-"""Font color for terminus file icon labels."""
+"""Font color for terminus file icon labels.
+
+The icon body carries a light fill in every theme and mode, so this ink stays
+dark rather than pairing through ``light-dark()``.
+"""
 
 # ---------------------------------------------------------------------------
 # Debug overlay colors
@@ -342,6 +392,13 @@ ICON_BANNER_FILL: str = "#222222"
 
 ICON_BANNER_TEXT_COLOR: str = "#ffffff"
 """Text colour of the bold label on the banner strip (banner style)."""
+
+ICON_BANNER_TEXT_COLOR_MUTED: str = "#eeeeee"
+"""Banner label colour paired with the theme's ``muted_line_color`` band fill.
+
+Near-white rather than pure white keeps the text legible against the grey band
+while reading as muted; a shared grey with the band would erase the label.
+"""
 
 # ---------------------------------------------------------------------------
 # Animation styling

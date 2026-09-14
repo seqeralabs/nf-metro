@@ -369,20 +369,9 @@ def test_leftward_up_channel_restack_preserves_concentric_radii() -> None:
     ]
 
 
-_XFAIL_COINCIDE_CENTRAL_DERIVATION: dict[str, str] = {}
-
-
-def _coincide_params() -> list:
-    params = []
-    for p in _gather_fixtures():
-        key = p.relative_to(REPO_ROOT).as_posix()
-        reason = _XFAIL_COINCIDE_CENTRAL_DERIVATION.get(key)
-        marks = (pytest.mark.xfail(reason=reason, strict=True),) if reason else ()
-        params.append(pytest.param(p, id=key, marks=marks))
-    return params
-
-
-@pytest.mark.parametrize("path", _coincide_params())
+@pytest.mark.parametrize(
+    "path", _gather_fixtures(), ids=lambda p: p.relative_to(REPO_ROOT).as_posix()
+)
 def test_coincide_pass_corners_match_central_derivation(
     path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

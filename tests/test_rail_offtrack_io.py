@@ -20,7 +20,7 @@ from nf_metro.layout.labels import find_label_overlaps, place_labels
 from nf_metro.layout.routing import compute_station_offsets
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.render.svg import render_svg
-from nf_metro.themes.nfcore import NFCORE_THEME
+from nf_metro.themes import NFCORE_DARK_THEME
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES = REPO_ROOT / "examples"
@@ -73,12 +73,12 @@ def test_offtrack_file_terminus_has_buffer_stop_nub(stem: str, term_id: str) -> 
     graph = _laid_out(stem)
     station = graph.stations[term_id]
     assert station.off_track and station.is_blank_terminus
-    svg = render_svg(graph, NFCORE_THEME)
+    svg = render_svg(graph, NFCORE_DARK_THEME)
     nubs = _station_rects(svg, term_id)
     assert nubs, f"{stem}: off-track file terminus {term_id!r} drew no buffer-stop nub"
     # The nub seats at the rail-side stub end (the station coordinate), not up at
     # the icon.
-    r = NFCORE_THEME.station_radius
+    r = NFCORE_DARK_THEME.station_radius
     assert any(
         abs(float(n.get("y")) + float(n.get("height")) / 2 - station.y) <= r + 1.0
         for n in nubs
@@ -89,7 +89,7 @@ def test_offtrack_file_terminus_nub_clears_caption() -> None:
     """The buffer-stop nub must not sit on the under-icon caption."""
     stem = "rail_offtrack_io"
     graph = _laid_out(stem)
-    svg = render_svg(graph, NFCORE_THEME)
+    svg = render_svg(graph, NFCORE_DARK_THEME)
     root = ET.fromstring(svg)
     captions = {el.text: el for el in root.iter(f"{NS}text") if el.text in ("Targets",)}
     assert "Targets" in captions, "expected the 'Targets' caption to render"
@@ -109,7 +109,7 @@ def test_plain_offtrack_node_renders_marker(node_id: str) -> None:
     graph = _laid_out("rail_offtrack_plain_io")
     station = graph.stations[node_id]
     assert station.off_track and not station.is_blank_terminus
-    svg = render_svg(graph, NFCORE_THEME)
+    svg = render_svg(graph, NFCORE_DARK_THEME)
     markers = _station_rects(svg, node_id)
     assert markers, (
         f"plain off-track node {node_id!r} rendered no marker (bare line end)"

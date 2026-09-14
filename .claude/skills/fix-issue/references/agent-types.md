@@ -47,6 +47,17 @@ If `CLAUDE_CODE_SUBAGENT_MODEL` is set it overrides **every** tier decision in
 this skill, so check it once at session start. An organisation `availableModels`
 allowlist can also substitute a model at any of these levels.
 
+**Never pass `model` when spawning a named `fix-issue-*` type.** Level 2 beats
+level 3, so an explicit `model` - even a generic alias like `opus` or `sonnet` -
+silently overrides the definition's pinned snapshot, including HIGH's pin
+against `opus` drifting onto a newer Opus release than the one this skill
+verified against. An explicit `model` is only for the two cases above: a
+generic type with no fix-issue definition, or a deliberate one-off test of a
+different snapshot. If a wrong-model spawn is caught mid-run, stop the task,
+discard any commits or changes it made - the tier contract was violated, so
+its output is not trustworthy even where it looks correct - and restart the
+same role fresh from the last known-good SHA with no `model` parameter.
+
 ## Effort, and enforcing read-only
 
 **`effort` is a second dial, but a fixed one.** Definitions take `effort`

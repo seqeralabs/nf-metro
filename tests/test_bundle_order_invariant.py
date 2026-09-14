@@ -42,11 +42,6 @@ FIXTURES = REPO_ROOT / "tests" / "fixtures"
 TOPOLOGIES = FIXTURES / "topologies"
 EXAMPLES = REPO_ROOT / "examples"
 
-# Fixtures with KNOWN bundle-order violations that the criterion
-# correctly surfaces.  These are real bugs we xfail rather than blunt
-# the criterion to hide them.
-_KNOWN_VIOLATION_FIXTURES: frozenset[str] = frozenset()
-
 
 # ---------------------------------------------------------------------------
 # Happy-path: every fixture and example must pass the invariant
@@ -72,17 +67,7 @@ def test_no_bundle_order_violations_in_gallery(path: Path) -> None:
     This is the corpus-level happy-path check.  A regression to a
     routing handler that creates a flipped concentric bundle would
     cause exactly one fixture to start failing here.
-
-    Fixtures listed in :data:`_KNOWN_VIOLATION_FIXTURES` are
-    xfailed: they have real bundle-order bugs at the Plots-entry
-    corner that the criterion correctly catches, and we'd rather
-    track those as known failures than silently blunt the criterion.
     """
-    if path.name in _KNOWN_VIOLATION_FIXTURES:
-        pytest.xfail(
-            f"{path.name} has a known bundle-order violation at the "
-            "Plots-entry corner; the criterion correctly catches it."
-        )
     graph = parse_metro_mermaid(path.read_text())
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
@@ -319,16 +304,91 @@ def test_exit_run_drop_columns_nest_across_three_handlers() -> None:
     )
 
 
-def _synthetic_route(line_id: str, points: list[tuple[float, float]]) -> RoutedPath:
+def test_riboseq_u_turn_corridor_is_accepted() -> None:
+    """A shared run that U-turns onto a reversed corridor is well-nested.
+
+    At riboseq's ``__junction_13`` two lines leave one rightward run, drop, and
+    turn back onto a leftward corridor before peeling into different downstream
+    sections.  Across that U-turn ``riboseq`` stays above ``rnaseq`` on both the
+    run and the corridor, so their order is preserved: whichever crossing the
+    shape forces is inherent to the topology, not a fixable bundle-order flip.
+
+    The single opening corner alone would read this as a flip -- the upper line
+    turns at the smaller x -- but that proxy is only valid for a terminal or
+    same-direction turn, not a corridor that reverses the frame.
+    """
+    path = (
+        REPO_ROOT
+        / "tests"
+        / "fixtures"
+        / "curve_invariant_repros"
+        / "riboseq_inter_row_corridor.mmd"
+    )
+    graph = parse_metro_mermaid(path.read_text())
+    compute_layout(graph)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+
+    flips = check_shared_run_turn_preserves_bundle_order(routes, offsets)
+    at_junction = [v for v in flips if v.source_id == "__junction_13"]
+    assert at_junction == [], (
+        f"{len(at_junction)} shared-run turn flip(s) at the U-turn junction; "
+        f"first: {at_junction[0].message() if at_junction else ''}"
+    )
+
+
+def test_translated_u_turn_fold_is_exempt() -> None:
+    """Two congruent U-turn brackets offset the same way are a forced crossing.
+
+    ``A`` sits above ``B`` on the run and stays above it on the reversed
+    corridor, so their U's are congruent brackets translated down-right together;
+    congruent brackets offset that way intersect wherever they are placed.  The
+    crossing is topologically forced, not an ordering bug, so the fold is exempt.
+    """
+    a = _synthetic_route(
+        "A", [(0.0, 100.0), (200.0, 100.0), (200.0, 396.0), (50.0, 396.0)], "__hub__"
+    )
+    b = _synthetic_route(
+        "B", [(0.0, 104.0), (204.0, 104.0), (204.0, 400.0), (60.0, 400.0)], "__hub__"
+    )
+    assert check_shared_run_turn_preserves_bundle_order([a, b], {}) == []
+
+
+def test_concentric_u_turn_fold_with_wrong_turn_column_is_caught() -> None:
+    """A nestable fold whose risers cross is an avoidable bundle flip.
+
+    ``A``'s run and corridor both enclose ``B``'s (higher run, lower corridor),
+    so the two U's are concentric about one centre and could nest cleanly.  But
+    ``A`` turns at the smaller x, threading its riser inside ``B``'s: the outer
+    bracket crosses the inner one at the corner.  The exemption is scoped to
+    translated folds, so this concentric crossing is surfaced.
+    """
+    a = _synthetic_route(
+        "A", [(0.0, 100.0), (200.0, 100.0), (200.0, 400.0), (50.0, 400.0)], "__hub__"
+    )
+    b = _synthetic_route(
+        "B", [(0.0, 104.0), (204.0, 104.0), (204.0, 396.0), (60.0, 396.0)], "__hub__"
+    )
+    violations = check_shared_run_turn_preserves_bundle_order([a, b], {})
+    assert [(v.line_a, v.line_b) for v in violations] == [("A", "B")], (
+        f"expected one A/B shared-run flip at the concentric fold's corner; "
+        f"got {[(v.line_a, v.line_b) for v in violations]}"
+    )
+
+
+def _synthetic_route(
+    line_id: str, points: list[tuple[float, float]], source: str = "__src__"
+) -> RoutedPath:
     """Build a ``RoutedPath`` from a points list for testing.
 
-    Source/target IDs are fixed (``'__src__'``, ``'__tgt__'``) so the
-    paths share a bundle key.  The ``Edge`` carries the line id; the
-    rest of the routing metadata is irrelevant to
-    :func:`check_bundle_order_preserved`.
+    ``source`` and the target ``'__tgt__'`` default to fixed ids so a pair
+    shares a bundle key; :func:`check_shared_run_turn_preserves_bundle_order`
+    groups routes by ``source`` alone, so a shared source with differing targets
+    stands in for a bundle that peels to different sections.  The ``Edge`` carries
+    the line id; the rest of the routing metadata is irrelevant to the checks.
     """
     return RoutedPath(
-        edge=Edge(source="__src__", target="__tgt__", line_id=line_id),
+        edge=Edge(source=source, target="__tgt__", line_id=line_id),
         line_id=line_id,
         points=points,
         is_inter_section=True,
@@ -338,7 +398,7 @@ def _synthetic_route(line_id: str, points: list[tuple[float, float]]) -> RoutedP
 
 def test_check_skips_clean_bundle() -> None:
     """Two paths that share waypoints exactly produce zero violations:
-    the COINCIDENT path-pair has nothing to compare on either side.
+    a coincident path-pair has nothing to compare on either side.
     """
     pts = [(0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (200.0, 100.0)]
     routes = [_synthetic_route("A", pts), _synthetic_route("B", pts)]

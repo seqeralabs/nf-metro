@@ -38,7 +38,7 @@ import nf_metro.layout.routing.convergences as convergences
 import nf_metro.layout.routing.core as routing_core
 import nf_metro.layout.routing.invariants as invariants
 import nf_metro.layout.routing.member_geometry as member_geometry
-from nf_metro.layout.constants import graph_offset_step
+from nf_metro.layout.constants import COORD_TOLERANCE, graph_offset_step
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import (
     compute_station_offsets,
@@ -606,6 +606,205 @@ def test_inter_row_corridor_seats_its_shared_destination_pair_together(
     assert separations[("la", "lc", "Y")] == pytest.approx(step)
     assert separations[("la", "lb", "Y")] == pytest.approx(step)
     assert separations[("lb", "lc", "Y")] == pytest.approx(2 * step)
+
+
+def test_cross_row_corridor_nests_lines_arriving_from_different_grid_rows() -> None:
+    """Distinct lines sharing an inter-row corridor keep the nesting step even
+    when they enter it from different grid rows.
+
+    On the riboseq map three corridor routes realise one reserved band from
+    separate reservation groups: ``rnaseq`` crosses from the alignment row to
+    ``te``, ``annotation`` from the transcript-discovery row to ``orf_calling``,
+    and ``riboseq`` runs its own trunk between them.  No group's own lane
+    allocation sees the others, so they settle onto one lane and paint over each
+    other -- ``rnaseq`` and ``annotation`` at the same coordinate, ``riboseq``
+    within one step of both.
+    """
+    path = CURVE_REPROS / "riboseq_inter_row_corridor.mmd"
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        graph, routes, offsets = _route(path)
+    violations = check_no_fused_cotravelling_lines(graph, routes, offsets)
+    assert not violations, "\n".join(v.message() for v in violations)
+
+
+def _junction_traverse_band(
+    routes, offsets, source: str, target: str
+) -> tuple[float, tuple[float, float]] | None:
+    """The Y and X-span of the widest horizontal leg *source*->*target* draws."""
+    for rp in routes:
+        if rp.edge.source != source or rp.edge.target != target:
+            continue
+        pts = list(apply_route_offsets(rp, offsets))
+        best: tuple[float, tuple[float, float]] | None = None
+        width = -1.0
+        for start, end in zip(pts, pts[1:], strict=False):
+            if (
+                abs(start[1] - end[1]) <= COORD_TOLERANCE
+                and abs(start[0] - end[0]) > COORD_TOLERANCE
+            ):
+                span = (min(start[0], end[0]), max(start[0], end[0]))
+                if span[1] - span[0] > width:
+                    width = span[1] - span[0]
+                    best = (start[1], span)
+        return best
+    return None
+
+
+def test_same_line_riboseq_junction_traverses_draw_as_one_stroke() -> None:
+    """Two same-line branches leaving one junction share their corridor as one stroke.
+
+    On the riboseq map ``riboseq`` leaves ``__junction_13`` on two inter-section
+    edges -- one convergence-plan-owned trunk to ``__merge_2`` and one fan-owned
+    branch to ``psite_id``'s left entry.  Their vertical arms already drop the
+    same column, but the horizontal corridor they turn onto settles on two bands
+    a couple of pixels apart, so the shared run reads as one line smeared across
+    two strokes.  A single line must draw as one stroke over the stretch its
+    branches co-travel, splitting only where the fan-owned branch peels off.
+    """
+    path = CURVE_REPROS / "riboseq_inter_row_corridor.mmd"
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        graph, routes, offsets = _route(path)
+    merge = _junction_traverse_band(routes, offsets, "__junction_13", "__merge_2")
+    psite = _junction_traverse_band(
+        routes, offsets, "__junction_13", "psite_id__entry_left_9"
+    )
+    assert merge is not None, "merge trunk leg not found"
+    assert psite is not None, "psite branch leg not found"
+    merge_y, merge_span = merge
+    psite_y, psite_span = psite
+    overlap = min(merge_span[1], psite_span[1]) - max(merge_span[0], psite_span[0])
+    assert overlap > 100.0, f"branches barely share a corridor: {overlap:.1f}px"
+    assert abs(merge_y - psite_y) <= COORD_TOLERANCE, (
+        f"same-line riboseq traverses draw {abs(merge_y - psite_y):.1f}px apart over "
+        f"a {overlap:.1f}px shared corridor -- one line as two strokes"
+    )
+
+
+def test_riboseq_corridor_bundle_holds_a_uniform_nesting_pitch() -> None:
+    """The three distinct lines sharing the inter-row corridor nest at one pitch.
+
+    ``annotation``, ``riboseq`` and ``rnaseq`` co-travel the corridor back toward
+    the ``te``/``reporting`` columns.  The separation cascade clears their
+    fusions but can strand the outermost movable line a full step wide when the
+    obstacle it stepped clear of then relocates past the pinned trunk, leaving a
+    4px/6px stack that reads as a bundle with one widened gap.  A bundle must
+    read at one pitch, so both adjacent gaps hold exactly one ``OFFSET_STEP``.
+    """
+    path = CURVE_REPROS / "riboseq_inter_row_corridor.mmd"
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        graph, routes, offsets = _route(path)
+    step = graph_offset_step(graph)
+    separations = _pair_separations(routes, offsets)
+    for pair in (("annotation", "riboseq", "Y"), ("riboseq", "rnaseq", "Y")):
+        assert pair in separations, f"{pair} no longer shares the corridor"
+        assert separations[pair] == pytest.approx(step), (
+            f"{pair[0]}/{pair[1]} nest {separations[pair]:.1f}px apart, not one "
+            f"{step:.1f}px step -- the corridor bundle carries a widened gap"
+        )
+
+
+def _peeloff_riser_xs(
+    routes: list[RoutedPath], offsets, port_id: str
+) -> dict[str, float]:
+    """Drawn riser X per line on the peel-off tails arriving at *port_id*."""
+    from dataclasses import replace
+
+    from nf_metro.layout.routing.common import port_peeloff_tail
+
+    out: dict[str, float] = {}
+    for rp in routes:
+        if rp.edge.target != port_id:
+            continue
+        drawn = replace(rp, points=list(apply_route_offsets(rp, offsets)))
+        tail = port_peeloff_tail(drawn)
+        if tail is not None:
+            out.setdefault(rp.line_id, tail.peel_x)
+    return out
+
+
+def test_inter_row_corridor_descends_into_its_port_on_the_nesting_pitch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two lines peeling off one trunk descend a bundle-pitch band, not a wider one.
+
+    ``inter_row_corridor_overflow``'s ``la``/``lc`` pair leaves a three-line
+    junction, so the fan that emits them reserves a middle lane for the third
+    line.  That line runs straight on and never enters the descent into
+    ``calling``'s left entry port, so the pair owns the descent alone and must
+    close up to one ``OFFSET_STEP``; held at the fan's width they descend
+    ``2 * OFFSET_STEP`` apart with a visible gap between two strokes that
+    co-travel the whole leg.
+    """
+    path = CURVE_REPROS / "inter_row_corridor_overflow.mmd"
+    graph, routes, offsets, _violations = _settled(path, monkeypatch)
+    risers = _peeloff_riser_xs(routes, offsets, "calling__entry_left_8")
+
+    assert set(risers) == {"la", "lc"}, risers
+    assert abs(risers["la"] - risers["lc"]) == pytest.approx(graph_offset_step(graph))
+
+
+def _overwide_peeloff_bands(
+    path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[int, list[tuple[str, float, int]]]:
+    """Peel-off bundles measured at *path*, and those spanning over one width."""
+    from nf_metro.layout.routing.common import iter_port_peeloff_bundles
+
+    graph, routes, offsets, _violations = _settled(path, monkeypatch)
+    step = graph_offset_step(graph)
+    measured = 0
+    wide: list[tuple[str, float, int]] = []
+    for bundle in iter_port_peeloff_bundles(routes, graph, step):
+        risers = _peeloff_riser_xs(routes, offsets, bundle.port_id)
+        drawn = [risers[line_id] for line_id in bundle.per_line if line_id in risers]
+        if len(drawn) < 2:
+            continue
+        measured += 1
+        span = max(drawn) - min(drawn)
+        if span > (len(drawn) - 1) * step + COORD_TOLERANCE:
+            wide.append((bundle.port_id, span, len(drawn)))
+    return measured, wide
+
+
+def test_peeloff_risers_descend_on_the_nesting_pitch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No corpus fixture descends a peel-off bundle wider than its own line count.
+
+    A peel-off bundle's risers share one vertical corridor into a single entry
+    port, so ``n`` of them occupy ``(n - 1) * OFFSET_STEP``.  A wider band is a
+    lane held for a line that is not in the corridor, drawn as a gap between
+    strokes that arrive together.
+
+    Inputs the engine rejects outright are skipped: they never reach a settled
+    geometry to measure, and their rejection is pinned elsewhere.
+    """
+    wide: dict[str, list[tuple[str, float, int]]] = {}
+    measured = 0
+    for path in _CORPUS:
+        try:
+            seen, found = _overwide_peeloff_bands(path, monkeypatch)
+        except Exception:  # noqa: BLE001 - deliberately defective fixtures abort
+            continue
+        measured += seen
+        if found:
+            wide[str(path.relative_to(REPO_ROOT))] = found
+    assert measured >= 20, (
+        f"only {measured} peel-off bundles measured across the corpus: the sweep "
+        "has stopped seeing the geometry it exists to check, so its silence is "
+        "not evidence. The floor is deliberately far below the count the corpus "
+        "yields, to catch that collapse without pinning an exact tally"
+    )
+    assert not wide, (
+        "peel-off risers descend wider than their own bundle: "
+        + "; ".join(
+            f"{rel} {port_id} spans {span:.1f}px on {count} lines"
+            for rel, found in sorted(wide.items())
+            for port_id, span, count in found
+        )
+    )
 
 
 @pytest.mark.parametrize("path", SEATED_WITHOUT_THE_PASS, ids=lambda p: p.stem)
