@@ -18,7 +18,7 @@ gather facts, not to make the final call:
 
 ```bash
 gh issue list --repo seqeralabs/nf-metro --state open \
-  --json number,title,labels,comments,createdAt --limit 200
+  --json number,title,labels,comments,assignees,createdAt --limit 200
 gh pr list --repo seqeralabs/nf-metro --state open --draft \
   --json number,title,headRefName,body
 git worktree list
@@ -29,8 +29,10 @@ From that:
 1. **Build the exclusion set.** An issue already has ongoing work if its
    number appears in an open (including draft) PR's `headRefName` (the
    `fix/<N>-*` / `codex/<N>-*` branch-naming convention) or body (`Fixes #N`,
-   `Closes #N`, `Resolves #N`), or in a local worktree's branch name from
-   `git worktree list`. Exclude every match and say why for each.
+   `Closes #N`, `Resolves #N`), in a local worktree's branch name from
+   `git worktree list`, or if it already carries a non-empty `assignees` list
+   - another session or human has claimed it. Exclude every match and say why
+   for each.
 2. **Rank what's left** by simple, stated heuristics: a `bug` label over an
    `enhancement`, a clear repro or render attached over a vague report,
    comment or reaction volume, and any explicit maintainer priority signal in
@@ -40,11 +42,11 @@ From that:
    plus the exclusion list. This is a survey, not a verdict: the investigator
    proposes, it does not pick.
 
-**This signal is local-only and not authoritative.** `git worktree list` only
-sees worktrees on this machine, and a peer session on another machine or
-another agent can already be mid-fix on an issue with no visible PR or
-worktree yet. State that caveat alongside the shortlist rather than treating
-an empty exclusion set as proof nothing is in flight.
+**The worktree check is local-only; assignees are not.** `git worktree list`
+only sees worktrees on this machine, so a peer session on another machine is
+invisible to it. Assignees are the cross-machine signal - exclude any issue
+that already carries one. A race still exists between this survey and the
+actual claim, which is why Step 2 re-checks immediately before claiming.
 
 Present the shortlist to the user and wait for them to confirm the top
 candidate or pick a different one, exactly as Step 1 waits for confirmation -
@@ -63,8 +65,10 @@ gh issue view <N> --repo seqeralabs/nf-metro
 assess the issue against current repository and remote evidence, and return the
 problem statement, initial scope, unknowns, and proposed diagnostic brief. The
 issue body and any comment thread stay in the worker; only its compact result
-reaches the coordinator. The coordinator summarizes that to the user and waits
-for confirmation before proceeding unless the user has pre-authorised autonomous
+reaches the coordinator, including current assignees plainly stated - if
+someone else already has it, surface that to the user rather than silently
+proceeding. The coordinator summarizes that to the user and waits for
+confirmation before proceeding unless the user has pre-authorised autonomous
 work; never infer merge or issue-edit authority from that permission.
 
 ### Issue hygiene
@@ -102,6 +106,41 @@ records the exact base SHA, and assigns one writer. Read-only workers may
 inspect only a frozen SHA or snapshot, not the live worktree while the writer
 is active. Do not allow a second writer until the first hands off and the
 coordinator serializes the next assignment.
+
+### Claim the issue before writing
+
+Immediately before creating the worktree, re-check
+`gh issue view <N> --repo seqeralabs/nf-metro --json assignees`. Step 0 or
+Step 1 may have checked this minutes ago; a peer session can have claimed it
+since. If it now carries an assignee other than the current `gh` actor, stop
+and tell the user rather than silently proceeding or overriding someone
+else's claim.
+
+Otherwise claim it:
+
+```bash
+gh issue edit <N> --repo seqeralabs/nf-metro --add-assignee @me
+```
+
+This is a bookkeeping mutation, not a body edit: it needs no separate
+authorization beyond the Step 1 confirmation to work this issue, and is
+distinct from the "Issue hygiene" gate above on editing issue content. It is
+also the cross-machine signal Step 0's `git worktree list` check cannot give
+- an assignee is visible to every peer session and every human, on any
+machine, whether or not a worktree or PR exists yet.
+
+If the repository rejects the assignee (403 - some repos restrict assignees
+to collaborators), fall back to a claim comment so the signal still posts:
+
+```bash
+gh issue comment <N> --repo seqeralabs/nf-metro \
+  --body "Claiming this issue via fix-issue, working on branch fix/<N>-<slug>."
+```
+
+If the run ends abandoned or blocked with no PR opened, remove the claim
+(`gh issue edit <N> --repo seqeralabs/nf-metro --remove-assignee @me`) so the
+issue does not look claimed forever. Once a PR exists, leave the assignee in
+place - the merge or Step 12's cleanup resolves it.
 
 Env, `PYTHONPATH`, and commit-hook mechanics:
 [`environment.md`](environment.md). Reuse the one
