@@ -854,10 +854,13 @@ def _row_trunk_alignment(
         # without lifting a box past content, which only grows downward.  A
         # non-carrier in the gap means a line bypasses it, so the carriers sit on
         # independent lanes and levelling would drag one off its own hand-over;
-        # leave such a run for the per-stretch pass.  The trunk also has to
-        # actually arrive at each partial section: one of its through-lines must
-        # tie it to a carrier, else the alignment would jump a row-mate that is
-        # off the trunk and sits between them.
+        # leave such a run for the per-stretch pass.  The contiguity guard binds
+        # only when the carriers disagree: carriers already sharing a Y are not
+        # dragged whatever separates them, and the partials then move solely by
+        # the tie check below, so a bypass in the gap is harmless.  The trunk also
+        # has to actually arrive at each partial section: one of its through-lines
+        # must tie it to a carrier, else the alignment would jump a row-mate that
+        # is off the trunk and sits between them.
         carrier_ys = {trunks[sid] for sid in carriers if sid in trunks}
         if not carrier_ys:
             return None

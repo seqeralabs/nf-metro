@@ -1033,6 +1033,11 @@ def _place_fan_out(
             split = split_output_spur_fan(
                 nodes, exit_reaching, G, graph, include_leaf_outputs=True
             )
+            # Only direct output leaves are peeled here.  The stranding this
+            # corrects happens when an output terminus snaps back onto the trunk;
+            # a spur that relays on to its output (a chain, not a leaf) does not
+            # snap, and pinning its through-station instead disturbs bundle
+            # geometry a later routing pass depends on.
             if (
                 split is not None
                 and len(split[0]) == 1

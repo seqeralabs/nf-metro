@@ -1742,6 +1742,153 @@ def test_carriers_share_one_trunk_requires_an_unbroken_run():
     assert not _carriers_share_one_trunk(group, {"s1", "s4"})
 
 
+def test_output_spur_peel_ignores_a_plain_terminal_branch():
+    """A plain terminal branch (no file output) is not peeled as an output spur.
+
+    ``split_output_spur_fan``'s ``include_leaf_outputs`` path recognises a
+    file-output leaf forked off a trunk-riding predecessor, but a leaf that
+    merely ends a line with no ``%%metro file:`` icon is not an output:
+    ``is_terminus`` is false, so it yields no split and stays with the ordinary
+    fan rather than being pulled into the #1772 trunk-fork peel.
+    """
+    import networkx as nx
+
+    from nf_metro.layout.ordering import split_output_spur_fan
+    from nf_metro.parser.model import MetroGraph
+
+    G = nx.DiGraph()
+    G.add_edge("P", "M")
+    G.add_edge("P", "L")
+    exit_reaching = frozenset({"P", "M"})
+
+    graph = MetroGraph()
+    graph.stations["P"] = Station(id="P", label="P")
+    graph.stations["M"] = Station(id="M", label="M")
+    graph.stations["L"] = Station(id="L", label="L")
+    assert not graph.stations["L"].is_terminus
+    assert (
+        split_output_spur_fan(
+            ["M", "L"], exit_reaching, G, graph, include_leaf_outputs=True
+        )
+        is None
+    )
+
+    graph.stations["L"] = Station(id="L", label="", terminus_labels=["VCF"])
+    assert graph.stations["L"].is_terminus
+    assert split_output_spur_fan(
+        ["M", "L"], exit_reaching, G, graph, include_leaf_outputs=True
+    ) == (["M"], ["L"])
+
+
+_TRUNK_FORK_ROW_PEER = """%%metro line: x | X | #e6007e
+%%metro file: a_out | AOUT | A output
+%%metro file: b_out | BOUT | B output
+%%metro off_track: a_out
+%%metro off_track: b_out
+%%metro grid: secA, secB, secC | 0,0
+graph LR
+  subgraph secA [SecA]
+    a0[A0]
+    a1[A1]
+    a2[A2]
+    a0 -->|x| a1
+    a1 -->|x| a2
+    a1 -->|x| a_out
+  end
+  subgraph secB [SecB]
+{secB}
+  end
+  subgraph secC [SecC]
+    c1[C1]
+  end
+  a2 -->|x| b0
+  b1 -->|x| c1
+"""
+
+_SECB_RELAY_BELOW = """    b0[B0]
+    b1[B1]
+    b2[Relay]
+    b0 -->|x| b1
+    b1 -->|x| b2
+    b2 -->|x| b_out"""
+
+_SECB_NO_BELOW = """    b0[B0]
+    b1[B1]
+    b0 -->|x| b1
+    b1 -->|x| b_out"""
+
+
+def test_trunk_fork_output_direction_is_peer_driven_and_sound():
+    """A trunk-fork output drops to match a same-row below-peer, and only then.
+
+    ``secA``'s ``a_out`` forks off ``a1``, which stays on the trunk (``a1`` ->
+    ``a2`` continues to the exit), so which side the output peels to is otherwise
+    free.  When a *different* section in its row (``secB``) already peels an
+    output below the trunk from an unrelated relay shape, ``a_out`` joins it and
+    the layout stays valid; with no such peer the default lift keeps ``a_out``
+    above.  So the direction follows a real row-peer signal (and the off-track
+    lift settles clearance), rather than being inherited blindly (#1772).
+    """
+    with_peer = parse_metro_mermaid(_TRUNK_FORK_ROW_PEER.format(secB=_SECB_RELAY_BELOW))
+    compute_layout(with_peer, validate=True)
+    trunk = with_peer.stations["a1"].y
+    assert with_peer.stations["b_out"].y - trunk > _Y_TOL
+    assert with_peer.stations["a_out"].y - trunk > _Y_TOL
+
+    no_peer = parse_metro_mermaid(_TRUNK_FORK_ROW_PEER.format(secB=_SECB_NO_BELOW))
+    compute_layout(no_peer, validate=True)
+    trunk = no_peer.stations["a1"].y
+    assert no_peer.stations["a_out"].y - trunk < -_Y_TOL
+
+
+_EQUAL_DEPTH_BYPASS_ROW = """%%metro line: x | X | #e6007e
+%%metro line: y | Y | #2db572
+%%metro grid: s1, s2, s3 | 0,0
+graph LR
+  subgraph s1 [S1]
+    p1[P1]
+    p1 -->|x,y| q1[Q1]
+  end
+  subgraph s2 [S2]
+    p2[P2]
+    p2 -->|x| q2[Q2]
+  end
+  subgraph s3 [S3]
+    p3[P3]
+    p3 -->|x,y| q3[Q3]
+  end
+  q1 -->|x| p2
+  q1 -->|y| p3
+  q2 -->|x| p3
+"""
+
+
+def test_equal_depth_carriers_across_a_bypass_still_align_their_partial():
+    """Carriers separated by a bypass but already level share their trunk.
+
+    Line ``y`` skips ``s2`` (running ``s1`` -> ``s3`` directly), so ``s2`` carries
+    only ``x`` and the two full-bundle carriers ``s1``/``s3`` are non-contiguous.
+    The contiguity guard blocks levelling only when the carriers *disagree* on Y;
+    once they already agree, no carrier is dragged, the shared trunk is their
+    common Y, and the ``x``-carrying partial rides level onto it.
+    """
+    from nf_metro.layout.phases._common import _row_through_and_carrier_lines
+
+    graph = parse_metro_mermaid(_EQUAL_DEPTH_BYPASS_ROW)
+    compute_layout(graph)
+    group = [graph.sections[s] for s in ("s1", "s2", "s3")]
+    through, carrier_lines = _row_through_and_carrier_lines(graph, group)
+    carriers = {s.id for s in group if set(through[s.id]) == carrier_lines}
+    assert carriers == {"s1", "s3"}
+    assert not _carriers_share_one_trunk(group, carriers)
+    carrier_ys = {
+        round(_section_trunk_y(graph, graph.sections[c]), 1) for c in carriers
+    }
+    assert len(carrier_ys) == 1
+    alignment = _row_trunk_alignment(graph, group)
+    assert alignment is not None and abs(alignment[0] - carrier_ys.pop()) <= _Y_TOL
+
+
 def test_row_trunk_alignment_is_inert_on_an_interior_through_set_break(monkeypatch):
     """No section moves when every row-neighbour pair carries different lines.
 
