@@ -304,7 +304,11 @@ finishes, after the stage pipeline and the spread loop, and read by no layout
 stage), and `graph.post_layout_half_grid_station_ids` (the half-pitch spine
 branches of a station-rooted reconvergence fan, recorded once every layout and
 re-layout pass has settled; read by no layout stage, and by the grid-alignment
-invariants as a union with `half_grid_station_ids`).
+invariants as a union with `half_grid_station_ids`), and
+`graph._carrier_clearance_shifted` (section ids Stage 4.8a dropped to open a
+side-entered vertical consumer's entry clearance, reassigned in full each pass;
+Stage 6.16 unions them into its top-refit set and reads the empty default as a
+no-op).
 
 A further group crosses a subsystem boundary rather than two numbered stages,
 so their `PhaseFieldSpec` names a lifecycle phase (`pre-layout`, `post-layout`,
