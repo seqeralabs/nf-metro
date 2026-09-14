@@ -25,7 +25,7 @@ from nf_metro.layout.phases.bbox import (
     _loop_corner_x,
     push_lower_rows_after_bbox_grow,
 )
-from nf_metro.layout.phases.ports import _set_port_y
+from nf_metro.layout.phases.ports import _entry_port_fan_trunk, _set_port_y
 from nf_metro.parser.model import (
     MetroGraph,
     PortSide,
@@ -101,6 +101,8 @@ def _snap_inter_section_port_pairs(graph: MetroGraph) -> None:
                 ep_st = graph.stations.get(eid)
                 if ep_st is None or abs(ep_st.y - port_st.y) < SAME_COORD_TOLERANCE:
                     continue
+                if _entry_seated_on_own_trunk(graph, eid, ep_st):
+                    continue
                 _set_port_y(graph, eid, port_st.y)
             continue
 
@@ -162,6 +164,27 @@ def _downstream_same_row_entry_ports(
             if eid in graph.stations:
                 out.append(eid)
     return out
+
+
+def _entry_seated_on_own_trunk(
+    graph: MetroGraph, entry_id: str, entry_st: Station
+) -> bool:
+    """Whether an entry port is already seated on its own internal fan trunk.
+
+    A fan-in exit snap flattens the inter-section bundle by dragging the
+    downstream entry onto the exit's convergence Y.  When that entry feeds a
+    root station its own seating already anchored it to, the drag would trade
+    the flat bundle for an internal dogleg through the section boundary, so this
+    entry keeps the trunk row and the level change becomes a riser in the gap.
+    """
+    ep = graph.ports.get(entry_id)
+    if ep is None:
+        return False
+    section = graph.sections.get(ep.section_id)
+    if section is None:
+        return False
+    trunk_st = _entry_port_fan_trunk(graph, entry_id, section)
+    return trunk_st is not None and abs(entry_st.y - trunk_st.y) < SAME_COORD_TOLERANCE
 
 
 def _entry_consumer_ys(graph: MetroGraph, entry_id: str) -> list[float]:

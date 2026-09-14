@@ -933,8 +933,12 @@ in pipeline order.
   `_position_junctions`.
 - **Precondition**: Row compaction done; port pair Ys may have drifted.
 - **Postcondition**: Within each row, every LEFT/RIGHT exit port and
-  its connected LEFT/RIGHT entry port share a Y. Junctions back at
-  exit-port Y.
+  its connected LEFT/RIGHT entry port share a Y, except an entry already
+  seated on its own internal fan trunk (a lead line running straight into
+  a root the port also feeds a deeper arm of): dragging it onto a fan-in
+  exit's convergence Y would trade the flat inter-section bundle for an
+  internal boundary dogleg, so it keeps the trunk row and the level change
+  becomes a riser in the gap. Junctions back at exit-port Y.
 - **Invariants preserved**: Internal station Y in each section.
 - **Related tests**: `test_no_kink_at_section_boundary`,
   `test_inter_section_route_y_stays_within_row_band`.
