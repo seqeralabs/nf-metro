@@ -239,6 +239,10 @@
   "note": "Defensive in iter_inter_row_gaps (consumed by inter_row_gap_upper_row and _inter_row_gap_band): adjacent rows in the sorted section-row set both contain sections, so row_bottom_edge / row_top_edge resolve; the None skip arm guards a row with no sections that the iteration never yields.",
   "status": "defensive"
  },
+ "common.py::if trunk_ys[-1] - trunk_ys[0] <= COORD_TOLERANCE:::#1": {
+  "note": "Equal-depth guard on iter_port_peeloff_bundles' shared bundle grouping: the sole corpus fixture that ever produced two peel-off members at coincident trunk depth (riboseq_band_hop_zero_length_seam.mmd) now diverges before reaching this comparison, per #1772's trunk-fork fan reordering (see tests/test_band_hop_zero_length_seam_1808.py). No fixture currently reaches the same-Y reject arm.",
+  "status": "needs-review"
+ },
  "common.py::or exit_port is None::#1": {
   "note": "_flow_exit_feeding_route_source returns a station id only after graph.ports.get(id) has already produced a port for it, so the id it hands back is always a key of graph.ports and this second lookup cannot miss. The arm protects a caller that supplies its own exit id.",
   "status": "defensive"
@@ -850,10 +854,6 @@
  "member_geometry.py::if abs(coordinate - claim.coordinate) > COORD_TOLERANCE:::#1": {
   "note": "The rejection inside feasible()'s same-line-carrier clause. Unreached for the same reason as its enclosing gate `if item.candidate.route.line_id in claim.line_ids and (:::#1`. Reachable.",
   "status": "needs-review"
- },
- "member_geometry.py::if abs(radii[radius_index] - planned_radius) > COORD_TOLERANCE_FINE:::#1": {
-  "note": "The same validator's radius-value flank: an owned corner, one of whose adjacent segment ranks is in plan.owned_segment_ranks, whose emitted radius differs from the planned one. Route-system-owned segment boundaries are exactly what the normalize and settlement passes are barred from re-sizing (route_system_owns_segment_boundary gates every one of them), so an owned corner reaches emission carrying the radius planning gave it. The raise fires only if a pass mutates owned geometry.",
-  "status": "defensive"
  },
  "member_geometry.py::if actual_offset != expected_offset or actual_base != expected_base:::#1": {
   "note": "The same validator's concentric-inputs flank: the offset/base pair recorded for an owned corner's two segment ranks must still match the plan's. fresh_member_route copies both maps wholesale and only record_concentric_corner rewrites them, which the same ownership bar keeps off owned boundaries. Distinct from the radius-value raise above in that a pass could in principle re-record the inputs and still land on the planned radius; both are construction-bug guards.",
