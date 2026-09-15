@@ -931,6 +931,39 @@ def _has_off_trunk_sibling(
     return False
 
 
+def _on_trunk_siblings(
+    graph: MetroGraph,
+    section: Section,
+    sid: str,
+    src_id: str,
+    tgt_id: str,
+    trunk_y: float,
+) -> list[str]:
+    """On-trunk stations sharing this station's src and tgt.
+
+    The counterpart to :func:`_has_off_trunk_sibling`: a fan/loop column can
+    include a member that sits ON the trunk row (e.g. the middle branch of an
+    odd-sized fan). It needs the same X as its recentred off-trunk siblings,
+    computed here rather than through a section-wide trunk anchor, which can
+    disagree with this column's own row in a section with more than one
+    internal trunk-like row.
+    """
+    siblings = []
+    for other_sid in section.station_ids:
+        if other_sid == sid:
+            continue
+        other = graph.stations.get(other_sid)
+        if other is None or other.is_port or other.is_hidden:
+            continue
+        if abs(other.y - trunk_y) > SAME_COORD_TOLERANCE:
+            continue
+        other_srcs = {e.source for e in graph.edges_to(other_sid)}
+        other_tgts = {e.target for e in graph.edges_from(other_sid)}
+        if other_srcs == {src_id} and other_tgts == {tgt_id}:
+            siblings.append(other_sid)
+    return siblings
+
+
 def _recenter_section_loop_sides(
     graph: MetroGraph,
     section: Section,
@@ -971,6 +1004,8 @@ def _recenter_section_loop_sides(
         if abs(midpoint - st.x) < min_recenter_delta:
             continue
         st.x = midpoint
+        for mate_id in _on_trunk_siblings(graph, section, sid, src.id, tgt.id, trunk_y):
+            graph.stations[mate_id].x = midpoint
 
 
 def _loop_column_key(
