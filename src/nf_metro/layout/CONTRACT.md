@@ -766,9 +766,14 @@ in pipeline order.
   suppressed. The descent is recorded in `graph._partial_trunk_descents`
   (reassigned in full each pass) with its two endpoint ports, because it is a
   sub-grid offset the Stage 6.4 grid snap can round onto the carrier slot --
-  Stage 6.4 re-seats it. A non-fold LR/RL exit selected by
-  `flow_exit_carrier_anchor` shares its carrier Y; its downstream entry
-  remains on the consumer row. Row-spanning sections are skipped.
+  Stage 6.4 re-seats it. When no one section carries the whole row trunk (no
+  carrier consensus), the run instead levels each sub-run of `bbox_x`-adjacent
+  sections carrying identical through-lines whose facing ports split their
+  shared lane, and only where one member's own through-line arrives and leaves
+  at different Ys; every other section keeps its pre-pass trunk Y. A non-fold
+  LR/RL exit selected by `flow_exit_carrier_anchor` shares its carrier Y; its
+  downstream entry remains on the consumer row. Row-spanning sections are
+  skipped.
 - **Invariants preserved**: Bbox tops, downstream entry coordinates,
   perpendicular exits, and row-spanning sections.
 - **Lifecycle:** invariant - the per-row trunk Y is consistent at the

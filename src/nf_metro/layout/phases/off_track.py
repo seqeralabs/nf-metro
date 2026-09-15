@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter, defaultdict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 from nf_metro.layout.constants import (
     COORD_GROUP_DIGITS_COARSE,
@@ -212,12 +212,60 @@ def _off_track_output_lead(
     return lead + extra
 
 
+def _section_has_seed_below_output(graph: MetroGraph, section: Section) -> bool:
+    """Whether *section* peels an output below its trunk from a dead-end branch.
+
+    An output whose producer peels off a still-continuing trunk -- the producer
+    never reaches a section exit while the section's through-line does -- fans to
+    the below (fan) side, the ``producer_on_branch`` seed a same-row trunk-fork
+    output matches when it drops.  This is the structural counterpart of
+    :func:`_off_track_output_below`'s coordinate check, evaluable before layout so
+    the X-spacing pass can anticipate the row's peel convention.  A terminal
+    section has no through-line, so its outputs are the trunk's natural termini,
+    not below-peels.
+    """
+    exit_reaching = _exit_reaching_nodes(graph, section)
+    if not exit_reaching:
+        return False
+    for sid in section.station_ids:
+        st = graph.stations.get(sid)
+        if st is None or not (st.off_track or st.is_terminus):
+            continue
+        for edge in graph.edges_to(sid):
+            producer = graph.stations.get(edge.source)
+            if (
+                producer is not None
+                and not producer.is_port
+                and edge.source not in exit_reaching
+            ):
+                return True
+    return False
+
+
+def _row_has_below_output_peer(graph: MetroGraph, section: Section) -> bool:
+    """Whether another section in *section*'s grid row peels an output below.
+
+    The trunk-fork peel drops an on-trunk output only to match such a peer, so
+    the X-spacing pass reserves the downward lead only when one exists.
+    """
+    return any(
+        other.id != section.id
+        and other.grid_row == section.grid_row
+        and _section_has_seed_below_output(graph, other)
+        for other in graph.sections.values()
+    )
+
+
 def _space_off_track_outputs(
     sub: MetroGraph,
     layers: dict[str, int],
     tracks: dict[str, float],
     x_spacing: float = X_SPACING,
     lead_extra: dict[str, float] | None = None,
+    *,
+    graph: MetroGraph | None = None,
+    section: Section | None = None,
+    exit_reaching: frozenset[str] | None = None,
 ) -> tuple[dict[str, float], dict[int, float]]:
     """Per-output X offset, plus a per-layer push to widen producer gaps.
 
@@ -262,6 +310,36 @@ def _space_off_track_outputs(
         else 0.0
     )
 
+    # An output whose producer sits on the trunk is peeled *below* it by the
+    # #1772 trunk-fork rule, which decides Y only once coordinates settle -- long
+    # after this pass.  Predict that drop structurally (from the track map) so a
+    # downward output reserves its label-clearance lead now; without it the
+    # diagonal later collapses into the leftover run with no horizontal lead-in.
+    fan_sign = (
+        AxisFrame.secondary_sign_for(section.direction or "LR")
+        if section is not None
+        else 1.0
+    )
+    baseline_signed = fan_sign * trunk_track
+    row_has_below_peer = (
+        graph is not None
+        and section is not None
+        and exit_reaching is not None
+        and _row_has_below_output_peer(graph, section)
+    )
+
+    def _peels_below(producer_id: str, sink_id: str) -> bool:
+        if not row_has_below_peer or graph is None or exit_reaching is None:
+            return False
+        return _forks_trunk_into_output_and_exit(
+            graph,
+            producer_id,
+            sink_id,
+            signed_pos=lambda node: fan_sign * tracks.get(node, trunk_track),
+            baseline_signed=baseline_signed,
+            reaches_exit=lambda node: node in exit_reaching,
+        )
+
     output_extra: dict[str, float] = {}
     # Clearance each output demands before the next station: the full output
     # run out to its icon's right edge, so the following output's divergence
@@ -287,7 +365,9 @@ def _space_off_track_outputs(
             target = sub.stations[target_id]
             if not target.off_track:
                 continue
-            is_downward = tracks.get(sid, trunk_track) > trunk_track
+            is_downward = tracks.get(sid, trunk_track) > trunk_track or _peels_below(
+                sid, target_id
+            )
             producer_extra = lead_extra.get(sid, 0.0) if lead_extra else 0.0
             lead = _off_track_output_lead(station, is_downward, producer_extra)
             output_extra[target_id] = lead + DIAGONAL_RUN + _OUTPUT_TAIL
@@ -1273,6 +1353,10 @@ def _off_track_output_below(graph: MetroGraph) -> set[str]:
             section_baseline[section.id] = (cross, fan_sign, baseline_signed)
 
     below: set[str] = set()
+    # A trunk-fork output has no producer-side reason to drop on its own; it is
+    # dropped only to match a same-row peer, so it is deferred to a second pass
+    # once the peers that drop unconditionally are known.
+    trunk_fork_outputs: list[tuple[str, int, str]] = []
     for off_id, anchor_id in anchor_of.items():
         off_st = graph.stations.get(off_id)
         anchor_st = graph.stations.get(anchor_id)
@@ -1292,6 +1376,32 @@ def _off_track_output_below(graph: MetroGraph) -> set[str]:
         if producer_on_branch or _lift_side_holds_fork_branch(
             graph, anchor_id, off_id, cross, fan_sign, baseline_signed
         ):
+            below.add(off_id)
+        elif _is_trunk_fork_output(
+            graph, anchor_id, off_id, cross, fan_sign, baseline_signed
+        ):
+            off_section = graph.sections.get(off_st.section_id)
+            if off_section is not None:
+                trunk_fork_outputs.append(
+                    (off_id, off_section.grid_row, off_section.id)
+                )
+
+    # A trunk-fork output drops only where a *different* section in its grid row
+    # already peels an output below the trunk: the row has set that convention
+    # (e.g. a relay-fed output below the trunk), so a lone through-station's
+    # output joins it rather than lifting against it.  Absent such a peer the
+    # default lift is kept, so a section whose row peels nothing down is
+    # untouched.
+    rows_with_below: dict[int, set[str]] = {}
+    for dropped in below:
+        sec_id = graph.stations[dropped].section_id
+        peer_section = graph.sections.get(sec_id) if sec_id else None
+        if peer_section is not None:
+            rows_with_below.setdefault(peer_section.grid_row, set()).add(
+                peer_section.id
+            )
+    for off_id, row, section_id in trunk_fork_outputs:
+        if any(peer != section_id for peer in rows_with_below.get(row, ())):
             below.add(off_id)
     return below
 
@@ -1330,6 +1440,124 @@ def _lift_side_holds_fork_branch(
         elif offset > _DOWNWARD_BRANCH_SLOP:
             fan_side = True
     return lift_side and not fan_side
+
+
+def _continuation_reaches_section_exit(
+    graph: MetroGraph, start: str, section: Section
+) -> bool:
+    """Whether an on-track chain from *start* reaches one of *section*'s ports.
+
+    Following real on-track successors that stay inside the section, does the
+    trunk leave via a port?  A chain reaching only in-section outputs never does,
+    so the section is a self-contained fan with no trunk running through it.
+    """
+    ports = section.port_ids
+    seen = {start}
+    stack = [start]
+    while stack:
+        for edge in graph.edges_from(stack.pop()):
+            target = edge.target
+            if target in ports:
+                return True
+            if target in seen:
+                continue
+            st = graph.stations.get(target)
+            if (
+                st is None
+                or st.section_id != section.id
+                or st.off_track
+                or st.is_terminus
+                or st.is_hidden
+            ):
+                continue
+            seen.add(target)
+            stack.append(target)
+    return False
+
+
+def _forks_trunk_into_output_and_exit(
+    graph: MetroGraph,
+    producer_id: str,
+    sink_id: str,
+    *,
+    signed_pos: Callable[[str], float],
+    baseline_signed: float,
+    reaches_exit: Callable[[str], bool],
+) -> bool:
+    """Structural core of a trunk-fork output.
+
+    True when *producer_id* sits on the trunk baseline and forks into an
+    on-track continuation carrying its whole line bundle onward to a section exit
+    plus the dead-end output *sink_id*, with the fan side empty.  ``signed_pos``
+    returns ``fan_sign * cross`` for a node and ``reaches_exit`` whether an
+    on-track chain from it leaves the section: the peel decision supplies these
+    from settled coordinates, and the earlier X-spacing reservation -- which must
+    predict the drop before coordinates settle -- supplies them from the
+    pre-placement track map.
+    """
+    if graph.stations.get(producer_id) is None:
+        return False
+    if abs(signed_pos(producer_id) - baseline_signed) > _DOWNWARD_BRANCH_SLOP:
+        return False
+    junction_ids = graph.junction_ids
+    sink_section = graph.stations[sink_id].section_id
+    producer_lines = set(graph.station_lines(producer_id))
+    has_continuation = False
+    for edge in graph.edges_from(producer_id):
+        sib = graph.stations.get(edge.target)
+        if sib is None or edge.target in (sink_id, producer_id):
+            continue
+        if sib.is_port or sib.off_track or sib.is_hidden:
+            continue
+        if edge.target in junction_ids or sib.section_id != sink_section:
+            continue
+        offset = signed_pos(edge.target) - baseline_signed
+        if offset > _DOWNWARD_BRANCH_SLOP:
+            return False
+        # The fan-side veto above must see every sibling, so the loop cannot
+        # return on the first continuation; the exit check below, though, only
+        # needs to confirm one, so skip it once one is known.
+        if abs(offset) > _DOWNWARD_BRANCH_SLOP or has_continuation:
+            continue
+        if set(graph.station_lines(edge.target)) != producer_lines:
+            continue
+        if reaches_exit(edge.target):
+            has_continuation = True
+    return has_continuation
+
+
+def _is_trunk_fork_output(
+    graph: MetroGraph,
+    producer_id: str,
+    sink_id: str,
+    cross: str,
+    fan_sign: float,
+    baseline_signed: float,
+) -> bool:
+    """Whether the output forks off a trunk station that carries on past it.
+
+    True when the producer sits on the trunk baseline and forks into a
+    through-station carrying its whole line bundle onward to a section exit plus
+    this dead-end output.  Such an output has no producer-side reason to drop --
+    its producer is on the trunk, not a branch -- so on its own it keeps the
+    default lift; the caller drops it only to match a same-row peer.  The fan
+    side must be empty: a sibling branch already fanned there (a diamond's lower
+    arm) would collide with an output dropped onto it.
+    """
+    sink_section_id = graph.stations[sink_id].section_id
+    section = graph.sections.get(sink_section_id) if sink_section_id else None
+    if section is None:
+        return False
+    return _forks_trunk_into_output_and_exit(
+        graph,
+        producer_id,
+        sink_id,
+        signed_pos=lambda node: fan_sign * getattr(graph.stations[node], cross),
+        baseline_signed=baseline_signed,
+        reaches_exit=lambda node: _continuation_reaches_section_exit(
+            graph, node, section
+        ),
+    )
 
 
 def _off_track_groups(
