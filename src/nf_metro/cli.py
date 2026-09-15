@@ -196,7 +196,7 @@ _FORMAT_TYPE = click.Choice(_RENDER_FORMATS)
 
 
 def _convert_manifest_number(
-    param_type: click.ParamType, value: object, name: str
+    param_type: click.ParamType[float | int, object], value: object, name: str
 ) -> float | int:
     """Run a manifest job's *value* through *param_type*, as the CLI flag would.
 

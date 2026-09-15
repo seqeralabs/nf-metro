@@ -69,6 +69,11 @@ dev = [
     # Pinned so the frozen PNG hash in tests/test_hash_seed_determinism.py has
     # one rasteriser build to lock against; runtime accepts any >=0.5.
     "resvg-py==0.5.0",
+    # Pinned so mypy checks against one click.ParamType generic signature;
+    # click's ParamType typing has changed shape across recent releases
+    # (non-generic in 8.3.x, Generic[_ValueT_co, _InputT_contra] in 8.5.0),
+    # so an unpinned mypy run is not reproducible. Runtime accepts any >=8.0.
+    "click==8.5.0",
 ]
 # Docs site is Astro/Starlight (see website/package.json). This extra only
 # provides pyyaml, for the gallery corpus map.
