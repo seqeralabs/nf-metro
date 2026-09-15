@@ -15,7 +15,7 @@ The composite action renders the map and reports whether the SVG changed.
 
 ```yaml
 - uses: actions/checkout@v4
-- uses: seqeralabs/nf-metro@2.0.0
+- uses: seqeralabs/nf-metro@2.1.0
   id: metro
   with:
     input: assets/metro_map.mmd
@@ -43,7 +43,7 @@ Re-render the SVG locally on every commit so it cannot drift from the source.
 # .pre-commit-config.yaml
 repos:
   - repo: https://github.com/seqeralabs/nf-metro
-    rev: 2.0.0
+    rev: 2.1.0
     hooks:
       - id: nf-metro
 ```
