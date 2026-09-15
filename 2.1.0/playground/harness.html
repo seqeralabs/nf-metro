@@ -1,0 +1,488 @@
+<!doctype html>
+<!--
+  E2E test harness for Playwright (website/playground-tests/).
+  This is NOT the deployed playground page — the deployed site uses the Astro
+  route at website/src/pages/playground.astro (served at /playground/).
+  This standalone file lets E2E tests run against a lightweight static server
+  from public/playground/ without needing the full Astro build.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>nf-metro playground (test harness)</title>
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/hint/show-hint.min.css"
+    />
+    <link rel="stylesheet" href="style.css" />
+    <style>
+      /* Replicate the Starlight layout overrides for the standalone harness */
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+      }
+      .nfm-playground {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-height: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="nfm-playground">
+      <div class="hidden" aria-hidden="true">
+        <span id="route-source"></span><span id="route-layout"></span
+        ><span id="route-export"></span> <span id="runtime-version"></span
+        ><span id="draft-status"></span><span id="document-name"></span>
+        <span id="render-status"><span class="status-dot"></span></span>
+        <button id="btn-new"></button><button id="btn-open"></button>
+        <input id="file-open" type="file" />
+        <button id="btn-undo"></button><button id="btn-redo"></button>
+        <button id="btn-commands"></button>
+      </div>
+      <nav class="mobile-view-switch" aria-label="Playground view">
+        <button
+          class="mobile-view active"
+          data-view="source"
+          aria-pressed="true"
+        >
+          Source
+        </button>
+        <button class="mobile-view" data-view="preview" aria-pressed="false">
+          Preview
+        </button>
+      </nav>
+      <main id="split">
+        <section id="editor-pane">
+          <div class="pane-toolbar">
+            <label
+              >Load
+              <select id="example-select">
+                <option value="" selected>example…</option>
+                <option value="__seed__">Starter pipeline</option>
+              </select>
+            </label>
+            <label
+              >Recent
+              <select id="recent-select">
+                <option value="">Choose…</option>
+              </select></label
+            >
+            <button
+              id="btn-convert"
+              title="Convert a Nextflow -with-dag Mermaid into a metro map"
+            >
+              Import Nextflow DAG
+            </button>
+            <span class="sep"></span>
+            <span class="group-label">Insert</span>
+            <button id="btn-section" title="Insert a section block">
+              + Section
+            </button>
+            <button id="btn-line" title="Insert a line definition">
+              + Line
+            </button>
+            <button id="btn-edge" title="Insert an edge">+ Edge</button>
+            <button
+              id="btn-logo"
+              title="Attach a logo image (embedded inline, since the playground can't read files from disk)"
+            >
+              + Logo
+            </button>
+            <span class="sep"></span>
+            <span class="group-label">Lines</span>
+            <div id="line-colors" class="swatches"></div>
+          </div>
+          <textarea id="editor"></textarea>
+          <div id="error" class="hidden" role="alert"></div>
+        </section>
+
+        <section id="preview-pane">
+          <div class="pane-toolbar">
+            <label
+              >Brand
+              <select id="opt-theme">
+                <option value="nfcore">nf-core</option>
+                <option value="seqera">Seqera</option>
+              </select>
+            </label>
+            <label
+              >Mode
+              <select id="opt-mode">
+                <option value="dark">dark</option>
+                <option value="light">light</option>
+              </select>
+            </label>
+            <label class="check"
+              ><input type="checkbox" id="opt-animate" /> Animate</label
+            >
+            <label class="check"
+              ><input type="checkbox" id="opt-directional" /> Chevrons</label
+            >
+            <label class="check"
+              ><input type="checkbox" id="opt-debug" /> Debug</label
+            >
+            <label class="check"
+              ><input type="checkbox" id="opt-center-ports" /> Centre
+              ports</label
+            >
+          </div>
+
+          <div class="pane-toolbar">
+            <span class="group-label">Export</span>
+            <button id="btn-svg">SVG</button>
+            <button id="btn-png">PNG</button>
+            <button id="btn-share">Share link</button>
+            <button id="btn-copy-source">Copy source</button>
+            <a
+              id="build-hint"
+              class="muted small build-hint hidden"
+              target="_blank"
+              rel="noopener"
+            ></a>
+            <button
+              id="btn-report"
+              class="report-btn"
+              title="Report a bug with this map"
+            >
+              Report a bug
+            </button>
+          </div>
+
+          <details id="advanced" class="advanced">
+            <summary>Advanced options</summary>
+            <div class="pane-toolbar advanced-controls">
+              <span class="group-label">Layout</span>
+              <label
+                >Line spread
+                <select id="opt-line-spread">
+                  <option value="">auto</option>
+                  <option value="bundle">bundle</option>
+                  <option value="centered">centered</option>
+                  <option value="rails">rails</option>
+                </select>
+              </label>
+              <label
+                >Diamonds
+                <select id="opt-diamond-style">
+                  <option value="">auto</option>
+                  <option value="straight">straight</option>
+                  <option value="symmetric">symmetric</option>
+                </select>
+              </label>
+              <label
+                >Line order
+                <select id="opt-line-order">
+                  <option value="">auto</option>
+                  <option value="definition">definition</option>
+                  <option value="span">span</option>
+                </select>
+              </label>
+              <label class="check"
+                ><input type="checkbox" id="opt-compact-offsets" /> Compact
+                offsets</label
+              >
+              <label
+                >Line gap
+                <input
+                  type="number"
+                  id="opt-track-gap"
+                  min="0"
+                  max="3"
+                  step="0.5"
+                  placeholder="1.0"
+                />
+              </label>
+              <label
+                >Font scale
+                <input
+                  type="number"
+                  id="opt-font-scale"
+                  min="0.1"
+                  step="0.1"
+                  placeholder="1.0"
+                />
+              </label>
+              <label
+                >Stroke scale
+                <input
+                  type="number"
+                  id="opt-stroke-scale"
+                  min="0.1"
+                  step="0.1"
+                  placeholder="1.0"
+                />
+              </label>
+              <label
+                >Fold cols
+                <input
+                  type="number"
+                  id="opt-fold-threshold"
+                  min="1"
+                  step="1"
+                  placeholder="auto"
+                />
+              </label>
+              <label
+                >X-spacing
+                <input
+                  type="number"
+                  id="opt-x-spacing"
+                  min="1"
+                  step="10"
+                  placeholder="auto"
+                />
+              </label>
+              <label
+                >Y-spacing
+                <input
+                  type="number"
+                  id="opt-y-spacing"
+                  min="1"
+                  step="10"
+                  placeholder="auto"
+                />
+              </label>
+            </div>
+          </details>
+
+          <div class="pane-toolbar edit-toolbar">
+            <span class="group-label">Edit map</span>
+            <button
+              class="mode-btn"
+              data-mode="select"
+              aria-pressed="true"
+              title="Select an element to inspect or edit it"
+            >
+              Select
+            </button>
+            <button
+              class="mode-btn"
+              data-mode="add-station"
+              aria-pressed="false"
+              title="Click a section to add a station to it"
+            >
+              + Station
+            </button>
+            <button
+              class="mode-btn"
+              data-mode="add-edge"
+              aria-pressed="false"
+              title="Click a source station, then a target, to connect them"
+            >
+              Connect
+            </button>
+            <span class="sep"></span>
+            <button id="btn-add-section" title="Add a new section">
+              + Section
+            </button>
+            <span class="sep"></span>
+            <span id="edit-hint" class="muted small"
+              >Click an element to select it.</span
+            >
+          </div>
+
+          <div id="drop-target">
+            <div id="stale-preview" class="hidden"></div>
+            <div id="preview"></div>
+            <div id="drop-invitation" class="hidden"></div>
+          </div>
+
+          <div id="zoom-controls">
+            <button id="zoom-out" title="Zoom out" aria-label="Zoom out">
+              &minus;
+            </button>
+            <button id="zoom-fit" title="Fit to view" aria-label="Fit to view">
+              Fit
+            </button>
+            <button id="zoom-in" title="Zoom in" aria-label="Zoom in">+</button>
+          </div>
+
+          <aside
+            id="prop-panel"
+            class="prop-panel hidden"
+            aria-label="Selected element"
+          >
+            <div class="prop-head">
+              <span id="prop-kind" class="prop-kind"></span>
+              <button id="prop-close" class="ghost" title="Deselect">×</button>
+            </div>
+            <div id="prop-body"></div>
+          </aside>
+
+          <div
+            id="line-picker"
+            class="line-picker hidden"
+            role="menu"
+            aria-label="Choose a line"
+          ></div>
+
+          <div id="boot" class="overlay">
+            <div class="spinner"></div>
+            <p id="boot-msg">Loading the browser runtime</p>
+            <p class="muted small">
+              Editing stays responsive while the renderer starts. The runtime is
+              cached after the first visit.
+            </p>
+            <button id="boot-retry" class="hidden">Retry renderer</button>
+          </div>
+        </section>
+      </main>
+
+      <div id="toast" class="hidden"></div>
+
+      <div
+        id="command-modal"
+        class="modal-overlay hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="command-title"
+      >
+        <div class="modal">
+          <h2 id="command-title">Commands</h2>
+          <label for="command-search">Search actions</label>
+          <input id="command-search" type="search" />
+          <div id="command-list" role="listbox"></div>
+        </div>
+      </div>
+
+      <div
+        id="welcome-modal"
+        class="modal-overlay hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="welcome-title"
+      >
+        <div class="modal">
+          <h2 id="welcome-title">Where do you want to start?</h2>
+          <button id="welcome-import">Import a Nextflow DAG</button>
+          <button id="welcome-new">Start a simple map</button>
+          <button id="welcome-example">Explore examples</button>
+          <button id="welcome-continue">Continue with recovered draft</button>
+        </div>
+      </div>
+
+      <div
+        id="report-modal"
+        class="modal-overlay hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="report-title"
+      >
+        <div class="modal">
+          <h2 id="report-title">Report a bug</h2>
+          <p class="muted small">
+            This opens a pre-filled GitHub issue in a new tab with your current
+            map, options, and description. You review and submit it there (a
+            GitHub account and sign-in are required).
+          </p>
+          <label for="report-text"
+            >What's wrong? <span class="req">required</span></label
+          >
+          <textarea
+            id="report-text"
+            rows="5"
+            placeholder="What did you expect, and what happened instead?"
+          ></textarea>
+          <div class="modal-actions">
+            <button id="report-cancel" class="ghost">Cancel</button>
+            <button id="report-submit" disabled>Open GitHub issue</button>
+          </div>
+        </div>
+      </div>
+
+      <div
+        id="convert-modal"
+        class="modal-overlay hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="convert-title"
+      >
+        <div class="modal">
+          <h2 id="convert-title">Import Nextflow DAG</h2>
+          <p class="muted small">
+            Paste a Nextflow <code>-with-dag</code> Mermaid file to convert it
+            into a starting metro map. Generate one with
+            <code
+              >nextflow run &lt;pipeline&gt; -preview -with-dag dag.mmd</code
+            >
+            — see the
+            <a href="../nextflow/" target="_blank" rel="noopener"
+              >Nextflow import guide</a
+            >.
+          </p>
+          <label for="convert-text">Nextflow DAG Mermaid</label>
+          <textarea
+            id="convert-text"
+            rows="8"
+            placeholder="flowchart TB&#10;    subgraph ..."
+          ></textarea>
+          <div id="convert-error" class="hidden modal-error"></div>
+          <div class="modal-actions">
+            <button id="convert-cancel" class="ghost">Cancel</button>
+            <button id="convert-submit">Convert</button>
+          </div>
+        </div>
+      </div>
+
+      <div
+        id="logo-modal"
+        class="modal-overlay hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="logo-title"
+      >
+        <div class="modal">
+          <h2 id="logo-title">Attach a logo</h2>
+          <p class="muted small">
+            Embeds the image directly into the
+            <code>%%metro logo:</code> directive as inline data, so it travels
+            with the map text. The playground runs entirely in your browser and
+            cannot read a logo file from your computer's disk by path.
+          </p>
+          <label for="logo-file">Image file</label>
+          <input
+            type="file"
+            id="logo-file"
+            accept="image/png,image/svg+xml,image/jpeg,image/gif,image/webp"
+          />
+          <img
+            id="logo-preview"
+            class="logo-preview hidden"
+            alt="Logo preview"
+          />
+          <div id="logo-warn" class="hidden modal-error">
+            This image is large; embedding it will make the map source (and any
+            share link) much bigger. A small logo (under ~50&nbsp;KB) works
+            best.
+          </div>
+          <div id="logo-error" class="hidden modal-error"></div>
+          <div class="modal-actions">
+            <button id="logo-remove" class="ghost">Remove logo</button>
+            <button id="logo-cancel" class="ghost">Cancel</button>
+            <button id="logo-submit" disabled>Use this logo</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/mode/simple.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/hint/show-hint.min.js"></script>
+    <script src="app.js"></script>
+    <script>
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("sw.js").catch(() => {});
+      }
+    </script>
+  </body>
+</html>
