@@ -875,17 +875,20 @@ def _loop_side_endpoints(
 ) -> tuple[Station, Station, float] | None:
     """The on-trunk (source, target, trunk_y) of a clean horizontal loop side.
 
-    A loop side station has exactly one in-edge and one out-edge, both
+    A loop side station has one distinct predecessor and one distinct successor
+    (possibly with several co-travelling line edges between each pair), both
     endpoints on a shared trunk Y, with the station itself off that trunk and
     strictly between the two endpoints (a real horizontal loop, not a U-turn).
     Returns ``None`` for any station that doesn't fit that shape.
     """
     ins = graph.edges_to(sid)
     outs = graph.edges_from(sid)
-    if len(ins) != 1 or len(outs) != 1:
+    source_ids = {edge.source for edge in ins}
+    target_ids = {edge.target for edge in outs}
+    if len(source_ids) != 1 or len(target_ids) != 1:
         return None
-    src = graph.stations.get(ins[0].source)
-    tgt = graph.stations.get(outs[0].target)
+    src = graph.stations.get(next(iter(source_ids)))
+    tgt = graph.stations.get(next(iter(target_ids)))
     if src is None or tgt is None:
         return None
     if abs(src.y - tgt.y) > SAME_COORD_TOLERANCE:
@@ -928,6 +931,39 @@ def _has_off_trunk_sibling(
     return False
 
 
+def _on_trunk_siblings(
+    graph: MetroGraph,
+    section: Section,
+    sid: str,
+    src_id: str,
+    tgt_id: str,
+    trunk_y: float,
+) -> list[str]:
+    """On-trunk stations sharing this station's src and tgt.
+
+    The counterpart to :func:`_has_off_trunk_sibling`: a fan/loop column can
+    include a member that sits ON the trunk row (e.g. the middle branch of an
+    odd-sized fan). It needs the same X as its recentred off-trunk siblings,
+    computed here rather than through a section-wide trunk anchor, which can
+    disagree with this column's own row in a section with more than one
+    internal trunk-like row.
+    """
+    siblings = []
+    for other_sid in section.station_ids:
+        if other_sid == sid:
+            continue
+        other = graph.stations.get(other_sid)
+        if other is None or other.is_port or other.is_hidden:
+            continue
+        if abs(other.y - trunk_y) > SAME_COORD_TOLERANCE:
+            continue
+        other_srcs = {e.source for e in graph.edges_to(other_sid)}
+        other_tgts = {e.target for e in graph.edges_from(other_sid)}
+        if other_srcs == {src_id} and other_tgts == {tgt_id}:
+            siblings.append(other_sid)
+    return siblings
+
+
 def _recenter_section_loop_sides(
     graph: MetroGraph,
     section: Section,
@@ -936,11 +972,20 @@ def _recenter_section_loop_sides(
 ) -> None:
     """Re-centre off-trunk loop side stations on their diagonal midpoint.
 
-    Skips moves below a minimum visual-benefit threshold: an imperceptible
-    re-centre is not worth breaking incidental column alignment with stacked
-    on-trunk co-loopers.
+    Skips moves below a minimum visual-benefit threshold: a small re-centre
+    is not worth breaking incidental column alignment with stacked on-trunk
+    co-loopers, and section-bbox-reactive invariants elsewhere (e.g. shared
+    grid-column edges between row-mate sections) can be sensitive to a
+    nudge of only a few pixels here.
+
+    A station with more than one edge to its predecessor or successor (a
+    multi-line co-travelling branch) was never reachable by this pass before
+    ``_loop_side_endpoints`` started tolerating that shape, so main never
+    exercised any position for it -- a lower threshold here is new ground,
+    not a change to an existing, already-validated one. A single-edge
+    station was already reachable, so it keeps the original threshold to
+    avoid perturbing placements main already settled on.
     """
-    min_recenter_delta = DIAGONAL_RUN / 3.0
     port_ids = section.port_ids
     for sid in section.station_ids:
         if sid in port_ids:
@@ -963,9 +1008,13 @@ def _recenter_section_loop_sides(
             min(corner_left, corner_right) <= midpoint <= max(corner_left, corner_right)
         ):
             continue
+        is_multiline = len(graph.edges_to(sid)) > 1 or len(graph.edges_from(sid)) > 1
+        min_recenter_delta = DIAGONAL_RUN / 4.0 if is_multiline else DIAGONAL_RUN / 3.0
         if abs(midpoint - st.x) < min_recenter_delta:
             continue
         st.x = midpoint
+        for mate_id in _on_trunk_siblings(graph, section, sid, src.id, tgt.id, trunk_y):
+            graph.stations[mate_id].x = midpoint
 
 
 def _loop_column_key(
@@ -1049,10 +1098,11 @@ def _snap_column_to_anchors(
     """Snap a loop column's movers to the mean X of its clean anchors.
 
     Anchors are the off-trunk siblings pass 1 already placed at the loop
-    midpoint (restricted to the same single-in/single-out filter). Movers are
-    the trunk-row station plus any off-trunk column-mate whose extra edge (e.g.
-    an exit-port feed alongside the trunk rejoin) disqualified it from pass 1
-    yet which belongs to the column.
+    midpoint (restricted to the same single-predecessor/single-successor
+    filter as pass 1, which tolerates several co-travelling line edges
+    between each pair). Movers are the trunk-row station plus any off-trunk
+    column-mate whose extra edge (e.g. an exit-port feed alongside the trunk
+    rejoin) disqualified it from pass 1 yet which belongs to the column.
     """
     movers: list[str] = []
     anchor_xs: list[float] = []
@@ -1073,7 +1123,9 @@ def _snap_column_to_anchors(
             if not graph.station_for_edge_target(e).is_hidden
             or is_converge_junction(e.target)
         ]
-        if len(ins) == 1 and len(outs) == 1:
+        source_ids = {e.source for e in ins}
+        target_ids = {e.target for e in outs}
+        if len(source_ids) == 1 and len(target_ids) == 1:
             anchor_xs.append(st.x)
         else:
             movers.append(sid)
