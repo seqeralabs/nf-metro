@@ -8,7 +8,9 @@ import pytest
 
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.mermaid import parse_metro_mermaid, parse_metro_mermaid_file
+
+EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
 
 FIXTURE = (
     Path(__file__).parent
@@ -62,3 +64,41 @@ def test_fan_branch_station_centered_between_diagonal_bends(
         f"{station_id} x={station.x:.2f} should sit at midpoint {midpoint:.2f} "
         f"between bends x={incoming_bend[0]:.2f} and x={outgoing_bend[0]:.2f}"
     )
+
+
+@pytest.mark.parametrize(
+    ("fixture", "station_ids"),
+    [
+        (
+            EXAMPLES_DIR / "riboseq_metro.mmd",
+            ["sortmerna", "ribodetector", "bowtie2_rrna"],
+        ),
+        (
+            EXAMPLES_DIR / "topologies" / "funcprofiler_upstream.mmd",
+            [
+                "humann3",
+                "humann4",
+                "fmhfunprofiler",
+                "RGI",
+                "mifaser",
+                "diamond",
+                "eggnog_mapper",
+            ],
+        ),
+    ],
+    ids=["riboseq_metro", "funcprofiler_upstream"],
+)
+def test_multiline_loop_column_mates_share_x(fixture: Path, station_ids: list[str]):
+    """A multi-line loop column's on-trunk and off-trunk stations share an X.
+
+    ``sortmerna``/``ribodetector``/``bowtie2_rrna`` fan out from ``bbsplit``
+    on three co-travelling lines and rejoin at ``fastqc``; ``humann3`` and its
+    six siblings do the same off ``merge``/``multiqc``. The on-trunk member of
+    each column must land at the same X as its recentred off-trunk siblings.
+    """
+    graph = parse_metro_mermaid_file(fixture)
+    graph.source_dir = str(fixture.parent)
+    compute_layout(graph)
+
+    xs = {sid: graph.stations[sid].x for sid in station_ids}
+    assert len(set(round(x, 2) for x in xs.values())) == 1, xs
