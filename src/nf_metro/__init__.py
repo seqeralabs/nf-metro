@@ -10,7 +10,7 @@ from nf_metro.api import (
 )
 from nf_metro.errors import EmptyGraphError, NfMetroError, UnknownInactiveLineError
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 
 __all__ = [
     "__version__",

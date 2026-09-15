@@ -15,6 +15,8 @@ history.
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-09-15
+
 ### Added
 
 - `nf-metro render` writes PNG directly. A `.png` output path selects it, or pass
@@ -43,6 +45,16 @@ history.
 - `av` (PyAV) joins the runtime dependencies, for the looping video formats.
   It ships FFmpeg in its own wheels, so an MP4 or WebM export needs nothing
   installed or found on `PATH`.
+
+### Fixed
+
+- A long tail of routing and layout fixes: fan-branch loop-side stations now
+  recenter correctly for multi-line edges, convergence landings record their
+  real cross-run start, exit-turn and perp-entry feeder ordering, bottom-entry
+  fan mirroring, single-word section headers no longer abort the render, bundle
+  corner-radius derivation is unified across concentric fans, and flat
+  (sectionless) graphs get an implicit section so skip-line bypass detours
+  resolve.
 
 ---
 
