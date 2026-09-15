@@ -7,7 +7,6 @@ from collections import defaultdict
 from nf_metro.layout.constants import (
     COORD_GROUP_DIGITS_COARSE,
     COORD_GROUP_DIGITS_FINE,
-    DIAGONAL_RUN,
     SAME_COORD_TOLERANCE,
     SECTION_Y_PADDING,
 )
@@ -875,17 +874,20 @@ def _loop_side_endpoints(
 ) -> tuple[Station, Station, float] | None:
     """The on-trunk (source, target, trunk_y) of a clean horizontal loop side.
 
-    A loop side station has exactly one in-edge and one out-edge, both
+    A loop side station has one distinct predecessor and one distinct successor
+    (possibly with several co-travelling line edges between each pair), both
     endpoints on a shared trunk Y, with the station itself off that trunk and
     strictly between the two endpoints (a real horizontal loop, not a U-turn).
     Returns ``None`` for any station that doesn't fit that shape.
     """
     ins = graph.edges_to(sid)
     outs = graph.edges_from(sid)
-    if len(ins) != 1 or len(outs) != 1:
+    source_ids = {edge.source for edge in ins}
+    target_ids = {edge.target for edge in outs}
+    if len(source_ids) != 1 or len(target_ids) != 1:
         return None
-    src = graph.stations.get(ins[0].source)
-    tgt = graph.stations.get(outs[0].target)
+    src = graph.stations.get(next(iter(source_ids)))
+    tgt = graph.stations.get(next(iter(target_ids)))
     if src is None or tgt is None:
         return None
     if abs(src.y - tgt.y) > SAME_COORD_TOLERANCE:
@@ -936,11 +938,10 @@ def _recenter_section_loop_sides(
 ) -> None:
     """Re-centre off-trunk loop side stations on their diagonal midpoint.
 
-    Skips moves below a minimum visual-benefit threshold: an imperceptible
-    re-centre is not worth breaking incidental column alignment with stacked
-    on-trunk co-loopers.
+    Skips only imperceptible sub-pixel moves; genuine off-centre loop
+    stations should be re-seated on the computed midpoint.
     """
-    min_recenter_delta = DIAGONAL_RUN / 3.0
+    min_recenter_delta = SAME_COORD_TOLERANCE
     port_ids = section.port_ids
     for sid in section.station_ids:
         if sid in port_ids:
