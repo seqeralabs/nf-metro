@@ -81,6 +81,7 @@ from nf_metro.layout.pass_metrics import font_scale_context
 from nf_metro.layout.phases._common import (
     _is_side_entered_vertical_section,
     _row_contiguous_column_groups,
+    _section_trunk_y,
     continuation_track_predecessors,
     flow_axis_exit_ports,
     flow_exit_carrier_anchor,
@@ -124,7 +125,11 @@ from nf_metro.layout.phases.ports import (
     _reconcile_flow_exit_carrier_anchors,
     _set_port_y,
 )
-from nf_metro.layout.phases.row_align import _packed_row_header_groups
+from nf_metro.layout.phases.row_align import (
+    _carriers_share_one_trunk,
+    _packed_row_header_groups,
+    _row_trunk_alignment,
+)
 from nf_metro.layout.routing import (
     OffsetRegime,
     compute_station_offsets,
@@ -1549,6 +1554,447 @@ def test_shared_cell_fork_continuing_branch_holds_trunk():
         f"coverage dead-end q_split y={q_split:.1f} did not peel off trunk "
         f"y={quant_entry:.1f}"
     )
+
+
+@pytest.mark.parametrize(
+    ("fixture", "upstream", "straddler"),
+    [
+        (
+            "curve_invariant_repros/inter_row_corridor_overflow.mmd",
+            "intake",
+            "primary",
+        ),
+        ("regressions/riboseq_row_trunk_subrun.mmd", "preprocessing", "alignment"),
+    ],
+)
+def test_row_trunk_subrun_holds_one_lane_past_a_differing_row_mate(
+    fixture, upstream, straddler
+):
+    """A section caught between two lanes settles on the one its row uses.
+
+    Both maps pack three sections into grid cell 0,0: a deep-trunked source, a
+    shallow chain, and a third that carries only part of the bundle.  The chain
+    takes the row's lane at its right boundary and its own content's at its
+    left, so the bundle drops into it and climbs straight back out -- and that
+    one differing row-mate must not cost the matching pair their common trunk
+    (issue #1772).
+    """
+    graph = _layout(fixture)
+
+    lane = {
+        "upstream exit": _sole_port_y(graph, graph.sections[upstream].exit_ports),
+        "entry": _sole_port_y(graph, graph.sections[straddler].entry_ports),
+        "exit": _sole_port_y(graph, graph.sections[straddler].exit_ports),
+    }
+    spread = max(lane.values()) - min(lane.values())
+    assert spread <= _Y_TOL, (
+        f"{fixture}: the row bundle steps by {spread:.1f}px across {straddler}: "
+        f"{ {k: round(v, 1) for k, v in lane.items()} }"
+    )
+    trunk = _section_trunk_y(graph, graph.sections[straddler])
+    assert trunk is not None and abs(trunk - lane["entry"]) <= _Y_TOL, (
+        f"{fixture}: {straddler}'s content sits at {trunk} while its boundary "
+        f"lane runs at {lane['entry']}"
+    )
+
+
+def test_discovery_output_spur_peels_below_a_trunk_continuation():
+    """A trunk station forking an output keeps its through-station on the trunk.
+
+    In ``inter_row_corridor_overflow`` the ``discovery`` section's ``step_c3``
+    forks into ``step_c4`` -- the through-continuation that carries the whole
+    bundle out to the next row -- and ``out_ref``, a dead-end file.  The
+    continuation must ride the row trunk (level with ``intake`` and ``primary``,
+    no kink at either section boundary) while the output peels off it; and since
+    the trunk descends to the row below past ``discovery``, the output peels
+    *downward*, matching ``primary``'s ``out_track`` rather than lifting against
+    the descent (issue #1772).
+    """
+    graph = _layout("curve_invariant_repros/inter_row_corridor_overflow.mmd")
+
+    row_trunk = _sole_port_y(graph, graph.sections["intake"].exit_ports)
+    c3 = graph.stations["step_c3"].y
+    c4 = graph.stations["step_c4"].y
+    assert abs(c3 - row_trunk) <= _Y_TOL, (
+        f"step_c3 y={c3:.1f} off the row trunk y={row_trunk:.1f}"
+    )
+    assert abs(c4 - row_trunk) <= _Y_TOL, (
+        f"through-continuation step_c4 y={c4:.1f} off the row trunk "
+        f"y={row_trunk:.1f}; it must not be stranded off the lane it carries out"
+    )
+
+    out_ref = graph.stations["out_ref"].y
+    assert out_ref - row_trunk > _Y_TOL, (
+        f"out_ref y={out_ref:.1f} did not peel below the trunk y={row_trunk:.1f}"
+    )
+    # Symmetric with the peer section's already-correct output.
+    out_track = graph.stations["out_track"].y
+    assert abs(out_ref - out_track) <= _Y_TOL, (
+        f"out_ref y={out_ref:.1f} peels to a different lane than the peer "
+        f"section's out_track y={out_track:.1f}"
+    )
+
+
+def test_below_peeled_output_reserves_its_downward_lead_in():
+    """A trunk-fork output dropped below keeps a horizontal lead-in to its icon.
+
+    ``discovery``'s ``out_ref`` forks off ``step_c3``, which stays on the trunk,
+    and the #1772 peel drops it below.  Its horizontal run from the producer must
+    clear the producer's label (the downward lead) before the diagonal, so the
+    spur reads as lead-in / diagonal / tail -- matching ``primary``'s
+    ``out_track`` -- rather than collapsing into a near-vertical drop with no
+    lead-in.  The X-spacing pass reserves this by anticipating the peel
+    structurally: a same-row peer (``primary``) already peels an output below.
+    """
+    from nf_metro.layout.constants import DIAGONAL_RUN, OFF_TRACK_OUTPUT_TAIL
+    from nf_metro.layout.phases.off_track import _off_track_output_lead
+
+    graph = _layout("curve_invariant_repros/inter_row_corridor_overflow.mmd")
+    c3 = graph.stations["step_c3"]
+    out_ref = graph.stations["out_ref"]
+    trunk = _sole_port_y(graph, graph.sections["intake"].exit_ports)
+    assert out_ref.y - trunk > _Y_TOL, "out_ref must peel below the trunk"
+    required = (
+        _off_track_output_lead(c3, is_downward=True)
+        + DIAGONAL_RUN
+        + OFF_TRACK_OUTPUT_TAIL
+    )
+    assert out_ref.x - c3.x >= required - _Y_TOL, (
+        f"out_ref reserves only {out_ref.x - c3.x:.1f}px from step_c3, short of "
+        f"the {required:.1f}px its downward label-clearance lead-in needs"
+    )
+
+
+def _shift_section(graph: MetroGraph, section_id: str, delta: float) -> None:
+    """Move every station and port of one section by *delta* on Y."""
+    section = graph.sections[section_id]
+    for sid in section.station_ids:
+        st = graph.stations.get(sid)
+        if st is not None:
+            st.y += delta
+        port = graph.ports.get(sid)
+        if port is not None:
+            port.y += delta
+
+
+_DEEPEST_WINS_ROW = """%%metro line: x | X | #e6007e
+%%metro line: y | Y | #2db572
+%%metro grid: s1, s2, s3, s4 | 0,0
+graph LR
+  subgraph s1 [S1]
+{dir}    a1[A1]
+    a1 -->|x,y| a2[A2]
+  end
+  subgraph s2 [S2]
+{dir}    b1[B1]
+    b1 -->|x,y| b2[B2]
+  end
+  subgraph s3 [S3]
+{dir}    c1[C1]
+    c1 -->|x,y| c2[C2]
+  end
+  subgraph s4 [S4]
+{dir}    d1[D1]
+    d1 -->|x| d2[D2]
+  end
+  a2 -->|x,y| b1
+  b2 -->|x,y| c1
+  c2 -->|x| d1
+"""
+
+
+@pytest.mark.parametrize("flow", ["LR", "RL"])
+def test_row_trunk_levels_to_deepest_carrier_regardless_of_position(flow):
+    """The row trunk target is the deepest carrier's lane, whichever section it is.
+
+    A row of three full-bundle carriers (``s1``-``s3``) plus a partial (``s4``)
+    is perturbed so the *middle* carrier ``s2`` sits deepest and ``s3`` between:
+    the target must be ``s2``'s lane, not the first carrier's or the shallowest.
+    Run under both LR and per-section RL so the levelling is shown
+    flow-direction-agnostic -- it keys off LEFT/RIGHT ports and trunk Ys, which
+    both flows share.
+    """
+    directive = "    %%metro direction: RL\n" if flow == "RL" else ""
+    graph = parse_metro_mermaid(_DEEPEST_WINS_ROW.format(dir=directive))
+    compute_layout(graph)
+    if flow == "RL":
+        assert all(
+            graph.sections[s].direction == "RL" for s in ("s1", "s2", "s3", "s4")
+        ), "fixture precondition lost: sections are not RL"
+
+    _shift_section(graph, "s2", 120.0)
+    _shift_section(graph, "s3", 60.0)
+    group = [graph.sections[s] for s in ("s1", "s2", "s3", "s4")]
+
+    trunks = {s.id: _section_trunk_y(graph, s) for s in group}
+    carrier_ys = [trunks[c] for c in ("s1", "s2", "s3")]
+    alignment = _row_trunk_alignment(graph, group)
+    assert alignment is not None, f"{flow}: three contiguous carriers went unaligned"
+    target = alignment[0]
+    assert abs(target - max(carrier_ys)) <= _Y_TOL, (
+        f"{flow}: target {target:.1f} is not the deepest carrier lane "
+        f"{max(carrier_ys):.1f} (carrier lanes {[round(y, 1) for y in carrier_ys]})"
+    )
+    assert abs(target - trunks["s2"]) <= _Y_TOL, (
+        f"{flow}: deepest carrier is s2 at {trunks['s2']:.1f} but target is "
+        f"{target:.1f}"
+    )
+
+
+def test_row_trunk_alignment_declines_carriers_split_by_a_bypass():
+    """Carriers with a non-carrier between them are not force-levelled.
+
+    In ``variant_calling`` the ``qc`` line bypasses the middle sections, so the
+    two full-bundle carriers (``preprocess`` and ``reporting``) sit at either end
+    of the row with partials between them and ride independent lanes.  Levelling
+    them would drag a middle section off its own hand-over, so the row-trunk pass
+    must decline the run when the carriers do not form one unbroken bundle.
+    """
+    graph = _layout_example("variant_calling.mmd")
+    group = [
+        graph.sections[s]
+        for s in ("preprocess", "alignment", "variant_calling", "reporting")
+    ]
+    assert _row_trunk_alignment(graph, group) is None
+
+
+def test_carriers_share_one_trunk_requires_an_unbroken_run():
+    """The contiguity test is order-free and rejects a non-carrier in the gap."""
+    order = ["s1", "s2", "s3", "s4"]
+    group = [Section(id=sid, name=sid) for sid in order]
+
+    assert _carriers_share_one_trunk(group, {"s1", "s2", "s3"})
+    assert _carriers_share_one_trunk(group, {"s2", "s3"})
+    # Order of the carrier set does not matter.
+    assert _carriers_share_one_trunk(group, {"s3", "s1", "s2"})
+    # A non-carrier (s2) between two carriers breaks the run.
+    assert not _carriers_share_one_trunk(group, {"s1", "s3"})
+    assert not _carriers_share_one_trunk(group, {"s1", "s4"})
+
+
+def test_output_spur_peel_ignores_a_plain_terminal_branch():
+    """A plain terminal branch (no file output) is not peeled as an output spur.
+
+    ``split_output_spur_fan``'s ``include_leaf_outputs`` path recognises a
+    file-output leaf forked off a trunk-riding predecessor, but a leaf that
+    merely ends a line with no ``%%metro file:`` icon is not an output:
+    ``is_terminus`` is false, so it yields no split and stays with the ordinary
+    fan rather than being pulled into the #1772 trunk-fork peel.
+    """
+    import networkx as nx
+
+    from nf_metro.layout.ordering import split_output_spur_fan
+    from nf_metro.parser.model import MetroGraph
+
+    G = nx.DiGraph()
+    G.add_edge("P", "M")
+    G.add_edge("P", "L")
+    exit_reaching = frozenset({"P", "M"})
+
+    graph = MetroGraph()
+    graph.stations["P"] = Station(id="P", label="P")
+    graph.stations["M"] = Station(id="M", label="M")
+    graph.stations["L"] = Station(id="L", label="L")
+    assert not graph.stations["L"].is_terminus
+    assert (
+        split_output_spur_fan(
+            ["M", "L"], exit_reaching, G, graph, include_leaf_outputs=True
+        )
+        is None
+    )
+
+    graph.stations["L"] = Station(id="L", label="", terminus_labels=["VCF"])
+    assert graph.stations["L"].is_terminus
+    assert split_output_spur_fan(
+        ["M", "L"], exit_reaching, G, graph, include_leaf_outputs=True
+    ) == (["M"], ["L"])
+
+
+_TRUNK_FORK_ROW_PEER = """%%metro line: x | X | #e6007e
+%%metro file: a_out | AOUT | A output
+%%metro file: b_out | BOUT | B output
+%%metro off_track: a_out
+%%metro off_track: b_out
+%%metro grid: secA, secB, secC | 0,0
+graph LR
+  subgraph secA [SecA]
+    a0[A0]
+    a1[A1]
+    a2[A2]
+    a0 -->|x| a1
+    a1 -->|x| a2
+    a1 -->|x| a_out
+  end
+  subgraph secB [SecB]
+{secB}
+  end
+  subgraph secC [SecC]
+    c1[C1]
+  end
+  a2 -->|x| b0
+  b1 -->|x| c1
+"""
+
+_SECB_RELAY_BELOW = """    b0[B0]
+    b1[B1]
+    b2[Relay]
+    b0 -->|x| b1
+    b1 -->|x| b2
+    b2 -->|x| b_out"""
+
+_SECB_NO_BELOW = """    b0[B0]
+    b1[B1]
+    b0 -->|x| b1
+    b1 -->|x| b_out"""
+
+
+def test_trunk_fork_output_direction_is_peer_driven_and_sound():
+    """A trunk-fork output drops to match a same-row below-peer, and only then.
+
+    ``secA``'s ``a_out`` forks off ``a1``, which stays on the trunk (``a1`` ->
+    ``a2`` continues to the exit), so which side the output peels to is otherwise
+    free.  When a *different* section in its row (``secB``) already peels an
+    output below the trunk from an unrelated relay shape, ``a_out`` joins it and
+    the layout stays valid; with no such peer the default lift keeps ``a_out``
+    above.  So the direction follows a real row-peer signal (and the off-track
+    lift settles clearance), rather than being inherited blindly (#1772).
+    """
+    with_peer = parse_metro_mermaid(_TRUNK_FORK_ROW_PEER.format(secB=_SECB_RELAY_BELOW))
+    compute_layout(with_peer, validate=True)
+    trunk = with_peer.stations["a1"].y
+    assert with_peer.stations["b_out"].y - trunk > _Y_TOL
+    assert with_peer.stations["a_out"].y - trunk > _Y_TOL
+
+    no_peer = parse_metro_mermaid(_TRUNK_FORK_ROW_PEER.format(secB=_SECB_NO_BELOW))
+    compute_layout(no_peer, validate=True)
+    trunk = no_peer.stations["a1"].y
+    assert no_peer.stations["a_out"].y - trunk < -_Y_TOL
+
+
+_EQUAL_DEPTH_BYPASS_ROW = """%%metro line: x | X | #e6007e
+%%metro line: y | Y | #2db572
+%%metro grid: s1, s2, s3 | 0,0
+graph LR
+  subgraph s1 [S1]
+    p1[P1]
+    p1 -->|x,y| q1[Q1]
+  end
+  subgraph s2 [S2]
+    p2[P2]
+    p2 -->|x| q2[Q2]
+  end
+  subgraph s3 [S3]
+    p3[P3]
+    p3 -->|x,y| q3[Q3]
+  end
+  q1 -->|x| p2
+  q1 -->|y| p3
+  q2 -->|x| p3
+"""
+
+
+def test_equal_depth_carriers_across_a_bypass_still_align_their_partial():
+    """Carriers separated by a bypass but already level share their trunk.
+
+    Line ``y`` skips ``s2`` (running ``s1`` -> ``s3`` directly), so ``s2`` carries
+    only ``x`` and the two full-bundle carriers ``s1``/``s3`` are non-contiguous.
+    The contiguity guard blocks levelling only when the carriers *disagree* on Y;
+    once they already agree, no carrier is dragged, the shared trunk is their
+    common Y, and the ``x``-carrying partial rides level onto it.
+    """
+    from nf_metro.layout.phases._common import _row_through_and_carrier_lines
+
+    graph = parse_metro_mermaid(_EQUAL_DEPTH_BYPASS_ROW)
+    compute_layout(graph)
+    group = [graph.sections[s] for s in ("s1", "s2", "s3")]
+    through, carrier_lines = _row_through_and_carrier_lines(graph, group)
+    carriers = {s.id for s in group if set(through[s.id]) == carrier_lines}
+    assert carriers == {"s1", "s3"}
+    assert not _carriers_share_one_trunk(group, carriers)
+    carrier_ys = {
+        round(_section_trunk_y(graph, graph.sections[c]), 1) for c in carriers
+    }
+    assert len(carrier_ys) == 1
+    alignment = _row_trunk_alignment(graph, group)
+    assert alignment is not None and abs(alignment[0] - carrier_ys.pop()) <= _Y_TOL
+
+
+def test_row_trunk_alignment_is_inert_on_an_interior_through_set_break(monkeypatch):
+    """No section moves when every row-neighbour pair carries different lines.
+
+    ``row_trunk_interior_break`` alternates its sections' through-lines along
+    one row ({main, qc}, {main}, {main, qc}, ...), so no two neighbours share a
+    trunk that could cross both.  Aligning any pair here would drag a section
+    down to a Y no bundle crosses, so the row-trunk pass owes this row nothing:
+    it must leave every station where it found it.
+    """
+    from nf_metro.layout import engine
+
+    path = _resolve_fixture("regressions/row_trunk_interior_break.mmd")
+    graph = parse_metro_mermaid(path.read_text())
+    graph.center_ports = False
+
+    real = engine._align_row_trunk_ys
+    calls = 0
+    moved: list[tuple[str, float, float]] = []
+
+    def spy(g: MetroGraph) -> None:
+        nonlocal calls
+        calls += 1
+        before = {sid: st.y for sid, st in g.stations.items()}
+        real(g)
+        moved.extend(
+            (sid, before[sid], st.y)
+            for sid, st in g.stations.items()
+            if abs(st.y - before[sid]) > SAME_COORD_TOLERANCE
+        )
+
+    monkeypatch.setattr(engine, "_align_row_trunk_ys", spy)
+    compute_layout(graph, validate=True)
+
+    assert calls, "the row-trunk pass never ran; this fixture guards nothing"
+    trunks = sorted(
+        {
+            round(_section_trunk_y(graph, sec) or 0.0, 1)
+            for sec in graph.sections.values()
+        }
+    )
+    assert len(trunks) > 1, (
+        f"fixture precondition lost: the row's trunks already agree at {trunks}"
+    )
+    sample = [(sid, round(a, 1), round(b, 1)) for sid, a, b in moved[:3]]
+    assert not moved, (
+        f"row-trunk alignment moved {len(moved)} station(s) on a row whose "
+        f"neighbours share no through-lines: {sample}"
+    )
+
+
+def test_riboseq_row_bundle_reaches_alignment_without_a_dogleg():
+    """Each nf-core/riboseq row-0 line runs straight into ``alignment``.
+
+    The port lanes agreeing is what the routed seam needs, and this is the map
+    where a reader sees it: three lines leave ``preprocessing`` together, and a
+    trunk 58.4px off the row's turns each of them into a two-corner detour
+    through the boundary gap.
+
+    The map carries a pre-existing carrier-row defect in its second row
+    (``psite_id``'s exit port), unrelated to the seam, so it lays out
+    unvalidated: the lock here is the row-0 routing, not the map's guard status.
+    """
+    graph = _layout("regressions/riboseq_row_trunk_subrun.mmd")
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    seam = [
+        apply_route_offsets(route, offsets)
+        for route in routes
+        if route.edge.source == "preprocessing__exit_right_0"
+        and route.edge.target == "alignment__entry_left_6"
+    ]
+    assert len(seam) == 3, f"expected the three-line seam, routed {len(seam)}"
+    for pts in seam:
+        assert len(pts) == 2 and abs(pts[0][1] - pts[-1][1]) <= _Y_TOL, (
+            f"the preprocessing -> alignment seam detours: {pts}"
+        )
 
 
 @lru_cache(maxsize=None)

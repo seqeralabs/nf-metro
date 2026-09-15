@@ -216,6 +216,7 @@
     "topologies/convergence_sink_above.mmd",
     "topologies/dogleg_exempt_distinct.mmd",
     "topologies/exit_corner_offset_dogleg.mmd",
+    "topologies/exit_lane_rise_bundle_order.mmd",
     "topologies/fold_fan_across.mmd",
     "topologies/fold_stacked_branch.mmd",
     "topologies/merge_offrow_continuation.mmd",

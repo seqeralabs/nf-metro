@@ -1,0 +1,44 @@
+%%metro title: Row trunk interior break
+%%metro line: main | Main | #2db572
+%%metro line: qc | QC | #0570b0
+
+graph LR
+    subgraph sec_a [Ingest]
+        a_qc[QC sample]
+        a_out[Ingest]
+    end
+
+    subgraph sec_b [Trimming]
+        b_one[Trim]
+        b_two[Sort]
+        b_three[Index]
+        b_one -->|main| b_two
+        b_two -->|main| b_three
+    end
+
+    subgraph sec_c [Calling]
+        c_left[Caller one]
+        c_right[Caller two]
+        c_join[Merge]
+        c_left -->|main| c_join
+        c_right -->|main| c_join
+    end
+
+    subgraph sec_d [Annotation]
+        d_one[Annotate]
+        d_two[Filter]
+        d_one -->|main| d_two
+    end
+
+    subgraph sec_e [Reporting]
+        e_one[Report]
+    end
+
+    a_out -->|main| b_one
+    b_three -->|main| c_left
+    b_three -->|main| c_right
+    c_join -->|main| d_one
+    d_two -->|main| e_one
+    a_qc -->|qc| c_left
+    a_out -->|qc| c_left
+    c_join -->|qc| e_one

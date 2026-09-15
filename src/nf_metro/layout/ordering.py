@@ -769,6 +769,16 @@ def _phantom_trunk_node(nodes: list[str], graph: MetroGraph | None) -> str | Non
     return None
 
 
+def _is_output_node(node: str, graph: MetroGraph) -> bool:
+    """Whether *node* is a file-icon terminus or an off-track output station.
+
+    A file-icon leaf is only flagged ``off_track`` on the engine's re-run pass;
+    on the first pass it reads as a terminus, so both are treated as outputs.
+    """
+    st = graph.stations.get(node)
+    return st is not None and (st.off_track or st.is_terminus)
+
+
 def _leads_only_to_off_track_output(
     node: str, G: nx.DiGraph[str], graph: MetroGraph
 ) -> bool:
@@ -781,10 +791,6 @@ def _leads_only_to_off_track_output(
     trunk rather than take it.  A node with no descendants (a plain terminal
     marker) or with any on-track continuation is not a spur.
 
-    A file-icon leaf is only flagged ``off_track`` on the engine's re-run pass;
-    on the first pass it reads as a terminus, so both are treated as outputs
-    here to catch the spur before any crossing forces that re-run.
-
     Under ``diamond_style: straight`` a multi-hop dead-end chain (relay stations
     feeding an output, e.g. ``split -> depth -> coverage``) also counts: only the
     chain's sinks must be outputs, the on-track relays between are part of the
@@ -796,14 +802,31 @@ def _leads_only_to_off_track_output(
     if not descendants:
         return False
 
-    def _is_output(d: str) -> bool:
-        st = graph.stations.get(d)
-        return st is not None and (st.off_track or st.is_terminus)
-
     if graph.diamond_style == "straight":
         sinks = [d for d in descendants if G.out_degree(d) == 0]
-        return bool(sinks) and all(_is_output(d) for d in sinks)
-    return all(_is_output(d) for d in descendants)
+        return bool(sinks) and all(_is_output_node(d, graph) for d in sinks)
+    return all(_is_output_node(d, graph) for d in descendants)
+
+
+def _shared_trunk_pred(
+    nodes: list[str],
+    preds_by_node: dict[str, list[str]],
+    exit_reaching: frozenset[str],
+) -> str | None:
+    """Return the fork's sole trunk-riding predecessor, if it has one.
+
+    A fork contests the section trunk when every member is fed from the same
+    single predecessor and that predecessor reaches a section exit -- so it
+    carries the trunk into the fork.  Returns that predecessor, or ``None``
+    when the members have differing or multiple predecessors, or the shared
+    one does not reach an exit.  Predecessor membership is compared as a set, so
+    ordering in *preds_by_node* does not matter.
+    """
+    first = set(preds_by_node[nodes[0]])
+    if len(first) != 1 or any(set(preds_by_node[n]) != first for n in nodes[1:]):
+        return None
+    pred = next(iter(first))
+    return pred if pred in exit_reaching else None
 
 
 def split_output_spur_fan(
@@ -811,8 +834,10 @@ def split_output_spur_fan(
     exit_reaching: frozenset[str],
     G: nx.DiGraph[str],
     graph: MetroGraph,
+    *,
+    include_leaf_outputs: bool = False,
 ) -> tuple[list[str], list[str]] | None:
-    """Split a root fan into through-chain mains and off-track output spurs.
+    """Split a fan into through-chain mains and off-track output spurs.
 
     Returns ``(mains, spurs)`` when every candidate is either a through-line
     reaching a section exit or a short spur dead-ending at an off-track output,
@@ -820,13 +845,22 @@ def split_output_spur_fan(
     to the mains so the through-chain rides it and the spurs peel off; a fan
     with no genuine through-line (every branch ends in an output file) has no
     trunk to award and yields ``None``.
+
+    With *include_leaf_outputs*, a candidate that is itself an output leaf (a
+    file terminus with no descendants, not merely one relaying to such a leaf)
+    also counts as a spur, so a fork forking straight into an output file is
+    recognised alongside one forking into a relay chain that ends in output.
     """
+
+    def _is_spur(node: str) -> bool:
+        if node in exit_reaching:
+            return False
+        if include_leaf_outputs and G.out_degree(node) == 0:
+            return _is_output_node(node, graph)
+        return _leads_only_to_off_track_output(node, G, graph)
+
     mains = [node for node in candidates if node in exit_reaching]
-    spurs = [
-        node
-        for node in candidates
-        if node not in exit_reaching and _leads_only_to_off_track_output(node, G, graph)
-    ]
+    spurs = [node for node in candidates if _is_spur(node)]
     if mains and spurs and len(mains) + len(spurs) == len(candidates):
         return mains, spurs
     return None
@@ -891,9 +925,11 @@ def _place_fan_out(
     # Predecessor-snapping: when each node has exactly one predecessor
     # at a distinct track, snap to the predecessor's track so single-line
     # connections stay horizontal instead of slanting.
+    preds_by_node = {node: list(G.predecessors(node)) for node in nodes}
+
     pred_snap: dict[str, float] = {}
     for node in nodes:
-        preds = list(G.predecessors(node))
+        preds = preds_by_node[node]
         if len(preds) == 1 and preds[0] in tracks:
             pred_snap[node] = tracks[preds[0]]
     if len(pred_snap) == n and len(set(pred_snap.values())) == n:
@@ -967,6 +1003,59 @@ def _place_fan_out(
             for i, node in enumerate(spurs, 1):
                 tracks[node] = bottom + i * fan_spacing
             return
+
+    # Trunk-riding output-spur peel: a fork of a single trunk-riding
+    # predecessor (one reaching a section exit) into exactly one continuing
+    # through-station and one or more dead-end output spurs contests the trunk
+    # just as the root fan above contests the section entry.  A default fan
+    # splits the pair symmetrically and a later phase snaps the output terminus
+    # back onto the trunk, leaving the through-station stranded off it; pin the
+    # through-station to the trunk instead and peel the spur(s) off, so the
+    # same-line exit route holds the trunk straight through its own station.
+    # A member forking straight into an output file counts as a spur, not only
+    # one relaying to one.
+    #
+    # Restricted to a lone real through-station carrying the predecessor's whole
+    # line bundle: two or more through-branches already straddle the trunk
+    # cleanly under the default fan; a hidden bypass phantom is not the visible
+    # through-line; and a through-branch on a subset of the bundle is a branch
+    # peeling off, not the trunk -- in each case the output terminus is the
+    # trunk's natural continuation and must keep it.
+    #
+    # The spur peels above the trunk, the side the default fan already spreads
+    # the through-station toward, so pinning it to the trunk leaves the
+    # section's vertical extent where the unpinned fan would have put it rather
+    # than opening a fresh lane below.  Its final off-trunk position is settled
+    # by the off-track lift.
+    if graph is not None and pred_avgs:
+        trunk_pred = _shared_trunk_pred(nodes, preds_by_node, exit_reaching)
+        if trunk_pred is not None and trunk_pred in tracks:
+            split = split_output_spur_fan(
+                nodes, exit_reaching, G, graph, include_leaf_outputs=True
+            )
+            # Only direct output leaves are peeled here.  The stranding this
+            # corrects happens when an output terminus snaps back onto the trunk;
+            # a spur that relays on to its output (a chain, not a leaf) does not
+            # snap, and pinning its through-station instead disturbs bundle
+            # geometry a later routing pass depends on.
+            if (
+                split is not None
+                and len(split[0]) == 1
+                and all(G.out_degree(spur) == 0 for spur in split[1])
+            ):
+                main = split[0][0]
+                main_station = graph.stations.get(main)
+                if (
+                    main_station is not None
+                    and not main_station.is_hidden
+                    and set(graph.station_lines(main))
+                    == set(graph.station_lines(trunk_pred))
+                ):
+                    trunk = tracks[trunk_pred]
+                    tracks[main] = trunk
+                    for i, node in enumerate(split[1], 1):
+                        tracks[node] = trunk - i * line_gap
+                    return
 
     # Trunk-anchored placement: when one node carries a strict superset
     # of every sibling's line set, it's the bundle trunk.  Pin it at
