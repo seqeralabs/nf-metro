@@ -216,7 +216,8 @@ This may expand bboxes.</li>
 <li><strong>Stages 4.6 to 4.7</strong>: Recompute grid-group bboxes, then re-run row top-align after the Stage 4.5 expansions.</li>
 <li><strong>Stage 4.8</strong>: Align trunk Ys across same-row sections.
 Shifts shallower sections’ content down so the inter-section bundle passes through at a single Y per row, then restores carrier-owned exits to their internal row while leaving downstream entries on their consumer row.
-Any level change therefore happens in the inter-section corridor.</li>
+Any level change therefore happens in the inter-section corridor.
+When no one section carries the whole row trunk, the row levels the sub-runs whose neighbours agree on their through-lines rather than the whole row, and only where a section is caught between two lanes (its own through-line arriving and leaving at different Ys).</li>
 <li><strong>Stages 4.9 to 4.10</strong>: Redistribute fan-out siblings and full-bundle columns around the trunk.
 Stage 4.9 first materializes complete semantic fan plans, then applies the ordinary redistribution to legacy fans.
 Stage 4.10 handles full-bundle columns.
