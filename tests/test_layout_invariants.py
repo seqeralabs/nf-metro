@@ -1635,6 +1635,36 @@ def test_discovery_output_spur_peels_below_a_trunk_continuation():
     )
 
 
+def test_below_peeled_output_reserves_its_downward_lead_in():
+    """A trunk-fork output dropped below keeps a horizontal lead-in to its icon.
+
+    ``discovery``'s ``out_ref`` forks off ``step_c3``, which stays on the trunk,
+    and the #1772 peel drops it below.  Its horizontal run from the producer must
+    clear the producer's label (the downward lead) before the diagonal, so the
+    spur reads as lead-in / diagonal / tail -- matching ``primary``'s
+    ``out_track`` -- rather than collapsing into a near-vertical drop with no
+    lead-in.  The X-spacing pass reserves this by anticipating the peel
+    structurally: a same-row peer (``primary``) already peels an output below.
+    """
+    from nf_metro.layout.constants import DIAGONAL_RUN, OFF_TRACK_OUTPUT_TAIL
+    from nf_metro.layout.phases.off_track import _off_track_output_lead
+
+    graph = _layout("curve_invariant_repros/inter_row_corridor_overflow.mmd")
+    c3 = graph.stations["step_c3"]
+    out_ref = graph.stations["out_ref"]
+    trunk = _sole_port_y(graph, graph.sections["intake"].exit_ports)
+    assert out_ref.y - trunk > _Y_TOL, "out_ref must peel below the trunk"
+    required = (
+        _off_track_output_lead(c3, is_downward=True)
+        + DIAGONAL_RUN
+        + OFF_TRACK_OUTPUT_TAIL
+    )
+    assert out_ref.x - c3.x >= required - _Y_TOL, (
+        f"out_ref reserves only {out_ref.x - c3.x:.1f}px from step_c3, short of "
+        f"the {required:.1f}px its downward label-clearance lead-in needs"
+    )
+
+
 def _shift_section(graph: MetroGraph, section_id: str, delta: float) -> None:
     """Move every station and port of one section by *delta* on Y."""
     section = graph.sections[section_id]
