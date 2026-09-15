@@ -977,8 +977,15 @@ def _recenter_section_loop_sides(
     co-loopers, and section-bbox-reactive invariants elsewhere (e.g. shared
     grid-column edges between row-mate sections) can be sensitive to a
     nudge of only a few pixels here.
+
+    A station with more than one edge to its predecessor or successor (a
+    multi-line co-travelling branch) was never reachable by this pass before
+    ``_loop_side_endpoints`` started tolerating that shape, so main never
+    exercised any position for it -- a lower threshold here is new ground,
+    not a change to an existing, already-validated one. A single-edge
+    station was already reachable, so it keeps the original threshold to
+    avoid perturbing placements main already settled on.
     """
-    min_recenter_delta = DIAGONAL_RUN / 4.0
     port_ids = section.port_ids
     for sid in section.station_ids:
         if sid in port_ids:
@@ -1001,6 +1008,8 @@ def _recenter_section_loop_sides(
             min(corner_left, corner_right) <= midpoint <= max(corner_left, corner_right)
         ):
             continue
+        is_multiline = len(graph.edges_to(sid)) > 1 or len(graph.edges_from(sid)) > 1
+        min_recenter_delta = DIAGONAL_RUN / 4.0 if is_multiline else DIAGONAL_RUN / 3.0
         if abs(midpoint - st.x) < min_recenter_delta:
             continue
         st.x = midpoint
