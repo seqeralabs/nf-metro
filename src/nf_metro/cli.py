@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import sys
@@ -77,6 +78,24 @@ def _parse_inactive_lines(value: object) -> frozenset[str] | None:
     if not isinstance(items, Iterable):
         raise ValueError("inactive_lines must be a string or list of line IDs")
     return frozenset(s for s in (str(i).strip() for i in items) if s)
+
+
+def _declared_outputs(input_file: Path) -> list[Path]:
+    """Output paths declared via ``%%metro output:``, resolved beside the .mmd.
+
+    A total pre-scan (no parse, so job planning sees the paths without raising
+    on a bad file or double-emitting warnings).
+    """
+    base = input_file.parent
+    outs: list[Path] = []
+    for raw in input_file.read_text().splitlines():
+        stripped = raw.strip()
+        if not stripped.startswith("%%metro"):
+            continue
+        key, sep, rest = stripped[len("%%metro") :].strip().partition(":")
+        if sep and key == "output":
+            outs += [base / p.strip() for p in rest.split(",") if p.strip()]
+    return outs
 
 
 def _format_from_output(output: Path | None) -> RenderFormat:
@@ -367,7 +386,7 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
             failure_count += 1
             click.echo(f"[{idx}/{total}] FAIL  {label}: {e}", err=True)
         else:
-            click.echo(f"[{idx}/{total}] OK    {label}")
+            click.echo(f"[{idx}/{total}] OK    {label}", err=True)
     if failure_count:
         raise click.ClickException(
             f"{failure_count}/{total} render(s) failed; "
@@ -633,12 +652,25 @@ def render(
     taking each output's format from its extension: -o map.svg -o map.png.
     An explicit --format overrides every extension.
 
+    With no -o, a `%%metro output:` directive in the .mmd supplies the default
+    output path(s) (comma-separate or repeat it for several), resolved as
+    siblings of the source; -o overrides them entirely. Falls back to the
+    sibling <input>.<format> when neither is given.
+
+    On success a YAML document (version + output paths) is printed to stdout;
+    human summaries and warnings go to stderr.
+
     A rejected input, and any other failure, surfaces as a plain error
     message rather than a traceback; set NF_METRO_DEBUG=1 to re-raise the
     original exception instead.
     """
     if len(input_files) > 1 and outputs:
         raise click.UsageError("-o/--output can only be used with a single INPUT_FILE.")
+
+    # Single input, no -o: use its %%metro output: declarations (multi-input is
+    # handled per file in the else branch below).
+    if not outputs and len(input_files) == 1:
+        outputs = tuple(_declared_outputs(input_files[0]))
 
     inactive_line_ids = _parse_inactive_lines(inactive_lines)
 
@@ -683,18 +715,34 @@ def render(
 
     # One job per output when -o is given (each output carries its own format,
     # unless --format pins one for all), else one per input file.
+    def _out_job(source: Path, out: Path) -> tuple[str, Path, Path, RenderFormat]:
+        return (out.name, source, out, format_ or _format_from_output(out))
+
     if outputs:
-        jobs = [
-            (out.name, input_files[0], out, format_ or _format_from_output(out))
-            for out in outputs
-        ]
+        jobs = [_out_job(input_files[0], out) for out in outputs]
     else:
+        # Multiple inputs: each expands its own %%metro output: declarations,
+        # else the sibling <input>.<format>. (A single input already resolved
+        # its declarations into `outputs` above, so skip the re-scan here.)
+        # ponytail: no cross-format layout sharing here; add if a multi-input
+        # batch with declared outputs ever gets hot.
         fmt = format_ or "svg"
-        jobs = [(f.name, f, f.with_suffix(f".{fmt}"), fmt) for f in input_files]
+        jobs = []
+        for f in input_files:
+            declared = _declared_outputs(f) if len(input_files) > 1 else []
+            if declared:
+                jobs += [_out_job(f, out) for out in declared]
+            else:
+                jobs.append((f.name, f, f.with_suffix(f".{fmt}"), fmt))
+
+    # Paths every job writes; printed to stdout only on success (see
+    # _print_render_result).
+    planned = [out_path for _, _, out_path, _ in jobs]
 
     if len(jobs) == 1:
         _, source, out_path, out_format = jobs[0]
         _job(source, out_path, out_format, quiet=False)()
+        _print_render_result(planned)
         return
 
     # Repeated -o always shares one input file (validated above), so every job's
@@ -747,6 +795,19 @@ def render(
             for label, source, out_path, out_format in jobs
         ]
     )
+    _print_render_result(planned)
+
+
+def _print_render_result(paths: list[Path]) -> None:
+    """Print the render result (version + output paths) to stdout as YAML.
+
+    JSON-quoted scalars are valid YAML, so no YAML dependency is needed. Called
+    only after a successful render, so ``paths`` is never empty.
+    """
+    click.echo(f"version: {json.dumps(__version__)}")
+    click.echo("outputs:")
+    for path in paths:
+        click.echo(f"  - {json.dumps(str(path))}")
 
 
 def _render_one(
@@ -1036,10 +1097,12 @@ def _render_one_unsafe(
     else:
         output.write_text(content if content.endswith("\n") else content + "\n")
     if not quiet:
+        # Human summary to stderr; the machine-readable result goes to stdout.
         click.echo(
             f"Rendered {len(graph.stations)} stations, "
             f"{len(graph.edges)} edges, "
-            f"{len(graph.lines)} lines -> {output}{detail}"
+            f"{len(graph.lines)} lines -> {output}{detail}",
+            err=True,
         )
 
 

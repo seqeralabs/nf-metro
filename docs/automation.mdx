@@ -11,7 +11,7 @@ nf-metro ships two integrations:
 
 ## GitHub Action
 
-The composite action renders the map and reports whether the SVG changed.
+The composite action renders the map and reports what it wrote and whether anything changed.
 
 ```yaml
 - uses: actions/checkout@v4
@@ -21,19 +21,22 @@ The composite action renders the map and reports whether the SVG changed.
     input: assets/metro_map.mmd
     theme: nfcore
     embed-font: "true"
-# steps.metro.outputs.output-path — where the SVG was written
-# steps.metro.outputs.changed     — 'true' when it differs from the committed SVG
+# steps.metro.outputs.output-path — the path(s) written, one per line
+# steps.metro.outputs.changed     — 'true' when any output differs from the committed version
 ```
 
 Every input is optional:
 
 - `input`: default `assets/metro_map.mmd`.
-- `output`: default is the sibling `.svg` of the input.
+- `output`: default is the map's `%%metro output:` path(s), else the sibling `.svg`. Give several whitespace-separated paths to write more than one format in a single run, each taken from its extension: `output: "assets/metro_map.svg assets/metro_map.png"`.
 - `theme`: default `nfcore`.
 - `mode`: no default.
 - `embed-font`: default `true`.
 - `version`: the nf-metro version to install.
 - `extra-args`: any other `nf-metro render` flag, such as `extra-args: "--fold-threshold 20"`.
+
+When it writes more than one file, `output-path` lists them one per line and `changed` is `'true'` if any of them differs from what is committed.
+The action reads these straight from nf-metro's own output, so declaring the paths with `%%metro output:` in the `.mmd` and leaving `output` empty renders and tracks every declared file.
 
 ## Pre-commit hook
 
@@ -50,6 +53,7 @@ repos:
 
 The hook matches `*.mmd` and writes the sibling `.svg`.
 `assets/metro_map.mmd` becomes `assets/metro_map.svg`.
+A map that declares `%%metro output:` paths instead writes those (for example an `.svg` and a `.png`), so a single commit keeps every declared file in sync.
 It runs with `--theme nfcore --embed-font` by default.
 Setting `args` replaces that whole list.
 Repeat the flags you want to keep alongside the new one:

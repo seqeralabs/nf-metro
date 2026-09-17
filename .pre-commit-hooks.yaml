@@ -1,6 +1,6 @@
 - id: nf-metro
   name: nf-metro (render metro map)
-  description: Re-render the metro-map SVG from its .mmd source.
+  description: Re-render the metro-map from its .mmd source.
   entry: nf-metro render
   language: python
   files: \.mmd$
