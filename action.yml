@@ -84,6 +84,7 @@ runs:
         MODE: ${{ inputs.mode }}
         EMBED_FONT: ${{ inputs.embed-font }}
         EXTRA_ARGS: ${{ inputs.extra-args }}
+        ACTION_PATH: ${{ github.action_path }}
       run: |
         set -euo pipefail
 
@@ -125,22 +126,11 @@ runs:
         # nf-metro prints a YAML document to stdout
         render_out="$(nf-metro "${args[@]}")"
 
-        # Read the outputs list without a YAML/JSON parser dependency: each
-        # path line is `  - "<path>"`, JSON-quoted (see _print_render_result
-        # in cli.py). Only a leading/trailing quote is stripped, not a full
-        # JSON unescape, so an output path must not contain a literal `"` or
-        # `\` (an ordinary filesystem path never does).
-        rendered=()
-        while IFS= read -r line; do
-          if [[ "$line" == '  - "'*'"' ]]; then
-            path="${line#  - \"}"
-            rendered+=("${path%\"}")
-          fi
-        done <<< "$render_out"
-        if [ "${#rendered[@]}" -eq 0 ]; then
-          echo "::error::nf-metro reported no output paths; its stdout contract may have changed" >&2
-          exit 1
-        fi
+        # Parsed by scripts/parse_render_output.sh (unit-tested in
+        # tests/test_parse_render_output.py), which errors out rather than
+        # silently returning no paths.
+        rendered_text="$("$ACTION_PATH/scripts/parse_render_output.sh" <<< "$render_out")"
+        mapfile -t rendered <<< "$rendered_text"
 
         # A delimiter unique to this run, so a rendered path that happens to
         # read "EOF" can't prematurely close the multiline output block.
