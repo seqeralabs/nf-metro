@@ -92,9 +92,14 @@ runs:
         # Each whitespace-separated 'output' value becomes its own -o (repeat -o
         # to write several formats from one input). When empty, the CLI resolves
         # its own outputs (%%metro output: in the .mmd, else the sibling .svg).
+        # set -f suppresses pathname expansion so a wildcard character in a
+        # path is passed through literally rather than expanded against the
+        # runner's filesystem.
         if [ -n "$OUTPUT_PATH" ]; then
+          set -f
           # shellcheck disable=SC2206
           outs=($OUTPUT_PATH)
+          set +f
           for out in "${outs[@]}"; do
             args+=(-o "$out")
           done
@@ -120,17 +125,29 @@ runs:
         # nf-metro prints a YAML document to stdout
         render_out="$(nf-metro "${args[@]}")"
 
-        # Read the outputs list with yq. pipefail makes a missing yq or parse error abort.
-        outputs_list="$(printf '%s\n' "$render_out" | yq '.outputs[]')"
+        # Read the outputs list without a YAML/JSON parser dependency: each
+        # path line is `  - "<path>"`, JSON-quoted (see _print_render_result
+        # in cli.py); a plain filesystem path never needs JSON's escape
+        # handling, so stripping one leading/trailing quote is enough.
         rendered=()
-        while IFS= read -r p; do
-          [ -n "$p" ] && rendered+=("$p")
-        done <<< "$outputs_list"
+        while IFS= read -r line; do
+          if [[ "$line" == '  - "'*'"' ]]; then
+            path="${line#  - \"}"
+            rendered+=("${path%\"}")
+          fi
+        done <<< "$render_out"
+        if [ "${#rendered[@]}" -eq 0 ]; then
+          echo "::error::nf-metro reported no output paths; its stdout contract may have changed" >&2
+          exit 1
+        fi
 
+        # A delimiter unique to this run, so a rendered path that happens to
+        # read "EOF" can't prematurely close the multiline output block.
+        delim="ghadelim_${GITHUB_RUN_ID}_${RANDOM}"
         {
-          echo "output-path<<EOF"
+          echo "output-path<<$delim"
           printf '%s\n' "${rendered[@]}"
-          echo "EOF"
+          echo "$delim"
         } >> "$GITHUB_OUTPUT"
         if [ -z "$(git status --porcelain -- "${rendered[@]}" 2>/dev/null)" ]; then
           echo "changed=false" >> "$GITHUB_OUTPUT"

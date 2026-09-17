@@ -34,6 +34,7 @@ from nf_metro.parser import (
     parse_metro_mermaid,
     validate_graph,
 )
+from nf_metro.parser.grammar import _split_csv
 from nf_metro.parser.model import (
     LineSpread,
     MetroGraph,
@@ -83,18 +84,23 @@ def _parse_inactive_lines(value: object) -> frozenset[str] | None:
 def _declared_outputs(input_file: Path) -> list[Path]:
     """Output paths declared via ``%%metro output:``, resolved beside the .mmd.
 
-    A total pre-scan (no parse, so job planning sees the paths without raising
-    on a bad file or double-emitting warnings).
+    A total pre-scan (no parse, so job planning sees the paths without the
+    full parser's warnings firing twice). A read failure surfaces the same
+    clean one-line error as any other render failure.
     """
+    try:
+        text = input_file.read_text()
+    except (OSError, UnicodeDecodeError) as e:
+        _clean_error(e, f"{input_file}: ")
     base = input_file.parent
     outs: list[Path] = []
-    for raw in input_file.read_text().splitlines():
+    for raw in text.splitlines():
         stripped = raw.strip()
         if not stripped.startswith("%%metro"):
             continue
         key, sep, rest = stripped[len("%%metro") :].strip().partition(":")
         if sep and key == "output":
-            outs += [base / p.strip() for p in rest.split(",") if p.strip()]
+            outs += [base / p for p in _split_csv(rest)]
     return outs
 
 
