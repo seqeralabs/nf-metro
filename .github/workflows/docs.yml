@@ -29,16 +29,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        # No cache: this workflow also runs on `release` and deploys published
+        # docs, so it must not restore a cache another run could have poisoned.
         with:
-          python-version: "3.12"
+          enable-cache: false
 
       - name: Install nf-metro (gallery generator + wheel build)
-        run: pip install -e ".[docs]" build
+        run: uv sync --frozen --extra docs
 
       # --- Generate dynamic content into the Astro project ---
       - name: Build playground wheel
@@ -48,7 +50,7 @@ jobs:
         # returning visitor's cached copy is superseded instead of served stale.
         run: |
           rm -rf website/public/playground/wheels
-          python -m build --wheel -o website/public/playground/wheels
+          uv build --wheel -o website/public/playground/wheels
           cd website/public/playground/wheels
           orig=$(basename ./*.whl)
           hash=$(sha256sum "$orig" | cut -c1-12)
@@ -61,13 +63,13 @@ jobs:
           printf '{"sha": "%s"}\n' "$GITHUB_SHA" > website/public/playground/build-info.json
 
       - name: Build playground example manifest
-        run: python scripts/build_playground_examples.py
+        run: uv run --frozen python scripts/build_playground_examples.py
 
       - name: Build gallery + pipelines (render SVGs, generate pages)
-        run: python scripts/build_gallery.py
+        run: uv run --frozen python scripts/build_gallery.py
 
       # --- Build the Astro / Starlight site ---
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
           cache: npm
@@ -153,10 +155,10 @@ jobs:
               cp -a "/tmp/site/$target/." "gh-pages/$target/"
             done
             if [ "$IS_RELEASE" = "true" ]; then
-              python scripts/update_versions_manifest.py \
+              uv run --frozen python scripts/update_versions_manifest.py \
                 --manifest gh-pages/versions.json --version "$VERSION" --latest
             else
-              python scripts/update_versions_manifest.py \
+              uv run --frozen python scripts/update_versions_manifest.py \
                 --manifest gh-pages/versions.json --version dev
             fi
             cp /tmp/site/root-index.html gh-pages/index.html

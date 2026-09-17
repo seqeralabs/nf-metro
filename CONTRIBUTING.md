@@ -11,8 +11,8 @@ For any change that touches `src/nf_metro/layout/`, `src/nf_metro/render/`, or r
 For purely additive changes (new tests, new fixtures, new documentation), the render diff should be empty. Verify locally with:
 
 ```bash
-python scripts/build_gallery.py --debug
-python scripts/build_render_diff.py <baseline-dir> docs/assets/renders <diff-out>
+uv run python scripts/build_gallery.py --debug
+uv run python scripts/build_render_diff.py <baseline-dir> docs/assets/renders <diff-out>
 ```
 
 The diff script returns exit code 2 on "no changes" and 0 on "changes detected" - exit 2 signals "no diff page worth publishing" so CI can skip the upload step.
@@ -65,17 +65,17 @@ When working a series of dependent PRs:
 
 ```bash
 # Install in editable mode (one-shot per environment)
-pip install -e ".[dev]"
+uv sync
 
 # Run the full test suite (fast)
-pytest tests/
+uv run pytest tests/
 
 # Lint and format
-ruff check src/ tests/
-ruff format --check src/ tests/
+uv run ruff check src/ tests/
+uv run ruff format --check src/ tests/
 
 # Type-check
-mypy
+uv run mypy
 
 # Render a single fixture
 nf-metro render examples/rnaseq_sections.mmd -o /tmp/rnaseq.svg
@@ -84,8 +84,13 @@ nf-metro render examples/rnaseq_sections.mmd -o /tmp/rnaseq.svg
 nf-metro render examples/rnaseq_sections.mmd --debug -o /tmp/rnaseq.svg
 
 # Build the full gallery (writes docs/assets/renders/)
-python scripts/build_gallery.py --debug
+uv run python scripts/build_gallery.py --debug
 ```
+
+`uv sync` installs the project editable, so `src/` edits are live. Dev tooling
+runs through `uv run` (above); the `nf-metro` CLI examples assume it's on your
+PATH — in a checkout, run `uv run nf-metro …`, or `uv tool install --editable .`
+once for a bare `nf-metro` that tracks your working tree.
 
 ### Git hooks
 
@@ -102,7 +107,7 @@ Hooks run automatically on `git commit`. To run them manually against all files:
 prek run --all-files
 ```
 
-The `mypy` hook uses `language: system`, so it relies on the mypy installed in your active environment (`pip install -e ".[dev]"`). Activate that environment before committing.
+The `mypy` hook runs `uv run --frozen mypy` (see `prek.toml`), so it provisions the dev dependency group from `uv.lock` automatically. There is no environment to activate — you just need `uv` on your PATH.
 
 The `prettier` hook formats the web/docs files across the repo (markdown, YAML, JSON, CSS, HTML, JS/TS, and `.astro` via `prettier-plugin-astro`, configured in `.prettierrc.js`). Python is left to ruff — prettier skips it. Programmatically generated and golden outputs (build artifacts, generated docs, lockfiles, `tests/data/` baselines) are excluded in `.prettierignore`.
 

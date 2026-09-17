@@ -17,15 +17,11 @@ OUT="$2"
 if command -v ffmpeg >/dev/null 2>&1; then
   FFMPEG=ffmpeg
 else
-  # No system ffmpeg (this machine doesn't have one via brew) - use the
-  # prebuilt binary pip's imageio-ffmpeg bundles, in a throwaway venv so this
+  # No system ffmpeg (this machine doesn't have one via brew) - use the prebuilt
+  # binary imageio-ffmpeg bundles, fetched into an ephemeral uv env so this
   # doesn't touch the system Python or Homebrew.
-  VENV_PARENT="$(mktemp -d)"
-  trap 'rm -rf "$VENV_PARENT"' EXIT
-  VENV="$VENV_PARENT/ffmpeg-venv"
-  python3 -m venv "$VENV"
-  "$VENV/bin/pip" install -q imageio-ffmpeg
-  FFMPEG="$("$VENV/bin/python" -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')"
+  FFMPEG="$(uv run --no-project --with imageio-ffmpeg -q \
+    python -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')"
 fi
 
 # 2x speed-up (the real run takes ~50s; the doc clip loops so shorter reads

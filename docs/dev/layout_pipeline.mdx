@@ -248,7 +248,7 @@ See [route planning and observation](/nf-metro/dev/route_plan/) for the plan rec
 Common scenarios and where to start looking:
 
 - **A station moved when it should not have.** Work out which stage's postcondition it violates.
-  Run `pytest tests/test_layout_invariants.py`, then read the failing invariant's "related tests" entry in CONTRACT.md, which names the stage that establishes the relevant property.
+  Run `uv run pytest tests/test_layout_invariants.py`, then read the failing invariant's "related tests" entry in CONTRACT.md, which names the stage that establishes the relevant property.
 - **A guard fired with `after Stage X.Y: ...` at `validate=True`.** Stage X.Y is the _latest_ sub-stage where the invariant could still have been broken.
   Bisect by toggling the preceding sub-stages.
 - **A guard fired with `after final: ...`.** The invariant holds only at the end, which puts the regression anywhere in Pass C. Run with `validate=True` and use the per-checkpoint bisection in `_run_pass_c_guards` to localize it.
