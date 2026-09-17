@@ -22,6 +22,13 @@ nf-metro ships eleven commands.
 `nf-metro --version` prints the installed version.
 Every command also takes `--help`.
 
+## Terminal output
+
+Help, errors, and progress are rendered in colour with [rich-click](https://ewels.github.io/rich-click/).
+Machine-readable results (such as `render`'s YAML) go to stdout; all human-readable logging, progress, and warnings go to stderr, so stdout stays pipe-safe.
+Colour follows the usual conventions: set `NO_COLOR` to disable it, `FORCE_COLOR` to force it, and nf-metro forces it automatically under GitHub Actions so CI logs keep their formatting.
+Restyle the help with any rich-click theme via `RICH_CLICK_THEME`.
+
 ## `nf-metro render`
 
 Render a Mermaid metro map definition to SVG or interactive HTML.
