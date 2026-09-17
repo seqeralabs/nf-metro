@@ -90,13 +90,6 @@ def test_routing_gate_job_pins_the_baseline_interpreter_and_demands_a_run():
     jobs = _jobs(WORKFLOWS / "ci.yml")
     job = jobs["routing-gates"]
 
-    setup = [step for step in _steps(job) if "uses: actions/setup-python" in step]
-    assert len(setup) == 1, f"expected one setup-python step, got {len(setup)}"
-    assert f'python-version: "{major}.{minor}"' in setup[0], (
-        f"routing-gates must pin CPython {major}.{minor} to match "
-        f"BASELINE_PYTHON, or the module it runs skips"
-    )
-
     invocations = [
         step
         for step in _steps(job)
@@ -106,6 +99,14 @@ def test_routing_gate_job_pins_the_baseline_interpreter_and_demands_a_run():
         f"expected exactly one pytest step in routing-gates, got {len(invocations)}"
     )
     step = invocations[0]
+    # uv, not setup-python, pins the interpreter now: the pytest run step must
+    # request CPython {major}.{minor} itself, so uv can't fall back to another
+    # version (with a different coverage arc model) for the gate ratchet.
+    assert f"--python {major}.{minor}" in step, (
+        f"the routing-gates pytest step must pin CPython {major}.{minor} via "
+        f"`uv run --python` to match BASELINE_PYTHON, or the module it runs "
+        f"skips; the step is: {step!r}"
+    )
     assert GATE_MODULE in step, (
         f"the routing-gates pytest step must invoke {GATE_MODULE}; it runs: {step!r}"
     )

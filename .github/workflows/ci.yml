@@ -72,10 +72,12 @@ jobs:
         with:
           enable-cache: true
       # The default dev group carries fonttools and jsonschema, so the full
-      # suite runs without extra flags.
+      # suite runs without extra flags. --python is pinned on both sync and run
+      # so uv can't fall back to another interpreter for the matrix version.
       - run: uv sync --frozen --python ${{ matrix.python-version }}
       - run: >-
-          uv run --frozen pytest --splits 3 --group ${{ matrix.split }}
+          uv run --frozen --python ${{ matrix.python-version }}
+          pytest --splits 3 --group ${{ matrix.split }}
           --splitting-algorithm least_duration --durations=25
           --ignore=tests/test_routing_gate_coverage.py
 
@@ -136,7 +138,9 @@ jobs:
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           enable-cache: true
+      # 3.11 pinned on the run step too: the gate baseline is CPython 3.11 and
+      # coverage's arc model differs on other versions, so uv must not pick one.
       - run: uv sync --frozen --python 3.11
-      - run: uv run --frozen pytest -n 0 tests/test_routing_gate_coverage.py
+      - run: uv run --frozen --python 3.11 pytest -n 0 tests/test_routing_gate_coverage.py
         env:
           NF_METRO_REQUIRE_GATE_COVERAGE: "1"

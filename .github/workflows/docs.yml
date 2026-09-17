@@ -40,7 +40,11 @@ jobs:
           enable-cache: false
 
       - name: Install nf-metro (gallery generator + wheel build)
-        run: uv sync --frozen --extra docs
+        run: |
+          uv sync --frozen --extra docs
+          # The Astro build's render-metro plugin spawns the `nf-metro` CLI; uv
+          # installs it into .venv, so put that on PATH for the later npm build.
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
 
       # --- Generate dynamic content into the Astro project ---
       - name: Build playground wheel

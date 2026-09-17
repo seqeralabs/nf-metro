@@ -58,19 +58,19 @@ jobs:
           key: render-base-${{ steps.strategy.outputs.base_render_key }}
 
       - name: Install (PR head)
-        run: uv sync --frozen --extra docs
+        run: uv sync --extra docs
 
       - name: Render base
         if: steps.base-cache.outputs.cache-hit != 'true'
         run: |
           git checkout '${{ github.event.pull_request.base.sha }}'
-          uv sync --frozen --extra docs
-          uv run --frozen python scripts/build_gallery.py --debug
+          uv sync --extra docs
+          uv run --no-sync python scripts/build_gallery.py --debug
           mkdir -p /tmp/base_renders
           cp docs/assets/renders/*.svg docs/assets/renders/manifest.json /tmp/base_renders/
           cp docs/assets/renders/metrics.json /tmp/base_renders/ 2>/dev/null || true
           git checkout '${{ steps.strategy.outputs.render_ref }}'
-          uv sync --frozen --extra docs
+          uv sync --extra docs
 
       - name: Render PR head
         run: |
@@ -78,9 +78,9 @@ jobs:
           mkdir -p docs/assets/renders
           if [ "${{ steps.strategy.outputs.mode }}" = "incremental" ]; then
             cp -r /tmp/base_renders/. docs/assets/renders/
-            uv run --frozen python scripts/build_gallery.py --debug --changed-list /tmp/changed_mmd.txt
+            uv run --no-sync python scripts/build_gallery.py --debug --changed-list /tmp/changed_mmd.txt
           else
-            uv run --frozen python scripts/build_gallery.py --debug
+            uv run --no-sync python scripts/build_gallery.py --debug
           fi
           mkdir -p /tmp/pr_renders
           cp docs/assets/renders/*.svg docs/assets/renders/manifest.json /tmp/pr_renders/
@@ -90,7 +90,7 @@ jobs:
         id: diff
         run: |
           set +e
-          uv run --frozen python scripts/build_render_diff.py \
+          uv run --no-sync python scripts/build_render_diff.py \
             /tmp/base_renders /tmp/pr_renders /tmp/diff_site \
             --pr ${{ github.event.number }} \
             --marker ${{ github.run_id }}

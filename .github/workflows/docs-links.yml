@@ -27,7 +27,11 @@ jobs:
           enable-cache: true
 
       - name: Install nf-metro (gallery generator + render CLI)
-        run: uv sync --frozen --extra docs
+        run: |
+          uv sync --frozen --extra docs
+          # The Astro build's render-metro plugin spawns the `nf-metro` CLI; uv
+          # installs it into .venv, so put that on PATH for the later npm build.
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Build gallery + pipelines content
         run: uv run --frozen python scripts/build_gallery.py
