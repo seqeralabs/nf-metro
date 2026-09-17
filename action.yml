@@ -88,7 +88,12 @@ runs:
       run: |
         set -euo pipefail
 
-        args=(render "$INPUT_PATH" --theme "$THEME")
+        # The .mmd being rendered may not be one the workflow author reviewed
+        # (a fork PR's map, say), so a %%metro output: declaration inside it
+        # must not be able to point the write outside the map's own
+        # directory. Harmless to pass alongside an explicit -o, which this
+        # flag never applies to.
+        args=(render "$INPUT_PATH" --theme "$THEME" --reject-output-outside-source)
 
         # Each whitespace-separated 'output' value becomes its own -o (repeat -o
         # to write several formats from one input). When empty, the CLI resolves
@@ -101,9 +106,15 @@ runs:
           # shellcheck disable=SC2206
           outs=($OUTPUT_PATH)
           set +f
-          for out in "${outs[@]}"; do
-            args+=(-o "$out")
-          done
+          # ${#outs[@]} (not ${outs[@]} directly) so a whitespace-only
+          # OUTPUT_PATH, which word-splits to zero elements, doesn't hit
+          # bash's pre-4.4 "unbound variable" behaviour for an empty array
+          # under set -u.
+          if [ "${#outs[@]}" -gt 0 ]; then
+            for out in "${outs[@]}"; do
+              args+=(-o "$out")
+            done
+          fi
         fi
 
         if [ -n "$MODE" ]; then
@@ -126,11 +137,16 @@ runs:
         # nf-metro prints a YAML document to stdout
         render_out="$(nf-metro "${args[@]}")"
 
-        # Parsed by scripts/parse_render_output.sh (unit-tested in
+        # Parsed by scripts/parse_render_output.py (unit-tested in
         # tests/test_parse_render_output.py), which errors out rather than
         # silently returning no paths.
-        rendered_text="$("$ACTION_PATH/scripts/parse_render_output.sh" <<< "$render_out")"
-        mapfile -t rendered <<< "$rendered_text"
+        rendered_text="$(python3 "$ACTION_PATH/scripts/parse_render_output.py" <<< "$render_out")"
+        # A plain read loop rather than mapfile/readarray, which macOS
+        # runners' default bash (3.2) doesn't have.
+        rendered=()
+        while IFS= read -r line; do
+          rendered+=("$line")
+        done <<< "$rendered_text"
 
         # A delimiter unique to this run, so a rendered path that happens to
         # read "EOF" can't prematurely close the multiline output block.

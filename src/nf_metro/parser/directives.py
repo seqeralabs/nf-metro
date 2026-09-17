@@ -98,11 +98,18 @@ def _dir_logo(value: str, graph: MetroGraph) -> None:
 
 
 def _dir_output(value: str, graph: MetroGraph) -> None:
-    """Validate ``%%metro output: path[, path...]`` (the default outputs when no
-    -o). The CLI resolves the paths from the .mmd; nothing is stored here.
+    """Record ``%%metro output: path[, path...]``: the default outputs used by
+    ``nf-metro render`` when no ``-o`` is given.
+
+    Repeating the directive accumulates, so a map may declare its formats on
+    one line or split across several. The paths are stored exactly as
+    written; the CLI resolves each one against the .mmd's own directory.
     """
-    if not _split_csv(value):
+    paths = _split_csv(value)
+    if not paths:
         _warn_malformed("output", value, "'path[, path...]'")
+        return
+    graph.declared_outputs.extend(paths)
 
 
 def _dir_off_track(value: str, graph: MetroGraph) -> None:

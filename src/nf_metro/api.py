@@ -179,21 +179,16 @@ def render_graph(graph: MetroGraph, theme_obj: Theme, cfg: RenderConfig) -> str:
     return render_graph_result(graph, theme_obj, cfg).content
 
 
-def _prepare_graph_state(
-    text: str,
-    *,
-    from_nextflow: bool = False,
-    title: str | None = None,
-    line_spread: str | None = None,
-    logo: str | None = None,
-    legend: str | None = None,
-    layout_options: Mapping[str, object] | None = None,
-    source_dir: str = "",
-    bare: bool = False,
-    output_format: Literal["svg", "html"] = "svg",
-    layout_commitments: LayoutCommitmentOverlay | None = None,
-) -> MetroGraph:
-    """Run the production preparation cascade up to the layout boundary."""
+def _resolve_commitment_options(
+    layout_options: Mapping[str, object] | None,
+    layout_commitments: LayoutCommitmentOverlay | None,
+) -> dict[str, object]:
+    """Merge *layout_options* with a caller's committed values, if any.
+
+    A committed value must agree with an explicitly supplied option of the
+    same name; a caller and its layout options disagreeing is a programming
+    error in the caller, not a user-facing one.
+    """
     opts = dict(layout_options or {})
     if layout_commitments is not None:
         for name, committed in (
@@ -208,6 +203,30 @@ def _prepare_graph_state(
                     f"caller {name!r} values disagree: {supplied!r} and {committed!r}"
                 )
             opts[name] = committed
+    return opts
+
+
+def _parse_source(
+    text: str,
+    *,
+    from_nextflow: bool = False,
+    title: str | None = None,
+    line_spread: str | None = None,
+    layout_options: Mapping[str, object] | None = None,
+    layout_commitments: LayoutCommitmentOverlay | None = None,
+) -> MetroGraph:
+    """Parse *text* into an un-laid-out graph: the cheap half of :func:`prepare_graph`.
+
+    Runs the grammar, directives, and pre-layout inference, applying the
+    parse-time half of the option cascade (``fold_threshold``,
+    ``auto_process``, ``process_scope``, ``line_order`` provenance,
+    ``line_spread``) and the ``--from-nextflow`` conversion, but never
+    :func:`~nf_metro.layout.compute_layout`.
+
+    Hand the result to :func:`prepare_graph` to finish the job (there, as
+    *source*) without re-reading or re-parsing the text.
+    """
+    opts = _resolve_commitment_options(layout_options, layout_commitments)
 
     if from_nextflow:
         from nf_metro.convert import convert_nextflow_dag
@@ -218,7 +237,7 @@ def _prepare_graph_state(
     auto_process = opts.get("auto_process")
     process_scope = opts.get("process_scope")
     caller_line_order = opts.get("line_order")
-    graph = parse_metro_mermaid(
+    return parse_metro_mermaid(
         text,
         max_station_columns=fold if isinstance(fold, int) else None,
         auto_process=auto_process if isinstance(auto_process, bool) else None,
@@ -231,6 +250,45 @@ def _prepare_graph_state(
         ),
         _layout_commitments=layout_commitments,
     )
+
+
+def _prepare_graph_state(
+    source: str | MetroGraph,
+    *,
+    from_nextflow: bool = False,
+    title: str | None = None,
+    line_spread: str | None = None,
+    logo: str | None = None,
+    legend: str | None = None,
+    layout_options: Mapping[str, object] | None = None,
+    source_dir: str = "",
+    bare: bool = False,
+    output_format: Literal["svg", "html"] = "svg",
+    layout_commitments: LayoutCommitmentOverlay | None = None,
+) -> MetroGraph:
+    """Run the production preparation cascade up to the layout boundary.
+
+    *source* already being a graph means a parse already happened, so
+    *layout_commitments* (a parse-time concern) has nowhere left to apply;
+    passing one raises rather than silently doing nothing.
+    """
+    opts = _resolve_commitment_options(layout_options, layout_commitments)
+    if isinstance(source, MetroGraph):
+        if layout_commitments is not None:
+            raise CommitmentConflictError(
+                "layout_commitments cannot be applied to an already-parsed "
+                "graph; pass them to _parse_source() instead"
+            )
+        graph = source
+    else:
+        graph = _parse_source(
+            source,
+            from_nextflow=from_nextflow,
+            title=title,
+            line_spread=line_spread,
+            layout_options=layout_options,
+            layout_commitments=layout_commitments,
+        )
     if not graph.stations:
         raise EmptyGraphError(
             "the map defines no stations, so there is nothing to lay out or "
@@ -283,7 +341,7 @@ def _prepare_graph_state(
 
 
 def prepare_graph(
-    text: str,
+    source: str | MetroGraph,
     *,
     from_nextflow: bool = False,
     title: str | None = None,
@@ -296,7 +354,16 @@ def prepare_graph(
     output_format: Literal["svg", "html"] = "svg",
     metrics_face: MetricsFace = MetricsFace.FALLBACK,
 ) -> MetroGraph:
-    """Parse *text*, apply option overrides, and compute the layout in place.
+    """Parse *source*, apply option overrides, and compute the layout in place.
+
+    *source* is the map's text, or an already-parsed graph, for a caller that
+    needs the same source laid out more than once (e.g. an SVG and an HTML
+    output of one map) without re-reading or re-parsing it: ``from_nextflow``,
+    ``line_spread``, and the parse-time layout options have already been
+    consumed by that parse and are ignored here, and ``layout_commitments``
+    is rejected outright (it can only apply during parsing). Layout settles
+    the graph **in place**, so a caller reusing one parse for several layouts
+    must pass a separate copy of it each time (:func:`copy.deepcopy`).
 
     ``bare`` and ``output_format`` mirror the eventual render call (the CLI's
     ``--bare``/``--format`` flags): used here only to resolve
@@ -351,7 +418,7 @@ def prepare_graph(
     those leave no geometry to fall back to.
     """
     graph = _prepare_graph_state(
-        text,
+        source,
         from_nextflow=from_nextflow,
         title=title,
         line_spread=line_spread,

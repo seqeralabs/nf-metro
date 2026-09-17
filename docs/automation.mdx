@@ -37,6 +37,7 @@ Every input is optional:
 
 When it writes more than one file, `output-path` lists them one per line and `changed` is `'true'` if any of them differs from what is committed.
 The action reads these straight from nf-metro's own output, so declaring the paths with `%%metro output:` in the `.mmd` and leaving `output` empty renders and tracks every declared file.
+The action always renders with `--reject-output-outside-source`, so a `%%metro output:` declaration that resolves outside the `.mmd`'s own directory (an absolute path, or a `..` escape) fails the step instead of being written: a workflow rendering a `.mmd` it doesn't control (an external contributor's PR, say) can't be made to write, or steer a later commit or diff step, outside its own repository.
 
 ## Pre-commit hook
 

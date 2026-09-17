@@ -1,19 +1,20 @@
-"""Tests for scripts/parse_render_output.sh, the GitHub Action's output-path parser.
+"""Tests for scripts/parse_render_output.py, the GitHub Action's output-path parser.
 
-Exercised as a subprocess (not imported) since it is a standalone shell
-script, run by the composite action in action.yml against nf-metro's real
-stdout contract (see ``_print_render_result`` in ``nf_metro.cli``).
+Exercised as a subprocess (not imported), run the same way action.yml runs
+it, against nf-metro's real stdout contract (see ``_print_render_result``
+in ``nf_metro.cli``).
 """
 
 import subprocess
+import sys
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "parse_render_output.sh"
+SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "parse_render_output.py"
 
 
 def _run(stdin_text: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [str(SCRIPT)],
+        [sys.executable, str(SCRIPT)],
         input=stdin_text,
         capture_output=True,
         text=True,

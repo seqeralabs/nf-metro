@@ -95,6 +95,50 @@ def test_render_output_directive_resolves_beside_source(tmp_path):
     assert (src / "map.svg").exists()
 
 
+def test_render_output_escape_allowed_by_default(tmp_path):
+    """Without the flag, a declared path may traverse above the .mmd's dir."""
+    src = tmp_path / "assets"
+    src.mkdir()
+    mmd = src / "map.mmd"
+    mmd.write_text("%%metro output: ../escaped.svg\n" + STANDALONE_MMD.read_text())
+    result = CliRunner().invoke(cli, ["render", str(mmd)])
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "escaped.svg").exists()
+
+
+def test_render_output_escape_rejected_with_flag(tmp_path):
+    """--reject-output-outside-source refuses a path escaping the .mmd's dir."""
+    src = tmp_path / "assets"
+    src.mkdir()
+    mmd = src / "map.mmd"
+    mmd.write_text("%%metro output: ../escaped.svg\n" + STANDALONE_MMD.read_text())
+    result = CliRunner().invoke(
+        cli, ["render", str(mmd), "--reject-output-outside-source"]
+    )
+    assert result.exit_code != 0
+    assert "resolves outside" in result.output
+    assert not (tmp_path / "escaped.svg").exists()
+    assert result.stdout == ""
+
+
+def test_render_output_escape_rejected_via_absolute_path(tmp_path):
+    """--reject-output-outside-source also refuses an absolute declared path."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    src = tmp_path / "assets"
+    src.mkdir()
+    mmd = src / "map.mmd"
+    mmd.write_text(
+        f"%%metro output: {outside / 'escaped.svg'}\n" + STANDALONE_MMD.read_text()
+    )
+    result = CliRunner().invoke(
+        cli, ["render", str(mmd), "--reject-output-outside-source"]
+    )
+    assert result.exit_code != 0
+    assert "resolves outside" in result.output
+    assert not (outside / "escaped.svg").exists()
+
+
 def test_render_reports_yaml_result_to_stdout(tmp_path):
     """stdout is one YAML doc: version banner then outputs; summary is on stderr."""
     import json
@@ -515,6 +559,103 @@ def test_render_multiple_files_partial_failure(tmp_path):
     assert "[2/2] OK" in result.output
     assert not (tmp_path / "bad.svg").exists()
     assert (tmp_path / "good.svg").exists()
+
+
+def test_render_unreadable_file_does_not_abort_the_batch(tmp_path):
+    """An unreadable file fails only its own job; the rest of the batch renders."""
+    bad = tmp_path / "bad.mmd"
+    good = tmp_path / "good.mmd"
+    bad.write_bytes(b"\xff\xfe not valid utf-8")
+    good.write_text(STANDALONE_MMD.read_text())
+    result = CliRunner().invoke(cli, ["render", str(bad), str(good)])
+    assert result.exit_code != 0
+    assert "[1/2] FAIL" in result.output
+    assert "[2/2] OK" in result.output
+    assert not (tmp_path / "bad.svg").exists()
+    assert (tmp_path / "good.svg").exists()
+    assert result.stdout == ""
+
+
+def test_render_unreadable_single_file_reports_cleanly(tmp_path, monkeypatch):
+    """A single unreadable input gives a clean error, not a traceback."""
+    monkeypatch.delenv("NF_METRO_DEBUG", raising=False)
+    bad = tmp_path / "bad.mmd"
+    bad.write_bytes(b"\xff\xfe not valid utf-8")
+    result = CliRunner().invoke(cli, ["render", str(bad)])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, SystemExit)
+    assert str(bad) in result.output
+    assert result.stdout == ""
+
+
+def test_render_unreadable_single_file_reraises_under_debug_env(tmp_path, monkeypatch):
+    """NF_METRO_DEBUG=1 re-raises the original decode error unwrapped."""
+    monkeypatch.setenv("NF_METRO_DEBUG", "1")
+    bad = tmp_path / "bad.mmd"
+    bad.write_bytes(b"\xff\xfe not valid utf-8")
+    result = CliRunner().invoke(cli, ["render", str(bad)])
+    assert isinstance(result.exception, UnicodeDecodeError)
+
+
+def test_render_declared_outputs_come_from_the_parser(tmp_path, monkeypatch):
+    """`render()` reads output paths from the parsed graph, not raw text.
+
+    Pins that ``declared_outputs`` comes from the ``MetroGraph`` the real
+    parser produced: a raw-text re-scan of the .mmd would ignore this
+    injected value and fail the assertion below.
+    """
+    import nf_metro.cli as cli_module
+
+    real_parse_source = cli_module._parse_source
+
+    def _parse_source_with_injected_output(*args, **kwargs):
+        graph = real_parse_source(*args, **kwargs)
+        graph.declared_outputs = ["injected.svg"]
+        return graph
+
+    monkeypatch.setattr(cli_module, "_parse_source", _parse_source_with_injected_output)
+    mmd = tmp_path / "test.mmd"
+    mmd.write_text(STANDALONE_MMD.read_text())
+    result = CliRunner().invoke(cli, ["render", str(mmd)])
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "injected.svg").exists()
+    assert not (tmp_path / "test.svg").exists()
+
+
+def test_render_parses_each_source_once(tmp_path, monkeypatch):
+    """One file declaring several outputs is parsed once, not once per output."""
+    import nf_metro.cli as cli_module
+
+    parse_calls: list[str] = []
+    real_parse_source = cli_module._parse_source
+
+    def _counting_parse_source(text, **kwargs):
+        parse_calls.append(text)
+        return real_parse_source(text, **kwargs)
+
+    monkeypatch.setattr(cli_module, "_parse_source", _counting_parse_source)
+    mmd = tmp_path / "test.mmd"
+    mmd.write_text("%%metro output: a.svg, a.png\n" + STANDALONE_MMD.read_text())
+    result = CliRunner().invoke(cli, ["render", str(mmd)])
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "a.svg").exists()
+    assert (tmp_path / "a.png").exists()
+    assert len(parse_calls) == 1
+
+
+def test_render_multiple_files_each_declare_their_own_outputs(tmp_path):
+    """Each file in a batch independently expands its own declared outputs."""
+    body = STANDALONE_MMD.read_text()
+    a = tmp_path / "a.mmd"
+    b = tmp_path / "b.mmd"
+    a.write_text("%%metro output: a1.svg, a2.svg\n" + body)
+    b.write_text("%%metro output: b1.svg, b2.svg\n" + body)
+    result = CliRunner().invoke(cli, ["render", str(a), str(b)])
+    assert result.exit_code == 0, result.output
+    assert "[1/2] OK" in result.output
+    assert "[2/2] OK" in result.output
+    for name in ("a1.svg", "a2.svg", "b1.svg", "b2.svg"):
+        assert (tmp_path / name).exists()
 
 
 def test_render_center_ports_cli_flag_accepted(tmp_path):
