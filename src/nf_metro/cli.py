@@ -663,16 +663,15 @@ def render(
     siblings of the source; -o overrides them entirely. Falls back to the
     sibling <input>.<format> when neither is given.
 
-    A `nf-metro: v<version>` banner is printed to stdout at the start, and on
-    success the output paths follow it as one YAML document; human summaries and
-    warnings go to stderr.
+    On success, a `nf-metro: v<version>` banner and the output paths are
+    printed to stdout as one YAML document; human summaries and warnings go
+    to stderr. Stdout stays empty on any failure, so a caller can gate on it
+    without also checking the exit code.
 
     A rejected input, and any other failure, surfaces as a plain error
     message rather than a traceback; set NF_METRO_DEBUG=1 to re-raise the
     original exception instead.
     """
-    click.echo(f"nf-metro: v{__version__}")
-
     if len(input_files) > 1 and outputs:
         raise click.UsageError("-o/--output can only be used with a single INPUT_FILE.")
 
@@ -808,11 +807,14 @@ def render(
 
 
 def _print_render_result(paths: list[Path]) -> None:
-    """Print the render result (output paths) to stdout as YAML.
+    """Print the render result (version banner + output paths) to stdout as YAML.
 
     JSON-quoted scalars are valid YAML, so no YAML dependency is needed. Called
-    only after a successful render, so ``paths`` is never empty.
+    only after a successful render, so ``paths`` is never empty and a failed
+    render's stdout stays empty: nothing about the result is printed until
+    every job it covers has already succeeded.
     """
+    click.echo(f"nf-metro: v{__version__}")
     click.echo("outputs:")
     for path in paths:
         click.echo(f"  - {json.dumps(str(path))}")

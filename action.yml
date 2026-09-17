@@ -127,8 +127,9 @@ runs:
 
         # Read the outputs list without a YAML/JSON parser dependency: each
         # path line is `  - "<path>"`, JSON-quoted (see _print_render_result
-        # in cli.py); a plain filesystem path never needs JSON's escape
-        # handling, so stripping one leading/trailing quote is enough.
+        # in cli.py). Only a leading/trailing quote is stripped, not a full
+        # JSON unescape, so an output path must not contain a literal `"` or
+        # `\` (an ordinary filesystem path never does).
         rendered=()
         while IFS= read -r line; do
           if [[ "$line" == '  - "'*'"' ]]; then

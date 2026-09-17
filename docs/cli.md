@@ -42,8 +42,8 @@ A rejected input, and any other failure, surfaces as a plain error message rathe
 Set `NF_METRO_DEBUG=1` to re-raise the original exception instead.
 An empty file, or one whose `graph` block holds no stations, is rejected by name rather than drawn.
 
-`render` prints a `nf-metro: v<version>` banner to stdout at the start, and on success the files written follow it as one YAML document.
-Human-readable render summaries and any warnings go to stderr, so stdout can be parsed on its own.
+On success, `render` prints a `nf-metro: v<version>` banner and the files written to stdout as one YAML document.
+Stdout stays empty on any failure, so a caller can parse it without also checking the exit code; human-readable render summaries and any warnings go to stderr.
 
 ```yaml frame="terminal"
 nf-metro: v2.1.0
