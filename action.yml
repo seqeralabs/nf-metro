@@ -13,8 +13,9 @@ inputs:
     default: assets/metro_map.mmd
   output:
     description: >-
-      Path for the rendered SVG. Leave empty to write a sibling file next to the
-      input (e.g. assets/metro_map.mmd -> assets/metro_map.svg).
+      Path for the rendered SVG. If empty, will use paths specified with '%%metro output'
+      or write a SVG next to the .mmd file. Input can take multiple whitespace-separated
+      paths, taking each format from its extension (e.g. "assets/metro_map.svg assets/metro_map.png").
     required: false
     default: ""
   theme:
@@ -45,10 +46,10 @@ inputs:
 
 outputs:
   output-path:
-    description: The path the SVG was written to (the resolved sibling path when `output` was empty).
+    description: The path(s) the map was written to, one per line.
     value: ${{ steps.render.outputs.output-path }}
   changed:
-    description: "'true' when the rendered SVG differs from the committed version, otherwise 'false'."
+    description: "'true' when any rendered output differs from the committed version, otherwise 'false'."
     value: ${{ steps.render.outputs.changed }}
 
 runs:
@@ -83,18 +84,26 @@ runs:
         MODE: ${{ inputs.mode }}
         EMBED_FONT: ${{ inputs.embed-font }}
         EXTRA_ARGS: ${{ inputs.extra-args }}
+        ACTION_PATH: ${{ github.action_path }}
       run: |
         set -euo pipefail
 
         args=(render "$INPUT_PATH" --theme "$THEME")
 
-        # Resolve the output path: explicit value, or the sibling .svg the CLI
-        # would derive from the input, so we can diff it afterwards.
+        # Each whitespace-separated 'output' value becomes its own -o (repeat -o
+        # to write several formats from one input). When empty, the CLI resolves
+        # its own outputs (%%metro output: in the .mmd, else the sibling .svg).
+        # set -f suppresses pathname expansion so a wildcard character in a
+        # path is passed through literally rather than expanded against the
+        # runner's filesystem.
         if [ -n "$OUTPUT_PATH" ]; then
-          args+=(-o "$OUTPUT_PATH")
-          rendered="$OUTPUT_PATH"
-        else
-          rendered="${INPUT_PATH%.*}.svg"
+          set -f
+          # shellcheck disable=SC2206
+          outs=($OUTPUT_PATH)
+          set +f
+          for out in "${outs[@]}"; do
+            args+=(-o "$out")
+          done
         fi
 
         if [ -n "$MODE" ]; then
@@ -114,10 +123,24 @@ runs:
           args+=("${extra[@]}")
         fi
 
-        nf-metro "${args[@]}"
+        # nf-metro prints a YAML document to stdout
+        render_out="$(nf-metro "${args[@]}")"
 
-        echo "output-path=$rendered" >> "$GITHUB_OUTPUT"
-        if [ -z "$(git status --porcelain -- "$rendered" 2>/dev/null)" ]; then
+        # Parsed by scripts/parse_render_output.sh (unit-tested in
+        # tests/test_parse_render_output.py), which errors out rather than
+        # silently returning no paths.
+        rendered_text="$("$ACTION_PATH/scripts/parse_render_output.sh" <<< "$render_out")"
+        mapfile -t rendered <<< "$rendered_text"
+
+        # A delimiter unique to this run, so a rendered path that happens to
+        # read "EOF" can't prematurely close the multiline output block.
+        delim="ghadelim_${GITHUB_RUN_ID}_${RANDOM}"
+        {
+          echo "output-path<<$delim"
+          printf '%s\n' "${rendered[@]}"
+          echo "$delim"
+        } >> "$GITHUB_OUTPUT"
+        if [ -z "$(git status --porcelain -- "${rendered[@]}" 2>/dev/null)" ]; then
           echo "changed=false" >> "$GITHUB_OUTPUT"
         else
           echo "changed=true" >> "$GITHUB_OUTPUT"

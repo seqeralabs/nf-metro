@@ -97,6 +97,14 @@ def _dir_logo(value: str, graph: MetroGraph) -> None:
         graph.logo_path = value
 
 
+def _dir_output(value: str, graph: MetroGraph) -> None:
+    """Validate ``%%metro output: path[, path...]`` (the default outputs when no
+    -o). The CLI resolves the paths from the .mmd; nothing is stored here.
+    """
+    if not _split_csv(value):
+        _warn_malformed("output", value, "'path[, path...]'")
+
+
 def _dir_off_track(value: str, graph: MetroGraph) -> None:
     station_ids = _split_csv(value)
     if not station_ids:
@@ -599,6 +607,7 @@ _GLOBAL_DIRECTIVE_HANDLERS.update(
         "style": _dir_style,
         "mode": _dir_mode,
         "logo": _dir_logo,
+        "output": _dir_output,
         "line": _dir_line,
         "off_track": _dir_off_track,
         "process": _dir_process,

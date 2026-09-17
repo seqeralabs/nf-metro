@@ -42,18 +42,28 @@ A rejected input, and any other failure, surfaces as a plain error message rathe
 Set `NF_METRO_DEBUG=1` to re-raise the original exception instead.
 An empty file, or one whose `graph` block holds no stations, is rejected by name rather than drawn.
 
+On success, `render` prints a `nf-metro: v<version>` banner and the files written to stdout as one YAML document.
+Stdout stays empty on any failure, so a caller can parse it without also checking the exit code; human-readable render summaries and any warnings go to stderr.
+
+```yaml frame="terminal"
+nf-metro: v2.1.0
+outputs:
+  - "assets/metro_map.svg"
+  - "assets/metro_map.png"
+```
+
 Most of the options in this section have a `%%metro` directive twin.
 An explicit flag overrides the directive.
 See the [precedence table](/nf-metro/guide/#cli-flags-and-directive-precedence) in the guide.
 
 ### Output and source
 
-| Option                                            | Default                              | Description                                                                                                                                                                                          |
-| ------------------------------------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `-o`, `--output PATH`                             | `<input>.<format>`                   | Output file path (only valid with a single `INPUT_FILE`). Repeat it to write several formats from one run: `-o map.svg -o map.png`                                                                   |
-| `--format [svg\|html\|png\|gif\|webp\|mp4\|webm]` | inferred from `--output`, else `svg` | Output format: `svg`, `png`, `html` for an interactive self-contained page, or `gif`/`webp`/`mp4`/`webm` for a [looping video](#looping-video-of-the-animation). `-o map.png` selects PNG on its own |
-| `--from-nextflow`                                 | off                                  | Convert Nextflow `-with-dag` Mermaid input before rendering                                                                                                                                          |
-| `--debug / --no-debug`                            | off                                  | Show the debug overlay (ports, hidden stations, edge waypoints)                                                                                                                                      |
+| Option                                            | Default                                    | Description                                                                                                                                                                                                                                                |
+| ------------------------------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `-o`, `--output PATH`                             | `%%metro output:`, else `<input>.<format>` | Output file path (only valid with a single `INPUT_FILE`). Repeat it to write several formats from one run: `-o map.svg -o map.png`. With no `-o`, the map's `%%metro output:` directive supplies the path(s); with neither, the sibling `<input>.<format>` |
+| `--format [svg\|html\|png\|gif\|webp\|mp4\|webm]` | inferred from `--output`, else `svg`       | Output format: `svg`, `png`, `html` for an interactive self-contained page, or `gif`/`webp`/`mp4`/`webm` for a [looping video](#looping-video-of-the-animation). `-o map.png` selects PNG on its own                                                       |
+| `--from-nextflow`                                 | off                                        | Convert Nextflow `-with-dag` Mermaid input before rendering                                                                                                                                                                                                |
+| `--debug / --no-debug`                            | off                                        | Show the debug overlay (ports, hidden stations, edge waypoints)                                                                                                                                                                                            |
 
 ### Theme and branding
 

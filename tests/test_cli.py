@@ -60,6 +60,83 @@ def test_render_default_output(tmp_path):
     assert (tmp_path / "test.svg").exists()
 
 
+def test_render_output_directive_writes_all_declared(tmp_path):
+    """With no -o, `%%metro output:` drives the outputs (sibling paths)."""
+    mmd = tmp_path / "test.mmd"
+    body = STANDALONE_MMD.read_text()
+    mmd.write_text("%%metro output: test.svg, test.png\n" + body)
+    result = CliRunner().invoke(cli, ["render", str(mmd)])
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "test.svg").exists()
+    assert (tmp_path / "test.png").exists()
+    # A registered directive: no "unknown directive" warning.
+    assert "unknown directive" not in result.output
+
+
+def test_render_o_overrides_output_directive(tmp_path):
+    """An explicit -o fully replaces the declared `%%metro output:` paths."""
+    mmd = tmp_path / "test.mmd"
+    mmd.write_text("%%metro output: declared.svg\n" + STANDALONE_MMD.read_text())
+    out = tmp_path / "explicit.svg"
+    result = CliRunner().invoke(cli, ["render", str(mmd), "-o", str(out)])
+    assert result.exit_code == 0, result.output
+    assert out.exists()
+    assert not (tmp_path / "declared.svg").exists()
+
+
+def test_render_output_directive_resolves_beside_source(tmp_path):
+    """A declared relative path resolves next to the .mmd, not the CWD."""
+    src = tmp_path / "assets"
+    src.mkdir()
+    mmd = src / "map.mmd"
+    mmd.write_text("%%metro output: map.svg\n" + STANDALONE_MMD.read_text())
+    result = CliRunner().invoke(cli, ["render", str(mmd)])
+    assert result.exit_code == 0, result.output
+    assert (src / "map.svg").exists()
+
+
+def test_render_reports_yaml_result_to_stdout(tmp_path):
+    """stdout is one YAML doc: version banner then outputs; summary is on stderr."""
+    import json
+
+    from nf_metro import __version__
+
+    mmd = tmp_path / "test.mmd"
+    mmd.write_text("%%metro output: test.svg, test.png\n" + STANDALONE_MMD.read_text())
+    result = CliRunner().invoke(cli, ["render", str(mmd)])
+    assert result.exit_code == 0, result.output
+    assert result.stdout.splitlines() == [
+        f"nf-metro: v{__version__}",
+        "outputs:",
+        f"  - {json.dumps(str(tmp_path / 'test.svg'))}",
+        f"  - {json.dumps(str(tmp_path / 'test.png'))}",
+    ]
+    # Human summary goes to stderr, never stdout.
+    assert "Rendered" not in result.stdout
+    assert "OK" in result.stderr
+
+
+def test_render_stdout_empty_on_failure(tmp_path):
+    """A failed render prints nothing to stdout: the version banner is part
+    of the result document, not printed ahead of it."""
+    mmd = tmp_path / "bad.mmd"
+    mmd.write_text("not a valid mermaid file")
+    result = CliRunner().invoke(cli, ["render", str(mmd)])
+    assert result.exit_code != 0
+    assert result.stdout == ""
+
+
+def test_render_stdout_empty_on_invalid_o_usage(tmp_path):
+    """-o rejected with more than one INPUT_FILE writes nothing to stdout."""
+    body = STANDALONE_MMD.read_text()
+    a, b = tmp_path / "a.mmd", tmp_path / "b.mmd"
+    a.write_text(body)
+    b.write_text(body)
+    result = CliRunner().invoke(cli, ["render", str(a), str(b), "-o", "out.svg"])
+    assert result.exit_code != 0
+    assert result.stdout == ""
+
+
 def test_validate_success():
     """validate command succeeds on valid input."""
     runner = CliRunner()
@@ -282,10 +359,11 @@ def test_render_section_gap_options(tmp_path):
 
 
 def test_render_nonexistent_file():
-    """render command fails gracefully on missing input."""
+    """render command fails gracefully on missing input, writing nothing to stdout."""
     runner = CliRunner()
     result = runner.invoke(cli, ["render", "/nonexistent/file.mmd"])
     assert result.exit_code != 0
+    assert result.stdout == ""
 
 
 def test_render_unexpected_exception_becomes_click_exception(tmp_path, monkeypatch):
