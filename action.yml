@@ -1,5 +1,5 @@
 name: nf-metro
-description: Render a metro-map SVG from a Mermaid .mmd source and report whether the committed SVG is out of date.
+description: Render a metro-map diagram from a Mermaid .mmd source and report whether the committed output is out of date.
 author: Seqera
 
 branding:
@@ -13,9 +13,10 @@ inputs:
     default: assets/metro_map.mmd
   output:
     description: >-
-      Path for the rendered SVG. If empty, will use paths specified with '%%metro output'
-      or write a SVG next to the .mmd file. Input can take multiple whitespace-separated
+      Path for the rendered output. If empty, will use paths specified with '%%metro output'
+      or write an SVG next to the .mmd file. Input can take multiple whitespace-separated
       paths, taking each format from its extension (e.g. "assets/metro_map.svg assets/metro_map.png").
+      A path cannot contain a space; use '%%metro output' in the .mmd for a path that needs one.
     required: false
     default: ""
   theme:

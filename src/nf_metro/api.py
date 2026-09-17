@@ -253,7 +253,7 @@ def _parse_source(
 
 
 def _prepare_graph_state(
-    source: str | MetroGraph,
+    text: str | MetroGraph,
     *,
     from_nextflow: bool = False,
     title: str | None = None,
@@ -268,21 +268,21 @@ def _prepare_graph_state(
 ) -> MetroGraph:
     """Run the production preparation cascade up to the layout boundary.
 
-    *source* already being a graph means a parse already happened, so
+    *text* already being a graph means a parse already happened, so
     *layout_commitments* (a parse-time concern) has nowhere left to apply;
     passing one raises rather than silently doing nothing.
     """
     opts = _resolve_commitment_options(layout_options, layout_commitments)
-    if isinstance(source, MetroGraph):
+    if isinstance(text, MetroGraph):
         if layout_commitments is not None:
             raise CommitmentConflictError(
                 "layout_commitments cannot be applied to an already-parsed "
                 "graph; pass them to _parse_source() instead"
             )
-        graph = source
+        graph = text
     else:
         graph = _parse_source(
-            source,
+            text,
             from_nextflow=from_nextflow,
             title=title,
             line_spread=line_spread,
@@ -341,7 +341,7 @@ def _prepare_graph_state(
 
 
 def prepare_graph(
-    source: str | MetroGraph,
+    text: str | MetroGraph,
     *,
     from_nextflow: bool = False,
     title: str | None = None,
@@ -354,9 +354,9 @@ def prepare_graph(
     output_format: Literal["svg", "html"] = "svg",
     metrics_face: MetricsFace = MetricsFace.FALLBACK,
 ) -> MetroGraph:
-    """Parse *source*, apply option overrides, and compute the layout in place.
+    """Parse *text*, apply option overrides, and compute the layout in place.
 
-    *source* is the map's text, or an already-parsed graph, for a caller that
+    *text* is the map's text, or an already-parsed graph, for a caller that
     needs the same source laid out more than once (e.g. an SVG and an HTML
     output of one map) without re-reading or re-parsing it: ``from_nextflow``,
     ``line_spread``, and the parse-time layout options have already been
@@ -418,7 +418,7 @@ def prepare_graph(
     those leave no geometry to fall back to.
     """
     graph = _prepare_graph_state(
-        source,
+        text,
         from_nextflow=from_nextflow,
         title=title,
         line_spread=line_spread,

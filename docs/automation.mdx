@@ -28,7 +28,7 @@ The composite action renders the map and reports what it wrote and whether anyth
 Every input is optional:
 
 - `input`: default `assets/metro_map.mmd`.
-- `output`: default is the map's `%%metro output:` path(s), else the sibling `.svg`. Give several whitespace-separated paths to write more than one format in a single run, each taken from its extension: `output: "assets/metro_map.svg assets/metro_map.png"`.
+- `output`: default is the map's `%%metro output:` path(s), else the sibling `.svg`. Give several whitespace-separated paths to write more than one format in a single run, each taken from its extension: `output: "assets/metro_map.svg assets/metro_map.png"`. A path here can't contain a space; declare it with `%%metro output:` in the `.mmd` instead if it needs one.
 - `theme`: default `nfcore`.
 - `mode`: no default.
 - `embed-font`: default `true`.
