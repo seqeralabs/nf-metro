@@ -5,16 +5,17 @@ from __future__ import annotations
 import json
 import math
 import os
-import sys
 import warnings
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
 from typing import Any, Literal, NoReturn, TypeVar, cast, get_args
 
-import click
+import rich_click as click
+from rich.markup import escape
 
 from nf_metro import __version__
 from nf_metro.api import RenderConfig, prepare_graph, render_graph_result, resolve_theme
+from nf_metro.console import console, progress_bar
 from nf_metro.explain import build_explain, format_explain_json, format_explain_text
 from nf_metro.introspect import build_info, format_info_json, format_info_text
 from nf_metro.layout import (
@@ -53,6 +54,29 @@ _RASTER_FORMATS: frozenset[str] = frozenset({"png", *VIDEO_FORMATS})
 
 #: Frames per second an exported loop runs at unless ``--fps`` says otherwise.
 DEFAULT_FPS = 12.0
+
+# rich-click: colourful help and error output (drop-in for click). Accent the
+# metro-map palette and sort the commands into panels. Colour in CI is handled
+# in nf_metro.console. Users can restyle everything with RICH_CLICK_THEME.
+click.rich_click.STYLE_OPTION = "bold cyan"
+click.rich_click.STYLE_ARGUMENT = "bold cyan"
+click.rich_click.STYLE_SWITCH = "bold green"
+click.rich_click.STYLE_COMMAND = "bold cyan"
+click.rich_click.SHOW_ARGUMENTS = True
+click.rich_click.COMMAND_GROUPS = {
+    "nf-metro": [
+        {"name": "Render", "commands": ["render", "render-many", "convert"]},
+        {
+            "name": "Inspect",
+            "commands": ["validate", "validate-svg", "info", "explain"],
+        },
+        {
+            "name": "Live progress",
+            "commands": ["serve", "serve-multi", "check-mapping"],
+        },
+        {"name": "Embed", "commands": ["embed-script"]},
+    ]
+}
 
 
 @click.group()
@@ -280,12 +304,12 @@ def _echo_block(label: str, entries: Iterable[str]) -> None:
     under its own bullet, so a guard message carrying per-defect detail reads
     as one item.
     """
-    click.echo(f"{label}:", err=True)
+    console.print(f"[bold yellow]{escape(label)}:[/]")
     for entry in entries:
         head, *rest = entry.split("\n")
-        click.echo(f"  - {head}", err=True)
+        console.print(f"  [yellow]-[/] {escape(head)}")
         for line in rest:
-            click.echo(f"    {line.strip()}", err=True)
+            console.print(f"    [dim]{escape(line.strip())}[/]")
 
 
 def _echo_issues(
@@ -377,21 +401,21 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
     """
     total = len(items)
     failure_count = 0
-    for idx, (label, job) in enumerate(items, 1):
+    for label, job in items:
         try:
             job()
         except Exception as e:
             if _debug_reraise():
                 raise
             failure_count += 1
-            click.echo(f"[{idx}/{total}] FAIL  {label}: {e}", err=True)
+            console.print(f"[red]✗[/] {escape(label)} [dim]— {escape(str(e))}[/]")
         else:
-            click.echo(f"[{idx}/{total}] OK    {label}", err=True)
+            console.print(f"[green]✓[/] {escape(label)}")
     if failure_count:
         raise click.ClickException(
-            f"{failure_count}/{total} render(s) failed; "
-            "see stderr output above for details"
+            f"{failure_count}/{total} render(s) failed; see the errors above"
         )
+    console.print(f"[green]✓[/] [bold]{total}[/] file(s) rendered")
 
 
 @cli.command()
@@ -1013,11 +1037,10 @@ def _render_one_unsafe(
             if enabled
         ]
         if ignored:
-            click.echo(
-                f"Note: {', '.join(ignored)} only affect --format svg and are "
-                "ignored for --format html (the interactive page is already "
-                "responsive and scopes each map independently).",
-                err=True,
+            console.print(
+                f"[yellow]note[/] [dim]{escape(', '.join(ignored))} only affect "
+                "--format svg and are ignored for --format html (the interactive "
+                "page is already responsive and scopes each map independently).[/]"
             )
 
     # Tier-A layout-invariant violations on the settled geometry surface here
@@ -1098,29 +1121,30 @@ def _render_one_unsafe(
         output.write_text(content if content.endswith("\n") else content + "\n")
     if not quiet:
         # Human summary to stderr; the machine-readable result goes to stdout.
-        click.echo(
-            f"Rendered {len(graph.stations)} stations, "
-            f"{len(graph.edges)} edges, "
-            f"{len(graph.lines)} lines -> {output}{detail}",
-            err=True,
+        console.print(
+            f"[green]✓[/] [dim]{len(graph.stations)} stations, "
+            f"{len(graph.edges)} edges, {len(graph.lines)} lines →[/] "
+            f"[bold cyan]{escape(str(output))}[/][dim]{escape(detail)}[/]"
         )
 
 
 def _video_notice(message: str) -> None:
     """Print what a large export is about to cost, before it starts."""
-    click.echo(f"Note: {message}", err=True)
+    console.print(f"[yellow]note[/] [dim]{escape(message)}[/]")
 
 
 def _video_progress(frames: Iterable[bytes], count: int) -> Iterator[bytes]:
-    """Draw a progress bar over the frames as they rasterise.
+    """Draw a narrow diamond progress bar over the frames as they rasterise.
 
-    An export runs for minutes, and click hides the bar when stderr is not a
-    terminal, so a piped or logged run stays as quiet as every other render.
+    An export runs for minutes. Rich hides the bar when stderr is not a
+    terminal (and not forced in CI), so a piped run stays as quiet as every
+    other render.
     """
-    with click.progressbar(
-        frames, length=count, label="Rendering frames", file=sys.stderr
-    ) as tracked:
-        yield from tracked
+    with progress_bar("Rendering frames") as progress:
+        task = progress.add_task("Rendering frames", total=count)
+        for frame in frames:
+            yield frame
+            progress.advance(task)
 
 
 @cli.command(name="render-many")

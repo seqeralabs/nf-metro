@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,14 @@ from nf_metro.convert import convert_nextflow_dag
 from nf_metro.layout.engine import compute_layout
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import MetroGraph
+
+# Tests assert on plain CLI text. Disable colour (Rich/rich-click otherwise
+# wrap output in ANSI, forced on in CI by nf_metro.console) and pin a wide width
+# so rich-click's help tables and error panels do not wrap or crop the messages
+# the assertions look for. Both are read by rich-click/Rich at render time, and
+# this runs before any test module imports the CLI.
+os.environ.setdefault("NO_COLOR", "1")
+os.environ.setdefault("TERMINAL_WIDTH", "200")
 
 # --- Graph text constants ---
 

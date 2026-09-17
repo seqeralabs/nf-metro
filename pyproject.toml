@@ -44,6 +44,10 @@ dependencies = [
     "networkx>=3.0",
     "pillow>=9.0",
     "resvg-py>=0.5",
+    # Colourful help/errors (rich-click) and rich stderr output + progress bars.
+    # rich-click forces colour in GitHub Actions; see nf_metro.console.
+    "rich>=13",
+    "rich-click>=1.8",
 ]
 
 [project.urls]

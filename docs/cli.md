@@ -22,6 +22,13 @@ nf-metro ships eleven commands.
 `nf-metro --version` prints the installed version.
 Every command also takes `--help`.
 
+## Terminal output
+
+Help, errors, and progress are rendered in colour with [rich-click](https://ewels.github.io/rich-click/).
+Machine-readable results (such as `render`'s YAML) go to stdout; all human-readable logging, progress, and warnings go to stderr, so stdout stays pipe-safe.
+Colour follows the usual conventions: set `NO_COLOR` to disable it, `FORCE_COLOR` to force it, and nf-metro forces it automatically under GitHub Actions so CI logs keep their formatting.
+Restyle the help with any rich-click theme via `RICH_CLICK_THEME`.
+
 ## `nf-metro render`
 
 Render a Mermaid metro map definition to SVG or interactive HTML.
@@ -58,12 +65,12 @@ See the [precedence table](/nf-metro/guide/#cli-flags-and-directive-precedence) 
 
 ### Output and source
 
-| Option                                            | Default                              | Description                                                                                                                                                                                          |
-| ------------------------------------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Option                                            | Default                                    | Description                                                                                                                                                                                                                                                |
+| ------------------------------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `-o`, `--output PATH`                             | `%%metro output:`, else `<input>.<format>` | Output file path (only valid with a single `INPUT_FILE`). Repeat it to write several formats from one run: `-o map.svg -o map.png`. With no `-o`, the map's `%%metro output:` directive supplies the path(s); with neither, the sibling `<input>.<format>` |
-| `--format [svg\|html\|png\|gif\|webp\|mp4\|webm]` | inferred from `--output`, else `svg` | Output format: `svg`, `png`, `html` for an interactive self-contained page, or `gif`/`webp`/`mp4`/`webm` for a [looping video](#looping-video-of-the-animation). `-o map.png` selects PNG on its own |
-| `--from-nextflow`                                 | off                                  | Convert Nextflow `-with-dag` Mermaid input before rendering                                                                                                                                          |
-| `--debug / --no-debug`                            | off                                  | Show the debug overlay (ports, hidden stations, edge waypoints)                                                                                                                                      |
+| `--format [svg\|html\|png\|gif\|webp\|mp4\|webm]` | inferred from `--output`, else `svg`       | Output format: `svg`, `png`, `html` for an interactive self-contained page, or `gif`/`webp`/`mp4`/`webm` for a [looping video](#looping-video-of-the-animation). `-o map.png` selects PNG on its own                                                       |
+| `--from-nextflow`                                 | off                                        | Convert Nextflow `-with-dag` Mermaid input before rendering                                                                                                                                                                                                |
+| `--debug / --no-debug`                            | off                                        | Show the debug overlay (ports, hidden stations, edge waypoints)                                                                                                                                                                                            |
 
 ### Theme and branding
 

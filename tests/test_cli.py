@@ -113,7 +113,7 @@ def test_render_reports_yaml_result_to_stdout(tmp_path):
     ]
     # Human summary goes to stderr, never stdout.
     assert "Rendered" not in result.stdout
-    assert "OK" in result.stderr
+    assert "file(s) rendered" in result.stderr
 
 
 def test_render_stdout_empty_on_failure(tmp_path):
@@ -465,8 +465,9 @@ def test_render_multiple_files(tmp_path):
     assert result.exit_code == 0, result.output
     assert (tmp_path / "a.svg").exists()
     assert (tmp_path / "b.svg").exists()
-    assert "[1/2] OK" in result.output
-    assert "[2/2] OK" in result.output
+    assert "a.svg" in result.output
+    assert "b.svg" in result.output
+    assert "file(s) rendered" in result.output
 
 
 def test_render_multiple_files_rejects_output_flag(tmp_path):
@@ -498,8 +499,9 @@ def test_render_multiple_files_partial_failure(tmp_path):
     runner = CliRunner()
     result = runner.invoke(cli, ["render", str(bad), str(good)])
     assert result.exit_code != 0
-    assert "[1/2] FAIL" in result.output
-    assert "[2/2] OK" in result.output
+    assert "bad.mmd" in result.output
+    assert "good.mmd" in result.output
+    assert "failed" in result.output
     assert not (tmp_path / "bad.svg").exists()
     assert (tmp_path / "good.svg").exists()
 
@@ -1055,7 +1057,8 @@ def test_render_rejection_is_one_line_without_debug_env(tmp_path, monkeypatch):
         cli, ["render", str(src), "-o", str(tmp_path / "out.svg")]
     )
     assert result.exit_code != 0
-    assert f"Error: {src}: synthetic render rejection" in result.output
+    # rich-click frames the message in an Error panel; it stays one clean line.
+    assert f"{src}: synthetic render rejection" in result.output
     assert "Traceback" not in result.output
 
 
@@ -1368,9 +1371,7 @@ def test_batch_failure_names_its_file_once(tmp_path):
     result = CliRunner().invoke(cli, ["render", str(good), str(empty)])
     assert result.exit_code != 0
     fail_line = next(
-        line
-        for line in result.output.splitlines()
-        if "FAIL" in line and "empty" in line
+        line for line in result.output.splitlines() if "empty.mmd" in line
     )
     assert fail_line.count("empty.mmd") == 1, fail_line
 
