@@ -1337,6 +1337,13 @@ def test_output_directive_repeated_accumulates():
     assert graph.declared_outputs == ["a.svg", "b.png"]
 
 
+def test_output_directive_duplicate_path_not_repeated():
+    graph = parse_metro_mermaid(
+        "%%metro output: a.svg\n%%metro output: a.svg, b.png\ngraph LR\n"
+    )
+    assert graph.declared_outputs == ["a.svg", "b.png"]
+
+
 def test_output_directive_malformed_warns_and_stores_nothing():
     with pytest.warns(UserWarning, match="output"):
         graph = parse_metro_mermaid("%%metro output: \ngraph LR\n")

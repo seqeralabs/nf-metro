@@ -102,14 +102,16 @@ def _dir_output(value: str, graph: MetroGraph) -> None:
     ``nf-metro render`` when no ``-o`` is given.
 
     Repeating the directive accumulates, so a map may declare its formats on
-    one line or split across several. The paths are stored exactly as
-    written; the CLI resolves each one against the .mmd's own directory.
+    one line or split across several. A path already declared is skipped
+    rather than duplicated, so a repeated declaration can't schedule the same
+    output to be rendered (and reported) twice. The paths are stored exactly
+    as written; the CLI resolves each one against the .mmd's own directory.
     """
     paths = _split_csv(value)
     if not paths:
         _warn_malformed("output", value, "'path[, path...]'")
         return
-    graph.declared_outputs.extend(paths)
+    graph.declared_outputs.extend(p for p in paths if p not in graph.declared_outputs)
 
 
 def _dir_off_track(value: str, graph: MetroGraph) -> None:
