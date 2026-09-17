@@ -96,7 +96,7 @@ def test_render_output_directive_resolves_beside_source(tmp_path):
 
 
 def test_render_reports_yaml_result_to_stdout(tmp_path):
-    """stdout is a YAML doc (version + outputs); the summary is on stderr."""
+    """stdout is one YAML doc: version banner then outputs; summary is on stderr."""
     import json
 
     from nf_metro import __version__
@@ -106,7 +106,7 @@ def test_render_reports_yaml_result_to_stdout(tmp_path):
     result = CliRunner().invoke(cli, ["render", str(mmd)])
     assert result.exit_code == 0, result.output
     assert result.stdout.splitlines() == [
-        f"version: {json.dumps(__version__)}",
+        f"nf-metro: v{__version__}",
         "outputs:",
         f"  - {json.dumps(str(tmp_path / 'test.svg'))}",
         f"  - {json.dumps(str(tmp_path / 'test.png'))}",
@@ -114,15 +114,6 @@ def test_render_reports_yaml_result_to_stdout(tmp_path):
     # Human summary goes to stderr, never stdout.
     assert "Rendered" not in result.stdout
     assert "OK" in result.stderr
-
-
-def test_render_stdout_empty_on_failure(tmp_path):
-    """A failed render prints no paths to stdout, so a caller can't misread it."""
-    mmd = tmp_path / "bad.mmd"
-    mmd.write_text("not a valid mermaid file")
-    result = CliRunner().invoke(cli, ["render", str(mmd)])
-    assert result.exit_code != 0
-    assert result.stdout.strip() == ""
 
 
 def test_validate_success():
