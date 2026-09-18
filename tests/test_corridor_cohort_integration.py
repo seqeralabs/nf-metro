@@ -6,6 +6,7 @@ import importlib.util
 from dataclasses import fields, replace
 from enum import Enum
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -24,7 +25,22 @@ from nf_metro.layout.route_plan import (
     SharedReferenceKind,
     register_settlement_stage,
 )
-from nf_metro.layout.route_reservations import CorridorRegionKind, FinalCanvasGeometry
+from nf_metro.layout.route_reservations import (
+    CorridorOrientation,
+    CorridorRegionKind,
+    FinalCanvasGeometry,
+    RowGapRegion,
+)
+from nf_metro.layout.routing.common import Direction
+from nf_metro.layout.routing.corridor_cohort_integration import (
+    CorridorCohortLedgerClaim,
+    CorridorCohortTarget,
+    CorridorScalarOwnerKind,
+    CorridorScalarVariable,
+    build_corridor_footprint_witnesses,
+    claims_share_fixed_lane_identity,
+)
+from nf_metro.layout.routing.families import RouteFamilyId
 from nf_metro.parser.model import Edge, MetroGraph
 from nf_metro.render import svg
 from nf_metro.render.plan import _RENDER_GRAPH_EXCLUDED_FIELDS, RenderPlan
@@ -645,3 +661,140 @@ def test_final_trace_registration_follows_reservation_realisation(
     _render("examples/simple_pipeline.mmd")
 
     assert events[-3:] == ["realise", "cohort-final", "validation"]
+
+
+# --- Owner-typed corridor records and the footprint relation graph ---
+
+
+def _footprint_target(
+    member_id: str, line_id: str, points: list[tuple[float, float]]
+) -> CorridorCohortTarget:
+    edge_key = (f"{member_id}:source", f"{member_id}:target", line_id)
+    return CorridorCohortTarget(
+        member_id,
+        f"plan:{member_id}",
+        edge_key,
+        RouteFamilyId.MERGE_TRUNK,
+        (f"connector:{member_id}",),
+        SimpleNamespace(
+            edge=SimpleNamespace(source=edge_key[0], target=edge_key[1]),
+            line_id=line_id,
+            points=points,
+        ),
+        False,
+    )
+
+
+def test_footprint_witnesses_publish_typed_scalar_ownership_deterministically() -> None:
+    target = _footprint_target(
+        "scalar",
+        "trunk",
+        [(0.0, 4.0), (10.0, 4.0), (10.0, 20.0)],
+    )
+    variable = CorridorScalarVariable(
+        "variable:scalar",
+        CorridorScalarOwnerKind.CONVERGENCE_TRUNK,
+        "convergence:scalar",
+        target.member_id,
+        target.edge_key,
+        target.connector_ids,
+        1,
+        0,
+        10.0,
+    )
+
+    witnesses = build_corridor_footprint_witnesses((target,), (variable,))
+
+    assert tuple(item.segment_rank for item in witnesses) == (0, 1)
+    assert witnesses[0].end_variable_id == variable.variable_id
+    assert witnesses[1].coordinate_variable_id == variable.variable_id
+    assert witnesses[1].owner_id == target.member_geometry_plan_id
+
+
+def test_semantic_ledger_claims_store_no_observed_geometry() -> None:
+    field_names = {field.name for field in fields(CorridorCohortLedgerClaim)}
+
+    assert "coordinate" not in field_names
+    assert "longitudinal_start" not in field_names
+    assert "longitudinal_end" not in field_names
+
+
+def _identity_claim(
+    *,
+    claim_id: str,
+    reservation_id: str,
+    network_id: str | None,
+    endpoint_cohort_id: str | None,
+    direction: Direction = Direction.R,
+) -> CorridorCohortLedgerClaim:
+    return CorridorCohortLedgerClaim(
+        claim_id=claim_id,
+        reservation_id=reservation_id,
+        reservation_rank=0,
+        claim_rank=0,
+        region=RowGapRegion(0, 1),
+        orientation=CorridorOrientation.HORIZONTAL,
+        direction=direction,
+        lane_rank=0,
+        member_id=claim_id,
+        member_geometry_plan_id=f"plan:{claim_id}",
+        edge_key=(f"{claim_id}:source", f"{claim_id}:target", "line"),
+        family_id=RouteFamilyId.SAME_Y_STRAIGHT,
+        connector_ids=(f"connector:{claim_id}",),
+        segment_rank=0,
+        path_rank=0,
+        endpoint_cohort_id=endpoint_cohort_id,
+        endpoint_network_rank=None,
+        destination_boundary_carrier=endpoint_cohort_id is not None,
+        destination_boundary_axis_sign=None,
+        network_id=network_id,
+        reservation_complete=True,
+    )
+
+
+def test_opposite_running_peer_is_not_a_fixed_equality() -> None:
+    """Two claims that run in opposite directions never share a fixed lane.
+
+    ``claims_share_fixed_lane_identity`` takes no coordinates, so it has
+    nothing to fall back on: the direction mismatch alone must decide it.
+    """
+    movable = _identity_claim(
+        claim_id="movable",
+        reservation_id="reservation:shared",
+        network_id="network",
+        endpoint_cohort_id="endpoint",
+    )
+    fixed = _identity_claim(
+        claim_id="fixed",
+        reservation_id="reservation:shared",
+        network_id="network",
+        endpoint_cohort_id=None,
+        direction=Direction.L,
+    )
+
+    assert not claims_share_fixed_lane_identity(movable, fixed)
+
+
+def test_coordinate_proximity_without_a_shared_network_is_not_a_fixed_equality() -> (
+    None
+):
+    """Two claims from different networks never share a fixed lane.
+
+    ``claims_share_fixed_lane_identity`` takes no coordinates, so a route
+    that later happens to land both claims at the same point cannot make
+    this true: only shared witness identity can.
+    """
+    movable = _identity_claim(
+        claim_id="movable",
+        reservation_id="reservation:movable",
+        network_id="network:movable",
+        endpoint_cohort_id="endpoint",
+    )
+    fixed = _identity_claim(
+        claim_id="fixed",
+        reservation_id="reservation:fixed",
+        network_id="network:fixed",
+        endpoint_cohort_id=None,
+    )
+
+    assert not claims_share_fixed_lane_identity(movable, fixed)

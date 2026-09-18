@@ -66,6 +66,9 @@ if TYPE_CHECKING:
     )
     from nf_metro.layout.routing.common import RoutedPath
     from nf_metro.layout.routing.context import _EdgeKey, _RoutingCtx
+    from nf_metro.layout.routing.corridor_cohort_integration import (
+        CorridorCohortLedger,
+    )
     from nf_metro.layout.routing.system_emission import RouteSystemEmissionExecution
     from nf_metro.layout.settlement_demand import BoundaryClearanceRequirement
 
@@ -2452,6 +2455,7 @@ class RoutePlan:
     boundary_clearance_owner_ids: tuple[str, ...] = ()
     """Systems whose member geometry owns a settled boundary-clearance cohort."""
     settlement_trace: SettlementStageTrace = SettlementStageTrace()
+    corridor_cohort_ledger: CorridorCohortLedger | None = None
 
 
 @dataclass(slots=True)
