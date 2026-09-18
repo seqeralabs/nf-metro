@@ -29,6 +29,7 @@ from nf_metro.layout.routing.corridor_cohorts import (
     CorridorAllocationStatus,
     CorridorClearanceShortfall,
     CorridorCoordinateDomain,
+    _overlaps,
 )
 from nf_metro.layout.routing.families import RouteFamilyId
 from nf_metro.parser.route_topology import ConnectorId
@@ -948,3 +949,184 @@ def _member_footprint_model(
         tuple(orders[key] for key in sorted(orders)),
         tuple(contacts[key] for key in sorted(contacts)),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class _AtomicComponentSpec:
+    """One closed corridor component.
+
+    ``physical_ranks`` indexes into the ``physical`` tuple a sibling
+    :func:`_physical_components` call returned for the same claim
+    population, not into that population's claims directly.
+    """
+
+    physical_ranks: tuple[int, ...]
+    scalar_variable_ids: tuple[str, ...]
+
+
+class _UnionFind:
+    def __init__(self, size: int) -> None:
+        self.parents = list(range(size))
+
+    def find(self, item: int) -> int:
+        if self.parents[item] != item:
+            self.parents[item] = self.find(self.parents[item])
+        return self.parents[item]
+
+    def union(self, left: int, right: int) -> None:
+        left, right = self.find(left), self.find(right)
+        if left != right:
+            self.parents[max(left, right)] = min(left, right)
+
+
+def _physical_components(
+    claims: tuple[_BoundClaim, ...],
+) -> tuple[tuple[int, ...], ...]:
+    """Group claims that physically overlap within one shared lane family.
+
+    Two claims can only occupy the same physical space if they run the same
+    orientation through the same corridor region, so claims are bucketed by
+    ``(region, orientation)`` first and overlap is tested only within a
+    bucket, never across one.
+    """
+    union = _UnionFind(len(claims))
+    buckets: defaultdict[tuple[CorridorRegion, CorridorOrientation], list[int]] = (
+        defaultdict(list)
+    )
+    for rank, claim in enumerate(claims):
+        buckets[(claim.ledger.region, claim.ledger.orientation)].append(rank)
+    for ranks in buckets.values():
+        for offset, left in enumerate(ranks):
+            for right in ranks[offset + 1 :]:
+                if _overlaps(
+                    claims[left].longitudinal_start,
+                    claims[left].longitudinal_end,
+                    claims[right].longitudinal_start,
+                    claims[right].longitudinal_end,
+                ):
+                    union.union(left, right)
+    grouped: defaultdict[int, list[int]] = defaultdict(list)
+    for rank in range(len(claims)):
+        grouped[union.find(rank)].append(rank)
+    return tuple(tuple(ranks) for _, ranks in sorted(grouped.items()))
+
+
+def _validate_atomic_component_orientation(
+    component: _AtomicComponentSpec,
+    claims: tuple[_BoundClaim, ...],
+    physical: tuple[tuple[int, ...], ...],
+    variables_by_id: Mapping[str, CorridorScalarVariable],
+) -> None:
+    """Reject a component whose members do not share one physical lane axis.
+
+    A typed relation can name participants drawn from two different
+    ``(region, orientation)`` buckets; nothing before this check stops that
+    union, and a component spanning two buckets would leave a downstream
+    solver with no single axis to read for part of what it thinks is one
+    component.
+    """
+    lanes = {
+        (claims[claim_rank].ledger.region, claims[claim_rank].ledger.orientation)
+        for physical_rank in component.physical_ranks
+        for claim_rank in physical[physical_rank]
+    }
+    if len(lanes) > 1:
+        raise CorridorCohortCompilationError(
+            f"corridor component with physical ranks {component.physical_ranks} "
+            "spans more than one (region, orientation) lane"
+        )
+    axes = {
+        variables_by_id[variable_id].axis
+        for variable_id in component.scalar_variable_ids
+    }
+    if component.physical_ranks:
+        claim_rank = physical[component.physical_ranks[0]][0]
+        axes.add(claims[claim_rank].axis)
+    if len(axes) > 1:
+        raise CorridorCohortCompilationError(
+            f"corridor component with scalar variables {component.scalar_variable_ids} "
+            "mixes axes across an orientation boundary"
+        )
+
+
+def _atomic_components(
+    claims: tuple[_BoundClaim, ...],
+    physical: tuple[tuple[int, ...], ...],
+    footprint_model: _MemberFootprintModel,
+) -> tuple[_AtomicComponentSpec, ...]:
+    """Close *physical* overlap groups and scalar variables over typed relations.
+
+    Every claim rank and every scalar variable id is a component node from
+    the start. Physical overlap seeds the union; each ``_FootprintOrder`` and
+    ``_FootprintContact`` then unions the nodes its participant variables
+    resolve to -- a claim-carrying variable resolves to its own claim ranks,
+    a scalar variable (one with no claim at all) resolves to its own node.
+    That relation participation is the only thing that ever joins two scalar
+    nodes, or a scalar node to a physical group: sharing an axis unions
+    nothing by itself.
+    """
+    variables_by_id = {
+        variable.variable_id: variable for variable in footprint_model.variables
+    }
+    scalar_variables = tuple(
+        variable
+        for variable in footprint_model.variables
+        if not footprint_model.claim_ids_by_variable[variable.variable_id]
+    )
+    claim_rank_by_id = {claim.claim_id: rank for rank, claim in enumerate(claims)}
+    scalar_node = {
+        variable.variable_id: len(claims) + rank
+        for rank, variable in enumerate(scalar_variables)
+    }
+    union = _UnionFind(len(claims) + len(scalar_variables))
+    for group in physical:
+        for claim_rank in group[1:]:
+            union.union(group[0], claim_rank)
+
+    def relation_nodes(variable_id: str) -> tuple[int, ...]:
+        claim_ids = footprint_model.claim_ids_by_variable[variable_id]
+        if claim_ids:
+            return tuple(
+                sorted(
+                    {
+                        claim_rank_by_id[claim_id]
+                        for claim_id in claim_ids
+                        if claim_id in claim_rank_by_id
+                    }
+                )
+            )
+        return (scalar_node[variable_id],)
+
+    relations: tuple[_FootprintOrder | _FootprintContact, ...] = (
+        *footprint_model.orders,
+        *footprint_model.contacts,
+    )
+    for relation in relations:
+        relation_ranks = tuple(
+            rank
+            for variable_id in relation.participant_variable_ids
+            for rank in relation_nodes(variable_id)
+        )
+        for rank in relation_ranks[1:]:
+            union.union(relation_ranks[0], rank)
+
+    grouped_physical: defaultdict[int, list[int]] = defaultdict(list)
+    for physical_rank, group in enumerate(physical):
+        grouped_physical[union.find(group[0])].append(physical_rank)
+    grouped_scalar: defaultdict[int, list[str]] = defaultdict(list)
+    for variable in scalar_variables:
+        grouped_scalar[union.find(scalar_node[variable.variable_id])].append(
+            variable.variable_id
+        )
+    roots = sorted(set(grouped_physical) | set(grouped_scalar))
+    components = tuple(
+        _AtomicComponentSpec(
+            tuple(grouped_physical[root]), tuple(sorted(grouped_scalar[root]))
+        )
+        for root in roots
+    )
+    for component in components:
+        _validate_atomic_component_orientation(
+            component, claims, physical, variables_by_id
+        )
+    return components

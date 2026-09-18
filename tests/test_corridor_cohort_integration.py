@@ -26,17 +26,27 @@ from nf_metro.layout.route_plan import (
     register_settlement_stage,
 )
 from nf_metro.layout.route_reservations import (
+    ColumnGapRegion,
     CorridorOrientation,
+    CorridorRegion,
     CorridorRegionKind,
     FinalCanvasGeometry,
     RowGapRegion,
 )
 from nf_metro.layout.routing.common import Direction
 from nf_metro.layout.routing.corridor_cohort_integration import (
+    CorridorCohortCompilationError,
     CorridorCohortLedgerClaim,
     CorridorCohortTarget,
     CorridorScalarOwnerKind,
     CorridorScalarVariable,
+    _atomic_components,
+    _BoundClaim,
+    _FootprintContact,
+    _FootprintOrder,
+    _FootprintTerm,
+    _MemberFootprintModel,
+    _physical_components,
     build_corridor_footprint_witnesses,
     claims_share_fixed_lane_identity,
 )
@@ -798,3 +808,260 @@ def test_coordinate_proximity_without_a_shared_network_is_not_a_fixed_equality()
     )
 
     assert not claims_share_fixed_lane_identity(movable, fixed)
+
+
+# --- Atomic component closure over typed footprint relations ---
+
+
+def _bound_claim(
+    *,
+    claim_id: str,
+    region: CorridorRegion,
+    orientation: CorridorOrientation,
+    longitudinal_start: float,
+    longitudinal_end: float,
+    coordinate: float = 0.0,
+) -> _BoundClaim:
+    ledger = replace(
+        _identity_claim(
+            claim_id=claim_id,
+            reservation_id=f"reservation:{claim_id}",
+            network_id=None,
+            endpoint_cohort_id=None,
+        ),
+        region=region,
+        orientation=orientation,
+    )
+    target = _footprint_target(claim_id, "line", [(0.0, 0.0), (1.0, 0.0)])
+    return _BoundClaim(
+        ledger, target, longitudinal_start, longitudinal_end, coordinate, None
+    )
+
+
+def _scalar_variable(
+    variable_id: str, *, axis: int, coordinate: float = 0.0
+) -> CorridorScalarVariable:
+    return CorridorScalarVariable(
+        variable_id,
+        CorridorScalarOwnerKind.CONVERGENCE_TRUNK,
+        f"convergence:{variable_id}",
+        f"member:{variable_id}",
+        (f"{variable_id}:source", f"{variable_id}:target", "line"),
+        (f"connector:{variable_id}",),
+        0,
+        axis,
+        coordinate,
+    )
+
+
+def _order(owner_id: str, participant_variable_ids: tuple[str, ...]) -> _FootprintOrder:
+    return _FootprintOrder(
+        owner_id,
+        _FootprintTerm(participant_variable_ids[0], None, f"witness:{owner_id}:lower"),
+        _FootprintTerm(None, 0.0, f"witness:{owner_id}:upper"),
+        1.0,
+        participant_variable_ids,
+        (f"witness:{owner_id}",),
+        (),
+    )
+
+
+def _contact(
+    owner_id: str, participant_variable_ids: tuple[str, ...]
+) -> _FootprintContact:
+    return _FootprintContact(
+        owner_id,
+        participant_variable_ids,
+        (f"witness:{owner_id}",),
+        "network",
+        (),
+        (),
+    )
+
+
+def test_seed77_closes_one_snapshot_into_complete_atomic_components() -> None:
+    """One closure snapshot groups overlap and relation-linked nodes together
+    and leaves an untouched physical group standing alone.
+
+    Asserts directly on the closure output
+    (``_AtomicComponentSpec.physical_ranks`` / ``.scalar_variable_ids``).
+    """
+    overlap_a = _bound_claim(
+        claim_id="overlap-a",
+        region=RowGapRegion(0, 1),
+        orientation=CorridorOrientation.HORIZONTAL,
+        longitudinal_start=0.0,
+        longitudinal_end=10.0,
+    )
+    overlap_b = _bound_claim(
+        claim_id="overlap-b",
+        region=RowGapRegion(0, 1),
+        orientation=CorridorOrientation.HORIZONTAL,
+        longitudinal_start=5.0,
+        longitudinal_end=15.0,
+    )
+    isolated_same_axis = _bound_claim(
+        claim_id="isolated-same-axis",
+        region=RowGapRegion(0, 1),
+        orientation=CorridorOrientation.HORIZONTAL,
+        longitudinal_start=20.0,
+        longitudinal_end=30.0,
+    )
+    isolated_other_axis = _bound_claim(
+        claim_id="isolated-other-axis",
+        region=ColumnGapRegion(0, 1),
+        orientation=CorridorOrientation.VERTICAL,
+        longitudinal_start=0.0,
+        longitudinal_end=10.0,
+    )
+    claims = (overlap_a, overlap_b, isolated_same_axis, isolated_other_axis)
+
+    carrier_variable = _scalar_variable("member-carrier|overlap-a", axis=1)
+    scalar_variable = _scalar_variable("convergence-trunk|scalar", axis=1)
+    footprint_model = _MemberFootprintModel(
+        (carrier_variable, scalar_variable),
+        (),
+        {
+            carrier_variable.variable_id: (overlap_a.claim_id,),
+            scalar_variable.variable_id: (),
+        },
+        (
+            _order(
+                "relation:carrier-scalar",
+                (carrier_variable.variable_id, scalar_variable.variable_id),
+            ),
+        ),
+        (),
+    )
+
+    physical = _physical_components(claims)
+    components = _atomic_components(claims, physical, footprint_model)
+
+    rank_by_claim_id = {claim.claim_id: rank for rank, claim in enumerate(claims)}
+    overlap_group = next(
+        group for group in physical if rank_by_claim_id["overlap-a"] in group
+    )
+    same_axis_group = next(
+        group for group in physical if rank_by_claim_id["isolated-same-axis"] in group
+    )
+    other_axis_group = next(
+        group for group in physical if rank_by_claim_id["isolated-other-axis"] in group
+    )
+    assert set(overlap_group) == {
+        rank_by_claim_id["overlap-a"],
+        rank_by_claim_id["overlap-b"],
+    }
+    assert same_axis_group == (rank_by_claim_id["isolated-same-axis"],)
+    assert other_axis_group == (rank_by_claim_id["isolated-other-axis"],)
+
+    components_by_physical_rank = {
+        rank: component for component in components for rank in component.physical_ranks
+    }
+    overlap_group_rank = physical.index(overlap_group)
+    same_axis_group_rank = physical.index(same_axis_group)
+    other_axis_group_rank = physical.index(other_axis_group)
+
+    joined = components_by_physical_rank[overlap_group_rank]
+    assert joined.physical_ranks == (overlap_group_rank,)
+    assert joined.scalar_variable_ids == (scalar_variable.variable_id,)
+
+    standalone_same_axis = components_by_physical_rank[same_axis_group_rank]
+    assert standalone_same_axis.physical_ranks == (same_axis_group_rank,)
+    assert standalone_same_axis.scalar_variable_ids == ()
+
+    standalone_other_axis = components_by_physical_rank[other_axis_group_rank]
+    assert standalone_other_axis.physical_ranks == (other_axis_group_rank,)
+    assert standalone_other_axis.scalar_variable_ids == ()
+
+    assert len(components) == 3
+
+
+def test_contact_only_scalar_nodes_close_into_one_component_without_claims() -> None:
+    """A contact relation must join two scalar-only nodes even though
+    neither has claim ranks.
+    """
+    scalar_a = _scalar_variable("scalar-a", axis=0)
+    scalar_b = _scalar_variable("scalar-b", axis=0)
+    footprint_model = _MemberFootprintModel(
+        (scalar_a, scalar_b),
+        (),
+        {scalar_a.variable_id: (), scalar_b.variable_id: ()},
+        (),
+        (_contact("relation:contact", (scalar_a.variable_id, scalar_b.variable_id)),),
+    )
+
+    components = _atomic_components((), (), footprint_model)
+
+    assert len(components) == 1
+    assert components[0].physical_ranks == ()
+    assert set(components[0].scalar_variable_ids) == {
+        scalar_a.variable_id,
+        scalar_b.variable_id,
+    }
+
+
+def test_same_axis_scalar_variables_without_a_relation_stay_separate() -> None:
+    """Sharing an axis must never union two scalar nodes by itself."""
+    scalar_a = _scalar_variable("scalar-a", axis=0, coordinate=0.0)
+    scalar_b = _scalar_variable("scalar-b", axis=0, coordinate=10.0)
+    footprint_model = _MemberFootprintModel(
+        (scalar_a, scalar_b),
+        (),
+        {scalar_a.variable_id: (), scalar_b.variable_id: ()},
+        (),
+        (),
+    )
+
+    components = _atomic_components((), (), footprint_model)
+
+    assert len(components) == 2
+    assert {component.scalar_variable_ids for component in components} == {
+        (scalar_a.variable_id,),
+        (scalar_b.variable_id,),
+    }
+
+
+def test_relation_spanning_two_orientation_buckets_fails_closed() -> None:
+    """A relation naming claims from two ``(region, orientation)`` buckets
+    must raise rather than silently merge them into one component.
+
+    Physical-overlap bucketing alone cannot stop this: a relation can name
+    participants that live in different buckets, so closure needs its own
+    guard.
+    """
+    horizontal = _bound_claim(
+        claim_id="horizontal",
+        region=RowGapRegion(0, 1),
+        orientation=CorridorOrientation.HORIZONTAL,
+        longitudinal_start=0.0,
+        longitudinal_end=10.0,
+    )
+    vertical = _bound_claim(
+        claim_id="vertical",
+        region=ColumnGapRegion(0, 1),
+        orientation=CorridorOrientation.VERTICAL,
+        longitudinal_start=0.0,
+        longitudinal_end=10.0,
+    )
+    claims = (horizontal, vertical)
+    horizontal_variable = _scalar_variable("member-carrier|horizontal", axis=1)
+    vertical_variable = _scalar_variable("member-carrier|vertical", axis=0)
+    footprint_model = _MemberFootprintModel(
+        (horizontal_variable, vertical_variable),
+        (),
+        {
+            horizontal_variable.variable_id: (horizontal.claim_id,),
+            vertical_variable.variable_id: (vertical.claim_id,),
+        },
+        (
+            _order(
+                "relation:cross-orientation",
+                (horizontal_variable.variable_id, vertical_variable.variable_id),
+            ),
+        ),
+        (),
+    )
+    physical = _physical_components(claims)
+
+    with pytest.raises(CorridorCohortCompilationError, match="orientation"):
+        _atomic_components(claims, physical, footprint_model)
