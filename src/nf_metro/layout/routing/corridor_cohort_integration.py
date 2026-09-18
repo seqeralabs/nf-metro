@@ -29,6 +29,7 @@ from nf_metro.layout.routing.corridor_cohorts import (
     CorridorAllocationStatus,
     CorridorClearanceShortfall,
     CorridorCoordinateDomain,
+    _overlaps,
 )
 from nf_metro.layout.routing.families import RouteFamilyId
 from nf_metro.parser.route_topology import ConnectorId
@@ -978,12 +979,6 @@ class _UnionFind:
             self.parents[max(left, right)] = min(left, right)
 
 
-def _overlap(left: _BoundClaim, right: _BoundClaim) -> bool:
-    return max(left.longitudinal_start, right.longitudinal_start) < min(
-        left.longitudinal_end, right.longitudinal_end
-    )
-
-
 def _physical_components(
     claims: tuple[_BoundClaim, ...],
 ) -> tuple[tuple[int, ...], ...]:
@@ -1003,7 +998,12 @@ def _physical_components(
     for ranks in buckets.values():
         for offset, left in enumerate(ranks):
             for right in ranks[offset + 1 :]:
-                if _overlap(claims[left], claims[right]):
+                if _overlaps(
+                    claims[left].longitudinal_start,
+                    claims[left].longitudinal_end,
+                    claims[right].longitudinal_start,
+                    claims[right].longitudinal_end,
+                ):
                     union.union(left, right)
     grouped: defaultdict[int, list[int]] = defaultdict(list)
     for rank in range(len(claims)):
@@ -1039,9 +1039,9 @@ def _validate_atomic_component_orientation(
         variables_by_id[variable_id].axis
         for variable_id in component.scalar_variable_ids
     }
-    if lanes:
-        ((_region, orientation),) = lanes
-        axes.add(1 if orientation is CorridorOrientation.HORIZONTAL else 0)
+    if component.physical_ranks:
+        claim_rank = physical[component.physical_ranks[0]][0]
+        axes.add(claims[claim_rank].axis)
     if len(axes) > 1:
         raise CorridorCohortCompilationError(
             f"corridor component with scalar variables {component.scalar_variable_ids} "

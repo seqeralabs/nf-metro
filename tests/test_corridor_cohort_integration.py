@@ -883,12 +883,8 @@ def test_seed77_closes_one_snapshot_into_complete_atomic_components() -> None:
     """One closure snapshot groups overlap and relation-linked nodes together
     and leaves an untouched physical group standing alone.
 
-    This name matches the checkpoint prototype's
-    ``test_seed77_closes_one_snapshot_into_complete_atomic_components``, but
-    this version asserts on the closure output
-    (``_AtomicComponentSpec.physical_ranks`` / ``.scalar_variable_ids``)
-    directly: no solver-facing consumer (``plan.allocations``) exists at this
-    layer, so there is nothing else to assert against yet.
+    Asserts directly on the closure output
+    (``_AtomicComponentSpec.physical_ranks`` / ``.scalar_variable_ids``).
     """
     overlap_a = _bound_claim(
         claim_id="overlap-a",
@@ -981,12 +977,8 @@ def test_seed77_closes_one_snapshot_into_complete_atomic_components() -> None:
 
 
 def test_contact_only_scalar_nodes_close_into_one_component_without_claims() -> None:
-    """A ``_FootprintContact`` alone must join two scalar-only nodes.
-
-    Guards against a downstream reader that decides component membership
-    from a variable's claim-rank set and silently drops a node whose
-    ``claim_ids_by_variable`` entry is empty: closure itself must never omit
-    it.
+    """A contact relation must join two scalar-only nodes even though
+    neither has claim ranks.
     """
     scalar_a = _scalar_variable("scalar-a", axis=0)
     scalar_b = _scalar_variable("scalar-b", axis=0)
@@ -1009,12 +1001,7 @@ def test_contact_only_scalar_nodes_close_into_one_component_without_claims() -> 
 
 
 def test_same_axis_scalar_variables_without_a_relation_stay_separate() -> None:
-    """Sharing an axis must never union two scalar nodes by itself.
-
-    Guards the defect this issue exists to kill: a discarded prototype
-    unioned every scalar sharing an axis globally, with no reference to a
-    typed relation connecting them.
-    """
+    """Sharing an axis must never union two scalar nodes by itself."""
     scalar_a = _scalar_variable("scalar-a", axis=0, coordinate=0.0)
     scalar_b = _scalar_variable("scalar-b", axis=0, coordinate=10.0)
     footprint_model = _MemberFootprintModel(
