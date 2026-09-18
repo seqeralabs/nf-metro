@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from nf_metro.api import prepare_graph, resolve_theme
+from nf_metro.layout.constants import COORD_TOLERANCE
 from nf_metro.layout.route_plan import (
     SETTLEMENT_STAGE_ORDER,
     ConvergenceDisposition,
@@ -33,9 +34,11 @@ from nf_metro.layout.route_reservations import (
     FinalCanvasGeometry,
     RowGapRegion,
 )
+from nf_metro.layout.routing import corridor_cohort_integration as cci
 from nf_metro.layout.routing.common import Direction
 from nf_metro.layout.routing.corridor_cohort_integration import (
     CorridorCohortCompilationError,
+    CorridorCohortLedger,
     CorridorCohortLedgerClaim,
     CorridorCohortTarget,
     CorridorScalarOwnerKind,
@@ -736,25 +739,30 @@ def _identity_claim(
     network_id: str | None,
     endpoint_cohort_id: str | None,
     direction: Direction = Direction.R,
+    region: CorridorRegion = RowGapRegion(0, 1),
+    orientation: CorridorOrientation = CorridorOrientation.HORIZONTAL,
+    lane_rank: int | None = 0,
+    segment_rank: int = 0,
+    endpoint_network_rank: int | None = None,
 ) -> CorridorCohortLedgerClaim:
     return CorridorCohortLedgerClaim(
         claim_id=claim_id,
         reservation_id=reservation_id,
         reservation_rank=0,
         claim_rank=0,
-        region=RowGapRegion(0, 1),
-        orientation=CorridorOrientation.HORIZONTAL,
+        region=region,
+        orientation=orientation,
         direction=direction,
-        lane_rank=0,
+        lane_rank=lane_rank,
         member_id=claim_id,
         member_geometry_plan_id=f"plan:{claim_id}",
         edge_key=(f"{claim_id}:source", f"{claim_id}:target", "line"),
         family_id=RouteFamilyId.SAME_Y_STRAIGHT,
         connector_ids=(f"connector:{claim_id}",),
-        segment_rank=0,
+        segment_rank=segment_rank,
         path_rank=0,
         endpoint_cohort_id=endpoint_cohort_id,
-        endpoint_network_rank=None,
+        endpoint_network_rank=endpoint_network_rank,
         destination_boundary_carrier=endpoint_cohort_id is not None,
         destination_boundary_axis_sign=None,
         network_id=network_id,
@@ -1065,3 +1073,166 @@ def test_relation_spanning_two_orientation_buckets_fails_closed() -> None:
 
     with pytest.raises(CorridorCohortCompilationError, match="orientation"):
         _atomic_components(claims, physical, footprint_model)
+
+
+# --- Member footprint relation lowering through the scalar corridor solver ---
+
+
+def _mutable_route(
+    *,
+    source: str,
+    target: str,
+    line_id: str,
+    points: list[tuple[float, float]],
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        edge=SimpleNamespace(source=source, target=target),
+        line_id=line_id,
+        points=points,
+        curve_radii=None,
+        route_system_owned_segment_ranks=(),
+        convergence_owned_segment_ranks=(),
+        fan_route_emitter=None,
+        exit_turn_axis_id=None,
+        exit_turn_segment_rank=None,
+    )
+
+
+def test_fixed_endpoint_landing_is_planned_clear_of_an_unclaimed_fixed_lead() -> None:
+    """A landing carrier plans at its own port slot, never snapped onto a
+    collinear fixed lead that belongs to a different network.
+
+    The carrier drops vertically and lands rightward at ``y=40``; an immutable
+    lead in a different network runs horizontally along the same ``y=40`` but
+    starts well to the right. Because the two claims share no network identity
+    they cannot form a ``CorridorFixedEquality``, so nothing may pull the
+    carrier onto the lead: the carrier keeps its own coordinates, the lead is
+    an obstacle rather than a member, and its geometry is left untouched.
+    """
+    carrier_claim = _identity_claim(
+        claim_id="carrier",
+        reservation_id="reservation:carrier",
+        network_id="network:carrier",
+        endpoint_cohort_id="cohort:landing",
+        direction=Direction.D,
+        region=ColumnGapRegion(0, 1),
+        orientation=CorridorOrientation.VERTICAL,
+        endpoint_network_rank=0,
+    )
+    fixed_claim = _identity_claim(
+        claim_id="fixed",
+        reservation_id="reservation:fixed",
+        network_id="network:fixed",
+        endpoint_cohort_id=None,
+    )
+    carrier_edge = carrier_claim.edge_key
+    fixed_edge = fixed_claim.edge_key
+    assert carrier_edge is not None and fixed_edge is not None
+    carrier_route = _mutable_route(
+        source=carrier_edge[0],
+        target=carrier_edge[1],
+        line_id=carrier_edge[2],
+        points=[(0.0, 0.0), (0.0, 40.0), (30.0, 40.0)],
+    )
+    fixed_route = _mutable_route(
+        source=fixed_edge[0],
+        target=fixed_edge[1],
+        line_id=fixed_edge[2],
+        points=[(60.0, 40.0), (90.0, 40.0)],
+    )
+    # The different-network precondition is what makes the assertions
+    # non-vacuous: a shared identity would let a fixed equality snap the two
+    # collinear claims together regardless of the lowering under test.
+    assert not claims_share_fixed_lane_identity(carrier_claim, fixed_claim)
+
+    ledger = CorridorCohortLedger(
+        claims=(carrier_claim, fixed_claim),
+        endpoint_members=(("cohort:landing", frozenset({"carrier"})),),
+        eligible_member_ids=frozenset({"carrier"}),
+        ambiguous_endpoint_cohort_ids=frozenset(),
+        offset_step=10.0,
+    )
+    carrier_target = CorridorCohortTarget(
+        "carrier",
+        "plan:carrier",
+        carrier_edge,
+        RouteFamilyId.SAME_Y_STRAIGHT,
+        ("connector:carrier",),
+        carrier_route,
+        True,
+        endpoint_lane_axis=1,
+        endpoint_lane_coordinate=40.0,
+        network_id="network:carrier",
+    )
+    fixed_target = CorridorCohortTarget(
+        "fixed",
+        "plan:fixed",
+        fixed_edge,
+        RouteFamilyId.SAME_Y_STRAIGHT,
+        ("connector:fixed",),
+        fixed_route,
+        False,
+        network_id="network:fixed",
+    )
+    targets = (carrier_target, fixed_target)
+
+    fixed_points_before = tuple(fixed_route.points)
+
+    plan = cci.compile_corridor_cohort_plan(ledger, targets)
+
+    (landing,) = plan.landings
+    assert landing.member_id == "carrier"
+    assert landing.axis == 1
+    assert landing.coordinate == pytest.approx(40.0)
+
+    (carrier_allocation,) = [
+        allocation
+        for allocation in plan.allocations
+        if allocation.member_id == "carrier"
+    ]
+    assert carrier_allocation.axis == 0
+    assert carrier_allocation.coordinate == pytest.approx(0.0)
+
+    landing_segment = carrier_route.points[-2:]
+    assert landing_segment[0][1] == pytest.approx(landing_segment[1][1])
+    assert fixed_route.points[0][1] == pytest.approx(fixed_route.points[1][1])
+    assert landing_segment[0][1] == pytest.approx(fixed_route.points[0][1])
+
+    landing_x_max = max(point[0] for point in landing_segment)
+    fixed_x_min = min(point[0] for point in fixed_route.points)
+    assert landing_x_max + COORD_TOLERANCE <= fixed_x_min
+
+    assert all(allocation.member_id != "fixed" for allocation in plan.allocations)
+    assert tuple(fixed_route.points) == fixed_points_before
+
+
+def test_problem_rejects_an_infeasible_fixed_fixed_footprint_order() -> None:
+    """A footprint order whose two ends are both fixed and overlap fails closed.
+
+    Both ``_FootprintOrder`` constructors in ``_member_footprint_model`` bind at
+    least one variable term today, so the fixed-fixed branch of ``_problem`` is
+    unreachable through the live builders. This drives it directly to prove the
+    guard raises rather than silently rotting into dead code.
+    """
+    order = _FootprintOrder(
+        "relation:fixed-fixed",
+        _FootprintTerm(None, 10.0, "witness:lower"),
+        _FootprintTerm(None, 0.0, "witness:upper"),
+        5.0,
+        (),
+        ("witness:fixed",),
+        (),
+    )
+    footprint_model = _MemberFootprintModel((), (), {}, (order,), (), ())
+
+    with pytest.raises(CorridorCohortCompilationError, match="infeasible"):
+        cci._problem(
+            (),
+            {},
+            True,
+            10.0,
+            8.0,
+            {},
+            footprint_model,
+            {},
+        )
