@@ -12,12 +12,12 @@ nf-metro accepts contributions as pull requests against `main`.
 ```bash frame="terminal"
 git clone https://github.com/seqeralabs/nf-metro
 cd nf-metro
-pip install -e ".[dev]"
+uv sync
 ```
 
 Required Python: 3.11+.
 Dependencies: `click`, `drawsvg`, `lark`, `networkx`, `pillow`.
-Dev extras add `pytest`, `ruff`, `mypy`.
+The dev dependency group adds `pytest`, `ruff`, `mypy`.
 
 A plain clone also fetches `gh-pages`, an orphan branch carrying the built docs site and every open PR's render preview.
 Work only ever happens on `main`.
@@ -31,16 +31,16 @@ git clone --single-branch --branch main https://github.com/seqeralabs/nf-metro
 
 ```bash frame="terminal"
 # All tests
-pytest
+uv run pytest
 
 # Single test file or case
-pytest tests/test_topology_validation.py
-pytest tests/test_parser.py::test_parse_title
+uv run pytest tests/test_topology_validation.py
+uv run pytest tests/test_parser.py::test_parse_title
 
 # Lint and types (match CI exactly)
-ruff check src/ tests/
-ruff format --check src/ tests/
-mypy src/
+uv run ruff check src/ tests/
+uv run ruff format --check src/ tests/
+uv run mypy
 ```
 
 The topology suite parametrizes over every `.mmd` in `examples/topologies/` and runs the full layout oracle against each one.
@@ -51,14 +51,14 @@ CI balances its three test shards from the committed `.test_durations` file and 
 If you change the test count or runtime, refresh the timings, then review and commit the updated file:
 
 ```bash frame="terminal"
-pytest --store-durations --clean-durations
+uv run pytest --store-durations --clean-durations
 ```
 
 ## Before you open a PR
 
 <Steps>
 
-1. Run `pytest` and `ruff format --check`.
+1. Run `uv run pytest` and `uv run ruff format --check`.
    CI runs both and fails on either.
 2. For any layout or rendering change, do a [visual review](#visual-review).
    The automated checks confirm the geometry is valid, not that it looks right.
@@ -77,7 +77,7 @@ You need no wiring, because the suite picks up every file in the directory autom
 
 1. Write a minimal `.mmd` that exercises the topology.
 2. Save it in `examples/topologies/`.
-3. Run `pytest tests/test_topology_validation.py` to confirm it passes (or fails, if you are pinning a known issue).
+3. Run `uv run pytest tests/test_topology_validation.py` to confirm it passes (or fails, if you are pinning a known issue).
 
 </Steps>
 
@@ -158,15 +158,14 @@ Scroll through and confirm nothing regressed.
 **Locally:** render individual examples directly:
 
 ```bash frame="terminal"
-# Activate the nf-metro dev environment if using micromamba
-source ~/.local/bin/mm-activate nf-metro
-
 # Render straight to PNG for review
-python -m nf_metro render examples/rnaseq_sections.mmd -o /tmp/out.png
+nf-metro render examples/rnaseq_sections.mmd -o /tmp/out.png
 open /tmp/out.png
 ```
 
-Batch-render the whole topology library with `python scripts/render_topologies.py` (output in `/tmp/nf_metro_topology_renders/`).
+In a dev checkout, run the CLI as `uv run nf-metro …`, or `uv tool install --editable .` once for a bare `nf-metro` on PATH that tracks your working tree.
+
+Batch-render the whole topology library with `uv run python scripts/render_topologies.py` (output in `/tmp/nf_metro_topology_renders/`).
 
 ## Commit and CI conventions
 

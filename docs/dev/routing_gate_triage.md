@@ -67,7 +67,7 @@ A campaign is not done while any arm is `needs-review`.
 
 ## Run a slice
 
-1. **Worktree off current `origin/main`.** Re-run `python scripts/routing_gate_coverage.py` first.
+1. **Worktree off current `origin/main`.** Re-run `uv run python scripts/routing_gate_coverage.py` first.
    Gap counts drift as fixtures land elsewhere.
    Never trust a stale number from an issue body.
 2. **One PR per module.** Cluster the tiny modules, such as `core.py`, `families.py`, and `corners.py`, into one PR.
@@ -79,10 +79,10 @@ A campaign is not done while any arm is `needs-review`.
    Append a card per new fixture to a shared triage JSON.
 5. **Human visual verdict before PR-open.** Build the review page and get a verdict on _every_ new fixture:
    ```bash frame="terminal"
-   source ~/.local/bin/mm-activate nf-metro && export PYTHONPATH="$PWD/src"
-   python .claude/skills/nf-metro-layout-triage/build_review.py --worktree "$PWD" \
+   export PYTHONPATH="$PWD/src"
+   uv run python .claude/skills/nf-metro-layout-triage/build_review.py --worktree "$PWD" \
        --output-dir /tmp/gate-triage-out --violations /tmp/gate-triage-<module>.json
-   cd /tmp/gate-triage-out && python -m http.server 8765
+   cd /tmp/gate-triage-out && python3 -m http.server 8765
    ```
    For any fixture flagged **Bug** that was not already classified defective, pull it from `GALLERY_ENTRIES`, file an issue with the repro, and park its arm as `needs-review` linked to that issue.
    Nothing flagged gets silently dropped.

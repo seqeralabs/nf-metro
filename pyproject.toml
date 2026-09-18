@@ -55,26 +55,8 @@ Issues = "https://github.com/seqeralabs/nf-metro/issues"
 [project.scripts]
 nf-metro = "nf_metro.cli:cli"
 
+# User-facing install-time extras (still `pip install "nf-metro[...]"`).
 [project.optional-dependencies]
-dev = [
-    "pytest>=7.0",
-    "pytest-cov>=4.0",
-    "pytest-split>=0.9",
-    "pytest-xdist>=3.0",
-    "ruff>=0.4",
-    "mypy>=1.8",
-    "types-networkx",
-    "numpy<2.5",
-    "nf-metro[validate]",
-    # Pinned so the frozen PNG hash in tests/test_hash_seed_determinism.py has
-    # one rasteriser build to lock against; runtime accepts any >=0.5.
-    "resvg-py==0.5.0",
-    # Pinned so mypy checks against one click.ParamType generic signature;
-    # click's ParamType typing has changed shape across recent releases
-    # (non-generic in 8.3.x, Generic[_ValueT_co, _InputT_contra] in 8.5.0),
-    # so an unpinned mypy run is not reproducible. Runtime accepts any >=8.0.
-    "click==8.5.0",
-]
 # Docs site is Astro/Starlight (see website/package.json). This extra only
 # provides pyyaml, for the gallery corpus map.
 docs = [
@@ -89,10 +71,38 @@ validate = [
     "jsonschema>=4.0",
 ]
 
+# Development tooling (PEP 735). `uv sync` installs the `dev` group by default,
+# so a bare checkout is ready to lint, type-check and run the full test suite
+# with no flags. These are not published as package extras.
+[dependency-groups]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "pytest-split>=0.9",
+    "pytest-xdist>=3.0",
+    "ruff>=0.4",
+    "mypy>=1.8",
+    "types-networkx",
+    "numpy<2.5",
+    # The `validate` (jsonschema) and `font` (fonttools) extras are exercised by
+    # the test suite, so the default dev env carries them directly.
+    "jsonschema>=4.0",
+    "fonttools[woff]>=4.0",
+    # Pinned so the frozen PNG hash in tests/test_hash_seed_determinism.py has
+    # one rasteriser build to lock against; runtime accepts any >=0.5.
+    "resvg-py==0.5.0",
+    # Pinned so mypy checks against one click.ParamType generic signature;
+    # click's ParamType typing has changed shape across recent releases
+    # (non-generic in 8.3.x, Generic[_ValueT_co, _InputT_contra] in 8.5.0),
+    # so an unpinned mypy run is not reproducible. Runtime accepts any >=8.0.
+    "click==8.5.0",
+]
+
 # The skill self-check needs pyyaml for the gallery corpus map, and a tokenizer to
 # gate SKILL.md against Claude Code's post-compaction re-attachment cap. `anthropic`
 # is the correct instrument (count_tokens knows Claude's tokenizer); tiktoken is a
-# fallback that undercounts Claude by 15-20% and is scaled accordingly.
+# fallback that undercounts Claude by 15-20% and is scaled accordingly. A separate
+# group so `uv sync --group skill-checks` opts in without pulling the whole dev set.
 skill-checks = [
     "pyyaml>=6.0",
     "anthropic>=0.40",
