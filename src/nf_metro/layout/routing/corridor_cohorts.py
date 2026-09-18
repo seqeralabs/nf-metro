@@ -30,6 +30,9 @@ class _NoCoordinateInsideBounds(Exception):
 
 class CorridorAllocationStatus(Enum):
     PLANNED = "planned"
+    # A production result carrying this status must attach typed, evidenced
+    # provenance naming why the component is unowned. Never a silent
+    # incompleteness fallback.
     COMPATIBILITY = "compatibility"
     FAILURE = "failure"
 
