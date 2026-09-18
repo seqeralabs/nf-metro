@@ -64,8 +64,9 @@ PINNED_HASH_SEED = "0"
 
 # The gate matrix scopes to routing *decision* modules: the dispatch handlers
 # and the post-routing passes.  ``invariants.py`` is the validator (its branches
-# only fire under ``validate=True``, a separate test surface), and ``__init__``
-# is re-exports; neither holds a topology gate.
+# only fire under ``validate=True``, a separate test surface), ``corridor_cohorts.py``
+# is exercised entirely by unit tests rather than fixture rendering, and
+# ``__init__`` is re-exports; none holds a topology gate the fixture corpus reaches.
 EXCLUDED_MODULES = {"__init__.py", "invariants.py", "corridor_cohorts.py"}
 
 # These fixtures naturally exercise the distinct public route-observation paths.
