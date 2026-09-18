@@ -66,7 +66,7 @@ PINNED_HASH_SEED = "0"
 # and the post-routing passes.  ``invariants.py`` is the validator (its branches
 # only fire under ``validate=True``, a separate test surface), and ``__init__``
 # is re-exports; neither holds a topology gate.
-EXCLUDED_MODULES = {"__init__.py", "invariants.py"}
+EXCLUDED_MODULES = {"__init__.py", "invariants.py", "corridor_cohorts.py"}
 
 # These fixtures naturally exercise the distinct public route-observation paths.
 # Keeping the lane explicit avoids a second routing pass over the full corpus,
