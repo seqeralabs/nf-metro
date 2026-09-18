@@ -1325,6 +1325,31 @@ def test_fold_threshold_keeps_wide_chain_on_one_row():
     assert rows_raised == {0}, f"fold_threshold should keep one row, got {rows_raised}"
 
 
+def test_output_directive_records_declared_outputs():
+    graph = parse_metro_mermaid("%%metro output: a.svg, b.png\ngraph LR\n")
+    assert graph.declared_outputs == ["a.svg", "b.png"]
+
+
+def test_output_directive_repeated_accumulates():
+    graph = parse_metro_mermaid(
+        "%%metro output: a.svg\n%%metro output: b.png\ngraph LR\n"
+    )
+    assert graph.declared_outputs == ["a.svg", "b.png"]
+
+
+def test_output_directive_duplicate_path_not_repeated():
+    graph = parse_metro_mermaid(
+        "%%metro output: a.svg\n%%metro output: a.svg, b.png\ngraph LR\n"
+    )
+    assert graph.declared_outputs == ["a.svg", "b.png"]
+
+
+def test_output_directive_malformed_warns_and_stores_nothing():
+    with pytest.warns(UserWarning, match="output"):
+        graph = parse_metro_mermaid("%%metro output: \ngraph LR\n")
+    assert graph.declared_outputs == []
+
+
 def test_max_station_columns_arg_overrides_fold_threshold():
     """An explicit caller value (the --fold-threshold CLI flag) wins over a
     fold_threshold directive, matching the CLI-overrides-directive convention."""

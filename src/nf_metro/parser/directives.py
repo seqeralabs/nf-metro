@@ -97,6 +97,23 @@ def _dir_logo(value: str, graph: MetroGraph) -> None:
         graph.logo_path = value
 
 
+def _dir_output(value: str, graph: MetroGraph) -> None:
+    """Record ``%%metro output: path[, path...]``: the default outputs used by
+    ``nf-metro render`` when no ``-o`` is given.
+
+    Repeating the directive accumulates, so a map may declare its formats on
+    one line or split across several. A path already declared is skipped
+    rather than duplicated, so a repeated declaration can't schedule the same
+    output to be rendered (and reported) twice. The paths are stored exactly
+    as written; the CLI resolves each one against the .mmd's own directory.
+    """
+    paths = _split_csv(value)
+    if not paths:
+        _warn_malformed("output", value, "'path[, path...]'")
+        return
+    graph.declared_outputs.extend(p for p in paths if p not in graph.declared_outputs)
+
+
 def _dir_off_track(value: str, graph: MetroGraph) -> None:
     station_ids = _split_csv(value)
     if not station_ids:
@@ -599,6 +616,7 @@ _GLOBAL_DIRECTIVE_HANDLERS.update(
         "style": _dir_style,
         "mode": _dir_mode,
         "logo": _dir_logo,
+        "output": _dir_output,
         "line": _dir_line,
         "off_track": _dir_off_track,
         "process": _dir_process,
