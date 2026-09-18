@@ -152,11 +152,15 @@ def test_seed_render_outcomes_are_stable_across_hash_seeds() -> None:
 def _pinned_resvg_version() -> str:
     """The resvg-py version pyproject pins, which the frozen PNG hash assumes."""
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    groups = [
+        *pyproject.get("project", {}).get("optional-dependencies", {}).values(),
+        *pyproject.get("dependency-groups", {}).values(),
+    ]
     pinned = {
         requirement.removeprefix("resvg-py==")
-        for group in pyproject["project"]["optional-dependencies"].values()
+        for group in groups
         for requirement in group
-        if requirement.startswith("resvg-py==")
+        if isinstance(requirement, str) and requirement.startswith("resvg-py==")
     }
     assert len(pinned) == 1, f"resvg-py is pinned to several versions: {pinned}"
     return pinned.pop()
