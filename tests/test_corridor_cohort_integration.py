@@ -739,25 +739,30 @@ def _identity_claim(
     network_id: str | None,
     endpoint_cohort_id: str | None,
     direction: Direction = Direction.R,
+    region: CorridorRegion = RowGapRegion(0, 1),
+    orientation: CorridorOrientation = CorridorOrientation.HORIZONTAL,
+    lane_rank: int | None = 0,
+    segment_rank: int = 0,
+    endpoint_network_rank: int | None = None,
 ) -> CorridorCohortLedgerClaim:
     return CorridorCohortLedgerClaim(
         claim_id=claim_id,
         reservation_id=reservation_id,
         reservation_rank=0,
         claim_rank=0,
-        region=RowGapRegion(0, 1),
-        orientation=CorridorOrientation.HORIZONTAL,
+        region=region,
+        orientation=orientation,
         direction=direction,
-        lane_rank=0,
+        lane_rank=lane_rank,
         member_id=claim_id,
         member_geometry_plan_id=f"plan:{claim_id}",
         edge_key=(f"{claim_id}:source", f"{claim_id}:target", "line"),
         family_id=RouteFamilyId.SAME_Y_STRAIGHT,
         connector_ids=(f"connector:{claim_id}",),
-        segment_rank=0,
+        segment_rank=segment_rank,
         path_rank=0,
         endpoint_cohort_id=endpoint_cohort_id,
-        endpoint_network_rank=None,
+        endpoint_network_rank=endpoint_network_rank,
         destination_boundary_carrier=endpoint_cohort_id is not None,
         destination_boundary_axis_sign=None,
         network_id=network_id,
@@ -1104,8 +1109,25 @@ def test_fixed_endpoint_landing_is_planned_clear_of_an_unclaimed_fixed_lead() ->
     carrier onto the lead: the carrier keeps its own coordinates, the lead is
     an obstacle rather than a member, and its geometry is left untouched.
     """
-    carrier_edge = ("carrier:source", "carrier:target", "carrier-line")
-    fixed_edge = ("fixed:source", "fixed:target", "fixed-line")
+    carrier_claim = _identity_claim(
+        claim_id="carrier",
+        reservation_id="reservation:carrier",
+        network_id="network:carrier",
+        endpoint_cohort_id="cohort:landing",
+        direction=Direction.D,
+        region=ColumnGapRegion(0, 1),
+        orientation=CorridorOrientation.VERTICAL,
+        endpoint_network_rank=0,
+    )
+    fixed_claim = _identity_claim(
+        claim_id="fixed",
+        reservation_id="reservation:fixed",
+        network_id="network:fixed",
+        endpoint_cohort_id=None,
+    )
+    carrier_edge = carrier_claim.edge_key
+    fixed_edge = fixed_claim.edge_key
+    assert carrier_edge is not None and fixed_edge is not None
     carrier_route = _mutable_route(
         source=carrier_edge[0],
         target=carrier_edge[1],
@@ -1117,52 +1139,6 @@ def test_fixed_endpoint_landing_is_planned_clear_of_an_unclaimed_fixed_lead() ->
         target=fixed_edge[1],
         line_id=fixed_edge[2],
         points=[(60.0, 40.0), (90.0, 40.0)],
-    )
-    carrier_claim = CorridorCohortLedgerClaim(
-        claim_id="carrier",
-        reservation_id="reservation:carrier",
-        reservation_rank=0,
-        claim_rank=0,
-        region=ColumnGapRegion(0, 1),
-        orientation=CorridorOrientation.VERTICAL,
-        direction=Direction.D,
-        lane_rank=0,
-        member_id="carrier",
-        member_geometry_plan_id="plan:carrier",
-        edge_key=carrier_edge,
-        family_id=RouteFamilyId.SAME_Y_STRAIGHT,
-        connector_ids=("connector:carrier",),
-        segment_rank=0,
-        path_rank=0,
-        endpoint_cohort_id="cohort:landing",
-        endpoint_network_rank=0,
-        destination_boundary_carrier=True,
-        destination_boundary_axis_sign=None,
-        network_id="network:carrier",
-        reservation_complete=True,
-    )
-    fixed_claim = CorridorCohortLedgerClaim(
-        claim_id="fixed",
-        reservation_id="reservation:fixed",
-        reservation_rank=0,
-        claim_rank=0,
-        region=RowGapRegion(0, 1),
-        orientation=CorridorOrientation.HORIZONTAL,
-        direction=Direction.R,
-        lane_rank=0,
-        member_id="fixed",
-        member_geometry_plan_id="plan:fixed",
-        edge_key=fixed_edge,
-        family_id=RouteFamilyId.SAME_Y_STRAIGHT,
-        connector_ids=("connector:fixed",),
-        segment_rank=0,
-        path_rank=0,
-        endpoint_cohort_id=None,
-        endpoint_network_rank=None,
-        destination_boundary_carrier=False,
-        destination_boundary_axis_sign=None,
-        network_id="network:fixed",
-        reservation_complete=True,
     )
     # The different-network precondition is what makes the assertions
     # non-vacuous: a shared identity would let a fixed equality snap the two
@@ -1228,3 +1204,35 @@ def test_fixed_endpoint_landing_is_planned_clear_of_an_unclaimed_fixed_lead() ->
 
     assert all(allocation.member_id != "fixed" for allocation in plan.allocations)
     assert tuple(fixed_route.points) == fixed_points_before
+
+
+def test_problem_rejects_an_infeasible_fixed_fixed_footprint_order() -> None:
+    """A footprint order whose two ends are both fixed and overlap fails closed.
+
+    Both ``_FootprintOrder`` constructors in ``_member_footprint_model`` bind at
+    least one variable term today, so the fixed-fixed branch of ``_problem`` is
+    unreachable through the live builders. This drives it directly to prove the
+    guard raises rather than silently rotting into dead code.
+    """
+    order = _FootprintOrder(
+        "relation:fixed-fixed",
+        _FootprintTerm(None, 10.0, "witness:lower"),
+        _FootprintTerm(None, 0.0, "witness:upper"),
+        5.0,
+        (),
+        ("witness:fixed",),
+        (),
+    )
+    footprint_model = _MemberFootprintModel((), (), {}, (order,), (), ())
+
+    with pytest.raises(CorridorCohortCompilationError, match="infeasible"):
+        cci._problem(
+            (),
+            {},
+            True,
+            10.0,
+            8.0,
+            {},
+            footprint_model,
+            {},
+        )

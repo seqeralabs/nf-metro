@@ -9,7 +9,7 @@ records yet; it ships ahead of the caller that will.
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import Enum
 from math import isclose, isfinite
@@ -539,6 +539,13 @@ def _bind_claim(
     target: CorridorCohortTarget,
     landing_coordinate: float | None,
 ) -> _BoundClaim:
+    """Match one ledger claim against its current route, or reject it.
+
+    Validates identity and current segment orientation, then resolves the
+    longitudinal span. ``landing_coordinate`` is the absolute port slot for an
+    endpoint claim whose last mutable lead lands into the cohort frame; it is
+    ``None`` for a claim that is not such a landing.
+    """
     edge_key = (
         target.route.edge.source,
         target.route.edge.target,
@@ -745,6 +752,17 @@ def _validate_control_recipe(
                 f"corridor scalar request {request.variable.variable_id} has an "
                 "invalid directed runway"
             )
+
+
+def _witnesses_by_lane(
+    witnesses: tuple[CorridorFootprintWitness, ...],
+) -> dict[tuple[str, tuple[str, str, str], int], list[CorridorFootprintWitness]]:
+    by_lane: defaultdict[
+        tuple[str, tuple[str, str, str], int], list[CorridorFootprintWitness]
+    ] = defaultdict(list)
+    for witness in witnesses:
+        by_lane[(witness.member_id, witness.edge_key, witness.axis)].append(witness)
+    return by_lane
 
 
 def _member_footprint_model(
@@ -1006,6 +1024,7 @@ def _member_footprint_model(
                 tuple(sorted({*carrier.regions, *witness.regions}, key=repr)),
             )
             contact_pairs.add((variable_id, witness.footprint_id))
+    fixed_by_lane = _witnesses_by_lane(fixed)
     intervals: dict[tuple[str, str], CorridorForbiddenInterval] = {}
     for variable_id, variable_witness in carrier_by_variable.items():
         variable = variables_by_id[variable_id]
@@ -1030,11 +1049,15 @@ def _member_footprint_model(
             parallel = next(
                 (
                     witness
-                    for witness in fixed
-                    if witness.member_id == perpendicular.member_id
-                    and witness.edge_key == perpendicular.edge_key
-                    and witness.axis == variable.axis
-                    and abs(witness.segment_rank - perpendicular.segment_rank) == 1
+                    for witness in fixed_by_lane.get(
+                        (
+                            perpendicular.member_id,
+                            perpendicular.edge_key,
+                            variable.axis,
+                        ),
+                        (),
+                    )
+                    if abs(witness.segment_rank - perpendicular.segment_rank) == 1
                     and _footprints_overlap(witness, variable_witness)
                 ),
                 None,
@@ -1388,6 +1411,7 @@ def _cohort_landing_coordinates(
     """Bind frozen endpoint-network ranks to current absolute port slots."""
     expected_by_cohort = dict(ledger.endpoint_members)
     ranks_by_member: defaultdict[str, set[tuple[str, int]]] = defaultdict(set)
+    members_by_cohort: defaultdict[str, set[str]] = defaultdict(set)
     for claim in ledger.claims:
         if (
             claim.endpoint_cohort_id is not None
@@ -1396,6 +1420,7 @@ def _cohort_landing_coordinates(
             ranks_by_member[claim.member_id].add(
                 (claim.endpoint_cohort_id, claim.endpoint_network_rank)
             )
+            members_by_cohort[claim.endpoint_cohort_id].add(claim.member_id)
     targets_by_member: defaultdict[str, list[CorridorCohortTarget]] = defaultdict(list)
     for target in targets:
         targets_by_member[target.member_id].append(target)
@@ -1406,14 +1431,7 @@ def _cohort_landing_coordinates(
             continue
         eligible_members = expected_members.intersection(
             ledger.eligible_member_ids,
-            (
-                member_id
-                for member_id, member_ranks in ranks_by_member.items()
-                if any(
-                    candidate_cohort == cohort_id
-                    for candidate_cohort, _rank in member_ranks
-                )
-            ),
+            members_by_cohort[cohort_id],
         )
         if not eligible_members:
             continue
@@ -1492,8 +1510,11 @@ def _cohort_landing_coordinates(
 
 
 def _overlap(left: _BoundClaim, right: _BoundClaim) -> bool:
-    return max(left.longitudinal_start, right.longitudinal_start) < min(
-        left.longitudinal_end, right.longitudinal_end
+    return _overlaps(
+        left.longitudinal_start,
+        left.longitudinal_end,
+        right.longitudinal_start,
+        right.longitudinal_end,
     )
 
 
@@ -1507,6 +1528,10 @@ def _same_lane(left: _BoundClaim, right: _BoundClaim) -> bool:
 
 
 def _same_semantic_fixed_lane(left: _BoundClaim, right: _BoundClaim) -> bool:
+    if not _overlap(left, right):
+        return False
+    if claims_share_fixed_lane_identity(left.ledger, right.ledger):
+        return True
     left_terminal = (
         left.longitudinal_end
         if left.ledger.direction in (Direction.R, Direction.D)
@@ -1517,17 +1542,14 @@ def _same_semantic_fixed_lane(left: _BoundClaim, right: _BoundClaim) -> bool:
         if right.ledger.direction in (Direction.R, Direction.D)
         else right.longitudinal_start
     )
-    return (
-        left.ledger.network_id is not None
-        and left.ledger.network_id == right.ledger.network_id
-        and left.ledger.direction is right.ledger.direction
-        and left.ledger.lane_rank is not None
-        and left.ledger.lane_rank == right.ledger.lane_rank
-        and _overlap(left, right)
-        and (
-            left.ledger.reservation_id == right.ledger.reservation_id
-            or isclose(left_terminal, right_terminal, abs_tol=COORD_TOLERANCE)
-        )
+    # Claims minted by different reservations name one fixed lane when they
+    # terminate at the same coordinate: align the reservation id so the shared
+    # identity check reduces to its network/direction/lane clause.
+    return isclose(
+        left_terminal, right_terminal, abs_tol=COORD_TOLERANCE
+    ) and claims_share_fixed_lane_identity(
+        left.ledger,
+        replace(right.ledger, reservation_id=left.ledger.reservation_id),
     )
 
 
@@ -1672,9 +1694,13 @@ def _problem(
     curve_radius: float,
     endpoint_order_signs: Mapping[str, int],
     footprint_model: _MemberFootprintModel,
+    witnesses_by_id: Mapping[str, CorridorFootprintWitness],
 ) -> CorridorAllocationProblem:
     movable = tuple(
         item for item in claims if roles[item.claim_id] != CorridorCohortClaimRole.FIXED
+    )
+    fixed_claims = tuple(
+        item for item in claims if roles[item.claim_id] is CorridorCohortClaimRole.FIXED
     )
     cohort_first_path_rank: dict[tuple[Direction, str], int] = {}
     for item in movable:
@@ -1733,14 +1759,10 @@ def _problem(
             fixed_claim.claim_id,
         )
         for movable_claim in movable
-        for fixed_claim in claims
-        if roles[fixed_claim.claim_id] == CorridorCohortClaimRole.FIXED
-        and _same_semantic_fixed_lane(movable_claim, fixed_claim)
+        for fixed_claim in fixed_claims
+        if _same_semantic_fixed_lane(movable_claim, fixed_claim)
     )
     contact_obstacles: dict[str, CorridorObstacle] = {}
-    witnesses_by_id = {
-        witness.footprint_id: witness for witness in footprint_model.witnesses
-    }
     for contact in footprint_model.contacts:
         fixed_witnesses = tuple(
             witnesses_by_id[witness_id]
@@ -1866,11 +1888,7 @@ def _problem(
             for item in movable
         ),
         (
-            *(
-                _obstacle(item)
-                for item in claims
-                if roles[item.claim_id] == CorridorCohortClaimRole.FIXED
-            ),
+            *(_obstacle(item) for item in fixed_claims),
             *contact_obstacles.values(),
         ),
         equalities,
@@ -1921,8 +1939,11 @@ def _footprints_overlap(
     left: CorridorFootprintWitness,
     right: CorridorFootprintWitness,
 ) -> bool:
-    return max(left.longitudinal_start, right.longitudinal_start) < min(
-        left.longitudinal_end, right.longitudinal_end
+    return _overlaps(
+        left.longitudinal_start,
+        left.longitudinal_end,
+        right.longitudinal_start,
+        right.longitudinal_end,
     )
 
 
@@ -2081,6 +2102,27 @@ def _scalar_component_plan(
     )
 
 
+def _clearance_resolver(
+    problems: tuple[CorridorAllocationProblem, ...],
+) -> Callable[[str, str], float]:
+    """Map an unordered member pair to its required clearance.
+
+    Unlisted pairs fall back to the shared problem clearance, the same rule
+    ``solve_corridor_cohorts`` applies over one exact-arithmetic problem.
+    """
+    by_pair = {
+        frozenset((separation.left_member_id, separation.right_member_id)): (
+            separation.distance
+        )
+        for problem in problems
+        for separation in problem.separations
+    }
+    default = problems[0].clearance
+    return lambda left_id, right_id: by_pair.get(
+        frozenset((left_id, right_id)), default
+    )
+
+
 def _planned_allocations_are_atomic_and_clear(
     claims: tuple[_BoundClaim, ...],
     physical_claims: tuple[tuple[_BoundClaim, ...], ...],
@@ -2103,14 +2145,7 @@ def _planned_allocations_are_atomic_and_clear(
         for result in results
         for claim_id, coordinate in result.allocations
     }
-    clearance_by_pair = {
-        frozenset((separation.left_member_id, separation.right_member_id)): (
-            separation.distance
-        )
-        for problem in problems
-        for separation in problem.separations
-    }
-    default_clearance = problems[0].clearance
+    required_clearance = _clearance_resolver(problems)
     for group in physical_claims:
         movable = tuple(
             item
@@ -2125,10 +2160,7 @@ def _planned_allocations_are_atomic_and_clear(
                     continue
                 if abs(
                     coordinates[left.claim_id] - coordinates[right.claim_id]
-                ) + COORD_TOLERANCE < clearance_by_pair.get(
-                    frozenset((left.claim_id, right.claim_id)),
-                    default_clearance,
-                ):
+                ) + COORD_TOLERANCE < required_clearance(left.claim_id, right.claim_id):
                     return False
     return True
 
@@ -2195,6 +2227,7 @@ def _component_plan(
     ledger: CorridorCohortLedger,
     endpoint_order_signs: Mapping[str, int],
     footprint_model: _MemberFootprintModel,
+    witnesses_by_id: Mapping[str, CorridorFootprintWitness],
 ) -> CorridorCohortComponentPlan:
     physical_ranks = spec.physical_ranks
     component_claims = tuple(
@@ -2223,6 +2256,7 @@ def _component_plan(
             ledger.curve_radius,
             endpoint_order_signs,
             footprint_model,
+            witnesses_by_id,
         )
         for group in physical_claims
         if any(roles[item.claim_id] != CorridorCohortClaimRole.FIXED for item in group)
@@ -2278,8 +2312,10 @@ class _RoutePatch:
     owned: tuple[int, ...]
 
 
-def _corner_input(route: RoutedPath, radius_rank: int) -> tuple[float, float] | None:
-    candidates = (
+def _corner_input_candidates(
+    route: RoutedPath, radius_rank: int
+) -> tuple[tuple[float | None, float | None], tuple[float | None, float | None]]:
+    return (
         (
             route.concentric_corner_offsets_by_segment.get(radius_rank, (None, None))[
                 1
@@ -2295,6 +2331,13 @@ def _corner_input(route: RoutedPath, radius_rank: int) -> tuple[float, float] | 
             ],
         ),
     )
+
+
+def _corner_input(
+    candidates: tuple[
+        tuple[float | None, float | None], tuple[float | None, float | None]
+    ],
+) -> tuple[float, float] | None:
     complete = tuple(
         (offset, base)
         for offset, base in candidates
@@ -2312,23 +2355,11 @@ def _corner_input(route: RoutedPath, radius_rank: int) -> tuple[float, float] | 
     return complete[0] if complete else None
 
 
-def _has_corner_input(route: RoutedPath, radius_rank: int) -> bool:
-    candidates = (
-        (
-            route.concentric_corner_offsets_by_segment.get(radius_rank, (None, None))[
-                1
-            ],
-            route.concentric_corner_bases_by_segment.get(radius_rank, (None, None))[1],
-        ),
-        (
-            route.concentric_corner_offsets_by_segment.get(
-                radius_rank + 1, (None, None)
-            )[0],
-            route.concentric_corner_bases_by_segment.get(radius_rank + 1, (None, None))[
-                0
-            ],
-        ),
-    )
+def _has_corner_input(
+    candidates: tuple[
+        tuple[float | None, float | None], tuple[float | None, float | None]
+    ],
+) -> bool:
     return any(offset is not None or base is not None for offset, base in candidates)
 
 
@@ -2417,11 +2448,12 @@ def _prepare_patches(
             for radius_rank in affected_corners:
                 if not 0 <= radius_rank < len(radii):
                     continue
-                if not _has_corner_input(route, radius_rank):
+                candidates = _corner_input_candidates(route, radius_rank)
+                if not _has_corner_input(candidates):
                     continue
                 if radius_rank + 2 >= len(points):
                     return None
-                corner_input = _corner_input(route, radius_rank)
+                corner_input = _corner_input(candidates)
                 if corner_input is None:
                     return None
                 radii[radius_rank] = concentric_corner_radius_at(
@@ -2555,6 +2587,7 @@ def compile_corridor_cohort_plan(
             ledger,
             endpoint_order_signs,
             footprint_model,
+            witnesses_by_id,
         )
         for rank, spec in enumerate(logical)
         if spec.physical_ranks
