@@ -250,6 +250,21 @@ class CorridorCohortTarget:
     legal_crossing_segment_ranks: frozenset[int] = frozenset()
 
 
+def _resolve_explicit_control(
+    key: tuple[str, tuple[str, str, str], int, int],
+    controlled_points: Mapping[
+        tuple[str, tuple[str, str, str], int, int], tuple[str, float]
+    ],
+    variables_by_id: Mapping[str, CorridorScalarVariable],
+) -> tuple[CorridorScalarVariable, float] | None:
+    """The variable and offset explicitly controlling one route point, if any."""
+    control = controlled_points.get(key)
+    if control is None:
+        return None
+    variable_id, offset = control
+    return variables_by_id[variable_id], offset
+
+
 def build_corridor_footprint_witnesses(
     targets: Sequence[CorridorCohortTarget],
     variables: Sequence[CorridorScalarVariable] = (),
@@ -279,6 +294,7 @@ def build_corridor_footprint_witnesses(
             )
         variables_by_segment[key] = variable
 
+    variables_by_id = {item.variable_id: item for item in variables}
     target_rank = {key: rank for rank, key in enumerate(sorted(target_keys))}
     regions_by_segment = regions_by_segment or {}
     controlled_points = controlled_points or {}
@@ -286,15 +302,10 @@ def build_corridor_footprint_witnesses(
     for target in targets:
         points = target.route.points
         for segment_rank, (start, end) in enumerate(zip(points, points[1:])):
-            if isclose(start[0], end[0], abs_tol=COORD_TOLERANCE):
-                axis = 0
-            elif isclose(start[1], end[1], abs_tol=COORD_TOLERANCE):
-                axis = 1
-            else:
-                continue
             direction = segment_direction(start, end)
             if direction is None:
                 continue
+            axis = 1 if direction in (Direction.R, Direction.L) else 0
             key = target.member_id, target.edge_key, segment_rank
             coordinate_variable = variables_by_segment.get(key)
             coordinate_variable_offset = 0.0
@@ -329,25 +340,21 @@ def build_corridor_footprint_witnesses(
                         "coordinate control"
                     )
                 variable_id, coordinate_variable_offset = coordinate_control
-                coordinate_variable = next(
-                    item for item in variables if item.variable_id == variable_id
-                )
-            explicit_start = controlled_points.get(
-                (target.member_id, target.edge_key, segment_rank, 1 - axis)
+                coordinate_variable = variables_by_id[variable_id]
+            explicit_start = _resolve_explicit_control(
+                (target.member_id, target.edge_key, segment_rank, 1 - axis),
+                controlled_points,
+                variables_by_id,
             )
             if explicit_start is not None:
-                variable_id, start_variable_offset = explicit_start
-                start_variable = next(
-                    item for item in variables if item.variable_id == variable_id
-                )
-            explicit_end = controlled_points.get(
-                (target.member_id, target.edge_key, segment_rank + 1, 1 - axis)
+                start_variable, start_variable_offset = explicit_start
+            explicit_end = _resolve_explicit_control(
+                (target.member_id, target.edge_key, segment_rank + 1, 1 - axis),
+                controlled_points,
+                variables_by_id,
             )
             if explicit_end is not None:
-                variable_id, end_variable_offset = explicit_end
-                end_variable = next(
-                    item for item in variables if item.variable_id == variable_id
-                )
+                end_variable, end_variable_offset = explicit_end
             for endpoint_variable in (start_variable, end_variable):
                 if endpoint_variable is not None and endpoint_variable.axis != 1 - axis:
                     raise CorridorCohortCompilationError(
@@ -597,27 +604,6 @@ def _bind_ledger(
             if claim.reservation_complete:
                 raise
     return tuple(bound)
-
-
-def _relinquished_exit_turns(claim: _BoundClaim) -> frozenset[str]:
-    """Exit-turn plan ids that release ownership of *claim*'s landing segment.
-
-    Non-empty only for the segment immediately adjacent to a route's owned
-    exit turn, and only once that turn's endpoint cohort has settled.
-    """
-    route = claim.target.route
-    if (
-        claim.ledger.endpoint_cohort_id is None
-        or claim.ledger.destination_boundary_axis_sign is None
-        or not claim.ledger.reservation_complete
-        or not claim.target.mutable
-        or route.exit_turn_plan_id is None
-        or route.exit_turn_segment_rank is None
-        or claim.ledger.segment_rank == route.exit_turn_segment_rank
-        or abs(claim.ledger.segment_rank - route.exit_turn_segment_rank) != 1
-    ):
-        return frozenset()
-    return frozenset((route.exit_turn_plan_id,))
 
 
 def _directly_movable(claim: _BoundClaim) -> bool:

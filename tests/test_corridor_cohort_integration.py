@@ -6,6 +6,7 @@ import importlib.util
 from dataclasses import fields, replace
 from enum import Enum
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -24,7 +25,22 @@ from nf_metro.layout.route_plan import (
     SharedReferenceKind,
     register_settlement_stage,
 )
-from nf_metro.layout.route_reservations import CorridorRegionKind, FinalCanvasGeometry
+from nf_metro.layout.route_reservations import (
+    CorridorOrientation,
+    CorridorRegionKind,
+    FinalCanvasGeometry,
+    RowGapRegion,
+)
+from nf_metro.layout.routing.common import Direction
+from nf_metro.layout.routing.corridor_cohort_integration import (
+    CorridorCohortLedgerClaim,
+    CorridorCohortTarget,
+    CorridorScalarOwnerKind,
+    CorridorScalarVariable,
+    build_corridor_footprint_witnesses,
+    claims_share_fixed_lane_identity,
+)
+from nf_metro.layout.routing.families import RouteFamilyId
 from nf_metro.parser.model import Edge, MetroGraph
 from nf_metro.render import svg
 from nf_metro.render.plan import _RENDER_GRAPH_EXCLUDED_FIELDS, RenderPlan
@@ -648,23 +664,6 @@ def test_final_trace_registration_follows_reservation_realisation(
 
 
 # --- Owner-typed corridor records and the footprint relation graph ---
-
-from types import SimpleNamespace  # noqa: E402
-
-from nf_metro.layout.route_reservations import (  # noqa: E402
-    CorridorOrientation,
-    RowGapRegion,
-)
-from nf_metro.layout.routing.common import Direction  # noqa: E402
-from nf_metro.layout.routing.corridor_cohort_integration import (  # noqa: E402
-    CorridorCohortLedgerClaim,
-    CorridorCohortTarget,
-    CorridorScalarOwnerKind,
-    CorridorScalarVariable,
-    build_corridor_footprint_witnesses,
-    claims_share_fixed_lane_identity,
-)
-from nf_metro.layout.routing.families import RouteFamilyId  # noqa: E402
 
 
 def _footprint_target(
