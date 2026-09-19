@@ -154,6 +154,11 @@ the one it got: that call belongs at spawn time or not at all.
 | 8 | admin-merge gate | `fix-issue-merge-assessor` | HIGH - it gates shipping code CI has not verified |
 | 8, 9 | visual judgment and D-delta narrowing | `fix-issue-visual-reviewer` | HIGH |
 
+**Do not set `model` on a named `fix-issue-*` spawn.** The tier above is
+already pinned in the type's own definition; passing `model` silently
+overrides it. The one exception, lowering `fix-issue-writer` to MID, is in
+`agent-types.md`.
+
 **Never use the `fork` subagent type.** A fork inherits the parent's entire
 conversation and always runs on the parent's model - the `model` parameter is
 ignored - so every tier rule here is void. Measured, fork spawns cost about 4x a comparable named

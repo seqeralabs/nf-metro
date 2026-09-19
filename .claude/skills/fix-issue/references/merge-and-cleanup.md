@@ -134,6 +134,8 @@ EOF
 )"
 ```
 
+**A later child continuing an already-open shared-branch PR inherits that PR's checklist, not a fresh one.** When a child issue merges into a branch/PR earlier children already used, read that PR's *current* Test plan before writing the new child's writer brief, and carry forward every command already listed there - a prior round may have pinned a repo-wide ratchet or ignored-by-default test file that the new issue's own text has no reason to mention. Deriving verification scope from the new issue alone, instead of the PR's accumulated checklist, is how a real CI failure reaches the shared branch on a check nobody thought to run locally.
+
 After every `git push`, **verify origin HEAD matches local**:
 
 ```bash
