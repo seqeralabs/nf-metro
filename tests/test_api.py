@@ -110,6 +110,40 @@ def test_prepare_graph_returns_settled_graph() -> None:
     assert all(s.x is not None and s.y is not None for s in graph.stations.values())
 
 
+def test_prepare_graph_accepts_text_as_a_keyword() -> None:
+    """`text` stays a valid keyword for the string form of *text*.
+
+    A caller may pass an already-parsed graph positionally too, but the
+    parameter's name and its use as a keyword for plain map text are part
+    of this function's public signature.
+    """
+    graph = prepare_graph(
+        text=(EXAMPLES / "rnaseq_auto.mmd").read_text(), source_dir=str(EXAMPLES)
+    )
+    assert graph.stations
+
+
+def test_prepare_graph_accepts_a_parsed_graph() -> None:
+    """prepare_graph(_parse_source(text)) lays out identically to prepare_graph(text).
+
+    Confirms the deepcopy-and-layout split the CLI relies on (one parse
+    shared across several output formats) never changes what gets drawn.
+    """
+    from nf_metro.api import _parse_source, render_graph
+    from nf_metro.themes import resolve_theme
+
+    text = (EXAMPLES / "rnaseq_auto.mmd").read_text()
+    source_dir = str(EXAMPLES)
+
+    direct = prepare_graph(text, source_dir=source_dir)
+    via_parse = prepare_graph(_parse_source(text), source_dir=source_dir)
+
+    cfg = RenderConfig()
+    direct_svg = render_graph(direct, resolve_theme(None, direct), cfg)
+    via_parse_svg = render_graph(via_parse, resolve_theme(None, via_parse), cfg)
+    assert direct_svg == via_parse_svg
+
+
 def test_render_string_propagates_layout_error() -> None:
     """A cyclic graph raises CyclicGraphError, which is also an NfMetroError
     (see tests/test_error_hierarchy.py for the rest of that contract:
