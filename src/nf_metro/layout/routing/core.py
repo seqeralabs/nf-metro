@@ -140,7 +140,10 @@ from nf_metro.layout.routing.tb_handlers import (  # noqa: F401
     _route_tb_lr_exit,
     _route_tb_section,
 )
-from nf_metro.layout.settlement_demand import BoundaryClearanceRequirement
+from nf_metro.layout.settlement_demand import (
+    BoundaryClearanceRequirement,
+    BoundaryClearanceRequirementKind,
+)
 from nf_metro.parser.model import (
     Edge,
     LineSpread,
@@ -347,6 +350,7 @@ def _route_edges(  # noqa: C901
             allow_convergence_clearance_requirements
         ),
         granted_clearance_owner_ids=boundary_clearance_owner_ids,
+        prior_plan=reservations,
     )
     execution = planning.exit_turns
     member_geometry = planning.member_geometry
@@ -363,15 +367,26 @@ def _route_edges(  # noqa: C901
             for plan in member_geometry.plans
             if plan.system_id in planned_system_ids
         )
+        # A corridor-cohort aperture requirement is owned by the corridor
+        # component that failed to allocate, not by a route system, so it never
+        # matches a planned system id; it is published on its own contract
+        # rather than gated by the legacy owner-id grant.
         published_member_requirements = tuple(
             requirement
             for requirement in member_geometry.clearance_requirements
             if requirement.owner_id in planned_owner_ids
+            or requirement.kind
+            is BoundaryClearanceRequirementKind.CORRIDOR_COHORT_APERTURE
         )
         published_owner_ids = _published_boundary_clearance_owner_ids(
             boundary_clearance_owner_ids,
             planned_system_ids,
-            published_member_requirements,
+            tuple(
+                requirement
+                for requirement in published_member_requirements
+                if requirement.kind
+                is not BoundaryClearanceRequirementKind.CORRIDOR_COHORT_APERTURE
+            ),
         )
         observer = build_route_plan_observer(
             graph,
@@ -400,6 +415,7 @@ def _route_edges(  # noqa: C901
             boundary_clearance_owner_ids=published_owner_ids,
             member_geometry_plans=published_member_geometry,
             exit_turn_dispositions=planning.exit_turn_dispositions,
+            corridor_cohort_ledger=planning.corridor_cohort_ledger,
         )
     # Route into the context's own list so handlers can read the routes settled
     # so far (a wrap clearing an already-placed sibling channel); it grows as
