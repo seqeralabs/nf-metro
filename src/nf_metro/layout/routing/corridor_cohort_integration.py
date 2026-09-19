@@ -2,32 +2,47 @@
 
 These types and helpers describe corridor scalar ownership and the witness
 evidence a corridor cohort compiles from one route snapshot, independent of
-any solver. Nothing in :mod:`nf_metro.layout` constructs this module's
-records yet; it ships ahead of the caller that will.
+any solver. Nothing in the render or route-system planning pipeline calls
+:func:`build_corridor_cohort_ledger` or :func:`compile_corridor_cohort_plan`
+yet; both ship ahead of the wiring that will call them.
 """
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import Enum
 from math import isclose, isfinite
 from types import MappingProxyType
 
-from nf_metro.layout.constants import COORD_TOLERANCE, CURVE_RADIUS
+from nf_metro.layout.constants import COORD_TOLERANCE, CURVE_RADIUS, graph_offset_step
 from nf_metro.layout.geometry import cotravelling_lane_clearance
 from nf_metro.layout.route_plan import (
+    BindingKind,
+    EmissionBinding,
+    EmissionMember,
+    RoutePlan,
+    RouteSemanticScaffold,
     SettlementStage,
     SettlementStageTrace,
     register_settlement_stage,
 )
-from nf_metro.layout.route_reservations import CorridorOrientation, CorridorRegion
+from nf_metro.layout.route_reservations import (
+    CanvasRegion,
+    ColumnGapRegion,
+    CorridorOrientation,
+    CorridorRegion,
+    RouteReservation,
+    RowGapRegion,
+    _reservation_content_id,
+)
 from nf_metro.layout.routing.common import (
     Direction,
     RoutedPath,
     convergence_owns_segment_boundary,
     planner_owns_segment,
+    right_normal_axis_sign,
     segment_direction,
 )
 from nf_metro.layout.routing.corners import concentric_corner_radius_at
@@ -49,10 +64,17 @@ from nf_metro.layout.routing.corridor_cohorts import (
     solve_corridor_cohorts,
 )
 from nf_metro.layout.routing.families import RouteFamilyId
+from nf_metro.parser.model import MetroGraph, PortSide
 from nf_metro.parser.route_topology import ConnectorId
 
 CorridorCohortSegmentKey = tuple[str, tuple[str, str, str], int]
 CorridorFootprintSegmentKey = tuple[str, tuple[str, str, str], int]
+_PORT_LEAD_DIRECTION = {
+    PortSide.LEFT: Direction.R,
+    PortSide.RIGHT: Direction.L,
+    PortSide.TOP: Direction.D,
+    PortSide.BOTTOM: Direction.U,
+}
 
 
 class CorridorCohortClaimRole(str, Enum):
@@ -287,6 +309,409 @@ class CorridorCohortTarget:
     endpoint_lane_coordinate: float | None = None
     network_id: str | None = None
     legal_crossing_segment_ranks: frozenset[int] = frozenset()
+
+
+def _claim_is_destination_boundary_carrier(
+    graph: MetroGraph,
+    target_station_id: str,
+    region: CorridorRegion,
+) -> bool:
+    """Whether *region* is the grid boundary feeding a target entry port."""
+    port = graph.ports.get(target_station_id)
+    if port is None or not port.is_entry:
+        return False
+    section = graph.sections.get(port.section_id)
+    if section is None or section.grid_col < 0 or section.grid_row < 0:
+        return False
+    if isinstance(region, CanvasRegion):
+        return False
+    if port.side is PortSide.LEFT:
+        return (
+            isinstance(region, ColumnGapRegion)
+            and region.right_column == section.grid_col
+        )
+    if port.side is PortSide.RIGHT:
+        return (
+            isinstance(region, ColumnGapRegion)
+            and region.left_column == section.grid_col + section.grid_col_span - 1
+        )
+    if port.side is PortSide.TOP:
+        return isinstance(region, RowGapRegion) and region.lower_row == section.grid_row
+    return (
+        isinstance(region, RowGapRegion)
+        and region.upper_row == section.grid_row + section.grid_row_span - 1
+    )
+
+
+def _destination_claim_axis_sign(side: PortSide, direction: Direction) -> int:
+    return right_normal_axis_sign(direction) // right_normal_axis_sign(
+        _PORT_LEAD_DIRECTION[side]
+    )
+
+
+def _network_id(
+    connector_ids: tuple[ConnectorId, ...], scaffold: RouteSemanticScaffold
+) -> str | None:
+    ids = {
+        str(scaffold.query.connector(connector_id).network_id)
+        for connector_id in connector_ids
+    }
+    return next(iter(ids)) if len(ids) == 1 else None
+
+
+def _endpoint_members(
+    graph: MetroGraph,
+    scaffold: RouteSemanticScaffold,
+    prior_plan: RoutePlan,
+) -> tuple[dict[str, str], dict[str, frozenset[str]], frozenset[str]]:
+    by_target: defaultdict[str, list[EmissionMember]] = defaultdict(list)
+    for member in prior_plan.members:
+        by_target[member.target.station_id].append(member)
+    memberships: defaultdict[str, list[str]] = defaultdict(list)
+    expected: dict[str, frozenset[str]] = {}
+    for group in scaffold.resolution.endpoint_groups:
+        port = graph.ports.get(group.port_id)
+        members = by_target.get(group.port_id, ())
+        connectors = tuple(
+            str(connector_id)
+            for member in members
+            for connector_id in member.connector_ids
+        )
+        if (
+            port is None
+            or not port.is_entry
+            or len(group.connector_ids) < 2
+            or Counter(connectors) != Counter(str(item) for item in group.connector_ids)
+        ):
+            continue
+        cohort_id = f"endpoint-cohort|{group.id}"
+        expected[cohort_id] = frozenset(str(member.id) for member in members)
+        for member in members:
+            memberships[str(member.id)].append(cohort_id)
+    ambiguous = frozenset(
+        cohort_id
+        for cohort_ids in memberships.values()
+        if len(cohort_ids) != 1
+        for cohort_id in cohort_ids
+    )
+    return (
+        {
+            member_id: cohort_ids[0]
+            for member_id, cohort_ids in memberships.items()
+            if len(cohort_ids) == 1
+        },
+        expected,
+        ambiguous,
+    )
+
+
+def _lane_rank(reservation: RouteReservation, claim_rank: int) -> int | None:
+    matches = tuple(
+        rank
+        for rank, lane in enumerate(reservation.lanes)
+        if claim_rank in lane.claim_indices
+    )
+    return matches[0] if len(matches) == 1 else None
+
+
+def _resolved_claimants(
+    reservation: RouteReservation, prior_plan: RoutePlan
+) -> tuple[frozenset[str], dict[str, str]] | None:
+    content_id = _reservation_content_id(
+        reservation.system_id,
+        reservation.kind,
+        reservation.direction,
+        reservation.region,
+        reservation.measurement_scope,
+        reservation.span,
+        reservation.claimant_member_ids,
+        reservation.claims,
+    )
+    if content_id != reservation.id or len(set(reservation.claimant_member_ids)) != len(
+        reservation.claimant_member_ids
+    ):
+        return None
+    bindings: defaultdict[str, list[EmissionBinding]] = defaultdict(list)
+    for binding in prior_plan.bindings:
+        bindings[str(binding.member_id)].append(binding)
+    resolved: set[str] = set()
+    resolved_by_claimant: dict[str, str] = {}
+    for member_id in reservation.claimant_member_ids:
+        candidates = bindings[str(member_id)]
+        if len(candidates) != 1:
+            return None
+        binding = candidates[0]
+        resolved_member_id = str(binding.covering_member_id or binding.member_id)
+        resolved.add(resolved_member_id)
+        resolved_by_claimant[str(member_id)] = resolved_member_id
+    return frozenset(resolved), resolved_by_claimant
+
+
+def build_corridor_cohort_ledger(
+    graph: MetroGraph,
+    scaffold: RouteSemanticScaffold,
+    prior_plan: RoutePlan,
+    *,
+    station_offsets: Mapping[tuple[str, str], float],
+    curve_radius: float = CURVE_RADIUS,
+) -> CorridorCohortLedger:
+    """Freeze coordinate-free cohort intent from one prior semantic ledger."""
+    del station_offsets
+    endpoint_by_member, expected, ambiguous = _endpoint_members(
+        graph, scaffold, prior_plan
+    )
+    members = {str(member.id): member for member in prior_plan.members}
+    edges = {
+        str(member.id): (
+            member.source.station_id,
+            member.target.station_id,
+            member.line_id,
+        )
+        for member in prior_plan.members
+    }
+    member_geometry_plan_ids: defaultdict[
+        tuple[str, tuple[str, str, str]], list[str]
+    ] = defaultdict(list)
+    for plan in prior_plan.member_geometry_plans:
+        member_geometry_plan_ids[
+            (
+                str(plan.member_id),
+                (plan.edge.source, plan.edge.target, plan.edge.line_id),
+            )
+        ].append(str(plan.id))
+    geometry_plan_id_by_member = {
+        member_id: plan_ids[0]
+        for (member_id, edge_key), plan_ids in member_geometry_plan_ids.items()
+        if len(plan_ids) == 1 and edges.get(member_id) == edge_key
+    }
+    resolved_by_reservation = {
+        reservation.id: _resolved_claimants(reservation, prior_plan)
+        for reservation in prior_plan.reservations
+    }
+    bindings_by_member: defaultdict[str, list[EmissionBinding]] = defaultdict(list)
+    for binding in prior_plan.bindings:
+        bindings_by_member[str(binding.member_id)].append(binding)
+
+    def emitted_path_rank(member_id: str) -> int | None:
+        seen: set[str] = set()
+        while member_id not in seen:
+            seen.add(member_id)
+            candidates = bindings_by_member.get(member_id, ())
+            if len(candidates) != 1:
+                return None
+            binding = candidates[0]
+            if binding.kind is BindingKind.EMITTED:
+                return binding.path_rank
+            if binding.covering_member_id is None:
+                return None
+            member_id = str(binding.covering_member_id)
+        return None
+
+    path_rank_by_member = {
+        member_id: path_rank
+        for member_id in endpoint_by_member
+        if (path_rank := emitted_path_rank(member_id)) is not None
+    }
+
+    endpoint_ranks: dict[str, int] = {}
+    ambiguous_path_rank_cohorts: set[str] = set()
+    by_cohort: defaultdict[str, list[str]] = defaultdict(list)
+    for member_id, cohort_id in endpoint_by_member.items():
+        by_cohort[cohort_id].append(member_id)
+    for cohort_id, member_ids in by_cohort.items():
+        by_network: defaultdict[str, list[str]] = defaultdict(list)
+        for member_id in member_ids:
+            member = members[member_id]
+            network_id = _network_id(member.connector_ids, scaffold)
+            by_network[network_id or f"member|{member_id}"].append(member_id)
+        if any(
+            any(member_id not in path_rank_by_member for member_id in network)
+            for network in by_network.values()
+        ):
+            ambiguous_path_rank_cohorts.add(cohort_id)
+            continue
+        first_path_rank_by_network = {
+            network_id: min(
+                path_rank_by_member[member_id]
+                for member_id in network_members
+                if member_id in path_rank_by_member
+            )
+            for network_id, network_members in by_network.items()
+        }
+        if len(set(first_path_rank_by_network.values())) != len(
+            first_path_rank_by_network
+        ):
+            ambiguous_path_rank_cohorts.add(cohort_id)
+            continue
+        ordered_networks = sorted(
+            by_network,
+            key=lambda network_id: (
+                first_path_rank_by_network[network_id],
+                network_id,
+            ),
+        )
+        for rank, network_id in enumerate(ordered_networks):
+            for member_id in by_network[network_id]:
+                endpoint_ranks[member_id] = rank
+    eligible_members = frozenset(
+        member_id
+        for resolved in resolved_by_reservation.values()
+        if resolved is not None
+        for member_id in resolved[0]
+    )
+    claim_semantics: list[tuple[str, str, object, int, int, str | None, bool]] = []
+    for reservation in prior_plan.reservations:
+        resolved = resolved_by_reservation[reservation.id]
+        resolved_by_claimant = {} if resolved is None else resolved[1]
+        for claim_rank, claim in enumerate(reservation.claims):
+            member_id = resolved_by_claimant.get(
+                str(claim.member_id), str(claim.member_id)
+            )
+            semantic_member = members.get(member_id)
+            target_station_id = (
+                None if semantic_member is None else semantic_member.target.station_id
+            )
+            claim_semantics.append(
+                (
+                    f"{reservation.id}|claim:{claim_rank}",
+                    member_id,
+                    claim.path_id,
+                    claim.segment_rank,
+                    claim.segment_end_rank,
+                    target_station_id,
+                    target_station_id is not None
+                    and _claim_is_destination_boundary_carrier(
+                        graph, target_station_id, reservation.region
+                    ),
+                )
+            )
+    carrier_claim_ids = {
+        claim_id
+        for (
+            claim_id,
+            _member_id,
+            _path_id,
+            _start,
+            _end,
+            _target,
+            carrier,
+        ) in claim_semantics
+        if carrier
+    }
+    destination_claim_ids = set(carrier_claim_ids)
+    destination_claim_ids.update(
+        candidate_id
+        for (
+            boundary_id,
+            boundary_member_id,
+            boundary_path_id,
+            boundary_start,
+            _boundary_end,
+            _boundary_target,
+            boundary_carrier,
+        ) in claim_semantics
+        if boundary_carrier
+        for (
+            candidate_id,
+            candidate_member_id,
+            candidate_path_id,
+            _candidate_start,
+            candidate_end,
+            _candidate_target,
+            _candidate_carrier,
+        ) in claim_semantics
+        if candidate_id != boundary_id
+        and candidate_member_id == boundary_member_id
+        and candidate_path_id == boundary_path_id
+        and candidate_end + 1 == boundary_start
+    )
+    claims: list[CorridorCohortLedgerClaim] = []
+    for reservation_rank, reservation in enumerate(prior_plan.reservations):
+        resolved = resolved_by_reservation[reservation.id]
+        resolved_member_ids = frozenset() if resolved is None else resolved[0]
+        resolved_by_claimant = {} if resolved is None else resolved[1]
+        reservation_member_ids = {
+            resolved_by_claimant.get(str(claim.member_id), str(claim.member_id))
+            for claim in reservation.claims
+        }
+        reservation_identity_complete = all(
+            member_id in members
+            and member_id in edges
+            and members[member_id].family_id is not None
+            and bool(members[member_id].connector_ids)
+            for member_id in reservation_member_ids
+        )
+        reservation_complete = (
+            resolved is not None
+            and resolved_member_ids == reservation_member_ids
+            and reservation_identity_complete
+        )
+        for claim_rank, claim in enumerate(reservation.claims):
+            claim_id = f"{reservation.id}|claim:{claim_rank}"
+            observed_member_id = str(claim.member_id)
+            member_id = resolved_by_claimant.get(
+                observed_member_id,
+                observed_member_id,
+            )
+            current_member = members.get(member_id)
+            destination_claim = claim_id in destination_claim_ids
+            claims.append(
+                CorridorCohortLedgerClaim(
+                    claim_id=claim_id,
+                    reservation_id=str(reservation.id),
+                    reservation_rank=reservation_rank,
+                    claim_rank=claim_rank,
+                    region=reservation.region,
+                    orientation=reservation.orientation,
+                    direction=reservation.direction,
+                    lane_rank=_lane_rank(reservation, claim_rank),
+                    member_id=member_id,
+                    member_geometry_plan_id=geometry_plan_id_by_member.get(member_id),
+                    edge_key=edges.get(member_id),
+                    family_id=None
+                    if current_member is None
+                    else current_member.family_id,
+                    connector_ids=(
+                        () if current_member is None else current_member.connector_ids
+                    ),
+                    segment_rank=claim.segment_rank,
+                    path_rank=claim.path_rank,
+                    endpoint_cohort_id=(
+                        endpoint_by_member.get(member_id) if destination_claim else None
+                    ),
+                    endpoint_network_rank=(
+                        endpoint_ranks.get(member_id) if destination_claim else None
+                    ),
+                    destination_boundary_carrier=claim_id in carrier_claim_ids,
+                    destination_boundary_axis_sign=(
+                        _destination_claim_axis_sign(
+                            graph.ports[current_member.target.station_id].side,
+                            reservation.direction,
+                        )
+                        if destination_claim and current_member is not None
+                        else None
+                    ),
+                    network_id=(
+                        None
+                        if current_member is None
+                        else _network_id(current_member.connector_ids, scaffold)
+                    ),
+                    reservation_complete=(
+                        reservation_complete
+                        and claim.segment_rank == claim.segment_end_rank
+                    ),
+                )
+            )
+    return CorridorCohortLedger(
+        claims=tuple(claims),
+        endpoint_members=tuple(sorted(expected.items())),
+        eligible_member_ids=eligible_members,
+        ambiguous_endpoint_cohort_ids=ambiguous
+        | frozenset(ambiguous_path_rank_cohorts),
+        offset_step=graph_offset_step(graph),
+        curve_radius=curve_radius,
+        finalized_owned_segments=None,
+    )
 
 
 def _resolve_explicit_control(
@@ -2757,9 +3182,21 @@ def compile_corridor_cohort_plan(
         shortfall = result.clearance_shortfall
         if shortfall is None:
             return None, ()
+        if shortfall.required_shift_sign not in (-1, 1):
+            raise CorridorCohortCompilationError(
+                "corridor clearance shortfall has no directed boundary side"
+            )
         obstacle_ids = shortfall.blocking_obstacle_ids
-        if any(obstacle_id not in obstacle_provenance for obstacle_id in obstacle_ids):
-            return None, ()
+        missing = tuple(
+            obstacle_id
+            for obstacle_id in obstacle_ids
+            if obstacle_id not in obstacle_provenance
+        )
+        if missing:
+            raise CorridorCohortCompilationError(
+                "corridor clearance shortfall names unwitnessed obstacles: "
+                f"{','.join(missing)}"
+            )
         return shortfall, tuple(
             obstacle_provenance[obstacle_id] for obstacle_id in obstacle_ids
         )

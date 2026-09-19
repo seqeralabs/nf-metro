@@ -1653,3 +1653,66 @@ def test_member_geometry_corridor_handoff_returns_heterogeneous_grants(
     scalar_variable_id = scalar_requests[0].variable.variable_id
     assert any(grant.variable_id == scalar_variable_id for grant in plan.scalar_grants)
     assert plan.route_patches
+
+
+def test_unwitnessed_blocking_obstacle_raises_instead_of_losing_its_shortfall(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A clearance shortfall naming an obstacle with no footprint provenance
+    fails closed rather than silently collapsing to no shortfall at all.
+
+    A component whose solve fails always makes ``compile_corridor_cohort_plan``
+    raise; what matters here is which message it raises with. Treating
+    "unwitnessed" the same as "no shortfall" would report a generic failure
+    with no obstacle identity, so the raised message must name the missing
+    obstacle explicitly to prove the shortfall was not silently discarded.
+    """
+    claim = _identity_claim(
+        claim_id="carrier",
+        reservation_id="reservation:carrier",
+        network_id="network",
+        endpoint_cohort_id=None,
+    )
+    route = _mutable_route(
+        source="carrier:source",
+        target="carrier:target",
+        line_id="line",
+        points=[(0.0, 10.0), (30.0, 10.0)],
+    )
+    target = CorridorCohortTarget(
+        "carrier",
+        "plan:carrier",
+        ("carrier:source", "carrier:target", "line"),
+        RouteFamilyId.SAME_Y_STRAIGHT,
+        ("connector:carrier",),
+        route,
+        True,
+    )
+    ledger = CorridorCohortLedger(
+        claims=(claim,),
+        endpoint_members=(),
+        eligible_member_ids=frozenset({"carrier"}),
+        ambiguous_endpoint_cohort_ids=frozenset(),
+        offset_step=10.0,
+    )
+
+    def fake_solve(
+        problem: cci.CorridorAllocationProblem,
+    ) -> cci.CorridorAllocationResult:
+        return cci.CorridorAllocationResult(
+            status=cci.CorridorAllocationStatus.FAILURE,
+            reason=cci.CorridorAllocationFailureReason.INFEASIBLE,
+            blocking_member_ids=("carrier",),
+            clearance_shortfall=cci.CorridorClearanceShortfall(
+                claim_ids=("carrier",),
+                blocking_obstacle_ids=("obstacle-missing",),
+                deficit=5.0,
+                axis=0,
+                required_shift_sign=1,
+            ),
+        )
+
+    monkeypatch.setattr(cci, "solve_corridor_cohorts", fake_solve)
+
+    with pytest.raises(CorridorCohortCompilationError, match="unwitnessed obstacles"):
+        cci.compile_corridor_cohort_plan(ledger, (target,))
