@@ -31,6 +31,7 @@ ROLE_TIER = {
     "fix-issue-simplifier": "MID",
     "fix-issue-gate-specialist": "MID",
     "fix-issue-diagnostician": "HIGH",
+    "fix-issue-diagnostician-mid": "MID",
     "fix-issue-writer": "HIGH",
     "fix-issue-visual-reviewer": "HIGH",
     "fix-issue-reviewer": "HIGH",
@@ -43,6 +44,7 @@ REQUIRED_TOOLS = {
     "fix-issue-verifier": {"Bash"},
     "fix-issue-renderer": {"Bash", "Skill"},
     "fix-issue-diagnostician": {"Bash", "Read"},
+    "fix-issue-diagnostician-mid": {"Bash", "Read"},
     "fix-issue-writer": {"Read", "Edit", "Write", "Bash"},
     "fix-issue-simplifier": {"Skill"},
     "fix-issue-gate-specialist": {"Bash"},
@@ -159,6 +161,34 @@ def check_agent_definitions() -> None:
             fail(f"{a.name} grants unrestricted Agent; use Agent(<type>)")
         if a.stem not in table:
             fail(f"{a.name} is not named in SKILL.md")
+
+
+def check_hook_model_exceptions() -> None:
+    """A role whose SKILL.md tier cell offers a conditional lower tier (e.g.
+    'HIGH; MID when ...') can only ever reach it if the model-override hook lets
+    that role's `model` parameter through. The hook enforces this by omission: a
+    role absent from its blocked-pattern list may override, everyone else may
+    not. Keep the two lists in lockstep, or a documented conditional tier goes
+    silently unreachable (as happened for fix-issue-diagnostician)."""
+    hook = Path(".claude/hooks/block-fix-issue-model-override.sh")
+    if not hook.exists():
+        fail(f"hook script referenced by SKILL.md is missing: {hook}")
+        return
+    m = re.search(r'case "\$subagent_type" in\n\s*(fix-issue[a-z-|]+)\)', hook.read_text())
+    if not m:
+        fail(f"{hook.name}: could not find the blocked-role case pattern")
+        return
+    blocked = set(m.group(1).split("|"))
+    table = (SKILL / "SKILL.md").read_text()
+    for role in ROLE_TIER:
+        cell = table_tier_for(table, role)
+        conditional = bool(re.search(r"\bHIGH\b", cell) and re.search(r"\bMID\b", cell))
+        if conditional and role in blocked:
+            fail(f"{hook.name}: blocks `model` on `{role}`, but SKILL.md's tier "
+                 "table documents a conditional MID tier for it")
+        if not conditional and role not in blocked:
+            fail(f"{hook.name}: omits `{role}` from the blocked-role list, "
+                 "silently allowing an unrestricted `model` override")
 
 
 def check_no_dangling_names() -> None:
@@ -463,6 +493,7 @@ def main() -> int:
         check_steps,
         check_tiers_named,
         check_agent_definitions,
+        check_hook_model_exceptions,
         check_owner_split,
         check_numeric_consistency,
         check_no_dangling_names,

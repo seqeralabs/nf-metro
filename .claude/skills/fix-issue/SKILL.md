@@ -144,7 +144,8 @@ the one it got: that call belongs at spawn time or not at all.
 | --- | --- | --- | --- |
 | 0 | issue selection (only when none given) | `fix-issue-investigator` | LIGHT |
 | 1 | issue investigator | `fix-issue-investigator` | LIGHT |
-| 3 | diagnosis | `fix-issue-diagnostician` | HIGH; MID when the issue already names its own single-site cause and the brief is confirm-or-refute |
+| 3 | diagnosis | `fix-issue-diagnostician` | HIGH |
+| 3 | diagnosis (issue already names its own single-site cause; brief is confirm-or-refute) | `fix-issue-diagnostician-mid` | MID |
 | 3, 11 | the two review gates | `fix-issue-reviewer` | HIGH |
 | 4-7 | sole writer | `fix-issue-writer` | HIGH when the diff changes geometry-affecting logic in `src/nf_metro/layout/` (including its `routing/` package) or `src/nf_metro/parser/`; MID for a class (c) structural change in those dirs that alters no geometry, or for anything outside them. Highest tier wins on a mixed diff |
 | 6 | `/simplify` review | `fix-issue-simplifier` | MID |
