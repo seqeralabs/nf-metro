@@ -46,6 +46,14 @@ def _corpus_paths() -> tuple[Path, ...]:
     return tuple(sorted({path for root in roots for path in root.glob("*.mmd")}))
 
 
+def _eligible_plans_by_owner(execution):
+    return {
+        str(plan.id): plan
+        for plan in execution.plans
+        if plan.owns_geometry and plan.trunk_axis is not None
+    }
+
+
 @lru_cache(maxsize=None)
 def _requests_for(path_str: str):
     path = Path(path_str)
@@ -97,11 +105,7 @@ def _corridor_fixture():
 
 def test_adapter_exposes_every_planned_trunk_without_replacing_members() -> None:
     execution, targets, requests = _corridor_fixture()
-    eligible = {
-        str(plan.id): plan
-        for plan in execution.plans
-        if plan.owns_geometry and plan.trunk_axis is not None
-    }
+    eligible = _eligible_plans_by_owner(execution)
 
     assert {request.variable.owner_id for request in requests} == set(eligible)
     assert len(targets) == len(requests) == len(eligible)
@@ -121,11 +125,7 @@ def test_every_eligible_trunk_is_a_closed_six_point_skeleton_across_both_corpora
     seen_trunks = 0
     for path in _corpus_paths():
         _graph, _ctx, execution, targets, requests = _requests_for(str(path))
-        eligible = {
-            str(plan.id): plan
-            for plan in execution.plans
-            if plan.owns_geometry and plan.trunk_axis is not None
-        }
+        eligible = _eligible_plans_by_owner(execution)
         assert {request.variable.owner_id for request in requests} == set(eligible)
         for target, request in zip(targets, requests, strict=True):
             seen_trunks += 1
@@ -151,9 +151,7 @@ def test_every_eligible_trunk_is_a_closed_six_point_skeleton_across_both_corpora
 def test_left_running_trunk_central_run_is_oriented_against_the_listing() -> None:
     for path in _corpus_paths():
         _graph, _ctx, execution, targets, requests = _requests_for(str(path))
-        by_owner = {
-            str(plan.id): plan for plan in execution.plans if plan.owns_geometry
-        }
+        by_owner = _eligible_plans_by_owner(execution)
         for target, request in zip(targets, requests, strict=True):
             axis = by_owner[request.variable.owner_id].trunk_axis
             if axis.direction is not Direction.L:
@@ -209,7 +207,7 @@ def test_collapsed_flank_never_stands_uncontrolled_on_the_moving_coordinate(
     fixture: str,
 ) -> None:
     _graph, _ctx, execution, targets, requests = _requests_for(str(ROOT / fixture))
-    by_owner = {str(plan.id): plan for plan in execution.plans if plan.owns_geometry}
+    by_owner = _eligible_plans_by_owner(execution)
     witnesses = _witnesses(targets, requests)
     collapsed_owners = {
         request.variable.owner_id
@@ -242,11 +240,7 @@ def _synthetic_plan(axis: ConvergenceTrunkAxis):
     _graph, ctx, execution, _targets, _requests = _requests_for(
         str(ROOT / "examples" / "topologies" / "fan_in_merge.mmd")
     )
-    plan = next(
-        plan
-        for plan in execution.plans
-        if plan.owns_geometry and plan.trunk_axis is not None
-    )
+    plan = next(iter(_eligible_plans_by_owner(execution).values()))
     return replace(plan, trunk_axis=axis), ctx
 
 
@@ -335,11 +329,7 @@ def test_requests_fail_closed_on_duplicate_plan_owners() -> None:
     graph, ctx, execution, _targets, _requests = _requests_for(
         str(ROOT / "examples" / "topologies" / "fan_in_merge.mmd")
     )
-    plan = next(
-        plan
-        for plan in execution.plans
-        if plan.owns_geometry and plan.trunk_axis is not None
-    )
+    plan = next(iter(_eligible_plans_by_owner(execution).values()))
     with pytest.raises(ConvergenceInvariantError, match="duplicate plan owners"):
         convergence_corridor_requests((plan, plan), graph, ctx)
 
@@ -367,7 +357,7 @@ def test_translating_the_recipe_moves_central_and_pivots_only() -> None:
     _graph, _ctx, execution, targets, requests = _requests_for(
         str(ROOT / "examples" / "topologies" / "fan_in_merge.mmd")
     )
-    by_owner = {str(plan.id): plan for plan in execution.plans if plan.owns_geometry}
+    by_owner = _eligible_plans_by_owner(execution)
     for target, request in zip(targets, requests, strict=True):
         axis = by_owner[request.variable.owner_id].trunk_axis
         if _has_collapsed_flank(axis):

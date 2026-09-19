@@ -4960,7 +4960,7 @@ def _convergence_corridor_target(
 def _convergence_corridor_preference(
     plan: ConvergencePlan,
     graph: MetroGraph,
-    ctx: _RoutingCtx,
+    variable_id: str,
 ) -> tuple[float, CorridorCoordinateDomain]:
     """Read one trunk's preferred coordinate and complete feasible domain."""
     axis = plan.trunk_axis
@@ -4974,7 +4974,6 @@ def _convergence_corridor_preference(
         run_start=axis.extent_start,
         run_end=axis.extent_end,
     )
-    variable_id = f"convergence-trunk|{plan.id}"
     if band is None:
         return axis.coordinate, CorridorCoordinateDomain(variable_id)
     minimum_coordinate = band.lo if math.isfinite(band.lo) else None
@@ -5043,7 +5042,7 @@ def convergence_corridor_requests(
             )
         target, variable, recipe = exposed
         preferred_coordinate, domain = _convergence_corridor_preference(
-            plan, graph, ctx
+            plan, graph, variable.variable_id
         )
         targets.append(target)
         requests.append(
