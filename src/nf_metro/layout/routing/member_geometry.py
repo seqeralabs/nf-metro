@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import operator
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -18,7 +19,10 @@ from nf_metro.layout.constants import (
 )
 from nf_metro.layout.geometry import (
     cotravelling_lane_clearance,
+    grid_spans_overlap,
     measured_distance,
+    section_column_span,
+    section_row_span,
     spans_share_corridor,
 )
 from nf_metro.layout.route_plan import (
@@ -36,9 +40,11 @@ from nf_metro.layout.route_plan import (
     RouteSemanticScaffold,
     RouteSystemId,
 )
+from nf_metro.layout.route_reservations import ColumnGapRegion, RowGapRegion
 from nf_metro.layout.routing.common import (
     Direction,
     GapSlot,
+    OffsetRegime,
     RoutedPath,
     SourceTurnout,
     _points_coincide,
@@ -49,10 +55,25 @@ from nf_metro.layout.routing.common import (
     same_destination_approach_slots,
     segment_direction,
 )
-from nf_metro.layout.routing.context import SettledExitTurn, _RoutingCtx
+from nf_metro.layout.routing.context import (
+    SettledExitTurn,
+    _RoutingCtx,
+    _tb_x_offset,
+    port_lane_coord,
+)
 from nf_metro.layout.routing.corners import (
     concentric_corner_radius_at,
     resolve_curve_radius_at,
+)
+from nf_metro.layout.routing.corridor_cohort_integration import (
+    CorridorCohortCompilationError,
+    CorridorCohortFailure,
+    CorridorCohortLedger,
+    CorridorCohortPlan,
+    CorridorCohortTarget,
+    CorridorScalarRequest,
+    _network_id,
+    compile_corridor_cohort_plan,
 )
 from nf_metro.layout.routing.families import RouteFamilyId
 from nf_metro.layout.routing.inter_section_handlers import (
@@ -86,6 +107,7 @@ from nf_metro.layout.routing.normalize import (
     _VChannel,
 )
 from nf_metro.layout.routing.orientation import direction_axis, lateral_order_sign
+from nf_metro.layout.routing.perp import _perp_entry_crossing_x
 from nf_metro.layout.routing.reserved_bands import (
     ReservedBand,
     bundle_travel,
@@ -94,9 +116,10 @@ from nf_metro.layout.routing.reserved_bands import (
 )
 from nf_metro.layout.settlement_demand import (
     BoundaryClearanceRequirement,
+    BoundaryClearanceRequirementKind,
     SettlementAxis,
 )
-from nf_metro.parser.model import Edge, MetroGraph, PortSide
+from nf_metro.parser.model import Edge, MetroGraph, Port, PortSide, Section
 from nf_metro.parser.route_topology import (
     ConnectorId,
     EndpointGroupId,
@@ -241,6 +264,520 @@ class MemberGeometryExecution:
 
 def empty_member_geometry_execution() -> MemberGeometryExecution:
     return MemberGeometryExecution((), MappingProxyType({}), MappingProxyType({}))
+
+
+def _member_geometry_plan_id(
+    scaffold: RouteSemanticScaffold, candidate: _MemberCandidate
+) -> RouteMemberGeometryPlanId:
+    route = candidate.route
+    resolved = ResolvedEdge(route.edge.source, route.edge.target, route.line_id)
+    return RouteMemberGeometryPlanId(
+        semantic_route_id(
+            "route-member-geometry",
+            candidate.system_id,
+            scaffold.member_id_by_edge[resolved],
+            candidate.family_id.value,
+        )
+    )
+
+
+def _entry_port_crossing_coord(
+    ctx: _RoutingCtx,
+    port: Port,
+    line_id: str,
+) -> float:
+    """Absolute coordinate where *line_id* crosses an entry-port boundary.
+
+    LEFT/RIGHT ports expose their Y lane through the section lane frame.
+    TOP/BOTTOM ports use the same perpendicular crossing calculation as the
+    route builders, including approach fans and feeder bundle-index channels.
+    """
+    station = ctx.graph.stations[port.id]
+    if port.side in (PortSide.LEFT, PortSide.RIGHT):
+        return port_lane_coord(
+            ctx.graph,
+            station,
+            line_id,
+            ctx.station_offsets or {},
+            ctx.positive_fan,
+        )
+    crossing = _perp_entry_crossing_x(ctx, port.id, line_id, station.x)
+    if crossing is not None:
+        return crossing
+    return station.x + _tb_x_offset(ctx, port.id, line_id, port.section_id)
+
+
+def _corridor_cohort_target(
+    candidate: _MemberCandidate,
+    scaffold: RouteSemanticScaffold,
+    ctx: _RoutingCtx,
+    *,
+    mutable: bool,
+) -> CorridorCohortTarget:
+    route = candidate.route
+    resolved = ResolvedEdge(route.edge.source, route.edge.target, route.line_id)
+    port = ctx.graph.ports.get(resolved.target)
+    station = ctx.graph.stations.get(resolved.target)
+    endpoint_lane_axis: int | None = None
+    endpoint_lane_coordinate: float | None = None
+    if port is not None and port.is_entry and station is not None:
+        endpoint_lane_axis = int(port.side in (PortSide.LEFT, PortSide.RIGHT))
+        endpoint_lane_coordinate = _entry_port_crossing_coord(ctx, port, route.line_id)
+        if route.offset_regime is OffsetRegime.DEFERRED and endpoint_lane_axis == 1:
+            endpoint_lane_coordinate -= (ctx.station_offsets or {}).get(
+                (resolved.target, route.line_id),
+                0.0,
+            )
+    return CorridorCohortTarget(
+        str(scaffold.member_id_by_edge[resolved]),
+        str(_member_geometry_plan_id(scaffold, candidate)),
+        (resolved.source, resolved.target, resolved.line_id),
+        candidate.family_id,
+        candidate.connector_ids,
+        route,
+        mutable,
+        endpoint_lane_axis,
+        endpoint_lane_coordinate,
+        _network_id(candidate.connector_ids, scaffold),
+        legal_crossing_segment_ranks=frozenset(route.convergence_owned_segment_ranks),
+    )
+
+
+def _corridor_cohort_targets(
+    candidates: Sequence[_MemberCandidate],
+    context_candidates: Sequence[_MemberCandidate],
+    scaffold: RouteSemanticScaffold,
+    ctx: _RoutingCtx,
+) -> tuple[CorridorCohortTarget, ...]:
+    selected: dict[tuple[str, tuple[str, str, str]], CorridorCohortTarget] = {}
+
+    def add(population: Sequence[_MemberCandidate], *, mutable: bool) -> None:
+        seen: dict[tuple[str, tuple[str, str, str]], CorridorCohortTarget] = {}
+        for candidate in population:
+            target = _corridor_cohort_target(
+                candidate,
+                scaffold,
+                ctx,
+                mutable=mutable,
+            )
+            key = target.member_id, target.edge_key
+            existing = seen.get(key)
+            if existing is not None:
+                if existing.route is target.route:
+                    continue
+                raise RuntimeError(
+                    "corridor cohort target identity is ambiguous in one population"
+                )
+            seen[key] = target
+            if mutable or key not in selected:
+                selected[key] = target
+
+    add(candidates, mutable=True)
+    add(context_candidates, mutable=False)
+    return tuple(selected.values())
+
+
+def _corridor_boundary_sections(
+    graph: MetroGraph,
+    region: ColumnGapRegion | RowGapRegion,
+    claim_sections: tuple[Section, ...],
+    blocker_sections: tuple[Section, ...],
+) -> tuple[tuple[Section, ...], tuple[Section, ...]]:
+    """Split every implicated section onto the region's own negative/positive side.
+
+    Classifies each candidate section purely by its own grid position against
+    the region's ``left_column``/``right_column`` (or row equivalent) --
+    never by whether it reached this function through *claim_sections* or
+    *blocker_sections* -- so a claim and the obstacle blocking it can anchor
+    either side; nothing here reads which end of an authored connector is its
+    source or its target. A side with no direct candidate is derived by
+    searching every section at that side's grid index for one that shares the
+    cross-axis span the known side already occupies.
+    """
+    if isinstance(region, ColumnGapRegion):
+        start_attr = "grid_col"
+        span_attr = "grid_col_span"
+        cross_span_of = section_row_span
+        bbox_start_attr = "bbox_x"
+        bbox_size_attr = "bbox_w"
+        negative_index = region.left_column
+        positive_index = region.right_column
+        axis_name = "column"
+    else:
+        start_attr = "grid_row"
+        span_attr = "grid_row_span"
+        cross_span_of = section_column_span
+        bbox_start_attr = "bbox_y"
+        bbox_size_attr = "bbox_h"
+        negative_index = region.upper_row
+        positive_index = region.lower_row
+        axis_name = "row"
+
+    def start(section: Section) -> int:
+        return int(getattr(section, start_attr))
+
+    def span(section: Section) -> int:
+        return int(getattr(section, span_attr))
+
+    def overlaps(left: Section, right: Section) -> bool:
+        return grid_spans_overlap(cross_span_of(left), cross_span_of(right))
+
+    def gap_facing(section: Section) -> float:
+        return float(getattr(section, bbox_start_attr)) + float(
+            getattr(section, bbox_size_attr)
+        )
+
+    def near_gap(section: Section) -> float:
+        return float(getattr(section, bbox_start_attr))
+
+    def cross_contains(outer: Section, inner: Section) -> bool:
+        outer_span = cross_span_of(outer)
+        inner_span = cross_span_of(inner)
+        return outer_span[0] <= inner_span[0] and outer_span[1] >= inner_span[1]
+
+    def only_bordering(
+        sections: tuple[Section, ...],
+        facing: Callable[[Section], float],
+        nearer_than: Callable[[float, float], bool],
+    ) -> tuple[Section, ...]:
+        """Drop any section fully shadowed from the gap by a nearer same-side one.
+
+        A section is dropped when another same-side candidate spans across it
+        in the cross axis and sits strictly nearer the gap (*nearer_than*
+        compares the two gap-facing coordinates): the shadowed section then
+        lies wholly behind that neighbour and touches the boundary nowhere, so
+        listing it is a false attribution. The nearest section is never
+        shadowed, so a non-empty side stays non-empty.
+        """
+
+        def shadowed(section: Section) -> bool:
+            return any(
+                other is not section
+                and cross_contains(other, section)
+                and nearer_than(facing(other), facing(section))
+                for other in sections
+            )
+
+        return tuple(section for section in sections if not shadowed(section))
+
+    candidates = {
+        section.id: section for section in (*claim_sections, *blocker_sections)
+    }
+    negative_sections = tuple(
+        section
+        for section in candidates.values()
+        if start(section) + span(section) - 1 == negative_index
+    )
+    positive_sections = tuple(
+        section for section in candidates.values() if start(section) == positive_index
+    )
+    if negative_sections and not positive_sections:
+        positive_sections = tuple(
+            section
+            for section in graph.sections.values()
+            if start(section) == positive_index
+            and any(overlaps(section, negative) for negative in negative_sections)
+        )
+    elif positive_sections and not negative_sections:
+        negative_sections = tuple(
+            section
+            for section in graph.sections.values()
+            if start(section) + span(section) - 1 == negative_index
+            and any(overlaps(section, positive) for positive in positive_sections)
+        )
+    if not negative_sections or not positive_sections:
+        raise ValueError(
+            f"clearance boundary has no facing section pair on the {axis_name} axis"
+        )
+    negative_sections = only_bordering(negative_sections, gap_facing, operator.gt)
+    positive_sections = only_bordering(positive_sections, near_gap, operator.lt)
+    return negative_sections, positive_sections
+
+
+def _local_section_ids(
+    graph: MetroGraph, edge_key: tuple[str, str, str] | None
+) -> frozenset[str]:
+    """Section ids the claim's own local hop touches, from live station identity.
+
+    Reads each endpoint's already-resolved ``section_id`` rather than an
+    authored connector's source or target section, which can name a station
+    many hops upstream of the boundary this specific segment actually sits
+    at (a junction station has no section and contributes nothing).
+    """
+    if edge_key is None:
+        return frozenset()
+    ids = set()
+    for station_id in (edge_key[0], edge_key[1]):
+        station = graph.stations.get(station_id)
+        if station is not None and station.section_id is not None:
+            ids.add(station.section_id)
+    return frozenset(ids)
+
+
+class _UnresolvedAperture(Exception):
+    """One failure is not an aperture candidate and is skipped, not fatal.
+
+    Raised for a consistent failure that simply has no aperture to request --
+    no clearance shortfall at all, or a well-formed shortfall with no facing
+    section pair to map to an adjacent grid boundary. These are collected and
+    skipped per-failure so one sibling's silence never voids another's demand.
+    """
+
+
+class _ApertureIntegrityError(Exception):
+    """One failure's shortfall is internally inconsistent; the batch fails closed.
+
+    Raised for a shortfall whose own data contradicts itself. One case -- an
+    undirected boundary side -- repeats an invariant the plan compile already
+    enforces, so reaching it here means that earlier guard was bypassed. The
+    other three are this producer's own: a shortfall naming an unknown claim,
+    a solver axis that disagrees with the corridor boundary, and a blocker
+    whose typed provenance does not match its live route target. Any of them
+    must raise even when a sibling in the batch resolves; discarding it
+    silently would hide a real defect.
+    """
+
+
+def _corridor_cohort_aperture_requirements(
+    graph: MetroGraph,
+    ledger: CorridorCohortLedger,
+    targets: Sequence[CorridorCohortTarget],
+    scalar_requests: Sequence[CorridorScalarRequest],
+    error: CorridorCohortCompilationError,
+) -> tuple[BoundaryClearanceRequirement, ...]:
+    """Map every resolvable failure to its own typed requirement, independently.
+
+    Each entry in ``error.failures`` is a separate corridor component that
+    failed to allocate; one that is simply not an aperture candidate
+    (``_UnresolvedAperture``) says nothing about whether its siblings are, so
+    it is skipped rather than voiding every requirement the batch could
+    otherwise produce, and a batch where nothing resolves at all raises.
+
+    An internally inconsistent shortfall (``_ApertureIntegrityError``) is a
+    different matter: it raises immediately, even when a sibling in the same
+    batch resolves, so a corrupt failure is never masked by a healthy one.
+    """
+    claims_by_id = {claim.claim_id: claim for claim in ledger.claims}
+    scalar_requests_by_id = {
+        request.variable.variable_id: request for request in scalar_requests
+    }
+    targets_by_key = {(target.member_id, target.edge_key): target for target in targets}
+    requirements: dict[
+        tuple[SettlementAxis, int, tuple[str, ...], tuple[str, ...]],
+        BoundaryClearanceRequirement,
+    ] = {}
+    skip_reasons: list[str] = []
+
+    def resolve(failure: CorridorCohortFailure) -> BoundaryClearanceRequirement:
+        shortfall = failure.clearance_shortfall
+        if shortfall is None:
+            raise _UnresolvedAperture(
+                "allocation failure has no typed clearance shortfall"
+            )
+        if shortfall.required_shift_sign not in (-1, 1):
+            raise _ApertureIntegrityError(
+                "clearance shortfall has no directed boundary side"
+            )
+        claims = tuple(
+            claims_by_id[claim_id]
+            for claim_id in shortfall.claim_ids
+            if claim_id in claims_by_id
+        )
+        scalar_claims = tuple(
+            scalar_requests_by_id[claim_id]
+            for claim_id in shortfall.claim_ids
+            if claim_id in scalar_requests_by_id
+        )
+        if len(claims) + len(scalar_claims) != len(shortfall.claim_ids):
+            raise _ApertureIntegrityError("clearance shortfall names an unknown claim")
+        regions = {claim.region for claim in claims}
+        for request in scalar_claims:
+            request_region = request.region
+            if request_region is None:
+                raise _UnresolvedAperture(
+                    "clearance claims do not name one corridor region"
+                )
+            regions.add(request_region)
+        if not shortfall.claim_ids or len(regions) != 1:
+            raise _UnresolvedAperture(
+                "clearance claims do not name one corridor region"
+            )
+        region = next(iter(regions))
+        if isinstance(region, ColumnGapRegion):
+            axis = SettlementAxis.COLUMN
+            boundary = region.right_column
+            expected_axis = 0
+        elif isinstance(region, RowGapRegion):
+            axis = SettlementAxis.ROW
+            boundary = region.lower_row
+            expected_axis = 1
+        else:
+            raise _UnresolvedAperture(
+                "clearance claim is not on an adjacent grid boundary"
+            )
+        if shortfall.axis != expected_axis:
+            raise _ApertureIntegrityError("solver axis and corridor boundary disagree")
+
+        claim_section_ids: set[str] = set()
+        for claim in claims:
+            claim_section_ids |= _local_section_ids(graph, claim.edge_key)
+        for request in scalar_claims:
+            claim_section_ids |= _local_section_ids(graph, request.variable.edge_key)
+        claim_sections = tuple(
+            graph.sections[section_id] for section_id in sorted(claim_section_ids)
+        )
+        typed_obstacles = {
+            item.obstacle_id: item for item in failure.blocking_obstacles
+        }
+        if set(typed_obstacles) != set(shortfall.blocking_obstacle_ids):
+            raise _ApertureIntegrityError("active blockers lack exact typed provenance")
+        blocker_section_ids: set[str] = set()
+        for obstacle in typed_obstacles.values():
+            target = targets_by_key.get((obstacle.member_id, obstacle.edge_key))
+            if target is None or target.connector_ids != obstacle.connector_ids:
+                raise _ApertureIntegrityError(
+                    "active blocker does not match its current route target"
+                )
+            blocker_section_ids |= _local_section_ids(graph, obstacle.edge_key)
+        blocker_sections = tuple(
+            graph.sections[section_id] for section_id in sorted(blocker_section_ids)
+        )
+        # Neither pool needs to be non-empty here: a claim or obstacle whose
+        # local hop touches no section (a junction-to-junction convergence
+        # trunk edge, say) is fine as long as the other pool anchors one side
+        # for _corridor_boundary_sections to derive the rest from.
+        try:
+            negative_sections, positive_sections = _corridor_boundary_sections(
+                graph, region, claim_sections, blocker_sections
+            )
+        except ValueError as mapping_error:
+            raise _UnresolvedAperture(str(mapping_error)) from mapping_error
+        if isinstance(region, ColumnGapRegion):
+            negative_edge = max(
+                section.bbox_x + section.bbox_w for section in negative_sections
+            )
+            positive_edge = min(section.bbox_x for section in positive_sections)
+        else:
+            negative_edge = max(
+                section.bbox_y + section.bbox_h for section in negative_sections
+            )
+            positive_edge = min(section.bbox_y for section in positive_sections)
+        negative_ids = tuple(sorted(section.id for section in negative_sections))
+        positive_ids = tuple(sorted(section.id for section in positive_sections))
+        required = max(0.0, positive_edge - negative_edge) + shortfall.deficit
+        return BoundaryClearanceRequirement(
+            axis,
+            boundary,
+            f"{failure.component_id}|result:{failure.result_rank}",
+            required,
+            negative_ids,
+            positive_ids,
+            f"corridor cohort aperture at {axis.value} boundary {boundary}",
+            BoundaryClearanceRequirementKind.CORRIDOR_COHORT_APERTURE,
+        )
+
+    for failure in error.failures:
+        try:
+            requirement = resolve(failure)
+        except _ApertureIntegrityError as integrity:
+            raise CorridorCohortCompilationError(
+                f"{error}; corridor aperture handoff hit an integrity violation on "
+                f"{failure.component_id}/result:{failure.result_rank}: {integrity}",
+                error.failures,
+            ) from integrity
+        except _UnresolvedAperture as unresolved:
+            skip_reasons.append(
+                f"{failure.component_id}/result:{failure.result_rank}: {unresolved}"
+            )
+            continue
+        key = (
+            requirement.axis,
+            requirement.boundary,
+            requirement.negative_section_ids,
+            requirement.positive_section_ids,
+        )
+        held = requirements.get(key)
+        if held is None or requirement.required > held.required:
+            requirements[key] = requirement
+    if not requirements:
+        raise CorridorCohortCompilationError(
+            f"{error}; corridor aperture handoff resolved no failure: "
+            + "; ".join(skip_reasons),
+            error.failures,
+        ) from error
+    return tuple(
+        requirements[key]
+        for key in sorted(
+            requirements,
+            key=lambda item: (item[0].value, item[1], item[2], item[3]),
+        )
+    )
+
+
+def _compile_corridor_cohorts(
+    ledger: CorridorCohortLedger | None,
+    candidates: Sequence[_MemberCandidate],
+    context_candidates: Sequence[_MemberCandidate],
+    scaffold: RouteSemanticScaffold,
+    ctx: _RoutingCtx,
+    *,
+    allow_clearance_requirements: bool,
+    additional_targets: Sequence[CorridorCohortTarget] = (),
+    scalar_requests: Sequence[CorridorScalarRequest] = (),
+) -> tuple[
+    CorridorCohortPlan | None,
+    dict[ResolvedEdge, tuple[int, ...]],
+    tuple[BoundaryClearanceRequirement, ...],
+]:
+    if ledger is None:
+        return None, {}, ()
+    member_targets = _corridor_cohort_targets(
+        candidates,
+        context_candidates,
+        scaffold,
+        ctx,
+    )
+    targets = (*member_targets, *additional_targets)
+    try:
+        cohort_plan = compile_corridor_cohort_plan(
+            ledger,
+            targets,
+            scalar_requests=scalar_requests,
+        )
+    except CorridorCohortCompilationError as error:
+        if not allow_clearance_requirements:
+            raise
+        return (
+            None,
+            {},
+            _corridor_cohort_aperture_requirements(
+                ctx.graph,
+                ledger,
+                targets,
+                scalar_requests,
+                error,
+            ),
+        )
+    targets_by_key = {(target.member_id, target.edge_key): target for target in targets}
+    ranks_by_edge: defaultdict[ResolvedEdge, list[int]] = defaultdict(list)
+    for allocation in cohort_plan.allocations:
+        target = targets_by_key.get((allocation.member_id, allocation.edge_key))
+        if target is None or not target.mutable:
+            raise RuntimeError(
+                "corridor cohort allocation has no mutable current target"
+            )
+        edge = ResolvedEdge(*allocation.edge_key)
+        ranks_by_edge[edge].append(allocation.segment_rank)
+    for landing in cohort_plan.landings:
+        target = targets_by_key.get((landing.member_id, landing.edge_key))
+        if target is None or not target.mutable:
+            raise RuntimeError("corridor cohort landing has no mutable current target")
+        ranks_by_edge[ResolvedEdge(*landing.edge_key)].append(landing.segment_rank)
+    return (
+        cohort_plan,
+        {edge: tuple(sorted(set(ranks))) for edge, ranks in ranks_by_edge.items()},
+        (),
+    )
 
 
 def _allocated_turn(
@@ -860,11 +1397,7 @@ def _freeze_plan(
                 localized_slot.direction,
             )
         )
-    plan_id = RouteMemberGeometryPlanId(
-        semantic_route_id(
-            "route-member-geometry", system_id, member_id, family_id.value
-        )
-    )
+    plan_id = _member_geometry_plan_id(scaffold, candidate)
     corner_offsets, corner_bases = _complete_concentric_corner_description(route)
     return RouteMemberGeometryPlan(
         plan_id,
@@ -1680,10 +2213,12 @@ def _short_destination_clearance_requirement(
 
 
 _BoundaryRequirementKey = tuple[
+    SettlementAxis,
     int,
     str,
     tuple[str, ...],
     tuple[str, ...],
+    BoundaryClearanceRequirementKind,
 ]
 
 
@@ -1691,12 +2226,20 @@ def _record_boundary_clearance_requirement(
     requirements: dict[_BoundaryRequirementKey, BoundaryClearanceRequirement],
     requirement: BoundaryClearanceRequirement,
 ) -> None:
-    """Keep section-pair demands independent and coalesce exact duplicates."""
+    """Keep section-pair demands independent and coalesce exact duplicates.
+
+    The key names ``axis`` and ``kind`` alongside the section pair so a
+    ``GENERAL`` and a ``CORRIDOR_COHORT_APERTURE`` requirement (or a
+    same-numbered boundary on different axes) never collapse into one
+    entry that silently keeps only the first requirement's typed identity.
+    """
     key = (
+        requirement.axis,
         requirement.boundary,
         requirement.owner_id,
         requirement.negative_section_ids,
         requirement.positive_section_ids,
+        requirement.kind,
     )
     current = requirements.setdefault(key, requirement)
     requirements[key] = replace(
@@ -2550,3 +3093,22 @@ def validate_member_geometry_emission(
                         f"member geometry plan {plan.id} owned corner inputs changed "
                         f"at index {radius_index}"
                     )
+
+
+def plan_corridor_cohorts(
+    ledger: CorridorCohortLedger,
+    targets: Sequence[CorridorCohortTarget],
+    *,
+    scalar_requests: Sequence[CorridorScalarRequest] = (),
+) -> CorridorCohortPlan:
+    """Compile one corridor cohort snapshot into heterogeneous grants.
+
+    Passes member and convergence scalar requests to
+    :func:`compile_corridor_cohort_plan` and returns member allocations, exact
+    route patches and convergence scalar grants in one plan. It solves without
+    publishing: the caller decides whether to apply the returned patches, so no
+    geometry moves here.
+    """
+    return compile_corridor_cohort_plan(
+        ledger, targets, scalar_requests=scalar_requests
+    )

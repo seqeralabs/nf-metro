@@ -66,6 +66,9 @@ if TYPE_CHECKING:
     )
     from nf_metro.layout.routing.common import RoutedPath
     from nf_metro.layout.routing.context import _EdgeKey, _RoutingCtx
+    from nf_metro.layout.routing.corridor_cohort_integration import (
+        CorridorCohortLedger,
+    )
     from nf_metro.layout.routing.system_emission import RouteSystemEmissionExecution
     from nf_metro.layout.settlement_demand import BoundaryClearanceRequirement
 
@@ -139,8 +142,10 @@ class SettlementStage(str, Enum):
     """Stable vocabulary for observing settlement progress.
 
     A render emits only ``DISCOVERY``, ``GENERAL_SETTLEMENT``, ``COHORT_FINAL``
-    and ``VALIDATION``.  The other four members are reserved vocabulary that no
-    production path may emit, which
+    and ``VALIDATION``.  ``FINAL_SOLVE`` is emitted by the corridor cohort
+    compiler when it is handed a settlement trace.  ``COHORT_INTENT``,
+    ``APERTURE_SETTLEMENT`` and ``TYPED_MATERIALIZATION`` remain reserved
+    vocabulary no production path emits, which
     ``tests/test_corridor_cohort_integration.py`` asserts.
     """
 
@@ -2452,6 +2457,7 @@ class RoutePlan:
     boundary_clearance_owner_ids: tuple[str, ...] = ()
     """Systems whose member geometry owns a settled boundary-clearance cohort."""
     settlement_trace: SettlementStageTrace = SettlementStageTrace()
+    corridor_cohort_ledger: CorridorCohortLedger | None = None
 
 
 @dataclass(slots=True)
