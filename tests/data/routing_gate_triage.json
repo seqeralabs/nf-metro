@@ -1554,5 +1554,73 @@
  "normalize.py::if blocked or settled:::#1": {
   "note": "A merge-fed confluence is re-seated only when a free leg is off its band-earned slot and unblocked. The move arm (rather than this skip) is reachable and is reached by test_merge_confluence_band_order_1835's inlined riboseq annotation/riboseq bundle into orf_calling, where _restack_channel fires and resolves the crossing. That map is excluded from the corpus fixture roots because it trips an unrelated symmetric-diamond centreline abort under validate=True (#1836), so no corpus fixture exercises this arm yet; committing that map as a real topology fixture is blocked on #1836.",
   "status": "needs-review"
+ },
+ "convergences.py::for plan in eligible:::#1": {
+  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #2017 completes the control-recipe wiring for this program (#1745); reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
+  "status": "needs-review"
+ },
+ "convergences.py::for run in runs:::#1": {
+  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #2017 completes the control-recipe wiring for this program (#1745); reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
+  "status": "needs-review"
+ },
+ "convergences.py::if axis is None or plan.primary_trunk_member_id is None:::#1": {
+  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #2017 completes the control-recipe wiring for this program (#1745); reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
+  "status": "needs-review"
+ },
+ "convergences.py::if axis.axis is DemandAxis.X:::#2": {
+  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #2017 completes the control-recipe wiring for this program (#1745); reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
+  "status": "needs-review"
+ },
+ "convergences.py::if axis.direction in {Direction.L, Direction.U}:::#1": {
+  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #2017 completes the control-recipe wiring for this program (#1745); reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
+  "status": "needs-review"
+ },
+ "convergences.py::if band is None:::#1": {
+  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #2017 completes the control-recipe wiring for this program (#1745); reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
+  "status": "needs-review"
+ },
+ "convergences.py::if edge is None:::#1": {
+  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #2017 completes the control-recipe wiring for this program (#1745); reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
+  "status": "needs-review"
+ },
+ "convergences.py::if exposed is None:::#1": {
+  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #2017 completes the control-recipe wiring for this program (#1745); reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
+  "status": "needs-review"
+ },
+ "convergences.py::if len(set(owner_ids)) != len(owner_ids):::#1": {
+  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #2017 completes the control-recipe wiring for this program (#1745); reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
+  "status": "needs-review"
+ },
+ "convergences.py::if maximum_coordinate is not None:::#1": {
+  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #2017 completes the control-recipe wiring for this program (#1745); reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
+  "status": "needs-review"
+ },
+ "convergences.py::if minimum_coordinate is not None:::#1": {
+  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #2017 completes the control-recipe wiring for this program (#1745); reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
+  "status": "needs-review"
+ },
+ "convergences.py::if not _points_coincide(points[-1], run[0]):::#1": {
+  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #2017 completes the control-recipe wiring for this program (#1745); reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
+  "status": "needs-review"
+ },
+ "convergences.py::if ownership is None:::#1": {
+  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #2017 completes the control-recipe wiring for this program (#1745); reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
+  "status": "needs-review"
+ },
+ "convergences.py::if source_collapsed:::#1": {
+  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #2017 completes the control-recipe wiring for this program (#1745); reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
+  "status": "needs-review"
+ },
+ "convergences.py::if source_collapsed:::#2": {
+  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #2017 completes the control-recipe wiring for this program (#1745); reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
+  "status": "needs-review"
+ },
+ "convergences.py::if target_collapsed:::#1": {
+  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #2017 completes the control-recipe wiring for this program (#1745); reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
+  "status": "needs-review"
+ },
+ "convergences.py::if target_collapsed:::#2": {
+  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #2017 completes the control-recipe wiring for this program (#1745); reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
+  "status": "needs-review"
  }
 }
