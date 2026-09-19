@@ -90,6 +90,17 @@ class CorridorScalarControlledPoint:
 
 
 @dataclass(frozen=True, slots=True)
+class CorridorScalarFixedPoint:
+    member_id: str
+    edge_key: tuple[str, str, str]
+    connector_ids: tuple[ConnectorId, ...]
+    point_rank: int
+    axis: int
+    coordinate: float
+    role_id: str
+
+
+@dataclass(frozen=True, slots=True)
 class CorridorScalarDirectedRunway:
     owner_id: str
     member_id: str
@@ -111,6 +122,7 @@ class CorridorScalarControlRecipe:
     owner_id: str
     source_coordinate: float
     controlled_points: tuple[CorridorScalarControlledPoint, ...]
+    fixed_points: tuple[CorridorScalarFixedPoint, ...] = ()
     directed_runways: tuple[CorridorScalarDirectedRunway, ...] = ()
 
 
@@ -735,6 +747,34 @@ def _validate_control_recipe(
                 "invalid controlled point"
             )
         role_ids.add(point.role_id)
+        point_keys.add(point_key)
+    for fixed in recipe.fixed_points:
+        target = targets_by_identity.get((fixed.member_id, fixed.edge_key))
+        point_key = (
+            fixed.member_id,
+            fixed.edge_key,
+            fixed.point_rank,
+            fixed.axis,
+        )
+        if (
+            target is None
+            or target.connector_ids != fixed.connector_ids
+            or fixed.axis not in (0, 1)
+            or not 0 <= fixed.point_rank < len(target.route.points)
+            or not isfinite(fixed.coordinate)
+            or not isclose(
+                target.route.points[fixed.point_rank][fixed.axis],
+                fixed.coordinate,
+                abs_tol=COORD_TOLERANCE,
+            )
+            or fixed.role_id in role_ids
+            or point_key in point_keys
+        ):
+            raise CorridorCohortCompilationError(
+                f"corridor scalar request {request.variable.variable_id} has an "
+                "invalid fixed point"
+            )
+        role_ids.add(fixed.role_id)
         point_keys.add(point_key)
     for runway in recipe.directed_runways:
         if (
