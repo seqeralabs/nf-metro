@@ -37,7 +37,22 @@ Every input is optional:
 
 When it writes more than one file, `output-path` lists them one per line and `changed` is `'true'` if any of them differs from what is committed.
 The action reads these straight from nf-metro's own output, so declaring the paths with `%%metro output:` in the `.mmd` and leaving `output` empty renders and tracks every declared file.
-The action always renders with `--reject-output-outside-source`, so a `%%metro output:` declaration that resolves outside the `.mmd`'s own directory (an absolute path, or a `..` escape) fails the step instead of being written: a workflow rendering a `.mmd` it doesn't control (an external contributor's PR, say) can't be made to write, or steer a later commit or diff step, outside its own repository.
+The action always renders with `--reject-output-outside-source`, so a `%%metro output:` declaration that resolves outside the pipeline repository holding the `.mmd` (an absolute path, or a `..` escape past the repo root), or into that repository's `.git/`, fails the step instead of being written: a workflow rendering a `.mmd` it doesn't control (an external contributor's PR, say) can't be made to write, or steer a later commit or diff step, outside its own checkout.
+Paths that stay inside the checkout are fine, `..` hops included, so `assets/metro_map.mmd` can declare `../docs/images/metro_map.svg`.
+
+### Several images from one `.mmd`
+
+A `%%metro output:` path can carry [per-output render overrides](/nf-metro/cli/#per-output-render-overrides) after a `|`, which is how one action run produces a whole image set without any `extra-args`:
+
+```
+%%metro output: nf-core-demo_metro_map.svg
+%%metro output: nf-core-demo_metro_map_animated.svg | animate
+%%metro output: nf-core-demo_metro_map_dark.png     | mode=dark
+%%metro output: nf-core-demo_metro_map_light.png    | mode=light
+```
+
+Leave the action's `output` input empty and every declared file is rendered, listed in `output-path`, and covered by `changed`.
+The same block drives the pre-commit hook below, so a single commit keeps all four in sync.
 
 ## Pre-commit hook
 
@@ -55,6 +70,7 @@ repos:
 The hook matches `*.mmd` and writes the sibling `.svg`.
 `assets/metro_map.mmd` becomes `assets/metro_map.svg`.
 A map that declares `%%metro output:` paths instead writes those (for example an `.svg` and a `.png`), so a single commit keeps every declared file in sync.
+Each of those paths can set its own `animate`/`mode`/`theme`/`scale`/`raster_width` after a `|`, so the hook needs no `args` to keep a light/dark/animated set current.
 It runs with `--theme nfcore --embed-font` by default.
 Setting `args` replaces that whole list.
 Repeat the flags you want to keep alongside the new one:

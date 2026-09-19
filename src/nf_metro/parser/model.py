@@ -599,10 +599,12 @@ class MetroGraph:
     logo_path_light: str = ""
     logo_path_dark: str = ""
     source_dir: str = ""
-    # Output paths from %%metro output:, exactly as written. Consumed only by
-    # the CLI's job planning, which resolves each against the .mmd's own
-    # directory; layout and render never read this.
-    declared_outputs: list[str] = field(default_factory=list)
+    # Output paths from %%metro output:, exactly as written, each paired with
+    # the per-output render overrides declared after its `|` (empty for a bare
+    # path). Consumed only by the CLI's job planning, which resolves each path
+    # against the .mmd's own directory and folds the overrides over the run's
+    # global options; layout and render never read this.
+    declared_outputs: list[tuple[str, dict[str, object]]] = field(default_factory=list)
     logo_scale: float = 1.0  # multiplies the logo size within the legend block
     legend_logo_gap: float | None = None  # px gap between logo and legend entries
     # Multiplies every text size for the render (station labels, title,
