@@ -58,12 +58,12 @@ See the [precedence table](/nf-metro/guide/#cli-flags-and-directive-precedence) 
 
 ### Output and source
 
-| Option                                                               | Default                                    | Description                                                                                                                                                                                                                                                                       |
-| -------------------------------------------------------------------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `-o`, `--output PATH`                                                | `%%metro output:`, else `<input>.<format>` | Output file path (only valid with a single `INPUT_FILE`). Repeat it to write several formats from one run: `-o map.svg -o map.png`. With no `-o`, the map's `%%metro output:` directive supplies the path(s), each with its own [per-output overrides](#per-output-render-overrides); with neither, the sibling `<input>.<format>`                        |
-| `--format [svg\|html\|png\|gif\|webp\|mp4\|webm]`                    | inferred from `--output`, else `svg`       | Output format: `svg`, `png`, `html` for an interactive self-contained page, or `gif`/`webp`/`mp4`/`webm` for a [looping video](#looping-video-of-the-animation). `-o map.png` selects PNG on its own                                                                              |
-| `--from-nextflow`                                                    | off                                        | Convert Nextflow `-with-dag` Mermaid input before rendering                                                                                                                                                                                                                       |
-| `--debug / --no-debug`                                               | off                                        | Show the debug overlay (ports, hidden stations, edge waypoints)                                                                                                                                                                                                                   |
+| Option                                                               | Default                                    | Description                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| -------------------------------------------------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `-o`, `--output PATH`                                                | `%%metro output:`, else `<input>.<format>` | Output file path (only valid with a single `INPUT_FILE`). Repeat it to write several formats from one run: `-o map.svg -o map.png`. With no `-o`, the map's `%%metro output:` directive supplies the path(s), each with its own [per-output overrides](#per-output-render-overrides); with neither, the sibling `<input>.<format>`                                                                                           |
+| `--format [svg\|html\|png\|gif\|webp\|mp4\|webm]`                    | inferred from `--output`, else `svg`       | Output format: `svg`, `png`, `html` for an interactive self-contained page, or `gif`/`webp`/`mp4`/`webm` for a [looping video](#looping-video-of-the-animation). `-o map.png` selects PNG on its own                                                                                                                                                                                                                         |
+| `--from-nextflow`                                                    | off                                        | Convert Nextflow `-with-dag` Mermaid input before rendering                                                                                                                                                                                                                                                                                                                                                                  |
+| `--debug / --no-debug`                                               | off                                        | Show the debug overlay (ports, hidden stations, edge waypoints)                                                                                                                                                                                                                                                                                                                                                              |
 | `--reject-output-outside-source / --no-reject-output-outside-source` | off                                        | Refuse a `%%metro output:` declaration that resolves outside the pipeline repository holding the `.mmd` (an absolute path, or a `..` escape past the repo root), or into its `.git/`, instead of writing there. Outside a git working tree the boundary falls back to the `.mmd`'s own directory. Never applies to an explicit `-o`. Meant for rendering a map you didn't author, e.g. a CI job rendering a fork PR's `.mmd` |
 
 #### Per-output render overrides
@@ -82,17 +82,17 @@ flags at all:
 Right of the first `|` is a space- or comma-separated list of `key=value`
 tokens; `animate` may also be written bare, meaning `animate=true`. An
 override applies to every path on its own line and beats the matching global
-flag for that output alone. Only options that change how the map is *drawn*
-are accepted — nothing here can change what the map *is*, so every declared
+flag for that output alone. Only options that change how the map is _drawn_
+are accepted — nothing here can change what the map _is_, so every declared
 output is the same diagram:
 
-| Key            | Equivalent flag  | Example            |
-| -------------- | ---------------- | ------------------ |
+| Key            | Equivalent flag  | Example                    |
+| -------------- | ---------------- | -------------------------- |
 | `animate`      | `--animate`      | `animate`, `animate=false` |
-| `mode`         | `--mode`         | `mode=dark`        |
-| `theme`        | `--theme`        | `theme=seqera`     |
-| `scale`        | `--scale`        | `scale=3`          |
-| `raster_width` | `--raster-width` | `raster_width=800` |
+| `mode`         | `--mode`         | `mode=dark`                |
+| `theme`        | `--theme`        | `theme=seqera`             |
+| `scale`        | `--scale`        | `scale=3`                  |
+| `raster_width` | `--raster-width` | `raster_width=800`         |
 
 An unknown key, or a value the matching flag would reject, is warned about and
 ignored; the output itself still renders under the run's global options.

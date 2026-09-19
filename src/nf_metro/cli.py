@@ -242,8 +242,10 @@ def _graph_key(
     purpose: they are baked when the graph is serialised, not laid out, so a
     static SVG and a light/dark PNG pair still share a single layout run.
     """
-    effective = _layout_opts_for(out_format, layout_opts)
-    return _svg_format_for(out_format), bool(effective.get("animate"))
+    animated = bool(layout_opts.get("animate")) or _forces_animation(
+        out_format, layout_opts
+    )
+    return _svg_format_for(out_format), animated
 
 
 class _FiniteFloatRange(click.FloatRange):
