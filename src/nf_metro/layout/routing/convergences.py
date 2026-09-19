@@ -4897,6 +4897,26 @@ def _skeleton_controlled_point_ranks(axis: ConvergenceTrunkAxis) -> tuple[int, .
     return tuple(ranks)
 
 
+def _convergence_dependant_role_slugs(plan: ConvergencePlan) -> Iterator[str]:
+    """Bare role-slug for every dependant one eligible plan's scalar governs.
+
+    The single source for the four dependant slug shapes -- one per landing
+    join, per opening turn present, per continuation start and per feeder
+    ownership endpoint.  The completeness oracle and the recipe builder both
+    consume this in the same order, so a slug rename lands in one place rather
+    than silently desyncing two hand-written copies.
+    """
+    for landing in plan.landings:
+        yield f"landing:{landing.member_id}|join"
+        if landing.opening_turn_segment is not None:
+            yield f"landing:{landing.member_id}|opening"
+    for continuation in plan.outgoing_continuations:
+        yield f"continuation:{continuation.member_id}|start"
+    for ownership in plan.endpoint_ownership:
+        if ownership.role is ConvergenceEndpointRole.FEEDER:
+            yield f"feeder:{ownership.member_id}|endpoint"
+
+
 def _convergence_recipe_role_ids(
     plan: ConvergencePlan, variable_id: str
 ) -> frozenset[str]:
@@ -4913,15 +4933,9 @@ def _convergence_recipe_role_ids(
     roles = {
         f"{variable_id}|point:{rank}" for rank in _skeleton_controlled_point_ranks(axis)
     }
-    for landing in plan.landings:
-        roles.add(f"{variable_id}|landing:{landing.member_id}|join")
-        if landing.opening_turn_segment is not None:
-            roles.add(f"{variable_id}|landing:{landing.member_id}|opening")
-    for continuation in plan.outgoing_continuations:
-        roles.add(f"{variable_id}|continuation:{continuation.member_id}|start")
-    for ownership in plan.endpoint_ownership:
-        if ownership.role is ConvergenceEndpointRole.FEEDER:
-            roles.add(f"{variable_id}|feeder:{ownership.member_id}|endpoint")
+    roles |= {
+        f"{variable_id}|{slug}" for slug in _convergence_dependant_role_slugs(plan)
+    }
     return frozenset(roles)
 
 
@@ -5080,10 +5094,9 @@ def _convergence_dependant_recipe(
             fixed.append(control)
         return role_id
 
+    role_slugs = _convergence_dependant_role_slugs(plan)
     for landing in plan.landings:
-        join_role = add(
-            f"landing:{landing.member_id}|join", landing.join_point, lateral
-        )
+        join_role = add(next(role_slugs), landing.join_point, lateral)
         if landing.opening_turn_segment is not None:
             assert landing.opening_turn_coordinate is not None
             opening_point = (
@@ -5091,7 +5104,7 @@ def _convergence_dependant_recipe(
                 if axis.axis is DemandAxis.X
                 else (landing.join_point[0], landing.opening_turn_coordinate)
             )
-            add(f"landing:{landing.member_id}|opening", opening_point, longitudinal)
+            add(next(role_slugs), opening_point, longitudinal)
         approach_index = landing.approach_axis.point_index
         direction_sign = int(landing.approach_direction.sign)
         anchor_coordinate = (
@@ -5115,14 +5128,10 @@ def _convergence_dependant_recipe(
             )
         )
     for continuation in plan.outgoing_continuations:
-        add(
-            f"continuation:{continuation.member_id}|start",
-            continuation.start_point,
-            lateral,
-        )
+        add(next(role_slugs), continuation.start_point, lateral)
     for ownership in plan.endpoint_ownership:
         if ownership.role is ConvergenceEndpointRole.FEEDER:
-            add(f"feeder:{ownership.member_id}|endpoint", ownership.endpoint, lateral)
+            add(next(role_slugs), ownership.endpoint, lateral)
 
     return tuple(controlled), tuple(fixed), tuple(runways), tuple(targets)
 

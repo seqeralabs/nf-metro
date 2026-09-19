@@ -720,23 +720,24 @@ def _validate_control_recipe(
     }
     role_ids: set[str] = set()
     point_keys: set[tuple[str, tuple[str, str, str], int, int]] = set()
-    for point in recipe.controlled_points:
+
+    def check_point_identity(
+        point: CorridorScalarControlledPoint | CorridorScalarFixedPoint,
+        finite_value: float,
+        expected_coordinate: float,
+        kind: str,
+    ) -> None:
         target = targets_by_identity.get((point.member_id, point.edge_key))
-        point_key = (
-            point.member_id,
-            point.edge_key,
-            point.point_rank,
-            point.axis,
-        )
+        point_key = (point.member_id, point.edge_key, point.point_rank, point.axis)
         if (
             target is None
             or target.connector_ids != point.connector_ids
             or point.axis not in (0, 1)
             or not 0 <= point.point_rank < len(target.route.points)
-            or not isfinite(point.source_offset)
+            or not isfinite(finite_value)
             or not isclose(
                 target.route.points[point.point_rank][point.axis],
-                recipe.source_coordinate + point.source_offset,
+                expected_coordinate,
                 abs_tol=COORD_TOLERANCE,
             )
             or point.role_id in role_ids
@@ -744,38 +745,25 @@ def _validate_control_recipe(
         ):
             raise CorridorCohortCompilationError(
                 f"corridor scalar request {request.variable.variable_id} has an "
-                "invalid controlled point"
+                f"invalid {kind}"
             )
         role_ids.add(point.role_id)
         point_keys.add(point_key)
-    for fixed in recipe.fixed_points:
-        target = targets_by_identity.get((fixed.member_id, fixed.edge_key))
-        point_key = (
-            fixed.member_id,
-            fixed.edge_key,
-            fixed.point_rank,
-            fixed.axis,
+
+    for point in recipe.controlled_points:
+        check_point_identity(
+            point,
+            point.source_offset,
+            recipe.source_coordinate + point.source_offset,
+            "controlled point",
         )
-        if (
-            target is None
-            or target.connector_ids != fixed.connector_ids
-            or fixed.axis not in (0, 1)
-            or not 0 <= fixed.point_rank < len(target.route.points)
-            or not isfinite(fixed.coordinate)
-            or not isclose(
-                target.route.points[fixed.point_rank][fixed.axis],
-                fixed.coordinate,
-                abs_tol=COORD_TOLERANCE,
-            )
-            or fixed.role_id in role_ids
-            or point_key in point_keys
-        ):
-            raise CorridorCohortCompilationError(
-                f"corridor scalar request {request.variable.variable_id} has an "
-                "invalid fixed point"
-            )
-        role_ids.add(fixed.role_id)
-        point_keys.add(point_key)
+    for fixed in recipe.fixed_points:
+        check_point_identity(
+            fixed,
+            fixed.coordinate,
+            fixed.coordinate,
+            "fixed point",
+        )
     for runway in recipe.directed_runways:
         if (
             runway.controlled_role_id not in role_ids
