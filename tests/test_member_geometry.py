@@ -32,7 +32,11 @@ from nf_metro.layout.route_reservations import (
 from nf_metro.layout.routing.common import Direction, GapSlot, OffsetRegime, RoutedPath
 from nf_metro.layout.routing.context import _build_routing_context
 from nf_metro.layout.routing.convergences import convergence_corridor_requests
-from nf_metro.layout.routing.core import _route_edges, observe_route_edges
+from nf_metro.layout.routing.core import (
+    _route_edges,
+    observe_route_edges,
+    observe_route_edges_centred,
+)
 from nf_metro.layout.routing.corners import (
     _corner_travel_units,
     concentric_corner_radius_at,
@@ -1652,6 +1656,50 @@ def test_corridor_cohort_aperture_requirements_resolves_packed_cell_conflict() -
     assert requirement.negative_section_ids == ("assemble",)
     assert requirement.positive_section_ids == ("qc",)
     assert requirement.kind is BoundaryClearanceRequirementKind.CORRIDOR_COHORT_APERTURE
+
+
+def test_packed_cell_routing_observation_publishes_corridor_aperture_requirement() -> (
+    None
+):
+    """The wired routing observation publishes the packed_cell aperture batch.
+
+    ``packed_cell_right_exit_left_entry_wrap.mmd`` has two feeders converging on
+    ``qc``'s left entry short of clearing the packed ``prep``/``assemble`` cell.
+    A first observation carries no prior semantic ledger, so it publishes no
+    corridor-cohort intent; a second observation reading that plan as its prior
+    builds the ledger and folds the shortfall into one typed aperture
+    requirement on the published plan, through the ordinary production call graph
+    rather than a direct compiler call.
+    """
+    path = (
+        ROOT / "examples" / "topologies" / "packed_cell_right_exit_left_entry_wrap.mmd"
+    )
+
+    graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+    prior_plan = observe_route_edges(
+        graph,
+        station_offsets=compute_station_offsets(graph),
+        allow_convergence_clearance_requirements=True,
+    ).plan
+    assert prior_plan.corridor_cohort_ledger is None
+    assert not prior_plan.boundary_clearance_requirements
+
+    graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+    provisional_plan = observe_route_edges_centred(
+        graph,
+        station_offsets=compute_station_offsets(graph),
+        reservations=prior_plan,
+        allow_convergence_clearance_requirements=True,
+    ).plan
+
+    assert provisional_plan.corridor_cohort_ledger is not None
+    (requirement,) = provisional_plan.boundary_clearance_requirements
+    assert requirement.kind is BoundaryClearanceRequirementKind.CORRIDOR_COHORT_APERTURE
+    assert requirement.axis is SettlementAxis.COLUMN
+    assert requirement.boundary == 2
+    assert requirement.required == pytest.approx(55.0)
+    assert requirement.negative_section_ids == ("assemble",)
+    assert requirement.positive_section_ids == ("qc",)
 
 
 def test_corridor_cohort_aperture_producer_processes_failures_independently() -> None:

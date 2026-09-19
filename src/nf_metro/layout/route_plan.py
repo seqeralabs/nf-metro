@@ -2704,6 +2704,7 @@ class RoutePlanObserver:
     boundary_clearance_owner_ids: frozenset[str] = frozenset()
     member_geometry_plans: tuple[RouteMemberGeometryPlan, ...] = ()
     exit_turn_dispositions: tuple[tuple[ExitTurnPlanId, str | None], ...] = ()
+    corridor_cohort_ledger: CorridorCohortLedger | None = None
     _family_by_edge: dict[_EdgeKey, RouteFamilyId] = field(default_factory=dict)
     _merge_skips: dict[_EdgeKey, _EdgeKey | None] = field(default_factory=dict)
 
@@ -2755,6 +2756,7 @@ def build_route_plan_observer(
     boundary_clearance_owner_ids: frozenset[str] = frozenset(),
     member_geometry_plans: tuple[RouteMemberGeometryPlan, ...] = (),
     exit_turn_dispositions: tuple[tuple[ExitTurnPlanId, str | None], ...] = (),
+    corridor_cohort_ledger: CorridorCohortLedger | None = None,
 ) -> RoutePlanObserver:
     """Create one transient observer after settled routing context construction."""
     return RoutePlanObserver(
@@ -2774,6 +2776,7 @@ def build_route_plan_observer(
         boundary_clearance_owner_ids=boundary_clearance_owner_ids,
         member_geometry_plans=member_geometry_plans,
         exit_turn_dispositions=exit_turn_dispositions,
+        corridor_cohort_ledger=corridor_cohort_ledger,
     )
 
 
@@ -3260,6 +3263,7 @@ def _build_route_plan(
             bindings=(),
             provenance=_plan_provenance(graph, ()),
             diagnostics=fan_diagnostics,
+            corridor_cohort_ledger=observer.corridor_cohort_ledger,
         )
 
     topology = scaffold.topology
@@ -3549,6 +3553,7 @@ def _build_route_plan(
         boundary_clearance_owner_ids=tuple(
             sorted(observer.boundary_clearance_owner_ids)
         ),
+        corridor_cohort_ledger=observer.corridor_cohort_ledger,
     )
     from nf_metro.layout.route_reservations import attach_route_reservations
 

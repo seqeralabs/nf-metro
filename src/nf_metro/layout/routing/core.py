@@ -140,7 +140,10 @@ from nf_metro.layout.routing.tb_handlers import (  # noqa: F401
     _route_tb_lr_exit,
     _route_tb_section,
 )
-from nf_metro.layout.settlement_demand import BoundaryClearanceRequirement
+from nf_metro.layout.settlement_demand import (
+    BoundaryClearanceRequirement,
+    BoundaryClearanceRequirementKind,
+)
 from nf_metro.parser.model import (
     Edge,
     LineSpread,
@@ -157,14 +160,37 @@ if TYPE_CHECKING:
     from nf_metro.layout.route_reservations import ReservationCoordinateTranslation
 
 
+def _self_published_clearance_requirement(
+    requirement: BoundaryClearanceRequirement,
+) -> bool:
+    """Whether a requirement publishes itself without a route-system grant.
+
+    A corridor-cohort aperture requirement is owned by the corridor component
+    that failed to allocate, not by a route system, so its owner id never
+    matches a planned system: it always reaches the plan and never mints an
+    owner-id grant.  Every other kind is gated by the legacy owner-id grant.
+    """
+    return requirement.kind is BoundaryClearanceRequirementKind.CORRIDOR_COHORT_APERTURE
+
+
 def _published_boundary_clearance_owner_ids(
     inherited_owner_ids: frozenset[str],
     planned_system_ids: frozenset[RouteSystemId],
     requirements: tuple[BoundaryClearanceRequirement, ...],
 ) -> frozenset[str]:
-    """Publish granted owners that survive this planning generation."""
+    """Publish granted owners that survive this planning generation.
+
+    Takes the whole member-requirement set and mints an owner id only for a
+    grant-gated requirement of a planned system; a self-published requirement
+    contributes none.
+    """
     planned_owner_ids = frozenset(str(system_id) for system_id in planned_system_ids)
-    new_owner_ids = frozenset(requirement.owner_id for requirement in requirements)
+    new_owner_ids = frozenset(
+        requirement.owner_id
+        for requirement in requirements
+        if requirement.owner_id in planned_owner_ids
+        and not _self_published_clearance_requirement(requirement)
+    )
     return (inherited_owner_ids & planned_owner_ids) | new_owner_ids
 
 
@@ -347,6 +373,7 @@ def _route_edges(  # noqa: C901
             allow_convergence_clearance_requirements
         ),
         granted_clearance_owner_ids=boundary_clearance_owner_ids,
+        prior_plan=reservations,
     )
     execution = planning.exit_turns
     member_geometry = planning.member_geometry
@@ -367,11 +394,12 @@ def _route_edges(  # noqa: C901
             requirement
             for requirement in member_geometry.clearance_requirements
             if requirement.owner_id in planned_owner_ids
+            or _self_published_clearance_requirement(requirement)
         )
         published_owner_ids = _published_boundary_clearance_owner_ids(
             boundary_clearance_owner_ids,
             planned_system_ids,
-            published_member_requirements,
+            member_geometry.clearance_requirements,
         )
         observer = build_route_plan_observer(
             graph,
@@ -400,6 +428,7 @@ def _route_edges(  # noqa: C901
             boundary_clearance_owner_ids=published_owner_ids,
             member_geometry_plans=published_member_geometry,
             exit_turn_dispositions=planning.exit_turn_dispositions,
+            corridor_cohort_ledger=planning.corridor_cohort_ledger,
         )
     # Route into the context's own list so handlers can read the routes settled
     # so far (a wrap clearing an already-placed sibling channel); it grows as

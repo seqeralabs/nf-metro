@@ -167,6 +167,16 @@ class _MemberCandidate:
     packed_cell_handoff: tuple[ResolvedEdge, float, bool] | None = None
 
 
+def _member_candidate_identity(
+    resolved: ResolvedEdge, scaffold: RouteSemanticScaffold
+) -> tuple[str, tuple[ConnectorId, ...]]:
+    """The carrier id and connector ids every member candidate shares."""
+    return (
+        semantic_route_id("member-channel-carrier", resolved.source, resolved.target),
+        tuple(scaffold.connector_ids_for_edge(resolved)),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class _MaterializedChannel:
     candidate: _MemberCandidate
@@ -230,6 +240,7 @@ class MemberGeometryExecution:
         ],
     ] = field(default_factory=lambda: MappingProxyType({}))
     clearance_requirements: tuple[BoundaryClearanceRequirement, ...] = ()
+    corridor_cohorts: CorridorCohortPlan | None = None
 
     def plan_for_edge(
         self, edge: Edge | ResolvedEdge
@@ -793,6 +804,69 @@ def _compile_corridor_cohorts(
         {edge: tuple(sorted(set(ranks))) for edge, ranks in ranks_by_edge.items()},
         (),
     )
+
+
+def _corridor_cohort_context_candidates(
+    context_routes: Sequence[RoutedPath],
+    candidate_route_ids: frozenset[int],
+    scaffold: RouteSemanticScaffold,
+    family_by_edge: Mapping[ResolvedEdge, RouteFamilyId],
+) -> tuple[_MemberCandidate, ...]:
+    """Wrap each settled convergence-context route as an immutable cohort target."""
+    context_candidates: list[_MemberCandidate] = []
+    for route in context_routes:
+        if id(route) in candidate_route_ids:
+            continue
+        resolved = ResolvedEdge(route.edge.source, route.edge.target, route.line_id)
+        family = family_by_edge.get(resolved)
+        if family is None or resolved not in scaffold.member_id_by_edge:
+            continue
+        carrier_id, connector_ids = _member_candidate_identity(resolved, scaffold)
+        context_candidates.append(
+            _MemberCandidate(
+                route,
+                family,
+                scaffold.system_for_edge(resolved),
+                carrier_id,
+                connector_ids,
+            )
+        )
+    return tuple(context_candidates)
+
+
+def _validate_corridor_cohort_outcome(
+    corridor_cohorts: CorridorCohortPlan | None,
+    requirements: tuple[BoundaryClearanceRequirement, ...],
+) -> None:
+    """Fail loudly if the corridor-cohort compile output is self-inconsistent.
+
+    A cohort compile either allocates every corridor (returning a plan and no
+    requirement) or fails one and publishes its typed aperture requirement
+    (returning no plan); it never does both, and every requirement it publishes
+    is an aperture requirement naming two disjoint boundary sides.  These hold by
+    construction today, so a violation is a wiring regression, not a layout
+    condition a caller can recover from.
+    """
+    aperture = BoundaryClearanceRequirementKind.CORRIDOR_COHORT_APERTURE
+    if corridor_cohorts is not None and requirements:
+        raise RuntimeError(
+            "corridor cohort compile published both an allocation plan and an "
+            "aperture requirement"
+        )
+    for requirement in requirements:
+        if requirement.kind is not aperture:
+            raise RuntimeError(
+                "corridor cohort compile published a non-aperture requirement: "
+                f"{requirement.kind.value}"
+            )
+        both_sides = set(requirement.negative_section_ids) & set(
+            requirement.positive_section_ids
+        )
+        if both_sides:
+            raise RuntimeError(
+                "corridor cohort aperture requirement names a section on both sides "
+                f"of boundary {requirement.boundary}"
+            )
 
 
 def _allocated_turn(
@@ -2578,12 +2652,16 @@ def build_member_geometry_execution(
     settled_exit_turn_plan_ids: frozenset[ExitTurnPlanId] = frozenset(),
     allow_clearance_requirements: bool = False,
     granted_clearance_owner_ids: frozenset[str] = frozenset(),
+    corridor_cohort_ledger: CorridorCohortLedger | None = None,
+    corridor_targets: Sequence[CorridorCohortTarget] = (),
+    corridor_scalar_requests: Sequence[CorridorScalarRequest] = (),
 ) -> MemberGeometryExecution:
     """Freeze each eligible non-convergence member's sole production template."""
     cohort_settled_turns: Mapping[tuple[str, str, str], SettledExitTurn] = (
         MappingProxyType({})
     )
     clearance_requirements: tuple[BoundaryClearanceRequirement, ...] = ()
+    corridor_cohorts: CorridorCohortPlan | None = None
     convergence_edges = frozenset(
         edge
         for plan in convergence_plans
@@ -2627,17 +2705,16 @@ def build_member_geometry_execution(
                 except MemberGeometryDeclinedError:
                     failures[system_id] = "canonical-template-declined-member"
                     break
+                carrier_id, connector_ids = _member_candidate_identity(
+                    resolved, scaffold
+                )
                 system_candidates.append(
                     _MemberCandidate(
                         route,
                         family_id,
                         system_id,
-                        semantic_route_id(
-                            "member-channel-carrier",
-                            resolved.source,
-                            resolved.target,
-                        ),
-                        tuple(scaffold.connector_ids_for_edge(resolved)),
+                        carrier_id,
+                        connector_ids,
                         _packed_cell_handoff_metadata(edge, family_id, ctx),
                     )
                 )
@@ -2810,6 +2887,34 @@ def build_member_geometry_execution(
             ctx.station_offsets or {},
             ctx.curve_radius,
         )
+        # A settled candidate route holds no route-system segment ownership; that
+        # is conferred only by the freeze below.  The cohort compiler must read
+        # the crossings a candidate has to clear, not the ownership a frozen plan
+        # would report, so the aperture shortfall is measured on the candidates.
+        # The compiler fails closed on a shortfall it cannot map to a requirement
+        # unless the pass permits clearance requirements, so it runs only on a
+        # pass that does.
+        if corridor_cohort_ledger is not None and allow_clearance_requirements:
+            context_candidates = _corridor_cohort_context_candidates(
+                context_routes,
+                candidate_route_ids,
+                scaffold,
+                family_by_edge,
+            )
+            corridor_cohorts, _cohort_ranks, corridor_requirements = (
+                _compile_corridor_cohorts(
+                    corridor_cohort_ledger,
+                    tuple(candidates),
+                    context_candidates,
+                    scaffold,
+                    ctx,
+                    allow_clearance_requirements=allow_clearance_requirements,
+                    additional_targets=corridor_targets,
+                    scalar_requests=corridor_scalar_requests,
+                )
+            )
+            _validate_corridor_cohort_outcome(corridor_cohorts, corridor_requirements)
+            clearance_requirements = clearance_requirements + corridor_requirements
         semantic_corner_templates = {
             ResolvedEdge(
                 route.edge.source,
@@ -2848,6 +2953,7 @@ def build_member_geometry_execution(
         settled_exit_turns,
         MappingProxyType(semantic_corner_templates),
         clearance_requirements,
+        corridor_cohorts,
     )
 
 
@@ -2936,6 +3042,7 @@ def settle_member_geometry_corner_cohorts(
         execution.settled_exit_turns,
         MappingProxyType(templates),
         execution.clearance_requirements,
+        execution.corridor_cohorts,
     )
 
 

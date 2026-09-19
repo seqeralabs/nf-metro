@@ -1555,124 +1555,72 @@
   "note": "A merge-fed confluence is re-seated only when a free leg is off its band-earned slot and unblocked. The move arm (rather than this skip) is reachable and is reached by test_merge_confluence_band_order_1835's inlined riboseq annotation/riboseq bundle into orf_calling, where _restack_channel fires and resolves the crossing. That map is excluded from the corpus fixture roots because it trips an unrelated symmetric-diamond centreline abort under validate=True (#1836), so no corpus fixture exercises this arm yet; committing that map as a real topology fixture is blocked on #1836.",
   "status": "needs-review"
  },
- "convergences.py::for continuation in plan.outgoing_continuations:::#1": {
-  "note": "`_convergence_recipe_role_ids`/`_convergence_dependant_recipe` are #2017's dependant-enumeration producer, called only from `_convergence_corridor_target`/`convergence_corridor_requests` (#2016's request producer): exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but still not called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #1754 applies the accepted grants and wires this path into planning; reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
-  "status": "needs-review"
- },
- "convergences.py::for continuation in plan.outgoing_continuations:::#2": {
-  "note": "`_convergence_recipe_role_ids`/`_convergence_dependant_recipe` are #2017's dependant-enumeration producer, called only from `_convergence_corridor_target`/`convergence_corridor_requests` (#2016's request producer): exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but still not called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #1754 applies the accepted grants and wires this path into planning; reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
-  "status": "needs-review"
- },
- "convergences.py::for landing in plan.landings:::#7": {
-  "note": "`_convergence_recipe_role_ids`/`_convergence_dependant_recipe` are #2017's dependant-enumeration producer, called only from `_convergence_corridor_target`/`convergence_corridor_requests` (#2016's request producer): exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but still not called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #1754 applies the accepted grants and wires this path into planning; reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
-  "status": "needs-review"
- },
- "convergences.py::for landing in plan.landings:::#8": {
-  "note": "`_convergence_recipe_role_ids`/`_convergence_dependant_recipe` are #2017's dependant-enumeration producer, called only from `_convergence_corridor_target`/`convergence_corridor_requests` (#2016's request producer): exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but still not called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #1754 applies the accepted grants and wires this path into planning; reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
-  "status": "needs-review"
- },
- "convergences.py::for ownership in plan.endpoint_ownership:::#2": {
-  "note": "`_convergence_recipe_role_ids`/`_convergence_dependant_recipe` are #2017's dependant-enumeration producer, called only from `_convergence_corridor_target`/`convergence_corridor_requests` (#2016's request producer): exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but still not called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #1754 applies the accepted grants and wires this path into planning; reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
-  "status": "needs-review"
- },
- "convergences.py::for ownership in plan.endpoint_ownership:::#3": {
-  "note": "`_convergence_recipe_role_ids`/`_convergence_dependant_recipe` are #2017's dependant-enumeration producer, called only from `_convergence_corridor_target`/`convergence_corridor_requests` (#2016's request producer): exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but still not called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #1754 applies the accepted grants and wires this path into planning; reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
-  "status": "needs-review"
- },
- "convergences.py::for plan in eligible:::#1": {
-  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #1754 applies the accepted grants and wires this path into planning; reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
-  "status": "needs-review"
- },
- "convergences.py::for run in runs:::#1": {
-  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #1754 applies the accepted grants and wires this path into planning; reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
-  "status": "needs-review"
- },
  "convergences.py::if axis is None or plan.primary_trunk_member_id is None:::#1": {
-  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #1754 applies the accepted grants and wires this path into planning; reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
-  "status": "needs-review"
+  "note": "`_convergence_corridor_target`'s fail-closed guard, now on #2020's wired production path via `convergence_corridor_requests`. It only receives plans already filtered to `owns_geometry and trunk_axis is not None`, so `axis` is never None and such a plan always names a `primary_trunk_member_id`; the None-return arm is unreachable for a valid convergence.",
+  "status": "defensive"
  },
  "convergences.py::if axis.axis is DemandAxis.X:::#2": {
-  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #1754 applies the accepted grants and wires this path into planning; reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
-  "status": "needs-review"
- },
- "convergences.py::if axis.direction in {Direction.L, Direction.U}:::#1": {
-  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #1754 applies the accepted grants and wires this path into planning; reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
-  "status": "needs-review"
- },
- "convergences.py::if band is None:::#1": {
-  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #1754 applies the accepted grants and wires this path into planning; reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
-  "status": "needs-review"
- },
- "convergences.py::if co_moving:::#1": {
-  "note": "`_dependant_control_point` decides whether a dependant is a `CorridorScalarControlledPoint` or a `CorridorScalarFixedPoint`, but it is only reached through #2016's unwired request producer (`convergence_corridor_requests`): exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but still not called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #1754 applies the accepted grants and wires this path into planning; reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
+  "note": "`_convergence_corridor_region` (wired into production by #2020): the true arm names a row-boundary (horizontal-trunk) corridor; the corpus only exercises the column-boundary else arm, so no swept fixture takes it. A TB/row-boundary convergence trunk would. Reachable, awaiting such a fixture.",
   "status": "needs-review"
  },
  "convergences.py::if edge is None:::#1": {
-  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #1754 applies the accepted grants and wires this path into planning; reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
-  "status": "needs-review"
+  "note": "`_convergence_corridor_target` (wired by #2020): a trunk member's ownership edge is always a live key in `ctx.edge_by_key`, so the missing-edge return is unreachable for a valid plan.",
+  "status": "defensive"
  },
  "convergences.py::if exposed is None:::#1": {
-  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #1754 applies the accepted grants and wires this path into planning; reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
-  "status": "needs-review"
- },
- "convergences.py::if isinstance(control, CorridorScalarControlledPoint):::#1": {
-  "note": "`_dependant_control_point`'s caller sorts each built control into the controlled or fixed list, but it is only reached through #2016's unwired request producer (`convergence_corridor_requests`): exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but still not called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #1754 applies the accepted grants and wires this path into planning; reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
-  "status": "needs-review"
- },
- "convergences.py::if landing.opening_turn_segment is not None:::#1": {
-  "note": "`_convergence_recipe_role_ids`/`_convergence_dependant_recipe` are #2017's dependant-enumeration producer, called only from `_convergence_corridor_target`/`convergence_corridor_requests` (#2016's request producer): exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but still not called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #1754 applies the accepted grants and wires this path into planning; reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
-  "status": "needs-review"
- },
- "convergences.py::if landing.opening_turn_segment is not None:::#2": {
-  "note": "`_convergence_recipe_role_ids`/`_convergence_dependant_recipe` are #2017's dependant-enumeration producer, called only from `_convergence_corridor_target`/`convergence_corridor_requests` (#2016's request producer): exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but still not called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #1754 applies the accepted grants and wires this path into planning; reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
-  "status": "needs-review"
+  "note": "`convergence_corridor_requests` (wired by #2020) raises when `_convergence_corridor_target` returns None, but every eligible plan (`owns_geometry and trunk_axis`) yields a complete trunk identity, so the raise is a fail-closed guard no valid topology reaches.",
+  "status": "defensive"
  },
  "convergences.py::if len(set(owner_ids)) != len(owner_ids):::#1": {
-  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #1754 applies the accepted grants and wires this path into planning; reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
-  "status": "needs-review"
- },
- "convergences.py::if maximum_coordinate is not None:::#1": {
-  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #1754 applies the accepted grants and wires this path into planning; reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
-  "status": "needs-review"
+  "note": "`convergence_corridor_requests` (wired by #2020): each eligible plan contributes one unique `str(plan.id)` owner, so the duplicate-owner raise is a fail-closed guard no valid topology reaches.",
+  "status": "defensive"
  },
  "convergences.py::if minimum_coordinate is not None:::#1": {
-  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #1754 applies the accepted grants and wires this path into planning; reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
+  "note": "`_convergence_corridor_preference` (wired into production by #2020): the true arm fires only for a corridor band bounded below (finite `band.lo`). Every corridor band the corpus produces is unbounded below, so no swept fixture takes it; a fixture with a bounded-below trunk band would. Reachable, awaiting such a fixture.",
   "status": "needs-review"
  },
  "convergences.py::if named != _convergence_recipe_role_ids(plan, variable_id):::#1": {
-  "note": "`_validate_convergence_recipe_completeness`'s fail-closed raise is the completeness oracle for #2017's recipe, reached only through #2016's unwired request producer (`convergence_corridor_requests`): exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but still not called from `routing/planning.py` or any other production path, so no corpus fixture can reach either arm. #1754 applies the accepted grants and wires this path into planning; reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
-  "status": "needs-review"
+  "note": "`_validate_convergence_recipe_completeness`'s fail-closed completeness oracle, now reached via #2020's wiring of `convergence_corridor_requests`. A planned convergence's recipe always names exactly its enumerated role ids, so the incomplete-recipe raise is unreachable for a valid plan.",
+  "status": "defensive"
  },
  "convergences.py::if not _points_coincide(points[-1], run[0]):::#1": {
-  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #1754 applies the accepted grants and wires this path into planning; reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
-  "status": "needs-review"
+  "note": "The trunk-skeleton polyline closure guard, now reached via #2020's wiring. Consecutive trunk runs are constructed to share endpoints, so the non-closing raise is a fail-closed guard no valid topology reaches.",
+  "status": "defensive"
  },
  "convergences.py::if ownership is None:::#1": {
-  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #1754 applies the accepted grants and wires this path into planning; reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
+  "note": "`_convergence_corridor_target` (wired by #2020): a planned convergence's `endpoint_ownership` always contains its `primary_trunk_member_id`, so the None-return arm is unreachable for a valid plan.",
+  "status": "defensive"
+ },
+ "member_geometry.py::if corridor_cohort_ledger is not None and allow_clearance_requirements:::#1": {
+  "note": "The compile-gate itself. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on).",
   "status": "needs-review"
  },
- "convergences.py::if ownership.role is ConvergenceEndpointRole.FEEDER:::#1": {
-  "note": "`_convergence_recipe_role_ids`/`_convergence_dependant_recipe` are #2017's dependant-enumeration producer, called only from `_convergence_corridor_target`/`convergence_corridor_requests` (#2016's request producer): exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but still not called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #1754 applies the accepted grants and wires this path into planning; reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
+ "member_geometry.py::for route in context_routes:::#1": {
+  "note": "Building corridor-cohort context candidates from the settled convergence-context routes. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on).",
   "status": "needs-review"
  },
- "convergences.py::if ownership.role is ConvergenceEndpointRole.FEEDER:::#2": {
-  "note": "`_convergence_recipe_role_ids`/`_convergence_dependant_recipe` are #2017's dependant-enumeration producer, called only from `_convergence_corridor_target`/`convergence_corridor_requests` (#2016's request producer): exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but still not called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #1754 applies the accepted grants and wires this path into planning; reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
+ "member_geometry.py::if id(route) in candidate_route_ids:::#1": {
+  "note": "Skipping mutable member candidates while collecting context candidates. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on).",
   "status": "needs-review"
  },
- "convergences.py::if source_collapsed:::#1": {
-  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #1754 applies the accepted grants and wires this path into planning; reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
+ "member_geometry.py::if family is None or resolved not in scaffold.member_id_by_edge:::#1": {
+  "note": "Dropping a context route with no family or member id. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on).",
   "status": "needs-review"
  },
- "convergences.py::if source_collapsed:::#2": {
-  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #1754 applies the accepted grants and wires this path into planning; reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
+ "member_geometry.py::for requirement in requirements:::#1": {
+  "note": "The corridor-cohort outcome validator iterating the published requirements. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on).",
   "status": "needs-review"
  },
- "convergences.py::if target_collapsed:::#1": {
-  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #1754 applies the accepted grants and wires this path into planning; reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
+ "member_geometry.py::if corridor_cohorts is not None and requirements:::#1": {
+  "note": "The validator's plan-and-requirement mutual-exclusion check. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on).",
   "status": "needs-review"
  },
- "convergences.py::if target_collapsed:::#2": {
-  "note": "`convergence_corridor_requests` and its helpers are #2016's request producer: exposed and unit-tested (`tests/test_convergence_corridor_grants.py`) but not yet called from `routing/planning.py` or any other production path, so no corpus fixture can reach this arm. #1754 applies the accepted grants and wires this path into planning; reconcile this entry then per docs/dev/routing_gate_triage.md's 'Reconcile needs-review when a parked bug closes' lifecycle -- replace with a fixture if the wiring makes the arm reachable through a real render, or reclassify if it does not.",
+ "member_geometry.py::if requirement.kind is not aperture:::#1": {
+  "note": "The validator's non-aperture requirement-kind check. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on).",
+  "status": "needs-review"
+ },
+ "member_geometry.py::if both_sides:::#1": {
+  "note": "The validator's disjoint-boundary-sides check. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on).",
   "status": "needs-review"
  }
 }
