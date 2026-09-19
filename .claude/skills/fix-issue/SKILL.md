@@ -154,6 +154,9 @@ the one it got: that call belongs at spawn time or not at all.
 | 8 | admin-merge gate | `fix-issue-merge-assessor` | HIGH - it gates shipping code CI has not verified |
 | 8, 9 | visual judgment and D-delta narrowing | `fix-issue-visual-reviewer` | HIGH |
 
+**A hook blocks `model` on a named `fix-issue-*` spawn** (`.claude/settings.json`),
+except lowering `fix-issue-writer` to MID; see `agent-types.md`.
+
 **Never use the `fork` subagent type.** A fork inherits the parent's entire
 conversation and always runs on the parent's model - the `model` parameter is
 ignored - so every tier rule here is void. Measured, fork spawns cost about 4x a comparable named

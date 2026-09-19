@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/block-fix-issue-model-override.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
