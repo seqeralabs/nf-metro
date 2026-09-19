@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import operator
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -18,7 +19,10 @@ from nf_metro.layout.constants import (
 )
 from nf_metro.layout.geometry import (
     cotravelling_lane_clearance,
+    grid_spans_overlap,
     measured_distance,
+    section_column_span,
+    section_row_span,
     spans_share_corridor,
 )
 from nf_metro.layout.route_plan import (
@@ -68,6 +72,7 @@ from nf_metro.layout.routing.corridor_cohort_integration import (
     CorridorCohortPlan,
     CorridorCohortTarget,
     CorridorScalarRequest,
+    _network_id,
     compile_corridor_cohort_plan,
 )
 from nf_metro.layout.routing.families import RouteFamilyId
@@ -323,10 +328,6 @@ def _corridor_cohort_target(
                 (resolved.target, route.line_id),
                 0.0,
             )
-    network_ids = {
-        str(scaffold.query.connector(connector_id).network_id)
-        for connector_id in candidate.connector_ids
-    }
     return CorridorCohortTarget(
         str(scaffold.member_id_by_edge[resolved]),
         str(_member_geometry_plan_id(scaffold, candidate)),
@@ -337,7 +338,7 @@ def _corridor_cohort_target(
         mutable,
         endpoint_lane_axis,
         endpoint_lane_coordinate,
-        next(iter(network_ids)) if len(network_ids) == 1 else None,
+        _network_id(candidate.connector_ids, scaffold),
         legal_crossing_segment_ranks=frozenset(route.convergence_owned_segment_ranks),
     )
 
@@ -396,8 +397,7 @@ def _corridor_boundary_sections(
     if isinstance(region, ColumnGapRegion):
         start_attr = "grid_col"
         span_attr = "grid_col_span"
-        cross_start_attr = "grid_row"
-        cross_span_attr = "grid_row_span"
+        cross_span_of = section_row_span
         bbox_start_attr = "bbox_x"
         bbox_size_attr = "bbox_w"
         negative_index = region.left_column
@@ -406,8 +406,7 @@ def _corridor_boundary_sections(
     else:
         start_attr = "grid_row"
         span_attr = "grid_row_span"
-        cross_start_attr = "grid_col"
-        cross_span_attr = "grid_col_span"
+        cross_span_of = section_column_span
         bbox_start_attr = "bbox_y"
         bbox_size_attr = "bbox_h"
         negative_index = region.upper_row
@@ -420,16 +419,8 @@ def _corridor_boundary_sections(
     def span(section: Section) -> int:
         return int(getattr(section, span_attr))
 
-    def cross_start(section: Section) -> int:
-        return int(getattr(section, cross_start_attr))
-
-    def cross_span(section: Section) -> int:
-        return int(getattr(section, cross_span_attr))
-
     def overlaps(left: Section, right: Section) -> bool:
-        return cross_start(left) < cross_start(right) + cross_span(
-            right
-        ) and cross_start(right) < cross_start(left) + cross_span(left)
+        return grid_spans_overlap(cross_span_of(left), cross_span_of(right))
 
     def gap_facing(section: Section) -> float:
         return float(getattr(section, bbox_start_attr)) + float(
@@ -440,34 +431,30 @@ def _corridor_boundary_sections(
         return float(getattr(section, bbox_start_attr))
 
     def cross_contains(outer: Section, inner: Section) -> bool:
-        return cross_start(outer) <= cross_start(inner) and cross_start(
-            outer
-        ) + cross_span(outer) >= cross_start(inner) + cross_span(inner)
+        outer_span = cross_span_of(outer)
+        inner_span = cross_span_of(inner)
+        return outer_span[0] <= inner_span[0] and outer_span[1] >= inner_span[1]
 
     def only_bordering(
         sections: tuple[Section, ...],
         facing: Callable[[Section], float],
-        *,
-        nearer_is_greater: bool,
+        nearer_than: Callable[[float, float], bool],
     ) -> tuple[Section, ...]:
         """Drop any section fully shadowed from the gap by a nearer same-side one.
 
         A section is dropped when another same-side candidate spans across it
-        in the cross axis and sits strictly nearer the gap: the shadowed
-        section then lies wholly behind that neighbour and touches the
-        boundary nowhere, so listing it is a false attribution. The nearest
-        section is never shadowed, so a non-empty side stays non-empty.
+        in the cross axis and sits strictly nearer the gap (*nearer_than*
+        compares the two gap-facing coordinates): the shadowed section then
+        lies wholly behind that neighbour and touches the boundary nowhere, so
+        listing it is a false attribution. The nearest section is never
+        shadowed, so a non-empty side stays non-empty.
         """
 
         def shadowed(section: Section) -> bool:
             return any(
                 other is not section
                 and cross_contains(other, section)
-                and (
-                    facing(other) > facing(section)
-                    if nearer_is_greater
-                    else facing(other) < facing(section)
-                )
+                and nearer_than(facing(other), facing(section))
                 for other in sections
             )
 
@@ -502,12 +489,8 @@ def _corridor_boundary_sections(
         raise ValueError(
             f"clearance boundary has no facing section pair on the {axis_name} axis"
         )
-    negative_sections = only_bordering(
-        negative_sections, gap_facing, nearer_is_greater=True
-    )
-    positive_sections = only_bordering(
-        positive_sections, near_gap, nearer_is_greater=False
-    )
+    negative_sections = only_bordering(negative_sections, gap_facing, operator.gt)
+    positive_sections = only_bordering(positive_sections, near_gap, operator.lt)
     return negative_sections, positive_sections
 
 
@@ -544,12 +527,14 @@ class _UnresolvedAperture(Exception):
 class _ApertureIntegrityError(Exception):
     """One failure's shortfall is internally inconsistent; the batch fails closed.
 
-    Raised for a shortfall whose own data contradicts itself -- an unknown
-    claim, an undirected boundary side, a solver/boundary axis disagreement,
-    or a blocker whose typed provenance does not match its live route target.
-    These are the conditions ``resolved_shortfall`` guards before a failure is
-    even recorded, so hitting one here means the batch must raise even when a
-    sibling resolves; silently discarding it would hide a real defect.
+    Raised for a shortfall whose own data contradicts itself. One case -- an
+    undirected boundary side -- repeats an invariant the plan compile already
+    enforces, so reaching it here means that earlier guard was bypassed. The
+    other three are this producer's own: a shortfall naming an unknown claim,
+    a solver axis that disagrees with the corridor boundary, and a blocker
+    whose typed provenance does not match its live route target. Any of them
+    must raise even when a sibling in the batch resolves; discarding it
+    silently would hide a real defect.
     """
 
 

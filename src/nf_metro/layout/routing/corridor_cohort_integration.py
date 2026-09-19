@@ -415,7 +415,8 @@ def _lane_rank(reservation: RouteReservation, claim_rank: int) -> int | None:
 
 
 def _resolved_claimants(
-    reservation: RouteReservation, prior_plan: RoutePlan
+    reservation: RouteReservation,
+    bindings_by_member: Mapping[str, list[EmissionBinding]],
 ) -> tuple[frozenset[str], dict[str, str]] | None:
     content_id = _reservation_content_id(
         reservation.system_id,
@@ -431,13 +432,10 @@ def _resolved_claimants(
         reservation.claimant_member_ids
     ):
         return None
-    bindings: defaultdict[str, list[EmissionBinding]] = defaultdict(list)
-    for binding in prior_plan.bindings:
-        bindings[str(binding.member_id)].append(binding)
     resolved: set[str] = set()
     resolved_by_claimant: dict[str, str] = {}
     for member_id in reservation.claimant_member_ids:
-        candidates = bindings[str(member_id)]
+        candidates = bindings_by_member.get(str(member_id), ())
         if len(candidates) != 1:
             return None
         binding = candidates[0]
@@ -484,13 +482,13 @@ def build_corridor_cohort_ledger(
         for (member_id, edge_key), plan_ids in member_geometry_plan_ids.items()
         if len(plan_ids) == 1 and edges.get(member_id) == edge_key
     }
-    resolved_by_reservation = {
-        reservation.id: _resolved_claimants(reservation, prior_plan)
-        for reservation in prior_plan.reservations
-    }
     bindings_by_member: defaultdict[str, list[EmissionBinding]] = defaultdict(list)
     for binding in prior_plan.bindings:
         bindings_by_member[str(binding.member_id)].append(binding)
+    resolved_by_reservation = {
+        reservation.id: _resolved_claimants(reservation, bindings_by_member)
+        for reservation in prior_plan.reservations
+    }
 
     def emitted_path_rank(member_id: str) -> int | None:
         seen: set[str] = set()
@@ -599,32 +597,37 @@ def build_corridor_cohort_ledger(
         if carrier
     }
     destination_claim_ids = set(carrier_claim_ids)
-    destination_claim_ids.update(
-        candidate_id
-        for (
-            boundary_id,
-            boundary_member_id,
-            boundary_path_id,
-            boundary_start,
-            _boundary_end,
-            _boundary_target,
-            boundary_carrier,
-        ) in claim_semantics
-        if boundary_carrier
-        for (
-            candidate_id,
-            candidate_member_id,
-            candidate_path_id,
-            _candidate_start,
-            candidate_end,
-            _candidate_target,
-            _candidate_carrier,
-        ) in claim_semantics
-        if candidate_id != boundary_id
-        and candidate_member_id == boundary_member_id
-        and candidate_path_id == boundary_path_id
-        and candidate_end + 1 == boundary_start
+    claims_by_member_path_end: defaultdict[tuple[str, object, int], list[str]] = (
+        defaultdict(list)
     )
+    for (
+        claim_id,
+        member_id,
+        path_id,
+        _start,
+        end,
+        _target,
+        _carrier,
+    ) in claim_semantics:
+        claims_by_member_path_end[(member_id, path_id, end)].append(claim_id)
+    for (
+        boundary_id,
+        boundary_member_id,
+        boundary_path_id,
+        boundary_start,
+        _boundary_end,
+        _boundary_target,
+        boundary_carrier,
+    ) in claim_semantics:
+        if not boundary_carrier:
+            continue
+        destination_claim_ids.update(
+            candidate_id
+            for candidate_id in claims_by_member_path_end.get(
+                (boundary_member_id, boundary_path_id, boundary_start - 1), ()
+            )
+            if candidate_id != boundary_id
+        )
     claims: list[CorridorCohortLedgerClaim] = []
     for reservation_rank, reservation in enumerate(prior_plan.reservations):
         resolved = resolved_by_reservation[reservation.id]
