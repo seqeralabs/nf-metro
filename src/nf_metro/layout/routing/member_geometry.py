@@ -7,7 +7,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
-from typing import TYPE_CHECKING, NoReturn, TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
 from nf_metro.layout.constants import (
     COORD_TOLERANCE,
@@ -63,6 +63,7 @@ from nf_metro.layout.routing.corners import (
 )
 from nf_metro.layout.routing.corridor_cohort_integration import (
     CorridorCohortCompilationError,
+    CorridorCohortFailure,
     CorridorCohortLedger,
     CorridorCohortPlan,
     CorridorCohortTarget,
@@ -380,8 +381,18 @@ def _corridor_boundary_sections(
     region: ColumnGapRegion | RowGapRegion,
     claim_sections: tuple[Section, ...],
     blocker_sections: tuple[Section, ...],
-    required_shift_sign: int,
 ) -> tuple[tuple[Section, ...], tuple[Section, ...]]:
+    """Split every implicated section onto the region's own negative/positive side.
+
+    Classifies each candidate section purely by its own grid position against
+    the region's ``left_column``/``right_column`` (or row equivalent) --
+    never by whether it reached this function through *claim_sections* or
+    *blocker_sections* -- so a claim and the obstacle blocking it can anchor
+    either side; nothing here reads which end of an authored connector is its
+    source or its target. A side with no direct candidate is derived by
+    searching every section at that side's grid index for one that shares the
+    cross-axis span the known side already occupies.
+    """
     if isinstance(region, ColumnGapRegion):
         start_attr = "grid_col"
         span_attr = "grid_col_span"
@@ -416,38 +427,25 @@ def _corridor_boundary_sections(
             right
         ) and cross_start(right) < cross_start(left) + cross_span(left)
 
-    if required_shift_sign > 0:
-        negative_sections = claim_sections
-        if any(
-            start(section) + span(section) - 1 != negative_index
-            for section in negative_sections
-        ):
-            raise ValueError(
-                f"clearance target does not face the negative {axis_name} side"
-            )
-        if any(start(section) < positive_index for section in blocker_sections):
-            raise ValueError(
-                f"active blocker is not carried by the positive {axis_name} side"
-            )
+    candidates = {
+        section.id: section for section in (*claim_sections, *blocker_sections)
+    }
+    negative_sections = tuple(
+        section
+        for section in candidates.values()
+        if start(section) + span(section) - 1 == negative_index
+    )
+    positive_sections = tuple(
+        section for section in candidates.values() if start(section) == positive_index
+    )
+    if negative_sections and not positive_sections:
         positive_sections = tuple(
             section
             for section in graph.sections.values()
             if start(section) == positive_index
             and any(overlaps(section, negative) for negative in negative_sections)
         )
-    else:
-        positive_sections = claim_sections
-        if any(start(section) != positive_index for section in positive_sections):
-            raise ValueError(
-                f"clearance target does not face the positive {axis_name} side"
-            )
-        if any(
-            start(section) + span(section) - 1 > negative_index
-            for section in blocker_sections
-        ):
-            raise ValueError(
-                f"active blocker is not held by the negative {axis_name} side"
-            )
+    elif positive_sections and not negative_sections:
         negative_sections = tuple(
             section
             for section in graph.sections.values()
@@ -455,18 +453,51 @@ def _corridor_boundary_sections(
             and any(overlaps(section, positive) for positive in positive_sections)
         )
     if not negative_sections or not positive_sections:
-        raise ValueError("clearance boundary has no facing section pair")
+        raise ValueError(
+            f"clearance boundary has no facing section pair on the {axis_name} axis"
+        )
     return negative_sections, positive_sections
+
+
+def _local_section_ids(
+    graph: MetroGraph, edge_key: tuple[str, str, str] | None
+) -> frozenset[str]:
+    """Section ids the claim's own local hop touches, from live station identity.
+
+    Reads each endpoint's already-resolved ``section_id`` rather than an
+    authored connector's source or target section, which can name a station
+    many hops upstream of the boundary this specific segment actually sits
+    at (a junction station has no section and contributes nothing).
+    """
+    if edge_key is None:
+        return frozenset()
+    ids = set()
+    for station_id in (edge_key[0], edge_key[1]):
+        station = graph.stations.get(station_id)
+        if station is not None and station.section_id is not None:
+            ids.add(station.section_id)
+    return frozenset(ids)
+
+
+class _UnresolvedAperture(Exception):
+    """One failure's clearance shortfall could not be mapped to a requirement."""
 
 
 def _corridor_cohort_aperture_requirements(
     graph: MetroGraph,
-    scaffold: RouteSemanticScaffold,
     ledger: CorridorCohortLedger,
     targets: Sequence[CorridorCohortTarget],
     scalar_requests: Sequence[CorridorScalarRequest],
     error: CorridorCohortCompilationError,
 ) -> tuple[BoundaryClearanceRequirement, ...]:
+    """Map every resolvable failure to its own typed requirement, independently.
+
+    Each entry in ``error.failures`` is a separate corridor component that
+    failed to allocate; one lacking a usable shortfall says nothing about
+    whether its siblings do, so an unresolvable failure is skipped rather than
+    voiding every requirement the batch could otherwise produce. Only a batch
+    where nothing resolves at all raises.
+    """
     claims_by_id = {claim.claim_id: claim for claim in ledger.claims}
     scalar_requests_by_id = {
         request.variable.variable_id: request for request in scalar_requests
@@ -476,19 +507,18 @@ def _corridor_cohort_aperture_requirements(
         tuple[SettlementAxis, int, tuple[str, ...], tuple[str, ...]],
         BoundaryClearanceRequirement,
     ] = {}
+    skip_reasons: list[str] = []
 
-    def refuse(reason: str) -> NoReturn:
-        raise CorridorCohortCompilationError(
-            f"{error}; corridor aperture handoff refused: {reason}",
-            error.failures,
-        ) from error
-
-    for failure in error.failures:
+    def resolve(failure: CorridorCohortFailure) -> BoundaryClearanceRequirement:
         shortfall = failure.clearance_shortfall
         if shortfall is None:
-            refuse("allocation failure has no typed clearance shortfall")
+            raise _UnresolvedAperture(
+                "allocation failure has no typed clearance shortfall"
+            )
         if shortfall.required_shift_sign not in (-1, 1):
-            refuse("clearance shortfall has no directed boundary side")
+            raise _UnresolvedAperture(
+                "clearance shortfall has no directed boundary side"
+            )
         claims = tuple(
             claims_by_id[claim_id]
             for claim_id in shortfall.claim_ids
@@ -500,15 +530,19 @@ def _corridor_cohort_aperture_requirements(
             if claim_id in scalar_requests_by_id
         )
         if len(claims) + len(scalar_claims) != len(shortfall.claim_ids):
-            refuse("clearance shortfall names an unknown claim")
+            raise _UnresolvedAperture("clearance shortfall names an unknown claim")
         regions = {claim.region for claim in claims}
         for request in scalar_claims:
             request_region = request.region
             if request_region is None:
-                refuse("clearance claims do not name one corridor region")
+                raise _UnresolvedAperture(
+                    "clearance claims do not name one corridor region"
+                )
             regions.add(request_region)
         if not shortfall.claim_ids or len(regions) != 1:
-            refuse("clearance claims do not name one corridor region")
+            raise _UnresolvedAperture(
+                "clearance claims do not name one corridor region"
+            )
         region = next(iter(regions))
         if isinstance(region, ColumnGapRegion):
             axis = SettlementAxis.COLUMN
@@ -519,53 +553,46 @@ def _corridor_cohort_aperture_requirements(
             boundary = region.lower_row
             expected_axis = 1
         else:
-            refuse("clearance claim is not on an adjacent grid boundary")
-        if shortfall.axis != expected_axis:
-            refuse("solver axis and corridor boundary disagree")
-
-        claim_target_section_ids = {
-            scaffold.query.connector(connector_id).target_section
-            for connector_ids in (
-                *(claim.connector_ids for claim in claims),
-                *(request.variable.connector_ids for request in scalar_claims),
+            raise _UnresolvedAperture(
+                "clearance claim is not on an adjacent grid boundary"
             )
-            for connector_id in connector_ids
-        }
-        if not claim_target_section_ids:
-            refuse("clearance claim has no authored target section")
+        if shortfall.axis != expected_axis:
+            raise _UnresolvedAperture("solver axis and corridor boundary disagree")
+
+        claim_section_ids: set[str] = set()
+        for claim in claims:
+            claim_section_ids |= _local_section_ids(graph, claim.edge_key)
+        for request in scalar_claims:
+            claim_section_ids |= _local_section_ids(graph, request.variable.edge_key)
         claim_sections = tuple(
-            graph.sections[section_id]
-            for section_id in sorted(claim_target_section_ids)
+            graph.sections[section_id] for section_id in sorted(claim_section_ids)
         )
         typed_obstacles = {
             item.obstacle_id: item for item in failure.blocking_obstacles
         }
         if set(typed_obstacles) != set(shortfall.blocking_obstacle_ids):
-            refuse("active blockers lack exact typed provenance")
-        blocker_source_sections: set[str] = set()
+            raise _UnresolvedAperture("active blockers lack exact typed provenance")
+        blocker_section_ids: set[str] = set()
         for obstacle in typed_obstacles.values():
             target = targets_by_key.get((obstacle.member_id, obstacle.edge_key))
             if target is None or target.connector_ids != obstacle.connector_ids:
-                refuse("active blocker does not match its current route target")
-            blocker_source_sections.update(
-                scaffold.query.connector(connector_id).source_section
-                for connector_id in obstacle.connector_ids
-            )
-        if not blocker_source_sections:
-            refuse("active blocker has no authored source section")
+                raise _UnresolvedAperture(
+                    "active blocker does not match its current route target"
+                )
+            blocker_section_ids |= _local_section_ids(graph, obstacle.edge_key)
         blocker_sections = tuple(
-            graph.sections[section_id] for section_id in sorted(blocker_source_sections)
+            graph.sections[section_id] for section_id in sorted(blocker_section_ids)
         )
+        # Neither pool needs to be non-empty here: a claim or obstacle whose
+        # local hop touches no section (a junction-to-junction convergence
+        # trunk edge, say) is fine as long as the other pool anchors one side
+        # for _corridor_boundary_sections to derive the rest from.
         try:
             negative_sections, positive_sections = _corridor_boundary_sections(
-                graph,
-                region,
-                claim_sections,
-                blocker_sections,
-                shortfall.required_shift_sign,
+                graph, region, claim_sections, blocker_sections
             )
         except ValueError as mapping_error:
-            refuse(str(mapping_error))
+            raise _UnresolvedAperture(str(mapping_error)) from mapping_error
         if isinstance(region, ColumnGapRegion):
             negative_edge = max(
                 section.bbox_x + section.bbox_w for section in negative_sections
@@ -579,7 +606,7 @@ def _corridor_cohort_aperture_requirements(
         negative_ids = tuple(sorted(section.id for section in negative_sections))
         positive_ids = tuple(sorted(section.id for section in positive_sections))
         required = max(0.0, positive_edge - negative_edge) + shortfall.deficit
-        requirement = BoundaryClearanceRequirement(
+        return BoundaryClearanceRequirement(
             axis,
             boundary,
             f"{failure.component_id}|result:{failure.result_rank}",
@@ -589,12 +616,30 @@ def _corridor_cohort_aperture_requirements(
             f"corridor cohort aperture at {axis.value} boundary {boundary}",
             BoundaryClearanceRequirementKind.CORRIDOR_COHORT_APERTURE,
         )
-        key = axis, boundary, negative_ids, positive_ids
+
+    for failure in error.failures:
+        try:
+            requirement = resolve(failure)
+        except _UnresolvedAperture as unresolved:
+            skip_reasons.append(
+                f"{failure.component_id}/result:{failure.result_rank}: {unresolved}"
+            )
+            continue
+        key = (
+            requirement.axis,
+            requirement.boundary,
+            requirement.negative_section_ids,
+            requirement.positive_section_ids,
+        )
         held = requirements.get(key)
         if held is None or requirement.required > held.required:
             requirements[key] = requirement
     if not requirements:
-        refuse("allocation failure produced no boundary requirement")
+        raise CorridorCohortCompilationError(
+            f"{error}; corridor aperture handoff resolved no failure: "
+            + "; ".join(skip_reasons),
+            error.failures,
+        ) from error
     return tuple(
         requirements[key]
         for key in sorted(
@@ -642,7 +687,6 @@ def _compile_corridor_cohorts(
             {},
             _corridor_cohort_aperture_requirements(
                 ctx.graph,
-                scaffold,
                 ledger,
                 targets,
                 scalar_requests,
@@ -1288,11 +1332,7 @@ def _freeze_plan(
                 localized_slot.direction,
             )
         )
-    plan_id = RouteMemberGeometryPlanId(
-        semantic_route_id(
-            "route-member-geometry", system_id, member_id, family_id.value
-        )
-    )
+    plan_id = _member_geometry_plan_id(scaffold, candidate)
     corner_offsets, corner_bases = _complete_concentric_corner_description(route)
     return RouteMemberGeometryPlan(
         plan_id,

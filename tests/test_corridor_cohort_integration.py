@@ -1716,3 +1716,61 @@ def test_unwitnessed_blocking_obstacle_raises_instead_of_losing_its_shortfall(
 
     with pytest.raises(CorridorCohortCompilationError, match="unwitnessed obstacles"):
         cci.compile_corridor_cohort_plan(ledger, (target,))
+
+
+def test_shortfall_without_a_directed_shift_sign_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A clearance shortfall with no directed boundary side fails closed the
+    same way an unwitnessed obstacle does, rather than reaching the aperture
+    producer with a shift sign it cannot act on.
+    """
+    claim = _identity_claim(
+        claim_id="carrier",
+        reservation_id="reservation:carrier",
+        network_id="network",
+        endpoint_cohort_id=None,
+    )
+    route = _mutable_route(
+        source="carrier:source",
+        target="carrier:target",
+        line_id="line",
+        points=[(0.0, 10.0), (30.0, 10.0)],
+    )
+    target = CorridorCohortTarget(
+        "carrier",
+        "plan:carrier",
+        ("carrier:source", "carrier:target", "line"),
+        RouteFamilyId.SAME_Y_STRAIGHT,
+        ("connector:carrier",),
+        route,
+        True,
+    )
+    ledger = CorridorCohortLedger(
+        claims=(claim,),
+        endpoint_members=(),
+        eligible_member_ids=frozenset({"carrier"}),
+        ambiguous_endpoint_cohort_ids=frozenset(),
+        offset_step=10.0,
+    )
+
+    def fake_solve(
+        problem: cci.CorridorAllocationProblem,
+    ) -> cci.CorridorAllocationResult:
+        return cci.CorridorAllocationResult(
+            status=cci.CorridorAllocationStatus.FAILURE,
+            reason=cci.CorridorAllocationFailureReason.INFEASIBLE,
+            blocking_member_ids=("carrier",),
+            clearance_shortfall=cci.CorridorClearanceShortfall(
+                claim_ids=("carrier",),
+                blocking_obstacle_ids=(),
+                deficit=5.0,
+                axis=0,
+                required_shift_sign=0,
+            ),
+        )
+
+    monkeypatch.setattr(cci, "solve_corridor_cohorts", fake_solve)
+
+    with pytest.raises(CorridorCohortCompilationError, match="directed boundary side"):
+        cci.compile_corridor_cohort_plan(ledger, (target,))
