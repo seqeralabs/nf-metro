@@ -3,10 +3,10 @@
 Step 3 in full. Read before briefing the diagnostic worker.
 
 
-Assign a read-only `fix-issue-diagnostician` at HIGH (or MID for a stated
-single-site cause, see below) before the writer changes code. **Do not
-propose fixes from hypotheses.** The worker must reproduce the symptom as a
-falsifiable claim, in one of two forms.
+Assign a read-only `fix-issue-diagnostician` at HIGH, or `fix-issue-diagnostician-mid`
+at MID for a stated single-site cause (see below), before the writer changes
+code. **Do not propose fixes from hypotheses.** The worker must reproduce the
+symptom as a falsifiable claim, in one of two forms.
 
 **Geometry defects** (a bad render: overlap, kink, asymmetry, breeze-past,
 bbox overflow). Tier HIGH:
@@ -18,7 +18,8 @@ bbox overflow). Tier HIGH:
 
 **Non-geometry defects** (a plumbing, contract, API-surface, or exception-path
 bug with no rendered symptom, possibly latent by the issue's own admission).
-Tier HIGH, or MID when the issue already names the cause - see below:
+Tier HIGH, or `fix-issue-diagnostician-mid` at MID when the issue already
+names the cause - see below:
 
 1. Name every call site on the path from the caller to the defect.
 2. Produce a failing observation that does not depend on geometry - a focused
@@ -46,17 +47,18 @@ an engine bug, the recommended fix path against the plan-time rule below.
 
 **When the issue already states its own root cause** (it names the function,
 the call site, and the acceptance bar), do not re-derive it from scratch at HIGH
-cost. Brief a MID worker to *confirm or refute that specific claim* against
-current `origin/main` and produce the failing observation. Independent
-confirmation is still mandatory - taking the issue's word for it is not
-diagnosis - but confirming a stated cause is bounded work, not open-ended
+cost. Brief `fix-issue-diagnostician-mid` to *confirm or refute that specific
+claim* against current `origin/main` and produce the failing observation.
+Independent confirmation is still mandatory - taking the issue's word for it is
+not diagnosis - but confirming a stated cause is bounded work, not open-ended
 judgment.
 
 This carve-out covers a **single-site** claim. If confirming it requires
 surveying every caller of a function, or choosing between two valid designs,
 that is open-ended judgment: the worker returns blocked naming the options in
-its `DECIDE` field, and the work re-routes to HIGH. A stated cause bounds
-*where to look*, not necessarily *how much there is to decide*.
+its `DECIDE` field, and the work re-routes to `fix-issue-diagnostician` at
+HIGH. A stated cause bounds *where to look*, not necessarily *how much there
+is to decide*.
 
 Don't ask the user to pick a magnitude/spacing `DECIDE` (a padding, a margin)
 blind before a render exists - implement the cheaper default, get a render in
