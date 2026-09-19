@@ -142,8 +142,10 @@ class SettlementStage(str, Enum):
     """Stable vocabulary for observing settlement progress.
 
     A render emits only ``DISCOVERY``, ``GENERAL_SETTLEMENT``, ``COHORT_FINAL``
-    and ``VALIDATION``.  The other four members are reserved vocabulary that no
-    production path may emit, which
+    and ``VALIDATION``.  ``FINAL_SOLVE`` is emitted by the corridor cohort
+    compiler when it is handed a settlement trace.  ``COHORT_INTENT``,
+    ``APERTURE_SETTLEMENT`` and ``TYPED_MATERIALIZATION`` remain reserved
+    vocabulary no production path emits, which
     ``tests/test_corridor_cohort_integration.py`` asserts.
     """
 
