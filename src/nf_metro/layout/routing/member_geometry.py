@@ -54,6 +54,13 @@ from nf_metro.layout.routing.corners import (
     concentric_corner_radius_at,
     resolve_curve_radius_at,
 )
+from nf_metro.layout.routing.corridor_cohort_integration import (
+    CorridorCohortLedger,
+    CorridorCohortPlan,
+    CorridorCohortTarget,
+    CorridorScalarRequest,
+    compile_corridor_cohort_plan,
+)
 from nf_metro.layout.routing.families import RouteFamilyId
 from nf_metro.layout.routing.inter_section_handlers import (
     _build_inter_facts,
@@ -2550,3 +2557,21 @@ def validate_member_geometry_emission(
                         f"member geometry plan {plan.id} owned corner inputs changed "
                         f"at index {radius_index}"
                     )
+
+
+def plan_corridor_cohorts(
+    ledger: CorridorCohortLedger,
+    targets: Sequence[CorridorCohortTarget],
+    *,
+    scalar_requests: Sequence[CorridorScalarRequest] = (),
+) -> CorridorCohortPlan:
+    """Compile one corridor cohort snapshot into heterogeneous grants.
+
+    Passes complete member and convergence scalar requests to the unified
+    compiler and returns member allocations, exact route patches and convergence
+    scalar grants in one plan. It solves without publishing: the caller decides
+    whether to apply the returned patches, so no geometry moves here.
+    """
+    return compile_corridor_cohort_plan(
+        ledger, targets, scalar_requests=scalar_requests
+    )

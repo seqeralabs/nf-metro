@@ -81,7 +81,6 @@ def build_gallery():
 RESERVED_STAGES = {
     SettlementStage.COHORT_INTENT,
     SettlementStage.APERTURE_SETTLEMENT,
-    SettlementStage.FINAL_SOLVE,
     SettlementStage.TYPED_MATERIALIZATION,
 }
 
@@ -1179,6 +1178,7 @@ def test_fixed_endpoint_landing_is_planned_clear_of_an_unclaimed_fixed_lead() ->
     fixed_points_before = tuple(fixed_route.points)
 
     plan = cci.compile_corridor_cohort_plan(ledger, targets)
+    cci.publish_corridor_cohort_plan(plan)
 
     (landing,) = plan.landings
     assert landing.member_id == "carrier"
@@ -1236,3 +1236,420 @@ def test_problem_rejects_an_infeasible_fixed_fixed_footprint_order() -> None:
             footprint_model,
             {},
         )
+
+
+def _footprint_witness(
+    *,
+    footprint_id: str,
+    member_id: str,
+    edge_key: tuple[str, str, str],
+    axis: int,
+    coordinate: float,
+    longitudinal_start: float,
+    longitudinal_end: float,
+    coordinate_variable_id: str,
+) -> cci.CorridorFootprintWitness:
+    return cci.CorridorFootprintWitness(
+        footprint_id=footprint_id,
+        owner_id=f"plan:{member_id}",
+        member_id=member_id,
+        edge_key=edge_key,
+        connector_ids=(f"connector:{member_id}",),
+        segment_rank=0,
+        axis=axis,
+        coordinate=coordinate,
+        longitudinal_start=longitudinal_start,
+        longitudinal_end=longitudinal_end,
+        direction=Direction.R,
+        line_id=edge_key[2],
+        network_id=None,
+        regions=(),
+        semantic_rank=(0, 0),
+        crossing_disposition=cci.CorridorCrossingDisposition.FIXED_DOGLEG,
+        coordinate_variable_id=coordinate_variable_id,
+    )
+
+
+def _member_scalar_relation_scenario():
+    """One movable member carrier plus one convergence scalar request that a
+    single ``_FootprintOrder`` joins into one atomic component.
+
+    Returns the compile inputs and the synthetic ``_MemberFootprintModel`` a
+    monkeypatched ``_member_footprint_model`` publishes, so the relation the live
+    witness builder does not yet mint is present at the compiler boundary.
+    """
+    carrier_claim = _identity_claim(
+        claim_id="carrier",
+        reservation_id="reservation:carrier",
+        network_id="network:carrier",
+        endpoint_cohort_id=None,
+        direction=Direction.R,
+        region=RowGapRegion(0, 1),
+        orientation=CorridorOrientation.HORIZONTAL,
+    )
+    carrier_edge = carrier_claim.edge_key
+    assert carrier_edge is not None
+    carrier_route = _mutable_route(
+        source=carrier_edge[0],
+        target=carrier_edge[1],
+        line_id=carrier_edge[2],
+        points=[(0.0, 10.0), (30.0, 10.0)],
+    )
+    carrier_target = CorridorCohortTarget(
+        "carrier",
+        "plan:carrier",
+        carrier_edge,
+        RouteFamilyId.SAME_Y_STRAIGHT,
+        ("connector:carrier",),
+        carrier_route,
+        True,
+        network_id="network:carrier",
+    )
+    ledger = CorridorCohortLedger(
+        claims=(carrier_claim,),
+        endpoint_members=(),
+        eligible_member_ids=frozenset({"carrier"}),
+        ambiguous_endpoint_cohort_ids=frozenset(),
+        offset_step=10.0,
+    )
+
+    scalar_edge = ("scalar:source", "scalar:target", "line")
+    scalar_variable = CorridorScalarVariable(
+        "convergence-trunk|scalar",
+        CorridorScalarOwnerKind.CONVERGENCE_TRUNK,
+        "convergence:scalar",
+        "member:scalar",
+        scalar_edge,
+        ("connector:member:scalar",),
+        0,
+        1,
+        25.0,
+    )
+    scalar_request = cci.CorridorScalarRequest(
+        scalar_variable,
+        preferred_coordinate=25.0,
+        domain=cci.CorridorCoordinateDomain(scalar_variable.variable_id),
+    )
+
+    carrier_variable_id = f"member-carrier|carrier|{carrier_edge}|segment:0"
+    carrier_variable = CorridorScalarVariable(
+        carrier_variable_id,
+        CorridorScalarOwnerKind.MEMBER_CARRIER,
+        "plan:carrier",
+        "carrier",
+        carrier_edge,
+        ("connector:carrier",),
+        0,
+        1,
+        10.0,
+    )
+    carrier_witness = _footprint_witness(
+        footprint_id="witness:carrier",
+        member_id="carrier",
+        edge_key=carrier_edge,
+        axis=1,
+        coordinate=10.0,
+        longitudinal_start=0.0,
+        longitudinal_end=30.0,
+        coordinate_variable_id=carrier_variable_id,
+    )
+    scalar_witness = _footprint_witness(
+        footprint_id="witness:scalar",
+        member_id="member:scalar",
+        edge_key=scalar_edge,
+        axis=1,
+        coordinate=25.0,
+        longitudinal_start=5.0,
+        longitudinal_end=20.0,
+        coordinate_variable_id=scalar_variable.variable_id,
+    )
+    order = _FootprintOrder(
+        "relation:carrier-scalar",
+        _FootprintTerm(carrier_variable_id, None, "witness:carrier"),
+        _FootprintTerm(scalar_variable.variable_id, None, "witness:scalar"),
+        5.0,
+        (carrier_variable_id, scalar_variable.variable_id),
+        ("witness:carrier", "witness:scalar"),
+        (),
+    )
+    footprint_model = _MemberFootprintModel(
+        (carrier_variable, scalar_variable),
+        (carrier_witness, scalar_witness),
+        {
+            carrier_variable_id: (carrier_claim.claim_id,),
+            scalar_variable.variable_id: (),
+        },
+        (order,),
+        (),
+        (),
+    )
+    return ledger, (carrier_target,), (scalar_request,), footprint_model
+
+
+def test_member_and_scalar_relation_occupy_one_problem(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A member carrier and a convergence scalar joined by one ``_FootprintOrder``
+    lower into one ``CorridorAllocationProblem`` solved once for their axis.
+
+    The live witness builder does not yet mint a member<->scalar order, so the
+    synthetic footprint model stands in for that relation at the compiler
+    boundary. The defect this locks is the split solve: the member reaches its
+    own component problem while the scalar is swept into a separate per-axis
+    problem, so no one problem names both and the solver runs twice.
+    """
+    ledger, targets, scalar_requests, footprint_model = (
+        _member_scalar_relation_scenario()
+    )
+    monkeypatch.setattr(
+        cci, "_member_footprint_model", lambda *args, **kwargs: footprint_model
+    )
+    solved_problems: list[cci.CorridorAllocationProblem] = []
+    real_solve = cci.solve_corridor_cohorts
+
+    def spy_solve(problem):
+        solved_problems.append(problem)
+        return real_solve(problem)
+
+    monkeypatch.setattr(cci, "solve_corridor_cohorts", spy_solve)
+
+    plan = cci.compile_corridor_cohort_plan(
+        ledger, targets, scalar_requests=scalar_requests
+    )
+
+    scalar_variable_id = scalar_requests[0].variable.variable_id
+    problems_with_carrier = [
+        problem
+        for problem in solved_problems
+        if any(lane.member_id == "carrier" for lane in problem.lanes)
+    ]
+    problems_with_scalar = [
+        problem
+        for problem in solved_problems
+        if any(lane.member_id == scalar_variable_id for lane in problem.lanes)
+    ]
+    joint_problems = [
+        problem
+        for problem in solved_problems
+        if {"carrier", scalar_variable_id}.issubset(
+            {lane.member_id for lane in problem.lanes}
+        )
+    ]
+
+    assert len(problems_with_carrier) == 1
+    assert len(problems_with_scalar) == 1
+    assert len(joint_problems) == 1
+    assert len(solved_problems) == 1
+
+    joint = joint_problems[0]
+    assert any(
+        separation.lower_member_id == "carrier"
+        and separation.upper_member_id == scalar_variable_id
+        for separation in joint.directed_separations
+    )
+
+    grant = next(
+        item for item in plan.scalar_grants if item.variable_id == scalar_variable_id
+    )
+    assert grant.owner_kind is CorridorScalarOwnerKind.CONVERGENCE_TRUNK
+
+
+def test_no_separate_scalar_solve_path_exists() -> None:
+    """The convergence sweep is deleted, not merely bypassed.
+
+    A second solve path is the anti-pattern this issue removes; a test that reds
+    if it reappears keeps the compiler down to its one integration call site.
+    """
+    assert not hasattr(cci, "_scalar_component_plan")
+
+
+def test_compiler_counts_every_solve_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One relation-joined component solves once, and the count is published."""
+    ledger, targets, scalar_requests, footprint_model = (
+        _member_scalar_relation_scenario()
+    )
+    monkeypatch.setattr(
+        cci, "_member_footprint_model", lambda *args, **kwargs: footprint_model
+    )
+    real_solve = cci.solve_corridor_cohorts
+    calls = 0
+
+    def counting_solve(problem):
+        nonlocal calls
+        calls += 1
+        return real_solve(problem)
+
+    monkeypatch.setattr(cci, "solve_corridor_cohorts", counting_solve)
+
+    plan = cci.compile_corridor_cohort_plan(
+        ledger, targets, scalar_requests=scalar_requests
+    )
+
+    assert plan.solve_call_count == 1
+    assert calls == plan.solve_call_count
+
+
+def test_final_solve_trace_is_emitted_from_the_integration_call_site(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The one integration call site records ``FINAL_SOLVE`` on a passed trace."""
+    ledger, targets, scalar_requests, footprint_model = (
+        _member_scalar_relation_scenario()
+    )
+    monkeypatch.setattr(
+        cci, "_member_footprint_model", lambda *args, **kwargs: footprint_model
+    )
+    trace = SettlementStageTrace()
+    trace = register_settlement_stage(
+        trace, SettlementStage.DISCOVERY, geometry_fingerprint="discovery"
+    )
+    trace = register_settlement_stage(
+        trace, SettlementStage.APERTURE_SETTLEMENT, geometry_fingerprint="aperture"
+    )
+
+    plan = cci.compile_corridor_cohort_plan(
+        ledger, targets, scalar_requests=scalar_requests, settlement_trace=trace
+    )
+
+    assert plan.settlement_trace is not None
+    assert plan.settlement_trace.records[-1].stage is SettlementStage.FINAL_SOLVE
+    assert plan.settlement_trace.records[-1].route_observation_rank is None
+
+
+def _assert_no_silent_compatibility(plan: cci.CorridorCohortPlan) -> None:
+    """Every compatibility disposition names its whole group and migrates nothing."""
+    for component in plan.components:
+        if component.status is not cci.CorridorAllocationStatus.COMPATIBILITY:
+            continue
+        assert component.compatibility is not None
+        assert component.allocations == ()
+
+
+def _overlapping_member_claim(
+    *,
+    claim_id: str,
+    reservation_complete: bool,
+    longitudinal: tuple[float, float],
+) -> tuple[CorridorCohortLedgerClaim, CorridorCohortTarget]:
+    claim = replace(
+        _identity_claim(
+            claim_id=claim_id,
+            reservation_id=f"reservation:{claim_id}",
+            network_id=f"network:{claim_id}",
+            endpoint_cohort_id=None,
+            direction=Direction.R,
+            region=RowGapRegion(0, 1),
+            orientation=CorridorOrientation.HORIZONTAL,
+        ),
+        reservation_complete=reservation_complete,
+    )
+    edge = claim.edge_key
+    assert edge is not None
+    route = _mutable_route(
+        source=edge[0],
+        target=edge[1],
+        line_id=edge[2],
+        points=[(longitudinal[0], 10.0), (longitudinal[1], 10.0)],
+    )
+    target = CorridorCohortTarget(
+        claim_id,
+        f"plan:{claim_id}",
+        edge,
+        RouteFamilyId.SAME_Y_STRAIGHT,
+        (f"connector:{claim_id}",),
+        route,
+        True,
+        network_id=f"network:{claim_id}",
+    )
+    return claim, target
+
+
+def test_incomplete_component_stands_as_typed_compatibility() -> None:
+    """A component with an incomplete claim keeps its whole group unmigrated.
+
+    The complete peer never migrates alone under a legacy owner: the disposition
+    is compatibility for the entire component, named by typed provenance, with no
+    allocation left behind.
+    """
+    complete_claim, complete_target = _overlapping_member_claim(
+        claim_id="complete", reservation_complete=True, longitudinal=(0.0, 30.0)
+    )
+    incomplete_claim, incomplete_target = _overlapping_member_claim(
+        claim_id="incomplete", reservation_complete=False, longitudinal=(10.0, 40.0)
+    )
+    ledger = CorridorCohortLedger(
+        claims=(complete_claim, incomplete_claim),
+        endpoint_members=(),
+        eligible_member_ids=frozenset({"complete", "incomplete"}),
+        ambiguous_endpoint_cohort_ids=frozenset(),
+        offset_step=10.0,
+    )
+
+    plan = cci.compile_corridor_cohort_plan(
+        ledger, (complete_target, incomplete_target)
+    )
+
+    (compatibility_component,) = [
+        component
+        for component in plan.components
+        if component.status is cci.CorridorAllocationStatus.COMPATIBILITY
+    ]
+    provenance = compatibility_component.compatibility
+    assert provenance is not None
+    assert provenance.reason is cci.CorridorCompatibilityReason.INCOMPLETE_WITNESSES
+    assert set(provenance.member_ids) == {"complete", "incomplete"}
+    assert plan.allocations == ()
+    _assert_no_silent_compatibility(plan)
+
+
+def test_unrepresented_endpoint_cohort_stands_as_typed_compatibility() -> None:
+    """An endpoint cohort with no current claim keeps its legacy geometry, typed."""
+    carrier_claim, carrier_target = _overlapping_member_claim(
+        claim_id="carrier", reservation_complete=True, longitudinal=(0.0, 30.0)
+    )
+    ledger = CorridorCohortLedger(
+        claims=(carrier_claim,),
+        endpoint_members=(("cohort:absent", frozenset({"ghost"})),),
+        eligible_member_ids=frozenset({"carrier"}),
+        ambiguous_endpoint_cohort_ids=frozenset(),
+        offset_step=10.0,
+    )
+
+    plan = cci.compile_corridor_cohort_plan(ledger, (carrier_target,))
+
+    (compatibility_component,) = [
+        component
+        for component in plan.components
+        if component.status is cci.CorridorAllocationStatus.COMPATIBILITY
+    ]
+    provenance = compatibility_component.compatibility
+    assert provenance is not None
+    assert (
+        provenance.reason
+        is cci.CorridorCompatibilityReason.UNREPRESENTED_ENDPOINT_COHORT
+    )
+    assert provenance.endpoint_cohort_ids == ("cohort:absent",)
+    _assert_no_silent_compatibility(plan)
+
+
+def test_member_geometry_corridor_handoff_returns_heterogeneous_grants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The member-geometry handoff compiles complete requests and receives grants
+    without applying the convergence grants."""
+    from nf_metro.layout.routing import member_geometry
+
+    ledger, targets, scalar_requests, footprint_model = (
+        _member_scalar_relation_scenario()
+    )
+    monkeypatch.setattr(
+        cci, "_member_footprint_model", lambda *args, **kwargs: footprint_model
+    )
+
+    plan = member_geometry.plan_corridor_cohorts(
+        ledger, targets, scalar_requests=scalar_requests
+    )
+
+    scalar_variable_id = scalar_requests[0].variable.variable_id
+    assert any(grant.variable_id == scalar_variable_id for grant in plan.scalar_grants)
+    assert plan.route_patches
