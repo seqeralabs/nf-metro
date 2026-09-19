@@ -13,6 +13,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import Enum
 from math import isclose, isfinite
+from types import MappingProxyType
 
 from nf_metro.layout.constants import COORD_TOLERANCE, CURVE_RADIUS
 from nf_metro.layout.geometry import cotravelling_lane_clearance
@@ -522,8 +523,12 @@ class CorridorCohortPlan:
     landings: tuple[CorridorCohortLanding, ...] = ()
     scalar_grants: tuple[CorridorScalarGrant, ...] = ()
     route_patches: tuple[_RoutePatch, ...] = ()
-    solve_call_count: int = 0
     settlement_trace: SettlementStageTrace | None = None
+
+    @property
+    def solve_call_count(self) -> int:
+        """How many solver problems the compile ran, one per non-empty component."""
+        return sum(len(component.problems) for component in self.components)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1831,6 +1836,9 @@ def _problem(
     witnesses_by_id: Mapping[str, CorridorFootprintWitness],
     *,
     scalar_requests: tuple[CorridorScalarRequest, ...] = (),
+    intervals_by_member: Mapping[str, Sequence[CorridorForbiddenInterval]] = (
+        MappingProxyType({})
+    ),
 ) -> CorridorAllocationProblem:
     movable = tuple(
         item for item in claims if roles[item.claim_id] != CorridorCohortClaimRole.FIXED
@@ -1845,9 +1853,10 @@ def _problem(
     scalar_witness_matches: defaultdict[str, list[CorridorFootprintWitness]] = (
         defaultdict(list)
     )
-    for witness in footprint_model.witnesses:
-        if witness.coordinate_variable_id in scalar_by_id:
-            scalar_witness_matches[witness.coordinate_variable_id].append(witness)
+    if scalar_by_id:
+        for witness in footprint_model.witnesses:
+            if witness.coordinate_variable_id in scalar_by_id:
+                scalar_witness_matches[witness.coordinate_variable_id].append(witness)
     scalar_witnesses: dict[str, CorridorFootprintWitness] = {}
     for variable_id in scalar_by_id:
         matches = scalar_witness_matches.get(variable_id, [])
@@ -2021,11 +2030,6 @@ def _problem(
         for interval in footprint_model.forbidden_intervals
         for member_id in lane_ids(interval.member_id)
     )
-    intervals_by_member: defaultdict[str, list[CorridorForbiddenInterval]] = (
-        defaultdict(list)
-    )
-    for interval in footprint_model.forbidden_intervals:
-        intervals_by_member[interval.member_id].append(interval)
     scalar_domains: list[CorridorCoordinateDomain] = []
     for request in scalar_requests:
         request_domains, _sources = _scalar_boundary_domains(
@@ -2296,14 +2300,14 @@ def _component_plan(
     footprint_model: _MemberFootprintModel,
     witnesses_by_id: Mapping[str, CorridorFootprintWitness],
     scalar_requests_by_id: Mapping[str, CorridorScalarRequest],
+    intervals_by_member: Mapping[str, Sequence[CorridorForbiddenInterval]],
     solve: Callable[[CorridorAllocationProblem], CorridorAllocationResult],
 ) -> CorridorCohortComponentPlan:
     """Lower one closed component into a single per-axis solver problem.
 
     Every physical overlap group and every relation-joined scalar variable the
-    closure gave this component seat in one ``CorridorAllocationProblem`` solved
-    exactly once, so a member and a scalar joined by a typed relation never split
-    across two problems or two solves.
+    closure gave this component seats in one ``CorridorAllocationProblem``, so a
+    member and a scalar joined by a typed relation always share one solve.
     """
     physical_ranks = spec.physical_ranks
     component_claims = tuple(
@@ -2346,6 +2350,7 @@ def _component_plan(
             footprint_model,
             witnesses_by_id,
             scalar_requests=component_scalar_requests,
+            intervals_by_member=intervals_by_member,
         )
         problems = (problem,)
         results = (solve(problem),)
@@ -2626,22 +2631,18 @@ def compile_corridor_cohort_plan(
     """Solve every cohort from one route snapshot without publishing geometry.
 
     This is the one production integration call site for the corridor cohort
-    solver: each closed component solves exactly once through the counted
-    ``solve`` closure below, so ``CorridorCohortPlan.solve_call_count`` names how
-    many solves the compile ran and there is no second convergence-only solve.
-    Solving is separated from publication: the returned plan carries its route
-    patches, and :func:`publish_corridor_cohort_plan` applies them.
+    solver: each closed component solves exactly once, through the ``solve``
+    closure below. Solving is separated from publication: the returned plan
+    carries its route patches, and :func:`publish_corridor_cohort_plan` applies
+    them.
     """
     endpoint_order_signs = _endpoint_order_signs(ledger, targets)
     claims = _bind_ledger(ledger, targets, endpoint_order_signs)
     scalar_requests_by_id = {
         request.variable.variable_id: request for request in scalar_requests
     }
-    solve_calls = 0
 
     def solve(problem: CorridorAllocationProblem) -> CorridorAllocationResult:
-        nonlocal solve_calls
-        solve_calls += 1
         return solve_corridor_cohorts(problem)
 
     footprint_model = _member_footprint_model(
@@ -2719,6 +2720,7 @@ def compile_corridor_cohort_plan(
             footprint_model,
             witnesses_by_id,
             scalar_requests_by_id,
+            intervals_by_member,
             solve,
         )
         for rank, spec in enumerate(logical)
@@ -2849,10 +2851,8 @@ def compile_corridor_cohort_plan(
         if component.compatibility is not None
         for variable_id in component.compatibility.scalar_variable_ids
     }
-    if (
-        len(granted_ids) != len(scalar_grants)
-        or (set(scalar_requests_by_id) - granted_ids) - compatibility_scalar_ids
-    ):
+    ungranted = (set(scalar_requests_by_id) - granted_ids) - compatibility_scalar_ids
+    if len(granted_ids) != len(scalar_grants) or ungranted:
         raise CorridorCohortCompilationError(
             "corridor scalar publication does not realize its complete grant"
         )
@@ -2911,6 +2911,7 @@ def compile_corridor_cohort_plan(
         for component in components
     ]
     ordered_grants = tuple(sorted(scalar_grants, key=lambda item: item.variable_id))
+    solve_call_count = sum(len(component.problems) for component in components)
     trace = settlement_trace
     if trace is not None:
         fingerprint = repr(
@@ -2924,7 +2925,7 @@ def compile_corridor_cohort_plan(
                 tuple(
                     (grant.variable_id, grant.coordinate) for grant in ordered_grants
                 ),
-                solve_calls,
+                solve_call_count,
             )
         )
         trace = register_settlement_stage(
@@ -2937,7 +2938,6 @@ def compile_corridor_cohort_plan(
         landings,
         ordered_grants,
         patches,
-        solve_calls,
         trace,
     )
 

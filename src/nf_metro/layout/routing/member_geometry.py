@@ -2567,10 +2567,11 @@ def plan_corridor_cohorts(
 ) -> CorridorCohortPlan:
     """Compile one corridor cohort snapshot into heterogeneous grants.
 
-    Passes complete member and convergence scalar requests to the unified
-    compiler and returns member allocations, exact route patches and convergence
-    scalar grants in one plan. It solves without publishing: the caller decides
-    whether to apply the returned patches, so no geometry moves here.
+    Passes member and convergence scalar requests to
+    :func:`compile_corridor_cohort_plan` and returns member allocations, exact
+    route patches and convergence scalar grants in one plan. It solves without
+    publishing: the caller decides whether to apply the returned patches, so no
+    geometry moves here.
     """
     return compile_corridor_cohort_plan(
         ledger, targets, scalar_requests=scalar_requests
