@@ -16,7 +16,12 @@ import pytest
 
 from nf_metro.api import prepare_graph
 from nf_metro.layout.constants import COORD_TOLERANCE, CURVE_RADIUS, DIAGONAL_RUN
-from nf_metro.layout.route_plan import ConvergenceTrunkAxis, DemandAxis, Direction
+from nf_metro.layout.route_plan import (
+    ConvergenceEndpointRole,
+    ConvergenceTrunkAxis,
+    DemandAxis,
+    Direction,
+)
 from nf_metro.layout.routing import convergences
 from nf_metro.layout.routing.context import _build_routing_context
 from nf_metro.layout.routing.convergences import (
@@ -28,6 +33,8 @@ from nf_metro.layout.routing.core import observe_route_edges
 from nf_metro.layout.routing.corridor_cohort_integration import (
     CorridorCohortCompilationError,
     CorridorCrossingDisposition,
+    CorridorScalarFixedPoint,
+    _validate_control_recipe,
     build_corridor_footprint_witnesses,
 )
 from nf_metro.layout.routing.offsets import compute_station_offsets
@@ -74,6 +81,12 @@ def _requests_for(path_str: str):
     return graph, ctx, execution, targets, requests
 
 
+def _trunk_target_for(targets, request):
+    return next(
+        target for target in targets if target.member_id == request.variable.member_id
+    )
+
+
 def _controlled_points_map(requests):
     return {
         (point.member_id, point.edge_key, point.point_rank, point.axis): (
@@ -108,10 +121,11 @@ def test_adapter_exposes_every_planned_trunk_without_replacing_members() -> None
     eligible = _eligible_plans_by_owner(execution)
 
     assert {request.variable.owner_id for request in requests} == set(eligible)
-    assert len(targets) == len(requests) == len(eligible)
+    assert len(requests) == len(eligible)
     assert len({target.member_id for target in targets}) == len(targets)
-    for target, request in zip(targets, requests, strict=True):
+    for request in requests:
         plan = eligible[request.variable.owner_id]
+        target = _trunk_target_for(targets, request)
         assert target.mutable
         assert target.member_id == request.variable.member_id
         assert target.member_id != plan.primary_trunk_member_id
@@ -127,9 +141,10 @@ def test_every_eligible_trunk_is_a_closed_six_point_skeleton_across_both_corpora
         _graph, _ctx, execution, targets, requests = _requests_for(str(path))
         eligible = _eligible_plans_by_owner(execution)
         assert {request.variable.owner_id for request in requests} == set(eligible)
-        for target, request in zip(targets, requests, strict=True):
+        for request in requests:
             seen_trunks += 1
             plan = eligible[request.variable.owner_id]
+            target = _trunk_target_for(targets, request)
             axis = plan.trunk_axis
             points = target.route.points
             assert len(points) == 6
@@ -152,10 +167,11 @@ def test_left_running_trunk_central_run_is_oriented_against_the_listing() -> Non
     for path in _corpus_paths():
         _graph, _ctx, execution, targets, requests = _requests_for(str(path))
         by_owner = _eligible_plans_by_owner(execution)
-        for target, request in zip(targets, requests, strict=True):
+        for request in requests:
             axis = by_owner[request.variable.owner_id].trunk_axis
             if axis.direction is not Direction.L:
                 continue
+            target = _trunk_target_for(targets, request)
             central_start, central_end = target.route.points[2], target.route.points[3]
             assert central_start[0] > central_end[0]
             return
@@ -257,7 +273,9 @@ def test_non_degenerate_collapsed_flank_run_moves_with_the_trunk() -> None:
         target_endpoint_coordinate=450.0,
     )
     plan, ctx = _synthetic_plan(axis)
-    target, variable, recipe = convergences._convergence_corridor_target(plan, ctx)
+    target, _dependants, variable, recipe = convergences._convergence_corridor_target(
+        plan, ctx
+    )
     witnesses = build_corridor_footprint_witnesses(
         (target,),
         (variable,),
@@ -358,14 +376,16 @@ def test_translating_the_recipe_moves_central_and_pivots_only() -> None:
         str(ROOT / "examples" / "topologies" / "fan_in_merge.mmd")
     )
     by_owner = _eligible_plans_by_owner(execution)
-    for target, request in zip(targets, requests, strict=True):
+    for request in requests:
         axis = by_owner[request.variable.owner_id].trunk_axis
         if _has_collapsed_flank(axis):
             continue
+        target = _trunk_target_for(targets, request)
         points = target.route.points
         controlled = {
             (point.point_rank, point.axis)
             for point in request.control_recipe.controlled_points
+            if point.member_id == request.variable.member_id
         }
         assert controlled == {(2, request.variable.axis), (3, request.variable.axis)}
         moved = _translate(points, controlled, delta)
@@ -388,6 +408,116 @@ def _translate(points, controlled, delta):
                 shifted[axis] += delta
         moved.append(tuple(shifted))
     return moved
+
+
+def test_recipe_controls_every_landing_join_opening_turn_and_continuation_start() -> (
+    None
+):
+    execution, targets, requests = _corridor_fixture()
+    by_owner = _eligible_plans_by_owner(execution)
+    saw_fixed_landing_join = False
+    saw_fixed_feeder_endpoint = False
+    for request in requests:
+        plan = by_owner[request.variable.owner_id]
+        recipe = request.control_recipe
+        variable_id = request.variable.variable_id
+
+        _validate_control_recipe(request, targets)
+
+        named = {point.role_id for point in recipe.controlled_points} | {
+            point.role_id for point in recipe.fixed_points
+        }
+        assert named == convergences._convergence_recipe_role_ids(plan, variable_id)
+        assert len(named) == len(recipe.controlled_points) + len(recipe.fixed_points)
+
+        for landing in plan.landings:
+            assert f"{variable_id}|landing:{landing.member_id}|join" in named
+            if landing.opening_turn_segment is not None:
+                assert f"{variable_id}|landing:{landing.member_id}|opening" in named
+        for continuation in plan.outgoing_continuations:
+            assert f"{variable_id}|continuation:{continuation.member_id}|start" in named
+        for ownership in plan.endpoint_ownership:
+            if ownership.role is ConvergenceEndpointRole.FEEDER:
+                assert f"{variable_id}|feeder:{ownership.member_id}|endpoint" in named
+
+        for role_id in named:
+            pruned = replace(
+                recipe,
+                controlled_points=tuple(
+                    point
+                    for point in recipe.controlled_points
+                    if point.role_id != role_id
+                ),
+                fixed_points=tuple(
+                    point for point in recipe.fixed_points if point.role_id != role_id
+                ),
+            )
+            with pytest.raises(
+                ConvergenceInvariantError, match="incomplete control recipe"
+            ):
+                convergences._validate_convergence_recipe_completeness(
+                    plan, variable_id, pruned
+                )
+
+        extra = replace(
+            recipe,
+            fixed_points=(
+                *recipe.fixed_points,
+                CorridorScalarFixedPoint(
+                    member_id=f"{variable_id}|invented|anchor",
+                    edge_key=(
+                        f"{variable_id}|invented|source",
+                        f"{variable_id}|invented|target",
+                        f"{variable_id}|invented|line",
+                    ),
+                    connector_ids=request.variable.connector_ids,
+                    point_rank=0,
+                    axis=request.variable.axis,
+                    coordinate=recipe.source_coordinate,
+                    role_id=f"{variable_id}|invented",
+                ),
+            ),
+        )
+        with pytest.raises(
+            ConvergenceInvariantError, match="incomplete control recipe"
+        ):
+            convergences._validate_convergence_recipe_completeness(
+                plan, variable_id, extra
+            )
+
+        for fixed in recipe.fixed_points:
+            if fixed.role_id.endswith("|join"):
+                saw_fixed_landing_join = True
+                assert fixed.coordinate != pytest.approx(recipe.source_coordinate)
+            if fixed.role_id.endswith("|endpoint"):
+                saw_fixed_feeder_endpoint = True
+                assert fixed.coordinate != pytest.approx(recipe.source_coordinate)
+
+    assert saw_fixed_landing_join
+    assert saw_fixed_feeder_endpoint
+
+
+def test_recipe_fails_closed_on_a_fixed_point_off_its_target() -> None:
+    _execution, targets, requests = _corridor_fixture()
+    request = next(
+        request for request in requests if request.control_recipe.fixed_points
+    )
+    recipe = request.control_recipe
+    corrupt = recipe.fixed_points[0]
+    broken = replace(
+        request,
+        control_recipe=replace(
+            recipe,
+            fixed_points=tuple(
+                replace(point, coordinate=point.coordinate + 100.0)
+                if point is corrupt
+                else point
+                for point in recipe.fixed_points
+            ),
+        ),
+    )
+    with pytest.raises(CorridorCohortCompilationError, match="invalid fixed point"):
+        _validate_control_recipe(broken, targets)
 
 
 def test_opposite_running_trunks_stay_direction_qualified_and_unbundled() -> None:

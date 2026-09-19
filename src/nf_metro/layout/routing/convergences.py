@@ -88,6 +88,8 @@ from nf_metro.layout.routing.corridor_cohort_integration import (
     CorridorCohortTarget,
     CorridorScalarControlledPoint,
     CorridorScalarControlRecipe,
+    CorridorScalarDirectedRunway,
+    CorridorScalarFixedPoint,
     CorridorScalarOwnerKind,
     CorridorScalarRequest,
     CorridorScalarVariable,
@@ -107,6 +109,7 @@ from nf_metro.layout.settlement_demand import (
 )
 from nf_metro.parser.model import Edge, MetroGraph, Station
 from nf_metro.parser.route_topology import (
+    ConnectorId,
     ResolvedConvergenceView,
     ResolvedEdge,
     semantic_route_id,
@@ -4855,14 +4858,297 @@ def _plan_section_ids(plan: ConvergencePlan, graph: MetroGraph) -> frozenset[str
     )
 
 
+def _on_central_run(point: tuple[float, float], axis: ConvergenceTrunkAxis) -> bool:
+    """Whether *point* stands on the central run the exposed scalar states.
+
+    Membership is read from the axis's own declared central coordinate and
+    longitudinal extent: the central run is the one coordinate the scalar moves,
+    so a dependant either shares that coordinate along the run or it does not.
+    This is a structural membership test against the stated run, not a proximity
+    search over the trunk polyline.
+    """
+    lateral = 1 if axis.axis is DemandAxis.X else 0
+    longitudinal = 1 - lateral
+    low, high = sorted((axis.extent_start, axis.extent_end))
+    return (
+        abs(point[lateral] - axis.coordinate) <= COORD_TOLERANCE
+        and low - COORD_TOLERANCE <= point[longitudinal] <= high + COORD_TOLERANCE
+    )
+
+
+def _skeleton_controlled_point_ranks(axis: ConvergenceTrunkAxis) -> tuple[int, ...]:
+    """Trunk skeleton point ranks the exposed scalar moves.
+
+    The central run is always stated; a flank joins it only where it collapses
+    onto the moving coordinate, otherwise it stays an uncontrolled fixed dogleg.
+    """
+    source_collapsed = (
+        abs(axis.source_flank_coordinate - axis.coordinate) <= COORD_TOLERANCE
+    )
+    target_collapsed = (
+        abs(axis.target_flank_coordinate - axis.coordinate) <= COORD_TOLERANCE
+    )
+    ranks: list[int] = []
+    if source_collapsed:
+        ranks.extend((0, 1))
+    ranks.extend((2, 3))
+    if target_collapsed:
+        ranks.extend((4, 5))
+    return tuple(ranks)
+
+
+def _convergence_dependant_role_slugs(plan: ConvergencePlan) -> Iterator[str]:
+    """Bare role-slug for every dependant one eligible plan's scalar governs.
+
+    The single source for the four dependant slug shapes -- one per landing
+    join, per opening turn present, per continuation start and per feeder
+    ownership endpoint.  The completeness oracle and the recipe builder both
+    consume this in the same order, so a slug rename lands in one place rather
+    than silently desyncing two hand-written copies.
+    """
+    for landing in plan.landings:
+        yield f"landing:{landing.member_id}|join"
+        if landing.opening_turn_segment is not None:
+            yield f"landing:{landing.member_id}|opening"
+    for continuation in plan.outgoing_continuations:
+        yield f"continuation:{continuation.member_id}|start"
+    for ownership in plan.endpoint_ownership:
+        if ownership.role is ConvergenceEndpointRole.FEEDER:
+            yield f"feeder:{ownership.member_id}|endpoint"
+
+
+def _convergence_recipe_role_ids(
+    plan: ConvergencePlan, variable_id: str
+) -> frozenset[str]:
+    """Every control role one eligible plan's complete recipe must name.
+
+    Derived by structural identity -- the trunk skeleton the scalar states plus
+    one role per landing join, per opening turn, per continuation start and per
+    feeder ownership endpoint the setters move -- never by geometry.  This is the
+    completeness oracle: a recipe naming a different set is missing or inventing
+    a dependant.
+    """
+    axis = plan.trunk_axis
+    assert axis is not None
+    roles = {
+        f"{variable_id}|point:{rank}" for rank in _skeleton_controlled_point_ranks(axis)
+    }
+    roles |= {
+        f"{variable_id}|{slug}" for slug in _convergence_dependant_role_slugs(plan)
+    }
+    return frozenset(roles)
+
+
+def _validate_convergence_recipe_completeness(
+    plan: ConvergencePlan,
+    variable_id: str,
+    recipe: CorridorScalarControlRecipe,
+) -> None:
+    """Fail closed unless *recipe* names exactly the plan's dependant roles.
+
+    Completeness is measured against the plan-derived structural enumeration, so
+    a recipe missing one landing join, opening turn, continuation start or feeder
+    endpoint -- or inventing one the plan does not hold -- raises rather than
+    validating a partial recipe.
+    """
+    named = {point.role_id for point in recipe.controlled_points} | {
+        point.role_id for point in recipe.fixed_points
+    }
+    if named != _convergence_recipe_role_ids(plan, variable_id):
+        raise ConvergenceInvariantError(
+            f"planned convergence {plan.id} has an incomplete control recipe"
+        )
+
+
+def _dependant_anchor_target(
+    owner_id: str,
+    variable_id: str,
+    edge: Edge,
+    connector_ids: tuple[ConnectorId, ...],
+    role_slug: str,
+    point: tuple[float, float],
+) -> tuple[CorridorCohortTarget, str, tuple[str, str, str]]:
+    """One immutable single-point target a dependant control role resolves onto.
+
+    The dependant lives on its own synthetic target, never spliced into the
+    trunk route: the trunk skeleton's five segment ranks stay exactly what the
+    scalar states.
+    """
+    member_id = f"{variable_id}|{role_slug}|anchor"
+    edge_key = (
+        f"{member_id}|source",
+        f"{member_id}|target",
+        f"{member_id}|line",
+    )
+    route = RoutedPath(edge, edge.line_id, [point], is_inter_section=True)
+    target = CorridorCohortTarget(
+        member_id,
+        owner_id,
+        edge_key,
+        RouteFamilyId.MERGE_TRUNK,
+        connector_ids,
+        route,
+        False,
+    )
+    return target, member_id, edge_key
+
+
+def _dependant_control_point(
+    owner_id: str,
+    variable_id: str,
+    edge: Edge,
+    connector_ids: tuple[ConnectorId, ...],
+    role_slug: str,
+    point: tuple[float, float],
+    control_axis: int,
+    source_coordinate: float,
+    co_moving: bool,
+) -> tuple[
+    CorridorCohortTarget,
+    CorridorScalarControlledPoint | CorridorScalarFixedPoint,
+    str,
+]:
+    """Build a dependant's anchor target and its controlled or fixed control.
+
+    A dependant sharing the scalar's coordinate co-moves and is controlled by an
+    offset from it; one that keeps its own coordinate is fixed under the scalar
+    and named at that coordinate rather than left invisible.
+    """
+    role_id = f"{variable_id}|{role_slug}"
+    target, member_id, edge_key = _dependant_anchor_target(
+        owner_id, variable_id, edge, connector_ids, role_slug, point
+    )
+    control: CorridorScalarControlledPoint | CorridorScalarFixedPoint
+    if co_moving:
+        control = CorridorScalarControlledPoint(
+            member_id=member_id,
+            edge_key=edge_key,
+            connector_ids=connector_ids,
+            point_rank=0,
+            axis=control_axis,
+            source_offset=point[control_axis] - source_coordinate,
+            role_id=role_id,
+        )
+    else:
+        control = CorridorScalarFixedPoint(
+            member_id=member_id,
+            edge_key=edge_key,
+            connector_ids=connector_ids,
+            point_rank=0,
+            axis=control_axis,
+            coordinate=point[control_axis],
+            role_id=role_id,
+        )
+    return target, control, role_id
+
+
+def _convergence_dependant_recipe(
+    plan: ConvergencePlan,
+    variable_id: str,
+    edge: Edge,
+    connector_ids: tuple[ConnectorId, ...],
+    curve_radius: float,
+) -> tuple[
+    tuple[CorridorScalarControlledPoint, ...],
+    tuple[CorridorScalarFixedPoint, ...],
+    tuple[CorridorScalarDirectedRunway, ...],
+    tuple[CorridorCohortTarget, ...],
+]:
+    """Name every per-element dependant one eligible plan's scalar governs.
+
+    Each landing join, continuation start and feeder endpoint relates to the
+    scalar on its lateral coordinate; each opening turn keeps its own column,
+    which the central scalar never moves, so it is always fixed.  Every landing
+    carries its approach runway as a directed feasibility invariant anchored on
+    the feeder's own fixed turn, rather than a re-derived length.
+    """
+    axis = plan.trunk_axis
+    assert axis is not None
+    lateral = 1 if axis.axis is DemandAxis.X else 0
+    longitudinal = 1 - lateral
+    source_coordinate = axis.coordinate
+    plan_owner_id = str(plan.id)
+
+    controlled: list[CorridorScalarControlledPoint] = []
+    fixed: list[CorridorScalarFixedPoint] = []
+    runways: list[CorridorScalarDirectedRunway] = []
+    targets: list[CorridorCohortTarget] = []
+
+    def add(role_slug: str, point: tuple[float, float], control_axis: int) -> str:
+        co_moving = control_axis == lateral and _on_central_run(point, axis)
+        target, control, role_id = _dependant_control_point(
+            plan_owner_id,
+            variable_id,
+            edge,
+            connector_ids,
+            role_slug,
+            point,
+            control_axis,
+            source_coordinate,
+            co_moving,
+        )
+        targets.append(target)
+        if isinstance(control, CorridorScalarControlledPoint):
+            controlled.append(control)
+        else:
+            fixed.append(control)
+        return role_id
+
+    role_slugs = _convergence_dependant_role_slugs(plan)
+    for landing in plan.landings:
+        join_role = add(next(role_slugs), landing.join_point, lateral)
+        if landing.opening_turn_segment is not None:
+            assert landing.opening_turn_coordinate is not None
+            opening_point = (
+                (landing.opening_turn_coordinate, landing.join_point[1])
+                if axis.axis is DemandAxis.X
+                else (landing.join_point[0], landing.opening_turn_coordinate)
+            )
+            add(next(role_slugs), opening_point, longitudinal)
+        approach_index = landing.approach_axis.point_index
+        direction_sign = int(landing.approach_direction.sign)
+        anchor_coordinate = (
+            landing.join_point[approach_index] - landing.minimum_runway * direction_sign
+        )
+        anchor_member = f"{variable_id}|landing:{landing.member_id}|join|anchor"
+        runways.append(
+            CorridorScalarDirectedRunway(
+                owner_id=plan_owner_id,
+                member_id=anchor_member,
+                edge_key=(
+                    f"{anchor_member}|source",
+                    f"{anchor_member}|target",
+                    f"{anchor_member}|line",
+                ),
+                controlled_role_id=join_role,
+                axis=approach_index,
+                direction_sign=direction_sign,
+                minimum_distance=curve_radius,
+                anchor_coordinate=anchor_coordinate,
+            )
+        )
+    for continuation in plan.outgoing_continuations:
+        add(next(role_slugs), continuation.start_point, lateral)
+    for ownership in plan.endpoint_ownership:
+        if ownership.role is ConvergenceEndpointRole.FEEDER:
+            add(next(role_slugs), ownership.endpoint, lateral)
+
+    return tuple(controlled), tuple(fixed), tuple(runways), tuple(targets)
+
+
 def _convergence_corridor_target(
     plan: ConvergencePlan,
     ctx: _RoutingCtx,
 ) -> (
-    tuple[CorridorCohortTarget, CorridorScalarVariable, CorridorScalarControlRecipe]
+    tuple[
+        CorridorCohortTarget,
+        tuple[CorridorCohortTarget, ...],
+        CorridorScalarVariable,
+        CorridorScalarControlRecipe,
+    ]
     | None
 ):
-    """Expose one plan-owned trunk skeleton as one scalar corridor variable.
+    """Expose one plan-owned trunk skeleton and its dependants as one variable.
 
     The scalar variable states the central run; its two endpoints, named in the
     control recipe, are the pivots the flank connectors turn on.  A flank
@@ -4870,6 +5156,12 @@ def _convergence_corridor_target(
     run stands on the moving coordinate: its endpoints join the recipe too, so it
     moves with the trunk rather than standing on the coordinate uncontrolled.  A
     flank that keeps its own coordinate stays an uncontrolled, immutable dogleg.
+
+    The recipe also names every per-element dependant the setters move -- each
+    landing join, opening turn, continuation start and feeder endpoint -- as a
+    controlled point where it shares the scalar's coordinate or a fixed point
+    where it keeps its own, each resolving onto its own immutable single-point
+    target rather than a vertex spliced into the trunk route.
     """
     axis = plan.trunk_axis
     if axis is None or plan.primary_trunk_member_id is None:
@@ -4905,13 +5197,7 @@ def _convergence_corridor_target(
     target_collapsed = (
         abs(axis.target_flank_coordinate - axis.coordinate) <= COORD_TOLERANCE
     )
-    controlled_point_ranks: list[int] = []
-    if source_collapsed:
-        controlled_point_ranks.extend((0, 1))
-    controlled_point_ranks.extend((2, 3))
-    if target_collapsed:
-        controlled_point_ranks.extend((4, 5))
-    controlled_points = tuple(
+    skeleton_points = tuple(
         CorridorScalarControlledPoint(
             member_id=member_id,
             edge_key=target_edge_key,
@@ -4921,13 +5207,24 @@ def _convergence_corridor_target(
             source_offset=0.0,
             role_id=f"{variable_id}|point:{point_rank}",
         )
-        for point_rank in controlled_point_ranks
+        for point_rank in _skeleton_controlled_point_ranks(axis)
+    )
+    (
+        dependant_controlled,
+        dependant_fixed,
+        dependant_runways,
+        dependant_targets,
+    ) = _convergence_dependant_recipe(
+        plan, variable_id, edge, ownership.connector_ids, ctx.curve_radius
     )
     recipe = CorridorScalarControlRecipe(
         owner_id=owner_id,
         source_coordinate=axis.coordinate,
-        controlled_points=controlled_points,
+        controlled_points=(*skeleton_points, *dependant_controlled),
+        fixed_points=dependant_fixed,
+        directed_runways=dependant_runways,
     )
+    _validate_convergence_recipe_completeness(plan, variable_id, recipe)
     legal_crossings = {_TRUNK_SKELETON_CENTRAL_RANK, *_TRUNK_SKELETON_CONNECTOR_RANKS}
     if source_collapsed:
         legal_crossings.add(_TRUNK_SKELETON_SOURCE_FLANK_RANK)
@@ -4954,7 +5251,7 @@ def _convergence_corridor_target(
         axis=coordinate_axis,
         coordinate=axis.coordinate,
     )
-    return target, variable, recipe
+    return target, dependant_targets, variable, recipe
 
 
 def _convergence_corridor_preference(
@@ -5040,11 +5337,12 @@ def convergence_corridor_requests(
             raise ConvergenceInvariantError(
                 f"planned convergence {plan.id} has an incomplete trunk identity"
             )
-        target, variable, recipe = exposed
+        target, dependant_targets, variable, recipe = exposed
         preferred_coordinate, domain = _convergence_corridor_preference(
             plan, graph, variable.variable_id
         )
         targets.append(target)
+        targets.extend(dependant_targets)
         requests.append(
             CorridorScalarRequest(
                 variable,
