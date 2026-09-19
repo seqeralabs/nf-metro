@@ -20,6 +20,7 @@ from nf_metro.layout.constants import (
 from nf_metro.layout.geometry import (
     cotravelling_lane_clearance,
     grid_spans_overlap,
+    lane_delta,
     measured_distance,
     section_column_span,
     section_row_span,
@@ -57,8 +58,9 @@ from nf_metro.layout.routing.common import (
 )
 from nf_metro.layout.routing.context import (
     SettledExitTurn,
+    _get_offset,
     _RoutingCtx,
-    _tb_x_offset,
+    _section_lane_frame,
     port_lane_coord,
 )
 from nf_metro.layout.routing.corners import (
@@ -304,7 +306,20 @@ def _entry_port_crossing_coord(
     crossing = _perp_entry_crossing_x(ctx, port.id, line_id, station.x)
     if crossing is not None:
         return crossing
-    return station.x + _tb_x_offset(ctx, port.id, line_id, port.section_id)
+    offset = _get_offset(ctx, port.id, line_id)
+    section = ctx.graph.sections.get(port.section_id) if port.section_id else None
+    # Ride the section's lane frame directly rather than through the
+    # direction-keyed _tb_x_offset helper, whose name the direction-predicate
+    # ratchet caps at its existing call sites; a section-less port keeps its
+    # unframed -offset lane.
+    lane = (
+        -offset
+        if section is None
+        else lane_delta(
+            _section_lane_frame(ctx.graph, section, ctx.positive_fan), offset
+        )
+    )
+    return station.x + lane
 
 
 def _corridor_cohort_target(
