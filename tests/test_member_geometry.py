@@ -24,7 +24,11 @@ from nf_metro.layout.route_plan import (
     build_route_semantic_scaffold,
     serialize_route_plan,
 )
-from nf_metro.layout.route_reservations import ColumnGapRegion, CorridorOrientation
+from nf_metro.layout.route_reservations import (
+    ColumnGapRegion,
+    CorridorOrientation,
+    RowGapRegion,
+)
 from nf_metro.layout.routing.common import Direction, GapSlot, OffsetRegime, RoutedPath
 from nf_metro.layout.routing.context import _build_routing_context
 from nf_metro.layout.routing.convergences import convergence_corridor_requests
@@ -1191,58 +1195,102 @@ def test_covered_convergence_member_needs_no_emitted_geometry_owner() -> None:
 # --- Corridor cohort aperture-requirement producer (unwired) ---
 
 
-def _column_aperture_scenario(
+def _aperture_scenario(
     *,
     claim_edge_key: tuple[str, str, str],
     obstacle_edge_key: tuple[str, str, str],
+    axis: SettlementAxis = SettlementAxis.COLUMN,
 ) -> tuple[
     MetroGraph,
     member_geometry.CorridorCohortLedger,
     tuple[member_geometry.CorridorCohortTarget, ...],
     member_geometry.CorridorCohortCompilationError,
 ]:
-    """A left/right section pair with one claim failing 20px short of clearing.
+    """A negative/positive section pair with one claim 20px short of clearing.
 
-    ``s_left`` (column 0) and ``s_right`` (column 1) sit 20px apart. The
-    claim's and obstacle's local hops each name one real station in
-    *claim_edge_key*/*obstacle_edge_key* and one synthetic junction with no
-    section at all, so the caller controls which end of each hop is the
-    station a section resolves from without touching any ``Direction``.
+    ``left-anchor`` lives in the negative-side section and ``right-anchor`` in
+    the positive-side one; ``junction-a``/``junction-b`` carry no section. The
+    caller names them across *claim_edge_key*/*obstacle_edge_key* to control
+    which end of each hop is the station a section resolves from, without
+    touching any ``Direction``. On the COLUMN axis the pair straddles the
+    column-1/2 boundary (``s_left``/``s_right``, 20px apart horizontally); on
+    the ROW axis it straddles the row-0/1 boundary (``s_top``/``s_bottom``,
+    20px apart vertically).
     """
+    if axis is SettlementAxis.COLUMN:
+        negative_id, positive_id = "s_left", "s_right"
+        negative_section = Section(
+            negative_id,
+            "Left",
+            grid_col=0,
+            grid_col_span=1,
+            grid_row=0,
+            grid_row_span=1,
+            bbox_x=0.0,
+            bbox_w=100.0,
+            bbox_y=0.0,
+            bbox_h=50.0,
+        )
+        positive_section = Section(
+            positive_id,
+            "Right",
+            grid_col=1,
+            grid_col_span=1,
+            grid_row=0,
+            grid_row_span=1,
+            bbox_x=120.0,
+            bbox_w=100.0,
+            bbox_y=0.0,
+            bbox_h=50.0,
+        )
+        region: ColumnGapRegion | RowGapRegion = ColumnGapRegion(0, 1)
+        orientation = CorridorOrientation.VERTICAL
+        direction = Direction.R
+        shortfall_axis = 0
+    else:
+        negative_id, positive_id = "s_top", "s_bottom"
+        negative_section = Section(
+            negative_id,
+            "Top",
+            grid_col=0,
+            grid_col_span=1,
+            grid_row=0,
+            grid_row_span=1,
+            bbox_x=0.0,
+            bbox_w=100.0,
+            bbox_y=0.0,
+            bbox_h=50.0,
+        )
+        positive_section = Section(
+            positive_id,
+            "Bottom",
+            grid_col=0,
+            grid_col_span=1,
+            grid_row=1,
+            grid_row_span=1,
+            bbox_x=0.0,
+            bbox_w=100.0,
+            bbox_y=120.0,
+            bbox_h=50.0,
+        )
+        region = RowGapRegion(0, 1)
+        orientation = CorridorOrientation.HORIZONTAL
+        direction = Direction.D
+        shortfall_axis = 1
     graph = MetroGraph(
         stations={
-            "left-anchor": Station("left-anchor", "Left Anchor", section_id="s_left"),
+            "left-anchor": Station(
+                "left-anchor", "Negative Anchor", section_id=negative_id
+            ),
             "right-anchor": Station(
-                "right-anchor", "Right Anchor", section_id="s_right"
+                "right-anchor", "Positive Anchor", section_id=positive_id
             ),
             "junction-a": Station("junction-a", "Junction A"),
             "junction-b": Station("junction-b", "Junction B"),
         },
         sections={
-            "s_left": Section(
-                "s_left",
-                "Left",
-                grid_col=0,
-                grid_col_span=1,
-                grid_row=0,
-                grid_row_span=1,
-                bbox_x=0.0,
-                bbox_w=100.0,
-                bbox_y=0.0,
-                bbox_h=50.0,
-            ),
-            "s_right": Section(
-                "s_right",
-                "Right",
-                grid_col=1,
-                grid_col_span=1,
-                grid_row=0,
-                grid_row_span=1,
-                bbox_x=120.0,
-                bbox_w=100.0,
-                bbox_y=0.0,
-                bbox_h=50.0,
-            ),
+            negative_id: negative_section,
+            positive_id: positive_section,
         },
     )
     claim = CorridorCohortLedgerClaim(
@@ -1250,9 +1298,9 @@ def _column_aperture_scenario(
         reservation_id="reservation-a",
         reservation_rank=0,
         claim_rank=0,
-        region=ColumnGapRegion(0, 1),
-        orientation=CorridorOrientation.VERTICAL,
-        direction=Direction.R,
+        region=region,
+        orientation=orientation,
+        direction=direction,
         lane_rank=0,
         member_id="member-a",
         member_geometry_plan_id="plan:member-a",
@@ -1291,7 +1339,7 @@ def _column_aperture_scenario(
         claim_ids=("claim-a",),
         blocking_obstacle_ids=("obstacle-a",),
         deficit=20.0,
-        axis=0,
+        axis=shortfall_axis,
         required_shift_sign=1,
     )
     failure = CorridorCohortFailure(
@@ -1318,7 +1366,7 @@ def _column_aperture_scenario(
 
 
 def test_corridor_cohort_aperture_requirements_builds_one_typed_requirement() -> None:
-    graph, ledger, targets, error = _column_aperture_scenario(
+    graph, ledger, targets, error = _aperture_scenario(
         claim_edge_key=("junction-a", "left-anchor", "line"),
         obstacle_edge_key=("right-anchor", "junction-b", "line"),
     )
@@ -1335,39 +1383,90 @@ def test_corridor_cohort_aperture_requirements_builds_one_typed_requirement() ->
     assert requirement.kind is BoundaryClearanceRequirementKind.CORRIDOR_COHORT_APERTURE
 
 
-def test_corridor_cohort_aperture_boundary_ignores_source_or_target_role() -> None:
-    """Boundary side comes from grid position alone, not from which end of a
-    claim's or an obstacle's local hop happens to be its source or its target.
+def test_corridor_cohort_aperture_requirements_builds_row_axis_requirement() -> None:
+    """A row-gap corridor produces a ROW-axis requirement off vertical edges.
 
-    Swapping source and target on both hops -- so the station carrying a
-    section moves from the target side to the source side and back -- must
-    not move which section counts as negative or positive: a boundary
-    selector reading an authored connector's fixed source/target roles would
-    fail this the moment the roles are the ones it did not expect.
+    ``s_top`` (row 0) and ``s_bottom`` (row 1) sit 70px apart vertically. The
+    requirement's aperture is measured from the top section's bottom edge to
+    the bottom section's top edge plus the shortfall, exercising the row-axis
+    edge computation that the column-axis fixtures never reach.
     """
-    forward_graph, forward_ledger, forward_targets, forward_error = (
-        _column_aperture_scenario(
-            claim_edge_key=("junction-a", "left-anchor", "line"),
-            obstacle_edge_key=("right-anchor", "junction-b", "line"),
-        )
+    graph, ledger, targets, error = _aperture_scenario(
+        claim_edge_key=("junction-a", "left-anchor", "line"),
+        obstacle_edge_key=("right-anchor", "junction-b", "line"),
+        axis=SettlementAxis.ROW,
     )
-    swapped_graph, swapped_ledger, swapped_targets, swapped_error = (
-        _column_aperture_scenario(
-            claim_edge_key=("left-anchor", "junction-a", "line"),
-            obstacle_edge_key=("junction-b", "right-anchor", "line"),
-        )
+
+    (requirement,) = member_geometry._corridor_cohort_aperture_requirements(
+        graph, ledger, targets, (), error
+    )
+
+    assert requirement.axis is SettlementAxis.ROW
+    assert requirement.boundary == 1
+    assert requirement.required == pytest.approx(90.0)
+    assert requirement.negative_section_ids == ("s_top",)
+    assert requirement.positive_section_ids == ("s_bottom",)
+    assert requirement.kind is BoundaryClearanceRequirementKind.CORRIDOR_COHORT_APERTURE
+
+
+def test_corridor_cohort_aperture_derives_positive_side_from_grid() -> None:
+    """When only the negative side is touched locally, the positive side is
+    recovered by grid position from the graph, not left unmapped.
+
+    The claim's hop touches ``s_left`` (the negative side); the obstacle's hop
+    touches only section-less junctions, so ``s_right`` is present in neither
+    pool. The graph-wide search must find it by column index and cross-axis
+    overlap, exercising the ``negative and not positive`` derivation that the
+    corpus fixtures reach only in its mirror direction.
+    """
+    graph, ledger, targets, error = _aperture_scenario(
+        claim_edge_key=("junction-a", "left-anchor", "line"),
+        obstacle_edge_key=("junction-b", "junction-a", "line"),
+    )
+
+    (requirement,) = member_geometry._corridor_cohort_aperture_requirements(
+        graph, ledger, targets, (), error
+    )
+
+    assert requirement.axis is SettlementAxis.COLUMN
+    assert requirement.negative_section_ids == ("s_left",)
+    assert requirement.positive_section_ids == ("s_right",)
+    assert requirement.required == pytest.approx(40.0)
+
+
+def test_corridor_cohort_aperture_boundary_ignores_source_or_target_role() -> None:
+    """Boundary side comes from grid position alone, never from which pool a
+    section arrived through or which end of a hop happens to carry it.
+
+    The *crossed* scenario is the discriminating one: the claim's hop touches
+    the positive-side section (``s_right``) and the obstacle's hop touches the
+    negative-side one (``s_left``), and both real stations sit at the *source*
+    end of their hop. A reader that classifies by pool role (claim -> negative,
+    obstacle -> positive) buckets both sections onto the wrong side and finds
+    no facing pair; a reader that consults only the target end of each hop
+    sees two section-less junctions and finds nothing at all. Only a reader
+    that classifies both hops' stations by grid position recovers the same
+    ``s_left``/``s_right`` split the role-neutral *forward* scenario produces.
+    """
+    forward_graph, forward_ledger, forward_targets, forward_error = _aperture_scenario(
+        claim_edge_key=("junction-a", "left-anchor", "line"),
+        obstacle_edge_key=("right-anchor", "junction-b", "line"),
+    )
+    crossed_graph, crossed_ledger, crossed_targets, crossed_error = _aperture_scenario(
+        claim_edge_key=("right-anchor", "junction-a", "line"),
+        obstacle_edge_key=("left-anchor", "junction-b", "line"),
     )
 
     (forward,) = member_geometry._corridor_cohort_aperture_requirements(
         forward_graph, forward_ledger, forward_targets, (), forward_error
     )
-    (swapped,) = member_geometry._corridor_cohort_aperture_requirements(
-        swapped_graph, swapped_ledger, swapped_targets, (), swapped_error
+    (crossed,) = member_geometry._corridor_cohort_aperture_requirements(
+        crossed_graph, crossed_ledger, crossed_targets, (), crossed_error
     )
 
-    assert swapped.negative_section_ids == forward.negative_section_ids == ("s_left",)
-    assert swapped.positive_section_ids == forward.positive_section_ids == ("s_right",)
-    assert swapped.required == forward.required == pytest.approx(40.0)
+    assert crossed.negative_section_ids == forward.negative_section_ids == ("s_left",)
+    assert crossed.positive_section_ids == forward.positive_section_ids == ("s_right",)
+    assert crossed.required == forward.required == pytest.approx(40.0)
 
 
 def test_corridor_cohort_aperture_requirements_refuses_undirected_shortfall() -> None:
@@ -1378,7 +1477,7 @@ def test_corridor_cohort_aperture_requirements_refuses_undirected_shortfall() ->
     copy of the guard directly to prove it holds independently of that
     earlier check.
     """
-    graph, ledger, targets, error = _column_aperture_scenario(
+    graph, ledger, targets, error = _aperture_scenario(
         claim_edge_key=("junction-a", "left-anchor", "line"),
         obstacle_edge_key=("right-anchor", "junction-b", "line"),
     )
@@ -1392,6 +1491,37 @@ def test_corridor_cohort_aperture_requirements_refuses_undirected_shortfall() ->
     with pytest.raises(CorridorCohortCompilationError, match="directed boundary side"):
         member_geometry._corridor_cohort_aperture_requirements(
             graph, ledger, targets, (), undirected_error
+        )
+
+
+def test_corridor_cohort_aperture_fails_closed_on_integrity_violation() -> None:
+    """A corrupt failure raises even when a healthy sibling resolves.
+
+    A batch of two failures -- one well-formed and resolvable, one whose
+    blocking obstacle names connectors that disagree with its live route
+    target -- must fail closed on the corrupt one rather than silently
+    returning the healthy sibling's single requirement. Skipping an
+    integrity-violating failure the moment any sibling resolves would hide a
+    real defect behind a clean-looking result.
+    """
+    graph, ledger, targets, error = _aperture_scenario(
+        claim_edge_key=("junction-a", "left-anchor", "line"),
+        obstacle_edge_key=("right-anchor", "junction-b", "line"),
+    )
+    (healthy,) = error.failures
+    corrupt_obstacle = replace(
+        healthy.blocking_obstacles[0], connector_ids=("connector-bogus",)
+    )
+    corrupt = replace(
+        healthy,
+        component_id="corridor-component|corrupt",
+        blocking_obstacles=(corrupt_obstacle,),
+    )
+    mixed = CorridorCohortCompilationError("synthetic mixed batch", (healthy, corrupt))
+
+    with pytest.raises(CorridorCohortCompilationError, match="current route target"):
+        member_geometry._corridor_cohort_aperture_requirements(
+            graph, ledger, targets, (), mixed
         )
 
 
@@ -1484,10 +1614,12 @@ def test_corridor_cohort_aperture_requirements_resolves_packed_cell_conflict() -
     typed aperture requirement, with no planning wiring in the call chain.
 
     ``packed_cell_right_exit_left_entry_wrap.mmd`` has two feeders converging
-    on ``qc``'s left entry 1px short of clearing the packed ``prep``/``assemble``
+    on ``qc``'s left entry short of clearing the packed ``prep``/``assemble``
     cell they cross from; the producer chain, called directly on this
     fixture's real ledger and candidate population, must resolve that
-    shortfall to the boundary between them rather than refusing it.
+    shortfall to the boundary between them rather than refusing it. Only
+    ``assemble`` borders that boundary -- ``prep`` sits entirely behind it in
+    the same grid cell -- so it alone names the negative side.
     """
     path = (
         ROOT / "examples" / "topologies" / "packed_cell_right_exit_left_entry_wrap.mmd"
@@ -1517,7 +1649,7 @@ def test_corridor_cohort_aperture_requirements_resolves_packed_cell_conflict() -
     assert requirement.axis is SettlementAxis.COLUMN
     assert requirement.boundary == 2
     assert requirement.required == pytest.approx(55.0)
-    assert requirement.negative_section_ids == ("assemble", "prep")
+    assert requirement.negative_section_ids == ("assemble",)
     assert requirement.positive_section_ids == ("qc",)
     assert requirement.kind is BoundaryClearanceRequirementKind.CORRIDOR_COHORT_APERTURE
 

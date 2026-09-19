@@ -398,6 +398,8 @@ def _corridor_boundary_sections(
         span_attr = "grid_col_span"
         cross_start_attr = "grid_row"
         cross_span_attr = "grid_row_span"
+        bbox_start_attr = "bbox_x"
+        bbox_size_attr = "bbox_w"
         negative_index = region.left_column
         positive_index = region.right_column
         axis_name = "column"
@@ -406,6 +408,8 @@ def _corridor_boundary_sections(
         span_attr = "grid_row_span"
         cross_start_attr = "grid_col"
         cross_span_attr = "grid_col_span"
+        bbox_start_attr = "bbox_y"
+        bbox_size_attr = "bbox_h"
         negative_index = region.upper_row
         positive_index = region.lower_row
         axis_name = "row"
@@ -426,6 +430,48 @@ def _corridor_boundary_sections(
         return cross_start(left) < cross_start(right) + cross_span(
             right
         ) and cross_start(right) < cross_start(left) + cross_span(left)
+
+    def gap_facing(section: Section) -> float:
+        return float(getattr(section, bbox_start_attr)) + float(
+            getattr(section, bbox_size_attr)
+        )
+
+    def near_gap(section: Section) -> float:
+        return float(getattr(section, bbox_start_attr))
+
+    def cross_contains(outer: Section, inner: Section) -> bool:
+        return cross_start(outer) <= cross_start(inner) and cross_start(
+            outer
+        ) + cross_span(outer) >= cross_start(inner) + cross_span(inner)
+
+    def only_bordering(
+        sections: tuple[Section, ...],
+        facing: Callable[[Section], float],
+        *,
+        nearer_is_greater: bool,
+    ) -> tuple[Section, ...]:
+        """Drop any section fully shadowed from the gap by a nearer same-side one.
+
+        A section is dropped when another same-side candidate spans across it
+        in the cross axis and sits strictly nearer the gap: the shadowed
+        section then lies wholly behind that neighbour and touches the
+        boundary nowhere, so listing it is a false attribution. The nearest
+        section is never shadowed, so a non-empty side stays non-empty.
+        """
+
+        def shadowed(section: Section) -> bool:
+            return any(
+                other is not section
+                and cross_contains(other, section)
+                and (
+                    facing(other) > facing(section)
+                    if nearer_is_greater
+                    else facing(other) < facing(section)
+                )
+                for other in sections
+            )
+
+        return tuple(section for section in sections if not shadowed(section))
 
     candidates = {
         section.id: section for section in (*claim_sections, *blocker_sections)
@@ -456,6 +502,12 @@ def _corridor_boundary_sections(
         raise ValueError(
             f"clearance boundary has no facing section pair on the {axis_name} axis"
         )
+    negative_sections = only_bordering(
+        negative_sections, gap_facing, nearer_is_greater=True
+    )
+    positive_sections = only_bordering(
+        positive_sections, near_gap, nearer_is_greater=False
+    )
     return negative_sections, positive_sections
 
 
@@ -480,7 +532,25 @@ def _local_section_ids(
 
 
 class _UnresolvedAperture(Exception):
-    """One failure's clearance shortfall could not be mapped to a requirement."""
+    """One failure is not an aperture candidate and is skipped, not fatal.
+
+    Raised for a consistent failure that simply has no aperture to request --
+    no clearance shortfall at all, or a well-formed shortfall with no facing
+    section pair to map to an adjacent grid boundary. These are collected and
+    skipped per-failure so one sibling's silence never voids another's demand.
+    """
+
+
+class _ApertureIntegrityError(Exception):
+    """One failure's shortfall is internally inconsistent; the batch fails closed.
+
+    Raised for a shortfall whose own data contradicts itself -- an unknown
+    claim, an undirected boundary side, a solver/boundary axis disagreement,
+    or a blocker whose typed provenance does not match its live route target.
+    These are the conditions ``resolved_shortfall`` guards before a failure is
+    even recorded, so hitting one here means the batch must raise even when a
+    sibling resolves; silently discarding it would hide a real defect.
+    """
 
 
 def _corridor_cohort_aperture_requirements(
@@ -493,10 +563,14 @@ def _corridor_cohort_aperture_requirements(
     """Map every resolvable failure to its own typed requirement, independently.
 
     Each entry in ``error.failures`` is a separate corridor component that
-    failed to allocate; one lacking a usable shortfall says nothing about
-    whether its siblings do, so an unresolvable failure is skipped rather than
-    voiding every requirement the batch could otherwise produce. Only a batch
-    where nothing resolves at all raises.
+    failed to allocate; one that is simply not an aperture candidate
+    (``_UnresolvedAperture``) says nothing about whether its siblings are, so
+    it is skipped rather than voiding every requirement the batch could
+    otherwise produce, and a batch where nothing resolves at all raises.
+
+    An internally inconsistent shortfall (``_ApertureIntegrityError``) is a
+    different matter: it raises immediately, even when a sibling in the same
+    batch resolves, so a corrupt failure is never masked by a healthy one.
     """
     claims_by_id = {claim.claim_id: claim for claim in ledger.claims}
     scalar_requests_by_id = {
@@ -516,7 +590,7 @@ def _corridor_cohort_aperture_requirements(
                 "allocation failure has no typed clearance shortfall"
             )
         if shortfall.required_shift_sign not in (-1, 1):
-            raise _UnresolvedAperture(
+            raise _ApertureIntegrityError(
                 "clearance shortfall has no directed boundary side"
             )
         claims = tuple(
@@ -530,7 +604,7 @@ def _corridor_cohort_aperture_requirements(
             if claim_id in scalar_requests_by_id
         )
         if len(claims) + len(scalar_claims) != len(shortfall.claim_ids):
-            raise _UnresolvedAperture("clearance shortfall names an unknown claim")
+            raise _ApertureIntegrityError("clearance shortfall names an unknown claim")
         regions = {claim.region for claim in claims}
         for request in scalar_claims:
             request_region = request.region
@@ -557,7 +631,7 @@ def _corridor_cohort_aperture_requirements(
                 "clearance claim is not on an adjacent grid boundary"
             )
         if shortfall.axis != expected_axis:
-            raise _UnresolvedAperture("solver axis and corridor boundary disagree")
+            raise _ApertureIntegrityError("solver axis and corridor boundary disagree")
 
         claim_section_ids: set[str] = set()
         for claim in claims:
@@ -571,12 +645,12 @@ def _corridor_cohort_aperture_requirements(
             item.obstacle_id: item for item in failure.blocking_obstacles
         }
         if set(typed_obstacles) != set(shortfall.blocking_obstacle_ids):
-            raise _UnresolvedAperture("active blockers lack exact typed provenance")
+            raise _ApertureIntegrityError("active blockers lack exact typed provenance")
         blocker_section_ids: set[str] = set()
         for obstacle in typed_obstacles.values():
             target = targets_by_key.get((obstacle.member_id, obstacle.edge_key))
             if target is None or target.connector_ids != obstacle.connector_ids:
-                raise _UnresolvedAperture(
+                raise _ApertureIntegrityError(
                     "active blocker does not match its current route target"
                 )
             blocker_section_ids |= _local_section_ids(graph, obstacle.edge_key)
@@ -620,6 +694,12 @@ def _corridor_cohort_aperture_requirements(
     for failure in error.failures:
         try:
             requirement = resolve(failure)
+        except _ApertureIntegrityError as integrity:
+            raise CorridorCohortCompilationError(
+                f"{error}; corridor aperture handoff hit an integrity violation on "
+                f"{failure.component_id}/result:{failure.result_rank}: {integrity}",
+                error.failures,
+            ) from integrity
         except _UnresolvedAperture as unresolved:
             skip_reasons.append(
                 f"{failure.component_id}/result:{failure.result_rank}: {unresolved}"
