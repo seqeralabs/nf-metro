@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
@@ -60,6 +61,7 @@ from nf_metro.layout.route_plan import (
     reservation_decision_refs,
     turn_handedness,
 )
+from nf_metro.layout.route_reservations import ColumnGapRegion, RowGapRegion
 from nf_metro.layout.routing.centrelines import gather_member_edges
 from nf_metro.layout.routing.common import (
     Direction,
@@ -82,13 +84,23 @@ from nf_metro.layout.routing.context import (
     _resolve_section_colrow,
     _RoutingCtx,
 )
+from nf_metro.layout.routing.corridor_cohort_integration import (
+    CorridorCohortTarget,
+    CorridorScalarControlledPoint,
+    CorridorScalarControlRecipe,
+    CorridorScalarOwnerKind,
+    CorridorScalarRequest,
+    CorridorScalarVariable,
+)
+from nf_metro.layout.routing.corridor_cohorts import CorridorCoordinateDomain
+from nf_metro.layout.routing.families import RouteFamilyId
 from nf_metro.layout.routing.member_geometry import (
     MemberGeometryExecution,
     PreliminaryGapChannelClaim,
     empty_member_geometry_execution,
 )
 from nf_metro.layout.routing.orientation import direction_axis, lateral_axis
-from nf_metro.layout.routing.reserved_bands import ReservedBand
+from nf_metro.layout.routing.reserved_bands import ReservedBand, corridor_clearance_band
 from nf_metro.layout.settlement_demand import (
     BoundaryClearanceRequirement,
     SettlementAxis,
@@ -4795,6 +4807,254 @@ def _trunk_segment_ranks(
         for rank, segment in enumerate(zip(route.points, route.points[1:]))
         if any(_segments_overlap(segment, item) for item in planned)
     )
+
+
+# A trunk skeleton is one connected polyline of six points -- five runs --
+# travelled from the source member's endpoint to the target member's: the source
+# flank run, the source connector, the central run the axis states, the target
+# connector, and the target flank run.  ``_trunk_segments`` lists the central run
+# low-to-high whatever the travel direction, so an L- or U-running trunk's
+# central run is reversed here before it can close the chain.
+_TRUNK_SKELETON_SOURCE_FLANK_RANK = 0
+_TRUNK_SKELETON_CENTRAL_RANK = 2
+_TRUNK_SKELETON_TARGET_FLANK_RANK = 4
+_TRUNK_SKELETON_CONNECTOR_RANKS = (1, 3)
+
+
+def _trunk_skeleton_travel_points(
+    axis: ConvergenceTrunkAxis,
+) -> list[tuple[float, float]]:
+    """*axis*'s complete trunk skeleton as one connected travel-order polyline."""
+    central = _trunk_segments(axis)[0]
+    if axis.direction in {Direction.L, Direction.U}:
+        central = (central[1], central[0])
+    runs = (
+        _trunk_run_in_travel_order(axis, 2),
+        _trunk_run_in_travel_order(axis, 1),
+        central,
+        _trunk_run_in_travel_order(axis, 3),
+        _trunk_run_in_travel_order(axis, 4),
+    )
+    points = [runs[0][0]]
+    for run in runs:
+        if not _points_coincide(points[-1], run[0]):
+            raise ConvergenceInvariantError(
+                "convergence trunk skeleton polyline does not close"
+            )
+        points.append(run[1])
+    return points
+
+
+def _plan_section_ids(plan: ConvergencePlan, graph: MetroGraph) -> frozenset[str]:
+    """The sections *plan*'s members start in, end in, or pass a port of."""
+    return frozenset(
+        section_id
+        for edge in plan.resolved_member_edges
+        for endpoint in (edge.source, edge.target)
+        if (section_id := graph.section_for_station(endpoint)) is not None
+    )
+
+
+def _convergence_corridor_target(
+    plan: ConvergencePlan,
+    ctx: _RoutingCtx,
+) -> (
+    tuple[CorridorCohortTarget, CorridorScalarVariable, CorridorScalarControlRecipe]
+    | None
+):
+    """Expose one plan-owned trunk skeleton as one scalar corridor variable.
+
+    The scalar variable states the central run; its two endpoints, named in the
+    control recipe, are the pivots the flank connectors turn on.  A flank
+    collapsed onto the trunk coordinate has no connector to turn, so its flank
+    run stands on the moving coordinate: its endpoints join the recipe too, so it
+    moves with the trunk rather than standing on the coordinate uncontrolled.  A
+    flank that keeps its own coordinate stays an uncontrolled, immutable dogleg.
+    """
+    axis = plan.trunk_axis
+    if axis is None or plan.primary_trunk_member_id is None:
+        return None
+    ownership = next(
+        (
+            item
+            for item in plan.endpoint_ownership
+            if item.member_id == plan.primary_trunk_member_id
+        ),
+        None,
+    )
+    if ownership is None:
+        return None
+    edge_key = (ownership.edge.source, ownership.edge.target, ownership.edge.line_id)
+    edge = ctx.edge_by_key.get(edge_key)
+    if edge is None:
+        return None
+    points = _trunk_skeleton_travel_points(axis)
+    route = RoutedPath(edge, edge.line_id, points, is_inter_section=True)
+    owner_id = str(plan.id)
+    variable_id = f"convergence-trunk|{owner_id}"
+    member_id = f"{variable_id}|footprint"
+    target_edge_key = (
+        f"{variable_id}|source",
+        f"{variable_id}|target",
+        f"{variable_id}|line",
+    )
+    coordinate_axis = 1 if axis.axis is DemandAxis.X else 0
+    source_collapsed = (
+        abs(axis.source_flank_coordinate - axis.coordinate) <= COORD_TOLERANCE
+    )
+    target_collapsed = (
+        abs(axis.target_flank_coordinate - axis.coordinate) <= COORD_TOLERANCE
+    )
+    controlled_point_ranks: list[int] = []
+    if source_collapsed:
+        controlled_point_ranks.extend((0, 1))
+    controlled_point_ranks.extend((2, 3))
+    if target_collapsed:
+        controlled_point_ranks.extend((4, 5))
+    controlled_points = tuple(
+        CorridorScalarControlledPoint(
+            member_id=member_id,
+            edge_key=target_edge_key,
+            connector_ids=ownership.connector_ids,
+            point_rank=point_rank,
+            axis=coordinate_axis,
+            source_offset=0.0,
+            role_id=f"{variable_id}|point:{point_rank}",
+        )
+        for point_rank in controlled_point_ranks
+    )
+    recipe = CorridorScalarControlRecipe(
+        owner_id=owner_id,
+        source_coordinate=axis.coordinate,
+        controlled_points=controlled_points,
+    )
+    legal_crossings = {_TRUNK_SKELETON_CENTRAL_RANK, *_TRUNK_SKELETON_CONNECTOR_RANKS}
+    if source_collapsed:
+        legal_crossings.add(_TRUNK_SKELETON_SOURCE_FLANK_RANK)
+    if target_collapsed:
+        legal_crossings.add(_TRUNK_SKELETON_TARGET_FLANK_RANK)
+    target = CorridorCohortTarget(
+        member_id,
+        owner_id,
+        target_edge_key,
+        RouteFamilyId.MERGE_TRUNK,
+        ownership.connector_ids,
+        route,
+        True,
+        legal_crossing_segment_ranks=frozenset(legal_crossings),
+    )
+    variable = CorridorScalarVariable(
+        variable_id=variable_id,
+        owner_kind=CorridorScalarOwnerKind.CONVERGENCE_TRUNK,
+        owner_id=owner_id,
+        member_id=member_id,
+        edge_key=target_edge_key,
+        connector_ids=ownership.connector_ids,
+        segment_rank=_TRUNK_SKELETON_CENTRAL_RANK,
+        axis=coordinate_axis,
+        coordinate=axis.coordinate,
+    )
+    return target, variable, recipe
+
+
+def _convergence_corridor_preference(
+    plan: ConvergencePlan,
+    graph: MetroGraph,
+    variable_id: str,
+) -> tuple[float, CorridorCoordinateDomain]:
+    """Read one trunk's preferred coordinate and complete feasible domain."""
+    axis = plan.trunk_axis
+    assert axis is not None
+    coordinate_axis = 1 if axis.axis is DemandAxis.X else 0
+    band = corridor_clearance_band(
+        graph,
+        axis=coordinate_axis,
+        section_ids=tuple(_plan_section_ids(plan, graph)),
+        coordinate=axis.coordinate,
+        run_start=axis.extent_start,
+        run_end=axis.extent_end,
+    )
+    if band is None:
+        return axis.coordinate, CorridorCoordinateDomain(variable_id)
+    minimum_coordinate = band.lo if math.isfinite(band.lo) else None
+    maximum_coordinate = band.hi if math.isfinite(band.hi) else None
+    preferred_coordinate = axis.coordinate
+    if minimum_coordinate is not None:
+        preferred_coordinate = max(preferred_coordinate, minimum_coordinate)
+    if maximum_coordinate is not None:
+        preferred_coordinate = min(preferred_coordinate, maximum_coordinate)
+    return (
+        preferred_coordinate,
+        CorridorCoordinateDomain(
+            variable_id,
+            minimum_coordinate=minimum_coordinate,
+            maximum_coordinate=maximum_coordinate,
+        ),
+    )
+
+
+def _convergence_corridor_region(
+    plan: ConvergencePlan,
+    graph: MetroGraph,
+) -> RowGapRegion | ColumnGapRegion | None:
+    """Name the adjacent layout boundary containing a planned trunk."""
+    axis = plan.trunk_axis
+    assert axis is not None
+    if axis.axis is DemandAxis.X:
+        upper_row = inter_row_gap_upper_row(graph, axis.coordinate)
+        return None if upper_row is None else RowGapRegion(upper_row, upper_row + 1)
+    gap = gap_lo_for_x(
+        graph,
+        axis.coordinate,
+        axis.extent_start,
+        axis.extent_end,
+    )
+    return None if gap is None else ColumnGapRegion(gap[0], gap[0] + 1)
+
+
+def convergence_corridor_requests(
+    plans: tuple[ConvergencePlan, ...],
+    graph: MetroGraph,
+    ctx: _RoutingCtx,
+) -> tuple[tuple[CorridorCohortTarget, ...], tuple[CorridorScalarRequest, ...]]:
+    """Publish every planned trunk skeleton as one owner-typed scalar request.
+
+    The complete eligible population is fixed before any target is extracted, so
+    an eligible plan can only leave through a raised error, never a silent
+    ``None``: a plan that owns geometry and holds a trunk axis is guaranteed a
+    request.
+    """
+    eligible = tuple(
+        plan for plan in plans if plan.owns_geometry and plan.trunk_axis is not None
+    )
+    owner_ids = [str(plan.id) for plan in eligible]
+    if len(set(owner_ids)) != len(owner_ids):
+        raise ConvergenceInvariantError(
+            "convergence corridor requests have duplicate plan owners"
+        )
+    targets: list[CorridorCohortTarget] = []
+    requests: list[CorridorScalarRequest] = []
+    for plan in eligible:
+        exposed = _convergence_corridor_target(plan, ctx)
+        if exposed is None:
+            raise ConvergenceInvariantError(
+                f"planned convergence {plan.id} has an incomplete trunk identity"
+            )
+        target, variable, recipe = exposed
+        preferred_coordinate, domain = _convergence_corridor_preference(
+            plan, graph, variable.variable_id
+        )
+        targets.append(target)
+        requests.append(
+            CorridorScalarRequest(
+                variable,
+                preferred_coordinate,
+                domain,
+                region=_convergence_corridor_region(plan, graph),
+                control_recipe=recipe,
+            )
+        )
+    return tuple(targets), tuple(requests)
 
 
 def _emitted_trunk_run_rank(route: RoutedPath, axis: ConvergenceTrunkAxis) -> int:
