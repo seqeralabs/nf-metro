@@ -167,6 +167,16 @@ class _MemberCandidate:
     packed_cell_handoff: tuple[ResolvedEdge, float, bool] | None = None
 
 
+def _member_candidate_identity(
+    resolved: ResolvedEdge, scaffold: RouteSemanticScaffold
+) -> tuple[str, tuple[ConnectorId, ...]]:
+    """The carrier id and connector ids every member candidate shares."""
+    return (
+        semantic_route_id("member-channel-carrier", resolved.source, resolved.target),
+        tuple(scaffold.connector_ids_for_edge(resolved)),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class _MaterializedChannel:
     candidate: _MemberCandidate
@@ -811,15 +821,14 @@ def _corridor_cohort_context_candidates(
         family = family_by_edge.get(resolved)
         if family is None or resolved not in scaffold.member_id_by_edge:
             continue
+        carrier_id, connector_ids = _member_candidate_identity(resolved, scaffold)
         context_candidates.append(
             _MemberCandidate(
                 route,
                 family,
                 scaffold.system_for_edge(resolved),
-                semantic_route_id(
-                    "member-channel-carrier", resolved.source, resolved.target
-                ),
-                tuple(scaffold.connector_ids_for_edge(resolved)),
+                carrier_id,
+                connector_ids,
             )
         )
     return tuple(context_candidates)
@@ -2696,17 +2705,16 @@ def build_member_geometry_execution(
                 except MemberGeometryDeclinedError:
                     failures[system_id] = "canonical-template-declined-member"
                     break
+                carrier_id, connector_ids = _member_candidate_identity(
+                    resolved, scaffold
+                )
                 system_candidates.append(
                     _MemberCandidate(
                         route,
                         family_id,
                         system_id,
-                        semantic_route_id(
-                            "member-channel-carrier",
-                            resolved.source,
-                            resolved.target,
-                        ),
-                        tuple(scaffold.connector_ids_for_edge(resolved)),
+                        carrier_id,
+                        connector_ids,
                         _packed_cell_handoff_metadata(edge, family_id, ctx),
                     )
                 )

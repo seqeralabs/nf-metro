@@ -358,15 +358,15 @@ Gates with an un-exercised arm:
 
 | Line | Gate | Un-exercised arm(s) | Triage |
 | ---: | --- | --- | --- |
-| 195 | `for handler in (_route_tb_section, _route_entry_runway, _route_intra_section):` | `->L200` |  |
-| 237 | `if scaffold is None:` | `->L244` |  |
-| 259 | `if rail_execution is not None:` | `->L263` |  |
-| 476 | `if result is not None:` | `->L-426` | **defensive** -- Append-guard after the priority-ordered handler chain. The final handler _route_intra_section is total: its three early returns and its _route_diagonal fallback (annotated -> RoutedPath, single return statement) always yield a RoutedPath, so result is never None and every edge appends. The None arm is unreachable. |
-| 478 | `if system_execution is not None:` | `->L480` |  |
-| 498 | `if system.system_id != expected.system_id:` | `->L501` |  |
-| 519 | `if system_execution is not None and next_system_rank != len(` | `->L522` |  |
-| 647 | `if system_execution is not None:` | `->L655` |  |
-| 679 | `if validate_final_route_frames:` | `->L681` |  |
+| 218 | `for handler in (_route_tb_section, _route_entry_runway, _route_intra_section):` | `->L223` |  |
+| 260 | `if scaffold is None:` | `->L267` |  |
+| 282 | `if rail_execution is not None:` | `->L286` |  |
+| 489 | `if result is not None:` | `->L-439` | **defensive** -- Append-guard after the priority-ordered handler chain. The final handler _route_intra_section is total: its three early returns and its _route_diagonal fallback (annotated -> RoutedPath, single return statement) always yield a RoutedPath, so result is never None and every edge appends. The None arm is unreachable. |
+| 491 | `if system_execution is not None:` | `->L493` |  |
+| 511 | `if system.system_id != expected.system_id:` | `->L514` |  |
+| 532 | `if system_execution is not None and next_system_rank != len(` | `->L535` |  |
+| 660 | `if system_execution is not None:` | `->L668` |  |
+| 692 | `if validate_final_route_frames:` | `->L694` |  |
 
 ## `corners.py`
 
@@ -686,115 +686,115 @@ Gates with an un-exercised arm:
 
 | Line | Gate | Un-exercised arm(s) | Triage |
 | ---: | --- | --- | --- |
-| 299 | `if port.side in (PortSide.LEFT, PortSide.RIGHT):` | `->L300`, `->L307` |  |
-| 308 | `if crossing is not None:` | `->L309`, `->L310` |  |
-| 339 | `if port is not None and port.is_entry and station is not None:` | `->L340`, `->L347` |  |
-| 342 | `if route.offset_regime is OffsetRegime.DEFERRED and endpoint_lane_axis == 1:` | `->L343`, `->L347` |  |
-| 372 | `for candidate in population:` | `->L-370`, `->L373` |  |
-| 381 | `if existing is not None:` | `->L382`, `->L387` |  |
-| 382 | `if existing.route is target.route:` | `->L383`, `->L384` |  |
-| 388 | `if mutable or key not in selected:` | `->L372`, `->L389` |  |
-| 413 | `if isinstance(region, ColumnGapRegion):` | `->L414`, `->L423` |  |
-| 490 | `if negative_sections and not positive_sections:` | `->L491`, `->L497` |  |
-| 497 | `elif positive_sections and not negative_sections:` | `->L498`, `->L504` |  |
-| 504 | `if not negative_sections or not positive_sections:` | `->L505`, `->L508` |  |
-| 523 | `if edge_key is None:` | `->L524`, `->L525` |  |
-| 526 | `for station_id in (edge_key[0], edge_key[1]):` | `->L527`, `->L530` |  |
-| 528 | `if station is not None and station.section_id is not None:` | `->L526`, `->L529` |  |
-| 589 | `if shortfall is None:` | `->L590`, `->L593` |  |
-| 593 | `if shortfall.required_shift_sign not in (-1, 1):` | `->L594`, `->L597` |  |
-| 607 | `if len(claims) + len(scalar_claims) != len(shortfall.claim_ids):` | `->L608`, `->L609` |  |
-| 610 | `for request in scalar_claims:` | `->L611`, `->L617` |  |
-| 612 | `if request_region is None:` | `->L613`, `->L616` |  |
-| 617 | `if not shortfall.claim_ids or len(regions) != 1:` | `->L618`, `->L621` |  |
-| 622 | `if isinstance(region, ColumnGapRegion):` | `->L623`, `->L626` |  |
-| 626 | `elif isinstance(region, RowGapRegion):` | `->L627`, `->L631` |  |
-| 634 | `if shortfall.axis != expected_axis:` | `->L635`, `->L637` |  |
-| 638 | `for claim in claims:` | `->L639`, `->L640` |  |
-| 640 | `for request in scalar_claims:` | `->L641`, `->L642` |  |
-| 648 | `if set(typed_obstacles) != set(shortfall.blocking_obstacle_ids):` | `->L649`, `->L650` |  |
-| 651 | `for obstacle in typed_obstacles.values():` | `->L652`, `->L658` |  |
-| 653 | `if target is None or target.connector_ids != obstacle.connector_ids:` | `->L654`, `->L657` |  |
-| 671 | `if isinstance(region, ColumnGapRegion):` | `->L672`, `->L677` |  |
-| 695 | `for failure in error.failures:` | `->L696`, `->L718` |  |
-| 716 | `if held is None or requirement.required > held.required:` | `->L695`, `->L717` |  |
-| 718 | `if not requirements:` | `->L719`, `->L724` |  |
-| 748 | `if ledger is None:` | `->L749`, `->L750` |  |
-| 764 | `if not allow_clearance_requirements:` | `->L765`, `->L766` |  |
-| 779 | `for allocation in cohort_plan.allocations:` | `->L780`, `->L787` |  |
-| 781 | `if target is None or not target.mutable:` | `->L782`, `->L785` |  |
-| 787 | `for landing in cohort_plan.landings:` | `->L788`, `->L792` |  |
-| 789 | `if target is None or not target.mutable:` | `->L790`, `->L791` |  |
-| 807 | `for route in context_routes:` | `->L808`, `->L825` | **needs-review** -- Building corridor-cohort context candidates from the settled convergence-context routes. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on). |
-| 808 | `if id(route) in candidate_route_ids:` | `->L809`, `->L810` | **needs-review** -- Skipping mutable member candidates while collecting context candidates. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on). |
-| 812 | `if family is None or resolved not in scaffold.member_id_by_edge:` | `->L813`, `->L814` | **needs-review** -- Dropping a context route with no family or member id. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on). |
-| 842 | `if corridor_cohorts is not None and requirements:` | `->L843`, `->L847` | **needs-review** -- The validator's plan-and-requirement mutual-exclusion check. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on). |
-| 847 | `for requirement in requirements:` | `->L-828`, `->L848` | **needs-review** -- The corridor-cohort outcome validator iterating the published requirements. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on). |
-| 848 | `if requirement.kind is not aperture:` | `->L849`, `->L853` | **needs-review** -- The validator's non-aperture requirement-kind check. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on). |
-| 856 | `if both_sides:` | `->L847`, `->L857` | **needs-review** -- The validator's disjoint-boundary-sides check. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on). |
-| 873 | `if run_direction is None or turn_direction is None:` | `->L874` |  |
-| 875 | `if (run_direction in {Direction.R, Direction.L}) == (` | `->L878` |  |
-| 1012 | `if not section_ids:` | `->L1013` |  |
-| 1128 | `if ctx.exit_turns is None or not pending_plan_ids:` | `->L1129` |  |
-| 1294 | `if source is None or source is route:` | `->L1296` |  |
-| 1323 | `if route is None:` | `->L1324` |  |
-| 1359 | `if edge is None or family_id is None:` | `->L1360` |  |
-| 1590 | `if route.exit_lane_transition_plan_id is not None:` | `->L1591` |  |
-| 1592 | `if route.fan_plan_id is not None or route.fan_route_emitter is not None:` | `->L1593` |  |
-| 1594 | `if convergence_owns_segment_boundary(route, segment_rank):` | `->L1595` |  |
-| 1654 | `if bounds.band is not None and not bounds.band.lo <= candidate <= bounds.band.hi:` | `->L1655` | **needs-review** -- _candidate_clears_runway's band rejection, unreachable while `if band is not None:::#1` never populates a band on this path. Reachable. |
-| 1794 | `if abs(channel.x - target) <= COORD_TOLERANCE:` | `->L1796` | **needs-review** -- _align_same_line_channels' re-seat arm. Its one fixture (genomeassembly_organellar) still reaches the gate but now finds the channel already on its carrier's claim coordinate, so the reseat is skipped. Bisecting the range shows 0f58d60c -- ranking member channels over a gap's whole population -- is what makes the claim and the channel coincide on arrival, not the bundle-pitch packing. Reachable; the frozen render corpus means no fixture was authored. |
-| 1819 | `if coordinate is not None:` | `->L1774`, `->L1820` |  |
-| 1891 | `if overlap <= MIN_CORRIDOR_Y_OVERLAP:` | `->L1892` |  |
-| 1985 | `if item.candidate.route.line_id in claim.line_ids and (` | `->L1988` | **needs-review** -- feasible()'s same-line-carrier clause, which forbids a candidate delta that would split a carrier the bundle already shares with a claim. No fixture reaches the feasibility search with a same-line source-compatible claim in range: _align_same_line_channels seats such a member on its claim before the bundle allocation runs. Reachable, wants a fixture. |
-| 1988 | `if abs(coordinate - claim.coordinate) > COORD_TOLERANCE:` | `->L1989`, `->L1990` | **needs-review** -- The rejection inside feasible()'s same-line-carrier clause. Unreached for the same reason as its enclosing gate `if item.candidate.route.line_id in claim.line_ids and (:::#1`. Reachable. |
-| 2130 | `if radii is not None:` | `->L2135` |  |
-| 2131 | `if 0 <= rank - 1 < len(radii):` | `->L2133` |  |
-| 2133 | `if rank < len(radii):` | `->L2135` |  |
-| 2179 | `elif abs(start[0] - end[0]) <= COORD_TOLERANCE:` | `->L2169` |  |
-| 2247 | `if movable_run:` | `->L2248` |  |
-| 2266 | `if boundary < 1:` | `->L2267` | **defensive** -- The short-overlap target sits below at least one grid row, so its upper row boundary is positive. A row-zero target has no upper boundary to enlarge and is defensively declined. |
-| 2273 | `if not negative:` | `->L2274` | **defensive** -- A positive target boundary always has at least one section in the row above in a valid packed grid. The empty-negative-side arm protects sparse or externally mutated section grids. |
-| 2351 | `if not route.is_inter_section or len(route.points) < 2:` | `->L2352` | **defensive** -- Source turnouts are defined only for drawable inter-section members. Intra-section and degenerate paths cannot cross a hidden section fork and are intentionally ignored. |
-| 2396 | `if horizontal_siblings and not continuing:` | `->L2397` | **defensive** -- A same-line horizontal sibling at a hidden fork must continue in the incoming direction. The opposite-tangent arm is rejected and covered by the focused lifecycle-safety test. |
-| 2471 | `if any(not _points_coincide(centre, centres[0]) for centre in centres[1:]):` | `->L2472` | **defensive** -- Concentric radii are derived from the same peer projection, which algebraically gives one centre. The mismatch arm guards future candidate families that violate that construction. |
-| 2474 | `if any(` | `->L2480` | **defensive** -- A continuing source trunk is accepted only when its first runway can hold the largest concentric turnout. Resolver spacing guarantees this; the short-runway rejection is covered by focused turnout tests. |
-| 2481 | `if any(` | `->L2486` | **defensive** -- Incoming and vertical source runways must each hold their assigned turnout radius. Production eligibility satisfies this; focused tests exercise rejection of a shortened incoming member. |
-| 2548 | `if len(system_ids) != 1:` | `->L2549` | **defensive** -- A complete same-destination bundle is resolved through one canonical route system. Mixed-system entries cannot be settled atomically and are defensively skipped. |
-| 2555 | `if ctx.exit_turns is not None:` | `->L2571` | **defensive** -- Production planning installs exit-turn execution before member settlement. The null arm supports isolated helper construction and cannot own replannable turns. |
-| 2558 | `if membership is None or membership.axis is None:` | `->L2560` | **needs-review** -- Routes without exit-turn membership or an owned axis are supported cohort members: they remain geometrically movable while declining exit-turn replanning. The corpus does not yet carry that ownership mix. Reachable; wants a minimal fixture. |
-| 2562 | `assignment is not None` | `->L2556`, `->L2563` | **defensive** -- Operand arm of the replannable-membership contract: production exit-turn memberships carry assignments; missing assignments are malformed plan state exercised by contract tests. |
-| 2563 | `and membership.axis.claimant_member_ids == (membership.member_id,)` | `->L2556`, `->L2564` | **defensive** -- Only a singly claimed axis may be replanned independently during same-destination settlement. Shared-axis plans are excluded to preserve their other claimants. |
-| 2564 | `and membership.member_id in cohort_member_ids` | `->L2556`, `->L2565` | **defensive** -- Membership is queried from an edge already resolved into the cohort, so its member id belongs to that cohort. The guard rejects an inconsistent scaffold/query pair. |
-| 2565 | `and assignment.run_direction in {Direction.R, Direction.L}` | `->L2556`, `->L2566` | **defensive** -- A replannable same-destination peel-off is sourced from a horizontal trunk assignment. Non-horizontal run directions belong to other exit-turn families and are defensively excluded. |
-| 2566 | `and assignment.turn_direction in {Direction.U, Direction.D}` | `->L2556`, `->L2567` | **defensive** -- The settlement cohort has a vertical destination riser, so its owned exit turn is perpendicular. A horizontal turn direction is incompatible plan metadata and is defensively excluded. |
-| 2567 | `and route.exit_turn_segment_rank == len(route.points) - 3` | `->L2556`, `->L2569` | **defensive** -- A plannable destination peel-off owns the penultimate turn. Other segment ranks identify a different turn family and cannot be rewritten by this settlement. |
-| 2582 | `if proposals is None:` | `->L2583` | **needs-review** -- A valid short same-destination cohort can be blocked by another route or reserved channel, causing proposal feasibility to reject the cohort atomically. The current corpus has no blocker-shaped witness. Reachable; wants a minimal fixture whose unchanged render is visually reviewed. |
-| 2604 | `if membership is None or membership.assignment is None:` | `->L2606` | **needs-review** -- A route without exit-turn membership is supported: it can participate in a feasible same-destination cohort while declining the optional settled-turn ownership refresh. A membership with no assignment is malformed, but the collapsed gate also covers the valid no-membership case. Reachable; wants a minimal fixture. |
-| 2610 | `if allow_clearance_requirements or shortfall > COORD_TOLERANCE:` | `->L2611` | **defensive** -- The apply pass runs only after the measured shortfall has been granted and removed. Seeing an outstanding shortfall while requirements are disabled would mean boundary settlement failed to move the target. |
-| 2618 | `membership is not None` | `->L2619` | **needs-review** -- Routes without exit-turn membership are a supported outcome of optional ownership refresh: proposal geometry is accepted without publishing settled-turn metadata. The render corpus currently exercises only owned members here. Reachable; wants a minimal fixture. |
-| 2619 | `and membership.assignment is not None` | `->L2620`, `->L2625` | **defensive** -- A recorded exit-turn membership used for settlement carries its frozen assignment by construction. Missing assignment metadata is an incomplete ownership record, covered by member-plan contract tests. |
-| 2620 | `and route.points[rank][0] != proposal.points[rank][0]` | `->L2622`, `->L2625` | **needs-review** -- Equal-X proposals are a supported no-rewrite outcome: the route accepts its proposal geometry without refreshing settled-turn metadata. Focused unit tests exercise it, but the render corpus has no authored topology for this valid arm. Reachable; wants a minimal fixture. |
-| 2681 | `if context is not None:` | `->L2683` | **defensive** -- _convergence_context_route returns None only when ctx.edge_by_key has no entry for the key, and edge_by_key is built from every graph.edge while the key comes from scaffold.edge_order, which is derived from the same edges. Same never-taken lookup as the sibling `if edge is None` guard on the non-convergence path (0 of 141 fixtures). |
-| 2684 | `if key in ctx.skip_edges:` | `->L2685` | **candidate-dead** -- Subsumed by the convergence-edge check two lines above. Instrumenting all 348 fixtures: ctx.skip_edges holds exactly one merge-junction->entry-port hop, it is always present in scaffold.edge_order, and it is always also a convergence member edge, so the loop continues at the convergence arm and never tests skip_edges (0 of 141 fixtures). Proposed simplification: drop the two lines. Not applied here -- deletion is a deliberate separate pass, and a skip hop that is not convergence-owned is not ruled out by contract. |
-| 2687 | `if edge is None:` | `->L2688` |  |
-| 2691 | `if family_id is None:` | `->L2692` |  |
-| 2714 | `if system_id not in failures:` | `->L2718` |  |
-| 2889 | `if corridor_cohort_ledger is not None and allow_clearance_requirements:` | `->L2890` | **needs-review** -- The compile-gate itself. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on). |
-| 2964 | `if resolved not in execution._semantic_corner_templates:` | `->L2965` | **defensive** -- Every emitted route is resolved from the same member execution that owns its semantic template. Missing lookup is an observer/emission mismatch guarded by member-plan tests. |
-| 2970 | `if edge is None or family_id is None:` | `->L2971` | **defensive** -- Semantic-corner templates are applied only to emitted routes registered in both the edge and family indexes. Missing either index entry is an incomplete observer contract. |
-| 3056 | `or route.curve_radii is None` | `->L3060` | **defensive** -- Every materialized exit-turn plan reaching corner-cohort settlement carries its frozen radius tuple. A missing tuple denotes incomplete direct or corrupted plan state; the guard prevents the optional metadata from being indexed. |
-| 3058 | `or route.curve_radii[rank] >= curve_radius - COORD_TOLERANCE_FINE` | `->L3061` | **needs-review** -- _restore_clear_planned_landing_radii only has work for a member whose landing corner was sized below the standard curve radius. Instrumenting the pass across the whole corpus: 2294 multi-line exit-turn members reach this operand and every one already carries the full radius at its exit_turn_segment_rank (a further 5880 short-circuit on the rank/radii operands ahead of it), so the operand always short-circuits to continue. The arm wants a settled multi-line exit-turn plan in which a clearance-limited concentric sizing shrank one member's landing corner. Per the triage doc's correction-pass rule this is a missing witness, not a guard a valid graph cannot violate. |
-| 3063 | `if (` | `->L3067`, `->L3068` | **needs-review** -- Runway re-check inside _restore_clear_planned_landing_radii: the restore is declined when resolve_curve_radius_at says the member's points cannot carry the full radius after all. Both arms are un-exercised because control never reaches the statement -- the radius operand two lines above always short-circuits, as its own entry records with the 2294-member measurement. Either arm needs the same missing shape: a shrunken landing corner on a settled multi-line exit turn. |
-| 3113 | `if tuple(route.route_system_owned_segment_ranks) != plan.owned_segment_ranks:` | `->L3114` |  |
-| 3119 | `if actual != (channel.start, channel.end):` | `->L3120` |  |
-| 3136 | `if radius_index >= len(radii):` | `->L3137` | **defensive** -- Every radius flanking a frozen plan-owned channel must survive emission. Production materialises the plan's complete radius tuple; test_member_geometry_validator_attributes_missing_flanking_radius exercises the attributed failure. |
-| 3143 | `if offsets is None or bases is None or offset is None or base is None:` | `->L3144` |  |
-| 3148 | `if radius_index + 2 >= len(route.points):` | `->L3149` | **defensive** -- A frozen member corner with a published radius must retain all three defining points. Production plans emit complete paths; test_member_geometry_validator_attributes_missing_corner_points exercises the attributed failure for malformed emitted geometry. |
-| 3164 | `if abs(actual_radius - expected_radius) > COORD_TOLERANCE_FINE:` | `->L3165` | **defensive** -- Final member-plan validation aborts when a plan-owned channel corner disagrees with its recorded concentric inputs. Valid production geometry derives that radius from the same inputs; both failure flanks are exercised by test_member_geometry_validator_rejects_changed_flanking_radius. |
-| 3179 | `if radius_index >= len(radii):` | `->L3180` | **defensive** -- Post-emission assertion in validate_member_geometry_emission: an owned corner index present in plan.curve_radii is missing from the emitted route's list. fresh_member_route copies plan.curve_radii element for element, or leaves both None, and no later pass shortens a route's radius list, so the two lists have equal length whenever the plan has radii at all. The raise is a construction-bug guard rather than a topology outcome. |
-| 3184 | `if abs(radii[radius_index] - planned_radius) > COORD_TOLERANCE_FINE:` | `->L3185` | **defensive** -- The same validator's radius-value flank: an owned corner, one of whose adjacent segment ranks is in plan.owned_segment_ranks, whose emitted radius differs from the planned one. Route-system-owned segment boundaries are exactly what the normalize and settlement passes are barred from re-sizing (route_system_owns_segment_boundary gates every one of them), so an owned corner reaches emission carrying the radius planning gave it. The raise fires only if a pass mutates owned geometry. |
-| 3205 | `if actual_offset != expected_offset or actual_base != expected_base:` | `->L3206` | **defensive** -- The same validator's concentric-inputs flank: the offset/base pair recorded for an owned corner's two segment ranks must still match the plan's. fresh_member_route copies both maps wholesale and only record_concentric_corner rewrites them, which the same ownership bar keeps off owned boundaries. Distinct from the radius-value raise above in that a pass could in principle re-record the inputs and still land on the planned radius; both are construction-bug guards. |
+| 309 | `if port.side in (PortSide.LEFT, PortSide.RIGHT):` | `->L310`, `->L317` |  |
+| 318 | `if crossing is not None:` | `->L319`, `->L320` |  |
+| 349 | `if port is not None and port.is_entry and station is not None:` | `->L350`, `->L357` |  |
+| 352 | `if route.offset_regime is OffsetRegime.DEFERRED and endpoint_lane_axis == 1:` | `->L353`, `->L357` |  |
+| 382 | `for candidate in population:` | `->L-380`, `->L383` |  |
+| 391 | `if existing is not None:` | `->L392`, `->L397` |  |
+| 392 | `if existing.route is target.route:` | `->L393`, `->L394` |  |
+| 398 | `if mutable or key not in selected:` | `->L382`, `->L399` |  |
+| 423 | `if isinstance(region, ColumnGapRegion):` | `->L424`, `->L433` |  |
+| 500 | `if negative_sections and not positive_sections:` | `->L501`, `->L507` |  |
+| 507 | `elif positive_sections and not negative_sections:` | `->L508`, `->L514` |  |
+| 514 | `if not negative_sections or not positive_sections:` | `->L515`, `->L518` |  |
+| 533 | `if edge_key is None:` | `->L534`, `->L535` |  |
+| 536 | `for station_id in (edge_key[0], edge_key[1]):` | `->L537`, `->L540` |  |
+| 538 | `if station is not None and station.section_id is not None:` | `->L536`, `->L539` |  |
+| 599 | `if shortfall is None:` | `->L600`, `->L603` |  |
+| 603 | `if shortfall.required_shift_sign not in (-1, 1):` | `->L604`, `->L607` |  |
+| 617 | `if len(claims) + len(scalar_claims) != len(shortfall.claim_ids):` | `->L618`, `->L619` |  |
+| 620 | `for request in scalar_claims:` | `->L621`, `->L627` |  |
+| 622 | `if request_region is None:` | `->L623`, `->L626` |  |
+| 627 | `if not shortfall.claim_ids or len(regions) != 1:` | `->L628`, `->L631` |  |
+| 632 | `if isinstance(region, ColumnGapRegion):` | `->L633`, `->L636` |  |
+| 636 | `elif isinstance(region, RowGapRegion):` | `->L637`, `->L641` |  |
+| 644 | `if shortfall.axis != expected_axis:` | `->L645`, `->L647` |  |
+| 648 | `for claim in claims:` | `->L649`, `->L650` |  |
+| 650 | `for request in scalar_claims:` | `->L651`, `->L652` |  |
+| 658 | `if set(typed_obstacles) != set(shortfall.blocking_obstacle_ids):` | `->L659`, `->L660` |  |
+| 661 | `for obstacle in typed_obstacles.values():` | `->L662`, `->L668` |  |
+| 663 | `if target is None or target.connector_ids != obstacle.connector_ids:` | `->L664`, `->L667` |  |
+| 681 | `if isinstance(region, ColumnGapRegion):` | `->L682`, `->L687` |  |
+| 705 | `for failure in error.failures:` | `->L706`, `->L728` |  |
+| 726 | `if held is None or requirement.required > held.required:` | `->L705`, `->L727` |  |
+| 728 | `if not requirements:` | `->L729`, `->L734` |  |
+| 758 | `if ledger is None:` | `->L759`, `->L760` |  |
+| 774 | `if not allow_clearance_requirements:` | `->L775`, `->L776` |  |
+| 789 | `for allocation in cohort_plan.allocations:` | `->L790`, `->L797` |  |
+| 791 | `if target is None or not target.mutable:` | `->L792`, `->L795` |  |
+| 797 | `for landing in cohort_plan.landings:` | `->L798`, `->L802` |  |
+| 799 | `if target is None or not target.mutable:` | `->L800`, `->L801` |  |
+| 817 | `for route in context_routes:` | `->L818`, `->L834` | **needs-review** -- Building corridor-cohort context candidates from the settled convergence-context routes. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on). |
+| 818 | `if id(route) in candidate_route_ids:` | `->L819`, `->L820` | **needs-review** -- Skipping mutable member candidates while collecting context candidates. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on). |
+| 822 | `if family is None or resolved not in scaffold.member_id_by_edge:` | `->L823`, `->L824` | **needs-review** -- Dropping a context route with no family or member id. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on). |
+| 851 | `if corridor_cohorts is not None and requirements:` | `->L852`, `->L856` | **needs-review** -- The validator's plan-and-requirement mutual-exclusion check. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on). |
+| 856 | `for requirement in requirements:` | `->L-837`, `->L857` | **needs-review** -- The corridor-cohort outcome validator iterating the published requirements. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on). |
+| 857 | `if requirement.kind is not aperture:` | `->L858`, `->L862` | **needs-review** -- The validator's non-aperture requirement-kind check. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on). |
+| 865 | `if both_sides:` | `->L856`, `->L866` | **needs-review** -- The validator's disjoint-boundary-sides check. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on). |
+| 882 | `if run_direction is None or turn_direction is None:` | `->L883` |  |
+| 884 | `if (run_direction in {Direction.R, Direction.L}) == (` | `->L887` |  |
+| 1021 | `if not section_ids:` | `->L1022` |  |
+| 1137 | `if ctx.exit_turns is None or not pending_plan_ids:` | `->L1138` |  |
+| 1303 | `if source is None or source is route:` | `->L1305` |  |
+| 1332 | `if route is None:` | `->L1333` |  |
+| 1368 | `if edge is None or family_id is None:` | `->L1369` |  |
+| 1599 | `if route.exit_lane_transition_plan_id is not None:` | `->L1600` |  |
+| 1601 | `if route.fan_plan_id is not None or route.fan_route_emitter is not None:` | `->L1602` |  |
+| 1603 | `if convergence_owns_segment_boundary(route, segment_rank):` | `->L1604` |  |
+| 1663 | `if bounds.band is not None and not bounds.band.lo <= candidate <= bounds.band.hi:` | `->L1664` | **needs-review** -- _candidate_clears_runway's band rejection, unreachable while `if band is not None:::#1` never populates a band on this path. Reachable. |
+| 1803 | `if abs(channel.x - target) <= COORD_TOLERANCE:` | `->L1805` | **needs-review** -- _align_same_line_channels' re-seat arm. Its one fixture (genomeassembly_organellar) still reaches the gate but now finds the channel already on its carrier's claim coordinate, so the reseat is skipped. Bisecting the range shows 0f58d60c -- ranking member channels over a gap's whole population -- is what makes the claim and the channel coincide on arrival, not the bundle-pitch packing. Reachable; the frozen render corpus means no fixture was authored. |
+| 1828 | `if coordinate is not None:` | `->L1783`, `->L1829` |  |
+| 1900 | `if overlap <= MIN_CORRIDOR_Y_OVERLAP:` | `->L1901` |  |
+| 1994 | `if item.candidate.route.line_id in claim.line_ids and (` | `->L1997` | **needs-review** -- feasible()'s same-line-carrier clause, which forbids a candidate delta that would split a carrier the bundle already shares with a claim. No fixture reaches the feasibility search with a same-line source-compatible claim in range: _align_same_line_channels seats such a member on its claim before the bundle allocation runs. Reachable, wants a fixture. |
+| 1997 | `if abs(coordinate - claim.coordinate) > COORD_TOLERANCE:` | `->L1998`, `->L1999` | **needs-review** -- The rejection inside feasible()'s same-line-carrier clause. Unreached for the same reason as its enclosing gate `if item.candidate.route.line_id in claim.line_ids and (:::#1`. Reachable. |
+| 2139 | `if radii is not None:` | `->L2144` |  |
+| 2140 | `if 0 <= rank - 1 < len(radii):` | `->L2142` |  |
+| 2142 | `if rank < len(radii):` | `->L2144` |  |
+| 2188 | `elif abs(start[0] - end[0]) <= COORD_TOLERANCE:` | `->L2178` |  |
+| 2256 | `if movable_run:` | `->L2257` |  |
+| 2275 | `if boundary < 1:` | `->L2276` | **defensive** -- The short-overlap target sits below at least one grid row, so its upper row boundary is positive. A row-zero target has no upper boundary to enlarge and is defensively declined. |
+| 2282 | `if not negative:` | `->L2283` | **defensive** -- A positive target boundary always has at least one section in the row above in a valid packed grid. The empty-negative-side arm protects sparse or externally mutated section grids. |
+| 2360 | `if not route.is_inter_section or len(route.points) < 2:` | `->L2361` | **defensive** -- Source turnouts are defined only for drawable inter-section members. Intra-section and degenerate paths cannot cross a hidden section fork and are intentionally ignored. |
+| 2405 | `if horizontal_siblings and not continuing:` | `->L2406` | **defensive** -- A same-line horizontal sibling at a hidden fork must continue in the incoming direction. The opposite-tangent arm is rejected and covered by the focused lifecycle-safety test. |
+| 2480 | `if any(not _points_coincide(centre, centres[0]) for centre in centres[1:]):` | `->L2481` | **defensive** -- Concentric radii are derived from the same peer projection, which algebraically gives one centre. The mismatch arm guards future candidate families that violate that construction. |
+| 2483 | `if any(` | `->L2489` | **defensive** -- A continuing source trunk is accepted only when its first runway can hold the largest concentric turnout. Resolver spacing guarantees this; the short-runway rejection is covered by focused turnout tests. |
+| 2490 | `if any(` | `->L2495` | **defensive** -- Incoming and vertical source runways must each hold their assigned turnout radius. Production eligibility satisfies this; focused tests exercise rejection of a shortened incoming member. |
+| 2557 | `if len(system_ids) != 1:` | `->L2558` | **defensive** -- A complete same-destination bundle is resolved through one canonical route system. Mixed-system entries cannot be settled atomically and are defensively skipped. |
+| 2564 | `if ctx.exit_turns is not None:` | `->L2580` | **defensive** -- Production planning installs exit-turn execution before member settlement. The null arm supports isolated helper construction and cannot own replannable turns. |
+| 2567 | `if membership is None or membership.axis is None:` | `->L2569` | **needs-review** -- Routes without exit-turn membership or an owned axis are supported cohort members: they remain geometrically movable while declining exit-turn replanning. The corpus does not yet carry that ownership mix. Reachable; wants a minimal fixture. |
+| 2571 | `assignment is not None` | `->L2565`, `->L2572` | **defensive** -- Operand arm of the replannable-membership contract: production exit-turn memberships carry assignments; missing assignments are malformed plan state exercised by contract tests. |
+| 2572 | `and membership.axis.claimant_member_ids == (membership.member_id,)` | `->L2565`, `->L2573` | **defensive** -- Only a singly claimed axis may be replanned independently during same-destination settlement. Shared-axis plans are excluded to preserve their other claimants. |
+| 2573 | `and membership.member_id in cohort_member_ids` | `->L2565`, `->L2574` | **defensive** -- Membership is queried from an edge already resolved into the cohort, so its member id belongs to that cohort. The guard rejects an inconsistent scaffold/query pair. |
+| 2574 | `and assignment.run_direction in {Direction.R, Direction.L}` | `->L2565`, `->L2575` | **defensive** -- A replannable same-destination peel-off is sourced from a horizontal trunk assignment. Non-horizontal run directions belong to other exit-turn families and are defensively excluded. |
+| 2575 | `and assignment.turn_direction in {Direction.U, Direction.D}` | `->L2565`, `->L2576` | **defensive** -- The settlement cohort has a vertical destination riser, so its owned exit turn is perpendicular. A horizontal turn direction is incompatible plan metadata and is defensively excluded. |
+| 2576 | `and route.exit_turn_segment_rank == len(route.points) - 3` | `->L2565`, `->L2578` | **defensive** -- A plannable destination peel-off owns the penultimate turn. Other segment ranks identify a different turn family and cannot be rewritten by this settlement. |
+| 2591 | `if proposals is None:` | `->L2592` | **needs-review** -- A valid short same-destination cohort can be blocked by another route or reserved channel, causing proposal feasibility to reject the cohort atomically. The current corpus has no blocker-shaped witness. Reachable; wants a minimal fixture whose unchanged render is visually reviewed. |
+| 2613 | `if membership is None or membership.assignment is None:` | `->L2615` | **needs-review** -- A route without exit-turn membership is supported: it can participate in a feasible same-destination cohort while declining the optional settled-turn ownership refresh. A membership with no assignment is malformed, but the collapsed gate also covers the valid no-membership case. Reachable; wants a minimal fixture. |
+| 2619 | `if allow_clearance_requirements or shortfall > COORD_TOLERANCE:` | `->L2620` | **defensive** -- The apply pass runs only after the measured shortfall has been granted and removed. Seeing an outstanding shortfall while requirements are disabled would mean boundary settlement failed to move the target. |
+| 2627 | `membership is not None` | `->L2628` | **needs-review** -- Routes without exit-turn membership are a supported outcome of optional ownership refresh: proposal geometry is accepted without publishing settled-turn metadata. The render corpus currently exercises only owned members here. Reachable; wants a minimal fixture. |
+| 2628 | `and membership.assignment is not None` | `->L2629`, `->L2634` | **defensive** -- A recorded exit-turn membership used for settlement carries its frozen assignment by construction. Missing assignment metadata is an incomplete ownership record, covered by member-plan contract tests. |
+| 2629 | `and route.points[rank][0] != proposal.points[rank][0]` | `->L2631`, `->L2634` | **needs-review** -- Equal-X proposals are a supported no-rewrite outcome: the route accepts its proposal geometry without refreshing settled-turn metadata. Focused unit tests exercise it, but the render corpus has no authored topology for this valid arm. Reachable; wants a minimal fixture. |
+| 2690 | `if context is not None:` | `->L2692` | **defensive** -- _convergence_context_route returns None only when ctx.edge_by_key has no entry for the key, and edge_by_key is built from every graph.edge while the key comes from scaffold.edge_order, which is derived from the same edges. Same never-taken lookup as the sibling `if edge is None` guard on the non-convergence path (0 of 141 fixtures). |
+| 2693 | `if key in ctx.skip_edges:` | `->L2694` | **candidate-dead** -- Subsumed by the convergence-edge check two lines above. Instrumenting all 348 fixtures: ctx.skip_edges holds exactly one merge-junction->entry-port hop, it is always present in scaffold.edge_order, and it is always also a convergence member edge, so the loop continues at the convergence arm and never tests skip_edges (0 of 141 fixtures). Proposed simplification: drop the two lines. Not applied here -- deletion is a deliberate separate pass, and a skip hop that is not convergence-owned is not ruled out by contract. |
+| 2696 | `if edge is None:` | `->L2697` |  |
+| 2700 | `if family_id is None:` | `->L2701` |  |
+| 2722 | `if system_id not in failures:` | `->L2726` |  |
+| 2897 | `if corridor_cohort_ledger is not None and allow_clearance_requirements:` | `->L2898` | **needs-review** -- The compile-gate itself. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on). |
+| 2972 | `if resolved not in execution._semantic_corner_templates:` | `->L2973` | **defensive** -- Every emitted route is resolved from the same member execution that owns its semantic template. Missing lookup is an observer/emission mismatch guarded by member-plan tests. |
+| 2978 | `if edge is None or family_id is None:` | `->L2979` | **defensive** -- Semantic-corner templates are applied only to emitted routes registered in both the edge and family indexes. Missing either index entry is an incomplete observer contract. |
+| 3064 | `or route.curve_radii is None` | `->L3068` | **defensive** -- Every materialized exit-turn plan reaching corner-cohort settlement carries its frozen radius tuple. A missing tuple denotes incomplete direct or corrupted plan state; the guard prevents the optional metadata from being indexed. |
+| 3066 | `or route.curve_radii[rank] >= curve_radius - COORD_TOLERANCE_FINE` | `->L3069` | **needs-review** -- _restore_clear_planned_landing_radii only has work for a member whose landing corner was sized below the standard curve radius. Instrumenting the pass across the whole corpus: 2294 multi-line exit-turn members reach this operand and every one already carries the full radius at its exit_turn_segment_rank (a further 5880 short-circuit on the rank/radii operands ahead of it), so the operand always short-circuits to continue. The arm wants a settled multi-line exit-turn plan in which a clearance-limited concentric sizing shrank one member's landing corner. Per the triage doc's correction-pass rule this is a missing witness, not a guard a valid graph cannot violate. |
+| 3071 | `if (` | `->L3075`, `->L3076` | **needs-review** -- Runway re-check inside _restore_clear_planned_landing_radii: the restore is declined when resolve_curve_radius_at says the member's points cannot carry the full radius after all. Both arms are un-exercised because control never reaches the statement -- the radius operand two lines above always short-circuits, as its own entry records with the 2294-member measurement. Either arm needs the same missing shape: a shrunken landing corner on a settled multi-line exit turn. |
+| 3121 | `if tuple(route.route_system_owned_segment_ranks) != plan.owned_segment_ranks:` | `->L3122` |  |
+| 3127 | `if actual != (channel.start, channel.end):` | `->L3128` |  |
+| 3144 | `if radius_index >= len(radii):` | `->L3145` | **defensive** -- Every radius flanking a frozen plan-owned channel must survive emission. Production materialises the plan's complete radius tuple; test_member_geometry_validator_attributes_missing_flanking_radius exercises the attributed failure. |
+| 3151 | `if offsets is None or bases is None or offset is None or base is None:` | `->L3152` |  |
+| 3156 | `if radius_index + 2 >= len(route.points):` | `->L3157` | **defensive** -- A frozen member corner with a published radius must retain all three defining points. Production plans emit complete paths; test_member_geometry_validator_attributes_missing_corner_points exercises the attributed failure for malformed emitted geometry. |
+| 3172 | `if abs(actual_radius - expected_radius) > COORD_TOLERANCE_FINE:` | `->L3173` | **defensive** -- Final member-plan validation aborts when a plan-owned channel corner disagrees with its recorded concentric inputs. Valid production geometry derives that radius from the same inputs; both failure flanks are exercised by test_member_geometry_validator_rejects_changed_flanking_radius. |
+| 3187 | `if radius_index >= len(radii):` | `->L3188` | **defensive** -- Post-emission assertion in validate_member_geometry_emission: an owned corner index present in plan.curve_radii is missing from the emitted route's list. fresh_member_route copies plan.curve_radii element for element, or leaves both None, and no later pass shortens a route's radius list, so the two lists have equal length whenever the plan has radii at all. The raise is a construction-bug guard rather than a topology outcome. |
+| 3192 | `if abs(radii[radius_index] - planned_radius) > COORD_TOLERANCE_FINE:` | `->L3193` | **defensive** -- The same validator's radius-value flank: an owned corner, one of whose adjacent segment ranks is in plan.owned_segment_ranks, whose emitted radius differs from the planned one. Route-system-owned segment boundaries are exactly what the normalize and settlement passes are barred from re-sizing (route_system_owns_segment_boundary gates every one of them), so an owned corner reaches emission carrying the radius planning gave it. The raise fires only if a pass mutates owned geometry. |
+| 3213 | `if actual_offset != expected_offset or actual_base != expected_base:` | `->L3214` | **defensive** -- The same validator's concentric-inputs flank: the offset/base pair recorded for an owned corner's two segment ranks must still match the plan's. fresh_member_route copies both maps wholesale and only record_concentric_corner rewrites them, which the same ownership bar keeps off owned boundaries. Distinct from the radius-value raise above in that a pass could in principle re-record the inputs and still land on the planned radius; both are construction-bug guards. |
 
 ## `normalize.py`
 
@@ -1089,13 +1089,13 @@ Gates with an un-exercised arm:
 
 | Line | Gate | Un-exercised arm(s) | Triage |
 | ---: | --- | --- | --- |
-| 103 | `if plan.curve_radii is None or ctx.exit_turns is None:` | `->L104` |  |
-| 108 | `if membership is None:` | `->L109` |  |
-| 111 | `if corner_offsets is None:` | `->L112` |  |
-| 225 | `if scaffold is None:` | `->L226` |  |
-| 362 | `if station_offsets is not None:` | `->L365` |  |
-| 407 | `if not pending_plan_ids and member_geometry.settled_exit_turns:` | `->L408` | **defensive** -- Boundary settlement is adopted only after every pending exit-turn plan has resolved. A settled cohort with pending owners would mix planning generations and is defensively withheld. |
-| 430 | `if station_offsets is not None:` | `->L431`, `->L433` | **defensive** -- Production observed routing supplies a mutable station-offset map before replaying settled turns. The null arm supports the offsetless observation probe and requires no cache refresh. |
+| 101 | `if plan.curve_radii is None or ctx.exit_turns is None:` | `->L102` |  |
+| 106 | `if membership is None:` | `->L107` |  |
+| 109 | `if corner_offsets is None:` | `->L110` |  |
+| 223 | `if scaffold is None:` | `->L224` |  |
+| 360 | `if station_offsets is not None:` | `->L363` |  |
+| 405 | `if not pending_plan_ids and member_geometry.settled_exit_turns:` | `->L406` | **defensive** -- Boundary settlement is adopted only after every pending exit-turn plan has resolved. A settled cohort with pending owners would mix planning generations and is defensively withheld. |
+| 428 | `if station_offsets is not None:` | `->L429`, `->L431` | **defensive** -- Production observed routing supplies a mutable station-offset map before replaying settled turns. The null arm supports the offsetless observation probe and requires no cache refresh. |
 
 ## `postprocess.py`
 

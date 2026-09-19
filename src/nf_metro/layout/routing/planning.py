@@ -27,7 +27,6 @@ from nf_metro.layout.routing.convergences import (
 )
 from nf_metro.layout.routing.corridor_cohort_integration import (
     CorridorCohortLedger,
-    CorridorCohortPlan,
     build_corridor_cohort_ledger,
 )
 from nf_metro.layout.routing.exit_turns import ExitTurnExecution
@@ -68,7 +67,6 @@ class RoutePlanningExecution:
     reach a different verdict on a plan sitting near a tolerance boundary.
     Replay reads the verdict from here, which is why it is captured before the
     published record is narrowed to planned systems."""
-    corridor_cohorts: CorridorCohortPlan | None = None
     corridor_cohort_ledger: CorridorCohortLedger | None = None
 
 
@@ -470,7 +468,6 @@ def prepare_route_system_planning(
         family_by_edge,
         ctx,
     )
-    corridor_cohorts = member_geometry.corridor_cohorts
     route_systems = build_route_system_emission_execution(
         scaffold,
         exit_turn_plans=exit_turns.plans,
@@ -511,6 +508,5 @@ def prepare_route_system_planning(
         route_systems,
         planned_system_ids,
         exit_turn_dispositions,
-        corridor_cohorts,
         corridor_cohort_ledger,
     )

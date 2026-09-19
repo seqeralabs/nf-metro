@@ -160,14 +160,37 @@ if TYPE_CHECKING:
     from nf_metro.layout.route_reservations import ReservationCoordinateTranslation
 
 
+def _self_published_clearance_requirement(
+    requirement: BoundaryClearanceRequirement,
+) -> bool:
+    """Whether a requirement publishes itself without a route-system grant.
+
+    A corridor-cohort aperture requirement is owned by the corridor component
+    that failed to allocate, not by a route system, so its owner id never
+    matches a planned system: it always reaches the plan and never mints an
+    owner-id grant.  Every other kind is gated by the legacy owner-id grant.
+    """
+    return requirement.kind is BoundaryClearanceRequirementKind.CORRIDOR_COHORT_APERTURE
+
+
 def _published_boundary_clearance_owner_ids(
     inherited_owner_ids: frozenset[str],
     planned_system_ids: frozenset[RouteSystemId],
     requirements: tuple[BoundaryClearanceRequirement, ...],
 ) -> frozenset[str]:
-    """Publish granted owners that survive this planning generation."""
+    """Publish granted owners that survive this planning generation.
+
+    Takes the whole member-requirement set and mints an owner id only for a
+    grant-gated requirement of a planned system; a self-published requirement
+    contributes none.
+    """
     planned_owner_ids = frozenset(str(system_id) for system_id in planned_system_ids)
-    new_owner_ids = frozenset(requirement.owner_id for requirement in requirements)
+    new_owner_ids = frozenset(
+        requirement.owner_id
+        for requirement in requirements
+        if requirement.owner_id in planned_owner_ids
+        and not _self_published_clearance_requirement(requirement)
+    )
     return (inherited_owner_ids & planned_owner_ids) | new_owner_ids
 
 
@@ -367,26 +390,16 @@ def _route_edges(  # noqa: C901
             for plan in member_geometry.plans
             if plan.system_id in planned_system_ids
         )
-        # A corridor-cohort aperture requirement is owned by the corridor
-        # component that failed to allocate, not by a route system, so it never
-        # matches a planned system id; it is published on its own contract
-        # rather than gated by the legacy owner-id grant.
         published_member_requirements = tuple(
             requirement
             for requirement in member_geometry.clearance_requirements
             if requirement.owner_id in planned_owner_ids
-            or requirement.kind
-            is BoundaryClearanceRequirementKind.CORRIDOR_COHORT_APERTURE
+            or _self_published_clearance_requirement(requirement)
         )
         published_owner_ids = _published_boundary_clearance_owner_ids(
             boundary_clearance_owner_ids,
             planned_system_ids,
-            tuple(
-                requirement
-                for requirement in published_member_requirements
-                if requirement.kind
-                is not BoundaryClearanceRequirementKind.CORRIDOR_COHORT_APERTURE
-            ),
+            member_geometry.clearance_requirements,
         )
         observer = build_route_plan_observer(
             graph,
