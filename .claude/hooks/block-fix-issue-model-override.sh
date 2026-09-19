@@ -3,13 +3,7 @@
 # fix-issue-* agent type, since its tier is already pinned in the agent
 # definition's own frontmatter. See
 # .claude/skills/fix-issue/references/agent-types.md for the full reasoning.
-# The one documented exception is fix-issue-writer (lowering it to MID) - its
-# tier can change mid-session on a mixed diff, and it is resumed via
-# SendMessage rather than respawned, so a separate MID definition would force
-# a context-losing restart instead of a same-agent escalation. Every other
-# role's MID/HIGH split is a spawn-time decision instead, so it gets a
-# separate fixed-tier definition (e.g. fix-issue-diagnostician-mid) rather
-# than an override exception here.
+# The one documented exception is fix-issue-writer (lowering it to MID).
 set -euo pipefail
 
 input="$(cat)"
