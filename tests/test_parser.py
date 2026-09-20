@@ -1403,7 +1403,16 @@ def test_output_directive_unknown_override_key_warns_and_is_dropped():
 
 @pytest.mark.parametrize(
     "spec",
-    ["mode=sepia", "theme=nosuchbrand", "scale=big", "scale=0", "raster_width=-5"],
+    [
+        "mode=sepia",
+        "theme=nosuchbrand",
+        "scale=big",
+        "scale=0",
+        "scale=inf",
+        "scale=-inf",
+        "scale=1e309",
+        "raster_width=-5",
+    ],
 )
 def test_output_directive_bad_override_value_warns_and_is_dropped(spec):
     with pytest.warns(UserWarning, match="bad value"):

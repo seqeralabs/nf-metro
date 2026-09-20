@@ -213,6 +213,64 @@ def test_render_output_into_dot_git_rejected(fake_repo, declared):
     assert not (fake_repo / ".git" / "hooks").exists()
 
 
+@pytest.mark.parametrize(
+    ("declared", "expected"),
+    [
+        ("../.git/../docs/images/map.svg", "docs/images/map.svg"),
+        (".git/../docs/images/map.svg", "assets/docs/images/map.svg"),
+    ],
+)
+def test_render_output_git_traversal_that_cancels_out_is_allowed(
+    fake_repo, declared, expected
+):
+    """A `..` that lexically passes through `.git` but cancels back out of it
+    is not a `.git/` write and must not be rejected.
+
+    `os.path.normpath` and `Path.resolve()` both collapse `x/.git/../y` to
+    `x/y` before the boundary check runs, so the final write never touches
+    `.git/` here - unlike ``../.git/config``, which stays inside it and is
+    rejected by ``test_render_output_into_dot_git_rejected``.
+    """
+    mmd = fake_repo / "assets" / "map.mmd"
+    _declare(mmd, f"%%metro output: {declared}")
+    result = CliRunner().invoke(
+        cli, ["render", str(mmd), "--reject-output-outside-source"]
+    )
+    assert result.exit_code == 0, result.output
+    assert (fake_repo / expected).exists()
+
+
+def test_render_output_symlink_into_dot_git_rejected(fake_repo):
+    """The `.git` check runs against the symlink-resolved destination, so a
+    symlink pointing at `.git` is caught the same as a direct path."""
+    link = fake_repo / "assets" / "link_to_git"
+    link.symlink_to(fake_repo / ".git")
+    mmd = fake_repo / "assets" / "map.mmd"
+    _declare(mmd, "%%metro output: link_to_git/config")
+    result = CliRunner().invoke(
+        cli, ["render", str(mmd), "--reject-output-outside-source"]
+    )
+    assert result.exit_code != 0
+    assert ".git/" in result.output
+    assert not (fake_repo / ".git" / "config").exists()
+
+
+def test_render_output_symlink_into_ordinary_dir_allowed(fake_repo):
+    """A symlink resolving to an ordinary in-repo directory is not `.git/`
+    and must render normally."""
+    target_dir = fake_repo / "docs"
+    target_dir.mkdir()
+    link = fake_repo / "assets" / "link_to_docs"
+    link.symlink_to(target_dir)
+    mmd = fake_repo / "assets" / "map.mmd"
+    _declare(mmd, "%%metro output: link_to_docs/map.svg")
+    result = CliRunner().invoke(
+        cli, ["render", str(mmd), "--reject-output-outside-source"]
+    )
+    assert result.exit_code == 0, result.output
+    assert (target_dir / "map.svg").exists()
+
+
 def test_render_output_escape_rejected_with_flag(outside_repo):
     """Outside a repo the old source-directory rule still stands in."""
     src = outside_repo / "assets"

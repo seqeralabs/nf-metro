@@ -8,6 +8,7 @@ need extra context and are handled by :func:`_apply_directive`.
 
 from __future__ import annotations
 
+import math
 import re
 import warnings
 from collections.abc import Callable, Collection, Iterator
@@ -140,7 +141,7 @@ def _output_override_value(key: str, raw: str) -> object | None:
             number: float = float(text)
         except ValueError:
             return None
-        return number if number > 0 else None
+        return number if number > 0 and math.isfinite(number) else None
     try:
         count = int(text)
     except ValueError:

@@ -139,9 +139,12 @@ def _declared_outputs(
     nothing they did not already have, while ``assets/metro_map.mmd`` writing
     ``../docs/images/map.svg`` is an ordinary first-party layout. Git's own
     metadata is the one exception - config and hooks there become code on the
-    next ``git`` call in the same job - so any ``.git`` path component is
-    refused, which covers a nested ``assets/.git/`` the same as the checkout's
-    own. Outside a repository there is no tree to scope to, so the old
+    next ``git`` call in the same job - so a declared path whose *resolved*
+    destination lies inside a ``.git`` directory is refused, which covers a
+    nested ``assets/.git/`` the same as the checkout's own. A ``..`` hop that
+    only lexically passes through ``.git`` before cancelling back out of it
+    (``assets/.git/../docs/map.svg``) is not refused: nothing is ever written
+    there. Outside a repository there is no tree to scope to, so the old
     source-directory rule stands in.
     """
     base = source.parent.resolve()

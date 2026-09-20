@@ -30,10 +30,11 @@ history.
 - `--reject-output-outside-source` now scopes to the git working tree holding
   the `.mmd` rather than to the `.mmd`'s own directory, so
   `assets/metro_map.mmd` may declare `../docs/images/map.svg`. Paths escaping
-  the repository, and any path with a `.git` component (git config and hooks
-  are a code-execution vector for a later `git` call in the same job), are
-  still refused; outside a git working tree the old source-directory rule
-  still applies. Declared paths are also reported collapsed
+  the repository, and any path whose resolved destination lies inside a
+  `.git` directory (git config and hooks are a code-execution vector for a
+  later `git` call in the same job), are still refused; outside a git
+  working tree the old source-directory rule still applies. Declared paths
+  are also reported collapsed
   (`docs/images/map.svg`, not `assets/../docs/images/map.svg`).
 
 ## [2.1.0] — 2026-09-15
