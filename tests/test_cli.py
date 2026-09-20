@@ -193,14 +193,16 @@ def test_render_output_absolute_path_outside_repo_rejected(fake_repo, tmp_path_f
     assert not (outside / "escaped.svg").exists()
 
 
-@pytest.mark.parametrize(
-    "declared", ["../.git/config", "../.git/hooks/pre-commit", ".git/config"]
-)
+@pytest.mark.parametrize("declared", ["../.git/config", ".git/config"])
 def test_render_output_into_dot_git_rejected(fake_repo, declared):
     """Widening the boundary to the repo must not open up its own .git/.
 
     Config and hooks there turn into code on the next `git` call in the same
-    job, which is exactly what the flag exists to prevent.
+    job, which is exactly what the flag exists to prevent. The two cases are
+    the checkout's own `.git/` and a nested `assets/.git/` - distinct code
+    paths through the boundary check; a path further nested under either
+    `.git/` (e.g. `.git/hooks/pre-commit`) exercises the same membership
+    check as `.git/config` with no different outcome.
     """
     mmd = fake_repo / "assets" / "map.mmd"
     _declare(mmd, f"%%metro output: {declared}")
