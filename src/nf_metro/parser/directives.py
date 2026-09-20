@@ -114,6 +114,10 @@ _OUTPUT_OVERRIDE_KINDS: dict[str, str] = {
 # Override tokens are separated by commas, whitespace, or both.
 _OUTPUT_OVERRIDE_SEP = re.compile(r"[,\s]+")
 
+# Whitespace hugging a `=` is part of the token's own separator, not the
+# token boundary, so `mode = dark` reads as one token rather than three.
+_OUTPUT_OVERRIDE_EQ_SPACE = re.compile(r"\s*=\s*")
+
 
 def _output_override_value(key: str, raw: str) -> object | None:
     """Coerce one override's payload, or ``None`` when it is unusable.
@@ -157,7 +161,8 @@ def _parse_output_overrides(spec: str) -> dict[str, object]:
     which still renders under the run's global options).
     """
     overrides: dict[str, object] = {}
-    for token in _OUTPUT_OVERRIDE_SEP.split(spec.strip()):
+    normalized = _OUTPUT_OVERRIDE_EQ_SPACE.sub("=", spec.strip())
+    for token in _OUTPUT_OVERRIDE_SEP.split(normalized):
         if not token:
             continue
         name, sep, raw = token.partition("=")

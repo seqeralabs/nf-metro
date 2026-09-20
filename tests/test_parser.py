@@ -1365,6 +1365,14 @@ def test_output_directive_parses_per_output_overrides():
     ]
 
 
+def test_output_directive_override_tolerates_spaces_around_equals():
+    """Whitespace next to `=` is part of the separator, not the token split."""
+    graph = parse_metro_mermaid(
+        "%%metro output: b.png | mode = dark, scale= 3\ngraph LR\n"
+    )
+    assert graph.declared_outputs == [("b.png", {"mode": "dark", "scale": 3.0})]
+
+
 def test_output_directive_bare_path_has_no_overrides():
     """A plain declaration keeps behaving exactly as it did before overrides."""
     graph = parse_metro_mermaid("%%metro output: a.svg\ngraph LR\n")
