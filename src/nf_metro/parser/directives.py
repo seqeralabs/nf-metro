@@ -80,9 +80,14 @@ def _dir_style(value: str, graph: MetroGraph) -> None:
     graph.style = value
 
 
+# The two display modes a theme can render in, shared with the per-output
+# `mode=` override below.
+_MODE_CHOICES: tuple[str, ...] = ("light", "dark")
+
+
 def _dir_mode(value: str, graph: MetroGraph) -> None:
     mode = value.strip().lower()
-    if mode not in ("light", "dark"):
+    if mode not in _MODE_CHOICES:
         _warn_malformed("mode", value, "light/dark")
         return
     graph.mode = mode
@@ -121,30 +126,32 @@ _OUTPUT_OVERRIDE_EQ_SPACE = re.compile(r"\s*=\s*")
 def _output_override_value(key: str, raw: str) -> object | None:
     """Coerce one override's payload, or ``None`` when it is unusable.
 
-    ``False`` is a legitimate result (``animate=false``), so callers test the
-    outcome against ``None`` rather than for truthiness.
+    Every kind is validated through :func:`nf_metro.options.coerce`, the same
+    path every other ``%%metro`` numeric/choice directive and its equivalent
+    CLI flag already go through. ``False`` is a legitimate result
+    (``animate=false``), so callers test the outcome against ``None`` rather
+    than for truthiness.
     """
     kind = _OUTPUT_OVERRIDE_KINDS[key]
     text = raw.strip().lower()
-    if kind == "bool":
-        # A bare flag ("animate") arrives with an empty payload and means on.
-        if text in ("", "true", "yes", "on", "1"):
-            return True
-        return False if text in ("false", "no", "off", "0") else None
+    if kind == "bool" and text == "":
+        # A bare flag ("animate") means on; coerce's own bool kind reads an
+        # empty payload as off, which only applies to an explicit `key=`.
+        return True
     if kind == "mode":
-        return text if text in ("light", "dark") else None
-    if kind == "theme":
-        # Imported here because the theme registry reaches the render package,
-        # which imports the parser back.
+        opt = LayoutOption(name=key, kind="choice", choices=_MODE_CHOICES, help="")
+    elif kind == "theme":
+        # Imported here, not at module scope, because the theme registry
+        # reaches the render package, which imports the parser back.
         from nf_metro.themes import STYLE_NAMES
 
-        return text if text in STYLE_NAMES else None
-    # float/int share nf-metro's one numeric-coercion path (cast, finite,
-    # sign), the same validation the equivalent CLI flag applies.
-    numeric_kind: Literal["float", "int"] = "float" if kind == "float" else "int"
-    value, _ = coerce(
-        LayoutOption(name=key, kind=numeric_kind, sign="positive", help=""), text
-    )
+        opt = LayoutOption(name=key, kind="choice", choices=tuple(STYLE_NAMES), help="")
+    elif kind in ("float", "int"):
+        numeric_kind: Literal["float", "int"] = "float" if kind == "float" else "int"
+        opt = LayoutOption(name=key, kind=numeric_kind, sign="positive", help="")
+    else:
+        opt = LayoutOption(name=key, kind="bool", help="")
+    value, _ = coerce(opt, text)
     return None if value is INVALID else value
 
 

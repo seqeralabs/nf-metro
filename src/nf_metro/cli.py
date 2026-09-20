@@ -10,7 +10,7 @@ import sys
 import warnings
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
-from typing import Any, Literal, NoReturn, TypeVar, cast, get_args
+from typing import Any, Literal, NamedTuple, NoReturn, TypeVar, cast, get_args
 
 import click
 
@@ -144,14 +144,15 @@ def _declared_outputs(
     nested ``assets/.git/`` the same as the checkout's own. A ``..`` hop that
     only lexically passes through ``.git`` before cancelling back out of it
     (``assets/.git/../docs/map.svg``) is not refused: nothing is ever written
-    there. Outside a repository there is no tree to scope to, so the old
-    source-directory rule stands in.
+    there. Outside a repository there is no tree to scope to, so the boundary
+    falls back to the map's own directory.
     """
     base = source.parent.resolve()
-    root = _project_root(base)
+    # _project_root walks the filesystem up to find .git, and candidate.resolve()
+    # below stats every path component - both skipped unless the flag that
+    # consumes them is actually set.
+    root = _project_root(base) if reject_outside_source else None
     boundary = root or base
-    # Outside a repository the boundary is the source directory, and saying
-    # "the pipeline repository" there would name something that isn't here.
     scope = "pipeline repository" if root is not None else "map's own directory"
     resolved: list[tuple[Path, dict[str, object]]] = []
     for p, overrides in graph.declared_outputs:
@@ -162,21 +163,27 @@ def _declared_outputs(
         # check below resolves this same collapsed path, so what is validated
         # and what is written are always the same file.
         candidate = Path(os.path.normpath(source.parent / p))
-        target = candidate.resolve()
-        escapes = not target.is_relative_to(boundary)
-        reaches_git = not escapes and ".git" in target.relative_to(boundary).parts
-        if reject_outside_source and (escapes or reaches_git):
-            raise click.ClickException(
-                f"{source}: %%metro output: {p!r} resolves outside the "
-                f"{scope} (or into a .git/); declared paths must stay within "
-                f"{boundary} and out of .git/"
-            )
+        if reject_outside_source:
+            target = candidate.resolve()
+            escapes = not target.is_relative_to(boundary)
+            reaches_git = not escapes and ".git" in target.relative_to(boundary).parts
+            if escapes or reaches_git:
+                raise click.ClickException(
+                    f"{source}: %%metro output: {p!r} resolves outside the "
+                    f"{scope} (or into a .git/); declared paths must stay within "
+                    f"{boundary} and out of .git/"
+                )
         resolved.append((candidate, overrides))
     return resolved
 
 
-# One planned write: (label, output path, format, per-output overrides).
-_OutputJob = tuple[str, Path, "RenderFormat", dict[str, object]]
+class _OutputJob(NamedTuple):
+    """One planned write, with the per-output overrides it carries."""
+
+    label: str
+    path: Path
+    format: RenderFormat
+    overrides: dict[str, object]
 
 
 def _format_from_output(output: Path | None) -> RenderFormat:
@@ -843,7 +850,9 @@ def render(
         )
 
     def _out_job(out: Path, overrides: dict[str, object] | None = None) -> _OutputJob:
-        return (out.name, out, format_ or _format_from_output(out), overrides or {})
+        return _OutputJob(
+            out.name, out, format_ or _format_from_output(out), overrides or {}
+        )
 
     def _jobs_for(source: Path, graph: MetroGraph) -> list[_OutputJob]:
         """One job per declared output, else the sibling <source>.<format>."""
@@ -854,7 +863,9 @@ def render(
             return [_out_job(out, overrides) for out, overrides in declared]
         fmt = format_ or "svg"
         return [
-            (source.name, source.with_suffix(f".{fmt}"), cast(RenderFormat, fmt), {})
+            _OutputJob(
+                source.name, source.with_suffix(f".{fmt}"), cast(RenderFormat, fmt), {}
+            )
         ]
 
     def _parse_for_planning(source: Path, *, quiet: bool) -> MetroGraph:
@@ -905,15 +916,18 @@ def render(
         share a layout or not.
         """
         graphs: dict[tuple[Literal["svg", "html"], bool], MetroGraph] = {}
+        job_opts = [_job_layout_opts(job.overrides) for job in jobs]
+        keys = [
+            _graph_key(job.format, opts)
+            for job, opts in zip(jobs, job_opts, strict=True)
+        ]
         if len(jobs) > 1:
             permissive = bool(layout_opts.get("permissive"))
             with warnings.catch_warnings(record=True) as caught:
                 if permissive:
                     warnings.filterwarnings("always", category=PermissiveGuardWarning)
                 try:
-                    for _, _, out_format, overrides in jobs:
-                        job_opts = _job_layout_opts(overrides)
-                        key = _graph_key(out_format, job_opts)
+                    for job, opts, key in zip(jobs, job_opts, keys, strict=True):
                         if key not in graphs:
                             graphs[key] = _prepare_graph_for_render(
                                 source,
@@ -922,7 +936,7 @@ def render(
                                 line_spread=line_spread,
                                 logo=logo,
                                 legend=legend,
-                                layout_opts=_layout_opts_for(out_format, job_opts),
+                                layout_opts=_layout_opts_for(job.format, opts),
                                 bare=bare,
                                 svg_format=key[0],
                                 error_prefix=_error_prefix(source, quiet=True),
@@ -935,20 +949,18 @@ def render(
 
         calls = [
             (
-                label,
+                job.label,
                 _job(
                     source,
-                    out_path,
-                    out_format,
-                    overrides,
+                    job.path,
+                    job.format,
+                    job.overrides,
                     quiet=quiet,
-                    graph=graphs.get(
-                        _graph_key(out_format, _job_layout_opts(overrides))
-                    ),
+                    graph=graphs.get(key),
                     parsed=parsed,
                 ),
             )
-            for label, out_path, out_format, overrides in jobs
+            for job, key in zip(jobs, keys, strict=True)
         ]
         if batch:
             _run_batch(calls)
@@ -967,11 +979,13 @@ def render(
             jobs = _jobs_for(source, parsed)
 
         if len(jobs) == 1:
-            _, out_path, out_format, overrides = jobs[0]
-            _job(source, out_path, out_format, overrides, quiet=False, parsed=parsed)()
+            job = jobs[0]
+            _job(
+                source, job.path, job.format, job.overrides, quiet=False, parsed=parsed
+            )()
         else:
             _render_source(source, jobs, quiet=True, parsed=parsed, batch=True)
-        _print_render_result([out for _, out, _, _ in jobs])
+        _print_render_result([job.path for job in jobs])
         return
 
     # Several inputs (and therefore no -o, rejected above). Everything a file
@@ -987,7 +1001,7 @@ def render(
             graph = _parse_for_planning(source, quiet=True)
             jobs = _jobs_for(source, graph)
             _render_source(source, jobs, quiet=True, parsed=graph, batch=False)
-            written.extend(out for _, out, _, _ in jobs)
+            written.extend(job.path for job in jobs)
 
         return _run
 
