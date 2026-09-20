@@ -4,20 +4,22 @@ on:
   release:
     types: [published]
 
+# No workflow-level id-token: only the publish job needs it (scoped below).
 permissions:
-  id-token: write
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        # No cache on a release build: it feeds a published artifact, so it must
+        # not restore anything a prior run could have poisoned.
         with:
-          python-version: "3.12"
-      - run: pip install build packaging
-      - run: python -m build
+          enable-cache: false
+      - run: uv build
 
       # PyPI takes the version from the artefact, not the tag, so a tag cut
       # against an unbumped tree would publish under the previous version.
@@ -27,7 +29,7 @@ jobs:
         env:
           TAG: ${{ github.event.release.tag_name }}
         run: |
-          python - <<'PY'
+          uv run --no-project --with packaging python - <<'PY'
           import glob
           import os
           import sys
@@ -47,7 +49,7 @@ jobs:
               sys.exit(f"release tag {tag} does not match built version {built}")
           print(f"release tag {tag} matches built version {built}")
           PY
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dist
           path: dist/
@@ -57,9 +59,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: pypi
+    # Scoped here, not workflow-wide: only this job mints the OIDC token.
+    permissions:
+      id-token: write
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: dist
           path: dist/
-      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          enable-cache: false
+      # Trusted publishing: uv reads the GitHub OIDC token (id-token: write) and
+      # needs no API token. Requires a PyPI trusted publisher for this workflow.
+      - run: uv publish --trusted-publishing always dist/*

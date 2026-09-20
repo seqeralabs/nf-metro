@@ -56,7 +56,7 @@ pip install "nf-metro[font]"       # render --text-to-paths (fonttools)
 ### Development
 
 ```bash
-pip install -e ".[dev]"
+uv sync
 ```
 
 Requires Python 3.11+.

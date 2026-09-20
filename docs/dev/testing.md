@@ -6,12 +6,12 @@ sidebar:
 ---
 
 The test suite has four validation layers, each checking a different artifact at a different point in the pipeline.
-Run everything with `pytest`, or run one file or test with the usual selectors:
+Run everything with `uv run pytest`, or run one file or test with the usual selectors:
 
 ```bash frame="terminal"
-pytest                                   # all tests
-pytest tests/test_topology_validation.py # one file
-pytest tests/test_parser.py::test_parse_title
+uv run pytest                                   # all tests
+uv run pytest tests/test_topology_validation.py # one file
+uv run pytest tests/test_parser.py::test_parse_title
 ```
 
 ## Fixtures
@@ -54,9 +54,9 @@ See also [Layout pipeline](/nf-metro/dev/layout_pipeline/).
 Review a layout or rendering change by rendering the whole gallery before and after, then diffing the SVGs.
 CI automates this in `.github/workflows/pr-renders.yml`, which:
 
-1. Renders every gallery entry on the PR branch (`python scripts/build_gallery.py --debug`) and saves the SVGs.
+1. Renders every gallery entry on the PR branch (`uv run python scripts/build_gallery.py --debug`) and saves the SVGs.
 2. Checks out the base branch and renders the same gallery.
-3. Runs `python scripts/build_render_diff.py BASE_DIR PR_DIR OUTPUT_DIR --pr <NUMBER>` to build a side-by-side before/after page for only the outputs that changed.
+3. Runs `uv run python scripts/build_render_diff.py BASE_DIR PR_DIR OUTPUT_DIR --pr <NUMBER>` to build a side-by-side before/after page for only the outputs that changed.
 
 `build_render_diff.py` exits `2` when there is **no** difference.
 A PR that intends to be visually neutral should therefore produce a byte-identical gallery and no diff page.
@@ -65,8 +65,8 @@ The preview is published at `https://seqeralabs.github.io/nf-metro/_pr/<PR_NUMBE
 To reproduce locally, render the gallery on each branch into separate directories and run the diff script the same way:
 
 ```bash frame="terminal"
-python scripts/build_gallery.py            # writes docs/assets/renders/*.svg
-python scripts/build_render_diff.py /tmp/base /tmp/pr /tmp/diff_site
+uv run python scripts/build_gallery.py            # writes docs/assets/renders/*.svg
+uv run python scripts/build_render_diff.py /tmp/base /tmp/pr /tmp/diff_site
 ```
 
 `scripts/render_topologies.py` batch-renders the topology fixtures to `/tmp/nf_metro_topology_renders/` for quick visual inspection.

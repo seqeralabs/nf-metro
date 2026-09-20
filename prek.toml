@@ -52,7 +52,9 @@ hooks = [
   {
     id = "mypy",
     name = "mypy",
-    entry = "mypy",
+    # `uv run` provisions the dev group from uv.lock on demand, so mypy sees the
+    # project's deps and stubs with no venv to activate first. Needs `uv` on PATH.
+    entry = "uv run --frozen mypy",
     language = "system",
     pass_filenames = false,
     types = ["python"]

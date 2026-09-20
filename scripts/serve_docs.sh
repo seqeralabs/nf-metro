@@ -85,10 +85,10 @@ if [[ -n "$BRANCH" ]]; then
 
   REPO_ROOT="$(cd "$WT" && pwd)"
 
-  echo "==> Installing $BRANCH's nf_metro into the active env (gallery renders reflect the branch)"
-  if ! pip install -e "$REPO_ROOT[docs]" -q; then
-    echo "WARNING: editable install of the branch failed; gallery renders may not" >&2
-    echo "         reflect '$BRANCH'. Activate the project env and retry." >&2
+  echo "==> Syncing $BRANCH's nf_metro env (gallery renders reflect the branch)"
+  if ! uv sync --project "$REPO_ROOT" --extra docs -q; then
+    echo "WARNING: uv sync of the branch failed; gallery renders may not" >&2
+    echo "         reflect '$BRANCH'. Check that 'uv' is on PATH and retry." >&2
   fi
 fi
 
@@ -99,17 +99,17 @@ WEBSITE_DIR="$REPO_ROOT/website"
 GALLERY_MARKER="$REPO_ROOT/website/src/content/gallery.json"
 
 generate_content() {
-  if ! python -c "import nf_metro" >/dev/null 2>&1; then
-    echo "WARNING: the 'nf_metro' package is not importable in this Python." >&2
-    echo "         Activate the project env (e.g. 'source ~/.local/bin/mm-activate nf-metro')" >&2
-    echo "         or 'pip install -e .', then re-run. Skipping content generation;" >&2
-    echo "         the Gallery / pipelines / playground pages will be empty." >&2
+  # uv provisions the project env from uv.lock on demand; no venv to activate.
+  if ! uv sync --project "$REPO_ROOT" --extra docs -q >/dev/null 2>&1; then
+    echo "WARNING: 'uv sync' failed for $REPO_ROOT (is 'uv' on PATH?)." >&2
+    echo "         Skipping content generation; the Gallery / pipelines /" >&2
+    echo "         playground pages will be empty." >&2
     return
   fi
   echo "==> Generating playground example manifest"
-  python "$REPO_ROOT/scripts/build_playground_examples.py"
+  uv run --project "$REPO_ROOT" python "$REPO_ROOT/scripts/build_playground_examples.py"
   echo "==> Generating gallery + pipelines pages and render SVGs (slow on first run)"
-  python "$REPO_ROOT/scripts/build_gallery.py"
+  uv run --project "$REPO_ROOT" python "$REPO_ROOT/scripts/build_gallery.py"
   # Drop the <Metro> live-render caches so served maps reflect the current engine
   # (the content-hash key won't change for an editable-install code edit).
   rm -rf "$WEBSITE_DIR/.metro-cache" "$WEBSITE_DIR/public/_generated"

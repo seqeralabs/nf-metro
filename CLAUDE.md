@@ -8,29 +8,38 @@ nf-metro generates metro-map-style SVG diagrams from Mermaid graph definitions a
 
 ## Build & Development
 
-```bash
-# Install in development mode (uses hatchling build system)
-pip install -e ".[dev]"
+Development is uv-native: `uv sync` builds the env from `uv.lock` (hatchling
+build backend) and installs the default `dev` dependency group — no venv to
+activate. Run **dev tooling** through `uv run` (`uv run pytest`, `uv run mypy`).
+The **`nf-metro` CLI** is used as `nf-metro …` as normal; in a dev checkout run
+it with `uv run nf-metro …`, or `uv tool install --editable .` once for a bare
+`nf-metro` on PATH that tracks your working tree. (End users install the
+published CLI with `uv tool install nf-metro` or `pip install nf-metro`.)
 
-# Run CLI
+```bash
+# Create/refresh the dev environment (installs the `dev` group; no flags needed)
+uv sync
+
+# Run the CLI (bare once installed on PATH; else `uv run nf-metro …`)
 nf-metro render examples/rnaseq_sections.mmd -o output.svg
 nf-metro validate examples/rnaseq_sections.mmd
 nf-metro info examples/rnaseq_sections.mmd
 
-# Run via module
-python -m nf_metro
-
 # Run all tests
-pytest
+uv run pytest
 
 # Run a single test
-pytest tests/test_parser.py::test_parse_title
+uv run pytest tests/test_parser.py::test_parse_title
 
-# Lint
-ruff check src/ tests/
+# Lint & type-check
+uv run ruff check src/ tests/
+uv run mypy
 ```
 
-Dependencies: click, drawsvg, networkx, pillow. Dev: pytest, ruff.
+Dependencies: click, drawsvg, networkx, pillow (runtime). The `dev` dependency
+group (PEP 735, in `pyproject.toml`) adds pytest, ruff, mypy, and the test-only
+extras. User-facing extras stay in `[project.optional-dependencies]`: `docs`,
+`font`, `validate`.
 
 ## Documentation site
 
@@ -133,16 +142,18 @@ This is the authoritative visual review and should be used for all layout or ren
 **Quick local render** (for fast iteration before pushing):
 
 ```bash
-source ~/.local/bin/mm-activate nf-metro
-
 # Render straight to PNG. --mode picks the palette; --scale 2 is retina.
-python -m nf_metro render examples/rnaseq_sections.mmd -o /tmp/rnaseq_sections.png --x-spacing 60 --y-spacing 40 --mode light
+nf-metro render examples/rnaseq_sections.mmd -o /tmp/rnaseq_sections.png --x-spacing 60 --y-spacing 40 --mode light
 
 # Open it
 open /tmp/rnaseq_sections.png
 ```
 
-Any env with the project importable works. Prefer pointing `PYTHONPATH` at the worktree you mean to test rather than an editable install, which binds one env to one worktree path and breaks when that worktree is pruned.
+In a dev checkout, invoke this as `uv run nf-metro render …` (or a bare
+`nf-metro` if you `uv tool install --editable .`). `uv run` resolves the project
+env from `uv.lock` for whatever worktree you run it in, so no activation or
+`PYTHONPATH` juggling is needed; to exercise a different worktree, run from
+inside it (or pass `uv run --project <path>`).
 
 `--format png` bakes concrete colors and omits the chrome `<style>` block entirely, so this PNG cannot show a chrome-CSS cascade defect (a rule that repaints an element the stylesheet is supposed to leave alone). Answer cascade questions with the CI render-diff or a targeted test, not this recipe.
 
