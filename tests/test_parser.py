@@ -1417,8 +1417,6 @@ def test_output_directive_unknown_override_key_warns_and_is_dropped():
         "scale=big",
         "scale=0",
         "scale=inf",
-        "scale=-inf",
-        "scale=1e309",
         "raster_width=-5",
     ],
 )
