@@ -1327,27 +1327,109 @@ def test_fold_threshold_keeps_wide_chain_on_one_row():
 
 def test_output_directive_records_declared_outputs():
     graph = parse_metro_mermaid("%%metro output: a.svg, b.png\ngraph LR\n")
-    assert graph.declared_outputs == ["a.svg", "b.png"]
+    assert graph.declared_outputs == [("a.svg", {}), ("b.png", {})]
 
 
 def test_output_directive_repeated_accumulates():
     graph = parse_metro_mermaid(
         "%%metro output: a.svg\n%%metro output: b.png\ngraph LR\n"
     )
-    assert graph.declared_outputs == ["a.svg", "b.png"]
+    assert graph.declared_outputs == [("a.svg", {}), ("b.png", {})]
 
 
 def test_output_directive_duplicate_path_not_repeated():
     graph = parse_metro_mermaid(
         "%%metro output: a.svg\n%%metro output: a.svg, b.png\ngraph LR\n"
     )
-    assert graph.declared_outputs == ["a.svg", "b.png"]
+    assert graph.declared_outputs == [("a.svg", {}), ("b.png", {})]
 
 
 def test_output_directive_malformed_warns_and_stores_nothing():
     with pytest.warns(UserWarning, match="output"):
         graph = parse_metro_mermaid("%%metro output: \ngraph LR\n")
     assert graph.declared_outputs == []
+
+
+def test_output_directive_parses_per_output_overrides():
+    """Everything right of the `|` becomes that output's own render config."""
+    graph = parse_metro_mermaid(
+        "%%metro output: a.svg | animate\n"
+        "%%metro output: b.png | mode=dark, scale=3\n"
+        "%%metro output: c.png | theme=seqera raster_width=800\n"
+        "graph LR\n"
+    )
+    assert graph.declared_outputs == [
+        ("a.svg", {"animate": True}),
+        ("b.png", {"mode": "dark", "scale": 3.0}),
+        ("c.png", {"theme": "seqera", "raster_width": 800}),
+    ]
+
+
+def test_output_directive_override_tolerates_spaces_around_equals():
+    """Whitespace next to `=` is part of the separator, not the token split."""
+    graph = parse_metro_mermaid(
+        "%%metro output: b.png | mode = dark, scale= 3\ngraph LR\n"
+    )
+    assert graph.declared_outputs == [("b.png", {"mode": "dark", "scale": 3.0})]
+
+
+def test_output_directive_bare_path_has_no_overrides():
+    """A plain declaration keeps behaving exactly as it did before overrides."""
+    graph = parse_metro_mermaid("%%metro output: a.svg\ngraph LR\n")
+    assert graph.declared_outputs == [("a.svg", {})]
+
+
+def test_output_directive_overrides_apply_to_every_path_on_the_line():
+    graph = parse_metro_mermaid("%%metro output: a.png, b.png | mode=light\ngraph LR\n")
+    assert graph.declared_outputs == [
+        ("a.png", {"mode": "light"}),
+        ("b.png", {"mode": "light"}),
+    ]
+
+
+def test_output_directive_line_mate_overrides_are_independent():
+    """Each declaration owns its dict, so mutating one can't reach the other."""
+    graph = parse_metro_mermaid("%%metro output: a.png, b.png | mode=light\ngraph LR\n")
+    graph.declared_outputs[0][1]["mode"] = "dark"
+    assert graph.declared_outputs[1][1] == {"mode": "light"}
+
+
+def test_output_directive_animate_can_be_switched_off():
+    graph = parse_metro_mermaid("%%metro output: a.svg | animate=false\ngraph LR\n")
+    assert graph.declared_outputs == [("a.svg", {"animate": False})]
+
+
+def test_output_directive_unknown_override_key_warns_and_is_dropped():
+    with pytest.warns(UserWarning, match="unknown override"):
+        graph = parse_metro_mermaid(
+            "%%metro output: a.svg | bare=true, mode=dark\ngraph LR\n"
+        )
+    # The typo is dropped; the valid override beside it survives, and the
+    # output itself still renders.
+    assert graph.declared_outputs == [("a.svg", {"mode": "dark"})]
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        "mode=sepia",
+        "theme=nosuchbrand",
+        "scale=big",
+        "scale=0",
+        "scale=inf",
+        "raster_width=-5",
+    ],
+)
+def test_output_directive_bad_override_value_warns_and_is_dropped(spec):
+    with pytest.warns(UserWarning, match="bad value"):
+        graph = parse_metro_mermaid(f"%%metro output: a.svg | {spec}\ngraph LR\n")
+    assert graph.declared_outputs == [("a.svg", {})]
+
+
+def test_output_directive_bare_non_bool_override_warns():
+    with pytest.warns(UserWarning, match="expected mode=<value>"):
+        graph = parse_metro_mermaid("%%metro output: a.svg | mode\ngraph LR\n")
+    assert graph.declared_outputs == [("a.svg", {})]
 
 
 def test_max_station_columns_arg_overrides_fold_threshold():

@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from nf_metro.cli import cli
+from nf_metro.cli import _project_root, cli
 from nf_metro.layout import FoldThresholdError
 
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
@@ -106,37 +106,335 @@ def test_render_output_escape_allowed_by_default(tmp_path):
     assert (tmp_path / "escaped.svg").exists()
 
 
-def test_render_output_escape_rejected_with_flag(tmp_path):
-    """--reject-output-outside-source refuses a path escaping the .mmd's dir."""
-    src = tmp_path / "assets"
+@pytest.fixture
+def outside_repo(tmp_path):
+    """A temp dir known not to sit inside a git working tree.
+
+    ``--reject-output-outside-source`` scopes to the repository holding the
+    .mmd and only falls back to the source directory outside one, so a test
+    of that fallback has to know which side of the boundary it is on.
+    """
+    if _project_root(tmp_path.resolve()) is not None:
+        pytest.skip("pytest temp dir sits inside a git working tree")
+    return tmp_path
+
+
+@pytest.fixture
+def fake_repo(tmp_path):
+    """A directory that looks like a git checkout, with a map under assets/.
+
+    Only the ``.git`` marker matters: ``_project_root`` walks up for it and
+    never shells out to git, so an empty directory is checkout enough.
+    """
+    (tmp_path / ".git").mkdir()
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    return tmp_path
+
+
+def _declare(mmd: Path, *directives: str) -> None:
+    """Write a standalone map at *mmd* prefixed with *directives*."""
+    mmd.write_text("".join(f"{d}\n" for d in directives) + STANDALONE_MMD.read_text())
+
+
+def test_render_output_sibling_subdir_allowed_within_repo(fake_repo):
+    """A `..` hop that stays inside the checkout is legitimate, not an escape.
+
+    `assets/metro_map.mmd` writing `../docs/images/` is the nf-core pipeline
+    template's own layout, so the guard must not reject it.
+    """
+    mmd = fake_repo / "assets" / "map.mmd"
+    _declare(mmd, "%%metro output: ../docs/images/map.svg")
+    result = CliRunner().invoke(
+        cli, ["render", str(mmd), "--reject-output-outside-source"]
+    )
+    assert result.exit_code == 0, result.output
+    assert (fake_repo / "docs" / "images" / "map.svg").exists()
+
+
+def test_render_declared_output_path_is_reported_collapsed(fake_repo):
+    """An in-repo `..` hop is reported as the path it means.
+
+    The GitHub Action publishes these strings as its `output-path`, so
+    `assets/../docs/images/map.svg` would be a papercut for every pipeline
+    using the nf-core template's layout.
+    """
+    mmd = fake_repo / "assets" / "map.mmd"
+    _declare(mmd, "%%metro output: ../docs/images/map.svg")
+    result = CliRunner().invoke(cli, ["render", str(mmd)])
+    assert result.exit_code == 0, result.output
+    reported = [line for line in result.stdout.splitlines() if "map.svg" in line]
+    assert reported and all(".." not in line for line in reported), result.stdout
+
+
+def test_render_output_escape_past_repo_root_rejected(fake_repo):
+    """The repo root is still a wall: `..` past it fails the render."""
+    mmd = fake_repo / "assets" / "map.mmd"
+    _declare(mmd, "%%metro output: ../../elsewhere/escaped.svg")
+    result = CliRunner().invoke(
+        cli, ["render", str(mmd), "--reject-output-outside-source"]
+    )
+    assert result.exit_code != 0
+    assert "resolves outside the pipeline repository" in result.output
+    assert not (fake_repo.parent / "elsewhere" / "escaped.svg").exists()
+    assert result.stdout == ""
+
+
+def test_render_output_absolute_path_outside_repo_rejected(fake_repo, tmp_path_factory):
+    """An absolute path leaving the checkout is rejected however it is spelled."""
+    outside = tmp_path_factory.mktemp("outside")
+    mmd = fake_repo / "assets" / "map.mmd"
+    _declare(mmd, f"%%metro output: {outside / 'escaped.svg'}")
+    result = CliRunner().invoke(
+        cli, ["render", str(mmd), "--reject-output-outside-source"]
+    )
+    assert result.exit_code != 0
+    assert "resolves outside the pipeline repository" in result.output
+    assert not (outside / "escaped.svg").exists()
+
+
+@pytest.mark.parametrize("declared", ["../.git/config", ".git/config"])
+def test_render_output_into_dot_git_rejected(fake_repo, declared):
+    """Widening the boundary to the repo must not open up its own .git/.
+
+    Config and hooks there turn into code on the next `git` call in the same
+    job, which is exactly what the flag exists to prevent. The two cases are
+    the checkout's own `.git/` and a nested `assets/.git/` - distinct code
+    paths through the boundary check; a path further nested under either
+    `.git/` (e.g. `.git/hooks/pre-commit`) exercises the same membership
+    check as `.git/config` with no different outcome.
+    """
+    mmd = fake_repo / "assets" / "map.mmd"
+    _declare(mmd, f"%%metro output: {declared}")
+    result = CliRunner().invoke(
+        cli, ["render", str(mmd), "--reject-output-outside-source"]
+    )
+    assert result.exit_code != 0
+    assert ".git/" in result.output
+    assert not (fake_repo / ".git" / "config").exists()
+
+
+@pytest.mark.parametrize(
+    ("declared", "expected"),
+    [
+        ("../.git/../docs/images/map.svg", "docs/images/map.svg"),
+        (".git/../docs/images/map.svg", "assets/docs/images/map.svg"),
+    ],
+)
+def test_render_output_git_traversal_that_cancels_out_is_allowed(
+    fake_repo, declared, expected
+):
+    """A `..` that lexically passes through `.git` but cancels back out of it
+    is not a `.git/` write and must not be rejected.
+
+    `os.path.normpath` and `Path.resolve()` both collapse `x/.git/../y` to
+    `x/y` before the boundary check runs, so the final write never touches
+    `.git/` here - unlike ``../.git/config``, which stays inside it and is
+    rejected by ``test_render_output_into_dot_git_rejected``.
+    """
+    mmd = fake_repo / "assets" / "map.mmd"
+    _declare(mmd, f"%%metro output: {declared}")
+    result = CliRunner().invoke(
+        cli, ["render", str(mmd), "--reject-output-outside-source"]
+    )
+    assert result.exit_code == 0, result.output
+    assert (fake_repo / expected).exists()
+
+
+def test_render_output_symlink_into_dot_git_rejected(fake_repo):
+    """The `.git` check runs against the symlink-resolved destination, so a
+    symlink pointing at `.git` is caught the same as a direct path."""
+    link = fake_repo / "assets" / "link_to_git"
+    link.symlink_to(fake_repo / ".git")
+    mmd = fake_repo / "assets" / "map.mmd"
+    _declare(mmd, "%%metro output: link_to_git/config")
+    result = CliRunner().invoke(
+        cli, ["render", str(mmd), "--reject-output-outside-source"]
+    )
+    assert result.exit_code != 0
+    assert ".git/" in result.output
+    assert not (fake_repo / ".git" / "config").exists()
+
+
+def test_render_output_symlink_into_ordinary_dir_allowed(fake_repo):
+    """A symlink resolving to an ordinary in-repo directory is not `.git/`
+    and must render normally."""
+    target_dir = fake_repo / "docs"
+    target_dir.mkdir()
+    link = fake_repo / "assets" / "link_to_docs"
+    link.symlink_to(target_dir)
+    mmd = fake_repo / "assets" / "map.mmd"
+    _declare(mmd, "%%metro output: link_to_docs/map.svg")
+    result = CliRunner().invoke(
+        cli, ["render", str(mmd), "--reject-output-outside-source"]
+    )
+    assert result.exit_code == 0, result.output
+    assert (target_dir / "map.svg").exists()
+
+
+def test_render_output_escape_rejected_with_flag(outside_repo):
+    """Outside a repo the old source-directory rule still stands in."""
+    src = outside_repo / "assets"
     src.mkdir()
     mmd = src / "map.mmd"
-    mmd.write_text("%%metro output: ../escaped.svg\n" + STANDALONE_MMD.read_text())
+    _declare(mmd, "%%metro output: ../escaped.svg")
     result = CliRunner().invoke(
         cli, ["render", str(mmd), "--reject-output-outside-source"]
     )
     assert result.exit_code != 0
     assert "resolves outside" in result.output
-    assert not (tmp_path / "escaped.svg").exists()
+    assert not (outside_repo / "escaped.svg").exists()
     assert result.stdout == ""
 
 
-def test_render_output_escape_rejected_via_absolute_path(tmp_path):
+def test_render_output_escape_rejected_via_absolute_path(outside_repo):
     """--reject-output-outside-source also refuses an absolute declared path."""
-    outside = tmp_path / "outside"
+    outside = outside_repo / "outside"
     outside.mkdir()
-    src = tmp_path / "assets"
+    src = outside_repo / "assets"
     src.mkdir()
     mmd = src / "map.mmd"
-    mmd.write_text(
-        f"%%metro output: {outside / 'escaped.svg'}\n" + STANDALONE_MMD.read_text()
-    )
+    _declare(mmd, f"%%metro output: {outside / 'escaped.svg'}")
     result = CliRunner().invoke(
         cli, ["render", str(mmd), "--reject-output-outside-source"]
     )
     assert result.exit_code != 0
     assert "resolves outside" in result.output
     assert not (outside / "escaped.svg").exists()
+
+
+TEMPLATE_OUTPUT_BLOCK = (
+    "%%metro output: map.svg",
+    "%%metro output: map_animated.svg | animate",
+    "%%metro output: map_dark.png | mode=dark",
+    "%%metro output: map_light.png | mode=light",
+)
+
+
+def test_render_per_output_overrides_write_four_configs_in_one_pass(tmp_path):
+    """The nf-core template's four images come out of a single render call.
+
+    Only the animated SVG carries the keyframes, and the two PNGs differ from
+    each other because each baked its own mode's palette.
+    """
+    mmd = tmp_path / "map.mmd"
+    _declare(mmd, *TEMPLATE_OUTPUT_BLOCK)
+    result = CliRunner().invoke(cli, ["render", str(mmd)])
+    assert result.exit_code == 0, result.output
+
+    static, animated = tmp_path / "map.svg", tmp_path / "map_animated.svg"
+    dark, light = tmp_path / "map_dark.png", tmp_path / "map_light.png"
+    assert all(p.exists() for p in (static, animated, dark, light))
+    assert "@keyframes" in animated.read_text()
+    assert "@keyframes" not in static.read_text()
+    assert dark.read_bytes() != light.read_bytes()
+
+
+@pytest.mark.parametrize("mode", ["dark", "light"])
+def test_render_per_output_mode_matches_the_global_flag(tmp_path, mode):
+    """A `| mode=` override bakes exactly what `--mode` would have baked."""
+    declared = tmp_path / "declared"
+    declared.mkdir()
+    mmd = declared / "map.mmd"
+    _declare(mmd, f"%%metro output: map.png | mode={mode}")
+    assert CliRunner().invoke(cli, ["render", str(mmd)]).exit_code == 0
+
+    reference = tmp_path / "reference.png"
+    flagged = CliRunner().invoke(
+        cli, ["render", str(mmd), "-o", str(reference), "--mode", mode]
+    )
+    assert flagged.exit_code == 0, flagged.output
+    assert (declared / "map.png").read_bytes() == reference.read_bytes()
+
+
+def test_render_per_output_overrides_share_one_layout_across_modes(
+    tmp_path, monkeypatch
+):
+    """mode/theme are baked at serialize time, so they must not split layouts.
+
+    Four declared outputs, three of them static: only the animated one needs a
+    layout of its own, so the whole block costs two layout runs, not four.
+    """
+    import nf_metro.cli as cli_module
+
+    layouts: list[object] = []
+    real_prepare = cli_module._prepare_graph_for_render
+
+    def _counting_prepare(*args, **kwargs):
+        layouts.append(kwargs.get("layout_opts"))
+        return real_prepare(*args, **kwargs)
+
+    monkeypatch.setattr(cli_module, "_prepare_graph_for_render", _counting_prepare)
+    mmd = tmp_path / "map.mmd"
+    _declare(mmd, *TEMPLATE_OUTPUT_BLOCK)
+    result = CliRunner().invoke(cli, ["render", str(mmd)])
+    assert result.exit_code == 0, result.output
+    assert len(layouts) == 2, layouts
+    assert sorted(bool(opts.get("animate")) for opts in layouts) == [False, True]
+
+
+def test_render_per_output_scale_override_beats_the_default(tmp_path):
+    """`| scale=` replaces the format's default scale for that output alone."""
+    from PIL import Image
+
+    mmd = tmp_path / "map.mmd"
+    _declare(mmd, "%%metro output: small.png | scale=1", "%%metro output: big.png")
+    result = CliRunner().invoke(cli, ["render", str(mmd)])
+    assert result.exit_code == 0, result.output
+    # PNG defaults to scale 2, so the un-overridden one is twice as wide.
+    small = Image.open(tmp_path / "small.png").width
+    assert Image.open(tmp_path / "big.png").width == pytest.approx(small * 2, abs=2)
+
+
+def test_render_per_output_raster_width_override(tmp_path):
+    from PIL import Image
+
+    mmd = tmp_path / "map.mmd"
+    _declare(mmd, "%%metro output: fixed.png | raster_width=640")
+    result = CliRunner().invoke(cli, ["render", str(mmd)])
+    assert result.exit_code == 0, result.output
+    assert Image.open(tmp_path / "fixed.png").width == 640
+
+
+def test_render_per_output_theme_override(tmp_path):
+    """Two brands from one map in one pass, without touching --theme."""
+    mmd = tmp_path / "map.mmd"
+    _declare(
+        mmd,
+        "%%metro output: seqera.svg | theme=seqera",
+        "%%metro output: nfcore.svg | theme=nfcore",
+    )
+    result = CliRunner().invoke(cli, ["render", str(mmd)])
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "seqera.svg").read_text() != (
+        tmp_path / "nfcore.svg"
+    ).read_text()
+
+
+def test_render_bare_declared_output_unchanged_by_the_override_syntax(tmp_path):
+    """Back-compat: a path with no `|` renders exactly as it always has."""
+    mmd = tmp_path / "map.mmd"
+    _declare(mmd, "%%metro output: plain.svg")
+    result = CliRunner().invoke(cli, ["render", str(mmd)])
+    assert result.exit_code == 0, result.output
+    assert "@keyframes" not in (tmp_path / "plain.svg").read_text()
+
+
+def test_render_unknown_per_output_override_is_reported(tmp_path):
+    """An unknown key is called out rather than silently changing nothing."""
+    mmd = tmp_path / "map.mmd"
+    _declare(mmd, "%%metro output: map.svg | bare=true")
+    result = CliRunner().invoke(cli, ["render", str(mmd)])
+    assert "unknown override" in result.output
+
+
+def test_render_per_output_override_beats_the_global_flag(tmp_path):
+    """The declaration is more specific than the run, so it wins."""
+    mmd = tmp_path / "map.mmd"
+    _declare(mmd, "%%metro output: still.svg | animate=false")
+    result = CliRunner().invoke(cli, ["render", str(mmd), "--animate"])
+    assert result.exit_code == 0, result.output
+    assert "@keyframes" not in (tmp_path / "still.svg").read_text()
 
 
 def test_render_reports_yaml_result_to_stdout(tmp_path):
@@ -610,7 +908,7 @@ def test_render_declared_outputs_come_from_the_parser(tmp_path, monkeypatch):
 
     def _parse_source_with_injected_output(*args, **kwargs):
         graph = real_parse_source(*args, **kwargs)
-        graph.declared_outputs = ["injected.svg"]
+        graph.declared_outputs = [("injected.svg", {})]
         return graph
 
     monkeypatch.setattr(cli_module, "_parse_source", _parse_source_with_injected_output)

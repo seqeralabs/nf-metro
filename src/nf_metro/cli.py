@@ -10,7 +10,7 @@ import sys
 import warnings
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
-from typing import Any, Literal, NoReturn, TypeVar, cast, get_args
+from typing import Any, Literal, NamedTuple, NoReturn, TypeVar, cast, get_args
 
 import click
 
@@ -98,38 +98,92 @@ def _parse_inactive_lines(value: object) -> frozenset[str] | None:
     return frozenset(s for s in (str(i).strip() for i in items) if s)
 
 
+def _project_root(start: Path) -> Path | None:
+    """The git working tree containing *start*, or None if not in one.
+
+    Walks up for a ``.git`` entry - a directory in a normal clone, a file in a
+    submodule or linked worktree. No ``git`` binary required, so this works in
+    the stripped-down containers CI renders run in.
+    """
+    for directory in (start, *start.parents):
+        if (directory / ".git").exists():
+            return directory
+    return None
+
+
 def _declared_outputs(
     graph: MetroGraph, source: Path, *, reject_outside_source: bool
-) -> list[Path]:
+) -> list[tuple[Path, dict[str, object]]]:
     """The map's ``%%metro output:`` declarations, resolved beside *source*.
 
     The directive itself is parsed by the parser's own handler (``_dir_output``
     in ``parser/directives.py``), which is the only place that knows the
     ``%%metro key: value`` syntax; all that is left here is where a relative
-    declared path points. *source*'s own parent is used rather than
+    declared path points. Each declaration keeps the per-output render
+    overrides it was written with, which job planning folds over the run's
+    global options. *source*'s own parent is used rather than
     ``graph.source_dir`` (an absolute path), so a relative INPUT_FILE yields
     relative paths in the printed result document.
 
-    With *reject_outside_source*, a declared path resolving outside
-    *source*'s own directory (an absolute path, or a ``..`` escape) is
+    With *reject_outside_source*, a declared path resolving outside the git
+    working tree holding *source* - or into any ``.git/`` within it - is
     rejected rather than written to: a caller rendering a map it did not
-    author (a CI job rendering a fork PR's .mmd, say) has no other chance
-    to review where the map's own directive would write, and the write
-    happens as an ordinary part of this same process, before any caller
-    could inspect and reject the path itself.
+    author (a CI job rendering a fork PR's .mmd, say) has no other chance to
+    review where the map's own directive would write, and the write happens
+    as an ordinary part of this same process, before any caller could inspect
+    and reject the path itself.
+
+    The repository, not the .mmd's own directory, is the boundary because that
+    is where the trust boundary actually is: a fork author already controls
+    every file in the PR tree, so a write inside the checkout grants them
+    nothing they did not already have, while ``assets/metro_map.mmd`` writing
+    ``../docs/images/map.svg`` is an ordinary first-party layout. Git's own
+    metadata is the one exception - config and hooks there become code on the
+    next ``git`` call in the same job - so a declared path whose *resolved*
+    destination lies inside a ``.git`` directory is refused, which covers a
+    nested ``assets/.git/`` the same as the checkout's own. A ``..`` hop that
+    only lexically passes through ``.git`` before cancelling back out of it
+    (``assets/.git/../docs/map.svg``) is not refused: nothing is ever written
+    there. Outside a repository there is no tree to scope to, so the boundary
+    falls back to the map's own directory.
     """
     base = source.parent.resolve()
-    resolved: list[Path] = []
-    for p in graph.declared_outputs:
-        candidate = source.parent / p
-        if reject_outside_source and not candidate.resolve().is_relative_to(base):
-            raise click.ClickException(
-                f"{source}: %%metro output: {p!r} resolves outside "
-                f"{source.parent}; declared paths must stay within the "
-                "map's own directory"
-            )
-        resolved.append(candidate)
+    # _project_root walks the filesystem up to find .git, and candidate.resolve()
+    # below stats every path component - both skipped unless the flag that
+    # consumes them is actually set.
+    root = _project_root(base) if reject_outside_source else None
+    boundary = root or base
+    scope = "pipeline repository" if root is not None else "map's own directory"
+    resolved: list[tuple[Path, dict[str, object]]] = []
+    for p, overrides in graph.declared_outputs:
+        # Collapsed lexically so a legitimate in-repo hop reads as the path
+        # it means: `assets/metro_map.mmd` declaring `../docs/images/map.svg`
+        # reports `docs/images/map.svg`, not `assets/../docs/images/map.svg`,
+        # which is what the GitHub Action publishes as `output-path`. The
+        # check below resolves this same collapsed path, so what is validated
+        # and what is written are always the same file.
+        candidate = Path(os.path.normpath(source.parent / p))
+        if reject_outside_source:
+            target = candidate.resolve()
+            escapes = not target.is_relative_to(boundary)
+            reaches_git = not escapes and ".git" in target.relative_to(boundary).parts
+            if escapes or reaches_git:
+                raise click.ClickException(
+                    f"{source}: %%metro output: {p!r} resolves outside the "
+                    f"{scope} (or into a .git/); declared paths must stay within "
+                    f"{boundary} and out of .git/"
+                )
+        resolved.append((candidate, overrides))
     return resolved
+
+
+class _OutputJob(NamedTuple):
+    """One planned write, with the per-output overrides it carries."""
+
+    label: str
+    path: Path
+    format: RenderFormat
+    overrides: dict[str, object]
 
 
 def _format_from_output(output: Path | None) -> RenderFormat:
@@ -192,9 +246,16 @@ def _graph_key(
     """Return the cache key for the graph *out_format* is rendered from.
 
     Two outputs share a prepared graph only when they share both a backend and
-    an animation state.
+    an animation state - whether the animation came from the run's own
+    --animate, from a video format forcing it on, or from one output's
+    ``%%metro output: ... | animate`` override. Mode and theme are absent on
+    purpose: they are baked when the graph is serialised, not laid out, so a
+    static SVG and a light/dark PNG pair still share a single layout run.
     """
-    return _svg_format_for(out_format), _forces_animation(out_format, layout_opts)
+    animated = bool(layout_opts.get("animate")) or _forces_animation(
+        out_format, layout_opts
+    )
+    return _svg_format_for(out_format), animated
 
 
 class _FiniteFloatRange(click.FloatRange):
@@ -650,12 +711,16 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
     default=False,
     help=(
         "Refuse a %%metro output: declaration that resolves outside the "
-        ".mmd's own directory (an absolute path, or a `..` escape), instead "
-        "of writing there. Off by default, since a trusted local map may "
-        "legitimately declare a path elsewhere; a caller rendering a map it "
-        "did not author (a CI job rendering a fork PR's .mmd, say) should "
-        "pass this. Has no effect on an explicit -o, which the caller "
-        "already chose."
+        "pipeline repository holding the .mmd (an absolute path, or a `..` "
+        "escape past the repo root), or into that repository's .git/, "
+        "instead of writing there. A `..` hop that stays inside the "
+        "checkout is fine, so assets/metro_map.mmd may declare "
+        "../docs/images/map.svg. Outside a git working tree the boundary "
+        "falls back to the .mmd's own directory. Off by default, since a "
+        "trusted local map may legitimately declare a path elsewhere; a "
+        "caller rendering a map it did not author (a CI job rendering a "
+        "fork PR's .mmd, say) should pass this. Has no effect on an "
+        "explicit -o, which the caller already chose."
     ),
 )
 @layout_cli_options
@@ -708,6 +773,11 @@ def render(
     siblings of the source; -o overrides them entirely. Falls back to the
     sibling <input>.<format> when neither is given.
 
+    Each declared path may carry its own render options after a `|` -
+    `animate`, `mode=`, `theme=`, `scale=`, `raster_width=` - which beat the
+    matching flag for that output alone, so one pass writes a static SVG, an
+    animated SVG and a light/dark PNG pair with no flags at all.
+
     On success, a `nf-metro: v<version>` banner and the output paths are
     printed to stdout as one YAML document; human summaries and warnings go
     to stderr. Stdout stays empty on any failure, so a caller can gate on it
@@ -722,25 +792,41 @@ def render(
 
     inactive_line_ids = _parse_inactive_lines(inactive_lines)
 
+    def _job_layout_opts(overrides: Mapping[str, object]) -> dict[str, object]:
+        """The run's layout options with this output's own `animate` folded in.
+
+        `animate` is the only per-output override that reaches layout, so it is
+        the only one that can split a file's outputs across two layout runs;
+        mode, theme, scale and raster_width are all applied downstream of it.
+        """
+        if "animate" not in overrides:
+            return layout_opts
+        return {**layout_opts, "animate": overrides["animate"]}
+
     def _job(
         input_file: Path,
         out_path: Path,
         out_format: RenderFormat,
+        overrides: Mapping[str, object],
         *,
         quiet: bool,
         graph: MetroGraph | None = None,
         parsed: MetroGraph | None = None,
     ) -> Callable[[], None]:
+        job_scale = cast("float | None", overrides.get("scale", scale))
+        job_raster_width = cast(
+            "int | None", overrides.get("raster_width", raster_width)
+        )
         return lambda: _render_one(
             input_file,
             out_path,
             format_=out_format,
-            scale=scale if scale is not None else _default_scale(out_format),
-            raster_width=raster_width,
+            scale=job_scale if job_scale is not None else _default_scale(out_format),
+            raster_width=job_raster_width,
             fps=fps,
             duration=duration,
-            theme=theme,
-            mode=mode,
+            theme=cast("str | None", overrides.get("theme", theme)),
+            mode=cast("str | None", overrides.get("mode", mode)),
             debug=debug,
             logo=logo,
             line_spread=line_spread,
@@ -757,26 +843,30 @@ def render(
             bare=bare,
             validate_geometry=validate_geometry,
             inactive_line_ids=inactive_line_ids,
-            layout_opts=layout_opts,
+            layout_opts=_job_layout_opts(overrides),
             quiet=quiet,
             graph=graph,
             parsed=parsed,
         )
 
-    def _out_job(out: Path) -> tuple[str, Path, RenderFormat]:
-        return (out.name, out, format_ or _format_from_output(out))
+    def _out_job(out: Path, overrides: dict[str, object] | None = None) -> _OutputJob:
+        return _OutputJob(
+            out.name, out, format_ or _format_from_output(out), overrides or {}
+        )
 
-    def _jobs_for(
-        source: Path, graph: MetroGraph
-    ) -> list[tuple[str, Path, RenderFormat]]:
+    def _jobs_for(source: Path, graph: MetroGraph) -> list[_OutputJob]:
         """One job per declared output, else the sibling <source>.<format>."""
         declared = _declared_outputs(
             graph, source, reject_outside_source=reject_output_outside_source
         )
         if declared:
-            return [_out_job(out) for out in declared]
+            return [_out_job(out, overrides) for out, overrides in declared]
         fmt = format_ or "svg"
-        return [(source.name, source.with_suffix(f".{fmt}"), cast(RenderFormat, fmt))]
+        return [
+            _OutputJob(
+                source.name, source.with_suffix(f".{fmt}"), cast(RenderFormat, fmt), {}
+            )
+        ]
 
     def _parse_for_planning(source: Path, *, quiet: bool) -> MetroGraph:
         """Read and parse *source* once, for planning and for the render.
@@ -810,7 +900,7 @@ def render(
 
     def _render_source(
         source: Path,
-        jobs: list[tuple[str, Path, RenderFormat]],
+        jobs: list[_OutputJob],
         *,
         quiet: bool,
         parsed: MetroGraph | None,
@@ -826,14 +916,18 @@ def render(
         share a layout or not.
         """
         graphs: dict[tuple[Literal["svg", "html"], bool], MetroGraph] = {}
+        job_opts = [_job_layout_opts(job.overrides) for job in jobs]
+        keys = [
+            _graph_key(job.format, opts)
+            for job, opts in zip(jobs, job_opts, strict=True)
+        ]
         if len(jobs) > 1:
             permissive = bool(layout_opts.get("permissive"))
             with warnings.catch_warnings(record=True) as caught:
                 if permissive:
                     warnings.filterwarnings("always", category=PermissiveGuardWarning)
                 try:
-                    for _, _, out_format in jobs:
-                        key = _graph_key(out_format, layout_opts)
+                    for job, opts, key in zip(jobs, job_opts, keys, strict=True):
                         if key not in graphs:
                             graphs[key] = _prepare_graph_for_render(
                                 source,
@@ -842,7 +936,7 @@ def render(
                                 line_spread=line_spread,
                                 logo=logo,
                                 legend=legend,
-                                layout_opts=_layout_opts_for(out_format, layout_opts),
+                                layout_opts=_layout_opts_for(job.format, opts),
                                 bare=bare,
                                 svg_format=key[0],
                                 error_prefix=_error_prefix(source, quiet=True),
@@ -855,17 +949,18 @@ def render(
 
         calls = [
             (
-                label,
+                job.label,
                 _job(
                     source,
-                    out_path,
-                    out_format,
+                    job.path,
+                    job.format,
+                    job.overrides,
                     quiet=quiet,
-                    graph=graphs.get(_graph_key(out_format, layout_opts)),
+                    graph=graphs.get(key),
                     parsed=parsed,
                 ),
             )
-            for label, out_path, out_format in jobs
+            for job, key in zip(jobs, keys, strict=True)
         ]
         if batch:
             _run_batch(calls)
@@ -884,11 +979,13 @@ def render(
             jobs = _jobs_for(source, parsed)
 
         if len(jobs) == 1:
-            _, out_path, out_format = jobs[0]
-            _job(source, out_path, out_format, quiet=False, parsed=parsed)()
+            job = jobs[0]
+            _job(
+                source, job.path, job.format, job.overrides, quiet=False, parsed=parsed
+            )()
         else:
             _render_source(source, jobs, quiet=True, parsed=parsed, batch=True)
-        _print_render_result([out for _, out, _ in jobs])
+        _print_render_result([job.path for job in jobs])
         return
 
     # Several inputs (and therefore no -o, rejected above). Everything a file
@@ -904,7 +1001,7 @@ def render(
             graph = _parse_for_planning(source, quiet=True)
             jobs = _jobs_for(source, graph)
             _render_source(source, jobs, quiet=True, parsed=graph, batch=False)
-            written.extend(out for _, out, _ in jobs)
+            written.extend(job.path for job in jobs)
 
         return _run
 
