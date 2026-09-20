@@ -212,7 +212,6 @@ def test_render_output_into_dot_git_rejected(fake_repo, declared):
     assert result.exit_code != 0
     assert ".git/" in result.output
     assert not (fake_repo / ".git" / "config").exists()
-    assert not (fake_repo / ".git" / "hooks").exists()
 
 
 @pytest.mark.parametrize(

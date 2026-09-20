@@ -8,7 +8,6 @@ need extra context and are handled by :func:`_apply_directive`.
 
 from __future__ import annotations
 
-import math
 import re
 import warnings
 from collections.abc import Callable, Collection, Iterator
@@ -140,17 +139,13 @@ def _output_override_value(key: str, raw: str) -> object | None:
         from nf_metro.themes import STYLE_NAMES
 
         return text if text in STYLE_NAMES else None
-    if kind == "float":
-        try:
-            number: float = float(text)
-        except ValueError:
-            return None
-        return number if number > 0 and math.isfinite(number) else None
-    try:
-        count = int(text)
-    except ValueError:
-        return None
-    return count if count > 0 else None
+    # float/int share nf-metro's one numeric-coercion path (cast, finite,
+    # sign), the same validation the equivalent CLI flag applies.
+    numeric_kind: Literal["float", "int"] = "float" if kind == "float" else "int"
+    value, _ = coerce(
+        LayoutOption(name=key, kind=numeric_kind, sign="positive", help=""), text
+    )
+    return None if value is INVALID else value
 
 
 def _parse_output_overrides(spec: str) -> dict[str, object]:
