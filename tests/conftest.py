@@ -12,16 +12,13 @@ from nf_metro.layout.engine import compute_layout
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import MetroGraph
 
-# Tests assert on plain CLI text. Disable colour and pin a wide width so
-# rich-click's help tables and error panels do not wrap or crop the messages the
-# assertions look for. NO_COLOR alone is not enough: rich-click forces a
-# terminal (bold ANSI, hard-wrapped panels) whenever it sees one of these CI
-# variables, so drop them for the test session. All are read by rich-click/Rich
-# at render time, and this runs before any test module imports the CLI.
+# Tests assert on plain CLI text. Disable colour (Rich/rich-click otherwise
+# wrap output in ANSI, forced on in CI by nf_metro.console) and pin a wide width
+# so rich-click's help tables and error panels do not wrap or crop the messages
+# the assertions look for. Both are read by rich-click/Rich at render time, and
+# this runs before any test module imports the CLI.
 os.environ.setdefault("NO_COLOR", "1")
 os.environ.setdefault("TERMINAL_WIDTH", "200")
-for _color_var in ("GITHUB_ACTIONS", "FORCE_COLOR", "PY_COLORS"):
-    os.environ.pop(_color_var, None)
 
 # --- Graph text constants ---
 

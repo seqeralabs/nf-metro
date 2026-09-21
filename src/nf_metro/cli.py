@@ -70,6 +70,11 @@ click.rich_click.STYLE_ARGUMENT = "bold cyan"
 click.rich_click.STYLE_SWITCH = "bold green"
 click.rich_click.STYLE_COMMAND = "bold cyan"
 click.rich_click.SHOW_ARGUMENTS = True
+# rich-click forces a terminal (bold ANSI, fixed-width panels) whenever it sees
+# FORCE_COLOR, PY_COLORS or GITHUB_ACTIONS, and never checks NO_COLOR. Honour
+# NO_COLOR here so it really does turn all styling off, CI included.
+if "NO_COLOR" in os.environ:
+    click.rich_click.FORCE_TERMINAL = False
 click.rich_click.COMMAND_GROUPS = {
     "nf-metro": [
         {"name": "Render", "commands": ["render", "render-many", "convert"]},
