@@ -28,6 +28,9 @@ NumberSign = Literal["any", "nonneg", "positive"]
 LineOrder = Literal["definition", "span"]
 LINE_ORDER_CHOICES: tuple[LineOrder, ...] = ("definition", "span")
 
+#: Station-columns a section row may reach before the auto-layout folds it.
+DEFAULT_FOLD_THRESHOLD: int = 15
+
 
 def is_line_order(value: object) -> TypeGuard[LineOrder]:
     """Return whether *value* is a supported line-order policy."""
@@ -107,25 +110,25 @@ LAYOUT_OPTIONS: tuple[LayoutOption, ...] = (
         name="x_spacing",
         kind="float",
         sign="positive",
-        help="Horizontal spacing between layers (default: auto).",
+        help="Horizontal spacing between layers.",
     ),
     LayoutOption(
         name="y_spacing",
         kind="float",
         sign="positive",
-        help="Vertical spacing between tracks (default: auto).",
+        help="Vertical spacing between tracks.",
     ),
     LayoutOption(
         name="section_x_gap",
         kind="float",
         sign="nonneg",
-        help="Horizontal gap between sections (default: 50).",
+        help="Horizontal gap between sections.",
     ),
     LayoutOption(
         name="section_y_gap",
         kind="float",
         sign="nonneg",
-        help="Vertical gap between sections (default: 50).",
+        help="Vertical gap between sections.",
     ),
     LayoutOption(
         name="track_gap",
@@ -209,13 +212,13 @@ LAYOUT_OPTIONS: tuple[LayoutOption, ...] = (
         name="width",
         kind="int",
         sign="positive",
-        help="Output width in pixels (default: auto from content).",
+        help="Output width in pixels.",
     ),
     LayoutOption(
         name="height",
         kind="int",
         sign="positive",
-        help="Output height in pixels (default: auto from content).",
+        help="Output height in pixels.",
     ),
     LayoutOption(
         name="animate",
@@ -254,7 +257,7 @@ LAYOUT_OPTIONS: tuple[LayoutOption, ...] = (
         attr="embed_manifest",
         kind="bool",
         hidden=True,
-        help="Embed the data manifest in the SVG. On by default.",
+        help="Embed the data manifest in the SVG.",
     ),
     LayoutOption(
         name="caption",

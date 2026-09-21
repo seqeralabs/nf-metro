@@ -21,7 +21,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from pathlib import Path
 
-from nf_metro.options import LineOrder, is_line_order
+from nf_metro.options import DEFAULT_FOLD_THRESHOLD, LineOrder, is_line_order
 from nf_metro.parser.commitments import (
     AppliedLayoutCommitments,
     LayoutCommitmentOverlay,
@@ -408,7 +408,7 @@ def _infer_layout(
             eff_cols = graph.fold_threshold
             author_set_fold = True
         else:
-            eff_cols = 15
+            eff_cols = DEFAULT_FOLD_THRESHOLD
             author_set_fold = False
 
         unbounded_grid = (

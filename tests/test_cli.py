@@ -1959,3 +1959,40 @@ def test_every_option_sits_in_a_help_panel(command):
         and not panelled.intersection(param.opts)
     ]
     assert not ungrouped, f"{command}: {ungrouped}"
+
+
+def test_layout_option_help_shows_the_effective_default():
+    """--help names the value a user gets, not the flag's placeholder None.
+
+    Registry flags all default to None so an omitted flag leaves the
+    directive value alone, so the default shown has to come from elsewhere:
+    the graph field, the constant that resolves it, or nothing at all.
+    """
+    params = {p.name: p for p in cli.commands["render"].params}
+    assert params["font_scale"].default_text == "1"  # MetroGraph field default
+    assert params["section_x_gap"].default_text == "50"  # resolving constant
+    assert params["x_spacing"].default_text == "auto"  # resolved at run time
+    assert params["center_ports"].default_text == ""  # off is the obvious read
+
+    help_text = _plain(CliRunner().invoke(cli, ["render", "--help"]).output)
+    assert "[default: auto]" in help_text
+    assert "(auto)" not in help_text  # the description is not parenthesised
+    assert "[default: None]" not in help_text
+
+
+def test_described_default_does_not_become_the_value(tmp_path):
+    """The help-time default text must not leak into the parsed value.
+
+    A described default is handed back by ``get_default(call=False)``, the
+    path that renders --help. An omitted flag still has to arrive as None so
+    the map's own directive survives.
+    """
+    from nf_metro.parser import parse_metro_mermaid
+
+    src = tmp_path / "map.mmd"
+    src.write_text("%%metro x_spacing: 77\n" + STANDALONE_MMD.read_text())
+    out = tmp_path / "out.svg"
+    result = CliRunner().invoke(cli, ["render", str(src), "-o", str(out)])
+    assert result.exit_code == 0, result.output
+    graph = parse_metro_mermaid(src.read_text())
+    assert graph.x_spacing == 77

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import dataclasses
 import json
 import math
 import os
@@ -32,8 +33,13 @@ from nf_metro.layout import (
     PhaseInvariantError,
     compute_layout,
 )
+from nf_metro.layout.constants import OFFSET_STEP, SECTION_X_GAP, SECTION_Y_GAP
 from nf_metro.live.server import DEFAULT_OVERLAY, OVERLAY_STYLES
-from nf_metro.options import LAYOUT_OPTIONS, LayoutOption
+from nf_metro.options import (
+    DEFAULT_FOLD_THRESHOLD,
+    LAYOUT_OPTIONS,
+    LayoutOption,
+)
 from nf_metro.parser import (
     ERROR,
     WARNING,
@@ -49,6 +55,7 @@ from nf_metro.parser.model import (
     split_guard_warnings,
 )
 from nf_metro.render import validate_render
+from nf_metro.render.constants import LOGO_GAP
 from nf_metro.render.video import VIDEO_FORMATS, NotAnimatedError, VideoFormat
 from nf_metro.themes import DEFAULT_MODE, STYLE_NAMES, THEMES, resolve_style
 
@@ -195,7 +202,7 @@ def _declared_outputs(
             reaches_git = not escapes and ".git" in target.relative_to(boundary).parts
             if escapes or reaches_git:
                 raise click.ClickException(
-                    f"{source}: %%metro output: {p!r} resolves outside the "
+                    f"{source}: %%metro output {p!r} resolves outside the "
                     f"{scope} (or into a .git/); declared paths must stay within "
                     f"{boundary} and out of .git/"
                 )
@@ -349,6 +356,76 @@ def _convert_manifest_number(
     return param_type.convert(value, None, None)
 
 
+class _DescribedDefault(click.RichOption):
+    """Option whose ``--help`` default is described in words, not a value.
+
+    rich-click parenthesises a string ``show_default`` - "[default: (auto)]" -
+    but prints a real default bare. Returning the description as the help-time
+    default takes that bare path. ``call=True``, the path that actually fills
+    the option's value, is left alone.
+    """
+
+    def __init__(
+        self,
+        *args: Any,  # noqa: ANN401
+        default_text: str = "",
+        **kwargs: Any,  # noqa: ANN401
+    ) -> None:
+        self.default_text = default_text
+        if default_text:
+            kwargs["show_default"] = True
+        super().__init__(*args, **kwargs)
+
+    def get_default(self, ctx: click.Context, call: bool = True) -> Any:  # noqa: ANN401
+        if not call and self.default_text:
+            return self.default_text
+        return super().get_default(ctx, call=call)
+
+
+def _trim_number(value: float) -> str:
+    """Render *value* without a trailing ``.0``, so --help reads "50" not "50.0"."""
+    return f"{value:g}"
+
+
+#: What --help shows as the default for a layout option whose MetroGraph
+#: field is None because the value is resolved later. The resolving constants
+#: live below this module in the import graph, hence the lookup here.
+_LAYOUT_DEFAULT_TEXT: dict[str, str] = {
+    "x_spacing": "auto",
+    "y_spacing": "auto",
+    "section_x_gap": _trim_number(SECTION_X_GAP),
+    "section_y_gap": _trim_number(SECTION_Y_GAP),
+    "track_gap": _trim_number(OFFSET_STEP),
+    "fold_threshold": str(DEFAULT_FOLD_THRESHOLD),
+    "label_angle": "from theme",
+    "legend_logo_gap": _trim_number(LOGO_GAP),
+    "width": "auto from content",
+    "height": "auto from content",
+}
+
+_GRAPH_FIELD_DEFAULTS: dict[str, Any] = {
+    f.name: f.default for f in dataclasses.fields(MetroGraph)
+}
+
+
+def _layout_default(opt: LayoutOption) -> str:
+    """What ``--help`` should print as *opt*'s default.
+
+    A registry option's CLI flag always defaults to ``None`` so an omitted
+    flag leaves the directive value alone, which would make click show every
+    default as "None". The value a user actually gets is the graph field's
+    own default, or - where that is ``None`` too - whatever resolves it
+    later, named in :data:`_LAYOUT_DEFAULT_TEXT`.
+    """
+    if opt.name in _LAYOUT_DEFAULT_TEXT:
+        return _LAYOUT_DEFAULT_TEXT[opt.name]
+    value = _GRAPH_FIELD_DEFAULTS.get(opt.target_attr)
+    # An opt-in flag reads as off already; "[default: False]" is just noise.
+    if value is None or value == "" or value is False:
+        return ""
+    return _trim_number(value) if isinstance(value, float) else str(value)
+
+
 def _layout_cli_option(opt: LayoutOption) -> Callable[..., Any]:
     """Build the ``click.option`` decorator for a registry option.
 
@@ -361,7 +438,9 @@ def _layout_cli_option(opt: LayoutOption) -> Callable[..., Any]:
         return click.option(
             f"{opt.cli_flag}/{no_flag}",
             opt.name,
+            cls=_DescribedDefault,
             default=None,
+            default_text=_layout_default(opt),
             help=opt.help,
             hidden=opt.hidden,
         )
@@ -379,8 +458,10 @@ def _layout_cli_option(opt: LayoutOption) -> Callable[..., Any]:
     return click.option(
         opt.cli_flag,
         opt.name,
+        cls=_DescribedDefault,
         type=ctype,
         default=None,
+        default_text=_layout_default(opt),
         help=opt.help,
         metavar=metavar,
         hidden=opt.hidden,
@@ -589,22 +670,27 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
     "outputs",
     type=click.Path(path_type=Path),
     multiple=True,
-    help="Output path (default: <input>.<format>). Repeat for several formats.",
+    cls=_DescribedDefault,
+    default_text="<input>.<format>",
+    help="Output path. Repeat for several formats.",
 )
 @click.option(
     "--format",
     "format_",
     type=_FORMAT_TYPE,
     default=None,
-    help="Output format (default: inferred from --output, else svg).",
+    cls=_DescribedDefault,
+    default_text="from --output, else svg",
+    help="Output format.",
 )
 @click.option(
     "--scale",
     type=_SCALE_TYPE,
     default=None,
     metavar="FLOAT",
-    help="Raster only: multiply the pixel dimensions by this factor. "
-    " [default: 2 for png, 1 for video]",
+    cls=_DescribedDefault,
+    default_text="2 for png, 1 for video",
+    help="Raster only: multiply the pixel dimensions by this factor.",
 )
 @click.option(
     "--raster-width",
@@ -626,19 +712,25 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
     type=_DURATION_TYPE,
     default=None,
     metavar="FLOAT",
-    help="Video only: loop length in seconds (default: the map's own animation cycle).",
+    cls=_DescribedDefault,
+    default_text="the map's animation cycle",
+    help="Video only: loop length in seconds.",
 )
 @click.option(
     "--theme",
     type=click.Choice(sorted(STYLE_NAMES)),
     default=None,
-    help="Visual theme (default: from %%metro style:, else nfcore).",
+    cls=_DescribedDefault,
+    default_text="from %%metro style, else nfcore",
+    help="Visual theme.",
 )
 @click.option(
     "--mode",
     type=click.Choice(["light", "dark"]),
     default=None,
-    help="Palette to render with (default: from %%metro mode:).",
+    cls=_DescribedDefault,
+    default_text="from %%metro mode",
+    help="Palette to render with.",
 )
 @click.option(
     "--debug/--no-debug",
@@ -649,17 +741,23 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
     "--logo",
     type=click.Path(exists=True, path_type=Path),
     default=None,
-    help="Logo image path (overrides %%metro logo:).",
+    cls=_DescribedDefault,
+    default_text="from %%metro logo",
+    help="Logo image path.",
 )
 @click.option(
     "--line-spread",
     type=click.Choice([m.value for m in LineSpread]),
     default=None,
+    cls=_DescribedDefault,
+    default_text="from %%metro line_spread, else bundle",
     help="Vertical arrangement of lines sharing a station.",
 )
 @click.option(
     "--legend",
     default=None,
+    cls=_DescribedDefault,
+    default_text="from %%metro legend",
     help="Position of the legend+logo block.",
 )
 @click.option(
@@ -672,7 +770,9 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
     "--title",
     type=str,
     default=None,
-    help="Pipeline title (overrides %%metro title:).",
+    cls=_DescribedDefault,
+    default_text="from %%metro title",
+    help="Pipeline title.",
 )
 @click.option(
     "--responsive/--no-responsive",
@@ -734,7 +834,7 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
 @click.option(
     "--reject-output-outside-source/--no-reject-output-outside-source",
     default=False,
-    help="Reject a %%metro output: path outside the .mmd's repository.",
+    help="Reject a %%metro output path outside the .mmd's repository.",
 )
 @layout_cli_options
 def render(
@@ -772,7 +872,7 @@ def render(
     the exit code is non-zero if any failed.
 
     Output paths come from -o, repeatable for several formats, else from the
-    map's `%%metro output:` directives, else <input>.<format>. A declared
+    map's `%%metro output` directives, else <input>.<format>. A declared
     path may carry its own overrides after a `|`.
 
     The paths written are printed to stdout as YAML; summaries and warnings
@@ -1265,7 +1365,7 @@ def _render_one_unsafe(
         if not graph.embed_manifest:
             raise click.ClickException(
                 "--validate reads the drawn SVG through its embedded manifest, "
-                "which this map turns off with %%metro manifest: false."
+                "which this map turns off with %%metro manifest false."
             )
         findings = validate_render(content, plan=rendered.plan)
         if findings:
@@ -1459,7 +1559,9 @@ def render_many(manifest_file: Path) -> None:
     "--output",
     type=click.Path(path_type=Path),
     default=None,
-    help="Output .mmd file path. Defaults to stdout.",
+    cls=_DescribedDefault,
+    default_text="stdout",
+    help="Output .mmd file path.",
 )
 @click.option(
     "--title",
@@ -1669,17 +1771,22 @@ def explain(
     "Shutdown", options=["--shutdown-after-complete", "--shutdown-grace"]
 )
 @click.argument("input_file", type=click.Path(exists=True, path_type=Path))
-@click.option("--port", type=int, default=8080, help="Port to listen on.")
+@click.option(
+    "--port", type=int, default=8080, show_default=True, help="Port to listen on."
+)
 @click.option(
     "--host",
     default="127.0.0.1",
+    show_default=True,
     help="Interface to bind. Use 0.0.0.0 to accept remote connections.",
 )
 @click.option(
     "--theme",
     type=click.Choice(sorted(STYLE_NAMES)),
     default=None,
-    help="Visual theme for a .mmd input (default: from %%metro style:).",
+    cls=_DescribedDefault,
+    default_text="from %%metro style, else nfcore",
+    help="Visual theme for a .mmd input.",
 )
 @click.option(
     "--overlay",
@@ -1705,6 +1812,7 @@ def explain(
     "--shutdown-grace",
     type=float,
     default=10.0,
+    show_default=True,
     help="Seconds to keep the map up after the run finishes.",
 )
 @click.argument("launch_cmd", nargs=-1, type=click.UNPROCESSED)
@@ -1731,7 +1839,7 @@ def serve(
 
         nf-metro serve map.mmd --open -- nextflow run my/pipeline
 
-    Only stations carrying a `%%metro process:` directive change state.
+    Only stations carrying a `%%metro process` directive change state.
     """
     from nf_metro.live.server import MapModel, run_lifecycle, serve_model
     from nf_metro.live.server import serve as serve_map
@@ -1760,7 +1868,7 @@ def serve(
         mapped = sorted(graph.process_mapping)
         if not mapped:
             click.echo(
-                "Warning: no %%metro process: directives; no station will update.",
+                "Warning: no %%metro process directives; no station will update.",
                 err=True,
             )
         httpd = serve_map(
@@ -1892,7 +2000,7 @@ def check_mapping_cmd(
     processes_file: Path | None,
     ignore: tuple[str, ...],
 ) -> None:
-    """Check a map's `%%metro process:` mapping against the processes.
+    """Check a map's `%%metro process` mapping against the processes.
 
     Reports processes the map cannot show and station patterns that match
     nothing, exiting non-zero if either is found. Supply the pipeline's
