@@ -1584,12 +1584,16 @@ def test_render_accepts_in_range_numeric_option(tmp_path, flag, value):
 
 
 def test_numeric_flag_help_keeps_its_plain_metavar():
-    """A bounded flag documents its bound without renaming its value type."""
+    """A bounded flag documents its bound without renaming its value type.
+
+    The metavar trails the description rather than sitting in a column of its
+    own, so it reads as `... (FLOAT x>0)`.
+    """
     result = CliRunner().invoke(cli, ["render", "--help"])
     assert result.exit_code == 0
-    help_text = " ".join(result.output.split())
-    assert "--x-spacing FLOAT" in help_text
-    assert "--width INTEGER" in help_text
+    help_text = _plain(result.output)
+    assert "(FLOAT x>0)" in help_text
+    assert "(INTEGER x>0)" in help_text
     assert "FLOAT RANGE" not in help_text
     assert "INTEGER RANGE" not in help_text
 
