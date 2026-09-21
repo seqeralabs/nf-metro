@@ -1,5 +1,5 @@
 name: nf-metro
-description: Render a metro-map SVG from a Mermaid .mmd source and report whether the committed SVG is out of date.
+description: Render a metro-map diagram from a Mermaid .mmd source and report whether the committed output is out of date.
 author: Seqera
 
 branding:
@@ -13,9 +13,10 @@ inputs:
     default: assets/metro_map.mmd
   output:
     description: >-
-      Path for the rendered SVG. If empty, will use paths specified with '%%metro output'
-      or write a SVG next to the .mmd file. Input can take multiple whitespace-separated
+      Path for the rendered output. If empty, will use paths specified with '%%metro output'
+      or write an SVG next to the .mmd file. Input can take multiple whitespace-separated
       paths, taking each format from its extension (e.g. "assets/metro_map.svg assets/metro_map.png").
+      A path cannot contain a space; use '%%metro output' in the .mmd for a path that needs one.
     required: false
     default: ""
   theme:
@@ -84,20 +85,37 @@ runs:
         MODE: ${{ inputs.mode }}
         EMBED_FONT: ${{ inputs.embed-font }}
         EXTRA_ARGS: ${{ inputs.extra-args }}
+        ACTION_PATH: ${{ github.action_path }}
       run: |
         set -euo pipefail
 
-        args=(render "$INPUT_PATH" --theme "$THEME")
+        # The .mmd being rendered may not be one the workflow author reviewed
+        # (a fork PR's map, say), so a %%metro output: declaration inside it
+        # must not be able to point the write outside the map's own
+        # directory. Harmless to pass alongside an explicit -o, which this
+        # flag never applies to.
+        args=(render "$INPUT_PATH" --theme "$THEME" --reject-output-outside-source)
 
         # Each whitespace-separated 'output' value becomes its own -o (repeat -o
         # to write several formats from one input). When empty, the CLI resolves
         # its own outputs (%%metro output: in the .mmd, else the sibling .svg).
+        # set -f suppresses pathname expansion so a wildcard character in a
+        # path is passed through literally rather than expanded against the
+        # runner's filesystem.
         if [ -n "$OUTPUT_PATH" ]; then
+          set -f
           # shellcheck disable=SC2206
           outs=($OUTPUT_PATH)
-          for out in "${outs[@]}"; do
-            args+=(-o "$out")
-          done
+          set +f
+          # ${#outs[@]} (not ${outs[@]} directly) so a whitespace-only
+          # OUTPUT_PATH, which word-splits to zero elements, doesn't hit
+          # bash's pre-4.4 "unbound variable" behaviour for an empty array
+          # under set -u.
+          if [ "${#outs[@]}" -gt 0 ]; then
+            for out in "${outs[@]}"; do
+              args+=(-o "$out")
+            done
+          fi
         fi
 
         if [ -n "$MODE" ]; then
@@ -120,17 +138,24 @@ runs:
         # nf-metro prints a YAML document to stdout
         render_out="$(nf-metro "${args[@]}")"
 
-        # Read the outputs list with yq. pipefail makes a missing yq or parse error abort.
-        outputs_list="$(printf '%s\n' "$render_out" | yq '.outputs[]')"
+        # Parsed by scripts/parse_render_output.py (unit-tested in
+        # tests/test_parse_render_output.py), which errors out rather than
+        # silently returning no paths.
+        rendered_text="$(python3 "$ACTION_PATH/scripts/parse_render_output.py" <<< "$render_out")"
+        # A plain read loop rather than mapfile/readarray, which macOS
+        # runners' default bash (3.2) doesn't have.
         rendered=()
-        while IFS= read -r p; do
-          [ -n "$p" ] && rendered+=("$p")
-        done <<< "$outputs_list"
+        while IFS= read -r line; do
+          rendered+=("$line")
+        done <<< "$rendered_text"
 
+        # A delimiter unique to this run, so a rendered path that happens to
+        # read "EOF" can't prematurely close the multiline output block.
+        delim="ghadelim_${GITHUB_RUN_ID}_${RANDOM}"
         {
-          echo "output-path<<EOF"
+          echo "output-path<<$delim"
           printf '%s\n' "${rendered[@]}"
-          echo "EOF"
+          echo "$delim"
         } >> "$GITHUB_OUTPUT"
         if [ -z "$(git status --porcelain -- "${rendered[@]}" 2>/dev/null)" ]; then
           echo "changed=false" >> "$GITHUB_OUTPUT"

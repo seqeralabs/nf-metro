@@ -57,6 +57,15 @@ near-total false diff that costs a full re-measurement to disprove.
 hand back a concurrent session's entry instead of yours, conflicting against
 changes you never made. Use a throwaway commit instead.
 
+## A `/tmp` worktree can vanish mid-session
+
+The OS can reclaim `/tmp/nf-metro-fix-<N>` during a long-running session. A
+missing worktree or branch is not evidence of lost work by itself: check
+whether the last known candidate SHA is still reachable from any ref (a
+branch already merged elsewhere, a remote tracking ref) before treating it as
+data loss. If it is, recreate the worktree at that SHA and continue; only
+escalate to the user if no ref reaches it.
+
 ## Commit hooks
 
 Hooks need the tools on `PATH` in the same Bash call: the repo uses `prek`

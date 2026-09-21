@@ -2,19 +2,26 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import math
 import os
 import warnings
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
-from typing import Any, Literal, NoReturn, TypeVar, cast, get_args
+from typing import Any, Literal, NamedTuple, NoReturn, TypeVar, cast, get_args
 
 import rich_click as click
 from rich.markup import escape
 
 from nf_metro import __version__
-from nf_metro.api import RenderConfig, prepare_graph, render_graph_result, resolve_theme
+from nf_metro.api import (
+    RenderConfig,
+    _parse_source,
+    prepare_graph,
+    render_graph_result,
+    resolve_theme,
+)
 from nf_metro.console import console, progress_bar
 from nf_metro.explain import build_explain, format_explain_json, format_explain_text
 from nf_metro.introspect import build_info, format_info_json, format_info_text
@@ -78,6 +85,17 @@ click.rich_click.COMMAND_GROUPS = {
     ]
 }
 
+#: Every typed failure the parse/layout pipeline raises for a rejected map,
+#: whether it surfaces during planning's parse-only pass or the render's
+#: full parse+layout.
+_SOURCE_ERRORS = (
+    ValueError,
+    CyclicGraphError,
+    BackwardFlowError,
+    MixedEntryDirectionError,
+    PhaseInvariantError,
+)
+
 
 @click.group()
 @click.version_option(version=__version__)
@@ -104,22 +122,92 @@ def _parse_inactive_lines(value: object) -> frozenset[str] | None:
     return frozenset(s for s in (str(i).strip() for i in items) if s)
 
 
-def _declared_outputs(input_file: Path) -> list[Path]:
-    """Output paths declared via ``%%metro output:``, resolved beside the .mmd.
+def _project_root(start: Path) -> Path | None:
+    """The git working tree containing *start*, or None if not in one.
 
-    A total pre-scan (no parse, so job planning sees the paths without raising
-    on a bad file or double-emitting warnings).
+    Walks up for a ``.git`` entry - a directory in a normal clone, a file in a
+    submodule or linked worktree. No ``git`` binary required, so this works in
+    the stripped-down containers CI renders run in.
     """
-    base = input_file.parent
-    outs: list[Path] = []
-    for raw in input_file.read_text().splitlines():
-        stripped = raw.strip()
-        if not stripped.startswith("%%metro"):
-            continue
-        key, sep, rest = stripped[len("%%metro") :].strip().partition(":")
-        if sep and key == "output":
-            outs += [base / p.strip() for p in rest.split(",") if p.strip()]
-    return outs
+    for directory in (start, *start.parents):
+        if (directory / ".git").exists():
+            return directory
+    return None
+
+
+def _declared_outputs(
+    graph: MetroGraph, source: Path, *, reject_outside_source: bool
+) -> list[tuple[Path, dict[str, object]]]:
+    """The map's ``%%metro output:`` declarations, resolved beside *source*.
+
+    The directive itself is parsed by the parser's own handler (``_dir_output``
+    in ``parser/directives.py``), which is the only place that knows the
+    ``%%metro key: value`` syntax; all that is left here is where a relative
+    declared path points. Each declaration keeps the per-output render
+    overrides it was written with, which job planning folds over the run's
+    global options. *source*'s own parent is used rather than
+    ``graph.source_dir`` (an absolute path), so a relative INPUT_FILE yields
+    relative paths in the printed result document.
+
+    With *reject_outside_source*, a declared path resolving outside the git
+    working tree holding *source* - or into any ``.git/`` within it - is
+    rejected rather than written to: a caller rendering a map it did not
+    author (a CI job rendering a fork PR's .mmd, say) has no other chance to
+    review where the map's own directive would write, and the write happens
+    as an ordinary part of this same process, before any caller could inspect
+    and reject the path itself.
+
+    The repository, not the .mmd's own directory, is the boundary because that
+    is where the trust boundary actually is: a fork author already controls
+    every file in the PR tree, so a write inside the checkout grants them
+    nothing they did not already have, while ``assets/metro_map.mmd`` writing
+    ``../docs/images/map.svg`` is an ordinary first-party layout. Git's own
+    metadata is the one exception - config and hooks there become code on the
+    next ``git`` call in the same job - so a declared path whose *resolved*
+    destination lies inside a ``.git`` directory is refused, which covers a
+    nested ``assets/.git/`` the same as the checkout's own. A ``..`` hop that
+    only lexically passes through ``.git`` before cancelling back out of it
+    (``assets/.git/../docs/map.svg``) is not refused: nothing is ever written
+    there. Outside a repository there is no tree to scope to, so the boundary
+    falls back to the map's own directory.
+    """
+    base = source.parent.resolve()
+    # _project_root walks the filesystem up to find .git, and candidate.resolve()
+    # below stats every path component - both skipped unless the flag that
+    # consumes them is actually set.
+    root = _project_root(base) if reject_outside_source else None
+    boundary = root or base
+    scope = "pipeline repository" if root is not None else "map's own directory"
+    resolved: list[tuple[Path, dict[str, object]]] = []
+    for p, overrides in graph.declared_outputs:
+        # Collapsed lexically so a legitimate in-repo hop reads as the path
+        # it means: `assets/metro_map.mmd` declaring `../docs/images/map.svg`
+        # reports `docs/images/map.svg`, not `assets/../docs/images/map.svg`,
+        # which is what the GitHub Action publishes as `output-path`. The
+        # check below resolves this same collapsed path, so what is validated
+        # and what is written are always the same file.
+        candidate = Path(os.path.normpath(source.parent / p))
+        if reject_outside_source:
+            target = candidate.resolve()
+            escapes = not target.is_relative_to(boundary)
+            reaches_git = not escapes and ".git" in target.relative_to(boundary).parts
+            if escapes or reaches_git:
+                raise click.ClickException(
+                    f"{source}: %%metro output: {p!r} resolves outside the "
+                    f"{scope} (or into a .git/); declared paths must stay within "
+                    f"{boundary} and out of .git/"
+                )
+        resolved.append((candidate, overrides))
+    return resolved
+
+
+class _OutputJob(NamedTuple):
+    """One planned write, with the per-output overrides it carries."""
+
+    label: str
+    path: Path
+    format: RenderFormat
+    overrides: dict[str, object]
 
 
 def _format_from_output(output: Path | None) -> RenderFormat:
@@ -182,9 +270,16 @@ def _graph_key(
     """Return the cache key for the graph *out_format* is rendered from.
 
     Two outputs share a prepared graph only when they share both a backend and
-    an animation state.
+    an animation state - whether the animation came from the run's own
+    --animate, from a video format forcing it on, or from one output's
+    ``%%metro output: ... | animate`` override. Mode and theme are absent on
+    purpose: they are baked when the graph is serialised, not laid out, so a
+    static SVG and a light/dark PNG pair still share a single layout run.
     """
-    return _svg_format_for(out_format), _forces_animation(out_format, layout_opts)
+    animated = bool(layout_opts.get("animate")) or _forces_animation(
+        out_format, layout_opts
+    )
+    return _svg_format_for(out_format), animated
 
 
 class _FiniteFloatRange(click.FloatRange):
@@ -390,7 +485,7 @@ def _report_render_warnings(
 
 
 def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
-    """Run every item's callable, printing a ``[i/total] OK``/``FAIL`` line.
+    """Run every item's callable, printing a ✓/✗ line per item.
 
     Every item runs regardless of whether an earlier one raised, so
     successful outputs are kept. Catches any exception type, since a
@@ -635,6 +730,23 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
         "Does not edit the .mmd."
     ),
 )
+@click.option(
+    "--reject-output-outside-source/--no-reject-output-outside-source",
+    default=False,
+    help=(
+        "Refuse a %%metro output: declaration that resolves outside the "
+        "pipeline repository holding the .mmd (an absolute path, or a `..` "
+        "escape past the repo root), or into that repository's .git/, "
+        "instead of writing there. A `..` hop that stays inside the "
+        "checkout is fine, so assets/metro_map.mmd may declare "
+        "../docs/images/map.svg. Outside a git working tree the boundary "
+        "falls back to the .mmd's own directory. Off by default, since a "
+        "trusted local map may legitimately declare a path elsewhere; a "
+        "caller rendering a map it did not author (a CI job rendering a "
+        "fork PR's .mmd, say) should pass this. Has no effect on an "
+        "explicit -o, which the caller already chose."
+    ),
+)
 @layout_cli_options
 def render(
     input_files: tuple[Path, ...],
@@ -662,15 +774,19 @@ def render(
     bare: bool,
     validate_geometry: bool,
     inactive_lines: str | None,
+    reject_output_outside_source: bool,
     **layout_opts: object,
 ) -> None:
     """Render Mermaid metro map definitions to SVG, PNG, or interactive HTML.
 
     Given more than one INPUT_FILE, all render within the same process
     (amortising interpreter/import startup across the batch) and each write
-    to their own sibling <input>.<format>; every file is attempted even if an
-    earlier one fails, successful outputs are kept, and a non-zero exit is
-    returned if any failed.
+    to their own sibling <input>.<format> or, if it declares one, its own
+    %%metro output: path(s); every file is attempted even if an earlier one
+    fails, successful outputs are kept, and a non-zero exit is returned if
+    any failed. A file with several declared outputs is one pass/fail unit:
+    if any of its outputs fails the others it already wrote are kept on disk,
+    but that file is reported as one FAIL and none of its paths are printed.
 
     Repeating -o writes one INPUT_FILE to several outputs in the same run,
     taking each output's format from its extension: -o map.svg -o map.png.
@@ -681,8 +797,15 @@ def render(
     siblings of the source; -o overrides them entirely. Falls back to the
     sibling <input>.<format> when neither is given.
 
-    On success a YAML document (version + output paths) is printed to stdout;
-    human summaries and warnings go to stderr.
+    Each declared path may carry its own render options after a `|` -
+    `animate`, `mode=`, `theme=`, `scale=`, `raster_width=` - which beat the
+    matching flag for that output alone, so one pass writes a static SVG, an
+    animated SVG and a light/dark PNG pair with no flags at all.
+
+    On success, a `nf-metro: v<version>` banner and the output paths are
+    printed to stdout as one YAML document; human summaries and warnings go
+    to stderr. Stdout stays empty on any failure, so a caller can gate on it
+    without also checking the exit code.
 
     A rejected input, and any other failure, surfaces as a plain error
     message rather than a traceback; set NF_METRO_DEBUG=1 to re-raise the
@@ -691,31 +814,43 @@ def render(
     if len(input_files) > 1 and outputs:
         raise click.UsageError("-o/--output can only be used with a single INPUT_FILE.")
 
-    # Single input, no -o: use its %%metro output: declarations (multi-input is
-    # handled per file in the else branch below).
-    if not outputs and len(input_files) == 1:
-        outputs = tuple(_declared_outputs(input_files[0]))
-
     inactive_line_ids = _parse_inactive_lines(inactive_lines)
+
+    def _job_layout_opts(overrides: Mapping[str, object]) -> dict[str, object]:
+        """The run's layout options with this output's own `animate` folded in.
+
+        `animate` is the only per-output override that reaches layout, so it is
+        the only one that can split a file's outputs across two layout runs;
+        mode, theme, scale and raster_width are all applied downstream of it.
+        """
+        if "animate" not in overrides:
+            return layout_opts
+        return {**layout_opts, "animate": overrides["animate"]}
 
     def _job(
         input_file: Path,
         out_path: Path,
         out_format: RenderFormat,
+        overrides: Mapping[str, object],
         *,
         quiet: bool,
         graph: MetroGraph | None = None,
+        parsed: MetroGraph | None = None,
     ) -> Callable[[], None]:
+        job_scale = cast("float | None", overrides.get("scale", scale))
+        job_raster_width = cast(
+            "int | None", overrides.get("raster_width", raster_width)
+        )
         return lambda: _render_one(
             input_file,
             out_path,
             format_=out_format,
-            scale=scale if scale is not None else _default_scale(out_format),
-            raster_width=raster_width,
+            scale=job_scale if job_scale is not None else _default_scale(out_format),
+            raster_width=job_raster_width,
             fps=fps,
             duration=duration,
-            theme=theme,
-            mode=mode,
+            theme=cast("str | None", overrides.get("theme", theme)),
+            mode=cast("str | None", overrides.get("mode", mode)),
             debug=debug,
             logo=logo,
             line_spread=line_spread,
@@ -732,103 +867,181 @@ def render(
             bare=bare,
             validate_geometry=validate_geometry,
             inactive_line_ids=inactive_line_ids,
-            layout_opts=layout_opts,
+            layout_opts=_job_layout_opts(overrides),
             quiet=quiet,
             graph=graph,
+            parsed=parsed,
         )
 
-    # One job per output when -o is given (each output carries its own format,
-    # unless --format pins one for all), else one per input file.
-    def _out_job(source: Path, out: Path) -> tuple[str, Path, Path, RenderFormat]:
-        return (out.name, source, out, format_ or _format_from_output(out))
+    def _out_job(out: Path, overrides: dict[str, object] | None = None) -> _OutputJob:
+        return _OutputJob(
+            out.name, out, format_ or _format_from_output(out), overrides or {}
+        )
 
-    if outputs:
-        jobs = [_out_job(input_files[0], out) for out in outputs]
-    else:
-        # Multiple inputs: each expands its own %%metro output: declarations,
-        # else the sibling <input>.<format>. (A single input already resolved
-        # its declarations into `outputs` above, so skip the re-scan here.)
-        # ponytail: no cross-format layout sharing here; add if a multi-input
-        # batch with declared outputs ever gets hot.
+    def _jobs_for(source: Path, graph: MetroGraph) -> list[_OutputJob]:
+        """One job per declared output, else the sibling <source>.<format>."""
+        declared = _declared_outputs(
+            graph, source, reject_outside_source=reject_output_outside_source
+        )
+        if declared:
+            return [_out_job(out, overrides) for out, overrides in declared]
         fmt = format_ or "svg"
-        jobs = []
-        for f in input_files:
-            declared = _declared_outputs(f) if len(input_files) > 1 else []
-            if declared:
-                jobs += [_out_job(f, out) for out in declared]
-            else:
-                jobs.append((f.name, f, f.with_suffix(f".{fmt}"), fmt))
+        return [
+            _OutputJob(
+                source.name, source.with_suffix(f".{fmt}"), cast(RenderFormat, fmt), {}
+            )
+        ]
 
-    # Paths every job writes; printed to stdout only on success (see
-    # _print_render_result).
-    planned = [out_path for _, _, out_path, _ in jobs]
+    def _parse_for_planning(source: Path, *, quiet: bool) -> MetroGraph:
+        """Read and parse *source* once, for planning and for the render.
 
-    if len(jobs) == 1:
-        _, source, out_path, out_format = jobs[0]
-        _job(source, out_path, out_format, quiet=False)()
-        _print_render_result(planned)
-        return
-
-    # Repeated -o always shares one input file (validated above), so every job's
-    # svg_format ("svg" or "html"; png renders through "svg") shares a layout -
-    # parse and lay it out once per distinct svg_format instead of once per job,
-    # capturing and reporting that shared step's warnings the same way a single
-    # job would (permissive downgrades included).
-    # A video output turns the animation on (see _layout_opts_for), which is a
-    # different layout from the one a plain .svg beside it wants, so the key
-    # carries that too rather than handing one graph to both.
-    graphs: dict[tuple[Literal["svg", "html"], bool], MetroGraph] = {}
-    if outputs:
+        Planning needs the map's %%metro output: declarations before it can
+        say how many jobs the file becomes, and parsing is the cheap half of
+        the pipeline - so the result is threaded through to the render rather
+        than thrown away: one read, one parse, one set of parse warnings per
+        file per run.
+        """
+        prefix = _error_prefix(source, quiet)
         permissive = bool(layout_opts.get("permissive"))
         with warnings.catch_warnings(record=True) as caught:
             if permissive:
                 warnings.filterwarnings("always", category=PermissiveGuardWarning)
             try:
-                for _, source, _, out_format in jobs:
-                    key = _graph_key(out_format, layout_opts)
-                    if key not in graphs:
-                        graphs[key] = _prepare_graph_for_render(
-                            source,
-                            from_nextflow=from_nextflow,
-                            title=title,
-                            line_spread=line_spread,
-                            logo=logo,
-                            legend=legend,
-                            layout_opts=_layout_opts_for(out_format, layout_opts),
-                            bare=bare,
-                            svg_format=key[0],
-                            error_prefix=_error_prefix(source, quiet=True),
-                        )
+                text = source.read_text()
+                return _parse_source(
+                    text,
+                    from_nextflow=from_nextflow,
+                    title=title,
+                    line_spread=line_spread,
+                    layout_options=layout_opts,
+                )
+            except (OSError, UnicodeDecodeError, *_SOURCE_ERRORS) as e:
+                _clean_error(e, prefix)
             finally:
                 _report_render_warnings(
-                    caught, permissive=permissive, source=input_files[0]
+                    caught, permissive=permissive, source=source if quiet else None
                 )
 
-    _run_batch(
-        [
+    def _render_source(
+        source: Path,
+        jobs: list[_OutputJob],
+        *,
+        quiet: bool,
+        parsed: MetroGraph | None,
+        batch: bool,
+    ) -> None:
+        """Render every output planned for one source file.
+
+        Jobs sharing a (backend, animation) key share one laid-out graph - a
+        video output turns the animation on (see _layout_opts_for), which is
+        a different layout from the one a plain .svg beside it wants, so the
+        key carries that too rather than handing one graph to both. *parsed*
+        lets every job in this call skip its own read+parse, whether they
+        share a layout or not.
+        """
+        graphs: dict[tuple[Literal["svg", "html"], bool], MetroGraph] = {}
+        job_opts = [_job_layout_opts(job.overrides) for job in jobs]
+        keys = [
+            _graph_key(job.format, opts)
+            for job, opts in zip(jobs, job_opts, strict=True)
+        ]
+        if len(jobs) > 1:
+            permissive = bool(layout_opts.get("permissive"))
+            with warnings.catch_warnings(record=True) as caught:
+                if permissive:
+                    warnings.filterwarnings("always", category=PermissiveGuardWarning)
+                try:
+                    for job, opts, key in zip(jobs, job_opts, keys, strict=True):
+                        if key not in graphs:
+                            graphs[key] = _prepare_graph_for_render(
+                                source,
+                                from_nextflow=from_nextflow,
+                                title=title,
+                                line_spread=line_spread,
+                                logo=logo,
+                                legend=legend,
+                                layout_opts=_layout_opts_for(job.format, opts),
+                                bare=bare,
+                                svg_format=key[0],
+                                error_prefix=_error_prefix(source, quiet=True),
+                                parsed=parsed,
+                            )
+                finally:
+                    _report_render_warnings(
+                        caught, permissive=permissive, source=source if quiet else None
+                    )
+
+        calls = [
             (
-                label,
+                job.label,
                 _job(
                     source,
-                    out_path,
-                    out_format,
-                    quiet=True,
-                    graph=graphs.get(_graph_key(out_format, layout_opts)),
+                    job.path,
+                    job.format,
+                    job.overrides,
+                    quiet=quiet,
+                    graph=graphs.get(key),
+                    parsed=parsed,
                 ),
             )
-            for label, source, out_path, out_format in jobs
+            for job, key in zip(jobs, keys, strict=True)
         ]
-    )
-    _print_render_result(planned)
+        if batch:
+            _run_batch(calls)
+        else:
+            for _, call in calls:
+                call()
+
+    if len(input_files) == 1:
+        source = input_files[0]
+        if outputs:
+            # Explicit -o: the outputs are already known, so nothing is
+            # parsed ahead of the render.
+            parsed, jobs = None, [_out_job(out) for out in outputs]
+        else:
+            parsed = _parse_for_planning(source, quiet=False)
+            jobs = _jobs_for(source, parsed)
+
+        if len(jobs) == 1:
+            job = jobs[0]
+            _job(
+                source, job.path, job.format, job.overrides, quiet=False, parsed=parsed
+            )()
+        else:
+            _render_source(source, jobs, quiet=True, parsed=parsed, batch=True)
+        _print_render_result([job.path for job in jobs])
+        return
+
+    # Several inputs (and therefore no -o, rejected above). Everything a file
+    # needs - the read, the parse its %%metro output: declarations come from,
+    # the layout, the write - happens inside its own callable, so a bad file
+    # (unreadable, undecodable, or rejected by the parser) only fails that
+    # one file's job under _run_batch, instead of aborting job planning for
+    # every file before any of them run.
+    written: list[Path] = []
+
+    def _file_job(source: Path) -> Callable[[], None]:
+        def _run() -> None:
+            graph = _parse_for_planning(source, quiet=True)
+            jobs = _jobs_for(source, graph)
+            _render_source(source, jobs, quiet=True, parsed=graph, batch=False)
+            written.extend(job.path for job in jobs)
+
+        return _run
+
+    _run_batch([(f.name, _file_job(f)) for f in input_files])
+    _print_render_result(written)
 
 
 def _print_render_result(paths: list[Path]) -> None:
-    """Print the render result (version + output paths) to stdout as YAML.
+    """Print the render result (version banner + output paths) to stdout as YAML.
 
     JSON-quoted scalars are valid YAML, so no YAML dependency is needed. Called
-    only after a successful render, so ``paths`` is never empty.
+    only after a successful render, so ``paths`` is never empty and a failed
+    render's stdout stays empty: nothing about the result is printed until
+    every job it covers has already succeeded.
     """
-    click.echo(f"version: {json.dumps(__version__)}")
+    click.echo(f"nf-metro: v{__version__}")
     click.echo("outputs:")
     for path in paths:
         click.echo(f"  - {json.dumps(str(path))}")
@@ -864,6 +1077,7 @@ def _render_one(
     layout_opts: dict[str, object],
     quiet: bool,
     graph: MetroGraph | None = None,
+    parsed: MetroGraph | None = None,
 ) -> None:
     # Applied here rather than in either caller, so `render` and `render-many`
     # both get it; `render`'s graph cache keys on the same predicate, so a
@@ -907,6 +1121,7 @@ def _render_one(
                 layout_opts=layout_opts,
                 quiet=quiet,
                 graph=graph,
+                parsed=parsed,
             )
         except click.ClickException:
             raise
@@ -932,12 +1147,21 @@ def _prepare_graph_for_render(
     bare: bool,
     svg_format: Literal["svg", "html"],
     error_prefix: str,
+    parsed: MetroGraph | None = None,
 ) -> MetroGraph:
-    """Parse and lay out *input_file*, reporting a typed failure via `_clean_error`."""
-    text = input_file.read_text()
+    """Lay out *input_file*, reporting a typed failure via `_clean_error`.
+
+    *parsed* is a graph planning already parsed from this file (see
+    `_parse_for_planning`); laying it out settles it in place, so each job
+    needing its own layout gets its own copy, never the same object twice.
+    Without *parsed*, the file is read and parsed here instead.
+    """
+    source: str | MetroGraph = (
+        copy.deepcopy(parsed) if parsed is not None else input_file.read_text()
+    )
     try:
         return prepare_graph(
-            text,
+            source,
             from_nextflow=from_nextflow,
             title=title,
             line_spread=line_spread,
@@ -948,13 +1172,7 @@ def _prepare_graph_for_render(
             bare=bare,
             output_format=svg_format,
         )
-    except (
-        ValueError,
-        CyclicGraphError,
-        BackwardFlowError,
-        MixedEntryDirectionError,
-        PhaseInvariantError,
-    ) as e:
+    except _SOURCE_ERRORS as e:
         _clean_error(e, error_prefix)
 
 
@@ -988,6 +1206,7 @@ def _render_one_unsafe(
     layout_opts: dict[str, object],
     quiet: bool,
     graph: MetroGraph | None = None,
+    parsed: MetroGraph | None = None,
 ) -> None:
     error_prefix = _error_prefix(input_file, quiet)
     # PNG renders through the SVG backend and is rasterised afterward; every
@@ -1006,6 +1225,7 @@ def _render_one_unsafe(
             bare=bare,
             svg_format=svg_format,
             error_prefix=error_prefix,
+            parsed=parsed,
         )
 
     if format_ in _RASTER_FORMATS:

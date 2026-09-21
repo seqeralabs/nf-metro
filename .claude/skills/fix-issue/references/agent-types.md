@@ -28,8 +28,8 @@ Two consequences before you reach for it:
 Eligible only for the investigator and the verifier, where the repo architecture
 is irrelevant - but measurement says the saving is negligible and the lost
 re-brief is not, so prefer the named role types. Never for the
-diagnostician, writer, visual reviewer, or reviewer: they need the architecture
-map and the station-as-elbow constraint.
+diagnostician (either tier), writer, visual reviewer, or reviewer: they need
+the architecture map and the station-as-elbow constraint.
 
 ## The model resolution order
 
@@ -47,16 +47,29 @@ If `CLAUDE_CODE_SUBAGENT_MODEL` is set it overrides **every** tier decision in
 this skill, so check it once at session start. An organisation `availableModels`
 allowlist can also substitute a model at any of these levels.
 
-**Never pass `model` when spawning a named `fix-issue-*` type.** Level 2 beats
-level 3, so an explicit `model` - even a generic alias like `opus` or `sonnet` -
-silently overrides the definition's pinned snapshot, including HIGH's pin
-against `opus` drifting onto a newer Opus release than the one this skill
-verified against. An explicit `model` is only for the two cases above: a
-generic type with no fix-issue definition, or a deliberate one-off test of a
-different snapshot. If a wrong-model spawn is caught mid-run, stop the task,
-discard any commits or changes it made - the tier contract was violated, so
-its output is not trustworthy even where it looks correct - and restart the
-same role fresh from the last known-good SHA with no `model` parameter.
+**Never pass `model` when spawning a named `fix-issue-*` type, with one
+exception.** Level 2 beats level 3, so an explicit `model` - even a generic
+alias like `opus` or `sonnet` - silently overrides the definition's pinned
+snapshot, including HIGH's pin against `opus` drifting onto a newer Opus
+release than the one this skill verified against. The exception is
+`fix-issue-writer`: pass `model` set to the MID tier's model (`sonnet`) to
+lower it for a class (c) structural change, or for anything outside
+`layout/`/`parser/` (see the tier table), and omit it again to return to
+HIGH. It earns the exception because its tier can change *mid-session* on a
+mixed diff, and the writer is resumed via `SendMessage` rather than
+respawned - overriding on resume keeps the one continuing agent instead of
+forcing a context-losing restart. Every other role's MID/HIGH split is a
+spawn-time decision instead, so it gets a separate fixed-tier definition
+(`fix-issue-diagnostician` at HIGH vs `fix-issue-diagnostician-mid` at MID)
+rather than an override exception; a hook denies the `model` parameter on all
+of those. Beyond the writer, an explicit `model` is only for a generic type
+with no fix-issue definition (`Explore`, `general-purpose`) or a deliberate
+one-off test of a different snapshot. If a wrong-model spawn is caught
+mid-run, stop the task, discard any commits or changes it made - the tier
+contract was violated, so its output is not trustworthy even where it looks
+correct - and restart the same role fresh from the last known-good SHA with
+no `model` parameter (or, for the writer, with `model` set only when its
+stated condition holds).
 
 ## Effort, and enforcing read-only
 

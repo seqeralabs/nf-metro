@@ -80,9 +80,14 @@ def _dir_style(value: str, graph: MetroGraph) -> None:
     graph.style = value
 
 
+# The two display modes a theme can render in, shared with the per-output
+# `mode=` override below.
+_MODE_CHOICES: tuple[str, ...] = ("light", "dark")
+
+
 def _dir_mode(value: str, graph: MetroGraph) -> None:
     mode = value.strip().lower()
-    if mode not in ("light", "dark"):
+    if mode not in _MODE_CHOICES:
         _warn_malformed("mode", value, "light/dark")
         return
     graph.mode = mode
@@ -97,12 +102,120 @@ def _dir_logo(value: str, graph: MetroGraph) -> None:
         graph.logo_path = value
 
 
-def _dir_output(value: str, graph: MetroGraph) -> None:
-    """Validate ``%%metro output: path[, path...]`` (the default outputs when no
-    -o). The CLI resolves the paths from the .mmd; nothing is stored here.
+# Render options one ``%%metro output:`` declaration may override for itself,
+# mapped to how each one's value is read. Deliberately narrow: every key here
+# changes how the map is *drawn*, never what the map *is*, so a file declaring
+# four outputs still declares one diagram. Anything structural stays graph-wide,
+# where a reader sees it once.
+_OUTPUT_OVERRIDE_KINDS: dict[str, str] = {
+    "animate": "bool",
+    "mode": "mode",
+    "theme": "theme",
+    "scale": "float",
+    "raster_width": "int",
+}
+
+# Override tokens are separated by commas, whitespace, or both.
+_OUTPUT_OVERRIDE_SEP = re.compile(r"[,\s]+")
+
+# Whitespace hugging a `=` is part of the token's own separator, not the
+# token boundary, so `mode = dark` reads as one token rather than three.
+_OUTPUT_OVERRIDE_EQ_SPACE = re.compile(r"\s*=\s*")
+
+
+def _output_override_value(key: str, raw: str) -> object | None:
+    """Coerce one override's payload, or ``None`` when it is unusable.
+
+    Every kind is validated through :func:`nf_metro.options.coerce`, the same
+    path every other ``%%metro`` numeric/choice directive and its equivalent
+    CLI flag already go through. ``False`` is a legitimate result
+    (``animate=false``), so callers test the outcome against ``None`` rather
+    than for truthiness.
     """
-    if not _split_csv(value):
-        _warn_malformed("output", value, "'path[, path...]'")
+    kind = _OUTPUT_OVERRIDE_KINDS[key]
+    text = raw.strip().lower()
+    if kind == "bool" and text == "":
+        # A bare flag ("animate") means on; coerce's own bool kind reads an
+        # empty payload as off, which only applies to an explicit `key=`.
+        return True
+    if kind == "mode":
+        opt = LayoutOption(name=key, kind="choice", choices=_MODE_CHOICES, help="")
+    elif kind == "theme":
+        # Imported here, not at module scope, because the theme registry
+        # reaches the render package, which imports the parser back.
+        from nf_metro.themes import STYLE_NAMES
+
+        opt = LayoutOption(name=key, kind="choice", choices=tuple(STYLE_NAMES), help="")
+    elif kind in ("float", "int"):
+        numeric_kind: Literal["float", "int"] = "float" if kind == "float" else "int"
+        opt = LayoutOption(name=key, kind=numeric_kind, sign="positive", help="")
+    else:
+        opt = LayoutOption(name=key, kind="bool", help="")
+    value, _ = coerce(opt, text)
+    return None if value is INVALID else value
+
+
+def _parse_output_overrides(spec: str) -> dict[str, object]:
+    """Read the ``key=value``/bare-flag tokens right of an output's ``|``.
+
+    Each bad token is warned about and dropped on its own, so one typo
+    doesn't silently discard the overrides beside it (nor the output itself,
+    which still renders under the run's global options).
+    """
+    overrides: dict[str, object] = {}
+    normalized = _OUTPUT_OVERRIDE_EQ_SPACE.sub("=", spec.strip())
+    for token in _OUTPUT_OVERRIDE_SEP.split(normalized):
+        if not token:
+            continue
+        name, sep, raw = token.partition("=")
+        key = name.strip().lower()
+        if key not in _OUTPUT_OVERRIDE_KINDS:
+            _warn_directive(
+                "output",
+                f"ignoring unknown override {token!r}; expected one of "
+                + ", ".join(sorted(_OUTPUT_OVERRIDE_KINDS)),
+            )
+            continue
+        if not sep and _OUTPUT_OVERRIDE_KINDS[key] != "bool":
+            _warn_directive("output", f"ignoring {token!r}; expected {key}=<value>")
+            continue
+        value = _output_override_value(key, raw)
+        if value is None:
+            _warn_directive("output", f"ignoring {token!r}; bad value for {key}")
+            continue
+        overrides[key] = value
+    return overrides
+
+
+def _dir_output(value: str, graph: MetroGraph) -> None:
+    """Record ``%%metro output: path[, path...] [| override...]``: the default
+    outputs used by ``nf-metro render`` when no ``-o`` is given.
+
+    Repeating the directive accumulates, so a map may declare its formats on
+    one line or split across several. A path already declared is skipped
+    rather than duplicated, so a repeated declaration can't schedule the same
+    output to be rendered (and reported) twice. The paths are stored exactly
+    as written; the CLI resolves each one against the .mmd's own directory.
+
+    Everything right of the first ``|`` is that line's per-output render
+    overrides (see :data:`_OUTPUT_OVERRIDE_KINDS`), applied to every path on
+    the line, which is how one map declares a static SVG, an animated SVG and
+    a light/dark PNG pair in a single ``nf-metro render`` pass.
+    """
+    spec, sep, override_spec = value.partition("|")
+    paths = _split_csv(spec)
+    if not paths:
+        _warn_malformed("output", value, "'path[, path...] [| override, ...]'")
+        return
+    overrides = _parse_output_overrides(override_spec) if sep else {}
+    declared = {p for p, _ in graph.declared_outputs}
+    for path in paths:
+        if path in declared:
+            continue
+        declared.add(path)
+        # A copy per path: the list's entries are independent records, and a
+        # later consumer mutating one must not reach its line-mates.
+        graph.declared_outputs.append((path, dict(overrides)))
 
 
 def _dir_off_track(value: str, graph: MetroGraph) -> None:
