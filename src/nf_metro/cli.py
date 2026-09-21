@@ -504,6 +504,70 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
 
 
 @cli.command()
+@click.option_panel(
+    "Output and source",
+    options=[
+        "--output",
+        "--format",
+        "--from-nextflow",
+        "--debug",
+        "--reject-output-outside-source",
+    ],
+)
+@click.option_panel(
+    "Theme and branding",
+    options=["--theme", "--mode", "--logo", "--title", "--caption"],
+)
+@click.option_panel(
+    "Legend and logo",
+    options=["--legend", "--logo-scale", "--legend-min-height", "--legend-logo-gap"],
+)
+@click.option_panel(
+    "Layout",
+    options=[
+        "--line-spread",
+        "--x-spacing",
+        "--y-spacing",
+        "--section-x-gap",
+        "--section-y-gap",
+        "--track-gap",
+        "--fold-threshold",
+        "--diamond-style",
+        "--line-order",
+        "--row-align",
+        "--center-ports",
+        "--compact-offsets",
+        "--label-angle",
+        "--font-scale",
+        "--stroke-scale",
+        "--width",
+        "--height",
+    ],
+)
+@click.option_panel("Line styling", options=["--inactive-lines", "--directional"])
+@click.option_panel(
+    "Animation and raster output",
+    options=["--animate", "--fps", "--duration", "--scale", "--raster-width"],
+)
+@click.option_panel(
+    "Embedding options",
+    options=[
+        "--responsive",
+        "--embed-font",
+        "--text-to-paths",
+        "--bare",
+        "--svg-class-prefix",
+        "--no-self-color-scheme",
+        "--no-dark-mode-css",
+        "--no-chrome-css",
+    ],
+)
+@click.option_panel(
+    "Guard behaviour", options=["--validate", "--strict", "--permissive"]
+)
+@click.option_panel(
+    "Live-progress metadata", options=["--auto-process", "--process-scope"]
+)
 @click.argument(
     "input_files", nargs=-1, required=True, type=click.Path(exists=True, path_type=Path)
 )
@@ -1736,6 +1800,11 @@ def explain(
 
 
 @cli.command(context_settings={"ignore_unknown_options": True})
+@click.option_panel("Server", options=["--port", "--host", "--token", "--open"])
+@click.option_panel("Display", options=["--theme", "--overlay"])
+@click.option_panel(
+    "Shutdown", options=["--shutdown-after-complete", "--shutdown-grace"]
+)
 @click.argument("input_file", type=click.Path(exists=True, path_type=Path))
 @click.option("--port", type=int, default=8080, help="Port to listen on.")
 @click.option(

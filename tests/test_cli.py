@@ -1943,3 +1943,24 @@ def test_no_color_beats_ci_colour_forcing():
         check=True,
     )
     assert "\x1b[" in coloured.stdout
+
+
+@pytest.mark.parametrize("command", ["render", "serve"])
+def test_every_option_sits_in_a_help_panel(command):
+    """Options are grouped into named panels, so a new one must join one.
+
+    Without this, an option added to a panelled command silently lands in the
+    catch-all "Options" panel at the bottom of the help, which reads as an
+    oversight rather than a decision.
+    """
+    cmd = cli.commands[command]
+    panelled = {name for panel in cmd.panels for name in panel.options}
+    ungrouped = [
+        param.opts[-1]
+        for param in cmd.params
+        if param.opts[0].startswith("-")
+        and not getattr(param, "hidden", False)
+        and param.name != "help"
+        and not panelled.intersection(param.opts)
+    ]
+    assert not ungrouped, f"{command}: {ungrouped}"
