@@ -62,34 +62,6 @@ _RASTER_FORMATS: frozenset[str] = frozenset({"png", *VIDEO_FORMATS})
 #: Frames per second an exported loop runs at unless ``--fps`` says otherwise.
 DEFAULT_FPS = 12.0
 
-# rich-click: colourful help and error output (drop-in for click). Accent the
-# metro-map palette and sort the commands into panels. Colour in CI is handled
-# in nf_metro.console. Users can restyle everything with RICH_CLICK_THEME.
-click.rich_click.STYLE_OPTION = "bold cyan"
-click.rich_click.STYLE_ARGUMENT = "bold cyan"
-click.rich_click.STYLE_SWITCH = "bold green"
-click.rich_click.STYLE_COMMAND = "bold cyan"
-click.rich_click.SHOW_ARGUMENTS = True
-# rich-click forces a terminal (bold ANSI, fixed-width panels) whenever it sees
-# FORCE_COLOR, PY_COLORS or GITHUB_ACTIONS, and never checks NO_COLOR. Honour
-# NO_COLOR here so it really does turn all styling off, CI included.
-if "NO_COLOR" in os.environ:
-    click.rich_click.FORCE_TERMINAL = False
-click.rich_click.COMMAND_GROUPS = {
-    "nf-metro": [
-        {"name": "Render", "commands": ["render", "render-many", "convert"]},
-        {
-            "name": "Inspect",
-            "commands": ["validate", "validate-svg", "info", "explain"],
-        },
-        {
-            "name": "Live progress",
-            "commands": ["serve", "serve-multi", "check-mapping"],
-        },
-        {"name": "Embed", "commands": ["embed-script"]},
-    ]
-}
-
 #: Every typed failure the parse/layout pipeline raises for a rejected map,
 #: whether it surfaces during planning's parse-only pass or the render's
 #: full parse+layout.
@@ -104,6 +76,19 @@ _SOURCE_ERRORS = (
 
 @click.group()
 @click.version_option(version=__version__)
+# rich-click forces a terminal (bold ANSI, fixed-width panels) whenever it sees
+# FORCE_COLOR, PY_COLORS or GITHUB_ACTIONS, and never checks NO_COLOR itself.
+@click.rich_config(
+    {"theme": "quartz2", "force_terminal": False if "NO_COLOR" in os.environ else None}
+)
+@click.command_panel("Render", commands=["render", "render-many", "convert"])
+@click.command_panel(
+    "Inspect", commands=["validate", "validate-svg", "info", "explain"]
+)
+@click.command_panel(
+    "Live progress", commands=["serve", "serve-multi", "check-mapping"]
+)
+@click.command_panel("Embed", commands=["embed-script"])
 def cli() -> None:
     """nf-metro: Generate metro-map-style SVG diagrams from Mermaid definitions."""
 
