@@ -18,7 +18,7 @@ from nf_metro.parser.model import MetroGraph
 # the assertions look for. Both are read by rich-click/Rich at render time, and
 # this runs before any test module imports the CLI.
 os.environ.setdefault("NO_COLOR", "1")
-os.environ.setdefault("TERMINAL_WIDTH", "200")
+os.environ.setdefault("TERMINAL_WIDTH", "400")
 
 # --- Graph text constants ---
 

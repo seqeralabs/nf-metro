@@ -140,6 +140,18 @@ def _declare(mmd: Path, *directives: str) -> None:
     mmd.write_text("".join(f"{d}\n" for d in directives) + STANDALONE_MMD.read_text())
 
 
+def _plain(output: str) -> str:
+    """CLI output as one unwrapped line, free of rich-click's panel borders.
+
+    rich-click draws errors and help in bordered panels and hard-wraps the
+    text inside them, so a phrase an assertion looks for can be split across
+    lines by nothing more interesting than a long temp path. A single word
+    longer than the panel is split mid-word and cannot be rejoined here; the
+    wide TERMINAL_WIDTH conftest pins is what keeps long paths off that edge.
+    """
+    return " ".join(output.replace("\u2502", " ").split())
+
+
 def test_render_output_sibling_subdir_allowed_within_repo(fake_repo):
     """A `..` hop that stays inside the checkout is legitimate, not an escape.
 
@@ -178,7 +190,7 @@ def test_render_output_escape_past_repo_root_rejected(fake_repo):
         cli, ["render", str(mmd), "--reject-output-outside-source"]
     )
     assert result.exit_code != 0
-    assert "resolves outside the pipeline repository" in result.output
+    assert "resolves outside the pipeline repository" in _plain(result.output)
     assert not (fake_repo.parent / "elsewhere" / "escaped.svg").exists()
     assert result.stdout == ""
 
@@ -192,7 +204,7 @@ def test_render_output_absolute_path_outside_repo_rejected(fake_repo, tmp_path_f
         cli, ["render", str(mmd), "--reject-output-outside-source"]
     )
     assert result.exit_code != 0
-    assert "resolves outside the pipeline repository" in result.output
+    assert "resolves outside the pipeline repository" in _plain(result.output)
     assert not (outside / "escaped.svg").exists()
 
 
@@ -213,7 +225,7 @@ def test_render_output_into_dot_git_rejected(fake_repo, declared):
         cli, ["render", str(mmd), "--reject-output-outside-source"]
     )
     assert result.exit_code != 0
-    assert ".git/" in result.output
+    assert ".git/" in _plain(result.output)
     assert not (fake_repo / ".git" / "config").exists()
 
 
@@ -255,7 +267,7 @@ def test_render_output_symlink_into_dot_git_rejected(fake_repo):
         cli, ["render", str(mmd), "--reject-output-outside-source"]
     )
     assert result.exit_code != 0
-    assert ".git/" in result.output
+    assert ".git/" in _plain(result.output)
     assert not (fake_repo / ".git" / "config").exists()
 
 
@@ -285,7 +297,7 @@ def test_render_output_escape_rejected_with_flag(outside_repo):
         cli, ["render", str(mmd), "--reject-output-outside-source"]
     )
     assert result.exit_code != 0
-    assert "resolves outside" in result.output
+    assert "resolves outside" in _plain(result.output)
     assert not (outside_repo / "escaped.svg").exists()
     assert result.stdout == ""
 
@@ -302,7 +314,7 @@ def test_render_output_escape_rejected_via_absolute_path(outside_repo):
         cli, ["render", str(mmd), "--reject-output-outside-source"]
     )
     assert result.exit_code != 0
-    assert "resolves outside" in result.output
+    assert "resolves outside" in _plain(result.output)
     assert not (outside / "escaped.svg").exists()
 
 
@@ -888,7 +900,7 @@ def test_render_unreadable_single_file_reports_cleanly(tmp_path, monkeypatch):
     result = CliRunner().invoke(cli, ["render", str(bad)])
     assert result.exit_code != 0
     assert isinstance(result.exception, SystemExit)
-    assert str(bad) in result.output
+    assert str(bad) in _plain(result.output)
     assert result.stdout == ""
 
 
@@ -1441,8 +1453,8 @@ def test_render_empty_source_names_file_and_cause(tmp_path):
         cli, ["render", str(src), "-o", str(tmp_path / "out.svg")]
     )
     assert result.exit_code != 0
-    assert str(src) in result.output
-    assert "defines no stations" in result.output
+    assert str(src) in _plain(result.output)
+    assert "defines no stations" in _plain(result.output)
     assert "max()" not in result.output
 
 
@@ -1515,7 +1527,7 @@ def test_render_rejection_is_one_line_without_debug_env(tmp_path, monkeypatch):
     )
     assert result.exit_code != 0
     # rich-click frames the message in an Error panel; it stays one clean line.
-    assert f"{src}: synthetic render rejection" in result.output
+    assert f"{src}: synthetic render rejection" in _plain(result.output)
     assert "Traceback" not in result.output
 
 
@@ -1705,8 +1717,7 @@ def test_render_validate_help_scopes_its_promise():
     """`--validate` names the guards it runs and points elsewhere for Tier-A."""
     result = CliRunner().invoke(cli, ["render", "--help"])
     assert result.exit_code == 0
-    # Drop rich-click's panel borders so a wrapped phrase reads as one line.
-    help_text = " ".join(result.output.replace("\u2502", " ").split())
+    help_text = _plain(result.output)
     assert "route drawn through a station's label or marker" in help_text
     assert "use --strict to fail on those" in help_text
 
