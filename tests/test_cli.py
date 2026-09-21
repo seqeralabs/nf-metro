@@ -1717,15 +1717,6 @@ def test_info_reports_the_resolved_theme(tmp_path, style, expected):
     assert f"Style: {expected}" in result.output
 
 
-def test_render_validate_help_scopes_its_promise():
-    """`--validate` names the guards it runs and points elsewhere for Tier-A."""
-    result = CliRunner().invoke(cli, ["render", "--help"])
-    assert result.exit_code == 0
-    help_text = _plain(result.output)
-    assert "route drawn through a station's label or marker" in help_text
-    assert "use --strict to fail on those" in help_text
-
-
 def test_manifest_flag_is_an_undocumented_escape_hatch(tmp_path):
     """The manifest opt-out works while staying out of `--help`."""
     help_result = CliRunner().invoke(cli, ["render", "--help"])

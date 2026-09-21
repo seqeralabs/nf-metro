@@ -107,15 +107,13 @@ LAYOUT_OPTIONS: tuple[LayoutOption, ...] = (
         name="x_spacing",
         kind="float",
         sign="positive",
-        help="Horizontal spacing between layers (default: auto - widened from "
-        "60 only when wide labels would otherwise collide).",
+        help="Horizontal spacing between layers (default: auto).",
     ),
     LayoutOption(
         name="y_spacing",
         kind="float",
         sign="positive",
-        help="Vertical spacing between tracks (default: auto - derived from the "
-        "map's content so captioned icons and dense labels don't collide).",
+        help="Vertical spacing between tracks (default: auto).",
     ),
     LayoutOption(
         name="section_x_gap",
@@ -133,10 +131,7 @@ LAYOUT_OPTIONS: tuple[LayoutOption, ...] = (
         name="track_gap",
         kind="float",
         sign="nonneg",
-        help="Visual gap (px, 0–3) between adjacent line strokes in a bundle "
-        "(edge to edge, not centre to centre). 0 means lines touch with no "
-        "space between them; 1 is the default. Values above 3 cause routing "
-        "problems on complex maps.",
+        help="Gap in px between adjacent strokes in a bundle.",
         max_val=3.0,
     ),
     LayoutOption(
@@ -144,86 +139,71 @@ LAYOUT_OPTIONS: tuple[LayoutOption, ...] = (
         kind="int",
         sign="positive",
         parse_time=True,
-        help="Max station-columns a section row may reach before the "
-        "auto-layout wraps it onto the next row (default 15). Raise it to keep "
-        "a long horizontal trunk of sections on a single row.",
+        help="Max station-columns in a section row before it wraps.",
     ),
     LayoutOption(
         name="diamond_style",
         kind="choice",
         choices=("straight", "symmetric"),
-        help="Fork-join (diamond) layout: 'straight' keeps the top branch on "
-        "the main track (default); 'symmetric' fans the branches evenly.",
+        help="Fork-join (diamond) branch layout.",
     ),
     LayoutOption(
         name="line_order",
         kind="choice",
         choices=LINE_ORDER_CHOICES,
-        help="Line ordering for track assignment: 'definition' (default) "
-        "preserves .mmd order, 'span' gives longest-spanning lines inner tracks.",
+        help="Track assignment order for lines.",
     ),
     LayoutOption(
         name="row_align",
         kind="choice",
         choices=("content", "top"),
-        help="Section bbox vertical sizing within a shared grid row: 'content' "
-        "(default) hugs each section's own content, 'top' grows shorter "
-        "row-mates upward so their bbox tops (and header badges) sit flush "
-        "with the tallest section in the row.",
+        help="Section bbox sizing within a grid row.",
     ),
     LayoutOption(
         name="center_ports",
         kind="bool",
-        help="Centre inter-section ports on the shorter of the two connected "
-        "sections, so lines enter/exit at the visual midpoint.",
+        help="Centre inter-section ports on the shorter section.",
     ),
     LayoutOption(
         name="compact_offsets",
         kind="bool",
-        help="Size each station only for the lines actually passing through it, "
-        "rather than reserving a slot for every declared line.",
+        help="Size each station for the lines passing through it.",
     ),
     LayoutOption(
         name="label_angle",
         kind="float",
         sign="any",
-        help="Angle in degrees for station labels (0 = horizontal). Overrides "
-        "the theme default; useful for dense trunks where horizontal labels "
-        "collide.",
+        help="Station label angle in degrees (0 = horizontal).",
     ),
     LayoutOption(
         name="font_scale",
         kind="float",
         sign="positive",
-        help="Scale every text size and the label-width metrics that drive "
-        "layout spacing (1.0 = default).",
+        help="Scale text sizes and label metrics.",
     ),
     LayoutOption(
         name="stroke_scale",
         kind="float",
         sign="positive",
-        help="Scale track stroke weight and station pill size, widening bundle "
-        "spacing, marker clearance, and rail pitch to match (1.0 = default). "
-        "Keeps a large map legible when it is downscaled to fit a screen.",
+        help="Scale stroke weight and station pill size.",
     ),
     LayoutOption(
         name="logo_scale",
         kind="float",
         sign="positive",
-        help="Scale the logo within the legend block (1.0 = default auto-size).",
+        help="Scale the logo within the legend block.",
     ),
     LayoutOption(
         name="legend_min_height",
         kind="float",
         sign="nonneg",
-        help="Minimum legend content height in pixels (useful for single-line "
-        "maps where the logo would otherwise be tiny).",
+        help="Minimum legend content height in px.",
     ),
     LayoutOption(
         name="legend_logo_gap",
         kind="float",
         sign="nonneg",
-        help="Horizontal gap in pixels between the logo and the legend entries.",
+        help="Gap in px between the logo and the legend entries.",
     ),
     LayoutOption(
         name="width",
@@ -240,59 +220,45 @@ LAYOUT_OPTIONS: tuple[LayoutOption, ...] = (
     LayoutOption(
         name="animate",
         kind="bool",
-        help="Add animated balls traveling along the metro lines.",
+        help="Animate markers travelling along the lines.",
     ),
     LayoutOption(
         name="directional",
         kind="bool",
-        help="Draw static chevrons along each route pointing in the flow "
-        "direction (source to target). Off by default.",
+        help="Draw chevrons showing each route's flow direction.",
     ),
     LayoutOption(
         name="strict",
         kind="bool",
-        help="Treat a Tier-A layout-invariant violation on the rendered "
-        "geometry as an error (non-zero exit) instead of a warning.",
+        help="Fail on a layout-invariant violation.",
     ),
     LayoutOption(
         name="permissive",
         kind="bool",
-        help="Downgrade layout/render guard failures to warnings and render "
-        "best-effort on whatever geometry was computed, instead of aborting "
-        "with no output. Overrides --strict.",
+        help="Downgrade guard failures to warnings and continue rendering.",
     ),
     LayoutOption(
         name="auto_process",
         kind="bool",
         parse_time=True,
-        help="Map each station to its own id as a default process pattern when "
-        "it has no explicit %%metro process: directive, so a map whose station "
-        "ids already name their Nextflow processes lights up live with no "
-        "per-station mapping. Explicit directives override the default.",
+        help="Default each station's process pattern to its own id.",
     ),
     LayoutOption(
         name="process_scope",
         kind="str",
         parse_time=True,
-        help="Common fully-qualified-name prefix shared by the pipeline's "
-        "processes (e.g. 'NFCORE_RNASEQ:RNASEQ'). Each %%metro process: value is "
-        "then the tail under this scope, joined as '<scope>:<tail>' and matched "
-        "literally - so a pasted process path needs no regex and the prefix is "
-        "written once. Without a scope, process: values stay regexes.",
+        help="Prefix shared by the pipeline's processes.",
     ),
     LayoutOption(
         name="manifest",
         attr="embed_manifest",
         kind="bool",
         hidden=True,
-        help="Embed the machine-readable data manifest (the <metadata> block "
-        "and per-node data-node-* attributes) in the SVG. On by default; "
-        "--no-manifest emits the drawn map only.",
+        help="Embed the data manifest in the SVG. On by default.",
     ),
     LayoutOption(
         name="caption",
         kind="str",
-        help="Free-text caption or attribution line rendered bottom-left of the map "
-        "(e.g. 'Adapted from Author et al., Journal (Year)').",
+        help="Caption or attribution line, rendered bottom-left.",
     ),
 )

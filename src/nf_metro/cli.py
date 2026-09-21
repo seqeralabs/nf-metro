@@ -589,36 +589,29 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
     "outputs",
     type=click.Path(path_type=Path),
     multiple=True,
-    help="Output file path. Defaults to <input>.<format>. Only valid with a "
-    "single INPUT_FILE. Repeat it to write several formats from one layout "
-    "run: -o map.svg -o map.png.",
+    help="Output path (default: <input>.<format>). Repeat for several formats.",
 )
 @click.option(
     "--format",
     "format_",
     type=_FORMAT_TYPE,
     default=None,
-    help="Output format: 'svg' (default), 'png', 'html' for an interactive "
-    "self-contained page with pan/zoom and per-line filtering, or one of "
-    "'gif'/'webp'/'mp4'/'webm' for a looping video of the animation. Inferred "
-    "from the --output extension when not given.",
+    help="Output format (default: inferred from --output, else svg).",
 )
 @click.option(
     "--scale",
     type=_SCALE_TYPE,
     default=None,
     metavar="FLOAT",
-    help="Raster formats only: multiply the rendered pixel dimensions by this "
-    "factor.  [default: 2 for png, 1 for gif/webp/mp4/webm]",
+    help="Raster only: multiply the pixel dimensions by this factor. "
+    " [default: 2 for png, 1 for video]",
 )
 @click.option(
     "--raster-width",
     type=_RASTER_WIDTH_TYPE,
     default=None,
     metavar="INTEGER",
-    help="Raster formats only: output width in pixels, height scaled with it. "
-    "Overrides --scale. Distinct from --width, which grows the SVG canvas "
-    "around a map drawn at its natural size rather than resizing the picture.",
+    help="Raster only: output width in px. Overrides --scale.",
 )
 @click.option(
     "--fps",
@@ -626,72 +619,60 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
     default=DEFAULT_FPS,
     show_default=True,
     metavar="FLOAT",
-    help="Video formats only: frames per second of the exported loop.",
+    help="Video only: frames per second of the exported loop.",
 )
 @click.option(
     "--duration",
     type=_DURATION_TYPE,
     default=None,
     metavar="FLOAT",
-    help="Video formats only: length of one loop in seconds, compressing (or "
-    "stretching) the map's own animation cycle into it. Defaults to that "
-    "cycle, which keeps the balls at exactly the speed the animated SVG "
-    "moves them.",
+    help="Video only: loop length in seconds (default: the map's own animation cycle).",
 )
 @click.option(
     "--theme",
     type=click.Choice(sorted(STYLE_NAMES)),
     default=None,
-    help="Visual theme (default: from the %%metro style: directive, else nfcore).",
+    help="Visual theme (default: from %%metro style:, else nfcore).",
 )
 @click.option(
     "--mode",
     type=click.Choice(["light", "dark"]),
     default=None,
-    help=(
-        "Display mode, independent of the brand theme (default: from the "
-        "%%metro mode: directive, else the brand's own default mode). Bakes the "
-        "chosen mode's palette - use for light/dark PNG export."
-    ),
+    help="Palette to render with (default: from %%metro mode:).",
 )
 @click.option(
     "--debug/--no-debug",
     default=False,
-    help="Show debug overlay (ports, hidden stations, edge waypoints)",
+    help="Show the debug overlay.",
 )
 @click.option(
     "--logo",
     type=click.Path(exists=True, path_type=Path),
     default=None,
-    help="Logo image path (overrides the %%metro logo: directive).",
+    help="Logo image path (overrides %%metro logo:).",
 )
 @click.option(
     "--line-spread",
     type=click.Choice([m.value for m in LineSpread]),
     default=None,
-    help="How lines sharing a station relate vertically: 'bundle' (default) "
-    "merges onto one trunk, 'centered' balances the bundle about the midline, "
-    "'rails' draws parallel rails with interchange stations. Overrides the "
-    "graph-wide %%metro line_spread: directive (per-section overrides stay).",
+    help="Vertical arrangement of lines sharing a station.",
 )
 @click.option(
     "--legend",
     default=None,
-    help="Position the legend+logo block (overrides the %%metro legend: "
-    "directive). Keyword (bl/br/tl/tr/bottom/right/none), '<keyword> | canvas', "
-    "'<keyword> | dx,dy', or absolute 'x,y'.",
+    help="Position of the legend+logo block.",
 )
 @click.option(
     "--from-nextflow",
     is_flag=True,
     default=False,
-    help="Convert Nextflow -with-dag mermaid input before rendering",
+    help="Convert Nextflow -with-dag mermaid input before rendering.",
 )
 @click.option(
     "--title",
     type=str,
     default=None,
-    help="Pipeline title (overrides the %%metro title: directive).",
+    help="Pipeline title (overrides %%metro title:).",
 )
 @click.option(
     "--responsive/--no-responsive",
@@ -701,117 +682,59 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
 @click.option(
     "--embed-font/--no-embed-font",
     default=False,
-    help=(
-        "Inline a subset of Inter as a base64 @font-face block so the SVG "
-        "renders identically on any host regardless of installed fonts."
-    ),
+    help="Inline an Inter font subset.",
 )
 @click.option(
     "--text-to-paths/--no-text-to-paths",
     default=False,
-    help=(
-        "Convert all text to vector paths, removing font dependencies entirely. "
-        'Loses selectable text. Needs pip install "nf-metro[font]".'
-    ),
+    help='Convert text to vector paths. Needs pip install "nf-metro[font]".',
 )
 @click.option(
     "--svg-class-prefix",
     type=str,
     default="",
-    help=(
-        "Prefix every SVG presentation class with this string (e.g. 'myapp' "
-        "produces 'myapp-nf-metro-station'). Use distinct prefixes for each map "
-        "on a shared page to prevent CSS collisions. Has no effect on the "
-        "interactive HTML output, which already scopes each map independently."
-    ),
+    help="Prefix every SVG presentation class.",
 )
 @click.option(
     "--no-self-color-scheme",
     is_flag=True,
     default=False,
-    help=(
-        "Omit the color-scheme: light dark attribute from the root <svg> "
-        "element. Use when inlining the SVG into a host page that owns the "
-        "theme (e.g. the docs site): the SVG then inherits the page's "
-        "color-scheme so a manual light/dark toggle drives light-dark() "
-        "resolution rather than the viewer's OS preference."
-    ),
+    help="Omit the color-scheme attribute on the root <svg>.",
 )
 @click.option(
     "--no-dark-mode-css",
     is_flag=True,
     default=False,
-    help=(
-        "Suppress the prefers-color-scheme: dark <style> block. "
-        "Useful when a host page manages its own theme and the injected "
-        "media query would conflict."
-    ),
+    help="Omit the prefers-color-scheme: dark <style> block.",
 )
 @click.option(
     "--no-chrome-css",
     is_flag=True,
     default=False,
-    help=(
-        "Omit the chrome --nfm-* CSS custom-property <style> block. Colors "
-        "still render (they are baked as presentation attributes); only live "
-        "host recoloring is dropped. --format png applies it for you; pass "
-        "it when handing the SVG to an external rasterizer, since many "
-        "cannot parse var() and fail without it."
-    ),
+    help="Omit the --nfm-* custom-property <style> block.",
 )
 @click.option(
     "--bare/--no-bare",
     default=False,
-    help=(
-        "Omit the title and outer padding so the canvas hugs the diagram "
-        "content. The attribution watermark is kept. Suitable for embedding "
-        "in a host page that supplies its own frame and heading."
-    ),
+    help="Omit the title and outer padding.",
 )
 @click.option(
     "--validate",
     "validate_geometry",
     is_flag=True,
     default=False,
-    help=(
-        "After rendering, fail if the render-geometry guards find a defect in "
-        "the produced SVG: a route drawn through a station's label or marker, "
-        "or two lines collapsed onto one stroke. These read the picture as "
-        "drawn, including render-time offsets and label lifts. A Tier-A "
-        "layout-invariant violation stays a warning; use --strict to fail on "
-        "those. SVG output only, and only for a map that keeps its manifest, "
-        "which the guards read the drawn geometry through."
-    ),
+    help="Fail if the rendered SVG violates a render-geometry guard.",
 )
 @click.option(
     "--inactive-lines",
     "inactive_lines",
     default=None,
-    help=(
-        "Comma-separated %%metro line: IDs to render inactive: their strokes, "
-        "chevrons, and legend swatches grey out, as do the stations, labels, and "
-        "terminus icons touched only by inactive lines. Unlisted lines stay "
-        "full-colour. Unknown IDs error. Fully replaces any lines the map marks "
-        "inactive by directive; pass an empty value to force every line active. "
-        "Does not edit the .mmd."
-    ),
+    help="Comma-separated line IDs to render inactive.",
 )
 @click.option(
     "--reject-output-outside-source/--no-reject-output-outside-source",
     default=False,
-    help=(
-        "Refuse a %%metro output: declaration that resolves outside the "
-        "pipeline repository holding the .mmd (an absolute path, or a `..` "
-        "escape past the repo root), or into that repository's .git/, "
-        "instead of writing there. A `..` hop that stays inside the "
-        "checkout is fine, so assets/metro_map.mmd may declare "
-        "../docs/images/map.svg. Outside a git working tree the boundary "
-        "falls back to the .mmd's own directory. Off by default, since a "
-        "trusted local map may legitimately declare a path elsewhere; a "
-        "caller rendering a map it did not author (a CI job rendering a "
-        "fork PR's .mmd, say) should pass this. Has no effect on an "
-        "explicit -o, which the caller already chose."
-    ),
+    help="Reject a %%metro output: path outside the .mmd's repository.",
 )
 @layout_cli_options
 def render(
@@ -845,37 +768,16 @@ def render(
 ) -> None:
     """Render Mermaid metro map definitions to SVG, PNG, or interactive HTML.
 
-    Given more than one INPUT_FILE, all render within the same process
-    (amortising interpreter/import startup across the batch) and each write
-    to their own sibling <input>.<format> or, if it declares one, its own
-    %%metro output: path(s); every file is attempted even if an earlier one
-    fails, successful outputs are kept, and a non-zero exit is returned if
-    any failed. A file with several declared outputs is one pass/fail unit:
-    if any of its outputs fails the others it already wrote are kept on disk,
-    but that file is reported as one FAIL and none of its paths are printed.
+    Several INPUT_FILEs render in one process. Every file is attempted, and
+    the exit code is non-zero if any failed.
 
-    Repeating -o writes one INPUT_FILE to several outputs in the same run,
-    taking each output's format from its extension: -o map.svg -o map.png.
-    An explicit --format overrides every extension.
+    Output paths come from -o, repeatable for several formats, else from the
+    map's `%%metro output:` directives, else <input>.<format>. A declared
+    path may carry its own overrides after a `|`.
 
-    With no -o, a `%%metro output:` directive in the .mmd supplies the default
-    output path(s) (comma-separate or repeat it for several), resolved as
-    siblings of the source; -o overrides them entirely. Falls back to the
-    sibling <input>.<format> when neither is given.
-
-    Each declared path may carry its own render options after a `|` -
-    `animate`, `mode=`, `theme=`, `scale=`, `raster_width=` - which beat the
-    matching flag for that output alone, so one pass writes a static SVG, an
-    animated SVG and a light/dark PNG pair with no flags at all.
-
-    On success, a `nf-metro: v<version>` banner and the output paths are
-    printed to stdout as one YAML document; human summaries and warnings go
-    to stderr. Stdout stays empty on any failure, so a caller can gate on it
-    without also checking the exit code.
-
-    A rejected input, and any other failure, surfaces as a plain error
-    message rather than a traceback; set NF_METRO_DEBUG=1 to re-raise the
-    original exception instead.
+    The paths written are printed to stdout as YAML; summaries and warnings
+    go to stderr. Set NF_METRO_DEBUG=1 to raise on error instead of
+    reporting it.
     """
     if len(input_files) > 1 and outputs:
         raise click.UsageError("-o/--output can only be used with a single INPUT_FILE.")
@@ -1438,50 +1340,12 @@ def _video_progress(frames: Iterable[bytes], count: int) -> Iterator[bytes]:
 def render_many(manifest_file: Path) -> None:
     """Render multiple metro maps from a JSON manifest in one process.
 
-    MANIFEST_FILE is a JSON array of render jobs.  Each job is an object
-    with ``input`` and ``output`` (required) plus any subset of the options
-    accepted by ``nf-metro render``, expressed as JSON keys:
+    MANIFEST_FILE is a JSON array of jobs. Each job needs `input` and
+    `output`, plus any `nf-metro render` option as a JSON key, with
+    layout options nested under `layout_options`.
 
-    \b
-      input                 Path to the source .mmd file (required).
-      output                Path for the output file (required).
-      format                "svg" (default), "png", "html", or a looping
-                            video: "gif", "webp", "mp4", "webm".
-      scale                 Raster formats only: pixel multiplier (default:
-                            2.0 for png, 1.0 for a video).
-      raster_width          Raster formats only: output width in pixels;
-                            overrides scale.
-      fps                   Video only: frames per second (default: 12).
-      duration              Video only: loop length in seconds; defaults to
-                            the map's own animation cycle.
-      theme                 Theme name (nfcore, light, seqera, …).
-      mode                  "light" or "dark" — bakes a concrete palette.
-      debug                 Show debug overlay (default: false).
-      logo                  Logo image path (overrides %%metro logo:).
-      line_spread           "bundle", "centered", or "rails".
-      legend                Legend position keyword or coordinate.
-      from_nextflow         Convert from Nextflow DAG first (default: false).
-      title                 Pipeline title override.
-      responsive            Emit viewBox-only SVG (default: false).
-      embed_font            Inline Inter @font-face subset (default: false).
-      text_to_paths         Convert text to vector paths (default: false).
-      svg_class_prefix      Prefix for SVG presentation classes.
-      no_self_color_scheme  Omit color-scheme on root <svg> (default: false).
-      no_dark_mode_css      Suppress prefers-color-scheme block (default: false).
-      no_chrome_css         Omit chrome CSS custom-properties (default: false).
-      bare                  Omit title and outer padding (default: false).
-      validate              Run render-geometry guards (default: false).
-      inactive_lines        Line IDs to render inactive: a comma-separated
-                            string or JSON list.  Omit the key to use the map's
-                            own inactive-by-directive lines; give [] to force
-                            every line active.
-      layout_options        Object of layout overrides, e.g.
-                            {"manifest": false, "x_spacing": 60}.
-
-    All maps are rendered within the same Python process, amortising
-    interpreter and import startup across the whole corpus.  Output
-    directories are created as needed.  On partial failure, successful
-    outputs are kept and a non-zero exit is returned.
+    Output directories are created as needed. On partial failure the
+    successful outputs are kept and the exit code is non-zero.
     """
     import json
 
@@ -1601,7 +1465,7 @@ def render_many(manifest_file: Path) -> None:
     "--title",
     type=str,
     default=None,
-    help="Pipeline title for the converted output",
+    help="Pipeline title for the converted output.",
 )
 def convert(
     input_file: Path,
@@ -1610,9 +1474,8 @@ def convert(
 ) -> None:
     """Convert a Nextflow -with-dag mermaid file to nf-metro .mmd format.
 
-    Takes a .mmd file produced by `nextflow -with-dag file.mmd` and converts
-    it to nf-metro format. The output can then be rendered with `nf-metro render`
-    or hand-tuned before rendering.
+    Takes a .mmd file produced by `nextflow -with-dag file.mmd`. The output
+    can be rendered as-is or hand-tuned first.
     """
     from nf_metro.convert import (
         FeedbackEdgesDroppedWarning,
@@ -1661,22 +1524,18 @@ def convert(
 @click.option(
     "--with-layout",
     is_flag=True,
-    help="Also run the layout engine with its full invariant suite, reporting "
-    "any layout failure as an error instead of a traceback.",
+    help="Also run the layout engine and its invariant suite.",
 )
 @click.option(
     "--strict",
     is_flag=True,
-    help="Treat warnings (e.g. a non-LR primary direction) as errors.",
+    help="Treat warnings as errors.",
 )
 def validate(input_file: Path, with_layout: bool, strict: bool) -> None:
     """Validate a Mermaid metro map definition.
 
-    The bare command runs graph-semantic checks: every edge references a
-    defined line, every section points at stations that exist, and the graph
-    is acyclic.  ``--with-layout`` additionally runs the layout engine with
-    its full invariant suite, reporting a layout failure as a clean error.
-    ``--strict`` escalates warnings to a non-zero exit.
+    Checks that every edge references a defined line, every section points
+    at stations that exist, and the graph is acyclic.
     """
     text = input_file.read_text()
 
@@ -1734,15 +1593,13 @@ def validate(input_file: Path, with_layout: bool, strict: bool) -> None:
 @click.option(
     "--verbose",
     is_flag=True,
-    help="Add the section dependency graph, per-line routes, inferred "
-    "auto-layout defaults, and synthetic ports/junctions to the text output.",
+    help="Add routes, inferred defaults, and synthetic elements.",
 )
 def info(input_file: Path, as_json: bool, verbose: bool) -> None:
     """Show information about a Mermaid metro map definition.
 
-    The default output is a stable human summary. ``--verbose`` adds the
-    richer introspection (what nf-metro derived and inferred); ``--json``
-    emits the complete structure for scripting.
+    The default output is a human summary; ``--json`` emits the complete
+    structure for scripting.
     """
     text = input_file.read_text()
     graph, messages = _parse_reporting_warnings(input_file, text)
@@ -1786,15 +1643,9 @@ def explain(
 ) -> None:
     """Explain WHY nf-metro made each layout decision.
 
-    Surfaces the rule that fired for each inferred decision (section direction,
-    port sides, fold/row layout) and each synthetic element the engine inserted
-    (fan-out junctions, bypass-V stations).
-
-    Pairs with ``nf-metro info``, which shows WHAT was built; this command
-    shows WHY each non-trivial choice was made.
-
-    Use ``--section SECTION_ID`` or ``--station STATION_ID`` to focus the
-    output on decisions involving a specific element.
+    Reports the rule behind each inferred decision (section direction, port
+    sides, fold and row layout) and each element the engine inserted.
+    ``nf-metro info`` shows what was built; this shows why.
     """
     text = input_file.read_text()
     graph, messages = _parse_reporting_warnings(input_file, text)
@@ -1822,27 +1673,25 @@ def explain(
 @click.option(
     "--host",
     default="127.0.0.1",
-    help="Interface to bind. Default 127.0.0.1 (local only); "
-    "use 0.0.0.0 to accept connections from other hosts.",
+    help="Interface to bind. Use 0.0.0.0 to accept remote connections.",
 )
 @click.option(
     "--theme",
     type=click.Choice(sorted(STYLE_NAMES)),
     default=None,
-    help="Visual theme (default: from the %%metro style: directive, else nfcore). "
-    "Applies to a .mmd input; an SVG input is served as drawn.",
+    help="Visual theme for a .mmd input (default: from %%metro style:).",
 )
 @click.option(
     "--overlay",
     type=click.Choice(OVERLAY_STYLES),
     default=DEFAULT_OVERLAY,
     show_default=True,
-    help="Status-overlay style shown until a viewer picks another in the page.",
+    help="Status-overlay style.",
 )
 @click.option(
     "--token",
     default=None,
-    help="If set, /events POSTs must supply ?token=... or an X-Metro-Token header.",
+    help="Require this token on /events POSTs.",
 )
 @click.option(
     "--open", "open_browser", is_flag=True, help="Open the live page in a browser."
@@ -1850,15 +1699,13 @@ def explain(
 @click.option(
     "--shutdown-after-complete",
     is_flag=True,
-    help="Stop the server shortly after the run's completed/error event "
-    "(or after the launched command exits).",
+    help="Stop the server once the run finishes.",
 )
 @click.option(
     "--shutdown-grace",
     type=float,
     default=10.0,
-    help="Seconds to keep the map up after the run finishes "
-    "(with --shutdown-after-complete).",
+    help="Seconds to keep the map up after the run finishes.",
 )
 @click.argument("launch_cmd", nargs=-1, type=click.UNPROCESSED)
 def serve(
@@ -1875,20 +1722,16 @@ def serve(
 ) -> None:
     """Serve a live-progress view of a metro map.
 
-    Renders the map once and serves it at http://HOST:PORT/. Point a Nextflow
-    run's weblog at the events endpoint to light up stations as tasks run:
+    Renders the map once and serves it at http://HOST:PORT/. Point a
+    Nextflow run's weblog at the events endpoint:
 
         nextflow run ... -with-weblog http://HOST:PORT/events
 
-    Or launch the run in one step (the weblog is wired up automatically) and
-    have the server open a browser and stop itself when the run finishes:
+    Or pass the run after `--` to have the weblog configured for you:
 
-        nf-metro serve map.mmd --open --shutdown-after-complete -- \\
-            nextflow run my/pipeline -profile docker
+        nf-metro serve map.mmd --open -- nextflow run my/pipeline
 
-    Stations are tied to processes with `%%metro process:` directives in the
-    map; only mapped stations change state. Use `nf-metro check-mapping` to
-    verify the mapping covers the pipeline.
+    Only stations carrying a `%%metro process:` directive change state.
     """
     from nf_metro.live.server import MapModel, run_lifecycle, serve_model
     from nf_metro.live.server import serve as serve_map
@@ -1961,8 +1804,7 @@ def serve(
 @click.option(
     "--host",
     default="127.0.0.1",
-    help="Interface to bind. Default 127.0.0.1 (local only); "
-    "use 0.0.0.0 to accept connections from other hosts.",
+    help="Interface to bind. Use 0.0.0.0 to accept remote connections.",
 )
 @click.option(
     "--theme",
@@ -1981,24 +1823,19 @@ def serve(
 @click.option(
     "--token",
     default=None,
-    help="If set, POSTs to /maps and /r/*/events must supply ?token=... "
-    "or an X-Metro-Token header.",
+    help="Require this token on POSTs to /maps and /r/*/events.",
 )
 def serve_multi_cmd(
     port: int, host: str, theme: str, overlay: str, token: str | None
 ) -> None:
     """Run a persistent live server many pipelines can report into.
 
-    Unlike `serve` (one map), this starts with no map. A pipeline registers its
-    map by POSTing the .mmd to /maps and then sends weblog events to the run's
-    /r/<id>/events endpoint:
+    Starts with no map. A pipeline registers one by POSTing the .mmd to
+    /maps, then sends weblog events to the run's /r/<id>/events endpoint:
 
         curl -s --data-binary @map.mmd "http://HOST:PORT/maps?name=myrun"
-        # -> {"id": "...", "view": "/r/<id>/", "events": "/r/<id>/events"}
 
-    The index at http://HOST:PORT/ lists every run with a live status. The
-    nf-metro Nextflow plugin's `metro.server` mode does the register-and-emit
-    automatically.
+    The index at http://HOST:PORT/ lists every run with a live status.
     """
     from nf_metro.live.server import serve_multi
 
@@ -2035,21 +1872,19 @@ def serve_multi_cmd(
     "--dag",
     type=click.Path(exists=True, path_type=Path),
     default=None,
-    help="Nextflow `-with-dag` mermaid file; process names are read from its "
-    "stadium nodes.",
+    help="Nextflow `-with-dag` mermaid file to read process names from.",
 )
 @click.option(
     "--processes",
     "processes_file",
     type=click.Path(exists=True, path_type=Path),
     default=None,
-    help="Newline-delimited process names (e.g. captured from a run). "
-    "Authoritative alternative to --dag.",
+    help="Newline-delimited process names.",
 )
 @click.option(
     "--ignore",
     multiple=True,
-    help="Regex for processes deliberately left unmapped (plumbing). Repeatable.",
+    help="Regex for processes deliberately left unmapped. Repeatable.",
 )
 def check_mapping_cmd(
     input_file: Path,
@@ -2059,10 +1894,9 @@ def check_mapping_cmd(
 ) -> None:
     """Check a map's `%%metro process:` mapping against the processes.
 
-    Reports processes the map can't show (drift) and station patterns that
-    match nothing (stale), exiting non-zero if any are found so CI can gate on
-    map fidelity. Supply the pipeline's processes via --dag (a `nextflow
-    -with-dag` export) or --processes (a newline-delimited list).
+    Reports processes the map cannot show and station patterns that match
+    nothing, exiting non-zero if either is found. Supply the pipeline's
+    processes with --dag or --processes.
     """
     from nf_metro.live.mapping import check_mapping, process_names_from_dag
 
@@ -2129,18 +1963,13 @@ def check_mapping_cmd(
     "--geometry",
     is_flag=True,
     default=False,
-    help=(
-        "Also run the artifact-only render-geometry guards on the drawn ink "
-        "(label strikes and non-consumer marker crossings), not just the "
-        "manifest schema. The offset-collapse check needs the engine's assigned "
-        "offsets and runs only via 'render --validate'."
-    ),
+    help="Also run the render-geometry guards on the drawn ink.",
 )
 def validate_svg_cmd(svg_file: Path, geometry: bool) -> None:
     """Validate an SVG's embedded manifest against the manifest JSON Schema.
 
-    With ``--geometry`` it additionally runs the artifact-only render-geometry
-    guards on the drawn ink and reports any defect.
+    With ``--geometry`` it also runs the render-geometry guards on the drawn
+    ink.
     """
     from nf_metro.render import manifest_schema, read_manifest
 
@@ -2193,9 +2022,8 @@ def validate_svg_cmd(svg_file: Path, geometry: bool) -> None:
 def embed_script_cmd(output: Path | None) -> None:
     """Output the nf-metro embed driver JS.
 
-    Prints the ``attachMetroMap()`` driver to stdout (or writes to ``-o``).
-    Load it on a host page alongside an nf-metro SVG to get the documented
-    interactive API.  See ``docs/embed.md`` for usage.
+    Prints the ``attachMetroMap()`` driver to stdout, or writes it to ``-o``.
+    Load it on a host page alongside an nf-metro SVG.
     """
     from nf_metro.render.driver import get_driver_js
 
