@@ -87,7 +87,7 @@ _SOURCE_ERRORS = (
 # FORCE_COLOR, PY_COLORS or GITHUB_ACTIONS, and never checks NO_COLOR itself.
 @click.rich_config(
     {
-        "theme": "quartz2",
+        "theme": "forest-nu",
         "force_terminal": False if "NO_COLOR" in os.environ else None,
         "options_table_column_types": ["required", "opt_long", "opt_short", "help"],
         "options_table_help_sections": [
