@@ -383,7 +383,7 @@ Parse warnings print as a `Warnings` panel on stderr rather than into the stdout
 
 `style:` reports the theme the map resolves to, using the same name `render --theme` accepts.
 
-<!-- RICH-CODEX {working_dir: ., head: 22} -->
+<!-- RICH-CODEX {working_dir: .} -->
 
 ![`nf-metro info examples/rnaseq_sections.mmd`](assets/img/nf-metro-info.svg)
 
