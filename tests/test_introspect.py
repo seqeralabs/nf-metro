@@ -105,8 +105,8 @@ def test_verbose_routes_keeps_both_lines_sharing_a_display_name() -> None:
         "  b -->|main2| c[C]\n"
     )
     verbose = format_info_text(build_info(graph), verbose=True)
-    assert '"Main Line (main1)":' in verbose
-    assert '"Main Line (main2)":' in verbose
+    assert "Main Line (main1):" in verbose
+    assert "Main Line (main2):" in verbose
 
 
 def test_verbose_routes_disambiguates_a_second_order_collision() -> None:
@@ -129,9 +129,10 @@ def test_verbose_routes_disambiguates_a_second_order_collision() -> None:
         "  c -->|other| d[D]\n"
     )
     verbose = format_info_text(build_info(graph), verbose=True)
-    assert '"Main (main1)":' in verbose
-    assert '"Main (main2)":' in verbose
-    assert '"Main (main1) #2":' in verbose
+    assert "Main (main1):" in verbose
+    assert "Main (main2):" in verbose
+    # "#2" needs quoting: a space before "#" opens a YAML comment.
+    assert "'Main (main1) #2':" in verbose
 
 
 @pytest.mark.parametrize("fixture", FIXTURES)
@@ -368,12 +369,11 @@ def test_yaml_key_round_trips_through_a_real_parser(text: str) -> None:
 
 @pytest.mark.parametrize("text", ["1__000", "07_", "0__0", "1___000", "10_"])
 def test_yaml_scalar_rejects_underscore_forms_float_would_accept(text: str) -> None:
-    """PyYAML's int/float resolvers accept underscore placements ``float()`` rejects.
+    """A digit run with underscores in unusual places is still a YAML int.
 
-    ``float("1__000")`` raises, but PyYAML's int resolver (``[0-9_]*``, no
-    adjacency rule) reads it as 1000, so a value using ``float()`` as a
-    stand-in for "would a real YAML parser treat this as a number" must still
-    quote it.
+    PyYAML's int resolver (``[0-9_]*``, no digit-adjacency rule) reads
+    ``"1__000"`` as 1000 even though Python's ``float()`` rejects that
+    literal, so a value like this must still come back quoted.
     """
     yaml = pytest.importorskip("yaml")
     from nf_metro.introspect import to_yaml
@@ -414,12 +414,12 @@ def test_to_yaml_handles_a_list_holding_an_empty_collection() -> None:
     ],
 )
 def test_yaml_scalar_preserves_astral_characters(text: str) -> None:
-    """An astral character (outside the BMP) must not become a lone surrogate.
+    """An astral character (outside the BMP), e.g. an emoji, must round-trip whole.
 
-    ``json.dumps`` with its default ``ensure_ascii=True`` splits an astral
-    character into a UTF-16 surrogate pair of ``\\uXXXX`` escapes; a JSON
-    parser recombines the pair, but PyYAML's double-quoted scalar parser
-    stores the two lone surrogates instead of the original character.
+    A naive ASCII-escaping encoder splits such a character into a UTF-16
+    surrogate pair of ``\\uXXXX`` escapes; some parsers recombine the pair,
+    but YAML's double-quoted scalar syntax does not, so it must be written
+    as the literal character instead.
     """
     yaml = pytest.importorskip("yaml")
     from nf_metro.introspect import to_yaml

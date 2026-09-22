@@ -48,6 +48,11 @@ dependencies = [
     # rich-click forces colour in GitHub Actions; see nf_metro.console.
     "rich>=13",
     "rich-click>=1.8",
+    # `info`/`render`'s YAML output is emitted with a real dumper (see
+    # nf_metro.introspect.to_yaml) rather than a hand-written quoter, so its
+    # correctness comes from PyYAML's own resolver rather than being
+    # re-derived and kept in sync by hand.
+    "pyyaml>=6",
 ]
 
 [project.urls]
@@ -68,10 +73,8 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.8",
     "types-networkx",
+    "types-PyYAML",
     "numpy<2.5",
-    # Only to prove `info` emits YAML a real parser accepts; nf-metro writes
-    # YAML with json.dumps scalars and needs no YAML library at runtime.
-    "pyyaml>=6",
     "nf-metro[validate]",
     # Pinned so the frozen PNG hash in tests/test_hash_seed_determinism.py has
     # one rasteriser build to lock against; runtime accepts any >=0.5.

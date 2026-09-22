@@ -52,14 +52,14 @@ def test_path_containing_spaces_is_preserved_whole():
 
 
 def test_decodes_unicode_escape_in_path():
-    """A non-ASCII path character, JSON-escaped by ``json.dumps``, decodes back."""
+    """A non-ASCII path character, YAML-escaped, decodes back."""
     result = _run('outputs:\n  - "assets/m\\u00e9tro_map.svg"\n')
     assert result.returncode == 0
     assert result.stdout.splitlines() == ["assets/métro_map.svg"]
 
 
 def test_decodes_embedded_quote_and_backslash_in_path():
-    """A literal quote or backslash in a path, JSON-escaped, decodes back."""
+    """A literal quote or backslash in a path, YAML-escaped, decodes back."""
     result = _run('outputs:\n  - "assets/weird\\"na\\\\me.svg"\n')
     assert result.returncode == 0
     assert result.stdout.splitlines() == ['assets/weird"na\\me.svg']
@@ -83,6 +83,15 @@ def test_errors_on_completely_unexpected_input():
     result = _run("not yaml at all\njust some text\n")
     assert result.returncode == 1
     assert result.stdout == ""
+
+
+def test_errors_on_malformed_yaml_rather_than_crashing():
+    """Invalid YAML syntax is a clean failure, not an unhandled traceback."""
+    result = _run(":\n  bad: [unterminated\n")
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert "no output paths" in result.stderr
+    assert "Traceback" not in result.stderr
 
 
 def test_ignores_the_version_banner_line():

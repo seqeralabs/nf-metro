@@ -23,10 +23,11 @@ resolution internally; no full layout pass is required.
 from __future__ import annotations
 
 import json
-import re
 from collections import Counter
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Literal
+
+import yaml
 
 from nf_metro.parser.provenance import ConnectorEndpointRole, EffectiveDecision
 from nf_metro.parser.route_topology import build_route_topology_query
@@ -294,147 +295,41 @@ def _format_inferred(inferred: bool | None) -> str:
     return "inferred" if inferred else "authored"
 
 
-#: PyYAML's own implicit-typing resolvers (``yaml.resolver.Resolver``),
-#: reproduced verbatim rather than approximated with Python's ``float()``:
-#: the two disagree on details ``float()`` is more permissive about, such as
-#: where an underscore may sit in a run of digits (``1__000`` is a YAML int,
-#: 1000, but not a valid Python float literal).
-_YAML_BOOL = re.compile(
-    r"yes|Yes|YES|no|No|NO|true|True|TRUE|false|False|FALSE|on|On|ON|off|Off|OFF"
-)
-_YAML_NULL = re.compile(r"~|null|Null|NULL|")
-_YAML_INT = re.compile(
-    r"[-+]?0b[0-1_]+"
-    r"|[-+]?0[0-7_]+"
-    r"|[-+]?(?:0|[1-9][0-9_]*)"
-    r"|[-+]?0x[0-9a-fA-F_]+"
-    r"|[-+]?[1-9][0-9_]*(?::[0-5]?[0-9])+"
-)
-_YAML_FLOAT = re.compile(
-    r"[-+]?(?:[0-9][0-9_]*)\.[0-9_]*(?:[eE][-+][0-9]+)?"
-    r"|\.[0-9][0-9_]*(?:[eE][-+][0-9]+)?"
-    r"|[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*"
-    r"|[-+]?\.(?:inf|Inf|INF)"
-    r"|\.(?:nan|NaN|NAN)"
-)
-_YAML_TIMESTAMP = re.compile(
-    r"[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]"
-    r"|[0-9][0-9][0-9][0-9]-[0-9][0-9]?-[0-9][0-9]?"
-    r"(?:[Tt]|[ \t]+)[0-9][0-9]?"
-    r":[0-9][0-9]:[0-9][0-9](?:\.[0-9]*)?"
-    r"(?:[ \t]*(?:Z|[-+][0-9][0-9]?(?::[0-9][0-9])?))?"
-)
-#: The bare ``value`` and ``merge`` tags: neither starts with an indicator
-#: character already blocked below, and neither is a bool/null/int/float/
-#: timestamp, so they need their own entry.
-_YAML_VALUE_OR_MERGE = re.compile(r"=|<<")
-_YAML_IMPLICIT_TYPES = (
-    _YAML_BOOL,
-    _YAML_NULL,
-    _YAML_INT,
-    _YAML_FLOAT,
-    _YAML_TIMESTAMP,
-    _YAML_VALUE_OR_MERGE,
-)
+class _BlockDumper(yaml.SafeDumper):
+    """A block-style dumper whose sequences are indented under their key."""
+
+    def increase_indent(self, flow: bool = False, indentless: bool = False) -> None:
+        super().increase_indent(flow, False)
 
 
-#: DEL, the C1 control range, and the Unicode line/paragraph separators:
-#: YAML treats a raw occurrence of any of these as a literal line break even
-#: inside a quoted scalar (some, like NEL U+0085, are instead silently folded
-#: to a space), which can corrupt or desynchronise the surrounding document.
-#: ``json.dumps`` only escapes plain ASCII control characters (below 0x20).
-#: Built from ``chr()`` calls, not literal characters, so the source file
-#: stays plain ASCII rather than embedding an invisible separator.
-_YAML_UNSAFE_CHARS = frozenset(chr(c) for c in range(0x7F, 0xA0)) | {
-    chr(0x2028),
-    chr(0x2029),
-}
-_YAML_UNSAFE_QUOTED = re.compile("[" + "".join(_YAML_UNSAFE_CHARS) + "]")
+def _represent_str(dumper: "_BlockDumper", data: str) -> yaml.Node:
+    """Force double-quoted style for a string containing NEL (U+0085).
 
-
-def _is_plain_scalar(text: str) -> bool:
-    """Whether *text* can be written unquoted and read back unchanged.
-
-    Conservative on purpose: anything a parser might resolve to a number, a
-    date, a boolean or null, and anything opening with an indicator
-    character, is quoted instead. A colon disqualifies outright - it
-    separates a key in a mapping, and ``12:30`` is a number in YAML 1.1.
+    PyYAML's single-quoted style folds NEL as a line break with no way to
+    tell it apart from an intentional one, so it comes back as a space.
     """
-    if not text or text != text.strip():
-        return False
-    if text[0] in "-?:,[]{}#&*!|>'\"%@`" or ":" in text or "#" in text:
-        return False
-    if any(ord(char) < 0x20 for char in text) or any(
-        char in _YAML_UNSAFE_CHARS for char in text
-    ):
-        return False
-    return not any(pattern.fullmatch(text) for pattern in _YAML_IMPLICIT_TYPES)
+    style = '"' if "\x85" in data else None
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data, style=style)
 
 
-def _yaml_quote(text: str) -> str:
-    """JSON-quote *text* for use as a YAML scalar.
-
-    ``ensure_ascii=False`` keeps an astral character (e.g. an emoji) as
-    itself rather than a UTF-16 surrogate pair, which JSON parsers recombine
-    but YAML's double-quoted scalar does not. The bytes JSON leaves raw that
-    YAML still rejects are escaped afterwards.
-    """
-    quoted = json.dumps(text, ensure_ascii=False)
-    return _YAML_UNSAFE_QUOTED.sub(lambda m: f"\\u{ord(m.group()):04x}", quoted)
+_BlockDumper.add_representer(str, _represent_str)
 
 
-def _yaml_scalar(value: object) -> str:
-    """One YAML scalar, quoted only where a bare word would not survive."""
-    if value is None:
-        return "null"
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, (int, float)):
-        return str(value)
-    text = str(value)
-    return text if _is_plain_scalar(text) else _yaml_quote(text)
-
-
-#: A key needing no quotes: no colon, no leading indicator character.
-_PLAIN_KEY = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.\-/ ]*$")
-
-
-def _yaml_key(key: object) -> str:
-    """*key* as written, quoted when a bare word would not parse back."""
-    text = str(key)
-    plain = _PLAIN_KEY.fullmatch(text) and _is_plain_scalar(text)
-    return text if plain else _yaml_quote(text)
-
-
-def to_yaml(value: object, indent: int = 0) -> list[str]:
-    """Render *value* as block-style YAML lines."""
-    pad = "  " * indent
-    lines: list[str] = []
-    if isinstance(value, dict):
-        for key, item in value.items():
-            name = _yaml_key(key)
-            if isinstance(item, (dict, list)) and item:
-                lines.append(f"{pad}{name}:")
-                lines.extend(to_yaml(item, indent + 1))
-            elif isinstance(item, dict):
-                lines.append(f"{pad}{name}: {{}}")
-            elif isinstance(item, list):
-                lines.append(f"{pad}{name}: []")
-            else:
-                lines.append(f"{pad}{name}: {_yaml_scalar(item)}")
-    elif isinstance(value, list):
-        for item in value:
-            if isinstance(item, (dict, list)) and item:
-                nested = to_yaml(item, indent + 1)
-                lines.append(f"{pad}- {nested[0].lstrip()}")
-                lines.extend(nested[1:])
-            elif isinstance(item, dict):
-                lines.append(f"{pad}- {{}}")
-            elif isinstance(item, list):
-                lines.append(f"{pad}- []")
-            else:
-                lines.append(f"{pad}- {_yaml_scalar(item)}")
-    return lines
+def to_yaml(value: object) -> list[str]:
+    """Render *value* as block-style YAML lines, via a real YAML emitter."""
+    text = yaml.dump(
+        value,
+        Dumper=_BlockDumper,
+        default_flow_style=False,
+        sort_keys=False,
+        allow_unicode=True,
+        width=10**9,
+    )
+    # Not str.splitlines(): it also splits on U+2028/U+2029, wrongly breaking
+    # an occurrence embedded in a scalar's own quoted content.
+    if text.endswith("\n"):
+        text = text[:-1]
+    return text.split("\n")
 
 
 def _info_summary(info: dict[str, Any]) -> dict[str, Any]:
