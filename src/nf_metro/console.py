@@ -113,16 +113,20 @@ def echo_yaml(text: str) -> None:
     Piped stdout is a machine-readable contract - the GitHub Action parses
     these lines - so a pipe gets the text bare. Rich's own is_terminal will
     not do: ``FORCE_COLOR`` turns it on through a pipe, and an escape code
-    inside a path breaks that parse.
+    inside a path breaks that parse. ``RICH_CODEX`` is the one exception:
+    rich-codex sets it while capturing the docs screenshots, which go through
+    a pipe but have to show what a terminal shows.
     """
-    if not sys.stdout.isatty():
+    if not (sys.stdout.isatty() or os.environ.get("RICH_CODEX")):
         print(text)
         return
     body = _YamlHighlighter()(Text(text.rstrip()))
     # The matched hex doubles as the style, so each colour prints as itself.
     for match in re.finditer(r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})\b", text):
         body.stylize(match.group(), match.start(), match.end())
-    _RichConsole(width=_width(), theme=_THEME).print(body)
+    # force_terminal for the RICH_CODEX case, where stdout is a pipe. It does
+    # not override NO_COLOR, which Rich still honours.
+    _RichConsole(width=_width(), theme=_THEME, force_terminal=True).print(body)
 
 
 def panel(body: str, *, title: str, style: str = "yellow") -> Panel:

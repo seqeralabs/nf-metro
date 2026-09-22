@@ -2014,6 +2014,34 @@ def test_render_stdout_stays_plain_through_a_pipe(tmp_path):
     assert f"  - {out}" in result.stdout
 
 
+def test_render_stdout_is_highlighted_under_rich_codex(tmp_path):
+    """rich-codex captures the docs screenshots through a pipe.
+
+    It sets RICH_CODEX while doing so, which is the one signal that overrides
+    the plain-through-a-pipe rule, so the screenshot shows the colours a
+    terminal would.
+    """
+    out = tmp_path / "map.svg"
+    env = {**os.environ, "RICH_CODEX": "1"}
+    env.pop("NO_COLOR", None)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "nf_metro",
+            "render",
+            str(_simple_map(tmp_path)),
+            "-o",
+            str(out),
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
+    )
+    assert "\x1b[" in result.stdout
+
+
 @pytest.mark.parametrize("args", [[], ["--verbose"]])
 def test_info_stdout_is_valid_yaml(args):
     """`info` output parses as YAML, in both its summary and verbose forms.

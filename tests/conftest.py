@@ -20,7 +20,7 @@ os.environ.setdefault("NO_COLOR", "1")
 os.environ.setdefault("TERMINAL_WIDTH", "400")
 # NO_COLOR alone is not enough: rich-click forces a terminal, keeping bold ANSI
 # and hard-wrapped panels, whenever it sees one of these.
-for _forces_colour in ("GITHUB_ACTIONS", "FORCE_COLOR", "PY_COLORS"):
+for _forces_colour in ("GITHUB_ACTIONS", "FORCE_COLOR", "PY_COLORS", "RICH_CODEX"):
     os.environ.pop(_forces_colour, None)
 
 # --- Graph text constants ---
