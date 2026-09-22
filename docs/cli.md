@@ -49,15 +49,21 @@ A rejected input, and any other failure, surfaces as a plain error message rathe
 Set `NF_METRO_DEBUG=1` to re-raise the original exception instead.
 An empty file, or one whose `graph` block holds no stations, is rejected by name rather than drawn.
 
-On success, `render` prints a `nf-metro: v<version>` banner and the files written to stdout as one YAML document.
+On success, `render` prints the version, the source it read, and the files written to stdout as one YAML document.
 Stdout stays empty on any failure, so a caller can parse it without also checking the exit code; human-readable render summaries and any warnings go to stderr.
+The YAML is syntax-highlighted on a terminal and plain through a pipe, so a consumer never sees escape codes.
 
 ```yaml frame="terminal"
-nf-metro: v2.1.0
+version: v2.1.0
+inputs:
+  - assets/metro_map.mmd
 outputs:
-  - "assets/metro_map.svg"
-  - "assets/metro_map.png"
+  - assets/metro_map.svg
+  - assets/metro_map.png
 ```
+
+`inputs` is always a list, so a caller never has to branch on whether one map or several were rendered.
+A path is quoted only where a bare word would not read back as the same string.
 
 Most of the options in this section have a `%%metro` directive twin.
 An explicit flag overrides the directive.
@@ -194,8 +200,8 @@ They do not change the drawn map.
 
 A map that parses with complaints, such as an unknown `%%metro` directive or a non-LR primary direction, is still written.
 So is a layout that widens a gap to fit its routing.
-Each complaint appears as a bullet in a `Warnings:` block on stderr.
-A geometry guard that was downgraded rather than enforced gets its own block, because those name geometry that was drawn anyway and may be defective.
+Each complaint appears as a bullet in a yellow `Warnings` panel on stderr.
+A geometry guard that was downgraded rather than enforced gets its own `Guard downgrades` panel, because those name geometry that was drawn anyway and may be defective.
 Read them differently from a warning about something ignored or adjusted.
 
 ### Embedding options
@@ -365,7 +371,7 @@ A map with no stations is reported as a warning here, because `render` refuses t
 ## `nf-metro info`
 
 Show information about a parsed map: its sections, lines, stations, and edges.
-The default output is a stable human-readable summary.
+The default output is a stable YAML summary, syntax-highlighted on a terminal and plain through a pipe.
 
 ```bash frame="terminal"
 nf-metro info [OPTIONS] INPUT_FILE
@@ -376,10 +382,10 @@ nf-metro info [OPTIONS] INPUT_FILE
 | `--json`    | off     | Emit the full introspection as JSON, for scripting                                                                                     |
 | `--verbose` | off     | Add the section dependency graph, per-line routes, inferred auto-layout defaults, and synthetic ports and junctions to the text output |
 
-Parse warnings print as a `Warnings:` block on stderr rather than into the stdout summary.
+Parse warnings print as a `Warnings` panel on stderr rather than into the stdout summary.
 `--verbose` and `--json` carry them in the report itself instead.
 
-`Style:` reports the theme the map resolves to, using the same name `render --theme` accepts.
+`style:` reports the theme the map resolves to, using the same name `render --theme` accepts.
 
 ## `nf-metro explain`
 

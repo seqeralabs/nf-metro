@@ -9,10 +9,14 @@ rich-click's own detection.
 from __future__ import annotations
 
 import os
+import re
+import sys
 from typing import Any
 
 from rich.console import Console as _RichConsole
+from rich.panel import Panel
 from rich.progress import Progress, ProgressColumn, Task, TextColumn
+from rich.syntax import Syntax
 from rich.text import Text
 
 # In GitHub Actions, force color for the whole Rich stack (rich-click's help and
@@ -54,10 +58,90 @@ class Console(_RichConsole):
         super().print(*objects, **kwargs)
 
 
+def _width() -> int | None:
+    """The width messages wrap at, or ``None`` to let Rich decide.
+
+    ``TERMINAL_WIDTH`` is rich-click's own override, read here too so a
+    panel and the help it sits beside wrap at the same column.
+    """
+    try:
+        return int(os.environ["TERMINAL_WIDTH"])
+    except (KeyError, ValueError):
+        return None
+
+
 #: Stderr console for all human output. stdout stays machine-readable.
 #: highlight=False so plain text (paths, "file(s)") is not auto-recolored; all
 #: styling is explicit.
-console = Console(stderr=True, force_terminal=force_color(), highlight=False)
+console = Console(
+    stderr=True, force_terminal=force_color(), highlight=False, width=_width()
+)
+
+
+def print_banner() -> None:
+    """Print the banner to stderr, ahead of any of the command's own output.
+
+    The rails are drawn to fit the name and version they frame. Assembled
+    rather than written as markup: a backslash escapes the tag that follows
+    it, which would eat the carriage's own sides.
+    """
+    from nf_metro import __version__
+
+    rail = "green"
+    name, version = "nf-metro", f"v{__version__}"
+    span = len(name) + len(version) + 7
+    console.print(
+        Text.assemble(
+            "\n○",
+            ("_" * span, rail),
+            "\n  ",
+            ("\\", rail),
+            f"  {name} ",
+            (version, "dim"),
+            "  ",
+            ("\\", rail),
+            "\n   ",
+            ("‾" * (span + 1), rail),
+            "○\n",
+        )
+    )
+
+
+def echo_yaml(text: str) -> None:
+    """Write *text* to stdout, syntax-highlighted only on a real terminal.
+
+    Piped stdout is a machine-readable contract - the GitHub Action parses
+    these lines - so highlighting is gated on an interactive terminal and
+    never on the CI colour forcing that :func:`force_color` applies to
+    stderr, which would put escape codes inside a quoted path.
+    """
+    # Deliberately sys.stdout.isatty() rather than Rich's is_terminal, which
+    # FORCE_COLOR turns on: the GitHub Action runs with colour forced and
+    # reads this through a pipe.
+    if "NO_COLOR" in os.environ or not sys.stdout.isatty():
+        print(text)
+        return
+    body = Syntax(text, "yaml", background_color="default").highlight(text)
+    body.rstrip()
+    # A hex colour is worth more shown than named, so paint each one itself.
+    for match in re.finditer(r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})\b", text):
+        body.stylize(match.group(), match.start(), match.end())
+    _RichConsole(highlight=False, width=_width()).print(body)
+
+
+def panel(body: str, *, title: str, style: str = "yellow") -> Panel:
+    """A titled box around *body*, for a block of warnings or errors.
+
+    Markup in *body* is rendered; the caller escapes anything it interpolates.
+    """
+    return Panel(
+        Text.from_markup(body),
+        title=f"[bold {style}]{title}[/]",
+        title_align="left",
+        border_style=style,
+        padding=(0, 1),
+        expand=False,
+    )
 
 
 class DiamondBar(ProgressColumn):

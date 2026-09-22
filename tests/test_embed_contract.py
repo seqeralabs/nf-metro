@@ -154,7 +154,7 @@ def test_embed_script_matches_inlined_driver():
 
     runner = CliRunner()
     result = runner.invoke(cli, ["embed-script"])
-    assert result.output.strip() == get_driver_js().strip()
+    assert result.stdout.strip() == get_driver_js().strip()
 
 
 def test_svg_carries_station_data_attributes(rendered_svg):

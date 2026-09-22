@@ -69,6 +69,9 @@ dev = [
     "mypy>=1.8",
     "types-networkx",
     "numpy<2.5",
+    # Only to prove `info` emits YAML a real parser accepts; nf-metro writes
+    # YAML with json.dumps scalars and needs no YAML library at runtime.
+    "pyyaml>=6",
     "nf-metro[validate]",
     # Pinned so the frozen PNG hash in tests/test_hash_seed_determinism.py has
     # one rasteriser build to lock against; runtime accepts any >=0.5.

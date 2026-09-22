@@ -7,9 +7,12 @@ from a broken parse: a silent empty match would leave the GitHub Action's
 later ``git status --porcelain -- "${rendered[@]}"`` with no pathspec at
 all, diffing the whole repository instead of nothing.
 
-A path line is ``  - "<path>"``, JSON-quoted (see ``_print_render_result``
-in ``src/nf_metro/cli.py``). This decodes it exactly, including unicode
+A path line is ``  - <path>`` under the ``outputs:`` key (see
+``_print_render_result`` in ``src/nf_metro/cli.py``). The emitter quotes a
+scalar only where a bare word would not read back unchanged, so both forms
+are accepted; a quoted one is JSON-decoded exactly, including unicode
 escapes and embedded quotes/backslashes, using only the standard library.
+The ``inputs:`` list is skipped: those are sources, not results.
 """
 
 import json
@@ -18,17 +21,30 @@ import sys
 
 def main() -> int:
     found = False
-    for line in sys.stdin:
-        line = line.rstrip("\n")
-        if not line.startswith("  - "):
+    in_outputs = False
+    for raw in sys.stdin:
+        line = raw.rstrip("\n")
+        if not line.startswith((" ", "-")):
+            # A top-level key ends the previous block; only outputs' items
+            # are paths to report, never the inputs listed alongside them.
+            in_outputs = line.startswith("outputs:")
             continue
-        try:
-            value = json.loads(line[4:])
-        except json.JSONDecodeError:
+        if not in_outputs or not line.startswith("  - "):
             continue
-        if isinstance(value, str):
-            print(value)
-            found = True
+        item = line[4:]
+        if item.startswith('"'):
+            try:
+                value = json.loads(item)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(value, str):
+                continue
+        else:
+            # A plain YAML scalar: written unquoted where quoting would not
+            # change how it reads back.
+            value = item
+        print(value)
+        found = True
 
     if not found:
         print(

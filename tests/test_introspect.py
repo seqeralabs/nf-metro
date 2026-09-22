@@ -258,5 +258,5 @@ def test_default_text_is_a_prefix_of_verbose(fixture: str) -> None:
     plain = format_info_text(info, verbose=False)
     verbose = format_info_text(info, verbose=True)
     assert verbose.startswith(plain)
-    assert "Section dependency graph:" not in plain
-    assert "Section dependency graph:" in verbose
+    assert "section_dag:" not in plain
+    assert "section_dag:" in verbose

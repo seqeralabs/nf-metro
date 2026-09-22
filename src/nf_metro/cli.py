@@ -23,9 +23,20 @@ from nf_metro.api import (
     render_graph_result,
     resolve_theme,
 )
-from nf_metro.console import console, progress_bar
+from nf_metro.console import (
+    console,
+    echo_yaml,
+    panel,
+    print_banner,
+    progress_bar,
+)
 from nf_metro.explain import build_explain, format_explain_json, format_explain_text
-from nf_metro.introspect import build_info, format_info_json, format_info_text
+from nf_metro.introspect import (
+    build_info,
+    format_info_json,
+    format_info_text,
+    to_yaml,
+)
 from nf_metro.layout import (
     BackwardFlowError,
     FoldThresholdError,
@@ -110,6 +121,7 @@ _SOURCE_ERRORS = (
 @click.command_panel("Embed", commands=["embed-script"])
 def cli() -> None:
     """nf-metro: Generate metro-map-style SVG diagrams from Mermaid definitions."""
+    print_banner()
 
 
 _F = TypeVar("_F", bound=Callable[..., Any])
@@ -475,26 +487,29 @@ def layout_cli_options(f: _F) -> _F:
     return f
 
 
-def _echo_block(label: str, entries: Iterable[str]) -> None:
-    """Print a labelled, bulleted block to stderr.
+def _echo_block(label: str, entries: Iterable[str], *, style: str = "yellow") -> None:
+    """Print a titled panel of *entries* to stderr.
 
     An entry spanning several lines keeps its continuation lines indented
     under its own bullet, so a guard message carrying per-defect detail reads
     as one item.
     """
-    console.print(f"[bold yellow]{escape(label)}:[/]")
+    lines: list[str] = []
     for entry in entries:
         head, *rest = entry.split("\n")
-        console.print(f"  [yellow]-[/] {escape(head)}")
-        for line in rest:
-            console.print(f"    [dim]{escape(line.strip())}[/]")
+        lines.append(f"[{style}]-[/] {escape(head)}")
+        lines.extend(f"  [dim]{escape(line.strip())}[/]" for line in rest)
+    if not lines:
+        return
+    console.print(panel("\n".join(lines), title=label, style=style))
 
 
 def _echo_issues(
     label: str, issues: Iterable[ValidationIssue], path: Path | str
 ) -> None:
     """Print a block of validation issues, each formatted against *path*."""
-    _echo_block(label, (issue.format(path) for issue in issues))
+    style = "red" if "error" in label.lower() else "yellow"
+    _echo_block(label, (issue.format(path) for issue in issues), style=style)
 
 
 def _error_prefix(input_file: Path, quiet: bool) -> str:
@@ -555,15 +570,20 @@ def _report_render_warnings(
     render, whose files would otherwise be indistinguishable.
     """
     guard_warnings, other_warnings = split_guard_warnings(caught)
-    suffix = f" ({source})" if source is not None else ""
+    # A panel truncates a title too long for its width, so the source file
+    # and the guard preamble go in the body where they can wrap.
+    lead = [str(source)] if source is not None else []
     if other_warnings:
-        _echo_block(f"Warnings{suffix}", (str(w.message) for w in other_warnings))
+        _echo_block("Warnings", lead + [str(w.message) for w in other_warnings])
     if guard_warnings:
         flag = "--permissive: " if permissive else ""
+        preamble = (
+            f"{flag}{len(guard_warnings)} guard(s) downgraded to warnings; "
+            "the rendered geometry may be defective at these points"
+        )
         _echo_block(
-            f"{flag}{len(guard_warnings)} guard(s) downgraded to warnings{suffix}; "
-            "the rendered geometry may be defective at these points",
-            (str(w.message) for w in guard_warnings),
+            "Guard downgrades",
+            [*lead, preamble, *(str(w.message) for w in guard_warnings)],
         )
 
 
@@ -1077,7 +1097,7 @@ def render(
             )()
         else:
             _render_source(source, jobs, quiet=True, parsed=parsed, batch=True)
-        _print_render_result([job.path for job in jobs])
+        _print_render_result([source], [job.path for job in jobs])
         return
 
     # Several inputs (and therefore no -o, rejected above). Everything a file
@@ -1098,21 +1118,26 @@ def render(
         return _run
 
     _run_batch([(f.name, _file_job(f)) for f in input_files])
-    _print_render_result(written)
+    _print_render_result(list(input_files), written)
 
 
-def _print_render_result(paths: list[Path]) -> None:
-    """Print the render result (version banner + output paths) to stdout as YAML.
+def _print_render_result(sources: list[Path], paths: list[Path]) -> None:
+    """Print the render result (version, inputs, output paths) as YAML on stdout.
 
     JSON-quoted scalars are valid YAML, so no YAML dependency is needed. Called
     only after a successful render, so ``paths`` is never empty and a failed
     render's stdout stays empty: nothing about the result is printed until
     every job it covers has already succeeded.
+
+    ``inputs`` is always a list, even for the single map that most runs
+    render, so a consumer never has to branch on its shape.
     """
-    click.echo(f"nf-metro: v{__version__}")
-    click.echo("outputs:")
-    for path in paths:
-        click.echo(f"  - {json.dumps(str(path))}")
+    document: dict[str, object] = {
+        "version": f"v{__version__}",
+        "inputs": [str(source) for source in sources],
+        "outputs": [str(path) for path in paths],
+    }
+    echo_yaml("\n".join(to_yaml(document)))
 
 
 def _render_one(
@@ -1447,8 +1472,6 @@ def render_many(manifest_file: Path) -> None:
     Output directories are created as needed. On partial failure the
     successful outputs are kept and the exit code is non-zero.
     """
-    import json
-
     try:
         jobs: list[object] = json.loads(manifest_file.read_text())
     except (json.JSONDecodeError, OSError) as e:
@@ -1715,7 +1738,7 @@ def info(input_file: Path, as_json: bool, verbose: bool) -> None:
     if as_json:
         click.echo(format_info_json(report))
     else:
-        click.echo(format_info_text(report, verbose=verbose))
+        echo_yaml(format_info_text(report, verbose=verbose))
 
 
 @cli.command()
