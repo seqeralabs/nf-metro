@@ -29,6 +29,8 @@ Help, errors, warnings, and progress are rendered in colour with [rich-click](ht
 Other commands print their result to stdout as they always have.
 Piped stdout is never coloured.
 
+![`nf-metro --help`](assets/img/nf-metro-help.svg)
+
 ## `nf-metro render`
 
 Render a Mermaid metro map definition to SVG or interactive HTML.
@@ -52,14 +54,9 @@ An empty file, or one whose `graph` block holds no stations, is rejected by name
 On success, `render` prints the version, the source it read, and the files written to stdout as one YAML document.
 Stdout stays empty on any failure, so a caller can parse it without also checking the exit code.
 
-```yaml frame="terminal"
-version: v2.1.0
-inputs:
-  - assets/metro_map.mmd
-outputs:
-  - assets/metro_map.svg
-  - assets/metro_map.png
-```
+<!-- RICH-CODEX {working_dir: ., after_command: rm -f rnaseq.svg} -->
+
+![`nf-metro render examples/rnaseq_sections.mmd -o rnaseq.svg`](assets/img/nf-metro-render.svg)
 
 `inputs` is always a list, even when one map was rendered.
 A path is quoted only where a bare word would not read back as the same string.
@@ -385,6 +382,10 @@ Parse warnings print as a `Warnings` panel on stderr rather than into the stdout
 `--verbose` and `--json` carry them in the report itself instead.
 
 `style:` reports the theme the map resolves to, using the same name `render --theme` accepts.
+
+<!-- RICH-CODEX {working_dir: ., head: 22} -->
+
+![`nf-metro info examples/rnaseq_sections.mmd`](assets/img/nf-metro-info.svg)
 
 ## `nf-metro explain`
 

@@ -30,7 +30,7 @@ pytest tests/test_parser.py::test_parse_title
 ruff check src/ tests/
 ```
 
-Dependencies: click, drawsvg, networkx, pillow. Dev: pytest, ruff.
+Dependencies: av, click, drawsvg, lark, networkx, pillow, pyyaml, resvg-py, rich, rich-click. Dev: pytest, ruff.
 
 ## Documentation site
 
