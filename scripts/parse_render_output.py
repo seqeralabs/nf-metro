@@ -16,9 +16,11 @@ import yaml
 def main() -> int:
     try:
         document = yaml.safe_load(sys.stdin.read())
-    except yaml.YAMLError:
+    except (yaml.YAMLError, RecursionError):
         document = None
     outputs = document.get("outputs") if isinstance(document, dict) else None
+    if not isinstance(outputs, list):
+        outputs = None
     if not outputs:
         print(
             "::error::nf-metro reported no output paths; its stdout contract "

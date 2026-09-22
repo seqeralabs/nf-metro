@@ -94,6 +94,23 @@ def test_errors_on_malformed_yaml_rather_than_crashing():
     assert "Traceback" not in result.stderr
 
 
+def test_errors_on_deeply_nested_yaml_rather_than_crashing():
+    """A pathologically nested document is a clean failure, not a RecursionError."""
+    result = _run("a: " + "[" * 3000 + "1" + "]" * 3000)
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert "no output paths" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_errors_when_outputs_is_not_a_list():
+    """A malformed `outputs` (e.g. a bare scalar) must not iterate its characters."""
+    result = _run('outputs: "hello.svg"\n')
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert "no output paths" in result.stderr
+
+
 def test_ignores_the_version_banner_line():
     """The `version: v<version>` line is not itself an output path."""
     result = _run('version: v2.1.0\noutputs:\n  - "out.svg"\n')
