@@ -139,11 +139,10 @@ runs:
         render_out="$(nf-metro "${args[@]}")"
 
         # Parsed by scripts/parse_render_output.py (unit-tested in
-        # tests/test_parse_render_output.py), which errors out rather than
-        # silently returning no paths. `uv run --with pyyaml` gives it a real
-        # YAML parser without a separate install step, reusing the `uv`
-        # already set up above.
-        rendered_text="$(uv run --with pyyaml "$ACTION_PATH/scripts/parse_render_output.py" <<< "$render_out")"
+        # tests/test_parse_render_output.py). --no-project stops uv treating
+        # the consuming repo's own pyproject.toml, if it has one, as this
+        # run's project.
+        rendered_text="$(uv run --no-project --with pyyaml "$ACTION_PATH/scripts/parse_render_output.py" <<< "$render_out")"
         # A plain read loop rather than mapfile/readarray, which macOS
         # runners' default bash (3.2) doesn't have.
         rendered=()
