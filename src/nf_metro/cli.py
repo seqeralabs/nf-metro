@@ -524,7 +524,9 @@ def _echo_block(label: str, entries: Iterable[str], *, style: str = "yellow") ->
         lines.extend(f"  [dim]{escape(line.strip())}[/]" for line in rest)
     if not lines:
         return
-    console.print(panel("\n".join(lines), title=label, style=style))
+    # soft_wrap would crop the panel body at the terminal width rather than
+    # wrapping it, silently losing the end of a long warning.
+    console.print(panel("\n".join(lines), title=label, style=style), soft_wrap=False)
 
 
 def _echo_issues(
