@@ -61,22 +61,22 @@ def print_banner() -> None:
     """
     from nf_metro import __version__
 
-    rail = "green"
+    top, bottom = "#158668", "#2EC09C"
     name, version = "nf-metro", f"v{__version__}"
     span = len(name) + len(version) + 7
     console.print(
         Text.assemble(
-            "\n○",
-            ("_" * span, rail),
+            "○",
+            ("_" * span, top),
             "\n  ",
-            ("\\", rail),
+            ("\\", bottom),
             f"  {name} ",
             (version, "dim"),
             "  ",
-            ("\\", rail),
+            ("\\", top),
             "\n   ",
-            ("‾" * (span + 1), rail),
-            "○\n",
+            ("‾" * (span + 1), bottom),
+            "○",
         )
     )
 
