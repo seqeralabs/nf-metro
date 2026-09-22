@@ -13,7 +13,9 @@ from pathlib import Path
 from typing import Any, Literal, NamedTuple, NoReturn, TypeVar, cast, get_args
 
 import rich_click as click
+from rich.default_styles import DEFAULT_STYLES
 from rich.markup import escape
+from rich.style import Style
 
 from nf_metro import __version__
 from nf_metro.api import (
@@ -91,9 +93,14 @@ _SOURCE_ERRORS = (
     PhaseInvariantError,
 )
 
+# rich-click's config has no hook for this, so the style goes on Rich's own
+# defaults, which its help console inherits.
+DEFAULT_STYLES["code"] = Style(color="yellow")
+
 help_config = click.RichHelpConfiguration(
     # Future: switch for default-square - https://github.com/ewels/rich-click/pull/358
     theme="default-box",
+    text_markup="rich",
     style_options_panel_box="SQUARE",
     style_options_panel_border="#158668",
     style_commands_panel_box="SQUARE",
@@ -699,7 +706,7 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
     type=click.Path(path_type=Path),
     multiple=True,
     cls=_DescribedDefault,
-    default_text="<input>.<format>",
+    default_text="{input}.{format}",
     help="Output path. Repeat for several formats.",
 )
 @click.option(
@@ -725,7 +732,7 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
     type=_RASTER_WIDTH_TYPE,
     default=None,
     metavar="INTEGER",
-    help="Raster only: output width in px. Overrides --scale.",
+    help="Raster only: output width in px. Overrides [code]--scale[/].",
 )
 @click.option(
     "--fps",
@@ -815,7 +822,7 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
 @click.option(
     "--text-to-paths/--no-text-to-paths",
     default=False,
-    help='Convert text to vector paths. Needs pip install "nf-metro[font]".',
+    help='Convert text to vector paths. Needs [code]pip install "nf-metro\\[font]"[/].',
 )
 @click.option(
     "--svg-class-prefix",
@@ -827,19 +834,19 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
     "--no-self-color-scheme",
     is_flag=True,
     default=False,
-    help="Omit the color-scheme attribute on the root <svg>.",
+    help="Omit the [code]color-scheme[/] attribute on the root [code]<svg>[/].",
 )
 @click.option(
     "--no-dark-mode-css",
     is_flag=True,
     default=False,
-    help="Omit the prefers-color-scheme: dark <style> block.",
+    help="Omit the [code]prefers-color-scheme: dark[/] [code]<style>[/] block.",
 )
 @click.option(
     "--no-chrome-css",
     is_flag=True,
     default=False,
-    help="Omit the --nfm-* custom-property <style> block.",
+    help="Omit the [code]--nfm-*[/] custom-property [code]<style>[/] block.",
 )
 @click.option(
     "--bare/--no-bare",
@@ -862,7 +869,8 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
 @click.option(
     "--reject-output-outside-source/--no-reject-output-outside-source",
     default=False,
-    help="Reject a %%metro output path outside the .mmd's repository.",
+    help="Reject a [code]%%metro output[/] path outside the "
+    "[code].mmd[/]'s repository.",
 )
 @layout_cli_options
 def render(
@@ -899,12 +907,12 @@ def render(
     Several INPUT_FILEs render in one process. Every file is attempted, and
     the exit code is non-zero if any failed.
 
-    Output paths come from -o, repeatable for several formats, else from the
-    map's `%%metro output` directives, else <input>.<format>. A declared
-    path may carry its own overrides after a `|`.
+    Output paths come from [code]-o[/], repeatable for several formats, else from
+    the map's [code]%%metro output[/] directives, else [code]{input}.{format}[/]. A
+    declared path may carry its own overrides after a [code]|[/].
 
     The paths written are printed to stdout as YAML; summaries and warnings
-    go to stderr. Set NF_METRO_DEBUG=1 to raise on error instead of
+    go to stderr. Set [code]NF_METRO_DEBUG=1[/] to raise on error instead of
     reporting it.
     """
     if len(input_files) > 1 and outputs:
@@ -1473,9 +1481,9 @@ def _video_progress(frames: Iterable[bytes], count: int) -> Iterator[bytes]:
 def render_many(manifest_file: Path) -> None:
     """Render multiple metro maps from a JSON manifest in one process.
 
-    MANIFEST_FILE is a JSON array of jobs. Each job needs `input` and
-    `output`, plus any `nf-metro render` option as a JSON key, with
-    layout options nested under `layout_options`.
+    MANIFEST_FILE is a JSON array of jobs. Each job needs [code]input[/] and
+    [code]output[/], plus any [code]nf-metro render[/] option as a JSON key, with
+    layout options nested under [code]layout_options[/].
 
     Output directories are created as needed. On partial failure the
     successful outputs are kept and the exit code is non-zero.
@@ -1592,7 +1600,7 @@ def render_many(manifest_file: Path) -> None:
     default=None,
     cls=_DescribedDefault,
     default_text="stdout",
-    help="Output .mmd file path.",
+    help="Output [code].mmd[/] file path.",
 )
 @click.option(
     "--title",
@@ -1605,10 +1613,11 @@ def convert(
     output: Path | None,
     title: str | None,
 ) -> None:
-    """Convert a Nextflow -with-dag mermaid file to nf-metro .mmd format.
+    """Convert a Nextflow [code]-with-dag[/] mermaid file to nf-metro format.
 
-    Takes a .mmd file produced by `nextflow -with-dag file.mmd`. The output
-    can be rendered as-is or hand-tuned first.
+    Takes a [code].mmd[/] file produced by
+    [code]nextflow -with-dag file.mmd[/]. The output can be rendered as-is or
+    hand-tuned first.
     """
     from nf_metro.convert import (
         FeedbackEdgesDroppedWarning,
@@ -1731,7 +1740,7 @@ def validate(input_file: Path, with_layout: bool, strict: bool) -> None:
 def info(input_file: Path, as_json: bool, verbose: bool) -> None:
     """Show information about a Mermaid metro map definition.
 
-    The default output is a human summary; ``--json`` emits the complete
+    The default output is a human summary; [code]--json[/] emits the complete
     structure for scripting.
     """
     text = input_file.read_text()
@@ -1778,7 +1787,7 @@ def explain(
 
     Reports the rule behind each inferred decision (section direction, port
     sides, fold and row layout) and each element the engine inserted.
-    ``nf-metro info`` shows what was built; this shows why.
+    [code]nf-metro info[/] shows what was built; this shows why.
     """
     text = input_file.read_text()
     graph, messages = _parse_reporting_warnings(input_file, text)
@@ -1817,7 +1826,7 @@ def explain(
     default=None,
     cls=_DescribedDefault,
     default_text="from %%metro style, else nfcore",
-    help="Visual theme for a .mmd input.",
+    help="Visual theme for a [code].mmd[/] input.",
 )
 @click.option(
     "--overlay",
@@ -1829,7 +1838,7 @@ def explain(
 @click.option(
     "--token",
     default=None,
-    help="Require this token on /events POSTs.",
+    help="Require this token on [code]/events[/] POSTs.",
 )
 @click.option(
     "--open", "open_browser", is_flag=True, help="Open the live page in a browser."
@@ -1866,11 +1875,11 @@ def serve(
 
         nextflow run ... -with-weblog http://HOST:PORT/events
 
-    Or pass the run after `--` to have the weblog configured for you:
+    Or pass the run after [code]--[/] to have the weblog configured for you:
 
         nf-metro serve map.mmd --open -- nextflow run my/pipeline
 
-    Only stations carrying a `%%metro process` directive change state.
+    Only stations carrying a [code]%%metro process[/] directive change state.
     """
     from nf_metro.live.server import MapModel, run_lifecycle, serve_model
     from nf_metro.live.server import serve as serve_map
@@ -1962,15 +1971,16 @@ def serve(
 @click.option(
     "--token",
     default=None,
-    help="Require this token on POSTs to /maps and /r/*/events.",
+    help="Require this token on POSTs to [code]/maps[/] and [code]/r/*/events[/].",
 )
 def serve_multi_cmd(
     port: int, host: str, theme: str, overlay: str, token: str | None
 ) -> None:
     """Run a persistent live server many pipelines can report into.
 
-    Starts with no map. A pipeline registers one by POSTing the .mmd to
-    /maps, then sends weblog events to the run's /r/<id>/events endpoint:
+    Starts with no map. A pipeline registers one by POSTing the
+    [code].mmd[/] to [code]/maps[/], then sends weblog events to the run's
+    [code]/r/{id}/events[/] endpoint:
 
         curl -s --data-binary @map.mmd "http://HOST:PORT/maps?name=myrun"
 
@@ -2011,7 +2021,7 @@ def serve_multi_cmd(
     "--dag",
     type=click.Path(exists=True, path_type=Path),
     default=None,
-    help="Nextflow `-with-dag` mermaid file to read process names from.",
+    help="Nextflow [code]-with-dag[/] mermaid file to read process names from.",
 )
 @click.option(
     "--processes",
@@ -2031,11 +2041,11 @@ def check_mapping_cmd(
     processes_file: Path | None,
     ignore: tuple[str, ...],
 ) -> None:
-    """Check a map's `%%metro process` mapping against the processes.
+    """Check a map's [code]%%metro process[/] mapping against the processes.
 
     Reports processes the map cannot show and station patterns that match
     nothing, exiting non-zero if either is found. Supply the pipeline's
-    processes with --dag or --processes.
+    processes with [code]--dag[/] or [code]--processes[/].
     """
     from nf_metro.live.mapping import check_mapping, process_names_from_dag
 
@@ -2107,7 +2117,7 @@ def check_mapping_cmd(
 def validate_svg_cmd(svg_file: Path, geometry: bool) -> None:
     """Validate an SVG's embedded manifest against the manifest JSON Schema.
 
-    With ``--geometry`` it also runs the render-geometry guards on the drawn
+    With [code]--geometry[/] it also runs the render-geometry guards on the drawn
     ink.
     """
     from nf_metro.render import manifest_schema, read_manifest
@@ -2161,7 +2171,7 @@ def validate_svg_cmd(svg_file: Path, geometry: bool) -> None:
 def embed_script_cmd(output: Path | None) -> None:
     """Output the nf-metro embed driver JS.
 
-    Prints the ``attachMetroMap()`` driver to stdout, or writes it to ``-o``.
+    Prints the [code]attachMetroMap()[/] driver to stdout, or writes it to [code]-o[/].
     Load it on a host page alongside an nf-metro SVG.
     """
     from nf_metro.render.driver import get_driver_js
