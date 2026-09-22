@@ -260,3 +260,60 @@ def test_default_text_is_a_prefix_of_verbose(fixture: str) -> None:
     assert verbose.startswith(plain)
     assert "section_dag:" not in plain
     assert "section_dag:" in verbose
+
+
+# --- to_yaml scalar/key quoting ---
+
+#: Strings a naive quoting rule could get wrong: booleans, null, YAML 1.1's
+#: hex/octal/binary integers and dotted infinity/nan, dates, and sexagesimals.
+_ADVERSARIAL_SCALARS = [
+    "true",
+    "True",
+    "false",
+    "null",
+    "yes",
+    "no",
+    "on",
+    "off",
+    "0x10",
+    "0b101",
+    ".inf",
+    "-.inf",
+    ".nan",
+    "123",
+    "1_000",
+    "2025-01-02",
+    "1:30",
+    "a:b",
+    "#fragment",
+    " leading space",
+    "trailing space ",
+    "",
+]
+
+
+@pytest.mark.parametrize("text", _ADVERSARIAL_SCALARS)
+def test_yaml_scalar_round_trips_through_a_real_parser(text: str) -> None:
+    """A value that reads like a YAML type still round-trips as the string."""
+    yaml = pytest.importorskip("yaml")
+    from nf_metro.introspect import to_yaml
+
+    lines = to_yaml({"key": text})
+    assert yaml.safe_load("\n".join(lines)) == {"key": text}
+
+
+@pytest.mark.parametrize("text", _ADVERSARIAL_SCALARS)
+def test_yaml_key_round_trips_through_a_real_parser(text: str) -> None:
+    """A mapping key that reads like a YAML type still round-trips as the string.
+
+    Line and section display names become mapping keys in ``info --verbose``'s
+    ``routes:`` block, and are author-supplied, so a line named e.g. ``true``
+    or ``123`` must not change type when parsed back.
+    """
+    yaml = pytest.importorskip("yaml")
+    from nf_metro.introspect import to_yaml
+
+    if text == "":
+        pytest.skip("an empty key cannot appear as a line/section name")
+    lines = to_yaml({text: "value"})
+    assert yaml.safe_load("\n".join(lines)) == {text: "value"}

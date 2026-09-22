@@ -303,6 +303,17 @@ _YAML_RESERVED = frozenset(
 #: A date, which YAML 1.1 resolves to a date object rather than a string.
 _YAML_DATE = re.compile(r"\d{4}-\d{1,2}-\d{1,2}")
 
+#: Hex, octal and binary integer forms YAML 1.1 resolves that Python's
+#: ``float()`` does not reject, plus the dotted infinity/nan spellings -
+#: ``float()`` only recognises the undotted ``inf``/``nan`` (already caught
+#: below), not YAML's ``.inf``/``.nan``.
+_YAML_SPECIAL_NUMERIC = re.compile(
+    r"[-+]?0[xX][0-9a-fA-F_]+"
+    r"|[-+]?0[bB][01_]+"
+    r"|[-+]?\.(?:inf|Inf|INF)"
+    r"|[-+]?\.(?:nan|NaN|NAN)"
+)
+
 
 def _is_plain_scalar(text: str) -> bool:
     """Whether *text* can be written unquoted and read back unchanged.
@@ -318,7 +329,7 @@ def _is_plain_scalar(text: str) -> bool:
         return False
     if any(char in text for char in "\n\r\t"):
         return False
-    if _YAML_DATE.fullmatch(text):
+    if _YAML_DATE.fullmatch(text) or _YAML_SPECIAL_NUMERIC.fullmatch(text):
         return False
     try:
         float(text)
@@ -346,7 +357,8 @@ _PLAIN_KEY = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.\-/ ]*$")
 def _yaml_key(key: object) -> str:
     """*key* as written, quoted when a bare word would not parse back."""
     text = str(key)
-    return text if _PLAIN_KEY.fullmatch(text) else json.dumps(text)
+    plain = _PLAIN_KEY.fullmatch(text) and _is_plain_scalar(text)
+    return text if plain else json.dumps(text)
 
 
 def to_yaml(value: object, indent: int = 0) -> list[str]:

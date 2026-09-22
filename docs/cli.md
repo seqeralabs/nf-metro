@@ -25,7 +25,8 @@ Every command also takes `--help`.
 ## Terminal output
 
 Help, errors, warnings, and progress are rendered in colour with [rich-click](https://ewels.github.io/rich-click/), with warnings and errors grouped into yellow and red panels.
-Machine-readable results (`render`'s and `info`'s YAML) go to stdout; everything else goes to stderr.
+`render`'s and `info`'s YAML results go to stdout, with warnings, summaries, and progress on stderr, so a caller can parse either command's stdout without picking through human-readable text.
+Other commands print their result to stdout as they always have.
 Piped stdout is never coloured.
 
 ## `nf-metro render`

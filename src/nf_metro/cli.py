@@ -229,7 +229,7 @@ def _declared_outputs(
             reaches_git = not escapes and ".git" in target.relative_to(boundary).parts
             if escapes or reaches_git:
                 raise click.ClickException(
-                    f"{source}: %%metro output {p!r} resolves outside the "
+                    f"{source}: %%metro output: {p!r} resolves outside the "
                     f"{scope} (or into a .git/); declared paths must stay within "
                     f"{boundary} and out of .git/"
                 )
@@ -1406,7 +1406,7 @@ def _render_one_unsafe(
         if not graph.embed_manifest:
             raise click.ClickException(
                 "--validate reads the drawn SVG through its embedded manifest, "
-                "which this map turns off with %%metro manifest false."
+                "which this map turns off with %%metro manifest: false."
             )
         findings = validate_render(content, plan=rendered.plan)
         if findings:
