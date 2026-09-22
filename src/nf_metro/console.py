@@ -1,9 +1,7 @@
 """Shared Rich console and helpers for nf-metro's human-readable CLI output.
 
 Every human-facing line (progress, summaries, warnings, notes) goes to stderr
-through :data:`console`, leaving stdout for machine-readable results. Color is
-forced in CI (GitHub Actions) so piped logs keep their formatting, mirroring
-rich-click's own detection.
+through :data:`console`, leaving stdout for machine-readable results.
 """
 
 from __future__ import annotations
@@ -14,35 +12,12 @@ import sys
 from typing import Any
 
 from rich.console import Console as _RichConsole
+from rich.highlighter import ReprHighlighter
 from rich.panel import Panel
 from rich.progress import Progress, ProgressColumn, Task, TextColumn
 from rich.syntax import Syntax
 from rich.text import Text
-
-# In GitHub Actions, force color for the whole Rich stack (rich-click's help and
-# errors, and our own output) so captured logs keep their formatting. Rich and
-# rich-click both read FORCE_COLOR. NO_COLOR still wins.
-if "GITHUB_ACTIONS" in os.environ and "NO_COLOR" not in os.environ:
-    os.environ.setdefault("FORCE_COLOR", "1")
-
-
-def _truthy(value: str | None) -> bool:
-    return (value or "").strip().lower() not in ("", "0", "false", "no", "off")
-
-
-def force_color() -> bool | None:
-    """Whether to force ANSI color, matching rich-click's CI detection.
-
-    True in GitHub Actions (and when ``FORCE_COLOR``/``PY_COLORS`` are set) so
-    captured CI logs keep their color; ``None`` elsewhere for auto-detection.
-    ``NO_COLOR`` always wins.
-    """
-    if "NO_COLOR" in os.environ:
-        return None
-    for var in ("FORCE_COLOR", "PY_COLORS", "GITHUB_ACTIONS"):
-        if var in os.environ:
-            return _truthy(os.environ[var])
-    return None
+from rich.theme import Theme
 
 
 class Console(_RichConsole):
@@ -70,20 +45,19 @@ def _width() -> int | None:
         return None
 
 
-#: Stderr console for all human output. stdout stays machine-readable.
-#: highlight=False so plain text (paths, "file(s)") is not auto-recolored; all
-#: styling is explicit.
-console = Console(
-    stderr=True, force_terminal=force_color(), highlight=False, width=_width()
-)
+#: Rich reads the "N file(s)" plural idiom these messages use as a call to a
+#: function named file, and bolds the brackets. Nothing here prints a call, so
+#: both rules are turned off; paths, numbers and URLs still highlight.
+_THEME = Theme({"repr.call": "none", "repr.brace": "none"})
+
+console = Console(stderr=True, width=_width(), theme=_THEME)
 
 
 def print_banner() -> None:
     """Print the banner to stderr, ahead of any of the command's own output.
 
-    The rails are drawn to fit the name and version they frame. Assembled
-    rather than written as markup: a backslash escapes the tag that follows
-    it, which would eat the carriage's own sides.
+    Assembled rather than written as markup, where a backslash would escape
+    the tag after it and eat the carriage's own sides.
     """
     from nf_metro import __version__
 
@@ -111,31 +85,30 @@ def echo_yaml(text: str) -> None:
     """Write *text* to stdout, syntax-highlighted only on a real terminal.
 
     Piped stdout is a machine-readable contract - the GitHub Action parses
-    these lines - so highlighting is gated on an interactive terminal and
-    never on the CI colour forcing that :func:`force_color` applies to
-    stderr, which would put escape codes inside a quoted path.
+    these lines - so a pipe gets the text bare. Rich's own is_terminal will
+    not do: ``FORCE_COLOR`` turns it on through a pipe, and an escape code
+    inside a path breaks that parse.
     """
-    # Deliberately sys.stdout.isatty() rather than Rich's is_terminal, which
-    # FORCE_COLOR turns on: the GitHub Action runs with colour forced and
-    # reads this through a pipe.
-    if "NO_COLOR" in os.environ or not sys.stdout.isatty():
+    if not sys.stdout.isatty():
         print(text)
         return
     body = Syntax(text, "yaml", background_color="default").highlight(text)
     body.rstrip()
-    # A hex colour is worth more shown than named, so paint each one itself.
+    # The matched hex doubles as the style, so each colour prints as itself.
     for match in re.finditer(r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})\b", text):
         body.stylize(match.group(), match.start(), match.end())
-    _RichConsole(highlight=False, width=_width()).print(body)
+    _RichConsole(width=_width(), theme=_THEME).print(body)
 
 
 def panel(body: str, *, title: str, style: str = "yellow") -> Panel:
     """A titled box around *body*, for a block of warnings or errors.
 
     Markup in *body* is rendered; the caller escapes anything it interpolates.
+    Rich highlights a plain string it is handed but not a Text, so the paths
+    and numbers in a message are highlighted here to match every other line.
     """
     return Panel(
-        Text.from_markup(body),
+        ReprHighlighter()(Text.from_markup(body)),
         title=f"[bold {style}]{title}[/]",
         title_align="left",
         border_style=style,

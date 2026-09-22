@@ -1924,35 +1924,6 @@ def test_convert_summary_line_is_unchanged_for_an_acyclic_pipeline(tmp_path):
     assert "Converted 5 processes, 1 sections -> " in result.output
 
 
-def test_no_color_beats_ci_colour_forcing():
-    """`NO_COLOR` strips ANSI even in CI, where rich-click forces a terminal.
-
-    rich-click decides `FORCE_TERMINAL` from FORCE_COLOR/PY_COLORS/
-    GITHUB_ACTIONS alone, so the CLI has to apply NO_COLOR itself. Run the
-    real CLI in a subprocess: the setting is read once at import.
-    """
-    env = {**os.environ, "GITHUB_ACTIONS": "true", "NO_COLOR": "1"}
-    env.pop("FORCE_COLOR", None)
-    plain = subprocess.run(
-        [sys.executable, "-m", "nf_metro", "--help"],
-        capture_output=True,
-        text=True,
-        env=env,
-        check=True,
-    )
-    assert "\x1b[" not in plain.stdout
-
-    del env["NO_COLOR"]
-    coloured = subprocess.run(
-        [sys.executable, "-m", "nf_metro", "--help"],
-        capture_output=True,
-        text=True,
-        env=env,
-        check=True,
-    )
-    assert "\x1b[" in coloured.stdout
-
-
 @pytest.mark.parametrize("command", ["render", "serve"])
 def test_every_option_sits_in_a_help_panel(command):
     """Options are grouped into named panels, so a new one must join one.

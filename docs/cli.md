@@ -24,10 +24,9 @@ Every command also takes `--help`.
 
 ## Terminal output
 
-Help, errors, and progress are rendered in colour with [rich-click](https://ewels.github.io/rich-click/).
-Machine-readable results (such as `render`'s YAML) go to stdout; all human-readable logging, progress, and warnings go to stderr, so stdout stays pipe-safe.
-Colour follows the usual conventions: set `NO_COLOR` to disable it, `FORCE_COLOR` to force it, and nf-metro forces it automatically under GitHub Actions so CI logs keep their formatting.
-Restyle the help with any rich-click theme via `RICH_CLICK_THEME`.
+Help, errors, warnings, and progress are rendered in colour with [rich-click](https://ewels.github.io/rich-click/), with warnings and errors grouped into yellow and red panels.
+Machine-readable results (`render`'s and `info`'s YAML) go to stdout; everything else goes to stderr.
+Piped stdout is never coloured.
 
 ## `nf-metro render`
 
@@ -50,8 +49,7 @@ Set `NF_METRO_DEBUG=1` to re-raise the original exception instead.
 An empty file, or one whose `graph` block holds no stations, is rejected by name rather than drawn.
 
 On success, `render` prints the version, the source it read, and the files written to stdout as one YAML document.
-Stdout stays empty on any failure, so a caller can parse it without also checking the exit code; human-readable render summaries and any warnings go to stderr.
-The YAML is syntax-highlighted on a terminal and plain through a pipe, so a consumer never sees escape codes.
+Stdout stays empty on any failure, so a caller can parse it without also checking the exit code.
 
 ```yaml frame="terminal"
 version: v2.1.0
@@ -62,7 +60,7 @@ outputs:
   - assets/metro_map.png
 ```
 
-`inputs` is always a list, so a caller never has to branch on whether one map or several were rendered.
+`inputs` is always a list, even when one map was rendered.
 A path is quoted only where a bare word would not read back as the same string.
 
 Most of the options in this section have a `%%metro` directive twin.
@@ -371,7 +369,7 @@ A map with no stations is reported as a warning here, because `render` refuses t
 ## `nf-metro info`
 
 Show information about a parsed map: its sections, lines, stations, and edges.
-The default output is a stable YAML summary, syntax-highlighted on a terminal and plain through a pipe.
+The default output is a stable YAML summary.
 
 ```bash frame="terminal"
 nf-metro info [OPTIONS] INPUT_FILE

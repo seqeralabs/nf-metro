@@ -94,12 +94,9 @@ _SOURCE_ERRORS = (
 
 @click.group()
 @click.version_option(version=__version__)
-# rich-click forces a terminal (bold ANSI, fixed-width panels) whenever it sees
-# FORCE_COLOR, PY_COLORS or GITHUB_ACTIONS, and never checks NO_COLOR itself.
 @click.rich_config(
     {
         "theme": "forest-nu",
-        "force_terminal": False if "NO_COLOR" in os.environ else None,
         "options_table_column_types": ["required", "opt_long", "opt_short", "help"],
         "options_table_help_sections": [
             "help",
