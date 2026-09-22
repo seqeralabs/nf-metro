@@ -46,7 +46,12 @@ from nf_metro.layout import (
     PhaseInvariantError,
     compute_layout,
 )
-from nf_metro.layout.constants import OFFSET_STEP, SECTION_X_GAP, SECTION_Y_GAP
+from nf_metro.layout.constants import (
+    DEFAULT_LINE_WIDTH,
+    OFFSET_STEP,
+    SECTION_X_GAP,
+    SECTION_Y_GAP,
+)
 from nf_metro.live.server import DEFAULT_OVERLAY, OVERLAY_STYLES
 from nf_metro.options import (
     DEFAULT_FOLD_THRESHOLD,
@@ -422,7 +427,10 @@ _LAYOUT_DEFAULT_TEXT: dict[str, str] = {
     "y_spacing": "auto",
     "section_x_gap": _trim_number(SECTION_X_GAP),
     "section_y_gap": _trim_number(SECTION_Y_GAP),
-    "track_gap": _trim_number(OFFSET_STEP),
+    # OFFSET_STEP is the centre-to-centre pitch the None default resolves
+    # to; the option itself is the visual edge-to-edge gap, offset minus
+    # the assumed stroke width (resolve_offset_step's inverse).
+    "track_gap": _trim_number(OFFSET_STEP - DEFAULT_LINE_WIDTH),
     "fold_threshold": str(DEFAULT_FOLD_THRESHOLD),
     "label_angle": "from theme",
     "legend_logo_gap": _trim_number(LOGO_GAP),

@@ -317,3 +317,42 @@ def test_yaml_key_round_trips_through_a_real_parser(text: str) -> None:
         pytest.skip("an empty key cannot appear as a line/section name")
     lines = to_yaml({text: "value"})
     assert yaml.safe_load("\n".join(lines)) == {text: "value"}
+
+
+@pytest.mark.parametrize("text", ["1__000", "07_", "0__0", "1___000", "10_"])
+def test_yaml_scalar_rejects_underscore_forms_float_would_accept(text: str) -> None:
+    """PyYAML's int/float resolvers accept underscore placements ``float()`` rejects.
+
+    ``float("1__000")`` raises, but PyYAML's int resolver (``[0-9_]*``, no
+    adjacency rule) reads it as 1000, so a value using ``float()`` as a
+    stand-in for "would a real YAML parser treat this as a number" must still
+    quote it.
+    """
+    yaml = pytest.importorskip("yaml")
+    from nf_metro.introspect import to_yaml
+
+    lines = to_yaml({"key": text})
+    assert yaml.safe_load("\n".join(lines)) == {"key": text}
+
+
+def test_to_yaml_distinguishes_empty_dict_from_empty_list() -> None:
+    """An empty dict and an empty list must not collapse to the same line.
+
+    ``info --verbose``'s ``layout.sections_by_row`` is a dict that is empty
+    for a section-less (flat) graph; it must round-trip as ``{}``, not
+    silently become a list.
+    """
+    yaml = pytest.importorskip("yaml")
+    from nf_metro.introspect import to_yaml
+
+    document = {"a_dict": {}, "a_list": []}
+    assert yaml.safe_load("\n".join(to_yaml(document))) == document
+
+
+def test_to_yaml_handles_a_list_holding_an_empty_collection() -> None:
+    """A list item that is itself an empty dict/list must not crash the emitter."""
+    yaml = pytest.importorskip("yaml")
+    from nf_metro.introspect import to_yaml
+
+    document = {"items": [{}, [], "x"]}
+    assert yaml.safe_load("\n".join(to_yaml(document))) == document

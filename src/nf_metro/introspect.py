@@ -293,49 +293,54 @@ def _format_inferred(inferred: bool | None) -> str:
     return "inferred" if inferred else "authored"
 
 
-#: Words a plain scalar cannot be, because a parser reads them as another
-#: type. YAML 1.1 (what PyYAML implements) is the permissive one, so this
-#: follows it rather than 1.2.
-_YAML_RESERVED = frozenset(
-    {"true", "false", "null", "yes", "no", "on", "off", "y", "n", "~", ""}
+#: PyYAML's own implicit-typing resolvers (``yaml.resolver.Resolver``),
+#: reproduced verbatim rather than approximated with Python's ``float()``:
+#: the two disagree on details ``float()`` is more permissive about, such as
+#: where an underscore may sit in a run of digits (``1__000`` is a YAML int,
+#: 1000, but not a valid Python float literal).
+_YAML_BOOL = re.compile(
+    r"yes|Yes|YES|no|No|NO|true|True|TRUE|false|False|FALSE|on|On|ON|off|Off|OFF"
 )
-
-#: A date, which YAML 1.1 resolves to a date object rather than a string.
-_YAML_DATE = re.compile(r"\d{4}-\d{1,2}-\d{1,2}")
-
-#: Hex, octal and binary integer forms YAML 1.1 resolves that Python's
-#: ``float()`` does not reject, plus the dotted infinity/nan spellings -
-#: ``float()`` only recognises the undotted ``inf``/``nan`` (already caught
-#: below), not YAML's ``.inf``/``.nan``.
-_YAML_SPECIAL_NUMERIC = re.compile(
-    r"[-+]?0[xX][0-9a-fA-F_]+"
-    r"|[-+]?0[bB][01_]+"
+_YAML_NULL = re.compile(r"~|null|Null|NULL|")
+_YAML_INT = re.compile(
+    r"[-+]?0b[0-1_]+"
+    r"|[-+]?0[0-7_]+"
+    r"|[-+]?(?:0|[1-9][0-9_]*)"
+    r"|[-+]?0x[0-9a-fA-F_]+"
+    r"|[-+]?[1-9][0-9_]*(?::[0-5]?[0-9])+"
+)
+_YAML_FLOAT = re.compile(
+    r"[-+]?(?:[0-9][0-9_]*)\.[0-9_]*(?:[eE][-+][0-9]+)?"
+    r"|\.[0-9][0-9_]*(?:[eE][-+][0-9]+)?"
+    r"|[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*"
     r"|[-+]?\.(?:inf|Inf|INF)"
-    r"|[-+]?\.(?:nan|NaN|NAN)"
+    r"|\.(?:nan|NaN|NAN)"
 )
+_YAML_TIMESTAMP = re.compile(
+    r"[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]"
+    r"|[0-9][0-9][0-9][0-9]-[0-9][0-9]?-[0-9][0-9]?"
+    r"(?:[Tt]|[ \t]+)[0-9][0-9]?"
+    r":[0-9][0-9]:[0-9][0-9](?:\.[0-9]*)?"
+    r"(?:[ \t]*(?:Z|[-+][0-9][0-9]?(?::[0-9][0-9])?))?"
+)
+_YAML_IMPLICIT_TYPES = (_YAML_BOOL, _YAML_NULL, _YAML_INT, _YAML_FLOAT, _YAML_TIMESTAMP)
 
 
 def _is_plain_scalar(text: str) -> bool:
     """Whether *text* can be written unquoted and read back unchanged.
 
     Conservative on purpose: anything a parser might resolve to a number, a
-    date or a boolean, and anything opening with an indicator character, is
-    quoted instead. A colon disqualifies outright - it separates a key in a
-    mapping, and ``12:30`` is a number in YAML 1.1.
+    date, a boolean or null, and anything opening with an indicator
+    character, is quoted instead. A colon disqualifies outright - it
+    separates a key in a mapping, and ``12:30`` is a number in YAML 1.1.
     """
-    if text != text.strip() or text.lower() in _YAML_RESERVED:
+    if not text or text != text.strip():
         return False
     if text[0] in "-?:,[]{}#&*!|>'\"%@`" or ":" in text or "#" in text:
         return False
     if any(char in text for char in "\n\r\t"):
         return False
-    if _YAML_DATE.fullmatch(text) or _YAML_SPECIAL_NUMERIC.fullmatch(text):
-        return False
-    try:
-        float(text)
-    except ValueError:
-        return True
-    return False
+    return not any(pattern.fullmatch(text) for pattern in _YAML_IMPLICIT_TYPES)
 
 
 def _yaml_scalar(value: object) -> str:
@@ -368,17 +373,28 @@ def to_yaml(value: object, indent: int = 0) -> list[str]:
     if isinstance(value, dict):
         for key, item in value.items():
             name = _yaml_key(key)
-            if isinstance(item, (dict, list)):
-                lines.append(f"{pad}{name}:" if item else f"{pad}{name}: []")
+            if isinstance(item, dict) and item:
+                lines.append(f"{pad}{name}:")
                 lines.extend(to_yaml(item, indent + 1))
+            elif isinstance(item, list) and item:
+                lines.append(f"{pad}{name}:")
+                lines.extend(to_yaml(item, indent + 1))
+            elif isinstance(item, dict):
+                lines.append(f"{pad}{name}: {{}}")
+            elif isinstance(item, list):
+                lines.append(f"{pad}{name}: []")
             else:
                 lines.append(f"{pad}{name}: {_yaml_scalar(item)}")
     elif isinstance(value, list):
         for item in value:
-            if isinstance(item, (dict, list)):
+            if isinstance(item, (dict, list)) and item:
                 nested = to_yaml(item, indent + 1)
                 lines.append(f"{pad}- {nested[0].lstrip()}")
                 lines.extend(nested[1:])
+            elif isinstance(item, dict):
+                lines.append(f"{pad}- {{}}")
+            elif isinstance(item, list):
+                lines.append(f"{pad}- []")
             else:
                 lines.append(f"{pad}- {_yaml_scalar(item)}")
     return lines

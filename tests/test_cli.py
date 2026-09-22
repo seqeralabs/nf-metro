@@ -1957,6 +1957,9 @@ def test_layout_option_help_shows_the_effective_default():
     assert params["section_x_gap"].default_text == "50"  # resolving constant
     assert params["x_spacing"].default_text == "auto"  # resolved at run time
     assert params["center_ports"].default_text == ""  # off is the obvious read
+    # track_gap is the visual edge-to-edge gap; OFFSET_STEP is the resolved
+    # centre-to-centre pitch, a different (larger) number.
+    assert params["track_gap"].default_text == "1"
 
     help_text = _plain(CliRunner().invoke(cli, ["render", "--help"]).output).lower()
     assert "default: auto" in help_text
