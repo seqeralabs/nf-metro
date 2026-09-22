@@ -48,10 +48,8 @@ dependencies = [
     # rich-click forces colour in GitHub Actions; see nf_metro.console.
     "rich>=13",
     "rich-click>=1.8",
-    # `info`/`render`'s YAML output is emitted with a real dumper (see
-    # nf_metro.introspect.to_yaml) rather than a hand-written quoter, so its
-    # correctness comes from PyYAML's own resolver rather than being
-    # re-derived and kept in sync by hand.
+    # `info`/`render`'s YAML output is emitted through a real dumper; see
+    # nf_metro.introspect.to_yaml.
     "pyyaml>=6",
 ]
 
