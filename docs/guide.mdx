@@ -516,12 +516,7 @@ nf-metro ignores duplicate or invalid overrides with a warning.
 Because a directive can name a station, section, or line that the file defines further down, nf-metro resolves ids once it has read the whole file.
 An id that appears nowhere, usually a typo, is reported and its directive dropped:
 
-```console
-$ nf-metro validate map.mmd
-Validation warnings:
-  - %%metro off_track: unknown station id 'sample_shet'; ignoring
-Valid: 24 stations, 26 edges, 3 lines, 5 sections
-```
+![Terminal: nf-metro validate reports the unresolved id in a yellow Validation warnings panel, then still calls the map valid](assets/img/nf-metro-validate.svg)
 
 A value outside a directive's accepted set is reported the same way, whether for `style:`, `mode:`, `line_order:`, a port side or anything else.
 The default or the inferred value stays in place.
@@ -603,8 +598,11 @@ nf-metro renders such a map **best-effort and prints a warning to stderr** namin
 
 ```console
 $ nf-metro render broken.mmd -o broken.svg
-... the settled layout violates Tier-A invariants the renderer is about to draw ...
-Rendered 12 stations, 11 edges, 1 lines -> broken.svg
+✓ 12 stations, 11 edges, 1 lines → broken.svg
+╭─ Warnings ──────────────────────────────────────────────────────────────╮
+│ - the settled layout violates Tier-A invariants the renderer is about   │
+│ to draw ...                                                             │
+╰─────────────────────────────────────────────────────────────────────────╯
 ```
 
 Pass `--strict` (or add `%%metro strict: true`) to turn that warning into a hard error with a non-zero exit.
@@ -612,7 +610,9 @@ A broken map then fails your build instead of shipping a visibly-wrong diagram:
 
 ```console
 $ nf-metro render broken.mmd -o broken.svg --strict
-Error: the settled layout violates Tier-A invariants ...
+┌─ Error ─────────────────────────────────────────────────────────────────┐
+│ the settled layout violates Tier-A invariants ...                       │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 `--strict` has the same meaning for `nf-metro validate --with-layout`, which checks a map without rendering it.

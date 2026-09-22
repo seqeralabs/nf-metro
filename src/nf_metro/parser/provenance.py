@@ -6,7 +6,7 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import TYPE_CHECKING, Generic, TypeVar
 
-from nf_metro.options import LineOrder
+from nf_metro.options import DEFAULT_FOLD_THRESHOLD, LineOrder
 
 if TYPE_CHECKING:
     from nf_metro.parser.model import MetroGraph, PortSide
@@ -372,7 +372,7 @@ class LayoutProvenance:
                 (selected_value,),
             )
         else:
-            selected_value = 15
+            selected_value = DEFAULT_FOLD_THRESHOLD
             source = FoldThresholdSource.DEFAULT
             fold_decision = EffectiveDecision(
                 selected_value,

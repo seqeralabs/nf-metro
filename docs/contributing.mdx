@@ -16,7 +16,7 @@ pip install -e ".[dev]"
 ```
 
 Required Python: 3.11+.
-Dependencies: `click`, `drawsvg`, `lark`, `networkx`, `pillow`.
+Dependencies: `av`, `click`, `drawsvg`, `lark`, `networkx`, `pillow`, `pyyaml`, `resvg-py`, `rich`, `rich-click`.
 Dev extras add `pytest`, `ruff`, `mypy`.
 
 A plain clone also fetches `gh-pages`, an orphan branch carrying the built docs site and every open PR's render preview.
@@ -66,6 +66,31 @@ pytest --store-durations --clean-durations
 4. If you fixed a bug that had an `xfail` marker, remove the marker so the fix is locked in.
 
 </Steps>
+
+## Terminal screenshots
+
+The terminal images in the [CLI reference](/nf-metro/cli/) and the guide are real output, captured with [rich-codex](https://ewels.github.io/rich-codex/).
+Each one is declared where it is used, as a markdown image whose alt-text is the command that produced it:
+
+{/* RICH-CODEX {skip: true} */}
+
+```markdown
+![`nf-metro --help`](assets/img/nf-metro-help.svg)
+```
+
+A `RICH-CODEX` comment above an image sets that image's options (`<!-- ... -->` in `.md`, `{/* ... */}` in `.mdx`).
+Any command that takes a repo path needs `working_dir: .` there, because a markdown-defined command otherwise runs in the markdown file's own directory.
+`.rich-codex.yml` holds only the settings shared by every image.
+
+`.github/workflows/rich-codex.yml` regenerates and commits them whenever `src/nf_metro/` changes on `main`, so a changed message or station count never leaves a stale image behind.
+Regenerate them by hand if you want the new image in the same PR:
+
+```bash frame="terminal"
+pip install rich-codex
+rich-codex --search-include 'docs/**/*.md*'
+```
+
+Each command cleans up after itself, so only `docs/assets/img/*.svg` should change.
 
 ## Add a topology test
 

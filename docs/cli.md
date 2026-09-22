@@ -22,6 +22,15 @@ nf-metro ships eleven commands.
 `nf-metro --version` prints the installed version.
 Every command also takes `--help`.
 
+## Terminal output
+
+Help, errors, warnings, and progress are rendered in colour with [rich-click](https://ewels.github.io/rich-click/), with warnings and errors grouped into yellow and red panels.
+`render`'s and `info`'s YAML results go to stdout, with warnings, summaries, and progress on stderr, so a caller can parse either command's stdout without picking through human-readable text.
+Other commands print their result to stdout as they always have.
+Piped stdout is never coloured.
+
+![`nf-metro --help`](assets/img/nf-metro-help.svg)
+
 ## `nf-metro render`
 
 Render a Mermaid metro map definition to SVG or interactive HTML.
@@ -42,15 +51,15 @@ A rejected input, and any other failure, surfaces as a plain error message rathe
 Set `NF_METRO_DEBUG=1` to re-raise the original exception instead.
 An empty file, or one whose `graph` block holds no stations, is rejected by name rather than drawn.
 
-On success, `render` prints a `nf-metro: v<version>` banner and the files written to stdout as one YAML document.
-Stdout stays empty on any failure, so a caller can parse it without also checking the exit code; human-readable render summaries and any warnings go to stderr.
+On success, `render` prints the version, the source it read, and the files written to stdout as one YAML document.
+Stdout stays empty on any failure, so a caller can parse it without also checking the exit code.
 
-```yaml frame="terminal"
-nf-metro: v2.1.0
-outputs:
-  - "assets/metro_map.svg"
-  - "assets/metro_map.png"
-```
+<!-- RICH-CODEX {working_dir: ., after_command: rm -f rnaseq.svg} -->
+
+![`nf-metro render examples/rnaseq_sections.mmd -o rnaseq.svg`](assets/img/nf-metro-render.svg)
+
+`inputs` is always a list, even when one map was rendered.
+A path is quoted only where a bare word would not read back as the same string.
 
 Most of the options in this section have a `%%metro` directive twin.
 An explicit flag overrides the directive.
@@ -187,8 +196,8 @@ They do not change the drawn map.
 
 A map that parses with complaints, such as an unknown `%%metro` directive or a non-LR primary direction, is still written.
 So is a layout that widens a gap to fit its routing.
-Each complaint appears as a bullet in a `Warnings:` block on stderr.
-A geometry guard that was downgraded rather than enforced gets its own block, because those name geometry that was drawn anyway and may be defective.
+Each complaint appears as a bullet in a yellow `Warnings` panel on stderr.
+A geometry guard that was downgraded rather than enforced gets its own `Guard downgrades` panel, because those name geometry that was drawn anyway and may be defective.
 Read them differently from a warning about something ignored or adjusted.
 
 ### Embedding options
@@ -358,7 +367,7 @@ A map with no stations is reported as a warning here, because `render` refuses t
 ## `nf-metro info`
 
 Show information about a parsed map: its sections, lines, stations, and edges.
-The default output is a stable human-readable summary.
+The default output is a stable YAML summary.
 
 ```bash frame="terminal"
 nf-metro info [OPTIONS] INPUT_FILE
@@ -369,10 +378,14 @@ nf-metro info [OPTIONS] INPUT_FILE
 | `--json`    | off     | Emit the full introspection as JSON, for scripting                                                                                     |
 | `--verbose` | off     | Add the section dependency graph, per-line routes, inferred auto-layout defaults, and synthetic ports and junctions to the text output |
 
-Parse warnings print as a `Warnings:` block on stderr rather than into the stdout summary.
+Parse warnings print as a `Warnings` panel on stderr rather than into the stdout summary.
 `--verbose` and `--json` carry them in the report itself instead.
 
-`Style:` reports the theme the map resolves to, using the same name `render --theme` accepts.
+`style:` reports the theme the map resolves to, using the same name `render --theme` accepts.
+
+<!-- RICH-CODEX {working_dir: .} -->
+
+![`nf-metro info examples/rnaseq_sections.mmd`](assets/img/nf-metro-info.svg)
 
 ## `nf-metro explain`
 

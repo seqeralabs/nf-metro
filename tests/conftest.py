@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,17 @@ from nf_metro.convert import convert_nextflow_dag
 from nf_metro.layout.engine import compute_layout
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import MetroGraph
+
+# Tests assert on plain CLI text. Read at render time, so this has to run
+# before any test module imports the CLI.
+os.environ.setdefault("NO_COLOR", "1")
+# Wide enough that help tables and error panels do not crop the messages the
+# assertions look for.
+os.environ.setdefault("TERMINAL_WIDTH", "400")
+# NO_COLOR alone is not enough: rich-click forces a terminal, keeping bold ANSI
+# and hard-wrapped panels, whenever it sees one of these.
+for _forces_colour in ("GITHUB_ACTIONS", "FORCE_COLOR", "PY_COLORS", "RICH_CODEX"):
+    os.environ.pop(_forces_colour, None)
 
 # --- Graph text constants ---
 

@@ -338,7 +338,7 @@ def test_explain_cli_json():
     runner = CliRunner()
     result = runner.invoke(cli, ["explain", str(RNASEQ_AUTO_MMD), "--json"])
     assert result.exit_code == 0, result.output
-    data = json.loads(result.output)
+    data = json.loads(result.stdout)
     assert {"title", "warnings", "decisions", "summary"} <= set(data)
 
 
@@ -361,7 +361,7 @@ def test_explain_cli_matches_formatter():
     runner = CliRunner()
     result = runner.invoke(cli, ["explain", str(RNASEQ_AUTO_MMD)])
     assert result.exit_code == 0
-    assert result.output == expected + "\n"
+    assert result.stdout == expected + "\n"
 
 
 @pytest.mark.parametrize(

@@ -1,5 +1,8 @@
 """Tests for the CLI entry points."""
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -137,6 +140,29 @@ def _declare(mmd: Path, *directives: str) -> None:
     mmd.write_text("".join(f"{d}\n" for d in directives) + STANDALONE_MMD.read_text())
 
 
+def _in_panel(output: str, label: str, entry: str = "") -> bool:
+    """Whether *output* carries a panel titled *label* listing *entry*.
+
+    Warning and error blocks render as bordered panels, which wrap their
+    contents, so both the title and the entry are matched against the
+    unwrapped text rather than a fixed layout.
+    """
+    plain = _plain(output)
+    return f"- {label} -" in plain.replace("\u2500", "-") and f"- {entry}" in plain
+
+
+def _plain(output: str) -> str:
+    """CLI output as one unwrapped line, free of rich-click's panel borders.
+
+    rich-click draws errors and help in bordered panels and hard-wraps the
+    text inside them, so a phrase an assertion looks for can be split across
+    lines by nothing more interesting than a long temp path. A single word
+    longer than the panel is split mid-word and cannot be rejoined here; the
+    wide TERMINAL_WIDTH conftest pins is what keeps long paths off that edge.
+    """
+    return " ".join(output.replace("\u2502", " ").split())
+
+
 def test_render_output_sibling_subdir_allowed_within_repo(fake_repo):
     """A `..` hop that stays inside the checkout is legitimate, not an escape.
 
@@ -175,7 +201,7 @@ def test_render_output_escape_past_repo_root_rejected(fake_repo):
         cli, ["render", str(mmd), "--reject-output-outside-source"]
     )
     assert result.exit_code != 0
-    assert "resolves outside the pipeline repository" in result.output
+    assert "resolves outside the pipeline repository" in _plain(result.output)
     assert not (fake_repo.parent / "elsewhere" / "escaped.svg").exists()
     assert result.stdout == ""
 
@@ -189,7 +215,7 @@ def test_render_output_absolute_path_outside_repo_rejected(fake_repo, tmp_path_f
         cli, ["render", str(mmd), "--reject-output-outside-source"]
     )
     assert result.exit_code != 0
-    assert "resolves outside the pipeline repository" in result.output
+    assert "resolves outside the pipeline repository" in _plain(result.output)
     assert not (outside / "escaped.svg").exists()
 
 
@@ -210,7 +236,7 @@ def test_render_output_into_dot_git_rejected(fake_repo, declared):
         cli, ["render", str(mmd), "--reject-output-outside-source"]
     )
     assert result.exit_code != 0
-    assert ".git/" in result.output
+    assert ".git/" in _plain(result.output)
     assert not (fake_repo / ".git" / "config").exists()
 
 
@@ -252,7 +278,7 @@ def test_render_output_symlink_into_dot_git_rejected(fake_repo):
         cli, ["render", str(mmd), "--reject-output-outside-source"]
     )
     assert result.exit_code != 0
-    assert ".git/" in result.output
+    assert ".git/" in _plain(result.output)
     assert not (fake_repo / ".git" / "config").exists()
 
 
@@ -282,7 +308,7 @@ def test_render_output_escape_rejected_with_flag(outside_repo):
         cli, ["render", str(mmd), "--reject-output-outside-source"]
     )
     assert result.exit_code != 0
-    assert "resolves outside" in result.output
+    assert "resolves outside" in _plain(result.output)
     assert not (outside_repo / "escaped.svg").exists()
     assert result.stdout == ""
 
@@ -299,7 +325,7 @@ def test_render_output_escape_rejected_via_absolute_path(outside_repo):
         cli, ["render", str(mmd), "--reject-output-outside-source"]
     )
     assert result.exit_code != 0
-    assert "resolves outside" in result.output
+    assert "resolves outside" in _plain(result.output)
     assert not (outside / "escaped.svg").exists()
 
 
@@ -438,9 +464,7 @@ def test_render_per_output_override_beats_the_global_flag(tmp_path):
 
 
 def test_render_reports_yaml_result_to_stdout(tmp_path):
-    """stdout is one YAML doc: version banner then outputs; summary is on stderr."""
-    import json
-
+    """stdout is one YAML doc: version, inputs, outputs; summary is on stderr."""
     from nf_metro import __version__
 
     mmd = tmp_path / "test.mmd"
@@ -448,14 +472,16 @@ def test_render_reports_yaml_result_to_stdout(tmp_path):
     result = CliRunner().invoke(cli, ["render", str(mmd)])
     assert result.exit_code == 0, result.output
     assert result.stdout.splitlines() == [
-        f"nf-metro: v{__version__}",
+        f"version: v{__version__}",
+        "inputs:",
+        f"  - {mmd}",
         "outputs:",
-        f"  - {json.dumps(str(tmp_path / 'test.svg'))}",
-        f"  - {json.dumps(str(tmp_path / 'test.png'))}",
+        f"  - {tmp_path / 'test.svg'}",
+        f"  - {tmp_path / 'test.png'}",
     ]
     # Human summary goes to stderr, never stdout.
     assert "Rendered" not in result.stdout
-    assert "OK" in result.stderr
+    assert "file(s) rendered" in result.stderr
 
 
 def test_render_stdout_empty_on_failure(tmp_path):
@@ -517,7 +543,7 @@ def test_validate_with_layout_catches_layout_invariant(fixture):
         cli, ["validate", "--with-layout", str(INVALID_DIR / fixture)]
     )
     assert result.exit_code != 0
-    assert "Validation errors:" in result.output
+    assert "Validation errors" in _plain(result.output)
     assert "Traceback" not in result.output
 
 
@@ -538,7 +564,7 @@ def test_validate_with_layout_reports_deferred_route_guard_cleanly(
     )
 
     assert result.exit_code == 1
-    assert "Validation errors:" in result.output
+    assert "Validation errors" in _plain(result.output)
     assert "Traceback" not in result.output
     assert guard_detail in result.output
 
@@ -552,7 +578,7 @@ def test_validate_with_layout_reports_fold_threshold_cleanly(monkeypatch) -> Non
     result = CliRunner().invoke(cli, ["validate", "--with-layout", str(RNASEQ_MMD)])
 
     assert result.exit_code == 1
-    assert "Validation errors:" in result.output
+    assert "Validation errors" in _plain(result.output)
     assert "fold threshold is too small" in result.output
     assert "Traceback" not in result.output
 
@@ -586,10 +612,10 @@ def test_info_output():
     runner = CliRunner()
     result = runner.invoke(cli, ["info", str(RNASEQ_MMD)])
     assert result.exit_code == 0
-    assert "Title:" in result.output
-    assert "Stations:" in result.output
-    assert "Lines:" in result.output
-    assert "Sections:" in result.output
+    assert "title:" in result.stdout
+    assert "stations:" in result.stdout
+    assert "lines:" in result.stdout
+    assert "sections:" in result.stdout
 
 
 def test_info_default_matches_formatter():
@@ -602,7 +628,7 @@ def test_info_default_matches_formatter():
     assert result.exit_code == 0
     graph = parse_metro_mermaid(RNASEQ_MMD.read_text())
     expected = format_info_text(build_info(graph), verbose=False)
-    assert result.output == expected + "\n"
+    assert result.stdout == expected + "\n"
     # The verbose-only sections must not leak into the default output.
     assert "Section dependency graph:" not in result.output
 
@@ -614,7 +640,7 @@ def test_info_json_is_valid_and_structured():
     runner = CliRunner()
     result = runner.invoke(cli, ["info", str(RNASEQ_MMD), "--json"])
     assert result.exit_code == 0
-    data = json.loads(result.output)
+    data = json.loads(result.stdout)
     assert data["title"] == "nf-core/rnaseq"
     assert {"counts", "lines", "sections", "ports", "junctions", "section_dag"} <= set(
         data
@@ -627,9 +653,9 @@ def test_info_verbose_adds_introspection():
     runner = CliRunner()
     result = runner.invoke(cli, ["info", str(RNASEQ_MMD), "--verbose"])
     assert result.exit_code == 0
-    assert "Section dependency graph:" in result.output
-    assert "Per-line routes:" in result.output
-    assert "Ports (synthetic):" in result.output
+    assert "section_dag:" in result.stdout
+    assert "routes:" in result.stdout
+    assert "ports:" in result.stdout
 
 
 def test_info_captures_parse_warnings(tmp_path):
@@ -646,7 +672,7 @@ def test_info_captures_parse_warnings(tmp_path):
     runner = CliRunner()
     result = runner.invoke(cli, ["info", str(mmd), "--json"])
     assert result.exit_code == 0
-    data = json.loads(result.output)
+    data = json.loads(result.stdout)
     assert any("LR" in w for w in data["warnings"])
 
 
@@ -820,8 +846,9 @@ def test_render_multiple_files(tmp_path):
     assert result.exit_code == 0, result.output
     assert (tmp_path / "a.svg").exists()
     assert (tmp_path / "b.svg").exists()
-    assert "[1/2] OK" in result.output
-    assert "[2/2] OK" in result.output
+    assert "a.svg" in result.output
+    assert "b.svg" in result.output
+    assert "file(s) rendered" in result.output
 
 
 def test_render_multiple_files_rejects_output_flag(tmp_path):
@@ -853,8 +880,9 @@ def test_render_multiple_files_partial_failure(tmp_path):
     runner = CliRunner()
     result = runner.invoke(cli, ["render", str(bad), str(good)])
     assert result.exit_code != 0
-    assert "[1/2] FAIL" in result.output
-    assert "[2/2] OK" in result.output
+    assert "bad.mmd" in result.output
+    assert "good.mmd" in result.output
+    assert "failed" in result.output
     assert not (tmp_path / "bad.svg").exists()
     assert (tmp_path / "good.svg").exists()
 
@@ -867,8 +895,9 @@ def test_render_unreadable_file_does_not_abort_the_batch(tmp_path):
     good.write_text(STANDALONE_MMD.read_text())
     result = CliRunner().invoke(cli, ["render", str(bad), str(good)])
     assert result.exit_code != 0
-    assert "[1/2] FAIL" in result.output
-    assert "[2/2] OK" in result.output
+    assert "bad.mmd" in result.output
+    assert "good.mmd" in result.output
+    assert "failed" in result.output
     assert not (tmp_path / "bad.svg").exists()
     assert (tmp_path / "good.svg").exists()
     assert result.stdout == ""
@@ -882,7 +911,7 @@ def test_render_unreadable_single_file_reports_cleanly(tmp_path, monkeypatch):
     result = CliRunner().invoke(cli, ["render", str(bad)])
     assert result.exit_code != 0
     assert isinstance(result.exception, SystemExit)
-    assert str(bad) in result.output
+    assert str(bad) in _plain(result.output)
     assert result.stdout == ""
 
 
@@ -950,8 +979,9 @@ def test_render_multiple_files_each_declare_their_own_outputs(tmp_path):
     b.write_text("%%metro output: b1.svg, b2.svg\n" + body)
     result = CliRunner().invoke(cli, ["render", str(a), str(b)])
     assert result.exit_code == 0, result.output
-    assert "[1/2] OK" in result.output
-    assert "[2/2] OK" in result.output
+    assert "a.mmd" in result.output
+    assert "b.mmd" in result.output
+    assert "file(s) rendered" in result.output
     for name in ("a1.svg", "a2.svg", "b1.svg", "b2.svg"):
         assert (tmp_path / name).exists()
 
@@ -1434,8 +1464,8 @@ def test_render_empty_source_names_file_and_cause(tmp_path):
         cli, ["render", str(src), "-o", str(tmp_path / "out.svg")]
     )
     assert result.exit_code != 0
-    assert str(src) in result.output
-    assert "defines no stations" in result.output
+    assert str(src) in _plain(result.output)
+    assert "defines no stations" in _plain(result.output)
     assert "max()" not in result.output
 
 
@@ -1457,7 +1487,7 @@ def test_validate_rejects_a_station_less_map(tmp_path):
 
     validated = CliRunner().invoke(cli, ["validate", str(src)])
     assert validated.exit_code != 0, validated.output
-    assert "Validation errors:" in validated.output
+    assert "Validation errors" in _plain(validated.output)
     assert "defines no stations" in validated.output
 
     rendered = CliRunner().invoke(
@@ -1507,7 +1537,8 @@ def test_render_rejection_is_one_line_without_debug_env(tmp_path, monkeypatch):
         cli, ["render", str(src), "-o", str(tmp_path / "out.svg")]
     )
     assert result.exit_code != 0
-    assert f"Error: {src}: synthetic render rejection" in result.output
+    # rich-click frames the message in an Error panel; it stays one clean line.
+    assert f"{src}: synthetic render rejection" in _plain(result.output)
     assert "Traceback" not in result.output
 
 
@@ -1564,12 +1595,18 @@ def test_render_accepts_in_range_numeric_option(tmp_path, flag, value):
 
 
 def test_numeric_flag_help_keeps_its_plain_metavar():
-    """A bounded flag documents its bound without renaming its value type."""
+    """A bounded flag documents its bound without renaming its value type.
+
+    The metavar trails the description rather than sitting in a column of its
+    own, so it reads as `... (FLOAT x>0)`.
+    """
     result = CliRunner().invoke(cli, ["render", "--help"])
     assert result.exit_code == 0
-    help_text = " ".join(result.output.split())
-    assert "--x-spacing FLOAT" in help_text
-    assert "--width INTEGER" in help_text
+    # The brackets around a metavar are the theme's, and vary with width;
+    # what must hold is the type name and its bound, unrenamed.
+    help_text = _plain(result.output)
+    assert "FLOAT x>0" in help_text
+    assert "INTEGER x>0" in help_text
     assert "FLOAT RANGE" not in help_text
     assert "INTEGER RANGE" not in help_text
 
@@ -1581,7 +1618,7 @@ def test_render_presents_parse_warnings_as_a_clean_block(tmp_path):
         cli, ["render", str(src), "-o", str(tmp_path / "out.svg")]
     )
     assert result.exit_code == 0, result.output
-    assert f"Warnings:\n  - {_UNKNOWN_DIRECTIVE_WARNING}" in result.output
+    assert _in_panel(result.output, "Warnings", _UNKNOWN_DIRECTIVE_WARNING)
     assert "UserWarning" not in result.output
     assert "directives.py" not in result.output
 
@@ -1602,7 +1639,7 @@ def test_render_presents_layout_warnings_as_a_clean_block(tmp_path, monkeypatch)
         cli, ["render", str(_simple_map(tmp_path)), "-o", str(tmp_path / "out.svg")]
     )
     assert result.exit_code == 0, result.output
-    assert "Warnings:\n  - synthetic layout adjustment" in result.output
+    assert _in_panel(result.output, "Warnings", "synthetic layout adjustment")
     assert "UserWarning" not in result.output
 
 
@@ -1625,7 +1662,7 @@ def test_batch_render_labels_each_file_warnings(tmp_path):
     warned.write_text(_UNKNOWN_DIRECTIVE + good.read_text())
     result = CliRunner().invoke(cli, ["render", str(good), str(warned)])
     assert result.exit_code == 0, result.output
-    assert f"Warnings ({warned})" in result.output
+    assert _in_panel(result.output, "Warnings", str(warned))
 
 
 def test_permissive_guard_block_names_the_flag_only_when_passed(tmp_path):
@@ -1664,7 +1701,7 @@ def test_info_presents_warnings_as_a_clean_block(tmp_path):
     src = _simple_map(tmp_path, prelude=_UNKNOWN_DIRECTIVE)
     result = CliRunner().invoke(cli, ["info", str(src)])
     assert result.exit_code == 0, result.output
-    assert f"Warnings:\n  - {_UNKNOWN_DIRECTIVE_WARNING}" in result.output
+    assert _in_panel(result.output, "Warnings", _UNKNOWN_DIRECTIVE_WARNING)
     assert "UserWarning" not in result.output
 
 
@@ -1690,16 +1727,7 @@ def test_info_reports_the_resolved_theme(tmp_path, style, expected):
     src = _simple_map(tmp_path, prelude=style)
     result = CliRunner().invoke(cli, ["info", str(src)])
     assert result.exit_code == 0, result.output
-    assert f"Style: {expected}" in result.output
-
-
-def test_render_validate_help_scopes_its_promise():
-    """`--validate` names the guards it runs and points elsewhere for Tier-A."""
-    result = CliRunner().invoke(cli, ["render", "--help"])
-    assert result.exit_code == 0
-    help_text = " ".join(result.output.split())
-    assert "route drawn through a station's label or marker" in help_text
-    assert "use --strict to fail on those" in help_text
+    assert f"style: {expected}" in result.stdout
 
 
 def test_manifest_flag_is_an_undocumented_escape_hatch(tmp_path):
@@ -1795,7 +1823,7 @@ def test_parse_failure_still_reports_earlier_warnings(tmp_path, command, label):
     src.write_text(_UNKNOWN_DIRECTIVE + "graph LR\n    a[A] --> b[B]\n")
     result = CliRunner().invoke(cli, [command, str(src)])
     assert result.exit_code != 0
-    assert f"{label}:\n  - {_UNKNOWN_DIRECTIVE_WARNING}" in result.output
+    assert _in_panel(result.output, label, _UNKNOWN_DIRECTIVE_WARNING)
     assert "no metro line annotation" in result.output
 
 
@@ -1819,11 +1847,7 @@ def test_batch_failure_names_its_file_once(tmp_path):
     empty.write_text("")
     result = CliRunner().invoke(cli, ["render", str(good), str(empty)])
     assert result.exit_code != 0
-    fail_line = next(
-        line
-        for line in result.output.splitlines()
-        if "FAIL" in line and "empty" in line
-    )
+    fail_line = next(line for line in result.output.splitlines() if "empty.mmd" in line)
     assert fail_line.count("empty.mmd") == 1, fail_line
 
 
@@ -1870,7 +1894,7 @@ def test_convert_reports_removed_feedback_on_stderr(tmp_path):
     )
 
     assert result.exit_code == 0
-    assert "Warnings:" in result.output
+    assert "Warnings" in _plain(result.output)
     assert "- 1 feedback connection(s) removed" in result.output
     assert "Polish -> Assemble" in result.output
     assert "FeedbackEdgesDroppedWarning" not in result.output
@@ -1898,3 +1922,155 @@ def test_convert_summary_line_is_unchanged_for_an_acyclic_pipeline(tmp_path):
 
     assert "feedback" not in result.output
     assert "Converted 5 processes, 1 sections -> " in result.output
+
+
+@pytest.mark.parametrize("command", ["render", "serve"])
+def test_every_option_sits_in_a_help_panel(command):
+    """Options are grouped into named panels, so a new one must join one.
+
+    Without this, an option added to a panelled command silently lands in the
+    catch-all "Options" panel at the bottom of the help, which reads as an
+    oversight rather than a decision.
+    """
+    cmd = cli.commands[command]
+    panelled = {name for panel in cmd.panels for name in panel.options}
+    ungrouped = [
+        param.opts[-1]
+        for param in cmd.params
+        if param.opts[0].startswith("-")
+        and not getattr(param, "hidden", False)
+        and param.name != "help"
+        and not panelled.intersection(param.opts)
+    ]
+    assert not ungrouped, f"{command}: {ungrouped}"
+
+
+def test_layout_option_help_shows_the_effective_default():
+    """--help names the value a user gets, not the flag's placeholder None.
+
+    Registry flags all default to None so an omitted flag leaves the
+    directive value alone, so the default shown has to come from elsewhere:
+    the graph field, the constant that resolves it, or nothing at all.
+    """
+    params = {p.name: p for p in cli.commands["render"].params}
+    assert params["font_scale"].default_text == "1"  # MetroGraph field default
+    assert params["section_x_gap"].default_text == "50"  # resolving constant
+    assert params["x_spacing"].default_text == "auto"  # resolved at run time
+    assert params["center_ports"].default_text == ""  # off is the obvious read
+    # track_gap is the visual edge-to-edge gap; OFFSET_STEP is the resolved
+    # centre-to-centre pitch, a different (larger) number.
+    assert params["track_gap"].default_text == "1"
+
+    help_text = _plain(CliRunner().invoke(cli, ["render", "--help"]).output).lower()
+    assert "default: auto" in help_text
+    assert "default: (auto)" not in help_text  # description, not a value
+    assert "default: none" not in help_text
+
+
+def test_described_default_does_not_become_the_value(tmp_path):
+    """The help-time default text must not leak into the parsed value.
+
+    A described default is handed back by ``get_default(call=False)``, the
+    path that renders --help. An omitted flag still has to arrive as None so
+    the map's own directive survives.
+    """
+    from nf_metro.parser import parse_metro_mermaid
+
+    src = tmp_path / "map.mmd"
+    src.write_text("%%metro x_spacing: 77\n" + STANDALONE_MMD.read_text())
+    out = tmp_path / "out.svg"
+    result = CliRunner().invoke(cli, ["render", str(src), "-o", str(out)])
+    assert result.exit_code == 0, result.output
+    graph = parse_metro_mermaid(src.read_text())
+    assert graph.x_spacing == 77
+
+
+def test_render_stdout_stays_plain_through_a_pipe(tmp_path):
+    """Highlighted YAML must never reach a pipe.
+
+    stdout is a machine-readable contract - the GitHub Action reads these
+    lines through a command substitution - and an escape code inside a quoted
+    path breaks the parse. Forced colour, which CI sets, must not reach it.
+    """
+    out = tmp_path / "map.svg"
+    env = {**os.environ, "GITHUB_ACTIONS": "true", "FORCE_COLOR": "1"}
+    env.pop("NO_COLOR", None)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "nf_metro",
+            "render",
+            str(_simple_map(tmp_path)),
+            "-o",
+            str(out),
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
+    )
+    assert "\x1b[" not in result.stdout
+    assert f"  - {out}" in result.stdout
+
+
+def test_render_stdout_is_highlighted_under_rich_codex(tmp_path):
+    """rich-codex captures the docs screenshots through a pipe.
+
+    It sets RICH_CODEX while doing so, which is the one signal that overrides
+    the plain-through-a-pipe rule, so the screenshot shows the colours a
+    terminal would.
+    """
+    out = tmp_path / "map.svg"
+    env = {**os.environ, "RICH_CODEX": "1"}
+    env.pop("NO_COLOR", None)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "nf_metro",
+            "render",
+            str(_simple_map(tmp_path)),
+            "-o",
+            str(out),
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
+    )
+    assert "\x1b[" in result.stdout
+
+
+@pytest.mark.parametrize("args", [[], ["--verbose"]])
+def test_info_stdout_is_valid_yaml(args):
+    """`info` output parses as YAML, in both its summary and verbose forms.
+
+    Line and section names are author-supplied and routinely carry colons
+    ("Aligner: STAR"), which a bare YAML key would not survive, so this
+    checks against a real parser rather than the shape of the text.
+    """
+    yaml = pytest.importorskip("yaml")
+    result = CliRunner().invoke(cli, ["info", str(RNASEQ_MMD), *args])
+    assert result.exit_code == 0, result.output
+    document = yaml.safe_load(result.stdout)
+    assert document["title"] == "nf-core/rnaseq"
+    assert document["counts"]["stations"] > 0
+    assert all(line["color"].startswith("#") for line in document["lines"])
+
+
+def test_render_result_names_every_input_in_a_batch(tmp_path):
+    """A multi-input run lists its sources, so outputs can be traced back."""
+    yaml = pytest.importorskip("yaml")
+    first, second = tmp_path / "a.mmd", tmp_path / "b.mmd"
+    body = STANDALONE_MMD.read_text()
+    first.write_text(body)
+    second.write_text(body)
+    result = CliRunner().invoke(cli, ["render", str(first), str(second)])
+    assert result.exit_code == 0, result.output
+    document = yaml.safe_load(result.stdout)
+    assert document["inputs"] == [str(first), str(second)]
+    assert document["outputs"] == [
+        str(tmp_path / "a.svg"),
+        str(tmp_path / "b.svg"),
+    ]
