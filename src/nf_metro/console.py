@@ -12,10 +12,9 @@ import sys
 from typing import Any
 
 from rich.console import Console as _RichConsole
-from rich.highlighter import ReprHighlighter
+from rich.highlighter import RegexHighlighter, ReprHighlighter
 from rich.panel import Panel
 from rich.progress import Progress, ProgressColumn, Task, TextColumn
-from rich.syntax import Syntax
 from rich.text import Text
 from rich.theme import Theme
 
@@ -48,9 +47,36 @@ def _width() -> int | None:
 #: Rich reads the "N file(s)" plural idiom these messages use as a call to a
 #: function named file, and bolds the brackets. Nothing here prints a call, so
 #: both rules are turned off; paths, numbers and URLs still highlight.
-_THEME = Theme({"repr.call": "none", "repr.brace": "none"})
+#: The two brand greens, shared so the banner, the help panels and the YAML
+#: output cannot drift apart.
+GREEN_DARK = "#158668"
+GREEN_LIGHT = "#2EC09C"
+
+
+_THEME = Theme(
+    {
+        "repr.call": "none",
+        "repr.brace": "none",
+        "yaml.key": GREEN_LIGHT,
+        "yaml.punct": GREEN_DARK,
+    }
+)
 
 console = Console(stderr=True, width=_width(), theme=_THEME)
+
+
+class _YamlHighlighter(RegexHighlighter):
+    """Keys and their punctuation, in the brand greens.
+
+    nf-metro writes the YAML it prints, so it is always this shape: a key at
+    the start of a line, optionally behind a list dash.
+    """
+
+    base_style = "yaml."
+    highlights = [
+        r"(?m)^\s*(?:-\s+)?(?P<key>\"[^\"]*\"|[\w.\-]+)(?P<punct>:)",
+        r"(?m)^\s*(?P<punct>-)\s",
+    ]
 
 
 def print_banner() -> None:
@@ -61,7 +87,7 @@ def print_banner() -> None:
     """
     from nf_metro import __version__
 
-    top, bottom = "#158668", "#2EC09C"
+    top, bottom = GREEN_DARK, GREEN_LIGHT
     name, version = "nf-metro", f"v{__version__}"
     span = len(name) + len(version) + 7
     console.print(
@@ -92,8 +118,7 @@ def echo_yaml(text: str) -> None:
     if not sys.stdout.isatty():
         print(text)
         return
-    body = Syntax(text, "yaml", background_color="default").highlight(text)
-    body.rstrip()
+    body = _YamlHighlighter()(Text(text.rstrip()))
     # The matched hex doubles as the style, so each colour prints as itself.
     for match in re.finditer(r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})\b", text):
         body.stylize(match.group(), match.start(), match.end())
