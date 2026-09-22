@@ -413,10 +413,7 @@ def to_yaml(value: object, indent: int = 0) -> list[str]:
     if isinstance(value, dict):
         for key, item in value.items():
             name = _yaml_key(key)
-            if isinstance(item, dict) and item:
-                lines.append(f"{pad}{name}:")
-                lines.extend(to_yaml(item, indent + 1))
-            elif isinstance(item, list) and item:
+            if isinstance(item, (dict, list)) and item:
                 lines.append(f"{pad}{name}:")
                 lines.extend(to_yaml(item, indent + 1))
             elif isinstance(item, dict):
