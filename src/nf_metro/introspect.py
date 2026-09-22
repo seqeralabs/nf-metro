@@ -464,22 +464,32 @@ def _info_summary(info: dict[str, Any]) -> dict[str, Any]:
 
 
 def _route_keys(lines: list[dict[str, Any]]) -> list[str]:
-    """Route keys for *lines*, one per line, never colliding.
+    """Route keys for *lines*, one per line, guaranteed unique.
 
     ``%%metro line:`` only requires a unique id; two lines may share a
     display name, and ``routes:`` is a dict keyed by name for readability,
     so a plain ``{display_name: route}`` comprehension would silently drop
-    one line's route on a collision. Disambiguated with the id only where
-    a collision actually occurs, so the common case stays plain names.
+    one line's route on a collision. Disambiguating a duplicated name with
+    its id is not by itself enough: that disambiguated form can coincide
+    with a third line's own, undisambiguated display name (e.g. two lines
+    named "Main" alongside one actually named "Main (main1)"), so every key
+    is checked against every key already assigned, not just against its own
+    name's duplicate count, with a numeric suffix as the last resort.
     """
     names = [line["display_name"] for line in lines]
     counts = Counter(names)
-    return [
-        f"{line['display_name']} ({line['id']})"
-        if counts[line["display_name"]] > 1
-        else line["display_name"]
-        for line in lines
-    ]
+    used: set[str] = set()
+    keys: list[str] = []
+    for line in lines:
+        name, lid = line["display_name"], line["id"]
+        base = f"{name} ({lid})" if counts[name] > 1 else name
+        candidate, suffix = base, 2
+        while candidate in used:
+            candidate = f"{base} #{suffix}"
+            suffix += 1
+        used.add(candidate)
+        keys.append(candidate)
+    return keys
 
 
 def _info_detail(info: dict[str, Any]) -> dict[str, Any]:

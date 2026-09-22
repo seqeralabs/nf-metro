@@ -109,6 +109,31 @@ def test_verbose_routes_keeps_both_lines_sharing_a_display_name() -> None:
     assert '"Main Line (main2)":' in verbose
 
 
+def test_verbose_routes_disambiguates_a_second_order_collision() -> None:
+    """A disambiguated key can itself collide with a third line's plain name.
+
+    Two lines named "Main" disambiguate to "Main (main1)"/"Main (main2)".
+    A third, differently-named line whose own display name happens to be
+    the literal string "Main (main1)" would then collide with the first
+    line's disambiguated key, silently dropping its route, unless keys are
+    checked for uniqueness against every key already assigned rather than
+    only against their own name's duplicate count.
+    """
+    graph = parse_metro_mermaid(
+        "%%metro line: main1 | Main | #ff0000\n"
+        "%%metro line: main2 | Main | #00ff00\n"
+        "%%metro line: other | Main (main1) | #0000ff\n"
+        "graph LR\n"
+        "  a[A] -->|main1| b[B]\n"
+        "  b -->|main2| c[C]\n"
+        "  c -->|other| d[D]\n"
+    )
+    verbose = format_info_text(build_info(graph), verbose=True)
+    assert '"Main (main1)":' in verbose
+    assert '"Main (main2)":' in verbose
+    assert '"Main (main1) #2":' in verbose
+
+
 @pytest.mark.parametrize("fixture", FIXTURES)
 def test_synthetic_elements_surfaced(fixture: str) -> None:
     """Ports and junctions appear in the inventory with the right kind."""
