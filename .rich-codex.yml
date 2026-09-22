@@ -12,12 +12,18 @@
 # The default 5s is close to a cold run's import + render time.
 timeout: 30
 
+# 120 columns keeps the longest warning on one line. notrim draws every image
+# at that full width rather than shrinking each to its own content, so they
+# are all the same width on the page.
+terminal_width: 120
+notrim: true
+
 # Output is captured through a pipe, not a pty, so colour has to be forced.
-# TERMINAL_WIDTH is the column rich-click and nf_metro.console wrap at; the
-# image is then trimmed to fit, so it also sets the width rich-codex draws.
+# TERMINAL_WIDTH is the column rich-click and nf_metro.console wrap at, and
+# has to match terminal_width above.
 extra_env:
   FORCE_COLOR: "1"
-  TERMINAL_WIDTH: "90"
+  TERMINAL_WIDTH: "120"
 
 outputs:
   # The guide's typo example is defined here rather than in the markdown: it
