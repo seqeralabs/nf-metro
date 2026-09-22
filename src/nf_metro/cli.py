@@ -91,23 +91,34 @@ _SOURCE_ERRORS = (
     PhaseInvariantError,
 )
 
+help_config = click.RichHelpConfiguration(
+    # Future: switch for default-square - https://github.com/ewels/rich-click/pull/358
+    theme="default-box",
+    style_options_panel_box="SQUARE",
+    style_options_panel_border="#158668",
+    style_commands_panel_box="SQUARE",
+    style_commands_panel_border="#2EC09C",
+    style_errors_panel_box="SQUARE",
+    style_usage="#2EC09C",
+    style_option="blue",
+    style_switch="blue",
+    style_argument="blue",
+    style_command="blue",
+    options_table_column_types=["required", "opt_long", "opt_short", "help"],
+    options_table_help_sections=[
+        "help",
+        "metavar",
+        "deprecated",
+        "envvar",
+        "default",
+        "required",
+    ],
+)
+
 
 @click.group()
 @click.version_option(version=__version__)
-@click.rich_config(
-    {
-        "theme": "forest-nu",
-        "options_table_column_types": ["required", "opt_long", "opt_short", "help"],
-        "options_table_help_sections": [
-            "help",
-            "metavar",
-            "deprecated",
-            "envvar",
-            "default",
-            "required",
-        ],
-    }
-)
+@click.rich_config(help_config=help_config)
 @click.command_panel("Render", commands=["render", "render-many", "convert"])
 @click.command_panel(
     "Inspect", commands=["validate", "validate-svg", "info", "explain"]
