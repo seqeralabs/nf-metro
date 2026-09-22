@@ -326,6 +326,20 @@ _YAML_TIMESTAMP = re.compile(
 _YAML_IMPLICIT_TYPES = (_YAML_BOOL, _YAML_NULL, _YAML_INT, _YAML_FLOAT, _YAML_TIMESTAMP)
 
 
+#: DEL, the C1 control range, and the Unicode line/paragraph separators:
+#: YAML treats a raw occurrence of any of these as a literal line break even
+#: inside a quoted scalar (some, like NEL U+0085, are instead silently folded
+#: to a space), which can corrupt or desynchronise the surrounding document.
+#: ``json.dumps`` only escapes plain ASCII control characters (below 0x20).
+#: Built from ``chr()`` calls, not literal characters, so the source file
+#: stays plain ASCII rather than embedding an invisible separator.
+_YAML_UNSAFE_CHARS = frozenset(chr(c) for c in range(0x7F, 0xA0)) | {
+    chr(0x2028),
+    chr(0x2029),
+}
+_YAML_UNSAFE_QUOTED = re.compile("[" + "".join(_YAML_UNSAFE_CHARS) + "]")
+
+
 def _is_plain_scalar(text: str) -> bool:
     """Whether *text* can be written unquoted and read back unchanged.
 
@@ -338,9 +352,23 @@ def _is_plain_scalar(text: str) -> bool:
         return False
     if text[0] in "-?:,[]{}#&*!|>'\"%@`" or ":" in text or "#" in text:
         return False
-    if any(char in text for char in "\n\r\t"):
+    if any(ord(char) < 0x20 for char in text) or any(
+        char in _YAML_UNSAFE_CHARS for char in text
+    ):
         return False
     return not any(pattern.fullmatch(text) for pattern in _YAML_IMPLICIT_TYPES)
+
+
+def _yaml_quote(text: str) -> str:
+    """JSON-quote *text* for use as a YAML scalar.
+
+    ``ensure_ascii=False`` keeps an astral character (e.g. an emoji) as
+    itself rather than a UTF-16 surrogate pair, which JSON parsers recombine
+    but YAML's double-quoted scalar does not. The bytes JSON leaves raw that
+    YAML still rejects are escaped afterwards.
+    """
+    quoted = json.dumps(text, ensure_ascii=False)
+    return _YAML_UNSAFE_QUOTED.sub(lambda m: f"\\u{ord(m.group()):04x}", quoted)
 
 
 def _yaml_scalar(value: object) -> str:
@@ -352,7 +380,7 @@ def _yaml_scalar(value: object) -> str:
     if isinstance(value, (int, float)):
         return str(value)
     text = str(value)
-    return text if _is_plain_scalar(text) else json.dumps(text)
+    return text if _is_plain_scalar(text) else _yaml_quote(text)
 
 
 #: A key needing no quotes: no colon, no leading indicator character.
@@ -363,7 +391,7 @@ def _yaml_key(key: object) -> str:
     """*key* as written, quoted when a bare word would not parse back."""
     text = str(key)
     plain = _PLAIN_KEY.fullmatch(text) and _is_plain_scalar(text)
-    return text if plain else json.dumps(text)
+    return text if plain else _yaml_quote(text)
 
 
 def to_yaml(value: object, indent: int = 0) -> list[str]:

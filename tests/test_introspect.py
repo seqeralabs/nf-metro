@@ -356,3 +356,46 @@ def test_to_yaml_handles_a_list_holding_an_empty_collection() -> None:
 
     document = {"items": [{}, [], "x"]}
     assert yaml.safe_load("\n".join(to_yaml(document))) == document
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Step 1: \U0001f389 Party",  # astral emoji forced to quote by the colon
+        "\U0001f600 alone",  # astral emoji, no other quote trigger
+        "\U0001d400 math bold A",  # a different astral plane
+    ],
+)
+def test_yaml_scalar_preserves_astral_characters(text: str) -> None:
+    """An astral character (outside the BMP) must not become a lone surrogate.
+
+    ``json.dumps`` with its default ``ensure_ascii=True`` splits an astral
+    character into a UTF-16 surrogate pair of ``\\uXXXX`` escapes; a JSON
+    parser recombines the pair, but PyYAML's double-quoted scalar parser
+    stores the two lone surrogates instead of the original character.
+    """
+    yaml = pytest.importorskip("yaml")
+    from nf_metro.introspect import to_yaml
+
+    lines = to_yaml({"key": text})
+    assert yaml.safe_load("\n".join(lines)) == {"key": text}
+
+
+@pytest.mark.parametrize(
+    "char",
+    [chr(c) for c in [0x00, 0x07, 0x0B, 0x1F, 0x7F, 0x85, 0x9F, 0x2028, 0x2029]],
+)
+def test_yaml_scalar_escapes_characters_yaml_forbids_or_folds(char: str) -> None:
+    """A control character, C1 character, or line/paragraph separator must survive.
+
+    YAML rejects most of these unescaped even inside a quoted scalar, and
+    silently folds a couple of them (e.g. NEL, U+0085) to a plain space
+    instead of erroring - either way the original character is lost unless
+    it is escaped.
+    """
+    yaml = pytest.importorskip("yaml")
+    from nf_metro.introspect import to_yaml
+
+    text = f"a{char}b"
+    lines = to_yaml({"key": text})
+    assert yaml.safe_load("\n".join(lines)) == {"key": text}
