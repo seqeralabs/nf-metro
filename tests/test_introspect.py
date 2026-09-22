@@ -89,6 +89,26 @@ def test_routes_exclude_synthetic_stations(fixture: str) -> None:
             assert station_kind(graph, sid) == "station"
 
 
+def test_verbose_routes_keeps_both_lines_sharing_a_display_name() -> None:
+    """Two lines may share a display name; ``--verbose``'s routes: must not drop one.
+
+    ``%%metro line:`` only enforces a unique id, not a unique display name,
+    and ``routes:`` is a dict keyed by name for readability - a plain
+    ``{display_name: route}`` comprehension collides and silently drops one
+    line's route.
+    """
+    graph = parse_metro_mermaid(
+        "%%metro line: main1 | Main Line | #ff0000\n"
+        "%%metro line: main2 | Main Line | #00ff00\n"
+        "graph LR\n"
+        "  a[A] -->|main1| b[B]\n"
+        "  b -->|main2| c[C]\n"
+    )
+    verbose = format_info_text(build_info(graph), verbose=True)
+    assert '"Main Line (main1)":' in verbose
+    assert '"Main Line (main2)":' in verbose
+
+
 @pytest.mark.parametrize("fixture", FIXTURES)
 def test_synthetic_elements_surfaced(fixture: str) -> None:
     """Ports and junctions appear in the inventory with the right kind."""
@@ -289,6 +309,8 @@ _ADVERSARIAL_SCALARS = [
     " leading space",
     "trailing space ",
     "",
+    "=",  # YAML's bare "value" tag
+    "<<",  # YAML's bare "merge" tag
 ]
 
 

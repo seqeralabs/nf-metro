@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -323,7 +324,18 @@ _YAML_TIMESTAMP = re.compile(
     r":[0-9][0-9]:[0-9][0-9](?:\.[0-9]*)?"
     r"(?:[ \t]*(?:Z|[-+][0-9][0-9]?(?::[0-9][0-9])?))?"
 )
-_YAML_IMPLICIT_TYPES = (_YAML_BOOL, _YAML_NULL, _YAML_INT, _YAML_FLOAT, _YAML_TIMESTAMP)
+#: The bare ``value`` and ``merge`` tags: neither starts with an indicator
+#: character already blocked below, and neither is a bool/null/int/float/
+#: timestamp, so they need their own entry.
+_YAML_VALUE_OR_MERGE = re.compile(r"=|<<")
+_YAML_IMPLICIT_TYPES = (
+    _YAML_BOOL,
+    _YAML_NULL,
+    _YAML_INT,
+    _YAML_FLOAT,
+    _YAML_TIMESTAMP,
+    _YAML_VALUE_OR_MERGE,
+)
 
 
 #: DEL, the C1 control range, and the Unicode line/paragraph separators:
@@ -454,6 +466,25 @@ def _info_summary(info: dict[str, Any]) -> dict[str, Any]:
     return summary
 
 
+def _route_keys(lines: list[dict[str, Any]]) -> list[str]:
+    """Route keys for *lines*, one per line, never colliding.
+
+    ``%%metro line:`` only requires a unique id; two lines may share a
+    display name, and ``routes:`` is a dict keyed by name for readability,
+    so a plain ``{display_name: route}`` comprehension would silently drop
+    one line's route on a collision. Disambiguated with the id only where
+    a collision actually occurs, so the common case stays plain names.
+    """
+    names = [line["display_name"] for line in lines]
+    counts = Counter(names)
+    return [
+        f"{line['display_name']} ({line['id']})"
+        if counts[line["display_name"]] > 1
+        else line["display_name"]
+        for line in lines
+    ]
+
+
 def _info_detail(info: dict[str, Any]) -> dict[str, Any]:
     """What ``--verbose`` adds: warnings, the DAG, layout, routes, synthetics."""
     layout = info["layout"]
@@ -470,7 +501,12 @@ def _info_detail(info: dict[str, Any]) -> dict[str, Any]:
                 str(row): list(ids) for row, ids in layout["sections_by_row"].items()
             },
         },
-        "routes": {line["display_name"]: list(line["route"]) for line in info["lines"]},
+        "routes": dict(
+            zip(
+                _route_keys(info["lines"]),
+                (list(line["route"]) for line in info["lines"]),
+            )
+        ),
         "section_detail": [
             {
                 "number": sec["number"],
