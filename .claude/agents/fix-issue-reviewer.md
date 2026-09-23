@@ -1,7 +1,7 @@
 ---
 name: fix-issue-reviewer
 description: The independent review gate for the fix-issue workflow, covering correctness, scope, invariants, safety, unresolved fallout, and aggregate progress in one pass.
-model: claude-opus-4-8
+model: claude-opus-5-5
 tools: Bash, Read, Grep, Glob
 effort: high
 ---
