@@ -3408,7 +3408,12 @@ def _land_feeder_on_run(rp: RoutedPath, run: HTrunkSeg, ctx: _RoutingCtx) -> Non
     _set_vchannel_x(ch, run.xb)
 
 
-def _materialize_trunk_slots(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
+def _materialize_trunk_slots(
+    routes: list[RoutedPath],
+    ctx: _RoutingCtx,
+    *,
+    fixed_route_ids: frozenset[int] = frozenset(),
+) -> None:
     """Resolve every declared :class:`TrunkSlot` to a concentric channel Y.
 
     The horizontal-trunk twin of :func:`_materialize_gap_slots`.  Handlers that
@@ -3432,9 +3437,17 @@ def _materialize_trunk_slots(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
     Trunks alone in their channel, or already at distinct Ys, are left
     untouched; the flanking corner radii are recomputed for any trunk that
     actually moves so the bundle stays concentric.
+
+    *fixed_route_ids* names routes present only as context for a stroke another
+    plan emits: neither restacked nor doglegged, as that plan's owned segments
+    are not when it emits them.
     """
     step = ctx.offset_step
-    trunks = _declared_htrunks(routes)
+    trunks = [
+        trunk
+        for trunk in _declared_htrunks(routes)
+        if id(trunk.route) not in fixed_route_ids
+    ]
     groups = _group_channel_trunks(trunks, step) if len(trunks) >= 2 else []
 
     # Routes whose trunk this pass has placed into a concentric bundle; the
@@ -3471,7 +3484,9 @@ def _materialize_trunk_slots(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
         # the reorder where no stack top seats it inside the claimed bands.
         _stack_trunk_bands(bands, ctx, step, bundled, discretionary=all_exempt)
 
-    _dogleg_off_exempt_trunks(routes, ctx, skip=bundled)
+    _dogleg_off_exempt_trunks(
+        routes, ctx, skip=bundled, fixed_route_ids=fixed_route_ids
+    )
     _bundle_same_destination_tails(routes, ctx)
     _separate_declared_opposing_gap_bundles(routes, ctx)
 
@@ -4081,7 +4096,11 @@ def _exempt_trunk_separation(
 
 
 def _dogleg_off_exempt_trunks(
-    routes: list[RoutedPath], ctx: _RoutingCtx, skip: set[int] | None = None
+    routes: list[RoutedPath],
+    ctx: _RoutingCtx,
+    skip: set[int] | None = None,
+    *,
+    fixed_route_ids: frozenset[int] = frozenset(),
 ) -> None:
     """Offset a non-exempt trunk drawn collinear with an exempt run.
 
@@ -4103,9 +4122,11 @@ def _dogleg_off_exempt_trunks(
       already that far apart are a legitimate bundle and left untouched.
 
     Both regimes clamp inside the inter-row gap, leaving the next row's header
-    protrusion clear so the trunk stays in the envelope.
+    protrusion clear so the trunk stays in the envelope.  A route in
+    *fixed_route_ids* is never the one moved.
     """
     skip = skip or set()
+    unmoved = skip | fixed_route_ids
     obstacles = [
         t
         for t in _collect_htrunks(routes, include_exempt=True)
@@ -4115,7 +4136,7 @@ def _dogleg_off_exempt_trunks(
         return
     clearance = EDGE_TO_BUNDLE_CLEARANCE
     for t in _collect_htrunks(routes):
-        if id(t.route) in skip or route_system_owns_segment_boundary(t.route, t.idx):
+        if id(t.route) in unmoved or route_system_owns_segment_boundary(t.route, t.idx):
             continue
         hit = next(
             (
@@ -4168,7 +4189,7 @@ def _dogleg_off_exempt_trunks(
 
     step = ctx.offset_step
     for t in _collect_htrunks(routes):
-        if id(t.route) in skip or route_system_owns_segment_boundary(t.route, t.idx):
+        if id(t.route) in unmoved or route_system_owns_segment_boundary(t.route, t.idx):
             continue
         hit = next(
             (

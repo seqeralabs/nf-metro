@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections import Counter, deque
 from collections.abc import (
     Callable,
@@ -38,6 +39,10 @@ from nf_metro.layout.phases._common import (
 from nf_metro.layout.route_topology import divergence_junction_exit_ports
 from nf_metro.layout.routing.arranger import BoundaryConfig, lane_order
 from nf_metro.layout.routing.common import (
+    _h_segment_penetrates_section,
+    _v_segment_crosses_other_section,
+    col_left_edge,
+    col_right_edge,
     merge_junction_ids,
     needs_perp_approach_fan,
     perp_entry_consumer,
@@ -3924,6 +3929,138 @@ def _order_top_descent_over_left_entry(ctx: _OffsetCtx) -> None:
             _apply_offset_upstream_on_row(ctx, port_id, lid, new_offs[lid])
 
 
+_DESCENT_CORRIDOR_EPS = 2.0
+"""How far past its reach a feeder's descent is taken to run, so a descent at a
+column's own inward edge counts that column's boundary."""
+
+
+def _outward_lead_sign(ctx: _OffsetCtx, station_id: str) -> int | None:
+    """Screen-X sign a feeder leaves *station_id* along, or ``None`` if unknown.
+
+    An exit port leads out of its own side; a divergence junction leads out of
+    the exit port it fans from.  Anything else has no single lead direction.
+    """
+    port = ctx.graph.ports.get(ctx.divergence_exit_ports.get(station_id, station_id))
+    if port is None:
+        return None
+    if port.side is PortSide.RIGHT:
+        return 1
+    if port.side is PortSide.LEFT:
+        return -1
+    return None
+
+
+def _feeder_descent_corridors(
+    ctx: _OffsetCtx, port_id: str, port: Port, outward: int
+) -> tuple[dict[str, int], dict[str, int]] | None:
+    """Each non-level feeder line's descent corridor at a flow-start side entry.
+
+    A feeder whose source leads out *outward* drops to the port's row down the
+    outer side of whichever reaches further out, its source or the port, and
+    turns in along that row.  The corridor is the count of grid-column inward
+    edges at or before that descent along *outward*.  Returns the lines
+    arriving from above and from below, or ``None`` when some feeder's corridor
+    is not decided that way: its lead is unknown or points toward the port, one
+    line arrives down two corridors, or an intervening section blocks the drop
+    or the turn-in.
+    """
+    graph = ctx.graph
+    section = graph.section_for_port(port)
+    port_station = graph.stations[port_id]
+    columns = {other.grid_col for other in graph.sections.values()}
+    inward_edges = [
+        col_left_edge(graph, col, default=math.inf)
+        if outward > 0
+        else col_right_edge(graph, col, default=-math.inf)
+        for col in columns
+    ]
+    above: dict[str, int] = {}
+    below: dict[str, int] = {}
+    for edge in graph.edges_to(port_id):
+        source = graph.stations[edge.source]
+        rise = source.y - port_station.y
+        if abs(rise) <= _SAME_Y_TOLERANCE:
+            continue
+        if _outward_lead_sign(ctx, edge.source) != outward:
+            return None
+        reach = max(0.0, outward * (source.x - port_station.x))
+        descent_x = port_station.x + outward * (reach + _DESCENT_CORRIDOR_EPS)
+        if reach > 0:
+            exempt = {section.id, source.section_id}
+            if _v_segment_crosses_other_section(
+                graph, descent_x, source.y, port_station.y, exempt
+            ) or any(
+                _h_segment_penetrates_section(
+                    min(descent_x, port_station.x),
+                    max(descent_x, port_station.x),
+                    port_station.y,
+                    other,
+                )
+                for other in graph.sections.values()
+                if other.id not in exempt
+            ):
+                return None
+        corridor = sum(
+            1 for inward in inward_edges if outward * (descent_x - inward) >= 0
+        )
+        group = above if rise < 0 else below
+        if group.get(edge.line_id, corridor) != corridor:
+            return None
+        group[edge.line_id] = corridor
+    return above, below
+
+
+def _order_flow_start_side_entry_by_descent_corridor(ctx: _OffsetCtx) -> None:
+    """Order a flow-start side entry's descending feeders by descent corridor.
+
+    Feeders dropping into a LEFT/RIGHT entry port on the flow-start side of an
+    LR/RL section turn in along the port's row from a vertical leg outward of
+    it.  Nested turn-ins stay crossing-free only when the lane nearest the
+    approach side holds the nearest corridor: feeders from above take the top
+    lanes in corridor order, feeders from below the bottom lanes in reverse.
+    Level feeders keep their slots.  The existing slots are re-dealt in that
+    order and carried along the consumer section.
+
+    Side-symmetric through the outward sign; a port whose feeders' corridors
+    :func:`_feeder_descent_corridors` cannot decide is left to the LEFT-only
+    phases :func:`_order_top_descent_over_left_entry` and
+    :func:`_order_convergence_by_approach`, which own the shapes that lead
+    toward the port.
+    """
+    graph = ctx.graph
+    for port_id, port in graph.ports.items():
+        if not port.is_entry or port.side not in (PortSide.LEFT, PortSide.RIGHT):
+            continue
+        section = graph.section_for_port(port)
+        if (
+            not lanes_run_along_y(section.direction)
+            or port.side is not flow_port_sides(section.direction)[0]
+            or port.section_id in ctx.reversed_sections
+            or len(graph.station_lines(port_id)) < 2
+        ):
+            continue
+        outward = 1 if port.side is PortSide.RIGHT else -1
+        corridors = _feeder_descent_corridors(ctx, port_id, port, outward)
+        if corridors is None:
+            continue
+        new_offs: dict[str, float] = {}
+        for group, nearest_first in zip(corridors, (1, -1), strict=True):
+            if len(set(group.values())) < 2:
+                continue
+            current = {lid: ctx.offsets.get((port_id, lid), 0.0) for lid in group}
+            ordered = sorted(
+                group, key=lambda lid: (nearest_first * group[lid], current[lid], lid)
+            )
+            for lid, slot in zip(ordered, sorted(current.values()), strict=True):
+                if abs(slot - current[lid]) > _OFFSET_EQ_TOLERANCE:
+                    new_offs[lid] = slot
+        if not new_offs or _bundle_reslot_collides(
+            ctx, port_id, port.section_id, new_offs
+        ):
+            continue
+        _apply_offsets_along_bundle(ctx, port_id, port.section_id, new_offs)
+
+
 def _recenter_partial_fan_branches(ctx: _OffsetCtx) -> None:
     """Collapse reserved absent-line slots at independent fan branches.
 
@@ -4855,6 +4992,10 @@ def compute_station_offsets(
        at a LEFT entry port fed both level from its own row and by a line
        descending from a row above, the descending line takes the top lane
        so it does not dive under the level feeder.
+    7f. **Flow-start side-entry descent ordering** - at a LEFT/RIGHT entry
+       port on the flow-start side of an LR/RL section, re-deals the feeders
+       descending from above (or climbing from below) onto the port's slots
+       in the order of the corridor each drops down, so their turn-ins nest.
     8. **Horizontal reconciliation** - snaps mismatched offsets on
        same-Y edges to eliminate almost-horizontal slopes.
     8b. **Flat TB-exit/entry alignment** - on an auto-folded return row,
@@ -4937,6 +5078,7 @@ def compute_station_offsets(
     _order_convergence_entry_ports(ctx)
     _order_convergence_by_approach(ctx)
     _order_top_descent_over_left_entry(ctx)
+    _order_flow_start_side_entry_by_descent_corridor(ctx)
     _reconcile_horizontal_offsets(ctx)
     _align_flat_tb_exit_to_entry(ctx)
     _recenter_partial_fan_branches(ctx)

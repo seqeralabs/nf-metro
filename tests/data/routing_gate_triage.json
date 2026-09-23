@@ -1622,5 +1622,13 @@
  "member_geometry.py::if both_sides:::#1": {
   "note": "The validator's disjoint-boundary-sides check. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on).",
   "status": "needs-review"
+ },
+ "offsets.py::if group.get(edge.line_id, corridor) != corridor:::#1": {
+  "note": "The flow-start side-entry descent phase skips a port where one line arrives down two different descent corridors from the same side: the line holds one lane at the port, which cannot nest inside both turn-ins. Reachable in principle (two authored networks of one line descending into one flow-start side entry from sources at different reach), but no corpus fixture presents it.",
+  "status": "needs-review"
+ },
+ "offsets.py::if port is None:::#1": {
+  "note": "The flow-start side-entry descent phase reads a feeder's lead direction from its exit port or its divergence junction's exit port; any other source (a merge junction, say) has no single lead, so the port is skipped. Such a source feeding a flow-start side entry off the port's row is valid, but every corpus feeder of this shape is an exit port or a divergence junction, or arrives level and is skipped before the lead is read.",
+  "status": "needs-review"
  }
 }
