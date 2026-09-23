@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from nf_metro.api import prepare_graph, resolve_theme
+from nf_metro.layout import route_reservations
 from nf_metro.layout.constants import COORD_TOLERANCE
 from nf_metro.layout.phases._common import _restoring_layout_geometry
 from nf_metro.layout.route_plan import RoutePlan
@@ -282,6 +283,34 @@ def test_trunk_slot_materialisation_leaves_convergence_context_in_place(
         == ("__junction_12", "__merge_2", "riboseq")
         for route in context_routes
     )
+
+
+def test_endpoint_section_lead_is_not_filed_in_a_neighbouring_gap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ``germline`` leg into ``annotation``'s left entry runs inside the
+    ``annotation`` band, so no gap region files it."""
+    real_region = route_reservations._corridor_region
+    filed: list[object] = []
+
+    def spy(graph, segment, segments, span, connector_ids, member, extents):
+        corridor = real_region(
+            graph, segment, segments, span, connector_ids, member, extents
+        )
+        if segment.after is None and (
+            member.source.station_id,
+            member.target.station_id,
+            member.line_id,
+        ) == ("__junction_9", "annotation__entry_left_6", "germline"):
+            filed.append(corridor)
+        return corridor
+
+    monkeypatch.setattr(route_reservations, "_corridor_region", spy)
+    _assert_planned(
+        "tests/fixtures/regressions/cross_column_perp_entry_overflow.mmd", monkeypatch
+    )
+    assert filed
+    assert set(filed) == {None}
 
 
 @pytest.mark.parametrize(
