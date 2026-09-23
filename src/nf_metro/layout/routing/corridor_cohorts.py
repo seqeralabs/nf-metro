@@ -170,7 +170,14 @@ class CorridorAllocationResult:
 
 
 def _q(value: float) -> Fraction:
-    return Fraction(str(value))
+    """*value* as an exact rational, with float noise below 1e-9 dropped.
+
+    Coordinates are sums of a pitch that need not be binary-exact (a 3.6px
+    lane step), so two lanes drawn one pitch apart can differ by
+    ``698.8000000000001 - 695.2``; read exactly, that sub-nanometre residue
+    is a distinct separation and a spurious contradiction.
+    """
+    return Fraction(str(round(value, 9)))
 
 
 def _overlaps(a_start: float, a_end: float, b_start: float, b_end: float) -> bool:

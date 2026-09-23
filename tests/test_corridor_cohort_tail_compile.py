@@ -27,7 +27,7 @@ from nf_metro.layout.envelope_settlement import (
 )
 from nf_metro.layout.phases.guards import LayoutInvariantError
 from nf_metro.layout.route_plan import RoutePlan, SettlementStage
-from nf_metro.layout.routing import member_geometry, planning
+from nf_metro.layout.routing import corridor_cohorts, member_geometry, planning
 from nf_metro.layout.routing.common import OffsetRegime
 from nf_metro.layout.routing.offsets import compute_station_offsets
 from nf_metro.layout.settlement_demand import (
@@ -143,6 +143,24 @@ def test_lanes_pitched_below_the_default_step_compile_at_their_own_pitch(
     is a separation the compiler must accept, between two movable lanes and
     between a movable lane and a fixed one."""
     _assert_planned(relative_path, monkeypatch, layout_options)
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    ("examples/variantbenchmarking.mmd", "examples/variantbenchmarking_auto.mmd"),
+)
+def test_lanes_on_a_non_binary_pitch_compile(
+    relative_path: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``stroke_scale: 0.9`` pitches lanes 3.6px apart, a step whose sums carry
+    float residue; one pitch is one separation however the sum rounded."""
+    _assert_planned(relative_path, monkeypatch, {"stroke_scale": 0.9})
+
+
+def test_one_non_binary_pitch_reads_as_one_exact_separation() -> None:
+    assert corridor_cohorts._q(698.8000000000001) - corridor_cohorts._q(
+        695.2
+    ) == corridor_cohorts._q(3.6)
 
 
 VERTICAL_FLOW_SIDE_ENTRY_FIXTURES = (
