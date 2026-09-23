@@ -1872,6 +1872,46 @@ def _assert_aperture_grant_closes(
             )
 
 
+@dataclass(frozen=True)
+class _RouteObservationInputs:
+    """The layout state one route observation read, kept so it can be replayed."""
+
+    station_positions: dict[str, tuple[float, float]]
+    section_boxes: dict[str, tuple[float, float, float, float]]
+    bypass_label_obstacles: dict[str, tuple[float, float, float, float]]
+    station_offsets: dict[tuple[str, str], float]
+
+    @classmethod
+    def capture(
+        cls, graph: MetroGraph, station_offsets: dict[tuple[str, str], float]
+    ) -> _RouteObservationInputs:
+        return cls(
+            {sid: (st.x, st.y) for sid, st in graph.stations.items()},
+            {
+                sid: (sec.bbox_x, sec.bbox_y, sec.bbox_w, sec.bbox_h)
+                for sid, sec in graph.sections.items()
+            },
+            graph.bypass_label_obstacles,
+            dict(station_offsets),
+        )
+
+    def restore(self, graph: MetroGraph) -> dict[tuple[str, str], float]:
+        """Write the captured layout back onto *graph*; return its offsets."""
+        for sid, (x, y) in self.station_positions.items():
+            station = graph.stations[sid]
+            station.x, station.y = x, y
+        for sid, (bx, by, bw, bh) in self.section_boxes.items():
+            section = graph.sections[sid]
+            section.bbox_x, section.bbox_y, section.bbox_w, section.bbox_h = (
+                bx,
+                by,
+                bw,
+                bh,
+            )
+        graph.bypass_label_obstacles = self.bypass_label_obstacles
+        return dict(self.station_offsets)
+
+
 class _SettledRenderGeometry(NamedTuple):
     """What :func:`_settle_render_geometry` derives from a laid-out graph."""
 
@@ -1936,7 +1976,9 @@ def _settle_render_geometry(
     - *Aperture*: after either, one re-observation against the ledger the last
       settlement consumed runs the corridor-cohort compiler, the only pass that
       does, because only a ledger already settled to its minimum widths compiles
-      without a spurious shortfall.  Its geometry is discarded.  A
+      without a spurious shortfall.  It replays the inputs of the last routing
+      pass, which seated that ledger's corridors, and its geometry is
+      discarded.  A
       ``CORRIDOR_COHORT_APERTURE`` requirement it publishes is settled once
       against that observed plan, :func:`_assert_aperture_grant_closes` proves
       from the settlement's own translations that the grant pays every measured
@@ -1978,6 +2020,7 @@ def _settle_render_geometry(
     carried_ports: tuple[str, ...] = ()
     carried_from: dict[str, tuple[float, float, float, float]] = {}
     settlement_trace = SettlementStageTrace()
+    last_route_inputs: _RouteObservationInputs | None = None
 
     def _place(
         station_offsets: dict[tuple[str, str], float], routes: list[RoutedPath]
@@ -2008,7 +2051,8 @@ def _settle_render_geometry(
         stage: SettlementStage,
         allow_clearance_requirements: bool = False,
     ) -> tuple[list[RoutedPath], RoutePlan]:
-        nonlocal settlement_trace
+        nonlocal settlement_trace, last_route_inputs
+        last_route_inputs = _RouteObservationInputs.capture(graph, station_offsets)
         observation = observe_route_edges_centred(
             graph,
             station_offsets=station_offsets,
@@ -2225,19 +2269,21 @@ def _settle_render_geometry(
     # The corridor-cohort compiler runs only on a pass that both holds a prior
     # ledger and may publish a clearance requirement, and only a ledger settled
     # to its minimum widths compiles without a spurious aperture shortfall; this
-    # observation is that pass.  Its routes are thrown away either way: a grant
-    # re-routes from the geometry the observation started on.
-    # `_resettle` clears `carried_ports` as a side effect; restore it here
-    # because this pass's own routes are discarded below, and the carried
-    # state belongs to whichever pass ultimately publishes.
-    carried_before_observation = carried_ports
+    # observation is that pass.  It replays the inputs of the routing pass it
+    # follows rather than deriving fresh ones: the label pass since then grew
+    # section boxes that pass never seated the ledger's corridors against, and
+    # routing against them can leave a corridor no band that fits.  Its
+    # routes are thrown away either way: a grant re-routes from the geometry
+    # the observation started on.
+    assert last_route_inputs is not None
     with _restoring_route_observation_geometry(graph):
-        _observed_offsets, observed_routes, observed_plan = _resettle(
+        observed_routes, observed_plan = _route(
+            last_route_inputs.restore(graph),
             settled_plan,
             settlement.coordinate_translations,
+            stage=SettlementStage.GENERAL_SETTLEMENT,
             allow_clearance_requirements=True,
         )
-    carried_ports = carried_before_observation
     aperture_requirements = _corridor_cohort_aperture_requirements(observed_plan)
     aperture_settlement: EnvelopeSettlement | None = None
     if aperture_requirements:

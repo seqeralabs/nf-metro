@@ -2118,14 +2118,18 @@ They are design evidence, not part of this specification.
   for drawn positive-side containment, then re-route while consuming it. The
   final decision-freeze check compares the strict plan with that consuming
   re-route. After either sequence the render takes one aperture observation:
-  a re-route against the ledger the last settlement consumed, with its
-  translations, that may publish clearance requirements. It is the only pass
-  that runs the corridor-cohort compiler, because only a ledger already settled
-  to its minimum widths compiles without a spurious shortfall. Its geometry
-  (station coordinates, section boxes, and bypass-label obstacles) is
-  discarded by `_restoring_route_observation_geometry`. The ports the label
-  pass before it carried are restored separately, by a manual save/restore
-  around that context manager rather than by the context manager itself. A
+  a replay of the last routing pass against the ledger the last settlement
+  consumed, with its translations, that may publish clearance requirements.
+  The replay reads exactly that pass's inputs (station coordinates, section
+  boxes, bypass-label obstacles and station offsets), not the geometry the
+  label pass after it grew: that pass seated the ledger's corridors against
+  those inputs, and a box the ledger never saw can leave a corridor with no
+  band that fits. It is the only pass that runs the corridor-cohort
+  compiler, because only a ledger already settled to its minimum widths
+  compiles without a spurious shortfall. Its geometry (station coordinates,
+  section boxes, and bypass-label obstacles) is discarded by
+  `_restoring_route_observation_geometry`; routing alone, it leaves the ports
+  the label pass before it carried as they were. A
   `CORRIDOR_COHORT_APERTURE` requirement it publishes is settled once against
   the observed plan, the grant is proven from that settlement's own
   translations to pay every measured deficit (`_assert_aperture_grant_closes`:

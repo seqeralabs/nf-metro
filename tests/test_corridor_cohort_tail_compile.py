@@ -697,20 +697,65 @@ def _layout_state(graph: MetroGraph) -> tuple[object, ...]:
 
 
 @pytest.mark.parametrize(
+    ("relative_path", "layout_options"),
+    (
+        ("examples/topologies/bypass_fan_in_outer_slot.mmd", {"font_scale": 2.0}),
+        ("examples/topologies/bypass_fan_in_outer_slot.mmd", {"stroke_scale": 0.5}),
+        (
+            "examples/topologies/symmetric_diamond_odd_slot_entry.mmd",
+            {"font_scale": 2.0},
+        ),
+        ("tests/fixtures/tb_exit_terminal_on_carrier.mmd", {"fold_threshold": 8}),
+        ("examples/simple_pipeline.mmd", None),
+    ),
+)
+def test_aperture_observation_replays_the_pass_it_follows(
+    relative_path: str,
+    layout_options: dict[str, object] | None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The label pass after a settlement re-route grows section boxes the
+    reservations it consumed were never measured against; the aperture
+    observation re-reads that re-route's own stations, boxes, bypass-label
+    obstacles and offsets, adding only the requirement it may publish."""
+    observations: list[tuple[bool, tuple[object, ...]]] = []
+    real_observe = svg.observe_route_edges_centred
+
+    def observe(graph, **kwargs):
+        stations, boxes, obstacles = _layout_state(graph)
+        observations.append(
+            (
+                _is_aperture_observation(kwargs),
+                (stations, boxes, dict(obstacles), dict(kwargs["station_offsets"])),
+            )
+        )
+        return real_observe(graph, **kwargs)
+
+    monkeypatch.setattr(svg, "observe_route_edges_centred", observe)
+    _assert_planned(relative_path, monkeypatch, layout_options)
+    tails = [rank for rank, (tail, _inputs) in enumerate(observations) if tail]
+    assert tails
+    for rank in tails:
+        assert observations[rank][1] == observations[rank - 1][1]
+
+
+@pytest.mark.parametrize(
     "relative_path",
     (
-        "examples/topologies/compact_hidden_passthrough.mmd",
         "examples/topologies/top_entry_left_neighbour.mmd",
-        "examples/topologies/multirow_source_stacked_fan.mmd",
+        "examples/topologies/bypass_fan_in_outer_slot.mmd",
+        "examples/topologies/wide_label_fan.mmd",
     ),
 )
 def test_a_discarded_aperture_observation_leaves_the_render_geometry(
     relative_path: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The observation re-anchors junctions, centres markers and refreshes the
-    bypass-label obstacles on these fixtures; with no aperture requirement all
-    of it is undone, the ports the label pass before it carried are still held,
-    and its route observation stays on the trace."""
+    """The observation replays the section boxes (and on the first two, the
+    station positions) the re-route before the last label pass read, which that
+    label pass has since grown; with no aperture requirement all of it is
+    undone, the bypass-label obstacles are the ones the render already holds,
+    the ports the label pass carried are still held, and its route observation
+    stays on the trace."""
     observed_states: list[tuple[tuple[object, ...], ...]] = []
     carries: list[tuple[str, ...]] = []
     carried_into_observation: list[tuple[str, ...]] = []
@@ -767,8 +812,7 @@ def test_a_discarded_aperture_observation_leaves_the_render_geometry(
     observed = svg.build_observed_render_plan(graph, resolve_theme(None, graph))
 
     ((before, during, after),) = observed_states
-    assert during[0] != before[0]
-    assert during[2] is not before[2]
+    assert during[:2] != before[:2]
     assert after[:2] == before[:2]
     assert after[2] is before[2]
     (carried,) = carried_into_observation
