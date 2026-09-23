@@ -23,8 +23,11 @@ resolution internally; no full layout pass is required.
 from __future__ import annotations
 
 import json
+from collections import Counter
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Literal
+
+import yaml
 
 from nf_metro.parser.provenance import ConnectorEndpointRole, EffectiveDecision
 from nf_metro.parser.route_topology import build_route_topology_query
@@ -292,108 +295,169 @@ def _format_inferred(inferred: bool | None) -> str:
     return "inferred" if inferred else "authored"
 
 
+class _BlockDumper(yaml.SafeDumper):
+    """A block-style dumper whose sequences are indented under their key."""
+
+    def increase_indent(self, flow: bool = False, indentless: bool = False) -> None:
+        super().increase_indent(flow, False)
+
+
+def _represent_str(dumper: "_BlockDumper", data: str) -> yaml.Node:
+    """Force double-quoted style for a string containing NEL (U+0085).
+
+    PyYAML's single-quoted style folds NEL as a line break with no way to
+    tell it apart from an intentional one, so it comes back as a space.
+    """
+    style = '"' if "\x85" in data else None
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data, style=style)
+
+
+_BlockDumper.add_representer(str, _represent_str)
+
+
+def to_yaml(value: object) -> list[str]:
+    """Render *value* as block-style YAML lines, via a real YAML emitter."""
+    text = yaml.dump(
+        value,
+        Dumper=_BlockDumper,
+        default_flow_style=False,
+        sort_keys=False,
+        allow_unicode=True,
+        width=10**9,
+    )
+    # Not str.splitlines(): it also splits on U+2028/U+2029, wrongly breaking
+    # an occurrence embedded in a scalar's own quoted content.
+    if text.endswith("\n"):
+        text = text[:-1]
+    return text.split("\n")
+
+
+def _info_summary(info: dict[str, Any]) -> dict[str, Any]:
+    """The stable headline summary: title, counts, lines, sections."""
+    summary: dict[str, Any] = {"title": info["title"]}
+    if info.get("caption"):
+        summary["caption"] = info["caption"]
+    summary["style"] = info["style"]
+    summary["counts"] = info["counts"]
+    summary["lines"] = [
+        {
+            "name": line["display_name"],
+            "color": line["color"],
+            "stations": line["n_stations"],
+        }
+        for line in info["lines"]
+    ]
+    summary["sections"] = [
+        {
+            "number": sec["number"],
+            "name": sec["name"],
+            "stations": sec["n_stations"],
+        }
+        for sec in info["sections"]
+    ]
+    return summary
+
+
+def _route_keys(lines: list[dict[str, Any]]) -> list[str]:
+    """Route keys for *lines*, one per line, guaranteed unique.
+
+    ``%%metro line:`` only requires a unique id; two lines may share a
+    display name, and ``routes:`` is a dict keyed by name for readability,
+    so a plain ``{display_name: route}`` comprehension would silently drop
+    one line's route on a collision. Disambiguating a duplicated name with
+    its id is not by itself enough: that disambiguated form can coincide
+    with a third line's own, undisambiguated display name (e.g. two lines
+    named "Main" alongside one actually named "Main (main1)"), so every key
+    is checked against every key already assigned, not just against its own
+    name's duplicate count, with a numeric suffix as the last resort.
+    """
+    names = [line["display_name"] for line in lines]
+    counts = Counter(names)
+    used: set[str] = set()
+    keys: list[str] = []
+    for line in lines:
+        name, lid = line["display_name"], line["id"]
+        base = f"{name} ({lid})" if counts[name] > 1 else name
+        candidate, suffix = base, 2
+        while candidate in used:
+            candidate = f"{base} #{suffix}"
+            suffix += 1
+        used.add(candidate)
+        keys.append(candidate)
+    return keys
+
+
+def _info_detail(info: dict[str, Any]) -> dict[str, Any]:
+    """What ``--verbose`` adds: warnings, the DAG, layout, routes, synthetics."""
+    layout = info["layout"]
+    return {
+        "warnings": list(info["warnings"]),
+        "section_dag": [
+            {"from": edge["from"], "to": edge["to"], "lines": list(edge["lines"])}
+            for edge in info["section_dag"]["edges"]
+        ],
+        "layout": {
+            "rows": layout["rows"],
+            "folded": layout["folded"],
+            "sections_by_row": {
+                str(row): list(ids) for row, ids in layout["sections_by_row"].items()
+            },
+        },
+        "routes": dict(
+            zip(
+                _route_keys(info["lines"]),
+                (list(line["route"]) for line in info["lines"]),
+            )
+        ),
+        "section_detail": [
+            {
+                "number": sec["number"],
+                "name": sec["name"],
+                "box": "implicit" if sec["is_implicit"] else "explicit",
+                "direction": sec["direction"],
+                "direction_source": (
+                    sec["direction_provenance"]["state"]
+                    if sec["direction_provenance"]
+                    else "unrecorded"
+                ),
+                "grid": f"{sec['grid']['col']},{sec['grid']['row']}",
+                "grid_source": (
+                    sec["grid_provenance"]["state"]
+                    if sec["grid_provenance"]
+                    else "unrecorded"
+                ),
+                "stations": list(sec["stations"]),
+                "entry_ports": list(sec["entry_ports"]),
+                "entry_sides": _format_inferred(sec["entry_sides_inferred"]),
+                "exit_ports": list(sec["exit_ports"]),
+                "exit_sides": _format_inferred(sec["exit_sides_inferred"]),
+            }
+            for sec in info["sections"]
+        ],
+        "ports": [
+            {
+                "id": port["id"],
+                "kind": "entry" if port["is_entry"] else "exit",
+                "side": port["side"],
+                "side_source": _format_inferred(port["side_inferred"]),
+                "section": port["section_id"],
+            }
+            for port in info["ports"]
+        ],
+        "junctions": list(info["junctions"]),
+    }
+
+
 def format_info_text(info: dict[str, Any], *, verbose: bool = False) -> str:
-    """Render the introspection dict as human-readable text.
+    """Render the introspection dict as YAML.
 
     The non-verbose form is the stable, headline summary (title, counts,
-    per-line and per-section station counts).  ``verbose`` appends the richer
+    per-line and per-section station counts). ``verbose`` appends the richer
     introspection: warnings, the section dependency graph, fold/row layout,
-    ordered per-line routes, per-section detail with inferred/explicit flags,
+    per-line routes, per-section detail with inferred/authored provenance,
     and the synthetic ports and junctions.
     """
-    out: list[str] = []
-    out.append(f"Title: {info['title'] or '(none)'}")
-    if info.get("caption"):
-        out.append(f"Caption: {info['caption']}")
-    out.append(f"Style: {info['style']}")
-    counts = info["counts"]
-    out.append(f"Stations: {counts['stations']}")
-    out.append(f"Edges: {counts['edges']}")
-    out.append(f"Lines: {counts['lines']}")
-    for line in info["lines"]:
-        out.append(
-            f"  {line['display_name']} ({line['color']}): {line['n_stations']} stations"
-        )
-    out.append(f"Sections: {counts['sections']}")
-    for sec in info["sections"]:
-        out.append(f"  [{sec['number']}] {sec['name']}: {sec['n_stations']} stations")
-
-    if not verbose:
-        return "\n".join(out)
-
-    out.append("")
-    out.append("Warnings:")
-    if info["warnings"]:
-        for warning in info["warnings"]:
-            out.append(f"  - {warning}")
-    else:
-        out.append("  (none)")
-
-    out.append("")
-    out.append("Section dependency graph:")
-    if info["section_dag"]["edges"]:
-        for edge in info["section_dag"]["edges"]:
-            out.append(f"  {edge['from']} -> {edge['to']} [{', '.join(edge['lines'])}]")
-    else:
-        out.append("  (no inter-section edges)")
-
-    layout = info["layout"]
-    fold = "folded" if layout["folded"] else "single row"
-    out.append("")
-    out.append(f"Layout: {layout['rows']} row(s), {fold}")
-    for row, ids in layout["sections_by_row"].items():
-        out.append(f"  row {row}: {', '.join(ids)}")
-
-    out.append("")
-    out.append("Per-line routes:")
-    for line in info["lines"]:
-        route = " -> ".join(line["route"]) if line["route"] else "(empty)"
-        out.append(f"  {line['display_name']}: {route}")
-
-    out.append("")
-    out.append("Sections (detail):")
-    for sec in info["sections"]:
-        direction_state = sec["direction_provenance"]
-        grid_state = sec["grid_provenance"]
-        tags = [
-            "implicit" if sec["is_implicit"] else "explicit-box",
-            f"{sec['direction']} "
-            f"({direction_state['state'] if direction_state else 'unrecorded'})",
-            f"grid {sec['grid']['col']},{sec['grid']['row']} "
-            f"({grid_state['state'] if grid_state else 'unrecorded'})",
-        ]
-        out.append(f"  [{sec['number']}] {sec['name']}: {', '.join(tags)}")
-        if sec["stations"]:
-            out.append(f"      stations: {', '.join(sec['stations'])}")
-        if sec["entry_ports"]:
-            out.append(
-                f"      entry ports ({_format_inferred(sec['entry_sides_inferred'])}): "
-                f"{', '.join(sec['entry_ports'])}"
-            )
-        if sec["exit_ports"]:
-            out.append(
-                f"      exit ports ({_format_inferred(sec['exit_sides_inferred'])}): "
-                f"{', '.join(sec['exit_ports'])}"
-            )
-
-    out.append("")
-    out.append("Ports (synthetic):")
-    if info["ports"]:
-        for port in info["ports"]:
-            kind = "entry" if port["is_entry"] else "exit"
-            out.append(
-                f"  {port['id']}: {kind} {port['side']} "
-                f"({_format_inferred(port['side_inferred'])}) in {port['section_id']}"
-            )
-    else:
-        out.append("  (none)")
-
-    out.append("")
-    out.append("Junctions (synthetic):")
-    if info["junctions"]:
-        for jid in info["junctions"]:
-            out.append(f"  {jid}")
-    else:
-        out.append("  (none)")
-
-    return "\n".join(out)
+    document = _info_summary(info)
+    if verbose:
+        document.update(_info_detail(info))
+    return "\n".join(to_yaml(document))

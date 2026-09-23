@@ -6,7 +6,12 @@
 repo = "https://github.com/pre-commit/pre-commit-hooks"
 rev = "v5.0.0"
 hooks = [
-  { id = "trailing-whitespace" },
+  {
+    id = "trailing-whitespace",
+    # rich-codex's terminal screenshots indent with whitespace-only lines, and
+    # CI regenerates and commits them without running these hooks.
+    exclude = '\.svg$'
+  },
   {
     id = "end-of-file-fixer",
     exclude = '\.svg$'

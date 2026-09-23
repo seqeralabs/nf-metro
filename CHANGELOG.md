@@ -15,6 +15,28 @@ history.
 
 ## [Unreleased]
 
+### Added
+
+- `%%metro output:` paths take per-output render overrides after a `|`:
+  `animate`, `mode=`, `theme=`, `scale=`, and `raster_width=`. One
+  `nf-metro render` pass now writes a static SVG, an animated SVG, and a
+  light/dark PNG pair with no CLI flags, which is what the nf-core pipeline
+  template needs from the GitHub Action and pre-commit hook. `mode` and
+  `theme` are baked at serialize time, so those four files still cost two
+  layout runs, not four.
+
+### Changed
+
+- `--reject-output-outside-source` now scopes to the git working tree holding
+  the `.mmd` rather than to the `.mmd`'s own directory, so
+  `assets/metro_map.mmd` may declare `../docs/images/map.svg`. Paths escaping
+  the repository, and any path whose resolved destination lies inside a
+  `.git` directory (git config and hooks are a code-execution vector for a
+  later `git` call in the same job), are still refused; outside a git
+  working tree the old source-directory rule still applies. Declared paths
+  are also reported collapsed
+  (`docs/images/map.svg`, not `assets/../docs/images/map.svg`).
+
 ## [2.1.0] — 2026-09-15
 
 ### Added

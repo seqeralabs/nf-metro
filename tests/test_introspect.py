@@ -89,6 +89,52 @@ def test_routes_exclude_synthetic_stations(fixture: str) -> None:
             assert station_kind(graph, sid) == "station"
 
 
+def test_verbose_routes_keeps_both_lines_sharing_a_display_name() -> None:
+    """Two lines may share a display name; ``--verbose``'s routes: must not drop one.
+
+    ``%%metro line:`` only enforces a unique id, not a unique display name,
+    and ``routes:`` is a dict keyed by name for readability - a plain
+    ``{display_name: route}`` comprehension collides and silently drops one
+    line's route.
+    """
+    graph = parse_metro_mermaid(
+        "%%metro line: main1 | Main Line | #ff0000\n"
+        "%%metro line: main2 | Main Line | #00ff00\n"
+        "graph LR\n"
+        "  a[A] -->|main1| b[B]\n"
+        "  b -->|main2| c[C]\n"
+    )
+    verbose = format_info_text(build_info(graph), verbose=True)
+    assert "Main Line (main1):" in verbose
+    assert "Main Line (main2):" in verbose
+
+
+def test_verbose_routes_disambiguates_a_second_order_collision() -> None:
+    """A disambiguated key can itself collide with a third line's plain name.
+
+    Two lines named "Main" disambiguate to "Main (main1)"/"Main (main2)".
+    A third, differently-named line whose own display name happens to be
+    the literal string "Main (main1)" would then collide with the first
+    line's disambiguated key, silently dropping its route, unless keys are
+    checked for uniqueness against every key already assigned rather than
+    only against their own name's duplicate count.
+    """
+    graph = parse_metro_mermaid(
+        "%%metro line: main1 | Main | #ff0000\n"
+        "%%metro line: main2 | Main | #00ff00\n"
+        "%%metro line: other | Main (main1) | #0000ff\n"
+        "graph LR\n"
+        "  a[A] -->|main1| b[B]\n"
+        "  b -->|main2| c[C]\n"
+        "  c -->|other| d[D]\n"
+    )
+    verbose = format_info_text(build_info(graph), verbose=True)
+    assert "Main (main1):" in verbose
+    assert "Main (main2):" in verbose
+    # "#2" needs quoting: a space before "#" opens a YAML comment.
+    assert "'Main (main1) #2':" in verbose
+
+
 @pytest.mark.parametrize("fixture", FIXTURES)
 def test_synthetic_elements_surfaced(fixture: str) -> None:
     """Ports and junctions appear in the inventory with the right kind."""
@@ -258,5 +304,145 @@ def test_default_text_is_a_prefix_of_verbose(fixture: str) -> None:
     plain = format_info_text(info, verbose=False)
     verbose = format_info_text(info, verbose=True)
     assert verbose.startswith(plain)
-    assert "Section dependency graph:" not in plain
-    assert "Section dependency graph:" in verbose
+    assert "section_dag:" not in plain
+    assert "section_dag:" in verbose
+
+
+# --- to_yaml scalar/key quoting ---
+
+#: Strings a naive quoting rule could get wrong: booleans, null, YAML 1.1's
+#: hex/octal/binary integers and dotted infinity/nan, dates, and sexagesimals.
+_ADVERSARIAL_SCALARS = [
+    "true",
+    "True",
+    "false",
+    "null",
+    "yes",
+    "no",
+    "on",
+    "off",
+    "0x10",
+    "0b101",
+    ".inf",
+    "-.inf",
+    ".nan",
+    "123",
+    "1_000",
+    "2025-01-02",
+    "1:30",
+    "a:b",
+    "#fragment",
+    " leading space",
+    "trailing space ",
+    "",
+    "=",  # YAML's bare "value" tag
+    "<<",  # YAML's bare "merge" tag
+]
+
+
+@pytest.mark.parametrize("text", _ADVERSARIAL_SCALARS)
+def test_yaml_scalar_round_trips_through_a_real_parser(text: str) -> None:
+    """A value that reads like a YAML type still round-trips as the string."""
+    yaml = pytest.importorskip("yaml")
+    from nf_metro.introspect import to_yaml
+
+    lines = to_yaml({"key": text})
+    assert yaml.safe_load("\n".join(lines)) == {"key": text}
+
+
+@pytest.mark.parametrize("text", _ADVERSARIAL_SCALARS)
+def test_yaml_key_round_trips_through_a_real_parser(text: str) -> None:
+    """A mapping key that reads like a YAML type still round-trips as the string.
+
+    Line and section display names become mapping keys in ``info --verbose``'s
+    ``routes:`` block, and are author-supplied, so a line named e.g. ``true``
+    or ``123`` must not change type when parsed back.
+    """
+    yaml = pytest.importorskip("yaml")
+    from nf_metro.introspect import to_yaml
+
+    if text == "":
+        pytest.skip("an empty key cannot appear as a line/section name")
+    lines = to_yaml({text: "value"})
+    assert yaml.safe_load("\n".join(lines)) == {text: "value"}
+
+
+@pytest.mark.parametrize("text", ["1__000", "07_", "0__0", "1___000", "10_"])
+def test_yaml_scalar_rejects_underscore_forms_float_would_accept(text: str) -> None:
+    """A digit run with underscores in unusual places is still a YAML int.
+
+    PyYAML's int resolver (``[0-9_]*``, no digit-adjacency rule) reads
+    ``"1__000"`` as 1000 even though Python's ``float()`` rejects that
+    literal, so a value like this must still come back quoted.
+    """
+    yaml = pytest.importorskip("yaml")
+    from nf_metro.introspect import to_yaml
+
+    lines = to_yaml({"key": text})
+    assert yaml.safe_load("\n".join(lines)) == {"key": text}
+
+
+def test_to_yaml_distinguishes_empty_dict_from_empty_list() -> None:
+    """An empty dict and an empty list must not collapse to the same line.
+
+    ``info --verbose``'s ``layout.sections_by_row`` is a dict that is empty
+    for a section-less (flat) graph; it must round-trip as ``{}``, not
+    silently become a list.
+    """
+    yaml = pytest.importorskip("yaml")
+    from nf_metro.introspect import to_yaml
+
+    document = {"a_dict": {}, "a_list": []}
+    assert yaml.safe_load("\n".join(to_yaml(document))) == document
+
+
+def test_to_yaml_handles_a_list_holding_an_empty_collection() -> None:
+    """A list item that is itself an empty dict/list must not crash the emitter."""
+    yaml = pytest.importorskip("yaml")
+    from nf_metro.introspect import to_yaml
+
+    document = {"items": [{}, [], "x"]}
+    assert yaml.safe_load("\n".join(to_yaml(document))) == document
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Step 1: \U0001f389 Party",  # astral emoji forced to quote by the colon
+        "\U0001f600 alone",  # astral emoji, no other quote trigger
+        "\U0001d400 math bold A",  # a different astral plane
+    ],
+)
+def test_yaml_scalar_preserves_astral_characters(text: str) -> None:
+    """An astral character (outside the BMP), e.g. an emoji, must round-trip whole.
+
+    A naive ASCII-escaping encoder splits such a character into a UTF-16
+    surrogate pair of ``\\uXXXX`` escapes; some parsers recombine the pair,
+    but YAML's double-quoted scalar syntax does not, so it must be written
+    as the literal character instead.
+    """
+    yaml = pytest.importorskip("yaml")
+    from nf_metro.introspect import to_yaml
+
+    lines = to_yaml({"key": text})
+    assert yaml.safe_load("\n".join(lines)) == {"key": text}
+
+
+@pytest.mark.parametrize(
+    "char",
+    [chr(c) for c in [0x00, 0x07, 0x0B, 0x1F, 0x7F, 0x85, 0x9F, 0x2028, 0x2029]],
+)
+def test_yaml_scalar_escapes_characters_yaml_forbids_or_folds(char: str) -> None:
+    """A control character, C1 character, or line/paragraph separator must survive.
+
+    YAML rejects most of these unescaped even inside a quoted scalar, and
+    silently folds a couple of them (e.g. NEL, U+0085) to a plain space
+    instead of erroring - either way the original character is lost unless
+    it is escaped.
+    """
+    yaml = pytest.importorskip("yaml")
+    from nf_metro.introspect import to_yaml
+
+    text = f"a{char}b"
+    lines = to_yaml({"key": text})
+    assert yaml.safe_load("\n".join(lines)) == {"key": text}

@@ -22,6 +22,15 @@ nf-metro ships eleven commands.
 `nf-metro --version` prints the installed version.
 Every command also takes `--help`.
 
+## Terminal output
+
+Help, errors, warnings, and progress are rendered in colour with [rich-click](https://ewels.github.io/rich-click/), with warnings and errors grouped into yellow and red panels.
+`render`'s and `info`'s YAML results go to stdout, with warnings, summaries, and progress on stderr, so a caller can parse either command's stdout without picking through human-readable text.
+Other commands print their result to stdout as they always have.
+Piped stdout is never coloured.
+
+![`nf-metro --help`](assets/img/nf-metro-help.svg)
+
 ## `nf-metro render`
 
 Render a Mermaid metro map definition to SVG or interactive HTML.
@@ -42,15 +51,15 @@ A rejected input, and any other failure, surfaces as a plain error message rathe
 Set `NF_METRO_DEBUG=1` to re-raise the original exception instead.
 An empty file, or one whose `graph` block holds no stations, is rejected by name rather than drawn.
 
-On success, `render` prints a `nf-metro: v<version>` banner and the files written to stdout as one YAML document.
-Stdout stays empty on any failure, so a caller can parse it without also checking the exit code; human-readable render summaries and any warnings go to stderr.
+On success, `render` prints the version, the source it read, and the files written to stdout as one YAML document.
+Stdout stays empty on any failure, so a caller can parse it without also checking the exit code.
 
-```yaml frame="terminal"
-nf-metro: v2.1.0
-outputs:
-  - "assets/metro_map.svg"
-  - "assets/metro_map.png"
-```
+<!-- RICH-CODEX {working_dir: ., after_command: rm -f rnaseq.svg} -->
+
+![`nf-metro render examples/rnaseq_sections.mmd -o rnaseq.svg`](assets/img/nf-metro-render.svg)
+
+`inputs` is always a list, even when one map was rendered.
+A path is quoted only where a bare word would not read back as the same string.
 
 Most of the options in this section have a `%%metro` directive twin.
 An explicit flag overrides the directive.
@@ -58,13 +67,48 @@ See the [precedence table](/nf-metro/guide/#cli-flags-and-directive-precedence) 
 
 ### Output and source
 
-| Option                                                               | Default                                    | Description                                                                                                                                                                                                                                                                       |
-| -------------------------------------------------------------------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `-o`, `--output PATH`                                                | `%%metro output:`, else `<input>.<format>` | Output file path (only valid with a single `INPUT_FILE`). Repeat it to write several formats from one run: `-o map.svg -o map.png`. With no `-o`, the map's `%%metro output:` directive supplies the path(s); with neither, the sibling `<input>.<format>`                        |
-| `--format [svg\|html\|png\|gif\|webp\|mp4\|webm]`                    | inferred from `--output`, else `svg`       | Output format: `svg`, `png`, `html` for an interactive self-contained page, or `gif`/`webp`/`mp4`/`webm` for a [looping video](#looping-video-of-the-animation). `-o map.png` selects PNG on its own                                                                              |
-| `--from-nextflow`                                                    | off                                        | Convert Nextflow `-with-dag` Mermaid input before rendering                                                                                                                                                                                                                       |
-| `--debug / --no-debug`                                               | off                                        | Show the debug overlay (ports, hidden stations, edge waypoints)                                                                                                                                                                                                                   |
-| `--reject-output-outside-source / --no-reject-output-outside-source` | off                                        | Refuse a `%%metro output:` declaration that resolves outside the `.mmd`'s own directory (an absolute path, or a `..` escape) instead of writing there. Never applies to an explicit `-o`. Meant for rendering a map you didn't author, e.g. a CI job rendering a fork PR's `.mmd` |
+| Option                                                               | Default                                    | Description                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| -------------------------------------------------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `-o`, `--output PATH`                                                | `%%metro output:`, else `<input>.<format>` | Output file path (only valid with a single `INPUT_FILE`). Repeat it to write several formats from one run: `-o map.svg -o map.png`. With no `-o`, the map's `%%metro output:` directive supplies the path(s), each with its own [per-output overrides](#per-output-render-overrides); with neither, the sibling `<input>.<format>`                                                                                           |
+| `--format [svg\|html\|png\|gif\|webp\|mp4\|webm]`                    | inferred from `--output`, else `svg`       | Output format: `svg`, `png`, `html` for an interactive self-contained page, or `gif`/`webp`/`mp4`/`webm` for a [looping video](#looping-video-of-the-animation). `-o map.png` selects PNG on its own                                                                                                                                                                                                                         |
+| `--from-nextflow`                                                    | off                                        | Convert Nextflow `-with-dag` Mermaid input before rendering                                                                                                                                                                                                                                                                                                                                                                  |
+| `--debug / --no-debug`                                               | off                                        | Show the debug overlay (ports, hidden stations, edge waypoints)                                                                                                                                                                                                                                                                                                                                                              |
+| `--reject-output-outside-source / --no-reject-output-outside-source` | off                                        | Refuse a `%%metro output:` declaration that resolves outside the pipeline repository holding the `.mmd` (an absolute path, or a `..` escape past the repo root), or into its `.git/`, instead of writing there. Outside a git working tree the boundary falls back to the `.mmd`'s own directory. Never applies to an explicit `-o`. Meant for rendering a map you didn't author, e.g. a CI job rendering a fork PR's `.mmd` |
+
+#### Per-output render overrides
+
+A `%%metro output:` path may carry its own render settings after a `|`, so one
+`nf-metro render` pass writes several differently-configured files with no CLI
+flags at all:
+
+```
+%%metro output: nf-core-demo_metro_map.svg
+%%metro output: nf-core-demo_metro_map_animated.svg | animate
+%%metro output: nf-core-demo_metro_map_dark.png     | mode=dark
+%%metro output: nf-core-demo_metro_map_light.png    | mode=light
+```
+
+Right of the first `|` is a space- or comma-separated list of `key=value`
+tokens; `animate` may also be written bare, meaning `animate=true`. An
+override applies to every path on its own line and beats the matching global
+flag for that output alone. Only options that change how the map is _drawn_
+are accepted — nothing here can change what the map _is_, so every declared
+output is the same diagram:
+
+| Key            | Equivalent flag  | Example                    |
+| -------------- | ---------------- | -------------------------- |
+| `animate`      | `--animate`      | `animate`, `animate=false` |
+| `mode`         | `--mode`         | `mode=dark`                |
+| `theme`        | `--theme`        | `theme=seqera`             |
+| `scale`        | `--scale`        | `scale=3`                  |
+| `raster_width` | `--raster-width` | `raster_width=800`         |
+
+An unknown key, or a value the matching flag would reject, is warned about and
+ignored; the output itself still renders under the run's global options.
+
+`mode` and `theme` are baked when the SVG is serialized rather than when the
+map is laid out, so the static SVG and both PNGs above share a single layout
+run — only the animated SVG needs one of its own. Four files, two layouts.
 
 ### Theme and branding
 
@@ -152,8 +196,8 @@ They do not change the drawn map.
 
 A map that parses with complaints, such as an unknown `%%metro` directive or a non-LR primary direction, is still written.
 So is a layout that widens a gap to fit its routing.
-Each complaint appears as a bullet in a `Warnings:` block on stderr.
-A geometry guard that was downgraded rather than enforced gets its own block, because those name geometry that was drawn anyway and may be defective.
+Each complaint appears as a bullet in a yellow `Warnings` panel on stderr.
+A geometry guard that was downgraded rather than enforced gets its own `Guard downgrades` panel, because those name geometry that was drawn anyway and may be defective.
 Read them differently from a warning about something ignored or adjusted.
 
 ### Embedding options
@@ -323,7 +367,7 @@ A map with no stations is reported as a warning here, because `render` refuses t
 ## `nf-metro info`
 
 Show information about a parsed map: its sections, lines, stations, and edges.
-The default output is a stable human-readable summary.
+The default output is a stable YAML summary.
 
 ```bash frame="terminal"
 nf-metro info [OPTIONS] INPUT_FILE
@@ -334,10 +378,14 @@ nf-metro info [OPTIONS] INPUT_FILE
 | `--json`    | off     | Emit the full introspection as JSON, for scripting                                                                                     |
 | `--verbose` | off     | Add the section dependency graph, per-line routes, inferred auto-layout defaults, and synthetic ports and junctions to the text output |
 
-Parse warnings print as a `Warnings:` block on stderr rather than into the stdout summary.
+Parse warnings print as a `Warnings` panel on stderr rather than into the stdout summary.
 `--verbose` and `--json` carry them in the report itself instead.
 
-`Style:` reports the theme the map resolves to, using the same name `render --theme` accepts.
+`style:` reports the theme the map resolves to, using the same name `render --theme` accepts.
+
+<!-- RICH-CODEX {working_dir: .} -->
+
+![`nf-metro info examples/rnaseq_sections.mmd`](assets/img/nf-metro-info.svg)
 
 ## `nf-metro explain`
 

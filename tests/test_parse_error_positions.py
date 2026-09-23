@@ -70,8 +70,8 @@ def test_lark_syntax_error_no_raw_traceback(tmp_path):
         result = runner.invoke(cli, ["validate", str(bad_mmd)])
 
     assert result.exit_code != 0
-    # ClickException wraps with "Error: <message>", no Python traceback
-    assert "Error:" in result.output
+    # rich-click frames the ClickException in an "Error" panel, no Python traceback
+    assert "Error" in result.output
     assert "Traceback" not in result.output
 
 

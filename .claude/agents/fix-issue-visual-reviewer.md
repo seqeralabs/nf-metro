@@ -1,7 +1,7 @@
 ---
 name: fix-issue-visual-reviewer
 description: Judges a fix-issue render preview, classifying every changed example as improvement, neutral, or detrimental, and returns an acceptance verdict. Aesthetic judgment a validator cannot make.
-model: claude-opus-4-8
+model: claude-opus-5-5
 tools: Bash, Read, Grep, Glob
 effort: high
 ---

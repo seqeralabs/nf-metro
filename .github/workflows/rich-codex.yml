@@ -1,0 +1,53 @@
+name: Update CLI screenshots
+
+# The terminal screenshots in docs/ are real output, so they go stale the
+# moment the CLI or the layout engine changes the counts it prints.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/nf_metro/**"
+      - "examples/rnaseq_sections.mmd"
+      - "docs/**/*.md*"
+      - ".rich-codex.yml"
+      - ".github/workflows/rich-codex.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: rich-codex
+
+jobs:
+  rich-codex:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install nf-metro
+        run: pip install .
+
+      - uses: ewels/rich-codex@f6d8165f6ab813603db81a49def997104f4fcd5a # v1.4.0
+        with:
+          skip_python_setup: "true"
+          # Each image is defined in the markdown that uses it; searching the
+          # whole repo would also walk website/node_modules and the symlinked
+          # copy of docs/ under website/src/content/.
+          search_include: "docs/**/*.md*"
+          commit_changes: "true"
+          clean_img_paths: "docs/assets/img/*.svg"
+
+      - name: Redeploy the docs with the new screenshots
+        # A push made with GITHUB_TOKEN doesn't trigger docs.yml, so the site
+        # would otherwise keep serving the old images until the next merge.
+        if: hashFiles('created.txt', 'deleted.txt') != ''
+        run: gh workflow run docs.yml --ref main
+        env:
+          GH_TOKEN: ${{ github.token }}

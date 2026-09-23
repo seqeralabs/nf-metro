@@ -44,6 +44,13 @@ dependencies = [
     "networkx>=3.0",
     "pillow>=9.0",
     "resvg-py>=0.5",
+    # Colourful help/errors (rich-click) and rich stderr output + progress bars.
+    # rich-click forces colour in GitHub Actions; see nf_metro.console.
+    "rich>=13",
+    "rich-click>=1.8",
+    # `info`/`render`'s YAML output is emitted through a real dumper; see
+    # nf_metro.introspect.to_yaml.
+    "pyyaml>=6",
 ]
 
 [project.urls]
@@ -64,6 +71,7 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.8",
     "types-networkx",
+    "types-PyYAML",
     "numpy<2.5",
     "nf-metro[validate]",
     # Pinned so the frozen PNG hash in tests/test_hash_seed_determinism.py has
