@@ -27,7 +27,12 @@ from nf_metro.layout.envelope_settlement import (
 )
 from nf_metro.layout.phases.guards import LayoutInvariantError
 from nf_metro.layout.route_plan import RoutePlan, SettlementStage
-from nf_metro.layout.routing import corridor_cohorts, member_geometry, planning
+from nf_metro.layout.routing import (
+    corridor_cohort_integration,
+    corridor_cohorts,
+    member_geometry,
+    planning,
+)
 from nf_metro.layout.routing.common import OffsetRegime
 from nf_metro.layout.routing.offsets import compute_station_offsets
 from nf_metro.layout.settlement_demand import (
@@ -161,6 +166,36 @@ def test_one_non_binary_pitch_reads_as_one_exact_separation() -> None:
     assert corridor_cohorts._q(698.8000000000001) - corridor_cohorts._q(
         695.2
     ) == corridor_cohorts._q(3.6)
+
+
+def test_only_an_endpoint_landing_claim_is_bound_to_a_port_slot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With ``section_x_gap: 0`` a corridor-fed trunk's two-point spur shares an
+    endpoint cohort with a landing member but has no lead of its own to land,
+    so it binds with no port slot rather than one it cannot reach."""
+    real_bind = corridor_cohort_integration._bind_claim
+    unlanded_cohort_claims = 0
+
+    def check(claim, target, landing_coordinate):
+        nonlocal unlanded_cohort_claims
+        bound = real_bind(claim, target, landing_coordinate)
+        lands = (
+            claim.endpoint_cohort_id is not None
+            and target.mutable
+            and claim.segment_rank == len(target.route.points) - 3
+        )
+        unlanded_cohort_claims += claim.endpoint_cohort_id is not None and not lands
+        assert (bound.landing_coordinate is not None) == lands, claim.claim_id
+        return bound
+
+    monkeypatch.setattr(corridor_cohort_integration, "_bind_claim", check)
+    _assert_planned(
+        "examples/topologies/corridor_fed_trunk_output_spur.mmd",
+        monkeypatch,
+        {"section_x_gap": 0.0},
+    )
+    assert unlanded_cohort_claims
 
 
 VERTICAL_FLOW_SIDE_ENTRY_FIXTURES = (

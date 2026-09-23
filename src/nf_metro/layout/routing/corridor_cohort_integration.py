@@ -1119,12 +1119,13 @@ def _bind_claim(
             f"corridor claim {claim.claim_id} changed segment orientation"
         )
     longitudinal_coordinates = start[longitudinal_axis], end[longitudinal_axis]
+    landing_slot: float | None = None
     if (
         claim.endpoint_cohort_id is not None
         and target.mutable
         and claim.segment_rank == len(target.route.points) - 3
     ):
-        _landing_rank, landing_axis, landing_coordinate = _landing_frame(
+        _landing_rank, landing_axis, landing_slot = _landing_frame(
             (target.member_id, target.edge_key), target, landing_coordinate
         )
         if landing_axis != longitudinal_axis:
@@ -1132,7 +1133,7 @@ def _bind_claim(
                 f"corridor claim {claim.claim_id} has no perpendicular endpoint lead"
             )
         prospective_end = list(end)
-        prospective_end[landing_axis] = landing_coordinate
+        prospective_end[landing_axis] = landing_slot
         if segment_direction(start, (prospective_end[0], prospective_end[1])) is not (
             claim.direction
         ):
@@ -1141,7 +1142,7 @@ def _bind_claim(
             )
         longitudinal_coordinates = (
             start[longitudinal_axis],
-            landing_coordinate,
+            landing_slot,
         )
     longitudinal_start, longitudinal_end = sorted(longitudinal_coordinates)
     if longitudinal_end - longitudinal_start <= COORD_TOLERANCE:
@@ -1154,7 +1155,7 @@ def _bind_claim(
         longitudinal_start,
         longitudinal_end,
         start[axis],
-        landing_coordinate,
+        landing_slot,
     )
 
 
