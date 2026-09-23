@@ -859,10 +859,6 @@
   "note": "The same validator's concentric-inputs flank: the offset/base pair recorded for an owned corner's two segment ranks must still match the plan's. fresh_member_route copies both maps wholesale and only record_concentric_corner rewrites them, which the same ownership bar keeps off owned boundaries. Distinct from the radius-value raise above in that a pass could in principle re-record the inputs and still land on the planned radius; both are construction-bug guards.",
   "status": "defensive"
  },
- "member_geometry.py::if allow_clearance_requirements or shortfall > COORD_TOLERANCE:::#1": {
-  "note": "The apply pass runs only after the measured shortfall has been granted and removed. Seeing an outstanding shortfall while requirements are disabled would mean boundary settlement failed to move the target.",
-  "status": "defensive"
- },
  "member_geometry.py::if any(::#2": {
   "note": "A continuing source trunk is accepted only when its first runway can hold the largest concentric turnout. Resolver spacing guarantees this; the short-runway rejection is covered by focused turnout tests.",
   "status": "defensive"
@@ -878,10 +874,6 @@
  "member_geometry.py::if boundary < 1:::#1": {
   "note": "The short-overlap target sits below at least one grid row, so its upper row boundary is positive. A row-zero target has no upper boundary to enlarge and is defensively declined.",
   "status": "defensive"
- },
- "member_geometry.py::if bounds.band is not None and not bounds.band.lo <= candidate <= bounds.band.hi:::#1": {
-  "note": "_candidate_clears_runway's band rejection, unreachable while `if band is not None:::#1` never populates a band on this path. Reachable.",
-  "status": "needs-review"
  },
  "member_geometry.py::if context is not None:::#1": {
   "note": "_convergence_context_route returns None only when ctx.edge_by_key has no entry for the key, and edge_by_key is built from every graph.edge while the key comes from scaffold.edge_order, which is derived from the same edges. Same never-taken lookup as the sibling `if edge is None` guard on the non-convergence path (0 of 141 fixtures).",
@@ -1351,10 +1343,6 @@
   "note": "_aligned_horizontal_drop_entry exempts a distinct-line approach fan, whose intra drop fans onto per-line channels (_perp_approach_fan_x) rather than the entry's single per-line offset.  Reaching it needs a horizontal-flow perp exit dropping straight into a single approach-fan entry; corpus instrumentation finds none, so the arm is never taken and the riser keeps the perp reflection.",
   "status": "defensive"
  },
- "perp.py::if not feeders:::#1": {
-  "note": "No-feeder guard in _perp_entry_crossing_x: the helper is called only from _route_perp_entry when a multi-line bundle shares the port with a per-line stagger, and a TOP/BOTTOM entry port in that case is always reached by a bundled inter-section feeder (dy!=0, so compute_bundle_info indexes it).  The empty-feeders return-None arm is a contract guard, never taken across the corpus.",
-  "status": "defensive"
- },
  "planning.py::if not pending_plan_ids and member_geometry.settled_exit_turns:::#1": {
   "note": "Boundary settlement is adopted only after every pending exit-turn plan has resolved. A settled cohort with pending owners would mix planning generations and is defensively withheld.",
   "status": "defensive"
@@ -1591,37 +1579,25 @@
   "note": "`_convergence_corridor_target` (wired by #2020): a planned convergence's `endpoint_ownership` always contains its `primary_trunk_member_id`, so the None-return arm is unreachable for a valid plan.",
   "status": "defensive"
  },
- "member_geometry.py::if corridor_cohort_ledger is not None and allow_clearance_requirements:::#1": {
-  "note": "The compile-gate itself. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on).",
-  "status": "needs-review"
- },
- "member_geometry.py::for route in context_routes:::#1": {
-  "note": "Building corridor-cohort context candidates from the settled convergence-context routes. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on).",
-  "status": "needs-review"
- },
  "member_geometry.py::if id(route) in candidate_route_ids:::#1": {
-  "note": "Skipping mutable member candidates while collecting context candidates. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on).",
-  "status": "needs-review"
+  "note": "Skipping a convergence-context route that is also a mutable member candidate while collecting the corridor-cohort context candidates. The collect arm runs on every aperture observation that carries a planned convergence leg (22 corpus fixtures, e.g. examples/genomic_pipeline.mmd). The skip arm cannot fire: build_member_geometry_execution builds each context route fresh from _route_template for a PLANNED convergence edge and moves on before that edge can become a candidate, so no context route object is ever in candidate_route_ids.",
+  "status": "defensive"
  },
  "member_geometry.py::if family is None or resolved not in scaffold.member_id_by_edge:::#1": {
-  "note": "Dropping a context route with no family or member id. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on).",
-  "status": "needs-review"
- },
- "member_geometry.py::for requirement in requirements:::#1": {
-  "note": "The corridor-cohort outcome validator iterating the published requirements. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on).",
-  "status": "needs-review"
+  "note": "Dropping a convergence-context route with no route family or no scaffold member id. The keep arm runs on the 22 corpus fixtures whose aperture observation carries a planned convergence leg (e.g. examples/genomic_pipeline.mmd). The drop arm cannot fire: _convergence_context_route returns no route for an edge without a family, and every context route comes from a scaffold edge, which the scaffold assigns a member id.",
+  "status": "defensive"
  },
  "member_geometry.py::if corridor_cohorts is not None and requirements:::#1": {
-  "note": "The validator's plan-and-requirement mutual-exclusion check. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on).",
-  "status": "needs-review"
+  "note": "The corridor-cohort outcome validator's plan-and-requirement exclusion. Its pass arm runs on every aperture observation (381 corpus fixtures). The raise arm is a wiring-regression guard: _compile_corridor_cohorts returns either a compiled plan with no requirement or, when the compile fails, no plan and the aperture requirements that failure resolves, so no graph publishes both.",
+  "status": "defensive"
  },
  "member_geometry.py::if requirement.kind is not aperture:::#1": {
-  "note": "The validator's non-aperture requirement-kind check. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on).",
-  "status": "needs-review"
+  "note": "The corridor-cohort outcome validator's requirement-kind check. Its pass arm runs on examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd, the corpus's one aperture requirement. The raise arm is a wiring-regression guard: every requirement the compile publishes is built by _corridor_cohort_aperture_requirements, which constructs only CORRIDOR_COHORT_APERTURE requirements.",
+  "status": "defensive"
  },
  "member_geometry.py::if both_sides:::#1": {
-  "note": "The validator's disjoint-boundary-sides check. The corridor-cohort compile block (#2020): fires only when a render pass carries both a non-None prior_plan/ledger and allow_clearance_requirements=True. Today the pass carrying a ledger runs with allow_clearance_requirements=False (settlement grant), and the allow=True pass (DISCOVERY) has no ledger yet, so no corpus render reaches the true arm. Becomes reachable once #2024 (render/svg.py settlement-stage tagging) lands and lets one pass carry both. Not defensive (no invariant forbids the combination) and not candidate-dead (#2024 is a concrete, already-scoped follow-on).",
-  "status": "needs-review"
+  "note": "The corridor-cohort outcome validator's disjoint-sides check. Its pass arm runs on examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd. The raise arm cannot fire: the requirement's region is an adjacent grid boundary (the producer rejects any other), and _corridor_boundary_sections puts a section on the negative side only when it ends at the lower index and on the positive side only when it starts at the next one, which no section of positive span does at once.",
+  "status": "defensive"
  },
  "offsets.py::if group.get(edge.line_id, corridor) != corridor:::#1": {
   "note": "The flow-start side-entry descent phase skips a port where one line arrives down two different descent corridors from the same side: the line holds one lane at the port, which cannot nest inside both turn-ins. Reachable in principle (two authored networks of one line descending into one flow-start side entry from sources at different reach), but no corpus fixture presents it.",

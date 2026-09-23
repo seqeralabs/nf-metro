@@ -2117,9 +2117,23 @@ They are design evidence, not part of this specification.
   strict plan that may not publish another requirement, settle that plan once
   for drawn positive-side containment, then re-route while consuming it. The
   final decision-freeze check compares the strict plan with that consuming
-  re-route. There is no retry or fixpoint search. A requirement surviving the
-  first strict observation, or any deficit surviving final settlement, is an
-  invariant failure.
+  re-route. After either sequence the render takes one aperture observation:
+  a re-route against the ledger the last settlement consumed, with its
+  translations, that may publish clearance requirements. It is the only pass
+  that runs the corridor-cohort compiler, because only a ledger already settled
+  to its minimum widths compiles without a spurious shortfall. Its geometry
+  (station coordinates, section boxes, bypass-label obstacles, and the ports
+  the label pass before it carried) is discarded. A `CORRIDOR_COHORT_APERTURE`
+  requirement it publishes is settled once against the observed plan, the
+  grant is proven from that settlement's own translations to pay every
+  measured deficit (`_assert_aperture_grant_closes`: the translation at the
+  requirement's boundary carries every positive-side box, no negative-side box,
+  and at least the deficit, which the quantised allocation may exceed), and a
+  re-route consuming the observed plan draws the result, which is adopted and
+  published. There is no retry or fixpoint search. A requirement surviving the
+  first strict observation, any deficit surviving final settlement, or an
+  aperture deficit its grant does not pay is an invariant failure; a render
+  settles at most one aperture batch.
   `attach_reroute_ledger_delta` compares each corridor's description together
   with the width it asks for, since a boundary whose corridor survives at a
   different `minimum_width` is one the translations were sized wrongly for.
@@ -2335,11 +2349,14 @@ every other stage. The stage decides it, so no caller can disagree with it.
 The render path (`_settle_render_geometry` and the publish step in
 `render/svg.py`) records `DISCOVERY` for the first route observation and
 `GENERAL_SETTLEMENT` for each re-observation a carried port, a header-collision
-reconcile, or an envelope-settlement translation forces. `COHORT_INTENT`,
-`APERTURE_SETTLEMENT`, `FINAL_SOLVE` and `TYPED_MATERIALIZATION` are positions
-the vocabulary reserves between them and the closing pair; no render records
-one, which `tests/test_corridor_cohort_integration.py` asserts alongside the
-frozen order.
+reconcile, or an envelope-settlement translation forces. The aperture
+observation and the re-route drawing an aperture grant are `GENERAL_SETTLEMENT`
+re-observations too, and the aperture observation keeps its record when its
+geometry is discarded, so every route observation has exactly one record.
+`COHORT_INTENT`, `APERTURE_SETTLEMENT`, `FINAL_SOLVE` and
+`TYPED_MATERIALIZATION` are positions the vocabulary reserves between them and
+the closing pair; no render records one, which
+`tests/test_corridor_cohort_integration.py` asserts alongside the frozen order.
 
 `COHORT_FINAL` sits *after* both closing acts, not between them: the final
 canvas geometry is published first (`_FinalPublishedGeometry` - canvas width and

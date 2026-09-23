@@ -1,17 +1,19 @@
 """Corridor-cohort compile outcomes at the post-settlement aperture observation.
 
-``_simulated_tail_plans`` re-observes the routes once per
-``_settle_render_geometry`` call, after envelope settlement and before
-``hold_port_anchored_edges``, against the reservations the last settlement
-resettle consumed (or the frozen plan when no settlement resettle ran), with
-clearance requirements allowed.  That observation is the first to run the
-corridor-cohort compiler with a ledger, so each fixture below must compile to
-``PLANNED`` or to one typed ``CORRIDOR_COHORT_APERTURE`` requirement.  A
-compiler exception propagates out of the render and fails the test.
+``_settle_render_geometry`` re-observes the routes once per call, after envelope
+settlement and before ``hold_port_anchored_edges``, against the reservations the
+last settlement resettle consumed (or the frozen plan when no settlement resettle
+ran), with clearance requirements allowed.  That observation is the only render
+pass that runs the corridor-cohort compiler with a ledger, so each fixture below
+must compile to ``PLANNED`` or to one typed ``CORRIDOR_COHORT_APERTURE``
+requirement.  A compiler exception propagates out of the render and fails the
+test.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -19,12 +21,18 @@ import pytest
 from nf_metro.api import prepare_graph, resolve_theme
 from nf_metro.layout import route_reservations
 from nf_metro.layout.constants import COORD_TOLERANCE
-from nf_metro.layout.phases._common import _restoring_layout_geometry
-from nf_metro.layout.route_plan import RoutePlan
+from nf_metro.layout.envelope_settlement import (
+    EnvelopeSettlement,
+    SettlementTranslation,
+)
+from nf_metro.layout.phases.guards import LayoutInvariantError
+from nf_metro.layout.route_plan import RoutePlan, SettlementStage
 from nf_metro.layout.routing import member_geometry
 from nf_metro.layout.routing.common import OffsetRegime
 from nf_metro.layout.routing.offsets import compute_station_offsets
 from nf_metro.layout.settlement_demand import (
+    BoundaryClearanceDemand,
+    BoundaryClearanceRequirement,
     BoundaryClearanceRequirementKind,
     SettlementAxis,
 )
@@ -32,75 +40,49 @@ from nf_metro.parser.model import MetroGraph, PortSide
 from nf_metro.render import svg
 
 ROOT = Path(__file__).parents[1]
+ORACLE = "examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd"
 
 
-def _simulated_tail_render(
+def _is_aperture_observation(kwargs: dict) -> bool:
+    """The one render observation that both holds a ledger and may publish."""
+    return kwargs.get("reservations") is not None and bool(
+        kwargs.get("allow_convergence_clearance_requirements")
+    )
+
+
+def _tail_render(
     relative_path: str, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[MetroGraph, svg.ObservedRenderPlan, tuple[RoutePlan, ...]]:
-    observations: list[tuple[MetroGraph, dict, RoutePlan]] = []
+    settle_calls = 0
     tail_plans: list[RoutePlan] = []
-    pending = [False]
     real_observe = svg.observe_route_edges_centred
     real_settle = svg._settle_render_geometry
-    real_hold = svg.hold_port_anchored_edges
-    real_attach = svg.attach_settlement_diagnostics
 
     def observe(graph, **kwargs):
         observation = real_observe(graph, **kwargs)
-        observations.append((graph, kwargs, observation.plan))
+        if _is_aperture_observation(kwargs):
+            tail_plans.append(observation.plan)
         return observation
 
     def settle(*args, **kwargs):
-        observations.clear()
-        pending[0] = True
+        nonlocal settle_calls
+        settle_calls += 1
         return real_settle(*args, **kwargs)
-
-    def observe_tail() -> None:
-        if not pending[0]:
-            return
-        pending[0] = False
-        consumed = [kw for _g, kw, _p in observations if kw.get("reservations")]
-        graph, last_kwargs, last_plan = observations[-1]
-        reservations = consumed[-1]["reservations"] if consumed else last_plan
-        translations = (
-            consumed[-1].get("reservation_translations", ()) if consumed else ()
-        )
-        with _restoring_layout_geometry(graph):
-            tail_plans.append(
-                real_observe(
-                    graph,
-                    station_offsets=last_kwargs["station_offsets"],
-                    offset_step=last_kwargs["offset_step"],
-                    reservations=reservations,
-                    reservation_translations=translations,
-                    allow_convergence_clearance_requirements=True,
-                ).plan
-            )
-
-    def hold(*args, **kwargs):
-        observe_tail()
-        return real_hold(*args, **kwargs)
-
-    def attach(*args, **kwargs):
-        observe_tail()
-        return real_attach(*args, **kwargs)
 
     monkeypatch.setattr(svg, "observe_route_edges_centred", observe)
     monkeypatch.setattr(svg, "_settle_render_geometry", settle)
-    monkeypatch.setattr(svg, "hold_port_anchored_edges", hold)
-    monkeypatch.setattr(svg, "attach_settlement_diagnostics", attach)
 
     path = ROOT / relative_path
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
     observed = svg.build_observed_render_plan(graph, resolve_theme(None, graph))
-    assert tail_plans, "no settlement pass reached the aperture observation"
+    assert len(tail_plans) == settle_calls >= 1
     return graph, observed, tuple(tail_plans)
 
 
-def _simulated_tail_plans(
+def _tail_plans(
     relative_path: str, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[MetroGraph, tuple[RoutePlan, ...]]:
-    graph, _observed, plans = _simulated_tail_render(relative_path, monkeypatch)
+    graph, _observed, plans = _tail_render(relative_path, monkeypatch)
     return graph, plans
 
 
@@ -115,7 +97,7 @@ def _aperture_requirements(plan: RoutePlan):
 def _assert_planned(
     relative_path: str, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[MetroGraph, tuple[RoutePlan, ...]]:
-    graph, plans = _simulated_tail_plans(relative_path, monkeypatch)
+    graph, plans = _tail_plans(relative_path, monkeypatch)
     for plan in plans:
         assert plan.corridor_cohort_ledger is not None
         assert _aperture_requirements(plan) == ()
@@ -125,9 +107,7 @@ def _assert_planned(
 def test_packed_cell_oracle_compiles_to_one_aperture_requirement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _graph, plans = _simulated_tail_plans(
-        "examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd", monkeypatch
-    )
+    _graph, plans = _tail_plans(ORACLE, monkeypatch)
     (plan,) = plans
     (requirement,) = _aperture_requirements(plan)
     assert requirement.axis is SettlementAxis.COLUMN
@@ -198,7 +178,7 @@ def test_same_line_edges_into_one_port_share_one_endpoint_slot(
     A port draws one lane per line, so both members hold one endpoint network
     rank rather than two ranks tied on one slot.
     """
-    _graph, plans = _simulated_tail_plans(
+    _graph, plans = _tail_plans(
         "examples/topologies/junction_entry_lane_step.mmd", monkeypatch
     )
     for plan in plans:
@@ -330,7 +310,7 @@ def test_unowned_lane_pair_seats_on_the_side_its_end_turns_take(
         return cohort_plan
 
     monkeypatch.setattr(member_geometry, "compile_corridor_cohort_plan", record)
-    _graph, observed, plans = _simulated_tail_render(relative_path, monkeypatch)
+    _graph, observed, plans = _tail_render(relative_path, monkeypatch)
     for plan in plans:
         assert plan.corridor_cohort_ledger is not None
         assert _aperture_requirements(plan) == ()
@@ -409,3 +389,219 @@ def test_post_settlement_observation_compiles_settled_reservations(
     """Discovery-time reservations on these fixtures are narrower than their
     minimum width; observed after settlement grants that deficit, they compile."""
     _assert_planned(relative_path, monkeypatch)
+
+
+RENDER_STAGES = frozenset(
+    {
+        SettlementStage.DISCOVERY,
+        SettlementStage.GENERAL_SETTLEMENT,
+        SettlementStage.COHORT_FINAL,
+        SettlementStage.VALIDATION,
+    }
+)
+
+
+def test_packed_cell_aperture_grant_widens_its_column_boundary_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``qc``'s aperture is 1.0px short at column boundary 2; one settlement of
+    the observed plan pays it with the 2.0px quantised floor, carrying ``qc``
+    and nothing on the negative side, which its own translation record shows."""
+    batches: list[
+        tuple[RoutePlan, tuple[BoundaryClearanceDemand, ...], EnvelopeSettlement]
+    ] = []
+    real_settle_envelopes = svg.settle_route_envelopes
+
+    def settle_envelopes(graph, plan, clearance=None):
+        owed = () if clearance is None else clearance(graph)
+        settlement = real_settle_envelopes(graph, plan, clearance=clearance)
+        if svg._corridor_cohort_aperture_requirements(plan):
+            batches.append((plan, owed, settlement))
+        return settlement
+
+    monkeypatch.setattr(svg, "settle_route_envelopes", settle_envelopes)
+    _graph, observed, plans = _tail_render(ORACLE, monkeypatch)
+
+    assert len(batches) == len(plans) == 1
+    ((batch_plan, owed, settlement),) = batches
+    (plan,) = plans
+    assert batch_plan is plan
+    (requirement,) = plan.boundary_clearance_requirements
+    assert requirement.kind is BoundaryClearanceRequirementKind.CORRIDOR_COHORT_APERTURE
+    (demand,) = owed
+    assert (demand.axis, demand.boundary) == (SettlementAxis.COLUMN, 2)
+    assert demand.deficit == pytest.approx(1.0)
+    (translation,) = settlement.translations
+    assert (translation.axis, translation.boundary) == (SettlementAxis.COLUMN, 2)
+    assert translation.amount == pytest.approx(2.0)
+    assert translation.amount >= demand.deficit
+    assert set(requirement.positive_section_ids) <= set(translation.section_ids)
+    assert set(translation.section_ids).isdisjoint(requirement.negative_section_ids)
+
+    published = observed.route_plan
+    assert translation.message in {item.message for item in published.diagnostics}
+    records = published.settlement_trace.records
+    assert {record.stage for record in records} <= RENDER_STAGES
+
+
+def _aperture_requirement() -> BoundaryClearanceRequirement:
+    return BoundaryClearanceRequirement(
+        SettlementAxis.COLUMN,
+        2,
+        "component|result:0",
+        55.0,
+        ("upstream",),
+        ("downstream",),
+        "corridor cohort aperture at column boundary 2",
+        BoundaryClearanceRequirementKind.CORRIDOR_COHORT_APERTURE,
+    )
+
+
+def _grant(amount: float, section_ids: tuple[str, ...]) -> SettlementTranslation:
+    return SettlementTranslation(
+        axis=SettlementAxis.COLUMN,
+        boundary=2,
+        coordinate=100.0,
+        amount=amount,
+        reservation_id=None,
+        claimant_member_ids=(),
+        blocker_ids=(),
+        section_ids=section_ids,
+        reservation_ids=(),
+    )
+
+
+@pytest.mark.parametrize(
+    "translations",
+    [
+        pytest.param((), id="no-translation"),
+        pytest.param((_grant(1.0, ("downstream",)),), id="grant-below-deficit"),
+        pytest.param((_grant(2.0, ("elsewhere",)),), id="positive-side-left-behind"),
+        pytest.param(
+            (_grant(2.0, ("downstream", "upstream")),), id="negative-side-carried"
+        ),
+    ],
+)
+def test_an_aperture_grant_that_does_not_close_its_deficit_fails(
+    translations: tuple[SettlementTranslation, ...],
+) -> None:
+    requirement = _aperture_requirement()
+    demand = BoundaryClearanceDemand(
+        SettlementAxis.COLUMN, 2, 55.0, 1.5, ("upstream",), requirement.description
+    )
+    with pytest.raises(LayoutInvariantError, match="one aperture batch"):
+        svg._assert_aperture_grant_closes(
+            ((requirement, demand),), EnvelopeSettlement(translations)
+        )
+
+
+def test_an_aperture_grant_may_exceed_its_deficit() -> None:
+    requirement = _aperture_requirement()
+    demand = BoundaryClearanceDemand(
+        SettlementAxis.COLUMN, 2, 55.0, 1.0, ("upstream",), requirement.description
+    )
+    svg._assert_aperture_grant_closes(
+        ((requirement, demand),),
+        EnvelopeSettlement((_grant(2.0, ("downstream", "elsewhere")),)),
+    )
+
+
+def _layout_state(graph: MetroGraph) -> tuple[object, ...]:
+    return (
+        {key: (item.x, item.y) for key, item in graph.stations.items()},
+        {
+            key: (item.bbox_x, item.bbox_y, item.bbox_w, item.bbox_h)
+            for key, item in graph.sections.items()
+        },
+        graph.bypass_label_obstacles,
+    )
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    (
+        "examples/topologies/compact_hidden_passthrough.mmd",
+        "examples/topologies/top_entry_left_neighbour.mmd",
+        "examples/topologies/multirow_source_stacked_fan.mmd",
+    ),
+)
+def test_a_discarded_aperture_observation_leaves_the_render_geometry(
+    relative_path: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The observation re-anchors junctions, centres markers and refreshes the
+    bypass-label obstacles on these fixtures; with no aperture requirement all
+    of it is undone, the ports the label pass before it carried are still held,
+    and its route observation stays on the trace."""
+    observed_states: list[tuple[tuple[object, ...], ...]] = []
+    carries: list[tuple[str, ...]] = []
+    carried_into_observation: list[tuple[str, ...]] = []
+    held: list[tuple[str, ...]] = []
+    observations = 0
+    tail_rank: int | None = None
+    real_restoring = svg._restoring_route_observation_geometry
+    real_carry = svg.carry_ports_with_section_edges
+    real_hold = svg.hold_port_anchored_edges
+    real_observe = svg.observe_route_edges_centred
+    real_settle = svg._settle_render_geometry
+
+    @contextmanager
+    def watch(graph: MetroGraph) -> Iterator[None]:
+        carried_into_observation.append(carries[-1])
+        before = _layout_state(graph)
+        with real_restoring(graph):
+            yield
+            during = _layout_state(graph)
+        observed_states.append((before, during, _layout_state(graph)))
+
+    def carry(graph, edges):
+        carried = real_carry(graph, edges)
+        carries.append(carried)
+        return carried
+
+    def hold(graph, edges, ports):
+        held.append(ports)
+        return real_hold(graph, edges, ports)
+
+    def observe(graph, **kwargs):
+        nonlocal observations, tail_rank
+        if _is_aperture_observation(kwargs):
+            tail_rank = observations
+        observations += 1
+        return real_observe(graph, **kwargs)
+
+    def settle(*args, **kwargs):
+        nonlocal observations, tail_rank
+        observations, tail_rank = 0, None
+        observed_states.clear()
+        carries.clear()
+        carried_into_observation.clear()
+        held.clear()
+        return real_settle(*args, **kwargs)
+
+    monkeypatch.setattr(svg, "_restoring_route_observation_geometry", watch)
+    monkeypatch.setattr(svg, "carry_ports_with_section_edges", carry)
+    monkeypatch.setattr(svg, "hold_port_anchored_edges", hold)
+    monkeypatch.setattr(svg, "observe_route_edges_centred", observe)
+    monkeypatch.setattr(svg, "_settle_render_geometry", settle)
+    path = ROOT / relative_path
+    graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+    observed = svg.build_observed_render_plan(graph, resolve_theme(None, graph))
+
+    ((before, during, after),) = observed_states
+    assert during[0] != before[0]
+    assert during[2] is not before[2]
+    assert after[:2] == before[:2]
+    assert after[2] is before[2]
+    (carried,) = carried_into_observation
+    assert held == ([carried] if carried else [])
+
+    records = observed.route_plan.settlement_trace.records
+    assert tail_rank == observations - 1
+    (tail_record,) = (
+        record for record in records if record.route_observation_rank == tail_rank
+    )
+    assert tail_record.stage is SettlementStage.GENERAL_SETTLEMENT
+    assert (
+        sum(record.stage is SettlementStage.GENERAL_SETTLEMENT for record in records)
+        == observations - 1
+    )

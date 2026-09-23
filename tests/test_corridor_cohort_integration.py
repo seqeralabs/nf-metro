@@ -98,6 +98,7 @@ def _render(relative_path: str):
             "examples/simple_pipeline.mmd",
             (
                 SettlementStage.DISCOVERY,
+                SettlementStage.GENERAL_SETTLEMENT,
                 SettlementStage.COHORT_FINAL,
                 SettlementStage.VALIDATION,
             ),
@@ -106,6 +107,7 @@ def _render(relative_path: str):
             "examples/rnaseq_auto.mmd",
             (
                 SettlementStage.DISCOVERY,
+                SettlementStage.GENERAL_SETTLEMENT,
                 SettlementStage.GENERAL_SETTLEMENT,
                 SettlementStage.COHORT_FINAL,
                 SettlementStage.VALIDATION,
