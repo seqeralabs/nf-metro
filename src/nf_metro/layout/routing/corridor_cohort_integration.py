@@ -1162,11 +1162,8 @@ def _bind_claim(
 def _bind_ledger(
     ledger: CorridorCohortLedger,
     targets: Sequence[CorridorCohortTarget],
-    endpoint_order_signs: Mapping[str, int],
 ) -> tuple[_BoundClaim, ...]:
-    landing_coordinates = _cohort_landing_coordinates(
-        ledger, targets, endpoint_order_signs
-    )
+    landing_coordinates = _cohort_landing_coordinates(ledger, targets)
     by_key: defaultdict[
         tuple[str, tuple[str, str, str]], list[CorridorCohortTarget]
     ] = defaultdict(list)
@@ -1865,106 +1862,16 @@ def _landing_frame(
     return segment_rank, axis, landing_coordinate
 
 
-def _endpoint_order_signs(
-    ledger: CorridorCohortLedger,
-    targets: Sequence[CorridorCohortTarget],
-) -> dict[str, int]:
-    """Orient endpoint ranks from complete fixed predecessor reservations."""
-    targets_by_key: defaultdict[
-        tuple[str, tuple[str, str, str]], list[CorridorCohortTarget]
-    ] = defaultdict(list)
-    for target in targets:
-        targets_by_key[(target.member_id, target.edge_key)].append(target)
-    claims_by_key: defaultdict[
-        tuple[str, tuple[str, str, str]], list[CorridorCohortLedgerClaim]
-    ] = defaultdict(list)
-    for claim in ledger.claims:
-        if claim.edge_key is not None:
-            claims_by_key[(claim.member_id, claim.edge_key)].append(claim)
-
-    witness_lanes: defaultdict[tuple[str, str], defaultdict[int, set[int]]] = (
-        defaultdict(lambda: defaultdict(set))
-    )
-    for claim in ledger.claims:
-        if (
-            claim.endpoint_cohort_id is None
-            or claim.endpoint_network_rank is None
-            or claim.edge_key is None
-            or claim.member_id not in ledger.eligible_member_ids
-            or claim.endpoint_cohort_id in ledger.ambiguous_endpoint_cohort_ids
-        ):
-            continue
-        identity = claim.member_id, claim.edge_key
-        target_matches = targets_by_key.get(identity, ())
-        if len(target_matches) != 1:
-            continue
-        predecessors = tuple(
-            predecessor
-            for predecessor in claims_by_key[identity]
-            if predecessor.segment_rank + 1 == claim.segment_rank
-            and predecessor.endpoint_cohort_id is None
-            and predecessor.lane_rank is not None
-            and predecessor.reservation_complete
-            and planner_owns_segment(
-                target_matches[0].route,
-                predecessor.segment_rank,
-            )
-        )
-        for predecessor in predecessors:
-            endpoint_network_rank = claim.endpoint_network_rank
-            lane_rank = predecessor.lane_rank
-            if endpoint_network_rank is None or lane_rank is None:
-                raise CorridorCohortCompilationError(
-                    f"corridor endpoint cohort {claim.endpoint_cohort_id} has an "
-                    "incomplete fixed predecessor witness"
-                )
-            witness_lanes[(claim.endpoint_cohort_id, predecessor.reservation_id)][
-                endpoint_network_rank
-            ].add(lane_rank)
-
-    signs_by_cohort: defaultdict[str, set[int]] = defaultdict(set)
-    for (cohort_id, _reservation_id), lanes_by_rank in witness_lanes.items():
-        if len(lanes_by_rank) < 2:
-            continue
-        if any(len(lanes) != 1 for lanes in lanes_by_rank.values()):
-            raise CorridorCohortCompilationError(
-                f"corridor endpoint cohort {cohort_id} has an ambiguous fixed "
-                "predecessor order witness"
-            )
-        ordered_lanes = [
-            next(iter(lanes_by_rank[rank])) for rank in sorted(lanes_by_rank)
-        ]
-        increasing = all(
-            left < right for left, right in zip(ordered_lanes, ordered_lanes[1:])
-        )
-        decreasing = all(
-            left > right for left, right in zip(ordered_lanes, ordered_lanes[1:])
-        )
-        if not (increasing or decreasing):
-            raise CorridorCohortCompilationError(
-                f"corridor endpoint cohort {cohort_id} has a non-monotone fixed "
-                "predecessor order witness"
-            )
-        signs_by_cohort[cohort_id].add(1 if increasing else -1)
-
-    if conflicting := {
-        cohort_id for cohort_id, signs in signs_by_cohort.items() if len(signs) != 1
-    }:
-        raise CorridorCohortCompilationError(
-            "corridor endpoint cohorts have conflicting fixed predecessor order "
-            f"witnesses: {','.join(sorted(conflicting))}"
-        )
-    return {
-        cohort_id: next(iter(signs)) for cohort_id, signs in signs_by_cohort.items()
-    }
-
-
 def _cohort_landing_coordinates(
     ledger: CorridorCohortLedger,
     targets: Sequence[CorridorCohortTarget],
-    endpoint_order_signs: Mapping[str, int],
 ) -> dict[tuple[str, tuple[str, str, str]], float]:
-    """Bind frozen endpoint-network ranks to current absolute port slots."""
+    """Bind each endpoint member to the port slot its own network draws into.
+
+    A network rank follows route emission order, which need not ascend with the
+    slots the networks draw into, so a rank is never dealt a slot by position:
+    it keeps the one slot its members share.
+    """
     expected_by_cohort = dict(ledger.endpoint_members)
     ranks_by_member: defaultdict[str, set[tuple[str, int]]] = defaultdict(set)
     members_by_cohort: defaultdict[str, set[str]] = defaultdict(set)
@@ -2042,10 +1949,7 @@ def _cohort_landing_coordinates(
                     f"corridor endpoint cohort {cohort_id} has split network slots"
                 )
             representative_slots.append(network_slots[0])
-        ordered_slots = sorted(
-            representative_slots,
-            reverse=endpoint_order_signs.get(cohort_id, 1) < 0,
-        )
+        ordered_slots = sorted(representative_slots)
         if any(
             isclose(left, right, abs_tol=COORD_TOLERANCE)
             for left, right in zip(ordered_slots, ordered_slots[1:])
@@ -2057,7 +1961,7 @@ def _cohort_landing_coordinates(
             raise CorridorCohortCompilationError(
                 f"corridor endpoint cohort {cohort_id} has incomplete port slots"
             )
-        slot_by_rank = dict(zip(ranks, ordered_slots))
+        slot_by_rank = dict(zip(ranks, representative_slots))
         for member_id, target in member_targets.items():
             coordinates[(member_id, target.edge_key)] = slot_by_rank[
                 rank_by_member[member_id]
@@ -2330,13 +2234,27 @@ def _scalar_boundary_domains(
     return tuple(domains), sources
 
 
+def _ranks_in_slot_order(slot_by_rank: Mapping[int, float | None]) -> list[int]:
+    """Endpoint network ranks in the order of the port slots they draw into.
+
+    A rank whose member has no port slot sorts after every slotted one.
+    """
+    return sorted(
+        slot_by_rank,
+        key=lambda rank: (
+            slot_by_rank[rank] is None,
+            slot_by_rank[rank] or 0.0,
+            rank,
+        ),
+    )
+
+
 def _problem(
     claims: tuple[_BoundClaim, ...],
     roles: dict[str, CorridorCohortClaimRole],
     complete: bool,
     offset_step: float,
     curve_radius: float,
-    endpoint_order_signs: Mapping[str, int],
     footprint_model: _MemberFootprintModel,
     witnesses_by_id: Mapping[str, CorridorFootprintWitness],
     *,
@@ -2400,14 +2318,13 @@ def _problem(
         for item in movable
         if item.ledger.endpoint_cohort_id is not None
     }:
-        ranks = sorted(
+        ranks = _ranks_in_slot_order(
             {
-                item.ledger.endpoint_network_rank
+                item.ledger.endpoint_network_rank: item.target.endpoint_lane_coordinate
                 for item in movable
                 if item.ledger.endpoint_cohort_id == cohort_id
                 and item.ledger.endpoint_network_rank is not None
-            },
-            reverse=endpoint_order_signs.get(cohort_id, 1) < 0,
+            }
         )
         local_boundary_ranks.update(
             {
@@ -2818,7 +2735,6 @@ def _component_plan(
     physical: tuple[tuple[int, ...], ...],
     claims: tuple[_BoundClaim, ...],
     ledger: CorridorCohortLedger,
-    endpoint_order_signs: Mapping[str, int],
     footprint_model: _MemberFootprintModel,
     witnesses_by_id: Mapping[str, CorridorFootprintWitness],
     scalar_requests_by_id: Mapping[str, CorridorScalarRequest],
@@ -2868,7 +2784,6 @@ def _component_plan(
             complete,
             ledger.offset_step,
             ledger.curve_radius,
-            endpoint_order_signs,
             footprint_model,
             witnesses_by_id,
             scalar_requests=component_scalar_requests,
@@ -3158,8 +3073,7 @@ def compile_corridor_cohort_plan(
     carries its route patches, and :func:`publish_corridor_cohort_plan` applies
     them.
     """
-    endpoint_order_signs = _endpoint_order_signs(ledger, targets)
-    claims = _bind_ledger(ledger, targets, endpoint_order_signs)
+    claims = _bind_ledger(ledger, targets)
     scalar_requests_by_id = {
         request.variable.variable_id: request for request in scalar_requests
     }
@@ -3239,7 +3153,6 @@ def compile_corridor_cohort_plan(
             physical,
             claims,
             ledger,
-            endpoint_order_signs,
             footprint_model,
             witnesses_by_id,
             scalar_requests_by_id,

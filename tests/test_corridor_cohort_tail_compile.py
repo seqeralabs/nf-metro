@@ -198,6 +198,79 @@ def test_only_an_endpoint_landing_claim_is_bound_to_a_port_slot(
     assert unlanded_cohort_claims
 
 
+@pytest.mark.parametrize(
+    ("relative_path", "layout_options"),
+    (
+        ("examples/showcase/seqinspector.mmd", None),
+        ("examples/longread_variant_calling.mmd", None),
+        ("examples/topologies/cross_row_gap_wrap.mmd", None),
+        ("examples/topologies/convergent_offrow_exit_climb.mmd", None),
+        (
+            "examples/rnaseq_sections.mmd",
+            {
+                "directional": True,
+                "font_scale": 0.8,
+                "section_x_gap": 0.0,
+                "stroke_scale": 0.9,
+            },
+        ),
+    ),
+)
+def test_endpoint_members_bind_and_rank_by_their_own_drawn_slots(
+    relative_path: str,
+    layout_options: dict[str, object] | None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Endpoint network ranks follow route emission order, which on these
+    fixtures does not ascend with the port slots the members draw into.  Each
+    member lands on its own slot, and its cohort's boundary order is the order
+    of those slots."""
+    real_landings = corridor_cohort_integration._cohort_landing_coordinates
+    real_lane = corridor_cohort_integration._lane
+    bound_slots: dict[str, set[float]] = {}
+    lanes_by_cohort: dict[str, list[tuple[int, float]]] = {}
+
+    def landings(ledger, targets, *args):
+        coordinates = real_landings(ledger, targets, *args)
+        slots = {
+            (target.member_id, target.edge_key): target.endpoint_lane_coordinate
+            for target in targets
+        }
+        cohorts = {
+            (claim.member_id, claim.edge_key): claim.endpoint_cohort_id
+            for claim in ledger.claims
+            if claim.endpoint_cohort_id is not None
+        }
+        for identity, coordinate in coordinates.items():
+            slot = slots[identity]
+            assert coordinate == pytest.approx(slot, abs=COORD_TOLERANCE), identity
+            bound_slots.setdefault(cohorts[identity], set()).add(round(coordinate, 3))
+        return coordinates
+
+    def lane(claim, cohort_first_path_rank, local_boundary_rank, *args):
+        cohort_id = claim.ledger.endpoint_cohort_id
+        slot = claim.target.endpoint_lane_coordinate
+        if (
+            cohort_id is not None
+            and local_boundary_rank is not None
+            and slot is not None
+        ):
+            lanes_by_cohort.setdefault(cohort_id, []).append(
+                (local_boundary_rank, slot)
+            )
+        return real_lane(claim, cohort_first_path_rank, local_boundary_rank, *args)
+
+    monkeypatch.setattr(
+        corridor_cohort_integration, "_cohort_landing_coordinates", landings
+    )
+    monkeypatch.setattr(corridor_cohort_integration, "_lane", lane)
+    _assert_planned(relative_path, monkeypatch, layout_options)
+    assert any(len(slots) > 1 for slots in bound_slots.values())
+    for cohort_id, seats in lanes_by_cohort.items():
+        slots_by_rank = [slot for _rank, slot in sorted(seats)]
+        assert slots_by_rank == sorted(slots_by_rank), cohort_id
+
+
 VERTICAL_FLOW_SIDE_ENTRY_FIXTURES = (
     "examples/topologies/fold_fan_across.mmd",
     "examples/topologies/fold_stacked_branch.mmd",
