@@ -8,6 +8,8 @@ from enum import Enum
 from fractions import Fraction
 from math import isfinite
 
+from nf_metro.layout.constants import COORD_TOLERANCE
+
 _ObstacleInterval = tuple[
     Fraction,
     Fraction,
@@ -45,6 +47,13 @@ class CorridorAllocationFailureReason(Enum):
 
 @dataclass(frozen=True)
 class CorridorLane:
+    """One straight corridor run.
+
+    ``start_turn_side`` and ``end_turn_side`` are the raw-coordinate side
+    (``+1``/``-1``) the route leaves the run toward at ``span_start`` and
+    ``span_end``; ``0`` where the route stops there or carries straight on.
+    """
+
     member_id: str
     cohort_id: str
     endpoint_owner_id: str
@@ -53,6 +62,8 @@ class CorridorLane:
     span_start: float
     span_end: float
     semantic_rank: tuple[int, ...]
+    start_turn_side: int = 0
+    end_turn_side: int = 0
 
 
 @dataclass(frozen=True)
@@ -541,6 +552,69 @@ def _ordered_roots_or_cycle(
     return (), frozenset(root for root in unresolved if reaches_self(root))
 
 
+def _turn_side_votes(left: CorridorLane, right: CorridorLane) -> set[int]:
+    """The raw sides of *right* (``+1``/``-1``) the pair's end turns put *left* on.
+
+    A lane that turns off at an end lying strictly inside the other lane's span
+    crosses that lane's run unless it sits on the side it turns toward.
+    """
+    votes: set[int] = set()
+    for lane, other, polarity in ((left, right, 1), (right, left, -1)):
+        for end, side in (
+            (lane.span_start, lane.start_turn_side),
+            (lane.span_end, lane.end_turn_side),
+        ):
+            if (
+                side
+                and other.span_start + COORD_TOLERANCE
+                < end
+                < other.span_end - COORD_TOLERANCE
+            ):
+                votes.add(side * polarity)
+    return votes
+
+
+def _turn_side_orders(
+    lanes: tuple[CorridorLane, ...],
+    union_find: _WeightedUnionFind,
+    peer_owners: dict[frozenset[int], set[str]],
+    sign: int,
+) -> dict[frozenset[int], tuple[int, int]]:
+    """Order each root pair whose member lanes' end turns all agree.
+
+    Votes pool over every overlapping member pair of the two roots.  Opposing
+    votes mean every order crosses somewhere, so such a pair, like one with no
+    vote, is left unordered.
+    """
+    orders: defaultdict[frozenset[int], set[tuple[int, int]]] = defaultdict(set)
+    for left_index, left_lane in enumerate(lanes):
+        left_root, _ = union_find.find(left_index)
+        for right_index in range(left_index + 1, len(lanes)):
+            right_lane = lanes[right_index]
+            if (
+                not _overlaps(
+                    left_lane.span_start,
+                    left_lane.span_end,
+                    right_lane.span_start,
+                    right_lane.span_end,
+                )
+                or frozenset((left_index, right_index)) in peer_owners
+            ):
+                continue
+            right_root, _ = union_find.find(right_index)
+            if left_root == right_root:
+                continue
+            for side in _turn_side_votes(left_lane, right_lane):
+                orders[frozenset((left_root, right_root))].add(
+                    (right_root, left_root)
+                    if side * sign > 0
+                    else (left_root, right_root)
+                )
+    return {
+        pair: next(iter(votes)) for pair, votes in orders.items() if len(votes) == 1
+    }
+
+
 def solve_corridor_cohorts(  # noqa: C901, PLR0915
     problem: CorridorAllocationProblem,
 ) -> CorridorAllocationResult:
@@ -913,6 +987,7 @@ def solve_corridor_cohorts(  # noqa: C901, PLR0915
 
         exclusion_intervals_by_root[root] = tuple(merged_intervals)
 
+    turn_side_orders = _turn_side_orders(lanes, union_find, peer_owners, sign)
     for left_index, left_lane in enumerate(lanes):
         left_root, _ = union_find.find(left_index)
         for right_index in range(left_index + 1, len(lanes)):
@@ -959,7 +1034,7 @@ def solve_corridor_cohorts(  # noqa: C901, PLR0915
                 if (left_root, right_root) in edge_order_owners
                 else (right_root, left_root)
                 if (right_root, left_root) in edge_order_owners
-                else None
+                else turn_side_orders.get(frozenset((left_root, right_root)))
             )
             if directed_edge == (left_root, right_root) or (
                 directed_edge is None and root_key[left_root] <= root_key[right_root]

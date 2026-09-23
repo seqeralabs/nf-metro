@@ -2186,6 +2186,27 @@ def _direction_owner(owner_id: str, direction: Direction) -> str:
     return f"{owner_id}|direction:{direction.value}"
 
 
+def _end_turn_sides(claim: _BoundClaim) -> tuple[int, int]:
+    """The raw side the route turns toward at the claim's low and high span ends."""
+    points = claim.target.route.points
+    rank = claim.ledger.segment_rank
+    axis = claim.axis
+    start, end = points[rank], points[rank + 1]
+
+    def turn_side(corner: tuple[float, float], beyond: int) -> int:
+        if not 0 <= beyond < len(points):
+            return 0
+        delta = points[beyond][axis] - corner[axis]
+        if abs(delta) <= COORD_TOLERANCE:
+            return 0
+        return 1 if delta > 0 else -1
+
+    at_start, at_end = turn_side(start, rank - 1), turn_side(end, rank + 2)
+    if start[1 - axis] <= end[1 - axis]:
+        return at_start, at_end
+    return at_end, at_start
+
+
 def _lane(
     claim: _BoundClaim,
     cohort_first_path_rank: int,
@@ -2222,6 +2243,7 @@ def _lane(
             claim.ledger.reservation_rank,
             claim.ledger.claim_rank,
         ),
+        *_end_turn_sides(claim),
     )
 
 

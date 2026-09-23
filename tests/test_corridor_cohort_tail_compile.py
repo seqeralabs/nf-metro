@@ -34,9 +34,9 @@ from nf_metro.render import svg
 ROOT = Path(__file__).parents[1]
 
 
-def _simulated_tail_plans(
+def _simulated_tail_render(
     relative_path: str, monkeypatch: pytest.MonkeyPatch
-) -> tuple[MetroGraph, tuple[RoutePlan, ...]]:
+) -> tuple[MetroGraph, svg.ObservedRenderPlan, tuple[RoutePlan, ...]]:
     observations: list[tuple[MetroGraph, dict, RoutePlan]] = []
     tail_plans: list[RoutePlan] = []
     pending = [False]
@@ -92,9 +92,16 @@ def _simulated_tail_plans(
 
     path = ROOT / relative_path
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-    svg.build_observed_render_plan(graph, resolve_theme(None, graph))
+    observed = svg.build_observed_render_plan(graph, resolve_theme(None, graph))
     assert tail_plans, "no settlement pass reached the aperture observation"
-    return graph, tuple(tail_plans)
+    return graph, observed, tuple(tail_plans)
+
+
+def _simulated_tail_plans(
+    relative_path: str, monkeypatch: pytest.MonkeyPatch
+) -> tuple[MetroGraph, tuple[RoutePlan, ...]]:
+    graph, _observed, plans = _simulated_tail_render(relative_path, monkeypatch)
+    return graph, plans
 
 
 def _aperture_requirements(plan: RoutePlan):
@@ -283,6 +290,66 @@ def test_trunk_slot_materialisation_leaves_convergence_context_in_place(
         == ("__junction_12", "__merge_2", "riboseq")
         for route in context_routes
     )
+
+
+RIBOSEQ_TOP_CORRIDOR_EDGES = (
+    ("__junction_13", "te__entry_left_10", "rnaseq"),
+    ("__junction_13", "psite_id__entry_left_9", "riboseq"),
+    ("novel_transcripts__exit_right_5", "orf_calling__entry_left_7", "annotation"),
+)
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "coordinates"),
+    (
+        ("examples/riboseq_metro.mmd", (321.0, 317.0, 313.0)),
+        (
+            "tests/fixtures/curve_invariant_repros/riboseq_inter_row_corridor.mmd",
+            (337.8, 333.8, 329.8),
+        ),
+    ),
+)
+def test_unowned_lane_pair_seats_on_the_side_its_end_turns_take(
+    relative_path: str,
+    coordinates: tuple[float, float, float],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Three lines drop from the right into one row corridor, run left, and drop
+    again.  ``rnaseq`` turns down at an end inside ``riboseq``'s run and
+    ``riboseq`` turns up at an end inside ``rnaseq``'s, so ``rnaseq`` seats
+    below ``riboseq`` whatever their connector ranks say.  ``annotation``'s run
+    spans both lanes' ends, which turn opposite ways, so no side avoids a
+    crossing and its order falls back to rank.  The compile seats every lane
+    where the render draws it."""
+    compiled = []
+    real_compile = member_geometry.compile_corridor_cohort_plan
+
+    def record(*args, **kwargs):
+        cohort_plan = real_compile(*args, **kwargs)
+        compiled.append(cohort_plan)
+        return cohort_plan
+
+    monkeypatch.setattr(member_geometry, "compile_corridor_cohort_plan", record)
+    _graph, observed, plans = _simulated_tail_render(relative_path, monkeypatch)
+    for plan in plans:
+        assert plan.corridor_cohort_ledger is not None
+        assert _aperture_requirements(plan) == ()
+    expected = dict(zip(RIBOSEQ_TOP_CORRIDOR_EDGES, coordinates, strict=True))
+    rendered = {
+        (route.edge.source, route.edge.target, route.line_id): route.points
+        for route in observed.plan.routes
+    }
+    for edge_key, coordinate in expected.items():
+        (_run_x, run_y), (_end_x, end_y) = rendered[edge_key][2:4]
+        assert run_y == pytest.approx(coordinate) == end_y
+    assert compiled
+    for cohort_plan in compiled:
+        seated = {
+            allocation.edge_key: allocation.coordinate
+            for allocation in cohort_plan.allocations
+            if allocation.edge_key in expected and allocation.segment_rank == 2
+        }
+        assert seated == pytest.approx(expected)
 
 
 def test_endpoint_section_lead_is_not_filed_in_a_neighbouring_gap(
