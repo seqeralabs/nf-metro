@@ -621,6 +621,7 @@
   "member_geometry.py::if mutable or key not in selected:::#1",
   "member_geometry.py::if negative_sections and not positive_sections:::#1",
   "member_geometry.py::if not allow_clearance_requirements:::#1",
+  "member_geometry.py::if not clearance_granted or shortfall > COORD_TOLERANCE:::#1",
   "member_geometry.py::if not negative:::#1",
   "member_geometry.py::if not negative_sections or not positive_sections:::#1",
   "member_geometry.py::if not requirements:::#1",

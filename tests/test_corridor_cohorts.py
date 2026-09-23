@@ -462,19 +462,39 @@ def test_end_turn_within_tolerance_of_the_other_span_end_does_not_vote() -> None
     assert allocations["semantic-second"] - allocations["semantic-first"] == 4.0
 
 
-def test_end_turn_orders_closing_a_cycle_with_semantic_order_fail_closed() -> None:
-    lanes = (
+def _end_turn_chain() -> tuple[CorridorLane, ...]:
+    """``a`` turns off inside ``b`` toward ``b``'s low side and ``b`` inside ``c``
+    toward ``c``'s; ``a``'s two turns inside ``c`` oppose each other, and
+    semantic rank alone would seat ``c`` below ``a``."""
+    return (
         _turning_lane("a", (100.0, 200.0), (1, -1), 2),
         _turning_lane("b", (150.0, 500.0), (0, -1), 1),
         _turning_lane("c", (0.0, 1000.0), (0, 0), 0),
     )
 
-    result = solve_corridor_cohorts(CorridorAllocationProblem(lanes))
+
+def test_an_unordered_pair_follows_the_order_end_turns_force() -> None:
+    for lanes in permutations(_end_turn_chain()):
+        assert _allocations(CorridorAllocationProblem(lanes)) == {
+            "a": -8.0,
+            "b": -4.0,
+            "c": 0.0,
+        }
+
+
+def test_end_turn_orders_contradicting_a_directed_separation_fail_closed() -> None:
+    problem = CorridorAllocationProblem(
+        _end_turn_chain(),
+        directed_separations=(CorridorDirectedSeparation("order:ca", "c", "a", 4.0),),
+    )
+
+    result = solve_corridor_cohorts(problem)
 
     assert result.status is CorridorAllocationStatus.FAILURE
     assert result.reason is CorridorAllocationFailureReason.INFEASIBLE
     assert result.allocations == ()
     assert result.blocking_member_ids == ("a", "b", "c")
+    assert result.blocking_order_owner_ids == ("order:ca",)
 
 
 def test_forbidden_coordinate_interval_chooses_one_deterministic_side() -> None:

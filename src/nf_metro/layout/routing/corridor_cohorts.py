@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from fractions import Fraction
@@ -615,6 +616,35 @@ def _turn_side_orders(
     }
 
 
+def _unforced_pair_ranks(
+    roots: set[int],
+    root_key: dict[int, tuple[tuple[int, ...], tuple[tuple[int, ...], ...], Fraction]],
+    separation_orders: Iterable[tuple[int, int]],
+    turn_side_orders: Mapping[frozenset[int], tuple[int, int]],
+) -> dict[int, int]:
+    """Rank roots for a pair that no directed separation or end-turn vote orders.
+
+    The ranks are a topological order of those forced orders, ties broken by
+    semantic rank, so no unforced pair closes a cycle through them.  When the
+    forced orders are themselves cyclic every ordering fails, so plain semantic
+    rank stands in.
+    """
+    forced = {edge: Fraction(0) for edge in separation_orders}
+    separated_pairs = {frozenset(edge) for edge in forced}
+    forced.update(
+        (order, Fraction(0))
+        for pair, order in turn_side_orders.items()
+        if pair not in separated_pairs
+    )
+    forced_order, _cycle = _ordered_roots_or_cycle(roots, forced, root_key)
+    return {
+        root: rank
+        for rank, root in enumerate(
+            forced_order or sorted(roots, key=root_key.__getitem__)
+        )
+    }
+
+
 def solve_corridor_cohorts(  # noqa: C901, PLR0915
     problem: CorridorAllocationProblem,
 ) -> CorridorAllocationResult:
@@ -988,6 +1018,9 @@ def solve_corridor_cohorts(  # noqa: C901, PLR0915
         exclusion_intervals_by_root[root] = tuple(merged_intervals)
 
     turn_side_orders = _turn_side_orders(lanes, union_find, peer_owners, sign)
+    fallback_rank = _unforced_pair_ranks(
+        set(roots), root_key, edge_order_owners.keys(), turn_side_orders
+    )
     for left_index, left_lane in enumerate(lanes):
         left_root, _ = union_find.find(left_index)
         for right_index in range(left_index + 1, len(lanes)):
@@ -1037,7 +1070,8 @@ def solve_corridor_cohorts(  # noqa: C901, PLR0915
                 else turn_side_orders.get(frozenset((left_root, right_root)))
             )
             if directed_edge == (left_root, right_root) or (
-                directed_edge is None and root_key[left_root] <= root_key[right_root]
+                directed_edge is None
+                and fallback_rank[left_root] < fallback_rank[right_root]
             ):
                 before, after = left_root, right_root
                 lane_separation = (

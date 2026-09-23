@@ -12,7 +12,7 @@ test.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -27,7 +27,7 @@ from nf_metro.layout.envelope_settlement import (
 )
 from nf_metro.layout.phases.guards import LayoutInvariantError
 from nf_metro.layout.route_plan import RoutePlan, SettlementStage
-from nf_metro.layout.routing import member_geometry
+from nf_metro.layout.routing import member_geometry, planning
 from nf_metro.layout.routing.common import OffsetRegime
 from nf_metro.layout.routing.offsets import compute_station_offsets
 from nf_metro.layout.settlement_demand import (
@@ -51,7 +51,9 @@ def _is_aperture_observation(kwargs: dict) -> bool:
 
 
 def _tail_render(
-    relative_path: str, monkeypatch: pytest.MonkeyPatch
+    relative_path: str,
+    monkeypatch: pytest.MonkeyPatch,
+    layout_options: Mapping[str, object] | None = None,
 ) -> tuple[MetroGraph, svg.ObservedRenderPlan, tuple[RoutePlan, ...]]:
     settle_calls = 0
     tail_plans: list[RoutePlan] = []
@@ -73,16 +75,20 @@ def _tail_render(
     monkeypatch.setattr(svg, "_settle_render_geometry", settle)
 
     path = ROOT / relative_path
-    graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+    graph = prepare_graph(
+        path.read_text(), source_dir=str(path.parent), layout_options=layout_options
+    )
     observed = svg.build_observed_render_plan(graph, resolve_theme(None, graph))
     assert len(tail_plans) == settle_calls >= 1
     return graph, observed, tuple(tail_plans)
 
 
 def _tail_plans(
-    relative_path: str, monkeypatch: pytest.MonkeyPatch
+    relative_path: str,
+    monkeypatch: pytest.MonkeyPatch,
+    layout_options: Mapping[str, object] | None = None,
 ) -> tuple[MetroGraph, tuple[RoutePlan, ...]]:
-    graph, _observed, plans = _tail_render(relative_path, monkeypatch)
+    graph, _observed, plans = _tail_render(relative_path, monkeypatch, layout_options)
     return graph, plans
 
 
@@ -95,9 +101,11 @@ def _aperture_requirements(plan: RoutePlan):
 
 
 def _assert_planned(
-    relative_path: str, monkeypatch: pytest.MonkeyPatch
+    relative_path: str,
+    monkeypatch: pytest.MonkeyPatch,
+    layout_options: Mapping[str, object] | None = None,
 ) -> tuple[MetroGraph, tuple[RoutePlan, ...]]:
-    graph, plans = _tail_plans(relative_path, monkeypatch)
+    graph, plans = _tail_plans(relative_path, monkeypatch, layout_options)
     for plan in plans:
         assert plan.corridor_cohort_ledger is not None
         assert _aperture_requirements(plan) == ()
@@ -389,6 +397,102 @@ def test_post_settlement_observation_compiles_settled_reservations(
     """Discovery-time reservations on these fixtures are narrower than their
     minimum width; observed after settlement grants that deficit, they compile."""
     _assert_planned(relative_path, monkeypatch)
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "layout_options"),
+    (
+        ("examples/topologies/target_lane_transition.mmd", {"line_order": "span"}),
+        (
+            "tests/fixtures/regressions/cross_column_perp_entry_overflow.mmd",
+            {"section_x_gap": 30.0, "y_spacing": 90.0},
+        ),
+    ),
+)
+def test_exit_turn_gap_allocation_pass_compiles_no_corridor_cohorts(
+    relative_path: str,
+    layout_options: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only the settled allocation survives the member-geometry execution that
+    allocates pending exit-turn gaps; the execution that re-plans against it
+    holds the cohort ledger and compiles the corridor cohorts."""
+    executions: list[tuple[bool, bool, bool]] = []
+    real_execution = planning.build_member_geometry_execution
+
+    def record(*args, **kwargs):
+        executions.append(
+            (
+                bool(kwargs["pending_exit_turn_plan_ids"]),
+                bool(kwargs["settled_exit_turn_plan_ids"]),
+                kwargs["corridor_cohort_ledger"] is not None
+                or bool(kwargs["corridor_targets"])
+                or bool(kwargs["corridor_scalar_requests"]),
+            )
+        )
+        return real_execution(*args, **kwargs)
+
+    monkeypatch.setattr(planning, "build_member_geometry_execution", record)
+    _assert_planned(relative_path, monkeypatch, layout_options)
+    assert not any(
+        compiles for allocates, _settles, compiles in executions if allocates
+    )
+    assert any(
+        allocation[0] and settled[1] and settled[2]
+        for allocation, settled in zip(executions, executions[1:], strict=False)
+    )
+
+
+def test_compact_convergence_seats_its_unordered_lanes_in_end_turn_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _assert_planned(
+        "examples/topologies/same_destination_vertical_convergence.mmd",
+        monkeypatch,
+        {"compact_offsets": True},
+    )
+
+
+def _flat(points) -> list[float]:
+    return [coordinate for point in points for coordinate in point]
+
+
+def test_granted_short_destination_cohort_is_seated_on_the_tail_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The aperture observation both allows clearance requirements and holds the
+    short-destination cohort's earlier grant, so it seats the cohort where the
+    render draws it rather than observing the unseated approach."""
+    tail_routes: list[dict[tuple[str, str, str], list[float]]] = []
+    real_observe = svg.observe_route_edges_centred
+
+    def observe(graph, **kwargs):
+        observation = real_observe(graph, **kwargs)
+        if _is_aperture_observation(kwargs):
+            tail_routes.append(
+                {
+                    (route.edge.source, route.edge.target, route.line_id): _flat(
+                        route.points
+                    )
+                    for route in observation.routes
+                }
+            )
+        return observation
+
+    monkeypatch.setattr(svg, "observe_route_edges_centred", observe)
+    path = ROOT / "examples/topologies/same_destination_short_overlap.mmd"
+    graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+    observed = svg.build_observed_render_plan(graph, resolve_theme(None, graph))
+
+    drawn = {
+        (route.edge.source, route.edge.target, route.line_id): _flat(route.points)
+        for route in observed.plan.routes
+        if route.edge.target == "target__entry_left_3"
+    }
+    assert len(drawn) >= 2
+    (observed_routes,) = tail_routes
+    for edge_key, points in drawn.items():
+        assert observed_routes[edge_key] == pytest.approx(points), edge_key
 
 
 RENDER_STAGES = frozenset(

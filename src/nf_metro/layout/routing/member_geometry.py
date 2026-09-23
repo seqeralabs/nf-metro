@@ -2614,7 +2614,7 @@ def _settle_plannable_short_destination_cohorts(
                     settled_turn(route, membership.assignment, route.points)
                 )
             continue
-        if allow_clearance_requirements or shortfall > COORD_TOLERANCE:
+        if not clearance_granted or shortfall > COORD_TOLERANCE:
             continue
 
         for proposal in proposals:

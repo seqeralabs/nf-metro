@@ -907,6 +907,10 @@
   "note": "A route without exit-turn membership is supported: it can participate in a feasible same-destination cohort while declining the optional settled-turn ownership refresh. A membership with no assignment is malformed, but the collapsed gate also covers the valid no-membership case. Reachable; wants a minimal fixture.",
   "status": "needs-review"
  },
+ "member_geometry.py::if not clearance_granted or shortfall > COORD_TOLERANCE:::#1": {
+  "note": "An allow pass reaches this with a short same-destination cohort that holds no clearance grant and has no shortfall to publish, so it has nothing to seat. same_destination_short_overlap takes it under x_spacing=60/y_spacing=40, track_gap=6 and x_spacing=80/section_y_gap=70, but no fixture does under the default options this corpus renders. Reachable; wants a fixture whose authored spacing leaves the cohort clear of its shortfall.",
+  "status": "needs-review"
+ },
  "member_geometry.py::if membership is None or membership.axis is None:::#1": {
   "note": "Routes without exit-turn membership or an owned axis are supported cohort members: they remain geometrically movable while declining exit-turn replanning. The corpus does not yet carry that ownership mix. Reachable; wants a minimal fixture.",
   "status": "needs-review"
