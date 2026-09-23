@@ -1652,7 +1652,7 @@ def test_corridor_cohort_aperture_requirements_resolves_packed_cell_conflict() -
     (requirement,) = requirements
     assert requirement.axis is SettlementAxis.COLUMN
     assert requirement.boundary == 2
-    assert requirement.required == pytest.approx(55.0)
+    assert requirement.required == pytest.approx(56.0)
     assert requirement.negative_section_ids == ("assemble",)
     assert requirement.positive_section_ids == ("qc",)
     assert requirement.kind is BoundaryClearanceRequirementKind.CORRIDOR_COHORT_APERTURE
@@ -1697,7 +1697,7 @@ def test_packed_cell_routing_observation_publishes_corridor_aperture_requirement
     assert requirement.kind is BoundaryClearanceRequirementKind.CORRIDOR_COHORT_APERTURE
     assert requirement.axis is SettlementAxis.COLUMN
     assert requirement.boundary == 2
-    assert requirement.required == pytest.approx(55.0)
+    assert requirement.required == pytest.approx(56.0)
     assert requirement.negative_section_ids == ("assemble",)
     assert requirement.positive_section_ids == ("qc",)
 

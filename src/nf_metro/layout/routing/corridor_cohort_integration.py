@@ -1622,6 +1622,7 @@ def _member_footprint_model(
                 same_line=parallel.line_id == variable_witness.line_id,
                 counter_running=parallel.direction is not variable_witness.direction,
                 curve_radius=curve_radius,
+                offset_step=offset_step,
             )
             if clearance <= COORD_TOLERANCE or (
                 abs(parallel.coordinate - variable.coordinate)
@@ -2477,6 +2478,7 @@ def _problem(
                 same_line=left.target.route.line_id == right.target.route.line_id,
                 counter_running=left.ledger.direction is not right.ledger.direction,
                 curve_radius=curve_radius,
+                offset_step=offset_step,
             ),
         )
         for rank, left in enumerate(claims)
@@ -2573,6 +2575,7 @@ def _problem(
                     is not scalar_witnesses[right.variable.variable_id].direction
                 ),
                 curve_radius=curve_radius,
+                offset_step=offset_step,
             ),
         )
         for rank, left in enumerate(ordered_requests)
@@ -2620,6 +2623,7 @@ def _problem(
         fixed_equalities=tuple(fixed_equalities),
         directed_separations=tuple(directed_separations),
         forbidden_intervals=forbidden_intervals,
+        clearance=offset_step,
         witnesses_complete=complete,
         axis_sign=_lane_order_axis_sign(
             coordinate_axis,

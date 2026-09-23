@@ -115,12 +115,34 @@ def _assert_planned(
 def test_packed_cell_oracle_compiles_to_one_aperture_requirement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The fixture's ``track_gap: 2`` pitches its lanes 5px apart, and the
+    aperture it requires is measured at that pitch."""
     _graph, plans = _tail_plans(ORACLE, monkeypatch)
     (plan,) = plans
     (requirement,) = _aperture_requirements(plan)
     assert requirement.axis is SettlementAxis.COLUMN
     assert requirement.boundary == 2
+    assert requirement.required == pytest.approx(56.0)
     assert requirement.positive_section_ids == ("qc",)
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "layout_options"),
+    (
+        ("examples/variant_calling.mmd", {"track_gap": 0.0}),
+        ("examples/guide/03_fan_out.mmd", {"stroke_scale": 0.5}),
+        ("examples/topologies/exit_run_three_drop_columns.mmd", {"track_gap": 0.0}),
+    ),
+)
+def test_lanes_pitched_below_the_default_step_compile_at_their_own_pitch(
+    relative_path: str,
+    layout_options: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Lanes nest one ``offset_step`` apart, so a pitch below the default step
+    is a separation the compiler must accept, between two movable lanes and
+    between a movable lane and a fixed one."""
+    _assert_planned(relative_path, monkeypatch, layout_options)
 
 
 VERTICAL_FLOW_SIDE_ENTRY_FIXTURES = (
@@ -508,9 +530,9 @@ RENDER_STAGES = frozenset(
 def test_packed_cell_aperture_grant_widens_its_column_boundary_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``qc``'s aperture is 1.0px short at column boundary 2; one settlement of
-    the observed plan pays it with the 2.0px quantised floor, carrying ``qc``
-    and nothing on the negative side, which its own translation record shows."""
+    """``qc``'s aperture is 2.0px short at column boundary 2; one settlement of
+    the observed plan pays it with a 2.0px translation, carrying ``qc`` and
+    nothing on the negative side, which its own translation record shows."""
     batches: list[
         tuple[RoutePlan, tuple[BoundaryClearanceDemand, ...], EnvelopeSettlement]
     ] = []
@@ -534,7 +556,7 @@ def test_packed_cell_aperture_grant_widens_its_column_boundary_once(
     assert requirement.kind is BoundaryClearanceRequirementKind.CORRIDOR_COHORT_APERTURE
     (demand,) = owed
     assert (demand.axis, demand.boundary) == (SettlementAxis.COLUMN, 2)
-    assert demand.deficit == pytest.approx(1.0)
+    assert demand.deficit == pytest.approx(2.0)
     (translation,) = settlement.translations
     assert (translation.axis, translation.boundary) == (SettlementAxis.COLUMN, 2)
     assert translation.amount == pytest.approx(2.0)
