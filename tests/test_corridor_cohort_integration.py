@@ -1234,7 +1234,6 @@ def test_problem_rejects_an_infeasible_fixed_fixed_footprint_order() -> None:
             True,
             10.0,
             8.0,
-            {},
             footprint_model,
             {},
         )
