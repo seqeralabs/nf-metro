@@ -1,7 +1,7 @@
 ---
 name: fix-issue-merge-assessor
 description: Decides whether the unverified delta on a PR is genuinely CI-irrelevant, gating an authorised admin merge for the fix-issue workflow. Judgment on shipping unverified code.
-model: claude-opus-4-8
+model: claude-opus-5-5
 tools: Bash, Read, Grep, Glob
 effort: high
 ---

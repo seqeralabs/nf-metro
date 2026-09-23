@@ -123,7 +123,7 @@ nobody chose - and where it lands depends on the resolution order in
 that overrides every tier in this table. Never leave it to that.
 
 The tier is the contract, not the model name. On Claude Code that is
-`haiku`/`sonnet`/`claude-opus-4-8`. HIGH is pinned to that exact snapshot rather
+`haiku`/`sonnet`/`claude-opus-5-5`. HIGH is pinned to that exact snapshot rather
 than the `opus` alias, so it does not silently follow Anthropic's newer Opus
 releases.
 
