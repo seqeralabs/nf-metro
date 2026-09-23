@@ -384,18 +384,28 @@ def test_forced_same_line_loop_crossing_is_not_a_forbidden_interval(
 
 
 @pytest.mark.parametrize(
-    "relative_path",
+    ("relative_path", "layout_options"),
     (
-        "examples/riboseq_metro.mmd",
-        "tests/fixtures/curve_invariant_repros/riboseq_inter_row_corridor.mmd",
+        ("examples/riboseq_metro.mmd", None),
+        ("tests/fixtures/curve_invariant_repros/riboseq_inter_row_corridor.mmd", None),
+        (
+            "tests/fixtures/curve_invariant_repros/riboseq_inter_row_corridor.mmd",
+            {"label_angle": 10.0},
+        ),
     ),
 )
 def test_trunk_slot_materialisation_leaves_convergence_context_in_place(
-    relative_path: str, monkeypatch: pytest.MonkeyPatch
+    relative_path: str,
+    layout_options: dict[str, object] | None,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A convergence leg rides member geometry only as gap-population context;
     its convergence plan emits it, so trunk-slot materialisation must not move
-    the copy the cohort compiler later binds as a fixed claim."""
+    the copy the cohort compiler later binds as a fixed claim.  It still stacks
+    that copy with the candidate trunks in its channel, as an anchor they take
+    their tracks around: at ``label_angle: 10`` a stack without it seats
+    ``annotation`` 2px from ``riboseq`` and the render fails its curve
+    invariants."""
     context_routes: list = []
     real_context_route = member_geometry._convergence_context_route
     real_materialize = member_geometry._materialize_trunk_slots
@@ -417,9 +427,7 @@ def test_trunk_slot_materialisation_leaves_convergence_context_in_place(
 
     monkeypatch.setattr(member_geometry, "_convergence_context_route", record_context)
     monkeypatch.setattr(member_geometry, "_materialize_trunk_slots", check_materialize)
-    path = ROOT / relative_path
-    graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-    svg.build_observed_render_plan(graph, resolve_theme(None, graph))
+    _assert_planned(relative_path, monkeypatch, layout_options)
     assert materialised
     assert any(
         (route.edge.source, route.edge.target, route.line_id)

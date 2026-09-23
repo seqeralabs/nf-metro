@@ -1028,6 +1028,20 @@ def solve_corridor_cohorts(  # noqa: C901, PLR0915
     fallback_rank = _unforced_pair_ranks(
         set(roots), root_key, edge_order_owners.keys(), turn_side_orders
     )
+
+    def unforced_before(left_root: int, right_root: int) -> bool:
+        """Whether *left_root* seats first in a pair no forced order directs.
+
+        A pair holding a fixed lane keeps the order its two lanes are drawn in,
+        since the fixed lane cannot move to take any other; a pair of movable
+        lanes follows the fallback ranks.
+        """
+        if (
+            left_root in fixed_root_owners or right_root in fixed_root_owners
+        ) and preferred[left_root] != preferred[right_root]:
+            return preferred[left_root] < preferred[right_root]
+        return fallback_rank[left_root] < fallback_rank[right_root]
+
     for left_index, left_lane in enumerate(lanes):
         left_root, _ = union_find.find(left_index)
         for right_index in range(left_index + 1, len(lanes)):
@@ -1077,8 +1091,7 @@ def solve_corridor_cohorts(  # noqa: C901, PLR0915
                 else turn_side_orders.get(frozenset((left_root, right_root)))
             )
             if directed_edge == (left_root, right_root) or (
-                directed_edge is None
-                and fallback_rank[left_root] < fallback_rank[right_root]
+                directed_edge is None and unforced_before(left_root, right_root)
             ):
                 before, after = left_root, right_root
                 lane_separation = (

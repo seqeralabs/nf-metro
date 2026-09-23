@@ -497,6 +497,53 @@ def test_end_turn_orders_contradicting_a_directed_separation_fail_closed() -> No
     assert result.blocking_order_owner_ids == ("order:ca",)
 
 
+def _pinned_pair_problem() -> CorridorAllocationProblem:
+    """``free`` is drawn one pitch below ``pinned``, which a fixed equality holds
+    at 100; nothing orders the pair, and semantic rank alone seats ``free``
+    first."""
+    return CorridorAllocationProblem(
+        lanes=(
+            _lane(
+                "free",
+                "corridor:free",
+                "endpoint:free",
+                104.0,
+                104.0,
+                span=(0.0, 10.0),
+                line_rank=0,
+            ),
+            _lane(
+                "pinned",
+                "corridor:pinned",
+                "endpoint:pinned",
+                100.0,
+                100.0,
+                span=(0.0, 10.0),
+                line_rank=1,
+            ),
+        ),
+        obstacles=(
+            _obstacle("anchor", 100.0, 100.0, span=(0.0, 10.0), semantic_rank=(1,)),
+        ),
+        fixed_equalities=(CorridorFixedEquality("context", "pinned", "anchor"),),
+    )
+
+
+def test_an_unordered_pair_holding_a_fixed_lane_keeps_its_drawn_order() -> None:
+    problem = _pinned_pair_problem()
+    for lanes in permutations(problem.lanes):
+        assert _allocations(replace(problem, lanes=lanes)) == {
+            "free": 104.0,
+            "pinned": 100.0,
+        }
+
+
+def test_an_unordered_pair_of_movable_lanes_follows_semantic_rank() -> None:
+    problem = replace(_pinned_pair_problem(), obstacles=(), fixed_equalities=())
+    allocations = _allocations(problem)
+    assert allocations["pinned"] - allocations["free"] == 4.0
+
+
 def test_forbidden_coordinate_interval_chooses_one_deterministic_side() -> None:
     lane = _lane(
         "movable",

@@ -3440,14 +3440,13 @@ def _materialize_trunk_slots(
 
     *fixed_route_ids* names routes carried only as context for a segment
     another plan owns; this pass must not restack or dogleg them, since that
-    plan has already fixed their geometry by the time it emits them.
+    plan has already fixed their geometry by the time it emits them.  Their
+    trunks still join the channel stack, as anchors: the stack is seated so they
+    keep their Y, and the other trunks take their tracks around them rather than
+    fanning onto a track one of them already holds.
     """
     step = ctx.offset_step
-    trunks = [
-        trunk
-        for trunk in _declared_htrunks(routes)
-        if id(trunk.route) not in fixed_route_ids
-    ]
+    trunks = _declared_htrunks(routes)
     groups = _group_channel_trunks(trunks, step) if len(trunks) >= 2 else []
 
     # Routes whose trunk this pass has placed into a concentric bundle; the
@@ -3482,7 +3481,14 @@ def _materialize_trunk_slots(
         bands.sort(key=lambda b: min(t.y for t in b))
         # An all-exempt channel's fan is best-effort (discretionary): abandon
         # the reorder where no stack top seats it inside the claimed bands.
-        _stack_trunk_bands(bands, ctx, step, bundled, discretionary=all_exempt)
+        _stack_trunk_bands(
+            bands,
+            ctx,
+            step,
+            bundled,
+            discretionary=all_exempt,
+            fixed_route_ids=fixed_route_ids,
+        )
 
     _dogleg_off_exempt_trunks(
         routes, ctx, skip=bundled, fixed_route_ids=fixed_route_ids
@@ -3498,6 +3504,7 @@ def _stack_trunk_bands(
     bundled: set[int],
     *,
     discretionary: bool = False,
+    fixed_route_ids: frozenset[int] = frozenset(),
 ) -> None:
     """Lay an ordered top -> bottom list of trunk bands into their inter-row gap.
 
@@ -3515,6 +3522,10 @@ def _stack_trunk_bands(
     where no stack top seats the reordered corridors inside the bands their
     reservations claim (:func:`_restack_fits_corridor_claims`) rather than
     reordering into a corridor that overruns its own band.
+
+    A trunk of a route in *fixed_route_ids* is an anchor: the stack top is the
+    one that seats it at its current Y, and a stack whose anchors no single top
+    seats together is abandoned.
     """
     planned = [_plan_trunk_band(b) for b in bands]
     gap = BUNDLE_TO_BUNDLE_CLEARANCE
@@ -3523,9 +3534,17 @@ def _stack_trunk_bands(
         ctx, planned, bands, step, gap
     ):
         return
-    top = min(t.y for b in bands for t in b)
-    band_top = _clamp_inter_row_band_top(ctx, top, total)
-    band_top = _hold_stack_in_claim_bands(ctx, band_top, planned, bands, step, gap)
+    anchors = [t for b in bands for t in b if id(t.route) in fixed_route_ids]
+    if anchors:
+        depth_of = _stack_depths(planned, bands, step, gap)
+        anchored_tops = [t.y - depth_of[id(t)] for t in anchors]
+        if max(anchored_tops) - min(anchored_tops) > COORD_TOLERANCE:
+            return
+        band_top = min(anchored_tops)
+    else:
+        top = min(t.y for b in bands for t in b)
+        band_top = _clamp_inter_row_band_top(ctx, top, total)
+        band_top = _hold_stack_in_claim_bands(ctx, band_top, planned, bands, step, gap)
     for (order, track_of, n), band in zip(planned, bands):
         _restack_trunk_band(
             order, track_of, n, band_top, band[0].dips_down, step, ctx, bundled
@@ -3541,6 +3560,26 @@ def _slot_depth_in_band(inner: int, count: int, dips: bool) -> int:
     the bottom -- hence the inner/(count-1-inner) swap.
     """
     return inner if dips else count - 1 - inner
+
+
+def _stack_depths(
+    planned: list[tuple[list[list[_HTrunk]], dict[int, int], int]],
+    bands: list[list[_HTrunk]],
+    step: float,
+    gap: float,
+) -> dict[int, float]:
+    """Each planned trunk's depth below the stack top, keyed by ``id(trunk)``."""
+    depth_of: dict[int, float] = {}
+    depth_offset = 0.0
+    for (order, track_of, count), band in zip(planned, bands):
+        dips = band[0].dips_down
+        for slot in order:
+            inner = track_of[id(slot)]
+            depth = depth_offset + _slot_depth_in_band(inner, count, dips) * step
+            for trunk in slot:
+                depth_of[id(trunk)] = depth
+        depth_offset += (count - 1) * step + gap
+    return depth_of
 
 
 def _restack_fits_corridor_claims(
@@ -3565,16 +3604,7 @@ def _restack_fits_corridor_claims(
     is claimed is therefore admitted outright rather than refused for want of
     evidence.
     """
-    depth_of: dict[int, float] = {}
-    depth_offset = 0.0
-    for (order, track_of, count), band in zip(planned, bands):
-        dips = band[0].dips_down
-        for slot in order:
-            inner = track_of[id(slot)]
-            depth = depth_offset + _slot_depth_in_band(inner, count, dips) * step
-            for trunk in slot:
-                depth_of[id(trunk)] = depth
-        depth_offset += (count - 1) * step + gap
+    depth_of = _stack_depths(planned, bands, step, gap)
     corridors: defaultdict[tuple[str, str], list[_HTrunk]] = defaultdict(list)
     for band in bands:
         for trunk in band:
