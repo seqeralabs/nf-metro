@@ -1365,6 +1365,7 @@ def _endpoint_lead_sections(
 def _gap_touches_section(
     region: RowGapRegion | ColumnGapRegion, section: Section
 ) -> bool:
+    """Whether *region*'s grid span overlaps *section*'s."""
     if isinstance(region, RowGapRegion):
         return grid_spans_overlap(
             (region.upper_row, region.lower_row), section_row_span(section)

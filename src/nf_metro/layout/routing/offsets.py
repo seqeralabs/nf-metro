@@ -3950,30 +3950,44 @@ def _outward_lead_sign(ctx: _OffsetCtx, station_id: str) -> int | None:
     return None
 
 
-def _feeder_descent_corridors(
-    ctx: _OffsetCtx, port_id: str, port: Port, outward: int
-) -> tuple[dict[str, int], dict[str, int]] | None:
-    """Each non-level feeder line's descent corridor at a flow-start side entry.
+def _inward_column_edges(ctx: _OffsetCtx, outward: int) -> list[float]:
+    """Each grid column's inward edge X, facing *outward*.
 
-    A feeder whose source leads out *outward* drops to the port's row down the
-    outer side of whichever reaches further out, its source or the port, and
-    turns in along that row.  The corridor is the count of grid-column inward
-    edges at or before that descent along *outward*.  Returns the lines
-    arriving from above and from below, or ``None`` when some feeder's corridor
-    is not decided that way: its lead is unknown or points toward the port, one
-    line arrives down two corridors, or an intervening section blocks the drop
-    or the turn-in.
+    Shared across every port queried with the same *outward* sign, so callers
+    that scan multiple ports should compute this once per sign rather than
+    once per port.
     """
     graph = ctx.graph
-    section = graph.section_for_port(port)
-    port_station = graph.stations[port_id]
     columns = {other.grid_col for other in graph.sections.values()}
-    inward_edges = [
+    return [
         col_left_edge(graph, col, default=math.inf)
         if outward > 0
         else col_right_edge(graph, col, default=-math.inf)
         for col in columns
     ]
+
+
+def _feeder_descent_corridors(
+    ctx: _OffsetCtx,
+    port_id: str,
+    port: Port,
+    outward: int,
+    inward_edges: Sequence[float],
+) -> tuple[dict[str, int], dict[str, int]] | None:
+    """Each non-level feeder line's descent corridor at a flow-start side entry.
+
+    A feeder whose source leads out *outward* drops to the port's row down the
+    outer side of whichever reaches further out, its source or the port, and
+    turns in along that row.  The corridor is the count of *inward_edges* (see
+    :func:`_inward_column_edges`) at or before that descent along *outward*.
+    Returns the lines arriving from above and from below, or ``None`` when
+    some feeder's corridor is not decided that way: its lead is unknown or
+    points toward the port, one line arrives down two corridors, or an
+    intervening section blocks the drop or the turn-in.
+    """
+    graph = ctx.graph
+    section = graph.section_for_port(port)
+    port_station = graph.stations[port_id]
     above: dict[str, int] = {}
     below: dict[str, int] = {}
     for edge in graph.edges_to(port_id):
@@ -4028,6 +4042,7 @@ def _order_flow_start_side_entry_by_descent_corridor(ctx: _OffsetCtx) -> None:
     toward the port.
     """
     graph = ctx.graph
+    inward_edges_by_outward: dict[int, list[float]] = {}
     for port_id, port in graph.ports.items():
         if not port.is_entry or port.side not in (PortSide.LEFT, PortSide.RIGHT):
             continue
@@ -4040,7 +4055,11 @@ def _order_flow_start_side_entry_by_descent_corridor(ctx: _OffsetCtx) -> None:
         ):
             continue
         outward = 1 if port.side is PortSide.RIGHT else -1
-        corridors = _feeder_descent_corridors(ctx, port_id, port, outward)
+        if outward not in inward_edges_by_outward:
+            inward_edges_by_outward[outward] = _inward_column_edges(ctx, outward)
+        corridors = _feeder_descent_corridors(
+            ctx, port_id, port, outward, inward_edges_by_outward[outward]
+        )
         if corridors is None:
             continue
         new_offs: dict[str, float] = {}

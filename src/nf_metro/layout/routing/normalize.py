@@ -3438,9 +3438,9 @@ def _materialize_trunk_slots(
     untouched; the flanking corner radii are recomputed for any trunk that
     actually moves so the bundle stays concentric.
 
-    *fixed_route_ids* names routes present only as context for a stroke another
-    plan emits: neither restacked nor doglegged, as that plan's owned segments
-    are not when it emits them.
+    *fixed_route_ids* names routes carried only as context for a segment
+    another plan owns; this pass must not restack or dogleg them, since that
+    plan has already fixed their geometry by the time it emits them.
     """
     step = ctx.offset_step
     trunks = [
