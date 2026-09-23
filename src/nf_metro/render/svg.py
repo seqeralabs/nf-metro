@@ -2227,9 +2227,12 @@ def _settle_render_geometry(
     # to its minimum widths compiles without a spurious aperture shortfall; this
     # observation is that pass.  Its routes are thrown away either way: a grant
     # re-routes from the geometry the observation started on.
+    # `_resettle` clears `carried_ports` as a side effect; restore it here
+    # because this pass's own routes are discarded below, and the carried
+    # state belongs to whichever pass ultimately publishes.
     carried_before_observation = carried_ports
     with _restoring_route_observation_geometry(graph):
-        _observed_offsets, _observed_routes, observed_plan = _resettle(
+        _observed_offsets, observed_routes, observed_plan = _resettle(
             settled_plan,
             settlement.coordinate_translations,
             allow_clearance_requirements=True,
@@ -2256,6 +2259,9 @@ def _settle_render_geometry(
         )
         labels = _place(station_offsets, routes)
         assert_render_curve_invariants(graph, routes, station_offsets)
+        _assert_settlement_decisions_frozen(
+            observed_routes, observed_plan, routes, granted_routed_plan
+        )
         route_plan = attach_reroute_ledger_delta(
             adopt_route_reservation_ledger(
                 observed_plan,

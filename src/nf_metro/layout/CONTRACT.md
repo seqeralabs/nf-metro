@@ -2122,13 +2122,16 @@ They are design evidence, not part of this specification.
   translations, that may publish clearance requirements. It is the only pass
   that runs the corridor-cohort compiler, because only a ledger already settled
   to its minimum widths compiles without a spurious shortfall. Its geometry
-  (station coordinates, section boxes, bypass-label obstacles, and the ports
-  the label pass before it carried) is discarded. A `CORRIDOR_COHORT_APERTURE`
-  requirement it publishes is settled once against the observed plan, the
-  grant is proven from that settlement's own translations to pay every
-  measured deficit (`_assert_aperture_grant_closes`: the translation at the
-  requirement's boundary carries every positive-side box, no negative-side box,
-  and at least the deficit, which the quantised allocation may exceed), and a
+  (station coordinates, section boxes, and bypass-label obstacles) is
+  discarded by `_restoring_route_observation_geometry`. The ports the label
+  pass before it carried are restored separately, by a manual save/restore
+  around that context manager rather than by the context manager itself. A
+  `CORRIDOR_COHORT_APERTURE` requirement it publishes is settled once against
+  the observed plan, the grant is proven from that settlement's own
+  translations to pay every measured deficit (`_assert_aperture_grant_closes`:
+  the translation at the requirement's boundary carries every positive-side box,
+  no negative-side box, and at least the deficit, which the quantised
+  allocation may exceed), and a
   re-route consuming the observed plan draws the result, which is adopted and
   published. There is no retry or fixpoint search. A requirement surviving the
   first strict observation, any deficit surviving final settlement, or an
