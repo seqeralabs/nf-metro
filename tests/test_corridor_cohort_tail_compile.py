@@ -162,6 +162,27 @@ def test_lanes_on_a_non_binary_pitch_compile(
     _assert_planned(relative_path, monkeypatch, {"stroke_scale": 0.9})
 
 
+@pytest.mark.parametrize("stroke_scale", (0.3, 0.5, 0.7))
+def test_a_lane_seated_on_its_band_edge_allocation_settles(
+    stroke_scale: float, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """At these stroke scales ``genomeassembly``'s ``hic_reads`` lane in column
+    gap 2|3 is allocated one pixel beyond its reservation band's edge; the
+    member seater must accept that allocation to clear the ``assemblies``
+    convergence it would otherwise crowd."""
+    _assert_planned(
+        "examples/genomeassembly.mmd", monkeypatch, {"stroke_scale": stroke_scale}
+    )
+
+
+def test_convergence_flanks_one_radius_apart_on_fractional_columns_settle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``label_angle: 30`` seats ``genomeassembly``'s ``assemblies`` flanks on
+    columns with fractional offsets, exactly one curve radius apart."""
+    _assert_planned("examples/genomeassembly.mmd", monkeypatch, {"label_angle": 30.0})
+
+
 def test_one_non_binary_pitch_reads_as_one_exact_separation() -> None:
     assert corridor_cohorts._q(698.8000000000001) - corridor_cohorts._q(
         695.2

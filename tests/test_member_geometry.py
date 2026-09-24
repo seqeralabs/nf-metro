@@ -12,7 +12,12 @@ import nf_metro.layout.routing.corridor_cohort_integration as cci
 import nf_metro.layout.routing.member_geometry as member_geometry
 import nf_metro.layout.routing.planning as planning_module
 from nf_metro.api import RenderConfig, prepare_graph, render_graph, resolve_theme
-from nf_metro.layout.constants import CURVE_RADIUS, DIAGONAL_RUN, OFFSET_STEP
+from nf_metro.layout.constants import (
+    COORD_TOLERANCE,
+    CURVE_RADIUS,
+    DIAGONAL_RUN,
+    OFFSET_STEP,
+)
 from nf_metro.layout.route_plan import (
     BindingKind,
     ConvergenceEndpointRole,
@@ -237,6 +242,61 @@ def _assert_channels_equal_emission(observation, plan) -> None:
             channel.start,
             channel.end,
         )
+
+
+@pytest.mark.parametrize(
+    ("candidate", "clears"),
+    (
+        (766.0 - COORD_TOLERANCE, True),
+        (784.0 + COORD_TOLERANCE, True),
+        (766.0 - 1.5 * COORD_TOLERANCE, False),
+        (784.0 + 1.5 * COORD_TOLERANCE, False),
+    ),
+)
+def test_runway_reads_its_reservation_band_at_coordinate_tolerance(
+    candidate: float, clears: bool
+) -> None:
+    """Gap materialisation can allocate a lane flush against its band edge
+    whose settled coordinate lands one tolerance outside it; the band edge is
+    as far as the gap edge a candidate may stand beyond."""
+    route = RoutedPath(
+        Edge("hic", "scaffolding", "hic"),
+        "hic",
+        [
+            (236.0, 124.0),
+            (254.0, 124.0),
+            (254.0, 238.0),
+            (783.0, 238.0),
+            (783.0, 122.0),
+            (800.0, 122.0),
+        ],
+        is_inter_section=True,
+    )
+    item = member_geometry._MaterializedChannel(
+        member_geometry._MemberCandidate(
+            route,
+            RouteFamilyId.STANDARD_L_SHAPE,
+            RouteSystemId("system"),
+            "carrier",
+            ("connector",),
+        ),
+        _VChannel(route, 3, 783.0, 122.0, 238.0, False),
+        GapSlot(2, 3, 0, Direction.U, 0, 2),
+    )
+    bounds = member_geometry._ChannelBounds(
+        gap_lo=750.0,
+        gap_hi=800.0,
+        lo=750.0,
+        hi=790.0,
+        band=ReservedBand(766.0, 784.0, 785.0),
+    )
+
+    assert (
+        member_geometry._candidate_clears_runway(
+            item, bounds, candidate, SimpleNamespace(curve_radius=CURVE_RADIUS)
+        )
+        is clears
+    )
 
 
 def test_live_claim_index_exposes_only_eligible_prior_systems_in_order() -> None:

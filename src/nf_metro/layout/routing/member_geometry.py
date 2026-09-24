@@ -1658,7 +1658,10 @@ def _candidate_clears_runway(
     gap, escape a reservation band, or starve either corner.
     """
     route = item.candidate.route
-    if bounds.band is not None and not bounds.band.lo <= candidate <= bounds.band.hi:
+    if bounds.band is not None and (
+        measured_distance(candidate, bounds.band.lo) > COORD_TOLERANCE
+        or measured_distance(bounds.band.hi, candidate) > COORD_TOLERANCE
+    ):
         return False
     corridor_lo = bounds.gap_lo if shared_carrier else bounds.lo
     corridor_hi = bounds.gap_hi if shared_carrier else bounds.hi
