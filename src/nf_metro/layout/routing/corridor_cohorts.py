@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Container, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from fractions import Fraction
@@ -638,6 +638,34 @@ def _turn_side_orders(
     }
 
 
+def _fixed_lane_drawn_orders(
+    lanes: tuple[CorridorLane, ...],
+    union_find: _WeightedUnionFind,
+    preferred: Mapping[int, Fraction],
+    fixed_roots: Container[int],
+) -> dict[frozenset[int], tuple[int, int]]:
+    """Order each overlapping root pair holding a fixed root by preferred base.
+
+    A fixed root's own coordinate cannot move, so this keeps the pair on the
+    sides it is drawn on.  The order is a preference nonetheless: the movable
+    roots around a fixed one can seat on either side of it, so pairs through it
+    can close a cycle with the other orders, and then they give way like any
+    other preference.  A pair whose bases coincide is left unordered.
+    """
+    return {
+        frozenset((left_root, right_root)): (
+            (left_root, right_root)
+            if preferred[left_root] < preferred[right_root]
+            else (right_root, left_root)
+        )
+        for *_, left_root, right_root in _overlapping_cross_root_pairs(
+            lanes, union_find
+        )
+        if (left_root in fixed_roots or right_root in fixed_roots)
+        and preferred[left_root] != preferred[right_root]
+    }
+
+
 def _seated_clear_orders(
     lanes: tuple[CorridorLane, ...],
     union_find: _WeightedUnionFind,
@@ -1076,54 +1104,44 @@ def solve_corridor_cohorts(  # noqa: C901, PLR0915
 
         exclusion_intervals_by_root[root] = tuple(merged_intervals)
 
-    # A seated-clear order outranks the pair's end-turn votes, so lanes the
-    # render already draws clear of each other compile where it draws them.
-    # Seated orders only prefer the drawn order: where they cycle through the
-    # directed separations and end-turn votes they all give way rather than
-    # fail a compile those orders alone would plan.
+    # Per pair, a seated-clear order outranks the end-turn votes, so lanes the
+    # render already draws clear of each other compile where it draws them,
+    # and both outrank a fixed lane's drawn order.  Seated and fixed-lane
+    # orders only prefer the drawn order: where the orders cycle, the seated
+    # orders give way first and the fixed-lane orders next, rather than fail a
+    # compile the directed separations and end-turn votes alone would plan.
     turn_orders = _turn_side_orders(lanes, union_find, sign)
-    pair_orders = {
-        **turn_orders,
-        **_seated_clear_orders(
-            lanes,
-            union_find,
-            {
-                index: preferred[union_find.find(index)[0]] + potentials[index]
-                for index in range(len(lanes))
-            },
-            required_clearance,
-        ),
-    }
-    forced_order = _forced_root_order(
-        set(roots), root_key, edge_order_owners.keys(), pair_orders
+    fixed_orders = _fixed_lane_drawn_orders(
+        lanes, union_find, preferred, fixed_root_owners
     )
-    if not forced_order:
-        pair_orders = turn_orders
+    seated_orders = _seated_clear_orders(
+        lanes,
+        union_find,
+        {
+            index: preferred[union_find.find(index)[0]] + potentials[index]
+            for index in range(len(lanes))
+        },
+        required_clearance,
+    )
+    for pair_orders in (
+        {**fixed_orders, **turn_orders, **seated_orders},
+        {**fixed_orders, **turn_orders},
+        turn_orders,
+    ):
         forced_order = _forced_root_order(
             set(roots), root_key, edge_order_owners.keys(), pair_orders
         )
-    # Unforced pairs follow this rank, so none closes a cycle through the
-    # forced orders; when those cycle regardless every order fails, and plain
-    # semantic rank stands in.
+        if forced_order:
+            break
+    # Pairs no order directs follow this rank, so they close no cycle through
+    # the kept orders; when the separations and end-turn votes cycle among
+    # themselves every order fails, and plain semantic rank stands in.
     fallback_rank = {
         root: rank
         for rank, root in enumerate(
             forced_order or sorted(roots, key=root_key.__getitem__)
         )
     }
-
-    def unforced_before(left_root: int, right_root: int) -> bool:
-        """Whether *left_root* seats first in a pair no forced order directs.
-
-        A pair holding a fixed lane keeps the order its two lanes are drawn in,
-        since the fixed lane cannot move to take any other; a pair of movable
-        lanes follows the fallback ranks.
-        """
-        if (
-            left_root in fixed_root_owners or right_root in fixed_root_owners
-        ) and preferred[left_root] != preferred[right_root]:
-            return preferred[left_root] < preferred[right_root]
-        return fallback_rank[left_root] < fallback_rank[right_root]
 
     for left_index, left_lane in enumerate(lanes):
         left_root, _ = union_find.find(left_index)
@@ -1174,7 +1192,8 @@ def solve_corridor_cohorts(  # noqa: C901, PLR0915
                 else pair_orders.get(frozenset((left_root, right_root)))
             )
             if directed_edge == (left_root, right_root) or (
-                directed_edge is None and unforced_before(left_root, right_root)
+                directed_edge is None
+                and fallback_rank[left_root] < fallback_rank[right_root]
             ):
                 before, after = left_root, right_root
                 lane_separation = (

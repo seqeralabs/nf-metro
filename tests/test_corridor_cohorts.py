@@ -752,6 +752,69 @@ def test_seated_orders_that_cycle_among_braided_cohorts_give_way() -> None:
         }
 
 
+def _straddled_fixed_lane_problem(
+    a_turns: tuple[int, int] = (0, 0),
+    directed_separations: tuple[CorridorDirectedSeparation, ...] = (),
+) -> CorridorAllocationProblem:
+    """Movable ``a`` drawn at 9 and ``b`` at 6 straddle ``f``, which a fixed
+    equality holds at 8; every pair is drawn inside its 4.0 clearance, so none
+    is seated clear, and semantic rank puts ``a`` first."""
+    return CorridorAllocationProblem(
+        (
+            _lane(
+                "a", "ca", "ea", 9.0, 9.0, span=(0.0, 50.0), line_rank=0, turns=a_turns
+            ),
+            _lane(
+                "b", "cb", "eb", 6.0, 6.0, span=(0.0, 100.0), line_rank=0, root_rank=1
+            ),
+            _lane(
+                "f", "cf", "ef", 8.0, 8.0, span=(0.0, 100.0), line_rank=0, root_rank=2
+            ),
+        ),
+        obstacles=(
+            _obstacle("anchor", 8.0, 8.0, span=(0.0, 100.0), semantic_rank=(9,)),
+        ),
+        fixed_equalities=(CorridorFixedEquality("context", "f", "anchor"),),
+        directed_separations=directed_separations,
+    )
+
+
+def test_movable_lanes_straddling_a_fixed_lane_keep_their_drawn_sides() -> None:
+    problem = _straddled_fixed_lane_problem()
+    for lanes in permutations(problem.lanes):
+        assert _allocations(replace(problem, lanes=lanes)) == {
+            "a": 12.0,
+            "b": 4.0,
+            "f": 8.0,
+        }
+
+
+@pytest.mark.parametrize(
+    "problem",
+    (
+        _straddled_fixed_lane_problem(
+            directed_separations=(
+                CorridorDirectedSeparation("order:ab", "a", "b", 4.0),
+            ),
+        ),
+        _straddled_fixed_lane_problem(a_turns=(0, -1)),
+    ),
+    ids=("directed-separation", "end-turn"),
+)
+def test_fixed_lane_drawn_orders_cycling_through_a_forced_order_give_way(
+    problem: CorridorAllocationProblem,
+) -> None:
+    """Seating ``a`` below ``b`` leaves ``f``'s drawn sides, ``b`` below it and
+    ``a`` above, no order of roots; the fixed lane's drawn orders give way and
+    semantic rank orders the pairs through it."""
+    for lanes in permutations(problem.lanes):
+        assert _allocations(replace(problem, lanes=lanes)) == {
+            "a": 0.0,
+            "b": 4.0,
+            "f": 8.0,
+        }
+
+
 def test_forbidden_coordinate_interval_chooses_one_deterministic_side() -> None:
     lane = _lane(
         "movable",
