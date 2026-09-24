@@ -1315,11 +1315,11 @@ def _parallel_run_separation(
     ):
         return None
     if first_horizontal:
-        separation = abs(first_start[1] - second_start[1])
+        separation = abs(measured_distance(second_start[1], first_start[1]))
         first_extent = sorted((first_start[0], first_end[0]))
         second_extent = sorted((second_start[0], second_end[0]))
     else:
-        separation = abs(first_start[0] - second_start[0])
+        separation = abs(measured_distance(second_start[0], first_start[0]))
         first_extent = sorted((first_start[1], first_end[1]))
         second_extent = sorted((second_start[1], second_end[1]))
     overlap = min(first_extent[1], second_extent[1]) - max(

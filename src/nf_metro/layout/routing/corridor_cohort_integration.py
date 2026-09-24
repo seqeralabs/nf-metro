@@ -13,6 +13,7 @@ from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import Enum
+from itertools import permutations
 from math import isclose, isfinite
 from types import MappingProxyType
 
@@ -275,6 +276,63 @@ class CorridorCohortLedger:
     offset_step: float
     curve_radius: float = CURVE_RADIUS
     finalized_owned_segments: frozenset[CorridorCohortSegmentKey] | None = None
+    forced_crossings: frozenset[tuple[tuple[str, str, str], tuple[str, str, str]]] = (
+        frozenset()
+    )
+    """``(member edge, perpendicular edge)`` pairs whose crossing the topology
+    forces (:func:`_forced_loop_crossings`)."""
+
+
+def _reaches_along(
+    graph: MetroGraph, upstream: str, downstream: str, line_id: str
+) -> bool:
+    """Whether *line_id*'s authored edges lead from *upstream* to *downstream*."""
+    seen = {downstream}
+    pending = [downstream]
+    while pending:
+        for edge in graph.edges_to(pending.pop()):
+            if edge.line_id != line_id or edge.source in seen:
+                continue
+            if edge.source == upstream:
+                return True
+            seen.add(edge.source)
+            pending.append(edge.source)
+    return False
+
+
+def _forced_loop_crossings(
+    graph: MetroGraph,
+) -> frozenset[tuple[tuple[str, str, str], tuple[str, str, str]]]:
+    """Edge pairs two same-line loops into one entry port are forced to cross.
+
+    Lines A and B each reach entry port T from exactly the two sources X and
+    Y, with X upstream of Y along both lines, so each line closes a loop
+    X..Y -> T beside its own X -> T.  Two loops over the same two endpoints
+    cross an even number of times, so A's X -> T crossing B's Y -> T is the
+    topology's, not an avoidable seating.
+    """
+    pairs: set[tuple[tuple[str, str, str], tuple[str, str, str]]] = set()
+    for port in graph.ports.values():
+        if not port.is_entry:
+            continue
+        sources_by_line: defaultdict[str, set[str]] = defaultdict(set)
+        for edge in graph.edges_to(port.id):
+            sources_by_line[edge.line_id].add(edge.source)
+        for line_a, sources_a in sources_by_line.items():
+            for line_b, sources_b in sources_by_line.items():
+                if line_a == line_b or len(sources_a) != 2 or sources_a != sources_b:
+                    continue
+                for upstream, downstream in permutations(sorted(sources_a)):
+                    if _reaches_along(
+                        graph, upstream, downstream, line_a
+                    ) and _reaches_along(graph, upstream, downstream, line_b):
+                        pairs.add(
+                            (
+                                (upstream, port.id, line_a),
+                                (downstream, port.id, line_b),
+                            )
+                        )
+    return frozenset(pairs)
 
 
 def claims_share_fixed_lane_identity(
@@ -517,39 +575,31 @@ def build_corridor_cohort_ledger(
     for member_id, cohort_id in endpoint_by_member.items():
         by_cohort[cohort_id].append(member_id)
     for cohort_id, member_ids in by_cohort.items():
-        by_network: defaultdict[str, list[str]] = defaultdict(list)
+        # A cohort is one entry port, and a port seats one lane per line, so
+        # every member carrying a line lands in that line's one slot whichever
+        # of the line's networks it belongs to.
+        by_line: defaultdict[str, list[str]] = defaultdict(list)
         for member_id in member_ids:
-            member = members[member_id]
-            network_id = _network_id(member.connector_ids, scaffold)
-            by_network[network_id or f"member|{member_id}"].append(member_id)
+            by_line[members[member_id].line_id].append(member_id)
         if any(
-            any(member_id not in path_rank_by_member for member_id in network)
-            for network in by_network.values()
+            any(member_id not in path_rank_by_member for member_id in line_members)
+            for line_members in by_line.values()
         ):
             ambiguous_path_rank_cohorts.add(cohort_id)
             continue
-        first_path_rank_by_network = {
-            network_id: min(
-                path_rank_by_member[member_id]
-                for member_id in network_members
-                if member_id in path_rank_by_member
-            )
-            for network_id, network_members in by_network.items()
+        first_path_rank_by_line = {
+            line_id: min(path_rank_by_member[member_id] for member_id in line_members)
+            for line_id, line_members in by_line.items()
         }
-        if len(set(first_path_rank_by_network.values())) != len(
-            first_path_rank_by_network
-        ):
+        if len(set(first_path_rank_by_line.values())) != len(first_path_rank_by_line):
             ambiguous_path_rank_cohorts.add(cohort_id)
             continue
-        ordered_networks = sorted(
-            by_network,
-            key=lambda network_id: (
-                first_path_rank_by_network[network_id],
-                network_id,
-            ),
+        ordered_lines = sorted(
+            by_line,
+            key=lambda line_id: (first_path_rank_by_line[line_id], line_id),
         )
-        for rank, network_id in enumerate(ordered_networks):
-            for member_id in by_network[network_id]:
+        for rank, line_id in enumerate(ordered_lines):
+            for member_id in by_line[line_id]:
                 endpoint_ranks[member_id] = rank
     eligible_members = frozenset(
         member_id
@@ -714,6 +764,7 @@ def build_corridor_cohort_ledger(
         offset_step=graph_offset_step(graph),
         curve_radius=curve_radius,
         finalized_owned_segments=None,
+        forced_crossings=_forced_loop_crossings(graph),
     )
 
 
@@ -1068,12 +1119,13 @@ def _bind_claim(
             f"corridor claim {claim.claim_id} changed segment orientation"
         )
     longitudinal_coordinates = start[longitudinal_axis], end[longitudinal_axis]
+    landing_slot: float | None = None
     if (
         claim.endpoint_cohort_id is not None
         and target.mutable
         and claim.segment_rank == len(target.route.points) - 3
     ):
-        _landing_rank, landing_axis, landing_coordinate = _landing_frame(
+        _landing_rank, landing_axis, landing_slot = _landing_frame(
             (target.member_id, target.edge_key), target, landing_coordinate
         )
         if landing_axis != longitudinal_axis:
@@ -1081,7 +1133,7 @@ def _bind_claim(
                 f"corridor claim {claim.claim_id} has no perpendicular endpoint lead"
             )
         prospective_end = list(end)
-        prospective_end[landing_axis] = landing_coordinate
+        prospective_end[landing_axis] = landing_slot
         if segment_direction(start, (prospective_end[0], prospective_end[1])) is not (
             claim.direction
         ):
@@ -1090,7 +1142,7 @@ def _bind_claim(
             )
         longitudinal_coordinates = (
             start[longitudinal_axis],
-            landing_coordinate,
+            landing_slot,
         )
     longitudinal_start, longitudinal_end = sorted(longitudinal_coordinates)
     if longitudinal_end - longitudinal_start <= COORD_TOLERANCE:
@@ -1103,18 +1155,15 @@ def _bind_claim(
         longitudinal_start,
         longitudinal_end,
         start[axis],
-        landing_coordinate,
+        landing_slot,
     )
 
 
 def _bind_ledger(
     ledger: CorridorCohortLedger,
     targets: Sequence[CorridorCohortTarget],
-    endpoint_order_signs: Mapping[str, int],
 ) -> tuple[_BoundClaim, ...]:
-    landing_coordinates = _cohort_landing_coordinates(
-        ledger, targets, endpoint_order_signs
-    )
+    landing_coordinates = _cohort_landing_coordinates(ledger, targets)
     by_key: defaultdict[
         tuple[str, tuple[str, str, str]], list[CorridorCohortTarget]
     ] = defaultdict(list)
@@ -1273,6 +1322,7 @@ def _member_footprint_model(
     finalized_owned_segments: frozenset[CorridorCohortSegmentKey] | None,
     offset_step: float,
     curve_radius: float,
+    forced_crossings: frozenset[tuple[tuple[str, str, str], tuple[str, str, str]]],
 ) -> _MemberFootprintModel:
     """Build the witness/relation graph one member population publishes.
 
@@ -1532,6 +1582,7 @@ def _member_footprint_model(
         for perpendicular in fixed:
             if (
                 (variable_id, perpendicular.footprint_id) in contact_pairs
+                or (variable.edge_key, perpendicular.edge_key) in forced_crossings
                 or perpendicular.axis == variable.axis
                 or perpendicular.crossing_disposition
                 is CorridorCrossingDisposition.LEGAL_CROSSING
@@ -1569,6 +1620,7 @@ def _member_footprint_model(
                 same_line=parallel.line_id == variable_witness.line_id,
                 counter_running=parallel.direction is not variable_witness.direction,
                 curve_radius=curve_radius,
+                offset_step=offset_step,
             )
             if clearance <= COORD_TOLERANCE or (
                 abs(parallel.coordinate - variable.coordinate)
@@ -1810,106 +1862,16 @@ def _landing_frame(
     return segment_rank, axis, landing_coordinate
 
 
-def _endpoint_order_signs(
-    ledger: CorridorCohortLedger,
-    targets: Sequence[CorridorCohortTarget],
-) -> dict[str, int]:
-    """Orient endpoint ranks from complete fixed predecessor reservations."""
-    targets_by_key: defaultdict[
-        tuple[str, tuple[str, str, str]], list[CorridorCohortTarget]
-    ] = defaultdict(list)
-    for target in targets:
-        targets_by_key[(target.member_id, target.edge_key)].append(target)
-    claims_by_key: defaultdict[
-        tuple[str, tuple[str, str, str]], list[CorridorCohortLedgerClaim]
-    ] = defaultdict(list)
-    for claim in ledger.claims:
-        if claim.edge_key is not None:
-            claims_by_key[(claim.member_id, claim.edge_key)].append(claim)
-
-    witness_lanes: defaultdict[tuple[str, str], defaultdict[int, set[int]]] = (
-        defaultdict(lambda: defaultdict(set))
-    )
-    for claim in ledger.claims:
-        if (
-            claim.endpoint_cohort_id is None
-            or claim.endpoint_network_rank is None
-            or claim.edge_key is None
-            or claim.member_id not in ledger.eligible_member_ids
-            or claim.endpoint_cohort_id in ledger.ambiguous_endpoint_cohort_ids
-        ):
-            continue
-        identity = claim.member_id, claim.edge_key
-        target_matches = targets_by_key.get(identity, ())
-        if len(target_matches) != 1:
-            continue
-        predecessors = tuple(
-            predecessor
-            for predecessor in claims_by_key[identity]
-            if predecessor.segment_rank + 1 == claim.segment_rank
-            and predecessor.endpoint_cohort_id is None
-            and predecessor.lane_rank is not None
-            and predecessor.reservation_complete
-            and planner_owns_segment(
-                target_matches[0].route,
-                predecessor.segment_rank,
-            )
-        )
-        for predecessor in predecessors:
-            endpoint_network_rank = claim.endpoint_network_rank
-            lane_rank = predecessor.lane_rank
-            if endpoint_network_rank is None or lane_rank is None:
-                raise CorridorCohortCompilationError(
-                    f"corridor endpoint cohort {claim.endpoint_cohort_id} has an "
-                    "incomplete fixed predecessor witness"
-                )
-            witness_lanes[(claim.endpoint_cohort_id, predecessor.reservation_id)][
-                endpoint_network_rank
-            ].add(lane_rank)
-
-    signs_by_cohort: defaultdict[str, set[int]] = defaultdict(set)
-    for (cohort_id, _reservation_id), lanes_by_rank in witness_lanes.items():
-        if len(lanes_by_rank) < 2:
-            continue
-        if any(len(lanes) != 1 for lanes in lanes_by_rank.values()):
-            raise CorridorCohortCompilationError(
-                f"corridor endpoint cohort {cohort_id} has an ambiguous fixed "
-                "predecessor order witness"
-            )
-        ordered_lanes = [
-            next(iter(lanes_by_rank[rank])) for rank in sorted(lanes_by_rank)
-        ]
-        increasing = all(
-            left < right for left, right in zip(ordered_lanes, ordered_lanes[1:])
-        )
-        decreasing = all(
-            left > right for left, right in zip(ordered_lanes, ordered_lanes[1:])
-        )
-        if not (increasing or decreasing):
-            raise CorridorCohortCompilationError(
-                f"corridor endpoint cohort {cohort_id} has a non-monotone fixed "
-                "predecessor order witness"
-            )
-        signs_by_cohort[cohort_id].add(1 if increasing else -1)
-
-    if conflicting := {
-        cohort_id for cohort_id, signs in signs_by_cohort.items() if len(signs) != 1
-    }:
-        raise CorridorCohortCompilationError(
-            "corridor endpoint cohorts have conflicting fixed predecessor order "
-            f"witnesses: {','.join(sorted(conflicting))}"
-        )
-    return {
-        cohort_id: next(iter(signs)) for cohort_id, signs in signs_by_cohort.items()
-    }
-
-
 def _cohort_landing_coordinates(
     ledger: CorridorCohortLedger,
     targets: Sequence[CorridorCohortTarget],
-    endpoint_order_signs: Mapping[str, int],
 ) -> dict[tuple[str, tuple[str, str, str]], float]:
-    """Bind frozen endpoint-network ranks to current absolute port slots."""
+    """Bind each endpoint member to the port slot its own network draws into.
+
+    A network rank follows route emission order, which need not ascend with the
+    slots the networks draw into, so a rank is never dealt a slot by position:
+    it keeps the one slot its members share.
+    """
     expected_by_cohort = dict(ledger.endpoint_members)
     ranks_by_member: defaultdict[str, set[tuple[str, int]]] = defaultdict(set)
     members_by_cohort: defaultdict[str, set[str]] = defaultdict(set)
@@ -1987,10 +1949,7 @@ def _cohort_landing_coordinates(
                     f"corridor endpoint cohort {cohort_id} has split network slots"
                 )
             representative_slots.append(network_slots[0])
-        ordered_slots = sorted(
-            representative_slots,
-            reverse=endpoint_order_signs.get(cohort_id, 1) < 0,
-        )
+        ordered_slots = sorted(representative_slots)
         if any(
             isclose(left, right, abs_tol=COORD_TOLERANCE)
             for left, right in zip(ordered_slots, ordered_slots[1:])
@@ -1998,11 +1957,7 @@ def _cohort_landing_coordinates(
             raise CorridorCohortCompilationError(
                 f"corridor endpoint cohort {cohort_id} has tied port slots"
             )
-        if len(ordered_slots) != len(ranks):
-            raise CorridorCohortCompilationError(
-                f"corridor endpoint cohort {cohort_id} has incomplete port slots"
-            )
-        slot_by_rank = dict(zip(ranks, ordered_slots))
+        slot_by_rank = dict(zip(ranks, representative_slots))
         for member_id, target in member_targets.items():
             coordinates[(member_id, target.edge_key)] = slot_by_rank[
                 rank_by_member[member_id]
@@ -2133,6 +2088,27 @@ def _direction_owner(owner_id: str, direction: Direction) -> str:
     return f"{owner_id}|direction:{direction.value}"
 
 
+def _end_turn_sides(claim: _BoundClaim) -> tuple[int, int]:
+    """The raw side the route turns toward at the claim's low and high span ends."""
+    points = claim.target.route.points
+    rank = claim.ledger.segment_rank
+    axis = claim.axis
+    start, end = points[rank], points[rank + 1]
+
+    def turn_side(corner: tuple[float, float], beyond: int) -> int:
+        if not 0 <= beyond < len(points):
+            return 0
+        delta = points[beyond][axis] - corner[axis]
+        if abs(delta) <= COORD_TOLERANCE:
+            return 0
+        return 1 if delta > 0 else -1
+
+    at_start, at_end = turn_side(start, rank - 1), turn_side(end, rank + 2)
+    if start[1 - axis] <= end[1 - axis]:
+        return at_start, at_end
+    return at_end, at_start
+
+
 def _lane(
     claim: _BoundClaim,
     cohort_first_path_rank: int,
@@ -2169,6 +2145,7 @@ def _lane(
             claim.ledger.reservation_rank,
             claim.ledger.claim_rank,
         ),
+        *_end_turn_sides(claim),
     )
 
 
@@ -2253,13 +2230,27 @@ def _scalar_boundary_domains(
     return tuple(domains), sources
 
 
+def _ranks_in_slot_order(slot_by_rank: Mapping[int, float | None]) -> list[int]:
+    """Endpoint network ranks in the order of the port slots they draw into.
+
+    A rank whose member has no port slot sorts after every slotted one.
+    """
+    return sorted(
+        slot_by_rank,
+        key=lambda rank: (
+            slot_by_rank[rank] is None,
+            slot_by_rank[rank] or 0.0,
+            rank,
+        ),
+    )
+
+
 def _problem(
     claims: tuple[_BoundClaim, ...],
     roles: dict[str, CorridorCohortClaimRole],
     complete: bool,
     offset_step: float,
     curve_radius: float,
-    endpoint_order_signs: Mapping[str, int],
     footprint_model: _MemberFootprintModel,
     witnesses_by_id: Mapping[str, CorridorFootprintWitness],
     *,
@@ -2323,14 +2314,13 @@ def _problem(
         for item in movable
         if item.ledger.endpoint_cohort_id is not None
     }:
-        ranks = sorted(
+        ranks = _ranks_in_slot_order(
             {
-                item.ledger.endpoint_network_rank
+                item.ledger.endpoint_network_rank: item.target.endpoint_lane_coordinate
                 for item in movable
                 if item.ledger.endpoint_cohort_id == cohort_id
                 and item.ledger.endpoint_network_rank is not None
-            },
-            reverse=endpoint_order_signs.get(cohort_id, 1) < 0,
+            }
         )
         local_boundary_ranks.update(
             {
@@ -2402,6 +2392,7 @@ def _problem(
                 same_line=left.target.route.line_id == right.target.route.line_id,
                 counter_running=left.ledger.direction is not right.ledger.direction,
                 curve_radius=curve_radius,
+                offset_step=offset_step,
             ),
         )
         for rank, left in enumerate(claims)
@@ -2498,6 +2489,7 @@ def _problem(
                     is not scalar_witnesses[right.variable.variable_id].direction
                 ),
                 curve_radius=curve_radius,
+                offset_step=offset_step,
             ),
         )
         for rank, left in enumerate(ordered_requests)
@@ -2532,14 +2524,7 @@ def _problem(
         )
         for item in movable
     )
-    if movable:
-        coordinate_axis = movable[0].axis
-        axis_sign = (
-            1 if movable[0].ledger.orientation is CorridorOrientation.HORIZONTAL else -1
-        )
-    else:
-        coordinate_axis = scalar_requests[0].variable.axis
-        axis_sign = 1 if coordinate_axis == 1 else -1
+    coordinate_axis = movable[0].axis if movable else scalar_requests[0].variable.axis
     return CorridorAllocationProblem(
         (*member_lanes, *scalar_lanes),
         (
@@ -2552,10 +2537,32 @@ def _problem(
         fixed_equalities=tuple(fixed_equalities),
         directed_separations=tuple(directed_separations),
         forbidden_intervals=forbidden_intervals,
+        clearance=offset_step,
         witnesses_complete=complete,
-        axis_sign=axis_sign,
+        axis_sign=_lane_order_axis_sign(
+            coordinate_axis,
+            {item.ledger.direction for item in movable}
+            | {
+                scalar_witnesses[request.variable.variable_id].direction
+                for request in scalar_requests
+            },
+        ),
         coordinate_axis=coordinate_axis,
     )
+
+
+def _lane_order_axis_sign(coordinate_axis: int, travel: set[Direction]) -> int:
+    """Screen sign of the canonical lane order along *coordinate_axis*.
+
+    A bundle fans its members along the right-hand normal of its travel, so a
+    component whose lanes all travel one way orders along that normal.
+    Counter-running lanes share no travel frame; they order in the frame of
+    screen-positive travel along the corridor (R for a Y-coordinate lane, D
+    for an X-coordinate one).
+    """
+    if len(travel) == 1:
+        return right_normal_axis_sign(next(iter(travel)))
+    return right_normal_axis_sign(Direction.R if coordinate_axis == 1 else Direction.D)
 
 
 def _component_complete(
@@ -2724,7 +2731,6 @@ def _component_plan(
     physical: tuple[tuple[int, ...], ...],
     claims: tuple[_BoundClaim, ...],
     ledger: CorridorCohortLedger,
-    endpoint_order_signs: Mapping[str, int],
     footprint_model: _MemberFootprintModel,
     witnesses_by_id: Mapping[str, CorridorFootprintWitness],
     scalar_requests_by_id: Mapping[str, CorridorScalarRequest],
@@ -2774,7 +2780,6 @@ def _component_plan(
             complete,
             ledger.offset_step,
             ledger.curve_radius,
-            endpoint_order_signs,
             footprint_model,
             witnesses_by_id,
             scalar_requests=component_scalar_requests,
@@ -3064,8 +3069,7 @@ def compile_corridor_cohort_plan(
     carries its route patches, and :func:`publish_corridor_cohort_plan` applies
     them.
     """
-    endpoint_order_signs = _endpoint_order_signs(ledger, targets)
-    claims = _bind_ledger(ledger, targets, endpoint_order_signs)
+    claims = _bind_ledger(ledger, targets)
     scalar_requests_by_id = {
         request.variable.variable_id: request for request in scalar_requests
     }
@@ -3080,6 +3084,7 @@ def compile_corridor_cohort_plan(
         ledger.finalized_owned_segments,
         ledger.offset_step,
         ledger.curve_radius,
+        ledger.forced_crossings,
     )
     obstacle_provenance: dict[str, CorridorCohortObstacleProvenance] = {}
     obstacle_provenance.update(
@@ -3144,7 +3149,6 @@ def compile_corridor_cohort_plan(
             physical,
             claims,
             ledger,
-            endpoint_order_signs,
             footprint_model,
             witnesses_by_id,
             scalar_requests_by_id,

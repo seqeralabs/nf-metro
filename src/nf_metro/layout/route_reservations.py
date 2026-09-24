@@ -1334,6 +1334,47 @@ def _canvas_region_for_segment(
     return None
 
 
+def _endpoint_lead_sections(
+    graph: MetroGraph, segment: _AxisSegment, member: EmissionMember
+) -> tuple[Section, ...]:
+    """The endpoint sections whose box a route end leg runs strictly inside.
+
+    A route's first leg leaves its source section and its last leg enters its
+    target; the section counts when the leg's coordinate lies strictly inside
+    its extent across the run.
+    """
+    horizontal = segment.orientation is CorridorOrientation.HORIZONTAL
+    sections: list[Section] = []
+    for is_end, section_id in (
+        (segment.before is None, member.source.section_id),
+        (segment.after is None, member.target.section_id),
+    ):
+        section = graph.sections.get(section_id) if is_end and section_id else None
+        if section is None or section.bbox_w <= 0 or section.bbox_h <= 0:
+            continue
+        low, high = (
+            (section.bbox_y, section.bbox_y + section.bbox_h)
+            if horizontal
+            else (section.bbox_x, section.bbox_x + section.bbox_w)
+        )
+        if low + COORD_TOLERANCE < segment.coordinate < high - COORD_TOLERANCE:
+            sections.append(section)
+    return tuple(sections)
+
+
+def _gap_touches_section(
+    region: RowGapRegion | ColumnGapRegion, section: Section
+) -> bool:
+    """Whether *region*'s grid span overlaps *section*'s."""
+    if isinstance(region, RowGapRegion):
+        return grid_spans_overlap(
+            (region.upper_row, region.lower_row), section_row_span(section)
+        )
+    return grid_spans_overlap(
+        (region.left_column, region.right_column), section_column_span(section)
+    )
+
+
 def _corridor_region(
     graph: MetroGraph,
     segment: _AxisSegment,
@@ -1370,16 +1411,24 @@ def _corridor_region(
         region = _nearest_topology_region(graph, segment, span, candidates)
         if region is not None:
             return region, CorridorMeasurementScope.TOPOLOGY_SPAN
-    observed_region: CorridorRegion | None = (
+    observed_region = (
         _geometric_row_gap(graph, segment, span)
         if horizontal
         else _geometric_column_gap(graph, segment, span)
     )
-    return (
-        (observed_region, CorridorMeasurementScope.OBSERVED_RUN)
-        if observed_region is not None
-        else None
-    )
+    if observed_region is None:
+        return None
+    # The geometric search excludes only sections overlapping the coordinate,
+    # and by construction the neighbours of an end leg running inside its own
+    # endpoint's box do not, so several gaps can tie for it.  A gap that box
+    # bounds is the leg's own (the landing exclusion measures past the box); one
+    # clear of the box's grid span is an unrelated tie winner.
+    lead_sections = _endpoint_lead_sections(graph, segment, member)
+    if lead_sections and not any(
+        _gap_touches_section(observed_region, section) for section in lead_sections
+    ):
+        return None
+    return observed_region, CorridorMeasurementScope.OBSERVED_RUN
 
 
 def _horizontal_kind(

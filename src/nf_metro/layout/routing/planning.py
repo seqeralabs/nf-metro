@@ -267,6 +267,8 @@ def prepare_route_system_planning(
         exit_turns: ExitTurnExecution,
         pending_plan_ids: frozenset[ExitTurnPlanId],
         settled_plan_ids: frozenset[ExitTurnPlanId] = frozenset(),
+        *,
+        compile_corridor_cohorts: bool = True,
     ) -> tuple[
         Mapping[ResolvedEdge, RouteFamilyId],
         ConvergencePlanExecution,
@@ -321,9 +323,10 @@ def prepare_route_system_planning(
             planned_system_ids=planned_ids,
         )
         ctx.convergences = convergences.query
+        cohort_ledger = corridor_cohort_ledger if compile_corridor_cohorts else None
         corridor_targets, corridor_scalar_requests = (
             convergence_corridor_requests(convergences.plans, graph, ctx)
-            if corridor_cohort_ledger is not None
+            if cohort_ledger is not None
             else ((), ())
         )
         member_geometry = build_member_geometry_execution(
@@ -343,7 +346,7 @@ def prepare_route_system_planning(
             settled_exit_turn_plan_ids=settled_plan_ids,
             allow_clearance_requirements=allow_convergence_clearance_requirements,
             granted_clearance_owner_ids=granted_clearance_owner_ids,
-            corridor_cohort_ledger=corridor_cohort_ledger,
+            corridor_cohort_ledger=cohort_ledger,
             corridor_targets=corridor_targets,
             corridor_scalar_requests=corridor_scalar_requests,
         )
@@ -353,8 +356,10 @@ def prepare_route_system_planning(
         exit_turn_routing.promote_pending_gap_allocation(provisional_exit_turns)
     )
     if pending_plan_ids:
+        # Only this execution's settled exit turns survive into the re-plan
+        # below, which compiles the corridor cohorts against them.
         _, _, _, allocation_geometry = prepare_member_geometry(
-            allocation_exit_turns, pending_plan_ids
+            allocation_exit_turns, pending_plan_ids, compile_corridor_cohorts=False
         )
         ctx.settled_exit_turns = allocation_geometry.settled_exit_turns
         if station_offsets is not None:

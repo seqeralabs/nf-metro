@@ -3408,7 +3408,12 @@ def _land_feeder_on_run(rp: RoutedPath, run: HTrunkSeg, ctx: _RoutingCtx) -> Non
     _set_vchannel_x(ch, run.xb)
 
 
-def _materialize_trunk_slots(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
+def _materialize_trunk_slots(
+    routes: list[RoutedPath],
+    ctx: _RoutingCtx,
+    *,
+    fixed_route_ids: frozenset[int] = frozenset(),
+) -> None:
     """Resolve every declared :class:`TrunkSlot` to a concentric channel Y.
 
     The horizontal-trunk twin of :func:`_materialize_gap_slots`.  Handlers that
@@ -3432,6 +3437,13 @@ def _materialize_trunk_slots(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
     Trunks alone in their channel, or already at distinct Ys, are left
     untouched; the flanking corner radii are recomputed for any trunk that
     actually moves so the bundle stays concentric.
+
+    *fixed_route_ids* names routes carried only as context for a segment
+    another plan owns; this pass must not restack or dogleg them, since that
+    plan has already fixed their geometry by the time it emits them.  Their
+    trunks still join the channel stack, as anchors: the stack is seated so they
+    keep their Y, and the other trunks take their tracks around them rather than
+    fanning onto a track one of them already holds.
     """
     step = ctx.offset_step
     trunks = _declared_htrunks(routes)
@@ -3469,9 +3481,18 @@ def _materialize_trunk_slots(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
         bands.sort(key=lambda b: min(t.y for t in b))
         # An all-exempt channel's fan is best-effort (discretionary): abandon
         # the reorder where no stack top seats it inside the claimed bands.
-        _stack_trunk_bands(bands, ctx, step, bundled, discretionary=all_exempt)
+        _stack_trunk_bands(
+            bands,
+            ctx,
+            step,
+            bundled,
+            discretionary=all_exempt,
+            fixed_route_ids=fixed_route_ids,
+        )
 
-    _dogleg_off_exempt_trunks(routes, ctx, skip=bundled)
+    _dogleg_off_exempt_trunks(
+        routes, ctx, skip=bundled, fixed_route_ids=fixed_route_ids
+    )
     _bundle_same_destination_tails(routes, ctx)
     _separate_declared_opposing_gap_bundles(routes, ctx)
 
@@ -3483,6 +3504,7 @@ def _stack_trunk_bands(
     bundled: set[int],
     *,
     discretionary: bool = False,
+    fixed_route_ids: frozenset[int] = frozenset(),
 ) -> None:
     """Lay an ordered top -> bottom list of trunk bands into their inter-row gap.
 
@@ -3500,17 +3522,33 @@ def _stack_trunk_bands(
     where no stack top seats the reordered corridors inside the bands their
     reservations claim (:func:`_restack_fits_corridor_claims`) rather than
     reordering into a corridor that overruns its own band.
+
+    A trunk of a route in *fixed_route_ids* is an anchor: the stack top is the
+    one that seats it at its current Y, and a stack whose anchors no single top
+    seats together is abandoned.
     """
     planned = [_plan_trunk_band(b) for b in bands]
     gap = BUNDLE_TO_BUNDLE_CLEARANCE
     total = sum((n - 1) * step for _o, _t, n in planned) + gap * (len(bands) - 1)
+    anchors = [t for b in bands for t in b if id(t.route) in fixed_route_ids]
+    depth_of = (
+        _stack_depths(planned, bands, step, gap) if discretionary or anchors else {}
+    )
     if discretionary and not _restack_fits_corridor_claims(
-        ctx, planned, bands, step, gap
+        ctx,
+        depth_of,
+        bands,
     ):
         return
-    top = min(t.y for b in bands for t in b)
-    band_top = _clamp_inter_row_band_top(ctx, top, total)
-    band_top = _hold_stack_in_claim_bands(ctx, band_top, planned, bands, step, gap)
+    if anchors:
+        anchored_tops = [t.y - depth_of[id(t)] for t in anchors]
+        if max(anchored_tops) - min(anchored_tops) > COORD_TOLERANCE:
+            return
+        band_top = min(anchored_tops)
+    else:
+        top = min(t.y for b in bands for t in b)
+        band_top = _clamp_inter_row_band_top(ctx, top, total)
+        band_top = _hold_stack_in_claim_bands(ctx, band_top, planned, bands, step, gap)
     for (order, track_of, n), band in zip(planned, bands):
         _restack_trunk_band(
             order, track_of, n, band_top, band[0].dips_down, step, ctx, bundled
@@ -3528,12 +3566,30 @@ def _slot_depth_in_band(inner: int, count: int, dips: bool) -> int:
     return inner if dips else count - 1 - inner
 
 
-def _restack_fits_corridor_claims(
-    ctx: _RoutingCtx,
+def _stack_depths(
     planned: list[tuple[list[list[_HTrunk]], dict[int, int], int]],
     bands: list[list[_HTrunk]],
     step: float,
     gap: float,
+) -> dict[int, float]:
+    """Each planned trunk's depth below the stack top, keyed by ``id(trunk)``."""
+    depth_of: dict[int, float] = {}
+    depth_offset = 0.0
+    for (order, track_of, count), band in zip(planned, bands):
+        dips = band[0].dips_down
+        for slot in order:
+            inner = track_of[id(slot)]
+            depth = depth_offset + _slot_depth_in_band(inner, count, dips) * step
+            for trunk in slot:
+                depth_of[id(trunk)] = depth
+        depth_offset += (count - 1) * step + gap
+    return depth_of
+
+
+def _restack_fits_corridor_claims(
+    ctx: _RoutingCtx,
+    depth_of: dict[int, float],
+    bands: list[list[_HTrunk]],
 ) -> bool:
     """Whether the planned stack can seat every corridor inside its own claim.
 
@@ -3550,16 +3606,6 @@ def _restack_fits_corridor_claims(
     is claimed is therefore admitted outright rather than refused for want of
     evidence.
     """
-    depth_of: dict[int, float] = {}
-    depth_offset = 0.0
-    for (order, track_of, count), band in zip(planned, bands):
-        dips = band[0].dips_down
-        for slot in order:
-            inner = track_of[id(slot)]
-            depth = depth_offset + _slot_depth_in_band(inner, count, dips) * step
-            for trunk in slot:
-                depth_of[id(trunk)] = depth
-        depth_offset += (count - 1) * step + gap
     corridors: defaultdict[tuple[str, str], list[_HTrunk]] = defaultdict(list)
     for band in bands:
         for trunk in band:
@@ -4081,7 +4127,11 @@ def _exempt_trunk_separation(
 
 
 def _dogleg_off_exempt_trunks(
-    routes: list[RoutedPath], ctx: _RoutingCtx, skip: set[int] | None = None
+    routes: list[RoutedPath],
+    ctx: _RoutingCtx,
+    skip: set[int] | None = None,
+    *,
+    fixed_route_ids: frozenset[int] = frozenset(),
 ) -> None:
     """Offset a non-exempt trunk drawn collinear with an exempt run.
 
@@ -4103,9 +4153,11 @@ def _dogleg_off_exempt_trunks(
       already that far apart are a legitimate bundle and left untouched.
 
     Both regimes clamp inside the inter-row gap, leaving the next row's header
-    protrusion clear so the trunk stays in the envelope.
+    protrusion clear so the trunk stays in the envelope.  A route in
+    *fixed_route_ids* is never the one moved.
     """
     skip = skip or set()
+    unmoved = skip | fixed_route_ids
     obstacles = [
         t
         for t in _collect_htrunks(routes, include_exempt=True)
@@ -4115,7 +4167,7 @@ def _dogleg_off_exempt_trunks(
         return
     clearance = EDGE_TO_BUNDLE_CLEARANCE
     for t in _collect_htrunks(routes):
-        if id(t.route) in skip or route_system_owns_segment_boundary(t.route, t.idx):
+        if id(t.route) in unmoved or route_system_owns_segment_boundary(t.route, t.idx):
             continue
         hit = next(
             (
@@ -4168,7 +4220,7 @@ def _dogleg_off_exempt_trunks(
 
     step = ctx.offset_step
     for t in _collect_htrunks(routes):
-        if id(t.route) in skip or route_system_owns_segment_boundary(t.route, t.idx):
+        if id(t.route) in unmoved or route_system_owns_segment_boundary(t.route, t.idx):
             continue
         hit = next(
             (

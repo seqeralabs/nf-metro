@@ -142,7 +142,9 @@ class SettlementStage(str, Enum):
     """Stable vocabulary for observing settlement progress.
 
     A render emits only ``DISCOVERY``, ``GENERAL_SETTLEMENT``, ``COHORT_FINAL``
-    and ``VALIDATION``.  ``FINAL_SOLVE`` is emitted by the corridor cohort
+    and ``VALIDATION``; the corridor-cohort aperture observation, and the
+    re-route drawing its grant, each record ``GENERAL_SETTLEMENT``.
+    ``FINAL_SOLVE`` is emitted by the corridor cohort
     compiler when it is handed a settlement trace.  ``COHORT_INTENT``,
     ``APERTURE_SETTLEMENT`` and ``TYPED_MATERIALIZATION`` remain reserved
     vocabulary no production path emits, which

@@ -98,6 +98,7 @@ def _render(relative_path: str):
             "examples/simple_pipeline.mmd",
             (
                 SettlementStage.DISCOVERY,
+                SettlementStage.GENERAL_SETTLEMENT,
                 SettlementStage.COHORT_FINAL,
                 SettlementStage.VALIDATION,
             ),
@@ -106,6 +107,7 @@ def _render(relative_path: str):
             "examples/rnaseq_auto.mmd",
             (
                 SettlementStage.DISCOVERY,
+                SettlementStage.GENERAL_SETTLEMENT,
                 SettlementStage.GENERAL_SETTLEMENT,
                 SettlementStage.COHORT_FINAL,
                 SettlementStage.VALIDATION,
@@ -1232,7 +1234,6 @@ def test_problem_rejects_an_infeasible_fixed_fixed_footprint_order() -> None:
             True,
             10.0,
             8.0,
-            {},
             footprint_model,
             {},
         )

@@ -61,7 +61,6 @@ from nf_metro.layout.routing.context import (
     _get_offset,
     _RoutingCtx,
     _section_lane_frame,
-    port_lane_coord,
 )
 from nf_metro.layout.routing.corners import (
     concentric_corner_radius_at,
@@ -294,30 +293,28 @@ def _member_geometry_plan_id(
     )
 
 
-def _entry_port_crossing_coord(
+def _entry_port_landing(
     ctx: _RoutingCtx,
     port: Port,
     line_id: str,
-) -> float:
-    """Absolute coordinate where *line_id* crosses an entry-port boundary.
+) -> tuple[int, float]:
+    """Screen axis and absolute coordinate where *line_id* crosses an entry port.
 
-    LEFT/RIGHT ports expose their Y lane through the section lane frame.
-    TOP/BOTTOM ports use the same perpendicular crossing calculation as the
-    route builders, including approach fans and feeder bundle-index channels.
+    The axis is the one the final lead into the port holds constant: Y (``1``)
+    for a LEFT/RIGHT port, X (``0``) for a TOP/BOTTOM one.  A LEFT/RIGHT lead
+    lands at the port's Y plus the line's own offset whatever the section's
+    flow; the section lane frame (:func:`port_lane_coord`) would report an X on
+    a vertical-flow section instead.  TOP/BOTTOM ports use the same
+    perpendicular crossing calculation as the route builders, including
+    approach fans and feeder bundle-index channels.
     """
     station = ctx.graph.stations[port.id]
+    offset = _get_offset(ctx, port.id, line_id)
     if port.side in (PortSide.LEFT, PortSide.RIGHT):
-        return port_lane_coord(
-            ctx.graph,
-            station,
-            line_id,
-            ctx.station_offsets or {},
-            ctx.positive_fan,
-        )
+        return 1, station.y + offset
     crossing = _perp_entry_crossing_x(ctx, port.id, line_id, station.x)
     if crossing is not None:
-        return crossing
-    offset = _get_offset(ctx, port.id, line_id)
+        return 0, crossing
     section = ctx.graph.sections.get(port.section_id) if port.section_id else None
     # Ride the section's lane frame directly rather than through the
     # direction-keyed _tb_x_offset helper, whose name the direction-predicate
@@ -330,7 +327,7 @@ def _entry_port_crossing_coord(
             _section_lane_frame(ctx.graph, section, ctx.positive_fan), offset
         )
     )
-    return station.x + lane
+    return 0, station.x + lane
 
 
 def _corridor_cohort_target(
@@ -347,8 +344,9 @@ def _corridor_cohort_target(
     endpoint_lane_axis: int | None = None
     endpoint_lane_coordinate: float | None = None
     if port is not None and port.is_entry and station is not None:
-        endpoint_lane_axis = int(port.side in (PortSide.LEFT, PortSide.RIGHT))
-        endpoint_lane_coordinate = _entry_port_crossing_coord(ctx, port, route.line_id)
+        endpoint_lane_axis, endpoint_lane_coordinate = _entry_port_landing(
+            ctx, port, route.line_id
+        )
         if route.offset_regime is OffsetRegime.DEFERRED and endpoint_lane_axis == 1:
             endpoint_lane_coordinate -= (ctx.station_offsets or {}).get(
                 (resolved.target, route.line_id),
@@ -1660,7 +1658,10 @@ def _candidate_clears_runway(
     gap, escape a reservation band, or starve either corner.
     """
     route = item.candidate.route
-    if bounds.band is not None and not bounds.band.lo <= candidate <= bounds.band.hi:
+    if bounds.band is not None and (
+        measured_distance(candidate, bounds.band.lo) > COORD_TOLERANCE
+        or measured_distance(bounds.band.hi, candidate) > COORD_TOLERANCE
+    ):
         return False
     corridor_lo = bounds.gap_lo if shared_carrier else bounds.lo
     corridor_hi = bounds.gap_hi if shared_carrier else bounds.hi
@@ -2616,7 +2617,7 @@ def _settle_plannable_short_destination_cohorts(
                     settled_turn(route, membership.assignment, route.points)
                 )
             continue
-        if allow_clearance_requirements or shortfall > COORD_TOLERANCE:
+        if not clearance_granted or shortfall > COORD_TOLERANCE:
             continue
 
         for proposal in proposals:
@@ -2769,7 +2770,11 @@ def build_member_geometry_execution(
             ctx,
             movable_route_ids=complete_path_route_ids,
         )
-        _materialize_trunk_slots(normalization_population, ctx)
+        _materialize_trunk_slots(
+            normalization_population,
+            ctx,
+            fixed_route_ids=frozenset(id(route) for route in context_routes),
+        )
         # Trunk-slot materialization compares dip groups, never two flows that
         # entered one inter-row gap from opposite rows, so counter-running
         # trunks leave it within bundle pitch of each other and read as one

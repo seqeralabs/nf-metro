@@ -249,7 +249,11 @@ def test_settlement_reroutes_only_when_ledger_changes_derived_band(
 
     def observe(*args, **kwargs):
         nonlocal ledger_reroutes
-        if kwargs.get("reservations") is not None:
+        # The aperture observation reads the ledger too, but runs on every
+        # settle rather than only when a translation changes a band.
+        if kwargs.get("reservations") is not None and not kwargs.get(
+            "allow_convergence_clearance_requirements"
+        ):
             ledger_reroutes += 1
         return original(*args, **kwargs)
 
