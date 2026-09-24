@@ -3530,13 +3530,17 @@ def _stack_trunk_bands(
     planned = [_plan_trunk_band(b) for b in bands]
     gap = BUNDLE_TO_BUNDLE_CLEARANCE
     total = sum((n - 1) * step for _o, _t, n in planned) + gap * (len(bands) - 1)
+    anchors = [t for b in bands for t in b if id(t.route) in fixed_route_ids]
+    depth_of = (
+        _stack_depths(planned, bands, step, gap) if discretionary or anchors else {}
+    )
     if discretionary and not _restack_fits_corridor_claims(
-        ctx, planned, bands, step, gap
+        ctx,
+        depth_of,
+        bands,
     ):
         return
-    anchors = [t for b in bands for t in b if id(t.route) in fixed_route_ids]
     if anchors:
-        depth_of = _stack_depths(planned, bands, step, gap)
         anchored_tops = [t.y - depth_of[id(t)] for t in anchors]
         if max(anchored_tops) - min(anchored_tops) > COORD_TOLERANCE:
             return
@@ -3584,10 +3588,8 @@ def _stack_depths(
 
 def _restack_fits_corridor_claims(
     ctx: _RoutingCtx,
-    planned: list[tuple[list[list[_HTrunk]], dict[int, int], int]],
+    depth_of: dict[int, float],
     bands: list[list[_HTrunk]],
-    step: float,
-    gap: float,
 ) -> bool:
     """Whether the planned stack can seat every corridor inside its own claim.
 
@@ -3604,7 +3606,6 @@ def _restack_fits_corridor_claims(
     is claimed is therefore admitted outright rather than refused for want of
     evidence.
     """
-    depth_of = _stack_depths(planned, bands, step, gap)
     corridors: defaultdict[tuple[str, str], list[_HTrunk]] = defaultdict(list)
     for band in bands:
         for trunk in band:
