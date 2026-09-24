@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from fractions import Fraction
@@ -623,13 +623,50 @@ def _turn_side_orders(
     }
 
 
+def _seated_clear_orders(
+    lanes: tuple[CorridorLane, ...],
+    union_find: _WeightedUnionFind,
+    seats: Mapping[int, Fraction],
+    required_clearance: Callable[[str, str], Fraction],
+) -> dict[frozenset[int], tuple[int, int]]:
+    """Order each root pair already a clearance apart, on one side, at its seats.
+
+    A lane's seat is where it sits with its root at the root's preferred base,
+    so it reads a rigid cohort at its offsets rather than at coordinates it may
+    be drawn at against them.  A pair any overlapping member pair of which is
+    seated coincident, inside its clearance, or on the other side, is left
+    unordered.
+    """
+    orders: dict[frozenset[int], tuple[int, int] | None] = {}
+    for left_index, left_lane in enumerate(lanes):
+        left_root, _ = union_find.find(left_index)
+        for right_index in range(left_index + 1, len(lanes)):
+            right_lane = lanes[right_index]
+            right_root, _ = union_find.find(right_index)
+            if left_root == right_root or not _overlaps(
+                left_lane.span_start,
+                left_lane.span_end,
+                right_lane.span_start,
+                right_lane.span_end,
+            ):
+                continue
+            pair = frozenset((left_root, right_root))
+            gap = seats[right_index] - seats[left_index]
+            order = (left_root, right_root) if gap > 0 else (right_root, left_root)
+            clear = gap != 0 and abs(gap) >= required_clearance(
+                left_lane.member_id, right_lane.member_id
+            )
+            orders[pair] = order if clear and orders.get(pair, order) == order else None
+    return {pair: order for pair, order in orders.items() if order is not None}
+
+
 def _unforced_pair_ranks(
     roots: set[int],
     root_key: dict[int, tuple[tuple[int, ...], tuple[tuple[int, ...], ...], Fraction]],
     separation_orders: Iterable[tuple[int, int]],
-    turn_side_orders: Mapping[frozenset[int], tuple[int, int]],
+    pair_orders: Mapping[frozenset[int], tuple[int, int]],
 ) -> dict[int, int]:
-    """Rank roots for a pair that no directed separation or end-turn vote orders.
+    """Rank roots for a pair that no directed separation or pair order orders.
 
     The ranks are a topological order of those forced orders, ties broken by
     semantic rank, so no unforced pair closes a cycle through them.  When the
@@ -640,7 +677,7 @@ def _unforced_pair_ranks(
     separated_pairs = {frozenset(edge) for edge in forced}
     forced.update(
         (order, Fraction(0))
-        for pair, order in turn_side_orders.items()
+        for pair, order in pair_orders.items()
         if pair not in separated_pairs
     )
     forced_order, _cycle = _ordered_roots_or_cycle(roots, forced, root_key)
@@ -1024,9 +1061,22 @@ def solve_corridor_cohorts(  # noqa: C901, PLR0915
 
         exclusion_intervals_by_root[root] = tuple(merged_intervals)
 
-    turn_side_orders = _turn_side_orders(lanes, union_find, peer_owners, sign)
+    # A seated-clear order outranks the pair's end-turn votes, so lanes the
+    # render already draws clear of each other compile where it draws them.
+    pair_orders = {
+        **_turn_side_orders(lanes, union_find, peer_owners, sign),
+        **_seated_clear_orders(
+            lanes,
+            union_find,
+            {
+                index: preferred[union_find.find(index)[0]] + potentials[index]
+                for index in range(len(lanes))
+            },
+            required_clearance,
+        ),
+    }
     fallback_rank = _unforced_pair_ranks(
-        set(roots), root_key, edge_order_owners.keys(), turn_side_orders
+        set(roots), root_key, edge_order_owners.keys(), pair_orders
     )
 
     def unforced_before(left_root: int, right_root: int) -> bool:
@@ -1088,7 +1138,7 @@ def solve_corridor_cohorts(  # noqa: C901, PLR0915
                 if (left_root, right_root) in edge_order_owners
                 else (right_root, left_root)
                 if (right_root, left_root) in edge_order_owners
-                else turn_side_orders.get(frozenset((left_root, right_root)))
+                else pair_orders.get(frozenset((left_root, right_root)))
             )
             if directed_edge == (left_root, right_root) or (
                 directed_edge is None and unforced_before(left_root, right_root)

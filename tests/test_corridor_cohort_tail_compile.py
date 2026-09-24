@@ -17,6 +17,11 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
+from packed_cell_aperture import (
+    PACKED_CELL,
+    REQUIRED_APERTURE,
+    direct_assembled_past_reference,
+)
 
 from nf_metro.api import prepare_graph, resolve_theme
 from nf_metro.layout import route_reservations
@@ -45,7 +50,6 @@ from nf_metro.parser.model import MetroGraph, PortSide
 from nf_metro.render import svg
 
 ROOT = Path(__file__).parents[1]
-ORACLE = "examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd"
 
 
 def _is_aperture_observation(kwargs: dict) -> bool:
@@ -117,17 +121,28 @@ def _assert_planned(
     return graph, plans
 
 
-def test_packed_cell_oracle_compiles_to_one_aperture_requirement(
+def test_packed_cell_corridor_compiles_in_its_drawn_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every lane pair in the column-2 corridor is drawn at least its clearance
+    apart, so the compile keeps the drawn order and ``qc``'s feeders fit."""
+    _assert_planned(PACKED_CELL, monkeypatch)
+
+
+def test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The fixture's ``track_gap: 2`` pitches its lanes 5px apart, and the
     aperture it requires is measured at that pitch."""
-    _graph, plans = _tail_plans(ORACLE, monkeypatch)
+    added = direct_assembled_past_reference(monkeypatch)
+    _graph, plans = _tail_plans(PACKED_CELL, monkeypatch)
+    assert added
     (plan,) = plans
     (requirement,) = _aperture_requirements(plan)
     assert requirement.axis is SettlementAxis.COLUMN
     assert requirement.boundary == 2
-    assert requirement.required == pytest.approx(56.0)
+    assert requirement.required == pytest.approx(REQUIRED_APERTURE)
+    assert requirement.negative_section_ids == ("assemble",)
     assert requirement.positive_section_ids == ("qc",)
 
 
@@ -484,8 +499,8 @@ def test_unowned_lane_pair_seats_on_the_side_its_end_turns_take(
     ``riboseq`` turns up at an end inside ``rnaseq``'s, so ``rnaseq`` seats
     below ``riboseq`` whatever their connector ranks say.  ``annotation``'s run
     spans both lanes' ends, which turn opposite ways, so no side avoids a
-    crossing and its order falls back to rank.  The compile seats every lane
-    where the render draws it."""
+    crossing; drawn a clearance clear of both, it keeps its drawn side.  The
+    compile seats every lane where the render draws it."""
     compiled = []
     real_compile = member_geometry.compile_corridor_cohort_plan
 
@@ -685,9 +700,16 @@ RENDER_STAGES = frozenset(
 def test_packed_cell_aperture_grant_widens_its_column_boundary_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``qc``'s aperture is 2.0px short at column boundary 2; one settlement of
-    the observed plan pays it with a 2.0px translation, carrying ``qc`` and
-    nothing on the negative side, which its own translation record shows."""
+    """Under the order it cannot afford, ``qc``'s aperture is 2.0px short at
+    column boundary 2; one settlement of the observed plan pays it with a 2.0px
+    translation, carrying ``qc`` and nothing on the negative side, which its
+    own translation record shows, and the render is 2.0px wider for it."""
+    path = ROOT / PACKED_CELL
+    graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+    drawn_width = svg.build_observed_render_plan(
+        graph, resolve_theme(None, graph)
+    ).plan.svg_width
+    direct_assembled_past_reference(monkeypatch)
     batches: list[
         tuple[RoutePlan, tuple[BoundaryClearanceDemand, ...], EnvelopeSettlement]
     ] = []
@@ -701,7 +723,7 @@ def test_packed_cell_aperture_grant_widens_its_column_boundary_once(
         return settlement
 
     monkeypatch.setattr(svg, "settle_route_envelopes", settle_envelopes)
-    _graph, observed, plans = _tail_render(ORACLE, monkeypatch)
+    _graph, observed, plans = _tail_render(PACKED_CELL, monkeypatch)
 
     assert len(batches) == len(plans) == 1
     ((batch_plan, owed, settlement),) = batches
@@ -718,6 +740,7 @@ def test_packed_cell_aperture_grant_widens_its_column_boundary_once(
     assert translation.amount >= demand.deficit
     assert set(requirement.positive_section_ids) <= set(translation.section_ids)
     assert set(translation.section_ids).isdisjoint(requirement.negative_section_ids)
+    assert observed.plan.svg_width == drawn_width + 2
 
     published = observed.route_plan
     assert translation.message in {item.message for item in published.diagnostics}

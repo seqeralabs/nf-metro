@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import replace
 from itertools import permutations
 
+import pytest
+
 from nf_metro.layout.routing.corridor_cohorts import (
     CorridorAllocationFailureReason,
     CorridorAllocationProblem,
@@ -538,10 +540,107 @@ def test_an_unordered_pair_holding_a_fixed_lane_keeps_its_drawn_order() -> None:
         }
 
 
-def test_an_unordered_pair_of_movable_lanes_follows_semantic_rank() -> None:
+def test_a_movable_pair_seated_clear_keeps_its_seated_order() -> None:
     problem = replace(_pinned_pair_problem(), obstacles=(), fixed_equalities=())
-    allocations = _allocations(problem)
+    for lanes in permutations(problem.lanes):
+        assert _allocations(replace(problem, lanes=lanes)) == {
+            "free": 104.0,
+            "pinned": 100.0,
+        }
+
+
+@pytest.mark.parametrize("free_coordinate", (100.0, 102.0, 98.0))
+def test_a_movable_pair_seated_inside_its_clearance_follows_semantic_rank(
+    free_coordinate: float,
+) -> None:
+    """Seated coincident or closer than the 4.0 clearance, neither order is
+    already clear, so ``free``'s semantic rank seats it first."""
+    problem = replace(_pinned_pair_problem(), obstacles=(), fixed_equalities=())
+    free, pinned = problem.lanes
+    lanes = (
+        replace(
+            free,
+            boundary_coordinate=free_coordinate,
+            planned_coordinate=free_coordinate,
+        ),
+        pinned,
+    )
+    allocations = _allocations(replace(problem, lanes=lanes))
     assert allocations["pinned"] - allocations["free"] == 4.0
+
+
+def test_a_pair_seated_clear_keeps_its_seated_order_over_opposing_end_turns() -> None:
+    """The two end turns oppose, so every order crosses one of them; the pair
+    is already seated a clearance apart with ``semantic-first`` above, and
+    reordering it would only add a move."""
+    lanes = (
+        replace(
+            _turning_lane("semantic-first", (0.0, 100.0), (0, 1), 0),
+            planned_coordinate=10.0,
+        ),
+        _turning_lane("semantic-second", (50.0, 200.0), (1, 0), 1),
+    )
+    for ordered in permutations(lanes):
+        assert _allocations(CorridorAllocationProblem(ordered)) == {
+            "semantic-first": 10.0,
+            "semantic-second": 0.0,
+        }
+
+
+def test_a_pair_seated_clear_keeps_its_seated_order_over_an_end_turn_vote() -> None:
+    """``semantic-first`` turns toward ``semantic-second``'s positive side
+    inside its run, but is seated a clearance below it already."""
+    lanes = (
+        _turning_lane("semantic-first", (0.0, 100.0), (0, 1), 0),
+        replace(
+            _turning_lane("semantic-second", (50.0, 200.0), (0, 0), 1),
+            planned_coordinate=10.0,
+        ),
+    )
+    for axis_sign in (1, -1):
+        assert _allocations(CorridorAllocationProblem(lanes, axis_sign=axis_sign)) == {
+            "semantic-first": 0.0,
+            "semantic-second": 10.0,
+        }
+
+
+def test_seated_order_reads_a_cohort_at_its_rigid_offsets() -> None:
+    """``x:0`` and ``x:1`` are one rigid cohort 4.0 apart but drawn 10.0 apart
+    the other way round; the cohort seats at ``x:0`` = 6.0 from the lower median
+    of its members' drawn bases.  ``y`` is drawn 4.0 below ``x:0``'s drawn
+    coordinate, yet seated 10.0 above ``x:0``'s seat, and it is the seat that
+    decides the order; semantic rank would seat ``y`` first."""
+    lanes = (
+        _lane(
+            "x:0",
+            "corridor:x",
+            "endpoint:x",
+            0.0,
+            20.0,
+            span=(0.0, 10.0),
+            line_rank=0,
+            root_rank=1,
+        ),
+        _lane(
+            "x:1",
+            "corridor:x",
+            "endpoint:x",
+            4.0,
+            10.0,
+            span=(20.0, 30.0),
+            line_rank=1,
+            root_rank=1,
+        ),
+        _lane(
+            "y", "corridor:y", "endpoint:y", 16.0, 16.0, span=(0.0, 10.0), line_rank=0
+        ),
+    )
+    for ordered in permutations(lanes):
+        assert _allocations(CorridorAllocationProblem(ordered)) == {
+            "x:0": 6.0,
+            "x:1": 10.0,
+            "y": 16.0,
+        }
 
 
 def test_forbidden_coordinate_interval_chooses_one_deterministic_side() -> None:
@@ -1260,13 +1359,16 @@ def test_coordinate_domains_constrain_the_joint_solve_and_attribute_conflicts() 
 
 
 def test_coordinate_domains_report_order_propagation_conflicts() -> None:
+    """Drawn 2.0 apart, inside the clearance, the pair has no seated order and
+    semantic rank seats ``before`` first, which its domain floor then pushes
+    past ``after``'s ceiling."""
     lanes = (
         _lane(
             "before",
             "corridor:before",
             "endpoint:before",
             10.0,
-            10.0,
+            7.0,
             span=(0.0, 10.0),
             line_rank=0,
         ),

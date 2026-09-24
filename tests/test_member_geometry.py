@@ -7,6 +7,11 @@ from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
 
 import pytest
+from packed_cell_aperture import (
+    PACKED_CELL,
+    REQUIRED_APERTURE,
+    direct_assembled_past_reference,
+)
 
 import nf_metro.layout.routing.corridor_cohort_integration as cci
 import nf_metro.layout.routing.member_geometry as member_geometry
@@ -1674,21 +1679,21 @@ def _corridor_cohort_population(path: Path):
     )
 
 
-def test_corridor_cohort_aperture_requirements_resolves_packed_cell_conflict() -> None:
+def test_corridor_cohort_aperture_requirements_resolves_packed_cell_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A real fixture's own corridor-cohort population produces exactly one
     typed aperture requirement, with no planning wiring in the call chain.
 
-    ``packed_cell_right_exit_left_entry_wrap.mmd`` has two feeders converging
-    on ``qc``'s left entry short of clearing the packed ``prep``/``assemble``
-    cell they cross from; the producer chain, called directly on this
-    fixture's real ledger and candidate population, must resolve that
-    shortfall to the boundary between them rather than refusing it. Only
-    ``assemble`` borders that boundary -- ``prep`` sits entirely behind it in
-    the same grid cell -- so it alone names the negative side.
+    ``packed_cell_right_exit_left_entry_wrap.mmd`` compiles as drawn; under an
+    order its column-2 corridor cannot afford, ``qc``'s two feeders fall short
+    of clearing the packed ``prep``/``assemble`` cell they cross from, and the
+    producer chain, called directly on this fixture's real ledger and candidate
+    population, must resolve that shortfall to the boundary between them
+    rather than refusing it. Only ``assemble`` borders that boundary -- ``prep``
+    sits entirely behind it in the same grid cell -- so it alone names the
+    negative side.
     """
-    path = (
-        ROOT / "examples" / "topologies" / "packed_cell_right_exit_left_entry_wrap.mmd"
-    )
     (
         ledger,
         candidates,
@@ -1697,33 +1702,42 @@ def test_corridor_cohort_aperture_requirements_resolves_packed_cell_conflict() -
         ctx,
         extra_targets,
         scalar_requests,
-    ) = _corridor_cohort_population(path)
+    ) = _corridor_cohort_population(ROOT / PACKED_CELL)
 
-    _plan, _ranks, requirements = member_geometry._compile_corridor_cohorts(
-        ledger,
-        candidates,
-        context_candidates,
-        scaffold,
-        ctx,
-        allow_clearance_requirements=True,
-        additional_targets=extra_targets,
-        scalar_requests=scalar_requests,
-    )
+    def compile_cohorts():
+        return member_geometry._compile_corridor_cohorts(
+            ledger,
+            candidates,
+            context_candidates,
+            scaffold,
+            ctx,
+            allow_clearance_requirements=True,
+            additional_targets=extra_targets,
+            scalar_requests=scalar_requests,
+        )
+
+    plan, _ranks, requirements = compile_cohorts()
+    assert plan is not None
+    assert requirements == ()
+
+    direct_assembled_past_reference(monkeypatch)
+    _plan, _ranks, requirements = compile_cohorts()
 
     (requirement,) = requirements
     assert requirement.axis is SettlementAxis.COLUMN
     assert requirement.boundary == 2
-    assert requirement.required == pytest.approx(56.0)
+    assert requirement.required == pytest.approx(REQUIRED_APERTURE)
     assert requirement.negative_section_ids == ("assemble",)
     assert requirement.positive_section_ids == ("qc",)
     assert requirement.kind is BoundaryClearanceRequirementKind.CORRIDOR_COHORT_APERTURE
 
 
-def test_packed_cell_routing_observation_publishes_corridor_aperture_requirement() -> (
-    None
-):
+def test_packed_cell_routing_observation_publishes_corridor_aperture_requirement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The wired routing observation publishes the packed_cell aperture batch.
 
+    Under an order its column-2 corridor cannot afford,
     ``packed_cell_right_exit_left_entry_wrap.mmd`` has two feeders converging on
     ``qc``'s left entry short of clearing the packed ``prep``/``assemble`` cell.
     A first observation carries no prior semantic ledger, so it publishes no
@@ -1732,9 +1746,8 @@ def test_packed_cell_routing_observation_publishes_corridor_aperture_requirement
     requirement on the published plan, through the ordinary production call graph
     rather than a direct compiler call.
     """
-    path = (
-        ROOT / "examples" / "topologies" / "packed_cell_right_exit_left_entry_wrap.mmd"
-    )
+    direct_assembled_past_reference(monkeypatch)
+    path = ROOT / PACKED_CELL
 
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
     prior_plan = observe_route_edges(
@@ -1758,7 +1771,7 @@ def test_packed_cell_routing_observation_publishes_corridor_aperture_requirement
     assert requirement.kind is BoundaryClearanceRequirementKind.CORRIDOR_COHORT_APERTURE
     assert requirement.axis is SettlementAxis.COLUMN
     assert requirement.boundary == 2
-    assert requirement.required == pytest.approx(56.0)
+    assert requirement.required == pytest.approx(REQUIRED_APERTURE)
     assert requirement.negative_section_ids == ("assemble",)
     assert requirement.positive_section_ids == ("qc",)
 
