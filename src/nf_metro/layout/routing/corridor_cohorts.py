@@ -612,7 +612,6 @@ def _overlapping_cross_root_pairs(
 def _turn_side_orders(
     lanes: tuple[CorridorLane, ...],
     union_find: _WeightedUnionFind,
-    peer_owners: dict[frozenset[int], set[str]],
     sign: int,
 ) -> dict[frozenset[int], tuple[int, int]]:
     """Order each root pair whose member lanes' end turns all agree.
@@ -630,8 +629,6 @@ def _turn_side_orders(
         left_root,
         right_root,
     ) in _overlapping_cross_root_pairs(lanes, union_find):
-        if frozenset((left_index, right_index)) in peer_owners:
-            continue
         for side in _turn_side_votes(left_lane, right_lane):
             orders[frozenset((left_root, right_root))].add(
                 (right_root, left_root) if side * sign > 0 else (left_root, right_root)
@@ -1084,7 +1081,7 @@ def solve_corridor_cohorts(  # noqa: C901, PLR0915
     # Seated orders only prefer the drawn order: where they cycle through the
     # directed separations and end-turn votes they all give way rather than
     # fail a compile those orders alone would plan.
-    turn_orders = _turn_side_orders(lanes, union_find, peer_owners, sign)
+    turn_orders = _turn_side_orders(lanes, union_find, sign)
     pair_orders = {
         **turn_orders,
         **_seated_clear_orders(
