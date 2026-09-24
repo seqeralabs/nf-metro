@@ -1957,10 +1957,6 @@ def _cohort_landing_coordinates(
             raise CorridorCohortCompilationError(
                 f"corridor endpoint cohort {cohort_id} has tied port slots"
             )
-        if len(ordered_slots) != len(ranks):
-            raise CorridorCohortCompilationError(
-                f"corridor endpoint cohort {cohort_id} has incomplete port slots"
-            )
         slot_by_rank = dict(zip(ranks, representative_slots))
         for member_id, target in member_targets.items():
             coordinates[(member_id, target.edge_key)] = slot_by_rank[

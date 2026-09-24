@@ -1978,12 +1978,12 @@ def _settle_render_geometry(
       does, because only a ledger already settled to its minimum widths compiles
       without a spurious shortfall.  It replays the inputs of the last routing
       pass, which seated that ledger's corridors, and its geometry is
-      discarded.  A
-      ``CORRIDOR_COHORT_APERTURE`` requirement it publishes is settled once
-      against that observed plan, :func:`_assert_aperture_grant_closes` proves
-      from the settlement's own translations that the grant pays every measured
-      deficit, and a re-route consuming the plan draws the result.  Any deficit
-      the grant leaves is an invariant failure rather than a second batch.
+      discarded.  A ``CORRIDOR_COHORT_APERTURE`` requirement it publishes is
+      settled once against that observed plan,
+      :func:`_assert_aperture_grant_closes` proves from the settlement's own
+      translations that the grant pays every measured deficit, and a re-route
+      consuming the plan draws the result.  Any deficit the grant leaves is an
+      invariant failure rather than a second batch.
 
     Rail-mode sections run a separate layout pipeline whose per-line centrelines
     are anchored during ``compute_layout`` and cannot be re-derived from a
