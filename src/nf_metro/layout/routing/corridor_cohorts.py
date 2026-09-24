@@ -686,18 +686,16 @@ def _seated_clear_orders(
     return orders
 
 
-def _unforced_pair_ranks(
+def _forced_root_order(
     roots: set[int],
     root_key: dict[int, tuple[tuple[int, ...], tuple[tuple[int, ...], ...], Fraction]],
     separation_orders: Iterable[tuple[int, int]],
     pair_orders: Mapping[frozenset[int], tuple[int, int]],
-) -> dict[int, int]:
-    """Rank roots for a pair that no directed separation or pair order orders.
+) -> tuple[int, ...]:
+    """Topologically order roots by the directed separations and pair orders.
 
-    The ranks are a topological order of those forced orders, ties broken by
-    semantic rank, so no unforced pair closes a cycle through them.  When the
-    forced orders are themselves cyclic every ordering fails, so plain semantic
-    rank stands in.
+    A pair a directed separation orders takes the separation's order, and ties
+    break by semantic rank.  Empty when those orders cycle.
     """
     forced = {edge: Fraction(0) for edge in separation_orders}
     separated_pairs = {frozenset(edge) for edge in forced}
@@ -706,13 +704,7 @@ def _unforced_pair_ranks(
         for pair, order in pair_orders.items()
         if pair not in separated_pairs
     )
-    forced_order, _cycle = _ordered_roots_or_cycle(roots, forced, root_key)
-    return {
-        root: rank
-        for rank, root in enumerate(
-            forced_order or sorted(roots, key=root_key.__getitem__)
-        )
-    }
+    return _ordered_roots_or_cycle(roots, forced, root_key)[0]
 
 
 def solve_corridor_cohorts(  # noqa: C901, PLR0915
@@ -1089,8 +1081,12 @@ def solve_corridor_cohorts(  # noqa: C901, PLR0915
 
     # A seated-clear order outranks the pair's end-turn votes, so lanes the
     # render already draws clear of each other compile where it draws them.
+    # Seated orders only prefer the drawn order: where they cycle through the
+    # directed separations and end-turn votes they all give way rather than
+    # fail a compile those orders alone would plan.
+    turn_orders = _turn_side_orders(lanes, union_find, peer_owners, sign)
     pair_orders = {
-        **_turn_side_orders(lanes, union_find, peer_owners, sign),
+        **turn_orders,
         **_seated_clear_orders(
             lanes,
             union_find,
@@ -1101,9 +1097,23 @@ def solve_corridor_cohorts(  # noqa: C901, PLR0915
             required_clearance,
         ),
     }
-    fallback_rank = _unforced_pair_ranks(
+    forced_order = _forced_root_order(
         set(roots), root_key, edge_order_owners.keys(), pair_orders
     )
+    if not forced_order:
+        pair_orders = turn_orders
+        forced_order = _forced_root_order(
+            set(roots), root_key, edge_order_owners.keys(), pair_orders
+        )
+    # Unforced pairs follow this rank, so none closes a cycle through the
+    # forced orders; when those cycle regardless every order fails, and plain
+    # semantic rank stands in.
+    fallback_rank = {
+        root: rank
+        for rank, root in enumerate(
+            forced_order or sorted(roots, key=root_key.__getitem__)
+        )
+    }
 
     def unforced_before(left_root: int, right_root: int) -> bool:
         """Whether *left_root* seats first in a pair no forced order directs.

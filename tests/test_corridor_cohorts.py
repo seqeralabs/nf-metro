@@ -643,6 +643,115 @@ def test_seated_order_reads_a_cohort_at_its_rigid_offsets() -> None:
         }
 
 
+def test_a_pair_seated_clear_on_both_sides_is_left_to_semantic_rank() -> None:
+    """``x`` is seated a clearance below ``y`` on the first span and above it on
+    the second, so neither order is already clear; ``y``'s semantic rank seats
+    it first."""
+    lanes = (
+        _lane(
+            "x:0", "corridor:x", "endpoint:x", 0.0, 0.0, span=(0.0, 10.0), line_rank=0
+        ),
+        _lane(
+            "x:1",
+            "corridor:x",
+            "endpoint:x",
+            20.0,
+            20.0,
+            span=(20.0, 30.0),
+            line_rank=1,
+        ),
+        _lane(
+            "y:0",
+            "corridor:y",
+            "endpoint:y",
+            10.0,
+            10.0,
+            span=(0.0, 10.0),
+            line_rank=0,
+            root_rank=-1,
+        ),
+        _lane(
+            "y:1",
+            "corridor:y",
+            "endpoint:y",
+            10.0,
+            10.0,
+            span=(20.0, 30.0),
+            line_rank=1,
+            root_rank=-1,
+        ),
+    )
+    for ordered in permutations(lanes):
+        assert _allocations(CorridorAllocationProblem(ordered)) == {
+            "x:0": 0.0,
+            "x:1": 20.0,
+            "y:0": -4.0,
+            "y:1": -4.0,
+        }
+
+
+def _seated_chain() -> tuple[CorridorLane, ...]:
+    """Three single-lane roots seated one after another a pitch apart, so the
+    seats alone order ``a < b < c``."""
+    return tuple(
+        _lane(
+            member_id,
+            f"corridor:{member_id}",
+            f"endpoint:{member_id}",
+            coordinate,
+            coordinate,
+            span=(0.0, 100.0),
+            line_rank=0,
+            root_rank=rank,
+        )
+        for rank, (member_id, coordinate) in enumerate(
+            (("a", 0.0), ("b", 10.0), ("c", 20.0))
+        )
+    )
+
+
+def test_seated_orders_cycling_through_a_directed_separation_give_way() -> None:
+    """The separation seats ``c`` below ``a``, which no order keeping both
+    seated orders can, so the seated orders give way and semantic rank orders
+    every pair the separation leaves free."""
+    for lanes in permutations(_seated_chain()):
+        problem = CorridorAllocationProblem(
+            lanes,
+            directed_separations=(
+                CorridorDirectedSeparation("order:ca", "c", "a", 4.0),
+            ),
+        )
+        assert _allocations(problem) == {"a": 0.0, "b": -8.0, "c": -4.0}
+
+
+def test_seated_orders_that_cycle_among_braided_cohorts_give_way() -> None:
+    """Each pair of the three rigid cohorts is seated clear on the one span the
+    pair shares, and those seated orders cycle: ``a`` below ``b`` below ``c``
+    below ``a``.  One order of roots cannot keep all three, so the seated
+    orders give way to semantic rank."""
+    lanes = (
+        _lane("a:0", "c1", "e1", 0.0, 0.0, span=(0.0, 10.0), line_rank=0),
+        _lane("a:1", "c1", "e1", 10.0, 10.0, span=(40.0, 50.0), line_rank=1),
+        _lane(
+            "b:0", "c2", "e2", 10.0, 10.0, span=(0.0, 10.0), line_rank=0, root_rank=1
+        ),
+        _lane("b:1", "c2", "e2", 0.0, 0.0, span=(20.0, 30.0), line_rank=1, root_rank=1),
+        _lane(
+            "c:0", "c3", "e3", 10.0, 10.0, span=(20.0, 30.0), line_rank=0, root_rank=2
+        ),
+        _lane("c:1", "c3", "e3", 0.0, 0.0, span=(40.0, 50.0), line_rank=1, root_rank=2),
+    )
+    for ordered in permutations(lanes):
+        assert _allocations(CorridorAllocationProblem(ordered)) == {
+            "a:0": -14.0,
+            "a:1": -4.0,
+            "b:0": 10.0,
+            "b:1": 0.0,
+            "c:0": 10.0,
+            "c:1": 0.0,
+        }
+
+
 def test_forbidden_coordinate_interval_chooses_one_deterministic_side() -> None:
     lane = _lane(
         "movable",
