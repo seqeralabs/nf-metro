@@ -8,6 +8,12 @@ column-2 corridor ``assembled``'s run (segment 1) is drawn 17px left of
 cohort 2.0px past its ceiling, a shortfall the producer maps to one aperture
 requirement at column boundary 2 with ``assemble`` on the negative side and
 ``qc`` on the positive.
+
+No topology under ``examples/topologies/`` draws this order on its own; the
+directed separation ``direct_assembled_past_reference`` installs below is
+synthetic, added by monkeypatching ``corridor_cohort_integration._problem`` so
+a test can reach the aperture-grant path directly without a corpus fixture
+that produces the requirement.
 """
 
 from __future__ import annotations

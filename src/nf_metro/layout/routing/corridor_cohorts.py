@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from fractions import Fraction
@@ -582,6 +582,33 @@ def _turn_side_votes(left: CorridorLane, right: CorridorLane) -> set[int]:
     return votes
 
 
+def _overlapping_cross_root_pairs(
+    lanes: tuple[CorridorLane, ...],
+    union_find: _WeightedUnionFind,
+) -> Iterator[tuple[int, CorridorLane, int, CorridorLane, int, int]]:
+    """Every overlapping ``left_index < right_index`` lane pair with distinct roots.
+
+    Yields ``(left_index, left_lane, right_index, right_lane, left_root,
+    right_root)``; a pair whose lanes share a root is not a candidate for an
+    inter-root order and is skipped.
+    """
+    for left_index, left_lane in enumerate(lanes):
+        left_root, _ = union_find.find(left_index)
+        for right_index in range(left_index + 1, len(lanes)):
+            right_lane = lanes[right_index]
+            if not _overlaps(
+                left_lane.span_start,
+                left_lane.span_end,
+                right_lane.span_start,
+                right_lane.span_end,
+            ):
+                continue
+            right_root, _ = union_find.find(right_index)
+            if left_root == right_root:
+                continue
+            yield left_index, left_lane, right_index, right_lane, left_root, right_root
+
+
 def _turn_side_orders(
     lanes: tuple[CorridorLane, ...],
     union_find: _WeightedUnionFind,
@@ -595,29 +622,20 @@ def _turn_side_orders(
     vote, is left unordered.
     """
     orders: defaultdict[frozenset[int], set[tuple[int, int]]] = defaultdict(set)
-    for left_index, left_lane in enumerate(lanes):
-        left_root, _ = union_find.find(left_index)
-        for right_index in range(left_index + 1, len(lanes)):
-            right_lane = lanes[right_index]
-            if (
-                not _overlaps(
-                    left_lane.span_start,
-                    left_lane.span_end,
-                    right_lane.span_start,
-                    right_lane.span_end,
-                )
-                or frozenset((left_index, right_index)) in peer_owners
-            ):
-                continue
-            right_root, _ = union_find.find(right_index)
-            if left_root == right_root:
-                continue
-            for side in _turn_side_votes(left_lane, right_lane):
-                orders[frozenset((left_root, right_root))].add(
-                    (right_root, left_root)
-                    if side * sign > 0
-                    else (left_root, right_root)
-                )
+    for (
+        left_index,
+        left_lane,
+        right_index,
+        right_lane,
+        left_root,
+        right_root,
+    ) in _overlapping_cross_root_pairs(lanes, union_find):
+        if frozenset((left_index, right_index)) in peer_owners:
+            continue
+        for side in _turn_side_votes(left_lane, right_lane):
+            orders[frozenset((left_root, right_root))].add(
+                (right_root, left_root) if side * sign > 0 else (left_root, right_root)
+            )
     return {
         pair: next(iter(votes)) for pair, votes in orders.items() if len(votes) == 1
     }
@@ -637,27 +655,35 @@ def _seated_clear_orders(
     seated coincident, inside its clearance, or on the other side, is left
     unordered.
     """
-    orders: dict[frozenset[int], tuple[int, int] | None] = {}
-    for left_index, left_lane in enumerate(lanes):
-        left_root, _ = union_find.find(left_index)
-        for right_index in range(left_index + 1, len(lanes)):
-            right_lane = lanes[right_index]
-            right_root, _ = union_find.find(right_index)
-            if left_root == right_root or not _overlaps(
-                left_lane.span_start,
-                left_lane.span_end,
-                right_lane.span_start,
-                right_lane.span_end,
-            ):
-                continue
-            pair = frozenset((left_root, right_root))
-            gap = seats[right_index] - seats[left_index]
-            order = (left_root, right_root) if gap > 0 else (right_root, left_root)
-            clear = gap != 0 and abs(gap) >= required_clearance(
-                left_lane.member_id, right_lane.member_id
-            )
-            orders[pair] = order if clear and orders.get(pair, order) == order else None
-    return {pair: order for pair, order in orders.items() if order is not None}
+    orders: dict[frozenset[int], tuple[int, int]] = {}
+    conflicting: set[frozenset[int]] = set()
+    for (
+        left_index,
+        left_lane,
+        right_index,
+        right_lane,
+        left_root,
+        right_root,
+    ) in _overlapping_cross_root_pairs(lanes, union_find):
+        pair = frozenset((left_root, right_root))
+        if pair in conflicting:
+            continue
+        gap = seats[right_index] - seats[left_index]
+        clear = gap != 0 and abs(gap) >= required_clearance(
+            left_lane.member_id, right_lane.member_id
+        )
+        if not clear:
+            conflicting.add(pair)
+            orders.pop(pair, None)
+            continue
+        order = (left_root, right_root) if gap > 0 else (right_root, left_root)
+        existing = orders.get(pair)
+        if existing is not None and existing != order:
+            conflicting.add(pair)
+            orders.pop(pair, None)
+            continue
+        orders[pair] = order
+    return orders
 
 
 def _unforced_pair_ranks(
