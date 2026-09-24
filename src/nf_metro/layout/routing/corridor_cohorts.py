@@ -1237,6 +1237,23 @@ def solve_corridor_cohorts(  # noqa: C901, PLR0915
                 forced_order or sorted(roots, key=root_key.__getitem__)
             )
         }
+
+        def domain_infeasible(
+            root: int,
+            blockers: set[str],
+            deficit: Fraction | None,
+        ) -> CorridorAllocationResult:
+            return _failure(
+                CorridorAllocationFailureReason.INFEASIBLE,
+                members={lanes[index].member_id for index in roots[root]},
+                obstacles=blockers,
+                equality_owners=fixed_root_owners.get(root, set()),
+                endpoint_owners={
+                    lanes[index].endpoint_owner_id for index in roots[root]
+                },
+                clearance_shortfall=clearance_shortfall(root, deficit, blockers),
+            )
+
         edges = dict(separation_edges)
         for (
             left_index,
@@ -1364,21 +1381,7 @@ def solve_corridor_cohorts(  # noqa: C901, PLR0915
                     ceiling_obstacles if coordinate == ceiling else set()
                 )
         except _NoCoordinateInsideBounds as error:
-            blockers = error.obstacle_ids
-            return _failure(
-                CorridorAllocationFailureReason.INFEASIBLE,
-                members={lanes[index].member_id for index in roots[error.root]},
-                obstacles=blockers,
-                equality_owners=fixed_root_owners.get(error.root, set()),
-                endpoint_owners={
-                    lanes[index].endpoint_owner_id for index in roots[error.root]
-                },
-                clearance_shortfall=clearance_shortfall(
-                    error.root,
-                    error.deficit,
-                    blockers,
-                ),
-            )
+            return domain_infeasible(error.root, error.obstacle_ids, error.deficit)
 
         coordinates: dict[int, Fraction] = {}
         coordinate_floor_obstacles: dict[int, set[str]] = {}
@@ -1402,20 +1405,10 @@ def solve_corridor_cohorts(  # noqa: C901, PLR0915
                 for obstacle_id in obstacle_ids
             }
             if floor is not None and floor > latest[root]:
-                blockers = floor_obstacles | latest_ceiling_obstacles[root]
-                return _failure(
-                    CorridorAllocationFailureReason.INFEASIBLE,
-                    members={lanes[index].member_id for index in roots[root]},
-                    obstacles=blockers,
-                    equality_owners=fixed_root_owners.get(root, set()),
-                    endpoint_owners={
-                        lanes[index].endpoint_owner_id for index in roots[root]
-                    },
-                    clearance_shortfall=clearance_shortfall(
-                        root,
-                        floor - latest[root],
-                        blockers,
-                    ),
+                return domain_infeasible(
+                    root,
+                    floor_obstacles | latest_ceiling_obstacles[root],
+                    floor - latest[root],
                 )
             try:
                 coordinate = closest_allowed(
@@ -1426,21 +1419,7 @@ def solve_corridor_cohorts(  # noqa: C901, PLR0915
                     ceiling_obstacle_ids=latest_ceiling_obstacles[root],
                 )
             except _NoCoordinateInsideBounds as error:
-                blockers = error.obstacle_ids
-                return _failure(
-                    CorridorAllocationFailureReason.INFEASIBLE,
-                    members={lanes[index].member_id for index in roots[error.root]},
-                    obstacles=blockers,
-                    equality_owners=fixed_root_owners.get(error.root, set()),
-                    endpoint_owners={
-                        lanes[index].endpoint_owner_id for index in roots[error.root]
-                    },
-                    clearance_shortfall=clearance_shortfall(
-                        error.root,
-                        error.deficit,
-                        blockers,
-                    ),
-                )
+                return domain_infeasible(error.root, error.obstacle_ids, error.deficit)
             coordinates[root] = coordinate
             coordinate_floor_obstacles[root] = (
                 floor_obstacles if coordinate == floor else set()
