@@ -1039,6 +1039,10 @@
   "note": "In _coincide_same_line_fanout_traverses: a fan-owned traverse is snapped onto its convergence-plan-owned sibling's band, but the movable member's own reserved claim band may forbid that Y. The corpus fan-owned traverses carry no claim band that conflicts with the anchor, so the target always lands on the reference and the skip arm is never taken. Defensive against a movable member whose reservation excludes the anchor's band.",
   "status": "defensive"
  },
+ "normalize.py::if anchors:::#1": {
+  "note": "The anchor arm of _stack_trunk_bands: a channel stack holding a convergence context trunk (#2024). Reachable but defective: the only topology the #2024 option sweep found reaching it is the riboseq inter-row corridor at label_angle 10 (tests/fixtures/curve_invariant_repros/riboseq_inter_row_corridor.mmd with --label-angle 10, exercised by test_trunk_slot_materialisation_leaves_convergence_context_in_place), and that render's angled station labels overlap (star_hybrid/ribocode and six more; the final label-overlap phase guard rejects it), so it cannot ship as a gallery fixture. The routing it exercises is clean; the label collision needs its own bug before the arm can be fixtured.",
+  "status": "needs-review"
+ },
  "normalize.py::if any(moved.fuses_with(other, step) for other in lanes if other is not lane):::#1": {
   "note": "In _tighten_overwide_movable_lanes: the tighter slot one step from a lane's nearest co-traveller is abandoned when it would fuse with another lane. The corpus's one tightening move (riboseq_inter_row_corridor's rnaseq) draws clear, so the would-fuse abandon arm is never taken. Defensive against a slot boxed in by a third lane.",
   "status": "defensive"
@@ -1106,6 +1110,10 @@
  "normalize.py::if len({id(t.route) for t in grp}) < 2:::#2": {
   "note": "Single-route-group skip in _suboptimal_trunk_bands, validate-only: called from the _guard_* validator and a unit test, not the production render path the validate=False sweep exercises. Defensive.",
   "status": "defensive"
+ },
+ "normalize.py::if max(anchored_tops) - min(anchored_tops) > COORD_TOLERANCE:::#1": {
+  "note": "Neither arm runs on the default examples/ corpus, which never reaches an anchored stack (see the if-anchors entry above). The abandon arm of _stack_trunk_bands' anchor seating: a channel stack holding two or more convergence context trunks whose fixed Ys no single stack top seats together. A stack with one anchor always has a top that seats it, and no fixture or option combination builds a stack with two: the #2024 option sweep (23,313 one-option-at-a-time renders plus 5,996 random multi-option renders over examples/ and tests/fixtures/) reaches an anchored stack on 69 renders, every one with a single anchor. The arm keeps a second anchor from being restacked should two ever share a stack.",
+  "status": "candidate-dead"
  },
  "normalize.py::if not _lane_move_is_grounded(lane, target, ctx):::#2": {
   "note": "In _tighten_overwide_movable_lanes: the tighter slot is abandoned when it enters a section or overruns a claim band. The corpus's one tightening move (riboseq_inter_row_corridor's rnaseq) is grounded, so the not-grounded abandon arm is never taken. Defensive against a bundle whose inner slot is blocked by a section or reservation.",
