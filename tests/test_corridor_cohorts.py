@@ -815,6 +815,174 @@ def test_fixed_lane_drawn_orders_cycling_through_a_forced_order_give_way(
         }
 
 
+def test_a_seated_order_that_cannot_seat_gives_way() -> None:
+    """``z`` is drawn a clearance above ``y``, which a domain holds at or above
+    its drawn 12, and a separation holds ``q`` a clearance above ``z``.  Keeping
+    ``y`` below ``z`` would lift ``z`` and ``q`` off where they are drawn, so
+    the seated order gives way and semantic rank seats ``z`` below ``y``."""
+    for lanes in permutations(
+        (
+            _lane(
+                "y", "cy", "ey", 12.0, 12.0, span=(0.0, 50.0), line_rank=0, root_rank=2
+            ),
+            _lane(
+                "z", "cz", "ez", 16.0, 16.0, span=(0.0, 100.0), line_rank=0, root_rank=1
+            ),
+            _lane(
+                "q",
+                "cq",
+                "eq",
+                17.0,
+                17.0,
+                span=(60.0, 100.0),
+                line_rank=0,
+                root_rank=3,
+            ),
+        )
+    ):
+        problem = CorridorAllocationProblem(
+            lanes,
+            domains=(CorridorCoordinateDomain("y", minimum_coordinate=12.0),),
+            directed_separations=(
+                CorridorDirectedSeparation("order:zq", "z", "q", 4.0),
+            ),
+        )
+        assert _allocations(problem) == {"q": 17.0, "y": 12.0, "z": 8.0}
+
+
+def _lifted_fixed_lane_problem(
+    z_coordinate: float,
+    directed_separations: tuple[CorridorDirectedSeparation, ...] = (),
+) -> CorridorAllocationProblem:
+    """A fixed equality holds ``x`` at 8, drawn below ``y`` at 10, so ``y``
+    clears ``x`` only at 12 or above; ``z`` overlaps ``y`` alone."""
+    return CorridorAllocationProblem(
+        (
+            _lane(
+                "y", "cy", "ey", 10.0, 10.0, span=(0.0, 100.0), line_rank=0, root_rank=1
+            ),
+            _lane(
+                "z",
+                "cz",
+                "ez",
+                z_coordinate,
+                z_coordinate,
+                span=(60.0, 100.0),
+                line_rank=0,
+                root_rank=2,
+            ),
+            _lane(
+                "x", "cx", "ex", 8.0, 8.0, span=(0.0, 40.0), line_rank=0, root_rank=3
+            ),
+        ),
+        obstacles=(
+            _obstacle("anchor", 8.0, 8.0, span=(0.0, 40.0), semantic_rank=(9,)),
+        ),
+        fixed_equalities=(CorridorFixedEquality("context", "x", "anchor"),),
+        directed_separations=directed_separations,
+    )
+
+
+@pytest.mark.parametrize(
+    ("problem", "expected"),
+    (
+        (_lifted_fixed_lane_problem(12.0), {"x": 8.0, "y": 12.0, "z": 8.0}),
+        (_lifted_fixed_lane_problem(14.0), {"x": 8.0, "y": 12.0, "z": 8.0}),
+        (
+            _lifted_fixed_lane_problem(
+                12.0,
+                directed_separations=(
+                    CorridorDirectedSeparation("order:yz", "y", "z", 4.0),
+                ),
+            ),
+            {"x": 8.0, "y": 4.0, "z": 12.0},
+        ),
+    ),
+    ids=("semantic-rank", "seated-clear", "directed-separation"),
+)
+def test_preference_orders_that_cannot_seat_give_way_in_turn(
+    problem: CorridorAllocationProblem, expected: dict[str, float]
+) -> None:
+    """Semantic rank seats ``z`` below ``y``, and ``y`` lifts clear of ``x``.
+    Seated a clearance above ``y``, ``z`` would hold ``y`` below 10 and so onto
+    ``x``; the seated order gives way first.  A separation holding ``z`` above
+    ``y`` instead leaves ``x``'s drawn order, ``x`` below ``y``, no seating; the
+    fixed-lane order gives way next, and ``y`` seats below ``x``."""
+    for lanes in permutations(problem.lanes):
+        assert _allocations(replace(problem, lanes=lanes)) == expected
+
+
+def test_a_failure_no_order_can_seat_reports_the_fullest_orders() -> None:
+    """A domain pins ``y`` at 12, and ``z`` lies between 10 and ``q``'s
+    ceiling of 17 less the separation, so ``z`` clears ``y`` on neither side.
+    With the seated order ``y`` fails against ``q``'s ceiling; without it
+    ``z`` fails against its own floor instead."""
+    for lanes in permutations(
+        (
+            _lane(
+                "y", "cy", "ey", 12.0, 12.0, span=(0.0, 50.0), line_rank=0, root_rank=2
+            ),
+            _lane(
+                "z", "cz", "ez", 16.0, 16.0, span=(0.0, 100.0), line_rank=0, root_rank=1
+            ),
+            _lane(
+                "q",
+                "cq",
+                "eq",
+                17.0,
+                17.0,
+                span=(60.0, 100.0),
+                line_rank=0,
+                root_rank=3,
+            ),
+        )
+    ):
+        problem = CorridorAllocationProblem(
+            lanes,
+            domains=(
+                CorridorCoordinateDomain("y", 12.0, 12.0, ("pin:y",)),
+                CorridorCoordinateDomain(
+                    "z", minimum_coordinate=10.0, obstacle_ids=("floor:z",)
+                ),
+                CorridorCoordinateDomain(
+                    "q", maximum_coordinate=17.0, obstacle_ids=("ceiling:q",)
+                ),
+            ),
+            directed_separations=(
+                CorridorDirectedSeparation("order:zq", "z", "q", 4.0),
+            ),
+        )
+
+        result = solve_corridor_cohorts(problem)
+
+        assert result.status is CorridorAllocationStatus.FAILURE
+        assert result.reason is CorridorAllocationFailureReason.INFEASIBLE
+        assert result.blocking_member_ids == ("y",)
+        assert result.blocking_obstacle_ids == ("ceiling:q", "pin:y")
+
+
+def test_contradicting_directed_separations_fail_closed_whatever_gives_way() -> None:
+    lanes = (
+        _lane("a", "ca", "ea", 0.0, 0.0, span=(0.0, 100.0), line_rank=0, root_rank=1),
+        _lane("b", "cb", "eb", 8.0, 8.0, span=(0.0, 100.0), line_rank=0, root_rank=2),
+    )
+    problem = CorridorAllocationProblem(
+        lanes,
+        directed_separations=(
+            CorridorDirectedSeparation("order:ab", "a", "b", 4.0),
+            CorridorDirectedSeparation("order:ba", "b", "a", 4.0),
+        ),
+    )
+
+    result = solve_corridor_cohorts(problem)
+
+    assert result.status is CorridorAllocationStatus.FAILURE
+    assert result.reason is CorridorAllocationFailureReason.INFEASIBLE
+    assert result.allocations == ()
+    assert result.blocking_member_ids == ("a", "b")
+    assert result.blocking_order_owner_ids == ("order:ab", "order:ba")
+
+
 def test_forbidden_coordinate_interval_chooses_one_deterministic_side() -> None:
     lane = _lane(
         "movable",
