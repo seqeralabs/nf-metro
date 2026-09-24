@@ -648,9 +648,12 @@ def _fixed_lane_drawn_orders(
 
     A fixed root's own coordinate cannot move, so this keeps the pair on the
     sides it is drawn on.  The order is a preference nonetheless: the movable
-    roots around a fixed one can seat on either side of it, so pairs through it
-    can close a cycle with the other orders, and then they give way like any
-    other preference.  A pair whose bases coincide is left unordered.
+    roots around a fixed one can seat on either side of it, so a pair through
+    it can close a cycle with the other orders, or can simply fail to seat
+    even though it closes none.  Either way it gives way like any other
+    preference, through the same outcome-driven ladder in
+    ``solve_corridor_cohorts`` that retries without it.  A pair whose bases
+    coincide is left unordered.
     """
     return {
         frozenset((left_root, right_root)): (
@@ -1263,8 +1266,6 @@ def solve_corridor_cohorts(  # noqa: C901, PLR0915
             left_root,
             right_root,
         ) in _overlapping_cross_root_pairs(lanes, union_find):
-            if frozenset((left_index, right_index)) in peer_owners:
-                continue
             directed_edge = (
                 (left_root, right_root)
                 if (left_root, right_root) in edge_order_owners
