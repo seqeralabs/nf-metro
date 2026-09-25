@@ -5085,6 +5085,10 @@ def _dependant_control_point(
     return target, control, role_id
 
 
+_OPENING_DESCENT_AXIS = 1
+"""Point index an opening turn's descent runs along, whatever the trunk's axis."""
+
+
 def _convergence_dependant_recipe(
     plan: ConvergencePlan,
     variable_id: str,
@@ -5106,7 +5110,9 @@ def _convergence_dependant_recipe(
     exactly when it lands on the lane its landing joins on, so the descent keeps
     reaching the trunk the join moves to.  Every landing carries its approach
     runway as a directed feasibility invariant anchored on the feeder's own
-    fixed turn, rather than a re-derived length.
+    fixed turn, rather than a re-derived length.  A co-moving descent end
+    carries one too, anchored on the descent's fixed start: the descent turns
+    at both ends, so it owes a full curve radius to each turn.
     """
     axis = plan.trunk_axis
     assert axis is not None
@@ -5145,6 +5151,31 @@ def _convergence_dependant_recipe(
             fixed.append(control)
         return role_id
 
+    def add_runway(
+        controlled_role_id: str,
+        axis_index: int,
+        direction_sign: int,
+        minimum_distance: float,
+        anchor_coordinate: float,
+    ) -> None:
+        anchor_member = f"{controlled_role_id}|anchor"
+        runways.append(
+            CorridorScalarDirectedRunway(
+                owner_id=plan_owner_id,
+                member_id=anchor_member,
+                edge_key=(
+                    f"{anchor_member}|source",
+                    f"{anchor_member}|target",
+                    f"{anchor_member}|line",
+                ),
+                controlled_role_id=controlled_role_id,
+                axis=axis_index,
+                direction_sign=direction_sign,
+                minimum_distance=minimum_distance,
+                anchor_coordinate=anchor_coordinate,
+            )
+        )
+
     role_slugs = _convergence_dependant_role_slugs(plan)
     for landing in plan.landings:
         join_point = landing.join_point
@@ -5158,35 +5189,31 @@ def _convergence_dependant_recipe(
                 0,
                 co_moving=False,
             )
-            opening_end = landing.opening_turn_segment[1]
-            add(
-                next(role_slugs),
-                opening_end,
-                lateral,
-                co_moving=join_co_moving
-                and abs(opening_end[lateral] - join_point[lateral]) <= COORD_TOLERANCE,
+            opening_start, opening_end = landing.opening_turn_segment
+            end_co_moving = (
+                join_co_moving
+                and abs(opening_end[lateral] - join_point[lateral]) <= COORD_TOLERANCE
             )
+            end_role = add(
+                next(role_slugs), opening_end, lateral, co_moving=end_co_moving
+            )
+            if end_co_moving and lateral == _OPENING_DESCENT_AXIS:
+                add_runway(
+                    end_role,
+                    _OPENING_DESCENT_AXIS,
+                    1 if opening_end[1] > opening_start[1] else -1,
+                    2 * curve_radius,
+                    opening_start[_OPENING_DESCENT_AXIS],
+                )
         approach_index = landing.approach_axis.point_index
         direction_sign = int(landing.approach_direction.sign)
-        anchor_coordinate = (
-            landing.join_point[approach_index] - landing.minimum_runway * direction_sign
-        )
-        anchor_member = f"{variable_id}|landing:{landing.member_id}|join|anchor"
-        runways.append(
-            CorridorScalarDirectedRunway(
-                owner_id=plan_owner_id,
-                member_id=anchor_member,
-                edge_key=(
-                    f"{anchor_member}|source",
-                    f"{anchor_member}|target",
-                    f"{anchor_member}|line",
-                ),
-                controlled_role_id=join_role,
-                axis=approach_index,
-                direction_sign=direction_sign,
-                minimum_distance=curve_radius,
-                anchor_coordinate=anchor_coordinate,
-            )
+        add_runway(
+            join_role,
+            approach_index,
+            direction_sign,
+            curve_radius,
+            landing.join_point[approach_index]
+            - landing.minimum_runway * direction_sign,
         )
     for continuation in plan.outgoing_continuations:
         add(next(role_slugs), continuation.start_point, lateral)
@@ -5511,6 +5538,98 @@ def _convergence_role_fields(
     return roles
 
 
+def _runway_frame_holds(
+    runway: CorridorScalarDirectedRunway,
+    kind: _ConvergenceRoleKind,
+    landing: ConvergenceLanding,
+    controlled: float,
+    anchor: float,
+) -> bool:
+    """Whether *runway* matches the landing field the plan holds."""
+    if kind is _ConvergenceRoleKind.LANDING_JOIN:
+        return (
+            runway.axis == landing.approach_axis.point_index
+            and runway.direction_sign == int(landing.approach_direction.sign)
+            and abs(
+                runway.direction_sign * (controlled - anchor) - landing.minimum_runway
+            )
+            <= COORD_TOLERANCE_FINE
+        )
+    segment = landing.opening_turn_segment
+    return (
+        segment is not None
+        and runway.axis == _OPENING_DESCENT_AXIS
+        and abs(anchor - segment[0][runway.axis]) <= COORD_TOLERANCE_FINE
+        and runway.direction_sign * (controlled - anchor) > 0.0
+    )
+
+
+def _granted_landing_runways(
+    variable_id: str,
+    recipe: CorridorScalarControlRecipe,
+    roles: Mapping[str, _ConvergenceRoleField],
+    landings: Mapping[EmissionMemberId, ConvergenceLanding],
+    role_point: Callable[[str], tuple[float, float]],
+    written: Mapping[str, tuple[int, float]],
+) -> dict[EmissionMemberId, float]:
+    """Hold every directed runway *recipe* names against the grant's *written* values.
+
+    Raises when a runway was taken on a stale frame or the grant leaves it
+    short of its minimum; returns the new runway of each landing join it moved.
+    """
+    runways: dict[EmissionMemberId, float] = {}
+    for runway in recipe.directed_runways:
+        runway_role = roles.get(runway.controlled_role_id)
+        if runway_role is None or runway_role.kind not in (
+            _ConvergenceRoleKind.LANDING_JOIN,
+            _ConvergenceRoleKind.LANDING_OPENING_END,
+        ):
+            raise ConvergenceInvariantError(
+                f"corridor grant {variable_id} runway names no landing join or "
+                "opening descent end"
+            )
+        member_id = runway_role.member_id
+        assert member_id is not None
+        landing = landings[member_id]
+        if runway.anchor_coordinate is not None:
+            current_anchor = moved_anchor = runway.anchor_coordinate
+        else:
+            assert runway.anchor_role_id is not None
+            current_anchor = role_point(runway.anchor_role_id)[runway.axis]
+            anchor_write = written.get(runway.anchor_role_id)
+            moved_anchor = (
+                anchor_write[1]
+                if anchor_write is not None and anchor_write[0] == runway.axis
+                else current_anchor
+            )
+        current = role_point(runway.controlled_role_id)[runway.axis]
+        if not _runway_frame_holds(
+            runway, runway_role.kind, landing, current, current_anchor
+        ):
+            raise ConvergenceInvariantError(
+                f"corridor grant {variable_id} runway of {runway.controlled_role_id} "
+                "was taken on a stale frame"
+            )
+        controlled_write = written.get(runway.controlled_role_id)
+        moved = (
+            controlled_write[1]
+            if controlled_write is not None and controlled_write[0] == runway.axis
+            else current
+        )
+        if moved == current and moved_anchor == current_anchor:
+            continue
+        distance = runway.direction_sign * (moved - moved_anchor)
+        if distance < runway.minimum_distance - COORD_TOLERANCE_FINE:
+            raise ConvergenceInvariantError(
+                f"corridor grant {variable_id} leaves {runway.controlled_role_id} a "
+                f"{distance:g}px directed runway, short of the "
+                f"{runway.minimum_distance:g}px its turns need"
+            )
+        if runway_role.kind is _ConvergenceRoleKind.LANDING_JOIN:
+            runways[member_id] = distance
+    return runways
+
+
 def _granted_convergence_plan(
     plan: ConvergencePlan,
     request: CorridorScalarRequest,
@@ -5622,60 +5741,10 @@ def _granted_convergence_plan(
         raise ConvergenceInvariantError(
             f"corridor grant {variable_id} does not control its trunk run"
         )
-    runways: dict[EmissionMemberId, float] = {}
-    for runway in recipe.directed_runways:
-        runway_role = roles.get(runway.controlled_role_id)
-        if (
-            runway_role is None
-            or runway_role.kind is not _ConvergenceRoleKind.LANDING_JOIN
-        ):
-            raise ConvergenceInvariantError(
-                f"corridor grant {variable_id} runway names no landing join"
-            )
-        member_id = runway_role.member_id
-        assert member_id is not None
-        landing = landings[member_id]
-        if runway.anchor_coordinate is not None:
-            current_anchor = moved_anchor = runway.anchor_coordinate
-        else:
-            assert runway.anchor_role_id is not None
-            current_anchor = role_point(runway.anchor_role_id)[runway.axis]
-            anchor_write = written.get(runway.anchor_role_id)
-            moved_anchor = (
-                anchor_write[1]
-                if anchor_write is not None and anchor_write[0] == runway.axis
-                else current_anchor
-            )
-        current_join = landing.join_point[runway.axis]
-        if (
-            runway.axis != landing.approach_axis.point_index
-            or runway.direction_sign != int(landing.approach_direction.sign)
-            or abs(
-                runway.direction_sign * (current_join - current_anchor)
-                - landing.minimum_runway
-            )
-            > COORD_TOLERANCE_FINE
-        ):
-            raise ConvergenceInvariantError(
-                f"corridor grant {variable_id} runway of {member_id} was taken on a "
-                "stale frame"
-            )
-        join_write = written.get(runway.controlled_role_id)
-        moved_join = (
-            join_write[1]
-            if join_write is not None and join_write[0] == runway.axis
-            else current_join
-        )
-        if moved_join == current_join and moved_anchor == current_anchor:
-            continue
-        distance = runway.direction_sign * (moved_join - moved_anchor)
-        if distance < runway.minimum_distance - COORD_TOLERANCE_FINE:
-            raise ConvergenceInvariantError(
-                f"corridor grant {variable_id} leaves feeder {member_id} a "
-                f"{distance:g}px directed runway, short of the "
-                f"{runway.minimum_distance:g}px its turn needs"
-            )
-        runways[member_id] = distance
+
+    runways = _granted_landing_runways(
+        variable_id, recipe, roles, landings, role_point, written
+    )
 
     for name in ("source_flank_coordinate", "target_flank_coordinate"):
         flank = getattr(axis, name)
@@ -5815,6 +5884,7 @@ def apply_convergence_corridor_grants(
         )
     plans_by_id = {str(plan.id): plan for plan in execution.plans}
     replacements: dict[ConvergencePlanId, ConvergencePlan] = {}
+    granted_plan_ids: set[ConvergencePlanId] = set()
     diagnostics: list[RoutePlanDiagnostic] = []
     for variable_id in sorted(requests_by_id):
         request = requests_by_id[variable_id]
@@ -5863,10 +5933,11 @@ def apply_convergence_corridor_grants(
                 f"corridor grant {variable_id} lies outside its request's domain"
             )
         plan = plans_by_id[variable.owner_id]
-        if plan.id in replacements:
+        if plan.id in granted_plan_ids:
             raise ConvergenceInvariantError(
                 f"convergence {plan.id} carries more than one corridor grant"
             )
+        granted_plan_ids.add(plan.id)
         granted, diagnostic = _granted_convergence_plan(plan, request, grant)
         if granted is not plan:
             replacements[plan.id] = granted

@@ -6,7 +6,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 
+from nf_metro.layout.constants import COORD_TOLERANCE_FINE
 from nf_metro.layout.route_plan import (
+    ConvergencePlanId,
     EmissionMemberId,
     ExitTurnPlanId,
     RoutePlan,
@@ -16,6 +18,7 @@ from nf_metro.layout.route_plan import (
 from nf_metro.layout.routing import exit_turns as exit_turn_routing
 from nf_metro.layout.routing.context import _RoutingCtx
 from nf_metro.layout.routing.convergences import (
+    CONVERGENCE_CORRIDOR_GRANT_APPLIED,
     ConvergenceInvariantError,
     ConvergencePlanExecution,
     apply_convergence_corridor_grants,
@@ -131,6 +134,44 @@ def _apply_corridor_grants(
             if grant.variable_id not in compatibility_ids
         ),
     )
+
+
+def _granted_trunk_coordinates(
+    convergences: ConvergencePlanExecution,
+) -> dict[ConvergencePlanId, float]:
+    """The trunk coordinate each moving corridor grant wrote, by plan."""
+    moved_trunk_members = {
+        item.member_id
+        for item in convergences.diagnostics
+        if item.code == CONVERGENCE_CORRIDOR_GRANT_APPLIED
+    }
+    return {
+        plan.id: plan.trunk_axis.coordinate
+        for plan in convergences.plans
+        if plan.trunk_axis is not None
+        and plan.primary_trunk_member_id in moved_trunk_members
+    }
+
+
+def _assert_grants_survive_settlement(
+    granted: Mapping[ConvergencePlanId, float],
+    settled: ConvergencePlanExecution,
+) -> None:
+    """Refuse a settlement that re-seated a trunk its corridor grant placed.
+
+    The grant's diagnostic names the coordinate the grant wrote, so a trunk
+    settled anywhere else would publish provenance for geometry the render
+    does not draw.
+    """
+    plans = {plan.id: plan for plan in settled.plans}
+    for plan_id, coordinate in granted.items():
+        plan = plans.get(plan_id)
+        axis = None if plan is None else plan.trunk_axis
+        if axis is None or abs(axis.coordinate - coordinate) > COORD_TOLERANCE_FINE:
+            raise ConvergenceInvariantError(
+                f"convergence {plan_id} was re-settled off the {coordinate:g} its "
+                "corridor grant wrote"
+            )
 
 
 def _with_settled_exit_turns(
@@ -518,6 +559,7 @@ def prepare_route_system_planning(
         preliminary_planned_ids,
         frozenset(member_geometry.failure_reasons),
     )
+    granted_trunks = _granted_trunk_coordinates(convergences)
     convergences = settle_global_convergence_execution(
         convergences,
         graph,
@@ -528,6 +570,7 @@ def prepare_route_system_planning(
         include_resources=False,
         allow_clearance_requirements=allow_convergence_clearance_requirements,
     )
+    _assert_grants_survive_settlement(granted_trunks, convergences)
     ctx.convergences = convergences.query
     member_geometry = settle_member_geometry_corner_cohorts(
         member_geometry,

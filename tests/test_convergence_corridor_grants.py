@@ -713,15 +713,18 @@ def _expected_writes(
         joins[point.role_id] = (point.axis, value)
     for runway in recipe.directed_runways:
         join = joins.get(runway.controlled_role_id)
-        if join is None or join[0] != runway.axis:
+        member = next(
+            (
+                landing.member_id
+                for landing in plan.landings
+                if runway.controlled_role_id
+                == f"{variable_id}|landing:{landing.member_id}|join"
+            ),
+            None,
+        )
+        if join is None or join[0] != runway.axis or member is None:
             continue
         assert runway.anchor_coordinate is not None
-        member = next(
-            landing.member_id
-            for landing in plan.landings
-            if runway.controlled_role_id
-            == f"{variable_id}|landing:{landing.member_id}|join"
-        )
         expected[("landing", member, "runway")] = runway.direction_sign * (
             join[1] - runway.anchor_coordinate
         )
@@ -971,6 +974,84 @@ def test_infeasible_directed_runway_raises_instead_of_flipping() -> None:
             )
 
 
+def test_opening_descent_that_would_collapse_or_reverse_raises_in_the_applier() -> None:
+    execution, requests = _grant_fixture(_MERGE_PULLAWAY)
+    (request,) = requests
+    plan = _plans_by_owner(execution)[request.variable.owner_id]
+    variable_id = request.variable.variable_id
+    runways = {
+        item.controlled_role_id: item
+        for item in request.control_recipe.directed_runways
+    }
+    descending = [
+        landing
+        for landing in plan.landings
+        if f"{variable_id}|landing:{landing.member_id}|opening-end" in runways
+    ]
+    assert descending
+    for landing in descending:
+        start, end = landing.opening_turn_segment
+        runway = runways[f"{variable_id}|landing:{landing.member_id}|opening-end"]
+        assert runway.anchor_coordinate == start[1]
+        assert runway.direction_sign * (end[1] - start[1]) > runway.minimum_distance
+        collapsed = start[1] + runway.direction_sign * runway.minimum_distance / 2
+        reversed_ = start[1] - runway.direction_sign * _SHIFT
+        for coordinate in (collapsed, reversed_):
+            with pytest.raises(
+                ConvergenceInvariantError, match=r"opening-end a \S+px directed runway"
+            ):
+                apply_convergence_corridor_grants(
+                    execution, requests, (_grant(request, coordinate),)
+                )
+
+
+def test_a_second_grant_for_one_plan_raises_even_after_a_no_op_first() -> None:
+    execution, requests = _grant_fixture(_FUNCPROFILER)
+    (request,) = requests
+    variable_id = request.variable.variable_id
+    twin_id = f"{variable_id}|twin"
+
+    def renamed(role_id: str | None) -> str | None:
+        return None if role_id is None else role_id.replace(variable_id, twin_id, 1)
+
+    recipe = request.control_recipe
+    twin = replace(
+        request,
+        variable=replace(request.variable, variable_id=twin_id),
+        control_recipe=replace(
+            recipe,
+            controlled_points=tuple(
+                replace(item, role_id=renamed(item.role_id))
+                for item in recipe.controlled_points
+            ),
+            fixed_points=tuple(
+                replace(item, role_id=renamed(item.role_id))
+                for item in recipe.fixed_points
+            ),
+            directed_runways=tuple(
+                replace(
+                    item,
+                    controlled_role_id=renamed(item.controlled_role_id),
+                    anchor_role_id=renamed(item.anchor_role_id),
+                )
+                for item in recipe.directed_runways
+            ),
+        ),
+    )
+    assert (
+        apply_convergence_corridor_grants(
+            execution, (twin,), (_grant(twin, twin.variable.coordinate + _SHIFT),)
+        ).plans
+        != execution.plans
+    )
+    grants = (
+        _grant(request, request.variable.coordinate),
+        _grant(twin, twin.variable.coordinate + _SHIFT),
+    )
+    with pytest.raises(ConvergenceInvariantError, match="more than one corridor grant"):
+        apply_convergence_corridor_grants(execution, (request, twin), grants)
+
+
 def test_grant_that_would_reverse_a_flank_connector_raises() -> None:
     execution, requests = _grant_fixture(_FUNCPROFILER)
     (request,) = requests
@@ -1181,14 +1262,14 @@ def test_granted_trunk_is_drawn_and_published_and_nothing_else_moves(
         assert route.points == baseline[key].points, key
 
 
-def test_fan_in_merge_grant_lands_in_the_appliers_own_output(
+def test_a_grant_the_global_settlement_re_seats_fails_closed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The applier's output carries the grant exactly.
+    """The applier writes the grant exactly, and a later re-seat of it raises.
 
-    ``settle_global_convergence_execution`` re-settles the co-travelling trunks
-    after the applier returns, so the published plan is not where the grant is
-    stated; the applier's own return value is.
+    ``settle_global_convergence_execution`` re-settles fan_in_merge's
+    co-travelling trunks off the coordinate the applier wrote, so publishing
+    would name a grant the drawn trunk does not sit on.
     """
     applied: list[tuple[tuple[CorridorScalarGrant, ...], ConvergencePlanExecution]] = []
     real_apply = planning.apply_convergence_corridor_grants
@@ -1201,7 +1282,8 @@ def test_fan_in_merge_grant_lands_in_the_appliers_own_output(
     monkeypatch.setattr(planning, "apply_convergence_corridor_grants", spy)
     _shift_corridor_preference(monkeypatch)
 
-    _render(_FAN_IN_MERGE, monkeypatch)
+    with pytest.raises(ConvergenceInvariantError, match="re-settled off the 208"):
+        _render(_FAN_IN_MERGE, monkeypatch)
 
     moving = [
         (grants, result)
