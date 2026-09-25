@@ -22,7 +22,7 @@ from typing import Literal
 
 from nf_metro.errors import EmptyGraphError, UnknownInactiveLineError
 from nf_metro.layout import PhaseInvariantError, compute_layout
-from nf_metro.options import LAYOUT_OPTIONS, is_line_order
+from nf_metro.options import LAYOUT_OPTIONS, is_line_order, validate_layout_options
 from nf_metro.parser import parse_metro_mermaid
 from nf_metro.parser.commitments import (
     CommitmentConflictError,
@@ -183,13 +183,16 @@ def _resolve_commitment_options(
     layout_options: Mapping[str, object] | None,
     layout_commitments: LayoutCommitmentOverlay | None,
 ) -> dict[str, object]:
-    """Merge *layout_options* with a caller's committed values, if any.
+    """Validate *layout_options* and merge a caller's committed values, if any.
 
+    Each supplied option must fall within its registry entry's declared range;
+    a directive or CLI flag is held to the same range when its text is parsed.
     A committed value must agree with an explicitly supplied option of the
     same name; a caller and its layout options disagreeing is a programming
     error in the caller, not a user-facing one.
     """
     opts = dict(layout_options or {})
+    validate_layout_options(opts)
     if layout_commitments is not None:
         for name, committed in (
             ("fold_threshold", layout_commitments.caller.fold_threshold),
@@ -385,6 +388,9 @@ def prepare_graph(
     not through a dedicated type); catch ``ValueError`` separately to cover
     that case too.
 
+    - A *layout_options* value of the wrong type or outside the range its
+      :data:`~nf_metro.options.LAYOUT_OPTIONS` entry declares (for example a
+      ``track_gap`` above 3): :class:`ValueError`.
     - A source that parses to no stations at all (an empty file, or one whose
       ``graph`` block holds nothing the grammar recognises):
       :class:`~nf_metro.errors.EmptyGraphError` (also a :class:`ValueError`).
