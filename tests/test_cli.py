@@ -36,8 +36,7 @@ DEFERRED_ROUTE_GUARD_FAILURES = [
     ),
     (
         "hash_seed_determinism/seed_77.mmd",
-        "undeclared gap channel: line 'l0' (__junction_37->__merge_11) runs "
-        "up at x=2158.0",
+        "destination-tail bundle into port 's16__entry_right_18'",
     ),
 ]
 

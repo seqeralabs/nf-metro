@@ -19,12 +19,18 @@ from pathlib import Path
 
 import pytest
 
+import nf_metro.layout.routing.inter_section_handlers as inter_handlers
+from nf_metro.api import prepare_graph
+from nf_metro.layout.constants import CURVE_RADIUS, DIAGONAL_RUN
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import (
     OffsetRegime,
     compute_station_offsets,
     route_edges,
 )
+from nf_metro.layout.routing.common import Direction
+from nf_metro.layout.routing.context import _build_routing_context
+from nf_metro.layout.routing.corners import l_shape_stagger
 from nf_metro.layout.routing.invariants import (
     assert_render_curve_invariants,
     check_bundle_order_preserved,
@@ -83,3 +89,46 @@ def test_multi_line_inter_section_bundles_are_offset_baked(path: Path) -> None:
     assert all(
         r.offset_regime is OffsetRegime.BAKED for rs in multiline.values() for r in rs
     )
+
+
+FROZEN_FUZZ = REPO_ROOT / "tests" / "fixtures" / "hash_seed_determinism"
+
+WESTWARD_JUNCTION_FAN_L_SHAPES = [
+    ("seed_15.mmd", "__junction_21", "__merge_9", "l0"),
+    ("seed_15.mmd", "__junction_27", "__merge_11", "l0"),
+    ("seed_15.mmd", "__junction_27", "__merge_12", "l2"),
+    ("seed_77.mmd", "__junction_37", "__merge_11", "l0"),
+]
+
+
+@pytest.mark.parametrize(
+    ("name", "source", "target", "line_id"),
+    WESTWARD_JUNCTION_FAN_L_SHAPES,
+    ids=lambda value: str(value),
+)
+def test_westward_junction_fan_l_shape_lands_on_its_endpoint_offsets(
+    name: str, source: str, target: str, line_id: str
+) -> None:
+    """A staggered junction-fan L-shape run leftward starts and ends on its lanes.
+
+    The member sits ``-delta`` along the bundle's right-hand normal, which is
+    ``-y`` on a westward run, so the centreline's horizontal legs must be lifted
+    by the same signed amount for the member to land on the source and target
+    offsets rather than ``2 * delta`` beside them.
+    """
+    path = FROZEN_FUZZ / name
+    graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+    offsets = compute_station_offsets(graph)
+    ctx = _build_routing_context(graph, DIAGONAL_RUN, CURVE_RADIUS, offsets)
+    edge = ctx.edge_by_key[(source, target, line_id)]
+    fan = ctx.junction_fan_info[(source, target, line_id)]
+    src, tgt = graph.stations[source], graph.stations[target]
+    geometry = inter_handlers._l_shape_fan_source_turn(edge, src, tgt, fan, ctx)
+    delta = l_shape_stagger(*fan, geometry.turn_direction, ctx.offset_step)
+    assert geometry.run_direction is Direction.L
+    assert delta != pytest.approx(0.0)
+
+    route = inter_handlers._route_l_shape_fan(edge, src, tgt, fan, ctx)
+
+    assert route.points[0][1] == pytest.approx(src.y + offsets[(source, line_id)])
+    assert route.points[-1][1] == pytest.approx(tgt.y + offsets[(target, line_id)])
