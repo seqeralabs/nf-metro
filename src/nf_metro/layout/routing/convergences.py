@@ -4899,9 +4899,10 @@ def _skeleton_controlled_point_ranks(axis: ConvergenceTrunkAxis) -> tuple[int, .
     return tuple(ranks)
 
 
-class _DependantRoleKind(Enum):
-    """The plan field one dependant control role names."""
+class _ConvergenceRoleKind(Enum):
+    """The plan field one convergence control role names."""
 
+    SKELETON = "point"
     LANDING_JOIN = "join"
     LANDING_OPENING = "opening"
     LANDING_OPENING_END = "opening-end"
@@ -4911,7 +4912,7 @@ class _DependantRoleKind(Enum):
 
 def _convergence_dependant_roles(
     plan: ConvergencePlan,
-) -> Iterator[tuple[str, _DependantRoleKind, EmissionMemberId]]:
+) -> Iterator[tuple[str, _ConvergenceRoleKind, EmissionMemberId]]:
     """Role slug, field kind and owning member of every dependant role.
 
     The single source for the dependant role shapes -- one per landing join,
@@ -4924,31 +4925,31 @@ def _convergence_dependant_roles(
     for landing in plan.landings:
         yield (
             f"landing:{landing.member_id}|join",
-            _DependantRoleKind.LANDING_JOIN,
+            _ConvergenceRoleKind.LANDING_JOIN,
             landing.member_id,
         )
         if landing.opening_turn_segment is not None:
             yield (
                 f"landing:{landing.member_id}|opening",
-                _DependantRoleKind.LANDING_OPENING,
+                _ConvergenceRoleKind.LANDING_OPENING,
                 landing.member_id,
             )
             yield (
                 f"landing:{landing.member_id}|opening-end",
-                _DependantRoleKind.LANDING_OPENING_END,
+                _ConvergenceRoleKind.LANDING_OPENING_END,
                 landing.member_id,
             )
     for continuation in plan.outgoing_continuations:
         yield (
             f"continuation:{continuation.member_id}|start",
-            _DependantRoleKind.CONTINUATION_START,
+            _ConvergenceRoleKind.CONTINUATION_START,
             continuation.member_id,
         )
     for ownership in plan.endpoint_ownership:
         if ownership.role is ConvergenceEndpointRole.FEEDER:
             yield (
                 f"feeder:{ownership.member_id}|endpoint",
-                _DependantRoleKind.FEEDER_ENDPOINT,
+                _ConvergenceRoleKind.FEEDER_ENDPOINT,
                 ownership.member_id,
             )
 
@@ -5341,27 +5342,31 @@ def _recipe_drags_entry_port(
     )
 
 
-def _convergence_corridor_preference(
-    plan: ConvergencePlan,
-    graph: MetroGraph,
-    variable_id: str,
-    *,
-    station_pinned: bool,
+def _pinned_convergence_preference(
+    plan: ConvergencePlan, variable_id: str
 ) -> tuple[float, CorridorCoordinateDomain]:
-    """Read one trunk's preferred coordinate and complete feasible domain.
+    """Pin a trunk whose recipe drags an entry port to the coordinate it holds.
 
-    A *station_pinned* trunk carries a controlled point on an entry port, so its
-    only feasible coordinate is the one it holds, whatever clearance band the
+    Its only feasible coordinate is that one, whatever clearance band the
     corridor around it would otherwise allow.
     """
     axis = plan.trunk_axis
     assert axis is not None
-    if station_pinned:
-        return axis.coordinate, CorridorCoordinateDomain(
-            variable_id,
-            minimum_coordinate=axis.coordinate,
-            maximum_coordinate=axis.coordinate,
-        )
+    return axis.coordinate, CorridorCoordinateDomain(
+        variable_id,
+        minimum_coordinate=axis.coordinate,
+        maximum_coordinate=axis.coordinate,
+    )
+
+
+def _convergence_corridor_preference(
+    plan: ConvergencePlan,
+    graph: MetroGraph,
+    variable_id: str,
+) -> tuple[float, CorridorCoordinateDomain]:
+    """Read one trunk's preferred coordinate and complete feasible domain."""
+    axis = plan.trunk_axis
+    assert axis is not None
     coordinate_axis = 1 if axis.axis is DemandAxis.X else 0
     band = corridor_clearance_band(
         graph,
@@ -5438,13 +5443,10 @@ def convergence_corridor_requests(
                 f"planned convergence {plan.id} has an incomplete trunk identity"
             )
         target, dependant_targets, variable, recipe = exposed
-        preferred_coordinate, domain = _convergence_corridor_preference(
-            plan,
-            graph,
-            variable.variable_id,
-            station_pinned=_recipe_drags_entry_port(
-                plan, recipe, (target, *dependant_targets)
-            ),
+        preferred_coordinate, domain = (
+            _pinned_convergence_preference(plan, variable.variable_id)
+            if _recipe_drags_entry_port(plan, recipe, (target, *dependant_targets))
+            else _convergence_corridor_preference(plan, graph, variable.variable_id)
         )
         targets.append(target)
         targets.extend(dependant_targets)
@@ -5479,19 +5481,33 @@ def _with_axis_value(
     return (value, point[1]) if axis == 0 else (point[0], value)
 
 
+@dataclass(frozen=True)
+class _ConvergenceRoleField:
+    """The plan field one recipe role id names.
+
+    A ``SKELETON`` field is the trunk travel point at ``rank``; every other
+    kind is a field of the member ``member_id`` names.
+    """
+
+    kind: _ConvergenceRoleKind
+    rank: int | None = None
+    member_id: EmissionMemberId | None = None
+
+
 def _convergence_role_fields(
     plan: ConvergencePlan, variable_id: str
-) -> dict[str, tuple[_DependantRoleKind | int, EmissionMemberId | None]]:
-    """The field every role id of *plan*'s recipe names, keyed by role id.
-
-    A skeleton role names its travel-point rank; a dependant role names its
-    kind and the member that owns the field.
-    """
-    roles: dict[str, tuple[_DependantRoleKind | int, EmissionMemberId | None]] = {
-        f"{variable_id}|point:{rank}": (rank, None) for rank in _SKELETON_RANK_FIELDS
+) -> dict[str, _ConvergenceRoleField]:
+    """The field every role id of *plan*'s recipe names, keyed by role id."""
+    roles = {
+        f"{variable_id}|point:{rank}": _ConvergenceRoleField(
+            _ConvergenceRoleKind.SKELETON, rank=rank
+        )
+        for rank in _SKELETON_RANK_FIELDS
     }
     for slug, kind, member_id in _convergence_dependant_roles(plan):
-        roles[f"{variable_id}|{slug}"] = (kind, member_id)
+        roles[f"{variable_id}|{slug}"] = _ConvergenceRoleField(
+            kind, member_id=member_id
+        )
     return roles
 
 
@@ -5540,20 +5556,22 @@ def _granted_convergence_plan(
     }
 
     def role_point(role_id: str) -> tuple[float, float]:
-        field_kind, member_id = roles[role_id]
-        if isinstance(field_kind, int):
-            return skeleton[field_kind]
+        role = roles[role_id]
+        if role.kind is _ConvergenceRoleKind.SKELETON:
+            assert role.rank is not None
+            return skeleton[role.rank]
+        member_id = role.member_id
         assert member_id is not None
-        if field_kind is _DependantRoleKind.CONTINUATION_START:
+        if role.kind is _ConvergenceRoleKind.CONTINUATION_START:
             return continuations[member_id].start_point
-        if field_kind is _DependantRoleKind.FEEDER_ENDPOINT:
+        if role.kind is _ConvergenceRoleKind.FEEDER_ENDPOINT:
             return feeders[member_id].endpoint
         landing = landings[member_id]
-        if field_kind is _DependantRoleKind.LANDING_JOIN:
+        if role.kind is _ConvergenceRoleKind.LANDING_JOIN:
             return landing.join_point
         assert landing.opening_turn_segment is not None
         assert landing.opening_turn_coordinate is not None
-        if field_kind is _DependantRoleKind.LANDING_OPENING:
+        if role.kind is _ConvergenceRoleKind.LANDING_OPENING:
             return (landing.opening_turn_coordinate, landing.join_point[1])
         return landing.opening_turn_segment[1]
 
@@ -5572,7 +5590,7 @@ def _granted_convergence_plan(
     written: dict[str, tuple[int, float]] = {}
     trunk_fields: dict[str, float] = {}
     dependant_writes: dict[
-        tuple[_DependantRoleKind, EmissionMemberId], tuple[int, float]
+        tuple[_ConvergenceRoleKind, EmissionMemberId], tuple[int, float]
     ] = {}
     for point in recipe.controlled_points:
         if stale(
@@ -5584,21 +5602,22 @@ def _granted_convergence_plan(
             )
         value = grant.coordinate + point.source_offset
         written[point.role_id] = (point.axis, value)
-        field_kind, member_id = roles[point.role_id]
-        if isinstance(field_kind, int):
-            name = _SKELETON_RANK_FIELDS[field_kind]
+        role = roles[point.role_id]
+        if role.kind is _ConvergenceRoleKind.SKELETON:
+            assert role.rank is not None
+            name = _SKELETON_RANK_FIELDS[role.rank]
             if point.axis != lateral or trunk_fields.setdefault(name, value) != value:
                 raise ConvergenceInvariantError(
                     f"corridor grant {variable_id} states trunk {name} inconsistently"
                 )
             continue
-        if field_kind is _DependantRoleKind.LANDING_OPENING:
+        if role.kind is _ConvergenceRoleKind.LANDING_OPENING:
             raise ConvergenceInvariantError(
                 f"corridor grant {variable_id} controls fixed opening column "
                 f"{point.role_id}"
             )
-        assert member_id is not None
-        dependant_writes[(field_kind, member_id)] = (point.axis, value)
+        assert role.member_id is not None
+        dependant_writes[(role.kind, role.member_id)] = (point.axis, value)
     if trunk_fields.get("coordinate") is None:
         raise ConvergenceInvariantError(
             f"corridor grant {variable_id} does not control its trunk run"
@@ -5606,11 +5625,14 @@ def _granted_convergence_plan(
     runways: dict[EmissionMemberId, float] = {}
     for runway in recipe.directed_runways:
         runway_role = roles.get(runway.controlled_role_id)
-        if runway_role is None or runway_role[0] is not _DependantRoleKind.LANDING_JOIN:
+        if (
+            runway_role is None
+            or runway_role.kind is not _ConvergenceRoleKind.LANDING_JOIN
+        ):
             raise ConvergenceInvariantError(
                 f"corridor grant {variable_id} runway names no landing join"
             )
-        member_id = runway_role[1]
+        member_id = runway_role.member_id
         assert member_id is not None
         landing = landings[member_id]
         if runway.anchor_coordinate is not None:
@@ -5670,7 +5692,7 @@ def _granted_convergence_plan(
         return plan, None
 
     def moved(
-        kind: _DependantRoleKind,
+        kind: _ConvergenceRoleKind,
         member_id: EmissionMemberId,
         point: tuple[float, float],
     ) -> tuple[float, float]:
@@ -5694,7 +5716,7 @@ def _granted_convergence_plan(
                 replace(
                     landing,
                     join_point=moved(
-                        _DependantRoleKind.LANDING_JOIN,
+                        _ConvergenceRoleKind.LANDING_JOIN,
                         landing.member_id,
                         landing.join_point,
                     ),
@@ -5707,7 +5729,7 @@ def _granted_convergence_plan(
                         else (
                             landing.opening_turn_segment[0],
                             moved(
-                                _DependantRoleKind.LANDING_OPENING_END,
+                                _ConvergenceRoleKind.LANDING_OPENING_END,
                                 landing.member_id,
                                 landing.opening_turn_segment[1],
                             ),
@@ -5720,7 +5742,7 @@ def _granted_convergence_plan(
                 replace(
                     item,
                     start_point=moved(
-                        _DependantRoleKind.CONTINUATION_START,
+                        _ConvergenceRoleKind.CONTINUATION_START,
                         item.member_id,
                         item.start_point,
                     ),
@@ -5731,7 +5753,7 @@ def _granted_convergence_plan(
                 replace(
                     item,
                     endpoint=moved(
-                        _DependantRoleKind.FEEDER_ENDPOINT,
+                        _ConvergenceRoleKind.FEEDER_ENDPOINT,
                         item.member_id,
                         item.endpoint,
                     ),

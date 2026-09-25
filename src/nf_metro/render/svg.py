@@ -2156,6 +2156,39 @@ def _settle_render_geometry(
         carried_ports = ()
         return offsets, moved_routes, moved_plan
 
+    def _publish_observed_routes(
+        station_offsets: dict[tuple[str, str], float],
+        routes: list[RoutedPath],
+        realised_plan: RoutePlan,
+        *,
+        decided_routes: list[RoutedPath],
+        decided_plan: RoutePlan,
+        ledger: RoutePlan,
+        sized_for: RoutePlan,
+        coordinate_translations: tuple[ReservationCoordinateTranslation, ...] = (),
+    ) -> tuple[list[LabelPlacement], RoutePlan]:
+        """Label and publish *routes*, once they hold *decided_plan*'s decisions.
+
+        The published plan is *ledger* adopted onto the labelled geometry, so it
+        is built only after the label pass has grown the boxes it reads;
+        *sized_for* is the ledger the settlement behind *routes* allocated
+        against, which the re-route delta is measured from.
+        """
+        labels = _place(station_offsets, routes)
+        assert_render_curve_invariants(graph, routes, station_offsets)
+        _assert_settlement_decisions_frozen(
+            decided_routes, decided_plan, routes, realised_plan
+        )
+        published = attach_reroute_ledger_delta(
+            adopt_route_reservation_ledger(
+                ledger, graph, coordinate_translations=coordinate_translations
+            ),
+            sized_for,
+            realised_plan,
+        )
+        _attach_published_reservation_attribution(routes, published)
+        return labels, published
+
     def _reconcile_carried_ports(
         station_offsets: dict[tuple[str, str], float],
         routes: list[RoutedPath],
@@ -2353,11 +2386,16 @@ def _settle_render_geometry(
             stage=SettlementStage.GENERAL_SETTLEMENT,
             allow_clearance_requirements=True,
         )
-        observed_state = _RouteObservationInputs.capture(graph, observed_offsets)
+        granted_plan_ids = _corridor_grant_moved_plan_ids(observed_plan)
+        observed_state = (
+            _RouteObservationInputs.capture(graph, observed_offsets)
+            if granted_plan_ids
+            else None
+        )
     aperture_requirements = _corridor_cohort_aperture_requirements(observed_plan)
-    granted_plan_ids = _corridor_grant_moved_plan_ids(observed_plan)
     aperture_settlement: EnvelopeSettlement | None = None
     if granted_plan_ids:
+        assert observed_state is not None
         if observed_plan.boundary_clearance_requirements:
             raise LayoutInvariantError(
                 "the observation that applied a convergence corridor grant also "
@@ -2370,17 +2408,15 @@ def _settle_render_geometry(
         station_offsets = observed_state.restore(graph)
         routes = observed_routes
         carried_ports = ()
-        labels = _place(station_offsets, routes)
-        assert_render_curve_invariants(graph, routes, station_offsets)
-        _assert_settlement_decisions_frozen(
-            drawn_routes, drawn_plan, routes, observed_plan
-        )
-        route_plan = attach_reroute_ledger_delta(
-            adopt_route_reservation_ledger(observed_plan, graph),
-            settled_plan,
+        labels, route_plan = _publish_observed_routes(
+            station_offsets,
+            routes,
             observed_plan,
+            decided_routes=drawn_routes,
+            decided_plan=drawn_plan,
+            ledger=observed_plan,
+            sized_for=settled_plan,
         )
-        _attach_published_reservation_attribution(routes, route_plan)
     elif aperture_requirements:
         owed = tuple(
             (requirement, demand)
@@ -2398,21 +2434,16 @@ def _settle_render_geometry(
         station_offsets, routes, granted_routed_plan = _resettle(
             observed_plan, aperture_settlement.coordinate_translations
         )
-        labels = _place(station_offsets, routes)
-        assert_render_curve_invariants(graph, routes, station_offsets)
-        _assert_settlement_decisions_frozen(
-            observed_routes, observed_plan, routes, granted_routed_plan
-        )
-        route_plan = attach_reroute_ledger_delta(
-            adopt_route_reservation_ledger(
-                observed_plan,
-                graph,
-                coordinate_translations=aperture_settlement.coordinate_translations,
-            ),
-            observed_plan,
+        labels, route_plan = _publish_observed_routes(
+            station_offsets,
+            routes,
             granted_routed_plan,
+            decided_routes=observed_routes,
+            decided_plan=observed_plan,
+            ledger=observed_plan,
+            sized_for=observed_plan,
+            coordinate_translations=aperture_settlement.coordinate_translations,
         )
-        _attach_published_reservation_attribution(routes, route_plan)
 
     # Settlement measured its corridors against these box edges, so a label
     # pass behind it gives back whatever it grew them by: a port carried past

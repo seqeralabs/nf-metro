@@ -1112,13 +1112,14 @@ def test_trunk_on_an_entry_port_lane_is_pinned_to_its_coordinate(fixture: str) -
 
 def _shift_corridor_preference(monkeypatch: pytest.MonkeyPatch, **domain) -> None:
     """Prefer every convergence trunk ``_SHIFT`` px past where it stands."""
-    real = convergences._convergence_corridor_preference
+    for name in ("_convergence_corridor_preference", "_pinned_convergence_preference"):
+        real = getattr(convergences, name)
 
-    def shifted(*args, **kwargs):
-        preferred, request_domain = real(*args, **kwargs)
-        return preferred + _SHIFT, replace(request_domain, **domain)
+        def shifted(*args, _real=real, **kwargs):
+            preferred, request_domain = _real(*args, **kwargs)
+            return preferred + _SHIFT, replace(request_domain, **domain)
 
-    monkeypatch.setattr(convergences, "_convergence_corridor_preference", shifted)
+        monkeypatch.setattr(convergences, name, shifted)
 
 
 def _render(
