@@ -118,6 +118,10 @@ EXPECTED_CLASSIFIER_ONLY_REVERSALS = frozenset(
         # half-turn that re-nests the delivered bundle.
         ("bottom_entry_fan_side_targets", "hub", "report", "L->R"),
         ("bottom_entry_fan_side_targets", "hub", "export", "L->R"),
+        # The same-row branch of a LEFT-exit fan whose sibling climbs a row into
+        # a merge: east's LEFT exit lands on sink's RIGHT entry, the same net
+        # half-turn.
+        ("merge_right_entry_cross_row_wrap", "east", "sink", "L->R"),
         # The RIGHT-facing mirror of that stacked LEFT half-turn: an LR row's
         # RIGHT exit descending into an RL row's RIGHT entry at or right of the
         # feeder's column.  Leaving rightward and arriving rightward is a net
