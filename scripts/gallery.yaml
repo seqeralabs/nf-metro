@@ -1674,6 +1674,13 @@ gallery:
       station: the sink flows right-to-left so the merge arrives beside its consumer, and the
       trunk loops under the sink onto that channel rather than slicing across the box to the
       far station (#885)."
+  - id: merge_right_entry_cross_row_wrap
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      "A merge feeder dropping from the row above into a RIGHT entry to its left leads out
+      past the port and turns in from the port's outward side, the same wrap an unmerged
+      feeder of that port takes (#2034)."
   - id: peeloff_riser_respace
     source_dir: examples/topologies
     category: Merge & Convergence
