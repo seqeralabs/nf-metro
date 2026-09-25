@@ -109,7 +109,10 @@ from nf_metro.layout.routing import (
     compute_station_offsets,
     observe_route_edges_centred,
 )
-from nf_metro.layout.routing.convergences import ConvergenceInvariantError
+from nf_metro.layout.routing.convergences import (
+    CONVERGENCE_CORRIDOR_GRANT_APPLIED,
+    ConvergenceInvariantError,
+)
 from nf_metro.layout.routing.corners import (
     curve_tangents,
     resolve_curve_radii,
@@ -1836,6 +1839,62 @@ def _corridor_cohort_aperture_requirements(
     )
 
 
+def _corridor_grant_moved_plan_ids(plan: RoutePlan) -> frozenset[str]:
+    """Published convergence plans whose corridor grant moved their trunk."""
+    moved_trunk_members = {
+        item.member_id
+        for item in plan.diagnostics
+        if item.code == CONVERGENCE_CORRIDOR_GRANT_APPLIED
+    }
+    return frozenset(
+        str(item.id)
+        for item in plan.convergence_plans
+        if item.primary_trunk_member_id in moved_trunk_members
+    )
+
+
+def _assert_grant_moves_only_its_convergences(
+    drawn_routes: Sequence[RoutedPath],
+    granted_routes: Sequence[RoutedPath],
+    granted_plan_ids: frozenset[str],
+) -> None:
+    """Reject a granted observation that moved any route outside its grant.
+
+    The observation replays the drawn pass's inputs, so every route no granted
+    convergence owns must match the drawn pass; one that differs would carry an
+    unrelated change into the render under cover of the grant.
+    """
+
+    def by_edge(
+        routes: Sequence[RoutedPath],
+    ) -> dict[tuple[str, str, str], RoutedPath]:
+        return {
+            (route.edge.source, route.edge.target, route.line_id): route
+            for route in routes
+        }
+
+    drawn = by_edge(drawn_routes)
+    granted = by_edge(granted_routes)
+    if drawn.keys() != granted.keys():
+        raise LayoutInvariantError(
+            "the convergence corridor grant observation routed a different edge set "
+            "from the drawn pass"
+        )
+    for key, route in granted.items():
+        if route.convergence_plan_id in granted_plan_ids:
+            continue
+        before = drawn[key].points
+        if len(before) != len(route.points) or any(
+            abs(old - new) > COORD_TOLERANCE_FINE
+            for old_point, new_point in zip(before, route.points)
+            for old, new in zip(old_point, new_point)
+        ):
+            raise LayoutInvariantError(
+                f"the convergence corridor grant moved route {key}, which no "
+                "granted convergence owns"
+            )
+
+
 def _assert_aperture_grant_closes(
     owed: Sequence[tuple[BoundaryClearanceRequirement, BoundaryClearanceDemand]],
     settlement: EnvelopeSettlement,
@@ -1983,7 +2042,11 @@ def _settle_render_geometry(
       :func:`_assert_aperture_grant_closes` proves from the settlement's own
       translations that the grant pays every measured deficit, and a re-route
       consuming the plan draws the result.  Any deficit the grant leaves is an
-      invariant failure rather than a second batch.
+      invariant failure rather than a second batch.  A convergence corridor
+      grant that moved a trunk is materialised by that same observation, so
+      its geometry is kept instead of discarded, once
+      :func:`_assert_grant_moves_only_its_convergences` proves it differs from
+      the drawn pass on the granted convergences alone.
 
     Rail-mode sections run a separate layout pipeline whose per-line centrelines
     are anchored during ``compute_layout`` and cannot be re-derived from a
@@ -2093,6 +2156,39 @@ def _settle_render_geometry(
         carried_ports = ()
         return offsets, moved_routes, moved_plan
 
+    def _publish_observed_routes(
+        station_offsets: dict[tuple[str, str], float],
+        routes: list[RoutedPath],
+        realised_plan: RoutePlan,
+        *,
+        decided_routes: list[RoutedPath],
+        decided_plan: RoutePlan,
+        ledger: RoutePlan,
+        sized_for: RoutePlan,
+        coordinate_translations: tuple[ReservationCoordinateTranslation, ...] = (),
+    ) -> tuple[list[LabelPlacement], RoutePlan]:
+        """Label and publish *routes*, once they hold *decided_plan*'s decisions.
+
+        The published plan is *ledger* adopted onto the labelled geometry, so it
+        is built only after the label pass has grown the boxes it reads;
+        *sized_for* is the ledger the settlement behind *routes* allocated
+        against, which the re-route delta is measured from.
+        """
+        labels = _place(station_offsets, routes)
+        assert_render_curve_invariants(graph, routes, station_offsets)
+        _assert_settlement_decisions_frozen(
+            decided_routes, decided_plan, routes, realised_plan
+        )
+        published = attach_reroute_ledger_delta(
+            adopt_route_reservation_ledger(
+                ledger, graph, coordinate_translations=coordinate_translations
+            ),
+            sized_for,
+            realised_plan,
+        )
+        _attach_published_reservation_attribution(routes, published)
+        return labels, published
+
     def _reconcile_carried_ports(
         station_offsets: dict[tuple[str, str], float],
         routes: list[RoutedPath],
@@ -2171,6 +2267,7 @@ def _settle_render_geometry(
 
     grant_settlement: EnvelopeSettlement | None = None
     settled_plan = frozen_plan
+    drawn_plan = frozen_plan
     settlement = settle_route_envelopes(
         graph, frozen_plan, clearance=_measure_clearance
     )
@@ -2265,6 +2362,7 @@ def _settle_render_geometry(
                 route_plan, diagnostics=route_plan.diagnostics + adopted_dispositions
             )
         _attach_published_reservation_attribution(routes, route_plan)
+        drawn_plan = routed_plan
 
     # The corridor-cohort compiler runs only on a pass that both holds a prior
     # ledger and may publish a clearance requirement, and only a ledger settled
@@ -2272,21 +2370,54 @@ def _settle_render_geometry(
     # observation is that pass.  It replays the inputs of the routing pass it
     # follows rather than deriving fresh ones: the label pass since then grew
     # section boxes that pass never seated the ledger's corridors against, and
-    # routing against them can leave a corridor no band that fits.  Its
-    # routes are thrown away either way: a grant re-routes from the geometry
-    # the observation started on.
+    # routing against them can leave a corridor no band that fits.  An aperture
+    # grant re-routes from the geometry the observation started on, so its
+    # routes are thrown away.  A convergence grant that moved a trunk is only
+    # drawn by this observation, so its routes are kept -- once they are proven
+    # to differ from the drawn pass on the granted convergences alone.
     assert last_route_inputs is not None
+    drawn_routes = routes
     with _restoring_route_observation_geometry(graph):
+        observed_offsets = last_route_inputs.restore(graph)
         observed_routes, observed_plan = _route(
-            last_route_inputs.restore(graph),
+            observed_offsets,
             settled_plan,
             settlement.coordinate_translations,
             stage=SettlementStage.GENERAL_SETTLEMENT,
             allow_clearance_requirements=True,
         )
+        granted_plan_ids = _corridor_grant_moved_plan_ids(observed_plan)
+        observed_state = (
+            _RouteObservationInputs.capture(graph, observed_offsets)
+            if granted_plan_ids
+            else None
+        )
     aperture_requirements = _corridor_cohort_aperture_requirements(observed_plan)
     aperture_settlement: EnvelopeSettlement | None = None
-    if aperture_requirements:
+    if granted_plan_ids:
+        assert observed_state is not None
+        if observed_plan.boundary_clearance_requirements:
+            raise LayoutInvariantError(
+                "the observation that applied a convergence corridor grant also "
+                "published a boundary clearance requirement; a render settles one "
+                "batch and does not retry"
+            )
+        _assert_grant_moves_only_its_convergences(
+            drawn_routes, observed_routes, granted_plan_ids
+        )
+        station_offsets = observed_state.restore(graph)
+        routes = observed_routes
+        carried_ports = ()
+        labels, route_plan = _publish_observed_routes(
+            station_offsets,
+            routes,
+            observed_plan,
+            decided_routes=drawn_routes,
+            decided_plan=drawn_plan,
+            ledger=observed_plan,
+            sized_for=settled_plan,
+        )
+    elif aperture_requirements:
         owed = tuple(
             (requirement, demand)
             for requirement in aperture_requirements
@@ -2303,21 +2434,16 @@ def _settle_render_geometry(
         station_offsets, routes, granted_routed_plan = _resettle(
             observed_plan, aperture_settlement.coordinate_translations
         )
-        labels = _place(station_offsets, routes)
-        assert_render_curve_invariants(graph, routes, station_offsets)
-        _assert_settlement_decisions_frozen(
-            observed_routes, observed_plan, routes, granted_routed_plan
-        )
-        route_plan = attach_reroute_ledger_delta(
-            adopt_route_reservation_ledger(
-                observed_plan,
-                graph,
-                coordinate_translations=aperture_settlement.coordinate_translations,
-            ),
-            observed_plan,
+        labels, route_plan = _publish_observed_routes(
+            station_offsets,
+            routes,
             granted_routed_plan,
+            decided_routes=observed_routes,
+            decided_plan=observed_plan,
+            ledger=observed_plan,
+            sized_for=observed_plan,
+            coordinate_translations=aperture_settlement.coordinate_translations,
         )
-        _attach_published_reservation_attribution(routes, route_plan)
 
     # Settlement measured its corridors against these box edges, so a label
     # pass behind it gives back whatever it grew them by: a port carried past

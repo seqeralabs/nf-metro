@@ -16,7 +16,9 @@ from nf_metro.layout.route_plan import (
 from nf_metro.layout.routing import exit_turns as exit_turn_routing
 from nf_metro.layout.routing.context import _RoutingCtx
 from nf_metro.layout.routing.convergences import (
+    ConvergenceInvariantError,
     ConvergencePlanExecution,
+    apply_convergence_corridor_grants,
     build_convergence_plan_execution,
     convergence_corridor_requests,
     empty_convergence_plan_execution,
@@ -27,6 +29,7 @@ from nf_metro.layout.routing.convergences import (
 )
 from nf_metro.layout.routing.corridor_cohort_integration import (
     CorridorCohortLedger,
+    CorridorScalarRequest,
     build_corridor_cohort_ledger,
 )
 from nf_metro.layout.routing.exit_turns import ExitTurnExecution
@@ -76,6 +79,58 @@ def _allocation_eligible_system_ids(
 ) -> frozenset[RouteSystemId]:
     """Remove member-failed systems before shared geometry allocation."""
     return preliminary_planned_ids - member_failure_ids
+
+
+def _apply_corridor_grants(
+    convergences: ConvergencePlanExecution,
+    requests: tuple[CorridorScalarRequest, ...],
+    member_geometry: MemberGeometryExecution,
+    *,
+    compiled: bool,
+) -> ConvergencePlanExecution:
+    """Publish the convergence plans the corridor-cohort compile granted.
+
+    The compile runs only on a pass that may publish clearance requirements, so
+    requests on any other pass are exposed without being solved.  On a
+    *compiled* pass a request goes ungranted only when the compile published an
+    aperture requirement instead of a plan; any other omission is a wiring
+    defect.  A component the compile kept on legacy geometry as a compatibility
+    outcome owns none of its coordinates, so neither its requests nor any grant
+    for them reach the applier.
+    """
+    if not requests:
+        return convergences
+    cohorts = member_geometry.corridor_cohorts
+    if cohorts is None:
+        aperture_pending = any(
+            requirement.kind
+            is BoundaryClearanceRequirementKind.CORRIDOR_COHORT_APERTURE
+            for requirement in member_geometry.clearance_requirements
+        )
+        if compiled and not aperture_pending:
+            raise ConvergenceInvariantError(
+                "corridor-cohort compile omitted convergence corridor requests"
+            )
+        return convergences
+    compatibility_ids = frozenset(
+        variable_id
+        for component in cohorts.components
+        if component.compatibility is not None
+        for variable_id in component.compatibility.scalar_variable_ids
+    )
+    return apply_convergence_corridor_grants(
+        convergences,
+        tuple(
+            request
+            for request in requests
+            if request.variable.variable_id not in compatibility_ids
+        ),
+        tuple(
+            grant
+            for grant in cohorts.scalar_grants
+            if grant.variable_id not in compatibility_ids
+        ),
+    )
 
 
 def _with_settled_exit_turns(
@@ -350,6 +405,13 @@ def prepare_route_system_planning(
             corridor_targets=corridor_targets,
             corridor_scalar_requests=corridor_scalar_requests,
         )
+        convergences = _apply_corridor_grants(
+            convergences,
+            corridor_scalar_requests,
+            member_geometry,
+            compiled=allow_convergence_clearance_requirements,
+        )
+        ctx.convergences = convergences.query
         return family_by_edge, convergences, planned_ids, member_geometry
 
     allocation_exit_turns, pending_plan_ids = (
