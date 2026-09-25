@@ -96,11 +96,9 @@ DEFICIT_CORPUS = (
     ROOT / "tests" / "fixtures" / "tb_exit_terminal_on_carrier.mmd",
 )
 
-# Fixtures whose only deficit falls on a column boundary, so the column phase has
-# to translate rather than merely confirm.
-COLUMN_DEFICIT_CORPUS = (
-    ROOT / "tests" / "fixtures" / "hash_seed_determinism" / "seed_15.mmd",
-)
+# Fixtures that starve a column gap, so the column phase has to translate rather
+# than merely confirm.
+COLUMN_DEFICIT_CORPUS = (TOPOLOGIES / "junction_entry_lane_step.mmd",)
 
 # Offsets a whole map is moved by to check the allocation reads the deficit and
 # not the coordinates it is measured at.  None is a whole pixel and none is
@@ -565,8 +563,7 @@ LEMMA_CORPUS = {
 # phase's result is exposed to the column phase.
 CROSS_AXIS_CORPUS = (
     TOPOLOGIES / "complex_multipath.mmd",
-    ROOT / "tests" / "fixtures" / "hash_seed_determinism" / "seed_15.mmd",
-    ROOT / "tests" / "fixtures" / "hash_seed_determinism" / "seed_77.mmd",
+    TOPOLOGIES / "junction_entry_lane_step.mmd",
 )
 
 

@@ -30,7 +30,6 @@ from nf_metro.layout.geometry import (
     station_lane_coord,
 )
 from nf_metro.layout.phases._common import (
-    feeder_dys,
     iter_corridor_fed_solo_entries,
     iter_flat_seam_solo_entries,
     line_forks_within_section,
@@ -4535,8 +4534,25 @@ def _entry_seam_is_flat(graph: MetroGraph, entry_port_id: str) -> bool:
     vertical leg, and the trunk-anchoring invariant then requires a lone
     consumer on offset 0 (:func:`iter_corridor_fed_solo_entries`); inheriting
     the upstream lane there would only reserve empty lanes.
+
+    A merge junction fronting the port stands level with it whatever its own
+    feeders do, so the seam is read from those feeders instead.
     """
-    return seam_is_flat(feeder_dys(graph, entry_port_id), _SAME_Y_TOLERANCE)
+    merges = merge_junction_ids(graph)
+    port_y = graph.stations[entry_port_id].y
+    feeders = [
+        feeder.source
+        for edge in graph.edges_to(entry_port_id)
+        for feeder in (
+            graph.edges_to(edge.source) if edge.source in merges else (edge,)
+        )
+    ]
+    dys = [
+        graph.stations[source].y - port_y
+        for source in feeders
+        if source in graph.stations
+    ]
+    return seam_is_flat(dys, _SAME_Y_TOLERANCE)
 
 
 def _carrier_offset_gap(

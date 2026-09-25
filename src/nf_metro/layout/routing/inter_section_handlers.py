@@ -10,7 +10,7 @@ The claim space is documented in ``docs/dev/inter_section_dispatch.mdx``.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from functools import cached_property
 from math import inf
@@ -301,6 +301,27 @@ class _InterFacts:
         if self.merge_ep is not None:
             return self.graph.ports[self.merge_ep.id].side
         return self.entry_side
+
+    @cached_property
+    def entry_facts(self) -> _InterFacts:
+        """These facts read against the entry port the hop lands on.
+
+        A merge junction stands in front of its entry port, so a builder that
+        draws the hop into the port itself needs the port as its target.
+        """
+        ep = self.merge_ep
+        if ep is None:
+            return self
+        tgt_col, tgt_row = self.section_colrow(ep)
+        return replace(
+            self,
+            tgt=ep,
+            tx=ep.x,
+            ty=ep.y,
+            tgt_port=self.graph.ports.get(ep.id),
+            tgt_col=tgt_col,
+            tgt_row=tgt_row,
+        )
 
     @property
     def is_perp_exit(self) -> bool:
@@ -1576,6 +1597,7 @@ class _MergeEntryRoute(Enum):
     AROUND_BELOW = "around_below"
     PERPENDICULAR_ENTRY = "perpendicular_entry"
     L_SHAPE = "l_shape"
+    RIGHT_ENTRY_CROSS_ROW_WRAP = "right_entry_cross_row_wrap"
 
 
 def _merge_entry_route_kind(f: _InterFacts) -> _MergeEntryRoute:
@@ -1587,7 +1609,9 @@ def _merge_entry_route_kind(f: _InterFacts) -> _MergeEntryRoute:
     TOP/BOTTOM entry is approached down its own column, so its feeders take the
     ``PERPENDICULAR_ENTRY`` staircase whose horizontal leg runs in the inter-row
     gap; the ``L_SHAPE`` would instead turn onto the port's own Y, which for a
-    perpendicular port is the section's own top or bottom edge.
+    perpendicular port is the section's own top or bottom edge.  A RIGHT entry
+    fed leftward from a row above takes the ``RIGHT_ENTRY_CROSS_ROW_WRAP`` its
+    unmerged siblings take, which no merge-entry rule claims.
     """
     src, ctx, graph = f.src, f.ctx, f.graph
     ep = f.merge_ep
@@ -1597,6 +1621,10 @@ def _merge_entry_route_kind(f: _InterFacts) -> _MergeEntryRoute:
     ep_port = graph.ports.get(ep.id)
     if ep_port and ep_port.side in (PortSide.TOP, PortSide.BOTTOM):
         return _MergeEntryRoute.PERPENDICULAR_ENTRY
+    if _takes_right_entry_cross_row_wrap(f) and not _right_entry_plough_needs_bypass(
+        f.entry_facts
+    ):
+        return _MergeEntryRoute.RIGHT_ENTRY_CROSS_ROW_WRAP
     if ep_port and ep_port.side == PortSide.LEFT:
         exclude = {src.section_id} if src.section_id else set[str]()
         if f.h_segment_crosses_other_section(f.sx, ep.x, ep.y, exclude):
@@ -1704,6 +1732,18 @@ def _right_entry_plough_needs_bypass(f: _InterFacts) -> bool:
     ):
         return False
     return f.h_segment_crosses_other_section(f.sx, f.tx, f.ty)
+
+
+def _takes_right_entry_cross_row_wrap(f: _InterFacts) -> bool:
+    """A feed travelling left from a row above into a RIGHT entry."""
+    landing = f.entry_facts
+    return (
+        f.effective_entry_side is PortSide.RIGHT
+        and landing.horizontal is Direction.L
+        and landing.src_row is not None
+        and landing.tgt_row is not None
+        and landing.src_row < landing.tgt_row
+    )
 
 
 def _route_right_entry_plough_bypass(f: _InterFacts) -> RoutedPath | None:
@@ -2033,14 +2073,8 @@ _INTER_SECTION_CLAIMS: tuple[_Rule, ...] = (
     _Rule(
         RouteFamilyId.RIGHT_ENTRY_CROSS_ROW_WRAP,
         "RIGHT entry cross-row wrap",
-        lambda f: (
-            f.entry_side is PortSide.RIGHT
-            and f.horizontal is Direction.L
-            and f.src_row is not None
-            and f.tgt_row is not None
-            and f.src_row < f.tgt_row
-        ),
-        _route_right_entry_cross_row,
+        _takes_right_entry_cross_row_wrap,
+        lambda f: _route_right_entry_cross_row(f.entry_facts),
     ),
 )
 
@@ -4100,11 +4134,12 @@ def _route_l_shape_fan(
     delta = l_shape_stagger(ui, un, geometry.turn_direction, ctx.offset_step)
     src_off = _get_offset(ctx, edge.source, edge.line_id)
     tgt_off = _get_offset(ctx, edge.target, edge.line_id)
+    lift = delta * right_normal_axis_sign(geometry.run_direction)
     centerline = [
-        (geometry.launch_x, sy + src_off + delta),
-        (geometry.axis_x, sy + src_off + delta),
-        (geometry.axis_x, ty + tgt_off + delta),
-        (tx, ty + tgt_off + delta),
+        (geometry.launch_x, sy + src_off + lift),
+        (geometry.axis_x, sy + src_off + lift),
+        (geometry.axis_x, ty + tgt_off + lift),
+        (tx, ty + tgt_off + lift),
     ]
     # Not normalize-exempt: L-shape fans from one junction to different targets
     # share the inter-column gap, and _materialize_gap_slots restacks them into

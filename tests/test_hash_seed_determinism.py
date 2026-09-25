@@ -87,7 +87,6 @@ def test_regressions_and_representative_corpus_are_hash_seed_deterministic() -> 
 EXPECTED_DEFECT_CLASSES = {
     "seed_15.mmd": (
         "bundle order (line crosses its bundle-mate)",
-        "undeclared gap channel",
         "peel-off bundle braids into port",
         "merge fan-out branches split off one fork corner",
     ),
@@ -95,16 +94,13 @@ EXPECTED_DEFECT_CLASSES = {
         "non-concentric bundle corner",
         "merge fan-out branches split off one fork corner",
     ),
-    "seed_77.mmd": (
-        "undeclared gap channel",
-        "peel-off bundle braids into port",
-    ),
+    "seed_77.mmd": ("peel-off bundle braids into port",),
 }
 
 EXPECTED_EXCEPTION_SHA256 = {
-    "seed_15.mmd": "aa5528e40c467cd49e4383c8acf62497f2265e896d37181bb72feb9522726d91",
+    "seed_15.mmd": "1c976a09cbf42d8504c93d273caf35ee63bdbfb5f8a392d948716f2e31d97561",
     "seed_41.mmd": "119a52417bd9fdf02767feb6b41d7c32a4f7dcaba5095adf991886c4175c6ebe",
-    "seed_77.mmd": "40597beab7da0cc311a70e6012896d1a493a854999499eea700c172aac652643",
+    "seed_77.mmd": "0e40e4cd0fae6f9609a8f4e696789da2c27cd7402f414942c3d8836e3b181bc5",
 }
 
 

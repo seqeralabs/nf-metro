@@ -1,0 +1,43 @@
+%%metro title: Merge Right Entry Cross-Row Wrap
+%%metro directional: true
+%%metro line: side | Side | #2a9d8f
+%%metro line: main | Main | #e63946
+%%metro grid: up | 0,0
+%%metro grid: side | 1,0
+%%metro grid: tgt | 0,1
+%%metro grid: sink | 0,2
+%%metro grid: east | 1,2
+
+graph LR
+    subgraph up [Upstream]
+        u1[Start]
+        u2[Split]
+        u1 -->|side,main| u2
+    end
+    subgraph side [Side]
+        s1[Side In]
+        s2[Side Out]
+        s1 -->|side| s2
+    end
+    subgraph tgt [Target]
+        %%metro entry: right | main
+        t1[Collect]
+        t2[Report]
+        t1 -->|main| t2
+    end
+    subgraph sink [Sink]
+        %%metro entry: right | main
+        k1[Sink In]
+        k2[Sink Out]
+        k1 -->|main| k2
+    end
+    subgraph east [East]
+        %%metro exit: left | main
+        e1[East In]
+        e2[East Out]
+        e1 -->|main| e2
+    end
+    u2 -->|side| s1
+    u2 -->|main| t1
+    e2 -->|main| t1
+    e2 -->|main| k1

@@ -587,10 +587,6 @@
   "note": "Every caller of _corridor_is_viable passes a non-None entry_port.",
   "status": "defensive"
  },
- "inter_section_handlers.py::if ep_port and ep_port.side == PortSide.LEFT:::#1": {
-  "note": "Contract guard in _route_inter_section: a merge entry port always resolves to a Port on the LEFT side here, so the non-LEFT/None arm (fall through to _route_l_shape at L344) is never taken (0/128). The earlier 'multiline phantom' note was inaccurate -- this is a recorded gate whose arm is never taken. Defensive guard. Reclassified defensive (#762).",
-  "status": "defensive"
- },
  "inter_section_handlers.py::if ep_section and ep_section.bbox_w > 0:::#1": {
   "note": "entry_port.section_id is always set and the section has bbox_w>0 after layout; the else arm never fires.",
   "status": "defensive"
@@ -1641,6 +1637,10 @@
  },
  "offsets.py::if port is None:::#1": {
   "note": "The flow-start side-entry descent phase reads a feeder's lead direction from its exit port or its divergence junction's exit port; any other source (a merge junction, say) has no single lead, so the port is skipped. Such a source feeding a flow-start side entry off the port's row is valid, but every corpus feeder of this shape is an exit port or a divergence junction, or arrives level and is skipped before the lead is read.",
+  "status": "needs-review"
+ },
+ "convergences.py::if movable and abs(channel.x - reference) > COORD_TOLERANCE:::#1": {
+  "note": "The seat arm fuses a feeder's final port approach onto the merge trunk's target flank before the landing states the feeder's opening column. tests/fixtures/hash_seed_determinism/seed_15.mmd reaches it (__junction_27->__merge_11 climbs into s8__entry_right_17 16px beside the trunk's flank at x=780), but the sweep's corpus roots do not include tests/fixtures/hash_seed_determinism, and seed_15 aborts on unrelated guards, so no swept fixture evaluates it.",
   "status": "needs-review"
  }
 }

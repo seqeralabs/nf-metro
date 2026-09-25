@@ -706,6 +706,28 @@ def test_linear_entry_frame_excludes_far_side_entry_routes() -> None:
     ]
 
 
+def test_linear_entry_frame_reads_a_merge_fed_seam_from_its_feeders() -> None:
+    """A merge junction level with its port does not make a corridor seam flat.
+
+    Both feeders of ``tgt``'s RIGHT entry reach it through ``__merge_2`` on
+    vertical legs, one from the row above and one from below, so the seam
+    absorbs any lane step there.  Framing the section onto the upstream lane
+    would move the port and its stations while the merge stays behind, and the
+    line would step where it crosses into the section.
+    """
+    path = TOPOLOGIES / "merge_right_entry_cross_row_wrap.mmd"
+    graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+    offsets = compute_station_offsets(graph)
+
+    ownership = routing_offsets.capture_linear_entry_frame_ownership(graph, offsets)
+
+    assert not any(
+        assignment.section_id == "tgt" for assignment in ownership.assignments
+    )
+    (merge,) = {edge.source for edge in graph.edges_to("tgt__entry_right_3")}
+    assert offsets[(merge, "main")] == offsets[("tgt__entry_right_3", "main")]
+
+
 def test_exit_plan_falls_back_before_changing_a_linear_entry_frame(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

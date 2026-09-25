@@ -394,6 +394,7 @@
     "topologies/merge_port_above_approach.mmd",
     "topologies/merge_pullaway.mmd",
     "topologies/merge_right_entry.mmd",
+    "topologies/merge_right_entry_cross_row_wrap.mmd",
     "topologies/merge_trunk_out_of_range_section.mmd",
     "topologies/merge_trunk_over_low_section.mmd",
     "topologies/mismatched_tracks.mmd",
