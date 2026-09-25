@@ -35,7 +35,8 @@ from nf_metro.layout.route_reservations import (
     RowGapRegion,
 )
 from nf_metro.layout.routing import corridor_cohort_integration as cci
-from nf_metro.layout.routing.common import Direction
+from nf_metro.layout.routing import member_geometry as member_geometry_routing
+from nf_metro.layout.routing.common import Direction, graph_offset_step
 from nf_metro.layout.routing.corridor_cohort_integration import (
     CorridorCohortCompilationError,
     CorridorCohortLedger,
@@ -1775,3 +1776,88 @@ def test_shortfall_without_a_directed_shift_sign_raises(
 
     with pytest.raises(CorridorCohortCompilationError, match="directed boundary side"):
         cci.compile_corridor_cohort_plan(ledger, (target,))
+
+
+def _top_entry_drops(routes, port_id: str) -> dict[str, tuple[float, int]]:
+    """Each line's drop X into *port_id* and the travel sign of its run there."""
+    drops = {}
+    for route in routes:
+        if route.edge.target != port_id:
+            continue
+        (run_start, run_end), (drop_start, drop_end) = zip(
+            route.points[-3:-1], route.points[-2:], strict=True
+        )
+        assert run_start[1] == run_end[1]
+        assert drop_start[0] == drop_end[0]
+        drops[route.line_id] = (
+            drop_start[0],
+            1 if run_end[0] > run_start[0] else -1,
+        )
+    return drops
+
+
+def test_opposing_bypass_lines_hold_separated_direction_qualified_lanes() -> None:
+    """Opposite-running bypasses into one top entry keep their own lanes.
+
+    ``ribo`` arrives running right and ``rnaseq`` running left.  Counter-running
+    lines never share a bundle, so each drops into the port on its own lane, one
+    pitch apart, in the order its travel direction earns.
+    """
+    graph, observed = _render("examples/topologies/opposing_bypass_corridor.mmd")
+    drops = _top_entry_drops(observed.plan.routes, "orf_calling__entry_top_9")
+
+    assert drops == {"ribo": (692.0, 1), "rnaseq": (696.0, -1)}
+    assert drops["rnaseq"][0] - drops["ribo"][0] == graph_offset_step(graph)
+
+
+def test_no_solver_owner_contains_opposite_running_claims(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No solver cohort or lane equality binds claims travelling opposite ways.
+
+    Seed 77 compiles one cohort over both directions of several shared gaps; a
+    cohort or equality owner holding both would bundle counter-running lines.
+    Scalar trunk lanes are their own cohort and carry no ledger claim.
+    """
+    compiles = []
+    original = member_geometry_routing.compile_corridor_cohort_plan
+
+    def capture(ledger, targets, **kwargs):
+        plan = original(ledger, targets, **kwargs)
+        compiles.append((ledger, plan))
+        return plan
+
+    monkeypatch.setattr(
+        member_geometry_routing, "compile_corridor_cohort_plan", capture
+    )
+    _render("tests/fixtures/hash_seed_determinism/seed_77.mmd")
+
+    assert compiles
+    for ledger, plan in compiles:
+        direction_by_claim = {
+            claim.claim_id: claim.direction for claim in ledger.claims
+        }
+        assert {claim.direction for claim in ledger.claims} >= {
+            Direction.U,
+            Direction.D,
+        }
+        for component in plan.components:
+            for problem in component.problems:
+                directions_by_owner: dict[str, set[Direction]] = {}
+                for lane in problem.lanes:
+                    if lane.member_id in direction_by_claim:
+                        directions_by_owner.setdefault(
+                            f"cohort|{lane.cohort_id}", set()
+                        ).add(direction_by_claim[lane.member_id])
+                for equality in problem.equalities:
+                    directions_by_owner.setdefault(
+                        f"equality|{equality.owner_id}", set()
+                    ).update(
+                        (
+                            direction_by_claim[equality.left_member_id],
+                            direction_by_claim[equality.right_member_id],
+                        )
+                    )
+                assert all(
+                    len(directions) == 1 for directions in directions_by_owner.values()
+                ), directions_by_owner
