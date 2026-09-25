@@ -584,6 +584,41 @@ def _landing_from_trial(
     )
 
 
+def _seat_port_approaches_on_trunk_flank(
+    trunk: RoutedPath, routes: list[RoutedPath], ctx: _RoutingCtx
+) -> None:
+    """Fuse feeders' final port approaches onto the trunk's target flank.
+
+    A feeder that climbs or drops into the entry port beside the trunk's own
+    final approach is one line arriving twice.
+    :func:`normalize._convergent_port_groups` fuses such same-line approaches
+    after emission, but it cannot move a column a plan owns, and the landing
+    states the feeder's opening column from this trial geometry.  Seating the
+    feeder here, with the same grouping, makes the plan state the fused column.
+    Only the feeders move: the trunk axis has already been read off its route.
+    """
+    from nf_metro.layout.routing.normalize import (
+        _convergent_port_groups,
+        _planner_owns_channel,
+        _reconcile_moved_gap_slot,
+        _set_vchannel_x,
+    )
+
+    for group in _convergent_port_groups(routes, ctx):
+        flank = next((item for item in group.channels if item.route is trunk), None)
+        if flank is None:
+            continue
+        for channel in group.channels:
+            if (
+                channel.route is trunk
+                or _planner_owns_channel(channel)
+                or abs(channel.x - flank.x) <= COORD_TOLERANCE
+            ):
+                continue
+            _reconcile_moved_gap_slot(channel, flank.x, ctx.graph)
+            _set_vchannel_x(channel, flank.x)
+
+
 def _direct_axis_points(
     merge: tuple[float, float], entry: tuple[float, float]
 ) -> ConvergenceTrunkAxis:
@@ -931,6 +966,9 @@ def _build_planned_convergence(
         trial_route_list = list(trial_routes.values())
         for feeder_group in _merge_feeder_groups(trial_route_list, ctx):
             _snap_merge_feeder_group(feeder_group, graph)
+        _seat_port_approaches_on_trunk_flank(
+            trial_routes[trunk_edge_key], trial_route_list, ctx
+        )
         if any(
             exit_turn_geometry[edge_key] != _exit_turn_geometry(route)
             for edge_key, route in trial_routes.items()

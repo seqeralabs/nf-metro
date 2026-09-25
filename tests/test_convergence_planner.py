@@ -995,7 +995,7 @@ def test_required_shared_terminal_axis_names_the_broken_contract(reason: str) ->
 
 
 def test_absent_shared_terminal_axis_selects_the_outgoing_continuation() -> None:
-    observed = _observe(FROZEN / "seed_77.mmd")[2]
+    observed = _observe(ROOT / "examples" / "riboseq_metro.mmd")[2]
 
     assert any(
         plan.primary_trunk_reason is ConvergenceTrunkReason.OUTGOING_CONTINUATION
