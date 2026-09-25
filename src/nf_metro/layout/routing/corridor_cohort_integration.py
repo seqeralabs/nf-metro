@@ -1506,6 +1506,7 @@ def _member_footprint_model(
                 or candidate.owner_kind is not CorridorScalarOwnerKind.MEMBER_CARRIER
                 or controller.owner_kind is not CorridorScalarOwnerKind.MEMBER_CARRIER
                 or carrier.direction is not controller_carrier.direction
+                or not set(carrier.regions) & set(controller_carrier.regions)
             ):
                 continue
             if not (

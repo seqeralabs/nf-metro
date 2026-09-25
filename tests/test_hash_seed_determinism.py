@@ -93,14 +93,15 @@ EXPECTED_DEFECT_CLASSES = {
         "non-concentric bundle corner",
         "merge fan-out branches split off one fork corner",
     ),
-    "seed_77.mmd": (),
 }
 
 EXPECTED_EXCEPTION_SHA256 = {
     "seed_15.mmd": "02298192a4e240832a8bc248efa1f01eba0898baf14469388815642948433901",
     "seed_41.mmd": "119a52417bd9fdf02767feb6b41d7c32a4f7dcaba5095adf991886c4175c6ebe",
-    "seed_77.mmd": "0e0456da5fb2d52d6a39bd6f61fe99a1a88eef5c4904dbea78236a9fc4edfe01",
 }
+
+
+RENDERING_SEEDS = frozenset({"seed_72.mmd", "seed_77.mmd"})
 
 
 def _defect_classes(message: str) -> tuple[str, ...]:
@@ -122,7 +123,7 @@ def test_seed_render_outcomes_are_stable_across_hash_seeds() -> None:
     for by_path in observations.values():
         for path, observation in by_path.items():
             name = Path(path).name
-            if name == "seed_72.mmd":
+            if name in RENDERING_SEEDS:
                 assert observation["outcome"] == "success"
                 assert observation["exception"] is None
                 continue

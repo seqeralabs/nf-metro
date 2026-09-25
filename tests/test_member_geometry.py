@@ -1095,6 +1095,42 @@ def test_reservation_reroute_keeps_identity_and_reuses_settled_template() -> Non
             ) == (channel.start, channel.end)
 
 
+def test_seed_77_shortfall_requests_one_atomic_corridor_aperture() -> None:
+    """Seed 77's corridor cohort compiles as atomic single-lane components.
+
+    Its ``s5`` carrier drops in the right-hand canvas margin while the ``s7``
+    carrier it would overtake runs down the column-9/10 gap.  A footprint order
+    between two carriers with no region in common could never bind, since each
+    carrier is held inside its own region, so it must not join them into one
+    component: the compile would then refuse a component spanning two lanes.
+    Every claim of this compile fits its corridor, so it requests no aperture.
+    """
+    path = ROOT / "tests" / "fixtures" / "hash_seed_determinism" / "seed_77.mmd"
+    graph, first = _observe(path)
+    _routes, _moves, provisional_plan = _route_edges(
+        graph,
+        DIAGONAL_RUN,
+        CURVE_RADIUS,
+        compute_station_offsets(graph),
+        observe_plan=True,
+        reservations=first.plan,
+        allow_convergence_clearance_requirements=True,
+    )
+
+    assert provisional_plan is not None
+    ledger = provisional_plan.corridor_cohort_ledger
+    assert ledger is not None
+    assert ledger.finalized_owned_segments is None
+    regions = {
+        (claim.edge_key, claim.segment_rank): claim.region for claim in ledger.claims
+    }
+    s5_carrier = regions[(("__junction_35", "s5__entry_right_17", "l0"), 3)]
+    s7_carrier = regions[(("__junction_40", "s7__entry_right_27", "l4"), 1)]
+    assert s7_carrier == ColumnGapRegion(9, 10)
+    assert s5_carrier != s7_carrier
+    assert provisional_plan.boundary_clearance_requirements == ()
+
+
 def test_failed_system_cannot_fall_back_from_member_geometry(
     monkeypatch,
 ) -> None:

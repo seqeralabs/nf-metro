@@ -2453,7 +2453,6 @@ render_only:
   expected_aborts:
     hash_seed_determinism/seed_15: nf_metro.layout.routing.invariants.CurveInvariantError
     hash_seed_determinism/seed_41: nf_metro.layout.routing.invariants.CurveInvariantError
-    hash_seed_determinism/seed_77: nf_metro.layout.routing.corridor_cohort_integration.CorridorCohortCompilationError
   # Stems from tests/fixtures/ rendered into the "Test Fixtures" render-diff section.
   test_fixtures:
     - multiline_labels
