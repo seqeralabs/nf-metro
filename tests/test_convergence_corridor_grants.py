@@ -1,32 +1,53 @@
-"""The convergence adapter publishes each planned trunk skeleton as one request.
+"""Convergence trunks are published as corridor requests and granted back.
 
-Every test here calls :func:`convergence_corridor_requests` and nothing that
-solves or applies a request: this slice exposes the trunk skeleton, it does not
-move it.  The skeleton is one connected six-point polyline of five runs -- the
+The adapter tests call :func:`convergence_corridor_requests` alone.  The trunk
+skeleton it publishes is one connected six-point polyline of five runs -- the
 central run the axis states, its two flank connectors, and the two flank runs --
 whatever the plan contains.
+
+The grant tests hand those requests' own recipes back to
+:func:`apply_convergence_corridor_grants`, either directly with a chosen
+coordinate or through a full render whose corridor preference is shifted by a
+known amount: no corpus fixture's solve moves a trunk on its own, so a clean
+render diff says nothing about whether granted coordinates reach the drawing.
 """
 
 import math
+from collections.abc import Callable
 from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
 
 import pytest
 
-from nf_metro.api import prepare_graph
-from nf_metro.layout.constants import COORD_TOLERANCE, CURVE_RADIUS, DIAGONAL_RUN
+from nf_metro.api import prepare_graph, resolve_theme
+from nf_metro.layout.constants import (
+    COORD_TOLERANCE,
+    COORD_TOLERANCE_FINE,
+    CURVE_RADIUS,
+    DIAGONAL_RUN,
+)
 from nf_metro.layout.route_plan import (
     ConvergenceEndpointRole,
+    ConvergencePlan,
     ConvergenceTrunkAxis,
     DemandAxis,
     Direction,
+    RoutePlan,
 )
-from nf_metro.layout.routing import convergences
+from nf_metro.layout.routing import (
+    convergences,
+    corridor_cohort_integration,
+    corridor_cohorts,
+    planning,
+)
+from nf_metro.layout.routing.common import RoutedPath, _points_coincide
 from nf_metro.layout.routing.context import _build_routing_context
 from nf_metro.layout.routing.convergences import (
+    CONVERGENCE_CORRIDOR_GRANT_APPLIED,
     ConvergenceInvariantError,
     ConvergencePlanExecution,
+    apply_convergence_corridor_grants,
     convergence_corridor_requests,
 )
 from nf_metro.layout.routing.core import observe_route_edges
@@ -34,10 +55,15 @@ from nf_metro.layout.routing.corridor_cohort_integration import (
     CorridorCohortCompilationError,
     CorridorCrossingDisposition,
     CorridorScalarFixedPoint,
+    CorridorScalarGrant,
+    CorridorScalarOwnerKind,
+    CorridorScalarRequest,
     _validate_control_recipe,
     build_corridor_footprint_witnesses,
 )
 from nf_metro.layout.routing.offsets import compute_station_offsets
+from nf_metro.render import svg
+from nf_metro.render.svg import _convergence_decision
 
 ROOT = Path(__file__).parents[1]
 
@@ -434,6 +460,7 @@ def test_recipe_controls_every_landing_join_opening_turn_and_continuation_start(
             assert f"{variable_id}|landing:{landing.member_id}|join" in named
             if landing.opening_turn_segment is not None:
                 assert f"{variable_id}|landing:{landing.member_id}|opening" in named
+                assert f"{variable_id}|landing:{landing.member_id}|opening-end" in named
         for continuation in plan.outgoing_continuations:
             assert f"{variable_id}|continuation:{continuation.member_id}|start" in named
         for ownership in plan.endpoint_ownership:
@@ -533,3 +560,673 @@ def test_opposite_running_trunks_stay_direction_qualified_and_unbundled() -> Non
         assert len(set(member_ids)) == len(member_ids)
         assert len(set(owner_ids)) == len(owner_ids)
     assert {Direction.R, Direction.L} <= central_directions
+
+
+_FUNCPROFILER = "examples/topologies/funcprofiler_upstream.mmd"
+_MERGE_RIGHT_ENTRY = "examples/topologies/merge_right_entry.mmd"
+_FAN_IN_MERGE = "examples/topologies/fan_in_merge.mmd"
+_MERGE_PULLAWAY = "examples/topologies/merge_pullaway.mmd"
+_STACKED_COLLECTOR = "tests/fixtures/regressions/stacked_collector_fanin.mmd"
+_CROSS_COLUMN = "tests/fixtures/regressions/cross_column_perp_entry_overflow.mmd"
+_MOVABLE_FIXTURES = (_FUNCPROFILER, _MERGE_RIGHT_ENTRY, _FAN_IN_MERGE, _MERGE_PULLAWAY)
+_STATION_PINNED_FIXTURES = (_STACKED_COLLECTOR, _CROSS_COLUMN)
+_SHIFT = 12.0
+
+_SKELETON_FIELDS = {
+    0: "source_flank_coordinate",
+    1: "source_flank_coordinate",
+    2: "coordinate",
+    3: "coordinate",
+    4: "target_flank_coordinate",
+    5: "target_flank_coordinate",
+}
+
+_PROXIMITY_AND_LEGACY_HELPERS = (
+    "_move_trunk_axis",
+    "_move_trunk_flank",
+    "_reseated_runway",
+    "_reseat_landing_opening",
+    "_reseat_landing_cross",
+    "_move_landing_opening",
+    "point_to_polyline_distance",
+    "_point_on_trunk_geometry",
+    "_route_covers_segment",
+    "_closest_point_on_polyline",
+    "_on_central_run",
+)
+
+
+def _grant(request: CorridorScalarRequest, coordinate: float) -> CorridorScalarGrant:
+    recipe = request.control_recipe
+    assert recipe is not None
+    return CorridorScalarGrant(
+        request.variable.variable_id,
+        request.variable.owner_kind,
+        request.variable.owner_id,
+        coordinate,
+        coordinate - recipe.source_coordinate,
+        recipe,
+    )
+
+
+def _grants(requests, shift: float = 0.0) -> tuple[CorridorScalarGrant, ...]:
+    return tuple(_grant(item, item.variable.coordinate + shift) for item in requests)
+
+
+def _unbounded(request: CorridorScalarRequest) -> CorridorScalarRequest:
+    return replace(
+        request,
+        domain=replace(
+            request.domain, minimum_coordinate=None, maximum_coordinate=None
+        ),
+    )
+
+
+def _grant_fixture(fixture: str):
+    """A fixture's execution and requests, with every request's domain lifted.
+
+    Lifting the domain separates what the applier writes from whether the
+    producer would have allowed the move; the domain is tested on its own.
+    """
+    _graph, _ctx, execution, _targets, requests = _requests_for(str(ROOT / fixture))
+    return execution, tuple(_unbounded(request) for request in requests)
+
+
+def _plan_scalars(plan: ConvergencePlan) -> dict[tuple[object, ...], float | None]:
+    """Every coordinate-bearing scalar *plan* states, keyed by where it lives."""
+    axis = plan.trunk_axis
+    assert axis is not None
+    values: dict[tuple[object, ...], float | None] = {
+        ("trunk", name): getattr(axis, name)
+        for name in (
+            "coordinate",
+            "extent_start",
+            "extent_end",
+            "source_flank_coordinate",
+            "target_flank_coordinate",
+            "source_endpoint_coordinate",
+            "target_endpoint_coordinate",
+        )
+    }
+    for landing in plan.landings:
+        member = landing.member_id
+        values[("landing", member, "runway")] = landing.minimum_runway
+        values[("landing", member, "opening")] = landing.opening_turn_coordinate
+        values[("landing", member, "cross_run_start")] = (
+            landing.cross_run_start_coordinate
+        )
+        for index in (0, 1):
+            values[("landing", member, "join", index)] = landing.join_point[index]
+            if landing.opening_turn_segment is not None:
+                start, end = landing.opening_turn_segment
+                values[("landing", member, "opening_start", index)] = start[index]
+                values[("landing", member, "opening_end", index)] = end[index]
+    for item in plan.outgoing_continuations:
+        for index in (0, 1):
+            values[("continuation", item.member_id, "start", index)] = item.start_point[
+                index
+            ]
+            values[("continuation", item.member_id, "end", index)] = item.end_point[
+                index
+            ]
+    for item in plan.endpoint_ownership:
+        for index in (0, 1):
+            values[("ownership", item.member_id, item.role, index)] = item.endpoint[
+                index
+            ]
+    return values
+
+
+def _role_field(
+    plan: ConvergencePlan, variable_id: str, role_id: str, axis: int
+) -> tuple[object, ...]:
+    """The one plan scalar a controlled role writes, per the recipe contract."""
+    for rank, name in _SKELETON_FIELDS.items():
+        if role_id == f"{variable_id}|point:{rank}":
+            return ("trunk", name)
+    for landing in plan.landings:
+        member = landing.member_id
+        if role_id == f"{variable_id}|landing:{member}|join":
+            return ("landing", member, "join", axis)
+        if role_id == f"{variable_id}|landing:{member}|opening-end":
+            return ("landing", member, "opening_end", axis)
+    for item in plan.outgoing_continuations:
+        if role_id == f"{variable_id}|continuation:{item.member_id}|start":
+            return ("continuation", item.member_id, "start", axis)
+    for item in plan.endpoint_ownership:
+        if role_id == f"{variable_id}|feeder:{item.member_id}|endpoint":
+            return ("ownership", item.member_id, item.role, axis)
+    raise AssertionError(f"role {role_id} names no writable field")
+
+
+def _expected_writes(
+    plan: ConvergencePlan, request: CorridorScalarRequest, grant: CorridorScalarGrant
+) -> dict[tuple[object, ...], float]:
+    recipe = request.control_recipe
+    assert recipe is not None
+    variable_id = request.variable.variable_id
+    expected: dict[tuple[object, ...], float] = {}
+    joins: dict[str, tuple[int, float]] = {}
+    for point in recipe.controlled_points:
+        value = grant.coordinate + point.source_offset
+        expected[_role_field(plan, variable_id, point.role_id, point.axis)] = value
+        joins[point.role_id] = (point.axis, value)
+    for runway in recipe.directed_runways:
+        join = joins.get(runway.controlled_role_id)
+        if join is None or join[0] != runway.axis:
+            continue
+        assert runway.anchor_coordinate is not None
+        member = next(
+            landing.member_id
+            for landing in plan.landings
+            if runway.controlled_role_id
+            == f"{variable_id}|landing:{landing.member_id}|join"
+        )
+        expected[("landing", member, "runway")] = runway.direction_sign * (
+            join[1] - runway.anchor_coordinate
+        )
+    return expected
+
+
+def _plans_by_owner(execution: ConvergencePlanExecution) -> dict[str, ConvergencePlan]:
+    return {str(plan.id): plan for plan in execution.plans}
+
+
+@pytest.mark.parametrize("fixture", (*_MOVABLE_FIXTURES, *_STATION_PINNED_FIXTURES))
+def test_grant_writes_exactly_its_recipes_controlled_fields(fixture: str) -> None:
+    execution, requests = _grant_fixture(fixture)
+    assert requests
+    for request in requests:
+        grants = tuple(
+            _grant(
+                item,
+                item.variable.coordinate + (_SHIFT if item is request else 0.0),
+            )
+            for item in requests
+        )
+        applied = apply_convergence_corridor_grants(execution, requests, grants)
+        before, after = _plans_by_owner(execution), _plans_by_owner(applied)
+        assert before.keys() == after.keys()
+        owner = request.variable.owner_id
+        for plan_id, plan in before.items():
+            if plan_id != owner:
+                assert after[plan_id] is plan
+        old, new = before[owner], after[owner]
+        expected = _expected_writes(old, request, grants[requests.index(request)])
+        old_values, new_values = _plan_scalars(old), _plan_scalars(new)
+        assert old_values.keys() == new_values.keys()
+        changed = {key for key in old_values if new_values[key] != old_values[key]}
+        assert changed == set(expected)
+        for key, value in expected.items():
+            assert new_values[key] == value
+        assert _convergence_decision(new) == _convergence_decision(old)
+        assert new.trunk_axis.direction is old.trunk_axis.direction
+        for old_landing, new_landing in zip(old.landings, new.landings, strict=True):
+            assert new_landing.approach_direction is old_landing.approach_direction
+            assert new_landing.corner_handedness is old_landing.corner_handedness
+
+
+@pytest.mark.parametrize("shift", [0.0, 1e-9], ids=["zero", "float-noise"])
+@pytest.mark.parametrize("fixture", (*_MOVABLE_FIXTURES, *_STATION_PINNED_FIXTURES))
+def test_unmoved_grants_return_an_equal_execution(fixture: str, shift: float) -> None:
+    execution, requests = _grant_fixture(fixture)
+    applied = apply_convergence_corridor_grants(
+        execution, requests, _grants(requests, shift)
+    )
+    assert applied == execution
+    assert applied.plans == execution.plans
+    assert not any(
+        item.code == CONVERGENCE_CORRIDOR_GRANT_APPLIED for item in applied.diagnostics
+    )
+
+
+def test_reapplying_a_granted_execution_fails_on_its_stale_frame() -> None:
+    execution, requests = _grant_fixture(_FUNCPROFILER)
+    grants = _grants(requests, _SHIFT)
+    applied = apply_convergence_corridor_grants(execution, requests, grants)
+    assert applied != execution
+    with pytest.raises(ConvergenceInvariantError, match="stale"):
+        apply_convergence_corridor_grants(applied, requests, grants)
+
+
+def test_opening_end_off_the_central_run_moves_with_its_landing() -> None:
+    execution, requests = _grant_fixture(_MERGE_PULLAWAY)
+    (request,) = requests
+    plan = _plans_by_owner(execution)[request.variable.owner_id]
+    axis = plan.trunk_axis
+    run_start = min(axis.extent_start, axis.extent_end)
+    landing = next(
+        item
+        for item in plan.landings
+        if item.opening_turn_segment is not None
+        and item.opening_turn_segment[1][0] < run_start - COORD_TOLERANCE
+    )
+    assert landing.opening_turn_segment[1][1] == axis.coordinate
+    grant = _grant(request, axis.coordinate + _SHIFT)
+    applied = apply_convergence_corridor_grants(execution, requests, (grant,))
+    moved = next(
+        item
+        for item in _plans_by_owner(applied)[request.variable.owner_id].landings
+        if item.member_id == landing.member_id
+    )
+    start, end = moved.opening_turn_segment
+    assert start == landing.opening_turn_segment[0]
+    assert end == (landing.opening_turn_segment[1][0], grant.coordinate)
+    assert moved.join_point == (landing.join_point[0], grant.coordinate)
+
+
+def test_controlled_point_beyond_the_run_moves_and_an_unnamed_one_on_it_stays() -> None:
+    execution, requests = _grant_fixture(_FUNCPROFILER)
+    (request,) = requests
+    plan = _plans_by_owner(execution)[request.variable.owner_id]
+    axis = plan.trunk_axis
+    run_end = max(axis.extent_start, axis.extent_end)
+    (continuation,) = plan.outgoing_continuations
+    beyond = (run_end + 5 * COORD_TOLERANCE, axis.coordinate)
+    on_run = ((axis.extent_start + axis.extent_end) / 2, axis.coordinate)
+    probed = replace(
+        plan,
+        outgoing_continuations=(
+            replace(continuation, start_point=beyond, end_point=on_run),
+        ),
+    )
+    probed_execution = replace(execution, plans=(probed,))
+    grant = _grant(request, axis.coordinate + _SHIFT)
+
+    applied = apply_convergence_corridor_grants(probed_execution, requests, (grant,))
+
+    (granted,) = _plans_by_owner(applied)[
+        request.variable.owner_id
+    ].outgoing_continuations
+    assert granted.start_point == (beyond[0], grant.coordinate)
+    assert granted.end_point == on_run
+    legacy = convergences._move_trunk_axis(probed, grant.coordinate)
+    assert legacy.outgoing_continuations[0].start_point == beyond
+
+
+def test_a_trunk_sharing_the_granted_coordinate_stays_put() -> None:
+    execution, requests = _grant_fixture(_FAN_IN_MERGE)
+    first, second = requests
+    assert first.variable.coordinate == second.variable.coordinate
+    granted = first.variable.coordinate + _SHIFT
+    grants = (_grant(first, granted), _grant(second, second.variable.coordinate))
+    applied = apply_convergence_corridor_grants(execution, requests, grants)
+    before, after = _plans_by_owner(execution), _plans_by_owner(applied)
+    assert after[first.variable.owner_id].trunk_axis.coordinate == granted
+    assert after[second.variable.owner_id] is before[second.variable.owner_id]
+
+
+def _drop_last(requests, grants):
+    return requests, grants[:-1]
+
+
+def _duplicate_grant(requests, grants):
+    return requests, (*grants, grants[0])
+
+
+def _duplicate_request(requests, grants):
+    return (*requests, requests[0]), grants
+
+
+def _extra_grant(requests, grants):
+    return requests, (
+        *grants,
+        replace(grants[0], variable_id="convergence-trunk|invented"),
+    )
+
+
+def _with_first(**changes) -> Callable:
+    def mutate(requests, grants):
+        return requests, (replace(grants[0], **changes), *grants[1:])
+
+    return mutate
+
+
+def _altered_recipe(requests, grants):
+    recipe = grants[0].control_recipe
+    first, *rest = recipe.controlled_points
+    altered = replace(
+        recipe,
+        controlled_points=(
+            replace(first, source_offset=first.source_offset + 1.0),
+            *rest,
+        ),
+    )
+    return requests, (replace(grants[0], control_recipe=altered), *grants[1:])
+
+
+def _below_domain(requests, grants):
+    request = requests[0]
+    minimum = request.domain.minimum_coordinate
+    assert minimum is not None
+    return requests, (_grant(request, minimum - _SHIFT), *grants[1:])
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        pytest.param(_drop_last, "do not complete", id="partial"),
+        pytest.param(_duplicate_grant, "duplicated", id="duplicate-grant"),
+        pytest.param(_duplicate_request, "duplicated", id="duplicate-request"),
+        pytest.param(_extra_grant, "do not complete", id="extra"),
+        pytest.param(
+            _with_first(coordinate=math.inf), "non-finite", id="nonfinite-coordinate"
+        ),
+        pytest.param(
+            _with_first(coordinate_delta=math.nan), "non-finite", id="nonfinite-delta"
+        ),
+        pytest.param(
+            _with_first(coordinate_delta=_SHIFT + 1.0),
+            "inconsistent",
+            id="inconsistent-delta",
+        ),
+        pytest.param(
+            _with_first(owner_id="convergence-plan|invented"),
+            "wrong owner",
+            id="wrong-owner-id",
+        ),
+        pytest.param(
+            _with_first(owner_kind=CorridorScalarOwnerKind.MEMBER_CARRIER),
+            "wrong owner",
+            id="wrong-owner-kind",
+        ),
+        pytest.param(_altered_recipe, "control recipe", id="altered-recipe"),
+        pytest.param(
+            _with_first(control_recipe=None), "control recipe", id="missing-recipe"
+        ),
+        pytest.param(_below_domain, "outside its request's domain", id="domain"),
+    ],
+)
+def test_invalid_grant_population_fails_before_publication(
+    mutate: Callable, message: str
+) -> None:
+    _graph, _ctx, execution, _targets, requests = _requests_for(
+        str(ROOT / _FAN_IN_MERGE)
+    )
+    assert len(requests) >= 2
+    plans = execution.plans
+    bad_requests, bad_grants = mutate(requests, _grants(requests, _SHIFT))
+    with pytest.raises(ConvergenceInvariantError, match=message):
+        apply_convergence_corridor_grants(execution, bad_requests, bad_grants)
+    assert execution.plans is plans
+
+
+def test_infeasible_directed_runway_raises_instead_of_flipping() -> None:
+    execution, requests = _grant_fixture(_FUNCPROFILER)
+    (request,) = requests
+    runway = next(
+        item
+        for item in request.control_recipe.directed_runways
+        if item.axis == request.variable.axis
+    )
+    assert runway.anchor_coordinate is not None
+    short = runway.anchor_coordinate + runway.direction_sign * (
+        runway.minimum_distance / 2
+    )
+    reversed_ = runway.anchor_coordinate - runway.direction_sign * _SHIFT
+    for coordinate in (short, reversed_):
+        with pytest.raises(ConvergenceInvariantError, match="directed runway"):
+            apply_convergence_corridor_grants(
+                execution, requests, (_grant(request, coordinate),)
+            )
+
+
+def test_grant_that_would_reverse_a_flank_connector_raises() -> None:
+    execution, requests = _grant_fixture(_FUNCPROFILER)
+    (request,) = requests
+    request = replace(
+        request,
+        control_recipe=replace(request.control_recipe, directed_runways=()),
+    )
+    axis = _plans_by_owner(execution)[request.variable.owner_id].trunk_axis
+    assert abs(axis.target_flank_coordinate - axis.coordinate) > COORD_TOLERANCE
+    beyond = axis.target_flank_coordinate - math.copysign(
+        _SHIFT, axis.coordinate - axis.target_flank_coordinate
+    )
+    with pytest.raises(ConvergenceInvariantError, match="reverse"):
+        apply_convergence_corridor_grants(
+            execution, (request,), (_grant(request, beyond),)
+        )
+
+
+@pytest.mark.parametrize("fixture", (*_MOVABLE_FIXTURES, *_STATION_PINNED_FIXTURES))
+def test_grant_path_reaches_no_proximity_helper_legacy_setter_or_solver(
+    fixture: str,
+) -> None:
+    execution, requests = _grant_fixture(fixture)
+    grants = _grants(requests, _SHIFT)
+    called: list[str] = []
+
+    def forbidden(name: str) -> Callable:
+        def raise_on_call(*_args, **_kwargs):
+            called.append(name)
+            raise AssertionError(f"the grant path called {name}")
+
+        return raise_on_call
+
+    with pytest.MonkeyPatch.context() as patch:
+        for name in _PROXIMITY_AND_LEGACY_HELPERS:
+            patch.setattr(convergences, name, forbidden(name))
+        for module in (corridor_cohorts, corridor_cohort_integration):
+            patch.setattr(
+                module, "solve_corridor_cohorts", forbidden("solve_corridor_cohorts")
+            )
+        patch.setattr(
+            corridor_cohort_integration,
+            "compile_corridor_cohort_plan",
+            forbidden("compile_corridor_cohort_plan"),
+        )
+        applied = apply_convergence_corridor_grants(execution, requests, grants)
+
+    assert called == []
+    assert {
+        plan.trunk_axis.coordinate
+        for plan in applied.plans
+        if plan.trunk_axis is not None
+    } == {request.variable.coordinate + _SHIFT for request in requests}
+
+
+def test_opening_roles_state_the_column_and_the_lateral_end_on_either_axis() -> None:
+    _graph, ctx, execution, _targets, requests = _requests_for(
+        str(ROOT / _FUNCPROFILER)
+    )
+    plan = next(iter(_eligible_plans_by_owner(execution).values()))
+    landing = next(item for item in plan.landings if item.opening_turn_segment)
+    column = landing.opening_turn_coordinate
+
+    def opening_roles(candidate: ConvergencePlan):
+        _target, _dependants, variable, recipe = (
+            convergences._convergence_corridor_target(candidate, ctx)
+        )
+        prefix = f"{variable.variable_id}|landing:{landing.member_id}|"
+        points = {
+            point.role_id.removeprefix(prefix): point
+            for point in (*recipe.controlled_points, *recipe.fixed_points)
+            if point.role_id.startswith(prefix)
+        }
+        return points["opening"], points["opening-end"]
+
+    opening, end = opening_roles(plan)
+    assert isinstance(opening, CorridorScalarFixedPoint)
+    assert (opening.axis, opening.coordinate) == (0, column)
+    assert not isinstance(end, CorridorScalarFixedPoint)
+    assert end.axis == 1
+
+    vertical_axis = ConvergenceTrunkAxis(
+        axis=DemandAxis.Y,
+        coordinate=column + 40.0,
+        extent_start=landing.join_point[1] - 100.0,
+        extent_end=landing.join_point[1] + 100.0,
+        direction=Direction.D,
+        source_flank_coordinate=column - 40.0,
+        target_flank_coordinate=column + 80.0,
+    )
+    vertical = replace(plan, trunk_axis=vertical_axis)
+    opening, end = opening_roles(vertical)
+    assert isinstance(opening, CorridorScalarFixedPoint)
+    assert (opening.axis, opening.coordinate) == (0, column)
+    assert isinstance(end, CorridorScalarFixedPoint)
+    assert (end.axis, end.coordinate) == (0, landing.opening_turn_segment[1][0])
+
+
+@pytest.mark.parametrize("fixture", _STATION_PINNED_FIXTURES)
+def test_trunk_on_an_entry_port_lane_is_pinned_to_its_coordinate(fixture: str) -> None:
+    _graph, _ctx, execution, targets, requests = _requests_for(str(ROOT / fixture))
+    by_owner = _eligible_plans_by_owner(execution)
+    targets_by_identity = {(item.member_id, item.edge_key): item for item in targets}
+    pinned = []
+    for request in requests:
+        plan = by_owner[request.variable.owner_id]
+        on_port = any(
+            _points_coincide(
+                targets_by_identity[(point.member_id, point.edge_key)].route.points[
+                    point.point_rank
+                ],
+                continuation.end_point,
+            )
+            for point in request.control_recipe.controlled_points
+            for continuation in plan.outgoing_continuations
+        )
+        domain = request.domain
+        is_pinned = (
+            domain.minimum_coordinate
+            == domain.maximum_coordinate
+            == request.variable.coordinate
+        )
+        assert is_pinned == on_port
+        if is_pinned:
+            pinned.append(request)
+    assert pinned
+    with pytest.raises(ConvergenceInvariantError, match="outside its request's domain"):
+        apply_convergence_corridor_grants(
+            execution,
+            requests,
+            tuple(
+                _grant(item, item.variable.coordinate + _SHIFT)
+                if item is pinned[0]
+                else _grant(item, item.variable.coordinate)
+                for item in requests
+            ),
+        )
+
+
+def _shift_corridor_preference(monkeypatch: pytest.MonkeyPatch, **domain) -> None:
+    """Prefer every convergence trunk ``_SHIFT`` px past where it stands."""
+    real = convergences._convergence_corridor_preference
+
+    def shifted(*args, **kwargs):
+        preferred, request_domain = real(*args, **kwargs)
+        return preferred + _SHIFT, replace(request_domain, **domain)
+
+    monkeypatch.setattr(convergences, "_convergence_corridor_preference", shifted)
+
+
+def _render(
+    fixture: str, monkeypatch: pytest.MonkeyPatch
+) -> tuple[RoutePlan, list[RoutedPath]]:
+    """Render *fixture*; return its published plan and the routes it drew."""
+    settled: list[svg._SettledRenderGeometry] = []
+    real_settle = svg._settle_render_geometry
+
+    def settle(*args, **kwargs):
+        result = real_settle(*args, **kwargs)
+        settled.append(result)
+        return result
+
+    with monkeypatch.context() as patch:
+        patch.setattr(svg, "_settle_render_geometry", settle)
+        path = ROOT / fixture
+        graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+        observed = svg.build_observed_render_plan(graph, resolve_theme(None, graph))
+    return observed.route_plan, settled[-1].routes
+
+
+def _routes_by_edge(routes: list[RoutedPath]) -> dict[tuple[str, str, str], RoutedPath]:
+    return {
+        (route.edge.source, route.edge.target, route.line_id): route for route in routes
+    }
+
+
+@pytest.mark.parametrize(
+    ("fixture", "granted"),
+    [(_FUNCPROFILER, 466.0), (_MERGE_RIGHT_ENTRY, 362.0)],
+)
+def test_granted_trunk_is_drawn_and_published_and_nothing_else_moves(
+    fixture: str, granted: float, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _baseline_plan, baseline_routes = _render(fixture, monkeypatch)
+    _shift_corridor_preference(monkeypatch)
+
+    plan, routes = _render(fixture, monkeypatch)
+
+    (trunk,) = (item for item in plan.convergence_plans if item.trunk_axis is not None)
+    assert trunk.trunk_axis.coordinate == granted
+    assert any(
+        item.code == CONVERGENCE_CORRIDOR_GRANT_APPLIED
+        and item.member_id == trunk.primary_trunk_member_id
+        for item in plan.diagnostics
+    )
+    drawn, baseline = _routes_by_edge(routes), _routes_by_edge(baseline_routes)
+    assert drawn.keys() == baseline.keys()
+    trunk_route = next(
+        route
+        for route in routes
+        if route.convergence_member_id == str(trunk.primary_trunk_member_id)
+    )
+    assert convergences._route_covers_trunk(trunk_route, trunk.trunk_axis)
+    for key, route in drawn.items():
+        if route.convergence_plan_id == str(trunk.id):
+            continue
+        assert route.points == baseline[key].points, key
+
+
+def test_fan_in_merge_grant_lands_in_the_appliers_own_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The applier's output carries the grant exactly.
+
+    ``settle_global_convergence_execution`` re-settles the co-travelling trunks
+    after the applier returns, so the published plan is not where the grant is
+    stated; the applier's own return value is.
+    """
+    applied: list[tuple[tuple[CorridorScalarGrant, ...], ConvergencePlanExecution]] = []
+    real_apply = planning.apply_convergence_corridor_grants
+
+    def spy(execution, requests, grants):
+        result = real_apply(execution, requests, grants)
+        applied.append((tuple(grants), result))
+        return result
+
+    monkeypatch.setattr(planning, "apply_convergence_corridor_grants", spy)
+    _shift_corridor_preference(monkeypatch)
+
+    _render(_FAN_IN_MERGE, monkeypatch)
+
+    moving = [
+        (grants, result)
+        for grants, result in applied
+        if any(abs(grant.coordinate_delta) > COORD_TOLERANCE_FINE for grant in grants)
+    ]
+    assert moving
+    for grants, result in moving:
+        by_owner = _plans_by_owner(result)
+        assert len(grants) == 2
+        for grant in grants:
+            assert grant.coordinate == 208.0
+            assert by_owner[grant.owner_id].trunk_axis.coordinate == grant.coordinate
+
+
+@pytest.mark.parametrize("fixture", _STATION_PINNED_FIXTURES)
+def test_trunk_on_an_entry_port_cannot_be_drawn_off_it(
+    fixture: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Lifting the pin draws a feeder into the port on the wrong approach.
+
+    The moved trunk's lane no longer meets the port it enters, so emission has
+    to turn onto the port and the landing's planned approach does not survive.
+    """
+    _shift_corridor_preference(
+        monkeypatch, minimum_coordinate=None, maximum_coordinate=None
+    )
+    with pytest.raises(ConvergenceInvariantError, match="planned .* approach"):
+        _render(fixture, monkeypatch)
