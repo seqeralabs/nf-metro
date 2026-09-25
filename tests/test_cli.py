@@ -34,10 +34,6 @@ DEFERRED_ROUTE_GUARD_FAILURES = [
         "hash_seed_determinism/seed_15.mmd",
         "bundle 's8__exit_left_8'->'s10__entry_right_19' corner (623.0,616.0)",
     ),
-    (
-        "hash_seed_determinism/seed_77.mmd",
-        "destination-tail bundle into port 's16__entry_right_18'",
-    ),
 ]
 
 

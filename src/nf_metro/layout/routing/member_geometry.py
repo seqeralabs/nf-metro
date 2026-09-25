@@ -2760,6 +2760,19 @@ def build_member_geometry_execution(
         complete_path_route_ids = frozenset(
             id(route) for route in complete_path_population
         )
+        # The freeze owns every gap channel a candidate records, whether or not
+        # its system owns the complete path, and the post-emission tail and riser
+        # repairs skip an owned channel; those repairs therefore reach every
+        # candidate here.
+        frozen_population = [
+            *complete_path_population,
+            *(
+                route
+                for route in candidate_routes
+                if id(route) not in complete_path_route_ids
+            ),
+        ]
+        frozen_route_ids = frozenset(id(route) for route in frozen_population)
         _materialize_gap_slots(
             allocation_population,
             ctx,
@@ -2782,7 +2795,7 @@ def build_member_geometry_execution(
         # direction bands have to be settled here rather than by the same pass
         # running after emission, which skips a plan-owned trunk.
         _separate_opposing_inter_row_trunks(normalization_population, ctx)
-        _reconcile_port_peeloff_risers(complete_path_population, ctx)
+        _reconcile_port_peeloff_risers(frozen_population, ctx)
         _coincide_same_line_tracks(normalization_population, ctx)
         _coincide_fanout_opening_descents(
             normalization_population, ctx, settle_frozen_arcs=True
@@ -2822,7 +2835,7 @@ def build_member_geometry_execution(
         settled_tail_segments = _bundle_same_destination_tails(
             normalization_population,
             ctx,
-            movable_route_ids=complete_path_route_ids,
+            movable_route_ids=frozen_route_ids,
         )
 
         settled_approach_segments = _settle_same_destination_approach_bundles(

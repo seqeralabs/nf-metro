@@ -47,6 +47,7 @@ from nf_metro.layout.routing.core import (
     _route_edges,
     observe_route_edges,
     observe_route_edges_centred,
+    route_edges,
 )
 from nf_metro.layout.routing.corners import (
     _corner_travel_units,
@@ -65,6 +66,10 @@ from nf_metro.layout.routing.corridor_cohorts import (
     CorridorClearanceShortfall,
 )
 from nf_metro.layout.routing.families import RouteFamilyId
+from nf_metro.layout.routing.invariants import (
+    check_no_fused_cotravelling_lines,
+    check_peeloff_concentric,
+)
 from nf_metro.layout.routing.normalize import _rederive_semantic_end_corners, _VChannel
 from nf_metro.layout.routing.offsets import compute_station_offsets
 from nf_metro.layout.routing.planning import _allocation_eligible_system_ids
@@ -942,6 +947,24 @@ def test_distinct_line_fan_traverses_bundle_before_member_freeze() -> None:
         assert red.points[2][0] > red.points[3][0]
         assert red.trunk_slot == green.trunk_slot
         _assert_channels_equal_emission(observation, red)
+
+
+@pytest.mark.parametrize("seed", ("seed_15", "seed_77"))
+def test_owned_peeloff_bundles_nest_before_member_freeze(seed: str) -> None:
+    """A frozen gap channel carrying a peel-off tail is seated on its band first.
+
+    The freeze owns every gap channel it records, and the post-emission tail and
+    riser repairs skip an owned channel, so the pre-freeze repairs are the only
+    ones that can settle the trunk depth and riser column of any frozen member,
+    whether or not its system owns the complete path.
+    """
+    path = ROOT / "tests" / "fixtures" / "hash_seed_determinism" / f"{seed}.mmd"
+    graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+
+    assert check_peeloff_concentric(graph, routes) == []
+    assert check_no_fused_cotravelling_lines(graph, routes, offsets) == []
 
 
 def test_one_segment_can_own_distinct_gap_row_claims() -> None:
