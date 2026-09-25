@@ -594,8 +594,9 @@ def _seat_port_approaches_on_trunk_flank(
     :func:`normalize._convergent_port_groups` fuses such same-line approaches
     after emission, but it cannot move a column a plan owns, and the landing
     states the feeder's opening column from this trial geometry.  Seating the
-    feeder here, with the same grouping, makes the plan state the fused column.
-    Only the feeders move: the trunk axis has already been read off its route.
+    feeder here, with the same grouping and reference, makes the plan state the
+    fused column.  Only the feeders move: the trunk axis has already been read
+    off its route, so a group holding the trunk fuses onto its flank.
     """
     from nf_metro.layout.routing.normalize import (
         _convergent_port_groups,
@@ -605,18 +606,14 @@ def _seat_port_approaches_on_trunk_flank(
     )
 
     for group in _convergent_port_groups(routes, ctx):
-        flank = next((item for item in group.channels if item.route is trunk), None)
-        if flank is None:
-            continue
+        reference = next(
+            (item.x for item in group.channels if item.route is trunk), group.ref_x
+        )
         for channel in group.channels:
-            if (
-                channel.route is trunk
-                or _planner_owns_channel(channel)
-                or abs(channel.x - flank.x) <= COORD_TOLERANCE
-            ):
-                continue
-            _reconcile_moved_gap_slot(channel, flank.x, ctx.graph)
-            _set_vchannel_x(channel, flank.x)
+            movable = channel.route is not trunk and not _planner_owns_channel(channel)
+            if movable and abs(channel.x - reference) > COORD_TOLERANCE:
+                _reconcile_moved_gap_slot(channel, reference, ctx.graph)
+                _set_vchannel_x(channel, reference)
 
 
 def _direct_axis_points(
