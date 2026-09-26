@@ -12,6 +12,7 @@ from collections.abc import (
     Sequence,
 )
 from dataclasses import dataclass, field
+from itertools import combinations
 from typing import NamedTuple
 
 from nf_metro.layout.constants import (
@@ -3306,18 +3307,101 @@ def _collider_slot(
     pair runs into needs reversed.  A fan that wants the order *vacated* gives
     agrees; one that wants the other order slides *collider* one slot beyond
     *claimed*, provided that slot is free, since sliding it on would displace a
-    third line in turn.
+    third line in turn, and provided no other line sits past *vacated*, since
+    the slide would leave *vacated* as a dead lane inside the station's bundle.
     """
     fan_ranks_mover_first = _fan_entry_ranks_first(ctx, station_id, mover, collider)
     if fan_ranks_mover_first is None:
         return vacated
     if fan_ranks_mover_first == (vacated > claimed):
         return vacated
-    beyond = claimed + (ctx.offset_step if claimed > vacated else -ctx.offset_step)
-    beyond_holder = _line_at_slot(
-        ctx, station_pending, station_id, beyond, exclude=collider
+    toward = 1.0 if claimed > vacated else -1.0
+    beyond = claimed + toward * ctx.offset_step
+    if _line_at_slot(ctx, station_pending, station_id, beyond, exclude=collider):
+        return vacated
+    strands_vacated = any(
+        (vacated - _pending_offset(ctx, station_pending, station_id, line_id)) * toward
+        > _OFFSET_EQ_TOLERANCE
+        for line_id in ctx.graph.station_lines(station_id)
+        if line_id not in (mover, collider)
     )
-    return vacated if beyond_holder is not None else beyond
+    return vacated if strands_vacated else beyond
+
+
+def _first_visible_along(
+    graph: MetroGraph, station_id: str, line_id: str, forward: bool
+) -> str:
+    """The first visible station or port *line_id* reaches from *station_id*.
+
+    Walks through hidden routing waypoints (a bypass V, say) along the line's
+    sole edge in the given direction.
+    """
+    current = station_id
+    for _ in range(len(graph.stations)):
+        station = graph.stations[current]
+        if not station.is_hidden or station.is_port:
+            return current
+        edges = [
+            edge
+            for edge in (
+                graph.edges_from(current) if forward else graph.edges_to(current)
+            )
+            if edge.line_id == line_id
+        ]
+        if len(edges) != 1:
+            return current
+        current = edges[0].target if forward else edges[0].source
+    return current
+
+
+def _reorders_off_lane_bundle(
+    ctx: _OffsetCtx,
+    same_y_adj: dict[str, dict[str, list[tuple[str, str]]]],
+    sec_id: str,
+    station_id: str,
+    station_pending: Mapping[str, float],
+) -> bool:
+    """Whether moving *station_id*'s lines to *station_pending* crosses a bundle.
+
+    Compaction carries a move only along the lane (``same_y_adj``), so a
+    neighbour across a turn -- the perpendicular entry port feeding a vertical
+    section's first station, say, or the side exit its last station feeds --
+    keeps its lanes.  Reversing a pair the station and that neighbour hold in
+    one order makes the bundle between them cross itself in the turn.
+    """
+    graph = ctx.graph
+    on_lane = {nbr for nbr, _ in same_y_adj.get(sec_id, {}).get(station_id, [])}
+    carried: dict[str, set[str]] = defaultdict(set)
+    for edge in graph.edges_from(station_id):
+        if edge.target not in on_lane:
+            nbr = _first_visible_along(graph, edge.target, edge.line_id, True)
+            carried[nbr].add(edge.line_id)
+    for edge in graph.edges_to(station_id):
+        if edge.source not in on_lane:
+            nbr = _first_visible_along(graph, edge.source, edge.line_id, False)
+            carried[nbr].add(edge.line_id)
+
+    def order(
+        sid: str, line_a: str, line_b: str, pending: Mapping[str, float]
+    ) -> float:
+        return _pending_offset(ctx, pending, sid, line_a) - _pending_offset(
+            ctx, pending, sid, line_b
+        )
+
+    for nbr, lines in carried.items():
+        for line_a, line_b in combinations(sorted(lines), 2):
+            held = order(nbr, line_a, line_b, {})
+            before = order(station_id, line_a, line_b, {})
+            after = order(station_id, line_a, line_b, station_pending)
+            if held * before > 0 and held * after < 0:
+                return True
+    return False
+
+
+def _raise_retryable_conflict(lid: str, mover: str | None) -> None:
+    """Raise :class:`_CompactionConflict` naming *lid* when there is a *mover*."""
+    if mover is not None:
+        raise _CompactionConflict(lid)
 
 
 def _propagate_compaction(
@@ -3339,9 +3423,12 @@ def _propagate_compaction(
     :func:`_compaction_peer_conflict`) and raises :class:`_CompactionConflict`
     (naming the offending line) instead of returning ``None`` on a conflict,
     so the caller can retry holding that one line fixed.  Left unset, a
-    conflict aborts the whole compaction for this seed.
+    conflict aborts the whole compaction for this seed.  In a vertical section,
+    a move that reverses a pair against a neighbour off the column
+    (:func:`_reorders_off_lane_bundle`) is a conflict too.
     """
     graph = ctx.graph
+    vertical = lanes_run_along_x(graph.sections[sec_id].direction)
     # Map: station_id -> {line_id: new_offset}
     pending: dict[str, dict[str, float]] = {seed_sid: compacted}
     visited: set[tuple[str, str]] = set()
@@ -3371,8 +3458,7 @@ def _propagate_compaction(
             if _compaction_peer_conflict(
                 graph, sec_layer_stations, sec_id, nbr_sid, lid, exclude=mover
             ):
-                if mover is not None:
-                    raise _CompactionConflict(lid)
+                _raise_retryable_conflict(lid, mover)
                 return None
 
             nbr_lines = graph.station_lines(nbr_sid)
@@ -3392,6 +3478,13 @@ def _propagate_compaction(
                     ctx, nbr_sid, nbr_pending, lid, collision_lid, nbr_cur, new_off
                 )
                 queue.append((nbr_sid, collision_lid))
+            # LR/RL runs are exempt: their port phases re-settle the ports and
+            # junctions a reordered run feeds.
+            if vertical and _reorders_off_lane_bundle(
+                ctx, same_y_adj, sec_id, nbr_sid, nbr_pending
+            ):
+                _raise_retryable_conflict(lid, mover)
+                return None
 
     if max_steps <= 0:
         return None

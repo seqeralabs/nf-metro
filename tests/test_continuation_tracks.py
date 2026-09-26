@@ -20,6 +20,7 @@ from nf_metro.layout.phases.guards import (
 )
 from nf_metro.layout.routing import compute_station_offsets
 from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.model import PortSide
 
 ROOT = Path(__file__).parents[1]
 SEED_72 = ROOT / "tests" / "fixtures" / "hash_seed_determinism" / "seed_72.mmd"
@@ -528,6 +529,32 @@ _COMPACTION_LINES = "\n".join(
     )
 )
 
+_PERPENDICULAR_ENTRY_SWAP = """
+graph LR
+    subgraph z0 [Zone 0]
+        q0x0[Q0X0]
+        q0x1[Q0X1]
+        q0x0 -->|m0,m1,m2| q0x1
+    end
+    subgraph z1 [Zone 1]
+        q1x0[Q1X0]
+        q1x1[Q1X1]
+        q1x0 -->|m1| q1x1
+    end
+    subgraph z2 [Zone 2]
+        %%metro direction: TB
+        q2x0[Q2X0]
+        q2x1[Q2X1]
+        q2x2[Q2X2]
+        q2x0 -->|m2| q2x1
+        q2x1 -->|m0| q2x2
+    end
+    q0x1 -->|m0,m1| q1x0
+    q1x1 -->|m0,m1,m2| q2x0
+    q0x1 -->|m0,m1| q2x0
+    q0x1 -->|m0,m1,m2| q1x0
+"""
+
 # Each map closes a lane gap whose propagation lands on a slot another line
 # holds at the next station, and each needs that line re-seated differently.
 COMPACTION_COLLISION_MAPS = {
@@ -714,6 +741,45 @@ graph LR
     q3x1 -->|m0| q4x0
     q3x1 -->|m2| q4x0
 """,
+    # Closing the lane gap at a vertical section's second station swaps the
+    # pair its side entry port feeds into the first station, across the turn
+    # the port's lanes take into the column.
+    "swap_across_perpendicular_entry": _PERPENDICULAR_ENTRY_SWAP,
+    # The displaced line's slot beyond the mover is free, but sliding it there
+    # would leave the mover's vacated slot empty inside the station's bundle.
+    "slot_beyond_strands_vacated": """
+graph LR
+    subgraph z0 [Zone 0]
+        q0x0[Q0X0]
+        q0x1[Q0X1]
+        q0x2[Q0X2]
+        q0x0 -->|m0,m3| q0x1
+        q0x1 -->|m0,m1| q0x2
+    end
+    subgraph z1 [Zone 1]
+        q1x0[Q1X0]
+        q1x1[Q1X1]
+        q1x2[Q1X2]
+        q1x0 -->|m1| q1x1
+        q1x1 -->|m1| q1x2
+    end
+    subgraph z2 [Zone 2]
+        %%metro direction: RL
+        q2x0[Q2X0]
+        q2x1[Q2X1]
+        q2x2[Q2X2]
+        q2x3[Q2X3]
+        q2x0 -->|m0| q2x1
+        q2x1 -->|m0| q2x2
+        q2x2 -->|m1| q2x3
+    end
+    q0x2 -->|m3| q1x0
+    q0x2 -->|m1| q1x0
+    q0x2 -->|m2| q2x0
+    q1x2 -->|m2| q2x3
+    q0x2 -->|m1,m3| q1x0
+    q0x2 -->|m1,m3| q2x0
+""",
 }
 
 
@@ -721,3 +787,20 @@ graph LR
 def test_gap_compaction_collision_renders(name: str) -> None:
     """A line displaced by gap compaction lands where the map still renders."""
     render_string(f"{_COMPACTION_LINES}\n{COMPACTION_COLLISION_MAPS[name]}")
+
+
+def test_gap_compaction_keeps_a_side_entry_bundle_in_its_order() -> None:
+    """A vertical section's first station holds its side entry's lane order.
+
+    ``q2x1`` carries ``m0`` and ``m2`` with ``m1``'s lane empty between them;
+    closing it along the column would swap ``m1`` and ``m2`` at ``q2x0``, whose
+    side entry port turns them into the column in the opposite order.
+    """
+    graph = parse_metro_mermaid(f"{_COMPACTION_LINES}\n{_PERPENDICULAR_ENTRY_SWAP}")
+    compute_layout(graph, validate=True)
+    offsets = compute_station_offsets(graph)
+    (entry_port,) = graph.sections["z2"].entry_ports
+
+    assert graph.ports[entry_port].side in (PortSide.LEFT, PortSide.RIGHT)
+    for station_id in (entry_port, "q2x0"):
+        assert offsets[station_id, "m1"] < offsets[station_id, "m2"], station_id
