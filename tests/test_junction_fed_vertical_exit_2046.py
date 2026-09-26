@@ -11,10 +11,13 @@ the exit leg then climbs back over the section's trunk.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
 
+from nf_metro.api import render_string
+from nf_metro.layout.constants import CURVE_RADIUS
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.geometry import AxisFrame, lanes_run_along_x
 from nf_metro.parser.mermaid import parse_metro_mermaid
@@ -89,3 +92,32 @@ def test_junction_fed_opposite_flow_seam_mirrors_like_a_direct_feed() -> None:
     station sits level with the feeder's trailing one."""
     graph = _layout(FIXTURES["bt_side_exit"], validate=False)
     assert graph.stations["s2n0"].y == pytest.approx(graph.stations["s1n4"].y)
+
+
+def _quadratic_corner_radii(svg: str) -> list[float]:
+    radii = []
+    for d in re.findall(r' d="([^"]*)"', svg):
+        cur = (0.0, 0.0)
+        for cmd, args in re.findall(r"([MLQ])([\d.\-,\s]+)", d):
+            n = [float(v) for v in re.findall(r"-?[\d.]+", args)]
+            if cmd == "Q":
+                radii.append(
+                    max(
+                        abs(n[0] - cur[0]) + abs(n[1] - cur[1]),
+                        abs(n[2] - n[0]) + abs(n[3] - n[1]),
+                    )
+                )
+                cur = (n[2], n[3])
+            else:
+                cur = (n[0], n[1])
+    return radii
+
+
+@pytest.mark.parametrize("fixture", ["tb_side_exit", "bt_top_exit", "bt_side_exit"])
+def test_junction_fed_branches_turn_at_full_radius(fixture: str) -> None:
+    """Each single-line branch off the junction turns on a formed curve: a
+    consumer entry seated a couple of pixels off the junction's run would
+    force a sub-radius S-jog instead."""
+    radii = _quadratic_corner_radii(render_string(FIXTURES[fixture]))
+    assert radii
+    assert min(radii) == pytest.approx(CURVE_RADIUS), sorted(radii)

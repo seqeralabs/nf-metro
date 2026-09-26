@@ -351,6 +351,7 @@ def _align_lr_entry_port(
 
         if entry_section.grid_row != src_section.grid_row:
             _seat_perp_entry_port_before_stations(graph, entry_section, port, port_id)
+            _level_entry_with_nearby_feeder(graph, entry_section, port_id, src_y)
             break
 
         # A source exit whose Y is a structural boundary, not a consumer-aligned
@@ -386,6 +387,9 @@ def _align_lr_entry_port(
                 if not mirrored:
                     _seat_perp_entry_port_before_stations(
                         graph, entry_section, port, port_id
+                    )
+                    _level_entry_with_nearby_feeder(
+                        graph, entry_section, port_id, src_y
                     )
                 break
             consumer_y = _entry_consumer_y(graph, port_id, entry_section)
@@ -1894,6 +1898,28 @@ def _seat_perp_entry_port_before_stations(
     _set_port_y(graph, port_id, target_y)
     if outside_bbox:
         _expand_bbox_for_y(entry_section, target_y)
+
+
+def _level_entry_with_nearby_feeder(
+    graph: MetroGraph, entry_section: Section, port_id: str, feeder_y: float
+) -> None:
+    """Level a seated vertical-flow side entry with a feeder arriving beside it.
+
+    A feeder off the seat by less than one S-bend (two curve radii) cannot step
+    onto the entry with formed curves, so the run is drawn as a sub-radius jog.
+    The entry takes the feeder's own Y instead, making the run straight,
+    provided that Y precedes the flow-start station by at least the port gap.
+    """
+    port_st = graph.stations.get(port_id)
+    internal_ys = _internal_station_ys(graph, entry_section)
+    if port_st is None or not internal_ys or lanes_run_along_y(entry_section.direction):
+        return
+    sign = AxisFrame.flow_sign(entry_section.direction)
+    flow_start_y = min(internal_ys) if sign > 0 else max(internal_ys)
+    if 0 < abs(feeder_y - port_st.y) < 2 * CURVE_RADIUS and (
+        sign * (flow_start_y - feeder_y) >= MIN_PORT_STATION_GAP
+    ):
+        _set_port_y(graph, port_id, feeder_y)
 
 
 def _space_ports_from_termini(

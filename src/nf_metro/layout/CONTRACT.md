@@ -520,6 +520,11 @@ in pipeline order.
   port (`divergence_junction_exit_ports`) before the check, so the TB
   entry clamp (`_clamp_tb_entry_port`) never pulls such an exit off its
   carrier station's side of the section.
+  A vertical-flow side entry seated before its flow start (cross-row, or
+  by the exception above) takes its feeder's Y when the two differ by
+  less than two curve radii, since no formed S-bend fits between them,
+  as long as that Y precedes the flow-start station by at least
+  `MIN_PORT_STATION_GAP` (`_level_entry_with_nearby_feeder`).
 - **Invariants preserved**: Real station coords, except the consumer
   section a seam mirror slides. Exit ports, except a same-row trunk
   feeder the TB entry clamp pulls level with the clamped entry.
