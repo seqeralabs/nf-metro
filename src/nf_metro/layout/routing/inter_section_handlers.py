@@ -85,6 +85,7 @@ from nf_metro.layout.routing.common import (
     inter_row_wrap_band,
     iter_horizontal_trunks,
     iter_vertical_segments,
+    lines_by_section,
     lowest_section_bottom_crossing_span,
     max_grid_row_with_content,
     merge_trunk_force_cross_row,
@@ -100,6 +101,7 @@ from nf_metro.layout.routing.common import (
     segment_direction,
     symmetric_bundle_midpoint,
     trailing_perp_side,
+    v_segment_crossed_sections,
     vertical_direction,
 )
 from nf_metro.layout.routing.context import (
@@ -378,14 +380,17 @@ class _InterFacts:
             return self.v_segment_crosses_other_section(self.sx, self.sy, self.ty)
         if not self.continues_tb_exit_through_junction:
             return False
-        section_ids = set(self.graph.sections)
-        return any(
-            not carries_line_along_column(self.graph, section, self.edge.line_id)
-            for section in self.graph.sections.values()
-            if section.id not in self.endpoint_section_ids
-            and self.v_segment_crosses_other_section(
-                self.sx, self.sy, self.ty, section_ids - {section.id}
+        crossed = list(
+            v_segment_crossed_sections(
+                self.graph, self.sx, self.sy, self.ty, self.endpoint_section_ids
             )
+        )
+        if not crossed:
+            return False
+        section_lines = lines_by_section(self.graph)
+        return any(
+            not carries_line_along_column(section, self.edge.line_id, section_lines)
+            for section in crossed
         )
 
     @property
@@ -2457,7 +2462,9 @@ def _around_stack_geometry(
     # measured against, and a planned turn axis is frozen against the settlement
     # that would otherwise push the ladder onto it, so it is stated here.  An
     # upward feeder's trailing edge carries its own header badge, so the
-    # clearance it owes there is the header band's.
+    # clearance it owes there is the full header band's in every row, not
+    # ``header_corridor_y``'s: that adds a curve radius the reservation does not
+    # hold, and in the topmost row relaxes onto the badge itself.
     fan_width = max(
         (len(line_ids) - 1) * ctx.offset_step,
         *(abs(lane_offset(line_id)) for line_id in line_ids),
@@ -4885,10 +4892,10 @@ def _perp_entry_junction_straight_drop(
         ctx, edge, resolve_section(ctx.graph, tgt), tx, edge.line_id
     )
     column = tx if crossing_x is None else crossing_x
-    fed_down_the_column = any(
-        (port := ctx.graph.ports.get(item.source)) is not None
-        and port.side in (PortSide.TOP, PortSide.BOTTOM)
-        for item in ctx.graph.edges_to(src.id)
+    exit_port = ctx.graph.ports.get(ctx.divergence_exit_ports.get(src.id, ""))
+    fed_down_the_column = exit_port is not None and exit_port.side in (
+        PortSide.TOP,
+        PortSide.BOTTOM,
     )
     launch_y = sy if fed_down_the_column else sy + src_off
     drop = route_along(

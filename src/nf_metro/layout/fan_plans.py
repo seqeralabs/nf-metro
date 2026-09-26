@@ -53,6 +53,7 @@ from nf_metro.layout.route_plan import (
     fan_has_vacant_trunk,
     fan_lane_seat_keys,
 )
+from nf_metro.layout.routing.context import _section_lane_frame
 from nf_metro.parser.commitments import FlowDirection, is_flow_direction
 from nf_metro.parser.model import LineSpread, MetroGraph, PortSide
 from nf_metro.parser.route_topology import (
@@ -3593,8 +3594,6 @@ def _fork_feed_lane_sign(
     )
     if section is None:
         return 1.0
-    from nf_metro.layout.routing.context import _section_lane_frame
-
     return _section_lane_frame(graph, section, positive_fan).secondary_sign
 
 

@@ -12,7 +12,7 @@ __all__ = ["place_sections", "position_ports"]
 
 import warnings
 from collections import defaultdict, deque
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 
 from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
@@ -49,6 +49,7 @@ from nf_metro.layout.routing.common import (
     carries_line_along_column,
     flanked_cross_row_riser_neighbour_col,
     inter_row_wrap_band,
+    lines_by_section,
     max_grid_row_with_content,
     merge_junction_ids,
     resolve_section,
@@ -969,6 +970,7 @@ def _around_stack_junction_row_minimums(
     per_gap: dict[tuple[int, int], dict[str, set[str]]] = defaultdict(
         lambda: defaultdict(set)
     )
+    section_lines = lines_by_section(graph)
     for junction_id, exit_port_id in divergence_junction_sources(graph).items():
         exit_port = graph.ports.get(exit_port_id)
         if exit_port is None or exit_port.is_entry:
@@ -977,21 +979,23 @@ def _around_stack_junction_row_minimums(
         if src_sec is None or not lanes_run_along_x(src_sec.direction):
             continue
         trailing = trailing_perp_side(src_sec.direction)
-        if exit_port.side != trailing:
+        if exit_port.side is not trailing:
             continue
-        step = 1 if trailing == PortSide.BOTTOM else -1
-        facing = PortSide.TOP if trailing == PortSide.BOTTOM else PortSide.BOTTOM
+        step = 1 if trailing is PortSide.BOTTOM else -1
+        facing = PortSide.TOP if trailing is PortSide.BOTTOM else PortSide.BOTTOM
         for edge in graph.edges_from(junction_id):
             port = graph.ports.get(edge.target)
             tgt_sec = graph.sections.get(port.section_id) if port else None
-            if port is None or tgt_sec is None or port.side != facing:
+            if port is None or tgt_sec is None or port.side is not facing:
                 continue
             if (tgt_sec.grid_row - src_sec.grid_row) * step < 2:
                 continue
             if not sections_share_a_column(src_sec, tgt_sec):
                 continue
             if not any(
-                _stack_blocks_line(graph, section, src_sec, tgt_sec, edge.line_id)
+                _stack_blocks_line(
+                    section, src_sec, tgt_sec, edge.line_id, section_lines
+                )
                 for section in graph.sections.values()
             ):
                 continue
@@ -1013,18 +1017,18 @@ def _ordered_gap(row_a: int, row_b: int) -> tuple[int, int]:
 
 
 def _stack_blocks_line(
-    graph: MetroGraph,
     section: Section,
     src_sec: Section,
     tgt_sec: Section,
     line_id: str,
+    section_lines: Mapping[str, set[str]],
 ) -> bool:
     """Whether *section* stands between two same-column sections, off *line_id*."""
     lo, hi = sorted((src_sec.grid_row, tgt_sec.grid_row))
     return (
         lo < section.grid_row < hi
         and sections_share_a_column(section, src_sec)
-        and not carries_line_along_column(graph, section, line_id)
+        and not carries_line_along_column(section, line_id, section_lines)
     )
 
 

@@ -180,18 +180,29 @@ def trailing_perp_side(direction: str) -> PortSide:
     return PortSide.BOTTOM if AxisFrame.flow_sign(direction) > 0 else PortSide.TOP
 
 
+def lines_by_section(graph: MetroGraph) -> dict[str, set[str]]:
+    """Every line a station of each section carries, its ports included."""
+    lines: dict[str, set[str]] = defaultdict(set)
+    for sid, station in graph.stations.items():
+        if station.section_id is not None:
+            lines[station.section_id].update(graph.station_lines(sid))
+    return lines
+
+
 def carries_line_along_column(
-    graph: MetroGraph, section: Section, line_id: str
+    section: Section,
+    line_id: str,
+    section_lines: Mapping[str, AbstractSet[str]],
 ) -> bool:
     """Whether *section* runs *line_id* down a vertical (TB/BT) trunk.
 
     A run continuing down the same column through such a section overlays the
     line's own trunk there -- one continuous stroke -- rather than ploughing
-    through a box it never calls at.
+    through a box it never calls at.  *section_lines* is
+    :func:`lines_by_section` of the graph.
     """
-    return lanes_run_along_x(section.direction) and any(
-        station.section_id == section.id and line_id in graph.station_lines(sid)
-        for sid, station in graph.stations.items()
+    return lanes_run_along_x(section.direction) and line_id in section_lines.get(
+        section.id, ()
     )
 
 
@@ -2973,6 +2984,33 @@ def _v_segment_crosses_other_section(
     expanded box boundary by default; callers policing a prospective move can
     request an open expanded boundary without changing the segment endpoints.
     """
+    return any(
+        v_segment_crossed_sections(
+            graph,
+            x,
+            y1,
+            y2,
+            exclude_section_ids,
+            margin,
+            include_margin_boundary=include_margin_boundary,
+        )
+    )
+
+
+def v_segment_crossed_sections(
+    graph: MetroGraph,
+    x: float,
+    y1: float,
+    y2: float,
+    exclude_section_ids: AbstractSet[str | None],
+    margin: float = 0.0,
+    *,
+    include_margin_boundary: bool = True,
+) -> Iterator[Section]:
+    """Each non-exempt section a vertical segment at *x* crosses.
+
+    Same crossing test as :func:`_v_segment_crosses_other_section`.
+    """
     lo_y, hi_y = (y1, y2) if y1 <= y2 else (y2, y1)
     for section in graph.sections.values():
         if section.bbox_w <= 0 or section.id in exclude_section_ids:
@@ -2984,8 +3022,7 @@ def _v_segment_crosses_other_section(
         right = section.bbox_x + section.bbox_w + margin
         inside_x = left <= x <= right if include_margin_boundary else left < x < right
         if inside_x:
-            return True
-    return False
+            yield section
 
 
 def _section_intrudes(
