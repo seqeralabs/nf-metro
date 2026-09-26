@@ -1579,9 +1579,10 @@ def _guard_corridor_fed_solo_rides_trunk(
     With one present line there is no bundle to keep ordered, so the lane the
     line held in the upstream multi-line section only drags the lone consumer
     off the section trunk -- the box then reserves empty space for lines that
-    never enter it.  The vertical corridor absorbs the lane step, so both the
-    LEFT/RIGHT entry port and the consumer it feeds must ride offset 0.  Scope
-    is exactly :func:`iter_corridor_fed_solo_entries`.
+    never enter it.  The corridor's vertical leg -- off the port's Y or on a
+    same-row bypass riser -- absorbs the lane step, so both the LEFT/RIGHT
+    entry port and the consumer it feeds must ride offset 0.  Scope is exactly
+    :func:`iter_corridor_fed_solo_entries`.
 
     A section whose line forks internally checks only the entry port: its fan
     branches straddle the trunk and may each hold a lane aligning them with a

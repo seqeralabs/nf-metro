@@ -2471,12 +2471,12 @@ def _recenter_single_line_corridor_entry(ctx: _OffsetCtx) -> None:
     the line held in the upstream multi-line section, and keeping it only drags
     the lone consumer off the section trunk, so the section reserves empty space
     for lines that never enter it.  When every feeder reaches the port on a
-    different base Y -- a vertical corridor -- the lane step resolves in that
-    vertical leg, so re-anchor the entry port (and, for a straight chain, every
-    consumer carrying the line) at offset 0.  Anchoring the consumers too, rather
-    than leaving horizontal reconciliation to settle them, keeps reconciliation's
-    larger-magnitude preference from snapping the port back off the trunk onto
-    the consumer's lane.
+    vertical leg -- from a different base Y, or rising from a same-row bypass
+    channel -- the lane step resolves in that leg, so re-anchor the entry port
+    (and, for a straight chain, every consumer carrying the line) at offset 0.
+    Anchoring the consumers too, rather than leaving horizontal reconciliation
+    to settle them, keeps reconciliation's larger-magnitude preference from
+    snapping the port back off the trunk onto the consumer's lane.
 
     When the single line forks internally, only the entry port is re-anchored:
     the fan branches straddle the trunk and each may hold a lane that aligns it
@@ -4633,9 +4633,12 @@ def _entry_seam_is_flat(graph: MetroGraph, entry_port_id: str) -> bool:
     corridor feeder (off the port's Y) instead absorbs the lane step in its
     vertical leg, and the trunk-anchoring invariant then requires a lone
     consumer on offset 0 (:func:`iter_corridor_fed_solo_entries`); inheriting
-    the upstream lane there would only reserve empty lanes.  A same-row bypass
-    (:func:`_rises_from_same_row_bypass`) is such a corridor too, though its
-    source shares the port's Y.
+    the upstream lane there would only reserve empty lanes.  A feeder rising
+    from a same-row bypass (:func:`_rises_from_same_row_bypass`) counts as a
+    corridor feeder though its source shares the port's Y, here and in the
+    solo-entry scopes (:func:`iter_corridor_fed_solo_entries`,
+    :func:`iter_flat_seam_solo_entries`) alike.  A seam with any corridor feeder
+    is not flat.
 
     A merge junction fronting the port stands level with it whatever its own
     feeders do, so the seam is read from those feeders instead.
