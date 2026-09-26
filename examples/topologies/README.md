@@ -2,7 +2,7 @@
 
 Example `.mmd` files demonstrating a range of pipeline topologies and the layout patterns they produce. Each example exercises different aspects of the auto-layout engine.
 
-This directory holds 292 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
+This directory holds 298 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
 
 To render one example:
 
@@ -644,14 +644,17 @@ python scripts/list_topology_fixtures.py
 
 ### BT section routing
 
-| Fixture                             | What it tests                                                                                                           |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `bt_chain.mmd`                      | Minimal `direction: BT` section - a station chain flowing bottom to top, the base case for BT intra-section flow        |
-| `bt_fork.mmd`                       | Two lines forking from a shared station inside a BT section                                                             |
-| `bt_infer_ports.mmd`                | A BT section with no explicit port directives - tests BT direction inference and frame-symmetric port placement (#1442) |
-| `bt_exit_top_above.mmd`             | A BT section exiting through its TOP port into an LR section above it (#1044)                                           |
-| `bt_exit_top_above_2line.mmd`       | Two-line member of that seam - the fan's perpendicular-entry crossing X is chosen by feeder lane sign (#1066)           |
-| `bt_perp_entry_below.mmd`           | A BT section fed perpendicularly from a BT section below it                                                             |
-| `bt_perp_left_entry_right_exit.mmd` | Four BT sections with LEFT entry and RIGHT exit ports - the perpendicular entry seats before the flow-start end         |
-| `bt_to_lr.mmd`                      | A BT section leaving through a perpendicular port into an LR section                                                    |
-| `bt_to_tb.mmd`                      | A BT section feeding a TB section - opposed flow axes either side of one seam                                           |
+| Fixture                                  | What it tests                                                                                                                                                                                           |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bt_chain.mmd`                           | Minimal `direction: BT` section - a station chain flowing bottom to top, the base case for BT intra-section flow                                                                                        |
+| `bt_fork.mmd`                            | Two lines forking from a shared station inside a BT section                                                                                                                                             |
+| `bt_infer_ports.mmd`                     | A BT section with no explicit port directives - tests BT direction inference and frame-symmetric port placement (#1442)                                                                                 |
+| `bt_exit_top_above.mmd`                  | A BT section exiting through its TOP port into an LR section above it (#1044)                                                                                                                           |
+| `bt_exit_top_above_2line.mmd`            | Two-line member of that seam - the fan's perpendicular-entry crossing X is chosen by feeder lane sign (#1066)                                                                                           |
+| `bt_perp_entry_below.mmd`                | A BT section fed perpendicularly from a BT section below it                                                                                                                                             |
+| `bt_perp_left_entry_right_exit.mmd`      | Four BT sections with LEFT entry and RIGHT exit ports - the perpendicular entry seats before the flow-start end                                                                                         |
+| `bt_to_lr.mmd`                           | A BT section leaving through a perpendicular port into an LR section                                                                                                                                    |
+| `bt_to_tb.mmd`                           | A BT section feeding a TB section - opposed flow axes either side of one seam                                                                                                                           |
+| `bt_junction_top_exit_side_entries.mmd`  | A BT section's TOP exit fanning out through a junction to two stacked TB sections' LEFT entries - each entry seats before its own flow start (#2046)                                                    |
+| `bt_junction_side_exit_side_entries.mmd` | A BT section's RIGHT exit fanning out through a junction to two TB sections' LEFT entries - the same-row consumer mirrors the feeder across the seam (#2046)                                            |
+| `tb_junction_side_exit_side_entries.mmd` | A TB section's RIGHT exit fanning out through a junction to two stacked TB sections' LEFT entries - the exit stays below its trunk's last station instead of being pulled up to the upper entry (#2046) |

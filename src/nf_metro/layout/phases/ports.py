@@ -40,7 +40,10 @@ from nf_metro.layout.phases.junctions import (
     _resolve_source_section_id,
     _resolve_source_xy,
 )
-from nf_metro.layout.route_topology import divergence_junction_sources
+from nf_metro.layout.route_topology import (
+    divergence_junction_exit_ports,
+    divergence_junction_sources,
+)
 from nf_metro.parser.model import Edge, MetroGraph, Port, PortSide, Section, Station
 
 
@@ -194,6 +197,7 @@ def _align_entry_ports(graph: MetroGraph, vertical_only: bool = False) -> None:
     those same phases deliberately settled them into.
     """
     junction_ids = graph.junction_ids
+    divergence_exits = divergence_junction_exit_ports(graph)
 
     for port_id, port in graph.ports.items():
         if not port.is_entry:
@@ -207,7 +211,9 @@ def _align_entry_ports(graph: MetroGraph, vertical_only: bool = False) -> None:
             continue
 
         if port.side in (PortSide.LEFT, PortSide.RIGHT):
-            _align_lr_entry_port(graph, port_id, port, entry_section, junction_ids)
+            _align_lr_entry_port(
+                graph, port_id, port, entry_section, junction_ids, divergence_exits
+            )
         elif port.side in (PortSide.TOP, PortSide.BOTTOM):
             _align_tb_entry_port(graph, port_id, port, entry_section, junction_ids)
 
@@ -312,8 +318,14 @@ def _align_lr_entry_port(
     port: Port,
     entry_section: Section,
     junction_ids: set[str],
+    divergence_exits: dict[str, str],
 ) -> None:
-    """Align a LEFT/RIGHT entry port's Y with its incoming source."""
+    """Align a LEFT/RIGHT entry port's Y with its incoming source.
+
+    *divergence_exits* maps each divergence junction to the exit port feeding
+    it, so an exit reached through a fan-out junction is judged as the exit
+    itself.
+    """
     if lanes_run_along_y(entry_section.direction):
         trunk_st = _entry_fan_trunk_station(graph, port_id, entry_section)
         if trunk_st is not None:
@@ -339,6 +351,7 @@ def _align_lr_entry_port(
 
         if entry_section.grid_row != src_section.grid_row:
             _seat_perp_entry_port_before_stations(graph, entry_section, port, port_id)
+            _level_entry_with_nearby_feeder(graph, entry_section, port_id, src_y)
             break
 
         # A source exit whose Y is a structural boundary, not a consumer-aligned
@@ -348,7 +361,7 @@ def _align_lr_entry_port(
         # exit dips onto the section's bottom/top edge below or above its
         # stations).  Anchor the entry on its own consumer station's Y so the
         # route rises in the inter-section gap and enters horizontally.
-        src_port = graph.ports.get(edge.source)
+        src_port = graph.ports.get(divergence_exits.get(edge.source, edge.source))
         if (
             src_port is not None
             and not src_port.is_entry
@@ -368,12 +381,15 @@ def _align_lr_entry_port(
                     and lanes_run_along_x(src_section.direction)
                     and _opposite_vertical_flow(src_section, entry_section)
                     and _mirror_entry_section_to_seam(
-                        graph, entry_section, port_id, edge.source
+                        graph, entry_section, port_id, src_port
                     )
                 )
                 if not mirrored:
                     _seat_perp_entry_port_before_stations(
                         graph, entry_section, port, port_id
+                    )
+                    _level_entry_with_nearby_feeder(
+                        graph, entry_section, port_id, src_y
                     )
                 break
             consumer_y = _entry_consumer_y(graph, port_id, entry_section)
@@ -440,18 +456,18 @@ def _opposite_vertical_flow(a: Section, b: Section) -> bool:
     return AxisFrame.flow_sign(a.direction) != AxisFrame.flow_sign(b.direction)
 
 
-def _vertical_exit_trailing_y(graph: MetroGraph, exit_port_id: str) -> float | None:
-    """Y of the internal station feeding *exit_port_id*, or ``None``.
+def _vertical_exit_trailing_y(graph: MetroGraph, exit_port: Port) -> float | None:
+    """Y of the internal station feeding *exit_port*, or ``None``.
 
     The trailing station a vertical-flow section's LEFT/RIGHT exit continues
     from -- the station whose Y a downstream seam should mirror.
     """
-    exit_st = graph.stations.get(exit_port_id)
+    exit_st = graph.stations.get(exit_port.id)
     if exit_st is None:
         return None
     ys = [
         graph.stations[e.source].y
-        for e in graph.edges_to(exit_port_id)
+        for e in graph.edges_to(exit_port.id)
         if e.source in graph.stations and not graph.stations[e.source].is_port
     ]
     if not ys:
@@ -463,7 +479,7 @@ def _mirror_entry_section_to_seam(
     graph: MetroGraph,
     entry_section: Section,
     entry_port_id: str,
-    exit_port_id: str,
+    exit_port: Port,
 ) -> bool:
     """Slide a vertical-flow consumer so it mirrors its feeder across the seam.
 
@@ -474,8 +490,8 @@ def _mirror_entry_section_to_seam(
     Returns ``False`` (mirror not applied) when the feeder or consumer station
     can't be resolved.
     """
-    exit_st = graph.stations.get(exit_port_id)
-    feeder_trailing_y = _vertical_exit_trailing_y(graph, exit_port_id)
+    exit_st = graph.stations.get(exit_port.id)
+    feeder_trailing_y = _vertical_exit_trailing_y(graph, exit_port)
     consumer = next(
         (
             graph.stations[e.target]
@@ -1882,6 +1898,28 @@ def _seat_perp_entry_port_before_stations(
     _set_port_y(graph, port_id, target_y)
     if outside_bbox:
         _expand_bbox_for_y(entry_section, target_y)
+
+
+def _level_entry_with_nearby_feeder(
+    graph: MetroGraph, entry_section: Section, port_id: str, feeder_y: float
+) -> None:
+    """Level a seated vertical-flow side entry with a feeder arriving beside it.
+
+    A feeder off the seat by less than one S-bend (two curve radii) cannot step
+    onto the entry with formed curves, so the run is drawn as a sub-radius jog.
+    The entry takes the feeder's own Y instead, making the run straight,
+    provided that Y precedes the flow-start station by at least the port gap.
+    """
+    port_st = graph.stations.get(port_id)
+    internal_ys = _internal_station_ys(graph, entry_section)
+    if port_st is None or not internal_ys or lanes_run_along_y(entry_section.direction):
+        return
+    sign = AxisFrame.flow_sign(entry_section.direction)
+    flow_start_y = min(internal_ys) if sign > 0 else max(internal_ys)
+    if 0 < abs(feeder_y - port_st.y) < 2 * CURVE_RADIUS and (
+        sign * (flow_start_y - feeder_y) >= MIN_PORT_STATION_GAP
+    ):
+        _set_port_y(graph, port_id, feeder_y)
 
 
 def _space_ports_from_termini(

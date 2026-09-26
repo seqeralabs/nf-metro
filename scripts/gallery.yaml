@@ -787,6 +787,30 @@ gallery:
     description:
       "A BT section's RIGHT exit feeding a TB section's LEFT entry: an upward flow
       handing off to a downward one across the column seam (#1044)."
+  - id: tb_junction_side_exit_side_entries
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      "A TB section's RIGHT exit fans out through a junction to the LEFT entries of two
+      TB sections stacked beside it. The exit stays below its trunk's last station and
+      the branch to the upper section rises in the column gap, rather than the exit
+      being dragged up to the upper entry so the line climbs back over its own trunk
+      (#2046)."
+  - id: bt_junction_top_exit_side_entries
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      "A BT section's TOP exit fans out through a junction to the LEFT entries of two
+      TB sections stacked beside it. Each entry seats a station gap above its own
+      section's first station instead of following the exit up to the row's top edge
+      (#2046)."
+  - id: bt_junction_side_exit_side_entries
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      "A BT section's RIGHT exit fans out through a junction to the LEFT entries of two
+      TB sections. The upper, same-row consumer mirrors the feeder across the seam as a
+      directly fed one does: its first station sits level with the feeder's last (#2046)."
   - id: tb_fork_lane_transpose
     source_dir: examples/topologies
     category: TB / BT Sections
