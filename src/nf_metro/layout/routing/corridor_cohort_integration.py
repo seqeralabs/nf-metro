@@ -1461,6 +1461,10 @@ def _member_footprint_model(
         for item in witnesses
         if item.coordinate_variable_id is not None
     }
+    regions_by_variable = {
+        variable_id: frozenset(item.regions)
+        for variable_id, item in carrier_by_variable.items()
+    }
     orders: dict[str, _FootprintOrder] = {}
     contacts: dict[str, _FootprintContact] = {}
     for lead in witnesses:
@@ -1518,6 +1522,7 @@ def _member_footprint_model(
         )
         if endpoint_cohorts_by_variable.get(controller_id):
             continue
+        controller_regions = regions_by_variable[controller_id]
         for candidate_id, carrier in carrier_by_variable.items():
             if candidate_id == controller_id:
                 continue
@@ -1530,7 +1535,7 @@ def _member_footprint_model(
                 or candidate.owner_kind is not CorridorScalarOwnerKind.MEMBER_CARRIER
                 or controller.owner_kind is not CorridorScalarOwnerKind.MEMBER_CARRIER
                 or carrier.direction is not controller_carrier.direction
-                or not set(carrier.regions) & set(controller_carrier.regions)
+                or not regions_by_variable[candidate_id] & controller_regions
             ):
                 continue
             if not (
@@ -1666,7 +1671,9 @@ def _member_footprint_model(
         if variable.variable_id in carrier_by_variable
     }
     intervals.update(
-        _cotravelling_turn_off_intervals(witnesses, scalar_carriers, offset_step)
+        _cotravelling_turn_off_intervals(
+            witnesses, scalar_carriers, offset_step, curve_radius
+        )
     )
 
     return _MemberFootprintModel(
@@ -1691,6 +1698,7 @@ def _cotravelling_turn_off_intervals(
     witnesses: tuple[CorridorFootprintWitness, ...],
     scalar_carriers: Mapping[str, CorridorFootprintWitness],
     offset_step: float,
+    curve_radius: float,
 ) -> dict[tuple[str, str], CorridorForbiddenInterval]:
     """Forbid a scalar lane the legs a co-travelling distinct line turns off on.
 
@@ -1702,6 +1710,12 @@ def _cotravelling_turn_off_intervals(
     """
     scalar_ids = frozenset(scalar_carriers)
     by_lane = _witnesses_by_lane(witnesses)
+    pitch = cotravelling_lane_clearance(
+        same_line=False,
+        counter_running=False,
+        curve_radius=curve_radius,
+        offset_step=offset_step,
+    )
     intervals: dict[tuple[str, str], CorridorForbiddenInterval] = {}
     for variable_id, carrier in scalar_carriers.items():
         for perpendicular in witnesses:
@@ -1728,7 +1742,7 @@ def _cotravelling_turn_off_intervals(
                 and parallel.direction is carrier.direction
                 and _footprints_overlap(parallel, carrier)
                 and abs(parallel.coordinate - carrier.coordinate)
-                < offset_step - COORD_TOLERANCE
+                < pitch - COORD_TOLERANCE
                 for parallel in by_lane.get(
                     (perpendicular.member_id, perpendicular.edge_key, carrier.axis),
                     (),
@@ -1739,8 +1753,8 @@ def _cotravelling_turn_off_intervals(
                 CorridorForbiddenInterval(
                     variable_id,
                     perpendicular.footprint_id,
-                    perpendicular.longitudinal_start - offset_step,
-                    perpendicular.longitudinal_end + offset_step,
+                    perpendicular.longitudinal_start - pitch,
+                    perpendicular.longitudinal_end + pitch,
                     perpendicular.semantic_rank,
                 )
             )
@@ -1805,6 +1819,7 @@ def _scalar_bundles(
         and not target.legal_crossing_segment_ranks
         and _interior_run(witness, target)
     )
+    run_corridors = {run.footprint_id: _row_gap(run.regions) for run in runs}
 
     def bundled(
         run: CorridorFootprintWitness,
@@ -1826,7 +1841,7 @@ def _scalar_bundles(
             )
         ):
             return False
-        run_corridor = _row_gap(run.regions)
+        run_corridor = run_corridors[run.footprint_id]
         if corridor is not None and run_corridor is not None:
             return corridor == run_corridor
         return abs(run.coordinate - trunk_run.coordinate) < BUNDLE_TO_BUNDLE_CLEARANCE
@@ -3380,15 +3395,6 @@ def compile_corridor_cohort_plan(
         witness = witnesses_by_id[fixed_term.witness_id]
         obstacle_provenance[order.owner_id] = CorridorCohortObstacleProvenance(
             order.owner_id,
-            witness.member_id,
-            witness.edge_key,
-            witness.segment_rank,
-            witness.connector_ids,
-        )
-    for bundle in footprint_model.bundles:
-        witness = witnesses_by_id[bundle.witness_id]
-        obstacle_provenance[bundle.owner_id] = CorridorCohortObstacleProvenance(
-            bundle.owner_id,
             witness.member_id,
             witness.edge_key,
             witness.segment_rank,

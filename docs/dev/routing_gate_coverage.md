@@ -1106,15 +1106,15 @@ Gates with an un-exercised arm:
 
 | Line | Gate | Un-exercised arm(s) | Triage |
 | ---: | --- | --- | --- |
-| 114 | `if compiled and not aperture_pending:` | `->L115` |  |
-| 183 | `if axis is None or abs(axis.coordinate - coordinate) > COORD_TOLERANCE_FINE:` | `->L184` |  |
-| 210 | `if plan.curve_radii is None or ctx.exit_turns is None:` | `->L211` |  |
-| 215 | `if membership is None:` | `->L216` |  |
-| 218 | `if corner_offsets is None:` | `->L219` |  |
-| 332 | `if scaffold is None:` | `->L333` |  |
-| 481 | `if station_offsets is not None:` | `->L484` |  |
-| 526 | `if not pending_plan_ids and member_geometry.settled_exit_turns:` | `->L527` | **defensive** -- Boundary settlement is adopted only after every pending exit-turn plan has resolved. A settled cohort with pending owners would mix planning generations and is defensively withheld. |
-| 549 | `if station_offsets is not None:` | `->L550`, `->L552` | **defensive** -- Production observed routing supplies a mutable station-offset map before replaying settled turns. The null arm supports the offsetless observation probe and requires no cache refresh. |
+| 115 | `if compiled and not aperture_pending:` | `->L116` |  |
+| 184 | `if axis is None or abs(axis.coordinate - coordinate) > COORD_TOLERANCE_FINE:` | `->L185` |  |
+| 211 | `if plan.curve_radii is None or ctx.exit_turns is None:` | `->L212` |  |
+| 216 | `if membership is None:` | `->L217` |  |
+| 219 | `if corner_offsets is None:` | `->L220` |  |
+| 333 | `if scaffold is None:` | `->L334` |  |
+| 482 | `if station_offsets is not None:` | `->L485` |  |
+| 527 | `if not pending_plan_ids and member_geometry.settled_exit_turns:` | `->L528` | **defensive** -- Boundary settlement is adopted only after every pending exit-turn plan has resolved. A settled cohort with pending owners would mix planning generations and is defensively withheld. |
+| 550 | `if station_offsets is not None:` | `->L551`, `->L553` | **defensive** -- Production observed routing supplies a mutable station-offset map before replaying settled turns. The null arm supports the offsetless observation probe and requires no cache refresh. |
 
 ## `postprocess.py`
 
