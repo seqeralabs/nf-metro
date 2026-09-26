@@ -3974,20 +3974,25 @@ def _slot_same_row_bypass_entry(ctx: _OffsetCtx, port_id: str, port: Port) -> No
         for left, right in zip(flat, flat[1:])
     )
     section = ctx.graph.sections[port.section_id]
+    must_pack = not contiguous
+    drift_only = not must_pack and _keeping_flat_lanes_drifts_row_trunk(
+        ctx, section, new_offs
+    )
     carries: dict[tuple[str, str], float] = {}
-    if not contiguous or _keeping_flat_lanes_drifts_row_trunk(ctx, section, new_offs):
+    if must_pack or drift_only:
         packed = {lid: rank * step for rank, lid in enumerate((*above, *flat, *below))}
         # Each carry is refused where another line still holds the lane, so
         # lines moving up go top first and lines moving down bottom first.
         moving_up = [lid for lid in flat if packed[lid] <= arrival[lid]]
         moving_down = [lid for lid in reversed(flat) if packed[lid] > arrival[lid]]
-        carries, refused = _plan_level_approach_carries(
+        planned, refused = _plan_level_approach_carries(
             ctx, port_id, [(lid, packed[lid]) for lid in (*moving_up, *moving_down)]
         )
-        if contiguous and refused:
-            carries = {}
-        else:
-            new_offs = packed
+        # A must-pack bundle packs whatever the carries do; a refused line
+        # steps on its connector into the port.
+        vetoed = drift_only and bool(refused)
+        if not vetoed:
+            new_offs, carries = packed, planned
     if not any(
         abs(new_offs[lid] - ctx.offsets.get((port_id, lid), 0.0)) > _OFFSET_EQ_TOLERANCE
         for lid in new_offs

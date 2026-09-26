@@ -612,8 +612,8 @@ def _line_runs_straight_into_reordered_bundle(
     Walks each of *downstream*'s entry-port lines back along edges that stay at
     the port's Y on the port's lane.  It succeeds on reaching *upstream* after
     passing through a station of some third section whose row bundle differs,
-    provided the lines both ends carry stand in a different order there than at
-    the entry port.
+    provided the lines that both ends carry stand in a different order there
+    than at the entry port.
     """
     bundle = _section_full_bundle(graph, downstream)
 
@@ -722,11 +722,12 @@ def test_row_trunk_marker_cy_consistent(fixture):
             target = info[anchor][0]
             for sid in members[1:]:
                 cy = info[sid][0]
-                # Where the other lines leave the row between the two sections,
-                # the downstream one can take its bundle in a different order,
+                # A shared line can run straight on one lane from one section
+                # to the other through a third section with a different bundle.
+                # The other lines leave the row in between, so the downstream
+                # section can take the shared lines in a different lane order,
                 # and its trunk then stands off the other's.  That offset is
-                # exempt when it is what keeps a shared line on the one lane it
-                # runs straight along between them.
+                # exempt: it is what keeps the shared line on its lane.
                 if any(
                     _line_runs_straight_into_reordered_bundle(graph, offsets, *pair)
                     for pair in (
