@@ -600,6 +600,62 @@ def _section_full_bundle(graph: MetroGraph, section) -> set[str] | None:
 # ---------------------------------------------------------------------------
 
 
+def _line_runs_straight_into_reordered_bundle(
+    graph: MetroGraph,
+    offsets: dict[tuple[str, str], float],
+    upstream,
+    downstream,
+) -> bool:
+    """Whether a line runs level on one lane from *upstream* into *downstream*,
+    which takes the shared lines in a different lane order.
+
+    Walks each of *downstream*'s entry-port lines back along edges that stay at
+    the port's Y on the port's lane.  It succeeds on reaching *upstream* after
+    passing through a station of some third section whose row bundle differs,
+    provided the lines both ends carry stand in a different order there than at
+    the entry port.
+    """
+    bundle = _section_full_bundle(graph, downstream)
+
+    def lane_order(station_id: str, lines: set[str]) -> list[str]:
+        return sorted(lines, key=lambda lid: offsets.get((station_id, lid), 0.0))
+
+    for port_id in downstream.entry_ports:
+        port_y = graph.stations[port_id].y
+        for line_id in graph.station_lines(port_id):
+            lane = offsets.get((port_id, line_id), 0.0)
+            current, crossed_other_bundle = port_id, False
+            while True:
+                source_id = next(
+                    (
+                        edge.source
+                        for edge in graph.edges_to(current)
+                        if edge.line_id == line_id
+                        and abs(graph.stations[edge.source].y - port_y) <= _Y_TOL
+                        and abs(offsets.get((edge.source, line_id), 0.0) - lane)
+                        <= _Y_TOL
+                    ),
+                    None,
+                )
+                if source_id is None:
+                    break
+                sec_id = graph.stations[source_id].section_id
+                if sec_id == upstream.id:
+                    shared = set(graph.station_lines(source_id)) & set(
+                        graph.station_lines(port_id)
+                    )
+                    if crossed_other_bundle and lane_order(
+                        source_id, shared
+                    ) != lane_order(port_id, shared):
+                        return True
+                    break
+                if sec_id is not None and sec_id != downstream.id:
+                    other = _section_full_bundle(graph, graph.sections[sec_id])
+                    crossed_other_bundle |= other != bundle
+                current = source_id
+    return False
+
+
 @pytest.mark.parametrize(
     "fixture",
     _FIXTURES_MULTI_SECTION,
@@ -666,6 +722,19 @@ def test_row_trunk_marker_cy_consistent(fixture):
             target = info[anchor][0]
             for sid in members[1:]:
                 cy = info[sid][0]
+                # Where the other lines leave the row between the two sections,
+                # the downstream one can take its bundle in a different order,
+                # and its trunk then stands off the other's.  That offset is
+                # exempt when it is what keeps a shared line on the one lane it
+                # runs straight along between them.
+                if any(
+                    _line_runs_straight_into_reordered_bundle(graph, offsets, *pair)
+                    for pair in (
+                        (graph.sections[anchor], graph.sections[sid]),
+                        (graph.sections[sid], graph.sections[anchor]),
+                    )
+                ):
+                    continue
                 assert abs(cy - target) < _Y_TOL, (
                     f"Row {row}: section {sid} trunk cy={cy} drifts from "
                     f"{anchor} cy={target}"

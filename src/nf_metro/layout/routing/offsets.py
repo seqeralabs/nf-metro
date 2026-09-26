@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections import Counter, deque
+from collections import ChainMap, Counter, deque
 from collections.abc import (
     Callable,
     Container,
@@ -3244,11 +3244,19 @@ def _same_section(graph: MetroGraph, id_a: str, id_b: str) -> bool:
 
 
 def _would_collide(
-    ctx: _OffsetCtx, station_id: str, line_id: str, value: float
+    ctx: _OffsetCtx,
+    station_id: str,
+    line_id: str,
+    value: float,
+    offsets: Mapping[tuple[str, str], float] | None = None,
 ) -> bool:
-    """Check if setting (station_id, line_id) to value collides with another line."""
+    """Check if setting (station_id, line_id) to value collides with another line.
+
+    *offsets* are the lanes to check against, ``ctx.offsets`` by default.
+    """
+    lanes = ctx.offsets if offsets is None else offsets
     return any(
-        ctx.offsets.get((station_id, lid), 0.0) == value
+        lanes.get((station_id, lid), 0.0) == value
         for lid in ctx.graph.station_lines(station_id)
         if lid != line_id
     )
@@ -3921,7 +3929,9 @@ def _slot_same_row_bypass_entry(ctx: _OffsetCtx, port_id: str, port: Port) -> No
     Where the flat lanes are not one contiguous block, or keeping them would
     drift the section's trunk (see :func:`_keeping_flat_lanes_drifts_row_trunk`),
     the bundle packs from the top lane and each moved flat line carries its new
-    lane back along its level approach.
+    lane back along its level approach.  A trunk kept level at the cost of a
+    flat line stepping into the port is no gain, so the drift alone packs only
+    when every moved flat line can carry its new lane.
     """
     entry = same_row_bypass_entry(ctx.graph, port_id, ctx.offsets)
     if entry is None:
@@ -3964,46 +3974,39 @@ def _slot_same_row_bypass_entry(ctx: _OffsetCtx, port_id: str, port: Port) -> No
         for left, right in zip(flat, flat[1:])
     )
     section = ctx.graph.sections[port.section_id]
-    packed = not contiguous or _keeping_flat_lanes_drifts_row_trunk(
-        ctx, section, new_offs
-    )
-    if packed:
-        new_offs = {
-            lid: rank * step for rank, lid in enumerate((*above, *flat, *below))
-        }
+    carries: dict[tuple[str, str], float] = {}
+    if not contiguous or _keeping_flat_lanes_drifts_row_trunk(ctx, section, new_offs):
+        packed = {lid: rank * step for rank, lid in enumerate((*above, *flat, *below))}
+        # Each carry is refused where another line still holds the lane, so
+        # lines moving up go top first and lines moving down bottom first.
+        moving_up = [lid for lid in flat if packed[lid] <= arrival[lid]]
+        moving_down = [lid for lid in reversed(flat) if packed[lid] > arrival[lid]]
+        carries, refused = _plan_level_approach_carries(
+            ctx, port_id, [(lid, packed[lid]) for lid in (*moving_up, *moving_down)]
+        )
+        if contiguous and refused:
+            carries = {}
+        else:
+            new_offs = packed
     if not any(
         abs(new_offs[lid] - ctx.offsets.get((port_id, lid), 0.0)) > _OFFSET_EQ_TOLERANCE
         for lid in new_offs
     ):
         return
     _apply_offsets_along_bundle(ctx, port_id, port.section_id, new_offs)
-    if packed:
-        # Each carry is refused where another line still holds the lane, so
-        # lines moving up go top first and lines moving down bottom first.
-        moving_up = [lid for lid in flat if new_offs[lid] <= arrival[lid]]
-        moving_down = [lid for lid in reversed(flat) if new_offs[lid] > arrival[lid]]
-        for lid in (*moving_up, *moving_down):
-            _carry_lane_up_level_approach(ctx, port_id, lid, new_offs[lid])
+    ctx.offsets.update(carries)
 
 
-def _carry_lane_up_level_approach(
-    ctx: _OffsetCtx, port_id: str, line_id: str, off: float
-) -> None:
-    """Move *line_id* onto *off* along its whole level approach, or not at all.
+def _level_approach(graph: MetroGraph, port_id: str, line_id: str) -> list[str]:
+    """Stations *line_id* passes on its level approach to *port_id*.
 
     Walks the line's feeders back from *port_id* while they stay level with it,
     stopping at a same-row bypass, whose vertical leg absorbs a lane change.
-    If some station on the way holds *off* for another line, the lane
-    cannot be carried to where the approach begins; moving part of it would
-    only relocate the step inside the approach, so the line keeps its lanes and
-    steps once, on its connector into the port.
 
-    It cannot reuse :func:`_row_upstream_line_sources` /
-    :func:`_apply_offset_upstream_on_row`: that walk yields a station before
-    deciding whether to continue past it (so it would commit the riser's feeder)
-    and applies a partial carry up to a collision rather than none at all.
+    It cannot reuse :func:`_row_upstream_line_sources`: that walk yields a
+    station before deciding whether to continue past it, so it would take in
+    the riser's feeder.
     """
-    graph = ctx.graph
     port_station = graph.stations[port_id]
     chain: list[str] = []
     frontier, seen = [port_id], {port_id}
@@ -4018,13 +4021,35 @@ def _carry_lane_up_level_approach(
                 or _arrives_on_same_row_bypass(graph, source, target)
             ):
                 continue
-            if _would_collide(ctx, edge.source, line_id, off):
-                return
             seen.add(edge.source)
             chain.append(edge.source)
             frontier.append(edge.source)
-    for station_id in chain:
-        ctx.offsets[(station_id, line_id)] = off
+    return chain
+
+
+def _plan_level_approach_carries(
+    ctx: _OffsetCtx, port_id: str, moves: Sequence[tuple[str, float]]
+) -> tuple[dict[tuple[str, str], float], frozenset[str]]:
+    """Plan moving each ``(line, lane)`` of *moves* along its level approach.
+
+    A line takes its lane along its whole approach to *port_id* or not at all:
+    if some station on the way holds the lane for another line, moving part of
+    the approach would only relocate the step inside it, so the line keeps its
+    lanes and steps once, on its connector into the port.  Moves are tried in
+    order, each against the lanes the earlier ones leave.
+
+    Returns the offsets the carries write, and the lines refused.
+    """
+    writes: dict[tuple[str, str], float] = {}
+    lanes = ChainMap(writes, ctx.offsets)
+    refused: set[str] = set()
+    for line_id, off in moves:
+        chain = _level_approach(ctx.graph, port_id, line_id)
+        if any(_would_collide(ctx, sid, line_id, off, lanes) for sid in chain):
+            refused.add(line_id)
+        else:
+            writes.update(dict.fromkeys(((sid, line_id) for sid in chain), off))
+    return writes, frozenset(refused)
 
 
 def _flow_entry_lane_y_ports(ctx: _OffsetCtx) -> Iterator[tuple[str, Port]]:

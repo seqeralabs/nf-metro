@@ -33,7 +33,11 @@ from nf_metro.layout.routing import compute_station_offsets
 from nf_metro.layout.routing.invariants import (
     check_convergence_shallow_feeder_concentric,
 )
-from nf_metro.layout.routing.offsets import same_row_bypass_entry
+from nf_metro.layout.routing.offsets import (
+    _OffsetCtx,
+    _plan_level_approach_carries,
+    same_row_bypass_entry,
+)
 from nf_metro.parser.model import MetroGraph
 from nf_metro.render.svg import build_render_plan
 from nf_metro.themes import resolve_theme
@@ -52,12 +56,6 @@ CASES = [
     ("folded_corridor_distinct_lanes", "realignment__entry_right_9"),
 ]
 CASE_IDS = [f"{fixture}:{port}" for fixture, port in CASES]
-
-# The fold hands ``realignment`` its bundle with ``rna`` above ``dna``, and its
-# trunk must stand level with ``normalization``'s, which carries the same bundle
-# on the same row.  With ``rna`` rising from below, ``dna`` cannot keep its lane
-# into the port: it steps once, on its connector into the port.
-FORCED_STEPS = {("folded_corridor_distinct_lanes", "realignment__entry_right_9"): 1}
 
 _TOL = 0.5
 Point = tuple[float, float]
@@ -121,9 +119,7 @@ def test_flat_feeders_run_level_into_the_port(fixture: str, port_id: str) -> Non
     """Every row-level connector a flat feeder rides up to the port stays level.
 
     Covers the whole flat approach back along the row, so a lane step cannot
-    simply move to a boundary further upstream.  Where a step is forced (see
-    ``FORCED_STEPS``) there is exactly that many, each a 45-degree diagonal on
-    the connector into the port.
+    simply move to a boundary further upstream.
     """
     graph, routes = _drawn_routes(fixture)
     row_y = graph.stations[port_id].y
@@ -164,11 +160,7 @@ def test_flat_feeders_run_level_into_the_port(fixture: str, port_id: str) -> Non
                 if route.edge.source not in seen:
                     seen.add(route.edge.source)
                     frontier.append(route.edge.source)
-    forced = FORCED_STEPS.get((fixture, port_id), 0)
-    assert len(steps) == forced, steps
-    for _line_id, _source, target, (a, b) in steps:
-        assert target == port_id, steps
-        assert abs(abs(b[0] - a[0]) - abs(b[1] - a[1])) <= _TOL, steps
+    assert not steps, steps
 
 
 SOLO_RISER_ENTRIES = [
@@ -289,3 +281,51 @@ def test_concentric_guard_reads_the_side_a_bypass_arrives_from() -> None:
     assert check_convergence_shallow_feeder_concentric(graph, above) == []
     (message,) = check_convergence_shallow_feeder_concentric(graph, below)
     assert OVER_TOP_PORT in message
+
+
+LEVEL_PAIR_MMD = """\
+%%metro line: a | A | #4a90d9
+%%metro line: b | B | #e63946
+graph LR
+    subgraph up [Up]
+        u1[U1]
+        u2[U2]
+        u1 -->|a,b| u2
+    end
+    subgraph down [Down]
+        d1[D1]
+    end
+    u2 -->|a,b| d1
+"""
+
+
+def _level_pair_ctx() -> tuple[_OffsetCtx, str, list[str]]:
+    graph = prepare_graph(LEVEL_PAIR_MMD)
+    (port_id,) = graph.sections["down"].entry_ports
+    approach = ["up__exit_right_0", "u2", "u1"]
+    offsets = {(sid, "a"): 4.0 for sid in approach}
+    offsets.update({(sid, "b"): 8.0 for sid in approach})
+    return _OffsetCtx(graph=graph, offsets=offsets), port_id, approach
+
+
+def test_level_approach_carries_see_the_lanes_earlier_moves_vacate() -> None:
+    """Moving ``a`` up first frees its lane for ``b``; the plan leaves ctx alone."""
+    ctx, port_id, approach = _level_pair_ctx()
+    before = dict(ctx.offsets)
+    writes, refused = _plan_level_approach_carries(
+        ctx, port_id, [("a", 0.0), ("b", 4.0)]
+    )
+    assert refused == frozenset()
+    assert writes == {
+        **{(sid, "a"): 0.0 for sid in approach},
+        **{(sid, "b"): 4.0 for sid in approach},
+    }
+    assert ctx.offsets == before
+
+
+def test_level_approach_carry_is_refused_whole_where_a_lane_is_held() -> None:
+    ctx, port_id, _approach = _level_pair_ctx()
+    ctx.offsets[("u1", "a")] = 0.0
+    writes, refused = _plan_level_approach_carries(ctx, port_id, [("b", 0.0)])
+    assert refused == frozenset({"b"})
+    assert writes == {}
