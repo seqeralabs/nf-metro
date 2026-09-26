@@ -3165,25 +3165,108 @@ def _line_at_slot(
     )
 
 
+def _line_exit_port(graph: MetroGraph, station_id: str, line_id: str) -> str | None:
+    """The exit port *line_id* leaves *station_id*'s section through, if one.
+
+    Follows the line's sole forward edge at each station; a fork, a dead end,
+    or a step out of the section without an exit port gives ``None``.
+    """
+    section_id = graph.stations[station_id].section_id
+    current = station_id
+    for _ in range(len(graph.stations)):
+        port = graph.ports.get(current)
+        if port is not None and not port.is_entry:
+            return current
+        edges = [edge for edge in graph.edges_from(current) if edge.line_id == line_id]
+        if len(edges) != 1:
+            return None
+        current = edges[0].target
+        if graph.stations[current].section_id != section_id:
+            return None
+    return None
+
+
+def _fan_entry_ranks_first(
+    ctx: _OffsetCtx, station_id: str, line_id: str, other_id: str
+) -> bool | None:
+    """Whether a shared fan entry gives *line_id* a smaller offset than *other_id*.
+
+    Both lines leave *station_id* through one exit port that feeds a divergence
+    junction, and a branch of that fan delivers both into one downstream entry
+    port.  That entry's lane order is settled by its own section, and the pair
+    rides the branch to it as one bundle whose lane order its corners cannot
+    change, so the station has to hold the pair in the same order.  Only an
+    entry on the flow-start side of a section flowing, and storing its lanes,
+    the way the source section does shares the source's lane frame; any other
+    entry, or entries disagreeing, give ``None``.
+    """
+    graph = ctx.graph
+    exit_port_id = _line_exit_port(graph, station_id, line_id)
+    if exit_port_id is None or exit_port_id != _line_exit_port(
+        graph, station_id, other_id
+    ):
+        return None
+    junction_id = next(
+        (
+            junction_id
+            for junction_id, port_id in ctx.divergence_exit_ports.items()
+            if port_id == exit_port_id
+        ),
+        None,
+    )
+    if junction_id is None:
+        return None
+    source_section = graph.section_for_port(graph.ports[exit_port_id])
+
+    def entries(of_line: str) -> set[str]:
+        return {
+            edge.target
+            for edge in graph.edges_from(junction_id)
+            if edge.line_id == of_line
+        }
+
+    verdicts = set()
+    for entry_id in entries(line_id) & entries(other_id):
+        entry = graph.ports.get(entry_id)
+        if entry is None or not entry.is_entry:
+            continue
+        entry_section = graph.section_for_port(entry)
+        if (
+            entry_section.direction != source_section.direction
+            or not lanes_run_along_y(entry_section.direction)
+            or entry.side is not flow_port_sides(entry_section.direction)[0]
+            or _stores_reflected(ctx, entry_section.id)
+            != _stores_reflected(ctx, source_section.id)
+        ):
+            return None
+        verdicts.add(
+            ctx.offsets.get((entry_id, line_id), 0.0)
+            < ctx.offsets.get((entry_id, other_id), 0.0)
+        )
+    return verdicts.pop() if len(verdicts) == 1 else None
+
+
 def _collider_slot(
     ctx: _OffsetCtx,
     station_id: str,
     station_pending: Mapping[str, float],
+    mover: str,
     collider: str,
     vacated: float,
     claimed: float,
 ) -> float:
-    """Where compaction re-seats *collider* when a moving line claims its slot.
+    """Where compaction re-seats *collider* when *mover* claims its slot.
 
-    The moving line travels from *vacated* to *claimed* at *station_id*.  The
-    collider slides one slot further the same way when that slot is free, so
-    the pair keeps its order: the station may hand both lines on to a fan
-    downstream, and a pair reversed here braids where that fan peels them
-    apart.  When the slot beyond is taken the collider drops into *vacated*
-    instead, since sliding it on would displace a third line in turn.
+    *mover* travels from *vacated* to *claimed* at *station_id*, and *collider*
+    takes *vacated* unless a fan downstream fixes the pair's order the other
+    way (:func:`_fan_entry_ranks_first`).  Then it slides one slot beyond
+    *claimed* instead, provided that slot is free: sliding it on would displace
+    a third line in turn.
     """
-    step = ctx.offset_step if claimed > vacated else -ctx.offset_step
-    beyond = claimed + step
+    mover_first = _fan_entry_ranks_first(ctx, station_id, mover, collider)
+    if mover_first is None or mover_first == (vacated > claimed):
+        return vacated
+    beyond = claimed + (ctx.offset_step if claimed > vacated else -ctx.offset_step)
     beyond_holder = _line_at_slot(
         ctx, station_pending, station_id, beyond, exclude=collider
     )
@@ -3259,7 +3342,7 @@ def _propagate_compaction(
             queue.append((nbr_sid, lid))
             if collision_lid is not None:
                 nbr_pending[collision_lid] = _collider_slot(
-                    ctx, nbr_sid, nbr_pending, collision_lid, nbr_cur, new_off
+                    ctx, nbr_sid, nbr_pending, lid, collision_lid, nbr_cur, new_off
                 )
                 queue.append((nbr_sid, collision_lid))
 

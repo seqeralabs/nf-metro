@@ -3,7 +3,7 @@ from pathlib import Path
 import networkx as nx
 import pytest
 
-from nf_metro.api import prepare_graph
+from nf_metro.api import prepare_graph, render_string
 from nf_metro.layout import compute_layout
 from nf_metro.layout.constants import SAME_COORD_TOLERANCE
 from nf_metro.layout.geometry import AxisFrame, lanes_run_along_x
@@ -484,3 +484,134 @@ def test_gap_compaction_keeps_a_straightened_handoff_in_peel_order() -> None:
     assert offsets["a1", "l2"] == offsets["a2", "l2"]
     for station_id in ("a2", exit_port):
         assert offsets[station_id, "l1"] < offsets[station_id, "l2"], station_id
+
+
+_COMPACTION_LINES = "\n".join(
+    f"%%metro line: m{index} | L{index} | {colour}"
+    for index, colour in enumerate(
+        ("#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4")
+    )
+)
+
+# Each map closes a lane gap whose propagation lands on a slot another line
+# holds at the next station, and each needs that line re-seated differently.
+COMPACTION_COLLISION_MAPS = {
+    # Both lines leave through one exit and enter the downstream section
+    # together, which fixes their order there; no fan has a say in it.
+    "shared_exit_no_fan": """
+graph LR
+    subgraph z0 [Zone 0]
+        %%metro direction: TB
+        q0x0[Q0X0]
+        q0x1[Q0X1]
+        q0x2[Q0X2]
+        q0x0 -->|m2| q0x1
+        q0x1 -->|m2| q0x2
+    end
+    subgraph z1 [Zone 1]
+        q1x0[Q1X0]
+        q1x1[Q1X1]
+        q1x2[Q1X2]
+        q1x3[Q1X3]
+        q1x0 -->|m3| q1x1
+        q1x1 -->|m0| q1x2
+        q1x2 -->|m1| q1x3
+    end
+    subgraph z2 [Zone 2]
+        %%metro direction: BT
+        q2x0[Q2X0]
+        q2x1[Q2X1]
+        q2x0 -->|m2| q2x1
+    end
+    q0x2 -->|m3| q1x0
+    q0x2 -->|m4| q2x0
+    q1x3 -->|m4| q2x0
+    q1x3 -->|m1| q2x1
+""",
+    # The displaced line's free slot beyond the mover is the lane a bypass
+    # rides past the station.
+    "slot_beyond_held_by_bypass": """
+graph LR
+    subgraph z0 [Zone 0]
+        q0x0[Q0X0]
+        q0x1[Q0X1]
+        q0x2[Q0X2]
+        q0x3[Q0X3]
+        q0x4[Q0X4]
+        q0x0 -->|m2| q0x1
+        q0x1 -->|m1| q0x2
+        q0x2 -->|m3| q0x3
+        q0x3 -->|m1| q0x4
+    end
+    subgraph z1 [Zone 1]
+        q1x0[Q1X0]
+        q1x1[Q1X1]
+        q1x2[Q1X2]
+        q1x3[Q1X3]
+        q1x0 -->|m0| q1x1
+        q1x1 -->|m2| q1x2
+        q1x2 -->|m1| q1x3
+    end
+    subgraph z2 [Zone 2]
+        %%metro direction: TB
+        q2x0[Q2X0]
+        q2x1[Q2X1]
+        q2x2[Q2X2]
+        q2x3[Q2X3]
+        q2x4[Q2X4]
+        q2x0 -->|m1| q2x1
+        q2x1 -->|m0| q2x2
+        q2x2 -->|m0| q2x3
+        q2x3 -->|m3| q2x4
+    end
+    subgraph z3 [Zone 3]
+        q3x0[Q3X0]
+    end
+    subgraph z4 [Zone 4]
+        q4x0[Q4X0]
+    end
+    q0x4 -->|m1| q1x0
+    q1x0 -->|m0| q2x0
+    q2x4 -->|m1| q3x0
+    q3x0 -->|m0| q4x0
+""",
+    # The fan delivers both lines to a vertical section, whose lane frame
+    # does not carry the source section's order across.
+    "fan_into_vertical_section": """
+graph LR
+    subgraph z0 [Zone 0]
+        q0x0[Q0X0]
+        q0x1[Q0X1]
+        q0x2[Q0X2]
+        q0x3[Q0X3]
+        q0x4[Q0X4]
+        q0x0 -->|m0| q0x1
+        q0x1 -->|m3| q0x2
+        q0x2 -->|m3| q0x3
+        q0x3 -->|m3| q0x4
+    end
+    subgraph z1 [Zone 1]
+        %%metro direction: TB
+        q1x0[Q1X0]
+        q1x1[Q1X1]
+        q1x2[Q1X2]
+        q1x0 -->|m3| q1x1
+        q1x1 -->|m1| q1x2
+    end
+    subgraph z2 [Zone 2]
+        q2x0[Q2X0]
+        q2x1[Q2X1]
+        q2x0 -->|m0| q2x1
+    end
+    q0x4 -->|m1| q1x0
+    q0x4 -->|m3| q1x0
+    q0x4 -->|m1| q2x0
+    q1x2 -->|m1| q2x0
+""",
+}
+
+
+@pytest.mark.parametrize("name", sorted(COMPACTION_COLLISION_MAPS))
+def test_gap_compaction_collision_renders(name: str) -> None:
+    """A line displaced by gap compaction lands where the map still renders."""
+    render_string(f"{_COMPACTION_LINES}\n{COMPACTION_COLLISION_MAPS[name]}")
