@@ -2,7 +2,7 @@
 
 Example `.mmd` files demonstrating a range of pipeline topologies and the layout patterns they produce. Each example exercises different aspects of the auto-layout engine.
 
-This directory holds 292 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
+This directory holds 298 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
 
 To render one example:
 
@@ -405,6 +405,9 @@ python scripts/list_topology_fixtures.py
 | `lr_bottom_exit_rl_top_entry_jog.mmd`                  | Six-section map whose LR BOTTOM exit drops into stacked RL TOP entries - the perpendicular drops co-align rather than jogging                                                                                                                                      |
 | `bottom_exit_junction_collinear_top_entry.mmd`         | A junction-fed BOTTOM exit dropping collinearly into a TOP entry directly below (#1428, #1509)                                                                                                                                                                     |
 | `bottom_exit_junction_offset_target.mmd`               | The same bottom-exit junction feed with the target offset, so the drop detours around an intervening section (#1428)                                                                                                                                               |
+| `tb_bottom_exit_junction_stacked_fork.mmd`             | A TB section's BOTTOM exit forking one line at a junction into two sections stacked in its column - the fork's lanes spread on X, so every branch leaves the junction on the feeder's lane (#2045)                                                                 |
+| `tb_bottom_exit_junction_stacked_fork_two_lines.mmd`   | Two-line member of the same TB stacked fork - each line keeps its own lane through the junction and the far branch clears the nearer section (#2045)                                                                                                               |
+| `bt_top_exit_junction_stacked_fork_two_lines.mmd`      | BT mirror of the stacked fork - the junction stands above the TOP exit and the branches rise into the column above (#2045)                                                                                                                                         |
 | `bottom_exit_stacked_right_entry_multiline_branch.mmd` | Multi-line branch member of the bottom-exit stacked RIGHT-entry fan - stacked fan grid origins are normalised                                                                                                                                                      |
 | `bottom_entry_same_row_boundary.mmd`                   | A section whose BOTTOM entry carries both lines from a same-row source to its left, exercising the BOTTOM-entry L-shape rule                                                                                                                                       |
 | `entry_hint_shared_edge.mmd`                           | The same section with `entry: bottom` hinted for only one of the two lines on the shared edge, so conflicting hints collapse to one hinted side                                                                                                                    |
