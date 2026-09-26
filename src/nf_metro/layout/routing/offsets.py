@@ -204,19 +204,21 @@ def _build_offset_ctx(graph: MetroGraph, offset_step: float) -> _OffsetCtx:
 def _build_same_y_adj(
     graph: MetroGraph,
 ) -> dict[str, dict[str, list[tuple[str, str]]]]:
-    """Build same-Y adjacency index per section.
+    """Build the same-lane adjacency index per section.
 
     For each section, maps station_id -> [(neighbour_id, line_id)] for
-    edges where both endpoints share the same Y coordinate (within
-    tolerance).  Used by offset phases that propagate changes along
-    horizontal runs.
+    edges whose endpoints share a lane coordinate (:func:`_share_lane`: Y for
+    LR/RL, X for TB/BT) -- the straight runs along the flow.  Used by offset
+    phases that propagate changes along those runs; it reads lanes exactly as
+    :func:`_reconcile_horizontal_offsets` does, so a change propagated here is
+    not snapped back there.
     """
     same_y_adj: dict[str, dict[str, list[tuple[str, str]]]] = {}
     for edge in graph.edges:
         src, tgt = graph.edge_endpoints(edge)
         if not src.section_id or src.section_id != tgt.section_id:
             continue
-        if abs(src.y - tgt.y) > _SAME_Y_TOLERANCE:
+        if not _share_lane(graph, src.id, tgt.id):
             continue
         sec_id = src.section_id
         if sec_id not in same_y_adj:

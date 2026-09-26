@@ -5,7 +5,7 @@ import pytest
 
 from nf_metro.api import prepare_graph, render_string
 from nf_metro.layout import compute_layout
-from nf_metro.layout.constants import SAME_COORD_TOLERANCE
+from nf_metro.layout.constants import SAME_COORD_TOLERANCE, graph_offset_step
 from nf_metro.layout.geometry import AxisFrame, lanes_run_along_x
 from nf_metro.layout.ordering import _place_single_node
 from nf_metro.layout.phases import _common as phase_common
@@ -463,6 +463,41 @@ def test_line_handed_to_a_fanning_exit_seeds_inheritance(direction: str) -> None
     lanes = _lane_columns(graph, chain)
 
     assert max(lanes) - min(lanes) <= SAME_COORD_TOLERANCE, dict(zip(chain, lanes))
+
+
+@pytest.mark.parametrize("direction", ("TB", "BT"))
+def test_vertical_line_change_chain_packs_its_lanes(direction: str) -> None:
+    """Every station of a vertical line-change chain holds its lines on
+    adjacent lanes, and each line keeps one lane down the column.
+
+    ``T0`` carries Line 1 and Line 3 but never Line 2, so Line 2's lane
+    between them is dead there; closing it has to move Line 3 down the whole
+    column rather than at ``T0`` alone, or Line 3 jogs on its way to ``T1``.
+    """
+    text = TB_LINE_CHANGE_CHAIN.read_text().replace(
+        "%%metro direction: TB", f"%%metro direction: {direction}"
+    )
+    graph = parse_metro_mermaid(text)
+    compute_layout(graph, validate=True)
+    offsets = compute_station_offsets(graph)
+    step = graph_offset_step(graph)
+    chain = ("t0", "t1", "t2", "t3")
+
+    for station_id in chain:
+        lanes = sorted(
+            offsets[(station_id, lid)] for lid in graph.station_lines(station_id)
+        )
+        assert lanes[-1] - lanes[0] == pytest.approx(step * (len(lanes) - 1)), (
+            station_id,
+            lanes,
+        )
+    for line_id in {lid for sid in chain for lid in graph.station_lines(sid)}:
+        lanes = {
+            offsets[(sid, line_id)]
+            for sid in chain
+            if line_id in graph.station_lines(sid)
+        }
+        assert len(lanes) == 1, (line_id, lanes)
 
 
 def test_gap_compaction_keeps_a_straightened_handoff_in_peel_order() -> None:
