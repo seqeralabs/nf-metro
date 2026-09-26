@@ -1747,22 +1747,23 @@ def _cotravelling_turn_off_intervals(
     return intervals
 
 
-def _interior_horizontal_run(
+def _interior_run(
     witness: CorridorFootprintWitness, target: CorridorCohortTarget
 ) -> bool:
-    """Whether *witness* is a horizontal run between two vertical legs.
+    """Whether *witness* is a run between two perpendicular legs.
 
     A first or last leg is the member's own approach to a station, which no
     bundle it passes through owns.
     """
     points = target.route.points
     rank = witness.segment_rank
-    if witness.axis != 1 or not 1 <= rank <= len(points) - 3:
+    if not 1 <= rank <= len(points) - 3:
         return False
     before, start, end, after = points[rank - 1 : rank + 3]
+    along = 1 - witness.axis
     return (
-        abs(before[0] - start[0]) <= COORD_TOLERANCE
-        and abs(after[0] - end[0]) <= COORD_TOLERANCE
+        abs(before[along] - start[along]) <= COORD_TOLERANCE
+        and abs(after[along] - end[along]) <= COORD_TOLERANCE
     )
 
 
@@ -1778,7 +1779,7 @@ def _scalar_bundles(
     offset_step: float,
     curve_radius: float,
 ) -> tuple[_FootprintBundle, ...]:
-    """Hold each horizontal scalar trunk on a bundle its system's runs describe.
+    """Hold a scalar trunk on the bundle its system's runs describe.
 
     A member run is a lane of the trunk's bundle when every clause holds: one
     route system, one travel direction, an overlapping span, a junction or port
@@ -1789,6 +1790,8 @@ def _scalar_bundles(
     The nearest such run is the reference and the trunk keeps the side it lies
     on, so the bundle narrows without transposing.  No relation is stated when
     the reference's pitch would put the trunk inside another lane of the bundle.
+    Only a trunk whose coordinate is a Y is bundled, as
+    ``_pack_cotravelling_corridor_runs`` packs only those.
     """
     targets_by_identity = {
         (target.member_id, target.edge_key): target for target in targets
@@ -1800,7 +1803,7 @@ def _scalar_bundles(
         is not None
         and target.system_id is not None
         and not target.legal_crossing_segment_ranks
-        and _interior_horizontal_run(witness, target)
+        and _interior_run(witness, target)
     )
 
     def bundled(
@@ -1812,6 +1815,7 @@ def _scalar_bundles(
         target = targets_by_identity[(run.member_id, run.edge_key)]
         if (
             target.system_id != trunk.system_id
+            or run.axis != trunk_run.axis
             or run.direction is not trunk_run.direction
             or not target.carrier_ids & trunk.carrier_ids
             or not spans_share_corridor(

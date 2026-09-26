@@ -2145,7 +2145,8 @@ def _pack_cotravelling_corridor_runs(
 
     Frozen member runs seat first because their geometry is settled before the
     plans reach here, so the bundle they already describe is the reference the
-    plans pack onto rather than something to be moved.
+    plans pack onto rather than something to be moved.  A trunk a corridor
+    grant placed is already packed by its bundle relation and may not move.
     """
     settled = list(plans)
     seated = list(member_runs)
@@ -2204,7 +2205,11 @@ def _separate_distinct_cotravelling_trunks(
     graph: MetroGraph,
     member_runs: tuple[_CotravellingRun, ...],
 ) -> tuple[ConvergencePlan, ...]:
-    """Greedily seat distinct-line trunks by local proper-crossing count."""
+    """Greedily seat distinct-line trunks by local proper-crossing count.
+
+    A trunk a corridor grant placed already clears a distinct line's turn-off
+    through its forbidden interval and may not move.
+    """
     step = graph_offset_step(graph)
     settled = list(plans)
     seated = list(member_runs)
