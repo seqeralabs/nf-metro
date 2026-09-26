@@ -99,6 +99,7 @@ from nf_metro.layout.routing.common import (
     section_header_top,
     section_ids_of_stations,
     segment_direction,
+    stack_diverted_junction_branches,
     symmetric_bundle_midpoint,
     trailing_perp_side,
     v_segment_crossed_sections,
@@ -374,7 +375,9 @@ class _InterFacts:
         A junction branch continuing the exit's column
         (:attr:`continues_tb_exit_through_junction`) diverts the same way, except
         past a section that carries its line down a vertical trunk: the run
-        overlays that trunk as one stroke and keeps the straight drop.
+        overlays that trunk as one stroke and keeps the straight drop.  It
+        diverts only as its junction's sole diversion
+        (:func:`stack_diverted_junction_branches`).
         """
         if self.is_tb_bottom_exit:
             return self.v_segment_crosses_other_section(self.sx, self.sy, self.ty)
@@ -388,7 +391,13 @@ class _InterFacts:
         if not crossed:
             return False
         section_lines = lines_by_section(self.graph)
-        return any(
+        diverted = stack_diverted_junction_branches(
+            self.graph,
+            self.edge.source,
+            self.ctx.divergence_exit_ports[self.edge.source],
+            section_lines,
+        )
+        return self.edge in diverted and any(
             not carries_line_along_column(section, self.edge.line_id, section_lines)
             for section in crossed
         )

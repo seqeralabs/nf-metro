@@ -31,6 +31,7 @@ from nf_metro.layout.geometry import (
     cotravelling_lanes_fuse,
     lanes_run_along_x,
     lanes_run_along_y,
+    sections_share_a_column,
     spans_share_corridor,
 )
 from nf_metro.layout.route_topology import (
@@ -3618,3 +3619,55 @@ def corridor_lanes(runs: Iterable[CorridorRun]) -> list[CorridorLane]:
         )
         for track in tracks
     ]
+
+
+def stack_diverted_junction_branches(
+    graph: MetroGraph,
+    junction_id: str,
+    exit_port_id: str,
+    section_lines: Mapping[str, AbstractSet[str]],
+) -> tuple[Edge, ...]:
+    """The branch of a trailing-exit junction that diverts round its column's stack.
+
+    A divergence junction fed through a vertical-flow section's trailing exit
+    stands on that exit's column.  A branch into a facing entry further along
+    the same column, past a section that does not carry its line down a
+    vertical trunk, diverts round the stack (``_route_around_stack``).  The
+    diversion owns the gap beside the column and the jogs into it outright, so
+    it is taken only when it is the junction's sole diverting branch and every
+    sibling carries straight on down the column into a facing entry; otherwise
+    no branch diverts (an empty result).
+    """
+    exit_port = graph.ports.get(exit_port_id)
+    src_sec = graph.sections.get(exit_port.section_id) if exit_port else None
+    if (
+        exit_port is None
+        or exit_port.is_entry
+        or src_sec is None
+        or not lanes_run_along_x(src_sec.direction)
+    ):
+        return ()
+    trailing = trailing_perp_side(src_sec.direction)
+    if exit_port.side is not trailing:
+        return ()
+    facing = PortSide.TOP if trailing is PortSide.BOTTOM else PortSide.BOTTOM
+    diverted: list[Edge] = []
+    for edge in graph.edges_from(junction_id):
+        port = graph.ports.get(edge.target)
+        tgt_sec = graph.sections.get(port.section_id) if port else None
+        if (
+            port is None
+            or tgt_sec is None
+            or port.side is not facing
+            or not sections_share_a_column(src_sec, tgt_sec)
+        ):
+            return ()
+        lo, hi = sorted((src_sec.grid_row, tgt_sec.grid_row))
+        if any(
+            lo < section.grid_row < hi
+            and sections_share_a_column(section, src_sec)
+            and not carries_line_along_column(section, edge.line_id, section_lines)
+            for section in graph.sections.values()
+        ):
+            diverted.append(edge)
+    return tuple(diverted) if len(diverted) == 1 else ()

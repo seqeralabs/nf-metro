@@ -19,10 +19,13 @@ import pytest
 from nf_metro.api import render_string
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.geometry import section_lane_sign
+from nf_metro.layout.route_topology import divergence_junction_sources
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.common import (
     _v_segment_crosses_other_section,
     apply_route_offsets,
+    lines_by_section,
+    stack_diverted_junction_branches,
 )
 from nf_metro.layout.routing.normalize import _h_segment_crosses_other_section
 from nf_metro.layout.routing.reversal import tb_positive_fan_sections
@@ -121,3 +124,119 @@ def test_inter_section_legs_clear_other_sections(name: str) -> None:
                 assert not _h_segment_crosses_other_section(
                     graph, x1, x2, y1, exclude
                 ), f"{route.edge.source}->{route.edge.target} runs through a box"
+
+
+_TWO_BRANCHES_PAST_THE_STACK = """\
+%%metro line: l1 | Line 1 | #3779b1
+%%metro line: l4 | Line 4 | #b13737
+%%metro line_order: span
+%%metro grid: a | 0,0
+%%metro grid: b | 1,0
+%%metro grid: x | 1,1
+%%metro grid: t0 | 1,2
+%%metro grid: t1 | 1,3
+graph LR
+    subgraph a [A]
+        a0[A0]
+    end
+    subgraph b [B]
+        %%metro direction: TB
+        b0[B0]
+        b1[B1]
+        b2[B2]
+        b0 -->|l1,l4| b1
+        b1 -->|l1,l4| b2
+    end
+    subgraph x [X]
+        %%metro direction: TB
+        xn0[XN0]
+        xn1[XN1]
+        xn0 -->|l4| xn1
+    end
+    subgraph t0 [T0]
+        t0n0[T0N0]
+        t0n1[T0N1]
+        t0n0 -->|l1| t0n1
+    end
+    subgraph t1 [T1]
+        t1n0[T1N0]
+    end
+    a0 -->|l1,l4| b0
+    b2 -->|l1| t0n0
+    b2 -->|l4| t1n0
+    b0 -->|l4| xn0
+"""
+
+_SIBLING_LEAVES_THE_COLUMN = """\
+%%metro line: l1 | Line 1 | #3779b1
+%%metro grid: a | 1,2
+%%metro grid: b | 0,2
+%%metro grid: x | 0,1
+%%metro grid: t0 | 0,0
+%%metro grid: t1 | 1,0
+graph LR
+    subgraph a [A]
+        %%metro direction: RL
+        a0[A0]
+    end
+    subgraph b [B]
+        %%metro direction: BT
+        b0[B0]
+        b1[B1]
+        b2[B2]
+        b0 -->|l1| b1
+        b1 -->|l1| b2
+    end
+    subgraph x [X]
+        %%metro direction: RL
+        xn0[XN0]
+    end
+    subgraph t0 [T0]
+        %%metro direction: TB
+        t0n0[T0N0]
+    end
+    subgraph t1 [T1]
+        %%metro direction: TB
+        t1n0[T1N0]
+    end
+    a0 -->|l1| b0
+    b2 -->|l1| t0n0
+    b2 -->|l1| t1n0
+    a0 -->|l1| xn0
+"""
+
+
+def _stack_diversions(graph) -> dict[str, tuple[str, ...]]:
+    section_lines = lines_by_section(graph)
+    return {
+        junction_id: tuple(
+            edge.target
+            for edge in stack_diverted_junction_branches(
+                graph, junction_id, exit_port_id, section_lines
+            )
+        )
+        for junction_id, exit_port_id in divergence_junction_sources(graph).items()
+    }
+
+
+@pytest.mark.parametrize("name", FIXTURES[:3])
+def test_one_branch_diverts_round_the_stack(name: str) -> None:
+    graph, _offsets, _polylines = _laid_out(name)
+    junction, _port = _fork(graph)
+    assert len(_stack_diversions(graph)[junction.id]) == 1
+
+
+@pytest.mark.parametrize(
+    "text",
+    [_TWO_BRANCHES_PAST_THE_STACK, _SIBLING_LEAVES_THE_COLUMN],
+    ids=["two-branches-past-the-stack", "sibling-leaves-the-column"],
+)
+def test_shared_stack_gap_keeps_the_straight_drops(text: str) -> None:
+    """A diversion owns the gap beside the column, so none is taken when a
+    second branch would divert too or a sibling leaves the column through it."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        assert render_string(text)
+        graph = parse_metro_mermaid(text)
+        compute_layout(graph)
+    assert not any(_stack_diversions(graph).values())
