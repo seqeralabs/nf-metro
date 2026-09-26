@@ -1749,7 +1749,22 @@ fan plan states.
   Two runs count as one bundle only on local evidence: one route system, one
   travel direction, an overlapping span, a shared carrier junction or entry
   port, and either one named inter-row gap or a separation already inside
-  `BUNDLE_TO_BUNDLE_CLEARANCE`.
+  `BUNDLE_TO_BUNDLE_CLEARANCE`. On a pass that compiles corridor cohorts the
+  compile states the same conflicts as relations on each trunk's scalar
+  request: a bundle-pitch fixed equality to the nearest bundled member run, a
+  one-pitch forbidden interval around every same-direction distinct-line member
+  run along the trunk once one of them crowds it, and a forbidden interval
+  around a distinct line's turn-off leg across the trunk. Where those relations
+  cover the conflict, the grant already sits where
+  `_pack_cotravelling_corridor_runs` and `_separate_distinct_cotravelling_trunks`
+  would seat it, so their re-seat is a no-op. The passes themselves do not know
+  about grants: where a relation does not cover a conflict they still move the
+  trunk, and `_assert_grants_survive_settlement` then fails the render closed
+  rather than drawing a trunk off its published grant. The relations tie a
+  trunk only to member runs; trunk-to-trunk packing and separation, which the
+  passes perform by counting already-seated trunks as neighbours, has no typed
+  relation, so a compiled round where it would move a granted trunk fails
+  closed.
 - **Precondition**: The semantic route scaffold, exit-turn decisions, station
   offsets, layout coordinates, topology resolution, merge
   classification, and stable member family IDs are settled. Final global

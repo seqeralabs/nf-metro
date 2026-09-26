@@ -17,8 +17,13 @@ from itertools import permutations
 from math import isclose, isfinite
 from types import MappingProxyType
 
-from nf_metro.layout.constants import COORD_TOLERANCE, CURVE_RADIUS, graph_offset_step
-from nf_metro.layout.geometry import cotravelling_lane_clearance
+from nf_metro.layout.constants import (
+    BUNDLE_TO_BUNDLE_CLEARANCE,
+    COORD_TOLERANCE,
+    CURVE_RADIUS,
+    graph_offset_step,
+)
+from nf_metro.layout.geometry import cotravelling_lane_clearance, spans_share_corridor
 from nf_metro.layout.route_plan import (
     BindingKind,
     EmissionBinding,
@@ -367,6 +372,10 @@ class CorridorCohortTarget:
     endpoint_lane_coordinate: float | None = None
     network_id: str | None = None
     legal_crossing_segment_ranks: frozenset[int] = frozenset()
+    system_id: str | None = None
+    carrier_ids: frozenset[str] = frozenset()
+    """The junctions and ports the route leaves and heads to, which decide
+    whether two co-travelling runs of one system are lanes of one bundle."""
 
 
 def _claim_is_destination_boundary_carrier(
@@ -1061,6 +1070,23 @@ class _FootprintContact:
 
 
 @dataclass(frozen=True, slots=True)
+class _FootprintBundle:
+    """A scalar lane held ``delta`` from a run of its own bundle.
+
+    The run is a fixed obstacle where it currently stands, so the relation moves
+    the scalar onto the bundle and never the run onto the scalar.  The run is
+    usually a member carrier's variable footprint; that stays sound only while
+    no relation joins a scalar into a member carrier's component, so a bundle
+    whose run is movable in the scalar's own problem fails closed.
+    """
+
+    owner_id: str
+    variable_id: str
+    witness_id: str
+    delta: float
+
+
+@dataclass(frozen=True, slots=True)
 class _MemberFootprintModel:
     variables: tuple[CorridorScalarVariable, ...]
     witnesses: tuple[CorridorFootprintWitness, ...]
@@ -1068,6 +1094,7 @@ class _MemberFootprintModel:
     orders: tuple[_FootprintOrder, ...]
     contacts: tuple[_FootprintContact, ...]
     forbidden_intervals: tuple[CorridorForbiddenInterval, ...] = ()
+    bundles: tuple[_FootprintBundle, ...] = ()
 
 
 def _bind_claim(
@@ -1437,6 +1464,10 @@ def _member_footprint_model(
         for item in witnesses
         if item.coordinate_variable_id is not None
     }
+    regions_by_variable = {
+        variable_id: frozenset(item.regions)
+        for variable_id, item in carrier_by_variable.items()
+    }
     orders: dict[str, _FootprintOrder] = {}
     contacts: dict[str, _FootprintContact] = {}
     for lead in witnesses:
@@ -1494,6 +1525,7 @@ def _member_footprint_model(
         )
         if endpoint_cohorts_by_variable.get(controller_id):
             continue
+        controller_regions = regions_by_variable[controller_id]
         for candidate_id, carrier in carrier_by_variable.items():
             if candidate_id == controller_id:
                 continue
@@ -1506,6 +1538,7 @@ def _member_footprint_model(
                 or candidate.owner_kind is not CorridorScalarOwnerKind.MEMBER_CARRIER
                 or controller.owner_kind is not CorridorScalarOwnerKind.MEMBER_CARRIER
                 or carrier.direction is not controller_carrier.direction
+                or not regions_by_variable[candidate_id] & controller_regions
             ):
                 continue
             if not (
@@ -1635,6 +1668,22 @@ def _member_footprint_model(
                 perpendicular.semantic_rank,
             )
             intervals[(interval.member_id, interval.obstacle_id)] = interval
+    scalar_carriers = {
+        variable.variable_id: carrier_by_variable[variable.variable_id]
+        for variable in request_variables
+        if variable.variable_id in carrier_by_variable
+    }
+    member_runs = _member_corridor_runs(targets, witnesses)
+    intervals.update(
+        _cotravelling_turn_off_intervals(
+            witnesses, scalar_carriers, offset_step, curve_radius
+        )
+    )
+    intervals.update(
+        _cotravelling_run_intervals(
+            member_runs, scalar_carriers, offset_step, curve_radius
+        )
+    )
 
     return _MemberFootprintModel(
         tuple(variables),
@@ -1643,7 +1692,287 @@ def _member_footprint_model(
         tuple(orders[key] for key in sorted(orders)),
         tuple(contacts[key] for key in sorted(contacts)),
         tuple(intervals[key] for key in sorted(intervals)),
+        _scalar_bundles(
+            targets,
+            member_runs,
+            scalar_requests,
+            scalar_carriers,
+            offset_step,
+            curve_radius,
+        ),
     )
+
+
+def _cotravelling_turn_off_intervals(
+    witnesses: tuple[CorridorFootprintWitness, ...],
+    scalar_carriers: Mapping[str, CorridorFootprintWitness],
+    offset_step: float,
+    curve_radius: float,
+) -> dict[tuple[str, str], CorridorForbiddenInterval]:
+    """Forbid a scalar lane the legs a co-travelling distinct line turns off on.
+
+    A distinct line running the same way within one pitch of the scalar's lane
+    turns off it on a perpendicular leg that ends on that lane inside the
+    scalar's span.  No relation joins the scalar to that member, so the leg is
+    cleared where it currently stands, whether or not its own carrier is a
+    variable; a leg owned by another scalar is that scalar's own geometry.
+    """
+    scalar_ids = frozenset(scalar_carriers)
+    by_lane = _witnesses_by_lane(witnesses)
+    pitch = cotravelling_lane_clearance(
+        same_line=False,
+        counter_running=False,
+        curve_radius=curve_radius,
+        offset_step=offset_step,
+    )
+    intervals: dict[tuple[str, str], CorridorForbiddenInterval] = {}
+    for variable_id, carrier in scalar_carriers.items():
+        for perpendicular in witnesses:
+            if (
+                perpendicular.axis == carrier.axis
+                or perpendicular.line_id == carrier.line_id
+                or perpendicular.coordinate_variable_id in scalar_ids
+                or perpendicular.crossing_disposition
+                is CorridorCrossingDisposition.LEGAL_CROSSING
+                or not (
+                    carrier.longitudinal_start + COORD_TOLERANCE
+                    < perpendicular.coordinate
+                    < carrier.longitudinal_end - COORD_TOLERANCE
+                )
+                or not (
+                    perpendicular.longitudinal_start - COORD_TOLERANCE
+                    <= carrier.coordinate
+                    <= perpendicular.longitudinal_end + COORD_TOLERANCE
+                )
+            ):
+                continue
+            if not any(
+                abs(parallel.segment_rank - perpendicular.segment_rank) == 1
+                and parallel.direction is carrier.direction
+                and _footprints_overlap(parallel, carrier)
+                and abs(parallel.coordinate - carrier.coordinate)
+                < pitch - COORD_TOLERANCE
+                for parallel in by_lane.get(
+                    (perpendicular.member_id, perpendicular.edge_key, carrier.axis),
+                    (),
+                )
+            ):
+                continue
+            intervals[(variable_id, perpendicular.footprint_id)] = (
+                CorridorForbiddenInterval(
+                    variable_id,
+                    perpendicular.footprint_id,
+                    perpendicular.longitudinal_start - pitch,
+                    perpendicular.longitudinal_end + pitch,
+                    perpendicular.semantic_rank,
+                )
+            )
+    return intervals
+
+
+def _interior_run(
+    witness: CorridorFootprintWitness, target: CorridorCohortTarget
+) -> bool:
+    """Whether *witness* is a run between two perpendicular legs.
+
+    A first or last leg is the member's own approach to a station, which no
+    bundle it passes through owns.
+    """
+    points = target.route.points
+    rank = witness.segment_rank
+    if not 1 <= rank <= len(points) - 3:
+        return False
+    before, start, end, after = points[rank - 1 : rank + 3]
+    along = 1 - witness.axis
+    return (
+        abs(before[along] - start[along]) <= COORD_TOLERANCE
+        and abs(after[along] - end[along]) <= COORD_TOLERANCE
+    )
+
+
+def _row_gap(regions: Sequence[CorridorRegion | None]) -> RowGapRegion | None:
+    return next((item for item in regions if isinstance(item, RowGapRegion)), None)
+
+
+def _member_corridor_runs(
+    targets: Sequence[CorridorCohortTarget],
+    witnesses: tuple[CorridorFootprintWitness, ...],
+) -> tuple[CorridorFootprintWitness, ...]:
+    """Every interior run of a member route no convergence owns."""
+    targets_by_identity = {
+        (target.member_id, target.edge_key): target for target in targets
+    }
+    return tuple(
+        witness
+        for witness in witnesses
+        if (target := targets_by_identity.get((witness.member_id, witness.edge_key)))
+        is not None
+        and target.system_id is not None
+        and not target.legal_crossing_segment_ranks
+        and _interior_run(witness, target)
+    )
+
+
+def _cotravelling_run_intervals(
+    runs: tuple[CorridorFootprintWitness, ...],
+    scalar_carriers: Mapping[str, CorridorFootprintWitness],
+    offset_step: float,
+    curve_radius: float,
+) -> dict[tuple[str, str], CorridorForbiddenInterval]:
+    """Forbid a crowded scalar lane every distinct line co-travelling its span.
+
+    Once a distinct line's run travelling the same way lies closer than one
+    pitch, the scalar has to clear every such run along its span by a pitch,
+    which leaves it exactly the lanes ``_separate_distinct_cotravelling_trunks``
+    chooses among.  A scalar already a pitch clear of each keeps its lane.  Only
+    a scalar whose coordinate is a Y takes part, as only those are separated.
+    """
+    pitch = cotravelling_lane_clearance(
+        same_line=False,
+        counter_running=False,
+        curve_radius=curve_radius,
+        offset_step=offset_step,
+    )
+    intervals: dict[tuple[str, str], CorridorForbiddenInterval] = {}
+    for variable_id, carrier in scalar_carriers.items():
+        if carrier.axis != 1:
+            continue
+        neighbours = tuple(
+            run
+            for run in runs
+            if run.axis == carrier.axis
+            and run.direction is carrier.direction
+            and run.line_id != carrier.line_id
+            and spans_share_corridor(
+                carrier.longitudinal_start,
+                carrier.longitudinal_end,
+                run.longitudinal_start,
+                run.longitudinal_end,
+            )
+        )
+        if not any(
+            abs(run.coordinate - carrier.coordinate) < pitch - COORD_TOLERANCE
+            for run in neighbours
+        ):
+            continue
+        intervals.update(
+            {
+                (variable_id, run.footprint_id): CorridorForbiddenInterval(
+                    variable_id,
+                    run.footprint_id,
+                    run.coordinate - pitch,
+                    run.coordinate + pitch,
+                    run.semantic_rank,
+                )
+                for run in neighbours
+            }
+        )
+    return intervals
+
+
+def _scalar_bundles(
+    targets: Sequence[CorridorCohortTarget],
+    runs: tuple[CorridorFootprintWitness, ...],
+    scalar_requests: Sequence[CorridorScalarRequest],
+    scalar_carriers: Mapping[str, CorridorFootprintWitness],
+    offset_step: float,
+    curve_radius: float,
+) -> tuple[_FootprintBundle, ...]:
+    """Hold a scalar trunk on the bundle its system's runs describe.
+
+    A member run is a lane of the trunk's bundle when every clause holds: one
+    route system, one travel direction, an overlapping span, a junction or port
+    both leave or head to, and either one named row gap or, unless a row gap
+    names both, a separation under ``BUNDLE_TO_BUNDLE_CLEARANCE``.  Only
+    interior runs of routes no convergence owns take part.
+
+    The nearest such run is the reference and the trunk keeps the side it lies
+    on, so the bundle narrows without transposing.  No relation is stated when
+    the reference's pitch would put the trunk inside another lane of the bundle.
+    Only a trunk whose coordinate is a Y is bundled, as
+    ``_pack_cotravelling_corridor_runs`` packs only those.
+    """
+    targets_by_identity = {
+        (target.member_id, target.edge_key): target for target in targets
+    }
+    run_corridors = {run.footprint_id: _row_gap(run.regions) for run in runs}
+
+    def bundled(
+        run: CorridorFootprintWitness,
+        trunk: CorridorCohortTarget,
+        trunk_run: CorridorFootprintWitness,
+        corridor: RowGapRegion | None,
+    ) -> bool:
+        target = targets_by_identity[(run.member_id, run.edge_key)]
+        if (
+            target.system_id != trunk.system_id
+            or run.axis != trunk_run.axis
+            or run.direction is not trunk_run.direction
+            or not target.carrier_ids & trunk.carrier_ids
+            or not spans_share_corridor(
+                trunk_run.longitudinal_start,
+                trunk_run.longitudinal_end,
+                run.longitudinal_start,
+                run.longitudinal_end,
+            )
+        ):
+            return False
+        run_corridor = run_corridors[run.footprint_id]
+        if corridor is not None and run_corridor is not None:
+            return corridor == run_corridor
+        return abs(run.coordinate - trunk_run.coordinate) < BUNDLE_TO_BUNDLE_CLEARANCE
+
+    def pitch(
+        run: CorridorFootprintWitness, trunk_run: CorridorFootprintWitness
+    ) -> float:
+        return cotravelling_lane_clearance(
+            same_line=run.line_id == trunk_run.line_id,
+            counter_running=False,
+            curve_radius=curve_radius,
+            offset_step=offset_step,
+        )
+
+    bundles: list[_FootprintBundle] = []
+    for request in scalar_requests:
+        variable_id = request.variable.variable_id
+        trunk_run = scalar_carriers.get(variable_id)
+        trunk = targets_by_identity.get(
+            (request.variable.member_id, request.variable.edge_key)
+        )
+        if trunk_run is None or trunk is None or trunk_run.axis != 1:
+            continue
+        corridor = _row_gap((request.region,))
+        neighbours = tuple(
+            run for run in runs if bundled(run, trunk, trunk_run, corridor)
+        )
+        reference = min(
+            neighbours,
+            key=lambda run: (
+                abs(run.coordinate - trunk_run.coordinate),
+                run.coordinate,
+            ),
+            default=None,
+        )
+        if reference is None:
+            continue
+        side = 1.0 if trunk_run.coordinate >= reference.coordinate else -1.0
+        delta = side * pitch(reference, trunk_run)
+        if any(
+            abs(reference.coordinate + delta - run.coordinate)
+            < pitch(run, trunk_run) - COORD_TOLERANCE
+            for run in neighbours
+            if run is not reference
+        ):
+            continue
+        bundles.append(
+            _FootprintBundle(
+                f"member-footprint-bundle|{variable_id}|{reference.footprint_id}",
+                variable_id,
+                reference.footprint_id,
+                delta,
+            )
+        )
+    return tuple(bundles)
 
 
 @dataclass(frozen=True, slots=True)
@@ -2359,7 +2688,7 @@ def _problem(
         for fixed_claim in fixed_claims
         if _same_semantic_fixed_lane(movable_claim, fixed_claim)
     )
-    contact_obstacles: dict[str, CorridorObstacle] = {}
+    relation_obstacles: dict[str, CorridorObstacle] = {}
     for contact in footprint_model.contacts:
         fixed_witnesses = tuple(
             witnesses_by_id[witness_id]
@@ -2371,7 +2700,7 @@ def _problem(
         if len(fixed_witnesses) != 1:
             continue
         witness = fixed_witnesses[0]
-        contact_obstacles[contact.owner_id] = CorridorObstacle(
+        relation_obstacles[contact.owner_id] = CorridorObstacle(
             contact.owner_id,
             witness.coordinate,
             witness.coordinate,
@@ -2383,6 +2712,32 @@ def _problem(
             CorridorFixedEquality(contact.owner_id, member_id, contact.owner_id)
             for variable_id in contact.participant_variable_ids
             for member_id in lane_ids(variable_id)
+        )
+    for bundle in footprint_model.bundles:
+        bundle_lane_ids = lane_ids(bundle.variable_id)
+        if not bundle_lane_ids:
+            continue
+        witness = witnesses_by_id[bundle.witness_id]
+        if witness.coordinate_variable_id is not None and lane_ids(
+            witness.coordinate_variable_id
+        ):
+            raise CorridorCohortCompilationError(
+                f"corridor bundle {bundle.owner_id} anchors on a run this "
+                "component also moves"
+            )
+        relation_obstacles[bundle.owner_id] = CorridorObstacle(
+            bundle.owner_id,
+            witness.coordinate,
+            witness.coordinate,
+            witness.longitudinal_start,
+            witness.longitudinal_end,
+            witness.semantic_rank,
+        )
+        fixed_equalities.extend(
+            CorridorFixedEquality(
+                bundle.owner_id, member_id, bundle.owner_id, bundle.delta
+            )
+            for member_id in bundle_lane_ids
         )
     separations = tuple(
         CorridorSeparation(
@@ -2529,7 +2884,7 @@ def _problem(
         (*member_lanes, *scalar_lanes),
         (
             *(_obstacle(item) for item in fixed_claims),
-            *contact_obstacles.values(),
+            *relation_obstacles.values(),
         ),
         equalities,
         (*separations, *scalar_separations),
@@ -3086,6 +3441,9 @@ def compile_corridor_cohort_plan(
         ledger.curve_radius,
         ledger.forced_crossings,
     )
+    interval_obstacle_ids = frozenset(
+        interval.obstacle_id for interval in footprint_model.forbidden_intervals
+    )
     obstacle_provenance: dict[str, CorridorCohortObstacleProvenance] = {}
     obstacle_provenance.update(
         {
@@ -3097,10 +3455,14 @@ def compile_corridor_cohort_plan(
                 witness.connector_ids,
             )
             for witness in footprint_model.witnesses
-            if witness.coordinate_variable_id is None
-            and witness.start_variable_id is None
-            and witness.end_variable_id is None
-            and witness.crossing_disposition is CorridorCrossingDisposition.FIXED_DOGLEG
+            if witness.footprint_id in interval_obstacle_ids
+            or (
+                witness.coordinate_variable_id is None
+                and witness.start_variable_id is None
+                and witness.end_variable_id is None
+                and witness.crossing_disposition
+                is CorridorCrossingDisposition.FIXED_DOGLEG
+            )
         }
     )
     witnesses_by_id = {

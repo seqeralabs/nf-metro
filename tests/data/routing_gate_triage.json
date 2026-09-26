@@ -991,8 +991,8 @@
   "note": "Fan-descent re-seating declines when any member's channel boundary is route-system-owned and the group is not already on adjacent tracks. Reaching this gate with an owned channel means the gate above it let the group through on `settle_frozen_arcs and tight`, since a route-system boundary is one of the ways `_planner_owns_channel` answers true, so `tight` is already true here and this arm's `not tight` cannot hold. Instrumented across the whole corpus under four option settings: 122,516 evaluations of the gate, zero fires, and still zero when the condition is widened to `_planner_owns_channel` itself. No construction reaches the arm.",
   "status": "candidate-dead"
  },
- "normalize.py::if (::#11": {
-  "note": "A secondary lane declines to move when it faces no pinned obstacle but the obstacle it would step around already holds a fixed segment, so stepping cannot separate them. Every corpus crowding either pins its obstacle or leaves the obstacle's segments free, so the skip has no fixture; it needs a topology where a non-primary lane meets a fixed-segment obstacle.",
+ "normalize.py::if movable_route_ids is not None and not any(::#1": {
+  "note": "The pre-freeze call passes every frozen member (complete-path systems and every candidate), so the skip is left for a same-port destination-tail bundle made solely of convergence context routes whose systems do not own their complete path. No corpus fixture routes such a bundle; it needs a topology where two or more distinct-line convergence strokes share an H-V-H tail into one port.",
   "status": "needs-review"
  },
  "normalize.py::if 0 <= k - 1 < len(rp.curve_radii):::#1": {

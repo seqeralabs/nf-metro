@@ -8,7 +8,8 @@ whatever the plan contains.
 The grant tests hand those requests' own recipes back to
 :func:`apply_convergence_corridor_grants`, either directly with a chosen
 coordinate or through a full render whose corridor preference is shifted by a
-known amount: no corpus fixture's solve moves a trunk on its own, so a clean
+known amount: a corpus fixture's solve moves a trunk only onto a lane its own
+bundle or a crossing leg forces, which settlement forces as well, so a clean
 render diff says nothing about whether granted coordinates reach the drawing.
 """
 
@@ -26,6 +27,7 @@ from nf_metro.layout.constants import (
     COORD_TOLERANCE_FINE,
     CURVE_RADIUS,
     DIAGONAL_RUN,
+    OFFSET_STEP,
 )
 from nf_metro.layout.route_plan import (
     ConvergenceEndpointRole,
@@ -1204,7 +1206,9 @@ def _shift_corridor_preference(monkeypatch: pytest.MonkeyPatch, **domain) -> Non
 
 
 def _render(
-    fixture: str, monkeypatch: pytest.MonkeyPatch
+    fixture: str,
+    monkeypatch: pytest.MonkeyPatch,
+    layout_options: dict[str, object] | None = None,
 ) -> tuple[RoutePlan, list[RoutedPath]]:
     """Render *fixture*; return its published plan and the routes it drew."""
     settled: list[svg._SettledRenderGeometry] = []
@@ -1218,7 +1222,11 @@ def _render(
     with monkeypatch.context() as patch:
         patch.setattr(svg, "_settle_render_geometry", settle)
         path = ROOT / fixture
-        graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+        graph = prepare_graph(
+            path.read_text(),
+            source_dir=str(path.parent),
+            layout_options=layout_options,
+        )
         observed = svg.build_observed_render_plan(graph, resolve_theme(None, graph))
     return observed.route_plan, settled[-1].routes
 
@@ -1231,7 +1239,9 @@ def _routes_by_edge(routes: list[RoutedPath]) -> dict[tuple[str, str, str], Rout
 
 @pytest.mark.parametrize(
     ("fixture", "granted"),
-    [(_FUNCPROFILER, 466.0), (_MERGE_RIGHT_ENTRY, 362.0)],
+    # merge_right_entry's trunk is held on its same-line member's lane, which
+    # outranks its shifted preference.
+    [(_FUNCPROFILER, 466.0), (_MERGE_RIGHT_ENTRY, 346.0)],
 )
 def test_granted_trunk_is_drawn_and_published_and_nothing_else_moves(
     fixture: str, granted: float, monkeypatch: pytest.MonkeyPatch
@@ -1262,14 +1272,45 @@ def test_granted_trunk_is_drawn_and_published_and_nothing_else_moves(
         assert route.points == baseline[key].points, key
 
 
+def _re_seat_trunks_in_global_settlement(
+    monkeypatch: pytest.MonkeyPatch, offset: float
+) -> None:
+    """Make the global settlement's last legacy pass move every trunk *offset*."""
+    global_passes: list[None] = []
+    real_settle = planning.settle_global_convergence_execution
+    real_reconcile = convergences._reconcile_landing_handedness
+
+    def settle(*args, **kwargs):
+        global_passes.append(None)
+        try:
+            return real_settle(*args, **kwargs)
+        finally:
+            global_passes.pop()
+
+    def reconcile(plans):
+        settled = real_reconcile(plans)
+        if not global_passes:
+            return settled
+        return tuple(
+            plan
+            if plan.trunk_axis is None
+            else convergences._move_trunk_axis(
+                plan, plan.trunk_axis.coordinate + offset
+            )
+            for plan in settled
+        )
+
+    monkeypatch.setattr(planning, "settle_global_convergence_execution", settle)
+    monkeypatch.setattr(convergences, "_reconcile_landing_handedness", reconcile)
+
+
 def test_a_grant_the_global_settlement_re_seats_fails_closed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The applier writes the grant exactly, and a later re-seat of it raises.
 
-    ``settle_global_convergence_execution`` re-settles fan_in_merge's
-    co-travelling trunks off the coordinate the applier wrote, so publishing
-    would name a grant the drawn trunk does not sit on.
+    A legacy pass that re-seats the granted trunk after the applier would make
+    the published grant name a coordinate the drawn trunk does not sit on.
     """
     applied: list[tuple[tuple[CorridorScalarGrant, ...], ConvergencePlanExecution]] = []
     real_apply = planning.apply_convergence_corridor_grants
@@ -1281,9 +1322,10 @@ def test_a_grant_the_global_settlement_re_seats_fails_closed(
 
     monkeypatch.setattr(planning, "apply_convergence_corridor_grants", spy)
     _shift_corridor_preference(monkeypatch)
+    _re_seat_trunks_in_global_settlement(monkeypatch, 4.0)
 
-    with pytest.raises(ConvergenceInvariantError, match="re-settled off the 208"):
-        _render(_FAN_IN_MERGE, monkeypatch)
+    with pytest.raises(ConvergenceInvariantError, match="re-settled off the 466"):
+        _render(_FUNCPROFILER, monkeypatch)
 
     moving = [
         (grants, result)
@@ -1293,10 +1335,24 @@ def test_a_grant_the_global_settlement_re_seats_fails_closed(
     assert moving
     for grants, result in moving:
         by_owner = _plans_by_owner(result)
-        assert len(grants) == 2
-        for grant in grants:
-            assert grant.coordinate == 208.0
-            assert by_owner[grant.owner_id].trunk_axis.coordinate == grant.coordinate
+        (grant,) = grants
+        assert grant.coordinate == 466.0
+        assert by_owner[grant.owner_id].trunk_axis.coordinate == grant.coordinate
+
+
+def test_an_unmoved_grant_the_global_settlement_re_seats_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A grant owns the coordinate it leaves in place as much as one it moves.
+
+    funcprofiler's trunk is granted the coordinate it already holds, so the
+    applier writes nothing, yet a legacy pass re-seating that trunk would
+    publish a grant the drawn trunk does not sit on.
+    """
+    _re_seat_trunks_in_global_settlement(monkeypatch, 4.0)
+
+    with pytest.raises(ConvergenceInvariantError, match="re-settled off the 454"):
+        _render(_FUNCPROFILER, monkeypatch)
 
 
 @pytest.mark.parametrize("fixture", _STATION_PINNED_FIXTURES)
@@ -1313,3 +1369,154 @@ def test_trunk_on_an_entry_port_cannot_be_drawn_off_it(
     )
     with pytest.raises(ConvergenceInvariantError, match="planned .* approach"):
         _render(fixture, monkeypatch)
+
+
+_DISTINCT_LANE_SEPARATION_FIXTURES = (
+    "examples/topologies/plan_owned_distinct_lane_separation.mmd",
+    "tests/fixtures/regressions/plan_owned_distinct_lane_separation_reordered.mmd",
+)
+
+
+def _render_with_compiled_grants(
+    fixture: str,
+    monkeypatch: pytest.MonkeyPatch,
+    layout_options: dict[str, object] | None = None,
+) -> tuple[RoutePlan, tuple[CorridorScalarGrant, ...]]:
+    """Render *fixture*; return its plan and the last compile's trunk grants."""
+    compiled: list[tuple[CorridorScalarGrant, ...]] = []
+    real_apply = planning.apply_convergence_corridor_grants
+
+    def spy(execution, requests, grants):
+        if grants:
+            compiled.append(tuple(grants))
+        return real_apply(execution, requests, grants)
+
+    monkeypatch.setattr(planning, "apply_convergence_corridor_grants", spy)
+    plan, _routes = _render(fixture, monkeypatch, layout_options)
+    assert compiled
+    return plan, compiled[-1]
+
+
+@pytest.mark.parametrize("fixture", _DISTINCT_LANE_SEPARATION_FIXTURES)
+def test_trunk_is_granted_clear_of_a_distinct_line_turning_off_its_lane(
+    fixture: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The grant, not settlement, seats a trunk clear of a distinct line's turn.
+
+    The ``secondary`` members run left on the ``primary`` trunks' lane and turn
+    up out of it across the trunks, so both trunks take the nearest lane one
+    pitch clear of that turn-off, and the drawn trunk is the granted one.
+    """
+    plan, grants = _render_with_compiled_grants(fixture, monkeypatch)
+
+    assert len(grants) == 2
+    assert {grant.coordinate for grant in grants} == {200.0}
+    by_owner = {str(item.id): item for item in plan.convergence_plans}
+    for grant in grants:
+        assert by_owner[grant.owner_id].trunk_axis.coordinate == grant.coordinate
+
+
+def test_trunk_is_granted_onto_the_same_line_run_it_bundles_with(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The grant, not settlement, fuses a trunk onto its own line's frozen run.
+
+    The unowned ``main`` member into the sink's right entry already runs along
+    the trunk's corridor one pitch away, so the two are one bundle drawn too
+    wide: the trunk is granted the member's lane, and the drawn trunk is the
+    granted one.
+    """
+    plan, grants = _render_with_compiled_grants(_MERGE_RIGHT_ENTRY, monkeypatch)
+
+    (grant,) = grants
+    assert grant.coordinate == 346.0
+    by_owner = {str(item.id): item for item in plan.convergence_plans}
+    assert by_owner[grant.owner_id].trunk_axis.coordinate == grant.coordinate
+
+
+def test_only_a_trunk_grant_binds_its_plan_through_settlement() -> None:
+    """The settlement guard holds a plan to its trunk grant alone.
+
+    A member-carrier grant sharing the owner id is another owner's coordinate,
+    so it can neither stand in for the trunk's nor overwrite it.
+    """
+    owner_id = "convergence-plan|shared"
+    trunk = CorridorScalarGrant(
+        "convergence-trunk|shared",
+        CorridorScalarOwnerKind.CONVERGENCE_TRUNK,
+        owner_id,
+        200.0,
+    )
+    carrier = CorridorScalarGrant(
+        "member-carrier|shared",
+        CorridorScalarOwnerKind.MEMBER_CARRIER,
+        owner_id,
+        196.0,
+    )
+    cohorts = corridor_cohort_integration.CorridorCohortPlan(
+        (), (), (), scalar_grants=(trunk, carrier)
+    )
+    member_geometry = replace(
+        planning.empty_member_geometry_execution(), corridor_cohorts=cohorts
+    )
+
+    assert planning._granted_trunk_coordinates(member_geometry) == {owner_id: 200.0}
+
+
+@pytest.mark.parametrize("stroke_scale", [0.6, 0.7])
+@pytest.mark.parametrize("fixture", _DISTINCT_LANE_SEPARATION_FIXTURES)
+def test_trunk_is_granted_clear_of_every_distinct_line_run_it_co_travels(
+    fixture: str, stroke_scale: float, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A narrowed step spreads the ``secondary`` runs over two lanes.
+
+    The grant clears both of them, not only the turn-off leg, so each trunk
+    holds at least one step from every run of the distinct line it shares the
+    corridor with, and the drawn trunk is the granted one.
+    """
+    plan, grants = _render_with_compiled_grants(
+        fixture, monkeypatch, {"stroke_scale": stroke_scale}
+    )
+
+    step = OFFSET_STEP * stroke_scale
+    by_owner = {str(item.id): item for item in plan.convergence_plans}
+    for grant in grants:
+        axis = by_owner[grant.owner_id].trunk_axis
+        assert axis.coordinate == grant.coordinate
+        secondary_runs = [
+            start[1]
+            for member in plan.member_geometry_plans
+            if member.edge.line_id == "secondary"
+            for start, end in zip(member.points[1:-2], member.points[2:-1], strict=True)
+            if start[1] == end[1]
+            and min(start[0], end[0]) < axis.extent_end
+            and max(start[0], end[0]) > axis.extent_start
+        ]
+        assert len(set(secondary_runs)) == 2
+        for coordinate in secondary_runs:
+            assert abs(coordinate - grant.coordinate) >= step - COORD_TOLERANCE_FINE
+
+
+def test_a_bundle_anchored_on_a_run_its_own_problem_moves_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bundle's run is a fixed obstacle, which a lane of the same problem is not.
+
+    Re-anchoring merge_right_entry's bundle on the trunk's own carrier puts the
+    reference inside the scalar's problem, which the compile refuses rather than
+    seating the trunk against geometry it is itself moving.
+    """
+    real_bundles = corridor_cohort_integration._scalar_bundles
+
+    def self_anchored(targets, runs, scalar_requests, scalar_carriers, *args):
+        return tuple(
+            replace(bundle, witness_id=scalar_carriers[bundle.variable_id].footprint_id)
+            for bundle in real_bundles(
+                targets, runs, scalar_requests, scalar_carriers, *args
+            )
+        )
+
+    monkeypatch.setattr(corridor_cohort_integration, "_scalar_bundles", self_anchored)
+
+    with pytest.raises(CorridorCohortCompilationError, match="anchors on a run"):
+        _render(_MERGE_RIGHT_ENTRY, monkeypatch)

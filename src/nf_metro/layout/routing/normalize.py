@@ -4416,20 +4416,6 @@ def _separate_fused_cotravelling_runs(
             )
         ):
             continue
-        primary = movable_route_ids is None or all(
-            id(run.route) in movable_route_ids for run in lane.runs
-        )
-        if (
-            not primary
-            and not pinned_obstacles
-            and any(
-                any(
-                    (id(run.route), run.idx) in fixed_segment_keys for run in other.runs
-                )
-                for other in obstacles
-            )
-        ):
-            continue
         candidates = {
             obstacle.coord + direction * step
             for obstacle in obstacles

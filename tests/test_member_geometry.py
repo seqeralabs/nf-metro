@@ -2,6 +2,7 @@
 
 import json
 import re
+import warnings
 from dataclasses import replace
 from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
@@ -39,6 +40,7 @@ from nf_metro.layout.route_reservations import (
     ColumnGapRegion,
     CorridorOrientation,
     RowGapRegion,
+    drawn_corridor_containment,
 )
 from nf_metro.layout.routing.common import Direction, GapSlot, OffsetRegime, RoutedPath
 from nf_metro.layout.routing.context import _build_routing_context
@@ -47,6 +49,7 @@ from nf_metro.layout.routing.core import (
     _route_edges,
     observe_route_edges,
     observe_route_edges_centred,
+    route_edges,
 )
 from nf_metro.layout.routing.corners import (
     _corner_travel_units,
@@ -65,6 +68,10 @@ from nf_metro.layout.routing.corridor_cohorts import (
     CorridorClearanceShortfall,
 )
 from nf_metro.layout.routing.families import RouteFamilyId
+from nf_metro.layout.routing.invariants import (
+    check_no_fused_cotravelling_lines,
+    check_peeloff_concentric,
+)
 from nf_metro.layout.routing.normalize import _rederive_semantic_end_corners, _VChannel
 from nf_metro.layout.routing.offsets import compute_station_offsets
 from nf_metro.layout.routing.planning import _allocation_eligible_system_ids
@@ -80,6 +87,7 @@ from nf_metro.layout.settlement_demand import (
 )
 from nf_metro.parser.model import Edge, MetroGraph, Section, Station
 from nf_metro.parser.route_topology import ConnectorId, ResolvedEdge, semantic_route_id
+from nf_metro.render.svg import build_observed_render_plan
 
 ROOT = Path(__file__).parents[1]
 
@@ -944,6 +952,24 @@ def test_distinct_line_fan_traverses_bundle_before_member_freeze() -> None:
         _assert_channels_equal_emission(observation, red)
 
 
+@pytest.mark.parametrize("seed", ("seed_15", "seed_77"))
+def test_owned_peeloff_bundles_nest_before_member_freeze(seed: str) -> None:
+    """A frozen gap channel carrying a peel-off tail is seated on its band first.
+
+    The freeze owns every gap channel it records, and the post-emission tail and
+    riser repairs skip an owned channel, so the pre-freeze repairs are the only
+    ones that can settle the trunk depth and riser column of any frozen member,
+    whether or not its system owns the complete path.
+    """
+    path = ROOT / "tests" / "fixtures" / "hash_seed_determinism" / f"{seed}.mmd"
+    graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+
+    assert check_peeloff_concentric(graph, routes) == []
+    assert check_no_fused_cotravelling_lines(graph, routes, offsets) == []
+
+
 def test_one_segment_can_own_distinct_gap_row_claims() -> None:
     channels = (
         RouteMemberGapChannel(1, (20.0, 10.0), (20.0, 90.0), 0, 0, Direction.D),
@@ -1070,6 +1096,73 @@ def test_reservation_reroute_keeps_identity_and_reuses_settled_template() -> Non
             assert tuple(
                 route.points[channel.segment_rank : channel.segment_rank + 2]
             ) == (channel.start, channel.end)
+
+
+def test_seed_77_shortfall_requests_one_atomic_corridor_aperture() -> None:
+    """Seed 77's corridor cohort compiles as atomic single-lane components.
+
+    Its ``s5`` carrier drops in the right-hand canvas margin while the ``s7``
+    carrier it would overtake runs down the column-9/10 gap.  A footprint order
+    between two carriers with no region in common could never bind, since each
+    carrier is held inside its own region, so it must not join them into one
+    component: the compile would then refuse a component spanning two lanes.
+    Every claim of this compile fits its corridor, so it requests no aperture.
+    """
+    path = ROOT / "tests" / "fixtures" / "hash_seed_determinism" / "seed_77.mmd"
+    graph, first = _observe(path)
+    _routes, _moves, provisional_plan = _route_edges(
+        graph,
+        DIAGONAL_RUN,
+        CURVE_RADIUS,
+        compute_station_offsets(graph),
+        observe_plan=True,
+        reservations=first.plan,
+        allow_convergence_clearance_requirements=True,
+    )
+
+    assert provisional_plan is not None
+    ledger = provisional_plan.corridor_cohort_ledger
+    assert ledger is not None
+    assert ledger.finalized_owned_segments is None
+    regions = {
+        (claim.edge_key, claim.segment_rank): claim.region for claim in ledger.claims
+    }
+    s5_carrier = regions[(("__junction_35", "s5__entry_right_17", "l0"), 3)]
+    s7_carrier = regions[(("__junction_40", "s7__entry_right_27", "l4"), 1)]
+    assert s7_carrier == ColumnGapRegion(9, 10)
+    assert s5_carrier != s7_carrier
+    assert provisional_plan.boundary_clearance_requirements == ()
+
+
+def test_reservation_reroute_reseats_port_peeloff_after_reconciliation() -> None:
+    path = ROOT / "examples" / "topologies" / "convergence_stacked_sink.mmd"
+    graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        observed = build_observed_render_plan(graph, resolve_theme(None, graph))
+    assert observed.route_plan is not None
+    plan = next(
+        item
+        for item in observed.route_plan.member_geometry_plans
+        if item.edge
+        == ResolvedEdge("dedup__exit_right_3", "merge_pt__entry_right_9", "main")
+    )
+    reservation, claim = next(
+        (reservation, claim)
+        for reservation in observed.route_plan.reservations
+        for claim in reservation.claims
+        if claim.member_id == plan.member_id and claim.segment_rank == 2
+    )
+    realised = build_route_plan_query(observed.route_plan).realised_reservation(
+        reservation.id
+    )
+
+    assert realised is not None
+    drawn = drawn_corridor_containment(
+        reservation, realised, observed.plan.route_polylines, (claim,)
+    )
+    assert drawn.negative_side_slack >= 0.0
+    assert drawn.positive_side_slack >= 0.0
 
 
 def test_failed_system_cannot_fall_back_from_member_geometry(
