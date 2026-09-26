@@ -65,8 +65,8 @@ def test_row_mate_junction_hands_over_on_one_lane(fixture: str) -> None:
 
     Two endpoints on the same row are drawn at ``row + lane``, so unequal lanes
     are the slant: the connector has to climb the difference over the width of
-    the inter-section gap.  A junction that reaches the port round below
-    intervening sections is not a level run: its riser absorbs the difference.
+    the inter-section gap.  A junction that reaches the port round intervening
+    sections is not a level run: its vertical leg absorbs the difference.
     """
     graph, offsets = _settled(fixture)
     slanted = []
@@ -80,7 +80,7 @@ def test_row_mate_junction_hands_over_on_one_lane(fixture: str) -> None:
         target = graph.stations[edge.target]
         if abs(source.y - target.y) > _SAME_LANE_TOLERANCE:
             continue
-        if offsets_module._rises_from_same_row_bypass(graph, source, target):
+        if offsets_module._arrives_on_same_row_bypass(graph, source, target):
             continue
         upstream = offsets.get((edge.source, edge.line_id), 0.0)
         downstream = offsets.get((edge.target, edge.line_id), 0.0)

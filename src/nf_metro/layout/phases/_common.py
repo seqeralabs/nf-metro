@@ -451,8 +451,8 @@ def _iter_solo_lr_entries(
 
     ``corridor`` flags, per feeder, whether it reaches the port on a vertical
     leg (:func:`~nf_metro.layout.routing.offsets._feeder_is_corridor`): from a
-    base Y more than *tol* away, or level with the port but climbing back up
-    from a same-row bypass channel below.
+    base Y more than *tol* away, or level with the port but turning in off a
+    same-row bypass detour.
     """
     from nf_metro.layout.routing.offsets import _feeder_is_corridor
 
@@ -508,7 +508,7 @@ def iter_flat_seam_solo_entries(
 
     The complement of :func:`iter_corridor_fed_solo_entries`: a solo LEFT/RIGHT
     entry whose every feeder runs level into the port (within ``tol``, and not
-    on a same-row bypass riser), so the junction-to-port run is horizontal.
+    on a same-row bypass), so the junction-to-port run is horizontal.
     Such a run carries the lane step as a slope rather than absorbing it in a
     vertical leg; the caller re-bases it to the trunk only when the feeder
     already rides the trunk, so the seam lands flat instead of tilting.

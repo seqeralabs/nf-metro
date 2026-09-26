@@ -1641,8 +1641,10 @@ def check_convergence_shallow_feeder_concentric(
     the shallow feeder must take a port-near slot above the climbing risers.
     Slotted port-far it weaves across the turning bundle at the corner.  The same
     holds at any flow-side entry of an LR or RL section where same-row bypass
-    risers climb in beside flat feeders (:func:`same_row_bypass_entry`).  Mirrors
-    the gating of ``_order_convergence_entry_ports``, which assigns the slot.
+    lines join flat feeders (:func:`same_row_bypass_entry`): each bypass line
+    must sit on the side of the flat band it arrives from, below it when it
+    climbs in and above it when it comes down.  Mirrors the gating of
+    ``_order_convergence_entry_ports``, which assigns the slot.
     """
     from nf_metro.layout.routing.offsets import (
         _convergence_feeders,
@@ -1667,25 +1669,39 @@ def check_convergence_shallow_feeder_concentric(
             if port.side is PortSide.LEFT and port.section_id not in reversed_sections
             else None
         )
+        descending: list[str] = []
         if feeders is not None:
             shallow = [lid for lid, _, is_bypass in feeders if not is_bypass]
             bypass = [lid for lid, _, is_bypass in feeders if is_bypass]
         else:
-            entry = same_row_bypass_entry(graph, port_id)
+            entry = same_row_bypass_entry(graph, port_id, offsets)
             if entry is None:
                 continue
-            shallow, bypass = list(entry.flat), list(entry.risers)
-        if not shallow or not bypass:
+            shallow, bypass = list(entry.flat), list(entry.rising)
+            descending = list(entry.descending)
+        if not shallow:
             continue
-        max_shallow = max(offsets.get((port_id, lid), 0.0) for lid in shallow)
-        min_bypass = min(offsets.get((port_id, lid), 0.0) for lid in bypass)
-        if max_shallow > min_bypass + COORD_TOLERANCE_FINE:
-            messages.append(
-                f"convergence entry {port_id!r}: shallow feeder sits at offset "
-                f"{max_shallow:.1f}, port-far of the climbing risers (min "
-                f"{min_bypass:.1f}); it weaves across the turning bundle instead "
-                f"of nesting on top"
-            )
+        lane = {lid: offsets.get((port_id, lid), 0.0) for lid in graph.lines}
+        if bypass:
+            max_shallow = max(lane[lid] for lid in shallow)
+            min_bypass = min(lane[lid] for lid in bypass)
+            if max_shallow > min_bypass + COORD_TOLERANCE_FINE:
+                messages.append(
+                    f"convergence entry {port_id!r}: shallow feeder sits at offset "
+                    f"{max_shallow:.1f}, port-far of the climbing risers (min "
+                    f"{min_bypass:.1f}); it weaves across the turning bundle "
+                    f"instead of nesting on top"
+                )
+        if descending:
+            min_shallow = min(lane[lid] for lid in shallow)
+            max_descending = max(lane[lid] for lid in descending)
+            if max_descending > min_shallow - COORD_TOLERANCE_FINE:
+                messages.append(
+                    f"convergence entry {port_id!r}: a line coming down into the "
+                    f"port sits at offset {max_descending:.1f}, not above the "
+                    f"flat feeders (min {min_shallow:.1f}); it crosses them to "
+                    f"reach its lane"
+                )
     return messages
 
 

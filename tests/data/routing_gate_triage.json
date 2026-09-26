@@ -19,10 +19,6 @@
   "note": "The lenient sign test, reached only when reject_collinear_touch is False; see that gate's verdict. Its one caller is the validator module this matrix excludes, so no sweep fixture evaluates it.",
   "status": "defensive"
  },
- "common.py::elif tgt_sec:::#1": {
-  "note": "The else (col_key=round(sx)) needs an L-shaped (dx!=0,dy!=0) inter edge whose target resolves to no section. Only exit_port->junction edges lack a target section, and junction positioning makes those axis-aligned (same-X RIGHT exit or same-Y BOTTOM exit), never L-shaped, so the else is unreachable. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
-  "status": "defensive"
- },
  "common.py::for e in graph.edges:::#1": {
   "note": "No-preference graph.edges scan loop-exit: a fan-out junction always has a sectioned incident port (its exit/entry ports carry a section_id), so the loop always returns and never exhausts graph.edges; the fall-through to the type-contract return None is the never-taken no-neighbour fallback.",
   "status": "defensive"

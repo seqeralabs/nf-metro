@@ -1433,6 +1433,13 @@ gallery:
     description:
       "The right-to-left mirror: the same-row bypass climbs into a shared right entry port
       below the flat bundle (issue #2043)."
+  - id: samerow_bypass_over_top_flat_bundle
+    source_dir: examples/topologies
+    category: Bypass Routing
+    description:
+      "A packed cell-mate sends the same-row bypass over the row top instead, so it comes down
+      into the shared entry port from above and takes the lane above the flat lines, again
+      crossing nothing (issue #2043)."
   - id: dogleg_exempt_distinct
     source_dir: examples/topologies
     category: Bypass Routing

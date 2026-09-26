@@ -7,7 +7,6 @@
   "centrelines.py::or run_direction is None::#1",
   "common.py::and abs(start[0] - other_start[0]) < required - COORD_TOLERANCE_FINE::#1",
   "common.py::elif (d1 > 0) == (d2 > 0) or (d3 > 0) == (d4 > 0):::#1",
-  "common.py::elif tgt_sec:::#1",
   "common.py::for e in graph.edges:::#1",
   "common.py::for edge in graph.edges_from(port_id):::#1",
   "common.py::for i in range(len(pts) - 1):::#1",

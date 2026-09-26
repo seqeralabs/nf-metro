@@ -20,7 +20,7 @@ from nf_metro.layout.constants import SAME_Y_TOLERANCE, graph_offset_step
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.geometry import flow_port_sides
 from nf_metro.layout.routing.offsets import (
-    _rises_from_same_row_bypass,
+    _arrives_on_same_row_bypass,
     compute_station_offsets,
 )
 from nf_metro.parser import parse_metro_mermaid
@@ -60,7 +60,7 @@ def _flat_seam_jogs(path: Path) -> list[tuple[str, str, float]]:
         ]
         if not feeders or any(
             abs(graph.stations[src].y - port_y) > SAME_Y_TOLERANCE
-            or _rises_from_same_row_bypass(
+            or _arrives_on_same_row_bypass(
                 graph, graph.stations[src], graph.stations[pid]
             )
             for src in feeders
