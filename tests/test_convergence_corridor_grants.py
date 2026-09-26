@@ -1313,3 +1313,46 @@ def test_trunk_on_an_entry_port_cannot_be_drawn_off_it(
     )
     with pytest.raises(ConvergenceInvariantError, match="planned .* approach"):
         _render(fixture, monkeypatch)
+
+
+_DISTINCT_LANE_SEPARATION_FIXTURES = (
+    "examples/topologies/plan_owned_distinct_lane_separation.mmd",
+    "tests/fixtures/regressions/plan_owned_distinct_lane_separation_reordered.mmd",
+)
+
+
+def _render_with_compiled_grants(
+    fixture: str, monkeypatch: pytest.MonkeyPatch
+) -> tuple[RoutePlan, tuple[CorridorScalarGrant, ...]]:
+    """Render *fixture*; return its plan and the last compile's trunk grants."""
+    compiled: list[tuple[CorridorScalarGrant, ...]] = []
+    real_apply = planning.apply_convergence_corridor_grants
+
+    def spy(execution, requests, grants):
+        if grants:
+            compiled.append(tuple(grants))
+        return real_apply(execution, requests, grants)
+
+    monkeypatch.setattr(planning, "apply_convergence_corridor_grants", spy)
+    plan, _routes = _render(fixture, monkeypatch)
+    assert compiled
+    return plan, compiled[-1]
+
+
+@pytest.mark.parametrize("fixture", _DISTINCT_LANE_SEPARATION_FIXTURES)
+def test_trunk_is_granted_clear_of_a_distinct_line_turning_off_its_lane(
+    fixture: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The grant, not settlement, seats a trunk clear of a distinct line's turn.
+
+    The ``secondary`` members run left on the ``primary`` trunks' lane and turn
+    up out of it across the trunks, so both trunks take the nearest lane one
+    pitch clear of that turn-off, and the drawn trunk is the granted one.
+    """
+    plan, grants = _render_with_compiled_grants(fixture, monkeypatch)
+
+    assert len(grants) == 2
+    assert {grant.coordinate for grant in grants} == {200.0}
+    by_owner = {str(item.id): item for item in plan.convergence_plans}
+    for grant in grants:
+        assert by_owner[grant.owner_id].trunk_axis.coordinate == grant.coordinate

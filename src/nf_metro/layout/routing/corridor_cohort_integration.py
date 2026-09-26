@@ -1636,6 +1636,14 @@ def _member_footprint_model(
                 perpendicular.semantic_rank,
             )
             intervals[(interval.member_id, interval.obstacle_id)] = interval
+    scalar_carriers = {
+        variable.variable_id: carrier_by_variable[variable.variable_id]
+        for variable in request_variables
+        if variable.variable_id in carrier_by_variable
+    }
+    intervals.update(
+        _cotravelling_turn_off_intervals(witnesses, scalar_carriers, offset_step)
+    )
 
     return _MemberFootprintModel(
         tuple(variables),
@@ -1645,6 +1653,66 @@ def _member_footprint_model(
         tuple(contacts[key] for key in sorted(contacts)),
         tuple(intervals[key] for key in sorted(intervals)),
     )
+
+
+def _cotravelling_turn_off_intervals(
+    witnesses: tuple[CorridorFootprintWitness, ...],
+    scalar_carriers: Mapping[str, CorridorFootprintWitness],
+    offset_step: float,
+) -> dict[tuple[str, str], CorridorForbiddenInterval]:
+    """Forbid a scalar lane the legs a co-travelling distinct line turns off on.
+
+    A distinct line running the same way within one pitch of the scalar's lane
+    turns off it on a perpendicular leg that ends on that lane inside the
+    scalar's span.  No relation joins the scalar to that member, so the leg is
+    cleared where it currently stands, whether or not its own carrier is a
+    variable; a leg owned by another scalar is that scalar's own geometry.
+    """
+    scalar_ids = frozenset(scalar_carriers)
+    by_lane = _witnesses_by_lane(witnesses)
+    intervals: dict[tuple[str, str], CorridorForbiddenInterval] = {}
+    for variable_id, carrier in scalar_carriers.items():
+        for perpendicular in witnesses:
+            if (
+                perpendicular.axis == carrier.axis
+                or perpendicular.line_id == carrier.line_id
+                or perpendicular.coordinate_variable_id in scalar_ids
+                or perpendicular.crossing_disposition
+                is CorridorCrossingDisposition.LEGAL_CROSSING
+                or not (
+                    carrier.longitudinal_start + COORD_TOLERANCE
+                    < perpendicular.coordinate
+                    < carrier.longitudinal_end - COORD_TOLERANCE
+                )
+                or not (
+                    perpendicular.longitudinal_start - COORD_TOLERANCE
+                    <= carrier.coordinate
+                    <= perpendicular.longitudinal_end + COORD_TOLERANCE
+                )
+            ):
+                continue
+            if not any(
+                abs(parallel.segment_rank - perpendicular.segment_rank) == 1
+                and parallel.direction is carrier.direction
+                and _footprints_overlap(parallel, carrier)
+                and abs(parallel.coordinate - carrier.coordinate)
+                < offset_step - COORD_TOLERANCE
+                for parallel in by_lane.get(
+                    (perpendicular.member_id, perpendicular.edge_key, carrier.axis),
+                    (),
+                )
+            ):
+                continue
+            intervals[(variable_id, perpendicular.footprint_id)] = (
+                CorridorForbiddenInterval(
+                    variable_id,
+                    perpendicular.footprint_id,
+                    perpendicular.longitudinal_start - offset_step,
+                    perpendicular.longitudinal_end + offset_step,
+                    perpendicular.semantic_rank,
+                )
+            )
+    return intervals
 
 
 @dataclass(frozen=True, slots=True)
@@ -3087,6 +3155,9 @@ def compile_corridor_cohort_plan(
         ledger.curve_radius,
         ledger.forced_crossings,
     )
+    interval_obstacle_ids = frozenset(
+        interval.obstacle_id for interval in footprint_model.forbidden_intervals
+    )
     obstacle_provenance: dict[str, CorridorCohortObstacleProvenance] = {}
     obstacle_provenance.update(
         {
@@ -3098,10 +3169,14 @@ def compile_corridor_cohort_plan(
                 witness.connector_ids,
             )
             for witness in footprint_model.witnesses
-            if witness.coordinate_variable_id is None
-            and witness.start_variable_id is None
-            and witness.end_variable_id is None
-            and witness.crossing_disposition is CorridorCrossingDisposition.FIXED_DOGLEG
+            if witness.footprint_id in interval_obstacle_ids
+            or (
+                witness.coordinate_variable_id is None
+                and witness.start_variable_id is None
+                and witness.end_variable_id is None
+                and witness.crossing_disposition
+                is CorridorCrossingDisposition.FIXED_DOGLEG
+            )
         }
     )
     witnesses_by_id = {
