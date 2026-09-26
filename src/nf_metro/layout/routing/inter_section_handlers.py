@@ -4795,6 +4795,12 @@ def _perp_entry_junction_straight_drop(
     travels instead would run this line past the boundary it is crossing, on a
     column none of its siblings stand in.
 
+    The drop launches from the junction's lane on the axis its feeder arrives
+    across: a junction fed along a row holds each line's lane on Y, so the drop
+    turns down from that lane; one fed down the column through a TOP/BOTTOM
+    exit already holds the lane on X, and the drop carries straight on from the
+    fork with no step along its travel.
+
     Returns ``None`` when this shortcut doesn't apply, so the caller
     continues with the ordinary lead-in.
     """
@@ -4807,10 +4813,16 @@ def _perp_entry_junction_straight_drop(
         ctx, edge, resolve_section(ctx.graph, tgt), tx, edge.line_id
     )
     column = tx if crossing_x is None else crossing_x
+    fed_down_the_column = any(
+        (port := ctx.graph.ports.get(item.source)) is not None
+        and port.side in (PortSide.TOP, PortSide.BOTTOM)
+        for item in ctx.graph.edges_to(src.id)
+    )
+    launch_y = sy if fed_down_the_column else sy + src_off
     drop = route_along(
         edge,
         [(edge, edge.line_id, 0.0)],
-        [(column, sy + src_off), (column, ty)],
+        [(column, launch_y), (column, ty)],
         base_radius=ctx.curve_radius,
         normalize_exempt=True,
     )

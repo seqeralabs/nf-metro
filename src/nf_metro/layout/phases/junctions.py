@@ -89,6 +89,33 @@ def _flow_side_junction_margin(
     return max(baseline, EDGE_TO_BUNDLE_CLEARANCE)
 
 
+def _divergence_junction_xy(
+    graph: MetroGraph,
+    jid: str,
+    exit_port_id: str,
+    exit_x: float,
+    exit_y: float,
+    margin: float,
+) -> tuple[float, float]:
+    """Where a divergence junction stands off the exit port feeding it.
+
+    The junction sits a margin out from the port along the direction the line
+    leaves it, so the feeder reaches it as one straight run on the port's own
+    column (TOP/BOTTOM) or row (LEFT/RIGHT).  :func:`_position_junctions` writes
+    this position and :func:`_resolve_source_xy` predicts it before junctions
+    are placed, so both read it here.
+    """
+    side = graph.ports[exit_port_id].side
+    if side in (PortSide.TOP, PortSide.BOTTOM):
+        return exit_x, exit_y + (margin if side is PortSide.BOTTOM else -margin)
+    direction = 1.0 if side is PortSide.RIGHT else -1.0
+    return (
+        exit_x
+        + direction * _flow_side_junction_margin(graph, jid, exit_port_id, margin),
+        exit_y,
+    )
+
+
 def _junction_outgoing_line_count(graph: MetroGraph, jid: str) -> int:
     """Return the number of distinct line_ids fanning out of *jid*."""
     return len({e.line_id for e in graph.edges_from(jid)}) or 1
@@ -201,18 +228,10 @@ def _position_junctions(graph: MetroGraph) -> None:
                 _junction_outgoing_line_count(graph, jid)
             )
             exit_port_obj = graph.ports.get(exit_port_id) if exit_port_id else None
-            if exit_port_obj and exit_port_obj.side == PortSide.BOTTOM:
-                junction.x = exit_port_x
-                junction.y = exit_port_y + margin
-            elif exit_port_obj and exit_port_obj.side in (
-                PortSide.RIGHT,
-                PortSide.LEFT,
-            ):
-                direction = 1.0 if exit_port_obj.side == PortSide.RIGHT else -1.0
-                junction.x = exit_port_x + direction * _flow_side_junction_margin(
-                    graph, jid, exit_port_id, margin
+            if exit_port_obj is not None:
+                junction.x, junction.y = _divergence_junction_xy(
+                    graph, jid, exit_port_obj.id, exit_port_x, exit_port_y, margin
                 )
-                junction.y = exit_port_y
             else:
                 nearest_entry_x = min(entry_port_xs, key=lambda x: abs(x - exit_port_x))
                 direction = 1.0 if nearest_entry_x > exit_port_x else -1.0
@@ -318,22 +337,12 @@ def _resolve_source_xy(
         exit_port_obj = graph.ports.get(e.source)
         if not exit_port_obj:
             return exit_st.x, exit_st.y
-        # Mirror _position_junctions: the resolved junction X must match
-        # what _position_junctions would write so that downstream
-        # alignment passes consuming this helper see the same coordinate.
         margin = _required_junction_margin(
             _junction_outgoing_line_count(graph, edge_source)
         )
-        if exit_port_obj.side == PortSide.BOTTOM:
-            return exit_st.x, exit_st.y + margin
-        elif exit_port_obj.side in (PortSide.RIGHT, PortSide.LEFT):
-            flow_margin = _flow_side_junction_margin(
-                graph, edge_source, e.source, margin
-            )
-            direction = 1.0 if exit_port_obj.side == PortSide.RIGHT else -1.0
-            return exit_st.x + direction * flow_margin, exit_st.y
-        else:
-            return exit_st.x + margin, exit_st.y
+        return _divergence_junction_xy(
+            graph, edge_source, e.source, exit_st.x, exit_st.y, margin
+        )
 
     # Recurse through chained junctions to find the underlying exit port.
     for js in chained:

@@ -3552,6 +3552,50 @@ def _boundary_spreads_on_axis(
     )
 
 
+def _fork_feed_lane_sign(
+    graph: MetroGraph,
+    plan: FanPlan,
+    line_id: str,
+    positive_fan_section_ids: Collection[str],
+) -> float:
+    """The sign a junction fork carries *line_id*'s lane offset with on its frame.
+
+    A junction owns no section, so its lanes are the ones the station feeding it
+    hands across: they spread on the frame's secondary axis exactly when that
+    feeder does (:func:`_boundary_spreads_on_axis`), and they open toward the
+    side the feeder's own section fans its lanes (:func:`section_lane_sign`),
+    which a TB section's positive-fan membership can flip.  ``0`` when the
+    feeder spreads its lanes on the other axis.
+    """
+    assert plan.frame is not None
+    feeder_id = next(
+        (
+            edge.source
+            for edge in graph.edges_to(plan.fork_station_id)
+            if edge.line_id == line_id
+        ),
+        None,
+    )
+    if feeder_id is None:
+        return 0.0
+    if plan.direction is not None and not _boundary_spreads_on_axis(
+        graph,
+        feeder_id,
+        perpendicular_sides=perpendicular_port_sides(plan.direction),
+        axis_name=plan.frame.secondary.name,
+    ):
+        return 0.0
+    port = graph.ports.get(feeder_id)
+    section = graph.sections.get(
+        (port.section_id if port is not None else None)
+        or graph.section_for_station(feeder_id)
+        or ""
+    )
+    if section is None:
+        return 1.0
+    return section_lane_sign(section, positive_fan_section_ids)
+
+
 def _validate_fan_runtime_frame(
     graph: MetroGraph,
     plan: FanPlan,
@@ -3674,12 +3718,13 @@ def _validate_fan_runtime_frame(
         for _edge, point, _points in incident
     )
     if carrier is None:
+        from nf_metro.layout.routing.reversal import tb_positive_fan_sections
+
+        positive_fan = tb_positive_fan_sections(graph)
         for line_id, point in fork_endpoints:
-            external_offset = (
-                station_offsets.get((plan.fork_station_id, line_id), 0.0)
-                if secondary_axis == 1
-                else 0.0
-            )
+            external_offset = _fork_feed_lane_sign(
+                graph, plan, line_id, positive_fan
+            ) * station_offsets.get((plan.fork_station_id, line_id), 0.0)
             if (
                 abs(point[secondary_axis] - planned_base - external_offset)
                 > COORD_TOLERANCE_FINE
