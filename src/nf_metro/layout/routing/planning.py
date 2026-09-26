@@ -33,6 +33,7 @@ from nf_metro.layout.routing.corridor_cohort_integration import (
     CorridorCohortLedger,
     CorridorCohortPlan,
     CorridorScalarGrant,
+    CorridorScalarOwnerKind,
     CorridorScalarRequest,
     build_corridor_cohort_ledger,
 )
@@ -124,7 +125,7 @@ def _apply_corridor_grants(
             for request in requests
             if request.variable.variable_id not in compatibility_ids
         ),
-        _owned_scalar_grants(cohorts),
+        _owned_scalar_grants(cohorts, compatibility_ids),
     )
 
 
@@ -138,10 +139,9 @@ def _compatibility_scalar_ids(cohorts: CorridorCohortPlan) -> frozenset[str]:
 
 
 def _owned_scalar_grants(
-    cohorts: CorridorCohortPlan,
+    cohorts: CorridorCohortPlan, compatibility_ids: frozenset[str]
 ) -> tuple[CorridorScalarGrant, ...]:
     """The grants outside every component kept on legacy geometry."""
-    compatibility_ids = _compatibility_scalar_ids(cohorts)
     return tuple(
         grant
         for grant in cohorts.scalar_grants
@@ -152,7 +152,7 @@ def _owned_scalar_grants(
 def _granted_trunk_coordinates(
     member_geometry: MemberGeometryExecution,
 ) -> dict[ConvergencePlanId, float]:
-    """The trunk coordinate every owned corridor grant decided, by plan.
+    """The trunk coordinate every owned trunk grant decided, by plan.
 
     A grant that leaves its trunk where it stands owns that coordinate as much
     as one that moves it.
@@ -162,7 +162,8 @@ def _granted_trunk_coordinates(
         return {}
     return {
         ConvergencePlanId(grant.owner_id): grant.coordinate
-        for grant in _owned_scalar_grants(cohorts)
+        for grant in _owned_scalar_grants(cohorts, _compatibility_scalar_ids(cohorts))
+        if grant.owner_kind is CorridorScalarOwnerKind.CONVERGENCE_TRUNK
     }
 
 

@@ -1423,3 +1423,32 @@ def test_trunk_is_granted_onto_the_same_line_run_it_bundles_with(
     assert grant.coordinate == 346.0
     by_owner = {str(item.id): item for item in plan.convergence_plans}
     assert by_owner[grant.owner_id].trunk_axis.coordinate == grant.coordinate
+
+
+def test_only_a_trunk_grant_binds_its_plan_through_settlement() -> None:
+    """The settlement guard holds a plan to its trunk grant alone.
+
+    A member-carrier grant sharing the owner id is another owner's coordinate,
+    so it can neither stand in for the trunk's nor overwrite it.
+    """
+    owner_id = "convergence-plan|shared"
+    trunk = CorridorScalarGrant(
+        "convergence-trunk|shared",
+        CorridorScalarOwnerKind.CONVERGENCE_TRUNK,
+        owner_id,
+        200.0,
+    )
+    carrier = CorridorScalarGrant(
+        "member-carrier|shared",
+        CorridorScalarOwnerKind.MEMBER_CARRIER,
+        owner_id,
+        196.0,
+    )
+    cohorts = corridor_cohort_integration.CorridorCohortPlan(
+        (), (), (), scalar_grants=(trunk, carrier)
+    )
+    member_geometry = replace(
+        planning.empty_member_geometry_execution(), corridor_cohorts=cohorts
+    )
+
+    assert planning._granted_trunk_coordinates(member_geometry) == {owner_id: 200.0}
