@@ -1108,10 +1108,11 @@ def _perpendicular_port_pins(
 
     A line crossing a TOP port apart from the fan belongs on the drawn bundle's
     top edge and one crossing a BOTTOM port on its bottom edge.  A port the fan
-    lines cross too pins nothing: its lines reach the section as one stream,
-    so their order is the bundle's own.  A reflected section stores its bottom
-    lane first (:func:`_stores_reflected`), so there the two swap.  A line
-    crossing both sides is pinned to neither.
+    lines cross too pins nothing: pinning those lines here would fight
+    :func:`peel_lane_order`'s own placement of them, since it already decides
+    where each fan line sits from the peel order alone.  A reflected section
+    stores its bottom lane first (:func:`_stores_reflected`), so there the two
+    swap.  A line crossing both sides is pinned to neither.
     """
     graph = ctx.graph
     top: set[str] = set()

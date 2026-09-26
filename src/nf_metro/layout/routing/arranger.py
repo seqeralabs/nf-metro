@@ -81,8 +81,9 @@ def peel_lane_order(
     it meets a fan line.  The exception is a line pinned to one side of the
     bundle by a crossing elsewhere -- *leading* lines take the front lanes and
     *trailing* lines the back, in priority order -- since from the far side
-    its turn through that crossing would pass over the bundle.  A line the fan
-    carries is never pinned.
+    its turn through that crossing would pass over the bundle.  A pin takes
+    precedence over a non-fan line keeping its own lane; fan membership takes
+    precedence over either, so a line the fan carries is never pinned.
     """
     present = set(config.present)
     determining = [lid for lid in config.determining if lid in present]
