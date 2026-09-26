@@ -1254,12 +1254,46 @@ def test_one_axis_based_implementation_covers_every_flow_direction(path: Path) -
         if realised is not None:
             by_boundary.setdefault(key, []).append((reservation, realised))
 
+    shortfall = 4.0
+
+    def facing_separation(axis: SettlementAxis, boundary: int) -> float:
+        """The tightest gap between boxes :func:`_narrow` pulls toward each other.
+
+        A corridor's slack can span more than one grid gap (a run beside a
+        narrow box measures from the row above it to the row below), so a
+        squeeze sized by that slack alone can drive the boxes either side of
+        the boundary into each other.
+        """
+        geometry = (
+            envelope_settlement.ROW_AXIS
+            if axis is SettlementAxis.ROW
+            else envelope_settlement.COLUMN_AXIS
+        )
+        index = "grid_row" if axis is SettlementAxis.ROW else "grid_col"
+        return min(
+            (
+                gap
+                for (first, second), gap in envelope_settlement._axis_gaps(
+                    graph, geometry
+                ).items()
+                if getattr(graph.sections[first], index)
+                < boundary
+                <= getattr(graph.sections[second], index)
+            ),
+            default=float("inf"),
+        )
+
+    squeezable = {
+        key: residents
+        for key, residents in by_boundary.items()
+        if min(got.capacity_slack for _res, got in residents) + shortfall
+        < facing_separation(*key)
+    }
     (axis, boundary), residents = max(
-        by_boundary.items(),
+        squeezable.items(),
         key=lambda item: min(got.capacity_slack for _res, got in item[1]),
     )
     target, tightest = min(residents, key=lambda pair: pair[1].capacity_slack)
-    shortfall = 4.0
     _narrow(graph, axis, boundary, tightest.capacity_slack + shortfall)
 
     settlement = settle_route_envelopes(graph, plan)
