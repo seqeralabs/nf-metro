@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="nf-metro-render-run" content="36234811343">
+<title>Render diff - PR #2047</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: light-dark(#f5f5f7, #1e1e2e);
+    --surface: light-dark(#eaeaef, #2a2a3c);
+    --border: light-dark(#c9c9d4, #3a3a4c);
+    --text: light-dark(#1e1e2e, #e0e0e0);
+    --muted: light-dark(#666, #888);
+    --accent: light-dark(#1a8575, #4ec9b0);
+    --added: light-dark(rgba(46,160,67,.25), rgba(46,160,67,.44));
+    --removed: light-dark(rgba(218,54,52,.25), rgba(218,54,52,.44));
+  }
+  [data-scheme="dark"] { color-scheme: dark; }
+  [data-scheme="light"] { color-scheme: light; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 2rem;
+    line-height: 1.5;
+  }
+  .page-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+  }
+  h1 {
+    font-size: 1.5rem;
+    color: var(--accent);
+  }
+  .scheme-btn {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 0.35rem 0.75rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
+  .scheme-btn:hover { background: var(--border); }
+  .summary {
+    color: var(--muted);
+    margin-bottom: 2rem;
+    font-size: 0.95rem;
+  }
+  .toc {
+    margin-bottom: 2rem;
+    padding: 1rem 1.5rem;
+    background: var(--surface);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  .toc h2 {
+    font-size: 1rem;
+    margin-bottom: 0.5rem;
+    color: var(--accent);
+  }
+  .toc h3 {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-top: 0.5rem;
+    margin-bottom: 0.25rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .toc ul {
+    list-style: none;
+    columns: 2;
+    column-gap: 2rem;
+  }
+  .toc li {
+    margin-bottom: 0.25rem;
+  }
+  .toc a {
+    color: var(--text);
+    text-decoration: none;
+  }
+  .toc a:hover {
+    color: var(--accent);
+    text-decoration: underline;
+  }
+  .badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    margin-left: 0.4rem;
+    vertical-align: middle;
+  }
+  .badge-changed { background: var(--border); }
+  .badge-added { background: var(--added); }
+  .badge-removed { background: var(--removed); }
+  .section-header {
+    font-size: 1.3rem;
+    color: var(--accent);
+    margin-top: 2.5rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid var(--border);
+  }
+  .diff-entry {
+    margin-bottom: 3rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .diff-entry h3 {
+    font-size: 1.1rem;
+    padding: 0.75rem 1rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .comparison {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+  }
+  .side {
+    padding: 1rem;
+    overflow-x: auto;
+  }
+  .side:first-child {
+    border-right: 1px solid var(--border);
+  }
+  .side h4 {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-bottom: 0.5rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .svg-wrapper { overflow-x: auto; }
+  .svg-wrapper svg, .side img, .side-only img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    border-radius: 4px;
+  }
+  .side-only {
+    padding: 1rem;
+  }
+  .empty {
+    color: var(--muted);
+    font-style: italic;
+    padding: 2rem;
+    text-align: center;
+  }
+  .toggle-bar {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .toggle-bar button {
+    background: var(--border);
+    color: var(--text);
+    border: none;
+    padding: 0.3rem 0.8rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+  .toggle-bar button.active {
+    background: var(--accent);
+    color: var(--bg);
+  }
+  .intro {
+    margin-bottom: 2rem;
+    padding: 1rem 1.5rem;
+    background: var(--surface);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    font-size: 0.9rem;
+    line-height: 1.6;
+  }
+  .intro summary {
+    cursor: pointer;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .intro p {
+    margin-top: 0.75rem;
+  }
+  .intro ul {
+    margin-top: 0.5rem;
+    padding-left: 1.5rem;
+  }
+  .intro li {
+    margin-bottom: 0.25rem;
+  }
+  .intro code {
+    background: var(--border);
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    font-size: 0.85em;
+  }
+  .intro a {
+    color: var(--accent);
+  }
+  .metrics {
+    margin-bottom: 2rem;
+    padding: 1rem 1.5rem;
+    background: var(--surface);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  .metrics h2 {
+    font-size: 1rem;
+    margin-bottom: 0.25rem;
+    color: var(--accent);
+  }
+  .metrics .caption {
+    color: var(--muted);
+    font-size: 0.8rem;
+    margin-bottom: 0.75rem;
+  }
+  .metrics table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.82rem;
+  }
+  .metrics th, .metrics td {
+    padding: 0.3rem 0.6rem;
+    text-align: right;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .metrics th:first-child, .metrics td:first-child {
+    text-align: left;
+  }
+  .metrics th {
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.7rem;
+  }
+  .metrics td a { color: var(--text); text-decoration: none; }
+  .metrics td a:hover { color: var(--accent); }
+  .m-flat { color: var(--muted); }
+  .m-better { color: light-dark(#1a8575, #4ec9b0); font-weight: 600; }
+  .m-worse { color: light-dark(#c0392b, #f38ba8); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="page-header">
+  <h1>Render diff - PR #2047</h1>
+  <button id="scheme-toggle" class="scheme-btn">System</button>
+</div>
+<p class="summary">2 added out of 359 total renders. Generated 2026-09-26 10:10 UTC.</p>
+<details class="intro">
+<summary>What is this page?</summary>
+<p>
+<a href="https://github.com/seqeralabs/nf-metro">nf-metro</a>
+generates metro-map-style SVG diagrams from Mermaid graph definitions.
+This page is automatically generated for every pull request and shows
+<strong>only the renders that changed</strong> compared to the
+<code>main</code> branch.
+</p>
+<p>
+Use it to check that code changes produce the intended visual result
+without unexpected side-effects on other diagrams. Each entry shows
+the <strong>base</strong> (main) render on the left and the
+<strong>PR</strong> render on the right. Use the toggle buttons to
+switch between side-by-side, base-only, and PR-only views.
+</p>
+<p><strong>What to look for:</strong></p>
+<ul>
+<li>Intended improvements in the PR column</li>
+<li>Unintended regressions (overlapping lines, shifted labels,
+    broken routing) in diagrams you did not mean to change</li>
+<li>New renders (green <em>added</em> badge) or removed renders
+    (red <em>removed</em> badge)</li>
+</ul>
+</details>
+<div class="metrics">
+<h2>Layout-quality metrics</h2>
+<p class="caption">Advisory only &mdash; nothing gates on these. <span class="m-better">green</span> improved, <span class="m-worse">red</span> regressed. Lower is better except in the &uarr; column.</p>
+<table>
+<tr><th>Render</th><th>Crossings</th><th>Near-horiz.</th><th>Lone diag.</th><th>Bends/route</th><th>Corners</th><th>Turn/route (rad)</th><th>Label strikes</th><th>Marker gap ↑</th><th>Excess gaps</th><th>Wasted canvas</th></tr>
+<tr><td><a href="#lr_line_handoff_fanning_exit">lr_line_handoff_fanning_exit</a></td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0.3</td><td class="m-flat">&ndash;&rarr;4</td><td class="m-flat">&ndash;&rarr;0.4</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;60.0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;56%</td></tr>
+<tr><td><a href="#tb_line_change_chain">tb_line_change_chain</a></td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0.4</td><td class="m-flat">&ndash;&rarr;4</td><td class="m-flat">&ndash;&rarr;0.6</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;40.0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;52%</td></tr>
+</table>
+</div>
+<div class="toc">
+<h2>Changed renders</h2>
+<h3><a href="#section-fan-out-and-fan-in">Fan-out and Fan-in</a></h3>
+<ul>
+<li><a href="#lr_line_handoff_fanning_exit">lr_line_handoff_fanning_exit</a><span class="badge badge-added">added</span></li>
+</ul>
+<h3><a href="#section-tb-/-bt-sections">TB / BT Sections</a></h3>
+<ul>
+<li><a href="#tb_line_change_chain">tb_line_change_chain</a><span class="badge badge-added">added</span></li>
+</ul>
+</div>
+<h2 class="section-header" id="section-fan-out-and-fan-in">Fan-out and Fan-in</h2>
+
+<div class="diff-entry" id="lr_line_handoff_fanning_exit">
+<h3>Lr Line Handoff Fanning Exit <span class="badge badge-added">added</span></h3>
+<div class="side-only"><h4>New in PR</h4><div class="svg-wrapper"><?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="670" height="470" viewBox="0 0 670 470">
+<defs>
+</defs>
+<style>.nf-metro-bg--lr_line_handoff_fanning_exit-pr { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }
+.nf-metro-title--lr_line_handoff_fanning_exit-pr { fill: var(--nfm-map-title-color, light-dark(#111111, #ffffff)); }
+.nf-metro-station-label--lr_line_handoff_fanning_exit-pr { fill: var(--nfm-map-label-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-section-box--lr_line_handoff_fanning_exit-pr { fill: var(--nfm-map-section-fill, light-dark(#ededed, #373737)); stroke: var(--nfm-map-section-stroke, light-dark(#e6e6e6, #595959)); }
+.nf-metro-section-label--lr_line_handoff_fanning_exit-pr { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-label--lr_line_handoff_fanning_exit-pr { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-underline--lr_line_handoff_fanning_exit-pr { stroke: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-legend-bg--lr_line_handoff_fanning_exit-pr { fill: var(--nfm-map-legend-bg, light-dark(rgba(255, 255, 255, 0.8), rgba(0, 0, 0, 0.3))); }
+.nf-metro-legend-text--lr_line_handoff_fanning_exit-pr { fill: var(--nfm-map-legend-text-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-marker-stroke--lr_line_handoff_fanning_exit-pr { stroke: var(--nfm-map-marker-stroke, light-dark(#333333, #f0f0f0)); }
+.nf-metro-label-halo--lr_line_handoff_fanning_exit-pr { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); stroke: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }</style>
+<rect x="0" y="0" width="670" height="470" fill="#2b2b2b" class="nf-metro-bg--lr_line_handoff_fanning_exit-pr" />
+<text x="60.0" y="30.0" font-size="24.0" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" class="nf-metro-title--lr_line_handoff_fanning_exit-pr">Line handoff into a fanning exit</text>
+<rect x="60.0" y="70.0" width="100.0" height="100.0" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box--lr_line_handoff_fanning_exit-pr" data-section-id="a" data-section-lines="l1" />
+<circle cx="71.0" cy="55.0" r="11" fill="#333333" class="nf-metro-section-num-circle--lr_line_handoff_fanning_exit-pr" data-section-id="a" />
+<text x="71.0" y="55.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="a">1</text>
+<text x="87.0" y="55.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label--lr_line_handoff_fanning_exit-pr" data-section-id="a">A</text>
+<rect x="210.0" y="70.0" width="220.0" height="100.0" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box--lr_line_handoff_fanning_exit-pr" data-section-id="b" data-section-lines="l1,l2,l3" />
+<circle cx="221.0" cy="55.0" r="11" fill="#333333" class="nf-metro-section-num-circle--lr_line_handoff_fanning_exit-pr" data-section-id="b" />
+<text x="221.0" y="55.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="b">2</text>
+<text x="237.0" y="55.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label--lr_line_handoff_fanning_exit-pr" data-section-id="b">B</text>
+<rect x="510.0" y="70.0" width="100.0" height="100.0" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box--lr_line_handoff_fanning_exit-pr" data-section-id="c" data-section-lines="l2" />
+<circle cx="521.0" cy="55.0" r="11" fill="#333333" class="nf-metro-section-num-circle--lr_line_handoff_fanning_exit-pr" data-section-id="c" />
+<text x="521.0" y="55.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="c">3</text>
+<text x="537.0" y="55.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label--lr_line_handoff_fanning_exit-pr" data-section-id="c">C</text>
+<rect x="510.0" y="220.0" width="100.0" height="100.0" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box--lr_line_handoff_fanning_exit-pr" data-section-id="d" data-section-lines="l3" />
+<circle cx="521.0" cy="205.0" r="11" fill="#333333" class="nf-metro-section-num-circle--lr_line_handoff_fanning_exit-pr" data-section-id="d" />
+<text x="521.0" y="205.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="d">4</text>
+<text x="537.0" y="205.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label--lr_line_handoff_fanning_exit-pr" data-section-id="d">D</text>
+<path d="M380.0,124.0 L430.0,124.0" stroke="#156075" stroke-width="3.0" stroke-linecap="round" class="metro-line-l3--lr_line_handoff_fanning_exit-pr" data-line-id="l3" />
+<path d="M510.0,270.0 L560.0,270.0" stroke="#156075" stroke-width="3.0" stroke-linecap="round" class="metro-line-l3--lr_line_handoff_fanning_exit-pr" data-line-id="l3" />
+<path d="M430.0,124.0 L440.0,124.0" stroke="#156075" stroke-width="3.0" stroke-linecap="round" class="metro-line-l3--lr_line_handoff_fanning_exit-pr" data-line-id="l3" />
+<path d="M440.0,124.0 L460.0,124.0 Q470.0,124.0,470.0,134.0 L470.0,260.0 Q470.0,270.0,480.0,270.0 L510.0,270.0" stroke="#156075" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-l3--lr_line_handoff_fanning_exit-pr" data-line-id="l3" />
+<path d="M320.0,120.0 L380.0,120.0" stroke="#a66d13" stroke-width="3.0" stroke-linecap="round" class="metro-line-l2--lr_line_handoff_fanning_exit-pr" data-line-id="l2" />
+<path d="M380.0,120.0 L430.0,120.0" stroke="#a66d13" stroke-width="3.0" stroke-linecap="round" class="metro-line-l2--lr_line_handoff_fanning_exit-pr" data-line-id="l2" />
+<path d="M510.0,120.0 L560.0,120.0" stroke="#a66d13" stroke-width="3.0" stroke-linecap="round" class="metro-line-l2--lr_line_handoff_fanning_exit-pr" data-line-id="l2" />
+<path d="M430.0,120.0 L440.0,120.0" stroke="#a66d13" stroke-width="3.0" stroke-linecap="round" class="metro-line-l2--lr_line_handoff_fanning_exit-pr" data-line-id="l2" />
+<path d="M440.0,120.0 L510.0,120.0" stroke="#a66d13" stroke-width="3.0" stroke-linecap="round" class="metro-line-l2--lr_line_handoff_fanning_exit-pr" data-line-id="l2" />
+<path d="M260.0,128.0 L320.0,128.0" stroke="#3779b1" stroke-width="3.0" stroke-linecap="round" class="metro-line-l1--lr_line_handoff_fanning_exit-pr" data-line-id="l1" />
+<path d="M110.0,120.0 L160.0,120.0" stroke="#3779b1" stroke-width="3.0" stroke-linecap="round" class="metro-line-l1--lr_line_handoff_fanning_exit-pr" data-line-id="l1" />
+<path d="M210.0,128.0 L260.0,128.0" stroke="#3779b1" stroke-width="3.0" stroke-linecap="round" class="metro-line-l1--lr_line_handoff_fanning_exit-pr" data-line-id="l1" />
+<path d="M160.0,120.0 L186.34314575050763,120.0 Q192.0,120.0,196.0,124.0 L196.0,124.0 Q200.0,128.0,205.65685424949237,128.0 L210.0,128.0" stroke="#3779b1" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-l1--lr_line_handoff_fanning_exit-pr" data-line-id="l1" />
+<rect x="105.0" y="115.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--lr_line_handoff_fanning_exit-pr" data-station-id="a0" data-station-lines="l1" data-station-label="A0" data-section-id="a" data-section-name="A" />
+<rect x="255.0" y="123.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--lr_line_handoff_fanning_exit-pr" data-station-id="b0" data-station-lines="l1" data-station-label="B0" data-section-id="b" data-section-name="B" />
+<rect x="315.0" y="115.0" width="10.0" height="18.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--lr_line_handoff_fanning_exit-pr" data-station-id="b1" data-station-lines="l1,l2" data-station-label="B1" data-section-id="b" data-section-name="B" />
+<rect x="375.0" y="115.0" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--lr_line_handoff_fanning_exit-pr" data-station-id="b2" data-station-lines="l2,l3" data-station-label="B2" data-section-id="b" data-section-name="B" />
+<rect x="555.0" y="115.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--lr_line_handoff_fanning_exit-pr" data-station-id="c0" data-station-lines="l2" data-station-label="C0" data-section-id="c" data-section-name="C" />
+<rect x="555.0" y="265.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--lr_line_handoff_fanning_exit-pr" data-station-id="d0" data-station-lines="l3" data-station-label="D0" data-section-id="d" data-section-name="D" />
+<text x="260.0" y="139.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--lr_line_handoff_fanning_exit-pr" text-anchor="middle" dominant-baseline="hanging">B0</text>
+<text x="260.0" y="139.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="b0" class="nf-metro-station-label--lr_line_handoff_fanning_exit-pr">B0</text>
+<text x="110.0" y="131.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--lr_line_handoff_fanning_exit-pr" text-anchor="middle" dominant-baseline="hanging">A0</text>
+<text x="110.0" y="131.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="a0" class="nf-metro-station-label--lr_line_handoff_fanning_exit-pr">A0</text>
+<text x="560.0" y="131.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--lr_line_handoff_fanning_exit-pr" text-anchor="middle" dominant-baseline="hanging">C0</text>
+<text x="560.0" y="131.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="c0" class="nf-metro-station-label--lr_line_handoff_fanning_exit-pr">C0</text>
+<text x="560.0" y="281.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--lr_line_handoff_fanning_exit-pr" text-anchor="middle" dominant-baseline="hanging">D0</text>
+<text x="560.0" y="281.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="d0" class="nf-metro-station-label--lr_line_handoff_fanning_exit-pr">D0</text>
+<text x="320.0" y="106.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--lr_line_handoff_fanning_exit-pr" text-anchor="middle" dominant-baseline="auto">B1</text>
+<text x="320.0" y="106.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="b1" class="nf-metro-station-label--lr_line_handoff_fanning_exit-pr">B1</text>
+<text x="380.0" y="135.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--lr_line_handoff_fanning_exit-pr" text-anchor="middle" dominant-baseline="hanging">B2</text>
+<text x="380.0" y="135.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="b2" class="nf-metro-station-label--lr_line_handoff_fanning_exit-pr">B2</text>
+<circle cx="192.0" cy="120.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="200.0" cy="128.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="470.0" cy="124.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="470.0" cy="270.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<path d="M160.0,115.0 L165.0,120.0 L160.0,125.0 L155.0,120.0 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
+<text x="160.0" y="112.0" font-size="7" fill="rgba(80, 180, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">a__exit_right_0 (right)</text>
+<path d="M430.0,115.0 L435.0,120.0 L430.0,125.0 L425.0,120.0 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
+<text x="430.0" y="112.0" font-size="7" fill="rgba(80, 180, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">b__exit_right_1 (right)</text>
+<path d="M210.0,115.0 L215.0,120.0 L210.0,125.0 L205.0,120.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="210.0" y="112.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">b__entry_left_2 (left)</text>
+<path d="M510.0,115.0 L515.0,120.0 L510.0,125.0 L505.0,120.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="510.0" y="112.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">c__entry_left_3 (left)</text>
+<path d="M510.0,265.0 L515.0,270.0 L510.0,275.0 L505.0,270.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="510.0" y="262.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">d__entry_left_4 (left)</text>
+<path d="M440.0,115.0 L445.0,120.0 L440.0,125.0 L435.0,120.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="440.0" y="112.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">__junction_5 (?)</text>
+<path d="M185.0,50.0 L185.0,340.0" stroke="rgba(255, 255, 0, 0.5)" stroke-width="1" stroke-dasharray="6,4" />
+<text x="185.0" y="46.0" font-size="7" fill="rgba(255, 255, 0, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">col 0|1</text>
+<path d="M470.0,50.0 L470.0,340.0" stroke="rgba(255, 255, 0, 0.5)" stroke-width="1" stroke-dasharray="6,4" />
+<text x="470.0" y="46.0" font-size="7" fill="rgba(255, 255, 0, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">col 1|2</text>
+<path d="M40.0,195.0 L630.0,195.0" stroke="rgba(255, 255, 0, 0.5)" stroke-width="1" stroke-dasharray="6,4" />
+<text x="36.0" y="195.0" font-size="7" fill="rgba(255, 255, 0, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0|1</text>
+<path d="M50.0,120.0 L170.0,120.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="46.0" y="120.0" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0 grid</text>
+<path d="M200.0,120.0 L440.0,120.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="196.0" y="120.0" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0 grid</text>
+<path d="M500.0,120.0 L620.0,120.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="496.0" y="120.0" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0 grid</text>
+<path d="M500.0,270.0 L620.0,270.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="496.0" y="270.0" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 1 grid</text>
+<rect x="60.0" y="350.0" width="106.2" height="96.0" rx="6" ry="6" fill="rgba(0, 0, 0, 0.3)" class="nf-metro-legend-bg--lr_line_handoff_fanning_exit-pr" />
+<path d="M72.0,374.0 L96.0,374.0" stroke="#3779b1" stroke-width="3.0" stroke-linecap="round" />
+<text x="108.0" y="374.0" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--lr_line_handoff_fanning_exit-pr">Line 1</text>
+<path d="M72.0,398.0 L96.0,398.0" stroke="#a66d13" stroke-width="3.0" stroke-linecap="round" />
+<text x="108.0" y="398.0" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--lr_line_handoff_fanning_exit-pr">Line 2</text>
+<path d="M72.0,422.0 L96.0,422.0" stroke="#156075" stroke-width="3.0" stroke-linecap="round" />
+<text x="108.0" y="422.0" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--lr_line_handoff_fanning_exit-pr">Line 3</text>
+<text x="640.0" y="462.0" font-size="8" fill="rgba(150, 150, 150, 0.6)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">created with nf-metro v2.1.0+dev</text>
+</svg></div></div>
+</div>
+
+<h2 class="section-header" id="section-tb-/-bt-sections">TB / BT Sections</h2>
+
+<div class="diff-entry" id="tb_line_change_chain">
+<h3>Tb Line Change Chain <span class="badge badge-added">added</span></h3>
+<div class="side-only"><h4>New in PR</h4><div class="svg-wrapper"><?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="580" height="508" viewBox="0 0 580 508">
+<defs>
+</defs>
+<style>.nf-metro-bg--tb_line_change_chain-pr { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }
+.nf-metro-title--tb_line_change_chain-pr { fill: var(--nfm-map-title-color, light-dark(#111111, #ffffff)); }
+.nf-metro-station-label--tb_line_change_chain-pr { fill: var(--nfm-map-label-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-section-box--tb_line_change_chain-pr { fill: var(--nfm-map-section-fill, light-dark(#ededed, #373737)); stroke: var(--nfm-map-section-stroke, light-dark(#e6e6e6, #595959)); }
+.nf-metro-section-label--tb_line_change_chain-pr { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-label--tb_line_change_chain-pr { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-underline--tb_line_change_chain-pr { stroke: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-legend-bg--tb_line_change_chain-pr { fill: var(--nfm-map-legend-bg, light-dark(rgba(255, 255, 255, 0.8), rgba(0, 0, 0, 0.3))); }
+.nf-metro-legend-text--tb_line_change_chain-pr { fill: var(--nfm-map-legend-text-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-marker-stroke--tb_line_change_chain-pr { stroke: var(--nfm-map-marker-stroke, light-dark(#333333, #f0f0f0)); }
+.nf-metro-label-halo--tb_line_change_chain-pr { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); stroke: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }</style>
+<rect x="0" y="0" width="580" height="508" fill="#2b2b2b" class="nf-metro-bg--tb_line_change_chain-pr" />
+<text x="60.0" y="30.0" font-size="24.0" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" class="nf-metro-title--tb_line_change_chain-pr">TB chain that changes line</text>
+<rect x="30.0" y="70.0" width="160.0" height="100.0" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box--tb_line_change_chain-pr" data-section-id="a" data-section-lines="l0" />
+<circle cx="41.0" cy="55.0" r="11" fill="#333333" class="nf-metro-section-num-circle--tb_line_change_chain-pr" data-section-id="a" />
+<text x="41.0" y="55.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="a">1</text>
+<text x="57.0" y="55.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label--tb_line_change_chain-pr" data-section-id="a">A</text>
+<rect x="240.0" y="70.0" width="100.0" height="288.0" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box--tb_line_change_chain-pr" data-section-id="t" data-section-lines="l0,l1,l2" />
+<circle cx="251.0" cy="55.0" r="11" fill="#333333" class="nf-metro-section-num-circle--tb_line_change_chain-pr" data-section-id="t" />
+<text x="251.0" y="55.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="t">2</text>
+<text x="267.0" y="55.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label--tb_line_change_chain-pr" data-section-id="t">T</text>
+<rect x="420.0" y="70.0" width="100.0" height="100.0" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box--tb_line_change_chain-pr" data-section-id="b" data-section-lines="l1" />
+<circle cx="431.0" cy="55.0" r="11" fill="#333333" class="nf-metro-section-num-circle--tb_line_change_chain-pr" data-section-id="b" />
+<text x="431.0" y="55.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="b">3</text>
+<text x="447.0" y="55.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label--tb_line_change_chain-pr" data-section-id="b">B</text>
+<path d="M282.0,160.0 L282.0,200.0" stroke="#a66d13" stroke-width="3.0" stroke-linecap="round" class="metro-line-l2--tb_line_change_chain-pr" data-line-id="l2" />
+<path d="M282.0,240.0 L282.0,280.0" stroke="#a66d13" stroke-width="3.0" stroke-linecap="round" class="metro-line-l2--tb_line_change_chain-pr" data-line-id="l2" />
+<path d="M286.0,200.0 L286.0,240.0" stroke="#6ef362" stroke-width="3.0" stroke-linecap="round" class="metro-line-l1--tb_line_change_chain-pr" data-line-id="l1" />
+<path d="M286.0,280.0 L286.0,314.0 Q286.0,324.0,296.0,324.0 L340.0,324.0" stroke="#6ef362" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-l1--tb_line_change_chain-pr" data-line-id="l1" />
+<path d="M420.0,120.0 L470.0,120.0" stroke="#6ef362" stroke-width="3.0" stroke-linecap="round" class="metro-line-l1--tb_line_change_chain-pr" data-line-id="l1" />
+<path d="M340.0,324.0 L370.0,324.0 Q380.0,324.0,380.0,314.0 L380.0,130.0 Q380.0,120.0,390.0,120.0 L420.0,120.0" stroke="#6ef362" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-l1--tb_line_change_chain-pr" data-line-id="l1" />
+<path d="M80.0,120.0 L140.0,120.0" stroke="#3779b1" stroke-width="3.0" stroke-linecap="round" class="metro-line-l0--tb_line_change_chain-pr" data-line-id="l0" />
+<path d="M140.0,120.0 L190.0,120.0" stroke="#3779b1" stroke-width="3.0" stroke-linecap="round" class="metro-line-l0--tb_line_change_chain-pr" data-line-id="l0" />
+<path d="M240.0,120.0 L280.0,120.0 Q290.0,120.0,290.0,130.0 L290.0,160.0" stroke="#3779b1" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-l0--tb_line_change_chain-pr" data-line-id="l0" />
+<path d="M190.0,120.0 L240.0,120.0" stroke="#3779b1" stroke-width="3.0" stroke-linecap="round" class="metro-line-l0--tb_line_change_chain-pr" data-line-id="l0" />
+<rect x="75.0" y="115.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--tb_line_change_chain-pr" data-station-id="a0" data-station-lines="l0" data-station-label="A0" data-section-id="a" data-section-name="A" />
+<rect x="135.0" y="115.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--tb_line_change_chain-pr" data-station-id="a1" data-station-lines="l0" data-station-label="A1" data-section-id="a" data-section-name="A" />
+<rect x="277.0" y="155.0" width="18.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--tb_line_change_chain-pr" data-station-id="t0" data-station-lines="l0,l2" data-station-label="T0" data-section-id="t" data-section-name="T" />
+<rect x="277.0" y="195.0" width="14.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--tb_line_change_chain-pr" data-station-id="t1" data-station-lines="l1,l2" data-station-label="T1" data-section-id="t" data-section-name="T" />
+<rect x="277.0" y="235.0" width="14.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--tb_line_change_chain-pr" data-station-id="t2" data-station-lines="l1,l2" data-station-label="T2" data-section-id="t" data-section-name="T" />
+<rect x="277.0" y="275.0" width="14.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--tb_line_change_chain-pr" data-station-id="t3" data-station-lines="l1,l2" data-station-label="T3" data-section-id="t" data-section-name="T" />
+<rect x="465.0" y="115.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--tb_line_change_chain-pr" data-station-id="b0" data-station-lines="l1" data-station-label="B0" data-section-id="b" data-section-name="B" />
+<text x="80.0" y="131.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--tb_line_change_chain-pr" text-anchor="middle" dominant-baseline="hanging">A0</text>
+<text x="80.0" y="131.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="a0" class="nf-metro-station-label--tb_line_change_chain-pr">A0</text>
+<text x="271.0" y="160.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--tb_line_change_chain-pr" text-anchor="end" dominant-baseline="central">T0</text>
+<text x="271.0" y="160.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="end" dominant-baseline="central" data-station-id="t0" class="nf-metro-station-label--tb_line_change_chain-pr">T0</text>
+<text x="470.0" y="131.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--tb_line_change_chain-pr" text-anchor="middle" dominant-baseline="hanging">B0</text>
+<text x="470.0" y="131.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="b0" class="nf-metro-station-label--tb_line_change_chain-pr">B0</text>
+<text x="140.0" y="106.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--tb_line_change_chain-pr" text-anchor="middle" dominant-baseline="auto">A1</text>
+<text x="140.0" y="106.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="a1" class="nf-metro-station-label--tb_line_change_chain-pr">A1</text>
+<text x="271.0" y="200.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--tb_line_change_chain-pr" text-anchor="end" dominant-baseline="central">T1</text>
+<text x="271.0" y="200.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="end" dominant-baseline="central" data-station-id="t1" class="nf-metro-station-label--tb_line_change_chain-pr">T1</text>
+<text x="271.0" y="240.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--tb_line_change_chain-pr" text-anchor="end" dominant-baseline="central">T2</text>
+<text x="271.0" y="240.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="end" dominant-baseline="central" data-station-id="t2" class="nf-metro-station-label--tb_line_change_chain-pr">T2</text>
+<text x="271.0" y="280.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--tb_line_change_chain-pr" text-anchor="end" dominant-baseline="central">T3</text>
+<text x="271.0" y="280.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="end" dominant-baseline="central" data-station-id="t3" class="nf-metro-station-label--tb_line_change_chain-pr">T3</text>
+<circle cx="290.0" cy="120.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="286.0" cy="324.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="380.0" cy="324.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="380.0" cy="120.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<path d="M190.0,115.0 L195.0,120.0 L190.0,125.0 L185.0,120.0 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
+<text x="190.0" y="112.0" font-size="7" fill="rgba(80, 180, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">a__exit_right_0 (right)</text>
+<path d="M340.0,315.0 L345.0,320.0 L340.0,325.0 L335.0,320.0 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
+<text x="340.0" y="312.0" font-size="7" fill="rgba(80, 180, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">t__exit_right_1 (right)</text>
+<path d="M240.0,115.0 L245.0,120.0 L240.0,125.0 L235.0,120.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="240.0" y="112.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">t__entry_left_2 (left)</text>
+<path d="M420.0,115.0 L425.0,120.0 L420.0,125.0 L415.0,120.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="420.0" y="112.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">b__entry_left_3 (left)</text>
+<path d="M215.0,50.0 L215.0,378.0" stroke="rgba(255, 255, 0, 0.5)" stroke-width="1" stroke-dasharray="6,4" />
+<text x="215.0" y="46.0" font-size="7" fill="rgba(255, 255, 0, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">col 0|1</text>
+<path d="M380.0,50.0 L380.0,378.0" stroke="rgba(255, 255, 0, 0.5)" stroke-width="1" stroke-dasharray="6,4" />
+<text x="380.0" y="46.0" font-size="7" fill="rgba(255, 255, 0, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">col 1|2</text>
+<path d="M20.0,120.0 L200.0,120.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="16.0" y="120.0" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0 grid</text>
+<path d="M230.0,160.0 L350.0,160.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="226.0" y="160.0" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0 grid</text>
+<path d="M230.0,200.0 L350.0,200.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<path d="M230.0,240.0 L350.0,240.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<path d="M230.0,280.0 L350.0,280.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<path d="M410.0,120.0 L530.0,120.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="406.0" y="120.0" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0 grid</text>
+<rect x="30.0" y="388.0" width="106.2" height="96.0" rx="6" ry="6" fill="rgba(0, 0, 0, 0.3)" class="nf-metro-legend-bg--tb_line_change_chain-pr" />
+<path d="M42.0,412.0 L66.0,412.0" stroke="#3779b1" stroke-width="3.0" stroke-linecap="round" />
+<text x="78.0" y="412.0" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--tb_line_change_chain-pr">Line 1</text>
+<path d="M42.0,436.0 L66.0,436.0" stroke="#6ef362" stroke-width="3.0" stroke-linecap="round" />
+<text x="78.0" y="436.0" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--tb_line_change_chain-pr">Line 2</text>
+<path d="M42.0,460.0 L66.0,460.0" stroke="#a66d13" stroke-width="3.0" stroke-linecap="round" />
+<text x="78.0" y="460.0" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--tb_line_change_chain-pr">Line 3</text>
+<text x="550.0" y="500.0" font-size="8" fill="rgba(150, 150, 150, 0.6)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">created with nf-metro v2.1.0+dev</text>
+</svg></div></div>
+</div>
+<script>
+(function() {
+  const root = document.documentElement;
+  const btn = document.getElementById('scheme-toggle');
+  const schemes = ['auto', 'dark', 'light'];
+  const labels = {'auto': 'System', 'dark': 'Dark', 'light': 'Light'};
+  let idx = 0;
+  function apply() {
+    const s = schemes[idx];
+    if (s === 'auto') {
+      root.removeAttribute('data-scheme');
+    } else {
+      root.setAttribute('data-scheme', s);
+    }
+    btn.textContent = labels[s];
+  }
+  apply();
+  btn.addEventListener('click', function() {
+    idx = (idx + 1) % schemes.length;
+    apply();
+  });
+})();
+document.querySelectorAll('.toggle-bar button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const entry = btn.closest('.diff-entry');
+    const mode = btn.dataset.mode;
+    const buttons = entry.querySelectorAll('.toggle-bar button');
+    buttons.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const comp = entry.querySelector('.comparison');
+    const sideBase = comp.querySelector('.side-base');
+    const sidePr = comp.querySelector('.side-pr');
+    if (mode === 'side-by-side') {
+      comp.style.gridTemplateColumns = '1fr 1fr';
+      sideBase.style.display = '';
+      sidePr.style.display = '';
+    } else if (mode === 'base') {
+      comp.style.gridTemplateColumns = '1fr';
+      sideBase.style.display = '';
+      sidePr.style.display = 'none';
+    } else if (mode === 'pr') {
+      comp.style.gridTemplateColumns = '1fr';
+      sideBase.style.display = 'none';
+      sidePr.style.display = '';
+    }
+  });
+});
+</script>
+</body>
+</html>
