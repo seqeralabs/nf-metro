@@ -443,15 +443,6 @@ def line_forks_within_section(
     return False
 
 
-def seam_is_flat(dys: Sequence[float], tol: float) -> bool:
-    """Whether every feeder meets the port level with it, within *tol*.
-
-    A flat seam carries a feeder-to-port lane mismatch as a horizontal slope; a
-    corridor feeder (some ``dy`` past *tol*) absorbs it in a vertical leg.
-    """
-    return bool(dys) and all(abs(dy) <= tol for dy in dys)
-
-
 def _iter_solo_lr_entries(
     graph: MetroGraph, tol: float
 ) -> Iterator[tuple[str, str, str, list[bool]]]:
@@ -459,11 +450,11 @@ def _iter_solo_lr_entries(
     LEFT/RIGHT entry port of an LR/RL section carrying a single present line.
 
     ``corridor`` flags, per feeder, whether it reaches the port on a vertical
-    leg: from a base Y more than *tol* away, or level with the port but climbing
-    back up from a same-row bypass channel below
-    (:func:`~nf_metro.layout.routing.offsets._rises_from_same_row_bypass`).
+    leg (:func:`~nf_metro.layout.routing.offsets._feeder_is_corridor`): from a
+    base Y more than *tol* away, or level with the port but climbing back up
+    from a same-row bypass channel below.
     """
-    from nf_metro.layout.routing.offsets import _rises_from_same_row_bypass
+    from nf_metro.layout.routing.offsets import _feeder_is_corridor
 
     present: dict[str, set[str]] = defaultdict(set)
     for sid, st in graph.stations.items():
@@ -482,8 +473,7 @@ def _iter_solo_lr_entries(
                 continue
             port_station = graph.stations[pid]
             corridor = [
-                abs(source.y - port_station.y) > tol
-                or _rises_from_same_row_bypass(graph, source, port_station)
+                _feeder_is_corridor(graph, source, port_station, tol)
                 for edge in graph.edges_to(pid)
                 if (source := graph.stations.get(edge.source)) is not None
             ]

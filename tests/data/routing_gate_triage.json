@@ -1203,7 +1203,7 @@
   "note": "In the exit-only-line reorder / same-Y offset propagation; reachable only via a multi-line LR/RL section with a perpendicular (TOP/BOTTOM) exit port, which the engine lays out as a station-as-elbow + collinear overlay PhaseInvariantError (#706). Exercise with a clean fixture once #706 is fixed.",
   "status": "needs-review"
  },
- "offsets.py::if any(::#4": {
+ "offsets.py::if any(::#3": {
   "note": "This post-acceptance marker-cache guard rejects a continuing cohort whose inherited offsets are not one contiguous step sequence. _linear_entry_frame only accepts and materializes contiguous inherited levels, so authored topology cannot reach this reject arm. It protects corrupted or hand-built state.",
   "status": "defensive"
  },

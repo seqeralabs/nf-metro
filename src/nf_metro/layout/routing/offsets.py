@@ -32,7 +32,6 @@ from nf_metro.layout.phases._common import (
     iter_corridor_fed_solo_entries,
     iter_flat_seam_solo_entries,
     line_forks_within_section,
-    seam_is_flat,
 )
 from nf_metro.layout.route_topology import divergence_junction_exit_ports
 from nf_metro.layout.routing.arranger import BoundaryConfig, lane_order
@@ -3750,6 +3749,20 @@ def _rises_from_same_row_bypass(
     return channel_y > port_station.y + _SAME_Y_TOLERANCE
 
 
+def _feeder_is_corridor(
+    graph: MetroGraph, source: Station, port_station: Station, tol: float
+) -> bool:
+    """Whether *source* reaches *port_station* on a vertical leg, not level.
+
+    Either its base Y lies more than *tol* off the port's, or it shares the
+    port's Y but rises from a same-row bypass channel
+    (:func:`_rises_from_same_row_bypass`).
+    """
+    return abs(source.y - port_station.y) > tol or _rises_from_same_row_bypass(
+        graph, source, port_station
+    )
+
+
 _Approach = Literal["flat", "below", "above"]
 
 
@@ -4634,14 +4647,14 @@ def _entry_seam_is_flat(graph: MetroGraph, entry_port_id: str) -> bool:
     vertical leg, and the trunk-anchoring invariant then requires a lone
     consumer on offset 0 (:func:`iter_corridor_fed_solo_entries`); inheriting
     the upstream lane there would only reserve empty lanes.  A feeder rising
-    from a same-row bypass (:func:`_rises_from_same_row_bypass`) counts as a
-    corridor feeder though its source shares the port's Y, here and in the
-    solo-entry scopes (:func:`iter_corridor_fed_solo_entries`,
-    :func:`iter_flat_seam_solo_entries`) alike.  A seam with any corridor feeder
-    is not flat.
+    from a same-row bypass counts as a corridor feeder though its source shares
+    the port's Y (:func:`_feeder_is_corridor`, which the solo-entry scopes also
+    apply to their direct feeders).  A seam with any corridor feeder is not
+    flat.
 
     A merge junction fronting the port stands level with it whatever its own
-    feeders do, so the seam is read from those feeders instead.
+    feeders do, so the seam is read from those feeders instead; the solo-entry
+    scopes do not look through a merge junction.
     """
     merges = merge_junction_ids(graph)
     port_station = graph.stations[entry_port_id]
@@ -4653,12 +4666,10 @@ def _entry_seam_is_flat(graph: MetroGraph, entry_port_id: str) -> bool:
         )
         if feeder.source in graph.stations
     ]
-    if any(
-        _rises_from_same_row_bypass(graph, source, port_station) for source in feeders
-    ):
-        return False
-    dys = [source.y - port_station.y for source in feeders]
-    return seam_is_flat(dys, _SAME_Y_TOLERANCE)
+    return bool(feeders) and not any(
+        _feeder_is_corridor(graph, source, port_station, _SAME_Y_TOLERANCE)
+        for source in feeders
+    )
 
 
 def _carrier_offset_gap(
