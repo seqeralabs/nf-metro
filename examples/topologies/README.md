@@ -2,7 +2,7 @@
 
 Example `.mmd` files demonstrating a range of pipeline topologies and the layout patterns they produce. Each example exercises different aspects of the auto-layout engine.
 
-This directory holds 292 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
+This directory holds 296 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
 
 To render one example:
 
@@ -523,6 +523,7 @@ python scripts/list_topology_fixtures.py
 | `render_labelwrap_row_gap.mmd`              | Render-time label wrap grows a section bbox, so the rows below it reflow to keep the gap                                                                                         |
 | `wrap_return_canvas_margin.mmd`             | Five-line bundle wrapping from a row-0 pair down into a row-1 section - the canvas grows for ink drawn outside the box envelope                                                  |
 | `bundle_terminator_continuation.mmd`        | A station that terminates one line of a two-line bundle - its sole successor stays on the trunk row (#979)                                                                       |
+| `lr_line_handoff_fanning_exit.mmd`          | A chain that swaps its line on the hop into an exit fanning out through a junction - the chain holds one row (#2042)                                                             |
 | `corridor_fed_trunk_output_spur.mmd`        | A corridor-fed entry riding its through-chain rather than a short output spur off the trunk                                                                                      |
 | `section_trunk_short_output_branch.mmd`     | A section trunk choosing the long main chain over a short output spur (#1487)                                                                                                    |
 | `near_edge_exit_corner.mmd`                 | An exit corner close to the section edge - the corner stays inside the section bbox (#1314)                                                                                      |

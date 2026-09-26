@@ -410,3 +410,35 @@ def test_tb_passthrough_fixture_keeps_its_column_without_a_relation() -> None:
     merge_lane, tail_lane = _lane_columns(graph, ("merge", "tail"))
 
     assert abs(tail_lane - merge_lane) <= SAME_COORD_TOLERANCE
+
+
+LR_LINE_HANDOFF = ROOT / "examples" / "topologies" / "lr_line_handoff_fanning_exit.mmd"
+
+
+@pytest.mark.parametrize("direction", ("LR",))
+def test_line_handed_to_a_fanning_exit_seeds_inheritance(direction: str) -> None:
+    """A line leaving through an exit that fans out via a junction continues.
+
+    The exit port feeds a hidden junction that splits to two downstream entry
+    ports, so the entry that proves the hand-off sits two hops past the exit.
+    """
+    text = LR_LINE_HANDOFF.read_text().replace(
+        "    subgraph b [B]\n",
+        f"    subgraph b [B]\n        %%metro direction: {direction}\n",
+    )
+    graph = parse_metro_mermaid(text)
+    assert graph.sections["b"].direction == direction
+    exit_targets = {
+        edge.target
+        for port_id in graph.sections["b"].exit_ports
+        for edge in graph.edges_from(port_id)
+    }
+    assert exit_targets <= graph.junction_ids
+    chain = ("b0", "b1", "b2")
+
+    assert continuation_track_predecessors(graph) == {"b1": "b0", "b2": "b1"}
+
+    compute_layout(graph, validate=True)
+    lanes = _lane_columns(graph, chain)
+
+    assert max(lanes) - min(lanes) <= SAME_COORD_TOLERANCE, dict(zip(chain, lanes))

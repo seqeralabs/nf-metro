@@ -14,6 +14,7 @@ two-section grid with simpler topology (variant calling).
 from __future__ import annotations
 
 import copy
+import itertools
 import json
 import warnings
 from collections import defaultdict, deque
@@ -952,6 +953,50 @@ graph LR
     expected = {("target", "pred", "node")} if direction in ("LR", "RL") else set()
     assert declared_in_flow_order == expected
     assert declared_in_reverse_order == expected
+
+
+# (fixture, section, chain) for a linear chain -- no fork, fan or merge -- whose
+# line changes at least once along it.  ``lr_line_handoff_fanning_exit`` hands
+# its last line to an exit port that fans out through a junction to two
+# downstream sections.
+_LINE_CHANGING_CHAINS = [
+    ("topologies/lr_line_handoff_fanning_exit.mmd", "b", ("b0", "b1", "b2")),
+    (
+        "topologies/recompacted_fanout_exit.mmd",
+        "paired",
+        ("paired_in", "paired_step", "paired_out"),
+    ),
+    (
+        "topologies/same_destination_vertical_convergence.mmd",
+        "s5",
+        ("n5_0", "n5_1", "n5_2"),
+    ),
+]
+
+
+@pytest.mark.parametrize("fixture,section_id,chain", _LINE_CHANGING_CHAINS)
+def test_line_changing_linear_chain_holds_one_lane(
+    fixture: str, section_id: str, chain: tuple[str, ...]
+) -> None:
+    """A linear chain holds one lane across a line change, in any orientation.
+
+    With no fork to peel off to, a station that swaps one line for another
+    continues the chain, so the relation must name every link and the settled
+    chain must share one lane-axis coordinate.  Snapping the new
+    line's station to that line's own base track instead paints a zigzag with
+    no structural cause.
+    """
+    graph = _layout(fixture)
+    assert all(graph.stations[sid].section_id == section_id for sid in chain)
+    assert {
+        node: pred for pred, node in itertools.pairwise(chain)
+    }.items() <= continuation_track_predecessors(graph).items()
+
+    frame = AxisFrame.for_direction(graph.sections[section_id].direction, 1.0, 1.0)
+    lanes = {sid: frame.secondary.get(graph.stations[sid]) for sid in chain}
+    assert max(lanes.values()) - min(lanes.values()) <= _Y_TOL, (
+        f"{fixture}: section {section_id} chain spreads across lanes {lanes}"
+    )
 
 
 # ---------------------------------------------------------------------------

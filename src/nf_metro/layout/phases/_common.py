@@ -197,14 +197,27 @@ def _leads_to_flow_side_entry(
     """Whether *line_id* reaches an entry port on a vertical section boundary.
 
     Such an entry proves the line continues past the section it is leaving,
-    rather than ending at the exit port itself.
+    rather than ending at the exit port itself.  The walk passes through
+    junctions, so an exit that fans out to several downstream sections reaches
+    the entries behind its junction.
     """
-    return any(
-        successor in graph.ports
-        and graph.ports[successor].is_entry
-        and graph.ports[successor].side in {PortSide.LEFT, PortSide.RIGHT}
-        for successor in line_targets.get(line_id, {}).get(exit_port_id, ())
-    )
+    targets_for_line = line_targets.get(line_id, {})
+    visited: set[str] = set()
+    frontier = list(targets_for_line.get(exit_port_id, ()))
+    while frontier:
+        station_id = frontier.pop()
+        if station_id in visited:
+            continue
+        visited.add(station_id)
+        if station_id in graph.junction_ids:
+            frontier.extend(targets_for_line.get(station_id, ()))
+        elif (
+            (port := graph.ports.get(station_id)) is not None
+            and port.is_entry
+            and port.side in {PortSide.LEFT, PortSide.RIGHT}
+        ):
+            return True
+    return False
 
 
 def _shared_y_lane_section(

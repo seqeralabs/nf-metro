@@ -501,6 +501,14 @@ gallery:
       A three-line fan-out whose active exit lanes close the gaps left by
       unrelated lines. The exit port, divergence junction, and horizontal
       hand-off stubs must share the same compact 4 px frame.
+  - id: lr_line_handoff_fanning_exit
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      A three-station chain that swaps its line on the last hop, then leaves
+      through an exit that fans out through a junction to two sections. The
+      junction hides the entries downstream, but the hand-off continues
+      the chain, so all three stations hold one row (issue #2042).
   - id: same_destination_short_overlap
     source_dir: examples/topologies
     category: Fan-out and Fan-in
