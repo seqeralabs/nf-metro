@@ -12,7 +12,7 @@ from collections.abc import (
     Sequence,
 )
 from dataclasses import dataclass, field
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 from nf_metro.layout.constants import (
     COORD_TOLERANCE_FINE,
@@ -3718,7 +3718,12 @@ def cross_row_convergence_channel_order(
 
 
 def _rises_from_same_row_bypass(
-    graph: MetroGraph, source: Station, port_station: Station
+    graph: MetroGraph,
+    source: Station,
+    port_station: Station,
+    *,
+    source_colrow: tuple[int | None, int | None] | None = None,
+    target_colrow: tuple[int | None, int | None] | None = None,
 ) -> bool:
     """Whether a feeder level with *port_station* reaches it on a riser.
 
@@ -3727,9 +3732,12 @@ def _rises_from_same_row_bypass(
     connector is not flat even though both ends share a Y.  The below-row
     channel is read from :func:`bypass_bottom_y`, the lane the router lays that
     detour on; a channel no lower than the port is a straight run instead.
+    Callers that already resolved either grid cell pass it in.
     """
-    target_col, target_row = _resolve_section_colrow(graph, port_station)
-    source_col, source_row = _resolve_section_colrow(graph, source)
+    target_col, target_row = target_colrow or _resolve_section_colrow(
+        graph, port_station
+    )
+    source_col, source_row = source_colrow or _resolve_section_colrow(graph, source)
     if target_col is None or source_col is None or source_row != target_row:
         return False
     if abs(target_col - source_col) <= 1 or not _has_intervening_sections(
@@ -3742,19 +3750,28 @@ def _rises_from_same_row_bypass(
     return channel_y > port_station.y + _SAME_Y_TOLERANCE
 
 
+_Approach = Literal["flat", "below", "above"]
+
+
 @dataclass(frozen=True)
 class SameRowBypassEntry:
     """A flow-side entry where same-row bypass risers join flat feeders.
 
-    ``flat`` and ``risers`` are the line ids arriving each way; ``feeders``
-    names each line's same-row feeder station and ``riser_depth`` each riser's
-    column distance to the port.
+    ``feeders`` names each line's same-row feeder station and ``riser_depth``
+    each riser's column distance to the port; every line not in
+    ``riser_depth`` arrives flat.
     """
 
-    flat: frozenset[str]
-    risers: frozenset[str]
     feeders: Mapping[str, str]
     riser_depth: Mapping[str, int]
+
+    @property
+    def risers(self) -> frozenset[str]:
+        return frozenset(self.riser_depth)
+
+    @property
+    def flat(self) -> frozenset[str]:
+        return frozenset(self.feeders) - self.risers
 
 
 def same_row_bypass_entry(graph: MetroGraph, port_id: str) -> SameRowBypassEntry | None:
@@ -3773,7 +3790,7 @@ def same_row_bypass_entry(graph: MetroGraph, port_id: str) -> SameRowBypassEntry
     target_col, target_row = _resolve_section_colrow(graph, port_station)
     if target_col is None or _port_fed_through_merge_junction(graph, port_id):
         return None
-    sides: dict[str, set[str]] = {}
+    sides: dict[str, set[_Approach]] = {}
     feeders: dict[str, str] = {}
     depth: dict[str, int] = {}
     for edge in graph.edges_to(port_id):
@@ -3784,18 +3801,23 @@ def same_row_bypass_entry(graph: MetroGraph, port_id: str) -> SameRowBypassEntry
         if source_row != target_row or abs(dy) > _SAME_Y_TOLERANCE:
             sides.setdefault(lid, set()).add("below" if dy > 0 else "above")
             continue
-        rises = _rises_from_same_row_bypass(graph, source, port_station)
+        rises = _rises_from_same_row_bypass(
+            graph,
+            source,
+            port_station,
+            source_colrow=(source_col, source_row),
+            target_colrow=(target_col, target_row),
+        )
         sides.setdefault(lid, set()).add("below" if rises else "flat")
         feeders.setdefault(lid, edge.source)
         if rises and source_col is not None:
             depth.setdefault(lid, abs(target_col - source_col))
     if set(sides) != set(feeders) or any(len(s) > 1 for s in sides.values()):
         return None
-    flat = frozenset(lid for lid, side in sides.items() if side == {"flat"})
-    risers = frozenset(depth)
-    if not flat or not risers or len(flat) + len(risers) != len(sides):
+    entry = SameRowBypassEntry(feeders, depth)
+    if not entry.flat or not entry.risers:
         return None
-    return SameRowBypassEntry(flat, risers, feeders, depth)
+    return entry
 
 
 def _section_flow_bundle(graph: MetroGraph, section: Section) -> frozenset[str]:
@@ -3900,6 +3922,11 @@ def _carry_lane_up_level_approach(
     cannot be carried to where the approach begins; moving part of it would
     only relocate the step inside the approach, so the line keeps its lanes and
     steps once, on its connector into the port.
+
+    It cannot reuse :func:`_row_upstream_line_sources` /
+    :func:`_apply_offset_upstream_on_row`: that walk yields a station before
+    deciding whether to continue past it (so it would commit the riser's feeder)
+    and applies a partial carry up to a collision rather than none at all.
     """
     graph = ctx.graph
     port_station = graph.stations[port_id]
