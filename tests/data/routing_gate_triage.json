@@ -1231,10 +1231,6 @@
   "note": "inbound is pre-built as {sid: set() for sid in graph.stations}, so every station id in the graph is a key. All edge endpoints are guaranteed to be in graph.stations after parsing (regular nodes via register_station, ports via add_port->add_station, junctions via add_station), so edge.target is always found in inbound and the False branch (54->56) is never taken.",
   "status": "defensive"
  },
- "offsets.py::if entry.side not in (PortSide.LEFT, PortSide.RIGHT):::#1": {
-  "note": "In _align_flat_tb_exit_to_entry: scopes the flat-seam exit/entry reconciliation to horizontal (LEFT/RIGHT) entry ports, whose per-line offsets are Y like the TB exit's. A TOP/BOTTOM entry stores X-offsets, so copying across would be a category error. No corpus fixture routes a TB LEFT/RIGHT exit directly into a TOP/BOTTOM entry at the same Y, so the skip arm is never taken; defensive against that cross-axis seam.",
-  "status": "defensive"
- },
  "offsets.py::if exit_lines == set(j_lines):::#1": {
   "note": "Reaches the realignment body of _align_junction_to_entry_port only via a TB-reversed two-line bundle fanning into a junction (the #704 boundary fix is in, so this body is now provably reachable). The junction_entry_reversed_fold fixture now ships that topology; with the bundle order carried concentrically through the reversal corners the junction offsets already match their entry ports, so the realignment body short-circuits before its offset-writing arms and they stay un-exercised corpus-wide. Defensive. Its lines-differ arm (->1147) is additionally defensive: a fan-out junction carries exactly its single exit port's fanned lines, so exit_lines == j_lines always.",
   "status": "defensive"

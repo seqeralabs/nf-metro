@@ -508,8 +508,22 @@ in pipeline order.
   runway out from it for a perpendicular entry fed by a LEFT/RIGHT
   exit, which turns onto its descent column only once clear of the box
   (`_feeder_descent_x`).
-- **Invariants preserved**: Real station coords (Pass-A is port- and
-  bbox-only). Exit ports. Junctions still unpositioned.
+  Exception: a LEFT/RIGHT entry fed by an exit off its consumer's trunk
+  (`_exit_off_consumer_trunk`: a perpendicular exit on any section, or
+  any exit on a TB/BT section) anchors on its own consumer instead: the
+  consumer station's Y on a horizontal-flow section, and on a
+  vertical-flow section a seat one station gap before the flow-start
+  row, or a mirror across the seam when a LEFT/RIGHT exit hands off
+  between opposite vertical flows (`_mirror_entry_section_to_seam`).
+  The exception covers an exit reached through the divergence junction
+  it feeds as well as a direct one: the junction resolves to its exit
+  port (`divergence_junction_exit_ports`) before the check, so the TB
+  entry clamp (`_clamp_tb_entry_port`) never pulls such an exit off its
+  carrier station's side of the section.
+- **Invariants preserved**: Real station coords, except the consumer
+  section a seam mirror slides. Exit ports, except a same-row trunk
+  feeder the TB entry clamp pulls level with the clamped entry.
+  Junctions still unpositioned.
 - **Related tests**: `test_no_kink_at_section_boundary` (the
   straight-run property this phase establishes).
 - **Lifecycle:** invariant - the entry-port straight-run (no-kink) Y

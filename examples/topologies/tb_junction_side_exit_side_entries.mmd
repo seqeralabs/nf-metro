@@ -1,0 +1,46 @@
+%%metro title: TB junction-fed side exit into TB side entries
+%%metro line: l0 | L0 | #3779b1
+%%metro line: l1 | L1 | #6ef362
+%%metro line: l2 | L2 | #a66d13
+graph LR
+    subgraph s0 [S0]
+        %%metro direction: TB
+        s0n0[S0N0]
+        s0n1[S0N1]
+        s0n2[S0N2]
+        s0n3[S0N3]
+        s0n4[S0N4]
+        s0n0 -->|l1| s0n1
+        s0n1 -->|l1| s0n2
+        s0n2 -->|l1| s0n3
+        s0n3 -->|l1| s0n4
+    end
+    subgraph s1 [S1]
+        %%metro direction: TB
+        s1n0[S1N0]
+        s1n1[S1N1]
+        s1n2[S1N2]
+        s1n3[S1N3]
+        s1n4[S1N4]
+        s1n0 -->|l0| s1n1
+        s1n1 -->|l0| s1n2
+        s1n2 -->|l0| s1n3
+        s1n3 -->|l0| s1n4
+    end
+    subgraph s2 [S2]
+        %%metro direction: TB
+        s2n0[S2N0]
+        s2n1[S2N1]
+        s2n0 -->|l1| s2n1
+    end
+    subgraph s3 [S3]
+        %%metro direction: TB
+        s3n0[S3N0]
+        s3n1[S3N1]
+        s3n2[S3N2]
+        s3n0 -->|l1| s3n1
+        s3n1 -->|l2| s3n2
+    end
+    s0n4 -->|l1| s1n0
+    s1n4 -->|l0| s2n0
+    s1n4 -->|l0| s3n0
