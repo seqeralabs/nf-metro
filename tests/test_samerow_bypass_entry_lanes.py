@@ -20,11 +20,19 @@ from pathlib import Path
 import pytest
 
 from nf_metro.api import prepare_graph
+from nf_metro.layout.constants import SAME_Y_TOLERANCE
+from nf_metro.layout.phases._common import (
+    iter_corridor_fed_solo_entries,
+    iter_flat_seam_solo_entries,
+)
+from nf_metro.layout.routing import compute_station_offsets
+from nf_metro.parser.model import MetroGraph
 from nf_metro.render.svg import build_render_plan
 from nf_metro.themes import resolve_theme
 
 ROOT = Path(__file__).resolve().parent.parent
-TOPOLOGIES = ROOT / "examples" / "topologies"
+EXAMPLES = ROOT / "examples"
+TOPOLOGIES = EXAMPLES / "topologies"
 
 CASES = [
     ("samerow_bypass_joins_flat_bundle", "report__entry_left_3"),
@@ -152,3 +160,78 @@ def test_flat_feeders_run_level_into_the_port(fixture: str, port_id: str) -> Non
     for _line_id, _source, target, (a, b) in steps:
         assert target == port_id, steps
         assert abs(abs(b[0] - a[0]) - abs(b[1] - a[1])) <= _TOL, steps
+
+
+SOLO_RISER_ENTRIES = [
+    ("topologies/disjoint_sameline_trunks", "secD", "secD__entry_left_6"),
+    ("topologies/junction_entry_align", "dst_b", "dst_b__entry_left_7"),
+    ("topologies/junction_entry_reversed_fold", "dst_b", "dst_b__entry_left_4"),
+    (
+        "topologies/seed72_cross_family_fan",
+        "normal_target",
+        "normal_target__entry_left_2",
+    ),
+]
+
+
+def _laid_out(fixture: str) -> MetroGraph:
+    path = EXAMPLES / f"{fixture}.mmd"
+    return prepare_graph(path.read_text(), source_dir=str(path.parent))
+
+
+def _solo_scopes(
+    graph: MetroGraph,
+) -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
+    corridor = {
+        (sec, port)
+        for sec, port, _ in iter_corridor_fed_solo_entries(graph, SAME_Y_TOLERANCE)
+    }
+    flat = {
+        (sec, port)
+        for sec, port, _ in iter_flat_seam_solo_entries(graph, SAME_Y_TOLERANCE)
+    }
+    return corridor, flat
+
+
+@pytest.mark.parametrize(
+    ("fixture", "section", "port_id"),
+    SOLO_RISER_ENTRIES,
+    ids=[f"{fixture}:{port}" for fixture, _, port in SOLO_RISER_ENTRIES],
+)
+def test_solo_entry_fed_by_a_same_row_bypass_rides_the_trunk(
+    fixture: str, section: str, port_id: str
+) -> None:
+    """A single-line section reached only on a same-row bypass riser is corridor-fed.
+
+    The riser absorbs the lane step in its climb, so the entry and its lone
+    consumers anchor on the trunk exactly as for an off-row corridor.
+    """
+    graph = _laid_out(fixture)
+    corridor, flat = _solo_scopes(graph)
+    assert (section, port_id) in corridor
+    assert (section, port_id) not in flat
+
+    offsets = compute_station_offsets(graph)
+    (line_id,) = graph.station_lines(port_id)
+    carriers = [
+        sid
+        for sid in graph.sections[section].station_ids
+        if line_id in graph.station_lines(sid)
+    ]
+    assert {sid: offsets.get((sid, line_id), 0.0) for sid in carriers} == dict.fromkeys(
+        carriers, 0.0
+    )
+
+
+def test_solo_entry_with_a_flat_and_a_riser_feeder_is_neither_scope() -> None:
+    """A solo entry fed both level and on a same-row bypass riser has no single seam.
+
+    ``reporting`` takes ``qc`` level from ``variant_calling`` beside it and on a
+    riser from ``preprocess`` three columns back.  It is not a corridor: the
+    level feeder would slope into a trunk-anchored port.  Nor is it a flat seam
+    to re-base, since one feeder climbs in.
+    """
+    corridor, flat = _solo_scopes(_laid_out("variant_calling_tuned"))
+    entry = ("reporting", "reporting__entry_left_5")
+    assert entry not in corridor
+    assert entry not in flat
