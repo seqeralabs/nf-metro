@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="nf-metro-render-run" content="36239237847">
+<meta name="nf-metro-render-run" content="36246945710">
 <title>Render diff - PR #2047</title>
 <style>
   :root {
@@ -257,7 +257,7 @@
   <h1>Render diff - PR #2047</h1>
   <button id="scheme-toggle" class="scheme-btn">System</button>
 </div>
-<p class="summary">2 added out of 359 total renders. Generated 2026-09-26 11:36 UTC.</p>
+<p class="summary">3 added out of 360 total renders. Generated 2026-09-26 14:00 UTC.</p>
 <details class="intro">
 <summary>What is this page?</summary>
 <p>
@@ -288,6 +288,7 @@ switch between side-by-side, base-only, and PR-only views.
 <p class="caption">Advisory only &mdash; nothing gates on these. <span class="m-better">green</span> improved, <span class="m-worse">red</span> regressed. Lower is better except in the &uarr; column.</p>
 <table>
 <tr><th>Render</th><th>Crossings</th><th>Near-horiz.</th><th>Lone diag.</th><th>Bends/route</th><th>Corners</th><th>Turn/route (rad)</th><th>Label strikes</th><th>Marker gap ↑</th><th>Excess gaps</th><th>Wasted canvas</th></tr>
+<tr><td><a href="#lr_handoff_fanning_exit_peel_order">lr_handoff_fanning_exit_peel_order</a></td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0.3</td><td class="m-flat">&ndash;&rarr;4</td><td class="m-flat">&ndash;&rarr;0.5</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;60.0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;65%</td></tr>
 <tr><td><a href="#lr_line_handoff_fanning_exit">lr_line_handoff_fanning_exit</a></td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0.3</td><td class="m-flat">&ndash;&rarr;4</td><td class="m-flat">&ndash;&rarr;0.4</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;60.0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;56%</td></tr>
 <tr><td><a href="#tb_line_change_chain">tb_line_change_chain</a></td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0.4</td><td class="m-flat">&ndash;&rarr;4</td><td class="m-flat">&ndash;&rarr;0.6</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;40.0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;52%</td></tr>
 </table>
@@ -296,6 +297,7 @@ switch between side-by-side, base-only, and PR-only views.
 <h2>Changed renders</h2>
 <h3><a href="#section-fan-out-and-fan-in">Fan-out and Fan-in</a></h3>
 <ul>
+<li><a href="#lr_handoff_fanning_exit_peel_order">lr_handoff_fanning_exit_peel_order</a><span class="badge badge-added">added</span></li>
 <li><a href="#lr_line_handoff_fanning_exit">lr_line_handoff_fanning_exit</a><span class="badge badge-added">added</span></li>
 </ul>
 <h3><a href="#section-tb-/-bt-sections">TB / BT Sections</a></h3>
@@ -304,6 +306,102 @@ switch between side-by-side, base-only, and PR-only views.
 </ul>
 </div>
 <h2 class="section-header" id="section-fan-out-and-fan-in">Fan-out and Fan-in</h2>
+
+<div class="diff-entry" id="lr_handoff_fanning_exit_peel_order">
+<h3>Lr Handoff Fanning Exit Peel Order <span class="badge badge-added">added</span></h3>
+<div class="side-only"><h4>New in PR</h4><div class="svg-wrapper"><?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="652" height="470" viewBox="0 0 652 470">
+<defs>
+</defs>
+<style>.nf-metro-bg--lr_handoff_fanning_exit_peel_order-pr { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }
+.nf-metro-title--lr_handoff_fanning_exit_peel_order-pr { fill: var(--nfm-map-title-color, light-dark(#111111, #ffffff)); }
+.nf-metro-station-label--lr_handoff_fanning_exit_peel_order-pr { fill: var(--nfm-map-label-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-section-box--lr_handoff_fanning_exit_peel_order-pr { fill: var(--nfm-map-section-fill, light-dark(#ededed, #373737)); stroke: var(--nfm-map-section-stroke, light-dark(#e6e6e6, #595959)); }
+.nf-metro-section-label--lr_handoff_fanning_exit_peel_order-pr { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-label--lr_handoff_fanning_exit_peel_order-pr { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-underline--lr_handoff_fanning_exit_peel_order-pr { stroke: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-legend-bg--lr_handoff_fanning_exit_peel_order-pr { fill: var(--nfm-map-legend-bg, light-dark(rgba(255, 255, 255, 0.8), rgba(0, 0, 0, 0.3))); }
+.nf-metro-legend-text--lr_handoff_fanning_exit_peel_order-pr { fill: var(--nfm-map-legend-text-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-marker-stroke--lr_handoff_fanning_exit_peel_order-pr { stroke: var(--nfm-map-marker-stroke, light-dark(#333333, #f0f0f0)); }
+.nf-metro-label-halo--lr_handoff_fanning_exit_peel_order-pr { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); stroke: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }</style>
+<rect x="0" y="0" width="652" height="470" fill="#2b2b2b" class="nf-metro-bg--lr_handoff_fanning_exit_peel_order-pr" />
+<text x="60.0" y="30.0" font-size="24.0" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" class="nf-metro-title--lr_handoff_fanning_exit_peel_order-pr">Line handoff into a fanning exit keeps its peel order</text>
+<rect x="30.0" y="70.0" width="220.0" height="100.0" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box--lr_handoff_fanning_exit_peel_order-pr" data-section-id="a" data-section-lines="l0,l1,l2" />
+<circle cx="41.0" cy="55.0" r="11" fill="#333333" class="nf-metro-section-num-circle--lr_handoff_fanning_exit_peel_order-pr" data-section-id="a" />
+<text x="41.0" y="55.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="a">1</text>
+<text x="57.0" y="55.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label--lr_handoff_fanning_exit_peel_order-pr" data-section-id="a">A</text>
+<rect x="330.0" y="70.0" width="100.0" height="100.0" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box--lr_handoff_fanning_exit_peel_order-pr" data-section-id="b" data-section-lines="l1" />
+<circle cx="341.0" cy="55.0" r="11" fill="#333333" class="nf-metro-section-num-circle--lr_handoff_fanning_exit_peel_order-pr" data-section-id="b" />
+<text x="341.0" y="55.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="b">2</text>
+<text x="357.0" y="55.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label--lr_handoff_fanning_exit_peel_order-pr" data-section-id="b">B</text>
+<rect x="300.0" y="220.0" width="160.0" height="100.0" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box--lr_handoff_fanning_exit_peel_order-pr" data-section-id="c" data-section-lines="l1,l2" />
+<circle cx="311.0" cy="205.0" r="11" fill="#333333" class="nf-metro-section-num-circle--lr_handoff_fanning_exit_peel_order-pr" data-section-id="c" />
+<text x="311.0" y="205.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="c">3</text>
+<text x="327.0" y="205.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label--lr_handoff_fanning_exit_peel_order-pr" data-section-id="c">C</text>
+<path d="M140.0,124.0 L200.0,124.0" stroke="#a66d13" stroke-width="3.0" stroke-linecap="round" class="metro-line-l2--lr_handoff_fanning_exit_peel_order-pr" data-line-id="l2" />
+<path d="M350.0,274.0 L410.0,274.0" stroke="#a66d13" stroke-width="3.0" stroke-linecap="round" class="metro-line-l2--lr_handoff_fanning_exit_peel_order-pr" data-line-id="l2" />
+<path d="M200.0,124.0 L250.0,124.0" stroke="#a66d13" stroke-width="3.0" stroke-linecap="round" class="metro-line-l2--lr_handoff_fanning_exit_peel_order-pr" data-line-id="l2" />
+<path d="M300.0,274.0 L350.0,274.0" stroke="#a66d13" stroke-width="3.0" stroke-linecap="round" class="metro-line-l2--lr_handoff_fanning_exit_peel_order-pr" data-line-id="l2" />
+<path d="M250.0,124.0 L260.0,124.0" stroke="#a66d13" stroke-width="3.0" stroke-linecap="round" class="metro-line-l2--lr_handoff_fanning_exit_peel_order-pr" data-line-id="l2" />
+<path d="M260.0,124.0 L263.0,124.0 Q273.0,124.0,273.0,134.0 L273.0,260.0 Q273.0,274.0,287.0,274.0 L300.0,274.0" stroke="#a66d13" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-l2--lr_handoff_fanning_exit_peel_order-pr" data-line-id="l2" />
+<path d="M200.0,120.0 L250.0,120.0" stroke="#6ef362" stroke-width="3.0" stroke-linecap="round" class="metro-line-l1--lr_handoff_fanning_exit_peel_order-pr" data-line-id="l1" />
+<path d="M330.0,120.0 L380.0,120.0" stroke="#6ef362" stroke-width="3.0" stroke-linecap="round" class="metro-line-l1--lr_handoff_fanning_exit_peel_order-pr" data-line-id="l1" />
+<path d="M300.0,270.0 L350.0,270.0" stroke="#6ef362" stroke-width="3.0" stroke-linecap="round" class="metro-line-l1--lr_handoff_fanning_exit_peel_order-pr" data-line-id="l1" />
+<path d="M250.0,120.0 L260.0,120.0" stroke="#6ef362" stroke-width="3.0" stroke-linecap="round" class="metro-line-l1--lr_handoff_fanning_exit_peel_order-pr" data-line-id="l1" />
+<path d="M260.0,120.0 L330.0,120.0" stroke="#6ef362" stroke-width="3.0" stroke-linecap="round" class="metro-line-l1--lr_handoff_fanning_exit_peel_order-pr" data-line-id="l1" />
+<path d="M260.0,120.0 L263.0,120.0 Q277.0,120.0,277.0,134.0 L277.0,260.0 Q277.0,270.0,287.0,270.0 L300.0,270.0" stroke="#6ef362" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-l1--lr_handoff_fanning_exit_peel_order-pr" data-line-id="l1" />
+<path d="M80.0,120.0 L140.0,120.0" stroke="#3779b1" stroke-width="3.0" stroke-linecap="round" class="metro-line-l0--lr_handoff_fanning_exit_peel_order-pr" data-line-id="l0" />
+<rect x="75.0" y="115.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--lr_handoff_fanning_exit_peel_order-pr" data-station-id="a0" data-station-lines="l0" data-station-label="A0" data-section-id="a" data-section-name="A" />
+<rect x="135.0" y="115.0" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--lr_handoff_fanning_exit_peel_order-pr" data-station-id="a1" data-station-lines="l0,l2" data-station-label="A1" data-section-id="a" data-section-name="A" />
+<rect x="195.0" y="115.0" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--lr_handoff_fanning_exit_peel_order-pr" data-station-id="a2" data-station-lines="l1,l2" data-station-label="A2" data-section-id="a" data-section-name="A" />
+<rect x="375.0" y="115.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--lr_handoff_fanning_exit_peel_order-pr" data-station-id="b0" data-station-lines="l1" data-station-label="B0" data-section-id="b" data-section-name="B" />
+<rect x="345.0" y="265.0" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--lr_handoff_fanning_exit_peel_order-pr" data-station-id="c0" data-station-lines="l1,l2" data-station-label="C0" data-section-id="c" data-section-name="C" />
+<rect x="405.0" y="269.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--lr_handoff_fanning_exit_peel_order-pr" data-station-id="c1" data-station-lines="l2" data-station-label="C1" data-section-id="c" data-section-name="C" />
+<text x="80.0" y="131.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--lr_handoff_fanning_exit_peel_order-pr" text-anchor="middle" dominant-baseline="hanging">A0</text>
+<text x="80.0" y="131.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="a0" class="nf-metro-station-label--lr_handoff_fanning_exit_peel_order-pr">A0</text>
+<text x="350.0" y="285.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--lr_handoff_fanning_exit_peel_order-pr" text-anchor="middle" dominant-baseline="hanging">C0</text>
+<text x="350.0" y="285.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="c0" class="nf-metro-station-label--lr_handoff_fanning_exit_peel_order-pr">C0</text>
+<text x="380.0" y="131.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--lr_handoff_fanning_exit_peel_order-pr" text-anchor="middle" dominant-baseline="hanging">B0</text>
+<text x="380.0" y="131.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="b0" class="nf-metro-station-label--lr_handoff_fanning_exit_peel_order-pr">B0</text>
+<text x="140.0" y="106.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--lr_handoff_fanning_exit_peel_order-pr" text-anchor="middle" dominant-baseline="auto">A1</text>
+<text x="140.0" y="106.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="a1" class="nf-metro-station-label--lr_handoff_fanning_exit_peel_order-pr">A1</text>
+<text x="410.0" y="260.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--lr_handoff_fanning_exit_peel_order-pr" text-anchor="middle" dominant-baseline="auto">C1</text>
+<text x="410.0" y="260.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="c1" class="nf-metro-station-label--lr_handoff_fanning_exit_peel_order-pr">C1</text>
+<text x="200.0" y="135.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--lr_handoff_fanning_exit_peel_order-pr" text-anchor="middle" dominant-baseline="hanging">A2</text>
+<text x="200.0" y="135.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="a2" class="nf-metro-station-label--lr_handoff_fanning_exit_peel_order-pr">A2</text>
+<circle cx="273.0" cy="124.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="273.0" cy="274.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="277.0" cy="120.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="277.0" cy="270.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<path d="M250.0,115.0 L255.0,120.0 L250.0,125.0 L245.0,120.0 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
+<text x="250.0" y="112.0" font-size="7" fill="rgba(80, 180, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">a__exit_right_0 (right)</text>
+<path d="M330.0,115.0 L335.0,120.0 L330.0,125.0 L325.0,120.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="330.0" y="112.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">b__entry_left_1 (left)</text>
+<path d="M300.0,265.0 L305.0,270.0 L300.0,275.0 L295.0,270.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="300.0" y="262.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">c__entry_left_2 (left)</text>
+<path d="M260.0,115.0 L265.0,120.0 L260.0,125.0 L255.0,120.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="260.0" y="112.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">__junction_3 (?)</text>
+<path d="M275.0,50.0 L275.0,340.0" stroke="rgba(255, 255, 0, 0.5)" stroke-width="1" stroke-dasharray="6,4" />
+<text x="275.0" y="46.0" font-size="7" fill="rgba(255, 255, 0, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">col 0|1</text>
+<path d="M10.0,195.0 L480.0,195.0" stroke="rgba(255, 255, 0, 0.5)" stroke-width="1" stroke-dasharray="6,4" />
+<text x="6.0" y="195.0" font-size="7" fill="rgba(255, 255, 0, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0|1</text>
+<path d="M20.0,120.0 L260.0,120.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="16.0" y="120.0" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0 grid</text>
+<path d="M320.0,120.0 L440.0,120.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="316.0" y="120.0" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0 grid</text>
+<path d="M290.0,270.0 L470.0,270.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="286.0" y="270.0" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 1 grid</text>
+<rect x="30.0" y="350.0" width="106.2" height="96.0" rx="6" ry="6" fill="rgba(0, 0, 0, 0.3)" class="nf-metro-legend-bg--lr_handoff_fanning_exit_peel_order-pr" />
+<path d="M42.0,374.0 L66.0,374.0" stroke="#3779b1" stroke-width="3.0" stroke-linecap="round" />
+<text x="78.0" y="374.0" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--lr_handoff_fanning_exit_peel_order-pr">Line 0</text>
+<path d="M42.0,398.0 L66.0,398.0" stroke="#6ef362" stroke-width="3.0" stroke-linecap="round" />
+<text x="78.0" y="398.0" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--lr_handoff_fanning_exit_peel_order-pr">Line 1</text>
+<path d="M42.0,422.0 L66.0,422.0" stroke="#a66d13" stroke-width="3.0" stroke-linecap="round" />
+<text x="78.0" y="422.0" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--lr_handoff_fanning_exit_peel_order-pr">Line 2</text>
+<text x="622.0" y="462.0" font-size="8" fill="rgba(150, 150, 150, 0.6)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">created with nf-metro v2.1.0+dev</text>
+</svg></div></div>
+</div>
 
 <div class="diff-entry" id="lr_line_handoff_fanning_exit">
 <h3>Lr Line Handoff Fanning Exit <span class="badge badge-added">added</span></h3>
