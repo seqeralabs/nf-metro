@@ -19,10 +19,6 @@
   "note": "The lenient sign test, reached only when reject_collinear_touch is False; see that gate's verdict. Its one caller is the validator module this matrix excludes, so no sweep fixture evaluates it.",
   "status": "defensive"
  },
- "common.py::elif tgt_sec:::#1": {
-  "note": "The else (col_key=round(sx)) needs an L-shaped (dx!=0,dy!=0) inter edge whose target resolves to no section. Only exit_port->junction edges lack a target section, and junction positioning makes those axis-aligned (same-X RIGHT exit or same-Y BOTTOM exit), never L-shaped, so the else is unreachable. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
-  "status": "defensive"
- },
  "common.py::for e in graph.edges:::#1": {
   "note": "No-preference graph.edges scan loop-exit: a fan-out junction always has a sectioned incident port (its exit/entry ports carry a section_id), so the loop always returns and never exhausts graph.edges; the fall-through to the type-contract return None is the never-taken no-neighbour fallback.",
   "status": "defensive"
@@ -169,10 +165,6 @@
  },
  "common.py::if s.bbox_h <= 0:::#1": {
   "note": "Degenerate-bbox guard in _grid_row_bands: a laid-out section always has bbox_h > 0, so the skip arm only protects against a zero/negative-height section that the layout never produces.",
-  "status": "defensive"
- },
- "common.py::if safe_cap >= row_bottom:::#1": {
-  "note": "The false arm is a defensive midpoint fallback for an inter-row gap too narrow to clear both an upper-row bypass and the lower section header. Placement reserves the routing band before bypass geometry is computed, so settled corpus layouts provide enough clearance for the safe-cap arm.",
   "status": "defensive"
  },
  "common.py::if sec.bbox_w <= 0:::#1": {

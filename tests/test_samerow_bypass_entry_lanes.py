@@ -1,0 +1,331 @@
+"""A same-row bypass joining a flat bundle takes a lane beside it, not inside it.
+
+At a shared LR/RL entry port, a line from a section on the port's own row can
+arrive perpendicular: intervening sections force it round below them, so it
+runs back up into the port on a riser.  Its feeder shares the port's row, yet
+it is not a flat co-traveller.  Slotted among the lines that do run straight in,
+it takes a lane one of them holds upstream; that line has to step aside just
+outside the port, and the riser crosses it on the way up.
+
+A packed cell can instead send the bypass over the row top, so it comes down
+into the port from above; it then belongs above the flat lines, not below.
+
+Each case names a port where a same-row bypass meets at least one flat feeder,
+in LR and RL, with one and with several flat lines, arriving from below and
+from above, and with the flat lines' upstream section sharing its bundle with
+the port's section.
+"""
+
+from __future__ import annotations
+
+import itertools
+from pathlib import Path
+
+import pytest
+
+from nf_metro.api import prepare_graph
+from nf_metro.layout.constants import SAME_Y_TOLERANCE
+from nf_metro.layout.phases._common import (
+    iter_corridor_fed_solo_entries,
+    iter_flat_seam_solo_entries,
+)
+from nf_metro.layout.routing import compute_station_offsets
+from nf_metro.layout.routing.invariants import (
+    check_convergence_shallow_feeder_concentric,
+)
+from nf_metro.layout.routing.offsets import (
+    _OffsetCtx,
+    _plan_level_approach_carries,
+    same_row_bypass_entry,
+)
+from nf_metro.parser.model import MetroGraph
+from nf_metro.render.svg import build_render_plan
+from nf_metro.themes import resolve_theme
+
+ROOT = Path(__file__).resolve().parent.parent
+EXAMPLES = ROOT / "examples"
+TOPOLOGIES = EXAMPLES / "topologies"
+
+CASES = [
+    ("samerow_bypass_joins_flat_bundle", "report__entry_left_3"),
+    ("samerow_bypass_joins_flat_bundle_rl", "report__entry_right_3"),
+    ("samerow_bypass_over_top_flat_bundle", "report__entry_left_4"),
+    ("junction_entry_lane_step", "orf_calling__entry_left_3"),
+    ("disjoint_sameline_trunks", "secC__entry_left_5"),
+    ("disjoint_sameline_trunks", "secE__entry_left_7"),
+    ("folded_corridor_distinct_lanes", "realignment__entry_right_9"),
+]
+CASE_IDS = [f"{fixture}:{port}" for fixture, port in CASES]
+
+_TOL = 0.5
+Point = tuple[float, float]
+
+
+def _drawn_routes(fixture: str):  # noqa: ANN202
+    path = TOPOLOGIES / f"{fixture}.mmd"
+    graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+    plan = build_render_plan(graph, resolve_theme("nfcore", graph, "light"))
+    return graph, list(zip(plan.routes, plan.route_polylines))
+
+
+def _proper_crossing(a: tuple[Point, Point], b: tuple[Point, Point]) -> Point | None:
+    (x1, y1), (x2, y2) = a
+    (x3, y3), (x4, y4) = b
+    denom = (x2 - x1) * (y4 - y3) - (y2 - y1) * (x4 - x3)
+    if abs(denom) < 1e-9:
+        return None
+    t = ((x3 - x1) * (y4 - y3) - (y3 - y1) * (x4 - x3)) / denom
+    u = ((x3 - x1) * (y2 - y1) - (y3 - y1) * (x2 - x1)) / denom
+    eps = 1e-6
+    if eps < t < 1 - eps and eps < u < 1 - eps:
+        return (round(x1 + t * (x2 - x1), 1), round(y1 + t * (y2 - y1), 1))
+    return None
+
+
+def _segments(points: list[Point]) -> list[tuple[Point, Point]]:
+    return list(zip(points, points[1:]))
+
+
+def _lane_steps(points: list[Point]) -> list[tuple[Point, Point]]:
+    """Segments that shift sideways by less than a turn: a lane step, not a riser."""
+    return [
+        (a, b)
+        for a, b in _segments(points)
+        if abs(b[0] - a[0]) > _TOL and _TOL < abs(b[1] - a[1]) < 10.0
+    ]
+
+
+@pytest.mark.parametrize(("fixture", "port_id"), CASES, ids=CASE_IDS)
+def test_routes_into_the_port_do_not_cross(fixture: str, port_id: str) -> None:
+    _graph, routes = _drawn_routes(fixture)
+    arriving = [
+        (route.line_id, points)
+        for route, points in routes
+        if route.edge.target == port_id
+    ]
+    crossings = [
+        (la, lb, hit)
+        for (la, pa), (lb, pb) in itertools.combinations(arriving, 2)
+        if la != lb
+        for sa in _segments(pa)
+        for sb in _segments(pb)
+        if (hit := _proper_crossing(sa, sb)) is not None
+    ]
+    assert not crossings, crossings
+
+
+@pytest.mark.parametrize(("fixture", "port_id"), CASES, ids=CASE_IDS)
+def test_flat_feeders_run_level_into_the_port(fixture: str, port_id: str) -> None:
+    """Every row-level connector a flat feeder rides up to the port stays level.
+
+    Covers the whole flat approach back along the row, so a lane step cannot
+    simply move to a boundary further upstream.
+    """
+    graph, routes = _drawn_routes(fixture)
+    row_y = graph.stations[port_id].y
+    by_target: dict[str, list] = {}
+    for route, points in routes:
+        by_target.setdefault(route.edge.target, []).append((route, points))
+
+    def on_row(station_id: str) -> bool:
+        return abs(graph.stations[station_id].y - row_y) <= _TOL
+
+    def level(points: list[Point]) -> bool:
+        return not any(
+            abs(b[0] - a[0]) <= _TOL and abs(b[1] - a[1]) > _TOL
+            for a, b in _segments(points)
+        )
+
+    flat_lines = {
+        route.line_id
+        for route, points in by_target.get(port_id, [])
+        if on_row(route.edge.source) and level(points)
+    }
+    assert flat_lines, f"{port_id} has no flat feeder"
+
+    steps = []
+    for line_id in sorted(flat_lines):
+        frontier, seen = [port_id], {port_id}
+        while frontier:
+            target = frontier.pop()
+            for route, points in by_target.get(target, []):
+                if route.line_id != line_id or not on_row(route.edge.source):
+                    continue
+                if not level(points):
+                    continue
+                steps.extend(
+                    (line_id, route.edge.source, route.edge.target, seg)
+                    for seg in _lane_steps(points)
+                )
+                if route.edge.source not in seen:
+                    seen.add(route.edge.source)
+                    frontier.append(route.edge.source)
+    assert not steps, steps
+
+
+SOLO_RISER_ENTRIES = [
+    ("topologies/disjoint_sameline_trunks", "secD", "secD__entry_left_6"),
+    ("topologies/junction_entry_align", "dst_b", "dst_b__entry_left_7"),
+    ("topologies/junction_entry_reversed_fold", "dst_b", "dst_b__entry_left_4"),
+    (
+        "topologies/seed72_cross_family_fan",
+        "normal_target",
+        "normal_target__entry_left_2",
+    ),
+]
+
+
+def _laid_out(fixture: str) -> MetroGraph:
+    path = EXAMPLES / f"{fixture}.mmd"
+    return prepare_graph(path.read_text(), source_dir=str(path.parent))
+
+
+def _solo_scopes(
+    graph: MetroGraph,
+) -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
+    corridor = {
+        (sec, port)
+        for sec, port, _ in iter_corridor_fed_solo_entries(graph, SAME_Y_TOLERANCE)
+    }
+    flat = {
+        (sec, port)
+        for sec, port, _ in iter_flat_seam_solo_entries(graph, SAME_Y_TOLERANCE)
+    }
+    return corridor, flat
+
+
+@pytest.mark.parametrize(
+    ("fixture", "section", "port_id"),
+    SOLO_RISER_ENTRIES,
+    ids=[f"{fixture}:{port}" for fixture, _, port in SOLO_RISER_ENTRIES],
+)
+def test_solo_entry_fed_by_a_same_row_bypass_rides_the_trunk(
+    fixture: str, section: str, port_id: str
+) -> None:
+    """A single-line section reached only on a same-row bypass riser is corridor-fed.
+
+    The riser absorbs the lane step in its climb, so the entry and its lone
+    consumers anchor on the trunk exactly as for an off-row corridor.
+    """
+    graph = _laid_out(fixture)
+    corridor, flat = _solo_scopes(graph)
+    assert (section, port_id) in corridor
+    assert (section, port_id) not in flat
+
+    offsets = compute_station_offsets(graph)
+    (line_id,) = graph.station_lines(port_id)
+    carriers = [
+        sid
+        for sid in graph.sections[section].station_ids
+        if line_id in graph.station_lines(sid)
+    ]
+    assert {sid: offsets.get((sid, line_id), 0.0) for sid in carriers} == dict.fromkeys(
+        carriers, 0.0
+    )
+
+
+def test_solo_entry_with_a_flat_and_a_riser_feeder_is_neither_scope() -> None:
+    """A solo entry fed both level and on a same-row bypass riser has no single seam.
+
+    ``reporting`` takes ``qc`` level from ``variant_calling`` beside it and on a
+    riser from ``preprocess`` three columns back.  It is not a corridor: the
+    level feeder would slope into a trunk-anchored port.  Nor is it a flat seam
+    to re-base, since one feeder climbs in.
+    """
+    corridor, flat = _solo_scopes(_laid_out("variant_calling_tuned"))
+    entry = ("reporting", "reporting__entry_left_5")
+    assert entry not in corridor
+    assert entry not in flat
+
+
+OVER_TOP_FIXTURE = "samerow_bypass_over_top_flat_bundle"
+OVER_TOP_PORT = "report__entry_left_4"
+
+
+@pytest.mark.parametrize(("fixture", "port_id"), CASES, ids=CASE_IDS)
+def test_bypass_approach_side_matches_the_drawn_route(
+    fixture: str, port_id: str
+) -> None:
+    """A bypass line counts as coming down exactly when its route descends in."""
+    graph, routes = _drawn_routes(fixture)
+    entry = same_row_bypass_entry(graph, port_id, compute_station_offsets(graph))
+    assert entry is not None
+    port_y = graph.stations[port_id].y
+    drawn_from_above = {
+        route.line_id
+        for route, points in routes
+        if route.edge.target == port_id
+        and route.line_id in entry.bypass_depth
+        and min(y for _x, y in points) < port_y - _TOL
+    }
+    assert entry.descending == drawn_from_above
+
+
+def test_over_top_bypass_takes_the_lane_above_the_flat_lines() -> None:
+    graph, _routes = _drawn_routes(OVER_TOP_FIXTURE)
+    offsets = compute_station_offsets(graph)
+    lanes = {lid: offsets[(OVER_TOP_PORT, lid)] for lid in ("skip", "main", "qc")}
+    assert lanes["skip"] < lanes["main"] < lanes["qc"], lanes
+
+
+def test_concentric_guard_reads_the_side_a_bypass_arrives_from() -> None:
+    """The guard accepts the over-top line above the flat band and rejects it below."""
+    graph, _routes = _drawn_routes(OVER_TOP_FIXTURE)
+    offsets = compute_station_offsets(graph)
+    assert check_convergence_shallow_feeder_concentric(graph, offsets) == []
+
+    main, qc = offsets[(OVER_TOP_PORT, "main")], offsets[(OVER_TOP_PORT, "qc")]
+    step = qc - main
+    above = {**offsets, (OVER_TOP_PORT, "skip"): main - step}
+    below = {**offsets, (OVER_TOP_PORT, "skip"): qc + step}
+    assert check_convergence_shallow_feeder_concentric(graph, above) == []
+    (message,) = check_convergence_shallow_feeder_concentric(graph, below)
+    assert OVER_TOP_PORT in message
+
+
+LEVEL_PAIR_MMD = """\
+%%metro line: a | A | #4a90d9
+%%metro line: b | B | #e63946
+graph LR
+    subgraph up [Up]
+        u1[U1]
+        u2[U2]
+        u1 -->|a,b| u2
+    end
+    subgraph down [Down]
+        d1[D1]
+    end
+    u2 -->|a,b| d1
+"""
+
+
+def _level_pair_ctx() -> tuple[_OffsetCtx, str, list[str]]:
+    graph = prepare_graph(LEVEL_PAIR_MMD)
+    (port_id,) = graph.sections["down"].entry_ports
+    approach = ["up__exit_right_0", "u2", "u1"]
+    offsets = {(sid, "a"): 4.0 for sid in approach}
+    offsets.update({(sid, "b"): 8.0 for sid in approach})
+    return _OffsetCtx(graph=graph, offsets=offsets), port_id, approach
+
+
+def test_level_approach_carries_see_the_lanes_earlier_moves_vacate() -> None:
+    """Moving ``a`` up first frees its lane for ``b``; the plan leaves ctx alone."""
+    ctx, port_id, approach = _level_pair_ctx()
+    before = dict(ctx.offsets)
+    writes, refused = _plan_level_approach_carries(
+        ctx, port_id, [("a", 0.0), ("b", 4.0)]
+    )
+    assert refused == frozenset()
+    assert writes == {
+        **{(sid, "a"): 0.0 for sid in approach},
+        **{(sid, "b"): 4.0 for sid in approach},
+    }
+    assert ctx.offsets == before
+
+
+def test_level_approach_carry_is_refused_whole_where_a_lane_is_held() -> None:
+    ctx, port_id, _approach = _level_pair_ctx()
+    ctx.offsets[("u1", "a")] = 0.0
+    writes, refused = _plan_level_approach_carries(ctx, port_id, [("b", 0.0)])
+    assert refused == frozenset({"b"})
+    assert writes == {}

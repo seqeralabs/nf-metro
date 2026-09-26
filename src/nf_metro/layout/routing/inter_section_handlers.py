@@ -2204,6 +2204,30 @@ def _match_inter_section_rule(f: _InterFacts) -> _Rule | None:
     return None
 
 
+def arrives_descending(edge: Edge, ctx: _RoutingCtx) -> bool:
+    """Whether inter-section *edge* reaches its target coming down from above.
+
+    Builds the route its dispatch rule draws and reads the last vertical leg:
+    a descent arrives from above the target, a climb from below.  A route
+    with no vertical leg arrives level, which is not a descent.
+    """
+    src, tgt = ctx.graph.edge_endpoints(edge)
+    f = _build_inter_facts(edge, src, tgt, ctx)
+    rule = _match_inter_section_rule(f)
+    route = (
+        rule.route(f)
+        if rule is not None
+        else _route_l_shape(edge, src, tgt, f.i, f.n, ctx)
+    )
+    points = route.points if route is not None else []
+    vertical_legs = [
+        y2 - y1
+        for (x1, y1), (x2, y2) in zip(points, points[1:])
+        if abs(y2 - y1) > max(abs(x2 - x1), COORD_TOLERANCE)
+    ]
+    return bool(vertical_legs) and vertical_legs[-1] > 0
+
+
 @dataclass(frozen=True, slots=True)
 class _TbBottomExitGeometry:
     points: tuple[tuple[float, float], ...]

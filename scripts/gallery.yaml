@@ -1419,6 +1419,27 @@ gallery:
       concentric bundle until a member peels up at its turn column, rather than being split
       apart by a track reserved for a trunk that only appears further along the channel (issue
       #702)."
+  - id: samerow_bypass_joins_flat_bundle
+    source_dir: examples/topologies
+    category: Bypass Routing
+    description:
+      "A line from the same row detours below an intervening section and climbs back into a
+      shared entry port beside three lines that run straight in. The flat lines keep the lanes
+      they arrive on and the riser takes the lane below them, so no flat line steps aside at
+      the port and the riser crosses nothing (issue #2043)."
+  - id: samerow_bypass_joins_flat_bundle_rl
+    source_dir: examples/topologies
+    category: Bypass Routing
+    description:
+      "The right-to-left mirror: the same-row bypass climbs into a shared right entry port
+      below the flat bundle (issue #2043)."
+  - id: samerow_bypass_over_top_flat_bundle
+    source_dir: examples/topologies
+    category: Bypass Routing
+    description:
+      "A packed cell-mate sends the same-row bypass over the row top instead, so it comes down
+      into the shared entry port from above and takes the lane above the flat lines, again
+      crossing nothing (issue #2043)."
   - id: dogleg_exempt_distinct
     source_dir: examples/topologies
     category: Bypass Routing
