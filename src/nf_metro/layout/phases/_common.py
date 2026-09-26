@@ -102,25 +102,47 @@ def section_lane_axis(graph: MetroGraph, section_id: str) -> Axis:
     return AxisFrame.for_direction(direction, 1.0, 1.0).secondary
 
 
+def is_icon_terminus(station: Station) -> bool:
+    """Whether *station* is drawn as a file icon rather than a labelled pill."""
+    return station.is_blank_terminus or bool(station.terminus_icon_types)
+
+
+def layer_occupants(graph: MetroGraph) -> dict[tuple[str, int], list[Station]]:
+    """Visible in-section stations bucketed by ``(section_id, layer)``."""
+    occupants: dict[tuple[str, int], list[Station]] = defaultdict(list)
+    for station in graph.stations.values():
+        if station.section_id is not None and not (
+            station.is_port or station.is_hidden
+        ):
+            occupants[station.section_id, station.layer].append(station)
+    return occupants
+
+
 def continuation_track_is_realizable(
-    graph: MetroGraph, node: str, predecessor: str
+    graph: MetroGraph,
+    node: str,
+    predecessor: str,
+    occupants: Mapping[tuple[str, int], list[Station]] | None = None,
 ) -> bool:
-    """Whether a continuation can occupy its predecessor's track at its layer."""
+    """Whether a continuation can occupy its predecessor's track at its layer.
+
+    *occupants* is :func:`layer_occupants`; a caller checking many pairs
+    passes it once.  It holds station references, so lane coordinates are
+    read live even after a caller moves stations between checks.
+    """
     station = graph.stations[node]
     predecessor_station = graph.stations[predecessor]
     section_id = station.section_id
     if section_id is None or predecessor_station.section_id != section_id:
         return False
+    if occupants is None:
+        occupants = layer_occupants(graph)
     lane = section_lane_axis(graph, section_id)
     target = lane.get(predecessor_station)
     return not any(
-        other_id not in {node, predecessor}
-        and other.section_id == section_id
-        and other.layer == station.layer
-        and not other.is_port
-        and not other.is_hidden
+        other.id not in {node, predecessor}
         and abs(lane.get(other) - target) < SAME_COORD_TOLERANCE
-        for other_id, other in graph.stations.items()
+        for other in occupants.get((section_id, station.layer), ())
     )
 
 
@@ -261,8 +283,7 @@ def continuation_track_predecessors(graph: MetroGraph) -> dict[str, str]:
         if not station.is_port
         and not station.is_hidden
         and not station.off_track
-        and not station.is_blank_terminus
-        and not station.terminus_icon_types
+        and not is_icon_terminus(station)
     }
     station_ids = set(graph.stations)
     targets: dict[str, set[str]] = {station_id: set() for station_id in station_ids}

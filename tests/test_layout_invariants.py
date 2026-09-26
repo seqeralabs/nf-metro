@@ -86,6 +86,7 @@ from nf_metro.layout.phases._common import (
     continuation_track_predecessors,
     flow_axis_exit_ports,
     flow_exit_carrier_anchor,
+    is_icon_terminus,
     iter_corridor_fed_solo_entries,
     iter_fold_lr_exit_straight_runs,
     iter_fold_lr_exits_short_of_target,
@@ -1074,9 +1075,7 @@ def test_vertical_passthrough_chain_holds_one_lane_column(
                 continue
             checked += 1
             excluded = len({edge.target for edge in graph.edges_from(node)}) > 1 or any(
-                graph.stations[sid].is_blank_terminus
-                or graph.stations[sid].terminus_icon_types
-                for sid in (pred, node)
+                is_icon_terminus(graph.stations[sid]) for sid in (pred, node)
             )
             assert excluded or named.get(node) == pred, (
                 f"{fixture}: section {section.id} link {pred}->{node} is not "

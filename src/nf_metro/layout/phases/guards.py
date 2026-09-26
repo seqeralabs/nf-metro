@@ -81,6 +81,7 @@ from nf_metro.layout.phases._common import (
     iter_fold_lr_exits_short_of_target,
     iter_sole_trunk_continuations,
     iter_stacked_rows_in_rowspan_band,
+    layer_occupants,
     line_forks_within_section,
     marker_cross_exempt,
     port_bundle_edge_reach,
@@ -1707,8 +1708,9 @@ def _guard_entry_port_not_opposite_targets(graph: MetroGraph, phase: str) -> Non
 
 def _guard_post_convergence_trunk_continues(graph: MetroGraph, phase: str) -> None:
     """An in-section linear continuation stays on one secondary track."""
+    occupants = layer_occupants(graph)
     for section_id, pred, node in iter_sole_trunk_continuations(graph):
-        if not continuation_track_is_realizable(graph, node, pred):
+        if not continuation_track_is_realizable(graph, node, pred, occupants):
             continue
         section = graph.sections[section_id]
         frame = AxisFrame.for_direction(section.direction, 1.0, 1.0)
