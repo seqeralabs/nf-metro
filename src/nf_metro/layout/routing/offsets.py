@@ -37,6 +37,7 @@ from nf_metro.layout.phases._common import (
 from nf_metro.layout.route_topology import divergence_junction_exit_ports
 from nf_metro.layout.routing.arranger import BoundaryConfig, lane_order
 from nf_metro.layout.routing.common import (
+    bypass_bottom_y,
     merge_junction_ids,
     needs_perp_approach_fan,
     perp_entry_consumer,
@@ -3716,6 +3717,225 @@ def cross_row_convergence_channel_order(
     return [line_id for line_id, _col, _bypass in sorted(feeders, key=lambda f: f[1])]
 
 
+def _rises_from_same_row_bypass(
+    graph: MetroGraph, source: Station, port_station: Station
+) -> bool:
+    """Whether a feeder level with *port_station* reaches it on a riser.
+
+    A source on the port's own grid row that hops past intervening sections in
+    that row routes round below them and climbs back up into the port, so its
+    connector is not flat even though both ends share a Y.  The below-row
+    channel is read from :func:`bypass_bottom_y`, the lane the router lays that
+    detour on; a channel no lower than the port is a straight run instead.
+    """
+    target_col, target_row = _resolve_section_colrow(graph, port_station)
+    source_col, source_row = _resolve_section_colrow(graph, source)
+    if target_col is None or source_col is None or source_row != target_row:
+        return False
+    if abs(target_col - source_col) <= 1 or not _has_intervening_sections(
+        graph, source_col, target_col, source_row
+    ):
+        return False
+    channel_y = bypass_bottom_y(
+        graph, source_col, target_col, src_row=source_row, tgt_row=target_row
+    )
+    return channel_y > port_station.y + _SAME_Y_TOLERANCE
+
+
+@dataclass(frozen=True)
+class SameRowBypassEntry:
+    """A flow-side entry where same-row bypass risers join flat feeders.
+
+    ``flat`` and ``risers`` are the line ids arriving each way; ``feeders``
+    names each line's same-row feeder station and ``riser_depth`` each riser's
+    column distance to the port.
+    """
+
+    flat: frozenset[str]
+    risers: frozenset[str]
+    feeders: Mapping[str, str]
+    riser_depth: Mapping[str, int]
+
+
+def same_row_bypass_entry(graph: MetroGraph, port_id: str) -> SameRowBypassEntry | None:
+    """Classify *port_id* as a same-row bypass entry, or ``None``.
+
+    Every line must reach the port from a feeder level with it on the port's
+    grid row, either flat or rising from a same-row bypass channel below; at
+    least one of each is needed.  A line fed more than once qualifies only when
+    all its feeders approach from the same side -- one flat and one rising feeder
+    for the same line cannot both be honoured by a single lane, so such a port
+    keeps its ordinary lane order.  A merge-fed confluence is left to the
+    routing-time band alignment that owns it (see
+    :func:`_port_fed_through_merge_junction`).
+    """
+    port_station = graph.stations[port_id]
+    target_col, target_row = _resolve_section_colrow(graph, port_station)
+    if target_col is None or _port_fed_through_merge_junction(graph, port_id):
+        return None
+    sides: dict[str, set[str]] = {}
+    feeders: dict[str, str] = {}
+    depth: dict[str, int] = {}
+    for edge in graph.edges_to(port_id):
+        lid = edge.line_id
+        source = graph.station_for_edge_source(edge)
+        source_col, source_row = _resolve_section_colrow(graph, source)
+        dy = source.y - port_station.y
+        if source_row != target_row or abs(dy) > _SAME_Y_TOLERANCE:
+            sides.setdefault(lid, set()).add("below" if dy > 0 else "above")
+            continue
+        rises = _rises_from_same_row_bypass(graph, source, port_station)
+        sides.setdefault(lid, set()).add("below" if rises else "flat")
+        feeders.setdefault(lid, edge.source)
+        if rises and source_col is not None:
+            depth.setdefault(lid, abs(target_col - source_col))
+    if set(sides) != set(feeders) or any(len(s) > 1 for s in sides.values()):
+        return None
+    flat = frozenset(lid for lid, side in sides.items() if side == {"flat"})
+    risers = frozenset(depth)
+    if not flat or not risers or len(flat) + len(risers) != len(sides):
+        return None
+    return SameRowBypassEntry(flat, risers, feeders, depth)
+
+
+def _section_flow_bundle(graph: MetroGraph, section: Section) -> frozenset[str]:
+    """Lines crossing *section*'s flow-axis boundary ports."""
+    sides = flow_port_sides(section.direction)
+    return frozenset(
+        lid
+        for pid in (*section.entry_ports, *section.exit_ports)
+        if graph.ports[pid].side in sides
+        for lid in graph.station_lines(pid)
+    )
+
+
+def _keeping_flat_lanes_drifts_row_trunk(
+    ctx: _OffsetCtx, section: Section, kept: Mapping[str, float]
+) -> bool:
+    """Whether a kept-lane slotting would drift *section*'s trunk off its row.
+
+    Keeping the flat lines on their arrival lanes can start the section's block
+    below its top lane.  That is harmless unless another section on the same
+    grid row carries exactly the same bundle: the two trunk markers then stand
+    at different heights along one row.  In that case the bundle has to pack
+    from the top lane instead, and a flat line steps once at the seam.
+    """
+    if min(kept.values()) <= _OFFSET_EQ_TOLERANCE:
+        return False
+    graph = ctx.graph
+    bundle = _section_flow_bundle(graph, section)
+    return any(
+        other.id != section.id
+        and other.grid_row == section.grid_row
+        and lanes_run_along_y(other.direction)
+        and _section_flow_bundle(graph, other) == bundle
+        for other in graph.sections.values()
+    )
+
+
+def _slot_same_row_bypass_entry(ctx: _OffsetCtx, port_id: str, port: Port) -> None:
+    """Seat same-row bypass risers beside the flat lines at *port_id*.
+
+    The flat lines keep the lanes they arrive on, in that order, so none of them
+    steps aside at the port.  The risers take the lanes directly below them,
+    nested by approach depth: the nearer source's riser turns in innermost, next
+    to the flat band, and lines from one source keep the order they leave it in,
+    since a bypass carries its bundle round the U unchanged.
+
+    Where the flat lanes are not one contiguous block, or keeping them would
+    drift the section's trunk (see :func:`_keeping_flat_lanes_drifts_row_trunk`),
+    the bundle packs from the top lane and each moved flat line carries its new
+    lane back along its level approach.
+    """
+    entry = same_row_bypass_entry(ctx.graph, port_id)
+    if entry is None:
+        return
+    arrival = {
+        lid: ctx.offsets.get((feeder, lid), 0.0)
+        for lid, feeder in entry.feeders.items()
+    }
+
+    def priority(lid: str) -> int:
+        return ctx.line_priority.get(lid, 0)
+
+    flat = sorted(entry.flat, key=lambda lid: (arrival[lid], priority(lid)))
+    risers = sorted(
+        entry.risers,
+        key=lambda lid: (entry.riser_depth[lid], arrival[lid], priority(lid)),
+    )
+    step = ctx.offset_step
+    new_offs = {lid: arrival[lid] for lid in flat}
+    new_offs.update(
+        {lid: arrival[flat[-1]] + rank * step for rank, lid in enumerate(risers, 1)}
+    )
+    contiguous = all(
+        abs(arrival[right] - arrival[left] - step) <= _OFFSET_EQ_TOLERANCE
+        for left, right in zip(flat, flat[1:])
+    )
+    section = ctx.graph.sections[port.section_id]
+    packed = not contiguous or _keeping_flat_lanes_drifts_row_trunk(
+        ctx, section, new_offs
+    )
+    if packed:
+        new_offs = {lid: rank * step for rank, lid in enumerate((*flat, *risers))}
+    if not any(
+        abs(new_offs[lid] - ctx.offsets.get((port_id, lid), 0.0)) > _OFFSET_EQ_TOLERANCE
+        for lid in new_offs
+    ):
+        return
+    _apply_offsets_along_bundle(ctx, port_id, port.section_id, new_offs)
+    if packed:
+        for lid in flat:
+            _carry_lane_up_level_approach(ctx, port_id, lid, new_offs[lid])
+
+
+def _carry_lane_up_level_approach(
+    ctx: _OffsetCtx, port_id: str, line_id: str, off: float
+) -> None:
+    """Move *line_id* onto *off* along its whole level approach, or not at all.
+
+    Walks the line's feeders back from *port_id* while they stay level with it,
+    stopping at a same-row bypass riser, which absorbs a lane change in its
+    climb.  If some station on the way holds *off* for another line, the lane
+    cannot be carried to where the approach begins; moving part of it would
+    only relocate the step inside the approach, so the line keeps its lanes and
+    steps once, on its connector into the port.
+    """
+    graph = ctx.graph
+    port_station = graph.stations[port_id]
+    chain: list[str] = []
+    frontier, seen = [port_id], {port_id}
+    while frontier:
+        target = graph.stations[frontier.pop()]
+        for edge in graph.edges_to(target.id):
+            source = graph.stations[edge.source]
+            if (
+                edge.line_id != line_id
+                or edge.source in seen
+                or abs(source.y - port_station.y) > _SAME_Y_TOLERANCE
+                or _rises_from_same_row_bypass(graph, source, target)
+            ):
+                continue
+            if _would_collide(ctx, edge.source, line_id, off):
+                return
+            seen.add(edge.source)
+            chain.append(edge.source)
+            frontier.append(edge.source)
+    for station_id in chain:
+        ctx.offsets[(station_id, line_id)] = off
+
+
+def _flow_entry_lane_y_ports(ctx: _OffsetCtx) -> Iterator[tuple[str, Port]]:
+    """Yield each entry port on the flow-start side of a Y-laned section."""
+    graph = ctx.graph
+    for port_id, port in graph.ports.items():
+        if not port.is_entry:
+            continue
+        direction = graph.section_for_port(port).direction
+        if lanes_run_along_y(direction) and port.side is flow_port_sides(direction)[0]:
+            yield port_id, port
+
+
 def _left_entry_lr_ports(ctx: _OffsetCtx) -> Iterator[tuple[str, Port]]:
     """Yield each LEFT entry port on a forward (non-reversed) LR section.
 
@@ -3733,7 +3953,7 @@ def _left_entry_lr_ports(ctx: _OffsetCtx) -> Iterator[tuple[str, Port]]:
 
 
 def _order_convergence_entry_ports(ctx: _OffsetCtx) -> None:
-    """Slot a LEFT entry port's bypass-convergence bundle by approach order.
+    """Slot a shared entry port's converging bundle by approach order.
 
     Lines from two or more source columns ride one bypass trunk into a shared
     LEFT entry port.  Their crossing-free slot order is by approach depth - the
@@ -3747,13 +3967,22 @@ def _order_convergence_entry_ports(ctx: _OffsetCtx) -> None:
     its new slot carried back along its horizontal approach to its source, so
     it runs straight into the port instead of kinking where its source-side
     slot differs from the port slot.
+
+    Any other flow-side entry of an LR or RL section where same-row bypass
+    risers join flat feeders is slotted by :func:`_slot_same_row_bypass_entry`.
     """
     if ctx.compact:
         return
     graph = ctx.graph
-    for port_id, port in _left_entry_lr_ports(ctx):
-        feeders = _convergence_feeders(graph, port_id)
+    approach_depth_ports = dict(_left_entry_lr_ports(ctx))
+    for port_id, port in _flow_entry_lane_y_ports(ctx):
+        feeders = (
+            _convergence_feeders(graph, port_id)
+            if port_id in approach_depth_ports
+            else None
+        )
         if feeders is None:
+            _slot_same_row_bypass_entry(ctx, port_id, port)
             continue
         line_col = {lid: col for lid, col, _ in feeders}
         ordered = sorted(
@@ -4377,25 +4606,28 @@ def _entry_seam_is_flat(graph: MetroGraph, entry_port_id: str) -> bool:
     corridor feeder (off the port's Y) instead absorbs the lane step in its
     vertical leg, and the trunk-anchoring invariant then requires a lone
     consumer on offset 0 (:func:`iter_corridor_fed_solo_entries`); inheriting
-    the upstream lane there would only reserve empty lanes.
+    the upstream lane there would only reserve empty lanes.  A same-row bypass
+    (:func:`_rises_from_same_row_bypass`) is such a corridor too, though its
+    source shares the port's Y.
 
     A merge junction fronting the port stands level with it whatever its own
     feeders do, so the seam is read from those feeders instead.
     """
     merges = merge_junction_ids(graph)
-    port_y = graph.stations[entry_port_id].y
+    port_station = graph.stations[entry_port_id]
     feeders = [
-        feeder.source
+        graph.stations[feeder.source]
         for edge in graph.edges_to(entry_port_id)
         for feeder in (
             graph.edges_to(edge.source) if edge.source in merges else (edge,)
         )
+        if feeder.source in graph.stations
     ]
-    dys = [
-        graph.stations[source].y - port_y
-        for source in feeders
-        if source in graph.stations
-    ]
+    if any(
+        _rises_from_same_row_bypass(graph, source, port_station) for source in feeders
+    ):
+        return False
+    dys = [source.y - port_station.y for source in feeders]
     return seam_is_flat(dys, _SAME_Y_TOLERANCE)
 
 
@@ -4862,7 +5094,9 @@ def compute_station_offsets(
        bundle slot nearest its approach side (non-compact only).
     7c. **Convergence entry-port ordering** - at a LEFT entry port fed by
        a bypass trunk from two or more source columns, slots the bundle by
-       approach depth so its risers turn in concentrically (non-compact).
+       approach depth so its risers turn in concentrically; at any LR/RL
+       flow-side entry where same-row bypass risers join flat feeders, seats
+       the risers beside the flat lanes (non-compact).
     7d. **Convergence approach-Y ordering** - at a LEFT entry port fed
        from sections at different rows, slots the bundle by feeder source Y
        so a feeder above the sink is not run down across its mates into a

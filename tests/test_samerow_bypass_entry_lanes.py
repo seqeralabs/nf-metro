@@ -36,6 +36,12 @@ CASES = [
 ]
 CASE_IDS = [f"{fixture}:{port}" for fixture, port in CASES]
 
+# The fold hands ``realignment`` its bundle with ``rna`` above ``dna``, and its
+# trunk must stand level with ``normalization``'s, which carries the same bundle
+# on the same row.  With ``rna`` rising from below, ``dna`` cannot keep its lane
+# into the port: it steps once, on its connector into the port.
+FORCED_STEPS = {("folded_corridor_distinct_lanes", "realignment__entry_right_9"): 1}
+
 _TOL = 0.5
 Point = tuple[float, float]
 
@@ -98,7 +104,9 @@ def test_flat_feeders_run_level_into_the_port(fixture: str, port_id: str) -> Non
     """Every row-level connector a flat feeder rides up to the port stays level.
 
     Covers the whole flat approach back along the row, so a lane step cannot
-    simply move to a boundary further upstream.
+    simply move to a boundary further upstream.  Where a step is forced (see
+    ``FORCED_STEPS``) there is exactly that many, each a 45-degree diagonal on
+    the connector into the port.
     """
     graph, routes = _drawn_routes(fixture)
     row_y = graph.stations[port_id].y
@@ -139,4 +147,8 @@ def test_flat_feeders_run_level_into_the_port(fixture: str, port_id: str) -> Non
                 if route.edge.source not in seen:
                     seen.add(route.edge.source)
                     frontier.append(route.edge.source)
-    assert not steps, steps
+    forced = FORCED_STEPS.get((fixture, port_id), 0)
+    assert len(steps) == forced, steps
+    for _line_id, _source, target, (a, b) in steps:
+        assert target == port_id, steps
+        assert abs(abs(b[0] - a[0]) - abs(b[1] - a[1])) <= _TOL, steps

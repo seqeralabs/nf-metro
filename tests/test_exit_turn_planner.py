@@ -2077,8 +2077,8 @@ def test_a_chained_trunk_descent_is_seated_off_the_column_it_is_built_on() -> No
         for route in observation.routes
         if route.edge.source == "secC__exit_right_2"
     }
-    assert built == {"a": 560.0, "b": 556.0}
-    assert drawn == {"a": 556.0, "b": 552.0}
+    assert built == {"a": 556.0, "b": 560.0}
+    assert drawn == {"a": 552.0, "b": 556.0}
 
 
 def test_a_gap_seated_axis_uses_the_allocated_coordinate() -> None:
@@ -2580,7 +2580,7 @@ def test_runtime_invariant_rejects_a_missing_planned_offset() -> None:
 
 
 def test_runtime_invariant_rejects_a_changed_lane_transition() -> None:
-    graph, offsets, observation = _observe(FROZEN / "seed_77.mmd")
+    graph, offsets, observation = _observe(FROZEN / "seed_41.mmd")
     routes = copy.deepcopy(observation.routes)
     route = next(
         item for item in routes if item.exit_lane_transition_plan_id is not None

@@ -4,9 +4,10 @@ When a single line crosses a flat (same-Y) section boundary, the receiving
 section must meet it on the exact lane its feeder rides.  The reactive
 trunk-anchoring path top-anchored such a lone entry to offset 0 regardless of
 its feeder's lane, drawing an offset-sized diagonal at the seam where the line
-should run straight through.  A corridor (off-Y) feeder is excluded: its
-vertical leg absorbs the lane step with no jog, and the lone consumer then rides
-the trunk by a separate invariant.
+should run straight through.  A corridor feeder is excluded: its vertical leg
+absorbs the lane step with no jog, and the lone consumer then rides the trunk by
+a separate invariant.  That covers an off-Y feeder and a same-row bypass, which
+shares the port's Y but climbs into it from the channel below its row.
 """
 
 from __future__ import annotations
@@ -18,7 +19,10 @@ import pytest
 from nf_metro.layout.constants import SAME_Y_TOLERANCE, graph_offset_step
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.geometry import flow_port_sides
-from nf_metro.layout.routing.offsets import compute_station_offsets
+from nf_metro.layout.routing.offsets import (
+    _rises_from_same_row_bypass,
+    compute_station_offsets,
+)
 from nf_metro.parser import parse_metro_mermaid
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -55,7 +59,11 @@ def _flat_seam_jogs(path: Path) -> list[tuple[str, str, float]]:
             edge.source for edge in graph.edges_to(pid) if edge.source in graph.stations
         ]
         if not feeders or any(
-            abs(graph.stations[src].y - port_y) > SAME_Y_TOLERANCE for src in feeders
+            abs(graph.stations[src].y - port_y) > SAME_Y_TOLERANCE
+            or _rises_from_same_row_bypass(
+                graph, graph.stations[src], graph.stations[pid]
+            )
+            for src in feeders
         ):
             continue
         entry_offset = offsets.get((pid, line_id), 0.0)

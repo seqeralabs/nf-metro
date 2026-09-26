@@ -171,10 +171,6 @@
   "note": "Degenerate-bbox guard in _grid_row_bands: a laid-out section always has bbox_h > 0, so the skip arm only protects against a zero/negative-height section that the layout never produces.",
   "status": "defensive"
  },
- "common.py::if safe_cap >= row_bottom:::#1": {
-  "note": "The false arm is a defensive midpoint fallback for an inter-row gap too narrow to clear both an upper-row bypass and the lower section header. Placement reserves the routing band before bypass geometry is computed, so settled corpus layouts provide enough clearance for the safe-cap arm.",
-  "status": "defensive"
- },
  "common.py::if sec.bbox_w <= 0:::#1": {
   "note": "Zero-width-section guard: the loop scans all graph.sections, but after compute_layout every placed section has bbox_w>0, so the skip arm only guards an empty/unplaced section that valid layouts don't produce.",
   "status": "defensive"
@@ -1207,7 +1203,7 @@
   "note": "In the exit-only-line reorder / same-Y offset propagation; reachable only via a multi-line LR/RL section with a perpendicular (TOP/BOTTOM) exit port, which the engine lays out as a station-as-elbow + collinear overlay PhaseInvariantError (#706). Exercise with a clean fixture once #706 is fixed.",
   "status": "needs-review"
  },
- "offsets.py::if any(::#3": {
+ "offsets.py::if any(::#4": {
   "note": "This post-acceptance marker-cache guard rejects a continuing cohort whose inherited offsets are not one contiguous step sequence. _linear_entry_frame only accepts and materializes contiguous inherited levels, so authored topology cannot reach this reject arm. It protects corrupted or hand-built state.",
   "status": "defensive"
  },
@@ -1248,7 +1244,7 @@
   "status": "defensive"
  },
  "offsets.py::if lid not in seen:::#1": {
-  "note": "The iterator at L554 is `sorted(set(sec_entry_lines), ...)`. The outer `set()` deduplicates the list before iteration, so each `lid` appears exactly once and `seen` never contains it when processed. The false arm (lid already in seen) is logically unreachable \u2014 the dedup happens at set construction, making the `seen` guard dead code. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
+  "note": "The iterator at L554 is `sorted(set(sec_entry_lines), ...)`. The outer `set()` deduplicates the list before iteration, so each `lid` appears exactly once and `seen` never contains it when processed. The false arm (lid already in seen) is logically unreachable — the dedup happens at set construction, making the `seen` guard dead code. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
   "status": "defensive"
  },
  "offsets.py::if local_offset is None or not (::#1": {
