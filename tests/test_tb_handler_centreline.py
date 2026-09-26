@@ -25,6 +25,7 @@ from pathlib import Path
 
 import pytest
 
+from nf_metro.api import render_string
 from nf_metro.layout.constants import CURVE_RADIUS
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import (
@@ -36,6 +37,7 @@ from nf_metro.layout.routing.context import _build_routing_context
 from nf_metro.layout.routing.invariants import (
     assert_render_curve_invariants,
     check_concentric_bundle_corners,
+    check_perp_entry_boundary_consistent,
 )
 from nf_metro.layout.routing.tb_handlers import (
     _route_perp_entry,
@@ -196,14 +198,10 @@ def test_perp_entry_l_corner_clears_floor_when_fanned(stem: str) -> None:
         )
 
 
-# A TB BOTTOM exit feeding a subset of a shared TOP entry port collapses every
-# port line onto one slot while the consumer station fans them apart -- a
-# multi-line perpendicular entry whose port offsets are uniform but whose target
-# offsets are distinct.  Such a collapse forces a per-line boundary offset, so it
-# cannot pass ``check_perp_entry_boundary_consistent`` and lives inline here
-# rather than as a corpus fixture.
-_COLLAPSED_PERP_FAN_MMD = """\
-%%metro title: Collapsed Perp Fan
+# A TB BOTTOM exit and a side feeder share one TOP entry port into a TB target
+# whose first station carries both lines on distinct lanes.
+_SHARED_TOP_ENTRY_MMD = """\
+%%metro title: Shared Top Entry
 %%metro line: main | Main | #0570b0
 %%metro line: feed | Feed | #e63946
 %%metro grid: up | 0,0
@@ -233,18 +231,17 @@ graph LR
 """
 
 
-def test_collapsed_perp_fan_routes_as_l_shape_not_staircase() -> None:
-    """A collapsed-fan TOP entry into a TB target routes V-H, never H-V-H.
+def test_shared_top_entry_port_seats_each_line_on_its_consumer_lane() -> None:
+    """A shared TOP entry into a TB target lands each line on its own lane.
 
-    When a shared TOP/BOTTOM entry port collapses every line onto one slot but
-    the consumer station fans them apart, each line could drop straight off the
-    port and turn in (V-H, an L-shape) or jog horizontally onto a per-line
-    channel before dropping (H-V-H), which lands an S-cusp on the section
-    boundary that ``check_perp_entry_boundary_consistent`` forbids.  Assert
-    every perp-entry route leaves the port on a vertical segment, the L-shape
-    signature.
+    The port and the station it feeds share a lane column, so each line crosses
+    the boundary on the lane it holds at that station: the lines sit side by
+    side through the port and drop straight in.  Seating them all on one port
+    slot instead would run both feeders down one channel into the port, which
+    the render rejects as a collinear overlay, and fan them apart only past the
+    boundary.
     """
-    graph = parse_metro_mermaid(_COLLAPSED_PERP_FAN_MMD)
+    graph = parse_metro_mermaid(_SHARED_TOP_ENTRY_MMD)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
@@ -263,21 +260,25 @@ def test_collapsed_perp_fan_routes_as_l_shape_not_staircase() -> None:
             perp_routes.append(r)
     assert perp_routes, "expected a TOP/BOTTOM perp-entry route"
 
-    # Require the collapsed-fan state (all port lines on one slot); a spread fan
-    # routes an ordinary L-shape and would pass the vertical-departure check
-    # without exercising the H-V-H temptation.
     port_id = perp_routes[0].edge.source
-    port_offsets = {
-        offsets.get((port_id, lid), 0.0) for lid in graph.station_lines(port_id)
-    }
-    assert len(port_offsets) == 1, f"port fan not collapsed: {port_offsets}"
-
+    lines = graph.station_lines(port_id)
+    assert len(lines) > 1
+    port_lanes = {lid: offsets.get((port_id, lid), 0.0) for lid in lines}
+    assert len(set(port_lanes.values())) == len(lines), port_lanes
     for r in perp_routes:
+        consumer_lane = offsets.get((r.edge.target, r.line_id), 0.0)
+        assert port_lanes[r.line_id] == consumer_lane, (
+            f"{r.line_id}: port lane {port_lanes[r.line_id]} is off its consumer "
+            f"lane {consumer_lane}"
+        )
         p0, p1 = r.points[0], r.points[1]
         assert abs(p1[1] - p0[1]) > abs(p1[0] - p0[0]), (
             f"{r.line_id}: perp-entry leaves the port on a horizontal jog "
-            f"{p0}->{p1} (H-V-H shape); expected a vertical drop (L-shape)"
+            f"{p0}->{p1}; expected a vertical drop"
         )
+
+    assert check_perp_entry_boundary_consistent(graph, routes) == []
+    render_string(_SHARED_TOP_ENTRY_MMD)
 
 
 @pytest.mark.parametrize(

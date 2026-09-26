@@ -1179,6 +1179,10 @@
   "note": "Skips a section the walk already took whole. the exit_lane_settlement_without_crossings variant described on the `if was_arriving is None or was_holder is None` entry takes the else arm (a fresh section) but not the skip: there the pair's two lines run into two different downstream sections. The skip arm wants a walk with two pair edges landing in one section, for instance both lines of the pair continuing into the same downstream box, or one box reached from two frontier stations.",
   "status": "needs-review"
  },
+ "offsets.py::for _ in range(len(graph.stations)):::#1": {
+  "note": "_line_exit_port's walk bound. Each step follows the line's sole forward edge, so the walk ends at an exit port, a fork or a dead end within one pass over the section; running out of steps needs a same-line cycle inside a section, which the layered DAG the parser builds cannot hold. The exhausted arm guards a hand-built graph.",
+  "status": "defensive"
+ },
  "offsets.py::for _ in range(max_iterations):::#1": {
   "note": "_reconcile_horizontal_offsets iterates at most 10 times and breaks early when no change occurs. The arc L1338->(-1310) represents loop exhaustion without early-break (all 10 iterations consumed). On any valid parsed graph, the reconciliation converges in at most a handful of iterations because each iteration resolves at least one edge conflict or reaches a fixed point. The 10-iteration ceiling is a backstop against hypothetical oscillating graphs; normal topologies stabilize in 1-3 passes.",
   "status": "defensive"
@@ -1197,6 +1201,10 @@
  },
  "offsets.py::if _offsets_exchanged(::#1": {
   "note": "Whether the propagated swap really exchanged the pair's slots at this exit port. Both arms are un-exercised because the guard above always continues today. the exit_lane_settlement_without_crossings variant described on the `if was_arriving is None or was_holder is None` entry reaches this gate and takes its True arm. The False arm needs an exit port the swap left alone: a section with a second exit port carrying the pair, or a port where the two lines already held equal offsets, neither of which that variant produces.",
+  "status": "needs-review"
+ },
+ "offsets.py::if _stores_reflected(ctx, entry.section_id) != _stores_reflected(::#1": {
+  "note": "_fan_entry_ranks_first declines when the shared entry's section stores its lanes reflected and the source's does not, or the reverse, since the raw offsets then rank the pair in opposite frames. Reaching it needs a gap-compaction collision in front of a fan whose shared branch enters a reverse-flow horizontal section; no swept fixture combines the two.",
   "status": "needs-review"
  },
  "offsets.py::if abs(exit_st.y - j_st.y) <= _SAME_Y_TOLERANCE:::#1": {
@@ -1230,6 +1238,10 @@
  "offsets.py::if edge.target in inbound:::#1": {
   "note": "inbound is pre-built as {sid: set() for sid in graph.stations}, so every station id in the graph is a key. All edge endpoints are guaranteed to be in graph.stations after parsing (regular nodes via register_station, ports via add_port->add_station, junctions via add_station), so edge.target is always found in inbound and the False branch (54->56) is never taken.",
   "status": "defensive"
+ },
+ "offsets.py::if entry is None or not entry.is_entry:::#1": {
+  "note": "_fan_entry_ranks_first skips a divergence-junction branch whose target is not an entry port. Every corpus fan hands its shared branch straight to an entry port; a junction that feeds a merge junction first (the case fanout_divergence_peel_order resolves through _fan_branch_entry_port) would take this arm, and no swept fixture has a two-line branch of that shape.",
+  "status": "needs-review"
  },
  "offsets.py::if entry.side not in (PortSide.LEFT, PortSide.RIGHT):::#1": {
   "note": "In _align_flat_tb_exit_to_entry: scopes the flat-seam exit/entry reconciliation to horizontal (LEFT/RIGHT) entry ports, whose per-line offsets are Y like the TB exit's. A TOP/BOTTOM entry stores X-offsets, so copying across would be a category error. No corpus fixture routes a TB LEFT/RIGHT exit directly into a TOP/BOTTOM entry at the same Y, so the skip arm is never taken; defensive against that cross-axis seam.",

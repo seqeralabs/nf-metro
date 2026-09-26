@@ -231,6 +231,11 @@ EXPECTED_RESIDUALS = frozenset(
         ("lr_top_entry_bundle_east_turn", "intake", "align", "B->T"),
         ("lr_top_entry_bundle_east_turn", "align", "report", "R->L"),
         ("rl_bottom_exit_lr_top_entry_bundle", "intake", "align", "B->T"),
+        # A TB section's BOTTOM drop marks its horizontal receiver reversed, and
+        # the receiver's exit fan carries the flag to both branch targets over
+        # plain R->L continuations the classifier preserves.
+        ("tb_drop_reversed_fanning_exit", "c", "d", "R->L"),
+        ("tb_drop_reversed_fanning_exit", "c", "e", "R->L"),
         # A TB LEFT exit marks its same-row horizontal consumer reversed.  The
         # seam itself is a straight L->R continuation, so the classifier
         # preserves the delivered bundle order.

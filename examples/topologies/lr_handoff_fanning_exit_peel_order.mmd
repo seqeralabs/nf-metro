@@ -1,0 +1,23 @@
+%%metro title: Line handoff into a fanning exit keeps its peel order
+%%metro line: l0 | Line 0 | #3779b1
+%%metro line: l1 | Line 1 | #6ef362
+%%metro line: l2 | Line 2 | #a66d13
+graph LR
+    subgraph a [A]
+        a0[A0]
+        a1[A1]
+        a2[A2]
+        a0 -->|l0| a1
+        a1 -->|l2| a2
+    end
+    subgraph b [B]
+        b0[B0]
+    end
+    subgraph c [C]
+        c0[C0]
+        c1[C1]
+        c0 -->|l2| c1
+    end
+    a2 -->|l1| b0
+    a2 -->|l2| c0
+    a2 -->|l1| c0
