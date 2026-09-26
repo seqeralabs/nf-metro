@@ -25,7 +25,9 @@ from nf_metro.layout.routing import offsets as offsets_module
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import MetroGraph
 
-SEEDS = Path(__file__).resolve().parent / "fixtures" / "hash_seed_determinism"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+SEEDS = REPO_ROOT / "tests" / "fixtures" / "hash_seed_determinism"
+TOPOLOGIES = REPO_ROOT / "examples" / "topologies"
 
 
 def _settled_offsets(path: Path) -> dict[tuple[str, str], float]:
@@ -48,18 +50,22 @@ def _without(name: str) -> Callable[[Path], dict[tuple[str, str], float]]:
 
 
 @pytest.mark.parametrize(
-    ("pass_name", "fixture"),
+    ("pass_name", "path"),
     [
-        ("_exchange_pair_beyond_exit", "seed_41.mmd"),
-        ("_exchange_pair_beyond_exit", "seed_77.mmd"),
-        ("_restore_fanout_peel_order", "seed_77.mmd"),
+        ("_exchange_pair_beyond_exit", SEEDS / "seed_41.mmd"),
+        ("_exchange_pair_beyond_exit", SEEDS / "seed_77.mmd"),
+        (
+            "_restore_fanout_peel_order",
+            TOPOLOGIES / "bottom_entry_fan_side_targets.mmd",
+        ),
     ],
-    ids=lambda value: str(value).removesuffix(".mmd").removeprefix("_"),
+    ids=lambda value: (
+        value.stem if isinstance(value, Path) else value.removeprefix("_")
+    ),
 )
-def test_offset_repair_pass_changes_its_witness(pass_name: str, fixture: str) -> None:
+def test_offset_repair_pass_changes_its_witness(pass_name: str, path: Path) -> None:
     """Neutering the named pass must move the named fixture's lane offsets."""
-    path = SEEDS / fixture
     assert _settled_offsets(path) != _without(pass_name)(path), (
-        f"{pass_name} left {fixture} unchanged; either the pass has gone inert "
+        f"{pass_name} left {path.name} unchanged; either the pass has gone inert "
         "or this fixture no longer reaches it"
     )

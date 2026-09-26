@@ -36,7 +36,11 @@ from nf_metro.layout.phases._common import (
     section_lane_axis,
 )
 from nf_metro.layout.route_topology import divergence_junction_exit_ports
-from nf_metro.layout.routing.arranger import BoundaryConfig, lane_order
+from nf_metro.layout.routing.arranger import (
+    BoundaryConfig,
+    lane_order,
+    peel_lane_order,
+)
 from nf_metro.layout.routing.common import (
     merge_junction_ids,
     needs_perp_approach_fan,
@@ -1097,6 +1101,50 @@ def _perp_entry_arrival_order(
     return tuple(peel_order)
 
 
+def _perpendicular_port_pins(
+    ctx: _OffsetCtx, section: Section, fan_lines: Container[str]
+) -> tuple[set[str], set[str]]:
+    """The lines *section*'s TOP and BOTTOM ports pin to its bundle's front/back.
+
+    A line crossing a TOP port apart from the fan belongs on the drawn bundle's
+    top edge and one crossing a BOTTOM port on its bottom edge.  A port the fan
+    lines cross too pins nothing: its lines reach the section as one stream,
+    so their order is the bundle's own.  A reflected section stores its bottom
+    lane first (:func:`_stores_reflected`), so there the two swap.  A line
+    crossing both sides is pinned to neither.
+    """
+    graph = ctx.graph
+    top: set[str] = set()
+    bottom: set[str] = set()
+    for port_id in (*section.entry_ports, *section.exit_ports):
+        lines = graph.station_lines(port_id)
+        if any(lid in fan_lines for lid in lines):
+            continue
+        side = graph.ports[port_id].side
+        if side is PortSide.TOP:
+            top.update(lines)
+        elif side is PortSide.BOTTOM:
+            bottom.update(lines)
+    top, bottom = top - bottom, bottom - top
+    if _stores_reflected(ctx, section.id):
+        return bottom, top
+    return top, bottom
+
+
+def _peel_section_lane_order(
+    ctx: _OffsetCtx, section: Section, peel_order: Sequence[str]
+) -> tuple[str, ...] | None:
+    """*section*'s lane order re-slotted onto a fan's *peel_order*."""
+    leading, trailing = _perpendicular_port_pins(ctx, section, set(peel_order))
+    config = BoundaryConfig(
+        present=tuple(_section_present_line_set(ctx, section.id)),
+        determining=tuple(peel_order),
+    )
+    return peel_lane_order(
+        config, ctx.line_priority, leading=leading, trailing=trailing
+    )
+
+
 def _reorder_fanout_divergence(ctx: _OffsetCtx) -> None:
     """Order a section's bundle by where its lines peel off a shared exit fan.
 
@@ -1106,7 +1154,9 @@ def _reorder_fanout_divergence(ctx: _OffsetCtx) -> None:
     the bundle's lead-in Y order matches the descent X order the fan channel
     assigns, so the source-section bundle is re-slotted into the same peel order
     (:func:`fanout_divergence_peel_order`) before the exit/junction ports inherit
-    their offsets.
+    their offsets.  Lines the fan does not carry keep their own lanes
+    (:func:`peel_lane_order`) unless a TOP/BOTTOM port of their own pins them
+    to that edge of the bundle (:func:`_perpendicular_port_pins`).
 
     The peel order also governs how the bundle arrives across the section's
     perpendicular entry.  The entry port turns the drop into the trunk through a
@@ -1139,11 +1189,7 @@ def _reorder_fanout_divergence(ctx: _OffsetCtx) -> None:
         if peel_order is None:
             continue
 
-        config = BoundaryConfig(
-            present=tuple(_section_present_line_set(ctx, sec_id)),
-            determining=tuple(peel_order),
-        )
-        new_order = lane_order(config, ctx.line_priority)
+        new_order = _peel_section_lane_order(ctx, section, peel_order)
         if new_order is not None:
             _apply_section_line_order(ctx, sec_id, new_order)
 
@@ -1158,11 +1204,9 @@ def _reorder_fanout_divergence(ctx: _OffsetCtx) -> None:
         for lid, off in _deal_slots_in_order(ctx, port_id, arrival).items():
             ctx.offsets[(port_id, lid)] = off
 
-        feeder_config = BoundaryConfig(
-            present=tuple(_section_present_line_set(ctx, feeder_id)),
-            determining=tuple(peel_order),
+        feeder_order = _peel_section_lane_order(
+            ctx, graph.sections[feeder_id], peel_order
         )
-        feeder_order = lane_order(feeder_config, ctx.line_priority)
         if feeder_order is not None:
             _apply_section_line_order(ctx, feeder_id, feeder_order)
 

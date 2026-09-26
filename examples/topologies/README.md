@@ -2,7 +2,7 @@
 
 Example `.mmd` files demonstrating a range of pipeline topologies and the layout patterns they produce. Each example exercises different aspects of the auto-layout engine.
 
-This directory holds 298 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
+This directory holds 301 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
 
 To render one example:
 
@@ -525,6 +525,9 @@ python scripts/list_topology_fixtures.py
 | `bundle_terminator_continuation.mmd`        | A station that terminates one line of a two-line bundle - its sole successor stays on the trunk row (#979)                                                                       |
 | `lr_line_handoff_fanning_exit.mmd`          | A chain that swaps its line on the hop into an exit fanning out through a junction - the chain holds one row (#2042)                                                             |
 | `lr_handoff_fanning_exit_peel_order.mmd`    | The same hand-off after a lane gap upstream - closing the gap keeps the exit bundle in the order its fan peels, so the drop does not braid (#2042)                               |
+| `lr_handoff_from_below_fanning_exit.mmd`    | A line handed off into a fanning exit after entering through a bottom port of its own - it rides the bottom lane, below the fan lines (#2042)                                    |
+| `lr_handoff_from_above_fanning_exit.mmd`    | A line declared last, handed off into a fanning exit after entering through a top port of its own - it rides the top lane, so the hand-off leaves no dead lane (#2042)           |
+| `tb_drop_reversed_fanning_exit.mmd`         | A TB drop into a reversed-storage section whose exit fans out - the bundle keeps the order the drop delivers (#2042)                                                             |
 | `corridor_fed_trunk_output_spur.mmd`        | A corridor-fed entry riding its through-chain rather than a short output spur off the trunk                                                                                      |
 | `section_trunk_short_output_branch.mmd`     | A section trunk choosing the long main chain over a short output spur (#1487)                                                                                                    |
 | `near_edge_exit_corner.mmd`                 | An exit corner close to the section edge - the corner stays inside the section bbox (#1314)                                                                                      |

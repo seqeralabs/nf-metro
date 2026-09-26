@@ -518,6 +518,28 @@ gallery:
       that slot keeps the bundle level along the row and in the order its
       fan peels, so the line running on to the section beside it stays
       above the line that drops, and the two do not braid (issue #2042).
+  - id: lr_handoff_from_below_fanning_exit
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      A line that climbs into a fanning section through a bottom port of its
+      own and hands off to the fan there. It rides the bottom lane, on the
+      side it arrives from, whatever the fan's peel order (issue #2042).
+  - id: lr_handoff_from_above_fanning_exit
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      A line declared after the fan lines drops into a fanning section
+      through a top port of its own and hands off to the fan there. It rides
+      the top lane, on the side it arrives from, so the hand-off station
+      spans only the two lines meeting at it (issue #2042).
+  - id: tb_drop_reversed_fanning_exit
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      A vertical section drops its bundle into a section that stores its
+      lanes reflected, and that section's exit fans out. The line that ends
+      before the fan keeps the side the drop delivers it on (issue #2042).
   - id: same_destination_short_overlap
     source_dir: examples/topologies
     category: Fan-out and Fan-in
