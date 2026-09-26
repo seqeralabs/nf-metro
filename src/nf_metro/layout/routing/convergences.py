@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from enum import Enum
 from types import MappingProxyType
 from typing import TypeAlias
 
@@ -60,6 +62,7 @@ from nf_metro.layout.route_plan import (
     reservation_decision_refs,
     turn_handedness,
 )
+from nf_metro.layout.route_reservations import ColumnGapRegion, RowGapRegion
 from nf_metro.layout.routing.centrelines import gather_member_edges
 from nf_metro.layout.routing.common import (
     Direction,
@@ -82,19 +85,33 @@ from nf_metro.layout.routing.context import (
     _resolve_section_colrow,
     _RoutingCtx,
 )
+from nf_metro.layout.routing.corridor_cohort_integration import (
+    CorridorCohortTarget,
+    CorridorScalarControlledPoint,
+    CorridorScalarControlRecipe,
+    CorridorScalarDirectedRunway,
+    CorridorScalarFixedPoint,
+    CorridorScalarGrant,
+    CorridorScalarOwnerKind,
+    CorridorScalarRequest,
+    CorridorScalarVariable,
+)
+from nf_metro.layout.routing.corridor_cohorts import CorridorCoordinateDomain
+from nf_metro.layout.routing.families import RouteFamilyId
 from nf_metro.layout.routing.member_geometry import (
     MemberGeometryExecution,
     PreliminaryGapChannelClaim,
     empty_member_geometry_execution,
 )
 from nf_metro.layout.routing.orientation import direction_axis, lateral_axis
-from nf_metro.layout.routing.reserved_bands import ReservedBand
+from nf_metro.layout.routing.reserved_bands import ReservedBand, corridor_clearance_band
 from nf_metro.layout.settlement_demand import (
     BoundaryClearanceRequirement,
     SettlementAxis,
 )
 from nf_metro.parser.model import Edge, MetroGraph, Station
 from nf_metro.parser.route_topology import (
+    ConnectorId,
     ResolvedConvergenceView,
     ResolvedEdge,
     semantic_route_id,
@@ -1335,11 +1352,11 @@ def _parallel_run_separation(
     ):
         return None
     if first_horizontal:
-        separation = abs(first_start[1] - second_start[1])
+        separation = abs(measured_distance(second_start[1], first_start[1]))
         first_extent = sorted((first_start[0], first_end[0]))
         second_extent = sorted((second_start[0], second_end[0]))
     else:
-        separation = abs(first_start[0] - second_start[0])
+        separation = abs(measured_distance(second_start[0], first_start[0]))
         first_extent = sorted((first_start[1], first_end[1]))
         second_extent = sorted((second_start[1], second_end[1]))
     overlap = min(first_extent[1], second_extent[1]) - max(
@@ -1946,16 +1963,21 @@ def _bundled_corridor_runs(first: _CotravellingRun, second: _CotravellingRun) ->
     )
 
 
-def _bundle_pitch(first: _CotravellingRun, second: _CotravellingRun) -> float:
+def _bundle_pitch(
+    first: _CotravellingRun, second: _CotravellingRun, offset_step: float
+) -> float:
     """The separation two lanes of one bundle hold through their shared span."""
     return cotravelling_lane_clearance(
         same_line=first.line_ids == second.line_ids,
         counter_running=False,
         curve_radius=CURVE_RADIUS,
+        offset_step=offset_step,
     )
 
 
-def _packed_lane(run: _CotravellingRun, seated: list[_CotravellingRun]) -> float | None:
+def _packed_lane(
+    run: _CotravellingRun, seated: list[_CotravellingRun], offset_step: float
+) -> float | None:
     """Where *run* sits once packed onto the bundle *seated* already describes.
 
     The nearest lane is the reference, and the side *run* already lies on is the
@@ -1972,13 +1994,14 @@ def _packed_lane(run: _CotravellingRun, seated: list[_CotravellingRun]) -> float
     )
     if reference is None:
         return None
-    pitch = _bundle_pitch(run, reference)
+    pitch = _bundle_pitch(run, reference, offset_step)
     side = 1.0 if run.coordinate >= reference.coordinate else -1.0
     candidate = reference.coordinate + side * pitch
     if abs(candidate - run.coordinate) <= COORD_TOLERANCE:
         return None
     if any(
-        abs(candidate - item.coordinate) < _bundle_pitch(run, item) - COORD_TOLERANCE
+        abs(candidate - item.coordinate)
+        < _bundle_pitch(run, item, offset_step) - COORD_TOLERANCE
         for item in neighbours
         if item is not reference
     ):
@@ -2034,6 +2057,16 @@ def _plan_segments(
     )
 
 
+def _trunk_carrier_ids(plan: ConvergencePlan) -> frozenset[str]:
+    """The junctions *plan*'s trunk leaves and the entry ports it heads to."""
+    return frozenset(
+        (
+            *(landing.source_junction_id for landing in plan.landings),
+            *plan.target_entry_port_ids,
+        )
+    )
+
+
 def _trunk_corridor_run(
     plan: ConvergencePlan, graph: MetroGraph
 ) -> _CotravellingRun | None:
@@ -2050,12 +2083,7 @@ def _trunk_corridor_run(
         max(start_x, end_x),
         axis.direction,
         frozenset(plan.line_ids),
-        frozenset(
-            (
-                *(landing.source_junction_id for landing in plan.landings),
-                *plan.target_entry_port_ids,
-            )
-        ),
+        _trunk_carrier_ids(plan),
         inter_row_gap_upper_row(graph, coordinate),
         segments,
     )
@@ -2123,15 +2151,19 @@ def _pack_cotravelling_corridor_runs(
 
     Frozen member runs seat first because their geometry is settled before the
     plans reach here, so the bundle they already describe is the reference the
-    plans pack onto rather than something to be moved.
+    plans pack onto rather than something to be moved.  On a compiled round a
+    granted trunk's bundle relation already seats it here, so this is a no-op
+    for it; a move this makes on a granted trunk anyway fails the settlement
+    guard.  Packing onto an already-seated trunk has no typed counterpart.
     """
+    step = graph_offset_step(graph)
     settled = list(plans)
     seated = list(member_runs)
     for plan_rank, plan in enumerate(settled):
         run = _trunk_corridor_run(plan, graph)
         if run is None:
             continue
-        coordinate = _packed_lane(run, seated)
+        coordinate = _packed_lane(run, seated, step)
         if coordinate is not None:
             settled[plan_rank] = _move_trunk_axis(plan, coordinate)
             moved = _trunk_corridor_run(settled[plan_rank], graph)
@@ -2182,7 +2214,14 @@ def _separate_distinct_cotravelling_trunks(
     graph: MetroGraph,
     member_runs: tuple[_CotravellingRun, ...],
 ) -> tuple[ConvergencePlan, ...]:
-    """Greedily seat distinct-line trunks by local proper-crossing count."""
+    """Greedily seat distinct-line trunks by local proper-crossing count.
+
+    On a compiled round a granted trunk's forbidden intervals already clear
+    every co-travelling distinct-line member run and turn-off leg, so this is a
+    no-op for it; a move this makes on a granted trunk anyway fails the
+    settlement guard.  Separation from an already-seated trunk has no typed
+    counterpart.
+    """
     step = graph_offset_step(graph)
     settled = list(plans)
     seated = list(member_runs)
@@ -4829,6 +4868,1150 @@ def _trunk_segment_ranks(
         rank
         for rank, segment in enumerate(zip(route.points, route.points[1:]))
         if any(_segments_overlap(segment, item) for item in planned)
+    )
+
+
+# A trunk skeleton is one connected polyline of six points -- five runs --
+# travelled from the source member's endpoint to the target member's: the source
+# flank run, the source connector, the central run the axis states, the target
+# connector, and the target flank run.  ``_trunk_segments`` lists the central run
+# low-to-high whatever the travel direction, so an L- or U-running trunk's
+# central run is reversed here before it can close the chain.
+_TRUNK_SKELETON_SOURCE_FLANK_RANK = 0
+_TRUNK_SKELETON_CENTRAL_RANK = 2
+_TRUNK_SKELETON_TARGET_FLANK_RANK = 4
+_TRUNK_SKELETON_CONNECTOR_RANKS = (1, 3)
+
+
+def _trunk_skeleton_travel_points(
+    axis: ConvergenceTrunkAxis,
+) -> list[tuple[float, float]]:
+    """*axis*'s complete trunk skeleton as one connected travel-order polyline."""
+    central = _trunk_segments(axis)[0]
+    if axis.direction in {Direction.L, Direction.U}:
+        central = (central[1], central[0])
+    runs = (
+        _trunk_run_in_travel_order(axis, 2),
+        _trunk_run_in_travel_order(axis, 1),
+        central,
+        _trunk_run_in_travel_order(axis, 3),
+        _trunk_run_in_travel_order(axis, 4),
+    )
+    points = [runs[0][0]]
+    for run in runs:
+        if not _points_coincide(points[-1], run[0]):
+            raise ConvergenceInvariantError(
+                "convergence trunk skeleton polyline does not close"
+            )
+        points.append(run[1])
+    return points
+
+
+def _plan_section_ids(plan: ConvergencePlan, graph: MetroGraph) -> frozenset[str]:
+    """The sections *plan*'s members start in, end in, or pass a port of."""
+    return frozenset(
+        section_id
+        for edge in plan.resolved_member_edges
+        for endpoint in (edge.source, edge.target)
+        if (section_id := graph.section_for_station(endpoint)) is not None
+    )
+
+
+def _on_central_run(point: tuple[float, float], axis: ConvergenceTrunkAxis) -> bool:
+    """Whether *point* stands on the central run the exposed scalar states.
+
+    Membership is read from the axis's own declared central coordinate and
+    longitudinal extent: the central run is the one coordinate the scalar moves,
+    so a dependant either shares that coordinate along the run or it does not.
+    This is a structural membership test against the stated run, not a proximity
+    search over the trunk polyline.
+    """
+    lateral = 1 if axis.axis is DemandAxis.X else 0
+    longitudinal = 1 - lateral
+    low, high = sorted((axis.extent_start, axis.extent_end))
+    return (
+        abs(point[lateral] - axis.coordinate) <= COORD_TOLERANCE
+        and low - COORD_TOLERANCE <= point[longitudinal] <= high + COORD_TOLERANCE
+    )
+
+
+def _skeleton_controlled_point_ranks(axis: ConvergenceTrunkAxis) -> tuple[int, ...]:
+    """Trunk skeleton point ranks the exposed scalar moves.
+
+    The central run is always stated; a flank joins it only where it collapses
+    onto the moving coordinate, otherwise it stays an uncontrolled fixed dogleg.
+    """
+    source_collapsed = (
+        abs(axis.source_flank_coordinate - axis.coordinate) <= COORD_TOLERANCE
+    )
+    target_collapsed = (
+        abs(axis.target_flank_coordinate - axis.coordinate) <= COORD_TOLERANCE
+    )
+    ranks: list[int] = []
+    if source_collapsed:
+        ranks.extend((0, 1))
+    ranks.extend((2, 3))
+    if target_collapsed:
+        ranks.extend((4, 5))
+    return tuple(ranks)
+
+
+class _ConvergenceRoleKind(Enum):
+    """The plan field one convergence control role names."""
+
+    SKELETON = "point"
+    LANDING_JOIN = "join"
+    LANDING_OPENING = "opening"
+    LANDING_OPENING_END = "opening-end"
+    CONTINUATION_START = "start"
+    FEEDER_ENDPOINT = "endpoint"
+
+
+def _convergence_dependant_roles(
+    plan: ConvergencePlan,
+) -> Iterator[tuple[str, _ConvergenceRoleKind, EmissionMemberId]]:
+    """Role slug, field kind and owning member of every dependant role.
+
+    The single source for the dependant role shapes -- one per landing join,
+    per opening turn present and the end of that turn's descent, per
+    continuation start and per feeder ownership endpoint.  The completeness
+    oracle, the recipe builder and the grant applier all consume this in the
+    same order, so a slug rename lands in one place rather than silently
+    desyncing hand-written copies.
+    """
+    for landing in plan.landings:
+        yield (
+            f"landing:{landing.member_id}|join",
+            _ConvergenceRoleKind.LANDING_JOIN,
+            landing.member_id,
+        )
+        if landing.opening_turn_segment is not None:
+            yield (
+                f"landing:{landing.member_id}|opening",
+                _ConvergenceRoleKind.LANDING_OPENING,
+                landing.member_id,
+            )
+            yield (
+                f"landing:{landing.member_id}|opening-end",
+                _ConvergenceRoleKind.LANDING_OPENING_END,
+                landing.member_id,
+            )
+    for continuation in plan.outgoing_continuations:
+        yield (
+            f"continuation:{continuation.member_id}|start",
+            _ConvergenceRoleKind.CONTINUATION_START,
+            continuation.member_id,
+        )
+    for ownership in plan.endpoint_ownership:
+        if ownership.role is ConvergenceEndpointRole.FEEDER:
+            yield (
+                f"feeder:{ownership.member_id}|endpoint",
+                _ConvergenceRoleKind.FEEDER_ENDPOINT,
+                ownership.member_id,
+            )
+
+
+def _convergence_dependant_role_slugs(plan: ConvergencePlan) -> Iterator[str]:
+    """Bare role-slug for every dependant one eligible plan's scalar governs."""
+    for slug, _kind, _member_id in _convergence_dependant_roles(plan):
+        yield slug
+
+
+def _convergence_recipe_role_ids(
+    plan: ConvergencePlan, variable_id: str
+) -> frozenset[str]:
+    """Every control role one eligible plan's complete recipe must name.
+
+    Derived by structural identity -- the trunk skeleton the scalar states plus
+    one role per landing join, per opening turn and its descent's end, per
+    continuation start and per feeder ownership endpoint the setters move --
+    never by geometry.  This is the completeness oracle: a recipe naming a
+    different set is missing or inventing a dependant.
+    """
+    axis = plan.trunk_axis
+    assert axis is not None
+    roles = {
+        f"{variable_id}|point:{rank}" for rank in _skeleton_controlled_point_ranks(axis)
+    }
+    roles |= {
+        f"{variable_id}|{slug}" for slug in _convergence_dependant_role_slugs(plan)
+    }
+    return frozenset(roles)
+
+
+def _validate_convergence_recipe_completeness(
+    plan: ConvergencePlan,
+    variable_id: str,
+    recipe: CorridorScalarControlRecipe,
+) -> None:
+    """Fail closed unless *recipe* names exactly the plan's dependant roles.
+
+    Completeness is measured against the plan-derived structural enumeration, so
+    a recipe missing one landing join, opening turn or its end, continuation
+    start or feeder endpoint -- or inventing one the plan does not hold -- raises
+    rather than validating a partial recipe.
+    """
+    named = {point.role_id for point in recipe.controlled_points} | {
+        point.role_id for point in recipe.fixed_points
+    }
+    if named != _convergence_recipe_role_ids(plan, variable_id):
+        raise ConvergenceInvariantError(
+            f"planned convergence {plan.id} has an incomplete control recipe"
+        )
+
+
+def _dependant_anchor_target(
+    owner_id: str,
+    variable_id: str,
+    edge: Edge,
+    connector_ids: tuple[ConnectorId, ...],
+    role_slug: str,
+    point: tuple[float, float],
+) -> tuple[CorridorCohortTarget, str, tuple[str, str, str]]:
+    """One immutable single-point target a dependant control role resolves onto.
+
+    The dependant lives on its own synthetic target, never spliced into the
+    trunk route: the trunk skeleton's five segment ranks stay exactly what the
+    scalar states.
+    """
+    member_id = f"{variable_id}|{role_slug}|anchor"
+    edge_key = (
+        f"{member_id}|source",
+        f"{member_id}|target",
+        f"{member_id}|line",
+    )
+    route = RoutedPath(edge, edge.line_id, [point], is_inter_section=True)
+    target = CorridorCohortTarget(
+        member_id,
+        owner_id,
+        edge_key,
+        RouteFamilyId.MERGE_TRUNK,
+        connector_ids,
+        route,
+        False,
+    )
+    return target, member_id, edge_key
+
+
+def _dependant_control_point(
+    owner_id: str,
+    variable_id: str,
+    edge: Edge,
+    connector_ids: tuple[ConnectorId, ...],
+    role_slug: str,
+    point: tuple[float, float],
+    control_axis: int,
+    source_coordinate: float,
+    co_moving: bool,
+) -> tuple[
+    CorridorCohortTarget,
+    CorridorScalarControlledPoint | CorridorScalarFixedPoint,
+    str,
+]:
+    """Build a dependant's anchor target and its controlled or fixed control.
+
+    A dependant sharing the scalar's coordinate co-moves and is controlled by an
+    offset from it; one that keeps its own coordinate is fixed under the scalar
+    and named at that coordinate rather than left invisible.
+    """
+    role_id = f"{variable_id}|{role_slug}"
+    target, member_id, edge_key = _dependant_anchor_target(
+        owner_id, variable_id, edge, connector_ids, role_slug, point
+    )
+    control: CorridorScalarControlledPoint | CorridorScalarFixedPoint
+    if co_moving:
+        control = CorridorScalarControlledPoint(
+            member_id=member_id,
+            edge_key=edge_key,
+            connector_ids=connector_ids,
+            point_rank=0,
+            axis=control_axis,
+            source_offset=point[control_axis] - source_coordinate,
+            role_id=role_id,
+        )
+    else:
+        control = CorridorScalarFixedPoint(
+            member_id=member_id,
+            edge_key=edge_key,
+            connector_ids=connector_ids,
+            point_rank=0,
+            axis=control_axis,
+            coordinate=point[control_axis],
+            role_id=role_id,
+        )
+    return target, control, role_id
+
+
+_OPENING_DESCENT_AXIS = 1
+"""Point index an opening turn's descent runs along, whatever the trunk's axis."""
+
+
+def _convergence_dependant_recipe(
+    plan: ConvergencePlan,
+    variable_id: str,
+    edge: Edge,
+    connector_ids: tuple[ConnectorId, ...],
+    curve_radius: float,
+) -> tuple[
+    tuple[CorridorScalarControlledPoint, ...],
+    tuple[CorridorScalarFixedPoint, ...],
+    tuple[CorridorScalarDirectedRunway, ...],
+    tuple[CorridorCohortTarget, ...],
+]:
+    """Name every per-element dependant one eligible plan's scalar governs.
+
+    Each landing join, continuation start and feeder endpoint relates to the
+    scalar on its lateral coordinate.  An opening turn is a vertical descent, so
+    its column is an x-value whatever the trunk's axis; the central scalar never
+    moves that column, so it is always fixed.  The descent's end co-moves
+    exactly when it lands on the lane its landing joins on, so the descent keeps
+    reaching the trunk the join moves to.  Every landing carries its approach
+    runway as a directed feasibility invariant anchored on the feeder's own
+    fixed turn, rather than a re-derived length.  A co-moving descent end
+    carries one too, anchored on the descent's fixed start: the descent turns
+    at both ends, so it owes a full curve radius to each turn.
+    """
+    axis = plan.trunk_axis
+    assert axis is not None
+    lateral = 1 if axis.axis is DemandAxis.X else 0
+    source_coordinate = axis.coordinate
+    plan_owner_id = str(plan.id)
+
+    controlled: list[CorridorScalarControlledPoint] = []
+    fixed: list[CorridorScalarFixedPoint] = []
+    runways: list[CorridorScalarDirectedRunway] = []
+    targets: list[CorridorCohortTarget] = []
+
+    def add(
+        role_slug: str,
+        point: tuple[float, float],
+        control_axis: int,
+        co_moving: bool | None = None,
+    ) -> str:
+        if co_moving is None:
+            co_moving = control_axis == lateral and _on_central_run(point, axis)
+        target, control, role_id = _dependant_control_point(
+            plan_owner_id,
+            variable_id,
+            edge,
+            connector_ids,
+            role_slug,
+            point,
+            control_axis,
+            source_coordinate,
+            co_moving,
+        )
+        targets.append(target)
+        if isinstance(control, CorridorScalarControlledPoint):
+            controlled.append(control)
+        else:
+            fixed.append(control)
+        return role_id
+
+    def add_runway(
+        controlled_role_id: str,
+        axis_index: int,
+        direction_sign: int,
+        minimum_distance: float,
+        anchor_coordinate: float,
+    ) -> None:
+        anchor_member = f"{controlled_role_id}|anchor"
+        runways.append(
+            CorridorScalarDirectedRunway(
+                owner_id=plan_owner_id,
+                member_id=anchor_member,
+                edge_key=(
+                    f"{anchor_member}|source",
+                    f"{anchor_member}|target",
+                    f"{anchor_member}|line",
+                ),
+                controlled_role_id=controlled_role_id,
+                axis=axis_index,
+                direction_sign=direction_sign,
+                minimum_distance=minimum_distance,
+                anchor_coordinate=anchor_coordinate,
+            )
+        )
+
+    role_slugs = _convergence_dependant_role_slugs(plan)
+    for landing in plan.landings:
+        join_point = landing.join_point
+        join_co_moving = _on_central_run(join_point, axis)
+        join_role = add(next(role_slugs), join_point, lateral)
+        if landing.opening_turn_segment is not None:
+            assert landing.opening_turn_coordinate is not None
+            add(
+                next(role_slugs),
+                (landing.opening_turn_coordinate, join_point[1]),
+                0,
+                co_moving=False,
+            )
+            opening_start, opening_end = landing.opening_turn_segment
+            end_co_moving = (
+                join_co_moving
+                and abs(opening_end[lateral] - join_point[lateral]) <= COORD_TOLERANCE
+            )
+            end_role = add(
+                next(role_slugs), opening_end, lateral, co_moving=end_co_moving
+            )
+            if end_co_moving and lateral == _OPENING_DESCENT_AXIS:
+                add_runway(
+                    end_role,
+                    _OPENING_DESCENT_AXIS,
+                    1 if opening_end[1] > opening_start[1] else -1,
+                    2 * curve_radius,
+                    opening_start[_OPENING_DESCENT_AXIS],
+                )
+        approach_index = landing.approach_axis.point_index
+        direction_sign = int(landing.approach_direction.sign)
+        add_runway(
+            join_role,
+            approach_index,
+            direction_sign,
+            curve_radius,
+            landing.join_point[approach_index]
+            - landing.minimum_runway * direction_sign,
+        )
+    for continuation in plan.outgoing_continuations:
+        add(next(role_slugs), continuation.start_point, lateral)
+    for ownership in plan.endpoint_ownership:
+        if ownership.role is ConvergenceEndpointRole.FEEDER:
+            add(next(role_slugs), ownership.endpoint, lateral)
+
+    return tuple(controlled), tuple(fixed), tuple(runways), tuple(targets)
+
+
+def _convergence_corridor_target(
+    plan: ConvergencePlan,
+    ctx: _RoutingCtx,
+) -> (
+    tuple[
+        CorridorCohortTarget,
+        tuple[CorridorCohortTarget, ...],
+        CorridorScalarVariable,
+        CorridorScalarControlRecipe,
+    ]
+    | None
+):
+    """Expose one plan-owned trunk skeleton and its dependants as one variable.
+
+    The scalar variable states the central run; its two endpoints, named in the
+    control recipe, are the pivots the flank connectors turn on.  A flank
+    collapsed onto the trunk coordinate has no connector to turn, so its flank
+    run stands on the moving coordinate: its endpoints join the recipe too, so it
+    moves with the trunk rather than standing on the coordinate uncontrolled.  A
+    flank that keeps its own coordinate stays an uncontrolled, immutable dogleg.
+
+    The recipe also names every per-element dependant the setters move -- each
+    landing join, opening turn and its end, continuation start and feeder
+    endpoint -- as a controlled point where it shares the scalar's coordinate or
+    a fixed point where it keeps its own, each resolving onto its own immutable
+    single-point target rather than a vertex spliced into the trunk route.
+    """
+    axis = plan.trunk_axis
+    if axis is None or plan.primary_trunk_member_id is None:
+        return None
+    ownership = next(
+        (
+            item
+            for item in plan.endpoint_ownership
+            if item.member_id == plan.primary_trunk_member_id
+        ),
+        None,
+    )
+    if ownership is None:
+        return None
+    edge_key = (ownership.edge.source, ownership.edge.target, ownership.edge.line_id)
+    edge = ctx.edge_by_key.get(edge_key)
+    if edge is None:
+        return None
+    points = _trunk_skeleton_travel_points(axis)
+    route = RoutedPath(edge, edge.line_id, points, is_inter_section=True)
+    owner_id = str(plan.id)
+    variable_id = f"convergence-trunk|{owner_id}"
+    member_id = f"{variable_id}|footprint"
+    target_edge_key = (
+        f"{variable_id}|source",
+        f"{variable_id}|target",
+        f"{variable_id}|line",
+    )
+    coordinate_axis = 1 if axis.axis is DemandAxis.X else 0
+    source_collapsed = (
+        abs(axis.source_flank_coordinate - axis.coordinate) <= COORD_TOLERANCE
+    )
+    target_collapsed = (
+        abs(axis.target_flank_coordinate - axis.coordinate) <= COORD_TOLERANCE
+    )
+    skeleton_points = tuple(
+        CorridorScalarControlledPoint(
+            member_id=member_id,
+            edge_key=target_edge_key,
+            connector_ids=ownership.connector_ids,
+            point_rank=point_rank,
+            axis=coordinate_axis,
+            source_offset=0.0,
+            role_id=f"{variable_id}|point:{point_rank}",
+        )
+        for point_rank in _skeleton_controlled_point_ranks(axis)
+    )
+    (
+        dependant_controlled,
+        dependant_fixed,
+        dependant_runways,
+        dependant_targets,
+    ) = _convergence_dependant_recipe(
+        plan, variable_id, edge, ownership.connector_ids, ctx.curve_radius
+    )
+    recipe = CorridorScalarControlRecipe(
+        owner_id=owner_id,
+        source_coordinate=axis.coordinate,
+        controlled_points=(*skeleton_points, *dependant_controlled),
+        fixed_points=dependant_fixed,
+        directed_runways=dependant_runways,
+    )
+    _validate_convergence_recipe_completeness(plan, variable_id, recipe)
+    legal_crossings = {_TRUNK_SKELETON_CENTRAL_RANK, *_TRUNK_SKELETON_CONNECTOR_RANKS}
+    if source_collapsed:
+        legal_crossings.add(_TRUNK_SKELETON_SOURCE_FLANK_RANK)
+    if target_collapsed:
+        legal_crossings.add(_TRUNK_SKELETON_TARGET_FLANK_RANK)
+    target = CorridorCohortTarget(
+        member_id,
+        owner_id,
+        target_edge_key,
+        RouteFamilyId.MERGE_TRUNK,
+        ownership.connector_ids,
+        route,
+        True,
+        legal_crossing_segment_ranks=frozenset(legal_crossings),
+        system_id=str(plan.system_id),
+        carrier_ids=_trunk_carrier_ids(plan),
+    )
+    variable = CorridorScalarVariable(
+        variable_id=variable_id,
+        owner_kind=CorridorScalarOwnerKind.CONVERGENCE_TRUNK,
+        owner_id=owner_id,
+        member_id=member_id,
+        edge_key=target_edge_key,
+        connector_ids=ownership.connector_ids,
+        segment_rank=_TRUNK_SKELETON_CENTRAL_RANK,
+        axis=coordinate_axis,
+        coordinate=axis.coordinate,
+    )
+    return target, dependant_targets, variable, recipe
+
+
+def _recipe_drags_entry_port(
+    plan: ConvergencePlan,
+    recipe: CorridorScalarControlRecipe,
+    targets: Iterable[CorridorCohortTarget],
+) -> bool:
+    """Whether *recipe* moves a point standing on an entry-port lane end.
+
+    Every continuation ends on the lane of the entry port it enters, a station
+    the scalar never moves.  A controlled point on that lane end is the port
+    itself: moving the scalar would carry the route off the station it has to
+    enter, so the trunk's coordinate is pinned to the one it stands on.
+    """
+    targets_by_identity = {
+        (target.member_id, target.edge_key): target for target in targets
+    }
+    return any(
+        _points_coincide(
+            targets_by_identity[(point.member_id, point.edge_key)].route.points[
+                point.point_rank
+            ],
+            continuation.end_point,
+        )
+        for point in recipe.controlled_points
+        for continuation in plan.outgoing_continuations
+    )
+
+
+def _pinned_convergence_preference(
+    plan: ConvergencePlan, variable_id: str
+) -> tuple[float, CorridorCoordinateDomain]:
+    """Pin a trunk whose recipe drags an entry port to the coordinate it holds.
+
+    Its only feasible coordinate is that one, whatever clearance band the
+    corridor around it would otherwise allow.
+    """
+    axis = plan.trunk_axis
+    assert axis is not None
+    return axis.coordinate, CorridorCoordinateDomain(
+        variable_id,
+        minimum_coordinate=axis.coordinate,
+        maximum_coordinate=axis.coordinate,
+    )
+
+
+def _convergence_corridor_preference(
+    plan: ConvergencePlan,
+    graph: MetroGraph,
+    variable_id: str,
+) -> tuple[float, CorridorCoordinateDomain]:
+    """Read one trunk's preferred coordinate and complete feasible domain."""
+    axis = plan.trunk_axis
+    assert axis is not None
+    coordinate_axis = 1 if axis.axis is DemandAxis.X else 0
+    band = corridor_clearance_band(
+        graph,
+        axis=coordinate_axis,
+        section_ids=tuple(_plan_section_ids(plan, graph)),
+        coordinate=axis.coordinate,
+        run_start=axis.extent_start,
+        run_end=axis.extent_end,
+    )
+    if band is None:
+        return axis.coordinate, CorridorCoordinateDomain(variable_id)
+    minimum_coordinate = band.lo if math.isfinite(band.lo) else None
+    maximum_coordinate = band.hi if math.isfinite(band.hi) else None
+    preferred_coordinate = axis.coordinate
+    if minimum_coordinate is not None:
+        preferred_coordinate = max(preferred_coordinate, minimum_coordinate)
+    if maximum_coordinate is not None:
+        preferred_coordinate = min(preferred_coordinate, maximum_coordinate)
+    return (
+        preferred_coordinate,
+        CorridorCoordinateDomain(
+            variable_id,
+            minimum_coordinate=minimum_coordinate,
+            maximum_coordinate=maximum_coordinate,
+        ),
+    )
+
+
+def _convergence_corridor_region(
+    plan: ConvergencePlan,
+    graph: MetroGraph,
+) -> RowGapRegion | ColumnGapRegion | None:
+    """Name the adjacent layout boundary containing a planned trunk."""
+    axis = plan.trunk_axis
+    assert axis is not None
+    if axis.axis is DemandAxis.X:
+        upper_row = inter_row_gap_upper_row(graph, axis.coordinate)
+        return None if upper_row is None else RowGapRegion(upper_row, upper_row + 1)
+    gap = gap_lo_for_x(
+        graph,
+        axis.coordinate,
+        axis.extent_start,
+        axis.extent_end,
+    )
+    return None if gap is None else ColumnGapRegion(gap[0], gap[0] + 1)
+
+
+def convergence_corridor_requests(
+    plans: tuple[ConvergencePlan, ...],
+    graph: MetroGraph,
+    ctx: _RoutingCtx,
+) -> tuple[tuple[CorridorCohortTarget, ...], tuple[CorridorScalarRequest, ...]]:
+    """Publish every planned trunk skeleton as one owner-typed scalar request.
+
+    The complete eligible population is fixed before any target is extracted, so
+    an eligible plan can only leave through a raised error, never a silent
+    ``None``: a plan that owns geometry and holds a trunk axis is guaranteed a
+    request.
+    """
+    eligible = tuple(
+        plan for plan in plans if plan.owns_geometry and plan.trunk_axis is not None
+    )
+    owner_ids = [str(plan.id) for plan in eligible]
+    if len(set(owner_ids)) != len(owner_ids):
+        raise ConvergenceInvariantError(
+            "convergence corridor requests have duplicate plan owners"
+        )
+    targets: list[CorridorCohortTarget] = []
+    requests: list[CorridorScalarRequest] = []
+    for plan in eligible:
+        exposed = _convergence_corridor_target(plan, ctx)
+        if exposed is None:
+            raise ConvergenceInvariantError(
+                f"planned convergence {plan.id} has an incomplete trunk identity"
+            )
+        target, dependant_targets, variable, recipe = exposed
+        preferred_coordinate, domain = (
+            _pinned_convergence_preference(plan, variable.variable_id)
+            if _recipe_drags_entry_port(plan, recipe, (target, *dependant_targets))
+            else _convergence_corridor_preference(plan, graph, variable.variable_id)
+        )
+        targets.append(target)
+        targets.extend(dependant_targets)
+        requests.append(
+            CorridorScalarRequest(
+                variable,
+                preferred_coordinate,
+                domain,
+                region=_convergence_corridor_region(plan, graph),
+                control_recipe=recipe,
+            )
+        )
+    return tuple(targets), tuple(requests)
+
+
+CONVERGENCE_CORRIDOR_GRANT_APPLIED = "convergence-corridor-grant-applied"
+"""Diagnostic code naming a trunk whose applied corridor grant moved it."""
+
+_SKELETON_RANK_FIELDS = {
+    0: "source_flank_coordinate",
+    1: "source_flank_coordinate",
+    2: "coordinate",
+    3: "coordinate",
+    4: "target_flank_coordinate",
+    5: "target_flank_coordinate",
+}
+
+
+def _with_axis_value(
+    point: tuple[float, float], axis: int, value: float
+) -> tuple[float, float]:
+    return (value, point[1]) if axis == 0 else (point[0], value)
+
+
+@dataclass(frozen=True)
+class _ConvergenceRoleField:
+    """The plan field one recipe role id names.
+
+    A ``SKELETON`` field is the trunk travel point at ``rank``; every other
+    kind is a field of the member ``member_id`` names.
+    """
+
+    kind: _ConvergenceRoleKind
+    rank: int | None = None
+    member_id: EmissionMemberId | None = None
+
+
+def _convergence_role_fields(
+    plan: ConvergencePlan, variable_id: str
+) -> dict[str, _ConvergenceRoleField]:
+    """The field every role id of *plan*'s recipe names, keyed by role id."""
+    roles = {
+        f"{variable_id}|point:{rank}": _ConvergenceRoleField(
+            _ConvergenceRoleKind.SKELETON, rank=rank
+        )
+        for rank in _SKELETON_RANK_FIELDS
+    }
+    for slug, kind, member_id in _convergence_dependant_roles(plan):
+        roles[f"{variable_id}|{slug}"] = _ConvergenceRoleField(
+            kind, member_id=member_id
+        )
+    return roles
+
+
+def _runway_frame_holds(
+    runway: CorridorScalarDirectedRunway,
+    kind: _ConvergenceRoleKind,
+    landing: ConvergenceLanding,
+    controlled: float,
+    anchor: float,
+) -> bool:
+    """Whether *runway* matches the landing field the plan holds."""
+    if kind is _ConvergenceRoleKind.LANDING_JOIN:
+        return (
+            runway.axis == landing.approach_axis.point_index
+            and runway.direction_sign == int(landing.approach_direction.sign)
+            and abs(
+                runway.direction_sign * (controlled - anchor) - landing.minimum_runway
+            )
+            <= COORD_TOLERANCE_FINE
+        )
+    segment = landing.opening_turn_segment
+    return (
+        segment is not None
+        and runway.axis == _OPENING_DESCENT_AXIS
+        and abs(anchor - segment[0][runway.axis]) <= COORD_TOLERANCE_FINE
+        and runway.direction_sign * (controlled - anchor) > 0.0
+    )
+
+
+def _granted_landing_runways(
+    variable_id: str,
+    recipe: CorridorScalarControlRecipe,
+    roles: Mapping[str, _ConvergenceRoleField],
+    landings: Mapping[EmissionMemberId, ConvergenceLanding],
+    role_point: Callable[[str], tuple[float, float]],
+    written: Mapping[str, tuple[int, float]],
+) -> dict[EmissionMemberId, float]:
+    """Hold every directed runway *recipe* names against the grant's *written* values.
+
+    Raises when a runway was taken on a stale frame or the grant leaves it
+    short of its minimum; returns the new runway of each landing join it moved.
+    """
+    runways: dict[EmissionMemberId, float] = {}
+    for runway in recipe.directed_runways:
+        runway_role = roles.get(runway.controlled_role_id)
+        if runway_role is None or runway_role.kind not in (
+            _ConvergenceRoleKind.LANDING_JOIN,
+            _ConvergenceRoleKind.LANDING_OPENING_END,
+        ):
+            raise ConvergenceInvariantError(
+                f"corridor grant {variable_id} runway names no landing join or "
+                "opening descent end"
+            )
+        member_id = runway_role.member_id
+        assert member_id is not None
+        landing = landings[member_id]
+        if runway.anchor_coordinate is not None:
+            current_anchor = moved_anchor = runway.anchor_coordinate
+        else:
+            assert runway.anchor_role_id is not None
+            current_anchor = role_point(runway.anchor_role_id)[runway.axis]
+            anchor_write = written.get(runway.anchor_role_id)
+            moved_anchor = (
+                anchor_write[1]
+                if anchor_write is not None and anchor_write[0] == runway.axis
+                else current_anchor
+            )
+        current = role_point(runway.controlled_role_id)[runway.axis]
+        if not _runway_frame_holds(
+            runway, runway_role.kind, landing, current, current_anchor
+        ):
+            raise ConvergenceInvariantError(
+                f"corridor grant {variable_id} runway of {runway.controlled_role_id} "
+                "was taken on a stale frame"
+            )
+        controlled_write = written.get(runway.controlled_role_id)
+        moved = (
+            controlled_write[1]
+            if controlled_write is not None and controlled_write[0] == runway.axis
+            else current
+        )
+        if moved == current and moved_anchor == current_anchor:
+            continue
+        distance = runway.direction_sign * (moved - moved_anchor)
+        if distance < runway.minimum_distance - COORD_TOLERANCE_FINE:
+            raise ConvergenceInvariantError(
+                f"corridor grant {variable_id} leaves {runway.controlled_role_id} a "
+                f"{distance:g}px directed runway, short of the "
+                f"{runway.minimum_distance:g}px its turns need"
+            )
+        if runway_role.kind is _ConvergenceRoleKind.LANDING_JOIN:
+            runways[member_id] = distance
+    return runways
+
+
+def _granted_convergence_plan(
+    plan: ConvergencePlan,
+    request: CorridorScalarRequest,
+    grant: CorridorScalarGrant,
+) -> tuple[ConvergencePlan, RoutePlanDiagnostic | None]:
+    """Build the plan *grant* leaves, validating it against *request*'s frame.
+
+    Every controlled role is read in its plan field and must sit on the recipe's
+    source frame before anything is written; each is then written with exactly
+    ``grant.coordinate + source_offset`` and nothing else changes except the
+    runway a moved join owes its fixed turn.  The solver round-trips every
+    coordinate through a decimal rational, so a grant within
+    ``COORD_TOLERANCE_FINE`` of its source is that source re-expressed rather
+    than a move, and leaves *plan* as it is.
+    """
+    variable = request.variable
+    variable_id = variable.variable_id
+    recipe = request.control_recipe
+    assert recipe is not None
+    axis = plan.trunk_axis
+    if axis is None or not plan.owns_geometry:
+        raise ConvergenceInvariantError(
+            f"corridor grant {variable_id} names no eligible convergence plan"
+        )
+    lateral = 1 if axis.axis is DemandAxis.X else 0
+    if (
+        abs(axis.coordinate - recipe.source_coordinate) > COORD_TOLERANCE_FINE
+        or abs(variable.coordinate - recipe.source_coordinate) > COORD_TOLERANCE_FINE
+        or variable.axis != lateral
+    ):
+        raise ConvergenceInvariantError(
+            f"corridor grant {variable_id} was taken on a stale trunk frame"
+        )
+    _validate_convergence_recipe_completeness(plan, variable_id, recipe)
+    roles = _convergence_role_fields(plan, variable_id)
+    skeleton = _trunk_skeleton_travel_points(axis)
+    landings = {landing.member_id: landing for landing in plan.landings}
+    continuations = {item.member_id: item for item in plan.outgoing_continuations}
+    feeders = {
+        item.member_id: item
+        for item in plan.endpoint_ownership
+        if item.role is ConvergenceEndpointRole.FEEDER
+    }
+
+    def role_point(role_id: str) -> tuple[float, float]:
+        role = roles[role_id]
+        if role.kind is _ConvergenceRoleKind.SKELETON:
+            assert role.rank is not None
+            return skeleton[role.rank]
+        member_id = role.member_id
+        assert member_id is not None
+        if role.kind is _ConvergenceRoleKind.CONTINUATION_START:
+            return continuations[member_id].start_point
+        if role.kind is _ConvergenceRoleKind.FEEDER_ENDPOINT:
+            return feeders[member_id].endpoint
+        landing = landings[member_id]
+        if role.kind is _ConvergenceRoleKind.LANDING_JOIN:
+            return landing.join_point
+        assert landing.opening_turn_segment is not None
+        assert landing.opening_turn_coordinate is not None
+        if role.kind is _ConvergenceRoleKind.LANDING_OPENING:
+            return (landing.opening_turn_coordinate, landing.join_point[1])
+        return landing.opening_turn_segment[1]
+
+    def stale(role_id: str, axis_index: int, expected: float) -> bool:
+        return (
+            axis_index not in (0, 1)
+            or abs(role_point(role_id)[axis_index] - expected) > COORD_TOLERANCE_FINE
+        )
+
+    for fixed in recipe.fixed_points:
+        if stale(fixed.role_id, fixed.axis, fixed.coordinate):
+            raise ConvergenceInvariantError(
+                f"corridor grant {variable_id} fixed role {fixed.role_id} was taken "
+                "on a stale frame"
+            )
+    written: dict[str, tuple[int, float]] = {}
+    trunk_fields: dict[str, float] = {}
+    dependant_writes: dict[
+        tuple[_ConvergenceRoleKind, EmissionMemberId], tuple[int, float]
+    ] = {}
+    for point in recipe.controlled_points:
+        if stale(
+            point.role_id, point.axis, recipe.source_coordinate + point.source_offset
+        ):
+            raise ConvergenceInvariantError(
+                f"corridor grant {variable_id} controlled role {point.role_id} was "
+                "taken on a stale frame"
+            )
+        value = grant.coordinate + point.source_offset
+        written[point.role_id] = (point.axis, value)
+        role = roles[point.role_id]
+        if role.kind is _ConvergenceRoleKind.SKELETON:
+            assert role.rank is not None
+            name = _SKELETON_RANK_FIELDS[role.rank]
+            if point.axis != lateral or trunk_fields.setdefault(name, value) != value:
+                raise ConvergenceInvariantError(
+                    f"corridor grant {variable_id} states trunk {name} inconsistently"
+                )
+            continue
+        if role.kind is _ConvergenceRoleKind.LANDING_OPENING:
+            raise ConvergenceInvariantError(
+                f"corridor grant {variable_id} controls fixed opening column "
+                f"{point.role_id}"
+            )
+        assert role.member_id is not None
+        dependant_writes[(role.kind, role.member_id)] = (point.axis, value)
+    if trunk_fields.get("coordinate") is None:
+        raise ConvergenceInvariantError(
+            f"corridor grant {variable_id} does not control its trunk run"
+        )
+
+    runways = _granted_landing_runways(
+        variable_id, recipe, roles, landings, role_point, written
+    )
+
+    for name in ("source_flank_coordinate", "target_flank_coordinate"):
+        flank = getattr(axis, name)
+        if (
+            name not in trunk_fields
+            and (flank - axis.coordinate) * (flank - trunk_fields["coordinate"]) <= 0.0
+        ):
+            raise ConvergenceInvariantError(
+                f"corridor grant {variable_id} would reverse its trunk's "
+                f"{name.removesuffix('_coordinate').replace('_', ' ')} connector"
+            )
+
+    if abs(grant.coordinate_delta) <= COORD_TOLERANCE_FINE:
+        return plan, None
+
+    def moved(
+        kind: _ConvergenceRoleKind,
+        member_id: EmissionMemberId,
+        point: tuple[float, float],
+    ) -> tuple[float, float]:
+        write = dependant_writes.get((kind, member_id))
+        return point if write is None else _with_axis_value(point, *write)
+
+    try:
+        granted = replace(
+            plan,
+            trunk_axis=replace(
+                axis,
+                coordinate=trunk_fields["coordinate"],
+                source_flank_coordinate=trunk_fields.get(
+                    "source_flank_coordinate", axis.source_flank_coordinate
+                ),
+                target_flank_coordinate=trunk_fields.get(
+                    "target_flank_coordinate", axis.target_flank_coordinate
+                ),
+            ),
+            landings=tuple(
+                replace(
+                    landing,
+                    join_point=moved(
+                        _ConvergenceRoleKind.LANDING_JOIN,
+                        landing.member_id,
+                        landing.join_point,
+                    ),
+                    minimum_runway=runways.get(
+                        landing.member_id, landing.minimum_runway
+                    ),
+                    opening_turn_segment=(
+                        None
+                        if landing.opening_turn_segment is None
+                        else (
+                            landing.opening_turn_segment[0],
+                            moved(
+                                _ConvergenceRoleKind.LANDING_OPENING_END,
+                                landing.member_id,
+                                landing.opening_turn_segment[1],
+                            ),
+                        )
+                    ),
+                )
+                for landing in plan.landings
+            ),
+            outgoing_continuations=tuple(
+                replace(
+                    item,
+                    start_point=moved(
+                        _ConvergenceRoleKind.CONTINUATION_START,
+                        item.member_id,
+                        item.start_point,
+                    ),
+                )
+                for item in plan.outgoing_continuations
+            ),
+            endpoint_ownership=tuple(
+                replace(
+                    item,
+                    endpoint=moved(
+                        _ConvergenceRoleKind.FEEDER_ENDPOINT,
+                        item.member_id,
+                        item.endpoint,
+                    ),
+                )
+                if item.role is ConvergenceEndpointRole.FEEDER
+                else item
+                for item in plan.endpoint_ownership
+            ),
+        )
+    except ValueError as error:
+        raise ConvergenceInvariantError(
+            f"corridor grant {variable_id} leaves an invalid convergence plan: {error}"
+        ) from error
+    return granted, RoutePlanDiagnostic(
+        plan.primary_trunk_member_id,
+        CONVERGENCE_CORRIDOR_GRANT_APPLIED,
+        f"convergence {plan.id} trunk granted "
+        f"{recipe.source_coordinate:g} -> {grant.coordinate:g}",
+        blocking=False,
+    )
+
+
+def apply_convergence_corridor_grants(
+    execution: ConvergencePlanExecution,
+    requests: Sequence[CorridorScalarRequest],
+    grants: Sequence[CorridorScalarGrant],
+) -> ConvergencePlanExecution:
+    """Materialise accepted trunk grants through their frozen control recipes.
+
+    A materialiser, not a planner: the request and grant populations are
+    validated whole and every replacement plan is built before any is
+    published, so a defect anywhere leaves *execution* untouched.  Each
+    controlled role receives exactly ``grant.coordinate + source_offset`` in the
+    one plan field it names; nothing is discovered from current geometry, no
+    direction is re-derived, and a move that would shorten a landing's directed
+    runway below its turn, or reverse a flank connector, raises rather than
+    flipping either.
+    """
+    requests_by_id: dict[str, CorridorScalarRequest] = {}
+    for request in requests:
+        if request.variable.variable_id in requests_by_id:
+            raise ConvergenceInvariantError(
+                f"corridor request {request.variable.variable_id} is duplicated"
+            )
+        requests_by_id[request.variable.variable_id] = request
+    grants_by_id: dict[str, CorridorScalarGrant] = {}
+    for grant in grants:
+        if grant.variable_id in grants_by_id:
+            raise ConvergenceInvariantError(
+                f"corridor grant {grant.variable_id} is duplicated"
+            )
+        grants_by_id[grant.variable_id] = grant
+    missing = sorted(requests_by_id.keys() - grants_by_id.keys())
+    extra = sorted(grants_by_id.keys() - requests_by_id.keys())
+    if missing or extra:
+        raise ConvergenceInvariantError(
+            "corridor grants do not complete their requests: "
+            f"missing={missing}, extra={extra}"
+        )
+    plans_by_id = {str(plan.id): plan for plan in execution.plans}
+    replacements: dict[ConvergencePlanId, ConvergencePlan] = {}
+    granted_plan_ids: set[ConvergencePlanId] = set()
+    diagnostics: list[RoutePlanDiagnostic] = []
+    for variable_id in sorted(requests_by_id):
+        request = requests_by_id[variable_id]
+        grant = grants_by_id[variable_id]
+        variable = request.variable
+        if (
+            variable.owner_kind is not CorridorScalarOwnerKind.CONVERGENCE_TRUNK
+            or grant.owner_kind is not CorridorScalarOwnerKind.CONVERGENCE_TRUNK
+            or grant.owner_id != variable.owner_id
+            or variable.owner_id not in plans_by_id
+        ):
+            raise ConvergenceInvariantError(
+                f"corridor grant {variable_id} has the wrong owner"
+            )
+        recipe = request.control_recipe
+        if (
+            recipe is None
+            or grant.control_recipe != recipe
+            or recipe.owner_id != variable.owner_id
+        ):
+            raise ConvergenceInvariantError(
+                f"corridor grant {variable_id} does not carry its request's "
+                "control recipe"
+            )
+        if (
+            not math.isfinite(grant.coordinate)
+            or not math.isfinite(grant.coordinate_delta)
+            or abs(
+                grant.coordinate_delta - (grant.coordinate - recipe.source_coordinate)
+            )
+            > COORD_TOLERANCE_FINE
+        ):
+            raise ConvergenceInvariantError(
+                f"corridor grant {variable_id} has a non-finite or inconsistent "
+                "coordinate"
+            )
+        domain = request.domain
+        if (
+            domain.minimum_coordinate is not None
+            and grant.coordinate < domain.minimum_coordinate - COORD_TOLERANCE_FINE
+        ) or (
+            domain.maximum_coordinate is not None
+            and grant.coordinate > domain.maximum_coordinate + COORD_TOLERANCE_FINE
+        ):
+            raise ConvergenceInvariantError(
+                f"corridor grant {variable_id} lies outside its request's domain"
+            )
+        plan = plans_by_id[variable.owner_id]
+        if plan.id in granted_plan_ids:
+            raise ConvergenceInvariantError(
+                f"convergence {plan.id} carries more than one corridor grant"
+            )
+        granted_plan_ids.add(plan.id)
+        granted, diagnostic = _granted_convergence_plan(plan, request, grant)
+        if granted is not plan:
+            replacements[plan.id] = granted
+        if diagnostic is not None:
+            diagnostics.append(diagnostic)
+    if not replacements:
+        return execution
+    plans = tuple(replacements.get(plan.id, plan) for plan in execution.plans)
+    return replace(
+        execution,
+        plans=plans,
+        diagnostics=(*execution.diagnostics, *diagnostics),
+        query=_query(
+            plans, execution.query._edge_order, execution.clearance_requirements
+        ),
     )
 
 

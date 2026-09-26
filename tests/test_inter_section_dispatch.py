@@ -30,7 +30,7 @@ from nf_metro.parser.model import PortSide, UnresolvedEndpointError
 
 _ROOT = Path(__file__).resolve().parents[1]
 _INTER_HANDLER_RAW_QUERY_LIMIT = 29
-_ROUTING_RAW_QUERY_LIMIT = 54
+_ROUTING_RAW_QUERY_LIMIT = 55
 
 
 def _route_corpus(before_fixture: Callable[[str], None] | None = None) -> None:

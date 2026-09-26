@@ -6,22 +6,36 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 
+from nf_metro.layout.constants import COORD_TOLERANCE_FINE
 from nf_metro.layout.route_plan import (
+    ConvergencePlanId,
     EmissionMemberId,
     ExitTurnPlanId,
+    RoutePlan,
     RouteSystemDisposition,
     RouteSystemId,
 )
 from nf_metro.layout.routing import exit_turns as exit_turn_routing
 from nf_metro.layout.routing.context import _RoutingCtx
 from nf_metro.layout.routing.convergences import (
+    ConvergenceInvariantError,
     ConvergencePlanExecution,
+    apply_convergence_corridor_grants,
     build_convergence_plan_execution,
+    convergence_corridor_requests,
     empty_convergence_plan_execution,
     preliminary_member_gap_claims,
     restrict_convergence_execution,
     settle_global_convergence_execution,
     settle_preliminary_convergence_execution,
+)
+from nf_metro.layout.routing.corridor_cohort_integration import (
+    CorridorCohortLedger,
+    CorridorCohortPlan,
+    CorridorScalarGrant,
+    CorridorScalarOwnerKind,
+    CorridorScalarRequest,
+    build_corridor_cohort_ledger,
 )
 from nf_metro.layout.routing.exit_turns import ExitTurnExecution
 from nf_metro.layout.routing.families import RouteFamilyId
@@ -40,6 +54,7 @@ from nf_metro.layout.routing.system_emission import (
     build_route_system_emission_execution,
     classify_route_system_dispositions,
 )
+from nf_metro.layout.settlement_demand import BoundaryClearanceRequirementKind
 from nf_metro.parser.model import MetroGraph
 from nf_metro.parser.route_topology import ResolvedEdge
 
@@ -60,6 +75,7 @@ class RoutePlanningExecution:
     reach a different verdict on a plan sitting near a tolerance boundary.
     Replay reads the verdict from here, which is why it is captured before the
     published record is narrowed to planned systems."""
+    corridor_cohort_ledger: CorridorCohortLedger | None = None
 
 
 def _allocation_eligible_system_ids(
@@ -68,6 +84,108 @@ def _allocation_eligible_system_ids(
 ) -> frozenset[RouteSystemId]:
     """Remove member-failed systems before shared geometry allocation."""
     return preliminary_planned_ids - member_failure_ids
+
+
+def _apply_corridor_grants(
+    convergences: ConvergencePlanExecution,
+    requests: tuple[CorridorScalarRequest, ...],
+    member_geometry: MemberGeometryExecution,
+    *,
+    compiled: bool,
+) -> ConvergencePlanExecution:
+    """Publish the convergence plans the corridor-cohort compile granted.
+
+    The compile runs only on a pass that may publish clearance requirements, so
+    requests on any other pass are exposed without being solved.  On a
+    *compiled* pass a request goes ungranted only when the compile published an
+    aperture requirement instead of a plan; any other omission is a wiring
+    defect.  A component the compile kept on legacy geometry as a compatibility
+    outcome owns none of its coordinates, so neither its requests nor any grant
+    for them reach the applier.
+    """
+    if not requests:
+        return convergences
+    cohorts = member_geometry.corridor_cohorts
+    if cohorts is None:
+        aperture_pending = any(
+            requirement.kind
+            is BoundaryClearanceRequirementKind.CORRIDOR_COHORT_APERTURE
+            for requirement in member_geometry.clearance_requirements
+        )
+        if compiled and not aperture_pending:
+            raise ConvergenceInvariantError(
+                "corridor-cohort compile omitted convergence corridor requests"
+            )
+        return convergences
+    compatibility_ids = _compatibility_scalar_ids(cohorts)
+    return apply_convergence_corridor_grants(
+        convergences,
+        tuple(
+            request
+            for request in requests
+            if request.variable.variable_id not in compatibility_ids
+        ),
+        _owned_scalar_grants(cohorts, compatibility_ids),
+    )
+
+
+def _compatibility_scalar_ids(cohorts: CorridorCohortPlan) -> frozenset[str]:
+    return frozenset(
+        variable_id
+        for component in cohorts.components
+        if component.compatibility is not None
+        for variable_id in component.compatibility.scalar_variable_ids
+    )
+
+
+def _owned_scalar_grants(
+    cohorts: CorridorCohortPlan, compatibility_ids: frozenset[str]
+) -> tuple[CorridorScalarGrant, ...]:
+    """The grants outside every component kept on legacy geometry."""
+    return tuple(
+        grant
+        for grant in cohorts.scalar_grants
+        if grant.variable_id not in compatibility_ids
+    )
+
+
+def _granted_trunk_coordinates(
+    member_geometry: MemberGeometryExecution,
+) -> dict[ConvergencePlanId, float]:
+    """The trunk coordinate every owned trunk grant decided, by plan.
+
+    A grant that leaves its trunk where it stands owns that coordinate as much
+    as one that moves it.
+    """
+    cohorts = member_geometry.corridor_cohorts
+    if cohorts is None:
+        return {}
+    return {
+        ConvergencePlanId(grant.owner_id): grant.coordinate
+        for grant in _owned_scalar_grants(cohorts, _compatibility_scalar_ids(cohorts))
+        if grant.owner_kind is CorridorScalarOwnerKind.CONVERGENCE_TRUNK
+    }
+
+
+def _assert_grants_survive_settlement(
+    granted: Mapping[ConvergencePlanId, float],
+    settled: ConvergencePlanExecution,
+) -> None:
+    """Refuse a settlement that re-seated a trunk its corridor grant placed.
+
+    The published grant names the coordinate it decided, so a trunk settled
+    anywhere else would publish provenance for geometry the render does not
+    draw.
+    """
+    plans = {plan.id: plan for plan in settled.plans}
+    for plan_id, coordinate in granted.items():
+        plan = plans.get(plan_id)
+        axis = None if plan is None else plan.trunk_axis
+        if axis is None or abs(axis.coordinate - coordinate) > COORD_TOLERANCE_FINE:
+            raise ConvergenceInvariantError(
+                f"convergence {plan_id} was re-settled off the {coordinate:g} its "
+                "corridor grant decided"
+            )
 
 
 def _with_settled_exit_turns(
@@ -183,6 +301,7 @@ def _with_settled_exit_turns(
         allocation.settled_exit_turns,
         MappingProxyType(semantic_corner_templates),
         execution.clearance_requirements,
+        execution.corridor_cohorts,
     )
 
 
@@ -194,6 +313,7 @@ def prepare_route_system_planning(
     reservation_ids_by_member: Mapping[EmissionMemberId, tuple[str, ...]] | None = None,
     allow_convergence_clearance_requirements: bool = False,
     granted_clearance_owner_ids: frozenset[str] = frozenset(),
+    prior_plan: RoutePlan | None = None,
 ) -> RoutePlanningExecution:
     """Run the canonical planning phases without emitting production paths.
 
@@ -226,10 +346,39 @@ def prepare_route_system_planning(
             ),
         )
 
+    # Corridor-cohort intent reads a prior semantic ledger, and only once the
+    # general convergence clearance it depends on has settled: a pending GENERAL
+    # requirement means the boxes the cohort would measure against are about to
+    # move, so the ledger waits a generation rather than freezing intent over
+    # geometry the next translation invalidates.
+    pending_general_clearance = prior_plan is not None and any(
+        requirement.kind is BoundaryClearanceRequirementKind.GENERAL
+        for requirement in prior_plan.boundary_clearance_requirements
+    )
+    corridor_cohort_ledger: CorridorCohortLedger | None = (
+        None
+        if prior_plan is None or pending_general_clearance
+        else prior_plan.corridor_cohort_ledger
+    )
+    if (
+        prior_plan is not None
+        and not pending_general_clearance
+        and corridor_cohort_ledger is None
+    ):
+        corridor_cohort_ledger = build_corridor_cohort_ledger(
+            graph,
+            scaffold,
+            prior_plan,
+            station_offsets=station_offsets or {},
+            curve_radius=ctx.curve_radius,
+        )
+
     def prepare_member_geometry(
         exit_turns: ExitTurnExecution,
         pending_plan_ids: frozenset[ExitTurnPlanId],
         settled_plan_ids: frozenset[ExitTurnPlanId] = frozenset(),
+        *,
+        compile_corridor_cohorts: bool = True,
     ) -> tuple[
         Mapping[ResolvedEdge, RouteFamilyId],
         ConvergencePlanExecution,
@@ -284,6 +433,12 @@ def prepare_route_system_planning(
             planned_system_ids=planned_ids,
         )
         ctx.convergences = convergences.query
+        cohort_ledger = corridor_cohort_ledger if compile_corridor_cohorts else None
+        corridor_targets, corridor_scalar_requests = (
+            convergence_corridor_requests(convergences.plans, graph, ctx)
+            if cohort_ledger is not None
+            else ((), ())
+        )
         member_geometry = build_member_geometry_execution(
             graph,
             ctx,
@@ -301,15 +456,27 @@ def prepare_route_system_planning(
             settled_exit_turn_plan_ids=settled_plan_ids,
             allow_clearance_requirements=allow_convergence_clearance_requirements,
             granted_clearance_owner_ids=granted_clearance_owner_ids,
+            corridor_cohort_ledger=cohort_ledger,
+            corridor_targets=corridor_targets,
+            corridor_scalar_requests=corridor_scalar_requests,
         )
+        convergences = _apply_corridor_grants(
+            convergences,
+            corridor_scalar_requests,
+            member_geometry,
+            compiled=allow_convergence_clearance_requirements,
+        )
+        ctx.convergences = convergences.query
         return family_by_edge, convergences, planned_ids, member_geometry
 
     allocation_exit_turns, pending_plan_ids = (
         exit_turn_routing.promote_pending_gap_allocation(provisional_exit_turns)
     )
     if pending_plan_ids:
+        # Only this execution's settled exit turns survive into the re-plan
+        # below, which compiles the corridor cohorts against them.
         _, _, _, allocation_geometry = prepare_member_geometry(
-            allocation_exit_turns, pending_plan_ids
+            allocation_exit_turns, pending_plan_ids, compile_corridor_cohorts=False
         )
         ctx.settled_exit_turns = allocation_geometry.settled_exit_turns
         if station_offsets is not None:
@@ -406,6 +573,7 @@ def prepare_route_system_planning(
         preliminary_planned_ids,
         frozenset(member_geometry.failure_reasons),
     )
+    granted_trunks = _granted_trunk_coordinates(member_geometry)
     convergences = settle_global_convergence_execution(
         convergences,
         graph,
@@ -416,6 +584,7 @@ def prepare_route_system_planning(
         include_resources=False,
         allow_clearance_requirements=allow_convergence_clearance_requirements,
     )
+    _assert_grants_survive_settlement(granted_trunks, convergences)
     ctx.convergences = convergences.query
     member_geometry = settle_member_geometry_corner_cohorts(
         member_geometry,
@@ -463,4 +632,5 @@ def prepare_route_system_planning(
         route_systems,
         planned_system_ids,
         exit_turn_dispositions,
+        corridor_cohort_ledger,
     )

@@ -1,15 +1,29 @@
 """Non-convergence member geometry is planned once and emitted exactly."""
 
 import json
+import re
+import warnings
 from dataclasses import replace
 from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
 
 import pytest
+from packed_cell_aperture import (
+    PACKED_CELL,
+    REQUIRED_APERTURE,
+    direct_assembled_past_reference,
+)
 
+import nf_metro.layout.routing.corridor_cohort_integration as cci
 import nf_metro.layout.routing.member_geometry as member_geometry
+import nf_metro.layout.routing.planning as planning_module
 from nf_metro.api import RenderConfig, prepare_graph, render_graph, resolve_theme
-from nf_metro.layout.constants import CURVE_RADIUS, DIAGONAL_RUN, OFFSET_STEP
+from nf_metro.layout.constants import (
+    COORD_TOLERANCE,
+    CURVE_RADIUS,
+    DIAGONAL_RUN,
+    OFFSET_STEP,
+)
 from nf_metro.layout.route_plan import (
     BindingKind,
     ConvergenceEndpointRole,
@@ -22,14 +36,42 @@ from nf_metro.layout.route_plan import (
     build_route_semantic_scaffold,
     serialize_route_plan,
 )
+from nf_metro.layout.route_reservations import (
+    ColumnGapRegion,
+    CorridorOrientation,
+    RowGapRegion,
+    drawn_corridor_containment,
+)
 from nf_metro.layout.routing.common import Direction, GapSlot, OffsetRegime, RoutedPath
 from nf_metro.layout.routing.context import _build_routing_context
-from nf_metro.layout.routing.core import _route_edges, observe_route_edges
+from nf_metro.layout.routing.convergences import convergence_corridor_requests
+from nf_metro.layout.routing.core import (
+    _route_edges,
+    observe_route_edges,
+    observe_route_edges_centred,
+    route_edges,
+)
 from nf_metro.layout.routing.corners import (
     _corner_travel_units,
     concentric_corner_radius_at,
 )
+from nf_metro.layout.routing.corridor_cohort_integration import (
+    CorridorCohortCompilationError,
+    CorridorCohortFailure,
+    CorridorCohortLedger,
+    CorridorCohortLedgerClaim,
+    CorridorCohortObstacleProvenance,
+    CorridorCohortTarget,
+)
+from nf_metro.layout.routing.corridor_cohorts import (
+    CorridorAllocationFailureReason,
+    CorridorClearanceShortfall,
+)
 from nf_metro.layout.routing.families import RouteFamilyId
+from nf_metro.layout.routing.invariants import (
+    check_no_fused_cotravelling_lines,
+    check_peeloff_concentric,
+)
 from nf_metro.layout.routing.normalize import _rederive_semantic_end_corners, _VChannel
 from nf_metro.layout.routing.offsets import compute_station_offsets
 from nf_metro.layout.routing.planning import _allocation_eligible_system_ids
@@ -38,8 +80,14 @@ from nf_metro.layout.routing.reserved_bands import (
     ReservedCorridors,
     build_reserved_corridors,
 )
-from nf_metro.parser.model import Edge
-from nf_metro.parser.route_topology import ConnectorId, ResolvedEdge
+from nf_metro.layout.settlement_demand import (
+    BoundaryClearanceRequirement,
+    BoundaryClearanceRequirementKind,
+    SettlementAxis,
+)
+from nf_metro.parser.model import Edge, MetroGraph, Section, Station
+from nf_metro.parser.route_topology import ConnectorId, ResolvedEdge, semantic_route_id
+from nf_metro.render.svg import build_observed_render_plan
 
 ROOT = Path(__file__).parents[1]
 
@@ -207,6 +255,61 @@ def _assert_channels_equal_emission(observation, plan) -> None:
             channel.start,
             channel.end,
         )
+
+
+@pytest.mark.parametrize(
+    ("candidate", "clears"),
+    (
+        (766.0 - COORD_TOLERANCE, True),
+        (784.0 + COORD_TOLERANCE, True),
+        (766.0 - 1.5 * COORD_TOLERANCE, False),
+        (784.0 + 1.5 * COORD_TOLERANCE, False),
+    ),
+)
+def test_runway_reads_its_reservation_band_at_coordinate_tolerance(
+    candidate: float, clears: bool
+) -> None:
+    """Gap materialisation can allocate a lane flush against its band edge
+    whose settled coordinate lands one tolerance outside it; the band edge is
+    as far as the gap edge a candidate may stand beyond."""
+    route = RoutedPath(
+        Edge("hic", "scaffolding", "hic"),
+        "hic",
+        [
+            (236.0, 124.0),
+            (254.0, 124.0),
+            (254.0, 238.0),
+            (783.0, 238.0),
+            (783.0, 122.0),
+            (800.0, 122.0),
+        ],
+        is_inter_section=True,
+    )
+    item = member_geometry._MaterializedChannel(
+        member_geometry._MemberCandidate(
+            route,
+            RouteFamilyId.STANDARD_L_SHAPE,
+            RouteSystemId("system"),
+            "carrier",
+            ("connector",),
+        ),
+        _VChannel(route, 3, 783.0, 122.0, 238.0, False),
+        GapSlot(2, 3, 0, Direction.U, 0, 2),
+    )
+    bounds = member_geometry._ChannelBounds(
+        gap_lo=750.0,
+        gap_hi=800.0,
+        lo=750.0,
+        hi=790.0,
+        band=ReservedBand(766.0, 784.0, 785.0),
+    )
+
+    assert (
+        member_geometry._candidate_clears_runway(
+            item, bounds, candidate, SimpleNamespace(curve_radius=CURVE_RADIUS)
+        )
+        is clears
+    )
 
 
 def test_live_claim_index_exposes_only_eligible_prior_systems_in_order() -> None:
@@ -849,6 +952,24 @@ def test_distinct_line_fan_traverses_bundle_before_member_freeze() -> None:
         _assert_channels_equal_emission(observation, red)
 
 
+@pytest.mark.parametrize("seed", ("seed_15", "seed_77"))
+def test_owned_peeloff_bundles_nest_before_member_freeze(seed: str) -> None:
+    """A frozen gap channel carrying a peel-off tail is seated on its band first.
+
+    The freeze owns every gap channel it records, and the post-emission tail and
+    riser repairs skip an owned channel, so the pre-freeze repairs are the only
+    ones that can settle the trunk depth and riser column of any frozen member,
+    whether or not its system owns the complete path.
+    """
+    path = ROOT / "tests" / "fixtures" / "hash_seed_determinism" / f"{seed}.mmd"
+    graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+
+    assert check_peeloff_concentric(graph, routes) == []
+    assert check_no_fused_cotravelling_lines(graph, routes, offsets) == []
+
+
 def test_one_segment_can_own_distinct_gap_row_claims() -> None:
     channels = (
         RouteMemberGapChannel(1, (20.0, 10.0), (20.0, 90.0), 0, 0, Direction.D),
@@ -975,6 +1096,73 @@ def test_reservation_reroute_keeps_identity_and_reuses_settled_template() -> Non
             assert tuple(
                 route.points[channel.segment_rank : channel.segment_rank + 2]
             ) == (channel.start, channel.end)
+
+
+def test_seed_77_shortfall_requests_one_atomic_corridor_aperture() -> None:
+    """Seed 77's corridor cohort compiles as atomic single-lane components.
+
+    Its ``s5`` carrier drops in the right-hand canvas margin while the ``s7``
+    carrier it would overtake runs down the column-9/10 gap.  A footprint order
+    between two carriers with no region in common could never bind, since each
+    carrier is held inside its own region, so it must not join them into one
+    component: the compile would then refuse a component spanning two lanes.
+    Every claim of this compile fits its corridor, so it requests no aperture.
+    """
+    path = ROOT / "tests" / "fixtures" / "hash_seed_determinism" / "seed_77.mmd"
+    graph, first = _observe(path)
+    _routes, _moves, provisional_plan = _route_edges(
+        graph,
+        DIAGONAL_RUN,
+        CURVE_RADIUS,
+        compute_station_offsets(graph),
+        observe_plan=True,
+        reservations=first.plan,
+        allow_convergence_clearance_requirements=True,
+    )
+
+    assert provisional_plan is not None
+    ledger = provisional_plan.corridor_cohort_ledger
+    assert ledger is not None
+    assert ledger.finalized_owned_segments is None
+    regions = {
+        (claim.edge_key, claim.segment_rank): claim.region for claim in ledger.claims
+    }
+    s5_carrier = regions[(("__junction_35", "s5__entry_right_17", "l0"), 3)]
+    s7_carrier = regions[(("__junction_40", "s7__entry_right_27", "l4"), 1)]
+    assert s7_carrier == ColumnGapRegion(9, 10)
+    assert s5_carrier != s7_carrier
+    assert provisional_plan.boundary_clearance_requirements == ()
+
+
+def test_reservation_reroute_reseats_port_peeloff_after_reconciliation() -> None:
+    path = ROOT / "examples" / "topologies" / "convergence_stacked_sink.mmd"
+    graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        observed = build_observed_render_plan(graph, resolve_theme(None, graph))
+    assert observed.route_plan is not None
+    plan = next(
+        item
+        for item in observed.route_plan.member_geometry_plans
+        if item.edge
+        == ResolvedEdge("dedup__exit_right_3", "merge_pt__entry_right_9", "main")
+    )
+    reservation, claim = next(
+        (reservation, claim)
+        for reservation in observed.route_plan.reservations
+        for claim in reservation.claims
+        if claim.member_id == plan.member_id and claim.segment_rank == 2
+    )
+    realised = build_route_plan_query(observed.route_plan).realised_reservation(
+        reservation.id
+    )
+
+    assert realised is not None
+    drawn = drawn_corridor_containment(
+        reservation, realised, observed.plan.route_polylines, (claim,)
+    )
+    assert drawn.negative_side_slack >= 0.0
+    assert drawn.positive_side_slack >= 0.0
 
 
 def test_failed_system_cannot_fall_back_from_member_geometry(
@@ -1165,3 +1353,619 @@ def test_covered_convergence_member_needs_no_emitted_geometry_owner() -> None:
     assert covered
     assert all(bindings[item].kind is not BindingKind.EMITTED for item in covered)
     build_route_plan_query(observation.plan)
+
+
+# --- Corridor cohort aperture-requirement producer (unwired) ---
+
+
+def _aperture_scenario(
+    *,
+    claim_edge_key: tuple[str, str, str],
+    obstacle_edge_key: tuple[str, str, str],
+    axis: SettlementAxis = SettlementAxis.COLUMN,
+) -> tuple[
+    MetroGraph,
+    member_geometry.CorridorCohortLedger,
+    tuple[member_geometry.CorridorCohortTarget, ...],
+    member_geometry.CorridorCohortCompilationError,
+]:
+    """A negative/positive section pair with one claim 20px short of clearing.
+
+    ``left-anchor`` lives in the negative-side section and ``right-anchor`` in
+    the positive-side one; ``junction-a``/``junction-b`` carry no section. The
+    caller names them across *claim_edge_key*/*obstacle_edge_key* to control
+    which end of each hop is the station a section resolves from, without
+    touching any ``Direction``. On the COLUMN axis the pair straddles the
+    column-1/2 boundary (``s_left``/``s_right``, 20px apart horizontally); on
+    the ROW axis it straddles the row-0/1 boundary (``s_top``/``s_bottom``,
+    20px apart vertically).
+    """
+    if axis is SettlementAxis.COLUMN:
+        negative_id, positive_id = "s_left", "s_right"
+        negative_section = Section(
+            negative_id,
+            "Left",
+            grid_col=0,
+            grid_col_span=1,
+            grid_row=0,
+            grid_row_span=1,
+            bbox_x=0.0,
+            bbox_w=100.0,
+            bbox_y=0.0,
+            bbox_h=50.0,
+        )
+        positive_section = Section(
+            positive_id,
+            "Right",
+            grid_col=1,
+            grid_col_span=1,
+            grid_row=0,
+            grid_row_span=1,
+            bbox_x=120.0,
+            bbox_w=100.0,
+            bbox_y=0.0,
+            bbox_h=50.0,
+        )
+        region: ColumnGapRegion | RowGapRegion = ColumnGapRegion(0, 1)
+        orientation = CorridorOrientation.VERTICAL
+        direction = Direction.R
+        shortfall_axis = 0
+    else:
+        negative_id, positive_id = "s_top", "s_bottom"
+        negative_section = Section(
+            negative_id,
+            "Top",
+            grid_col=0,
+            grid_col_span=1,
+            grid_row=0,
+            grid_row_span=1,
+            bbox_x=0.0,
+            bbox_w=100.0,
+            bbox_y=0.0,
+            bbox_h=50.0,
+        )
+        positive_section = Section(
+            positive_id,
+            "Bottom",
+            grid_col=0,
+            grid_col_span=1,
+            grid_row=1,
+            grid_row_span=1,
+            bbox_x=0.0,
+            bbox_w=100.0,
+            bbox_y=120.0,
+            bbox_h=50.0,
+        )
+        region = RowGapRegion(0, 1)
+        orientation = CorridorOrientation.HORIZONTAL
+        direction = Direction.D
+        shortfall_axis = 1
+    graph = MetroGraph(
+        stations={
+            "left-anchor": Station(
+                "left-anchor", "Negative Anchor", section_id=negative_id
+            ),
+            "right-anchor": Station(
+                "right-anchor", "Positive Anchor", section_id=positive_id
+            ),
+            "junction-a": Station("junction-a", "Junction A"),
+            "junction-b": Station("junction-b", "Junction B"),
+        },
+        sections={
+            negative_id: negative_section,
+            positive_id: positive_section,
+        },
+    )
+    claim = CorridorCohortLedgerClaim(
+        claim_id="claim-a",
+        reservation_id="reservation-a",
+        reservation_rank=0,
+        claim_rank=0,
+        region=region,
+        orientation=orientation,
+        direction=direction,
+        lane_rank=0,
+        member_id="member-a",
+        member_geometry_plan_id="plan:member-a",
+        edge_key=claim_edge_key,
+        family_id=RouteFamilyId.SAME_Y_STRAIGHT,
+        connector_ids=("connector-a",),
+        segment_rank=0,
+        path_rank=0,
+        endpoint_cohort_id=None,
+        endpoint_network_rank=None,
+        destination_boundary_carrier=False,
+        destination_boundary_axis_sign=None,
+        network_id=None,
+        reservation_complete=True,
+    )
+    ledger = CorridorCohortLedger(
+        claims=(claim,),
+        endpoint_members=(),
+        eligible_member_ids=frozenset({"member-a", "blocker"}),
+        ambiguous_endpoint_cohort_ids=frozenset(),
+        offset_step=10.0,
+    )
+    route = RoutedPath(
+        Edge(*obstacle_edge_key), obstacle_edge_key[2], [(0.0, 0.0), (10.0, 0.0)]
+    )
+    target = CorridorCohortTarget(
+        "blocker",
+        "plan:blocker",
+        obstacle_edge_key,
+        RouteFamilyId.SAME_Y_STRAIGHT,
+        ("connector-blocker",),
+        route,
+        True,
+    )
+    shortfall = CorridorClearanceShortfall(
+        claim_ids=("claim-a",),
+        blocking_obstacle_ids=("obstacle-a",),
+        deficit=20.0,
+        axis=shortfall_axis,
+        required_shift_sign=1,
+    )
+    failure = CorridorCohortFailure(
+        component_id="corridor-component|0",
+        result_rank=0,
+        reason=CorridorAllocationFailureReason.INFEASIBLE,
+        blocking_member_ids=(),
+        blocking_obstacle_ids=("obstacle-a",),
+        blocking_equality_owner_ids=(),
+        blocking_endpoint_owner_ids=(),
+        clearance_shortfall=shortfall,
+        blocking_obstacles=(
+            CorridorCohortObstacleProvenance(
+                "obstacle-a",
+                "blocker",
+                obstacle_edge_key,
+                0,
+                ("connector-blocker",),
+            ),
+        ),
+    )
+    error = CorridorCohortCompilationError("synthetic failure", (failure,))
+    return graph, ledger, (target,), error
+
+
+def test_corridor_cohort_aperture_requirements_builds_one_typed_requirement() -> None:
+    graph, ledger, targets, error = _aperture_scenario(
+        claim_edge_key=("junction-a", "left-anchor", "line"),
+        obstacle_edge_key=("right-anchor", "junction-b", "line"),
+    )
+
+    (requirement,) = member_geometry._corridor_cohort_aperture_requirements(
+        graph, ledger, targets, (), error
+    )
+
+    assert requirement.axis is SettlementAxis.COLUMN
+    assert requirement.boundary == 1
+    assert requirement.required == pytest.approx(40.0)
+    assert requirement.negative_section_ids == ("s_left",)
+    assert requirement.positive_section_ids == ("s_right",)
+    assert requirement.kind is BoundaryClearanceRequirementKind.CORRIDOR_COHORT_APERTURE
+
+
+def test_corridor_cohort_aperture_requirements_builds_row_axis_requirement() -> None:
+    """A row-gap corridor produces a ROW-axis requirement off vertical edges.
+
+    ``s_top`` (row 0) and ``s_bottom`` (row 1) sit 70px apart vertically. The
+    requirement's aperture is measured from the top section's bottom edge to
+    the bottom section's top edge plus the shortfall, exercising the row-axis
+    edge computation that the column-axis fixtures never reach.
+    """
+    graph, ledger, targets, error = _aperture_scenario(
+        claim_edge_key=("junction-a", "left-anchor", "line"),
+        obstacle_edge_key=("right-anchor", "junction-b", "line"),
+        axis=SettlementAxis.ROW,
+    )
+
+    (requirement,) = member_geometry._corridor_cohort_aperture_requirements(
+        graph, ledger, targets, (), error
+    )
+
+    assert requirement.axis is SettlementAxis.ROW
+    assert requirement.boundary == 1
+    assert requirement.required == pytest.approx(90.0)
+    assert requirement.negative_section_ids == ("s_top",)
+    assert requirement.positive_section_ids == ("s_bottom",)
+    assert requirement.kind is BoundaryClearanceRequirementKind.CORRIDOR_COHORT_APERTURE
+
+
+def test_corridor_cohort_aperture_derives_positive_side_from_grid() -> None:
+    """When only the negative side is touched locally, the positive side is
+    recovered by grid position from the graph, not left unmapped.
+
+    The claim's hop touches ``s_left`` (the negative side); the obstacle's hop
+    touches only section-less junctions, so ``s_right`` is present in neither
+    pool. The graph-wide search must find it by column index and cross-axis
+    overlap, exercising the ``negative and not positive`` derivation that the
+    corpus fixtures reach only in its mirror direction.
+    """
+    graph, ledger, targets, error = _aperture_scenario(
+        claim_edge_key=("junction-a", "left-anchor", "line"),
+        obstacle_edge_key=("junction-b", "junction-a", "line"),
+    )
+
+    (requirement,) = member_geometry._corridor_cohort_aperture_requirements(
+        graph, ledger, targets, (), error
+    )
+
+    assert requirement.axis is SettlementAxis.COLUMN
+    assert requirement.negative_section_ids == ("s_left",)
+    assert requirement.positive_section_ids == ("s_right",)
+    assert requirement.required == pytest.approx(40.0)
+
+
+def test_corridor_cohort_aperture_boundary_ignores_source_or_target_role() -> None:
+    """Boundary side comes from grid position alone, never from which pool a
+    section arrived through or which end of a hop happens to carry it.
+
+    The *crossed* scenario is the discriminating one: the claim's hop touches
+    the positive-side section (``s_right``) and the obstacle's hop touches the
+    negative-side one (``s_left``), and both real stations sit at the *source*
+    end of their hop. A reader that classifies by pool role (claim -> negative,
+    obstacle -> positive) buckets both sections onto the wrong side and finds
+    no facing pair; a reader that consults only the target end of each hop
+    sees two section-less junctions and finds nothing at all. Only a reader
+    that classifies both hops' stations by grid position recovers the same
+    ``s_left``/``s_right`` split the role-neutral *forward* scenario produces.
+    """
+    forward_graph, forward_ledger, forward_targets, forward_error = _aperture_scenario(
+        claim_edge_key=("junction-a", "left-anchor", "line"),
+        obstacle_edge_key=("right-anchor", "junction-b", "line"),
+    )
+    crossed_graph, crossed_ledger, crossed_targets, crossed_error = _aperture_scenario(
+        claim_edge_key=("right-anchor", "junction-a", "line"),
+        obstacle_edge_key=("left-anchor", "junction-b", "line"),
+    )
+
+    (forward,) = member_geometry._corridor_cohort_aperture_requirements(
+        forward_graph, forward_ledger, forward_targets, (), forward_error
+    )
+    (crossed,) = member_geometry._corridor_cohort_aperture_requirements(
+        crossed_graph, crossed_ledger, crossed_targets, (), crossed_error
+    )
+
+    assert crossed.negative_section_ids == forward.negative_section_ids == ("s_left",)
+    assert crossed.positive_section_ids == forward.positive_section_ids == ("s_right",)
+    assert crossed.required == forward.required == pytest.approx(40.0)
+
+
+def test_corridor_cohort_aperture_requirements_refuses_undirected_shortfall() -> None:
+    """A shortfall with no directed boundary side fails closed here too.
+
+    ``compile_corridor_cohort_plan`` already guards this before a failure
+    ever reaches the aperture producer, so this drives the producer's own
+    copy of the guard directly to prove it holds independently of that
+    earlier check.
+    """
+    graph, ledger, targets, error = _aperture_scenario(
+        claim_edge_key=("junction-a", "left-anchor", "line"),
+        obstacle_edge_key=("right-anchor", "junction-b", "line"),
+    )
+    (failure,) = error.failures
+    undirected_shortfall = replace(failure.clearance_shortfall, required_shift_sign=0)
+    undirected_error = CorridorCohortCompilationError(
+        "synthetic failure",
+        (replace(failure, clearance_shortfall=undirected_shortfall),),
+    )
+
+    with pytest.raises(CorridorCohortCompilationError, match="directed boundary side"):
+        member_geometry._corridor_cohort_aperture_requirements(
+            graph, ledger, targets, (), undirected_error
+        )
+
+
+def test_corridor_cohort_aperture_fails_closed_on_integrity_violation() -> None:
+    """A corrupt failure raises even when a healthy sibling resolves.
+
+    A batch of two failures -- one well-formed and resolvable, one whose
+    blocking obstacle names connectors that disagree with its live route
+    target -- must fail closed on the corrupt one rather than silently
+    returning the healthy sibling's single requirement. Skipping an
+    integrity-violating failure the moment any sibling resolves would hide a
+    real defect behind a clean-looking result.
+    """
+    graph, ledger, targets, error = _aperture_scenario(
+        claim_edge_key=("junction-a", "left-anchor", "line"),
+        obstacle_edge_key=("right-anchor", "junction-b", "line"),
+    )
+    (healthy,) = error.failures
+    corrupt_obstacle = replace(
+        healthy.blocking_obstacles[0], connector_ids=("connector-bogus",)
+    )
+    corrupt = replace(
+        healthy,
+        component_id="corridor-component|corrupt",
+        blocking_obstacles=(corrupt_obstacle,),
+    )
+    mixed = CorridorCohortCompilationError("synthetic mixed batch", (healthy, corrupt))
+
+    with pytest.raises(CorridorCohortCompilationError, match="current route target"):
+        member_geometry._corridor_cohort_aperture_requirements(
+            graph, ledger, targets, (), mixed
+        )
+
+
+def _corridor_cohort_population(path: Path):
+    """Reproduce one real observation's own corridor-cohort compile inputs.
+
+    ``build_member_geometry_execution`` already assembles the exact member
+    candidates, context candidates, ``ctx`` and ``scaffold`` this producer
+    would consume if it were wired; this wraps three already-called
+    production functions to capture that population rather than
+    reconstructing any of it by hand, so the routes and their families come
+    from one real render rather than a stand-in template.
+    """
+    graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+    captured_align: list[tuple[tuple, object]] = []
+    captured_population: list[tuple] = []
+    captured_bmge: list[tuple] = []
+    real_align = member_geometry._align_packed_cell_handoffs
+    real_settle = member_geometry._settle_plannable_short_destination_cohorts
+    real_bmge = planning_module.build_member_geometry_execution
+
+    def spy_align(candidates, ctx, pending):
+        captured_align.append((tuple(candidates), ctx))
+        return real_align(candidates, ctx, pending)
+
+    def spy_settle(population, graph_, ctx, scaffold, **kwargs):
+        captured_population.append(tuple(population))
+        return real_settle(population, graph_, ctx, scaffold, **kwargs)
+
+    def spy_bmge(graph_, ctx, scaffold, **kwargs):
+        result = real_bmge(graph_, ctx, scaffold, **kwargs)
+        captured_bmge.append((ctx, scaffold, kwargs))
+        return result
+
+    member_geometry._align_packed_cell_handoffs = spy_align
+    member_geometry._settle_plannable_short_destination_cohorts = spy_settle
+    planning_module.build_member_geometry_execution = spy_bmge
+    try:
+        observation = observe_route_edges(
+            graph, station_offsets=compute_station_offsets(graph)
+        )
+    finally:
+        member_geometry._align_packed_cell_handoffs = real_align
+        member_geometry._settle_plannable_short_destination_cohorts = real_settle
+        planning_module.build_member_geometry_execution = real_bmge
+
+    ctx, scaffold, kwargs = captured_bmge[-1]
+    candidates, _ctx = captured_align[-1]
+    convergence_plans = kwargs.get("convergence_plans", ())
+    family_by_edge = kwargs.get("family_by_edge", {})
+    extra_targets, scalar_requests = convergence_corridor_requests(
+        convergence_plans, graph, ctx
+    )
+    ledger = cci.build_corridor_cohort_ledger(
+        graph, scaffold, observation.plan, station_offsets=ctx.station_offsets or {}
+    )
+    candidate_route_ids = {id(candidate.route) for candidate in candidates}
+    context_candidates = []
+    for route in captured_population[-1] if captured_population else ():
+        if id(route) in candidate_route_ids:
+            continue
+        resolved = ResolvedEdge(route.edge.source, route.edge.target, route.line_id)
+        family = family_by_edge.get(resolved)
+        if family is None or resolved not in scaffold.member_id_by_edge:
+            continue
+        context_candidates.append(
+            member_geometry._MemberCandidate(
+                route,
+                family,
+                scaffold.system_for_edge(resolved),
+                semantic_route_id(
+                    "member-channel-carrier", resolved.source, resolved.target
+                ),
+                tuple(scaffold.connector_ids_for_edge(resolved)),
+            )
+        )
+    return (
+        ledger,
+        candidates,
+        tuple(context_candidates),
+        scaffold,
+        ctx,
+        extra_targets,
+        scalar_requests,
+    )
+
+
+def test_corridor_cohort_aperture_requirements_resolves_packed_cell_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A real fixture's own corridor-cohort population produces exactly one
+    typed aperture requirement, with no planning wiring in the call chain.
+
+    ``packed_cell_right_exit_left_entry_wrap.mmd`` compiles as drawn; under an
+    order its column-2 corridor cannot afford, ``qc``'s two feeders fall short
+    of clearing the packed ``prep``/``assemble`` cell they cross from, and the
+    producer chain, called directly on this fixture's real ledger and candidate
+    population, must resolve that shortfall to the boundary between them
+    rather than refusing it. Only ``assemble`` borders that boundary -- ``prep``
+    sits entirely behind it in the same grid cell -- so it alone names the
+    negative side.
+    """
+    (
+        ledger,
+        candidates,
+        context_candidates,
+        scaffold,
+        ctx,
+        extra_targets,
+        scalar_requests,
+    ) = _corridor_cohort_population(ROOT / PACKED_CELL)
+
+    def compile_cohorts():
+        return member_geometry._compile_corridor_cohorts(
+            ledger,
+            candidates,
+            context_candidates,
+            scaffold,
+            ctx,
+            allow_clearance_requirements=True,
+            additional_targets=extra_targets,
+            scalar_requests=scalar_requests,
+        )
+
+    plan, _ranks, requirements = compile_cohorts()
+    assert plan is not None
+    assert requirements == ()
+
+    direct_assembled_past_reference(monkeypatch)
+    _plan, _ranks, requirements = compile_cohorts()
+
+    (requirement,) = requirements
+    assert requirement.axis is SettlementAxis.COLUMN
+    assert requirement.boundary == 2
+    assert requirement.required == pytest.approx(REQUIRED_APERTURE)
+    assert requirement.negative_section_ids == ("assemble",)
+    assert requirement.positive_section_ids == ("qc",)
+    assert requirement.kind is BoundaryClearanceRequirementKind.CORRIDOR_COHORT_APERTURE
+
+
+def test_packed_cell_routing_observation_publishes_corridor_aperture_requirement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The wired routing observation publishes the packed_cell aperture batch.
+
+    Under an order its column-2 corridor cannot afford,
+    ``packed_cell_right_exit_left_entry_wrap.mmd`` has two feeders converging on
+    ``qc``'s left entry short of clearing the packed ``prep``/``assemble`` cell.
+    A first observation carries no prior semantic ledger, so it publishes no
+    corridor-cohort intent; a second observation reading that plan as its prior
+    builds the ledger and folds the shortfall into one typed aperture
+    requirement on the published plan, through the ordinary production call graph
+    rather than a direct compiler call.
+    """
+    direct_assembled_past_reference(monkeypatch)
+    path = ROOT / PACKED_CELL
+
+    graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+    prior_plan = observe_route_edges(
+        graph,
+        station_offsets=compute_station_offsets(graph),
+        allow_convergence_clearance_requirements=True,
+    ).plan
+    assert prior_plan.corridor_cohort_ledger is None
+    assert not prior_plan.boundary_clearance_requirements
+
+    graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+    provisional_plan = observe_route_edges_centred(
+        graph,
+        station_offsets=compute_station_offsets(graph),
+        reservations=prior_plan,
+        allow_convergence_clearance_requirements=True,
+    ).plan
+
+    assert provisional_plan.corridor_cohort_ledger is not None
+    (requirement,) = provisional_plan.boundary_clearance_requirements
+    assert requirement.kind is BoundaryClearanceRequirementKind.CORRIDOR_COHORT_APERTURE
+    assert requirement.axis is SettlementAxis.COLUMN
+    assert requirement.boundary == 2
+    assert requirement.required == pytest.approx(REQUIRED_APERTURE)
+    assert requirement.negative_section_ids == ("assemble",)
+    assert requirement.positive_section_ids == ("qc",)
+
+
+def test_corridor_cohort_aperture_producer_processes_failures_independently() -> None:
+    """One failed corridor component with no usable shortfall does not void a
+    sibling component's diagnosis in the same allocation batch.
+
+    ``hash_seed_determinism/seed_15.mmd`` fails two components at once:
+    ``corridor-component|3`` (a plain equality conflict with no shortfall at
+    all) and a later convergence-trunk component (a shortfall whose negative
+    side has no section anywhere in this fixture's sparse grid, so it cannot
+    map to a two-section boundary either). An all-or-nothing batch would
+    report only whichever came first and never even look at the other; this
+    asserts both are named, proving each was actually attempted.
+    """
+    path = ROOT / "tests" / "fixtures" / "hash_seed_determinism" / "seed_15.mmd"
+    (
+        ledger,
+        candidates,
+        context_candidates,
+        scaffold,
+        ctx,
+        extra_targets,
+        scalar_requests,
+    ) = _corridor_cohort_population(path)
+
+    with pytest.raises(CorridorCohortCompilationError) as excinfo:
+        member_geometry._compile_corridor_cohorts(
+            ledger,
+            candidates,
+            context_candidates,
+            scaffold,
+            ctx,
+            allow_clearance_requirements=True,
+            additional_targets=extra_targets,
+            scalar_requests=scalar_requests,
+        )
+
+    message = str(excinfo.value)
+    assert "corridor-component|3/result:0: allocation failure has no typed" in message
+    (trunk_component,) = re.findall(
+        r"(corridor-component\|\d+/result:0) infeasible members=convergence-trunk",
+        message,
+    )
+    assert trunk_component != "corridor-component|3/result:0"
+    assert f"{trunk_component}: clearance boundary has no facing section" in message
+
+
+def test_record_boundary_clearance_requirement_keeps_kinds_distinct() -> None:
+    """A ``GENERAL`` and an ``APERTURE`` requirement on the same section pair
+    and boundary number coalesce independently, each keeping its own kind;
+    likewise for two ``GENERAL`` requirements that agree on everything except
+    axis.
+
+    Before the merge-key fix, both collided on ``(boundary, owner_id,
+    negative_section_ids, positive_section_ids)`` alone, so recording the
+    second silently discarded the first's ``kind``/``axis`` identity.
+    """
+    general = BoundaryClearanceRequirement(
+        SettlementAxis.COLUMN,
+        3,
+        "owner",
+        50.0,
+        ("s16",),
+        ("s17",),
+        "general demand",
+    )
+    aperture = BoundaryClearanceRequirement(
+        SettlementAxis.COLUMN,
+        3,
+        "owner",
+        80.0,
+        ("s16",),
+        ("s17",),
+        "aperture demand",
+        BoundaryClearanceRequirementKind.CORRIDOR_COHORT_APERTURE,
+    )
+    row_axis_general = BoundaryClearanceRequirement(
+        SettlementAxis.ROW,
+        3,
+        "owner",
+        65.0,
+        ("s16",),
+        ("s17",),
+        "general demand on the row axis",
+    )
+    requirements: dict[
+        member_geometry._BoundaryRequirementKey, BoundaryClearanceRequirement
+    ] = {}
+
+    record = member_geometry._record_boundary_clearance_requirement
+    record(requirements, general)
+    record(requirements, aperture)
+    record(requirements, row_axis_general)
+
+    assert len(requirements) == 3
+    by_key = {(item.axis, item.kind): item for item in requirements.values()}
+    kind = BoundaryClearanceRequirementKind
+    assert by_key[(SettlementAxis.COLUMN, kind.GENERAL)].required == pytest.approx(50.0)
+    assert by_key[
+        (SettlementAxis.COLUMN, kind.CORRIDOR_COHORT_APERTURE)
+    ].required == pytest.approx(80.0)
+    assert by_key[(SettlementAxis.ROW, kind.GENERAL)].required == pytest.approx(65.0)
