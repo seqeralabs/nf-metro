@@ -231,150 +231,150 @@ Gates with an un-exercised arm:
 | 2108 | `if plan.edge in owned_edges:` | `->L2109` | **defensive** -- _member_corridor_runs skips a frozen member plan whose edge a convergence already owns, but the two sets are disjoint by construction: build_member_geometry_execution never freezes a plan for an edge in _convergence_member_edges (member_geometry.py:1010), and resolved_member_edges is derived from the same scaffold predicate. 3830 frozen member plans across 348 fixtures, zero hits. |
 | 2117 | `or abs(before[0] - start[0]) > COORD_TOLERANCE` | `->L2120` | **needs-review** -- Rejects an interior horizontal whose leading flank is not vertical. Reachable: _member_corridor_runs walks raw plan.points with no normalize filter, and the corpus already freezes an H-D-H member polyline (examples/topologies/rail_boundary_bundle_fan.mmd), so one extra leg makes a horizontal run diagonal-flanked. Not the same contract as the look-alike defensive pair in common.py::iter_horizontal_trunks, which is fed only normalize-filtered bypass U-shapes. Wants a fixture. |
 | 2118 | `or abs(after[0] - end[0]) > COORD_TOLERANCE` | `->L2120` | **needs-review** -- Mirror of the leading-flank reject: an interior horizontal whose trailing flank is not vertical. Same H-D-H evidence and the same reason it is not covered by the common.py precedent. Wants a fixture. |
-| 2162 | `if run is None:` | `->L2163` | **defensive** -- _pack_cotravelling_corridor_runs skips a plan with no X-axis trunk run. _trunk_corridor_run returns None only when trunk_axis is absent or is DemandAxis.Y; every plan reaching here is owns_geometry, and owns_geometry => trunk_axis is not None is asserted at four call sites. One root cause with the module's other DemandAxis.X scope guards: no corpus topology produces a vertical convergence trunk (346 calls, all X). |
-| 2225 | `if run is None:` | `->L2226` |  |
-| 2258 | `if axis is None:` | `->L2259` |  |
-| 2300 | `if axis is None or axis.axis is not DemandAxis.X:` | `->L2301` |  |
-| 2310 | `if primary is None:` | `->L2311` |  |
-| 2323 | `or landing.opening_turn_segment is None` | `->L2325` |  |
-| 2336 | `if reseated is not None:` | `->L2319` |  |
-| 2387 | `obstacle_segment is None` | `->L2392` | **defensive** -- A resident is read back from `settled` on every comparison, and laning moves its cross run rather than removing it, so the segment is drawable whenever it is read. The operand guards the Optional that read returns. |
-| 2388 | `or landing_segment is None` | `->L2392` |  |
-| 2403 | `if reseated is None:` | `->L2404` |  |
-| 2409 | `landing.member_id == plan.primary_trunk_member_id` | `->L2432` | **defensive** -- The first conjunct of the widened flank-carry condition. Its false arm is the ordinary feeder landing, which every fixture re-seating a landing takes; the coverage tool reports the operand separately from the conjunction above it. |
-| 2410 | `and plan.trunk_axis is not None` | `->L2432` | **defensive** -- _settle_opposing_landing_channels carries the trunk flank only when the landing it re-seated is the plan's primary trunk member. A plan naming a primary trunk member always states the trunk axis that member travels, so the false arm is unreachable through this conjunction; it narrows the Optional for the flank move below. |
-| 2411 | `and plan.trunk_axis.axis is landing.approach_axis` | `->L2432` | **needs-review** -- The flank follows a re-seated landing only where flank and landing are measured on one axis. Every primary-trunk landing the corpus re-seats approaches on its own trunk's axis, so the false arm wants a fixture whose trunk travels one axis while its primary trunk member's landing approaches on the other -- a perpendicular approach into a convergence, which is the class the widened scope newly admits. Reachable. |
-| 2441 | `if (` | `->L2374` | **defensive** -- A landing enters `ordered` only because _landing_cross_segment admitted it, and laning moves that run rather than removing it, so the read that names the landing as a resident always finds a segment. The gate guards the Optional that read returns. |
-| 2456 | `if axis is None:` | `->L2457` |  |
-| 2480 | `if coordinate is not None:` | `->L2485` |  |
-| 2522 | `if endpoint is None:` | `->L2523` |  |
-| 2545 | `if plan.trunk_axis is None:` | `->L2546` | **defensive** -- Pre-existing gap, re-keyed from #1 by the restored _turn_crosses_shared_run guard that now takes that ordinal (unchanged [0,11] split). _lane_trunk_flanks' skip for a plan with no trunk axis. Every plan reaching it is PLANNED -- the two _settle_convergence_geometry call sites filter on owns_geometry and the third caller passes freshly built planned plans -- and validate_convergence_plans asserts trunk_axis is not None for exactly those, so a plan that took this skip would abort on that assertion rather than render. _build_planned_convergence can construct such a plan, so the guard is defensive in practice rather than unconstructible. |
-| 2571 | `if coordinate is not None:` | `->L2577` | **needs-review** -- Pre-existing gap, re-keyed from #2 by the newly inserted packing gates (unchanged [0,2] split). _nearest_lane's fall-through when no flank candidate clears the runway: it runs 9 times, always against a single obstacle, and in 5 of those one of the two candidates is already rejected by the curve-radius runway test, so a shorter flank runway rejects both. Reachable; wants a fixture. |
-| 2631 | `for seat, obstacle in obstacles:` | `->L-2616`, `->L2632` | **needs-review** -- The give-way loop in _lane_trunk_flanks, entered only when no lane one clearance from the residents leaves the arriving flank a full turn radius to its endpoint. No corpus fixture crowds two same-line counter-running flanks that tightly, so the loop body is un-entered. Reachable, and exercised by test_a_flank_with_no_lane_of_its_own_is_given_way_to_by_the_resident and by test_a_resident_gives_way_to_a_lane_clear_of_the_flanks_around_it. |
-| 2633 | `if axis is None:` | `->L2634`, `->L2635` |  |
-| 2645 | `if lane is None:` | `->L2646`, `->L2647` | **needs-review** -- A resident asked to give way that has no reachable lane of its own either. Un-entered because the give-way path itself is un-entered on the corpus. Reachable; a fixture is a channel with no seat for either run, which is the population #1712 exists to give room to. |
-| 2666 | `if flank_rank != 1:` | `->L2668` |  |
-| 2677 | `if fork is None:` | `->L2678`, `->L2686` |  |
-| 2754 | `if forked:` | `->L2755` |  |
-| 2755 | `if abs(flank_coordinate - landing_coordinate) <= COORD_TOLERANCE:` | `->L2756`, `->L2757` |  |
-| 2759 | `if abs(endpoint - flank_coordinate) <= clearance:` | `->L2760` |  |
-| 2783 | `if forked:` | `->L2784`, `->L2785` | **needs-review** -- _landing_gives_way_to_flank joins the landing to the flank's column when the two are one stroke off a shared fork, and steps it one clearance off otherwise. Neither arm is reached because _flank_settled_column never declines on the corpus: all 32 crowded landing/flank pairs seat with 9px to spare. Reachable; a fixture needs an inter-column gap below MERGE_GAP_MIN carrying a chained convergence. |
-| 2858 | `if endpoint is None:` | `->L2859` | **defensive** -- _flank_lane needs the endpoint its flank turns onto to price the runway. ConvergenceTrunkAxis states source and target endpoint coordinates together or not at all, and every construction site in this module passes both, so the arm guards the Optional rather than a shape the planner builds. |
-| 2869 | `if coordinate is None:` | `->L2870` |  |
-| 2882 | `if reseated is not None:` | `->L2883`, `->L2886` |  |
-| 2947 | `if not (` | `->L2950` |  |
-| 2966 | `if axis is None or axis.axis is not DemandAxis.X:` | `->L2967` | **defensive** -- Pre-existing gap, re-keyed from #2 by the newly inserted packing gates (unchanged [0,18] split). The `axis is None` half cannot fire: callers filter on plan.owns_geometry and owns_geometry => trunk_axis is not None is asserted at 4 sites. The DemandAxis.Y half is unsettled -- a vertical trunk axis is constructible in code (_direct_axis_points / _shared_terminal_axis yield Y for a vertical approach) but no corpus topology produces one; if a TB convergence trunk is shown constructible this reclassifies reachable-but-benign (the guard returns the right empty answer). |
-| 3024 | `if primary_edge is not None and plan.primary_trunk_member_id is not None:` | `->L3009` |  |
-| 3231 | `if not carries_coupled_primary and any(` | `->L3237` | **needs-review** -- Reached by the corpus at 897747b0 and no longer: the branch's later commits (908637eb..04209e3d) changed which paths fire, so this arm lost its last covering fixture rather than becoming unreachable. Left un-exercised deliberately -- the render corpus is frozen for a measurement against main, so no fixture was authored. |
-| 3243 | `if endpoint is None or abs(endpoint - column) <= curve_radius:` | `->L3244` |  |
-| 3261 | `if (endpoint - candidate) * toward_endpoint <= curve_radius:` | `->L3262` |  |
-| 3316 | `if axis is None:` | `->L3317` | **defensive** -- A resident flank in _give_way_to was seated from a plan whose trunk axis was read to build it, so the plan still states one. The guard narrows the Optional before the flank move. |
-| 3460 | `if plan.trunk_axis is None or plan.trunk_axis.axis is not DemandAxis.X:` | `->L3461` |  |
-| 3542 | `for candidate_coordinate in direct_candidates:` | `->L3568` | **needs-review** -- Reached by the corpus at 897747b0 and no longer: the branch's later commits (908637eb..04209e3d) changed which paths fire, so this arm lost its last covering fixture rather than becoming unreachable. Left un-exercised deliberately -- the render corpus is frozen for a measurement against main, so no fixture was authored. |
-| 3553 | `if not moved_channels or any(` | `->L3558` | **needs-review** -- Reached by the corpus at 897747b0 and no longer: the branch's later commits (908637eb..04209e3d) changed which paths fire, so this arm lost its last covering fixture rather than becoming unreachable. Left un-exercised deliberately -- the render corpus is frozen for a measurement against main, so no fixture was authored. |
-| 3559 | `if any(` | `->L3563` | **needs-review** -- Reached by the corpus at 897747b0 and no longer: the branch's later commits (908637eb..04209e3d) changed which paths fire, so this arm lost its last covering fixture rather than becoming unreachable. Left un-exercised deliberately -- the render corpus is frozen for a measurement against main, so no fixture was authored. |
-| 3564 | `if not landing_feasible(candidate_coordinate):` | `->L3565` |  |
-| 3568 | `if coordinate is None:` | `->L3569` | **needs-review** -- Reached by the corpus at 897747b0 and no longer: the branch's later commits (908637eb..04209e3d) changed which paths fire, so this arm lost its last covering fixture rather than becoming unreachable. Left un-exercised deliberately -- the render corpus is frozen for a measurement against main, so no fixture was authored. |
-| 3574 | `if (` | `->L3578` |  |
-| 3597 | `if not obstacles:` | `->L3599` | **defensive** -- The ordinal moved when the endpoint check left this condition; the arm is the ordinary no-crowding case _lane_trunk_flanks takes on most plans. |
-| 3605 | `for coordinate in candidates:` | `->L3584`, `->L3606` |  |
-| 3606 | `if not _inside_usable_gap(gap_edges, coordinate):` | `->L3607`, `->L3608` |  |
-| 3614 | `if moved_plan is None:` | `->L3615`, `->L3616` |  |
-| 3625 | `if moved_channel is None or any(` | `->L3629`, `->L3630` |  |
-| 3634 | `if (` | `->L3638`, `->L3639` | **candidate-dead** -- Pre-existing gap, re-keyed from #8 by the gates the restored conflict conditions inserted earlier in the file (same never-executed line, same [0,0] split). Dead sub-block of _settle_opposing_gap_flanks' landing-opening move: its enclosing `if not obstacles:` never takes the has-obstacles arm, so no non-flank plan gap channel is ever crowded by a resident one and nothing below line 3072 runs. What would settle it is a fixture whose settled convergence gap channel crowds a resident member channel of a different line in the same column gap. |
-| 3651 | `if first.system_id != second.system_id:` | `->L3652` |  |
-| 3653 | `if first.claimant_member_ids & second.claimant_member_ids:` | `->L3654` | **needs-review** -- _channels_share_source_carrier's shared-claimant shortcut. Its sole caller is _validate_final_convergence_feasibility, which pairs a convergence plan channel against a frozen member channel; the intersection is non-empty only when the plan's channel names the very member it is compared with, which no corpus fixture produces. Reachable in principle, wants a fixture. |
-| 3660 | `if first.member_geometry_owned == second.member_geometry_owned:` | `->L3661` | **needs-review** -- _channels_share_source_carrier's equal-ownership rejection. Its sole caller always pairs a convergence-owned channel with a member-owned one, so the two flags always differ and the rejection arm is unreachable from that caller. Reachable only if a second caller compares two channels of one owner. |
-| 3834 | `if _direction(*landing_segment) not in (Direction.U, Direction.D):` | `->L3835` |  |
-| 3839 | `if endpoint is None or _shared_source_bundle_stroke(` | `->L3847` |  |
-| 3852 | `if shortfall <= SAME_COORD_TOLERANCE:` | `->L3854` |  |
-| 3867 | `if gap is None:` | `->L3868`, `->L3869` |  |
-| 3889 | `if not negative or not positive:` | `->L3890`, `->L3891` |  |
-| 3917 | `if current is None or requirement.required > current.required:` | `->L3826`, `->L3918` |  |
-| 3965 | `if first_plan.trunk_axis.axis is DemandAxis.X:` | `->L3969` | **needs-review** -- The Y-axis half of the opening-arm delta measurement. Six fixtures reach it and all take the X half, for the one root cause shared with this module's other DemandAxis.X scope guards: no corpus topology produces a vertical convergence trunk. Not a guard -- both halves are correct code for their axis -- so it is reachable exactly when a vertical trunk axis is. What would settle it is a TB convergence whose _direct_axis_points / _shared_terminal_axis yields DemandAxis.Y. |
-| 3972 | `if first_delta * second_delta < 0:` | `->L3975` | **needs-review** -- OPPOSING_OPENING_CHANNEL: two arms of one line that turn on one shared column and then open to opposite sides of their source. Six fixtures reach the test with a genuine shared-opening pair, and in every one the two trunks open the same way, which the code below reads as one stroke branching to several destinations. Neutralising _settle_opposing_landing_channels makes it fire on merge_bottom_row_bypass and merge_feeder_shared_channel_gap; neutralising _settle_shared_opening_pivots and _settle_shared_source_openings does not, and the pivot pass cannot suppress it in any case because its group key partitions by the travel direction of flank 1. Reachable; reaching it is a feasibility refusal rather than a change of emitter -- see #1712. |
-| 3989 | `if opposing_approaches is not None:` | `->L3990` | **needs-review** -- The refusal arm for the SHARED_APPROACH_CHANNEL conflict _opposing_landing_approaches reports. Un-exercised for exactly the reason that helper's own pair test is (`convergences.py::if (::#4`): the helper is called on 18 fixtures and returns None on every one. Reachable; closing it and closing #4 are the same fixture. |
-| 4034 | `if same_line and first_direction is not second_direction:` | `->L4039` | **needs-review** -- SHARED_TRUNK_CHANNEL for a same-line pair whose outward and return legs crowd one channel and which _settle_shared_trunk_channels could seat no lane for: both runs boxed in by the obstacles either side of them, since the arriving flank now gives way to a resident and the resident gives way back. Read in the travel frame the laning pass decides in, so it no longer fires on a rank-1/rank-3 pair that pass deliberately fused. Neutralising that pass makes it fire 5 times on merge_around_below_leftmost, all central-run pairs at separation 0 and 6px. Reachable; reaching it is a feasibility refusal rather than a change of emitter -- see #1712. |
-| 4040 | `if (` | `->L4067` |  |
-| 4087 | `if conflict is not None:` | `->L4088` |  |
-| 4096 | `if requirements:` | `->L4097`, `->L4099` |  |
-| 4124 | `if shared_carrier and separation > COORD_TOLERANCE:` | `->L4125` |  |
-| 4131 | `if (` | `->L4142` | **defensive** -- Pre-existing gap, re-keyed from #11 by the gates the restored conflict conditions inserted earlier in the file (unchanged [0,18] split). validate_convergence_plans' re-check that a landing's join point sits on its plan's own trunk axis and on the trunk route's polyline. The join point is derived from the trunk axis when the plan is built and consume_convergence_route connects the emitted endpoint to it, so taking the raise arm means the planner contradicted its own axis: an engine bug and a hard abort, not a shippable topology. |
-| 4149 | `if _gap_channels_crowd(` | `->L4156` |  |
-| 4172 | `if not plan.owns_geometry:` | `->L4173` |  |
-| 4236 | `if not plan.owns_geometry:` | `->L4237` |  |
-| 4259 | `owner_edge not in edge_ranks` | `->L4263` |  |
-| 4298 | `if not plan.owns_geometry:` | `->L4299` |  |
-| 4317 | `if ownership.edge in by_edge:` | `->L4318` |  |
-| 4442 | `for item in system_plans:` | `->L4443`, `->L4453` |  |
-| 4711 | `if not horizontal and not vertical:` | `->L4712` |  |
-| 4735 | `if interval[1] - interval[0] > COORD_TOLERANCE:` | `->L4720` |  |
-| 4738 | `for interval_start, interval_end in sorted(intervals):` | `->L4746` |  |
-| 4741 | `if interval_start > covered_until + COORD_TOLERANCE:` | `->L4742` |  |
-| 4744 | `if covered_until >= extent_end - COORD_TOLERANCE:` | `->L4738` |  |
-| 4768 | `if axis.axis is DemandAxis.X:` | `->L4791` |  |
-| 4897 | `if not _points_coincide(points[-1], run[0]):` | `->L4898` | **defensive** -- The trunk-skeleton polyline closure guard, now reached via #2020's wiring. Consecutive trunk runs are constructed to share endpoints, so the non-closing raise is a fail-closed guard no valid topology reaches. |
-| 5052 | `if named != _convergence_recipe_role_ids(plan, variable_id):` | `->L5053` | **defensive** -- `_validate_convergence_recipe_completeness`'s fail-closed completeness oracle, now reached via #2020's wiring of `convergence_corridor_requests`. A planned convergence's recipe always names exactly its enumerated role ids, so the incomplete-recipe raise is unreachable for a valid plan. |
-| 5307 | `if axis is None or plan.primary_trunk_member_id is None:` | `->L5308` | **defensive** -- `_convergence_corridor_target`'s fail-closed guard, now on #2020's wired production path via `convergence_corridor_requests`. It only receives plans already filtered to `owns_geometry and trunk_axis is not None`, so `axis` is never None and such a plan always names a `primary_trunk_member_id`; the None-return arm is unreachable for a valid convergence. |
-| 5317 | `if ownership is None:` | `->L5318` | **defensive** -- `_convergence_corridor_target` (wired by #2020): a planned convergence's `endpoint_ownership` always contains its `primary_trunk_member_id`, so the None-return arm is unreachable for a valid plan. |
-| 5321 | `if edge is None:` | `->L5322` | **defensive** -- `_convergence_corridor_target` (wired by #2020): a trunk member's ownership edge is always a live key in `ctx.edge_by_key`, so the missing-edge return is unreachable for a valid plan. |
-| 5465 | `if minimum_coordinate is not None:` | `->L5467` | **needs-review** -- `_convergence_corridor_preference` (wired into production by #2020): the true arm fires only for a corridor band bounded below (finite `band.lo`). Every corridor band the corpus produces is unbounded below, so no swept fixture takes it; a fixture with a bounded-below trunk band would. Reachable, awaiting such a fixture. |
-| 5486 | `if axis.axis is DemandAxis.X:` | `->L5489` | **needs-review** -- `_convergence_corridor_region` (wired into production by #2020): the true arm names a row-boundary (horizontal-trunk) corridor; the corpus only exercises the column-boundary else arm, so no swept fixture takes it. A TB/row-boundary convergence trunk would. Reachable, awaiting such a fixture. |
-| 5514 | `if len(set(owner_ids)) != len(owner_ids):` | `->L5515` | **defensive** -- `convergence_corridor_requests` (wired by #2020): each eligible plan contributes one unique `str(plan.id)` owner, so the duplicate-owner raise is a fail-closed guard no valid topology reaches. |
-| 5522 | `if exposed is None:` | `->L5523` | **defensive** -- `convergence_corridor_requests` (wired by #2020) raises when `_convergence_corridor_target` returns None, but every eligible plan (`owns_geometry and trunk_axis`) yields a complete trunk identity, so the raise is a fail-closed guard no valid topology reaches. |
-| 5637 | `if runway_role is None or runway_role.kind not in (` | `->L5641` |  |
-| 5648 | `if runway.anchor_coordinate is not None:` | `->L5651` |  |
-| 5660 | `if not _runway_frame_holds(` | `->L5663` |  |
-| 5676 | `if distance < runway.minimum_distance - COORD_TOLERANCE_FINE:` | `->L5677` |  |
-| 5707 | `if axis is None or not plan.owns_geometry:` | `->L5708` |  |
-| 5713 | `abs(axis.coordinate - recipe.source_coordinate) > COORD_TOLERANCE_FINE` | `->L5717` |  |
-| 5714 | `or abs(variable.coordinate - recipe.source_coordinate) > COORD_TOLERANCE_FINE` | `->L5717` |  |
-| 5715 | `or variable.axis != lateral` | `->L5717` |  |
-| 5758 | `if stale(fixed.role_id, fixed.axis, fixed.coordinate):` | `->L5759` |  |
-| 5769 | `if stale(` | `->L5772` |  |
-| 5782 | `if point.axis != lateral or trunk_fields.setdefault(name, value) != value:` | `->L5783` |  |
-| 5787 | `if role.kind is _ConvergenceRoleKind.LANDING_OPENING:` | `->L5788` |  |
-| 5794 | `if trunk_fields.get("coordinate") is None:` | `->L5795` |  |
-| 5807 | `and (flank - axis.coordinate) * (flank - trunk_fields["coordinate"]) <= 0.0` | `->L5809` |  |
-| 5920 | `if request.variable.variable_id in requests_by_id:` | `->L5921` |  |
-| 5927 | `if grant.variable_id in grants_by_id:` | `->L5928` |  |
-| 5934 | `if missing or extra:` | `->L5935` |  |
-| 5948 | `variable.owner_kind is not CorridorScalarOwnerKind.CONVERGENCE_TRUNK` | `->L5953` |  |
-| 5949 | `or grant.owner_kind is not CorridorScalarOwnerKind.CONVERGENCE_TRUNK` | `->L5953` |  |
-| 5950 | `or grant.owner_id != variable.owner_id` | `->L5953` |  |
-| 5951 | `or variable.owner_id not in plans_by_id` | `->L5953` |  |
-| 5957 | `if (` | `->L5962` | **defensive** -- Pre-existing gap, re-keyed from #12 by the gates the restored conflict conditions inserted earlier in the file (unchanged [0,18] split). The raise for a covered continuation absent from the carrier member that is recorded as covering it. _reconcile_continuation_ownership only names a carrier whose route already spans the continuation's endpoints, so the raise arm reports an engine bug and aborts the render; no valid topology reaches it. |
-| 5966 | `if (` | `->L5974` | **candidate-dead** -- Pre-existing gap, re-keyed from #13 by the gates the restored conflict conditions inserted earlier in the file (unchanged [0,0] split). Never executed rather than half-taken: its enclosing `if continuation.covered_by_member_id is not None:` never takes the None arm on any of the 18 fixtures that validate a planned convergence, so an uncovered outgoing continuation does not exist in this corpus. What would settle it is a topology whose continuation no endpoint owner's route spans, which _reconcile_continuation_ownership would then leave uncovered. |
-| 5979 | `if (` | `->L5986` |  |
-| 5990 | `if plan.id in granted_plan_ids:` | `->L5991` |  |
-| 6032 | `if not candidates:` | `->L6033` |  |
-| 6140 | `if not 0 <= flank_rank < len(route.points) - 1:` | `->L6141` |  |
-| 6159 | `if actual is None:` | `->L6160` |  |
-| 6166 | `direction is not landing.approach_direction` | `->L6170` |  |
-| 6167 | `or handedness is not landing.corner_handedness` | `->L6170` |  |
-| 6168 | `or runway < landing.minimum_runway - COORD_TOLERANCE` | `->L6170` |  |
-| 6187 | `opening is None` | `->L6191` |  |
-| 6188 | `or abs(opening.x - landing.opening_turn_coordinate) > COORD_TOLERANCE` | `->L6191` |  |
-| 6189 | `or emitted_segment != landing.opening_turn_segment` | `->L6191` |  |
-| 6200 | `if query is None:` | `->L6201` |  |
-| 6206 | `if not plan.owns_geometry:` | `->L6207` |  |
-| 6216 | `if (` | `->L6230` |  |
-| 6234 | `if plan.primary_trunk_member_id == membership.member_id:` | `->L6239` |  |
-| 6257 | `if opening is None:` | `->L6258` |  |
-| 6258 | `if not clearance_pending:` | `->L6259`, `->L6265` |  |
-| 6282 | `if ctx.validate_final_route_frames and not clearance_pending:` | `->L6284` |  |
-| 6299 | `if not clearance_pending and any(` | `->L6303` | **needs-review** -- The endpoint-agreement refusal is deferred only while a provisional convergence plan carries a published boundary-clearance requirement. Production rendering settles that grant and immediately observes a strict plan with clearance publication disabled, so the same guard is active before anything can render. No committed corpus fixture reaches the provisional shortfall; the controlled regression lowers the placement floor to exercise both arms. |
-| 6304 | `if ctx.validate_final_route_frames and not clearance_pending:` | `->L-6198` |  |
-| 6318 | `if not plan.owns_geometry:` | `->L6319` |  |
-| 6320 | `if plan.system_id in execution.query.clearance_requirement_system_ids:` | `->L6321` |  |
-| 6329 | `if trunk_route is None or not _route_covers_trunk(trunk_route, plan.trunk_axis):` | `->L6330` |  |
-| 6339 | `if route is None:` | `->L6340` |  |
-| 6345 | `if (` | `->L6350` |  |
-| 6357 | `if any(` | `->L6361` |  |
-| 6381 | `if (` | `->L6390` |  |
-| 6396 | `if (` | `->L6407` |  |
-| 6423 | `if route is None or membership is None:` | `->L6424` |  |
-| 6429 | `if any(` | `->L6433` |  |
+| 2164 | `if run is None:` | `->L2165` | **defensive** -- _pack_cotravelling_corridor_runs skips a plan with no X-axis trunk run. _trunk_corridor_run returns None only when trunk_axis is absent or is DemandAxis.Y; every plan reaching here is owns_geometry, and owns_geometry => trunk_axis is not None is asserted at four call sites. One root cause with the module's other DemandAxis.X scope guards: no corpus topology produces a vertical convergence trunk (346 calls, all X). |
+| 2230 | `if run is None:` | `->L2231` |  |
+| 2263 | `if axis is None:` | `->L2264` |  |
+| 2305 | `if axis is None or axis.axis is not DemandAxis.X:` | `->L2306` |  |
+| 2315 | `if primary is None:` | `->L2316` |  |
+| 2328 | `or landing.opening_turn_segment is None` | `->L2330` |  |
+| 2341 | `if reseated is not None:` | `->L2324` |  |
+| 2392 | `obstacle_segment is None` | `->L2397` | **defensive** -- A resident is read back from `settled` on every comparison, and laning moves its cross run rather than removing it, so the segment is drawable whenever it is read. The operand guards the Optional that read returns. |
+| 2393 | `or landing_segment is None` | `->L2397` |  |
+| 2408 | `if reseated is None:` | `->L2409` |  |
+| 2414 | `landing.member_id == plan.primary_trunk_member_id` | `->L2437` | **defensive** -- The first conjunct of the widened flank-carry condition. Its false arm is the ordinary feeder landing, which every fixture re-seating a landing takes; the coverage tool reports the operand separately from the conjunction above it. |
+| 2415 | `and plan.trunk_axis is not None` | `->L2437` | **defensive** -- _settle_opposing_landing_channels carries the trunk flank only when the landing it re-seated is the plan's primary trunk member. A plan naming a primary trunk member always states the trunk axis that member travels, so the false arm is unreachable through this conjunction; it narrows the Optional for the flank move below. |
+| 2416 | `and plan.trunk_axis.axis is landing.approach_axis` | `->L2437` | **needs-review** -- The flank follows a re-seated landing only where flank and landing are measured on one axis. Every primary-trunk landing the corpus re-seats approaches on its own trunk's axis, so the false arm wants a fixture whose trunk travels one axis while its primary trunk member's landing approaches on the other -- a perpendicular approach into a convergence, which is the class the widened scope newly admits. Reachable. |
+| 2446 | `if (` | `->L2379` | **defensive** -- A landing enters `ordered` only because _landing_cross_segment admitted it, and laning moves that run rather than removing it, so the read that names the landing as a resident always finds a segment. The gate guards the Optional that read returns. |
+| 2461 | `if axis is None:` | `->L2462` |  |
+| 2485 | `if coordinate is not None:` | `->L2490` |  |
+| 2527 | `if endpoint is None:` | `->L2528` |  |
+| 2550 | `if plan.trunk_axis is None:` | `->L2551` | **defensive** -- Pre-existing gap, re-keyed from #1 by the restored _turn_crosses_shared_run guard that now takes that ordinal (unchanged [0,11] split). _lane_trunk_flanks' skip for a plan with no trunk axis. Every plan reaching it is PLANNED -- the two _settle_convergence_geometry call sites filter on owns_geometry and the third caller passes freshly built planned plans -- and validate_convergence_plans asserts trunk_axis is not None for exactly those, so a plan that took this skip would abort on that assertion rather than render. _build_planned_convergence can construct such a plan, so the guard is defensive in practice rather than unconstructible. |
+| 2576 | `if coordinate is not None:` | `->L2582` | **needs-review** -- Pre-existing gap, re-keyed from #2 by the newly inserted packing gates (unchanged [0,2] split). _nearest_lane's fall-through when no flank candidate clears the runway: it runs 9 times, always against a single obstacle, and in 5 of those one of the two candidates is already rejected by the curve-radius runway test, so a shorter flank runway rejects both. Reachable; wants a fixture. |
+| 2636 | `for seat, obstacle in obstacles:` | `->L-2621`, `->L2637` | **needs-review** -- The give-way loop in _lane_trunk_flanks, entered only when no lane one clearance from the residents leaves the arriving flank a full turn radius to its endpoint. No corpus fixture crowds two same-line counter-running flanks that tightly, so the loop body is un-entered. Reachable, and exercised by test_a_flank_with_no_lane_of_its_own_is_given_way_to_by_the_resident and by test_a_resident_gives_way_to_a_lane_clear_of_the_flanks_around_it. |
+| 2638 | `if axis is None:` | `->L2639`, `->L2640` |  |
+| 2650 | `if lane is None:` | `->L2651`, `->L2652` | **needs-review** -- A resident asked to give way that has no reachable lane of its own either. Un-entered because the give-way path itself is un-entered on the corpus. Reachable; a fixture is a channel with no seat for either run, which is the population #1712 exists to give room to. |
+| 2671 | `if flank_rank != 1:` | `->L2673` |  |
+| 2682 | `if fork is None:` | `->L2683`, `->L2691` |  |
+| 2759 | `if forked:` | `->L2760` |  |
+| 2760 | `if abs(flank_coordinate - landing_coordinate) <= COORD_TOLERANCE:` | `->L2761`, `->L2762` |  |
+| 2764 | `if abs(endpoint - flank_coordinate) <= clearance:` | `->L2765` |  |
+| 2788 | `if forked:` | `->L2789`, `->L2790` | **needs-review** -- _landing_gives_way_to_flank joins the landing to the flank's column when the two are one stroke off a shared fork, and steps it one clearance off otherwise. Neither arm is reached because _flank_settled_column never declines on the corpus: all 32 crowded landing/flank pairs seat with 9px to spare. Reachable; a fixture needs an inter-column gap below MERGE_GAP_MIN carrying a chained convergence. |
+| 2863 | `if endpoint is None:` | `->L2864` | **defensive** -- _flank_lane needs the endpoint its flank turns onto to price the runway. ConvergenceTrunkAxis states source and target endpoint coordinates together or not at all, and every construction site in this module passes both, so the arm guards the Optional rather than a shape the planner builds. |
+| 2874 | `if coordinate is None:` | `->L2875` |  |
+| 2887 | `if reseated is not None:` | `->L2888`, `->L2891` |  |
+| 2952 | `if not (` | `->L2955` |  |
+| 2971 | `if axis is None or axis.axis is not DemandAxis.X:` | `->L2972` | **defensive** -- Pre-existing gap, re-keyed from #2 by the newly inserted packing gates (unchanged [0,18] split). The `axis is None` half cannot fire: callers filter on plan.owns_geometry and owns_geometry => trunk_axis is not None is asserted at 4 sites. The DemandAxis.Y half is unsettled -- a vertical trunk axis is constructible in code (_direct_axis_points / _shared_terminal_axis yield Y for a vertical approach) but no corpus topology produces one; if a TB convergence trunk is shown constructible this reclassifies reachable-but-benign (the guard returns the right empty answer). |
+| 3029 | `if primary_edge is not None and plan.primary_trunk_member_id is not None:` | `->L3014` |  |
+| 3236 | `if not carries_coupled_primary and any(` | `->L3242` | **needs-review** -- Reached by the corpus at 897747b0 and no longer: the branch's later commits (908637eb..04209e3d) changed which paths fire, so this arm lost its last covering fixture rather than becoming unreachable. Left un-exercised deliberately -- the render corpus is frozen for a measurement against main, so no fixture was authored. |
+| 3248 | `if endpoint is None or abs(endpoint - column) <= curve_radius:` | `->L3249` |  |
+| 3266 | `if (endpoint - candidate) * toward_endpoint <= curve_radius:` | `->L3267` |  |
+| 3321 | `if axis is None:` | `->L3322` | **defensive** -- A resident flank in _give_way_to was seated from a plan whose trunk axis was read to build it, so the plan still states one. The guard narrows the Optional before the flank move. |
+| 3465 | `if plan.trunk_axis is None or plan.trunk_axis.axis is not DemandAxis.X:` | `->L3466` |  |
+| 3547 | `for candidate_coordinate in direct_candidates:` | `->L3573` | **needs-review** -- Reached by the corpus at 897747b0 and no longer: the branch's later commits (908637eb..04209e3d) changed which paths fire, so this arm lost its last covering fixture rather than becoming unreachable. Left un-exercised deliberately -- the render corpus is frozen for a measurement against main, so no fixture was authored. |
+| 3558 | `if not moved_channels or any(` | `->L3563` | **needs-review** -- Reached by the corpus at 897747b0 and no longer: the branch's later commits (908637eb..04209e3d) changed which paths fire, so this arm lost its last covering fixture rather than becoming unreachable. Left un-exercised deliberately -- the render corpus is frozen for a measurement against main, so no fixture was authored. |
+| 3564 | `if any(` | `->L3568` | **needs-review** -- Reached by the corpus at 897747b0 and no longer: the branch's later commits (908637eb..04209e3d) changed which paths fire, so this arm lost its last covering fixture rather than becoming unreachable. Left un-exercised deliberately -- the render corpus is frozen for a measurement against main, so no fixture was authored. |
+| 3569 | `if not landing_feasible(candidate_coordinate):` | `->L3570` |  |
+| 3573 | `if coordinate is None:` | `->L3574` | **needs-review** -- Reached by the corpus at 897747b0 and no longer: the branch's later commits (908637eb..04209e3d) changed which paths fire, so this arm lost its last covering fixture rather than becoming unreachable. Left un-exercised deliberately -- the render corpus is frozen for a measurement against main, so no fixture was authored. |
+| 3579 | `if (` | `->L3583` |  |
+| 3602 | `if not obstacles:` | `->L3604` | **defensive** -- The ordinal moved when the endpoint check left this condition; the arm is the ordinary no-crowding case _lane_trunk_flanks takes on most plans. |
+| 3610 | `for coordinate in candidates:` | `->L3589`, `->L3611` |  |
+| 3611 | `if not _inside_usable_gap(gap_edges, coordinate):` | `->L3612`, `->L3613` |  |
+| 3619 | `if moved_plan is None:` | `->L3620`, `->L3621` |  |
+| 3630 | `if moved_channel is None or any(` | `->L3634`, `->L3635` |  |
+| 3639 | `if (` | `->L3643`, `->L3644` | **candidate-dead** -- Pre-existing gap, re-keyed from #8 by the gates the restored conflict conditions inserted earlier in the file (same never-executed line, same [0,0] split). Dead sub-block of _settle_opposing_gap_flanks' landing-opening move: its enclosing `if not obstacles:` never takes the has-obstacles arm, so no non-flank plan gap channel is ever crowded by a resident one and nothing below line 3072 runs. What would settle it is a fixture whose settled convergence gap channel crowds a resident member channel of a different line in the same column gap. |
+| 3656 | `if first.system_id != second.system_id:` | `->L3657` |  |
+| 3658 | `if first.claimant_member_ids & second.claimant_member_ids:` | `->L3659` | **needs-review** -- _channels_share_source_carrier's shared-claimant shortcut. Its sole caller is _validate_final_convergence_feasibility, which pairs a convergence plan channel against a frozen member channel; the intersection is non-empty only when the plan's channel names the very member it is compared with, which no corpus fixture produces. Reachable in principle, wants a fixture. |
+| 3665 | `if first.member_geometry_owned == second.member_geometry_owned:` | `->L3666` | **needs-review** -- _channels_share_source_carrier's equal-ownership rejection. Its sole caller always pairs a convergence-owned channel with a member-owned one, so the two flags always differ and the rejection arm is unreachable from that caller. Reachable only if a second caller compares two channels of one owner. |
+| 3839 | `if _direction(*landing_segment) not in (Direction.U, Direction.D):` | `->L3840` |  |
+| 3844 | `if endpoint is None or _shared_source_bundle_stroke(` | `->L3852` |  |
+| 3857 | `if shortfall <= SAME_COORD_TOLERANCE:` | `->L3859` |  |
+| 3872 | `if gap is None:` | `->L3873`, `->L3874` |  |
+| 3894 | `if not negative or not positive:` | `->L3895`, `->L3896` |  |
+| 3922 | `if current is None or requirement.required > current.required:` | `->L3831`, `->L3923` |  |
+| 3970 | `if first_plan.trunk_axis.axis is DemandAxis.X:` | `->L3974` | **needs-review** -- The Y-axis half of the opening-arm delta measurement. Six fixtures reach it and all take the X half, for the one root cause shared with this module's other DemandAxis.X scope guards: no corpus topology produces a vertical convergence trunk. Not a guard -- both halves are correct code for their axis -- so it is reachable exactly when a vertical trunk axis is. What would settle it is a TB convergence whose _direct_axis_points / _shared_terminal_axis yields DemandAxis.Y. |
+| 3977 | `if first_delta * second_delta < 0:` | `->L3980` | **needs-review** -- OPPOSING_OPENING_CHANNEL: two arms of one line that turn on one shared column and then open to opposite sides of their source. Six fixtures reach the test with a genuine shared-opening pair, and in every one the two trunks open the same way, which the code below reads as one stroke branching to several destinations. Neutralising _settle_opposing_landing_channels makes it fire on merge_bottom_row_bypass and merge_feeder_shared_channel_gap; neutralising _settle_shared_opening_pivots and _settle_shared_source_openings does not, and the pivot pass cannot suppress it in any case because its group key partitions by the travel direction of flank 1. Reachable; reaching it is a feasibility refusal rather than a change of emitter -- see #1712. |
+| 3994 | `if opposing_approaches is not None:` | `->L3995` | **needs-review** -- The refusal arm for the SHARED_APPROACH_CHANNEL conflict _opposing_landing_approaches reports. Un-exercised for exactly the reason that helper's own pair test is (`convergences.py::if (::#4`): the helper is called on 18 fixtures and returns None on every one. Reachable; closing it and closing #4 are the same fixture. |
+| 4039 | `if same_line and first_direction is not second_direction:` | `->L4044` | **needs-review** -- SHARED_TRUNK_CHANNEL for a same-line pair whose outward and return legs crowd one channel and which _settle_shared_trunk_channels could seat no lane for: both runs boxed in by the obstacles either side of them, since the arriving flank now gives way to a resident and the resident gives way back. Read in the travel frame the laning pass decides in, so it no longer fires on a rank-1/rank-3 pair that pass deliberately fused. Neutralising that pass makes it fire 5 times on merge_around_below_leftmost, all central-run pairs at separation 0 and 6px. Reachable; reaching it is a feasibility refusal rather than a change of emitter -- see #1712. |
+| 4045 | `if (` | `->L4072` |  |
+| 4092 | `if conflict is not None:` | `->L4093` |  |
+| 4101 | `if requirements:` | `->L4102`, `->L4104` |  |
+| 4129 | `if shared_carrier and separation > COORD_TOLERANCE:` | `->L4130` |  |
+| 4136 | `if (` | `->L4147` | **defensive** -- Pre-existing gap, re-keyed from #11 by the gates the restored conflict conditions inserted earlier in the file (unchanged [0,18] split). validate_convergence_plans' re-check that a landing's join point sits on its plan's own trunk axis and on the trunk route's polyline. The join point is derived from the trunk axis when the plan is built and consume_convergence_route connects the emitted endpoint to it, so taking the raise arm means the planner contradicted its own axis: an engine bug and a hard abort, not a shippable topology. |
+| 4154 | `if _gap_channels_crowd(` | `->L4161` |  |
+| 4177 | `if not plan.owns_geometry:` | `->L4178` |  |
+| 4241 | `if not plan.owns_geometry:` | `->L4242` |  |
+| 4264 | `owner_edge not in edge_ranks` | `->L4268` |  |
+| 4303 | `if not plan.owns_geometry:` | `->L4304` |  |
+| 4322 | `if ownership.edge in by_edge:` | `->L4323` |  |
+| 4447 | `for item in system_plans:` | `->L4448`, `->L4458` |  |
+| 4716 | `if not horizontal and not vertical:` | `->L4717` |  |
+| 4740 | `if interval[1] - interval[0] > COORD_TOLERANCE:` | `->L4725` |  |
+| 4743 | `for interval_start, interval_end in sorted(intervals):` | `->L4751` |  |
+| 4746 | `if interval_start > covered_until + COORD_TOLERANCE:` | `->L4747` |  |
+| 4749 | `if covered_until >= extent_end - COORD_TOLERANCE:` | `->L4743` |  |
+| 4773 | `if axis.axis is DemandAxis.X:` | `->L4796` |  |
+| 4902 | `if not _points_coincide(points[-1], run[0]):` | `->L4903` | **defensive** -- The trunk-skeleton polyline closure guard, now reached via #2020's wiring. Consecutive trunk runs are constructed to share endpoints, so the non-closing raise is a fail-closed guard no valid topology reaches. |
+| 5057 | `if named != _convergence_recipe_role_ids(plan, variable_id):` | `->L5058` | **defensive** -- `_validate_convergence_recipe_completeness`'s fail-closed completeness oracle, now reached via #2020's wiring of `convergence_corridor_requests`. A planned convergence's recipe always names exactly its enumerated role ids, so the incomplete-recipe raise is unreachable for a valid plan. |
+| 5312 | `if axis is None or plan.primary_trunk_member_id is None:` | `->L5313` | **defensive** -- `_convergence_corridor_target`'s fail-closed guard, now on #2020's wired production path via `convergence_corridor_requests`. It only receives plans already filtered to `owns_geometry and trunk_axis is not None`, so `axis` is never None and such a plan always names a `primary_trunk_member_id`; the None-return arm is unreachable for a valid convergence. |
+| 5322 | `if ownership is None:` | `->L5323` | **defensive** -- `_convergence_corridor_target` (wired by #2020): a planned convergence's `endpoint_ownership` always contains its `primary_trunk_member_id`, so the None-return arm is unreachable for a valid plan. |
+| 5326 | `if edge is None:` | `->L5327` | **defensive** -- `_convergence_corridor_target` (wired by #2020): a trunk member's ownership edge is always a live key in `ctx.edge_by_key`, so the missing-edge return is unreachable for a valid plan. |
+| 5470 | `if minimum_coordinate is not None:` | `->L5472` | **needs-review** -- `_convergence_corridor_preference` (wired into production by #2020): the true arm fires only for a corridor band bounded below (finite `band.lo`). Every corridor band the corpus produces is unbounded below, so no swept fixture takes it; a fixture with a bounded-below trunk band would. Reachable, awaiting such a fixture. |
+| 5491 | `if axis.axis is DemandAxis.X:` | `->L5494` | **needs-review** -- `_convergence_corridor_region` (wired into production by #2020): the true arm names a row-boundary (horizontal-trunk) corridor; the corpus only exercises the column-boundary else arm, so no swept fixture takes it. A TB/row-boundary convergence trunk would. Reachable, awaiting such a fixture. |
+| 5519 | `if len(set(owner_ids)) != len(owner_ids):` | `->L5520` | **defensive** -- `convergence_corridor_requests` (wired by #2020): each eligible plan contributes one unique `str(plan.id)` owner, so the duplicate-owner raise is a fail-closed guard no valid topology reaches. |
+| 5527 | `if exposed is None:` | `->L5528` | **defensive** -- `convergence_corridor_requests` (wired by #2020) raises when `_convergence_corridor_target` returns None, but every eligible plan (`owns_geometry and trunk_axis`) yields a complete trunk identity, so the raise is a fail-closed guard no valid topology reaches. |
+| 5642 | `if runway_role is None or runway_role.kind not in (` | `->L5646` |  |
+| 5653 | `if runway.anchor_coordinate is not None:` | `->L5656` |  |
+| 5665 | `if not _runway_frame_holds(` | `->L5668` |  |
+| 5681 | `if distance < runway.minimum_distance - COORD_TOLERANCE_FINE:` | `->L5682` |  |
+| 5712 | `if axis is None or not plan.owns_geometry:` | `->L5713` |  |
+| 5718 | `abs(axis.coordinate - recipe.source_coordinate) > COORD_TOLERANCE_FINE` | `->L5722` |  |
+| 5719 | `or abs(variable.coordinate - recipe.source_coordinate) > COORD_TOLERANCE_FINE` | `->L5722` |  |
+| 5720 | `or variable.axis != lateral` | `->L5722` |  |
+| 5763 | `if stale(fixed.role_id, fixed.axis, fixed.coordinate):` | `->L5764` |  |
+| 5774 | `if stale(` | `->L5777` |  |
+| 5787 | `if point.axis != lateral or trunk_fields.setdefault(name, value) != value:` | `->L5788` |  |
+| 5792 | `if role.kind is _ConvergenceRoleKind.LANDING_OPENING:` | `->L5793` |  |
+| 5799 | `if trunk_fields.get("coordinate") is None:` | `->L5800` |  |
+| 5812 | `and (flank - axis.coordinate) * (flank - trunk_fields["coordinate"]) <= 0.0` | `->L5814` |  |
+| 5925 | `if request.variable.variable_id in requests_by_id:` | `->L5926` |  |
+| 5932 | `if grant.variable_id in grants_by_id:` | `->L5933` |  |
+| 5939 | `if missing or extra:` | `->L5940` |  |
+| 5953 | `variable.owner_kind is not CorridorScalarOwnerKind.CONVERGENCE_TRUNK` | `->L5958` |  |
+| 5954 | `or grant.owner_kind is not CorridorScalarOwnerKind.CONVERGENCE_TRUNK` | `->L5958` |  |
+| 5955 | `or grant.owner_id != variable.owner_id` | `->L5958` |  |
+| 5956 | `or variable.owner_id not in plans_by_id` | `->L5958` |  |
+| 5962 | `if (` | `->L5967` | **defensive** -- Pre-existing gap, re-keyed from #12 by the gates the restored conflict conditions inserted earlier in the file (unchanged [0,18] split). The raise for a covered continuation absent from the carrier member that is recorded as covering it. _reconcile_continuation_ownership only names a carrier whose route already spans the continuation's endpoints, so the raise arm reports an engine bug and aborts the render; no valid topology reaches it. |
+| 5971 | `if (` | `->L5979` | **candidate-dead** -- Pre-existing gap, re-keyed from #13 by the gates the restored conflict conditions inserted earlier in the file (unchanged [0,0] split). Never executed rather than half-taken: its enclosing `if continuation.covered_by_member_id is not None:` never takes the None arm on any of the 18 fixtures that validate a planned convergence, so an uncovered outgoing continuation does not exist in this corpus. What would settle it is a topology whose continuation no endpoint owner's route spans, which _reconcile_continuation_ownership would then leave uncovered. |
+| 5984 | `if (` | `->L5991` |  |
+| 5995 | `if plan.id in granted_plan_ids:` | `->L5996` |  |
+| 6037 | `if not candidates:` | `->L6038` |  |
+| 6145 | `if not 0 <= flank_rank < len(route.points) - 1:` | `->L6146` |  |
+| 6164 | `if actual is None:` | `->L6165` |  |
+| 6171 | `direction is not landing.approach_direction` | `->L6175` |  |
+| 6172 | `or handedness is not landing.corner_handedness` | `->L6175` |  |
+| 6173 | `or runway < landing.minimum_runway - COORD_TOLERANCE` | `->L6175` |  |
+| 6192 | `opening is None` | `->L6196` |  |
+| 6193 | `or abs(opening.x - landing.opening_turn_coordinate) > COORD_TOLERANCE` | `->L6196` |  |
+| 6194 | `or emitted_segment != landing.opening_turn_segment` | `->L6196` |  |
+| 6205 | `if query is None:` | `->L6206` |  |
+| 6211 | `if not plan.owns_geometry:` | `->L6212` |  |
+| 6221 | `if (` | `->L6235` |  |
+| 6239 | `if plan.primary_trunk_member_id == membership.member_id:` | `->L6244` |  |
+| 6262 | `if opening is None:` | `->L6263` |  |
+| 6263 | `if not clearance_pending:` | `->L6264`, `->L6270` |  |
+| 6287 | `if ctx.validate_final_route_frames and not clearance_pending:` | `->L6289` |  |
+| 6304 | `if not clearance_pending and any(` | `->L6308` | **needs-review** -- The endpoint-agreement refusal is deferred only while a provisional convergence plan carries a published boundary-clearance requirement. Production rendering settles that grant and immediately observes a strict plan with clearance publication disabled, so the same guard is active before anything can render. No committed corpus fixture reaches the provisional shortfall; the controlled regression lowers the placement floor to exercise both arms. |
+| 6309 | `if ctx.validate_final_route_frames and not clearance_pending:` | `->L-6203` |  |
+| 6323 | `if not plan.owns_geometry:` | `->L6324` |  |
+| 6325 | `if plan.system_id in execution.query.clearance_requirement_system_ids:` | `->L6326` |  |
+| 6334 | `if trunk_route is None or not _route_covers_trunk(trunk_route, plan.trunk_axis):` | `->L6335` |  |
+| 6344 | `if route is None:` | `->L6345` |  |
+| 6350 | `if (` | `->L6355` |  |
+| 6362 | `if any(` | `->L6366` |  |
+| 6386 | `if (` | `->L6395` |  |
+| 6401 | `if (` | `->L6412` |  |
+| 6428 | `if route is None or membership is None:` | `->L6429` |  |
+| 6434 | `if any(` | `->L6438` |  |
 
 ## `core.py`
 

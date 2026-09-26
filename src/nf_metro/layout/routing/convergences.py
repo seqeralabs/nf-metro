@@ -2151,8 +2151,10 @@ def _pack_cotravelling_corridor_runs(
 
     Frozen member runs seat first because their geometry is settled before the
     plans reach here, so the bundle they already describe is the reference the
-    plans pack onto rather than something to be moved.  A trunk a corridor
-    grant placed is already packed by its bundle relation and may not move.
+    plans pack onto rather than something to be moved.  On a compiled round a
+    granted trunk's bundle relation already seats it here, so this is a no-op
+    for it; a move this makes on a granted trunk anyway fails the settlement
+    guard.  Packing onto an already-seated trunk has no typed counterpart.
     """
     step = graph_offset_step(graph)
     settled = list(plans)
@@ -2214,8 +2216,11 @@ def _separate_distinct_cotravelling_trunks(
 ) -> tuple[ConvergencePlan, ...]:
     """Greedily seat distinct-line trunks by local proper-crossing count.
 
-    A trunk a corridor grant placed already clears a distinct line's turn-off
-    through its forbidden interval and may not move.
+    On a compiled round a granted trunk's forbidden intervals already clear
+    every co-travelling distinct-line member run and turn-off leg, so this is a
+    no-op for it; a move this makes on a granted trunk anyway fails the
+    settlement guard.  Separation from an already-seated trunk has no typed
+    counterpart.
     """
     step = graph_offset_step(graph)
     settled = list(plans)

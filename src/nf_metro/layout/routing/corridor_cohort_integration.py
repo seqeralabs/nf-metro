@@ -1074,7 +1074,10 @@ class _FootprintBundle:
     """A scalar lane held ``delta`` from a run of its own bundle.
 
     The run is a fixed obstacle where it currently stands, so the relation moves
-    the scalar onto the bundle and never the run onto the scalar.
+    the scalar onto the bundle and never the run onto the scalar.  The run is
+    usually a member carrier's variable footprint; that stays sound only while
+    no relation joins a scalar into a member carrier's component, so a bundle
+    whose run is movable in the scalar's own problem fails closed.
     """
 
     owner_id: str
@@ -1670,9 +1673,15 @@ def _member_footprint_model(
         for variable in request_variables
         if variable.variable_id in carrier_by_variable
     }
+    member_runs = _member_corridor_runs(targets, witnesses)
     intervals.update(
         _cotravelling_turn_off_intervals(
             witnesses, scalar_carriers, offset_step, curve_radius
+        )
+    )
+    intervals.update(
+        _cotravelling_run_intervals(
+            member_runs, scalar_carriers, offset_step, curve_radius
         )
     )
 
@@ -1685,7 +1694,7 @@ def _member_footprint_model(
         tuple(intervals[key] for key in sorted(intervals)),
         _scalar_bundles(
             targets,
-            witnesses,
+            member_runs,
             scalar_requests,
             scalar_carriers,
             offset_step,
@@ -1785,9 +1794,85 @@ def _row_gap(regions: Sequence[CorridorRegion | None]) -> RowGapRegion | None:
     return next((item for item in regions if isinstance(item, RowGapRegion)), None)
 
 
-def _scalar_bundles(
+def _member_corridor_runs(
     targets: Sequence[CorridorCohortTarget],
     witnesses: tuple[CorridorFootprintWitness, ...],
+) -> tuple[CorridorFootprintWitness, ...]:
+    """Every interior run of a member route no convergence owns."""
+    targets_by_identity = {
+        (target.member_id, target.edge_key): target for target in targets
+    }
+    return tuple(
+        witness
+        for witness in witnesses
+        if (target := targets_by_identity.get((witness.member_id, witness.edge_key)))
+        is not None
+        and target.system_id is not None
+        and not target.legal_crossing_segment_ranks
+        and _interior_run(witness, target)
+    )
+
+
+def _cotravelling_run_intervals(
+    runs: tuple[CorridorFootprintWitness, ...],
+    scalar_carriers: Mapping[str, CorridorFootprintWitness],
+    offset_step: float,
+    curve_radius: float,
+) -> dict[tuple[str, str], CorridorForbiddenInterval]:
+    """Forbid a crowded scalar lane every distinct line co-travelling its span.
+
+    Once a distinct line's run travelling the same way lies closer than one
+    pitch, the scalar has to clear every such run along its span by a pitch,
+    which leaves it exactly the lanes ``_separate_distinct_cotravelling_trunks``
+    chooses among.  A scalar already a pitch clear of each keeps its lane.  Only
+    a scalar whose coordinate is a Y takes part, as only those are separated.
+    """
+    pitch = cotravelling_lane_clearance(
+        same_line=False,
+        counter_running=False,
+        curve_radius=curve_radius,
+        offset_step=offset_step,
+    )
+    intervals: dict[tuple[str, str], CorridorForbiddenInterval] = {}
+    for variable_id, carrier in scalar_carriers.items():
+        if carrier.axis != 1:
+            continue
+        neighbours = tuple(
+            run
+            for run in runs
+            if run.axis == carrier.axis
+            and run.direction is carrier.direction
+            and run.line_id != carrier.line_id
+            and spans_share_corridor(
+                carrier.longitudinal_start,
+                carrier.longitudinal_end,
+                run.longitudinal_start,
+                run.longitudinal_end,
+            )
+        )
+        if not any(
+            abs(run.coordinate - carrier.coordinate) < pitch - COORD_TOLERANCE
+            for run in neighbours
+        ):
+            continue
+        intervals.update(
+            {
+                (variable_id, run.footprint_id): CorridorForbiddenInterval(
+                    variable_id,
+                    run.footprint_id,
+                    run.coordinate - pitch,
+                    run.coordinate + pitch,
+                    run.semantic_rank,
+                )
+                for run in neighbours
+            }
+        )
+    return intervals
+
+
+def _scalar_bundles(
+    targets: Sequence[CorridorCohortTarget],
+    runs: tuple[CorridorFootprintWitness, ...],
     scalar_requests: Sequence[CorridorScalarRequest],
     scalar_carriers: Mapping[str, CorridorFootprintWitness],
     offset_step: float,
@@ -1810,15 +1895,6 @@ def _scalar_bundles(
     targets_by_identity = {
         (target.member_id, target.edge_key): target for target in targets
     }
-    runs = tuple(
-        witness
-        for witness in witnesses
-        if (target := targets_by_identity.get((witness.member_id, witness.edge_key)))
-        is not None
-        and target.system_id is not None
-        and not target.legal_crossing_segment_ranks
-        and _interior_run(witness, target)
-    )
     run_corridors = {run.footprint_id: _row_gap(run.regions) for run in runs}
 
     def bundled(
@@ -2642,6 +2718,13 @@ def _problem(
         if not bundle_lane_ids:
             continue
         witness = witnesses_by_id[bundle.witness_id]
+        if witness.coordinate_variable_id is not None and lane_ids(
+            witness.coordinate_variable_id
+        ):
+            raise CorridorCohortCompilationError(
+                f"corridor bundle {bundle.owner_id} anchors on a run this "
+                "component also moves"
+            )
         relation_obstacles[bundle.owner_id] = CorridorObstacle(
             bundle.owner_id,
             witness.coordinate,
