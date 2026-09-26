@@ -23,6 +23,7 @@ from nf_metro.layout.constants import (
     graph_offset_step,
 )
 from nf_metro.layout.geometry import (
+    Axis,
     AxisFrame,
     lanes_run_along_x,
     lanes_run_along_y,
@@ -85,14 +86,20 @@ def iter_sole_trunk_continuations(
     """Yield the full-graph-proven continuation relation, with sections.
 
     Carries every exclusion :func:`continuation_track_predecessors` applies, so
-    a vertical (TB/BT) section and a file-icon station yield nothing here
-    either. A test that needs those chains has to derive them from the
-    sections' own edges rather than from this iterator.
+    a file-icon station yields nothing here either. A test that needs those
+    chains has to derive them from the sections' own edges rather than from
+    this iterator.
     """
     for node, predecessor in continuation_track_predecessors(graph).items():
         section_id = graph.stations[node].section_id
         assert section_id is not None
         yield section_id, predecessor, node
+
+
+def section_lane_axis(graph: MetroGraph, section_id: str) -> Axis:
+    """The secondary (lane) axis of *section_id*: Y for LR/RL, X for TB/BT."""
+    direction = graph.sections[section_id].direction
+    return AxisFrame.for_direction(direction, 1.0, 1.0).secondary
 
 
 def continuation_track_is_realizable(
@@ -104,14 +111,15 @@ def continuation_track_is_realizable(
     section_id = station.section_id
     if section_id is None or predecessor_station.section_id != section_id:
         return False
-    target = predecessor_station.y
+    lane = section_lane_axis(graph, section_id)
+    target = lane.get(predecessor_station)
     return not any(
         other_id not in {node, predecessor}
         and other.section_id == section_id
         and other.layer == station.layer
         and not other.is_port
         and not other.is_hidden
-        and abs(other.y - target) < SAME_COORD_TOLERANCE
+        and abs(lane.get(other) - target) < SAME_COORD_TOLERANCE
         for other_id, other in graph.stations.items()
     )
 
@@ -188,18 +196,19 @@ def _line_bypasses_boundary(
     return False
 
 
-def _leads_to_flow_side_entry(
+def _leads_to_entry_port(
     graph: MetroGraph,
     line_targets: Mapping[str, Mapping[str, set[str]]],
     line_id: str,
     exit_port_id: str,
 ) -> bool:
-    """Whether *line_id* reaches an entry port on a vertical section boundary.
+    """Whether *line_id* reaches a downstream entry port from *exit_port_id*.
 
     Such an entry proves the line continues past the section it is leaving,
     rather than ending at the exit port itself.  The walk passes through
     junctions, so an exit that fans out to several downstream sections reaches
-    the entries behind its junction.
+    the entries behind its junction.  Any entry side counts: the proof is that
+    the line carries on, whichever face of the next section it arrives on.
     """
     targets_for_line = line_targets.get(line_id, {})
     visited: set[str] = set()
@@ -211,54 +220,34 @@ def _leads_to_flow_side_entry(
         visited.add(station_id)
         if station_id in graph.junction_ids:
             frontier.extend(targets_for_line.get(station_id, ()))
-        elif (
-            (port := graph.ports.get(station_id)) is not None
-            and port.is_entry
-            and port.side in {PortSide.LEFT, PortSide.RIGHT}
-        ):
+        elif (port := graph.ports.get(station_id)) is not None and port.is_entry:
             return True
     return False
 
 
-def _shared_y_lane_section(
-    graph: MetroGraph, predecessor: str, node: str
-) -> str | None:
-    """The one Y-lane section a sole predecessor->node link stays inside.
-
-    A shared secondary track exists only where the section stacks its lines
-    along Y.  One that lanes along X separates its lines on the flow's own
-    cross axis, so there is no common Y track to inherit.
-    """
+def _shared_lane_section(graph: MetroGraph, predecessor: str, node: str) -> str | None:
+    """The one section a sole predecessor->node link stays inside, if any."""
     section_id = graph.stations[predecessor].section_id
-    if (
-        section_id is None
-        or graph.stations[node].section_id != section_id
-        or lanes_run_along_x(graph.sections[section_id].direction)
-    ):
+    if section_id is None or graph.stations[node].section_id != section_id:
         return None
     return section_id
 
 
 def continuation_track_predecessors(graph: MetroGraph) -> dict[str, str]:
-    """Return horizontal track inheritance proven against the complete graph.
+    """Return track inheritance proven against the complete graph.
 
     Seeds cross a safe line-membership transition. Equal-line closure then
     extends only through one-in/one-out visible chains. Ports and hidden nodes
     remain in the adjacency and reachability facts, so an external branch or a
     hidden merge prevents inheritance instead of disappearing from the proof.
 
-    Scoped to horizontal (LR/RL) sections: a vertical (TB/BT) section
-    contributes no relation at all. It needs none -- a vertical sole successor
-    already settles on its predecessor's lane column unaided -- and admitting
-    one re-seats bundle geometry this relation has no business moving (it
-    re-seats ``seed_41`` and gains it a defect class). Both halves of that claim
-    are locked outside this function, against the sections' own edges rather
-    than against the answer here: ``tests/test_continuation_tracks.py`` for the
-    two named fixtures, and
-    ``test_vertical_passthrough_chain_holds_one_lane_column`` in
-    ``tests/test_layout_invariants.py`` across the corpus.
+    Orientation-agnostic: the inherited track is the section's lane-axis
+    coordinate (:func:`section_lane_axis` -- Y for LR/RL, X for TB/BT), and an
+    added line proves the chain continues when it leaves through any exit port
+    and reaches any downstream entry port.  Without the relation, a vertical
+    chain whose line changes snaps each station to its own line's base column.
 
-    A file-icon (blank-terminus) station is also outside the proof. It is drawn
+    A file-icon (blank-terminus) station is outside the proof. It is drawn
     as an icon at the line convergence rather than a labelled pill and the
     router seats it against the producer it hangs off, so naming it here would
     re-assert a placement this relation does not own.
@@ -311,11 +300,15 @@ def continuation_track_predecessors(graph: MetroGraph) -> dict[str, str]:
         if len(non_port_predecessors) != 1:
             continue
         predecessor = next(iter(non_port_predecessors))
+        shared_section_id = _shared_lane_section(graph, predecessor, node)
+        if shared_section_id is None:
+            continue
+        lane = section_lane_axis(graph, shared_section_id)
         port_predecessors = node_predecessors - non_port_predecessors
         # A node fed by a section-boundary port alongside its sole internal
         # predecessor inherits that predecessor's track when the same port also
         # feeds the predecessor: they share one boundary source, so the port
-        # imposes no independent Y constraint.  Confined to authored-grid
+        # imposes no independent lane constraint.  Confined to authored-grid
         # layouts, where the inter-section port resnap re-anchors the shifted
         # carrier's port; auto-layout freezes ports for routing stability, so a
         # lifted continuation there would strand its port off the station.  A
@@ -327,9 +320,10 @@ def continuation_track_predecessors(graph: MetroGraph) -> dict[str, str]:
             shares_port_with_predecessor = not (
                 port_predecessors - predecessors[predecessor]
             )
-            predecessor_y = graph.stations[predecessor].y
+            predecessor_lane = lane.get(graph.stations[predecessor])
             port_off_predecessor_track = all(
-                abs(graph.stations[p].y - predecessor_y) >= SAME_COORD_TOLERANCE
+                abs(lane.get(graph.stations[p]) - predecessor_lane)
+                >= SAME_COORD_TOLERANCE
                 for p in port_predecessors
             )
             if not (
@@ -342,8 +336,7 @@ def continuation_track_predecessors(graph: MetroGraph) -> dict[str, str]:
             continue
         predecessor_station = graph.stations[predecessor]
         node_station = graph.stations[node]
-        shared_section_id = _shared_y_lane_section(graph, predecessor, node)
-        if targets[predecessor] != {node} or shared_section_id is None:
+        if targets[predecessor] != {node}:
             continue
         predecessor_lines = line_memberships[predecessor]
         node_lines = line_memberships[node]
@@ -380,9 +373,7 @@ def continuation_track_predecessors(graph: MetroGraph) -> dict[str, str]:
             rejoined_lines = (predecessor_lines & node_lines) - connecting_lines[
                 predecessor, node
             ]
-            flow_exit_ports = flow_axis_exit_ports(
-                graph.sections[shared_section_id], graph
-            )
+            exit_ports = set(graph.sections[shared_section_id].exit_ports)
             added_continues = (
                 any(
                     target in visible
@@ -392,12 +383,10 @@ def continuation_track_predecessors(graph: MetroGraph) -> dict[str, str]:
                 )
                 or len(added_lines) == 1
                 and any(
-                    target in flow_exit_ports
+                    target in exit_ports
                     and any(
                         line_id in connecting_lines[node, target]
-                        and _leads_to_flow_side_entry(
-                            graph, line_targets, line_id, target
-                        )
+                        and _leads_to_entry_port(graph, line_targets, line_id, target)
                         for line_id in added_lines
                     )
                     for target in targets[node]
@@ -417,7 +406,7 @@ def continuation_track_predecessors(graph: MetroGraph) -> dict[str, str]:
         if node in inherited or node not in visible:
             continue
         if (
-            _shared_y_lane_section(graph, predecessor, node) is None
+            _shared_lane_section(graph, predecessor, node) is None
             or predecessors[node] != {predecessor}
             or targets[predecessor] != {node}
             or line_memberships[predecessor] != line_memberships[node]

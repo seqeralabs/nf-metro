@@ -838,12 +838,12 @@ in pipeline order.
   from `CONTENT_PLACEMENT_PHASES`.
 - **Precondition**: Stage 4.10 has fanned the full-bundle columns of this pass
   (against the local port Y).
-- **Postcondition**: In every section whose lanes run along Y, each station the
-  continuation relation names - a visible one-in/one-out chain proven against
-  the whole graph - sits on its predecessor's Y wherever that track is free of
-  another station at the same layer.
-- **Invariants preserved**: Port anchors, section bboxes, stations the relation
-  declines to name, and sections whose lanes run along X.
+- **Postcondition**: In every section, each station the continuation relation
+  names - a visible one-in/one-out chain proven against the whole graph - sits
+  on its predecessor's lane-axis coordinate (Y for LR/RL, X for TB/BT) wherever
+  that lane is free of another station at the same layer.
+- **Invariants preserved**: Port anchors, section bboxes, each station's
+  flow-axis coordinate, and stations the relation declines to name.
 - **Related tests**: `test_bundle_terminator_successor_stays_on_trunk`.
 - **Lifecycle:** transient - superseded by Stage 6.7a, which re-runs the same
   carry once Stage 6.7 has re-fanned those columns against the final trunk Y.
@@ -1138,7 +1138,8 @@ in pipeline order.
 - **Precondition**: Stage 6.7 has re-centred full-bundle columns against the
   row's final trunk Y.
 - **Postcondition**: Each station the continuation relation names sits on its
-  predecessor's post-recenter Y wherever that track is free.
+  predecessor's post-recenter lane-axis coordinate (Y for LR/RL, X for TB/BT)
+  wherever that lane is free.
 - **Invariants preserved**: Port anchors and the recenter's own symmetry; only
   continuation stations move.
 - **Related tests**: `test_bundle_terminator_successor_stays_on_trunk`.

@@ -33,6 +33,7 @@ from nf_metro.layout.phases._common import (
     iter_flat_seam_solo_entries,
     line_forks_within_section,
     seam_is_flat,
+    section_lane_axis,
 )
 from nf_metro.layout.route_topology import divergence_junction_exit_ports
 from nf_metro.layout.routing.arranger import BoundaryConfig, lane_order
@@ -3240,6 +3241,15 @@ def _same_section(graph: MetroGraph, id_a: str, id_b: str) -> bool:
     return bool(sec_a and sec_b and sec_a == sec_b)
 
 
+def _share_lane(graph: MetroGraph, id_a: str, id_b: str) -> bool:
+    """Whether two :func:`_same_section` stations sit on one lane coordinate."""
+    a, b = graph.stations[id_a], graph.stations[id_b]
+    section_id = a.section_id or b.section_id
+    assert section_id is not None
+    lane = section_lane_axis(graph, section_id)
+    return abs(lane.get(a) - lane.get(b)) <= _SAME_Y_TOLERANCE
+
+
 def _would_collide(
     ctx: _OffsetCtx, station_id: str, line_id: str, value: float
 ) -> bool:
@@ -3957,11 +3967,13 @@ def _recenter_partial_fan_branches(ctx: _OffsetCtx) -> None:
 
 
 def _reconcile_horizontal_offsets(ctx: _OffsetCtx, max_iterations: int = 10) -> None:
-    """Snap offsets for same-section edges where endpoints share base Y.
+    """Snap offsets for same-section edges whose endpoints share a lane.
 
-    Only processes edges where both endpoints belong to the same
-    section. Inter-section offset mismatches are handled by routing
-    (L-shaped paths with vertical segments), so they must not be
+    A lane is the section's lane-axis coordinate -- Y for LR/RL, X for TB/BT --
+    so the edges processed are the straight runs along the flow, where an
+    offset mismatch draws as a jog.  Only processes edges where both endpoints
+    belong to the same section. Inter-section offset mismatches are handled by
+    routing (L-shaped paths with vertical segments), so they must not be
     reconciled here - doing so cascades offsets across section
     boundaries and breaks per-section reindexing.
 
@@ -3978,14 +3990,12 @@ def _reconcile_horizontal_offsets(ctx: _OffsetCtx, max_iterations: int = 10) -> 
     (:func:`_reinherit_junction_lanes`), which is outside the same-section
     filter above: a junction has no section of its own.
     """
-    # Pre-filter to edges where both endpoints share the same Y and
-    # section. These properties are immutable during reconciliation.
+    # Section membership and lane coordinates are immutable during reconciliation.
     candidates = [
         edge
         for edge in ctx.graph.edges
-        if abs(ctx.graph.stations[edge.source].y - ctx.graph.stations[edge.target].y)
-        <= _SAME_Y_TOLERANCE
-        and _same_section(ctx.graph, edge.source, edge.target)
+        if _same_section(ctx.graph, edge.source, edge.target)
+        and _share_lane(ctx.graph, edge.source, edge.target)
     ]
 
     moved: set[str] = set()

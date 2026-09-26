@@ -5728,13 +5728,13 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
         "B",
         issue_pin=("#946", "#977"),
         narrow_reason=(
-            "Scoped to an in-section chain of horizontal (LR/RL) sections whose "
-            "node has one visible predecessor and whose predecessor has that "
-            "node as its one complete forward target -- membership-changing or "
-            "membership-preserving, since equal-line closure extends the same "
-            "proof along a chain. Sibling paths, lines that bypass an "
-            "intermediate carrier, vertical sections, and file-icon stations "
-            "stay out; each keeps its own track for a reason the relation's "
+            "Scoped to an in-section chain, in a section of any orientation, "
+            "whose node has one visible predecessor and whose predecessor has "
+            "that node as its one complete forward target -- "
+            "membership-changing or membership-preserving, since equal-line "
+            "closure extends the same proof along a chain. Sibling paths, lines "
+            "that bypass an intermediate carrier, and file-icon stations stay "
+            "out; each keeps its own track for a reason the relation's "
             "docstring records."
         ),
     ),

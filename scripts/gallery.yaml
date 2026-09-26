@@ -834,6 +834,14 @@ gallery:
       down to a station directly below the merge while a collinear feeder peels off. The continuation
       rides the trunk slot so it drops straight, instead of being forced outboard where it kinks
       at the merge and crosses the collinear feeder (issue #1012)."
+  - id: tb_line_change_chain
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      "A linear chain in a `%%metro direction: TB` section whose line changes at
+      every hop, with no fork or merge anywhere along it. Each station continues
+      its predecessor, so the whole chain drops straight down one lane column
+      instead of zigzagging between the base columns of its lines (issue #2042)."
   - id: tb_column_continuation_two_lines
     source_dir: examples/topologies
     category: TB / BT Sections

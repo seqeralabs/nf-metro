@@ -368,21 +368,14 @@ graph LR
 
 
 @pytest.mark.parametrize("direction", ("TB", "BT"))
-def test_vertical_flow_contributes_no_relation_yet_keeps_one_lane(
+def test_vertical_flow_names_its_continuation_and_keeps_one_lane(
     direction: str,
 ) -> None:
-    """A vertical section reports no continuation, and needs none.
-
-    Horizontal-only is the relation's contract, so the empty answer here is the
-    specified one rather than an accident: a change that started emitting
-    vertical relations would red this. The same chain still settles with every
-    node on its predecessor's lane column, which is asserted against the settled
-    geometry so the empty relation costs no guarantee.
-    """
+    """A vertical section's chain is named by the relation and holds one lane."""
     graph = _transition_graph(direction)
     assert lanes_run_along_x(graph.sections["target"].direction)
 
-    assert continuation_track_predecessors(graph) == {}
+    assert continuation_track_predecessors(graph) == {"node": "pred", "tail": "node"}
 
     compute_layout(graph)
     lanes = _lane_columns(graph, ("pred", "node", "tail"))
@@ -390,19 +383,18 @@ def test_vertical_flow_contributes_no_relation_yet_keeps_one_lane(
     assert max(lanes) - min(lanes) <= SAME_COORD_TOLERANCE, lanes
 
 
-def test_tb_passthrough_fixture_keeps_its_column_without_a_relation() -> None:
+def test_tb_passthrough_fixture_names_its_merge_tail_continuation() -> None:
     """The TB passthrough corpus fixture's merge->tail chain shares one column.
 
     ``merge`` is ``tail``'s only predecessor and ``tail`` its only target, so the
-    chain is a sole continuation by the section's own edges; the horizontal-only
-    relation declines to name it, and the column it would have pulled ``tail``
-    onto is where the vertical layout puts it anyway.
+    chain is a sole continuation by the section's own edges and the relation
+    names it.
     """
     path = ROOT / "examples" / "topologies" / "tb_passthrough_continuation.mmd"
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
     assert lanes_run_along_x(graph.sections["work"].direction)
 
-    assert continuation_track_predecessors(graph) == {}
+    assert continuation_track_predecessors(graph) == {"tail": "merge"}
     assert [edge.source for edge in graph.edges_to("tail")] == ["merge"]
     assert [edge.target for edge in graph.edges_from("merge")] == ["tail"]
 
@@ -412,10 +404,35 @@ def test_tb_passthrough_fixture_keeps_its_column_without_a_relation() -> None:
     assert abs(tail_lane - merge_lane) <= SAME_COORD_TOLERANCE
 
 
+TB_LINE_CHANGE_CHAIN = ROOT / "examples" / "topologies" / "tb_line_change_chain.mmd"
 LR_LINE_HANDOFF = ROOT / "examples" / "topologies" / "lr_line_handoff_fanning_exit.mmd"
 
 
-@pytest.mark.parametrize("direction", ("LR",))
+@pytest.mark.parametrize("direction", ("TB", "BT"))
+def test_vertical_chain_holds_its_lane_column_across_a_line_change(
+    direction: str,
+) -> None:
+    """A vertical chain that swaps lines mid-way stays in one lane column."""
+    text = TB_LINE_CHANGE_CHAIN.read_text().replace(
+        "%%metro direction: TB", f"%%metro direction: {direction}"
+    )
+    graph = parse_metro_mermaid(text)
+    chain = ("t0", "t1", "t2", "t3")
+
+    assert continuation_track_predecessors(graph) == {
+        "a1": "a0",
+        "t1": "t0",
+        "t2": "t1",
+        "t3": "t2",
+    }
+
+    compute_layout(graph, validate=True)
+    lanes = _lane_columns(graph, chain)
+
+    assert max(lanes) - min(lanes) <= SAME_COORD_TOLERANCE, dict(zip(chain, lanes))
+
+
+@pytest.mark.parametrize("direction", ("LR", "TB"))
 def test_line_handed_to_a_fanning_exit_seeds_inheritance(direction: str) -> None:
     """A line leaving through an exit that fans out via a junction continues.
 
