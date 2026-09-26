@@ -3134,6 +3134,37 @@ def _compaction_peer_conflict(
     return False
 
 
+def _pending_offset(
+    ctx: _OffsetCtx,
+    station_pending: Mapping[str, float],
+    station_id: str,
+    line_id: str,
+) -> float:
+    """*line_id*'s offset at *station_id*, a scheduled compaction move first."""
+    return station_pending.get(line_id, ctx.offsets.get((station_id, line_id), 0.0))
+
+
+def _line_at_slot(
+    ctx: _OffsetCtx,
+    station_pending: Mapping[str, float],
+    station_id: str,
+    slot: float,
+    *,
+    exclude: str | None = None,
+) -> str | None:
+    """The first line other than *exclude* sitting on *slot* at *station_id*."""
+    return next(
+        (
+            line_id
+            for line_id in ctx.graph.station_lines(station_id)
+            if line_id != exclude
+            and abs(_pending_offset(ctx, station_pending, station_id, line_id) - slot)
+            < _OFFSET_EQ_TOLERANCE
+        ),
+        None,
+    )
+
+
 def _collider_slot(
     ctx: _OffsetCtx,
     station_id: str,
@@ -3153,16 +3184,10 @@ def _collider_slot(
     """
     step = ctx.offset_step if claimed > vacated else -ctx.offset_step
     beyond = claimed + step
-    beyond_taken = any(
-        line_id != collider
-        and abs(
-            station_pending.get(line_id, ctx.offsets.get((station_id, line_id), 0.0))
-            - beyond
-        )
-        < _OFFSET_EQ_TOLERANCE
-        for line_id in ctx.graph.station_lines(station_id)
+    beyond_holder = _line_at_slot(
+        ctx, station_pending, station_id, beyond, exclude=collider
     )
-    return vacated if beyond_taken else beyond
+    return vacated if beyond_holder is not None else beyond
 
 
 def _propagate_compaction(
@@ -3209,11 +3234,7 @@ def _propagate_compaction(
             if (nbr_sid, lid) in visited:
                 continue
 
-            # Read pending value if a prior BFS step already scheduled a
-            # change, otherwise use current offset.
-            nbr_cur = pending.get(nbr_sid, {}).get(
-                lid, ctx.offsets.get((nbr_sid, lid), 0.0)
-            )
+            nbr_cur = _pending_offset(ctx, pending.get(nbr_sid, {}), nbr_sid, lid)
             if abs(nbr_cur - new_off) < _OFFSET_EQ_TOLERANCE:
                 continue
 
@@ -3230,20 +3251,10 @@ def _propagate_compaction(
                 queue.append((nbr_sid, lid))
                 continue
 
-            # Check for collision with another line's offset
-            collision_lid = None
-            for other_lid in nbr_lines:
-                if other_lid == lid:
-                    continue
-                other_off = pending.get(nbr_sid, {}).get(
-                    other_lid,
-                    ctx.offsets.get((nbr_sid, other_lid), 0.0),
-                )
-                if abs(other_off - new_off) < _OFFSET_EQ_TOLERANCE:
-                    collision_lid = other_lid
-                    break
-
             nbr_pending = pending.setdefault(nbr_sid, {})
+            collision_lid = _line_at_slot(
+                ctx, nbr_pending, nbr_sid, new_off, exclude=lid
+            )
             nbr_pending[lid] = new_off
             queue.append((nbr_sid, lid))
             if collision_lid is not None:
