@@ -83,6 +83,7 @@ from nf_metro.layout.routing.common import (
     inter_row_channel_y,
     inter_row_gap_upper_row,
     inter_row_wrap_band,
+    is_trailing_exit,
     iter_horizontal_trunks,
     iter_vertical_segments,
     lines_by_section,
@@ -380,7 +381,12 @@ class _InterFacts:
         (:func:`stack_diverted_junction_branches`).
         """
         if self.is_tb_bottom_exit:
-            return self.v_segment_crosses_other_section(self.sx, self.sy, self.ty)
+            return any(
+                self.lies_between_endpoint_rows(section)
+                for section in v_segment_crossed_sections(
+                    self.graph, self.sx, self.sy, self.ty, self.endpoint_section_ids
+                )
+            )
         if not self.continues_tb_exit_through_junction:
             return False
         crossed = list(
@@ -400,6 +406,22 @@ class _InterFacts:
         return self.edge in diverted and any(
             not carries_line_along_column(section, self.edge.line_id, section_lines)
             for section in crossed
+        )
+
+    def lies_between_endpoint_rows(self, section: Section) -> bool:
+        """Whether *section* stands in a grid row strictly between the endpoints'.
+
+        A stack to divert round is a box in a row the run has to pass; one in
+        the target's own row is only reached by the straight run's overshoot
+        past the gap the flow-direction route turns in.  Without both rows,
+        every section counts.
+        """
+        return (
+            self.src_row is None
+            or self.tgt_row is None
+            or min(self.src_row, self.tgt_row)
+            < section.grid_row
+            < max(self.src_row, self.tgt_row)
         )
 
     @property
@@ -2410,6 +2432,7 @@ class _AroundStackGeometry:
     seam: _SourceSeam
     cross_lo: float
     cross_hi: float
+    channel_direction: Direction
 
 
 def _around_stack_geometry(
@@ -2517,8 +2540,19 @@ def _around_stack_geometry(
     turn_direction = segment_direction(points[1], points[2])
     channel_direction = segment_direction(points[2], points[3])
     return_direction = segment_direction(points[3], points[4])
-    assert run_direction is not None and turn_direction is not None
-    assert channel_direction is not None and return_direction is not None
+    if (
+        run_direction is None
+        or turn_direction is None
+        or channel_direction is None
+        or return_direction is None
+    ):
+        from nf_metro.layout.routing.exit_turns import ExitTurnInvariantError
+
+        raise ExitTurnInvariantError(
+            f"around-stack detour for {edge!r} collapses a leg: "
+            f"exit ({sx}, {sy}), corridors y={cy_out}/{cy_entry}, channel x={vx}, "
+            f"target x={tx}"
+        )
     source_x = sx - run_direction.sign * own_offset
     channel_x = vx - channel_direction.sign * own_offset
     channel_y_start = cy_out + turn_direction.sign * own_offset
@@ -2533,6 +2567,7 @@ def _around_stack_geometry(
         _SourceSeam(run_direction, turn_direction, sy, channel_y_start),
         min(source_x, channel_x),
         max(source_x, channel_x),
+        channel_direction,
     )
 
 
@@ -2548,9 +2583,7 @@ def _route_around_stack(f: _InterFacts) -> RoutedPath | None:
         base_radius=ctx.curve_radius,
         bundle_offsets=list(geometry.bundle_offsets),
     )
-    channel_direction = segment_direction(geometry.points[2], geometry.points[3])
-    assert channel_direction is not None
-    _declare_channel(route, ctx, geometry.points[2][0], channel_direction)
+    _declare_channel(route, ctx, geometry.points[2][0], geometry.channel_direction)
     return route
 
 
@@ -4885,9 +4918,9 @@ def _perp_entry_junction_straight_drop(
 
     The drop launches from the junction's lane on the axis its feeder arrives
     across: a junction fed along a row holds each line's lane on Y, so the drop
-    turns down from that lane; one fed down the column through a TOP/BOTTOM
-    exit already holds the lane on X, and the drop carries straight on from the
-    fork with no step along its travel.
+    turns down from that lane; one fed down the column through a vertical-flow
+    section's trailing exit already holds the lane on X, and the drop carries
+    straight on from the fork with no step along its travel.
 
     Returns ``None`` when this shortcut doesn't apply, so the caller
     continues with the ordinary lead-in.
@@ -4901,10 +4934,8 @@ def _perp_entry_junction_straight_drop(
         ctx, edge, resolve_section(ctx.graph, tgt), tx, edge.line_id
     )
     column = tx if crossing_x is None else crossing_x
-    exit_port = ctx.graph.ports.get(ctx.divergence_exit_ports.get(src.id, ""))
-    fed_down_the_column = exit_port is not None and exit_port.side in (
-        PortSide.TOP,
-        PortSide.BOTTOM,
+    fed_down_the_column = is_trailing_exit(
+        ctx.graph, ctx.graph.ports.get(ctx.divergence_exit_ports.get(src.id, ""))
     )
     launch_y = sy if fed_down_the_column else sy + src_off
     drop = route_along(

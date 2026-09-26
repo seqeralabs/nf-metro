@@ -7,6 +7,7 @@ from nf_metro.layout.constants import (
     JUNCTION_MARGIN,
 )
 from nf_metro.layout.geometry import sections_share_a_column
+from nf_metro.layout.routing.common import is_trailing_exit
 from nf_metro.parser.model import LineSpread, MetroGraph, PortSide, Station
 from nf_metro.parser.route_topology import build_route_topology_query
 
@@ -96,16 +97,21 @@ def _divergence_junction_xy(
     exit_x: float,
     exit_y: float,
     margin: float,
-) -> tuple[float, float]:
+) -> tuple[float, float] | None:
     """Where a divergence junction stands off the exit port feeding it.
 
     The junction sits a margin out from the port along the direction the line
     leaves it, so the feeder reaches it as one straight run on the port's own
     column (TOP/BOTTOM) or row (LEFT/RIGHT).  :func:`_position_junctions` writes
     this position and :func:`_resolve_source_xy` predicts it before junctions
-    are placed, so both read it here.
+    are placed, so both read it here.  A TOP exit is placed this way only as a
+    vertical-flow section's trailing exit; any other TOP exit has no placement
+    here (``None``) and each caller keeps its own.
     """
-    side = graph.ports[exit_port_id].side
+    port = graph.ports[exit_port_id]
+    side = port.side
+    if side is PortSide.TOP and not is_trailing_exit(graph, port):
+        return None
     if side in (PortSide.TOP, PortSide.BOTTOM):
         return exit_x, exit_y + (margin if side is PortSide.BOTTOM else -margin)
     direction = 1.0 if side is PortSide.RIGHT else -1.0
@@ -228,10 +234,15 @@ def _position_junctions(graph: MetroGraph) -> None:
                 _junction_outgoing_line_count(graph, jid)
             )
             exit_port_obj = graph.ports.get(exit_port_id) if exit_port_id else None
-            if exit_port_obj is not None:
-                junction.x, junction.y = _divergence_junction_xy(
+            placed = (
+                _divergence_junction_xy(
                     graph, jid, exit_port_obj.id, exit_port_x, exit_port_y, margin
                 )
+                if exit_port_obj is not None
+                else None
+            )
+            if placed is not None:
+                junction.x, junction.y = placed
             else:
                 nearest_entry_x = min(entry_port_xs, key=lambda x: abs(x - exit_port_x))
                 direction = 1.0 if nearest_entry_x > exit_port_x else -1.0
@@ -340,9 +351,10 @@ def _resolve_source_xy(
         margin = _required_junction_margin(
             _junction_outgoing_line_count(graph, edge_source)
         )
-        return _divergence_junction_xy(
+        placed = _divergence_junction_xy(
             graph, edge_source, e.source, exit_st.x, exit_st.y, margin
         )
+        return placed if placed is not None else (exit_st.x + margin, exit_st.y)
 
     # Recurse through chained junctions to find the underlying exit port.
     for js in chained:

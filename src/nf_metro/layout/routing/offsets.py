@@ -37,11 +37,11 @@ from nf_metro.layout.phases._common import (
 from nf_metro.layout.route_topology import divergence_junction_exit_ports
 from nf_metro.layout.routing.arranger import BoundaryConfig, lane_order
 from nf_metro.layout.routing.common import (
+    is_trailing_exit,
     merge_junction_ids,
     needs_perp_approach_fan,
     perp_entry_consumer,
     tb_right_entry_sections,
-    trailing_perp_side,
     vertical_flow_sections,
 )
 from nf_metro.layout.routing.context import (
@@ -2116,13 +2116,9 @@ def _slot_perp_fan_bundle(ctx: _OffsetCtx, port_id: str) -> None:
 
 def _faces_trailing_exit(ctx: _OffsetCtx, entry: Port, feeder: Port | None) -> bool:
     """Whether *feeder* is a TB/BT trailing exit and *entry* the side facing it."""
-    section = ctx.graph.sections.get(feeder.section_id) if feeder is not None else None
     return (
         feeder is not None
-        and not feeder.is_entry
-        and section is not None
-        and section.id in ctx.tb_sections
-        and feeder.side is trailing_perp_side(section.direction)
+        and is_trailing_exit(ctx.graph, feeder)
         and entry.side is not feeder.side
     )
 
@@ -2133,15 +2129,16 @@ def _facing_entries_from_trailing_exits(ctx: _OffsetCtx) -> None:
     A vertical-flow section's trailing exit (BOTTOM for TB, TOP for BT) carries
     each line straight on along its column, preserving the per-line X position,
     into the entry that faces it (TOP below a BOTTOM exit, BOTTOM above a TOP
-    one).  A divergence junction between the two is transparent: it stands on
-    the exit's column, and a branch leaving it rides the lane it arrived on.
-    How the entry port matches depends on the receiver's flow axis:
+    one).  How the entry port matches depends on the receiver's flow axis:
 
     - **Vertical (TB/BT) receiver**: a straight column continuation -- both
       sections share the same rotation sign, so the exit offset is copied
       directly for each line.  Lines that arrive via a different feeder (not
       the trailing exit) default to 0.0, collapsing them onto the column
-      spine so they each drop straight to their target station.
+      spine so they each drop straight to their target station.  Only a
+      direct feed is matched: the receiver's first station keeps its own trunk
+      lane, so a lane copied through a divergence junction would part the
+      entry from that trunk inside the fork's planned frame.
 
     - **Horizontal (LR/RL) receiver**: the receiver is marked positive_fan by
       ``_detect_tb_bottom_top_entries``; its in-section draw uses
@@ -2152,7 +2149,10 @@ def _facing_entries_from_trailing_exits(ctx: _OffsetCtx) -> None:
       consumer to the right (the run turns toward larger X) keeps the order,
       ``entry_off = exit_off``; a consumer to the left (toward smaller X)
       reverses it, ``entry_off = max_exit_off - exit_off``.  Lines not at the
-      exit also default to 0.0 and thus collapse to the innermost slot.
+      exit also default to 0.0 and thus collapse to the innermost slot.  A
+      divergence junction between the exit and the entry is transparent: it
+      stands on the exit's column, and a branch leaving it rides the lane it
+      arrived on.
 
     In both cases the 0.0 default for lines absent from the exit port is
     intentional: it collapses lines from other feeders onto one slot, so each
@@ -2181,12 +2181,17 @@ def _facing_entries_from_trailing_exits(ctx: _OffsetCtx) -> None:
             _slot_perp_fan_bundle(ctx, port_id)
             continue
         entry_section = graph.section_for_port(port_obj)
+        column_receiver = lanes_run_along_x(entry_section.direction)
         for edge in graph.edges_to(port_id):
-            exit_port_id = ctx.divergence_exit_ports.get(edge.source, edge.source)
+            exit_port_id = (
+                edge.source
+                if column_receiver
+                else ctx.divergence_exit_ports.get(edge.source, edge.source)
+            )
             if not _faces_trailing_exit(ctx, port_obj, graph.ports.get(exit_port_id)):
                 continue
             lines = graph.station_lines(port_id)
-            if lanes_run_along_x(entry_section.direction):
+            if column_receiver:
                 for lid in lines:
                     ctx.offsets[(port_id, lid)] = ctx.offsets.get(
                         (exit_port_id, lid), 0.0

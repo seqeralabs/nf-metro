@@ -3561,13 +3561,17 @@ def _fork_feed_lane_sign(
 ) -> float:
     """The sign a junction fork carries *line_id*'s lane offset with on its frame.
 
-    A junction owns no section, so its lanes are the ones the station feeding it
-    hands across: they spread on the frame's secondary axis exactly when that
-    feeder does (:func:`_boundary_spreads_on_axis`), and they open toward the
-    side the feeder's own section draws its lanes on (its lane frame's
-    secondary sign), which a positive-fan section flips.  ``0`` when the feeder
-    spreads its lanes on the other axis.
+    A junction fed down its column by a vertical-flow section's trailing exit
+    owns no section, so its lanes are the ones that exit hands across: they
+    spread on the frame's secondary axis exactly when the exit does
+    (:func:`_boundary_spreads_on_axis`), and they open toward the side the
+    exit's section draws its lanes on (its lane frame's secondary sign), which
+    a positive-fan section flips.  ``0`` when the exit spreads its lanes on the
+    other axis.  Any other junction carries its offset unsigned, and only when
+    its frame spreads lanes along y.
     """
+    from nf_metro.layout.routing.common import is_trailing_exit
+
     assert plan.frame is not None
     feeder_id = next(
         (
@@ -3579,6 +3583,8 @@ def _fork_feed_lane_sign(
     )
     if feeder_id is None:
         return 0.0
+    if not is_trailing_exit(graph, graph.ports.get(feeder_id)):
+        return 1.0 if plan.frame.secondary.name == "y" else 0.0
     if plan.direction is not None and not _boundary_spreads_on_axis(
         graph,
         feeder_id,

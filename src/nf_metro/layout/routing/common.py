@@ -181,6 +181,18 @@ def trailing_perp_side(direction: str) -> PortSide:
     return PortSide.BOTTOM if AxisFrame.flow_sign(direction) > 0 else PortSide.TOP
 
 
+def is_trailing_exit(graph: MetroGraph, port: Port | None) -> bool:
+    """Whether *port* is a vertical-flow section's trailing (flow-side) exit."""
+    section = graph.sections.get(port.section_id) if port is not None else None
+    return (
+        port is not None
+        and not port.is_entry
+        and section is not None
+        and lanes_run_along_x(section.direction)
+        and port.side is trailing_perp_side(section.direction)
+    )
+
+
 def lines_by_section(graph: MetroGraph) -> dict[str, set[str]]:
     """Every line a station of each section carries, its ports included."""
     lines: dict[str, set[str]] = defaultdict(set)
