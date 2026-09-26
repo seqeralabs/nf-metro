@@ -1394,7 +1394,9 @@ def _fixed_axis(
 ) -> float | None:
     source = ctx.graph.stations[edge.source]
     target = ctx.graph.stations[edge.target]
-    source_port = ctx.graph.ports.get(edge.source)
+    source_port = ctx.graph.ports.get(
+        ctx.divergence_exit_ports.get(edge.source, edge.source)
+    )
     source_run = (
         Direction.U
         if source_port is not None and source_port.side is PortSide.TOP

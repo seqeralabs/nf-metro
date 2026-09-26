@@ -853,9 +853,12 @@ in pipeline order.
   at the exit port's Y (fan-out) or near the entry port (merge).
 - **Helper**: `_position_junctions` (`phases/junctions.py`).
 - **Precondition**: All port Ys final (Pass B complete).
-- **Postcondition**: Every junction has finite `(x, y)`. Fan-out
-  junctions sit at `exit_port.y` plus a `JUNCTION_MARGIN` X offset
-  toward the targets; merge junctions sit at
+- **Postcondition**: Every junction has finite `(x, y)`. A fan-out
+  junction stands `JUNCTION_MARGIN` out from its exit port along the way the
+  line leaves it: on the port's X, below a BOTTOM exit and above a TOP one; on
+  the port's Y, beyond a LEFT/RIGHT exit. `_resolve_source_xy` predicts the
+  same position through the shared `_divergence_junction_xy`. Merge junctions
+  sit at
   `max(pred.x) + JUNCTION_MARGIN, entry_port.y`. A fan-out junction on a
   LEFT/RIGHT exit stands `EDGE_TO_BUNDLE_CLEARANCE` from the wall instead
   wherever a branch descends the junction's own X - the column is then a

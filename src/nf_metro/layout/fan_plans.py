@@ -3556,16 +3556,16 @@ def _fork_feed_lane_sign(
     graph: MetroGraph,
     plan: FanPlan,
     line_id: str,
-    positive_fan_section_ids: Collection[str],
+    positive_fan: set[str] | None,
 ) -> float:
     """The sign a junction fork carries *line_id*'s lane offset with on its frame.
 
     A junction owns no section, so its lanes are the ones the station feeding it
     hands across: they spread on the frame's secondary axis exactly when that
     feeder does (:func:`_boundary_spreads_on_axis`), and they open toward the
-    side the feeder's own section fans its lanes (:func:`section_lane_sign`),
-    which a TB section's positive-fan membership can flip.  ``0`` when the
-    feeder spreads its lanes on the other axis.
+    side the feeder's own section draws its lanes on (its lane frame's
+    secondary sign), which a positive-fan section flips.  ``0`` when the feeder
+    spreads its lanes on the other axis.
     """
     assert plan.frame is not None
     feeder_id = next(
@@ -3593,7 +3593,9 @@ def _fork_feed_lane_sign(
     )
     if section is None:
         return 1.0
-    return section_lane_sign(section, positive_fan_section_ids)
+    from nf_metro.layout.routing.context import _section_lane_frame
+
+    return _section_lane_frame(graph, section, positive_fan).secondary_sign
 
 
 def _validate_fan_runtime_frame(
@@ -3601,6 +3603,7 @@ def _validate_fan_runtime_frame(
     plan: FanPlan,
     bound_routes: Mapping[ResolvedEdge, RoutedPath],
     station_offsets: dict[tuple[str, str], float],
+    positive_fan: set[str] | None = None,
 ) -> None:
     """Validate final route continuity against one fan's frozen frame."""
     from nf_metro.layout.routing.common import apply_route_offsets
@@ -3718,9 +3721,6 @@ def _validate_fan_runtime_frame(
         for _edge, point, _points in incident
     )
     if carrier is None:
-        from nf_metro.layout.routing.reversal import tb_positive_fan_sections
-
-        positive_fan = tb_positive_fan_sections(graph)
         for line_id, point in fork_endpoints:
             external_offset = _fork_feed_lane_sign(
                 graph, plan, line_id, positive_fan
@@ -3751,13 +3751,15 @@ def validate_fan_route_emissions(
     *,
     planned_system_ids: frozenset[RouteSystemId] | None = None,
     covered_edges: frozenset[ResolvedEdge] = frozenset(),
+    positive_fan: set[str] | None = None,
 ) -> None:
     """Bind every planned fan member and exclusive emitter exactly once.
 
     A leg in *covered_edges* is one another member draws end to end, so it
     carries no geometry of its own: a fan whose path runs over it reads it
     rather than emitting it, and binding it to its carrier would state the
-    carrier's far endpoint at this leg's own.
+    carrier's far endpoint at this leg's own.  *positive_fan* is the routing
+    context's positive-fan section set, derived afresh when not given.
     """
 
     def emitted_plan(plan: FanPlan) -> bool:
@@ -3839,7 +3841,9 @@ def validate_fan_route_emissions(
     route_list = list(routes)
     offset_dict = dict(station_offsets)
     for plan, bound_routes in bound_routes_by_plan:
-        _validate_fan_runtime_frame(graph, plan, bound_routes, offset_dict)
+        _validate_fan_runtime_frame(
+            graph, plan, bound_routes, offset_dict, positive_fan
+        )
     planned_routes = tuple(
         {
             id(route): route

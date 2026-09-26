@@ -41,6 +41,7 @@ from nf_metro.layout.routing.common import (
     needs_perp_approach_fan,
     perp_entry_consumer,
     tb_right_entry_sections,
+    trailing_perp_side,
     vertical_flow_sections,
 )
 from nf_metro.layout.routing.context import (
@@ -2113,29 +2114,45 @@ def _slot_perp_fan_bundle(ctx: _OffsetCtx, port_id: str) -> None:
     _apply_offsets_along_bundle(ctx, port_id, graph.ports[port_id].section_id, new_offs)
 
 
-def _entry_top_from_tb_bottom_exits(ctx: _OffsetCtx) -> None:
-    """Match TOP entry ports to the offsets of feeding TB BOTTOM exits.
+def _faces_trailing_exit(ctx: _OffsetCtx, entry: Port, feeder: Port | None) -> bool:
+    """Whether *feeder* is a TB/BT trailing exit and *entry* the side facing it."""
+    section = ctx.graph.sections.get(feeder.section_id) if feeder is not None else None
+    return (
+        feeder is not None
+        and not feeder.is_entry
+        and section is not None
+        and section.id in ctx.tb_sections
+        and feeder.side is trailing_perp_side(section.direction)
+        and entry.side is not feeder.side
+    )
 
-    A TB BOTTOM exit drops each line straight down, preserving the per-line X
-    position.  How the entry port matches depends on the receiver's flow axis:
+
+def _facing_entries_from_trailing_exits(ctx: _OffsetCtx) -> None:
+    """Match facing entry ports to the offsets of feeding TB/BT trailing exits.
+
+    A vertical-flow section's trailing exit (BOTTOM for TB, TOP for BT) carries
+    each line straight on along its column, preserving the per-line X position,
+    into the entry that faces it (TOP below a BOTTOM exit, BOTTOM above a TOP
+    one).  A divergence junction between the two is transparent: it stands on
+    the exit's column, and a branch leaving it rides the lane it arrived on.
+    How the entry port matches depends on the receiver's flow axis:
 
     - **Vertical (TB/BT) receiver**: a straight column continuation -- both
       sections share the same rotation sign, so the exit offset is copied
       directly for each line.  Lines that arrive via a different feeder (not
-      the TB BOTTOM exit) default to 0.0, collapsing them onto the column
+      the trailing exit) default to 0.0, collapsing them onto the column
       spine so they each drop straight to their target station.
 
     - **Horizontal (LR/RL) receiver**: the receiver is marked positive_fan by
       ``_detect_tb_bottom_top_entries``; its in-section draw uses
-      ``y + offset`` while the drop places line ``i`` at ``x - offset_i``
-      (for a standard-sign TB exit).  The concentric perp-entry corner pairs
-      the line on the inside of the vertical drop with the line on the inside
-      of the horizontal turn-in, and which exit slot lands inside depends on
-      which way the run turns out of the port: a consumer to the right (the
-      run turns toward larger X) keeps the order, ``entry_off = exit_off``; a
-      consumer to the left (toward smaller X) reverses it, ``entry_off =
-      max_exit_off - exit_off``.  Lines not at the exit also default to 0.0 and
-      thus collapse to the innermost slot.
+      ``y + offset`` while the drop places each line on its exit lane.  The
+      concentric perp-entry corner pairs the line on the inside of the column
+      run with the line on the inside of the horizontal turn-in, and which exit
+      slot lands inside depends on which way the run turns out of the port: a
+      consumer to the right (the run turns toward larger X) keeps the order,
+      ``entry_off = exit_off``; a consumer to the left (toward smaller X)
+      reverses it, ``entry_off = max_exit_off - exit_off``.  Lines not at the
+      exit also default to 0.0 and thus collapse to the innermost slot.
 
     In both cases the 0.0 default for lines absent from the exit port is
     intentional: it collapses lines from other feeders onto one slot, so each
@@ -2149,25 +2166,25 @@ def _entry_top_from_tb_bottom_exits(ctx: _OffsetCtx) -> None:
     """
     graph = ctx.graph
     for port_id, port_obj in graph.ports.items():
-        if not port_obj.is_entry or port_obj.side != PortSide.TOP:
+        # Slotting a distinct-line fan orders its feeders top-down, so only a
+        # TOP entry's fan is slotted here; a BOTTOM entry's is left as it is.
+        if (
+            not port_obj.is_entry
+            or port_obj.side in (PortSide.LEFT, PortSide.RIGHT)
+            or (
+                port_obj.side is PortSide.BOTTOM
+                and needs_perp_approach_fan(graph, port_id)
+            )
+        ):
             continue
         if needs_perp_approach_fan(graph, port_id):
             _slot_perp_fan_bundle(ctx, port_id)
             continue
         entry_section = graph.section_for_port(port_obj)
         for edge in graph.edges_to(port_id):
-            src = graph.station_for_edge_source(edge)
-            if not src.is_port:
+            exit_port_id = ctx.divergence_exit_ports.get(edge.source, edge.source)
+            if not _faces_trailing_exit(ctx, port_obj, graph.ports.get(exit_port_id)):
                 continue
-            src_port = graph.ports.get(edge.source)
-            if not (
-                src_port
-                and not src_port.is_entry
-                and src_port.side == PortSide.BOTTOM
-                and src.section_id in ctx.tb_sections
-            ):
-                continue
-            exit_port_id = edge.source
             lines = graph.station_lines(port_id)
             if lanes_run_along_x(entry_section.direction):
                 for lid in lines:
@@ -2635,8 +2652,9 @@ def _compute_entry_port_offsets(ctx: _OffsetCtx) -> None:
     """Compute entry port offsets and propagate to downstream stations.
 
     Handles five cases:
-    1. TOP entry ports fed by TB BOTTOM exits: match the reversed offset
-       scheme used by inter-section routing.
+    1. TOP/BOTTOM entry ports fed by a TB/BT trailing exit, directly or
+       through a divergence junction: match the reversed offset scheme used
+       by inter-section routing.
     2. TOP entry ports fed by the BOTTOM exit straight above: nest the drop
        column and the trunk against the two turns the seam makes.
     3. LEFT/RIGHT entry ports fed by a single LR/RL exit: propagate
@@ -2646,7 +2664,7 @@ def _compute_entry_port_offsets(ctx: _OffsetCtx) -> None:
     5. LEFT/RIGHT entry ports of a TB/BT section whose lines land on two or
        more distinct columns: reorder the bundle so the turns nest.
     """
-    _entry_top_from_tb_bottom_exits(ctx)
+    _facing_entries_from_trailing_exits(ctx)
     _order_perp_entry_seam_lanes(ctx)
     _propagate_lr_rl_exit_to_entry(ctx)
     _inherit_level_convergence_entry_offsets(ctx)

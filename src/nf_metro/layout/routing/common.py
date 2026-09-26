@@ -180,6 +180,21 @@ def trailing_perp_side(direction: str) -> PortSide:
     return PortSide.BOTTOM if AxisFrame.flow_sign(direction) > 0 else PortSide.TOP
 
 
+def carries_line_along_column(
+    graph: MetroGraph, section: Section, line_id: str
+) -> bool:
+    """Whether *section* runs *line_id* down a vertical (TB/BT) trunk.
+
+    A run continuing down the same column through such a section overlays the
+    line's own trunk there -- one continuous stroke -- rather than ploughing
+    through a box it never calls at.
+    """
+    return lanes_run_along_x(section.direction) and any(
+        station.section_id == section.id and line_id in graph.station_lines(sid)
+        for sid, station in graph.stations.items()
+    )
+
+
 def perp_entry_consumer(graph: MetroGraph, port_id: str) -> Station | None:
     """The internal station a perpendicular entry port turns into."""
     for edge in graph.edges_from(port_id):

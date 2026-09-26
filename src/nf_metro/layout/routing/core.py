@@ -657,6 +657,7 @@ def _route_edges(  # noqa: C901
         if system_execution is not None
         else frozenset(),
         covered_edges=covered_edges,
+        positive_fan=ctx.positive_fan,
     )
     from nf_metro.layout.routing.convergences import validate_convergence_plans
 

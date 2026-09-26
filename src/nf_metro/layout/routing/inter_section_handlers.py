@@ -38,7 +38,11 @@ from nf_metro.layout.constants import (
     NEXT_ROW_HEADER_BADGE_CLEARANCE,
     SECTION_ROUTE_CLEARANCE,
 )
-from nf_metro.layout.geometry import cotravelling_lane_clearance, lanes_run_along_x
+from nf_metro.layout.geometry import (
+    AxisFrame,
+    cotravelling_lane_clearance,
+    lanes_run_along_x,
+)
 from nf_metro.layout.pass_metrics import canvas_edge_clearance
 from nf_metro.layout.routing.bundle import build_tapered_bundle
 from nf_metro.layout.routing.centrelines import (
@@ -64,6 +68,7 @@ from nf_metro.layout.routing.common import (
     _v_segment_crosses_other_section,
     bundle_width,
     bypass_bottom_y,
+    carries_line_along_column,
     centre_inter_column_channel,
     clear_channel_of_section_edge,
     col_left_edge,
@@ -355,7 +360,7 @@ class _InterFacts:
 
     @property
     def tb_bottom_exit_drops_through_stack(self) -> bool:
-        """A TB bottom-exit straight drop would plough an intervening section.
+        """A TB/BT trailing-exit straight run would plough an intervening section.
 
         The flow-direction drop (:func:`_route_tb_bottom_exit`) descends the
         exit column straight to the target.  When other sections are stacked in
@@ -363,10 +368,50 @@ class _InterFacts:
         folded below its branches, fed through a TOP entry -- the drop crosses
         their boxes away from any port.  Such a feeder diverts through a clear
         inter-column gap instead (:func:`_route_around_stack`).
+
+        A junction branch continuing the exit's column
+        (:attr:`continues_tb_exit_through_junction`) diverts the same way, except
+        past a section that carries its line down a vertical trunk: the run
+        overlays that trunk as one stroke and keeps the straight drop.
         """
-        if not self.is_tb_bottom_exit:
+        if self.is_tb_bottom_exit:
+            return self.v_segment_crosses_other_section(self.sx, self.sy, self.ty)
+        if not self.continues_tb_exit_through_junction:
             return False
-        return self.v_segment_crosses_other_section(self.sx, self.sy, self.ty)
+        section_ids = set(self.graph.sections)
+        return any(
+            not carries_line_along_column(self.graph, section, self.edge.line_id)
+            for section in self.graph.sections.values()
+            if section.id not in self.endpoint_section_ids
+            and self.v_segment_crosses_other_section(
+                self.sx, self.sy, self.ty, section_ids - {section.id}
+            )
+        )
+
+    @property
+    def continues_tb_exit_through_junction(self) -> bool:
+        """A junction branch carrying a TB/BT trailing exit on down its column.
+
+        A divergence junction fed through a vertical-flow section's trailing
+        perp exit stands a margin out along the exit's column, so a branch into
+        a same-column entry on the far side continues the exit's own drop and
+        faces the same stack of sections as the exit itself would.
+        """
+        exit_port_id = self.ctx.divergence_exit_ports.get(self.edge.source)
+        if (
+            exit_port_id is None
+            or not self.ctx.station_offsets
+            or not self.same_col
+            or self.entry_side is None
+        ):
+            return False
+        port = self.graph.ports[exit_port_id]
+        section = self.graph.sections.get(port.section_id)
+        if section is None or not lanes_run_along_x(section.direction):
+            return False
+        trailing = trailing_perp_side(section.direction)
+        facing = PortSide.TOP if trailing is PortSide.BOTTOM else PortSide.BOTTOM
+        return port.side is trailing and self.entry_side is facing
 
     @property
     def is_tb_perp_exit_against_flow(self) -> bool:
@@ -2321,17 +2366,23 @@ def _route_tb_bottom_exit(
     )
 
 
-def _around_stack_channel_x(f: _InterFacts) -> float:
-    """X of a descent channel just left of the feeder's stacked column.
+def _around_stack_channel_x(f: _InterFacts, col: int, flows_down: bool) -> float:
+    """X of the channel just beside the feeder's stacked column.
 
-    Seated a corner-and-step left of the column's leftmost edge -- so the
-    descent runs in the gap to the column's left, clearing every box stacked in
-    it (the section headers sit on the right, so the left gap is the open side).
-    Mirrors :func:`_route_left_exit_left_entry_drop`, which places its channel
-    the same way for a folded TB bridge feeding a convergence sink.
+    A downward (TB) feeder's channel is seated a corner-and-step left of the
+    column's leftmost edge -- so the descent runs in the gap to the column's
+    left, clearing every box stacked in it (the section headers sit on the
+    right, so the left gap is the open side).  Mirrors
+    :func:`_route_left_exit_left_entry_drop`, which places its channel the same
+    way for a folded TB bridge feeding a convergence sink.  An upward (BT)
+    column is the TB one turned half round, lanes fanning to ``+x``, so its
+    channel stands the same distance right of the column's rightmost edge: the
+    lines peeling into it leave from the side of the bundle it is on.
     """
-    left_edge = col_left_edge(f.graph, f.src_col, default=f.sx)
-    return left_edge - f.ctx.curve_radius - f.ctx.offset_step
+    step = f.ctx.curve_radius + f.ctx.offset_step
+    if flows_down:
+        return col_left_edge(f.graph, col, default=f.sx) - step
+    return col_right_edge(f.graph, col, default=f.sx) + step
 
 
 @dataclass(frozen=True, slots=True)
@@ -2352,20 +2403,26 @@ def _around_stack_geometry(
 ) -> _AroundStackGeometry:
     """Resolve the stack-bypass channel shared by planning and emission.
 
-    The flow-direction drop would plough the branch boxes stacked between this
-    feeder and a convergence sink folded onto a lower row of the same column.
-    Divert through the clear inter-column gap beside the column instead::
+    The flow-direction run would plough the boxes stacked between this feeder
+    and a target further along the same column (a convergence sink folded onto
+    a later row, or a junction branch bound past a nearer sibling).  Divert
+    through the clear inter-column gap beside the column instead; for a
+    downward (TB) feeder::
 
-        (sx, sy)             leave the BOTTOM port
-        (sx, cy_down)        drop into the gap below the source row
-        (vx, cy_down)        jog out to the clear gap channel
-        (vx, cy_entry)       descend past every intervening box
-        (tx, cy_entry)       jog back over the target in the gap above it
-        (tx, ty)             drop into the TOP entry port
+        (sx, sy)             leave the trailing exit
+        (sx, cy_out)         run into the gap past the source row
+        (vx, cy_out)         jog out to the clear gap channel
+        (vx, cy_entry)       run past every intervening box
+        (tx, cy_entry)       jog back over the target in the gap before it
+        (tx, ty)             enter the facing port
+
+    An upward (BT) feeder is the same shape reflected across the rows: it
+    leaves through its TOP edge, clears the source row's header band, and
+    comes back under the target into its BOTTOM entry.
 
     Each co-travelling line rides the source section's rotation lane, fanned off
-    one centreline so the final drop lands on the same per-line X as the
-    adjacent straight-drop feeders converging on the shared port.  Where distinct
+    one centreline so the final run lands on the same per-line X as the
+    adjacent straight feeders converging on the shared port.  Where distinct
     lines share the entry (:func:`needs_perp_approach_fan`) that shared X is the
     per-line approach channel (:func:`perp._perp_approach_fan_x`) instead of the
     feeder lane, since every feeder sits on one column trunk.
@@ -2376,6 +2433,7 @@ def _around_stack_geometry(
     tgt_sec = resolve_section(graph, tgt)
     # Guaranteed by the predicate, which fires only for a vertical-flow exit.
     assert src_sec is not None and tgt_sec is not None and f.src_col is not None
+    flows_down = AxisFrame.flow_sign(src_sec.direction) > 0
 
     _members, line_ids, _edge_by_line = gather_member_edges(graph, edge)
 
@@ -2384,54 +2442,71 @@ def _around_stack_geometry(
         tx = _perp_approach_fan_x(ctx, edge.target, edge.line_id, tgt.x)
 
     def lane_offset(line_id: str) -> float:
-        # Negated so the down-leg's right-hand normal lands each riser on its
-        # own trunk X.  Where distinct lines fan, the per-line channel is baked
-        # into ``tx`` (each feeder carries one line), so the lane fan is zero.
+        # Signed so each run's right-hand normal lands it on its own trunk X:
+        # that normal points to -x down a TB column and to +x up a BT one.
+        # Where distinct lines fan, the per-line channel is baked into ``tx``
+        # (each feeder carries one line), so the lane fan is zero.
         if fans_distinct:
             return 0.0
-        return -_tb_x_offset(ctx, edge.source, line_id, src.section_id)
+        lane = _tb_x_offset(ctx, edge.source, line_id, src_sec.id)
+        return -lane if flows_down else lane
 
     # The bundle fan lifts the jog's innermost line toward the source box, so
-    # seat the corridor a fan width below the clearance that innermost lane owes
-    # the bottom edge.  That clearance is the one the row-gap reservation is
+    # seat the corridor a fan width past the clearance that innermost lane owes
+    # the trailing edge.  That clearance is the one the row-gap reservation is
     # measured against, and a planned turn axis is frozen against the settlement
-    # that would otherwise push the ladder onto it, so it is stated here.
-    src_bottom = src_sec.bbox_y + src_sec.bbox_h
-    fan_clearance = INTER_ROW_EDGE_CLEARANCE + (len(line_ids) - 1) * ctx.offset_step
-    cy_down = max(
-        header_corridor_y(
-            graph,
-            src_sec.grid_row,
-            below=True,
-            base_radius=ctx.curve_radius,
-            default=sy,
-            col=f.src_col,
-        ),
-        src_bottom + fan_clearance,
+    # that would otherwise push the ladder onto it, so it is stated here.  An
+    # upward feeder's trailing edge carries its own header badge, so the
+    # clearance it owes there is the header band's.
+    fan_width = max(
+        (len(line_ids) - 1) * ctx.offset_step,
+        *(abs(lane_offset(line_id)) for line_id in line_ids),
     )
+    if flows_down:
+        cy_out = max(
+            header_corridor_y(
+                graph,
+                src_sec.grid_row,
+                below=True,
+                base_radius=ctx.curve_radius,
+                default=sy,
+                col=f.src_col,
+            ),
+            src_sec.bbox_y + src_sec.bbox_h + INTER_ROW_EDGE_CLEARANCE + fan_width,
+        )
+    else:
+        cy_out = src_sec.bbox_y - INTER_ROW_HEADER_CLEARANCE - fan_width
     cy_entry = header_corridor_y(
-        graph, tgt_sec.grid_row, below=False, base_radius=ctx.curve_radius, default=ty
+        graph,
+        tgt_sec.grid_row,
+        below=not flows_down,
+        base_radius=ctx.curve_radius,
+        default=ty,
     )
-    vx = _around_stack_channel_x(f)
+    vx = _around_stack_channel_x(f, f.src_col, flows_down)
 
     own_offset = lane_offset(edge.line_id)
-    channel_y_start = cy_down - own_offset
-    channel_y_end = cy_entry + own_offset
     points = (
         (sx, sy),
-        (sx, cy_down),
-        (vx, cy_down),
+        (sx, cy_out),
+        (vx, cy_out),
         (vx, cy_entry),
         (tx, cy_entry),
         (tx, ty),
     )
-    # Both legs the jog joins descend, so the jog's ends and the jog itself take
-    # their shift from the same right-hand normal (``bundle._right_normal``): one
-    # lateral off the exit X, off the channel X, and off the corridor Y.
-    channel_x = vx - own_offset
+    # Every leg takes its shift from the same right-hand normal
+    # (``bundle._right_normal``): a vertical leg shifts in X by the heading's
+    # ``-sign`` and a horizontal one in Y by its ``+sign``.
     run_direction = segment_direction(points[0], points[1])
     turn_direction = segment_direction(points[1], points[2])
+    channel_direction = segment_direction(points[2], points[3])
+    return_direction = segment_direction(points[3], points[4])
     assert run_direction is not None and turn_direction is not None
+    assert channel_direction is not None and return_direction is not None
+    source_x = sx - run_direction.sign * own_offset
+    channel_x = vx - channel_direction.sign * own_offset
+    channel_y_start = cy_out + turn_direction.sign * own_offset
+    channel_y_end = cy_entry + return_direction.sign * own_offset
     return _AroundStackGeometry(
         points,
         own_offset,
@@ -2439,19 +2514,14 @@ def _around_stack_geometry(
         channel_x,
         min(channel_y_start, channel_y_end),
         max(channel_y_start, channel_y_end),
-        _SourceSeam(
-            run_direction,
-            turn_direction,
-            sy,
-            cy_down + own_offset * turn_direction.sign,
-        ),
-        min(sx - own_offset, channel_x),
-        max(sx - own_offset, channel_x),
+        _SourceSeam(run_direction, turn_direction, sy, channel_y_start),
+        min(source_x, channel_x),
+        max(source_x, channel_x),
     )
 
 
 def _route_around_stack(f: _InterFacts) -> RoutedPath | None:
-    """Route a TB bottom-exit feeder around sections stacked below it."""
+    """Route a TB/BT trailing-exit feeder around sections stacked beyond it."""
     geometry = _around_stack_geometry(f)
     edge, ctx = f.edge, f.ctx
 
@@ -2462,7 +2532,9 @@ def _route_around_stack(f: _InterFacts) -> RoutedPath | None:
         base_radius=ctx.curve_radius,
         bundle_offsets=list(geometry.bundle_offsets),
     )
-    _declare_channel(route, ctx, geometry.points[2][0], Direction.D)
+    channel_direction = segment_direction(geometry.points[2], geometry.points[3])
+    assert channel_direction is not None
+    _declare_channel(route, ctx, geometry.points[2][0], channel_direction)
     return route
 
 
