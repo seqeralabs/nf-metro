@@ -18,7 +18,6 @@ from nf_metro.layout.route_plan import (
 from nf_metro.layout.routing import exit_turns as exit_turn_routing
 from nf_metro.layout.routing.context import _RoutingCtx
 from nf_metro.layout.routing.convergences import (
-    CONVERGENCE_CORRIDOR_GRANT_APPLIED,
     ConvergenceInvariantError,
     ConvergencePlanExecution,
     apply_convergence_corridor_grants,
@@ -32,6 +31,8 @@ from nf_metro.layout.routing.convergences import (
 )
 from nf_metro.layout.routing.corridor_cohort_integration import (
     CorridorCohortLedger,
+    CorridorCohortPlan,
+    CorridorScalarGrant,
     CorridorScalarRequest,
     build_corridor_cohort_ledger,
 )
@@ -115,12 +116,7 @@ def _apply_corridor_grants(
                 "corridor-cohort compile omitted convergence corridor requests"
             )
         return convergences
-    compatibility_ids = frozenset(
-        variable_id
-        for component in cohorts.components
-        if component.compatibility is not None
-        for variable_id in component.compatibility.scalar_variable_ids
-    )
+    compatibility_ids = _compatibility_scalar_ids(cohorts)
     return apply_convergence_corridor_grants(
         convergences,
         tuple(
@@ -128,28 +124,45 @@ def _apply_corridor_grants(
             for request in requests
             if request.variable.variable_id not in compatibility_ids
         ),
-        tuple(
-            grant
-            for grant in cohorts.scalar_grants
-            if grant.variable_id not in compatibility_ids
-        ),
+        _owned_scalar_grants(cohorts),
+    )
+
+
+def _compatibility_scalar_ids(cohorts: CorridorCohortPlan) -> frozenset[str]:
+    return frozenset(
+        variable_id
+        for component in cohorts.components
+        if component.compatibility is not None
+        for variable_id in component.compatibility.scalar_variable_ids
+    )
+
+
+def _owned_scalar_grants(
+    cohorts: CorridorCohortPlan,
+) -> tuple[CorridorScalarGrant, ...]:
+    """The grants outside every component kept on legacy geometry."""
+    compatibility_ids = _compatibility_scalar_ids(cohorts)
+    return tuple(
+        grant
+        for grant in cohorts.scalar_grants
+        if grant.variable_id not in compatibility_ids
     )
 
 
 def _granted_trunk_coordinates(
-    convergences: ConvergencePlanExecution,
+    member_geometry: MemberGeometryExecution,
 ) -> dict[ConvergencePlanId, float]:
-    """The trunk coordinate each moving corridor grant wrote, by plan."""
-    moved_trunk_members = {
-        item.member_id
-        for item in convergences.diagnostics
-        if item.code == CONVERGENCE_CORRIDOR_GRANT_APPLIED
-    }
+    """The trunk coordinate every owned corridor grant decided, by plan.
+
+    A grant that leaves its trunk where it stands owns that coordinate as much
+    as one that moves it.
+    """
+    cohorts = member_geometry.corridor_cohorts
+    if cohorts is None:
+        return {}
     return {
-        plan.id: plan.trunk_axis.coordinate
-        for plan in convergences.plans
-        if plan.trunk_axis is not None
-        and plan.primary_trunk_member_id in moved_trunk_members
+        ConvergencePlanId(grant.owner_id): grant.coordinate
+        for grant in _owned_scalar_grants(cohorts)
     }
 
 
@@ -159,9 +172,9 @@ def _assert_grants_survive_settlement(
 ) -> None:
     """Refuse a settlement that re-seated a trunk its corridor grant placed.
 
-    The grant's diagnostic names the coordinate the grant wrote, so a trunk
-    settled anywhere else would publish provenance for geometry the render
-    does not draw.
+    The published grant names the coordinate it decided, so a trunk settled
+    anywhere else would publish provenance for geometry the render does not
+    draw.
     """
     plans = {plan.id: plan for plan in settled.plans}
     for plan_id, coordinate in granted.items():
@@ -170,7 +183,7 @@ def _assert_grants_survive_settlement(
         if axis is None or abs(axis.coordinate - coordinate) > COORD_TOLERANCE_FINE:
             raise ConvergenceInvariantError(
                 f"convergence {plan_id} was re-settled off the {coordinate:g} its "
-                "corridor grant wrote"
+                "corridor grant decided"
             )
 
 
@@ -559,7 +572,7 @@ def prepare_route_system_planning(
         preliminary_planned_ids,
         frozenset(member_geometry.failure_reasons),
     )
-    granted_trunks = _granted_trunk_coordinates(convergences)
+    granted_trunks = _granted_trunk_coordinates(member_geometry)
     convergences = settle_global_convergence_execution(
         convergences,
         graph,

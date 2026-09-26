@@ -1333,6 +1333,21 @@ def test_a_grant_the_global_settlement_re_seats_fails_closed(
         assert by_owner[grant.owner_id].trunk_axis.coordinate == grant.coordinate
 
 
+def test_an_unmoved_grant_the_global_settlement_re_seats_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A grant owns the coordinate it leaves in place as much as one it moves.
+
+    funcprofiler's trunk is granted the coordinate it already holds, so the
+    applier writes nothing, yet a legacy pass re-seating that trunk would
+    publish a grant the drawn trunk does not sit on.
+    """
+    _re_seat_trunks_in_global_settlement(monkeypatch, 4.0)
+
+    with pytest.raises(ConvergenceInvariantError, match="re-settled off the 454"):
+        _render(_FUNCPROFILER, monkeypatch)
+
+
 @pytest.mark.parametrize("fixture", _STATION_PINNED_FIXTURES)
 def test_trunk_on_an_entry_port_cannot_be_drawn_off_it(
     fixture: str, monkeypatch: pytest.MonkeyPatch
