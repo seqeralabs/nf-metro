@@ -787,6 +787,7 @@
   "offsets.py::if entry.side not in (PortSide.LEFT, PortSide.RIGHT):::#1",
   "offsets.py::if entry_port is None:::#1",
   "offsets.py::if exit_lines == set(j_lines):::#1",
+  "offsets.py::if fan_ranks_mover_first == (vacated > claimed):::#1",
   "offsets.py::if feeder is None or not lanes_run_along_y(feeder.direction):::#1",
   "offsets.py::if feeder.entry_ports:::#1",
   "offsets.py::if gap is not None:::#1",

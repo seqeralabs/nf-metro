@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections import Counter, deque
+from collections import Counter, defaultdict, deque
 from collections.abc import (
     Callable,
     Container,
@@ -3197,6 +3197,9 @@ def _fan_entry_ranks_first(
     whose section stores its lanes reflected when the source's does not, or
     the other way round, ranks them in a frame the source cannot compare
     against; that, or entries disagreeing, gives ``None``.
+
+    :func:`fanout_divergence_peel_order` declines a fan that sends one line
+    down several branches; the entry a branch shares still fixes this pair.
     """
     graph = ctx.graph
     exit_port_id = _line_exit_port(graph, station_id, line_id)
@@ -3216,15 +3219,14 @@ def _fan_entry_ranks_first(
         return None
     source_section = graph.section_for_port(graph.ports[exit_port_id])
 
-    def entries(of_line: str) -> set[str]:
-        return {
-            edge.target
-            for edge in graph.edges_from(junction_id)
-            if edge.line_id == of_line
-        }
+    lines_into: dict[str, set[str]] = defaultdict(set)
+    for edge in graph.edges_from(junction_id):
+        lines_into[edge.target].add(edge.line_id)
 
     verdicts = set()
-    for entry_id in entries(line_id) & entries(other_id):
+    for entry_id, lines in lines_into.items():
+        if not {line_id, other_id} <= lines:
+            continue
         entry = graph.ports.get(entry_id)
         if entry is None or not entry.is_entry:
             continue
@@ -3250,14 +3252,19 @@ def _collider_slot(
 ) -> float:
     """Where compaction re-seats *collider* when *mover* claims its slot.
 
-    *mover* travels from *vacated* to *claimed* at *station_id*, and *collider*
-    takes *vacated* unless a fan downstream fixes the pair's order the other
-    way (:func:`_fan_entry_ranks_first`).  Then it slides one slot beyond
-    *claimed* instead, provided that slot is free: sliding it on would displace
-    a third line in turn.
+    *mover* travels from *vacated* to *claimed* at *station_id*.  With no fan
+    downstream fixing the pair's order (:func:`_fan_entry_ranks_first`),
+    *collider* takes *vacated*: sliding it beyond *claimed* instead can land it
+    on a lane a bypass rides past the station, or keep an order the entry the
+    pair runs into needs reversed.  A fan that wants the order *vacated* gives
+    agrees; one that wants the other order slides *collider* one slot beyond
+    *claimed*, provided that slot is free, since sliding it on would displace a
+    third line in turn.
     """
-    mover_first = _fan_entry_ranks_first(ctx, station_id, mover, collider)
-    if mover_first is None or mover_first == (vacated > claimed):
+    fan_ranks_mover_first = _fan_entry_ranks_first(ctx, station_id, mover, collider)
+    if fan_ranks_mover_first is None:
+        return vacated
+    if fan_ranks_mover_first == (vacated > claimed):
         return vacated
     beyond = claimed + (ctx.offset_step if claimed > vacated else -ctx.offset_step)
     beyond_holder = _line_at_slot(
