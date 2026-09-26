@@ -1963,16 +1963,21 @@ def _bundled_corridor_runs(first: _CotravellingRun, second: _CotravellingRun) ->
     )
 
 
-def _bundle_pitch(first: _CotravellingRun, second: _CotravellingRun) -> float:
+def _bundle_pitch(
+    first: _CotravellingRun, second: _CotravellingRun, offset_step: float
+) -> float:
     """The separation two lanes of one bundle hold through their shared span."""
     return cotravelling_lane_clearance(
         same_line=first.line_ids == second.line_ids,
         counter_running=False,
         curve_radius=CURVE_RADIUS,
+        offset_step=offset_step,
     )
 
 
-def _packed_lane(run: _CotravellingRun, seated: list[_CotravellingRun]) -> float | None:
+def _packed_lane(
+    run: _CotravellingRun, seated: list[_CotravellingRun], offset_step: float
+) -> float | None:
     """Where *run* sits once packed onto the bundle *seated* already describes.
 
     The nearest lane is the reference, and the side *run* already lies on is the
@@ -1989,13 +1994,14 @@ def _packed_lane(run: _CotravellingRun, seated: list[_CotravellingRun]) -> float
     )
     if reference is None:
         return None
-    pitch = _bundle_pitch(run, reference)
+    pitch = _bundle_pitch(run, reference, offset_step)
     side = 1.0 if run.coordinate >= reference.coordinate else -1.0
     candidate = reference.coordinate + side * pitch
     if abs(candidate - run.coordinate) <= COORD_TOLERANCE:
         return None
     if any(
-        abs(candidate - item.coordinate) < _bundle_pitch(run, item) - COORD_TOLERANCE
+        abs(candidate - item.coordinate)
+        < _bundle_pitch(run, item, offset_step) - COORD_TOLERANCE
         for item in neighbours
         if item is not reference
     ):
@@ -2148,13 +2154,14 @@ def _pack_cotravelling_corridor_runs(
     plans pack onto rather than something to be moved.  A trunk a corridor
     grant placed is already packed by its bundle relation and may not move.
     """
+    step = graph_offset_step(graph)
     settled = list(plans)
     seated = list(member_runs)
     for plan_rank, plan in enumerate(settled):
         run = _trunk_corridor_run(plan, graph)
         if run is None:
             continue
-        coordinate = _packed_lane(run, seated)
+        coordinate = _packed_lane(run, seated, step)
         if coordinate is not None:
             settled[plan_rank] = _move_trunk_axis(plan, coordinate)
             moved = _trunk_corridor_run(settled[plan_rank], graph)
