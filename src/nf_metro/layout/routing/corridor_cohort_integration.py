@@ -17,8 +17,13 @@ from itertools import permutations
 from math import isclose, isfinite
 from types import MappingProxyType
 
-from nf_metro.layout.constants import COORD_TOLERANCE, CURVE_RADIUS, graph_offset_step
-from nf_metro.layout.geometry import cotravelling_lane_clearance
+from nf_metro.layout.constants import (
+    BUNDLE_TO_BUNDLE_CLEARANCE,
+    COORD_TOLERANCE,
+    CURVE_RADIUS,
+    graph_offset_step,
+)
+from nf_metro.layout.geometry import cotravelling_lane_clearance, spans_share_corridor
 from nf_metro.layout.route_plan import (
     BindingKind,
     EmissionBinding,
@@ -367,6 +372,10 @@ class CorridorCohortTarget:
     endpoint_lane_coordinate: float | None = None
     network_id: str | None = None
     legal_crossing_segment_ranks: frozenset[int] = frozenset()
+    system_id: str | None = None
+    carrier_ids: frozenset[str] = frozenset()
+    """The junctions and ports the route leaves and heads to, which decide
+    whether two co-travelling runs of one system are lanes of one bundle."""
 
 
 def _claim_is_destination_boundary_carrier(
@@ -1061,6 +1070,20 @@ class _FootprintContact:
 
 
 @dataclass(frozen=True, slots=True)
+class _FootprintBundle:
+    """A scalar lane held ``delta`` from a run of its own bundle.
+
+    The run is a fixed obstacle where it currently stands, so the relation moves
+    the scalar onto the bundle and never the run onto the scalar.
+    """
+
+    owner_id: str
+    variable_id: str
+    witness_id: str
+    delta: float
+
+
+@dataclass(frozen=True, slots=True)
 class _MemberFootprintModel:
     variables: tuple[CorridorScalarVariable, ...]
     witnesses: tuple[CorridorFootprintWitness, ...]
@@ -1068,6 +1091,7 @@ class _MemberFootprintModel:
     orders: tuple[_FootprintOrder, ...]
     contacts: tuple[_FootprintContact, ...]
     forbidden_intervals: tuple[CorridorForbiddenInterval, ...] = ()
+    bundles: tuple[_FootprintBundle, ...] = ()
 
 
 def _bind_claim(
@@ -1652,6 +1676,14 @@ def _member_footprint_model(
         tuple(orders[key] for key in sorted(orders)),
         tuple(contacts[key] for key in sorted(contacts)),
         tuple(intervals[key] for key in sorted(intervals)),
+        _scalar_bundles(
+            targets,
+            witnesses,
+            scalar_requests,
+            scalar_carriers,
+            offset_step,
+            curve_radius,
+        ),
     )
 
 
@@ -1713,6 +1745,139 @@ def _cotravelling_turn_off_intervals(
                 )
             )
     return intervals
+
+
+def _interior_horizontal_run(
+    witness: CorridorFootprintWitness, target: CorridorCohortTarget
+) -> bool:
+    """Whether *witness* is a horizontal run between two vertical legs.
+
+    A first or last leg is the member's own approach to a station, which no
+    bundle it passes through owns.
+    """
+    points = target.route.points
+    rank = witness.segment_rank
+    if witness.axis != 1 or not 1 <= rank <= len(points) - 3:
+        return False
+    before, start, end, after = points[rank - 1 : rank + 3]
+    return (
+        abs(before[0] - start[0]) <= COORD_TOLERANCE
+        and abs(after[0] - end[0]) <= COORD_TOLERANCE
+    )
+
+
+def _row_gap(regions: Sequence[CorridorRegion | None]) -> RowGapRegion | None:
+    return next((item for item in regions if isinstance(item, RowGapRegion)), None)
+
+
+def _scalar_bundles(
+    targets: Sequence[CorridorCohortTarget],
+    witnesses: tuple[CorridorFootprintWitness, ...],
+    scalar_requests: Sequence[CorridorScalarRequest],
+    scalar_carriers: Mapping[str, CorridorFootprintWitness],
+    offset_step: float,
+    curve_radius: float,
+) -> tuple[_FootprintBundle, ...]:
+    """Hold each horizontal scalar trunk on a bundle its system's runs describe.
+
+    A member run is a lane of the trunk's bundle when every clause holds: one
+    route system, one travel direction, an overlapping span, a junction or port
+    both leave or head to, and either one named row gap or, unless a row gap
+    names both, a separation under ``BUNDLE_TO_BUNDLE_CLEARANCE``.  Only
+    interior runs of routes no convergence owns take part.
+
+    The nearest such run is the reference and the trunk keeps the side it lies
+    on, so the bundle narrows without transposing.  No relation is stated when
+    the reference's pitch would put the trunk inside another lane of the bundle.
+    """
+    targets_by_identity = {
+        (target.member_id, target.edge_key): target for target in targets
+    }
+    runs = tuple(
+        witness
+        for witness in witnesses
+        if (target := targets_by_identity.get((witness.member_id, witness.edge_key)))
+        is not None
+        and target.system_id is not None
+        and not target.legal_crossing_segment_ranks
+        and _interior_horizontal_run(witness, target)
+    )
+
+    def bundled(
+        run: CorridorFootprintWitness,
+        trunk: CorridorCohortTarget,
+        trunk_run: CorridorFootprintWitness,
+        corridor: RowGapRegion | None,
+    ) -> bool:
+        target = targets_by_identity[(run.member_id, run.edge_key)]
+        if (
+            target.system_id != trunk.system_id
+            or run.direction is not trunk_run.direction
+            or not target.carrier_ids & trunk.carrier_ids
+            or not spans_share_corridor(
+                trunk_run.longitudinal_start,
+                trunk_run.longitudinal_end,
+                run.longitudinal_start,
+                run.longitudinal_end,
+            )
+        ):
+            return False
+        run_corridor = _row_gap(run.regions)
+        if corridor is not None and run_corridor is not None:
+            return corridor == run_corridor
+        return abs(run.coordinate - trunk_run.coordinate) < BUNDLE_TO_BUNDLE_CLEARANCE
+
+    def pitch(
+        run: CorridorFootprintWitness, trunk_run: CorridorFootprintWitness
+    ) -> float:
+        return cotravelling_lane_clearance(
+            same_line=run.line_id == trunk_run.line_id,
+            counter_running=False,
+            curve_radius=curve_radius,
+            offset_step=offset_step,
+        )
+
+    bundles: list[_FootprintBundle] = []
+    for request in scalar_requests:
+        variable_id = request.variable.variable_id
+        trunk_run = scalar_carriers.get(variable_id)
+        trunk = targets_by_identity.get(
+            (request.variable.member_id, request.variable.edge_key)
+        )
+        if trunk_run is None or trunk is None or trunk_run.axis != 1:
+            continue
+        corridor = _row_gap((request.region,))
+        neighbours = tuple(
+            run for run in runs if bundled(run, trunk, trunk_run, corridor)
+        )
+        reference = min(
+            neighbours,
+            key=lambda run: (
+                abs(run.coordinate - trunk_run.coordinate),
+                run.coordinate,
+            ),
+            default=None,
+        )
+        if reference is None:
+            continue
+        side = 1.0 if trunk_run.coordinate >= reference.coordinate else -1.0
+        delta = side * pitch(reference, trunk_run)
+        if any(
+            abs(reference.coordinate + delta - run.coordinate)
+            < pitch(run, trunk_run) - COORD_TOLERANCE
+            for run in neighbours
+            if run is not reference
+        ):
+            continue
+        bundles.append(
+            _FootprintBundle(
+                f"member-footprint-bundle|{variable_id}|{reference.footprint_id}",
+                variable_id,
+                reference.footprint_id,
+                delta,
+            )
+        )
+    return tuple(bundles)
 
 
 @dataclass(frozen=True, slots=True)
@@ -2428,7 +2593,7 @@ def _problem(
         for fixed_claim in fixed_claims
         if _same_semantic_fixed_lane(movable_claim, fixed_claim)
     )
-    contact_obstacles: dict[str, CorridorObstacle] = {}
+    relation_obstacles: dict[str, CorridorObstacle] = {}
     for contact in footprint_model.contacts:
         fixed_witnesses = tuple(
             witnesses_by_id[witness_id]
@@ -2440,7 +2605,7 @@ def _problem(
         if len(fixed_witnesses) != 1:
             continue
         witness = fixed_witnesses[0]
-        contact_obstacles[contact.owner_id] = CorridorObstacle(
+        relation_obstacles[contact.owner_id] = CorridorObstacle(
             contact.owner_id,
             witness.coordinate,
             witness.coordinate,
@@ -2452,6 +2617,25 @@ def _problem(
             CorridorFixedEquality(contact.owner_id, member_id, contact.owner_id)
             for variable_id in contact.participant_variable_ids
             for member_id in lane_ids(variable_id)
+        )
+    for bundle in footprint_model.bundles:
+        bundle_lane_ids = lane_ids(bundle.variable_id)
+        if not bundle_lane_ids:
+            continue
+        witness = witnesses_by_id[bundle.witness_id]
+        relation_obstacles[bundle.owner_id] = CorridorObstacle(
+            bundle.owner_id,
+            witness.coordinate,
+            witness.coordinate,
+            witness.longitudinal_start,
+            witness.longitudinal_end,
+            witness.semantic_rank,
+        )
+        fixed_equalities.extend(
+            CorridorFixedEquality(
+                bundle.owner_id, member_id, bundle.owner_id, bundle.delta
+            )
+            for member_id in bundle_lane_ids
         )
     separations = tuple(
         CorridorSeparation(
@@ -2598,7 +2782,7 @@ def _problem(
         (*member_lanes, *scalar_lanes),
         (
             *(_obstacle(item) for item in fixed_claims),
-            *contact_obstacles.values(),
+            *relation_obstacles.values(),
         ),
         equalities,
         (*separations, *scalar_separations),
@@ -3192,6 +3376,15 @@ def compile_corridor_cohort_plan(
         witness = witnesses_by_id[fixed_term.witness_id]
         obstacle_provenance[order.owner_id] = CorridorCohortObstacleProvenance(
             order.owner_id,
+            witness.member_id,
+            witness.edge_key,
+            witness.segment_rank,
+            witness.connector_ids,
+        )
+    for bundle in footprint_model.bundles:
+        witness = witnesses_by_id[bundle.witness_id]
+        obstacle_provenance[bundle.owner_id] = CorridorCohortObstacleProvenance(
+            bundle.owner_id,
             witness.member_id,
             witness.edge_key,
             witness.segment_rank,

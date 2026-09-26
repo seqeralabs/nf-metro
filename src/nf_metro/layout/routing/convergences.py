@@ -2051,6 +2051,16 @@ def _plan_segments(
     )
 
 
+def _trunk_carrier_ids(plan: ConvergencePlan) -> frozenset[str]:
+    """The junctions *plan*'s trunk leaves and the entry ports it heads to."""
+    return frozenset(
+        (
+            *(landing.source_junction_id for landing in plan.landings),
+            *plan.target_entry_port_ids,
+        )
+    )
+
+
 def _trunk_corridor_run(
     plan: ConvergencePlan, graph: MetroGraph
 ) -> _CotravellingRun | None:
@@ -2067,12 +2077,7 @@ def _trunk_corridor_run(
         max(start_x, end_x),
         axis.direction,
         frozenset(plan.line_ids),
-        frozenset(
-            (
-                *(landing.source_junction_id for landing in plan.landings),
-                *plan.target_entry_port_ids,
-            )
-        ),
+        _trunk_carrier_ids(plan),
         inter_row_gap_upper_row(graph, coordinate),
         segments,
     )
@@ -5362,6 +5367,8 @@ def _convergence_corridor_target(
         route,
         True,
         legal_crossing_segment_ranks=frozenset(legal_crossings),
+        system_id=str(plan.system_id),
+        carrier_ids=_trunk_carrier_ids(plan),
     )
     variable = CorridorScalarVariable(
         variable_id=variable_id,

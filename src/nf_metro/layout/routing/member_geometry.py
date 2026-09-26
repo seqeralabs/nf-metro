@@ -364,6 +364,8 @@ def _corridor_cohort_target(
         endpoint_lane_coordinate,
         _network_id(candidate.connector_ids, scaffold),
         legal_crossing_segment_ranks=frozenset(route.convergence_owned_segment_ranks),
+        system_id=str(candidate.system_id),
+        carrier_ids=frozenset((resolved.source, resolved.target)),
     )
 
 
