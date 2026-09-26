@@ -78,6 +78,22 @@ def _port(side: PortSide, *, is_entry: bool) -> SimpleNamespace:
     return SimpleNamespace(side=side, is_entry=is_entry)
 
 
+def _ctx(**overrides: object) -> SimpleNamespace:
+    """A duck-typed routing ctx carrying every field the rule predicates read."""
+    fields: dict[str, object] = dict(
+        junction_ids=set(),
+        fanout_junctions=set(),
+        bottom_exit_junctions=set(),
+        divergence_exit_ports={},
+        tb_sections=set(),
+        station_offsets={},
+        merge=SimpleNamespace(trunk_source={}, branch_edges=set()),
+        graph=SimpleNamespace(sections={}),
+    )
+    fields.update(overrides)
+    return SimpleNamespace(**fields)
+
+
 def _facts(**overrides: object) -> H._InterFacts:
     """A fall-through ``_InterFacts`` (no rule matches) with field overrides.
 
@@ -88,20 +104,11 @@ def _facts(**overrides: object) -> H._InterFacts:
     exercised (predicates), never a route builder, so duck-typed stand-ins for
     the ctx/edge/stations are enough.
     """
-    ctx = SimpleNamespace(
-        junction_ids=set(),
-        fanout_junctions=set(),
-        bottom_exit_junctions=set(),
-        tb_sections=set(),
-        station_offsets={},
-        merge=SimpleNamespace(trunk_source={}, branch_edges=set()),
-        graph=SimpleNamespace(sections={}),
-    )
     defaults: dict[str, object] = dict(
         edge=SimpleNamespace(source="a", target="b", line_id="L"),
         src=SimpleNamespace(section_id="src_sec"),
         tgt=SimpleNamespace(section_id="tgt_sec"),
-        ctx=ctx,
+        ctx=_ctx(),
         sx=0.0,
         sy=0.0,
         tx=100.0,
@@ -142,13 +149,9 @@ _CASES = [
     pytest.param(
         dict(
             src_port=_port(PortSide.BOTTOM, is_entry=False),
-            ctx=SimpleNamespace(
-                junction_ids=set(),
-                fanout_junctions=set(),
-                bottom_exit_junctions=set(),
+            ctx=_ctx(
                 tb_sections={"src_sec"},
                 station_offsets={"x": 1.0},
-                merge=SimpleNamespace(trunk_source={}, branch_edges=set()),
                 graph=SimpleNamespace(
                     sections={"src_sec": SimpleNamespace(direction="TB", bbox_w=0.0)}
                 ),
@@ -166,13 +169,9 @@ _CASES = [
             sy=0.0,
             tx=0.0,
             ty=100.0,
-            ctx=SimpleNamespace(
-                junction_ids=set(),
-                fanout_junctions=set(),
-                bottom_exit_junctions=set(),
+            ctx=_ctx(
                 tb_sections={"src_sec"},
                 station_offsets={"x": 1.0},
-                merge=SimpleNamespace(trunk_source={}, branch_edges=set()),
                 graph=SimpleNamespace(
                     sections={
                         "src_sec": SimpleNamespace(direction="TB", bbox_w=0.0),
@@ -195,13 +194,9 @@ _CASES = [
         # BOTTOM), so the same rule claims it.
         dict(
             src_port=_port(PortSide.TOP, is_entry=False),
-            ctx=SimpleNamespace(
-                junction_ids=set(),
-                fanout_junctions=set(),
-                bottom_exit_junctions=set(),
+            ctx=_ctx(
                 tb_sections={"src_sec"},
                 station_offsets={"x": 1.0},
-                merge=SimpleNamespace(trunk_source={}, branch_edges=set()),
                 graph=SimpleNamespace(
                     sections={"src_sec": SimpleNamespace(direction="BT", bbox_w=0.0)}
                 ),
@@ -233,14 +228,7 @@ _CASES = [
     pytest.param(
         dict(
             edge=SimpleNamespace(source="j", target="b", line_id="L"),
-            ctx=SimpleNamespace(
-                junction_ids=set(),
-                fanout_junctions=set(),
-                bottom_exit_junctions={"j"},
-                tb_sections=set(),
-                station_offsets={},
-                merge=SimpleNamespace(trunk_source={}, branch_edges=set()),
-            ),
+            ctx=_ctx(bottom_exit_junctions={"j"}),
         ),
         "bottom-exit junction",
         id="bottom-exit-junction",
@@ -251,13 +239,8 @@ _CASES = [
         dict(
             edge=SimpleNamespace(source="t", target="m", line_id="L"),
             needs_bypass=True,
-            ctx=SimpleNamespace(
-                junction_ids=set(),
-                fanout_junctions=set(),
-                bottom_exit_junctions=set(),
-                tb_sections=set(),
-                station_offsets={},
-                merge=SimpleNamespace(trunk_source={"m": "t"}, branch_edges=set()),
+            ctx=_ctx(
+                merge=SimpleNamespace(trunk_source={"m": "t"}, branch_edges=set())
             ),
         ),
         "merge trunk",
@@ -270,12 +253,7 @@ _CASES = [
         dict(
             edge=SimpleNamespace(source="b", target="m", line_id="L"),
             merge_ep=SimpleNamespace(id="ep", x=0.0, y=0.0, section_id="m"),
-            ctx=SimpleNamespace(
-                junction_ids=set(),
-                fanout_junctions=set(),
-                bottom_exit_junctions=set(),
-                tb_sections=set(),
-                station_offsets={},
+            ctx=_ctx(
                 merge=SimpleNamespace(
                     trunk_source={"m": "t"},
                     branch_edges={("b", "m", "L")},
@@ -290,14 +268,7 @@ _CASES = [
         dict(
             edge=SimpleNamespace(source="j", target="b", line_id="L"),
             tx=5.0,
-            ctx=SimpleNamespace(
-                junction_ids={"j"},
-                fanout_junctions=set(),
-                bottom_exit_junctions=set(),
-                tb_sections=set(),
-                station_offsets={},
-                merge=SimpleNamespace(trunk_source={}, branch_edges=set()),
-            ),
+            ctx=_ctx(junction_ids={"j"}),
         ),
         "near-vertical same-col junction",
         id="near-vertical-junction",
