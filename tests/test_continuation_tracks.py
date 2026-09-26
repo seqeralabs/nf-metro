@@ -575,9 +575,55 @@ graph LR
     q2x4 -->|m1| q3x0
     q3x0 -->|m0| q4x0
 """,
-    # The fan delivers both lines to a vertical section, whose lane frame
-    # does not carry the source section's order across.
-    "fan_into_vertical_section": """
+    # The fan delivers both lines into a vertical section through its
+    # bottom entry, whose order the displaced line has to keep.
+    "fan_into_bottom_entry": """
+graph LR
+    subgraph z0 [Zone 0]
+        q0x0[Q0X0]
+        q0x1[Q0X1]
+        q0x2[Q0X2]
+        q0x0 -->|m0| q0x1
+        q0x1 -->|m3| q0x2
+    end
+    subgraph z1 [Zone 1]
+        %%metro direction: BT
+        q1x0[Q1X0]
+        q1x1[Q1X1]
+        q1x2[Q1X2]
+        q1x3[Q1X3]
+        q1x4[Q1X4]
+        q1x0 -->|m0| q1x1
+        q1x1 -->|m0| q1x2
+        q1x2 -->|m3| q1x3
+        q1x3 -->|m3| q1x4
+    end
+    subgraph z2 [Zone 2]
+        q2x0[Q2X0]
+        q2x1[Q2X1]
+        q2x2[Q2X2]
+        q2x0 -->|m0| q2x1
+        q2x1 -->|m0| q2x2
+    end
+    subgraph z3 [Zone 3]
+        q3x0[Q3X0]
+        q3x1[Q3X1]
+        q3x2[Q3X2]
+        q3x3[Q3X3]
+        q3x4[Q3X4]
+        q3x0 -->|m1| q3x1
+        q3x1 -->|m1| q3x2
+        q3x2 -->|m3| q3x3
+        q3x3 -->|m1| q3x4
+    end
+    q0x2 -->|m2| q1x0
+    q0x2 -->|m3| q1x0
+    q1x4 -->|m3| q2x0
+    q2x2 -->|m0| q3x0
+    q0x2 -->|m3| q2x0
+""",
+    # The same through a side entry of a vertical section a row below.
+    "fan_into_side_entry_of_vertical_section": """
 graph LR
     subgraph z0 [Zone 0]
         q0x0[Q0X0]
@@ -586,27 +632,52 @@ graph LR
         q0x3[Q0X3]
         q0x4[Q0X4]
         q0x0 -->|m0| q0x1
-        q0x1 -->|m3| q0x2
-        q0x2 -->|m3| q0x3
+        q0x1 -->|m0| q0x2
+        q0x2 -->|m0| q0x3
         q0x3 -->|m3| q0x4
     end
     subgraph z1 [Zone 1]
-        %%metro direction: TB
         q1x0[Q1X0]
         q1x1[Q1X1]
         q1x2[Q1X2]
-        q1x0 -->|m3| q1x1
+        q1x3[Q1X3]
+        q1x0 -->|m1| q1x1
         q1x1 -->|m1| q1x2
+        q1x2 -->|m1| q1x3
     end
     subgraph z2 [Zone 2]
+        %%metro direction: TB
         q2x0[Q2X0]
         q2x1[Q2X1]
-        q2x0 -->|m0| q2x1
+        q2x2[Q2X2]
+        q2x3[Q2X3]
+        q2x4[Q2X4]
+        q2x0 -->|m1| q2x1
+        q2x1 -->|m1| q2x2
+        q2x2 -->|m1| q2x3
+        q2x3 -->|m2| q2x4
     end
-    q0x4 -->|m1| q1x0
-    q0x4 -->|m3| q1x0
-    q0x4 -->|m1| q2x0
-    q1x2 -->|m1| q2x0
+    subgraph z3 [Zone 3]
+        %%metro direction: TB
+        q3x0[Q3X0]
+        q3x1[Q3X1]
+        q3x0 -->|m3| q3x1
+    end
+    subgraph z4 [Zone 4]
+        q4x0[Q4X0]
+        q4x1[Q4X1]
+        q4x2[Q4X2]
+        q4x3[Q4X3]
+        q4x0 -->|m0| q4x1
+        q4x1 -->|m0| q4x2
+        q4x2 -->|m0| q4x3
+    end
+    q0x4 -->|m2| q1x0
+    q1x3 -->|m2| q2x0
+    q0x4 -->|m2| q3x0
+    q0x4 -->|m3| q3x0
+    q3x1 -->|m0| q4x0
+    q3x1 -->|m2| q4x0
 """,
 }
 

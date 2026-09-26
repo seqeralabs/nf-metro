@@ -3168,10 +3168,10 @@ def _line_at_slot(
 def _line_exit_port(graph: MetroGraph, station_id: str, line_id: str) -> str | None:
     """The exit port *line_id* leaves *station_id*'s section through, if one.
 
-    Follows the line's sole forward edge at each station; a fork, a dead end,
-    or a step out of the section without an exit port gives ``None``.
+    Follows the line's sole forward edge at each station, which cannot leave
+    the section other than through an exit port; a fork or a dead end gives
+    ``None``.
     """
-    section_id = graph.stations[station_id].section_id
     current = station_id
     for _ in range(len(graph.stations)):
         port = graph.ports.get(current)
@@ -3181,8 +3181,6 @@ def _line_exit_port(graph: MetroGraph, station_id: str, line_id: str) -> str | N
         if len(edges) != 1:
             return None
         current = edges[0].target
-        if graph.stations[current].section_id != section_id:
-            return None
     return None
 
 
@@ -3195,10 +3193,10 @@ def _fan_entry_ranks_first(
     junction, and a branch of that fan delivers both into one downstream entry
     port.  That entry's lane order is settled by its own section, and the pair
     rides the branch to it as one bundle whose lane order its corners cannot
-    change, so the station has to hold the pair in the same order.  Only an
-    entry on the flow-start side of a section flowing, and storing its lanes,
-    the way the source section does shares the source's lane frame; any other
-    entry, or entries disagreeing, give ``None``.
+    change, so the station has to hold the pair in the same order.  An entry
+    whose section stores its lanes reflected when the source's does not, or
+    the other way round, ranks them in a frame the source cannot compare
+    against; that, or entries disagreeing, gives ``None``.
     """
     graph = ctx.graph
     exit_port_id = _line_exit_port(graph, station_id, line_id)
@@ -3230,13 +3228,8 @@ def _fan_entry_ranks_first(
         entry = graph.ports.get(entry_id)
         if entry is None or not entry.is_entry:
             continue
-        entry_section = graph.section_for_port(entry)
-        if (
-            entry_section.direction != source_section.direction
-            or not lanes_run_along_y(entry_section.direction)
-            or entry.side is not flow_port_sides(entry_section.direction)[0]
-            or _stores_reflected(ctx, entry_section.id)
-            != _stores_reflected(ctx, source_section.id)
+        if _stores_reflected(ctx, entry.section_id) != _stores_reflected(
+            ctx, source_section.id
         ):
             return None
         verdicts.add(
