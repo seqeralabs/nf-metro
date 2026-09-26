@@ -14,6 +14,7 @@ two-section grid with simpler topology (variant calling).
 from __future__ import annotations
 
 import copy
+import itertools
 import json
 import warnings
 from collections import defaultdict, deque
@@ -85,6 +86,7 @@ from nf_metro.layout.phases._common import (
     continuation_track_predecessors,
     flow_axis_exit_ports,
     flow_exit_carrier_anchor,
+    is_icon_terminus,
     iter_corridor_fed_solo_entries,
     iter_fold_lr_exit_straight_runs,
     iter_fold_lr_exits_short_of_target,
@@ -874,11 +876,9 @@ def test_bundle_terminator_successor_stays_on_trunk(fixture):
     climb back to the exit) on what is a simple chain (#977).
 
     Its subject comes from the production relation, so it can only check pairs
-    that relation names.  Chains the relation declines -- vertical sections and
-    file-icon stations -- are locked by
-    :func:`test_vertical_passthrough_chain_holds_one_lane_column` and
-    :func:`test_file_icon_sole_continuation_holds_its_producer_track`, whose
-    subjects come from the section's own edges instead.
+    that relation names.  File-icon stations, which the relation declines, are
+    locked by :func:`test_file_icon_sole_continuation_holds_its_producer_track`,
+    whose subjects come from the section's own edges instead.
     """
     graph = _layout(fixture)
     for section_id, pred, node in iter_sole_trunk_continuations(graph):
@@ -907,13 +907,8 @@ def test_sole_continuation_is_independent_of_station_declaration_order(
     """The relation reads the same whichever order the stations are declared in.
 
     All four flows are covered because declaration order is a parser-level
-    accident in every one of them.  The relation is scoped to horizontal (LR/RL)
-    sections, so a vertical flow's answer is the empty set -- and that answer has
-    to be order-independent too, or the scope holds only for some inputs.  See
-    :func:`~nf_metro.layout.phases._common.continuation_track_predecessors` for
-    why the scope is drawn there, and
-    :func:`test_vertical_passthrough_chain_holds_one_lane_column` for the
-    guarantee that stands in its place on a vertical section.
+    accident in every one of them, and the relation names the same link in a
+    vertical section as in a horizontal one.
     """
     axis, target, sink = _DECLARATION_ORDER_GRIDS[direction]
 
@@ -949,9 +944,54 @@ graph LR
     declared_in_flow_order = continuations("pred[Pred]\n        node[Node]")
     declared_in_reverse_order = continuations("node[Node]\n        pred[Pred]")
 
-    expected = {("target", "pred", "node")} if direction in ("LR", "RL") else set()
+    expected = {("target", "pred", "node")}
     assert declared_in_flow_order == expected
     assert declared_in_reverse_order == expected
+
+
+# (fixture, section, chain) for a linear chain -- no fork, fan or merge -- whose
+# line changes at least once along it.  ``tb_line_change_chain`` does so in a
+# vertical section; ``lr_line_handoff_fanning_exit`` hands its last line to an
+# exit port that fans out through a junction to two downstream sections.
+_LINE_CHANGING_CHAINS = [
+    ("topologies/tb_line_change_chain.mmd", "t", ("t0", "t1", "t2", "t3")),
+    ("topologies/lr_line_handoff_fanning_exit.mmd", "b", ("b0", "b1", "b2")),
+    (
+        "topologies/recompacted_fanout_exit.mmd",
+        "paired",
+        ("paired_in", "paired_step", "paired_out"),
+    ),
+    (
+        "topologies/same_destination_vertical_convergence.mmd",
+        "s5",
+        ("n5_0", "n5_1", "n5_2"),
+    ),
+]
+
+
+@pytest.mark.parametrize("fixture,section_id,chain", _LINE_CHANGING_CHAINS)
+def test_line_changing_linear_chain_holds_one_lane(
+    fixture: str, section_id: str, chain: tuple[str, ...]
+) -> None:
+    """A linear chain holds one lane across a line change, in any orientation.
+
+    With no fork to peel off to, a station that swaps one line for another
+    continues the chain, so the relation must name every link and the settled
+    chain must share one lane-axis coordinate.  Snapping the new
+    line's station to that line's own base track instead paints a zigzag with
+    no structural cause.
+    """
+    graph = _layout(fixture)
+    assert all(graph.stations[sid].section_id == section_id for sid in chain)
+    assert {
+        node: pred for pred, node in itertools.pairwise(chain)
+    }.items() <= continuation_track_predecessors(graph).items()
+
+    frame = AxisFrame.for_direction(graph.sections[section_id].direction, 1.0, 1.0)
+    lanes = {sid: frame.secondary.get(graph.stations[sid]) for sid in chain}
+    assert max(lanes.values()) - min(lanes.values()) <= _Y_TOL, (
+        f"{fixture}: section {section_id} chain spreads across lanes {lanes}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1000,18 +1040,25 @@ def _edge_derived_sole_continuations(
         yield pred, station_id
 
 
-@pytest.mark.parametrize("fixture", _FIXTURES_WITH_VERTICAL_PASSTHROUGH)
-def test_vertical_passthrough_chain_holds_one_lane_column(fixture: str) -> None:
-    """A vertical chain that changes no line keeps one lane column unaided.
+@pytest.mark.parametrize(
+    "fixture,lines_change",
+    [(fixture, False) for fixture in _FIXTURES_WITH_VERTICAL_PASSTHROUGH]
+    + [("topologies/tb_line_change_chain.mmd", True)],
+)
+def test_vertical_passthrough_chain_holds_one_lane_column(
+    fixture: str, lines_change: bool
+) -> None:
+    """A vertical chain link is a named continuation on one lane column.
 
-    This is the guarantee that lets
-    :func:`~nf_metro.layout.phases._common.continuation_track_predecessors` stay
-    scoped to horizontal sections: on a vertical (TB/BT) section the ordinary
-    layout already settles a sole successor on its predecessor's lane column, so
-    the relation has nothing to add there.  Both halves are asserted -- the
-    geometry, and that the relation indeed names none of these links -- so a
-    change that broke the geometry or that started emitting vertical relations
-    reds this rather than passing quietly.
+    The subjects come from each vertical (TB/BT) section's own edges, and every
+    link must settle its node on its predecessor's lane column.  Each link must
+    also be named by
+    :func:`~nf_metro.layout.phases._common.continuation_track_predecessors`
+    unless it falls under one of that relation's structural exclusions, which
+    hold in every orientation: a file-icon end, or a node that forks onward.
+    The corpus cases take only links whose two ends carry the same lines; the
+    ``lines_change`` case takes every link of a chain whose line changes, which
+    only the relation can hold on one column.
     """
     graph = _layout(fixture)
     named = continuation_track_predecessors(graph)
@@ -1021,21 +1068,27 @@ def test_vertical_passthrough_chain_holds_one_lane_column(fixture: str) -> None:
             continue
         frame = AxisFrame.for_direction(section.direction, 1.0, 1.0)
         for pred, node in _edge_derived_sole_continuations(graph, section):
-            if set(graph.station_lines(pred)) != set(graph.station_lines(node)):
+            same_lines = set(graph.station_lines(pred)) == set(
+                graph.station_lines(node)
+            )
+            if not lines_change and not same_lines:
                 continue
             checked += 1
-            assert named.get(node) != pred, (
-                f"{fixture}: section {section.id} link {pred}->{node} is now "
-                "named by the horizontal-only continuation relation"
+            excluded = len({edge.target for edge in graph.edges_from(node)}) > 1 or any(
+                is_icon_terminus(graph.stations[sid]) for sid in (pred, node)
+            )
+            assert excluded or named.get(node) == pred, (
+                f"{fixture}: section {section.id} link {pred}->{node} is not "
+                "named by the continuation relation"
             )
             pred_lane = frame.secondary.get(graph.stations[pred])
             node_lane = frame.secondary.get(graph.stations[node])
             assert abs(node_lane - pred_lane) <= _Y_TOL, (
                 f"{fixture}: section {section.id} link {pred}->{node} steps "
                 f"{abs(node_lane - pred_lane):.0f}px off its predecessor's lane "
-                "column, so the chain no longer holds it unaided"
+                "column"
             )
-    assert checked, f"{fixture}: no vertical line-preserving chain link found"
+    assert checked, f"{fixture}: no vertical chain link found"
 
 
 @pytest.mark.parametrize("fixture", _FIXTURES_WITH_ICON_SOLE_CONTINUATION)

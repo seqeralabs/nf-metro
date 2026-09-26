@@ -2,7 +2,7 @@
 
 Example `.mmd` files demonstrating a range of pipeline topologies and the layout patterns they produce. Each example exercises different aspects of the auto-layout engine.
 
-This directory holds 292 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
+This directory holds 298 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
 
 To render one example:
 
@@ -523,6 +523,8 @@ python scripts/list_topology_fixtures.py
 | `render_labelwrap_row_gap.mmd`              | Render-time label wrap grows a section bbox, so the rows below it reflow to keep the gap                                                                                         |
 | `wrap_return_canvas_margin.mmd`             | Five-line bundle wrapping from a row-0 pair down into a row-1 section - the canvas grows for ink drawn outside the box envelope                                                  |
 | `bundle_terminator_continuation.mmd`        | A station that terminates one line of a two-line bundle - its sole successor stays on the trunk row (#979)                                                                       |
+| `lr_line_handoff_fanning_exit.mmd`          | A chain that swaps its line on the hop into an exit fanning out through a junction - the chain holds one row (#2042)                                                             |
+| `lr_handoff_fanning_exit_peel_order.mmd`    | The same hand-off after a lane gap upstream - closing the gap keeps the exit bundle in the order its fan peels, so the drop does not braid (#2042)                               |
 | `corridor_fed_trunk_output_spur.mmd`        | A corridor-fed entry riding its through-chain rather than a short output spur off the trunk                                                                                      |
 | `section_trunk_short_output_branch.mmd`     | A section trunk choosing the long main chain over a short output spur (#1487)                                                                                                    |
 | `near_edge_exit_corner.mmd`                 | An exit corner close to the section edge - the corner stays inside the section bbox (#1314)                                                                                      |
@@ -541,6 +543,7 @@ python scripts/list_topology_fixtures.py
 | `tb_column_continuation_two_lines.mmd`     | Two TB sections stacked in one column - lane offsets are preserved across the continuation seam                                                                                                                                                 |
 | `tb_convergence_straight_drop.mmd`         | A collinear feeder dropping straight into a TB convergence rather than doglegging (#1007, #1009)                                                                                                                                                |
 | `tb_passthrough_continuation.mmd`          | A pass-through TB convergence whose continuation drops straight (#1012)                                                                                                                                                                         |
+| `tb_line_change_chain.mmd`                 | A TB chain whose line changes at every hop - the chain drops straight down one lane column instead of zigzagging (#2042)                                                                                                                        |
 | `tb_perp_exit_side_neighbour.mmd`          | A TB BOTTOM exit into an LR neighbour that is beside it rather than below - the route goes down and over                                                                                                                                        |
 | `tb_two_line_vert_seam.mmd`                | Two TB sections side by side - the two-line LEFT/RIGHT entry lifts above the vertical-flow trunk head (#1054)                                                                                                                                   |
 | `tb_offtrack_fork_baseline.mmd`            | A TB asymmetric fork whose branch reaches further toward the lift side than the trunk - the off-track baseline anchors on the trunk column, not the lift-most station (#1388)                                                                   |

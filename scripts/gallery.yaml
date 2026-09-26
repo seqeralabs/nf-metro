@@ -501,6 +501,23 @@ gallery:
       A three-line fan-out whose active exit lanes close the gaps left by
       unrelated lines. The exit port, divergence junction, and horizontal
       hand-off stubs must share the same compact 4 px frame.
+  - id: lr_line_handoff_fanning_exit
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      A three-station chain that swaps its line on the last hop, then leaves
+      through an exit that fans out through a junction to two sections. The
+      junction hides the entries downstream, but the hand-off continues
+      the chain, so all three stations hold one row (issue #2042).
+  - id: lr_handoff_fanning_exit_peel_order
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      A line hand-off into a fanning exit, where the station before the
+      hand-off carries two lines with an empty slot between them. Closing
+      that slot keeps the bundle level along the row and in the order its
+      fan peels, so the line running on to the section beside it stays
+      above the line that drops, and the two do not braid (issue #2042).
   - id: same_destination_short_overlap
     source_dir: examples/topologies
     category: Fan-out and Fan-in
@@ -826,6 +843,14 @@ gallery:
       down to a station directly below the merge while a collinear feeder peels off. The continuation
       rides the trunk slot so it drops straight, instead of being forced outboard where it kinks
       at the merge and crosses the collinear feeder (issue #1012)."
+  - id: tb_line_change_chain
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      "A linear chain in a `%%metro direction: TB` section whose line changes at
+      every hop, with no fork or merge anywhere along it. Each station continues
+      its predecessor, so the whole chain drops straight down one lane column
+      instead of zigzagging between the base columns of its lines (issue #2042)."
   - id: tb_column_continuation_two_lines
     source_dir: examples/topologies
     category: TB / BT Sections

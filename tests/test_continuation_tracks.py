@@ -3,7 +3,7 @@ from pathlib import Path
 import networkx as nx
 import pytest
 
-from nf_metro.api import prepare_graph
+from nf_metro.api import prepare_graph, render_string
 from nf_metro.layout import compute_layout
 from nf_metro.layout.constants import SAME_COORD_TOLERANCE
 from nf_metro.layout.geometry import AxisFrame, lanes_run_along_x
@@ -18,6 +18,7 @@ from nf_metro.layout.phases.guards import (
     PhaseInvariantError,
     _guard_post_convergence_trunk_continues,
 )
+from nf_metro.layout.routing import compute_station_offsets
 from nf_metro.parser.mermaid import parse_metro_mermaid
 
 ROOT = Path(__file__).parents[1]
@@ -368,21 +369,14 @@ graph LR
 
 
 @pytest.mark.parametrize("direction", ("TB", "BT"))
-def test_vertical_flow_contributes_no_relation_yet_keeps_one_lane(
+def test_vertical_flow_names_its_continuation_and_keeps_one_lane(
     direction: str,
 ) -> None:
-    """A vertical section reports no continuation, and needs none.
-
-    Horizontal-only is the relation's contract, so the empty answer here is the
-    specified one rather than an accident: a change that started emitting
-    vertical relations would red this. The same chain still settles with every
-    node on its predecessor's lane column, which is asserted against the settled
-    geometry so the empty relation costs no guarantee.
-    """
+    """A vertical section's chain is named by the relation and holds one lane."""
     graph = _transition_graph(direction)
     assert lanes_run_along_x(graph.sections["target"].direction)
 
-    assert continuation_track_predecessors(graph) == {}
+    assert continuation_track_predecessors(graph) == {"node": "pred", "tail": "node"}
 
     compute_layout(graph)
     lanes = _lane_columns(graph, ("pred", "node", "tail"))
@@ -390,19 +384,18 @@ def test_vertical_flow_contributes_no_relation_yet_keeps_one_lane(
     assert max(lanes) - min(lanes) <= SAME_COORD_TOLERANCE, lanes
 
 
-def test_tb_passthrough_fixture_keeps_its_column_without_a_relation() -> None:
+def test_tb_passthrough_fixture_names_its_merge_tail_continuation() -> None:
     """The TB passthrough corpus fixture's merge->tail chain shares one column.
 
     ``merge`` is ``tail``'s only predecessor and ``tail`` its only target, so the
-    chain is a sole continuation by the section's own edges; the horizontal-only
-    relation declines to name it, and the column it would have pulled ``tail``
-    onto is where the vertical layout puts it anyway.
+    chain is a sole continuation by the section's own edges and the relation
+    names it.
     """
     path = ROOT / "examples" / "topologies" / "tb_passthrough_continuation.mmd"
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
     assert lanes_run_along_x(graph.sections["work"].direction)
 
-    assert continuation_track_predecessors(graph) == {}
+    assert continuation_track_predecessors(graph) == {"tail": "merge"}
     assert [edge.source for edge in graph.edges_to("tail")] == ["merge"]
     assert [edge.target for edge in graph.edges_from("merge")] == ["tail"]
 
@@ -410,3 +403,286 @@ def test_tb_passthrough_fixture_keeps_its_column_without_a_relation() -> None:
     merge_lane, tail_lane = _lane_columns(graph, ("merge", "tail"))
 
     assert abs(tail_lane - merge_lane) <= SAME_COORD_TOLERANCE
+
+
+TB_LINE_CHANGE_CHAIN = ROOT / "examples" / "topologies" / "tb_line_change_chain.mmd"
+LR_LINE_HANDOFF = ROOT / "examples" / "topologies" / "lr_line_handoff_fanning_exit.mmd"
+LR_HANDOFF_PEEL_ORDER = (
+    ROOT / "examples" / "topologies" / "lr_handoff_fanning_exit_peel_order.mmd"
+)
+
+
+@pytest.mark.parametrize("direction", ("TB", "BT"))
+def test_vertical_chain_holds_its_lane_column_across_a_line_change(
+    direction: str,
+) -> None:
+    """A vertical chain that swaps lines mid-way stays in one lane column."""
+    text = TB_LINE_CHANGE_CHAIN.read_text().replace(
+        "%%metro direction: TB", f"%%metro direction: {direction}"
+    )
+    graph = parse_metro_mermaid(text)
+    chain = ("t0", "t1", "t2", "t3")
+
+    assert continuation_track_predecessors(graph) == {
+        "a1": "a0",
+        "t1": "t0",
+        "t2": "t1",
+        "t3": "t2",
+    }
+
+    compute_layout(graph, validate=True)
+    lanes = _lane_columns(graph, chain)
+
+    assert max(lanes) - min(lanes) <= SAME_COORD_TOLERANCE, dict(zip(chain, lanes))
+
+
+@pytest.mark.parametrize("direction", ("LR", "TB"))
+def test_line_handed_to_a_fanning_exit_seeds_inheritance(direction: str) -> None:
+    """A line leaving through an exit that fans out via a junction continues.
+
+    The exit port feeds a hidden junction that splits to two downstream entry
+    ports, so the entry that proves the hand-off sits two hops past the exit.
+    """
+    text = LR_LINE_HANDOFF.read_text().replace(
+        "    subgraph b [B]\n",
+        f"    subgraph b [B]\n        %%metro direction: {direction}\n",
+    )
+    graph = parse_metro_mermaid(text)
+    assert graph.sections["b"].direction == direction
+    exit_targets = {
+        edge.target
+        for port_id in graph.sections["b"].exit_ports
+        for edge in graph.edges_from(port_id)
+    }
+    assert exit_targets <= graph.junction_ids
+    chain = ("b0", "b1", "b2")
+
+    assert continuation_track_predecessors(graph) == {"b1": "b0", "b2": "b1"}
+
+    compute_layout(graph, validate=True)
+    lanes = _lane_columns(graph, chain)
+
+    assert max(lanes) - min(lanes) <= SAME_COORD_TOLERANCE, dict(zip(chain, lanes))
+
+
+def test_gap_compaction_keeps_a_straightened_handoff_in_peel_order() -> None:
+    """Closing a feeder's lane gap does not flip the bundle it hands off.
+
+    ``a1`` carries ``l0`` and ``l2`` with ``l1``'s slot empty between them, so
+    compaction lifts ``l2`` a slot, and ``a2`` -- on ``a1``'s row -- follows it
+    to keep the run level.  ``a2``'s other line, ``l1``, also runs on to ``b``
+    on this row while ``l2`` only drops to ``c``, so ``l1`` has to stay above
+    ``l2`` out through the exit, or ``l2``'s drop crosses ``l1``'s level run
+    where the fan peels.
+    """
+    graph = parse_metro_mermaid(LR_HANDOFF_PEEL_ORDER.read_text())
+    compute_layout(graph, validate=True)
+    offsets = compute_station_offsets(graph)
+    (exit_port,) = graph.sections["a"].exit_ports
+
+    assert graph.stations["a1"].y == graph.stations["a2"].y
+    assert offsets["a1", "l2"] == offsets["a2", "l2"]
+    for station_id in ("a2", exit_port):
+        assert offsets[station_id, "l1"] < offsets[station_id, "l2"], station_id
+
+
+_COMPACTION_LINES = "\n".join(
+    f"%%metro line: m{index} | L{index} | {colour}"
+    for index, colour in enumerate(
+        ("#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4")
+    )
+)
+
+# Each map closes a lane gap whose propagation lands on a slot another line
+# holds at the next station, and each needs that line re-seated differently.
+COMPACTION_COLLISION_MAPS = {
+    # Both lines leave through one exit and enter the downstream section
+    # together, which fixes their order there; no fan has a say in it.
+    "shared_exit_no_fan": """
+graph LR
+    subgraph z0 [Zone 0]
+        %%metro direction: TB
+        q0x0[Q0X0]
+        q0x1[Q0X1]
+        q0x2[Q0X2]
+        q0x0 -->|m2| q0x1
+        q0x1 -->|m2| q0x2
+    end
+    subgraph z1 [Zone 1]
+        q1x0[Q1X0]
+        q1x1[Q1X1]
+        q1x2[Q1X2]
+        q1x3[Q1X3]
+        q1x0 -->|m3| q1x1
+        q1x1 -->|m0| q1x2
+        q1x2 -->|m1| q1x3
+    end
+    subgraph z2 [Zone 2]
+        %%metro direction: BT
+        q2x0[Q2X0]
+        q2x1[Q2X1]
+        q2x0 -->|m2| q2x1
+    end
+    q0x2 -->|m3| q1x0
+    q0x2 -->|m4| q2x0
+    q1x3 -->|m4| q2x0
+    q1x3 -->|m1| q2x1
+""",
+    # The displaced line's free slot beyond the mover is the lane a bypass
+    # rides past the station.
+    "slot_beyond_held_by_bypass": """
+graph LR
+    subgraph z0 [Zone 0]
+        q0x0[Q0X0]
+        q0x1[Q0X1]
+        q0x2[Q0X2]
+        q0x3[Q0X3]
+        q0x4[Q0X4]
+        q0x0 -->|m2| q0x1
+        q0x1 -->|m1| q0x2
+        q0x2 -->|m3| q0x3
+        q0x3 -->|m1| q0x4
+    end
+    subgraph z1 [Zone 1]
+        q1x0[Q1X0]
+        q1x1[Q1X1]
+        q1x2[Q1X2]
+        q1x3[Q1X3]
+        q1x0 -->|m0| q1x1
+        q1x1 -->|m2| q1x2
+        q1x2 -->|m1| q1x3
+    end
+    subgraph z2 [Zone 2]
+        %%metro direction: TB
+        q2x0[Q2X0]
+        q2x1[Q2X1]
+        q2x2[Q2X2]
+        q2x3[Q2X3]
+        q2x4[Q2X4]
+        q2x0 -->|m1| q2x1
+        q2x1 -->|m0| q2x2
+        q2x2 -->|m0| q2x3
+        q2x3 -->|m3| q2x4
+    end
+    subgraph z3 [Zone 3]
+        q3x0[Q3X0]
+    end
+    subgraph z4 [Zone 4]
+        q4x0[Q4X0]
+    end
+    q0x4 -->|m1| q1x0
+    q1x0 -->|m0| q2x0
+    q2x4 -->|m1| q3x0
+    q3x0 -->|m0| q4x0
+""",
+    # The fan delivers both lines into a vertical section through its
+    # bottom entry, whose order the displaced line has to keep.
+    "fan_into_bottom_entry": """
+graph LR
+    subgraph z0 [Zone 0]
+        q0x0[Q0X0]
+        q0x1[Q0X1]
+        q0x2[Q0X2]
+        q0x0 -->|m0| q0x1
+        q0x1 -->|m3| q0x2
+    end
+    subgraph z1 [Zone 1]
+        %%metro direction: BT
+        q1x0[Q1X0]
+        q1x1[Q1X1]
+        q1x2[Q1X2]
+        q1x3[Q1X3]
+        q1x4[Q1X4]
+        q1x0 -->|m0| q1x1
+        q1x1 -->|m0| q1x2
+        q1x2 -->|m3| q1x3
+        q1x3 -->|m3| q1x4
+    end
+    subgraph z2 [Zone 2]
+        q2x0[Q2X0]
+        q2x1[Q2X1]
+        q2x2[Q2X2]
+        q2x0 -->|m0| q2x1
+        q2x1 -->|m0| q2x2
+    end
+    subgraph z3 [Zone 3]
+        q3x0[Q3X0]
+        q3x1[Q3X1]
+        q3x2[Q3X2]
+        q3x3[Q3X3]
+        q3x4[Q3X4]
+        q3x0 -->|m1| q3x1
+        q3x1 -->|m1| q3x2
+        q3x2 -->|m3| q3x3
+        q3x3 -->|m1| q3x4
+    end
+    q0x2 -->|m2| q1x0
+    q0x2 -->|m3| q1x0
+    q1x4 -->|m3| q2x0
+    q2x2 -->|m0| q3x0
+    q0x2 -->|m3| q2x0
+""",
+    # The same through a side entry of a vertical section a row below.
+    "fan_into_side_entry_of_vertical_section": """
+graph LR
+    subgraph z0 [Zone 0]
+        q0x0[Q0X0]
+        q0x1[Q0X1]
+        q0x2[Q0X2]
+        q0x3[Q0X3]
+        q0x4[Q0X4]
+        q0x0 -->|m0| q0x1
+        q0x1 -->|m0| q0x2
+        q0x2 -->|m0| q0x3
+        q0x3 -->|m3| q0x4
+    end
+    subgraph z1 [Zone 1]
+        q1x0[Q1X0]
+        q1x1[Q1X1]
+        q1x2[Q1X2]
+        q1x3[Q1X3]
+        q1x0 -->|m1| q1x1
+        q1x1 -->|m1| q1x2
+        q1x2 -->|m1| q1x3
+    end
+    subgraph z2 [Zone 2]
+        %%metro direction: TB
+        q2x0[Q2X0]
+        q2x1[Q2X1]
+        q2x2[Q2X2]
+        q2x3[Q2X3]
+        q2x4[Q2X4]
+        q2x0 -->|m1| q2x1
+        q2x1 -->|m1| q2x2
+        q2x2 -->|m1| q2x3
+        q2x3 -->|m2| q2x4
+    end
+    subgraph z3 [Zone 3]
+        %%metro direction: TB
+        q3x0[Q3X0]
+        q3x1[Q3X1]
+        q3x0 -->|m3| q3x1
+    end
+    subgraph z4 [Zone 4]
+        q4x0[Q4X0]
+        q4x1[Q4X1]
+        q4x2[Q4X2]
+        q4x3[Q4X3]
+        q4x0 -->|m0| q4x1
+        q4x1 -->|m0| q4x2
+        q4x2 -->|m0| q4x3
+    end
+    q0x4 -->|m2| q1x0
+    q1x3 -->|m2| q2x0
+    q0x4 -->|m2| q3x0
+    q0x4 -->|m3| q3x0
+    q3x1 -->|m0| q4x0
+    q3x1 -->|m2| q4x0
+""",
+}
+
+
+@pytest.mark.parametrize("name", sorted(COMPACTION_COLLISION_MAPS))
+def test_gap_compaction_collision_renders(name: str) -> None:
+    """A line displaced by gap compaction lands where the map still renders."""
+    render_string(f"{_COMPACTION_LINES}\n{COMPACTION_COLLISION_MAPS[name]}")

@@ -26,6 +26,8 @@ from nf_metro.layout.phases._common import (
     continuation_track_predecessors,
     grow_section_bbox_max_edge,
     grow_section_bbox_min_edge,
+    layer_occupants,
+    section_lane_axis,
 )
 from nf_metro.layout.phases.planned_fans import (
     planned_fan_layout_station_ids,
@@ -52,10 +54,14 @@ def _carry_full_bundle_continuations(graph: MetroGraph) -> None:
     other coordinate-inheritance passes of Stage 6.7 (6.7b's symmetric-branch
     carry, 6.7c/6.7d's port centring), which are bare for the same reason.
     """
+    occupants = layer_occupants(graph)
     for node, predecessor in continuation_track_predecessors(graph).items():
-        if not continuation_track_is_realizable(graph, node, predecessor):
+        if not continuation_track_is_realizable(graph, node, predecessor, occupants):
             continue
-        graph.stations[node].y = graph.stations[predecessor].y
+        section_id = graph.stations[node].section_id
+        assert section_id is not None
+        lane = section_lane_axis(graph, section_id)
+        lane.set(graph.stations[node], lane.get(graph.stations[predecessor]))
 
 
 def _convergence_source_ys(graph: MetroGraph) -> dict[str, list[str]]:

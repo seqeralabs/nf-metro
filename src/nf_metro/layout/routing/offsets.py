@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections import Counter, deque
+from collections import Counter, defaultdict, deque
 from collections.abc import (
     Callable,
     Container,
@@ -33,6 +33,7 @@ from nf_metro.layout.phases._common import (
     iter_flat_seam_solo_entries,
     line_forks_within_section,
     seam_is_flat,
+    section_lane_axis,
 )
 from nf_metro.layout.route_topology import divergence_junction_exit_ports
 from nf_metro.layout.routing.arranger import BoundaryConfig, lane_order
@@ -3133,6 +3134,145 @@ def _compaction_peer_conflict(
     return False
 
 
+def _pending_offset(
+    ctx: _OffsetCtx,
+    station_pending: Mapping[str, float],
+    station_id: str,
+    line_id: str,
+) -> float:
+    """*line_id*'s offset at *station_id*, a scheduled compaction move first."""
+    return station_pending.get(line_id, ctx.offsets.get((station_id, line_id), 0.0))
+
+
+def _line_at_slot(
+    ctx: _OffsetCtx,
+    station_pending: Mapping[str, float],
+    station_id: str,
+    slot: float,
+    *,
+    exclude: str | None = None,
+) -> str | None:
+    """The first line other than *exclude* sitting on *slot* at *station_id*."""
+    return next(
+        (
+            line_id
+            for line_id in ctx.graph.station_lines(station_id)
+            if line_id != exclude
+            and abs(_pending_offset(ctx, station_pending, station_id, line_id) - slot)
+            < _OFFSET_EQ_TOLERANCE
+        ),
+        None,
+    )
+
+
+def _line_exit_port(graph: MetroGraph, station_id: str, line_id: str) -> str | None:
+    """The exit port *line_id* leaves *station_id*'s section through, if one.
+
+    Follows the line's sole forward edge at each station, which cannot leave
+    the section other than through an exit port; a fork or a dead end gives
+    ``None``.
+    """
+    current = station_id
+    for _ in range(len(graph.stations)):
+        port = graph.ports.get(current)
+        if port is not None and not port.is_entry:
+            return current
+        edges = [edge for edge in graph.edges_from(current) if edge.line_id == line_id]
+        if len(edges) != 1:
+            return None
+        current = edges[0].target
+    return None
+
+
+def _fan_entry_ranks_first(
+    ctx: _OffsetCtx, station_id: str, line_id: str, other_id: str
+) -> bool | None:
+    """Whether a shared fan entry gives *line_id* a smaller offset than *other_id*.
+
+    Both lines leave *station_id* through one exit port that feeds a divergence
+    junction, and a branch of that fan delivers both into one downstream entry
+    port.  That entry's lane order is settled by its own section, and the pair
+    rides the branch to it as one bundle whose lane order its corners cannot
+    change, so the station has to hold the pair in the same order.  An entry
+    whose section stores its lanes reflected when the source's does not, or
+    the other way round, ranks them in a frame the source cannot compare
+    against; that, or entries disagreeing, gives ``None``.
+
+    :func:`fanout_divergence_peel_order` declines a fan that sends one line
+    down several branches; the entry a branch shares still fixes this pair.
+    """
+    graph = ctx.graph
+    exit_port_id = _line_exit_port(graph, station_id, line_id)
+    if exit_port_id is None or exit_port_id != _line_exit_port(
+        graph, station_id, other_id
+    ):
+        return None
+    junction_id = next(
+        (
+            junction_id
+            for junction_id, port_id in ctx.divergence_exit_ports.items()
+            if port_id == exit_port_id
+        ),
+        None,
+    )
+    if junction_id is None:
+        return None
+    source_section = graph.section_for_port(graph.ports[exit_port_id])
+
+    lines_into: dict[str, set[str]] = defaultdict(set)
+    for edge in graph.edges_from(junction_id):
+        lines_into[edge.target].add(edge.line_id)
+
+    verdicts = set()
+    for entry_id, lines in lines_into.items():
+        if not {line_id, other_id} <= lines:
+            continue
+        entry = graph.ports.get(entry_id)
+        if entry is None or not entry.is_entry:
+            continue
+        if _stores_reflected(ctx, entry.section_id) != _stores_reflected(
+            ctx, source_section.id
+        ):
+            return None
+        verdicts.add(
+            ctx.offsets.get((entry_id, line_id), 0.0)
+            < ctx.offsets.get((entry_id, other_id), 0.0)
+        )
+    return verdicts.pop() if len(verdicts) == 1 else None
+
+
+def _collider_slot(
+    ctx: _OffsetCtx,
+    station_id: str,
+    station_pending: Mapping[str, float],
+    mover: str,
+    collider: str,
+    vacated: float,
+    claimed: float,
+) -> float:
+    """Where compaction re-seats *collider* when *mover* claims its slot.
+
+    *mover* travels from *vacated* to *claimed* at *station_id*.  With no fan
+    downstream fixing the pair's order (:func:`_fan_entry_ranks_first`),
+    *collider* takes *vacated*: sliding it beyond *claimed* instead can land it
+    on a lane a bypass rides past the station, or keep an order the entry the
+    pair runs into needs reversed.  A fan that wants the order *vacated* gives
+    agrees; one that wants the other order slides *collider* one slot beyond
+    *claimed*, provided that slot is free, since sliding it on would displace a
+    third line in turn.
+    """
+    fan_ranks_mover_first = _fan_entry_ranks_first(ctx, station_id, mover, collider)
+    if fan_ranks_mover_first is None:
+        return vacated
+    if fan_ranks_mover_first == (vacated > claimed):
+        return vacated
+    beyond = claimed + (ctx.offset_step if claimed > vacated else -ctx.offset_step)
+    beyond_holder = _line_at_slot(
+        ctx, station_pending, station_id, beyond, exclude=collider
+    )
+    return vacated if beyond_holder is not None else beyond
+
+
 def _propagate_compaction(
     ctx: _OffsetCtx,
     same_y_adj: dict[str, dict[str, list[tuple[str, str]]]],
@@ -3177,11 +3317,7 @@ def _propagate_compaction(
             if (nbr_sid, lid) in visited:
                 continue
 
-            # Read pending value if a prior BFS step already scheduled a
-            # change, otherwise use current offset.
-            nbr_cur = pending.get(nbr_sid, {}).get(
-                lid, ctx.offsets.get((nbr_sid, lid), 0.0)
-            )
+            nbr_cur = _pending_offset(ctx, pending.get(nbr_sid, {}), nbr_sid, lid)
             if abs(nbr_cur - new_off) < _OFFSET_EQ_TOLERANCE:
                 continue
 
@@ -3198,25 +3334,16 @@ def _propagate_compaction(
                 queue.append((nbr_sid, lid))
                 continue
 
-            # Check for collision with another line's offset
-            collision_lid = None
-            for other_lid in nbr_lines:
-                if other_lid == lid:
-                    continue
-                other_off = pending.get(nbr_sid, {}).get(
-                    other_lid,
-                    ctx.offsets.get((nbr_sid, other_lid), 0.0),
-                )
-                if abs(other_off - new_off) < _OFFSET_EQ_TOLERANCE:
-                    collision_lid = other_lid
-                    break
-
             nbr_pending = pending.setdefault(nbr_sid, {})
+            collision_lid = _line_at_slot(
+                ctx, nbr_pending, nbr_sid, new_off, exclude=lid
+            )
             nbr_pending[lid] = new_off
             queue.append((nbr_sid, lid))
             if collision_lid is not None:
-                # Swap: move collider to the slot we're vacating
-                nbr_pending[collision_lid] = nbr_cur
+                nbr_pending[collision_lid] = _collider_slot(
+                    ctx, nbr_sid, nbr_pending, lid, collision_lid, nbr_cur, new_off
+                )
                 queue.append((nbr_sid, collision_lid))
 
     if max_steps <= 0:
@@ -3238,6 +3365,15 @@ def _same_section(graph: MetroGraph, id_a: str, id_b: str) -> bool:
     if sec_b is None and id_b in graph.ports:
         sec_b = graph.ports[id_b].section_id
     return bool(sec_a and sec_b and sec_a == sec_b)
+
+
+def _share_lane(graph: MetroGraph, id_a: str, id_b: str) -> bool:
+    """Whether two :func:`_same_section` stations sit on one lane coordinate."""
+    a, b = graph.stations[id_a], graph.stations[id_b]
+    section_id = a.section_id or b.section_id
+    assert section_id is not None
+    lane = section_lane_axis(graph, section_id)
+    return abs(lane.get(a) - lane.get(b)) <= _SAME_Y_TOLERANCE
 
 
 def _would_collide(
@@ -3957,11 +4093,13 @@ def _recenter_partial_fan_branches(ctx: _OffsetCtx) -> None:
 
 
 def _reconcile_horizontal_offsets(ctx: _OffsetCtx, max_iterations: int = 10) -> None:
-    """Snap offsets for same-section edges where endpoints share base Y.
+    """Snap offsets for same-section edges whose endpoints share a lane.
 
-    Only processes edges where both endpoints belong to the same
-    section. Inter-section offset mismatches are handled by routing
-    (L-shaped paths with vertical segments), so they must not be
+    A lane is the section's lane-axis coordinate -- Y for LR/RL, X for TB/BT --
+    so the edges processed are the straight runs along the flow, where an
+    offset mismatch draws as a jog.  Only processes edges where both endpoints
+    belong to the same section. Inter-section offset mismatches are handled by
+    routing (L-shaped paths with vertical segments), so they must not be
     reconciled here - doing so cascades offsets across section
     boundaries and breaks per-section reindexing.
 
@@ -3978,14 +4116,12 @@ def _reconcile_horizontal_offsets(ctx: _OffsetCtx, max_iterations: int = 10) -> 
     (:func:`_reinherit_junction_lanes`), which is outside the same-section
     filter above: a junction has no section of its own.
     """
-    # Pre-filter to edges where both endpoints share the same Y and
-    # section. These properties are immutable during reconciliation.
+    # Section membership and lane coordinates are immutable during reconciliation.
     candidates = [
         edge
         for edge in ctx.graph.edges
-        if abs(ctx.graph.stations[edge.source].y - ctx.graph.stations[edge.target].y)
-        <= _SAME_Y_TOLERANCE
-        and _same_section(ctx.graph, edge.source, edge.target)
+        if _same_section(ctx.graph, edge.source, edge.target)
+        and _share_lane(ctx.graph, edge.source, edge.target)
     ]
 
     moved: set[str] = set()
