@@ -2,7 +2,7 @@
 
 Example `.mmd` files demonstrating a range of pipeline topologies and the layout patterns they produce. Each example exercises different aspects of the auto-layout engine.
 
-This directory holds 297 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
+This directory holds 298 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
 
 To render one example:
 
@@ -508,6 +508,7 @@ python scripts/list_topology_fixtures.py
 | `disjoint_sameline_trunks.mmd`              | Two separate trunks for the same line in disjoint sections - tests that same-line bypass trunks do not falsely merge                                                                                                                                                                  |
 | `samerow_bypass_joins_flat_bundle.mmd`      | A same-row bypass (round below an intervening section) joining a multi-line flat bundle at a shared LEFT entry - it takes the lane below the flat lines instead of a declaration-order lane among them, so no flat line steps aside at the port and the riser crosses nothing (#2043) |
 | `samerow_bypass_joins_flat_bundle_rl.mmd`   | RL mirror of the above at a shared RIGHT entry (#2043)                                                                                                                                                                                                                                |
+| `samerow_bypass_over_top_flat_bundle.mmd`   | The same join with the bypass sent over the row top by a packed cell-mate - it takes the lane above the flat lines (#2043)                                                                                                                                                            |
 | `off_track_input_above_consumer.mmd`        | Off-track file input positioned above its consumer - tests the above-consumer routing arm for off-track inputs                                                                                                                                                                        |
 | `peeloff_extra_line_consumer.mmd`           | Peel-off where an extra line has its own consumer in the target section - tests that the extra-consumer line peels correctly from the bundle                                                                                                                                          |
 | `peeloff_riser_respace.mmd`                 | Peel-off riser respacing - tests that risers are re-spaced after a peel-off to maintain visual separation                                                                                                                                                                             |

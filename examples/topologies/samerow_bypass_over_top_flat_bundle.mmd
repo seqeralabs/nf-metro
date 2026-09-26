@@ -1,0 +1,35 @@
+%%metro title: Same-Row Bypass Over the Top Joins a Flat Bundle
+%%metro style: dark
+%%metro line: main | Main | #e63946
+%%metro line: skip | Skip | #f5c542
+%%metro line: qc | QC | #2db572
+%%metro grid: ingest, prepare | 0,0
+%%metro grid: process | 1,0
+%%metro grid: report | 2,0
+
+graph LR
+    subgraph ingest [Ingest]
+        load[Load]
+        split[Split]
+        load -->|skip| split
+    end
+
+    subgraph prepare [Prepare]
+        trim[Trim]
+        filter[Filter]
+        trim -->|main,qc| filter
+    end
+
+    subgraph process [Process]
+        align[Align]
+        quant[Quantify]
+        align -->|main,qc| quant
+    end
+
+    subgraph report [Report]
+        summary[Summary]
+    end
+
+    filter -->|main,qc| align
+    split -->|skip| summary
+    quant -->|main,qc| summary

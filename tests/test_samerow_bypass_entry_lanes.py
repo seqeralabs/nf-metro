@@ -7,9 +7,13 @@ it is not a flat co-traveller.  Slotted among the lines that do run straight in,
 it takes a lane one of them holds upstream; that line has to step aside just
 outside the port, and the riser crosses it on the way up.
 
+A packed cell can instead send the bypass over the row top, so it comes down
+into the port from above; it then belongs above the flat lines, not below.
+
 Each case names a port where a same-row bypass meets at least one flat feeder,
-in LR and RL, with one and with several flat lines, and with the flat lines'
-upstream section sharing its bundle with the port's section.
+in LR and RL, with one and with several flat lines, arriving from below and
+from above, and with the flat lines' upstream section sharing its bundle with
+the port's section.
 """
 
 from __future__ import annotations
@@ -26,6 +30,10 @@ from nf_metro.layout.phases._common import (
     iter_flat_seam_solo_entries,
 )
 from nf_metro.layout.routing import compute_station_offsets
+from nf_metro.layout.routing.invariants import (
+    check_convergence_shallow_feeder_concentric,
+)
+from nf_metro.layout.routing.offsets import same_row_bypass_entry
 from nf_metro.parser.model import MetroGraph
 from nf_metro.render.svg import build_render_plan
 from nf_metro.themes import resolve_theme
@@ -37,6 +45,7 @@ TOPOLOGIES = EXAMPLES / "topologies"
 CASES = [
     ("samerow_bypass_joins_flat_bundle", "report__entry_left_3"),
     ("samerow_bypass_joins_flat_bundle_rl", "report__entry_right_3"),
+    ("samerow_bypass_over_top_flat_bundle", "report__entry_left_4"),
     ("junction_entry_lane_step", "orf_calling__entry_left_3"),
     ("disjoint_sameline_trunks", "secC__entry_left_5"),
     ("disjoint_sameline_trunks", "secE__entry_left_7"),
@@ -235,3 +244,48 @@ def test_solo_entry_with_a_flat_and_a_riser_feeder_is_neither_scope() -> None:
     entry = ("reporting", "reporting__entry_left_5")
     assert entry not in corridor
     assert entry not in flat
+
+
+OVER_TOP_FIXTURE = "samerow_bypass_over_top_flat_bundle"
+OVER_TOP_PORT = "report__entry_left_4"
+
+
+@pytest.mark.parametrize(("fixture", "port_id"), CASES, ids=CASE_IDS)
+def test_bypass_approach_side_matches_the_drawn_route(
+    fixture: str, port_id: str
+) -> None:
+    """A bypass line counts as coming down exactly when its route descends in."""
+    graph, routes = _drawn_routes(fixture)
+    entry = same_row_bypass_entry(graph, port_id, compute_station_offsets(graph))
+    assert entry is not None
+    port_y = graph.stations[port_id].y
+    drawn_from_above = {
+        route.line_id
+        for route, points in routes
+        if route.edge.target == port_id
+        and route.line_id in entry.bypass_depth
+        and min(y for _x, y in points) < port_y - _TOL
+    }
+    assert entry.descending == drawn_from_above
+
+
+def test_over_top_bypass_takes_the_lane_above_the_flat_lines() -> None:
+    graph, _routes = _drawn_routes(OVER_TOP_FIXTURE)
+    offsets = compute_station_offsets(graph)
+    lanes = {lid: offsets[(OVER_TOP_PORT, lid)] for lid in ("skip", "main", "qc")}
+    assert lanes["skip"] < lanes["main"] < lanes["qc"], lanes
+
+
+def test_concentric_guard_reads_the_side_a_bypass_arrives_from() -> None:
+    """The guard accepts the over-top line above the flat band and rejects it below."""
+    graph, _routes = _drawn_routes(OVER_TOP_FIXTURE)
+    offsets = compute_station_offsets(graph)
+    assert check_convergence_shallow_feeder_concentric(graph, offsets) == []
+
+    main, qc = offsets[(OVER_TOP_PORT, "main")], offsets[(OVER_TOP_PORT, "qc")]
+    step = qc - main
+    above = {**offsets, (OVER_TOP_PORT, "skip"): main - step}
+    below = {**offsets, (OVER_TOP_PORT, "skip"): qc + step}
+    assert check_convergence_shallow_feeder_concentric(graph, above) == []
+    (message,) = check_convergence_shallow_feeder_concentric(graph, below)
+    assert OVER_TOP_PORT in message
