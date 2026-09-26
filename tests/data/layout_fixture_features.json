@@ -380,6 +380,7 @@
     "topologies/leftward_up_exit_turn_order.mmd",
     "topologies/lr_bottom_exit_rl_top_entry_jog.mmd",
     "topologies/lr_exit_into_tb_shared_carrier_row.mmd",
+    "topologies/lr_handoff_fanning_exit_peel_order.mmd",
     "topologies/lr_line_handoff_fanning_exit.mmd",
     "topologies/lr_perp_bottom_exit_perp_entry.mmd",
     "topologies/lr_perp_bottom_exit_side_entry.mmd",

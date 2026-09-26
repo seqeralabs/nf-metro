@@ -3134,6 +3134,37 @@ def _compaction_peer_conflict(
     return False
 
 
+def _collider_slot(
+    ctx: _OffsetCtx,
+    station_id: str,
+    station_pending: Mapping[str, float],
+    collider: str,
+    vacated: float,
+    claimed: float,
+) -> float:
+    """Where compaction re-seats *collider* when a moving line claims its slot.
+
+    The moving line travels from *vacated* to *claimed* at *station_id*.  The
+    collider slides one slot further the same way when that slot is free, so
+    the pair keeps its order: the station may hand both lines on to a fan
+    downstream, and a pair reversed here braids where that fan peels them
+    apart.  When the slot beyond is taken the collider drops into *vacated*
+    instead, since sliding it on would displace a third line in turn.
+    """
+    step = ctx.offset_step if claimed > vacated else -ctx.offset_step
+    beyond = claimed + step
+    beyond_taken = any(
+        line_id != collider
+        and abs(
+            station_pending.get(line_id, ctx.offsets.get((station_id, line_id), 0.0))
+            - beyond
+        )
+        < _OFFSET_EQ_TOLERANCE
+        for line_id in ctx.graph.station_lines(station_id)
+    )
+    return vacated if beyond_taken else beyond
+
+
 def _propagate_compaction(
     ctx: _OffsetCtx,
     same_y_adj: dict[str, dict[str, list[tuple[str, str]]]],
@@ -3216,8 +3247,9 @@ def _propagate_compaction(
             nbr_pending[lid] = new_off
             queue.append((nbr_sid, lid))
             if collision_lid is not None:
-                # Swap: move collider to the slot we're vacating
-                nbr_pending[collision_lid] = nbr_cur
+                nbr_pending[collision_lid] = _collider_slot(
+                    ctx, nbr_sid, nbr_pending, collision_lid, nbr_cur, new_off
+                )
                 queue.append((nbr_sid, collision_lid))
 
     if max_steps <= 0:

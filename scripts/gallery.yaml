@@ -509,6 +509,15 @@ gallery:
       through an exit that fans out through a junction to two sections. The
       junction hides the entries downstream, but the hand-off continues
       the chain, so all three stations hold one row (issue #2042).
+  - id: lr_handoff_fanning_exit_peel_order
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      A line hand-off into a fanning exit, where the station before the
+      hand-off carries two lines with an empty slot between them. Closing
+      that slot keeps the bundle level along the row and in the order its
+      fan peels, so the line running on to the section beside it stays
+      above the line that drops, and the two do not braid (issue #2042).
   - id: same_destination_short_overlap
     source_dir: examples/topologies
     category: Fan-out and Fan-in

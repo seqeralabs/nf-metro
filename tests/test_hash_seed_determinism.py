@@ -92,7 +92,7 @@ EXPECTED_DEFECT_CLASSES = {
     ),
     "seed_41.mmd": (
         "bundle order (line crosses its bundle-mate)",
-        "peel-off bundle braids into port",
+        "non-concentric bundle corner",
         "merge fan-out branches split off one fork corner",
     ),
     "seed_77.mmd": ("peel-off bundle braids into port",),
@@ -100,7 +100,7 @@ EXPECTED_DEFECT_CLASSES = {
 
 EXPECTED_EXCEPTION_SHA256 = {
     "seed_15.mmd": "1c976a09cbf42d8504c93d273caf35ee63bdbfb5f8a392d948716f2e31d97561",
-    "seed_41.mmd": "a515073d4452588f8daf32ed4e71ba3b1ce57cd1dd4b7da9f8d0f71ea80facff",
+    "seed_41.mmd": "b046b2201c15101519b614bcb3fc9df4c5783d1db140b59bbee61888c3ecc985",
     "seed_77.mmd": "1968df4f188a78b30214d4321ca9825e0b7640e367490bf90ec5aa4811fc8967",
 }
 

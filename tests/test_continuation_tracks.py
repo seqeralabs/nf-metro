@@ -18,6 +18,7 @@ from nf_metro.layout.phases.guards import (
     PhaseInvariantError,
     _guard_post_convergence_trunk_continues,
 )
+from nf_metro.layout.routing import compute_station_offsets
 from nf_metro.parser.mermaid import parse_metro_mermaid
 
 ROOT = Path(__file__).parents[1]
@@ -406,6 +407,9 @@ def test_tb_passthrough_fixture_names_its_merge_tail_continuation() -> None:
 
 TB_LINE_CHANGE_CHAIN = ROOT / "examples" / "topologies" / "tb_line_change_chain.mmd"
 LR_LINE_HANDOFF = ROOT / "examples" / "topologies" / "lr_line_handoff_fanning_exit.mmd"
+LR_HANDOFF_PEEL_ORDER = (
+    ROOT / "examples" / "topologies" / "lr_handoff_fanning_exit_peel_order.mmd"
+)
 
 
 @pytest.mark.parametrize("direction", ("TB", "BT"))
@@ -459,3 +463,24 @@ def test_line_handed_to_a_fanning_exit_seeds_inheritance(direction: str) -> None
     lanes = _lane_columns(graph, chain)
 
     assert max(lanes) - min(lanes) <= SAME_COORD_TOLERANCE, dict(zip(chain, lanes))
+
+
+def test_gap_compaction_keeps_a_straightened_handoff_in_peel_order() -> None:
+    """Closing a feeder's lane gap does not flip the bundle it hands off.
+
+    ``a1`` carries ``l0`` and ``l2`` with ``l1``'s slot empty between them, so
+    compaction lifts ``l2`` a slot, and ``a2`` -- on ``a1``'s row -- follows it
+    to keep the run level.  ``a2``'s other line, ``l1``, also runs on to ``b``
+    on this row while ``l2`` only drops to ``c``, so ``l1`` has to stay above
+    ``l2`` out through the exit, or ``l2``'s drop crosses ``l1``'s level run
+    where the fan peels.
+    """
+    graph = parse_metro_mermaid(LR_HANDOFF_PEEL_ORDER.read_text())
+    compute_layout(graph, validate=True)
+    offsets = compute_station_offsets(graph)
+    (exit_port,) = graph.sections["a"].exit_ports
+
+    assert graph.stations["a1"].y == graph.stations["a2"].y
+    assert offsets["a1", "l2"] == offsets["a2", "l2"]
+    for station_id in ("a2", exit_port):
+        assert offsets[station_id, "l1"] < offsets[station_id, "l2"], station_id
