@@ -158,7 +158,7 @@ def test_intra_section_edit_does_not_regrid_others(path: Path) -> None:
 
     violations: list[str] = []
     for sid, section in base.sections.items():
-        if section.is_implicit:
+        if section.is_implicit or section.is_hidden:
             continue
         anchor = _deepest_real_anchor(base, section)
         if anchor is None:

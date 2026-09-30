@@ -3297,7 +3297,7 @@ def _render_first_class_sections(
     for section in graph.sections.values():
         if section.bbox_w <= 0 or section.bbox_h <= 0:
             continue
-        if section.is_implicit:
+        if section.is_implicit or section.is_hidden:
             continue
 
         section_lines: set[str] = set()
@@ -4089,7 +4089,9 @@ def _station_group_attrs(
     """
     section = graph.sections.get(station.section_id) if station.section_id else None
     section_id = (
-        station.section_id if section is not None and not section.is_implicit else None
+        station.section_id
+        if section is not None and not (section.is_implicit or section.is_hidden)
+        else None
     )
     cx: float = station.x
     cy: float = station.y

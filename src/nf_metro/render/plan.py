@@ -158,7 +158,7 @@ class FrozenGraph(FrozenRecord):
         return {
             section_id: section
             for section_id, section in self.sections.items()
-            if not section.is_implicit
+            if not (section.is_implicit or section.is_hidden)
         }
 
 

@@ -597,6 +597,67 @@ def test_empty_section_removed_render():
     assert "SeqKit" in svg_str
 
 
+# --- Hidden section tests ---
+
+
+def test_hidden_section():
+    """Sections whose id starts with '_' are marked as hidden."""
+    text = (
+        "%%metro line: line | My line | #756bb1\n"
+        "graph LR\n"
+        "    subgraph visible [Visible]\n"
+        "        a[A]\n"
+        "    end\n"
+        "    subgraph _hidden [Hidden]\n"
+        "        b[B]\n"
+        "    end\n"
+        "    a -->|line| b"
+    )
+    graph = parse_metro_mermaid(text)
+    assert "_hidden" in graph.sections
+    assert graph.sections["visible"].is_hidden is False
+    assert graph.sections["_hidden"].is_hidden is True
+
+
+def test_hidden_section_render():
+    """A hidden section participates in layout but its section box is not rendered."""
+    from nf_metro.layout.engine import compute_layout
+    from nf_metro.render.svg import render_svg
+    from nf_metro.themes import NFCORE_DARK_THEME
+
+    text = (
+        "%%metro line: line | My line | #756bb1\n"
+        "graph LR\n"
+        "    subgraph visible [Visible Section]\n"
+        "        a[A]\n"
+        "    end\n"
+        "    subgraph _hidden [Hidden Section]\n"
+        "        b[My station in _hidden]\n"
+        "    end\n"
+        "    a -->|line| b\n"
+    )
+
+    graph = parse_metro_mermaid(text)
+
+    compute_layout(graph)
+    svg_str = render_svg(graph, NFCORE_DARK_THEME)
+
+    # The hidden section remains part of the graph and participates in layout.
+    assert "_hidden" in graph.sections
+    assert graph.sections["_hidden"].is_hidden is True
+    assert graph.sections["_hidden"].bbox_w > 0
+    assert graph.sections["_hidden"].bbox_h > 0
+
+    # The visible section is rendered.
+    assert 'class="nf-metro-section-box" data-section-id="visible"' in svg_str
+
+    # The hidden section has no rendered section box.
+    assert 'class="nf-metro-section-box" data-section-id="_hidden"' not in svg_str
+
+    # Stations inside the hidden section are still rendered.
+    assert "My station in _hidden" in svg_str
+
+
 # --- Hidden station tests ---
 
 

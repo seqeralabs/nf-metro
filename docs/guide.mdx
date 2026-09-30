@@ -225,7 +225,9 @@ This two-line variant-calling pipeline uses square markers for mandatory steps, 
 Stations with no `%%metro marker:` keep the default pill.
 The feature is opt-in.
 
-## 7. Hidden stations
+## 7. Hidden stations and sections
+
+### Hidden stations
 
 A graph sometimes needs a branching or merging point that does not represent a real pipeline step, for instance where lines diverge but no tool runs.
 A visible station there clutters the diagram with a meaningless marker.
@@ -257,6 +259,37 @@ The lines still fork at the same point, with no marker or label.
 That gives fine control over where splits happen without adding a fake step to the diagram.
 
 Use `--debug` to see hidden stations as dashed circles: `nf-metro render --debug pipeline.mmd -o debug.svg`
+
+### Hidden sections
+
+Sometimes you may want to place a station outside any section.
+This works well when there is only one such station, but multiple unsectioned stations are
+grouped together and cannot be positioned independently.
+
+To position such stations independently, put them in a hidden section by prefixing the section
+ID with `_`.
+The section remains part of the layout, so you can position it using
+`%%metro grid`, while its box, title, and number are not rendered.
+
+For example:
+
+```metro ins={2,5,6,9}
+subgraph _hidden [Hidden]
+    input1[Input 1]
+    input2[Input 2]
+
+    input1 --> input2
+end
+```
+
+The stations remain visible, but the `Hidden` section itself is not displayed.
+This allows you to use sections purely for controlling the layout without adding visual clutter to the diagram.
+
+Hidden sections can be positioned like any other section:
+
+```metro
+%%metro grid: _hidden | 1,0
+```
 
 ## 8. Highlight the active path
 

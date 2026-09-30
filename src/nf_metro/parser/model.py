@@ -390,6 +390,7 @@ class Section:
     number_override: int | None = None
     station_ids: list[str] = field(default_factory=list)
     internal_edges: list[Edge] = field(default_factory=list)
+    is_hidden: bool = False
     entry_ports: list[str] = field(default_factory=list)  # port IDs
     exit_ports: list[str] = field(default_factory=list)  # port IDs
 

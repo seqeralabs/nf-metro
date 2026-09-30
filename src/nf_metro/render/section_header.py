@@ -684,7 +684,9 @@ def resolve_all_section_headers(
             graph, section, label_font_size, polylines, title_font_size
         )
         for section in graph.sections.values()
-        if section.bbox_w > 0 and section.bbox_h > 0 and not section.is_implicit
+        if section.bbox_w > 0
+        and section.bbox_h > 0
+        and not (section.is_implicit or section.is_hidden)
     }
 
 
