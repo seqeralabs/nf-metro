@@ -3328,32 +3328,33 @@ def _render_first_class_sections(
         # otherwise cross it; the resolver never moves a route to do so.
         placement = header_placements[section.id]
 
-        d.append(
-            draw.Circle(
-                placement.badge_cx,
-                placement.badge_cy,
-                SECTION_NUM_CIRCLE_R_LARGE,
-                fill=theme.station_stroke,
-                **{
-                    "class": _ns("nf-metro-section-num-circle"),
-                    "data-section-id": section.id,
-                },
+        if section.number > 0:
+            d.append(
+                draw.Circle(
+                    placement.badge_cx,
+                    placement.badge_cy,
+                    SECTION_NUM_CIRCLE_R_LARGE,
+                    fill=theme.station_stroke,
+                    **{
+                        "class": _ns("nf-metro-section-num-circle"),
+                        "data-section-id": section.id,
+                    },
+                )
             )
-        )
-        d.append(
-            draw.Text(
-                str(section.number),
-                SECTION_NUM_FONT_SIZE,
-                placement.badge_cx,
-                placement.badge_cy,
-                fill=theme.station_fill,
-                font_family=theme.label_font_family,
-                font_weight="bold",
-                text_anchor="middle",
-                dy=TEXT_VCENTER_DY,
-                **{"data-section-id": section.id},
+            d.append(
+                draw.Text(
+                    str(section.number),
+                    SECTION_NUM_FONT_SIZE,
+                    placement.badge_cx,
+                    placement.badge_cy,
+                    fill=theme.station_fill,
+                    font_family=theme.label_font_family,
+                    font_weight="bold",
+                    text_anchor="middle",
+                    dy=TEXT_VCENTER_DY,
+                    **{"data-section-id": section.id},
+                )
             )
-        )
 
         label_kwargs: dict[str, object] = {
             "class": _ns("nf-metro-section-label"),

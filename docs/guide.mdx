@@ -494,12 +494,12 @@ The [cross_track_interchange](https://github.com/seqeralabs/nf-metro/blob/main/e
 
 These go inside `subgraph` blocks.
 
-| Directive                            | Description                                              |
-| ------------------------------------ | -------------------------------------------------------- |
-| `%%metro entry: <side> \| <lines>`   | Entry port hint. Sides: `left`, `right`, `top`, `bottom` |
-| `%%metro exit: <side> \| <lines>`    | Exit port hint. Sides: `left`, `right`, `top`, `bottom`  |
-| `%%metro direction: <dir>`           | Internal flow direction: `LR`, `RL`, or `TB`             |
-| `%%metro number: <positive_integer>` | Override the section's number badge                      |
+| Directive                                | Description                                              |
+| ---------------------------------------- | -------------------------------------------------------- |
+| `%%metro entry: <side> \| <lines>`       | Entry port hint. Sides: `left`, `right`, `top`, `bottom` |
+| `%%metro exit: <side> \| <lines>`        | Exit port hint. Sides: `left`, `right`, `top`, `bottom`  |
+| `%%metro direction: <dir>`               | Internal flow direction: `LR`, `RL`, or `TB`             |
+| `%%metro number: <non_negative_integer>` | Override the section's number badge (0 to disable)       |
 
 Entry and exit hints tell the layout engine which side of the section box lines should enter or leave from.
 Usually you can **omit them** and let the auto-layout engine work it out.
@@ -510,6 +510,7 @@ Numbering prefers the nearest connected section on the current row, keeps parall
 A clear primary row can finish before numbering a secondary route that rejoins it.
 An explicit `number:` stays fixed, and automatic sections take the lowest positive numbers not already reserved.
 nf-metro ignores duplicate or invalid overrides with a warning.
+Use the value `0` to disable the numbering for a given section.
 
 ### Typos and duplicate declarations
 
