@@ -257,3 +257,38 @@ def test_render_html_warns_on_svg_only_flags(tmp_path):
     assert "--bare" in result.output
     assert "--svg-class-prefix" in result.output
     assert "ignored for --format html" in result.output
+
+
+def _page_color_scheme(html: str) -> str:
+    match = re.search(r":root\s*\{\s*color-scheme:\s*([^;]+);", html)
+    assert match, "expected a color-scheme declaration on the page :root"
+    return match.group(1)
+
+
+def test_render_html_chrome_follows_mode(tmp_path):
+    """The page chrome bakes --mode, else adapts to the viewer's colour scheme."""
+    mmd = tmp_path / "map.mmd"
+    mmd.write_text(STANDALONE_MMD.read_text())
+    runner = CliRunner()
+    for args, expected in (
+        ([], "light dark"),
+        (["--mode", "light"], "light"),
+        (["--mode", "dark"], "dark"),
+    ):
+        out = tmp_path / f"map-{expected.replace(' ', '-')}.html"
+        result = runner.invoke(cli, ["render", str(mmd), "-o", str(out), *args])
+        assert result.exit_code == 0, result.output
+        assert _page_color_scheme(out.read_text()) == expected
+
+
+def test_render_html_chrome_colours_pair_light_and_dark(tmp_path):
+    """Every chrome colour in the page stylesheet is a light-dark() pair."""
+    _result, out = _render_html_via_cli(tmp_path)
+    style = re.search(r"<head>.*?<style>(.*?)</style>", out.read_text(), re.S)
+    assert style
+    unpaired = [
+        decl
+        for decl in re.findall(r"[^;{}]*#[0-9a-fA-F]{3,8}\b[^;{}]*", style.group(1))
+        if "light-dark(" not in decl and "border-color: #4a8a4a" not in decl
+    ]
+    assert not unpaired, unpaired

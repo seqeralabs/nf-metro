@@ -27,6 +27,10 @@ history.
 
 ### Changed
 
+- The interactive HTML page's chrome (header, side panel, buttons, tooltips,
+  embed dialog) now follows the map's mode instead of always being dark.
+  `--mode` or `%%metro mode:` bakes it light or dark; with no mode set it
+  adapts to the viewer's `color-scheme`, as the SVG already does.
 - `--reject-output-outside-source` now scopes to the git working tree holding
   the `.mmd` rather than to the `.mmd`'s own directory, so
   `assets/metro_map.mmd` may declare `../docs/images/map.svg`. Paths escaping

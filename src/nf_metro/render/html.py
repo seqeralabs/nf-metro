@@ -107,6 +107,7 @@ def emit_render_plan_html(
         embed_basename=html.escape(embed_basename),
         inline_snippet_json=_script_safe_json(inline_snippet),
         shared_js=get_driver_js(),
+        color_scheme=baked_mode if baked_mode in ("light", "dark") else "light dark",
     )
 
 
