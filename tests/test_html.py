@@ -1,5 +1,6 @@
 """Tests for the interactive HTML output mode (``render --format html``)."""
 
+import json
 import re
 from importlib.resources import files
 from pathlib import Path
@@ -298,36 +299,68 @@ def test_render_html_normalises_mode_for_chrome_and_map():
     assert re.search(r"<svg[^>]*color-scheme: dark", html_out)
 
 
-def test_render_html_baked_light_drops_os_keyed_dark_css(tmp_path):
-    """A baked-light page omits the SVG's prefers-color-scheme block.
+def test_render_html_transparent_labels_follow_page_mode(tmp_path):
+    """Transparent-theme labels key on the page's color-scheme, not the OS.
 
-    That block lightens labels when the OS prefers dark, which would put them
-    on the white canvas a baked-light page always has.
+    The page paints its own canvas, so an OS-keyed media query would pick
+    label colours for a canvas the page may not be showing.
     """
-    for args in ((), ("--mode", "dark")):
+    for args in ((), ("--mode", "light"), ("--mode", "dark")):
         page = _render_cli(tmp_path, "--theme", "light", *args)
-        assert "prefers-color-scheme" in page
-    page = _render_cli(tmp_path, "--theme", "light", "--mode", "light")
-    assert "prefers-color-scheme" not in page
+        assert "prefers-color-scheme" not in page
+        assert "light-dark(#666666, #d0d0d0)" in page
+        assert "light-dark(#111111, #ffffff)" in page
 
 
-_LIGHT_DARK = r"light-dark\((?:[^()]|\([^()]*\))*\)"
-_COLOUR = r"#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)"
+def test_render_html_no_self_color_scheme_snippet_inherits_host(tmp_path):
+    """--no-self-color-scheme leaves the snippet's color-scheme to its host."""
+    page = _render_cli(tmp_path, "--no-self-color-scheme")
+    i = page.index("snippet: ") + len("snippet: ")
+    snippet = json.JSONDecoder().raw_decode(page[i:])[0]
+    assert "color-scheme" not in snippet.split("<metadata")[0]
+    assert re.search(r":root\s*\{[^}]*?color-scheme:\s*light dark;", page)
+
+
+def test_render_html_notes_ignored_no_chrome_css(tmp_path):
+    mmd = tmp_path / "map.mmd"
+    mmd.write_text(STANDALONE_MMD.read_text())
+    out = tmp_path / "map.html"
+    result = CliRunner().invoke(
+        cli, ["render", str(mmd), "-o", str(out), "--no-chrome-css"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "--no-chrome-css" in result.output
+    assert "ignored for --format html" in result.output
+
+
+_COLOUR_PROPS = re.compile(
+    r"^(--[a-z-]+|color|background(-color)?|border(-[a-z]+)*|outline|fill|stroke|box-shadow)$"
+)
+_PAIRED = re.compile(r"(light-dark|var)\((?:[^()]|\([^()]*\))*\)")
 # Read correctly against both palettes: the copied-state accent and the modal scrim.
-_MODE_NEUTRAL = {"#4a8a4a", "rgba(0,0,0,0.6)"}
+_MODE_NEUTRAL = ("#4a8a4a", "rgba(0,0,0,0.6)")
+_NON_COLOUR_TOKEN = re.compile(
+    r"^(-?[\d.]+[a-z%]*|solid|dashed|dotted|none|transparent|inherit|"
+    r"currentcolor|!important)$"
+)
 
 
 def test_chrome_colours_pair_light_and_dark():
-    """Every chrome colour in both HTML templates is a light-dark() pair."""
+    """Every colour in both HTML templates is a light-dark() pair or a var()."""
     render_pkg = files("nf_metro.render")
     for name in ("standalone.html", "inline.html"):
         style = re.search(
             r"<style>(.*?)</style>", render_pkg.joinpath(name).read_text(), re.S
         )
         assert style, name
-        unpaired = [
-            c
-            for c in re.findall(_COLOUR, re.sub(_LIGHT_DARK, "", style.group(1)))
-            if c not in _MODE_NEUTRAL
-        ]
+        unpaired = []
+        for decl in re.findall(r"([a-z-]+)\s*:\s*([^;{}]+)", style.group(1)):
+            prop, value = decl[0], " ".join(decl[1].split())
+            if not _COLOUR_PROPS.match(prop):
+                continue
+            rest = _PAIRED.sub("", value)
+            for neutral in _MODE_NEUTRAL:
+                rest = rest.replace(neutral, "")
+            if any(not _NON_COLOUR_TOKEN.match(t.lower()) for t in rest.split()):
+                unpaired.append(f"{prop}: {value}")
         assert not unpaired, (name, unpaired)
