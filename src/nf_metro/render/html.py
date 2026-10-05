@@ -78,11 +78,16 @@ def emit_render_plan_html(
     baked_mode: str | None = None,
 ) -> str:
     """Create a standalone HTML page from an immutable render plan."""
+    mode = (baked_mode or "").strip().lower()
+    baked = mode if mode in ("light", "dark") else None
+    color_scheme = baked or "light dark"
+    # The SVG's dark-mode block keys on the OS preference, not color-scheme, so
+    # on a baked-light canvas it would lighten labels against white.
     svg = emit_render_plan(
         plan,
         animate=animate,
-        inject_dark_mode_css=inject_dark_mode_css,
-        baked_mode=baked_mode,
+        inject_dark_mode_css=inject_dark_mode_css and baked != "light",
+        baked_mode=baked,
     )
     svg = apply_font_portability(svg, font_portability)
 
@@ -98,7 +103,7 @@ def emit_render_plan_html(
         for lid, ln in graph.lines.items()
     ]
     snippet_id = "m" + hashlib.sha1(svg.encode("utf-8")).hexdigest()[:8]
-    inline_snippet = _build_inline_snippet(svg, lines, snippet_id)
+    inline_snippet = _build_inline_snippet(svg, lines, snippet_id, color_scheme)
 
     return _STANDALONE_TEMPLATE.substitute(
         title=html.escape(title),
@@ -107,7 +112,7 @@ def emit_render_plan_html(
         embed_basename=html.escape(embed_basename),
         inline_snippet_json=_script_safe_json(inline_snippet),
         shared_js=get_driver_js(),
-        color_scheme=baked_mode if baked_mode in ("light", "dark") else "light dark",
+        color_scheme=color_scheme,
     )
 
 
@@ -124,9 +129,12 @@ def _script_safe_json(value: list[dict[str, str]] | str) -> str:
     return json.dumps(value).replace("</", "<\\/")
 
 
-def _build_inline_snippet(svg: str, lines: list[dict[str, str]], sid: str) -> str:
+def _build_inline_snippet(
+    svg: str, lines: list[dict[str, str]], sid: str, color_scheme: str
+) -> str:
     return _INLINE_TEMPLATE.substitute(
         sid=sid,
+        color_scheme=color_scheme,
         svg=svg,
         lines_json=_script_safe_json(lines),
         shared_js=get_driver_js(),

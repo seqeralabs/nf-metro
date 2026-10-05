@@ -1,6 +1,7 @@
 """Tests for the interactive HTML output mode (``render --format html``)."""
 
 import re
+from importlib.resources import files
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -259,36 +260,74 @@ def test_render_html_warns_on_svg_only_flags(tmp_path):
     assert "ignored for --format html" in result.output
 
 
-def _page_color_scheme(html: str) -> str:
-    match = re.search(r":root\s*\{\s*color-scheme:\s*([^;]+);", html)
-    assert match, "expected a color-scheme declaration on the page :root"
-    return match.group(1)
+def _color_schemes(html: str) -> tuple[str, str]:
+    """Return the ``color-scheme`` of the page ``:root`` and of the inline snippet."""
+    page = re.search(r":root\s*\{[^}]*?color-scheme:\s*([^;]+);", html)
+    snippet = re.search(r"\.nfmm-\w+\s*\{[^}]*?color-scheme:\s*([^;]+);", html)
+    assert page and snippet, "expected color-scheme on the page and the snippet"
+    return page.group(1), snippet.group(1)
+
+
+def _render_cli(tmp_path, *args):
+    mmd = tmp_path / "map.mmd"
+    mmd.write_text(STANDALONE_MMD.read_text())
+    out = tmp_path / f"map{'_'.join(a.strip('-') for a in args)}.html"
+    result = CliRunner().invoke(cli, ["render", str(mmd), "-o", str(out), *args])
+    assert result.exit_code == 0, result.output
+    return out.read_text()
 
 
 def test_render_html_chrome_follows_mode(tmp_path):
-    """The page chrome bakes --mode, else adapts to the viewer's colour scheme."""
-    mmd = tmp_path / "map.mmd"
-    mmd.write_text(STANDALONE_MMD.read_text())
-    runner = CliRunner()
+    """Page and snippet chrome bake --mode, else adapt to the viewer's scheme."""
     for args, expected in (
-        ([], "light dark"),
-        (["--mode", "light"], "light"),
-        (["--mode", "dark"], "dark"),
+        ((), "light dark"),
+        (("--mode", "light"), "light"),
+        (("--mode", "dark"), "dark"),
     ):
-        out = tmp_path / f"map-{expected.replace(' ', '-')}.html"
-        result = runner.invoke(cli, ["render", str(mmd), "-o", str(out), *args])
-        assert result.exit_code == 0, result.output
-        assert _page_color_scheme(out.read_text()) == expected
+        assert _color_schemes(_render_cli(tmp_path, *args)) == (expected, expected)
 
 
-def test_render_html_chrome_colours_pair_light_and_dark(tmp_path):
-    """Every chrome colour in the page stylesheet is a light-dark() pair."""
-    _result, out = _render_html_via_cli(tmp_path)
-    style = re.search(r"<head>.*?<style>(.*?)</style>", out.read_text(), re.S)
-    assert style
-    unpaired = [
-        decl
-        for decl in re.findall(r"[^;{}]*#[0-9a-fA-F]{3,8}\b[^;{}]*", style.group(1))
-        if "light-dark(" not in decl and "border-color: #4a8a4a" not in decl
-    ]
-    assert not unpaired, unpaired
+def test_render_html_normalises_mode_for_chrome_and_map():
+    """A mode passed with stray case or whitespace still bakes chrome and map."""
+    graph = parse_metro_mermaid(
+        "%%metro line: l | L | #ff0000\ngraph LR\n    a[A] -->|l| b[B]\n"
+    )
+    compute_layout(graph)
+    html_out = render_html(graph, THEMES["nfcore"], baked_mode=" Dark ")
+    assert _color_schemes(html_out) == ("dark", "dark")
+    assert re.search(r"<svg[^>]*color-scheme: dark", html_out)
+
+
+def test_render_html_baked_light_drops_os_keyed_dark_css(tmp_path):
+    """A baked-light page omits the SVG's prefers-color-scheme block.
+
+    That block lightens labels when the OS prefers dark, which would put them
+    on the white canvas a baked-light page always has.
+    """
+    for args in ((), ("--mode", "dark")):
+        page = _render_cli(tmp_path, "--theme", "light", *args)
+        assert "prefers-color-scheme" in page
+    page = _render_cli(tmp_path, "--theme", "light", "--mode", "light")
+    assert "prefers-color-scheme" not in page
+
+
+_LIGHT_DARK = r"light-dark\((?:[^()]|\([^()]*\))*\)"
+_COLOUR = r"#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)"
+# Read correctly against both palettes: the copied-state accent and the modal scrim.
+_MODE_NEUTRAL = {"#4a8a4a", "rgba(0,0,0,0.6)"}
+
+
+def test_chrome_colours_pair_light_and_dark():
+    """Every chrome colour in both HTML templates is a light-dark() pair."""
+    render_pkg = files("nf_metro.render")
+    for name in ("standalone.html", "inline.html"):
+        style = re.search(
+            r"<style>(.*?)</style>", render_pkg.joinpath(name).read_text(), re.S
+        )
+        assert style, name
+        unpaired = [
+            c
+            for c in re.findall(_COLOUR, re.sub(_LIGHT_DARK, "", style.group(1)))
+            if c not in _MODE_NEUTRAL
+        ]
+        assert not unpaired, (name, unpaired)
