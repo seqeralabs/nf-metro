@@ -17,6 +17,10 @@ history.
 
 ### Added
 
+- Hidden sections: a subgraph whose ID starts with `_` keeps its grid cell
+  but draws no box, title or number badge, mirroring hidden stations. Use it
+  to place stations independently without a visible section. Existing maps
+  with a `_`-prefixed section ID lose that section's box.
 - `%%metro output:` paths take per-output render overrides after a `|`:
   `animate`, `mode=`, `theme=`, `scale=`, and `raster_width=`. One
   `nf-metro render` pass now writes a static SVG, an animated SVG, and a
@@ -27,6 +31,15 @@ history.
 
 ### Changed
 
+- The interactive HTML page's chrome (header, side panel, buttons, tooltips,
+  embed dialog) and the copyable inline-HTML snippet now follow the map's mode
+  instead of always being dark. `--mode` or `%%metro mode:` fixes both light
+  or dark. With no mode set they follow the viewer's light/dark preference, as
+  the SVG already does, so a page with no mode now renders light for viewers
+  who prefer light. `--no-self-color-scheme` makes the snippet follow its host
+  page's `color-scheme` instead. The transparent `light` theme's labels track
+  the page's mode rather than the OS setting, so they stay readable on either
+  canvas.
 - `--reject-output-outside-source` now scopes to the git working tree holding
   the `.mmd` rather than to the `.mmd`'s own directory, so
   `assets/metro_map.mmd` may declare `../docs/images/map.svg`. Paths escaping
@@ -39,6 +52,11 @@ history.
 - The interactive HTML viewer moves the line legend from the right-hand
   column to a bar under the map on portrait or narrow (under 640px)
   viewports, such as phones and side-by-side editor panels.
+
+### Fixed
+
+- Section number badges skip sections that draw no badge. A map mixing loose
+  stations with subgraphs numbered its visible sections from 2.
 
 ## [2.1.0] — 2026-09-15
 

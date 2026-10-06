@@ -290,7 +290,17 @@ Most static-site generators and wikis accept the inline SVG unchanged.
 `render --format html` produces a complete page with the SVG, driver, and styling inlined and no network access needed.
 Its **Embed…** modal offers an inline `<div>` snippet that keeps interactivity without an iframe, an iframe one-liner, and a static-SVG fallback.
 The page is already responsive and scopes each map independently.
-The SVG-only sizing and namespacing flags described earlier therefore do not apply to it, and the CLI warns if you pass them with `--format html`.
+The SVG-only sizing and namespacing flags described earlier therefore do not apply to it, and nor does `--no-chrome-css`.
+The CLI notes each one it ignores when you pass it with `--format html`.
+
+The page and its snippet follow the map's mode.
+With `--mode` or `%%metro mode:` set, both use that palette everywhere.
+With no mode, both declare `color-scheme: light dark` and follow the viewer's light/dark preference, as a standalone SVG does.
+That suits a snippet pasted into a page with no opinion on theme.
+On a host with its own theme picker, pass `--no-self-color-scheme`: the snippet then leaves `color-scheme` to the host and follows its picker, like the inline SVGs in [Theming](/nf-metro/theming/#where-color-scheme-should-live).
+The page itself always declares its own, since it is a whole document.
+In an iframe with no mode, Chrome and Firefox show the page in the host's `color-scheme`, while Safari uses the viewer's own preference.
+Set `--mode` for an iframe whose look must be the same everywhere.
 Font portability **does** reach the inlined SVG, which lets an embeddable page carry its own fonts:
 
 ```bash

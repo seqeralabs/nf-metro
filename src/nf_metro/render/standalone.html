@@ -5,8 +5,14 @@
 <title>@@title</title>
 <style>
   :root {
-    --bg: #1d1d1d; --panel: #161616; --panel-border: #333;
-    --text: #e8e8e8; --muted: #888; --hover: #232323; --active: #2a3a4a;
+    color-scheme: @@color_scheme;
+    --bg: light-dark(#ffffff, #1d1d1d); --panel: light-dark(#f6f6f6, #161616);
+    --panel-border: light-dark(#dddddd, #333); --text: light-dark(#1f1f1f, #e8e8e8);
+    --muted: light-dark(#666, #888); --hover: light-dark(#ececec, #232323);
+    --active: light-dark(#dbe7f3, #2a3a4a); --strong: light-dark(#000, #fff);
+    --control: light-dark(#ccc, #444); --control-text: light-dark(#333, #ccc);
+    --raised: light-dark(#ececec, #2a2a2a); --surface: light-dark(#fff, #1f1f1f);
+    --code-bg: light-dark(#f6f6f6, #0d0d0d);
   }
   html, body { margin: 0; padding: 0; height: 100%; background: var(--bg);
                 font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
@@ -19,12 +25,13 @@
   header h1 { font-size: 14px; font-weight: 600; margin: 0; flex: 1;
                overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   header .hint { font-size: 11px; color: var(--muted); }
-  .btn { background: transparent; color: #ccc; border: 1px solid #444;
+  .btn { background: transparent; color: var(--control-text); border: 1px solid var(--control);
           padding: 4px 10px; border-radius: 4px; font-size: 12px;
           cursor: pointer; font-family: inherit; }
-  .btn:hover { background: var(--hover); color: #fff; }
-  .btn.primary { border-color: #555; background: #2a2a2a; }
-  .nf-metro-copied { background: #2e4a2e !important; color: #c8efc8 !important;
+  .btn:hover { background: var(--hover); color: var(--strong); }
+  .btn.primary { border-color: light-dark(#bbb, #555); background: var(--raised); }
+  .nf-metro-copied { background: light-dark(#dff0df, #2e4a2e) !important;
+                     color: light-dark(#1e5a1e, #c8efc8) !important;
                      border-color: #4a8a4a !important; }
   .nf-metro-canvas { position: relative; overflow: hidden; background: var(--bg);
                       cursor: grab; }
@@ -49,16 +56,16 @@
                          white-space: nowrap; }
   .footer-help { font-size: 11px; color: var(--muted); margin-top: 16px;
                   line-height: 1.6; }
-  .footer-help kbd { background: #2a2a2a; border: 1px solid #444; padding: 1px 5px;
+  .footer-help kbd { background: var(--raised); border: 1px solid var(--control); padding: 1px 5px;
                       border-radius: 3px; font-family: inherit; font-size: 10px; }
   .nf-metro-filtering [class^="metro-line-"] { opacity: 0.05;
                                                 transition: opacity 0.2s; }
   .nf-metro-filtering [class^="metro-line-"].nf-metro-line-active { opacity: 1; }
   .nf-metro-hidden { display: none !important; }
   .nf-metro-tip { position: fixed; pointer-events: none; z-index: 50;
-                   background: #1f1f1f; border: 1px solid #444; border-radius: 6px;
+                   background: var(--surface); border: 1px solid var(--control); border-radius: 6px;
                    padding: 8px 10px; font-size: 12px; max-width: 240px;
-                   box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+                   box-shadow: 0 4px 12px light-dark(rgba(0,0,0,0.15), rgba(0,0,0,0.4));
                    opacity: 0; transition: opacity 0.08s; }
   .nf-metro-tip-show { opacity: 1; }
   .nf-metro-tt-title { font-weight: 600; font-size: 13px; margin-bottom: 3px; }
@@ -69,11 +76,11 @@
                           display: none; align-items: center; justify-content: center;
                           z-index: 100; }
   .nf-metro-modal-open { display: flex; }
-  .nf-metro-modal { background: #1f1f1f; border: 1px solid #444; border-radius: 8px;
+  .nf-metro-modal { background: var(--surface); border: 1px solid var(--control); border-radius: 8px;
                     padding: 20px; max-width: 640px; width: 90%; }
   .nf-metro-modal h3 { margin: 0 0 12px; font-size: 15px; }
   .nf-metro-modal p { margin: 0 0 8px; font-size: 12px; color: var(--muted); }
-  .nf-metro-modal pre { background: #0d0d0d; border: 1px solid #333; border-radius: 4px;
+  .nf-metro-modal pre { background: var(--code-bg); border: 1px solid var(--panel-border); border-radius: 4px;
                         padding: 10px; font-size: 11px; overflow-x: auto;
                         margin: 4px 0 12px; max-height: 200px; overflow-y: auto;
                         white-space: pre-wrap; word-break: break-all; }

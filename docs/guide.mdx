@@ -232,7 +232,7 @@ This two-line variant-calling pipeline uses square markers for mandatory steps, 
 Stations with no `%%metro marker:` keep the default pill.
 The feature is opt-in.
 
-## 7. Hidden stations
+## 7. Hidden stations and sections
 
 A graph sometimes needs a branching or merging point that does not represent a real pipeline step, for instance where lines diverge but no tool runs.
 A visible station there clutters the diagram with a meaningless marker.
@@ -264,6 +264,30 @@ The lines still fork at the same point, with no marker or label.
 That gives fine control over where splits happen without adding a fake step to the diagram.
 
 Use `--debug` to see hidden stations as dashed circles: `nf-metro render --debug pipeline.mmd -o debug.svg`
+
+### Hidden sections
+
+Stations outside any subgraph share one implicit section, so they cannot be placed independently of each other.
+A visible section around a single station adds a box, title and number that mean nothing in the pipeline.
+
+**Any section whose ID starts with `_` (underscore) is hidden.** It keeps its grid cell, so `%%metro grid:` places it like any other section, but nf-metro renders no box, title or number badge, and the visible sections are numbered without it.
+
+Here the "If no regions" step gets its own cell in the top row:
+
+```metro ins={1,4}
+%%metro grid: _no_regions | 1,0
+...
+graph LR
+    subgraph _no_regions [No regions]
+        noregion[If no regions]
+    end
+```
+
+<Metro src="examples/guide/06c_hidden_section.mmd" mmd={false} />
+
+The hidden section still occupies its cell, so lines between other sections route around it as they would around a visible one.
+
+Use `--debug` to see hidden sections as dashed boxes.
 
 ## 8. Highlight the active path
 
@@ -666,6 +690,7 @@ The overlay shows:
 | **Entry ports**     | Green diamonds       | Where lines enter a section, with port ID and side                        |
 | **Exit ports**      | Red diamonds         | Where lines leave a section, with port ID and side                        |
 | **Hidden stations** | Dashed circles       | Stations whose ID starts with `_`, invisible in normal rendering          |
+| **Hidden sections** | Dashed boxes         | Sections whose ID starts with `_`, invisible in normal rendering          |
 | **Edge waypoints**  | Small filled circles | Intermediate routing points along each edge path                          |
 | **Grid lines**      | Yellow dashed lines  | Boundaries between grid columns and rows, labeled with column/row indices |
 

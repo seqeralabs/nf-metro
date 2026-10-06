@@ -238,6 +238,10 @@ Clicking a line isolates it.
 Stations and sections that do not carry that line are hidden, and the view zooms to the bounding box of what remains.
 Click again, press `Esc`, or select **Reset** to restore the full view.
 
+The page's colours follow the map's mode.
+`--mode` fixes them, and with no mode they follow the viewer's light/dark preference.
+[Embedding](/nf-metro/embedding/#the-self-contained-interactive-page) covers the snippet's theming on a host page.
+
 The **Embed&hellip;** button opens a panel with copyable inline-HTML, iframe, and static-SVG snippets.
 The [Embedding guide](/nf-metro/embedding/) covers responsive sizing, font portability, host theming, and progress overlays.
 
