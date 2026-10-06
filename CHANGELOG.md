@@ -36,6 +36,9 @@ history.
   working tree the old source-directory rule still applies. Declared paths
   are also reported collapsed
   (`docs/images/map.svg`, not `assets/../docs/images/map.svg`).
+- The interactive HTML viewer moves the line legend from the right-hand
+  column to a bar under the map on portrait or narrow (under 640px)
+  viewports, such as phones and side-by-side editor panels.
 
 ## [2.1.0] — 2026-09-15
 
