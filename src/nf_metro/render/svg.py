@@ -2616,10 +2616,16 @@ def emit_render_plan(
     animation_frame_slot: bool = False,
     responsive: bool = False,
     inject_dark_mode_css: bool = True,
+    dark_mode_css_follows_color_scheme: bool = False,
     self_color_scheme: bool = True,
     baked_mode: str | None = None,
 ) -> str:
-    """Create an SVG string from an immutable render plan."""
+    """Create an SVG string from an immutable render plan.
+
+    ``dark_mode_css_follows_color_scheme`` keys the transparent-theme label
+    fallback on the inherited ``color-scheme`` (``light-dark()``) instead of
+    the OS-level ``prefers-color-scheme``, for a host that owns the canvas.
+    """
     with metrics_face_context(plan.metrics_face):
         return _emit_render_plan(
             plan,
@@ -2627,6 +2633,7 @@ def emit_render_plan(
             animation_frame_slot=animation_frame_slot,
             responsive=responsive,
             inject_dark_mode_css=inject_dark_mode_css,
+            dark_mode_css_follows_color_scheme=dark_mode_css_follows_color_scheme,
             self_color_scheme=self_color_scheme,
             baked_mode=baked_mode,
         )
@@ -2639,6 +2646,7 @@ def _emit_render_plan(
     animation_frame_slot: bool = False,
     responsive: bool = False,
     inject_dark_mode_css: bool = True,
+    dark_mode_css_follows_color_scheme: bool = False,
     self_color_scheme: bool = True,
     baked_mode: str | None = None,
 ) -> str:
@@ -2701,7 +2709,9 @@ def _emit_render_plan(
     if inject_dark_mode_css and (
         not theme.background_color or theme.background_color == "none"
     ):
-        _inject_dark_mode_style(d)
+        _inject_dark_mode_style(
+            d, theme, follow_color_scheme=dark_mode_css_follows_color_scheme
+        )
 
     # Background (skip for transparent themes)
     if theme.background_color and theme.background_color != "none":
@@ -3225,7 +3235,9 @@ def _inject_chrome_css(d: draw.Drawing, theme: Theme, any_inactive: bool) -> Non
     d.append(draw.Raw(f"<style>{chr(10).join(lines)}</style>"))
 
 
-def _inject_dark_mode_style(d: draw.Drawing) -> None:
+def _inject_dark_mode_style(
+    d: draw.Drawing, theme: Theme, *, follow_color_scheme: bool = False
+) -> None:
     """Inject CSS for dark-mode browsers viewing a transparent-background SVG.
 
     When the SVG has no opaque background, elements rendered directly on the
@@ -3233,17 +3245,31 @@ def _inject_dark_mode_style(d: draw.Drawing) -> None:
     browser supplies a dark page background.  A ``prefers-color-scheme: dark``
     media query adjusts those elements so they remain readable.  CSS rules
     override SVG presentation attributes, so we only need class selectors.
+
+    ``follow_color_scheme`` swaps the media query for ``light-dark()`` pairs,
+    so the labels track the inherited ``color-scheme`` of a host that paints
+    the canvas itself, which the OS preference need not match.
     """
     sl = _ns("nf-metro-section-label")
     sc = _ns("nf-metro-section-num-circle")
     ti = _ns("nf-metro-title")
-    css = textwrap.dedent(f"""\
-        @media (prefers-color-scheme: dark) {{
-            .{sl} {{ fill: #d0d0d0; }}
-            .{sc} {{ fill: #777777; }}
-            .{ti} {{ fill: #ffffff; }}
-        }}
-    """)
+    if follow_color_scheme:
+        label = theme.section_label_color
+        css = (
+            f".{sl} {{ fill: var(--nfm-map-section-label-color,"
+            f" light-dark({label}, #d0d0d0)); }}\n"
+            f".{sc} {{ fill: light-dark({theme.station_stroke}, #777777); }}\n"
+            f".{ti} {{ fill: var(--nfm-map-title-color,"
+            f" light-dark({theme.title_color}, #ffffff)); }}\n"
+        )
+    else:
+        css = textwrap.dedent(f"""\
+            @media (prefers-color-scheme: dark) {{
+                .{sl} {{ fill: #d0d0d0; }}
+                .{sc} {{ fill: #777777; }}
+                .{ti} {{ fill: #ffffff; }}
+            }}
+        """)
     d.append(draw.Raw(f"<style>{css}</style>"))
 
 

@@ -147,6 +147,9 @@ That media query branches a whole stylesheet rule, rather than a property like `
 
 `--no-dark-mode-css` turns it off, for a host whose own theming it would otherwise fight.
 
+In `--format html` output the page paints the canvas itself, so these rules use `light-dark()` instead of the media query.
+They then follow the page's mode rather than the OS setting.
+
 <Aside type="note" title="One theme opts out of all of this on purpose">
 
 nf-metro ships one theme with no light/dark sibling at all: `light` (`THEME_MODES`, `src/nf_metro/themes/__init__.py`).
