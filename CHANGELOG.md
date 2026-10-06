@@ -50,8 +50,9 @@ history.
   are also reported collapsed
   (`docs/images/map.svg`, not `assets/../docs/images/map.svg`).
 - The interactive HTML viewer moves the line legend from the right-hand
-  column to a bar under the map on portrait or narrow (under 640px)
-  viewports, such as phones and side-by-side editor panels.
+  column to a bar under the map on portrait viewports or ones 640px wide or
+  narrower, such as phones and side-by-side editor panels. The page declares
+  a device-width viewport and supports touch pan and pinch-zoom.
 
 ### Fixed
 

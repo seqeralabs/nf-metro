@@ -364,3 +364,13 @@ def test_chrome_colours_pair_light_and_dark():
             if any(not _NON_COLOUR_TOKEN.match(t.lower()) for t in rest.split()):
                 unpaired.append(f"{prop}: {value}")
         assert not unpaired, (name, unpaired)
+
+
+def test_render_html_mobile_viewport_support(tmp_path):
+    """The page declares a device-width viewport, moves the legend under the
+    map on narrow screens, and takes over touch input only on the canvas."""
+    page = _render_cli(tmp_path)
+    assert '<meta name="viewport" content="width=device-width' in page
+    assert "@media (max-aspect-ratio: 1/1), (max-width: 640px)" in page
+    assert re.search(r"\.nf-metro-canvas\s*\{[^}]*touch-action:\s*none", page)
+    assert "'touchmove'" in page
