@@ -299,7 +299,8 @@ With no mode, both declare `color-scheme: light dark` and follow the viewer's li
 That suits a snippet pasted into a page with no opinion on theme.
 On a host with its own theme picker, pass `--no-self-color-scheme`: the snippet then leaves `color-scheme` to the host and follows its picker, like the inline SVGs in [Theming](/nf-metro/theming/#where-color-scheme-should-live).
 The page itself always declares its own, since it is a whole document.
-Whether an iframe follows the `color-scheme` of its host varies between browsers, so set `--mode` for an iframe whose look must be fixed.
+In an iframe with no mode, Chrome and Firefox show the page in the host's `color-scheme`, while Safari uses the viewer's own preference.
+Set `--mode` for an iframe whose look must be the same everywhere.
 Font portability **does** reach the inlined SVG, which lets an embeddable page carry its own fonts:
 
 ```bash
