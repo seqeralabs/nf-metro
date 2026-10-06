@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>@@title</title>
 <style>
   :root {
@@ -18,7 +19,7 @@
                 font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
                 color: var(--text); overflow: hidden; }
   #app { display: grid; grid-template-columns: 1fr 260px;
-          grid-template-rows: 44px 1fr; height: 100vh; }
+          grid-template-rows: 44px 1fr; height: 100vh; height: 100dvh; }
   header { grid-column: 1 / span 2; display: flex; align-items: center;
             padding: 0 14px; background: var(--panel);
             border-bottom: 1px solid var(--panel-border); gap: 12px; }
@@ -34,7 +35,7 @@
                      color: light-dark(#1e5a1e, #c8efc8) !important;
                      border-color: #4a8a4a !important; }
   .nf-metro-canvas { position: relative; overflow: hidden; background: var(--bg);
-                      cursor: grab; }
+                      cursor: grab; touch-action: none; }
   .nf-metro-grabbing .nf-metro-canvas { cursor: grabbing; }
   .nf-metro-canvas svg { width: 100% !important; height: 100% !important;
                           display: block; user-select: none; }
@@ -88,6 +89,24 @@
                           margin-bottom: 4px; }
   .nf-metro-modal .row label { font-size: 11px; color: var(--muted); flex: 1; }
   .nf-metro-modal-close { float: right; }
+  /* Narrow or portrait viewports (phones, side-by-side editor panels):
+     move the legend from the 260px right column to a wrapping bar under
+     the map. The header hint would squeeze the title; the footer help in
+     the bar says the same thing. */
+  @media (max-aspect-ratio: 1/1), (max-width: 640px) {
+    #app { grid-template-columns: 1fr; grid-template-rows: 44px 1fr auto; }
+    header { grid-column: 1; }
+    header .hint { display: none; }
+    aside { border-left: none; border-top: 1px solid var(--panel-border);
+             padding: 8px 12px; max-height: 30vh; }
+    .nf-metro-legend { flex-direction: row; flex-wrap: wrap; column-gap: 4px; }
+    .nf-metro-chip { margin: 1px 0; }
+    .footer-help { margin-top: 8px; }
+  }
+  @media ((max-aspect-ratio: 1/1) or (max-width: 640px)) and (max-height: 480px) {
+    aside { max-height: 40vh; }
+    aside h2, .footer-help { display: none; }
+  }
 </style>
 </head>
 <body>

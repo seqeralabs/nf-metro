@@ -83,6 +83,48 @@ function attachMetroMap(opts) {
     );
   }, { passive: false });
 
+  // One finger pans, two fingers pinch-zoom about their midpoint. Only the
+  // standalone page (touch-action: none on the canvas) takes over touch input;
+  // inline embeds leave it to the host page's scrolling.
+  if (!requireModifier) {
+    let gesture = null;
+    const snapshot = touches => {
+      const a = touches[0], b = touches[1];
+      return {
+        n: b ? 2 : 1,
+        x: b ? (a.clientX + b.clientX) / 2 : a.clientX,
+        y: b ? (a.clientY + b.clientY) / 2 : a.clientY,
+        dist: b ? Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) : 0,
+        vb: { ...current },
+      };
+    };
+    const track = e => {
+      gesture = e.touches.length ? snapshot(e.touches) : null;
+    };
+    canvas.addEventListener('touchstart', track, { passive: true });
+    canvas.addEventListener('touchend', track, { passive: true });
+    canvas.addEventListener('touchcancel', track, { passive: true });
+    canvas.addEventListener('touchmove', e => {
+      if (!gesture || e.touches.length !== gesture.n) return;
+      const now = snapshot(e.touches);
+      const rect = canvas.getBoundingClientRect();
+      const g = gesture.vb;
+      let k = 1;
+      if (now.n === 2 && gesture.dist > 0) {
+        k = Math.min(initial.w * 3 / g.w,
+                     Math.max(initial.w / 30 / g.w, gesture.dist / now.dist));
+      }
+      const w = g.w * k, h = g.h * k;
+      const fx = (gesture.x - rect.left) / rect.width;
+      const fy = (gesture.y - rect.top) / rect.height;
+      setVB(
+        g.x + g.w * fx - w * ((now.x - rect.left) / rect.width),
+        g.y + g.h * fy - h * ((now.y - rect.top) / rect.height),
+        w, h,
+      );
+    }, { passive: true });
+  }
+
   // ---- Line filter ----------------------------------------------------------
   let active = null;
   const setOf = (el, attr) => {
