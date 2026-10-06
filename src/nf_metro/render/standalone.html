@@ -81,6 +81,20 @@
                           margin-bottom: 4px; }
   .nf-metro-modal .row label { font-size: 11px; color: var(--muted); flex: 1; }
   .nf-metro-modal-close { float: right; }
+  /* Narrow or portrait viewports (phones, side-by-side editor panels):
+     move the legend from the 260px right column to a wrapping bar under
+     the map. The header hint would squeeze the title; the footer help in
+     the bar says the same thing. */
+  @media (max-aspect-ratio: 1/1), (max-width: 640px) {
+    #app { grid-template-columns: 1fr; grid-template-rows: 44px 1fr auto; }
+    header { grid-column: 1; }
+    header .hint { display: none; }
+    aside { border-left: none; border-top: 1px solid var(--panel-border);
+             padding: 8px 12px; max-height: 30vh; }
+    .nf-metro-legend { flex-direction: row; flex-wrap: wrap; column-gap: 4px; }
+    .nf-metro-chip { margin: 1px 0; }
+    .footer-help { margin-top: 8px; }
+  }
 </style>
 </head>
 <body>
