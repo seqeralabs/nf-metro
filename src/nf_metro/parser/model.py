@@ -398,6 +398,11 @@ class Section:
         """Set of all entry- and exit-port IDs on this section."""
         return set(self.entry_ports).union(self.exit_ports)
 
+    @property
+    def draws_box(self) -> bool:
+        """Whether the section renders its box, header and number badge."""
+        return not (self.is_implicit or self.is_hidden)
+
     # Hints from %%metro entry/exit directives: list of (side, [line_ids])
     exit_hints: list[tuple[PortSide, list[str]]] = field(default_factory=list)
     entry_hints: list[tuple[PortSide, list[str]]] = field(default_factory=list)
@@ -418,6 +423,9 @@ class Section:
     offset_y: float = 0.0
     # Implicit sections are auto-created for loose stations; no visible box
     is_implicit: bool = False
+    # Hidden sections (id starts with ``_``) keep their grid cell but draw no
+    # box, header or number
+    is_hidden: bool = False
     # Extra runway, in whole grid columns, that the strike-clearance loop grows
     # on the entry/exit side when a boundary-fan diagonal rakes a station's name
     # label.  Sides are independent so the loop grows only the struck one.  The
@@ -1020,7 +1028,11 @@ class MetroGraph:
 
     @property
     def real_sections(self) -> dict[str, Section]:
-        """Sections that draw a visible box (excludes implicit holders)."""
+        """Sections that own a grid cell (excludes implicit holders).
+
+        Hidden sections are included: they take part in layout even though
+        they draw no box.
+        """
         return {sid: sec for sid, sec in self.sections.items() if not sec.is_implicit}
 
     @property

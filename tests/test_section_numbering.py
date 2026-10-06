@@ -83,11 +83,18 @@ class TestSectionNumberingOrder:
             if not g.sections:
                 continue
             compute_layout(g)
-            numbers = sorted(s.number for s in g.sections.values())
-            assert numbers == list(range(1, len(g.sections) + 1)), (
+            drawn = {sid for sid, s in g.sections.items() if s.draws_box}
+            numbers = sorted(g.sections[sid].number for sid in drawn)
+            assert numbers == list(range(1, len(drawn) + 1)), (
                 f"{mmd_path.name}: section numbers not sequential: {numbers}"
             )
-            section_edges = g.section_dag.section_edges if g.section_dag else set()
+            section_edges = {
+                (source, target)
+                for source, target in (
+                    g.section_dag.section_edges if g.section_dag else set()
+                )
+                if source in drawn and target in drawn
+            }
 
             def lane(sid: str) -> int:
                 return g.sections[sid].grid_row

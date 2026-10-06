@@ -242,7 +242,7 @@ def _renumber_sections_by_route(graph: MetroGraph) -> None:
         if section.number_override is not None
     }
     next_number = 1
-    for sid in ordered_ids:
+    for sid in sorted(ordered_ids, key=lambda sid: not graph.sections[sid].draws_box):
         section = graph.sections[sid]
         if section.number_override is not None:
             section.number = section.number_override

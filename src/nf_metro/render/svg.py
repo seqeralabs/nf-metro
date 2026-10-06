@@ -3323,7 +3323,7 @@ def _render_first_class_sections(
     for section in graph.sections.values():
         if section.bbox_w <= 0 or section.bbox_h <= 0:
             continue
-        if section.is_implicit:
+        if not section.draws_box:
             continue
 
         section_lines: set[str] = set()
@@ -4115,7 +4115,7 @@ def _station_group_attrs(
     """
     section = graph.sections.get(station.section_id) if station.section_id else None
     section_id = (
-        station.section_id if section is not None and not section.is_implicit else None
+        station.section_id if section is not None and section.draws_box else None
     )
     cx: float = station.x
     cy: float = station.y
@@ -5553,6 +5553,33 @@ def _render_debug_overlay(
             debug_font=debug_font,
             debug_font_size=debug_font_size,
             color=row_grid_color,
+        )
+
+    for sec in graph.sections.values():
+        if not sec.is_hidden or sec.bbox_w <= 0 or sec.bbox_h <= 0:
+            continue
+        d.append(
+            draw.Rectangle(
+                sec.bbox_x,
+                sec.bbox_y,
+                sec.bbox_w,
+                sec.bbox_h,
+                fill="none",
+                stroke=DEBUG_HIDDEN_STATION_COLOR,
+                stroke_width=DEBUG_STROKE_WIDTH,
+                stroke_dasharray="6,4",
+            )
+        )
+        d.append(
+            draw.Text(
+                sec.id,
+                debug_font_size,
+                sec.bbox_x + DEBUG_HIDDEN_LABEL_OFFSET,
+                sec.bbox_y - DEBUG_HIDDEN_LABEL_OFFSET,
+                fill=DEBUG_HIDDEN_STATION_COLOR,
+                font_family=debug_font,
+                dominant_baseline="auto",
+            )
         )
 
     # Hidden stations: dashed-outline circles with labels

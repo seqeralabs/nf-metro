@@ -17,6 +17,10 @@ history.
 
 ### Added
 
+- Hidden sections: a subgraph whose ID starts with `_` keeps its grid cell
+  but draws no box, title or number badge, mirroring hidden stations. Use it
+  to place stations independently without a visible section. Existing maps
+  with a `_`-prefixed section ID lose that section's box.
 - `%%metro output:` paths take per-output render overrides after a `|`:
   `animate`, `mode=`, `theme=`, `scale=`, and `raster_width=`. One
   `nf-metro render` pass now writes a static SVG, an animated SVG, and a
@@ -45,6 +49,11 @@ history.
   working tree the old source-directory rule still applies. Declared paths
   are also reported collapsed
   (`docs/images/map.svg`, not `assets/../docs/images/map.svg`).
+
+### Fixed
+
+- Section number badges skip sections that draw no badge. A map mixing loose
+  stations with subgraphs numbered its visible sections from 2.
 
 ## [2.1.0] — 2026-09-15
 
