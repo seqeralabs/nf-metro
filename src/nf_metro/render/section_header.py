@@ -144,11 +144,12 @@ def _badge_span() -> float:
     return 2.0 * SECTION_NUM_CIRCLE_R_LARGE + SECTION_LABEL_TEXT_OFFSET
 
 
-def _header_length(name: str, font_size: float) -> float:
+def _header_length(name: str, font_size: float, *, has_number: bool = True) -> float:
     """Length of the header (badge + gap + title) along its reading axis."""
     if not name:
-        return 2.0 * SECTION_NUM_CIRCLE_R_LARGE
-    return _badge_span() + estimate_section_label_width(name, font_size)
+        return 2.0 * SECTION_NUM_CIRCLE_R_LARGE if has_number else 0.0
+    title_width = estimate_section_label_width(name, font_size)
+    return _badge_span() + title_width if has_number else title_width
 
 
 def header_line_height(font_size: float) -> float:
@@ -516,6 +517,8 @@ def _wrapped_header_geometry(
     bbox_w: float,
     single_line_length: float,
     max_lines: int,
+    *,
+    has_number: bool = True,
 ) -> tuple[list[str], float, float, bool]:
     """Header lines, horizontal length, extra block height, and height-capped flag.
 
@@ -529,7 +532,7 @@ def _wrapped_header_geometry(
     """
     if not name or single_line_length <= bbox_w:
         return [name], single_line_length, 0.0, False
-    badge_span = _badge_span()
+    badge_span = _badge_span() if has_number else 0.0
     available_width = max(bbox_w - badge_span, 1.0)
     lines, height_capped = _wrap_header_lines(
         name, font_size, available_width, max_lines
@@ -546,6 +549,8 @@ def _band_slot_placements(
     above: SectionHeaderPlacement,
     block: _BandBlock,
     polylines: list[Polyline],
+    *,
+    has_number: bool = True,
 ) -> list[SectionHeaderPlacement]:
     """One header per route-clear slot the band above ``section`` offers, each
     centred in its slot and wholly inside the box width.
@@ -574,7 +579,7 @@ def _band_slot_placements(
         free_to = lo - pad
         if free_to - free_from >= length:
             start = free_from + (free_to - free_from - length) / 2.0
-            slots.append(_band_shift(start, section, block))
+            slots.append(_band_shift(start, section, block, has_number=has_number))
         free_from = max(free_from, hi + pad)
     return [slot for slot in slots if _placement_clear(slot, polylines)]
 
@@ -605,25 +610,37 @@ def resolve_section_header_placement(
     box_right = section.bbox_x + section.bbox_w
     half_text = SECTION_LABEL_HALF_HEIGHT_RATIO * label_font_size
 
+    has_number = section.number > 0
+
     # A rotated side header runs down a vertical edge and is never wrapped; a
     # horizontal header wraps onto extra lines instead of overhanging bbox_w,
     # growing away from the box - upward for above/nudge, downward for below -
     # capped at however many lines fit before whatever is nearest that way.
-    side_length = _header_length(section.name, label_font_size)
+    side_length = _header_length(section.name, label_font_size, has_number=has_number)
     up_max_lines = _max_lines_upward(graph, section, title_font_size, label_font_size)
     lines, length, extra_height, height_capped = _wrapped_header_geometry(
-        section.name, label_font_size, section.bbox_w, side_length, up_max_lines
+        section.name,
+        label_font_size,
+        section.bbox_w,
+        side_length,
+        up_max_lines,
+        has_number=has_number,
     )
     block = _BandBlock(
         circle_r, num_y, length, half_text, lines, extra_height, height_capped
     )
-    above = _above(x0, y0, block)
+    above = _above(x0, y0, block, has_number=has_number)
     if polylines is None or _placement_clear(above, polylines):
         return above
 
     down_max_lines = _max_lines_downward(graph, section, label_font_size)
     lines_dn, length_dn, extra_dn, capped_dn = _wrapped_header_geometry(
-        section.name, label_font_size, section.bbox_w, side_length, down_max_lines
+        section.name,
+        label_font_size,
+        section.bbox_w,
+        side_length,
+        down_max_lines,
+        has_number=has_number,
     )
     down_block = _BandBlock(
         circle_r, num_y, length_dn, half_text, lines_dn, extra_dn, capped_dn
@@ -638,8 +655,19 @@ def resolve_section_header_placement(
     badge_diameter = 2.0 * circle_r
     side_room = section.bbox_h >= badge_diameter
     upright = [
-        *_band_slot_placements(section, above, block, polylines),
-        _below(x0, box_bottom, down_block),
+        *_band_slot_placements(
+            section,
+            above,
+            block,
+            polylines,
+            has_number=has_number,
+        ),
+        _below(
+            x0,
+            box_bottom,
+            down_block,
+            has_number=has_number,
+        ),
     ]
     rotated = []
     if (
@@ -668,7 +696,10 @@ def resolve_section_header_placement(
     if scored:
         return max(scored, key=lambda item: (item.clearance, -item.rank)).placement
     return _band_shift(
-        _leftmost_clear_band_start(section, above, length, polylines), section, block
+        _leftmost_clear_band_start(section, above, length, polylines),
+        section,
+        block,
+        has_number=has_number,
     )
 
 
@@ -701,15 +732,18 @@ def _placement_clear(
     )
 
 
-def _above(x0: float, y0: float, block: _BandBlock) -> SectionHeaderPlacement:
+def _above(
+    x0: float, y0: float, block: _BandBlock, *, has_number: bool = True
+) -> SectionHeaderPlacement:
     circle_r, num_y, length, half_text, lines, extra_height, height_capped = block
-    cx = x0 + circle_r
+    cx = x0 + circle_r if has_number else x0
     cy = y0 - circle_r - num_y
+    label_x = cx + circle_r + SECTION_LABEL_TEXT_OFFSET if has_number else x0
     return SectionHeaderPlacement(
         mode="above",
         badge_cx=cx,
         badge_cy=cy - extra_height / 2.0,
-        label_x=cx + circle_r + SECTION_LABEL_TEXT_OFFSET,
+        label_x=label_x,
         label_y=cy - extra_height,
         label_rotation=0.0,
         label_lines=tuple(lines),
@@ -718,15 +752,22 @@ def _above(x0: float, y0: float, block: _BandBlock) -> SectionHeaderPlacement:
     )
 
 
-def _below(x0: float, box_bottom: float, block: _BandBlock) -> SectionHeaderPlacement:
+def _below(
+    x0: float,
+    box_bottom: float,
+    block: _BandBlock,
+    *,
+    has_number: bool = True,
+) -> SectionHeaderPlacement:
     circle_r, num_y, length, half_text, lines, extra_height, height_capped = block
-    cx = x0 + circle_r
+    cx = x0 + circle_r if has_number else x0
     cy = box_bottom + circle_r + num_y
+    label_x = cx + circle_r + SECTION_LABEL_TEXT_OFFSET if has_number else x0
     return SectionHeaderPlacement(
         mode="below",
         badge_cx=cx,
         badge_cy=cy + extra_height / 2.0,
-        label_x=cx + circle_r + SECTION_LABEL_TEXT_OFFSET,
+        label_x=label_x,
         label_y=cy,
         label_rotation=0.0,
         label_lines=tuple(lines),
@@ -780,17 +821,22 @@ def _right(
 
 
 def _band_shift(
-    start: float, section: Section, block: _BandBlock
+    start: float,
+    section: Section,
+    block: _BandBlock,
+    *,
+    has_number: bool = True,
 ) -> SectionHeaderPlacement:
     """The above-left header moved along the band to begin at ``start``."""
     circle_r, num_y, length, half_text, lines, extra_height, height_capped = block
-    cx = start + circle_r
+    cx = start + circle_r if has_number else start
     cy = section.bbox_y - circle_r - num_y
+    label_x = cx + circle_r + SECTION_LABEL_TEXT_OFFSET if has_number else start
     return SectionHeaderPlacement(
         mode="nudge",
         badge_cx=cx,
         badge_cy=cy - extra_height / 2.0,
-        label_x=cx + circle_r + SECTION_LABEL_TEXT_OFFSET,
+        label_x=label_x,
         label_y=cy - extra_height,
         label_rotation=0.0,
         label_lines=tuple(lines),
