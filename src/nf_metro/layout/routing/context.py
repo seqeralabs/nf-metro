@@ -232,6 +232,7 @@ class _RoutingCtx:
     fanout_junctions: set[str]
     bottom_exit_junctions: set[str]
     bottom_exit_junction_ports: dict[str, str]
+    divergence_exit_ports: dict[str, str]
     offset_step: float
     fork_stations: set[str]
     join_stations: set[str]
@@ -493,6 +494,7 @@ def _build_routing_context(
         fanout_junctions=fanout_junction_ids(graph, topology),
         bottom_exit_junctions=bottom_exit_junctions,
         bottom_exit_junction_ports=bottom_exit_junction_ports,
+        divergence_exit_ports=divergence_exit_ports,
         offset_step=resolved_offset_step,
         fork_stations=fork_stations,
         join_stations=join_stations,

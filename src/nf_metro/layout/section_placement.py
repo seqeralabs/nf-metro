@@ -47,10 +47,12 @@ from nf_metro.layout.route_topology import divergence_junction_sources
 from nf_metro.layout.routing.common import (
     flanked_cross_row_riser_neighbour_col,
     inter_row_wrap_band,
+    lines_by_section,
     max_grid_row_with_content,
     merge_junction_ids,
     resolve_section,
     section_exists_above_row,
+    stack_diverted_junction_branches,
 )
 from nf_metro.layout.seam_topology import (
     entry_fan_receives_stacked_reversed_bundle,
@@ -922,7 +924,10 @@ def _inter_row_routing_minimums(graph: MetroGraph) -> dict[tuple[int, int], floa
     """
     wrap = _wrap_bundle_row_minimums(graph)
     minimums = dict(wrap)
-    for gap, band in _merge_trunk_row_minimums(graph).items():
+    for gap, band in (
+        *_merge_trunk_row_minimums(graph).items(),
+        *_around_stack_junction_row_minimums(graph).items(),
+    ):
         minimums[gap] = max(minimums.get(gap, 0.0), band)
     # A same-row over-top wrap (a feed from a section to a horizontal-side entry
     # of a same-row neighbour, looping over the neighbour's top) shares the gap
@@ -945,6 +950,44 @@ def _inter_row_routing_minimums(graph: MetroGraph) -> dict[tuple[int, int], floa
         )
         minimums[gap] = max(minimums.get(gap, 0.0), stacked)
     return minimums
+
+
+def _around_stack_junction_row_minimums(
+    graph: MetroGraph,
+) -> dict[tuple[int, int], float]:
+    """Row gaps a junction branch diverted round its own column's stack needs.
+
+    The diverted branch (:func:`stack_diverted_junction_branches`) jogs out
+    through the gap just past the source row and back through the gap just
+    before the target row.  Each jog is a horizontal inter-row run, so both gaps
+    reserve a wrap band for the branch's lines.
+    """
+    per_gap: dict[tuple[int, int], dict[str, set[str]]] = defaultdict(
+        lambda: defaultdict(set)
+    )
+    section_lines = lines_by_section(graph)
+    for junction_id, exit_port_id in divergence_junction_sources(graph).items():
+        for edge in stack_diverted_junction_branches(
+            graph, junction_id, exit_port_id, section_lines
+        ):
+            src_row = graph.sections[graph.ports[exit_port_id].section_id].grid_row
+            tgt_row = graph.sections[graph.ports[edge.target].section_id].grid_row
+            step = 1 if tgt_row > src_row else -1
+            per_gap[_ordered_gap(src_row, src_row + step)][junction_id].add(
+                edge.line_id
+            )
+            per_gap[_ordered_gap(tgt_row - step, tgt_row)][junction_id].add(
+                edge.line_id
+            )
+    offset_step = graph_offset_step(graph)
+    return {
+        gap: inter_row_wrap_band(widest, offset_step)
+        for gap, widest in _widest_lines_per_gap(per_gap).items()
+    }
+
+
+def _ordered_gap(row_a: int, row_b: int) -> tuple[int, int]:
+    return (row_a, row_b) if row_a < row_b else (row_b, row_a)
 
 
 def _over_top_wrap_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], int]:

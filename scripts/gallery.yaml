@@ -1051,6 +1051,31 @@ gallery:
       same column, so approach and drop meet as one straight stroke at the port
       boundary rather than parting onto a bundle-index fan lane (issue #1428
       defect 2 / #1509)."
+  - id: tb_bottom_exit_junction_stacked_fork
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "A TB section's bottom exit forks one line at a junction into two sections
+      stacked in its own column. The branch to the nearer section carries straight
+      on down the column; the branch to the farther one leaves the fork on the
+      same lane, jogs out to the gap beside the column, and comes back over its
+      target, so it never ploughs through the section in between (issue #2045)."
+  - id: tb_bottom_exit_junction_stacked_fork_two_lines
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "The same stacked fork carrying a different line to each section. Each line
+      keeps its own lane through the junction with no step where the branches
+      leave it, and the line bound for the farther section clears the nearer one
+      through the inter-column gap (issue #2045)."
+  - id: bt_top_exit_junction_stacked_fork_two_lines
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "The upward mirror: a BT section's top exit forks two lines at a junction
+      above the port into sections stacked above it. The farther branch goes round
+      the nearer section on the side its lanes fan toward, so the two lines peel
+      apart without crossing (issue #2045)."
   - id: shared_cell_fork_trunk_align
     source_dir: examples/topologies
     category: Inter-section Routing

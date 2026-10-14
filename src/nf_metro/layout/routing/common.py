@@ -31,6 +31,7 @@ from nf_metro.layout.geometry import (
     cotravelling_lanes_fuse,
     lanes_run_along_x,
     lanes_run_along_y,
+    sections_share_a_column,
     spans_share_corridor,
 )
 from nf_metro.layout.route_topology import (
@@ -178,6 +179,44 @@ def trailing_perp_side(direction: str) -> PortSide:
     Only meaningful for a vertical-flow (TB/BT) section.
     """
     return PortSide.BOTTOM if AxisFrame.flow_sign(direction) > 0 else PortSide.TOP
+
+
+def is_trailing_exit(graph: MetroGraph, port: Port | None) -> bool:
+    """Whether *port* is a vertical-flow section's trailing (flow-side) exit."""
+    section = graph.sections.get(port.section_id) if port is not None else None
+    return (
+        port is not None
+        and not port.is_entry
+        and section is not None
+        and lanes_run_along_x(section.direction)
+        and port.side is trailing_perp_side(section.direction)
+    )
+
+
+def lines_by_section(graph: MetroGraph) -> dict[str, set[str]]:
+    """Every line a station of each section carries, its ports included."""
+    lines: dict[str, set[str]] = defaultdict(set)
+    for sid, station in graph.stations.items():
+        if station.section_id is not None:
+            lines[station.section_id].update(graph.station_lines(sid))
+    return lines
+
+
+def carries_line_along_column(
+    section: Section,
+    line_id: str,
+    section_lines: Mapping[str, AbstractSet[str]],
+) -> bool:
+    """Whether *section* runs *line_id* down a vertical (TB/BT) trunk.
+
+    A run continuing down the same column through such a section overlays the
+    line's own trunk there -- one continuous stroke -- rather than ploughing
+    through a box it never calls at.  *section_lines* is
+    :func:`lines_by_section` of the graph.
+    """
+    return lanes_run_along_x(section.direction) and line_id in section_lines.get(
+        section.id, ()
+    )
 
 
 def perp_entry_consumer(graph: MetroGraph, port_id: str) -> Station | None:
@@ -2958,6 +2997,33 @@ def _v_segment_crosses_other_section(
     expanded box boundary by default; callers policing a prospective move can
     request an open expanded boundary without changing the segment endpoints.
     """
+    return any(
+        v_segment_crossed_sections(
+            graph,
+            x,
+            y1,
+            y2,
+            exclude_section_ids,
+            margin,
+            include_margin_boundary=include_margin_boundary,
+        )
+    )
+
+
+def v_segment_crossed_sections(
+    graph: MetroGraph,
+    x: float,
+    y1: float,
+    y2: float,
+    exclude_section_ids: AbstractSet[str | None],
+    margin: float = 0.0,
+    *,
+    include_margin_boundary: bool = True,
+) -> Iterator[Section]:
+    """Each non-exempt section a vertical segment at *x* crosses.
+
+    Same crossing test as :func:`_v_segment_crosses_other_section`.
+    """
     lo_y, hi_y = (y1, y2) if y1 <= y2 else (y2, y1)
     for section in graph.sections.values():
         if section.bbox_w <= 0 or section.id in exclude_section_ids:
@@ -2969,8 +3035,7 @@ def _v_segment_crosses_other_section(
         right = section.bbox_x + section.bbox_w + margin
         inside_x = left <= x <= right if include_margin_boundary else left < x < right
         if inside_x:
-            return True
-    return False
+            yield section
 
 
 def _section_intrudes(
@@ -3566,3 +3631,55 @@ def corridor_lanes(runs: Iterable[CorridorRun]) -> list[CorridorLane]:
         )
         for track in tracks
     ]
+
+
+def stack_diverted_junction_branches(
+    graph: MetroGraph,
+    junction_id: str,
+    exit_port_id: str,
+    section_lines: Mapping[str, AbstractSet[str]],
+) -> tuple[Edge, ...]:
+    """The branch of a trailing-exit junction that diverts round its column's stack.
+
+    A divergence junction fed through a vertical-flow section's trailing exit
+    stands on that exit's column.  A branch into a facing entry further along
+    the same column, past a section that does not carry its line down a
+    vertical trunk, diverts round the stack (``_route_around_stack``).  The
+    diversion owns the gap beside the column and the jogs into it outright, so
+    it is taken only when it is the junction's sole diverting branch and every
+    sibling carries straight on down the column into a facing entry; otherwise
+    no branch diverts (an empty result).
+    """
+    exit_port = graph.ports.get(exit_port_id)
+    src_sec = graph.sections.get(exit_port.section_id) if exit_port else None
+    if (
+        exit_port is None
+        or exit_port.is_entry
+        or src_sec is None
+        or not lanes_run_along_x(src_sec.direction)
+    ):
+        return ()
+    trailing = trailing_perp_side(src_sec.direction)
+    if exit_port.side is not trailing:
+        return ()
+    facing = PortSide.TOP if trailing is PortSide.BOTTOM else PortSide.BOTTOM
+    diverted: list[Edge] = []
+    for edge in graph.edges_from(junction_id):
+        port = graph.ports.get(edge.target)
+        tgt_sec = graph.sections.get(port.section_id) if port else None
+        if (
+            port is None
+            or tgt_sec is None
+            or port.side is not facing
+            or not sections_share_a_column(src_sec, tgt_sec)
+        ):
+            return ()
+        lo, hi = sorted((src_sec.grid_row, tgt_sec.grid_row))
+        if any(
+            lo < section.grid_row < hi
+            and sections_share_a_column(section, src_sec)
+            and not carries_line_along_column(section, edge.line_id, section_lines)
+            for section in graph.sections.values()
+        ):
+            diverted.append(edge)
+    return tuple(diverted) if len(diverted) == 1 else ()
