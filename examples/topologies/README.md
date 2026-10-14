@@ -2,7 +2,7 @@
 
 Example `.mmd` files demonstrating a range of pipeline topologies and the layout patterns they produce. Each example exercises different aspects of the auto-layout engine.
 
-This directory holds 298 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
+This directory holds 301 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
 
 To render one example:
 
