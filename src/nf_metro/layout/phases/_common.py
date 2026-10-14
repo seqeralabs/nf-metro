@@ -958,6 +958,34 @@ def _station_bundle_offset_span(
     return min(line_offs), max(line_offs)
 
 
+def station_drawn_bundle_span(
+    graph: MetroGraph,
+    sid: str,
+    offsets: dict[tuple[str, str], float],
+    positive_fan: set[str] | None = None,
+) -> tuple[float, float]:
+    """Min/max of ``sid``'s per-line offsets *as drawn* along its lane axis.
+
+    A line rides ``lane + section_lane_sign * offset`` (``_tb_x_offset`` for a
+    vertical flow), so a TB section whose bundle draws on the ``-x`` side spans
+    the negated offsets.  Spanning the marker over the drawn offsets keeps it
+    centred on the lines that actually pass through the station.
+    ``positive_fan`` lets a per-station loop pass the section lane frame's
+    positive-fan set once rather than re-deriving it per station.
+    """
+    raw_min, raw_max = _station_bundle_offset_span(graph, sid, offsets)
+    if not graph.station_lines(sid):
+        return 0.0, 0.0
+    st = graph.stations[sid]
+    sec = graph.sections.get(st.section_id) if st.section_id else None
+    if sec is None:
+        return raw_min, raw_max
+    from nf_metro.layout.routing.context import _section_lane_frame
+
+    sign = _section_lane_frame(graph, sec, positive_fan).secondary_sign
+    return min(sign * raw_min, sign * raw_max), max(sign * raw_min, sign * raw_max)
+
+
 def _station_marker_bbox(
     graph: MetroGraph,
     sid: str,
@@ -967,9 +995,10 @@ def _station_marker_bbox(
     """Rendered marker / icon bbox for ``sid``, or ``None`` for ports,
     hidden stations, and junctions.
 
-    Mirrors the pill geometry used by ``nf_metro.render.svg``: width
-    ``2 * radius``, height ``(max_off - min_off) + 2 * radius``, centred
-    at ``(station.x, station.y + (min_off + max_off) / 2)``.
+    Mirrors the pill geometry used by ``nf_metro.render.svg``: ``2 * radius``
+    along the flow and ``(max_off - min_off) + 2 * radius`` across it, on the
+    section's lane axis (Y for LR/RL, X for TB/BT), centred on the drawn
+    bundle's mid-offset.
     """
     from nf_metro.layout.routing import compute_station_offsets
 
@@ -981,10 +1010,15 @@ def _station_marker_bbox(
         return None
     if offsets is None:
         offsets = compute_station_offsets(graph)
-    min_off, max_off = _station_bundle_offset_span(graph, sid, offsets)
-    cy = st.y + (min_off + max_off) / 2
-    half_h = (max_off - min_off) / 2 + radius
-    return (st.x - radius, cy - half_h, st.x + radius, cy + half_h)
+    min_off, max_off = station_drawn_bundle_span(graph, sid, offsets)
+    mid = (min_off + max_off) / 2
+    half_span = (max_off - min_off) / 2 + radius
+    sec = graph.sections.get(st.section_id) if st.section_id else None
+    if sec is not None and lanes_run_along_x(sec.direction):
+        cx = st.x + mid
+        return (cx - half_span, st.y - radius, cx + half_span, st.y + radius)
+    cy = st.y + mid
+    return (st.x - radius, cy - half_span, st.x + radius, cy + half_span)
 
 
 def marker_cross_exempt(graph: MetroGraph, sid: str) -> bool:

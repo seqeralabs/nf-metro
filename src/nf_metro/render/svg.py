@@ -49,7 +49,7 @@ from nf_metro.layout.labels import (
     place_labels,
 )
 from nf_metro.layout.pass_metrics import font_scale_context, stroke_scale_context
-from nf_metro.layout.phases._common import _station_bundle_offset_span
+from nf_metro.layout.phases._common import station_drawn_bundle_span
 from nf_metro.layout.phases.bbox import measure_row_gap_clearance
 from nf_metro.layout.phases.canvas import translate_graph
 from nf_metro.layout.phases.guards import (
@@ -3657,32 +3657,6 @@ def _render_bridged_edge(
     d.append(path)
 
 
-def _drawn_bundle_span(
-    graph: MetroGraph,
-    station: Station,
-    station_offsets: dict[tuple[str, str], float],
-    positive_fan: set[str],
-) -> tuple[float, float]:
-    """Min/max of a station's per-line offsets *as drawn*.
-
-    A vertical-flow (TB) section is the 90-degree rotation of a horizontal one:
-    a line rides ``x - offset`` where an LR line rides ``y + offset`` (matching
-    :func:`_tb_x_offset`).  Spanning the marker over the drawn offsets keeps it
-    centred on the lines that actually pass through the station, so a one-line or
-    off-trunk-subset station does not leave its glyph beside its own track.
-    """
-    raw_min, raw_max = _station_bundle_offset_span(graph, station.id, station_offsets)
-    if not graph.station_lines(station.id):
-        return 0.0, 0.0
-    sec = graph.sections.get(station.section_id) if station.section_id else None
-    if sec is not None and sec.direction == "TB":
-        sign = 1.0 if station.section_id in positive_fan else -1.0
-        drawn = [sign * raw_min, sign * raw_max]
-    else:
-        drawn = [raw_min, raw_max]
-    return min(drawn), max(drawn)
-
-
 def _pill_box(
     station: Station,
     r: float,
@@ -3734,7 +3708,7 @@ def station_marker_box(
     is_tb_vert = bool(
         station.section_id
         and (sec := graph.sections.get(station.section_id))
-        and sec.direction == "TB"
+        and lanes_run_along_x(sec.direction)
     )
     if positive_fan is None:
         positive_fan = tb_positive_fan_sections(graph)
@@ -3742,8 +3716,8 @@ def station_marker_box(
         used = station.rail_used_ys or [station.y]
         min_off, max_off = min(used) - station.y, max(used) - station.y
     elif station_offsets and not graph.station_is_rail(station.id):
-        min_off, max_off = _drawn_bundle_span(
-            graph, station, station_offsets, positive_fan
+        min_off, max_off = station_drawn_bundle_span(
+            graph, station.id, station_offsets, positive_fan
         )
     else:
         min_off = max_off = 0.0
@@ -4275,8 +4249,8 @@ def _render_station_into(
     # marked single-rail station's glyph must seat on the rail rather than
     # ride the bundle's mid-offset.
     if station_offsets and not graph.station_is_rail(station.id):
-        min_off, max_off = _drawn_bundle_span(
-            graph, station, station_offsets, positive_fan
+        min_off, max_off = station_drawn_bundle_span(
+            graph, station.id, station_offsets, positive_fan
         )
     else:
         min_off = max_off = 0.0
@@ -4826,12 +4800,7 @@ def _station_marker_extent(
         if sec and lanes_run_along_x(sec.direction):
             is_vertical_flow = True
 
-    line_offsets = [
-        station_offsets.get((station.id, lid), 0.0)
-        for lid in graph.station_lines(station.id)
-    ]
-    min_off = min(line_offsets) if line_offsets else 0.0
-    max_off = max(line_offsets) if line_offsets else 0.0
+    min_off, max_off = station_drawn_bundle_span(graph, station.id, station_offsets)
 
     x, y, w, h = _pill_box(station, r, min_off, max_off, is_vertical_flow)
     return (x, x + w, y, y + h)
