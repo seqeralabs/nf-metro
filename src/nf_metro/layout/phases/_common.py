@@ -167,6 +167,7 @@ def _topological_station_order(
 
 
 def _line_bypasses_boundary(
+    graph: MetroGraph,
     line_id: str,
     predecessor: str,
     node: str,
@@ -176,9 +177,20 @@ def _line_bypasses_boundary(
 ) -> bool:
     """Whether one line reaches below a boundary without crossing it.
 
+    In a section whose lanes run along X, only a route that rejoins inside the
+    section counts: that one runs beside the chain and needs a lane of its own,
+    while a route around the outside of the box takes no lane in it, and the
+    relation is the only thing holding such a chain in one column.  A section
+    whose lanes run along Y already keeps the chain on one row through line
+    priority, so there any route around the boundary counts.
+
     Each query holds only its line-local bypass set and one global forward-walk
     set, avoiding an all-pairs descendant index for the station DAG.
     """
+    section_id = graph.stations[node].section_id
+    inside_only = section_id is not None and lanes_run_along_x(
+        graph.sections[section_id].direction
+    )
     predecessors_for_line = line_predecessors.get(line_id, {})
     targets_for_line = line_targets.get(line_id, {})
     upstream: set[str] = set()
@@ -200,7 +212,8 @@ def _line_bypasses_boundary(
         visited.add(station_id)
         for target in targets_for_line.get(station_id, set()):
             if target not in {predecessor, node}:
-                bypass_reachable.add(target)
+                if not inside_only or graph.stations[target].section_id == section_id:
+                    bypass_reachable.add(target)
                 frontier.append(target)
 
     if not bypass_reachable:
@@ -378,6 +391,7 @@ def continuation_track_predecessors(graph: MetroGraph) -> dict[str, str]:
         dropped_lines = predecessor_lines - node_lines
         if any(
             _line_bypasses_boundary(
+                graph,
                 line_id,
                 predecessor,
                 node,

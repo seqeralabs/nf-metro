@@ -12,6 +12,7 @@ from nf_metro.layout.phases import _common as phase_common
 from nf_metro.layout.phases._common import (
     continuation_track_is_realizable,
     continuation_track_predecessors,
+    section_lane_axis,
 )
 from nf_metro.layout.phases.fan_bundles import _carry_full_bundle_continuations
 from nf_metro.layout.phases.guards import (
@@ -210,9 +211,7 @@ graph LR
     assert "node" not in continuation_track_predecessors(graph)
 
 
-def test_downstream_line_reoccupation_rejects_transition_seed() -> None:
-    graph = prepare_graph(
-        """
+_REOCCUPATION_AROUND_THE_BOX = """
 %%metro line: first | First | #3779b1
 %%metro line: second | Second | #6ef362
 graph LR
@@ -220,6 +219,7 @@ graph LR
         source
     end
     subgraph target [Target]
+        %%metro direction: {direction}
         pred -->|second| node
         node -->|second| tail
     end
@@ -233,6 +233,58 @@ graph LR
     source -->|first| bypass
     bypass -->|first| sink
     tail -->|second| sink
+"""
+
+
+def test_downstream_line_reoccupation_rejects_transition_seed() -> None:
+    graph = prepare_graph(_REOCCUPATION_AROUND_THE_BOX.format(direction="LR"))
+
+    assert "node" not in continuation_track_predecessors(graph)
+
+
+@pytest.mark.parametrize("direction", ("TB", "BT"))
+def test_vertical_reoccupation_around_the_box_seeds_inheritance(
+    direction: str,
+) -> None:
+    """A dropped line that reaches the sink around a vertical section needs no lane.
+
+    ``first`` stops at ``pred`` and reaches ``sink`` again through another
+    section, so its other route never runs beside ``pred -> node`` in the
+    column.
+    """
+    graph = prepare_graph(_REOCCUPATION_AROUND_THE_BOX.format(direction=direction))
+
+    assert continuation_track_predecessors(graph)["node"] == "pred"
+
+
+@pytest.mark.parametrize("direction", ("TB", "BT"))
+def test_vertical_bypass_inside_the_box_rejects_transition_seed(
+    direction: str,
+) -> None:
+    """A dropped line that rejoins inside the section keeps the chain apart.
+
+    ``first`` stops at ``pred`` but reaches ``tail`` through the section's own
+    entry, so it runs past ``node`` inside the column.
+    """
+    graph = prepare_graph(
+        f"""
+%%metro line: first | First | #3779b1
+%%metro line: second | Second | #6ef362
+graph LR
+    subgraph feeder [Feeder]
+        source
+    end
+    subgraph target [Target]
+        %%metro direction: {direction}
+        pred -->|second| node
+        node -->|second| tail
+    end
+    subgraph sink_section [Sink]
+        sink
+    end
+    source -->|first,second| pred
+    source -->|first| tail
+    tail -->|first,second| sink
 """
     )
 
@@ -404,6 +456,48 @@ def test_tb_passthrough_fixture_names_its_merge_tail_continuation() -> None:
     merge_lane, tail_lane = _lane_columns(graph, ("merge", "tail"))
 
     assert abs(tail_lane - merge_lane) <= SAME_COORD_TOLERANCE
+
+
+_DROPPED_LINE_BYPASS_CHAIN = """
+%%metro line: m0 | L0 | #e6194b
+%%metro line: m1 | L1 | #3cb44b
+%%metro line: m3 | L3 | #f58231
+graph LR
+    subgraph a [A]
+        a0[A0]
+    end
+    subgraph b [B]
+        %%metro direction: {direction}
+        b0[B0]
+        b1[B1]
+        b2[B2]
+        b0 -->|m3| b1
+        b1 -->|m0| b2
+    end
+    subgraph c [C]
+        c0[C0]
+    end
+    a0 -->|m0,m1,m3| b0
+    a0 -->|m1| c0
+    b2 -->|m0| c0
+"""
+
+
+@pytest.mark.parametrize("direction", ("TB", "BT", "LR"))
+def test_chain_holds_its_lane_past_a_line_rerouted_around_the_box(
+    direction: str,
+) -> None:
+    """A chain keeps one lane when a line it drops reaches the sink another way.
+
+    ``m1`` stops at ``B0`` and also runs from ``A0`` straight to ``C``, outside
+    section ``B``, so it takes no lane beside the chain.
+    """
+    graph = parse_metro_mermaid(_DROPPED_LINE_BYPASS_CHAIN.format(direction=direction))
+    compute_layout(graph)
+    lane = section_lane_axis(graph, "b")
+    lanes = [lane.get(graph.stations[station_id]) for station_id in ("b0", "b1", "b2")]
+
+    assert max(lanes) - min(lanes) <= SAME_COORD_TOLERANCE, lanes
 
 
 TB_LINE_CHANGE_CHAIN = ROOT / "examples" / "topologies" / "tb_line_change_chain.mmd"
