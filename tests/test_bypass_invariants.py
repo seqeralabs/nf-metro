@@ -301,3 +301,72 @@ def test_source_fan_bypass_v_stays_between_its_fan_siblings():
             f"[{lo:.1f}, {hi:.1f}] - a bundle helper stacked beyond a fan "
             f"sibling forces the input-section U-well loop"
         )
+
+
+_COTRAVELLING_SKIP = """\
+%%metro line: m0 | L0 | #e6194b
+%%metro line: m1 | L1 | #3cb44b
+%%metro line: m2 | L2 | #4363d8
+%%metro line: m3 | L3 | #f58231
+%%metro line: m4 | L4 | #911eb4
+
+graph LR
+    subgraph z0 [Zone 0]
+        q0x0[Q0X0]
+        q0x1[Q0X1]
+        q0x2[Q0X2]
+        q0x3[Q0X3]
+        q0x0 -->|m1,m2,m3| q0x1
+        q0x0 -->|m4| q0x2
+        q0x1 -->|m3,m4| q0x2
+        q0x1 -->|m1,m2| q0x3
+        q0x2 -->|m0,m1,m3| q0x3
+    end
+    subgraph z1 [Zone 1]
+        %%metro direction: TB
+        q1x0[Q1X0]
+        q1x1[Q1X1]
+        q1x2[Q1X2]
+        q1x3[Q1X3]
+        q1x0 -->|m0,m4| q1x1
+        q1x1 -->|m0| q1x2
+        q1x1 -->|m3,m4| q1x3
+        q1x2 -->|m0| q1x3
+    end
+    subgraph z2 [Zone 2]
+        q2x0[Q2X0]
+        q2x1[Q2X1]
+        q2x2[Q2X2]
+        q2x0 -->|m3| q2x1
+        q2x1 -->|m3| q2x2
+    end
+    q0x1 -->|m3| q1x1
+    q0x2 -->|m4| q1x0
+    q0x3 -->|m1| q1x0
+    q0x3 -->|m0,m2| q1x2
+    q0x3 -->|m3| q2x0
+    q1x3 -->|m3| q2x0
+    q1x3 -->|m0| q2x2
+"""
+
+
+def test_cotravelling_lines_share_one_geometric_bypass_helper() -> None:
+    """Two lines skipping one station together bow around it as one bundle.
+
+    ``q1x1 -> q1x3`` carries ``m3`` and ``m4`` straight through ``q1x2``'s
+    marker, so the geometric bypass pass routes them around it.  One helper per
+    line would stack both helpers on a single point and draw the two lines a
+    fraction of a pixel apart along the bow, which the curve invariants reject;
+    a shared helper carries them at the bundle pitch.
+    """
+    from nf_metro.api import render_string
+
+    graph = parse_metro_mermaid(_COTRAVELLING_SKIP)
+    compute_layout(graph)
+    helpers = [
+        (st.bypasses_station_id, frozenset(graph.station_lines(sid)))
+        for sid, st in graph.stations.items()
+        if is_bypass_v(sid) and st.section_id == "z1"
+    ]
+    assert helpers == [("q1x2", frozenset({"m3", "m4"}))], helpers
+    render_string(_COTRAVELLING_SKIP)

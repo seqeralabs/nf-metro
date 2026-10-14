@@ -208,7 +208,10 @@ def _insert_helpers(
     """Rewrite each crossed edge ``pred -> V1 -> ... -> Vn -> target``.
 
     One hidden ``__bypass_`` helper is inserted per skipped station, ordered
-    along the edge.  Returns the helper ids and the corresponding physical-edge
+    along the edge.  Lines sharing a predecessor and target share the helper
+    for a station they all skip, as the parse-time bypass does, so the lines
+    bow around it as one bundle rather than as separate helpers stacked on one
+    point.  Returns the helper ids and the corresponding physical-edge
     replacements for the canonical authored-route trace.
     """
     by_edge: dict[int, list[_Crossing]] = {}
@@ -220,6 +223,7 @@ def _insert_helpers(
     new_edges: list[Edge] = []
     edges_to_remove: set[int] = set()
     replacements: dict[ResolvedEdge, list[tuple[ResolvedEdge, ...]]] = {}
+    shared_v: dict[tuple[str, str, str], str] = {}
 
     for ei, edge_crossings in by_edge.items():
         edge = graph.edges[ei]
@@ -236,17 +240,21 @@ def _insert_helpers(
         prev = edge.source
         replacement_path: list[ResolvedEdge] = []
         for c in ordered:
-            count += 1
-            v_id = f"{BYPASS_V_PREFIX}{c.crossed_id}_{c.pred_id}_{count}"
-            new_stations.append(
-                Station(
-                    id=v_id,
-                    label="",
-                    section_id=c.section_id,
-                    is_hidden=True,
-                    bypasses_station_id=c.crossed_id,
+            key = (c.pred_id, c.crossed_id, edge.target)
+            v_id = shared_v.get(key, "")
+            if not v_id:
+                count += 1
+                v_id = f"{BYPASS_V_PREFIX}{c.crossed_id}_{c.pred_id}_{count}"
+                shared_v[key] = v_id
+                new_stations.append(
+                    Station(
+                        id=v_id,
+                        label="",
+                        section_id=c.section_id,
+                        is_hidden=True,
+                        bypasses_station_id=c.crossed_id,
+                    )
                 )
-            )
             replacement = Edge(source=prev, target=v_id, line_id=edge.line_id)
             new_edges.append(replacement)
             replacement_path.append(
