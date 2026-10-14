@@ -4,14 +4,21 @@ entry, perpendicular entry, and diagonal placement.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 
 from nf_metro.layout.constants import (
     COORD_TOLERANCE,
+    COORD_TOLERANCE_FINE,
     MIN_STRAIGHT_EDGE,
+    MIN_STRAIGHT_PORT,
 )
 from nf_metro.layout.geometry import (
+    AxisFrame,
+    axis_split,
     diagonal_centreline,
+    flow_port_sides,
+    lanes_run_along_x,
     single_corner_centreline,
 )
 from nf_metro.layout.routing.bundle import (
@@ -420,6 +427,16 @@ def _route_perp_entry(
             offset_regime=OffsetRegime.BAKED,
         )
 
+    tgt_sec = graph.sections.get(tgt.section_id or "")
+    if (
+        tgt_sec is not None
+        and lanes_run_along_x(tgt_sec.direction)
+        and src_port.side == flow_port_sides(tgt_sec.direction)[0]
+    ):
+        route = _route_flow_side_lane_change(edge, src, tgt, ctx, tgt_sec)
+        if route is not None:
+            return route
+
     _members, line_ids, edge_by_line = gather_member_edges(graph, edge)
     return _route_perp_entry_l_shape(edge, src, tgt, ctx, dx, line_ids, edge_by_line)
 
@@ -461,6 +478,139 @@ def _route_perp_entry_l_shape(
         line_ids,
         source_offset,
         target_offset,
+    )
+
+
+def entry_runway_placement(
+    edge: Edge,
+    src: Station,
+    tgt: Station,
+    ctx: _RoutingCtx,
+    section: Section,
+) -> tuple[float, float] | None:
+    """Flow-axis start and end of an entry runway's lane-change diagonal.
+
+    The runway runs straight along one of two tracks (the port's or the
+    target's) and crosses to the other on the diagonal, so a bypassed station
+    this line does not carry sitting on the straight run's track would be raked
+    through its marker.  ``None`` when there is nothing to bypass, no room for
+    the diagonal before the first bypassed station, or both tracks carry a
+    non-consumer.  Placement is kept in terms of distance from the source, so
+    either flow sense along either axis reads the same.
+    """
+    graph = ctx.graph
+    flow_axis, _lane_axis = AxisFrame.axes_for_direction(section.direction)
+    sp, sq = axis_split(flow_axis, (src.x, src.y))
+    tp, tq = axis_split(flow_axis, (tgt.x, tgt.y))
+    lo, hi = min(sp, tp), max(sp, tp)
+    between: list[float] = []
+    target_track_blockers: list[float] = []
+    source_track_blocked = False
+    for sid in section.station_ids:
+        if sid == edge.target or sid in section.port_ids:
+            continue
+        st = graph.stations.get(sid)
+        if not st or st.is_port:
+            continue
+        p, q = axis_split(flow_axis, (st.x, st.y))
+        if not lo < p < hi:
+            continue
+        between.append(p)
+        if edge.line_id not in graph.station_lines(sid):
+            if abs(q - tq) < COORD_TOLERANCE_FINE:
+                target_track_blockers.append(p)
+            elif abs(q - sq) < COORD_TOLERANCE_FINE:
+                source_track_blocked = True
+
+    if not between:
+        return None
+
+    if not target_track_blockers:
+        # Target track is clear: compress the diagonal in the entry region and
+        # run straight along the target track past the bypassed stations.
+        nearest_src = min(between, key=lambda p: abs(p - sp))
+        src_min = ctx.curve_radius + MIN_STRAIGHT_PORT
+        if abs(nearest_src - sp) < src_min + ctx.diagonal_run:
+            return None
+        return _compute_diagonal_placement(
+            sp,
+            nearest_src,
+            ctx.diagonal_run,
+            src_min,
+            0.0,
+            is_fork=edge.source in ctx.fork_stations,
+            is_join=False,
+        )
+    if source_track_blocked:
+        return None
+    # Target track carries a non-consumer but the source (entry) track is
+    # clear: keep the straight run on the source track and cross into the
+    # target only after the last bypassed station, so the crossing clears it.
+    tgt_min = ctx.curve_radius + MIN_STRAIGHT_PORT
+    diag_start, diag_end = _compute_diagonal_placement(
+        sp, tp, ctx.diagonal_run, 0.0, tgt_min, is_fork=False, is_join=True
+    )
+    last_blocker = max(target_track_blockers, key=lambda p: abs(p - sp))
+    if abs(diag_start - sp) <= abs(last_blocker - sp):
+        return None
+    return diag_start, diag_end
+
+
+def _route_flow_side_lane_change(
+    edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx, section: Section
+) -> RoutedPath | None:
+    """Change lanes along the flow axis from a vertical section's flow-start port.
+
+    The port on a vertical section's flow-start edge is not perpendicular to
+    it, so a line entering there keeps travelling along the flow axis: it
+    leaves the port on the lane its feeder lands on, crosses to the target's
+    lane on a diagonal (inside the entry region when it bypasses stations,
+    just inside the port otherwise), and reaches the station on that lane.
+
+    The lines sharing the edge cross on parallel diagonals, which the diagonal
+    spread pass separates by translating each along the flow axis.  ``None``
+    when the run from the port to the station is too short for that spread,
+    leaving the bundle to the perpendicular turn-in.
+    """
+    flow_axis, _lane_axis = AxisFrame.axes_for_direction(section.direction)
+    sp, sq = axis_split(flow_axis, (src.x, src.y))
+    tp, tq = axis_split(flow_axis, (tgt.x, tgt.y))
+    _members, line_ids, _edge_by_line = gather_member_edges(ctx.graph, edge)
+    lateral = abs(tq - sq)
+    if lateral < COORD_TOLERANCE:
+        return None
+    spread = (
+        (len(line_ids) - 1)
+        * ctx.offset_step
+        * (math.hypot(ctx.diagonal_run, lateral) - ctx.diagonal_run)
+        / lateral
+    )
+    slack = abs(tp - sp) - ctx.diagonal_run - 2 * MIN_STRAIGHT_EDGE
+    if slack < spread:
+        return None
+
+    placement = entry_runway_placement(
+        edge, src, tgt, ctx, section
+    ) or _compute_diagonal_placement(
+        sp,
+        tp,
+        ctx.diagonal_run,
+        MIN_STRAIGHT_EDGE,
+        MIN_STRAIGHT_EDGE,
+        is_fork=True,
+        is_join=False,
+    )
+    src_lane, tgt_lane = (
+        station.x + _tb_x_offset(ctx, station.id, edge.line_id, section.id)
+        for station in (src, tgt)
+    )
+    return RoutedPath(
+        edge=edge,
+        line_id=edge.line_id,
+        points=diagonal_centreline(
+            section.direction, (src_lane, src.y), (tgt_lane, tgt.y), *placement
+        ),
+        offset_regime=OffsetRegime.BAKED,
     )
 
 
