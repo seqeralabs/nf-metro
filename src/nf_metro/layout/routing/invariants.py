@@ -1427,6 +1427,47 @@ def bypass_horizontal_targets(
     return result
 
 
+def _pinned_inside_level_band(
+    graph,  # noqa: ANN001 - MetroGraph (avoid import cycle)
+    port_id: str,
+    feeder_id: str,
+    line_id: str,
+    level: Sequence[str],
+    offsets: Mapping[tuple[str, str], float],
+    *,
+    from_below: bool,
+) -> bool:
+    """Whether a perpendicular joiner must stay out of the approach re-slot.
+
+    A line entering the port from two feeders is classified by its first, so a
+    line counted as level can also rise or drop in from an exit facing the port
+    as one lane of that exit's bundle.  The bundle keeps its lane order up or
+    down the riser and into the port, so a joiner from that exit can take a slot
+    past the level band on its approach side only when it arrives beyond every
+    level line it shares the exit with; otherwise the move braids it through
+    them.  An exit on any other side reaches the port through turns whose effect
+    on the lane order depends on the whole route, so it pins nothing.
+    """
+    feeder = graph.ports.get(feeder_id)
+    if (
+        feeder is None
+        or feeder.side not in (PortSide.LEFT, PortSide.RIGHT)
+        or feeder.side is graph.ports[port_id].side
+    ):
+        return False
+    lane = offsets.get((feeder_id, line_id), 0.0)
+    mate_lanes = [
+        offsets.get((feeder_id, edge.line_id), 0.0)
+        for edge in graph.edges_to(port_id)
+        if edge.source == feeder_id and edge.line_id in level
+    ]
+    if not mate_lanes:
+        return False
+    if from_below:
+        return lane <= max(mate_lanes)
+    return lane >= min(mate_lanes)
+
+
 def classify_merge_port_feeders(
     graph,  # noqa: ANN001 - MetroGraph (avoid import cycle)
     port_id: str,
@@ -1446,12 +1487,12 @@ def classify_merge_port_feeders(
     left unclassified.  Bypass horizontal lines (junction-derived,
     same-Y feeder, but heading to a deeper station) are excluded from
     the horizontal list so they do not inflate ``max_horiz`` and push
-    perpendicular lines into unnecessary outer slots.  A perpendicular
-    line that shares its feeder with a horizontal line and does not
-    arrive outside it in that feeder's lane order is left unclassified
-    too (see :func:`_joins_inside_level_mates`).  Returns ``None``
+    perpendicular lines into unnecessary outer slots.  Returns ``None``
     when the port is not such a reconvergence merge - i.e. when there
-    is no approach-side decision to make.
+    is no approach-side decision to make.  A perpendicular line that
+    shares its feeder with a horizontal line and does not arrive outside
+    it in that feeder's lane order is left unclassified too (see
+    :func:`_pinned_inside_level_band`).
     """
     port_obj = graph.ports.get(port_id)
     if port_obj is None or not port_obj.is_entry:
@@ -1465,8 +1506,7 @@ def classify_merge_port_feeders(
     bypass_lids = set(bypass_horizontal_targets(graph, port_id))
     distinct_sources: set[int] = set()
     horizontal: list[str] = []
-    below: list[str] = []
-    above: list[str] = []
+    joiners: list[tuple[str, str, bool]] = []
     for lid in graph.station_lines(port_id):
         src, is_junction = _immediate_feeder(graph, port_id, lid)
         if src is None:
@@ -1477,74 +1517,21 @@ def classify_merge_port_feeders(
         dy = src.y - port_st.y
         if abs(dy) <= _MERGE_APPROACH_Y_TOL:
             horizontal.append(lid)
-        elif is_junction:
-            continue
-        elif dy > 0:
-            below.append(lid)
-        else:
-            above.append(lid)
+        elif not is_junction:
+            joiners.append((lid, src.id, dy > 0))
     if len(distinct_sources) < 2:
         return None
-    below = [
-        lid
-        for lid in below
-        if not _joins_inside_level_mates(
-            graph, port_id, lid, horizontal, offsets, from_below=True
-        )
-    ]
-    above = [
-        lid
-        for lid in above
-        if not _joins_inside_level_mates(
-            graph, port_id, lid, horizontal, offsets, from_below=False
-        )
-    ]
+    below: list[str] = []
+    above: list[str] = []
+    for lid, feeder_id, from_below in joiners:
+        if _pinned_inside_level_band(
+            graph, port_id, feeder_id, lid, horizontal, offsets, from_below=from_below
+        ):
+            continue
+        (below if from_below else above).append(lid)
     if not horizontal or not (below or above):
         return None
     return horizontal, below, above
-
-
-def _joins_inside_level_mates(
-    graph,  # noqa: ANN001 - MetroGraph (avoid import cycle)
-    port_id: str,
-    line_id: str,
-    level: Sequence[str],
-    offsets: Mapping[tuple[str, str], float],
-    *,
-    from_below: bool,
-) -> bool:
-    """Whether a perpendicular joiner's feeder bundle pins it inside the band.
-
-    A line entering the port from two feeders is classified by its first, so a
-    line counted as level can also rise or drop in from an exit facing the port
-    as one lane of that exit's bundle.  The bundle keeps its lane order up or
-    down the riser and into the port, so a joiner from that exit can take a slot
-    past the level band on its approach side only when it arrives beyond every
-    level line it shares the exit with; otherwise the move braids it through
-    them.  An exit on any other side reaches the port through turns whose effect
-    on the lane order depends on the whole route, so it pins nothing.
-    """
-    feeder_id = next(
-        edge.source for edge in graph.edges_to(port_id) if edge.line_id == line_id
-    )
-    feeder = graph.ports.get(feeder_id)
-    if (
-        feeder is None
-        or feeder.side not in (PortSide.LEFT, PortSide.RIGHT)
-        or feeder.side is graph.ports[port_id].side
-    ):
-        return False
-    lane = offsets.get((feeder_id, line_id), 0.0)
-    mate_lanes = [
-        offsets.get((feeder_id, edge.line_id), 0.0)
-        for edge in graph.edges_to(port_id)
-        if edge.source == feeder_id and edge.line_id in level
-    ]
-    if not mate_lanes:
-        return False
-    if from_below:
-        return lane <= max(mate_lanes)
-    return lane >= min(mate_lanes)
 
 
 def check_merge_port_approach_side(

@@ -140,6 +140,7 @@ from nf_metro.layout.routing import (
 )
 from nf_metro.layout.routing.common import merge_fanout_junctions, resolve_section
 from nf_metro.layout.routing.invariants import (
+    _MERGE_APPROACH_Y_TOL,
     assert_render_curve_invariants,
     check_bottom_row_climb_stays_at_row_level,
     check_bundle_order_preserved,
@@ -10784,8 +10785,6 @@ def test_dual_fed_merge_entry_renders(fixture):
 
     Each map has a line arriving both level with the port and on a riser
     from an exit in another row, alongside lines that only take the riser.
-    Whether those riser-only lines are re-slotted past the level band
-    depends on where the exit's own lane order puts them.
     """
     from nf_metro.api import render_string
 
@@ -10814,7 +10813,7 @@ def _facing_exit_order_flips(graph, offsets):
             if feeder is None or feeder.side not in lateral or feeder.side is port.side:
                 continue
             dy = graph.stations[feeder_id].y - graph.stations[port_id].y
-            if abs(dy) <= SAME_Y_TOLERANCE:
+            if abs(dy) <= _MERGE_APPROACH_Y_TOL:
                 continue
             at_exit = sorted(lines, key=lambda lid: offsets[feeder_id, lid])
             at_entry = sorted(lines, key=lambda lid: offsets[port_id, lid])
