@@ -148,6 +148,9 @@ Pick the mix with `purpose`, or override a single section by setting `mmd`, `com
 The page must be `.mdx`, not `.md`.
 nf-metro leaves plain ` ```metro ` fences untouched.
 Use them for highlight-only snippets that don't need a render.
+Add `playground="metro"` to the fence of a complete, renderable `.mmd` to get an **Open in playground** button.
+`<Metro>` adds the button to its source block automatically, except for `fromNextflow` sources.
+Leave it off fragments such as a single directive or a lone subgraph.
 The Gallery and nf-core pipelines pages emit `<Metro>` automatically from `scripts/build_gallery.py`.
 Do not hand-author those.
 

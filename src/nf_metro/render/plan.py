@@ -67,6 +67,8 @@ class FrozenRecord:
                     )
             if self.kind == "Section" and name == "port_ids":
                 return frozenset((*self.entry_ports, *self.exit_ports))
+            if self.kind == "Section" and name == "draws_box":
+                return not (self.is_implicit or self.is_hidden)
             raise AttributeError(name) from exc
 
 

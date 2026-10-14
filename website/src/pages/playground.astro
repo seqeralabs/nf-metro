@@ -776,21 +776,34 @@ import { base } from "../site";
   .nfm-playground .CodeMirror-line > span::selection {
     background: #31507a;
   }
+  /* Token colours match the docs' code blocks (Night Owl / Starlight light). */
   .nfm-playground .cm-s-default .cm-comment {
-    color: #5c6b7a;
+    color: light-dark(#5f636f, #919f9f);
   }
-  .nfm-playground .cm-metro-directive {
-    color: var(--accent);
-    font-weight: 600;
-  }
+  .nfm-playground .cm-metro-directive,
   .nfm-playground .cm-metro-keyword {
-    color: #c792ea;
+    color: light-dark(#8844ae, #c792ea);
   }
-  .nfm-playground .cm-metro-line {
-    color: #ffcb6b;
+  .nfm-playground .cm-metro-property {
+    color: light-dark(#096e72, #80cbc4);
+  }
+  .nfm-playground .cm-metro-constant {
+    color: light-dark(#3b61b0, #82aaff);
+  }
+  .nfm-playground .cm-metro-hex {
+    color: light-dark(#aa0982, #ffeb95);
+  }
+  .nfm-playground .cm-metro-number {
+    color: light-dark(#aa0982, #f78c6c);
   }
   .nfm-playground .cm-metro-arrow {
-    color: #82aaff;
+    color: light-dark(#096e72, #7fdbca);
+  }
+  .nfm-playground .cm-metro-edgelabel {
+    color: light-dark(#3b61b0, #ecc48d);
+  }
+  .nfm-playground .cm-metro-nodelabel {
+    color: light-dark(#984e4d, #ecc48d);
   }
 
   #error {
