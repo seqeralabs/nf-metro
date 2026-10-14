@@ -15,6 +15,7 @@ import pytest
 from conftest import parse_and_layout
 
 from nf_metro.layout.geometry import AxisFrame, flow_port_sides, lanes_run_along_x
+from nf_metro.layout.labels import LabelPlacement, segment_strikes_label
 from nf_metro.layout.pass_metrics import station_radius_approx
 from nf_metro.layout.routing.common import apply_route_offsets
 from nf_metro.parser.model import MetroGraph
@@ -117,6 +118,21 @@ def _drawn(graph: MetroGraph) -> dict[tuple[str, str, str], list[Point]]:
         )
         for r in plan.routes
     }
+
+
+def _drawn_and_labels(
+    graph: MetroGraph,
+) -> tuple[dict[tuple[str, str, str], list[Point]], dict[str, LabelPlacement]]:
+    plan = build_render_plan(graph, resolve_theme(None, graph))
+    drawn = {
+        (r.edge.source, r.edge.target, r.line_id): [tuple(p) for p in points]
+        for r, points in zip(plan.routes, plan.route_polylines)
+    }
+    labels = {
+        rec.station_id: LabelPlacement(**dict(rec.values.entries))
+        for rec in plan.labels
+    }
+    return drawn, labels
 
 
 def _flow_entries(
@@ -233,3 +249,188 @@ def test_flow_entry_route_clears_stations_it_passes(name: str) -> None:
             assert not any(
                 _segment_hits_box(a, b, box) for a, b in zip(points, points[1:])
             ), f"{line_id} {port_id}->{target_id} runs through {station_id}'s marker"
+
+
+# A line entering a BT section at the bottom both to the first station of a
+# chain and, bypassing it, to a later one.  The bypass leaves the port beside
+# the chain's own run into its first station, so it must pass the stations it
+# skips without crossing their markers (which would read as stopping there) or
+# their labels, which sit on the low-x side of each pill.
+_BYPASS_MAPS = {
+    "chain_two_columns_bt": """
+%%metro line: m1 | L1 | #3cb44b
+%%metro line: m2 | L2 | #4363d8
+
+graph LR
+    subgraph z0 [Zone 0]
+        q0x2[Q0X2]
+        q0x3[Q0X3]
+    end
+    subgraph z1 [Zone 1]
+        %%metro direction: BT
+        q1x0[Q1X0]
+        q1x1[Q1X1]
+        q1x2[Q1X2]
+        q1x0 -->|m1| q1x1
+        q1x1 -->|m1| q1x2
+    end
+    subgraph z2 [Zone 2]
+        %%metro direction: TB
+        q2x0[Q2X0]
+        q2x1[Q2X1]
+        q2x3[Q2X3]
+        q2x1 -->|m1| q2x3
+    end
+    subgraph z3 [Zone 3]
+        %%metro direction: RL
+        q3x0[Q3X0]
+    end
+    q0x2 -->|m1| q1x2
+    q0x3 -->|m1| q1x0
+    q1x0 -->|m2| q3x0
+    q1x2 -->|m1| q2x0
+""",
+    "fork_after_bypassed_station_bt": """
+%%metro line: m0 | L0 | #e6194b
+%%metro line: m1 | L1 | #3cb44b
+%%metro line: m2 | L2 | #4363d8
+%%metro line: m3 | L3 | #f58231
+
+graph LR
+    subgraph z0 [Zone 0]
+        q0x0[Q0X0]
+        q0x3[Q0X3]
+    end
+    subgraph z1 [Zone 1]
+        %%metro direction: BT
+        q1x0[Q1X0]
+        q1x1[Q1X1]
+        q1x2[Q1X2]
+        q1x3[Q1X3]
+        q1x1 -->|m0| q1x2
+        q1x1 -->|m2| q1x3
+        q1x2 -->|m0| q1x3
+    end
+    subgraph z2 [Zone 2]
+        %%metro direction: BT
+        q2x0[Q2X0]
+        q2x1[Q2X1]
+        q2x2[Q2X2]
+        q2x3[Q2X3]
+        q2x1 -->|m3| q2x2
+    end
+    subgraph z3 [Zone 3]
+        %%metro direction: BT
+        q3x0[Q3X0]
+        q3x1[Q3X1]
+        q3x0 -->|m1| q3x1
+    end
+    q0x0 -->|m0| q1x0
+    q0x3 -->|m0| q1x2
+    q1x3 -->|m2| q2x0
+    q2x0 -->|m1| q3x0
+    q2x3 -->|m3| q3x0
+""",
+    "single_bypass_bt": """
+%%metro line: m1 | L1 | #3cb44b
+%%metro line: m2 | L2 | #4363d8
+%%metro line: m3 | L3 | #f58231
+
+graph LR
+    subgraph z0 [Zone 0]
+        q0x1[Q0X1]
+    end
+    subgraph z1 [Zone 1]
+        %%metro direction: BT
+        q1x0[Q1X0]
+        q1x1[Q1X1]
+        q1x0 -->|m1| q1x1
+    end
+    subgraph z2 [Zone 2]
+        q2x0[Q2X0]
+    end
+    subgraph z3 [Zone 3]
+        %%metro direction: TB
+        q3x0[Q3X0]
+        q3x1[Q3X1]
+        q3x0 -->|m2| q3x1
+    end
+    q0x1 -->|m1| q1x0
+    q0x1 -->|m1| q1x1
+    q1x0 -->|m3| q2x0
+""",
+    "bypass_into_shared_column_bt": """
+%%metro line: m0 | L0 | #e6194b
+%%metro line: m1 | L1 | #3cb44b
+%%metro line: m2 | L2 | #4363d8
+%%metro line: m3 | L3 | #f58231
+%%metro line: m4 | L4 | #911eb4
+
+graph LR
+    subgraph z0 [Zone 0]
+        q0x2[Q0X2]
+    end
+    subgraph z1 [Zone 1]
+        %%metro direction: TB
+        q1x0[Q1X0]
+        q1x1[Q1X1]
+    end
+    subgraph z2 [Zone 2]
+        %%metro direction: BT
+        q2x0[Q2X0]
+        q2x1[Q2X1]
+        q2x2[Q2X2]
+        q2x3[Q2X3]
+        q2x0 -->|m0| q2x1
+        q2x2 -->|m4| q2x3
+    end
+    q0x2 -->|m4| q1x0
+    q0x2 -->|m0| q2x1
+    q1x1 -->|m0| q2x0
+""",
+}
+
+
+@pytest.mark.parametrize("name", sorted(_BYPASS_MAPS))
+def test_flow_entry_bypass_clears_skipped_markers_and_labels(name: str) -> None:
+    graph = parse_and_layout(_BYPASS_MAPS[name])
+    drawn, labels = _drawn_and_labels(graph)
+    radius = station_radius_approx()
+    entries = [key for key in _flow_entries(graph, drawn) if len(drawn[key]) > 2]
+    assert entries, "fixture lost its lane-changing flow-side entry"
+    for port_id, target_id, line_id in entries:
+        points = drawn[port_id, target_id, line_id]
+        port = graph.stations[port_id]
+        target = graph.stations[target_id]
+        section = graph.sections[graph.ports[port_id].section_id]
+        lo, hi = sorted((port.y, target.y))
+        for station_id in section.station_ids:
+            station = graph.stations[station_id]
+            if station.is_port or station.is_hidden or station_id == target_id:
+                continue
+            if not lo < station.y < hi:
+                continue
+            xs = [
+                pts[0][0] if src == station_id else pts[-1][0]
+                for (src, tgt, _lid), pts in drawn.items()
+                if station_id in (src, tgt)
+            ]
+            box = (
+                min(xs) - radius,
+                station.y - radius,
+                max(xs) + radius,
+                station.y + radius,
+            )
+            segments = list(zip(points, points[1:]))
+            assert not any(_segment_hits_box(a, b, box) for a, b in segments), (
+                f"{line_id} {port_id}->{target_id} runs through {station_id}'s "
+                f"marker: {points}"
+            )
+            label = labels.get(station_id)
+            assert label is None or not any(
+                segment_strikes_label(a[0], a[1], b[0], b[1], label)
+                for a, b in segments
+            ), (
+                f"{line_id} {port_id}->{target_id} strikes {station_id}'s label: "
+                f"{points}"
+            )

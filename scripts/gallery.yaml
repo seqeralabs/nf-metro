@@ -786,6 +786,28 @@ gallery:
       "A BT section fed from below: a lower BT section's trailing TOP exit continues
       up the shared lane into an upper BT section's BOTTOM entry, a two-line bundle riding
       one column across the seam (#1044)."
+  - id: bt_entry_bypass_beside_chain
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      "A line entering a BT section through its bottom port both to the first
+      station of a chain and, bypassing it, to the last: the bypass steps aside just inside
+      the port and passes the skipped stations beside them, clear of their markers and labels,
+      before stepping onto its target's lane."
+  - id: bt_entry_bypass_holds_port_lane
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      "A BT section's bottom entry bypassing a station that stands in another
+      column: the bypass holds the port's lane past it and steps onto its target's lane just
+      before arriving, so it never runs through the skipped station's marker."
+  - id: bt_entry_bundle_bypass
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      "A two-line bundle entering a BT section through its bottom port and bypassing
+      a chain to its last station: the bundle steps across just inside the port and passes
+      the skipped stations on their label-free side."
   - id: bt_exit_top_above
     source_dir: examples/topologies
     category: TB / BT Sections
