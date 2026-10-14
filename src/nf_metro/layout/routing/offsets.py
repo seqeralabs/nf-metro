@@ -3680,7 +3680,7 @@ def _allocate_merge_ports_by_approach(ctx: _OffsetCtx) -> None:
 
     graph = ctx.graph
     for port_id in graph.ports:
-        classified = classify_merge_port_feeders(graph, port_id)
+        classified = classify_merge_port_feeders(graph, port_id, ctx.offsets)
         if classified is None:
             continue
         horizontal, below, above = classified

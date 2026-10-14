@@ -1,0 +1,18 @@
+%%metro title: Dual-fed merge entry joiner sharing a feeder with a level line
+%%metro line: m0 | L0 | #e6194b
+%%metro line: m1 | L1 | #3cb44b
+%%metro line: m3 | L3 | #f58231
+%%metro line: m4 | L4 | #911eb4
+
+graph LR
+    subgraph z0 [Zone 0]
+        q0x2[Q0X2]
+    end
+    subgraph z1 [Zone 1]
+        q1x2[Q1X2]
+    end
+    subgraph z2 [Zone 2]
+        q2x0[Q2X0]
+    end
+    q1x2 -->|m0,m1,m4| q2x0
+    q0x2 -->|m3,m4| q2x0

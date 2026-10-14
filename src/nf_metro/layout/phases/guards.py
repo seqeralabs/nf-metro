@@ -4543,7 +4543,10 @@ def _guard_bypass_port_no_slot_gaps(
         offsets = routing.compute_station_offsets(graph)
 
     for port_id in graph.ports:
-        if routing_invariants.classify_merge_port_feeders(graph, port_id) is None:
+        if (
+            routing_invariants.classify_merge_port_feeders(graph, port_id, offsets)
+            is None
+        ):
             continue
         bypass = routing_invariants.bypass_horizontal_targets(graph, port_id)
         if not bypass:

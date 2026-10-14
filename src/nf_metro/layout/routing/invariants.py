@@ -1430,6 +1430,7 @@ def bypass_horizontal_targets(
 def classify_merge_port_feeders(
     graph,  # noqa: ANN001 - MetroGraph (avoid import cycle)
     port_id: str,
+    offsets: Mapping[tuple[str, str], float],
 ) -> tuple[list[str], list[str], list[str]] | None:
     """Classify a merge port's feeder lines by approach side.
 
@@ -1445,7 +1446,10 @@ def classify_merge_port_feeders(
     left unclassified.  Bypass horizontal lines (junction-derived,
     same-Y feeder, but heading to a deeper station) are excluded from
     the horizontal list so they do not inflate ``max_horiz`` and push
-    perpendicular lines into unnecessary outer slots.  Returns ``None``
+    perpendicular lines into unnecessary outer slots.  A perpendicular
+    line that shares its feeder with a horizontal line and does not
+    arrive outside it in that feeder's lane order is left unclassified
+    too (see :func:`_joins_inside_level_mates`).  Returns ``None``
     when the port is not such a reconvergence merge - i.e. when there
     is no approach-side decision to make.
     """
@@ -1481,9 +1485,66 @@ def classify_merge_port_feeders(
             above.append(lid)
     if len(distinct_sources) < 2:
         return None
+    below = [
+        lid
+        for lid in below
+        if not _joins_inside_level_mates(
+            graph, port_id, lid, horizontal, offsets, from_below=True
+        )
+    ]
+    above = [
+        lid
+        for lid in above
+        if not _joins_inside_level_mates(
+            graph, port_id, lid, horizontal, offsets, from_below=False
+        )
+    ]
     if not horizontal or not (below or above):
         return None
     return horizontal, below, above
+
+
+def _joins_inside_level_mates(
+    graph,  # noqa: ANN001 - MetroGraph (avoid import cycle)
+    port_id: str,
+    line_id: str,
+    level: Sequence[str],
+    offsets: Mapping[tuple[str, str], float],
+    *,
+    from_below: bool,
+) -> bool:
+    """Whether a perpendicular joiner's feeder bundle pins it inside the band.
+
+    A line entering the port from two feeders is classified by its first, so a
+    line counted as level can also rise or drop in from an exit facing the port
+    as one lane of that exit's bundle.  The bundle keeps its lane order up or
+    down the riser and into the port, so a joiner from that exit can take a slot
+    past the level band on its approach side only when it arrives beyond every
+    level line it shares the exit with; otherwise the move braids it through
+    them.  An exit on any other side reaches the port through turns whose effect
+    on the lane order depends on the whole route, so it pins nothing.
+    """
+    feeder_id = next(
+        edge.source for edge in graph.edges_to(port_id) if edge.line_id == line_id
+    )
+    feeder = graph.ports.get(feeder_id)
+    if (
+        feeder is None
+        or feeder.side not in (PortSide.LEFT, PortSide.RIGHT)
+        or feeder.side is graph.ports[port_id].side
+    ):
+        return False
+    lane = offsets.get((feeder_id, line_id), 0.0)
+    mate_lanes = [
+        offsets.get((feeder_id, edge.line_id), 0.0)
+        for edge in graph.edges_to(port_id)
+        if edge.source == feeder_id and edge.line_id in level
+    ]
+    if not mate_lanes:
+        return False
+    if from_below:
+        return lane <= max(mate_lanes)
+    return lane >= min(mate_lanes)
 
 
 def check_merge_port_approach_side(
@@ -1499,7 +1560,7 @@ def check_merge_port_approach_side(
     """
     violations: list[MergePortApproachViolation] = []
     for port_id in graph.ports:
-        classified = classify_merge_port_feeders(graph, port_id)
+        classified = classify_merge_port_feeders(graph, port_id, offsets)
         if classified is None:
             continue
         horizontal, below, above = classified
@@ -1711,7 +1772,7 @@ def check_merge_port_outgoing_side_preserved(
     """
     violations: list[MergePortOutgoingFlip] = []
     for port_id in graph.ports:
-        classified = classify_merge_port_feeders(graph, port_id)
+        classified = classify_merge_port_feeders(graph, port_id, offsets)
         if classified is None:
             continue
         _horizontal, below, above = classified

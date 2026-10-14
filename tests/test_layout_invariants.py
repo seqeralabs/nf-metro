@@ -10720,8 +10720,9 @@ def _layout_feature_names(graph: MetroGraph, fixture: str) -> set[str]:
                 features.add("icon_sole_continuation")
     if next(iter_corridor_fed_solo_entries(graph, SAME_Y_TOLERANCE), None) is not None:
         features.add("corridor_solo")
+    offsets = compute_station_offsets(graph)
     if any(
-        classify_merge_port_feeders(graph, port_id) is not None
+        classify_merge_port_feeders(graph, port_id, offsets) is not None
         for port_id in graph.ports
     ):
         features.add("merge_port")
@@ -10769,6 +10770,76 @@ def test_merge_port_rejoining_line_takes_approach_slot(fixture):
     )
 
 
+_DUAL_FED_MERGE_REPROS = [
+    "curve_invariant_repros/merge_entry_joiner_inside_dual_fed_mate.mmd",
+    "curve_invariant_repros/merge_entry_joiner_outside_dual_fed_mates.mmd",
+    "curve_invariant_repros/merge_entry_dual_fed_joiner_shares_level_feeder.mmd",
+    "curve_invariant_repros/merge_entry_dual_fed_line_from_top_exit.mmd",
+]
+
+
+@pytest.mark.parametrize("fixture", _DUAL_FED_MERGE_REPROS)
+def test_dual_fed_merge_entry_renders(fixture):
+    """A merge entry that one line reaches from two feeders renders.
+
+    Each map has a line arriving both level with the port and on a riser
+    from an exit in another row, alongside lines that only take the riser.
+    Whether those riser-only lines are re-slotted past the level band
+    depends on where the exit's own lane order puts them.
+    """
+    from nf_metro.api import render_string
+
+    render_string(_resolve_fixture(fixture).read_text())
+
+
+def _facing_exit_order_flips(graph, offsets):
+    """Merge entries whose lanes reorder the lines a facing exit feeds them.
+
+    Only an off-row LEFT/RIGHT exit on the side opposite the entry counts: its
+    riser turns twice in opposite senses, which carries the exit's lane order
+    straight into the port.
+    """
+    flips = []
+    lateral = (PortSide.LEFT, PortSide.RIGHT)
+    for port_id, port in graph.ports.items():
+        if not port.is_entry or port.side not in lateral:
+            continue
+        feeds: dict[str, list[str]] = defaultdict(list)
+        for edge in graph.edges_to(port_id):
+            feeds[edge.source].append(edge.line_id)
+        if len(feeds) < 2:
+            continue
+        for feeder_id, lines in feeds.items():
+            feeder = graph.ports.get(feeder_id)
+            if feeder is None or feeder.side not in lateral or feeder.side is port.side:
+                continue
+            dy = graph.stations[feeder_id].y - graph.stations[port_id].y
+            if abs(dy) <= SAME_Y_TOLERANCE:
+                continue
+            at_exit = sorted(lines, key=lambda lid: offsets[feeder_id, lid])
+            at_entry = sorted(lines, key=lambda lid: offsets[port_id, lid])
+            if at_exit != at_entry:
+                flips.append((port_id, feeder_id, at_exit, at_entry))
+    return flips
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    [*_FIXTURES_WITH_MERGE_PORT, *_DUAL_FED_MERGE_REPROS],
+)
+def test_merge_entry_keeps_facing_exit_lane_order(fixture):
+    """A merge entry keeps the lane order of an exit facing it from another row.
+
+    The bundle from that exit rises or drops to the port's row and turns into
+    it without reordering, so the lines it carries have to hold their exit
+    order at the port.  Re-slotting a riser-only line past a line the port
+    also receives level would braid the two inside the riser's turn.
+    """
+    graph = _layout(fixture)
+    offsets = compute_station_offsets(graph)
+    assert _facing_exit_order_flips(graph, offsets) == []
+
+
 # ---------------------------------------------------------------------------
 # Bypass line at fan-in entry port must hold the outer slot
 # ---------------------------------------------------------------------------
@@ -10799,7 +10870,7 @@ def test_bypass_fan_in_outer_slot(fixture):
     offsets = compute_station_offsets(graph)
 
     for port_id in graph.ports:
-        if classify_merge_port_feeders(graph, port_id) is None:
+        if classify_merge_port_feeders(graph, port_id, offsets) is None:
             continue
         bypass = bypass_horizontal_targets(graph, port_id)
         if not bypass:

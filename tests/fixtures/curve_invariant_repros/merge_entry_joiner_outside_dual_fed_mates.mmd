@@ -1,0 +1,23 @@
+%%metro title: Merge entry joiner rising outside its dual-fed level mates
+%%metro line: m0 | L0 | #e6194b
+%%metro line: m2 | L2 | #4363d8
+%%metro line: m3 | L3 | #f58231
+
+graph LR
+    subgraph z0 [Zone 0]
+        q0x0[Q0X0]
+        q0x1[Q0X1]
+    end
+    subgraph z1 [Zone 1]
+        q1x1[Q1X1]
+    end
+    subgraph z2 [Zone 2]
+        q2x0[Q2X0]
+        q2x1[Q2X1]
+        q2x2[Q2X2]
+        q2x0 -->|m2,m3| q2x1
+        q2x1 -->|m2,m3| q2x2
+    end
+    q0x1 -->|m2| q2x2
+    q1x1 -->|m2,m3| q2x0
+    q0x0 -->|m0| q2x2

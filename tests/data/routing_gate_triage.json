@@ -1531,10 +1531,6 @@
   "note": "Descending-run mirror of the ascending collapse clamp (#1 of `if diag_end < diag_start:`): fires only when |run| < 2*MIN_STRAIGHT_EDGE (20px), but connected diagonal endpoints are always >= one grid pitch (40/60px) apart on the run axis. Unreachable degenerate-geometry guard.",
   "status": "defensive"
  },
- "tb_handlers.py::if tgt_sec is not None and tgt_sec.direction not in (\"TB\", \"BT\"):::#1": {
-  "note": "Perp-entry drop crossing-X override: the edge's target is always a sectioned station, so tgt_sec resolves and the `tgt_sec is None` short-circuit to the plain drop is never taken; the `direction in (TB, BT)` arm (a drop continuing into a vertical-flow trunk) and the horizontal-target arm are both exercised.",
-  "status": "defensive"
- },
  "inter_section_handlers.py::if _v_segment_crosses_other_section(graph, corner_x, src.y, ey, exclude):::#1": {
   "note": "Drop-in viability test in _right_entry_drop_in_is_clear (#889). The cross-row RIGHT-entry rule fires only when the earlier bypass / plough rules ceded the edge, i.e. no section sits between source and port, so the outward-side descent runs clear; the not-clear arm covers only an exotic descent blocked by a wide same-column sibling no corpus fixture builds. Defensive.",
   "status": "defensive"

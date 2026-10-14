@@ -660,7 +660,6 @@
   "normalize.py::if any(::#7",
   "normalize.py::if any(::#8",
   "normalize.py::if any(::#9",
-  "normalize.py::if any(abs(base - bases[0]) > COORD_TOLERANCE for base in bases[1:]):::#1",
   "normalize.py::if any(abs(channel.x - ref_x) > COORD_TOLERANCE for channel in planned[1:]):::#1",
   "normalize.py::if any(moved.fuses_with(other, step) for other in lanes if other is not lane):::#1",
   "normalize.py::if band is not None:::#1",
@@ -755,7 +754,6 @@
   "offsets.py::for _ in range(max_iterations):::#1",
   "offsets.py::for _iteration in range(len(ctx.graph.sections) + 1):::#1",
   "offsets.py::for edge in graph.edges_from(port_id):::#2",
-  "offsets.py::for lid in above:::#1",
   "offsets.py::for pid in section.entry_ports:::#3",
   "offsets.py::if (tgt_id, lid) not in ctx.offsets:::#1",
   "offsets.py::if _bundle_reslot_collides(ctx, port_id, port_obj.section_id, inherited):::#1",
@@ -808,7 +806,6 @@
   "offsets.py::if max_steps <= 0:::#1",
   "offsets.py::if max_steps <= 0:::#2",
   "offsets.py::if neighbour is None:::#1",
-  "offsets.py::if new_order is None:::#2",
   "offsets.py::if not _frame_carriers_are_conflict_free(::#1",
   "offsets.py::if not _stores_reflected(ctx, tgt_port.section_id) and reversed_seam:::#1",
   "offsets.py::if not all(lid in feeder_off for lid in continuing):::#1",
@@ -942,6 +939,5 @@
   "system_emission.py::route.route_system_id is not None::#1",
   "tb_handlers.py::if crossing_x is not None:::#1",
   "tb_handlers.py::if diag_end < diag_start:::#1",
-  "tb_handlers.py::if diag_end > diag_start:::#1",
-  "tb_handlers.py::if tgt_sec is not None and tgt_sec.direction not in (\"TB\", \"BT\"):::#1"
+  "tb_handlers.py::if diag_end > diag_start:::#1"
 ]
