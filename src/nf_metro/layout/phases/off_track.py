@@ -22,7 +22,12 @@ from nf_metro.layout.constants import (
     X_SPACING,
     graph_offset_step,
 )
-from nf_metro.layout.geometry import AxisFrame, lanes_run_along_x, quantize_coord
+from nf_metro.layout.geometry import (
+    AxisFrame,
+    lanes_run_along_x,
+    quantize_coord,
+    section_bbox_span,
+)
 from nf_metro.layout.labels import _label_text_height, label_text_width
 from nf_metro.layout.pass_metrics import icon_half_height_approx, terminus_width_approx
 from nf_metro.layout.phases._common import (
@@ -2054,13 +2059,6 @@ def _lift_off_track_stations(
         )
 
 
-def _cross_bbox_edges(section: Section, axis: str) -> tuple[float, float]:
-    """The section's ``(cross_min, cross_max)`` bbox edges on *axis*."""
-    if axis == "x":
-        return section.bbox_x, section.bbox_x + section.bbox_w
-    return section.bbox_y, section.bbox_y + section.bbox_h
-
-
 def _off_track_fit_edge(
     graph: MetroGraph,
     section: Section,
@@ -2139,7 +2137,7 @@ def _grow_off_track_band_edges(
         target = _off_track_fit_edge(
             graph, section, axis, coord, padding, toward_min=toward_min
         )
-        edge = _cross_bbox_edges(section, axis)[0 if toward_min else 1]
+        edge = section_bbox_span(section, axis)[0 if toward_min else 1]
         if abs(target - edge) > SAME_COORD_TOLERANCE:
             move = (
                 move_section_bbox_min_edge if toward_min else move_section_bbox_max_edge

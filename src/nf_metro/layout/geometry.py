@@ -370,6 +370,13 @@ def flow_port_sides(direction: str) -> tuple[PortSide, PortSide]:
     return (low, high) if AxisFrame.flow_sign(direction) > 0 else (high, low)
 
 
+def section_bbox_span(section: Section, axis: str) -> tuple[float, float]:
+    """*section*'s bbox ``(min, max)`` edges along *axis* (``"x"`` or ``"y"``)."""
+    if axis == "x":
+        return section.bbox_x, section.bbox_x + section.bbox_w
+    return section.bbox_y, section.bbox_y + section.bbox_h
+
+
 def section_row_span(section: Section) -> tuple[int, int]:
     """*section*'s first and last grid row, both inclusive."""
     return section.grid_row, section.grid_row + section.grid_row_span - 1

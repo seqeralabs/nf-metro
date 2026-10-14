@@ -1498,6 +1498,25 @@ def _place_station_label(
     )
 
 
+def label_beside_pill(
+    station: Station, pill_edge: float, *, left: bool
+) -> LabelPlacement:
+    """A vertical-flow station's label hung beside its pill edge *pill_edge*.
+
+    *left* hangs it off the pill's low-x edge (the preferred side), otherwise
+    off its high-x edge.
+    """
+    return LabelPlacement(
+        station_id=station.id,
+        text=station.label,
+        x=pill_edge - TB_LABEL_H_SPACING if left else pill_edge + TB_LABEL_H_SPACING,
+        y=station.y,
+        above=True,
+        text_anchor="end" if left else "start",
+        dominant_baseline="central",
+    )
+
+
 def _place_tb_label(
     ctx: _LabelCtx,
     station: Station,
@@ -1524,25 +1543,9 @@ def _place_tb_label(
         drawn = [-half, half]
     pill_left = station.x + min(drawn) - TB_PILL_EDGE_OFFSET
     pill_right = station.x + max(drawn) + TB_PILL_EDGE_OFFSET
-    candidate = LabelPlacement(
-        station_id=station.id,
-        text=station.label,
-        x=pill_left - TB_LABEL_H_SPACING,
-        y=station.y,
-        above=True,
-        text_anchor="end",
-        dominant_baseline="central",
-    )
+    candidate = label_beside_pill(station, pill_left, left=True)
     if _has_collision(candidate, placements):
-        candidate = LabelPlacement(
-            station_id=station.id,
-            text=station.label,
-            x=pill_right + TB_LABEL_H_SPACING,
-            y=station.y,
-            above=True,
-            text_anchor="start",
-            dominant_baseline="central",
-        )
+        candidate = label_beside_pill(station, pill_right, left=False)
     if station.section_id:
         tb_sec = graph.sections.get(station.section_id)
         if tb_sec and tb_sec.bbox_w > 0:

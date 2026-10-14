@@ -1,0 +1,18 @@
+%%metro title: BT Entry Bundle Bypass
+%%metro line: dna | DNA | #e63946
+%%metro line: rna | RNA | #457b9d
+
+graph LR
+    subgraph source [Source]
+        reads[Reads]
+    end
+    subgraph work [Work]
+        %%metro direction: BT
+        call[Call]
+        index[Index]
+        merge[Merge]
+        call -->|dna,rna| index
+        index -->|dna,rna| merge
+    end
+    reads -->|dna,rna| merge
+    reads -->|dna| call

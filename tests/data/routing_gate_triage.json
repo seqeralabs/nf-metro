@@ -1215,10 +1215,6 @@
   "note": "inbound is pre-built as {sid: set() for sid in graph.stations}, so every station id in the graph is a key. All edge endpoints are guaranteed to be in graph.stations after parsing (regular nodes via register_station, ports via add_port->add_station, junctions via add_station), so edge.target is always found in inbound and the False branch (54->56) is never taken.",
   "status": "defensive"
  },
- "offsets.py::if entry.side not in (PortSide.LEFT, PortSide.RIGHT):::#1": {
-  "note": "In _align_flat_tb_exit_to_entry: scopes the flat-seam exit/entry reconciliation to horizontal (LEFT/RIGHT) entry ports, whose per-line offsets are Y like the TB exit's. A TOP/BOTTOM entry stores X-offsets, so copying across would be a category error. No corpus fixture routes a TB LEFT/RIGHT exit directly into a TOP/BOTTOM entry at the same Y, so the skip arm is never taken; defensive against that cross-axis seam.",
-  "status": "defensive"
- },
  "offsets.py::if exit_lines == set(j_lines):::#1": {
   "note": "Reaches the realignment body of _align_junction_to_entry_port only via a TB-reversed two-line bundle fanning into a junction (the #704 boundary fix is in, so this body is now provably reachable). The junction_entry_reversed_fold fixture now ships that topology; with the bundle order carried concentrically through the reversal corners the junction offsets already match their entry ports, so the realignment body short-circuits before its offset-writing arms and they stay un-exercised corpus-wide. Defensive. Its lines-differ arm (->1147) is additionally defensive: a fan-out junction carries exactly its single exit port's fanned lines, so exit_lines == j_lines always.",
   "status": "defensive"
@@ -1538,5 +1534,21 @@
  "convergences.py::if movable and abs(channel.x - reference) > COORD_TOLERANCE:::#1": {
   "note": "The seat arm fuses a feeder's final port approach onto the merge trunk's target flank before the landing states the feeder's opening column. tests/fixtures/hash_seed_determinism/seed_15.mmd reaches it (__junction_27->__merge_11 climbs into s8__entry_right_17 16px beside the trunk's flank at x=780), but the sweep's corpus roots do not include tests/fixtures/hash_seed_determinism, and seed_15 aborts on unrelated guards, so no swept fixture evaluates it.",
   "status": "needs-review"
+ },
+ "tb_handlers.py::if (late[0] - early[1]) * math.copysign(1.0, tp - sp) < 2 * ctx.curve_radius:::#1": {
+  "note": "In _clear_lane_change: declines the step-aside route when the flow distance from the port to the target cannot hold a step off the port's lane, a full-radius run beside the passed stations and a step onto the target's lane. Only reached once the plain lane change and the hold-the-port-lane route both cross a passed station's pill or label, which needs passed stations, and layout already spaces a vertical section's layers for a diagonal; no map in about 7800 fuzzed vertical-bypass topologies takes it. Taking it keeps the plain lane change, which crosses that station.",
+  "status": "needs-review"
+ },
+ "tb_handlers.py::for lane in sorted(candidates, key=preference):::#1": {
+  "note": "In _clear_lane_change: the loop exhausts when no side lane inside the section box clears every passed station's pill and label, so the entry keeps the plain lane change and crosses one of them. Reached when stations on both sides leave no gap for a full stroke (for instance a passed station in the target's column with a non-consumer in the port's column on the same row, too close to the port for the step to clear its label); no map in about 7800 fuzzed vertical-bypass topologies takes it.",
+  "status": "needs-review"
+ },
+ "tb_handlers.py::if not inside[0] <= lane <= inside[1]:::#1": {
+  "note": "In _clear_lane_change: skips a side lane outside the section box, which a step past a label hung off the box's leftmost column would otherwise take. Fuzzed vertical-bypass maps reach it, but each one found also routes an aligned bundle straight through passed stations' labels on another edge, so none is a clean fixture yet.",
+  "status": "needs-review"
+ },
+ "tb_handlers.py::if min(abs(lane - tgt_lane), abs(lane - src_lane)) < COORD_TOLERANCE:::#1": {
+  "note": "In _clear_lane_change: coincidence guard. A side lane is a footprint edge offset by a lane pitch, or the lane a step must reach to clear a footprint corner; landing within a pixel of the port's or the target's lane would make one step zero-width and the route a copy of a shape already rejected. No valid topology is expected to place a footprint edge exactly there.",
+  "status": "defensive"
  }
 }
