@@ -804,3 +804,64 @@ def test_gap_compaction_keeps_a_side_entry_bundle_in_its_order() -> None:
     assert graph.ports[entry_port].side in (PortSide.LEFT, PortSide.RIGHT)
     for station_id in (entry_port, "q2x0"):
         assert offsets[station_id, "m1"] < offsets[station_id, "m2"], station_id
+
+
+CURVE_REPROS = ROOT / "tests" / "fixtures" / "curve_invariant_repros"
+SIDE_EXIT_FED_FROM_TWO_STATIONS = (
+    CURVE_REPROS / "tb_side_exit_fed_from_two_stations.mmd"
+)
+TOP_EXIT_GAP_INTO_MERGE_ENTRY = CURVE_REPROS / "bt_top_exit_gap_into_merge_entry.mmd"
+BYPASS_INTO_SIDE_EXIT = CURVE_REPROS / "tb_bypass_into_side_exit.mmd"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        SIDE_EXIT_FED_FROM_TWO_STATIONS,
+        TOP_EXIT_GAP_INTO_MERGE_ENTRY,
+        BYPASS_INTO_SIDE_EXIT,
+    ],
+    ids=lambda path: path.stem,
+)
+def test_vertical_gap_compaction_repro_renders(path: Path) -> None:
+    """Closing a vertical section's lane gaps leaves a map that renders."""
+    render_string(path.read_text())
+
+
+def _layout_offsets(path: Path):
+    graph = parse_metro_mermaid(path.read_text())
+    compute_layout(graph)
+    return graph, compute_station_offsets(graph)
+
+
+def test_side_exit_pair_is_judged_where_the_column_lines_meet() -> None:
+    """A side exit fed from two stations of a column keeps the entry's pair order.
+
+    ``l3`` leaves the column for the side exit at ``a1`` and ``l2`` at ``a2``,
+    so the pair first rides together at the exit, whose order ``b``'s entry
+    settles.  Closing ``a1``'s dead lane down the column would lift ``l3``
+    past ``l2`` at ``a2`` and cross the pair in the exit's turn.
+    """
+    graph, offsets = _layout_offsets(SIDE_EXIT_FED_FROM_TWO_STATIONS)
+    (exit_port,) = graph.sections["a"].exit_ports
+    (entry_port,) = graph.sections["b"].entry_ports
+
+    for station_id in ("a2", exit_port, entry_port):
+        assert offsets[station_id, "l2"] < offsets[station_id, "l3"], station_id
+
+
+def test_vertical_exit_gap_hands_its_order_to_a_merge_entry() -> None:
+    """A merge entry fed by a vertical section's gapped top exit keeps its order.
+
+    The exit carries ``l1`` and ``l3`` with ``l2``'s lane empty between them,
+    and closing that gap down the column would reorder the column against its
+    bottom entry.  Left alone, the merge entry ``c`` re-slots ``l3`` above
+    ``l1`` as a line descending from above, which crosses the bundle turning in
+    from the exit, where ``l3`` rides on ``l1``'s far side.
+    """
+    graph, offsets = _layout_offsets(TOP_EXIT_GAP_INTO_MERGE_ENTRY)
+    (exit_port,) = graph.sections["b"].exit_ports
+    (entry_port,) = graph.sections["c"].entry_ports
+
+    for station_id in (exit_port, entry_port):
+        assert offsets[station_id, "l1"] < offsets[station_id, "l3"], station_id

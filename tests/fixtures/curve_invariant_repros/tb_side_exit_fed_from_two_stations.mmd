@@ -1,0 +1,20 @@
+%%metro title: TB column feeding one side exit from two stations
+%%metro line: l0 | Line 1 | #3779b1
+%%metro line: l1 | Line 2 | #6ef362
+%%metro line: l2 | Line 3 | #a66d13
+%%metro line: l3 | Line 4 | #156075
+graph LR
+    subgraph a [A]
+        %%metro direction: TB
+        a0[A0]
+        a1[A1]
+        a2[A2]
+        a0 -->|l3| a1
+        a1 -->|l0,l3| a2
+    end
+    subgraph b [B]
+        b0[B0]
+        b1[B1]
+    end
+    a1 -->|l3| b0
+    a2 -->|l0,l2| b1
