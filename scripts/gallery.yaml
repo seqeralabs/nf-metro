@@ -808,20 +808,6 @@ gallery:
       "A two-line bundle entering a BT section through its bottom port and bypassing
       a chain to its last station: the bundle steps across just inside the port and passes
       the skipped stations on their label-free side."
-  - id: bt_in_section_bypass_lane_grid
-    source_dir: examples/topologies
-    category: TB / BT Sections
-    description:
-      "A BT section where one line skips a station on its way to the top exit and
-      another skips a station on its way in: both bypasses run on whole lanes of the
-      section's lane grid, the counter-clockwise rotation of the LR sibling
-      lr_in_section_bypass_lane_grid."
-  - id: tb_in_section_bypass_lane_grid
-    source_dir: examples/topologies
-    category: TB / BT Sections
-    description:
-      "The TB sibling of bt_in_section_bypass_lane_grid: the same in-section
-      bypasses in a downward section."
   - id: bt_exit_top_above
     source_dir: examples/topologies
     category: TB / BT Sections
@@ -1395,13 +1381,6 @@ gallery:
     description:
       An express line skips a station three collinear stations share; the geometric
       bypass pass bows it around the skipped marker (#990).
-  - id: lr_in_section_bypass_lane_grid
-    source_dir: examples/topologies
-    category: Bypass Routing
-    description:
-      "One line runs its station's lane past a skipped station on the way to the
-      exit while another drops lanes before a station it skips: every bypass clears
-      the station by whole lanes. The LR reference for bt_in_section_bypass_lane_grid."
   - id: sectionless_skip_breeze
     source_dir: examples/topologies
     category: Bypass Routing

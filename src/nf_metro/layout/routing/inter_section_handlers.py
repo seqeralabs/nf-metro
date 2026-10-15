@@ -4616,47 +4616,6 @@ def _top_entry_side_fan_traverse_is_clear(
     return not _v_segment_crosses_other_section(graph, final_x, src.y, tgt.y, exclude)
 
 
-def _perp_entry_source_beyond_channel(
-    src: Station,
-    tgt: Station,
-    tgt_sec: Section | None,
-    final_x: float,
-    channel_y: float,
-    lead: Direction,
-    n: int,
-    ctx: _RoutingCtx,
-    *,
-    is_top: bool,
-) -> bool:
-    """Whether a perpendicular entry's source already stands past its channel.
-
-    The staircase climbs from the source to the channel outside the port's box
-    edge and turns twice on that riser, so the riser needs a full outer-lane
-    radius for each turn.  A source standing outside that edge at or beyond the
-    channel leaves the riser shorter than that, and its corners clamp.  Such a
-    source can traverse on its own Y to the landing column and turn once into
-    the port, provided that turn fits outside the box and both legs clear every
-    other section.
-    """
-    if tgt_sec is None:
-        return False
-    runway = outer_lane_radius(n, ctx.curve_radius, ctx.offset_step)
-    travel = 1.0 if is_top else -1.0
-    if (channel_y - src.y) * travel >= 2 * runway:
-        return False
-    if (final_x - src.x) * lead.sign < runway:
-        return False
-    box_edge = tgt_sec.bbox_y if is_top else tgt_sec.bbox_y + tgt_sec.bbox_h
-    if (box_edge - src.y) * travel < runway:
-        return False
-    exclude = {sid for sid in (src.section_id, tgt.section_id) if sid is not None}
-    if _h_segment_crosses_other_section(ctx.graph, src.x, final_x, src.y, exclude):
-        return False
-    return not _v_segment_crosses_other_section(
-        ctx.graph, final_x, src.y, tgt.y, exclude
-    )
-
-
 def _corridor_riser_x(
     ctx: _RoutingCtx, src_sec: Section | None, tgt_sec: Section | None
 ) -> float | None:
@@ -5442,21 +5401,14 @@ def _perp_entry_l_geometry(
                 run_start=lx0,
                 run_end=final_x,
             )
-        # A fan branch nests its staircase with its siblings', so it keeps it.
-        if fan_single is None and _perp_entry_source_beyond_channel(
-            src, tgt, tgt_sec, final_x, mid_y, lead, n, ctx, is_top=is_top
-        ):
-            points = ((sx, sy), (final_x, sy), (final_x, ty))
-            transition_leg = 1
-        else:
-            points = (
-                (sx, sy),
-                (lx0, sy),
-                (lx0, mid_y),
-                (final_x, mid_y),
-                (final_x, ty),
-            )
-            transition_leg = 3
+        points = (
+            (sx, sy),
+            (lx0, sy),
+            (lx0, mid_y),
+            (final_x, mid_y),
+            (final_x, ty),
+        )
+        transition_leg = 3
     return _perp_entry_l_record(
         points,
         tuple(members),

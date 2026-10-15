@@ -30,7 +30,6 @@ from nf_metro.layout.constants import (
 from nf_metro.layout.geometry import (
     Axis,
     AxisFrame,
-    flow_port_sides,
     lanes_run_along_x,
     lanes_run_along_y,
     section_lane_sign,
@@ -50,10 +49,8 @@ from nf_metro.layout.pass_metrics import (
 from nf_metro.layout.phases._common import (
     _build_section_subgraph,
     _exit_reaching_nodes,
-    lane_grid_origin,
     perp_entry_lands_left,
     section_exit_lines,
-    snap_to_lane,
 )
 from nf_metro.layout.phases.off_track import (
     _align_phantom_pass_throughs,
@@ -421,9 +418,6 @@ def _layout_single_section(
     # Ensure minimum inner extent so stations sit on visible track
     _enforce_min_extent(sub, section, x_spacing, y_spacing)
 
-    if lanes_run_along_x(section.direction):
-        _seat_bypass_vs_on_lane_grid(sub, frame)
-
     # Put each bypass V on the side its carried line is drawn, so the fork
     # from the bypassed station's feeder reaches it without crossing the trunk.
     _align_bypass_v_to_lane_side(sub, section, graph)
@@ -521,50 +515,12 @@ def _layout_single_section(
     _adjust_tb_labels(sub, section)
     _adjust_tb_entry_shifts(section, sub, graph, y_spacing)
     _adjust_lr_entry_inset(sub, section, graph, x_spacing)
-    _adjust_flow_exit_gap(sub, section, graph, layers, frame)
+    _adjust_lr_exit_gap(sub, section, graph, layers, x_spacing)
     _apply_label_strike_runway(sub, section, x_spacing)
     _adjust_lr_label_clearance(sub, section)
     _adjust_terminus_icon_clearance(sub, section, graph)
 
     return sub
-
-
-def _seat_bypass_vs_on_lane_grid(sub: MetroGraph, frame: AxisFrame) -> None:
-    """Snap each bypass V onto the section's lane grid along its lane axis.
-
-    :func:`assign_tracks` gives a V a fractional track, so its lane coordinate
-    can fall between two station lanes and the bypass run skims the station it
-    passes by part of a lane.  A horizontal section's row grid (Stage 1.2 and
-    Stage 6.4) removes that residue on Y; this is the same snap for a section
-    whose lanes run along X.  A V never takes a lane a real station holds at
-    its own layer: it steps one lane further out, away from that station.
-    """
-    secondary, primary = frame.secondary, frame.primary
-    pitch = secondary.step
-    real = [
-        s
-        for s in sub.stations.values()
-        if not is_bypass_v(s.id) and not s.is_port and not s.off_track
-    ]
-    origin = lane_grid_origin((secondary.get(s) for s in real), pitch)
-    if origin is None:
-        return
-    half_layer = max(primary.step, 1.0) / 2
-    for v in sub.stations.values():
-        if not is_bypass_v(v.id):
-            continue
-        lane = snap_to_lane(secondary.get(v), origin, pitch)
-        held = [
-            secondary.get(s)
-            for s in real
-            if abs(primary.get(s) - primary.get(v)) < half_layer
-        ]
-        blocker = next((c for c in held if abs(c - lane) <= SAME_COORD_TOLERANCE), None)
-        if blocker is not None:
-            step = pitch if secondary.get(v) >= blocker else -pitch
-            while any(abs(c - lane) <= SAME_COORD_TOLERANCE for c in held):
-                lane += step
-        secondary.set(v, lane)
 
 
 def _align_bypass_v_to_lane_side(
@@ -575,12 +531,11 @@ def _align_bypass_v_to_lane_side(
     A bypass V (``__bypass_`` helper) carries one line around the station it
     bypasses.  In a vertical-flow (TB/BT) section every lane is drawn on the
     section's lane-sign side of the trunk -- left for a downward (TB) section,
-    right for an upward (BT) one or a positive-fan section.  Tracks are laid
-    out toward ``+x``, so where the lane sign is ``+1`` the V's priority slot
-    already sits on its line's side, exactly as in a horizontal section, and
-    the V is left there.  A ``-1`` lane sign mirrors the drawn lanes against
-    the tracks, so a V left on the priority slot lands on the wrong side and
-    the fork from the bypassed station's feeder crosses the trunk lane (#1163).
+    right for an upward (BT) one or a positive-fan section.  But
+    :func:`assign_tracks` slots the V by its line's priority index, which for a
+    TB section is the mirror of that side, so a V left on the priority slot
+    lands on the wrong side and the fork from the bypassed station's feeder
+    crosses the trunk lane (#1163).
 
     Snap the V onto the lane-side grid column its bypass run should share with
     section content (the nearest real-station column on that side), so the run
@@ -599,8 +554,6 @@ def _align_bypass_v_to_lane_side(
     from nf_metro.layout.routing.reversal import tb_positive_fan_sections
 
     lane_sign = section_lane_sign(section, tb_positive_fan_sections(graph))
-    if lane_sign > 0:
-        return
     real_xs = [
         s.x
         for s in sub.stations.values()
@@ -933,7 +886,7 @@ def _adjust_lr_entry_inset(
             entry_inset = x_spacing * EXIT_GAP_MULTIPLIER
             # For single-layer sections the asymmetry is very visible,
             # so split the inset between both sides to keep stations
-            # visually centered (same logic as _adjust_flow_exit_gap).
+            # visually centered (same logic as _adjust_lr_exit_gap).
             n_layers = len({s.layer for s in sub.stations.values()})
             shift = entry_inset / 2 if n_layers <= 1 else entry_inset
             for s in sub.stations.values():
@@ -942,22 +895,24 @@ def _adjust_lr_entry_inset(
             return
 
 
-def _adjust_flow_exit_gap(
+def _adjust_lr_exit_gap(
     sub: MetroGraph,
     section: Section,
     graph: MetroGraph,
     layers: dict[str, int],
-    frame: AxisFrame,
+    x_spacing: float,
 ) -> None:
-    """Sections with a flow-side exit: add a runway before the exit port.
+    """LR/RL sections with flow-side exit: add label clearance gap.
 
-    The gap is only added when lines converge from different lanes to the
-    exit port (requiring diagonal routing).  When all feeder stations share
-    one lane, lines exit straight along the flow and no extra space is
-    needed.  The runway lies along the flow axis, so a vertical section gets
-    the same room for its convergence diagonal as a horizontal one.
+    The gap is only added when lines converge from different Y tracks to
+    the exit port (requiring diagonal routing).  When all feeder stations
+    share the same Y, lines exit straight horizontally and no extra space
+    is needed.
     """
-    flow_exit_side = flow_port_sides(section.direction)[1]
+    if lanes_run_along_x(section.direction):
+        return
+
+    flow_exit_side = PortSide.RIGHT if section.direction == "LR" else PortSide.LEFT
     flow_exit_port_ids = {
         pid
         for pid in section.exit_ports
@@ -966,59 +921,56 @@ def _adjust_flow_exit_gap(
     if not flow_exit_port_ids or not layers:
         return
 
-    # Collect the lanes of internal stations that feed into flow-side exit
-    # ports.  If they all share one lane, no diagonal convergence is needed
-    # and the gap can be skipped.  When the feeder is a bypass V helper
-    # (``__bypass_`` id), trace back to its visible predecessor so the
-    # diagonal at the V is collapsed back onto the predecessor's lane - the V
-    # exists only because the line couldn't cross a consumer marker, but the
-    # diagonal still terminates at a visible station.
-    lane = frame.secondary
-    feeder_lanes: set[float] = set()
+    # Collect Y positions of internal stations that feed into flow-side
+    # exit ports.  If they all share the same Y, no diagonal convergence
+    # is needed and the gap can be skipped.  When the feeder is a bypass
+    # V helper (``__bypass_`` id), trace back to its visible predecessor
+    # so the diagonal at the V is collapsed back onto the predecessor's
+    # Y - the V exists only because the line couldn't cross a consumer
+    # marker, but the diagonal still terminates at a visible station.
+    feeder_ys: set[float] = set()
     real_ids = set(sub.stations)
     for pid in flow_exit_port_ids:
         for edge in graph.edges_to(pid):
             if edge.source not in real_ids:
                 continue
-            src_id: str | None = edge.source
-            seen: set[str] = set()
-            while src_id is not None and is_bypass_v(src_id) and src_id not in seen:
-                seen.add(src_id)
-                src_id = next(
-                    (
-                        pe.source
-                        for pe in graph.edges_to(src_id)
-                        if pe.source in real_ids and pe.line_id == edge.line_id
-                    ),
-                    None,
-                )
-            if src_id is None or is_bypass_v(src_id):
-                continue
-            feeder_lanes.add(lane.get(sub.stations[src_id]))
+            src_id = edge.source
+            if is_bypass_v(src_id):
+                pred_y = None
+                for pe in graph.edges_to(src_id):
+                    if pe.source in real_ids and not is_bypass_v(pe.source):
+                        ps = sub.stations.get(pe.source)
+                        if ps is not None:
+                            pred_y = ps.y
+                            break
+                if pred_y is None:
+                    continue
+                feeder_ys.add(pred_y)
+            else:
+                feeder_ys.add(sub.stations[src_id].y)
 
-    if len(feeder_lanes) <= 1:
+    if len(feeder_ys) <= 1:
         return
 
-    exit_gap = frame.primary.step * EXIT_GAP_MULTIPLIER
+    exit_gap = x_spacing * EXIT_GAP_MULTIPLIER
 
     # For single-layer sections the asymmetry is very visible, so split the
     # gap between both sides to keep the station visually centered.  For
-    # multi-layer sections the gap belongs entirely on the exit side.  The
-    # box grows along the flow axis from its low edge, so a flow running
-    # toward that edge shifts its stations away from it to open the gap there.
+    # multi-layer sections the gap belongs entirely on the exit side.
     n_layers = len(set(layers.values()))
     center = n_layers <= 1
-    if frame.primary_sign > 0:
-        shift = exit_gap / 2 if center else 0.0
-    else:
-        shift = exit_gap / 2 if center else exit_gap
-    if shift:
-        for s in sub.stations.values():
-            frame.primary.set(s, frame.primary.get(s) + shift)
-    if frame.primary.name == "x":
+
+    if section.direction == "LR":
+        if center:
+            half_gap = exit_gap / 2
+            for s in sub.stations.values():
+                s.x += half_gap
         section.bbox_w += exit_gap
     else:
-        section.bbox_h += exit_gap
+        shift = exit_gap / 2 if center else exit_gap
+        for s in sub.stations.values():
+            s.x += shift
+        section.bbox_w += exit_gap
 
 
 def _apply_label_strike_runway(

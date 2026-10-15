@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import heapq
-import math
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -95,24 +94,6 @@ def iter_sole_trunk_continuations(
         section_id = graph.stations[node].section_id
         assert section_id is not None
         yield section_id, predecessor, node
-
-
-def lane_grid_origin(coords: Iterable[float], pitch: float) -> float | None:
-    """The residue modulo *pitch* that most lane coordinates in *coords* share.
-
-    A section lays its stations on ``rank * pitch`` along its lane axis, so the
-    shared residue names the section's lane grid; ``None`` when *coords* is
-    empty.
-    """
-    residues = Counter(round(c % pitch, 3) for c in coords)
-    if not residues:
-        return None
-    return residues.most_common(1)[0][0]
-
-
-def snap_to_lane(coord: float, origin: float, pitch: float) -> float:
-    """The lane ``origin + n * pitch`` nearest *coord* (ties go to the higher)."""
-    return origin + math.floor((coord - origin) / pitch + 0.5) * pitch
 
 
 def section_lane_axis(graph: MetroGraph, section_id: str) -> Axis:

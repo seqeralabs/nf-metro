@@ -304,8 +304,8 @@ from nf_metro.layout.phases.row_align import (  # noqa: F401
     _top_align_row_sections,
 )
 from nf_metro.layout.phases.single_section import (  # noqa: F401
-    _adjust_flow_exit_gap,
     _adjust_lr_entry_inset,
+    _adjust_lr_exit_gap,
     _adjust_lr_label_clearance,
     _adjust_tb_entry_shifts,
     _adjust_tb_labels,
