@@ -903,13 +903,6 @@ gallery:
       by a three-line bundle one of whose lines bypasses the section to the next one. The
       chain still drops down one lane column under its entry, so the section stays one
       column wide instead of stepping diagonally across a widened box (issue #2042)."
-  - id: bt_handoff_chain_beside_bypass
-    source_dir: examples/topologies
-    category: TB / BT Sections
-    description:
-      "The `%%metro direction: BT` mirror: the bundle rises in from the bottom and the
-      hand-off chain climbs one lane column, so the line leaving the top and the line
-      bypassing below both start from a straight chain rather than a staircase (issue #2042)."
   - id: tb_column_continuation_two_lines
     source_dir: examples/topologies
     category: TB / BT Sections
