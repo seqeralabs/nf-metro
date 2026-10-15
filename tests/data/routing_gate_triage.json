@@ -1483,6 +1483,10 @@
   "note": "Band-fit test in _right_entry_gap_above_is_clear (#889), reached only when the cross-row RIGHT-entry drop-in is not clear (the exotic blocked-descent case above). The corpus always takes the drop-in, so neither arm of the gap-above fallback is exercised. Defensive.",
   "status": "defensive"
  },
+ "inter_section_handlers.py::if tgt_row is None:::#1": {
+  "note": "In _left_exit_wrap_over_top_y: narrows the Optional target row for the band lookups below. A same-row wrap reaches it with both ends in placed sections, whose grid rows always resolve, so the unresolved arm cannot be taken.",
+  "status": "defensive"
+ },
  "offsets.py::if len(hubs) != 1:::#1": {
   "note": "Guard in _is_flat_handover_hub admitting a linear entry frame whose cohort terminates at a hub. Refuses unless exactly one carrier originates the local bundle; a section with two independent origination points hands its trunk over in two places, not one. The one corpus section that reaches the relaxed path (continuation_lane_step's Results hub) has a single hub, so the multi-hub refusal stays un-exercised. Defensive.",
   "status": "defensive"
@@ -1519,7 +1523,7 @@
   "note": "The seat arm fuses a feeder's final port approach onto the merge trunk's target flank before the landing states the feeder's opening column. tests/fixtures/hash_seed_determinism/seed_15.mmd reaches it (__junction_27->__merge_11 climbs into s8__entry_right_17 16px beside the trunk's flank at x=780), but the sweep's corpus roots do not include tests/fixtures/hash_seed_determinism, and seed_15 aborts on unrelated guards, so no swept fixture evaluates it.",
   "status": "needs-review"
  },
- "tb_handlers.py::if (late[0] - early[1]) * math.copysign(1.0, tp - sp) < 2 * ctx.curve_radius:::#1": {
+ "tb_handlers.py::if (late[0] - early[1]) * math.copysign(1.0, tp - sp) < room_for_two_turns:::#1": {
   "note": "In _clear_lane_change: declines the step-aside route when the flow distance from the port to the target cannot hold a step off the port's lane, a full-radius run beside the passed stations and a step onto the target's lane. Only reached once the plain lane change and the hold-the-port-lane route both cross a passed station's pill or label, which needs passed stations, and layout already spaces a vertical section's layers for a diagonal; no map in about 7800 fuzzed vertical-bypass topologies takes it. Taking it keeps the plain lane change, which crosses that station.",
   "status": "needs-review"
  },
