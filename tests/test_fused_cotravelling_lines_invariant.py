@@ -30,6 +30,7 @@ Covers:
 from __future__ import annotations
 
 import warnings
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -47,8 +48,11 @@ from nf_metro.layout.routing import (
 )
 from nf_metro.layout.routing.common import (
     OffsetRegime,
+    PortPeeloffBundle,
     RoutedPath,
     apply_route_offsets,
+    iter_port_peeloff_bundles,
+    port_peeloff_tail,
 )
 from nf_metro.layout.routing.invariants import (
     _routes_crossings,
@@ -706,18 +710,15 @@ def test_riboseq_corridor_bundle_holds_a_uniform_nesting_pitch() -> None:
         )
 
 
-def _peeloff_riser_xs(
-    routes: list[RoutedPath], offsets, port_id: str
-) -> dict[str, float]:
-    """Drawn riser X per line on the peel-off tails arriving at *port_id*."""
-    from dataclasses import replace
+def _peeloff_riser_xs(bundle: PortPeeloffBundle, offsets) -> dict[str, float]:
+    """Drawn riser X per line, read from the bundle's own routes.
 
-    from nf_metro.layout.routing.common import port_peeloff_tail
-
+    A line can reach one port by several routes on different shapes (one rising,
+    one descending), each in its own bundle, so a riser looked up by line id at
+    the port can come from a route outside *bundle*.
+    """
     out: dict[str, float] = {}
-    for rp in routes:
-        if rp.edge.target != port_id:
-            continue
+    for rp, _tail in bundle.entries:
         drawn = replace(rp, points=list(apply_route_offsets(rp, offsets)))
         tail = port_peeloff_tail(drawn)
         if tail is not None:
@@ -740,7 +741,12 @@ def test_inter_row_corridor_descends_into_its_port_on_the_nesting_pitch(
     """
     path = CURVE_REPROS / "inter_row_corridor_overflow.mmd"
     graph, routes, offsets, _violations = _settled(path, monkeypatch)
-    risers = _peeloff_riser_xs(routes, offsets, "calling__entry_left_8")
+    (bundle,) = [
+        b
+        for b in iter_port_peeloff_bundles(routes, graph, graph_offset_step(graph))
+        if b.port_id == "calling__entry_left_8"
+    ]
+    risers = _peeloff_riser_xs(bundle, offsets)
 
     assert set(risers) == {"la", "lc"}, risers
     assert abs(risers["la"] - risers["lc"]) == pytest.approx(graph_offset_step(graph))
@@ -750,15 +756,12 @@ def _overwide_peeloff_bands(
     path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[int, list[tuple[str, float, int]]]:
     """Peel-off bundles measured at *path*, and those spanning over one width."""
-    from nf_metro.layout.routing.common import iter_port_peeloff_bundles
-
     graph, routes, offsets, _violations = _settled(path, monkeypatch)
     step = graph_offset_step(graph)
     measured = 0
     wide: list[tuple[str, float, int]] = []
     for bundle in iter_port_peeloff_bundles(routes, graph, step):
-        risers = _peeloff_riser_xs(routes, offsets, bundle.port_id)
-        drawn = [risers[line_id] for line_id in bundle.per_line if line_id in risers]
+        drawn = list(_peeloff_riser_xs(bundle, offsets).values())
         if len(drawn) < 2:
             continue
         measured += 1
@@ -766,10 +769,6 @@ def _overwide_peeloff_bands(
         if span > (len(drawn) - 1) * step + COORD_TOLERANCE:
             wide.append((bundle.port_id, span, len(drawn)))
     return measured, wide
-
-
-PEELOFF_WIDE_DUAL_FED = CURVE_REPROS / "merge_entry_dual_fed_line_from_top_exit.mmd"
-DUAL_FED_PEELOFF_PITCH_XFAIL_ISSUE: int | None = None
 
 
 def test_peeloff_risers_descend_on_the_nesting_pitch(
@@ -788,8 +787,6 @@ def test_peeloff_risers_descend_on_the_nesting_pitch(
     wide: dict[str, list[tuple[str, float, int]]] = {}
     measured = 0
     for path in _CORPUS:
-        if path == PEELOFF_WIDE_DUAL_FED:
-            continue
         try:
             seen, found = _overwide_peeloff_bands(path, monkeypatch)
         except Exception:  # noqa: BLE001 - deliberately defective fixtures abort
@@ -811,21 +808,6 @@ def test_peeloff_risers_descend_on_the_nesting_pitch(
             for port_id, span, count in found
         )
     )
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        f"issue #{DUAL_FED_PEELOFF_PITCH_XFAIL_ISSUE}: z2__entry_left_4's two "
-        "peel-off risers descend 6.0px apart, wider than one 4.0px nesting step"
-    ),
-)
-def test_dual_fed_line_from_top_exit_peels_off_on_the_nesting_pitch(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    measured, wide = _overwide_peeloff_bands(PEELOFF_WIDE_DUAL_FED, monkeypatch)
-    assert measured
-    assert not wide, wide
 
 
 @pytest.mark.parametrize("path", SEATED_WITHOUT_THE_PASS, ids=lambda p: p.stem)
