@@ -1155,10 +1155,6 @@
   "note": "Skips a section the walk already took whole. the exit_lane_settlement_without_crossings variant described on the `if was_arriving is None or was_holder is None` entry takes the else arm (a fresh section) but not the skip: there the pair's two lines run into two different downstream sections. The skip arm wants a walk with two pair edges landing in one section, for instance both lines of the pair continuing into the same downstream box, or one box reached from two frontier stations.",
   "status": "needs-review"
  },
- "offsets.py::for _ in range(max_iterations):::#1": {
-  "note": "_reconcile_horizontal_offsets iterates at most 10 times and breaks early when no change occurs. The arc L1338->(-1310) represents loop exhaustion without early-break (all 10 iterations consumed). On any valid parsed graph, the reconciliation converges in at most a handful of iterations because each iteration resolves at least one edge conflict or reaches a fixed point. The 10-iteration ceiling is a backstop against hypothetical oscillating graphs; normal topologies stabilize in 1-3 passes.",
-  "status": "defensive"
- },
  "offsets.py::if (tgt_id, lid) not in ctx.offsets:::#1": {
   "note": "The True branch (missing entry-port offset -> ok=False) is unreachable because phase 7 (_compute_entry_port_offsets) runs before this function (phase 7a) and assigns an offset for every (entry_port_id, line_id) pair in the graph. By the time _align_junction_to_entry_port runs, ctx.offsets is populated for all entry ports, so the guard never fires. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
   "status": "defensive"
@@ -1285,10 +1281,6 @@
  },
  "offsets.py::if single_exit and feeding_exit is not None:::#1": {
   "note": "Reaches the realignment body of _align_junction_to_entry_port only via a TB-reversed two-line bundle fanning into a junction (the #704 boundary fix is in, so this body is now provably reachable). The junction_entry_reversed_fold fixture now ships that topology; with the bundle order carried concentrically through the reversal corners the junction offsets already match their entry ports, so the realignment body short-circuits before its offset-writing arms and they stay un-exercised corpus-wide. Defensive. Its False arm (->1147) is additionally defensive: a >=2-line junction reaching this body is always a single-exit-port-fed fan-out junction (merge junctions carry one line and are skipped by len(j_lines)<2).",
-  "status": "defensive"
- },
- "offsets.py::if source_col is None:::#1": {
-  "note": "_convergence_feeders receives resolved sources feeding a registered LEFT entry port. Each source is a sectioned port or a junction resolvable through one, so the missing-column arm protects an incomplete graph.",
   "status": "defensive"
  },
  "offsets.py::if src_port and not src_port.is_entry:::#2": {
