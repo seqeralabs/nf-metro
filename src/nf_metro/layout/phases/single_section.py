@@ -980,20 +980,21 @@ def _adjust_flow_exit_gap(
         for edge in graph.edges_to(pid):
             if edge.source not in real_ids:
                 continue
-            src_id = edge.source
-            if is_bypass_v(src_id):
-                pred_lane = None
-                for pe in graph.edges_to(src_id):
-                    if pe.source in real_ids and not is_bypass_v(pe.source):
-                        ps = sub.stations.get(pe.source)
-                        if ps is not None:
-                            pred_lane = lane.get(ps)
-                            break
-                if pred_lane is None:
-                    continue
-                feeder_lanes.add(pred_lane)
-            else:
-                feeder_lanes.add(lane.get(sub.stations[src_id]))
+            src_id: str | None = edge.source
+            seen: set[str] = set()
+            while src_id is not None and is_bypass_v(src_id) and src_id not in seen:
+                seen.add(src_id)
+                src_id = next(
+                    (
+                        pe.source
+                        for pe in graph.edges_to(src_id)
+                        if pe.source in real_ids and pe.line_id == edge.line_id
+                    ),
+                    None,
+                )
+            if src_id is None or is_bypass_v(src_id):
+                continue
+            feeder_lanes.add(lane.get(sub.stations[src_id]))
 
     if len(feeder_lanes) <= 1:
         return

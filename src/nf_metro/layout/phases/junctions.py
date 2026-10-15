@@ -7,7 +7,7 @@ from nf_metro.layout.constants import (
     JUNCTION_MARGIN,
 )
 from nf_metro.layout.geometry import sections_share_a_column
-from nf_metro.parser.model import LineSpread, MetroGraph, PortSide, Station
+from nf_metro.parser.model import LineSpread, MetroGraph, Port, PortSide, Station
 from nf_metro.parser.route_topology import build_route_topology_query
 
 
@@ -277,6 +277,22 @@ def _resolve_source_section_id(
                 src_section_id = s2.section_id
                 break
     return src_section_id
+
+
+def _resolve_source_port(
+    graph: MetroGraph, edge_source: str, junction_ids: set[str]
+) -> Port | None:
+    """The port an edge leaves from, tracing a junction back to its feeding port."""
+    if edge_source in junction_ids:
+        return next(
+            (
+                port
+                for e2 in graph.edges_to(edge_source)
+                if (port := graph.ports.get(e2.source)) is not None
+            ),
+            None,
+        )
+    return graph.ports.get(edge_source)
 
 
 def _resolve_source_xy(

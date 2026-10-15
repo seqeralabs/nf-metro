@@ -109,23 +109,73 @@ def _spread_diagonal_bundles(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
     # perpendicular gap on its own geometry.  A baked bundle is every diagonal
     # sharing one end station and one span, whichever edge it belongs to, so
     # lines of distinct edges riding one diagonal off (or into) a station spread
-    # as one bundle, as a horizontal section's hub pass spreads them.
+    # as one bundle, as a horizontal section's hub pass spreads them.  Bundles
+    # sharing a line are one bundle: every member then rides the same span
+    # between the same two columns, so spreading them apart would leave lines
+    # of the two halves stacked on one stroke.
+    remaining = [
+        rp
+        for rp in routes
+        if _is_diagonal_route(rp)
+        and _edge_key(rp) not in spread
+        and rp.exit_lane_transition_plan_id is None
+    ]
+    for component in _connected_diagonal_bundles(remaining, ctx.graph):
+        sources = {rp.edge.source for rp in component}
+        targets = {rp.edge.target for rp in component}
+        if len(sources) == 1:
+            _apply_diagonal_spread(component, component[0].edge.source, ctx=ctx)
+        elif len(targets) == 1:
+            _apply_diagonal_spread(component, component[0].edge.target, ctx=ctx)
+        else:
+            _spread_bundles_by_end(component, ctx, spread)
+            continue
+        spread.update(_edge_key(rp) for rp in component)
+
+
+def _connected_diagonal_bundles(
+    routes: list[RoutedPath], graph: MetroGraph
+) -> list[list[RoutedPath]]:
+    """Group diagonals into bundles joined by a shared source or target bundle.
+
+    Each multi-member group keeps the order *routes* lists its members in.
+    """
+    parent = list(range(len(routes)))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for key_of in (_source_bundle_key, _target_bundle_key):
+        first: dict[tuple[object, ...], int] = {}
+        for i, rp in enumerate(routes):
+            j = first.setdefault(key_of(rp, graph), i)
+            parent[find(i)] = find(j)
+    components: dict[int, list[RoutedPath]] = defaultdict(list)
+    for i, rp in enumerate(routes):
+        components[find(i)].append(rp)
+    return [group for group in components.values() if len(group) >= 2]
+
+
+def _spread_bundles_by_end(
+    routes: list[RoutedPath],
+    ctx: _RoutingCtx,
+    spread: set[tuple[str, str, str]],
+) -> None:
+    """Spread each source bundle, then each target bundle not yet spread."""
     for end, key_of in ((0, _source_bundle_key), (1, _target_bundle_key)):
         bundles: dict[tuple[object, ...], list[RoutedPath]] = defaultdict(list)
         for rp in routes:
-            if (
-                not _is_diagonal_route(rp)
-                or _edge_key(rp) in spread
-                or rp.exit_lane_transition_plan_id is not None
-            ):
-                continue
-            bundles[key_of(rp, ctx.graph)].append(rp)
+            if (rp.edge.source, rp.edge.target, rp.line_id) not in spread:
+                bundles[key_of(rp, ctx.graph)].append(rp)
         for group in bundles.values():
             if len(group) < 2:
                 continue
             anchor = group[0].edge.source if end == 0 else group[0].edge.target
             _apply_diagonal_spread(group, anchor, ctx=ctx)
-            spread.update(_edge_key(rp) for rp in group)
+            spread.update((rp.edge.source, rp.edge.target, rp.line_id) for rp in group)
 
 
 def _baked_diagonal_span(rp: RoutedPath) -> tuple[float, float]:

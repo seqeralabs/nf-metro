@@ -485,9 +485,12 @@ def _insert_bypass_stations(
 
     new_stations: list[Station] = []
     new_edges: list[Edge] = []
-    edges_to_remove: set[int] = set()
     bypass_replacements: dict[ResolvedEdge, list[tuple[ResolvedEdge, ...]]] = {}
     bypass_count = 0
+    # Every helper an edge acquires, keyed by edge index and ordered by the
+    # layer of the station it skips: an edge skipping several stations is one
+    # path through all their helpers, never one parallel path per station.
+    helpers_by_edge: dict[int, list[tuple[int, str]]] = {}
 
     for section in graph.sections.values():
         station_ids = set(section.station_ids)
@@ -513,29 +516,34 @@ def _insert_bypass_stations(
                         bypasses_station_id=sid,
                     )
                 )
-                for idx, edge in bypass_edges:
-                    edges_to_remove.add(idx)
-                    first = Edge(source=edge.source, target=v_id, line_id=edge.line_id)
-                    second = Edge(source=v_id, target=edge.target, line_id=edge.line_id)
-                    new_edges.extend((first, second))
-                    replaced = ResolvedEdge(edge.source, edge.target, edge.line_id)
-                    bypass_replacements.setdefault(replaced, []).append(
-                        (
-                            ResolvedEdge(first.source, first.target, first.line_id),
-                            ResolvedEdge(second.source, second.target, second.line_id),
-                        )
+                for idx, _edge in bypass_edges:
+                    helpers_by_edge.setdefault(idx, []).append(
+                        (ctx.sec_layers[sid], v_id)
                     )
 
     if not new_stations:
         return route_resolution
 
+    for idx, helpers in helpers_by_edge.items():
+        edge = graph.edges[idx]
+        stops = [
+            edge.source,
+            *(v_id for _layer, v_id in sorted(helpers)),
+            edge.target,
+        ]
+        path = tuple(ResolvedEdge(a, b, edge.line_id) for a, b in zip(stops, stops[1:]))
+        new_edges.extend(
+            Edge(source=a, target=b, line_id=edge.line_id) for a, b, _ in path
+        )
+        replaced = ResolvedEdge(edge.source, edge.target, edge.line_id)
+        bypass_replacements.setdefault(replaced, []).append(path)
+
     for st in new_stations:
         graph.register_station(st)
 
-    if edges_to_remove:
-        graph.replace_edges(
-            [e for i, e in enumerate(graph.edges) if i not in edges_to_remove]
-        )
+    graph.replace_edges(
+        [e for i, e in enumerate(graph.edges) if i not in helpers_by_edge]
+    )
     for edge in new_edges:
         graph.add_edge(edge)
 

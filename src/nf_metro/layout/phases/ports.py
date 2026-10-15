@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Iterator
 
 from nf_metro.layout.constants import (
@@ -37,6 +38,7 @@ from nf_metro.layout.phases.guards import (
     _exit_off_consumer_trunk,
 )
 from nf_metro.layout.phases.junctions import (
+    _resolve_source_port,
     _resolve_source_section_id,
     _resolve_source_xy,
 )
@@ -590,7 +592,9 @@ def _align_tb_entry_port(
         else:
             boundary_y = entry_section.bbox_y + entry_section.bbox_h
         _set_port_y(graph, port_id, boundary_y)
-        trunk_x = _tb_trunk_x(graph, entry_section)
+        trunk_x = _flow_entry_lane_x(graph, port_id, entry_section)
+        if trunk_x is None:
+            trunk_x = _tb_trunk_x(graph, entry_section)
         if trunk_x is not None:
             _set_port_x(graph, port_id, trunk_x)
         return
@@ -647,6 +651,41 @@ def _align_tb_entry_port(
         elif entry_section.direction in ("LR", "RL"):
             _nudge_port_from_stations(port_id, entry_section, graph)
             graph._cross_column_perp_bridges.add(entry_section.id)
+
+
+def _flow_entry_lane_x(
+    graph: MetroGraph, port_id: str, section: Section
+) -> float | None:
+    """The lane a TB/BT section's flow-side entry feeds, or ``None``.
+
+    The stations the port feeds are the head of the trunk it enters; a stepped
+    section's other stations stand on other lanes, so the section-wide trunk
+    median can name a lane the port never feeds.  The lane carrying the most of
+    the port's lines is the trunk head, as a horizontal section's entry seats on
+    its trunk station.  Without a single such lane the port takes the seat Stage
+    3.1 gives it, which keeps a symmetric fan centred.
+    """
+    from nf_metro.layout.section_placement import (
+        _connected_internal_stations,
+        _find_connected_internal_coord,
+        _flow_port_lane,
+    )
+
+    lane_x = {
+        round(graph.stations[sid].x, 3): graph.stations[sid].x
+        for sid in _connected_internal_stations(port_id, section, graph)
+    }
+    lines_by_lane = Counter(
+        round(graph.stations[sid].x, 3)
+        for sid in _connected_internal_stations(port_id, section, graph)
+    )
+    ranked = lines_by_lane.most_common(2)
+    if len(ranked) == 1 or (len(ranked) == 2 and ranked[0][1] > ranked[1][1]):
+        return lane_x[ranked[0][0]]
+    anchor = _find_connected_internal_coord(port_id, section, graph, "x")
+    if anchor is None:
+        return None
+    return _flow_port_lane(port_id, anchor, section, graph)
 
 
 def _tb_trunk_x(graph: MetroGraph, section: Section) -> float | None:
@@ -1824,6 +1863,12 @@ def _clamp_tb_entry_port(
     else:
         target_y = max_y
 
+    # A vertical-flow section's side exit sits past the stations feeding it in
+    # flow order; a pull that would lift it upstream of one of them is refused,
+    # and the run climbs to the entry in the gap between the sections instead.
+    if _pull_seats_exit_upstream(graph, edge.source, junction_ids, target_y):
+        return target_y
+
     # Pull source up to maintain straight horizontal run
     src.y = target_y
     if src.is_port and edge.source in graph.ports:
@@ -1839,6 +1884,29 @@ def _clamp_tb_entry_port(
                         graph.ports[e2.source].y = target_y
 
     return target_y
+
+
+def _pull_seats_exit_upstream(
+    graph: MetroGraph, source_id: str, junction_ids: set[str], target_y: float
+) -> bool:
+    """Whether moving *source_id*'s exit to *target_y* puts it before a feeder.
+
+    Only a LEFT/RIGHT exit of a vertical-flow section has a flow order along
+    the Y it would be pulled on.
+    """
+    exit_port = _resolve_source_port(graph, source_id, junction_ids)
+    if exit_port is None or exit_port.side not in (PortSide.LEFT, PortSide.RIGHT):
+        return False
+    section = graph.sections.get(exit_port.section_id)
+    if section is None or not lanes_run_along_x(section.direction):
+        return False
+    flow = AxisFrame.flow_sign(section.direction)
+    return any(
+        (target_y - feeder.y) * flow < -COORD_TOLERANCE
+        for edge in graph.edges_to(exit_port.id)
+        if (feeder := graph.stations.get(edge.source)) is not None
+        and not feeder.is_port
+    )
 
 
 def _seat_perp_entry_port_before_stations(
