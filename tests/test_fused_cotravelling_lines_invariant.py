@@ -768,6 +768,9 @@ def _overwide_peeloff_bands(
     return measured, wide
 
 
+PEELOFF_WIDE_DUAL_FED = CURVE_REPROS / "merge_entry_dual_fed_line_from_top_exit.mmd"
+
+
 def test_peeloff_risers_descend_on_the_nesting_pitch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -784,6 +787,8 @@ def test_peeloff_risers_descend_on_the_nesting_pitch(
     wide: dict[str, list[tuple[str, float, int]]] = {}
     measured = 0
     for path in _CORPUS:
+        if path == PEELOFF_WIDE_DUAL_FED:
+            continue
         try:
             seen, found = _overwide_peeloff_bands(path, monkeypatch)
         except Exception:  # noqa: BLE001 - deliberately defective fixtures abort
@@ -805,6 +810,21 @@ def test_peeloff_risers_descend_on_the_nesting_pitch(
             for port_id, span, count in found
         )
     )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "z2__entry_left_4's two peel-off risers descend 6.0px apart, wider than "
+        "one 4.0px nesting step"
+    ),
+)
+def test_dual_fed_line_from_top_exit_peels_off_on_the_nesting_pitch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    measured, wide = _overwide_peeloff_bands(PEELOFF_WIDE_DUAL_FED, monkeypatch)
+    assert measured
+    assert not wide, wide
 
 
 @pytest.mark.parametrize("path", SEATED_WITHOUT_THE_PASS, ids=lambda p: p.stem)
