@@ -44,7 +44,6 @@ from nf_metro.layout.routing.common import (
     merge_junction_ids,
     needs_perp_approach_fan,
     perp_entry_consumer,
-    resolve_section_colrow,
     tb_right_entry_sections,
     vertical_flow_sections,
 )
@@ -5160,10 +5159,6 @@ def _materialize_linear_entry_frames(ctx: _OffsetCtx) -> tuple[_LinearEntryFrame
     return ()
 
 
-def _hop_end(graph: MetroGraph, station: Station) -> HopEnd:
-    return HopEnd(station, *resolve_section_colrow(graph, station))
-
-
 def _straight_branches_land_level(
     ctx: _OffsetCtx,
     section: Section,
@@ -5182,7 +5177,7 @@ def _straight_branches_land_level(
     flow_entry = flow_entry_side(section.direction)
     lane_axis = "y" if lanes_run_along_y(section.direction) else "x"
     junction = graph.stations[junction_id]
-    start = _hop_end(graph, junction)
+    start = HopEnd(junction, *_resolve_section_colrow(graph, junction))
     for edge in graph.edges_from(junction_id):
         port = graph.ports.get(edge.target)
         target = graph.stations[edge.target]
@@ -5193,7 +5188,9 @@ def _straight_branches_land_level(
             or graph.sections[port.section_id].direction != section.direction
             or abs(getattr(target, lane_axis) - getattr(junction, lane_axis))
             > _OFFSET_EQ_TOLERANCE
-            or _hop_needs_bypass(graph, start, _hop_end(graph, target)).needed
+            or _hop_needs_bypass(
+                graph, start, HopEnd(target, *_resolve_section_colrow(graph, target))
+            ).needed
         ):
             continue
         landing = ctx.offsets.get((edge.target, edge.line_id))
