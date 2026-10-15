@@ -3256,14 +3256,19 @@ def _bundle_divergent_distinct_descents(
 
         # Never re-seat a descent into a section it does not belong to, nor onto a
         # column another line already travels.  Where the turn order's tracks are
-        # obstructed the lines nest one step apart in the order they stand in,
-        # so no two of them are left fused on near tracks; the group keeps its
-        # handler channels only when both are obstructed.
+        # obstructed and the handler channels leave two lines fused on near
+        # tracks, the lines nest one step apart in the order they stand in
+        # instead; otherwise the group keeps its handler channels.
         standing = sorted(by_line, key=lambda lid: min(c.x for c in by_line[lid]))
+        fused = any(
+            first.route.line_id != second.route.line_id
+            and abs(first.x - second.x) < step - COORD_TOLERANCE
+            for first, second in itertools.combinations(chans, 2)
+        )
         candidates = (
             [[(ch, ch.x, ch.x - base) for ch in chans]]
             if tight
-            else [seated_in(ordered), seated_in(standing)]
+            else [seated_in(ordered), *([seated_in(standing)] if fused else [])]
         )
         moves = next((m for m in candidates if not obstructed(m)), [])
         if not moves:

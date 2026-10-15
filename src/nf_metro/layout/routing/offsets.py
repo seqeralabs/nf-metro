@@ -38,6 +38,7 @@ from nf_metro.layout.phases._common import (
 from nf_metro.layout.route_topology import divergence_junction_exit_ports
 from nf_metro.layout.routing.arranger import BoundaryConfig, lane_order
 from nf_metro.layout.routing.common import (
+    Direction,
     bypass_bottom_y,
     merge_junction_ids,
     needs_perp_approach_fan,
@@ -46,8 +47,10 @@ from nf_metro.layout.routing.common import (
     vertical_flow_sections,
 )
 from nf_metro.layout.routing.context import (
+    HopEnd,
     _build_routing_context,
     _has_intervening_sections,
+    _hop_needs_bypass,
     _resolve_section_colrow,
     _section_lane_frame,
     fanout_divergence_peel_order,
@@ -3705,7 +3708,7 @@ def _convergence_feeders(
     off-target row. A single bypass joined by a flat same-row feeder does not
     form a climbing bundle and remains in its ordinary lane order.  A feeder
     that loops round the section into the port
-    (:func:`_loops_round_entry_section`) has no approach depth on this side, so
+    (:func:`loops_round_entry_section`) has no approach depth on this side, so
     its port is left to :func:`same_row_bypass_entry`.
     """
     target_col, target_row = _resolve_section_colrow(graph, graph.stations[port_id])
@@ -3717,7 +3720,7 @@ def _convergence_feeders(
     for edge in graph.edges_to(port_id):
         source = graph.station_for_edge_source(edge)
         source_col, source_row = _resolve_section_colrow(graph, source)
-        if source_col is None or _loops_round_entry_section(
+        if source_col is None or loops_round_entry_section(
             graph, source, graph.stations[port_id]
         ):
             return None
@@ -3770,7 +3773,7 @@ def _arrives_on_same_row_bypass(
     is not flat even though both ends share a Y.  The below-row channel is read
     from :func:`bypass_bottom_y`, the lane the router lays the usual detour on; a
     channel no lower than the port is a straight run instead.  Which side the
-    detour actually takes is :func:`_same_row_bypass_descents`' question.
+    detour actually takes is :func:`_same_row_bypass_approaches`' question.
     Callers that already resolved either grid cell pass it in.
     """
     target_col, target_row = target_colrow or _resolve_section_colrow(
@@ -3789,7 +3792,7 @@ def _arrives_on_same_row_bypass(
     return channel_y > port_station.y + _SAME_Y_TOLERANCE
 
 
-def _loops_round_entry_section(
+def loops_round_entry_section(
     graph: MetroGraph, source: Station, port_station: Station
 ) -> bool:
     """Whether *source* lies past *port_station* along its section's flow.
@@ -3820,18 +3823,20 @@ def _feeder_is_corridor(
     )
 
 
-def _same_row_bypass_descents(
+def _same_row_bypass_approaches(
     graph: MetroGraph,
     edges: Sequence[Edge],
     station_offsets: dict[tuple[str, str], float] | None,
-) -> frozenset[str]:
-    """Lines among the same-row bypass *edges* that come down into their port.
+) -> list[_Approach]:
+    """How each same-row bypass in *edges* reaches its port, in order.
 
     The router chooses the detour's side: usually round below the row, but a
-    packed cell can send it over the row top instead.  Each edge's side is read
-    from the route its dispatch rule draws (:func:`arrives_descending`).
+    packed cell can send it over the row top instead.  A route the dispatch
+    draws with no vertical leg runs straight at the port rather than detouring,
+    so it arrives flat.  Each edge's approach is read from the route its
+    dispatch rule draws (:func:`arrival_approach`).
     """
-    from nf_metro.layout.routing.inter_section_handlers import arrives_descending
+    from nf_metro.layout.routing.inter_section_handlers import arrival_approach
 
     ctx = _build_routing_context(
         graph,
@@ -3839,7 +3844,12 @@ def _same_row_bypass_descents(
         CURVE_RADIUS,
         None if station_offsets is None else dict(station_offsets),
     )
-    return frozenset(edge.line_id for edge in edges if arrives_descending(edge, ctx))
+    sides: dict[Direction | None, _Approach] = {
+        Direction.D: "above",
+        Direction.U: "below",
+        None: "flat",
+    }
+    return [sides[arrival_approach(edge, ctx)] for edge in edges]
 
 
 _Approach = Literal["flat", "below", "above"]
@@ -3882,7 +3892,7 @@ def same_row_bypass_entry(
     Every line must reach the port from a feeder level with it on the port's
     grid row, either flat or through a same-row bypass; at least one of each is
     needed.  A bypass looping round the section into the port
-    (:func:`_loops_round_entry_section`) needs only a second feeder station of
+    (:func:`loops_round_entry_section`) needs only a second feeder station of
     any kind: the loop turns its lines over against every other approach, so
     the port has an order to settle even with no flat line.  A line fed more than
     once qualifies only when all its feeders approach from the same side --
@@ -3914,7 +3924,7 @@ def same_row_bypass_entry(
             line_sides.add("below" if dy > 0 else "above")
             continue
         feeders.setdefault(lid, edge.source)
-        loops = _loops_round_entry_section(graph, source, port_station)
+        loops = loops_round_entry_section(graph, source, port_station)
         if source_col is not None and (
             loops
             or _arrives_on_same_row_bypass(
@@ -3930,18 +3940,35 @@ def same_row_bypass_entry(
             (u_turn if loops else detour).add(lid)
         else:
             line_sides.add("flat")
-    flat_fed = any("flat" in line_sides for line_sides in sides.values())
-    joined = flat_fed or (bool(u_turn) and len(set(feeders.values())) > 1)
-    if set(sides) != set(feeders) or not bypass_edges or not joined:
+    if set(sides) != set(feeders) or not bypass_edges:
         return None
-    descending = _same_row_bypass_descents(graph, bypass_edges, station_offsets)
-    for edge in bypass_edges:
-        sides[edge.line_id].add("above" if edge.line_id in descending else "below")
+    # A detour leaves its row by construction (:func:`_arrives_on_same_row_bypass`),
+    # so only a loop round the section can turn out to be drawn level.
+    approaches = [
+        "below" if approach == "flat" and edge.line_id not in u_turn else approach
+        for edge, approach in zip(
+            bypass_edges,
+            _same_row_bypass_approaches(graph, bypass_edges, station_offsets),
+        )
+    ]
+    for edge, approach in zip(bypass_edges, approaches):
+        sides[edge.line_id].add(approach)
     if any(len(line_sides) > 1 for line_sides in sides.values()):
         return None
-    if not u_turn.isdisjoint(detour):
+    level = {lid for lid, line_sides in sides.items() if line_sides == {"flat"}}
+    u_turn -= level
+    detour -= level
+    flat_fed = bool(level)
+    joined = flat_fed or (bool(u_turn) and len(set(feeders.values())) > 1)
+    if not (u_turn or detour) or not joined or not u_turn.isdisjoint(detour):
         return None
-    return SameRowBypassEntry(feeders, depth, descending, frozenset(u_turn))
+    descending = frozenset(
+        edge.line_id
+        for edge, approach in zip(bypass_edges, approaches)
+        if approach == "above"
+    )
+    bypass_depth = {lid: d for lid, d in depth.items() if lid not in level}
+    return SameRowBypassEntry(feeders, bypass_depth, descending, frozenset(u_turn))
 
 
 def _section_flow_bundle(graph: MetroGraph, section: Section) -> frozenset[str]:
@@ -4932,10 +4959,14 @@ def _linear_entry_frame(
     strand a reserved lane, or one already level on its feeder lane, defers to
     the reactive trunk-anchoring path instead.
 
-    The frame runs on through any divergence junction its flow exit feeds: the
+    The frame runs on through a divergence junction its flow exit feeds: the
     junction sits a few pixels past the port, so a lane it kept from before the
     frame would draw the frame's shift as a jog on that short leg.  A section
-    downstream of the junction then reads its own frame off the shifted exit.
+    the junction feeds straight on then reads its own frame off the shifted
+    exit.  Where that section cannot take the shift -- its entry also seats
+    other feeders' lines -- the junction keeps its own lanes: carried past it,
+    the shift would only move the jog onto the straight branch, where the line
+    still holds a lane the port gives to another feeder until it steps across.
     """
     graph = ctx.graph
     flow_entry, flow_exit = flow_port_sides(section.direction)
@@ -5052,6 +5083,7 @@ def _linear_entry_frame(
         junction_id
         for junction_id, exit_port_id in ctx.divergence_exit_ports.items()
         if exit_port_id in section_carriers
+        and _straight_branches_land_level(ctx, section, junction_id, assignments)
     )
     for station_id in carrier_ids:
         for line_id in graph.station_lines(station_id):
@@ -5122,6 +5154,49 @@ def _materialize_linear_entry_frames(ctx: _OffsetCtx) -> tuple[_LinearEntryFrame
     ctx.offsets.clear()
     ctx.offsets.update(original)
     return ()
+
+
+def _straight_branches_land_level(
+    ctx: _OffsetCtx,
+    section: Section,
+    junction_id: str,
+    assignments: Mapping[str, float],
+) -> bool:
+    """Whether every branch *junction_id* sends straight on keeps its frame lane.
+
+    A branch runs straight on when it enters the flow-side entry of a section
+    flowing the same way on the junction's own baseline with no box to bypass
+    on the way.  It lands level only once that entry holds the line on the
+    frame's lane; one that does not takes the frame's shift as a jog on that
+    short leg.
+    """
+    graph = ctx.graph
+    flow_entry = flow_port_sides(section.direction)[0]
+    lane_axis = "y" if lanes_run_along_y(section.direction) else "x"
+    junction = graph.stations[junction_id]
+    start = HopEnd(junction, *_resolve_section_colrow(graph, junction))
+    for edge in graph.edges_from(junction_id):
+        port = graph.ports.get(edge.target)
+        target = graph.stations[edge.target]
+        if (
+            edge.line_id not in assignments
+            or port is None
+            or port.side is not flow_entry
+            or graph.sections[port.section_id].direction != section.direction
+            or abs(getattr(target, lane_axis) - getattr(junction, lane_axis))
+            > _OFFSET_EQ_TOLERANCE
+            or _hop_needs_bypass(
+                graph, start, HopEnd(target, *_resolve_section_colrow(graph, target))
+            ).needed
+        ):
+            continue
+        landing = ctx.offsets.get((edge.target, edge.line_id))
+        if (
+            landing is None
+            or abs(landing - assignments[edge.line_id]) > _OFFSET_EQ_TOLERANCE
+        ):
+            return False
+    return True
 
 
 def _cache_linear_entry_pill_lines(

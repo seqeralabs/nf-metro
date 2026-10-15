@@ -10,7 +10,8 @@
   on the loop on its inside, stays inside through both corners, and lands on
   the lane farthest from the port's flat band.
 * A fan's opening channels that cannot take their turn order nest one step
-  apart in the order they stand in rather than fuse.
+  apart in the order they stand in rather than fuse; channels already a step
+  apart keep their places.
 """
 
 from __future__ import annotations
@@ -175,4 +176,71 @@ def test_blocked_turn_order_nests_the_fan(
 
     monkeypatch.setattr(invariants, "check_no_fused_cotravelling_lines", spy)
     _render(BLOCKED_ASCENT_FAN)
+    assert found == []
+
+
+PEELOFF_FAN_MMD = """\
+%%metro line: l0 | Bin_Call | #e6194b
+%%metro line: l1 | Markdup_Filter_Fastqc | #3cb44b
+%%metro line: l2 | Dedup | #4363d8
+%%metro line: l3 | Count | #f58231
+%%metro grid: sec0 | 3,0
+%%metro grid: sec1 | 2,0
+
+graph LR
+    subgraph sec0 [Assemble_Export 0]
+        %%metro direction: RL
+        s0n0[call_stats_classify]
+        s0n3 -->|l0,l3| s0n4
+    end
+    subgraph sec1 [Index_Merge 1]
+        %%metro direction: RL
+        s1n0 -->|l0| s1n3
+        s1n0 -->|l2| s1n1
+        s1n1 -->|l2| s1n3
+    end
+    subgraph sec2 [Summarise 2]
+        %%metro exit: bottom | l0, l1, l2, l3
+        s2n0[summarise_pca]
+        s2n4[assemble_markdup]
+    end
+    subgraph sec3 [Stats_Trim_Bin 3]
+        %%metro entry: top | l0, l1, l2, l3
+        s3n0[sort]
+        s3n1[assemble]
+    end
+    s0n4 -->|l0,l3| s1n0
+    s1n3 -->|l0| s2n4
+    s2n4 -->|l0,l3| s3n0
+    s0n3 -->|l0| s3n1
+    s0n4 -->|l1| s1n3
+    s1n3 -->|l1| s2n0
+    s0n0 -->|l2| s1n0
+    s1n3 -->|l2| s3n0
+    s0n0 -->|l2| s2n0
+    s1n0 -->|l3| s2n0
+"""
+
+
+def test_unfused_blocked_fan_keeps_its_peel_off_band(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A blocked fan already a step apart is not re-nested across its peel-off.
+
+    Most of the fan drops into one entry port, whose peel-off band nests by trunk
+    depth; packing the fan into its standing order instead would braid that band.
+    """
+    found: list[str] = []
+    check = invariants.check_peeloff_concentric
+
+    def spy(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202 - forwards the check
+        violations = check(*args, **kwargs)
+        found.extend(v.message() for v in violations)
+        return violations
+
+    monkeypatch.setattr(invariants, "check_peeloff_concentric", spy)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        graph = prepare_graph(PEELOFF_FAN_MMD)
+        render_graph_result(graph, resolve_theme(None, graph, "light"), RenderConfig())
     assert found == []

@@ -2208,12 +2208,15 @@ def _match_inter_section_rule(f: _InterFacts) -> _Rule | None:
     return None
 
 
-def arrives_descending(edge: Edge, ctx: _RoutingCtx) -> bool:
-    """Whether inter-section *edge* reaches its target coming down from above.
+def arrival_approach(edge: Edge, ctx: _RoutingCtx) -> Direction | None:
+    """The way inter-section *edge* travels on its last vertical leg.
 
-    Builds the route its dispatch rule draws and reads the last vertical leg:
-    a descent arrives from above the target, a climb from below.  A route
-    with no vertical leg arrives level, which is not a descent.
+    Builds the route its dispatch rule draws and reads that leg:
+    :attr:`Direction.D` comes down into the target from above,
+    :attr:`Direction.U` climbs into it from below, and ``None`` is a route with
+    no vertical leg at all, which arrives level.  A route whose vertical steps
+    are all shorter than a curve radius only shifts its line's lane on the way,
+    so it arrives level too.
     """
     src, tgt = ctx.graph.edge_endpoints(edge)
     f = _build_inter_facts(edge, src, tgt, ctx)
@@ -2229,7 +2232,9 @@ def arrives_descending(edge: Edge, ctx: _RoutingCtx) -> bool:
         for (x1, y1), (x2, y2) in zip(points, points[1:])
         if abs(y2 - y1) > max(abs(x2 - x1), COORD_TOLERANCE)
     ]
-    return bool(vertical_legs) and vertical_legs[-1] > 0
+    if all(abs(dy) <= ctx.curve_radius for dy in vertical_legs):
+        return None
+    return vertical_direction(vertical_legs[-1])
 
 
 @dataclass(frozen=True, slots=True)
