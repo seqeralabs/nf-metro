@@ -19,7 +19,7 @@ from nf_metro.layout.geometry import (
     AxisFrame,
     axis_split,
     diagonal_centreline,
-    flow_port_sides,
+    flow_entry_side,
     lanes_run_along_x,
     section_bbox_span,
     segment_intersects_bbox,
@@ -438,7 +438,7 @@ def _route_perp_entry(
     if (
         tgt_sec is not None
         and lanes_run_along_x(tgt_sec.direction)
-        and src_port.side == flow_port_sides(tgt_sec.direction)[0]
+        and src_port.side == flow_entry_side(tgt_sec.direction)
     ):
         route = _route_flow_side_lane_change(edge, src, tgt, ctx, tgt_sec)
         if route is not None:
@@ -586,13 +586,9 @@ def _route_flow_side_lane_change(
     lateral = abs(tq - sq)
     if lateral < COORD_TOLERANCE:
         return None
-    spread = (
-        (len(line_ids) - 1)
-        * ctx.offset_step
-        * (math.hypot(ctx.diagonal_run, lateral) - ctx.diagonal_run)
-        / lateral
-    )
-    slack = abs(tp - sp) - ctx.diagonal_run - 2 * MIN_STRAIGHT_EDGE
+    spread = _diagonal_spread(len(line_ids), ctx.offset_step, ctx.diagonal_run, lateral)
+    end_straights = 2 * MIN_STRAIGHT_EDGE
+    slack = abs(tp - sp) - ctx.diagonal_run - end_straights
     if slack < spread:
         return None
 
@@ -631,6 +627,16 @@ def _route_flow_side_lane_change(
     )
 
 
+def _diagonal_spread(n: int, step: float, run: float, lateral: float) -> float:
+    """Flow-axis room *n* parallel diagonals need to separate by *step*.
+
+    Each diagonal covers *run* along the flow axis and *lateral* across it;
+    translating the lines along the flow axis opens a *step* of perpendicular
+    clearance between neighbours at the cost of this much extra run.
+    """
+    return (n - 1) * step * (math.hypot(run, lateral) - run) / lateral
+
+
 _Box = tuple[float, float, float, float]
 
 
@@ -643,9 +649,11 @@ def _passed_station_footprints(
     the flow axis contributes its pill and its label; the target contributes
     its label only.  Crossing a passed station's pill reads as stopping there,
     even on the line's own lane.  Labels are seated after routing, so the box
-    assumes the preferred, low-x side of the pill.
+    assumes the preferred, low-x side of the pill.  The section's flow runs
+    along ``y`` (lanes along ``x``).
     """
     graph = ctx.graph
+    frame = _section_lane_frame(graph, section, ctx.positive_fan)
     lo, hi = sorted((src.y, tgt.y))
     half_stroke = DEFAULT_LINE_WIDTH / 2
     boxes: list[_Box] = []
@@ -656,7 +664,7 @@ def _passed_station_footprints(
         passed = lo < st.y < hi
         if sid != tgt.id and not passed:
             continue
-        lanes = _lane_coords(ctx, section, st) or [st.x]
+        lanes = _lane_coords(ctx, frame, st) or [st.x]
         pill_left = min(lanes) - TB_PILL_EDGE_OFFSET
         x0, y0, x1, y1 = label_glyph_ink_bbox(
             label_beside_pill(st, pill_left, left=True)
@@ -671,9 +679,8 @@ def _passed_station_footprints(
     return boxes
 
 
-def _lane_coords(ctx: _RoutingCtx, section: Section, station: Station) -> list[float]:
-    """Lane-axis coordinates of the lines *station* carries in *section*."""
-    frame = _section_lane_frame(ctx.graph, section, ctx.positive_fan)
+def _lane_coords(ctx: _RoutingCtx, frame: AxisFrame, station: Station) -> list[float]:
+    """Lane-axis coordinates of the lines *station* carries, read in *frame*."""
     return [
         station_lane_coord(frame, station, _get_offset(ctx, station.id, lid))
         for lid in ctx.graph.station_lines(station.id)
@@ -681,6 +688,7 @@ def _lane_coords(ctx: _RoutingCtx, section: Section, station: Station) -> list[f
 
 
 def _clears(points: list[tuple[float, float]], boxes: list[_Box]) -> bool:
+    """Whether no segment of the polyline *points* touches any of *boxes*."""
     return not any(
         segment_intersects_bbox(a[0], a[1], b[0], b[1], box)
         for a, b in zip(points, points[1:])
@@ -704,6 +712,9 @@ def _clear_lane_change(
     beside the footprints and inside the section box, pass them there, and
     cross to the target's lane just before it.  Side lanes that cross another
     line's lane at the port come last, then nearer the target's lane first.
+
+    The section's flow runs along ``y`` (lanes along ``x``): the route's
+    flow-axis coordinates are the stations' ``y`` and its lanes are ``x``.
     """
     sp, tp = src.y, tgt.y
     end_min = ctx.curve_radius + MIN_STRAIGHT_PORT
@@ -719,9 +730,11 @@ def _clear_lane_change(
     early = _compute_diagonal_placement(
         sp, tp, ctx.diagonal_run, end_min, 0.0, is_fork=True, is_join=False
     )
-    if (late[0] - early[1]) * math.copysign(1.0, tp - sp) < 2 * ctx.curve_radius:
+    room_for_two_turns = 2 * ctx.curve_radius
+    if (late[0] - early[1]) * math.copysign(1.0, tp - sp) < room_for_two_turns:
         return None
-    port_lanes = _lane_coords(ctx, section, src)
+    frame = _section_lane_frame(ctx.graph, section, ctx.positive_fan)
+    port_lanes = _lane_coords(ctx, frame, src)
 
     def preference(lane: float) -> tuple[bool, float, float]:
         crosses_port_lane = any(
@@ -732,7 +745,8 @@ def _clear_lane_change(
     candidates = _side_lane_candidates(footprints, ctx.offset_step, src_lane, early)
     _flow_axis, lane_axis = AxisFrame.axes_for_direction(section.direction)
     box_lo, box_hi = section_bbox_span(section, lane_axis)
-    inside = (box_lo + ctx.offset_step, box_hi - ctx.offset_step)
+    inside_margin = ctx.offset_step
+    inside = (box_lo + inside_margin, box_hi - inside_margin)
     for lane in sorted(candidates, key=preference):
         if not inside[0] <= lane <= inside[1]:
             continue

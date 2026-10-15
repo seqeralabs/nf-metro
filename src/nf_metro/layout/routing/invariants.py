@@ -54,7 +54,7 @@ from nf_metro.layout.geometry import (
     AxisFrame,
     axis_split,
     cotravelling_lane_clearance,
-    flow_port_sides,
+    flow_entry_side,
     lanes_run_along_y,
     point_to_polyline_distance,
 )
@@ -1661,7 +1661,7 @@ def check_convergence_shallow_feeder_concentric(
             continue
         sec = graph.section_for_port(port)
         if not lanes_run_along_y(sec.direction) or (
-            port.side is not flow_port_sides(sec.direction)[0]
+            port.side is not flow_entry_side(sec.direction)
         ):
             continue
         feeders = (

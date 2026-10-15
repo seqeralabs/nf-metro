@@ -251,8 +251,6 @@ def fanout_divergence_peel_order(
             [float(abs(reach[branch])) for branch in branches],
         )
     if len(set(reach)) > 1 and 0 in row_delta:
-        if len(set(row_delta)) < 2:
-            return None
         if len({value > 0 for value in row_delta if value != 0}) != 1:
             return None
 

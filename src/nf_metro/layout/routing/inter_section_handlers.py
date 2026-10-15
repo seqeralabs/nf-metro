@@ -1223,14 +1223,13 @@ def _left_exit_wrap_over_top_y(
     the dips give each feeder its own descent below the target.
     """
     graph, src, tgt, tgt_row = f.graph, f.src, f.tgt, f.tgt_row
-    gap_top, gap_bottom = (
-        _gap_above_target_y(graph, tgt_row) if tgt_row is not None else (0.0, 0.0)
-    )
+    if tgt_row is None:
+        return None
+    gap_top, gap_bottom = _gap_above_target_y(graph, tgt_row)
     if gap_bottom <= gap_top or not _inter_row_band_fits(gap_top, gap_bottom):
         return None
     if len({e.line_id for e in graph.edges_to(tgt.id)}) > 1:
         return None
-    assert tgt_row is not None
     gy = _gap_above_channel_y(f.ctx, tgt_row)
     blocked = (
         f.v_segment_crosses_other_section(cx, src.y, gy)
@@ -2227,14 +2226,14 @@ def arrival_approach(edge: Edge, ctx: _RoutingCtx) -> Direction | None:
         else _route_l_shape(edge, src, tgt, f.i, f.n, ctx)
     )
     points = route.points if route is not None else []
-    vertical_legs = [
-        (start, (start[0], end[1]))
+    vertical_steps = [
+        end[1] - start[1]
         for start, end in zip(points, points[1:])
         if abs(end[1] - start[1]) > max(abs(end[0] - start[0]), COORD_TOLERANCE)
     ]
-    if all(abs(end[1] - start[1]) <= ctx.curve_radius for start, end in vertical_legs):
+    if all(abs(dy) <= ctx.curve_radius for dy in vertical_steps):
         return None
-    return segment_direction(*vertical_legs[-1])
+    return Direction.D if vertical_steps[-1] > 0 else Direction.U
 
 
 @dataclass(frozen=True, slots=True)
@@ -4678,10 +4677,11 @@ def _perp_entry_source_beyond_channel(
     other section.
     """
     runway = outer_lane_radius(n, ctx.curve_radius, ctx.offset_step)
+    two_turn_riser = 2 * runway
     travel = 1.0 if is_top else -1.0
     return (
         tgt_sec is not None
-        and (channel_y - src.y) * travel < 2 * runway
+        and (channel_y - src.y) * travel < two_turn_riser
         and (final_x - src.x) * lead.sign >= runway
         and (section_bbox_span(tgt_sec, "y")[0 if is_top else 1] - src.y) * travel
         >= runway

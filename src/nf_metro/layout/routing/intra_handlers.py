@@ -27,7 +27,7 @@ from nf_metro.layout.constants import (
 )
 from nf_metro.layout.geometry import (
     diagonal_centreline,
-    flow_port_sides,
+    flow_entry_side,
     lanes_run_along_y,
     segment_intersects_bbox,
     single_corner_centreline,
@@ -88,7 +88,7 @@ def _route_entry_runway(
     if (
         not section
         or not lanes_run_along_y(section.direction)
-        or port.side != flow_port_sides(section.direction)[0]
+        or port.side != flow_entry_side(section.direction)
     ):
         return None
 

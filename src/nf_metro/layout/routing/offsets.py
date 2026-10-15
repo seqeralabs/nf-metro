@@ -24,6 +24,7 @@ from nf_metro.layout.constants import (
 )
 from nf_metro.layout.geometry import (
     AxisFrame,
+    flow_entry_side,
     flow_port_sides,
     lanes_run_along_x,
     lanes_run_along_y,
@@ -1043,7 +1044,7 @@ def _free_entry_feeder(
     """
     graph = ctx.graph
     sides = (
-        (flow_port_sides(section.direction)[0],)
+        (flow_entry_side(section.direction),)
         if flow_entry
         else perpendicular_port_sides(section.direction)
     )
@@ -1165,7 +1166,7 @@ def _reorder_fanout_divergence(ctx: _OffsetCtx) -> None:
             if flow_feeder_id is not None and new_order is not None:
                 _reslot_section_lines(ctx, flow_feeder_id, new_order)
             continue
-        port_id = _perp_entry_port_carrying(graph, section, set(peel_order))
+        port_id = _perp_entry_port_carrying(graph, section, bundle)
         if port_id is None:
             continue
         arrival = _perp_entry_arrival_order(graph, port_id, peel_order)
@@ -2813,7 +2814,7 @@ def _branch_leaves_junction_straight(
     if port is None or not port.is_entry:
         return False
     direction = graph.section_for_port(port).direction
-    if port.side is not flow_port_sides(direction)[0]:
+    if port.side is not flow_entry_side(direction):
         return False
     junction, target = graph.stations[junction_id], graph.stations[edge.target]
     lane_gap = getattr(target, lane_axis) - getattr(junction, lane_axis)
@@ -3823,6 +3824,15 @@ def _feeder_is_corridor(
     )
 
 
+_Approach = Literal["flat", "below", "above"]
+
+_APPROACH_BY_ARRIVAL: dict[Direction | None, _Approach] = {
+    Direction.D: "above",
+    Direction.U: "below",
+    None: "flat",
+}
+
+
 def _same_row_bypass_approaches(
     graph: MetroGraph,
     edges: Sequence[Edge],
@@ -3844,15 +3854,7 @@ def _same_row_bypass_approaches(
         CURVE_RADIUS,
         None if station_offsets is None else dict(station_offsets),
     )
-    sides: dict[Direction | None, _Approach] = {
-        Direction.D: "above",
-        Direction.U: "below",
-        None: "flat",
-    }
-    return [sides[arrival_approach(edge, ctx)] for edge in edges]
-
-
-_Approach = Literal["flat", "below", "above"]
+    return [_APPROACH_BY_ARRIVAL[arrival_approach(edge, ctx)] for edge in edges]
 
 
 @dataclass(frozen=True)
@@ -3942,6 +3944,8 @@ def same_row_bypass_entry(
             line_sides.add("flat")
     if set(sides) != set(feeders) or not bypass_edges:
         return None
+    if not u_turn and not any("flat" in line_sides for line_sides in sides.values()):
+        return None
     # A detour leaves its row by construction (:func:`_arrives_on_same_row_bypass`),
     # so only a loop round the section can turn out to be drawn level.
     approaches = [
@@ -3958,8 +3962,7 @@ def same_row_bypass_entry(
     level = {lid for lid, line_sides in sides.items() if line_sides == {"flat"}}
     u_turn -= level
     detour -= level
-    flat_fed = bool(level)
-    joined = flat_fed or (bool(u_turn) and len(set(feeders.values())) > 1)
+    joined = bool(level) or (bool(u_turn) and len(set(feeders.values())) > 1)
     if not (u_turn or detour) or not joined or not u_turn.isdisjoint(detour):
         return None
     descending = frozenset(
@@ -4176,7 +4179,7 @@ def _flow_entry_lane_y_ports(ctx: _OffsetCtx) -> Iterator[tuple[str, Port]]:
         if not port.is_entry:
             continue
         direction = graph.section_for_port(port).direction
-        if lanes_run_along_y(direction) and port.side is flow_port_sides(direction)[0]:
+        if lanes_run_along_y(direction) and port.side is flow_entry_side(direction):
             yield port_id, port
 
 
@@ -5171,7 +5174,7 @@ def _straight_branches_land_level(
     short leg.
     """
     graph = ctx.graph
-    flow_entry = flow_port_sides(section.direction)[0]
+    flow_entry = flow_entry_side(section.direction)
     lane_axis = "y" if lanes_run_along_y(section.direction) else "x"
     junction = graph.stations[junction_id]
     start = HopEnd(junction, *_resolve_section_colrow(graph, junction))
