@@ -769,6 +769,7 @@ def _overwide_peeloff_bands(
 
 
 PEELOFF_WIDE_DUAL_FED = CURVE_REPROS / "merge_entry_dual_fed_line_from_top_exit.mmd"
+DUAL_FED_PEELOFF_PITCH_XFAIL_ISSUE: int | None = None
 
 
 def test_peeloff_risers_descend_on_the_nesting_pitch(
@@ -815,8 +816,8 @@ def test_peeloff_risers_descend_on_the_nesting_pitch(
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "z2__entry_left_4's two peel-off risers descend 6.0px apart, wider than "
-        "one 4.0px nesting step"
+        f"issue #{DUAL_FED_PEELOFF_PITCH_XFAIL_ISSUE}: z2__entry_left_4's two "
+        "peel-off risers descend 6.0px apart, wider than one 4.0px nesting step"
     ),
 )
 def test_dual_fed_line_from_top_exit_peels_off_on_the_nesting_pitch(
