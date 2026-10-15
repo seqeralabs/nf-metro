@@ -81,9 +81,11 @@ A `%%metro output:` path may carry its own render settings after a `|`, so one
 `nf-metro render` pass writes several differently-configured files with no CLI
 flags at all:
 
-```
+```metro
 %%metro output: nf-core-demo_metro_map.svg
+%% [!callout /|/] Everything right of the first `|` overrides this output alone.
 %%metro output: nf-core-demo_metro_map_animated.svg | animate
+%% [!callout /mode=dark/] A `key=value` token. `mode=dark` is `--mode dark`.
 %%metro output: nf-core-demo_metro_map_dark.png     | mode=dark
 %%metro output: nf-core-demo_metro_map_light.png    | mode=light
 ```
@@ -227,7 +229,7 @@ The directive is the supported control.
 `--format html` produces a self-contained `.html` file with the SVG inlined and a small JS and CSS layer.
 It has no external dependencies and needs no network:
 
-```bash frame="terminal"
+```bash frame="terminal" placeholder="pipeline.mmd"
 nf-metro render pipeline.mmd --format html -o pipeline.html
 ```
 
@@ -235,6 +237,10 @@ The page supports drag-to-pan, scroll-to-zoom, station hover tooltips, and a cli
 Clicking a line isolates it.
 Stations and sections that do not carry that line are hidden, and the view zooms to the bounding box of what remains.
 Click again, press `Esc`, or select **Reset** to restore the full view.
+
+The page's colours follow the map's mode.
+`--mode` fixes them, and with no mode they follow the viewer's light/dark preference.
+[Embedding](/nf-metro/embedding/#the-self-contained-interactive-page) covers the snippet's theming on a host page.
 
 The **Embed&hellip;** button opens a panel with copyable inline-HTML, iframe, and static-SVG snippets.
 The [Embedding guide](/nf-metro/embedding/) covers responsive sizing, font portability, host theming, and progress overlays.
@@ -245,7 +251,7 @@ The [Embedding guide](/nf-metro/embedding/) covers responsive sizing, font porta
 A rasterizer has no CSS clock, so exporting that motion means drawing the frames instead.
 A `.gif`, `.webp`, `.mp4`, or `.webm` output path does exactly that, and turns the animation on for you:
 
-```bash frame="terminal"
+```bash frame="terminal" placeholder="pipeline.mmd"
 nf-metro render pipeline.mmd -o pipeline.gif --duration 12 --fps 20
 ```
 
@@ -270,7 +276,7 @@ It exits non-zero if a route is drawn through a station's label or marker, or if
 It reads the geometry as it ends up on the page, after the per-line offsets and label shifts the layout applies.
 It therefore catches defects the pre-render checks cannot see:
 
-```bash frame="terminal"
+```bash frame="terminal" placeholder="pipeline.mmd"
 nf-metro render pipeline.mmd -o pipeline.svg --validate
 ```
 
@@ -320,13 +326,16 @@ Each job is an object with the required `input` and `output` keys, plus any subs
 | `inactive_lines`       | Line IDs to render inactive, as a comma-separated string or a JSON list. Omit the key to use the map's own inactive-by-directive lines. Give `[]` to force every line active |
 | `layout_options`       | Object of layout overrides, for example `{"manifest": false, "x_spacing": 60}`                                                                                               |
 
-```json
+<!-- prettier-ignore -->
+```jsonc
 [
+  // [!callout /input/] Only `input` and `output` are required.
   { "input": "examples/rnaseq_auto.mmd", "output": "out/rnaseq.svg" },
   {
     "input": "examples/sarek.mmd",
     "output": "out/sarek.svg",
     "mode": "light",
+    // [!callout /layout_options/] Layout overrides nest under one key.
     "layout_options": { "x_spacing": 60 }
   }
 ]
@@ -434,8 +443,9 @@ With an SVG input the map is served exactly as drawn.
 
 Passing a `LAUNCH_CMD` after `--` starts the run in one step with the weblog configured automatically:
 
-```bash frame="terminal"
+```bash frame="terminal" placeholder="map.mmd,my/pipeline"
 nf-metro serve map.mmd --open --shutdown-after-complete -- \
+  # [!callout /nextflow/] Everything after `--` is the launch command. The weblog is added for you.
   nextflow run my/pipeline -profile docker
 ```
 

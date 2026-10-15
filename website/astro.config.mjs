@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig, fontProviders } from "astro/config";
 import starlight from "@astrojs/starlight";
 import starlightLinksValidator from "starlight-links-validator";
+import codeblocks, { linksValidatorExclude } from "starlight-codeblocks";
 import sitemap from "@astrojs/sitemap";
 import mermaid from "astro-mermaid";
 import {
@@ -15,7 +16,7 @@ import { remarkRebaseLinks } from "./src/lib/rebase-links.mjs";
 import { ogImageMetaTags } from "./src/lib/og-meta-tags.mjs";
 import { GITHUB_URL, PAGES_ORIGIN } from "./src/repo";
 
-// Expressive Code options (custom grammars + the color-chips plugin) live in
+// Expressive Code options (custom grammars + the codeblocks EC plugin) live in
 // ec.config.mjs - the <Code> component requires them to be loadable separately.
 
 // Canonical Pages origin (owner-specific value lives in src/repo).
@@ -34,6 +35,29 @@ const componentsDir = fileURLToPath(
   new URL("./src/components", import.meta.url),
 );
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
+
+// Nextflow logo path from Simple Icons (CC0), 24x24.
+const NEXTFLOW_ICON =
+  "M.005 4.424V0c6.228.259 11.227 5.268 11.477 11.506H7.058C6.828 7.715 3.786 4.673.005 4.424m7.082 8.089h4.424C11.251 18.741 6.242 23.741.005 23.99v-4.423c3.79-.231 6.832-3.273 7.082-7.054m9.826-1.036h-4.424C12.749 5.249 17.758.25 23.995 0v4.424c-3.79.23-6.832 3.263-7.082 7.053m7.082 8.099V24c-6.228-.259-11.227-5.268-11.477-11.506h4.424c.23 3.791 3.272 6.833 7.053 7.082";
+
+// The playground reads `#mmd=<base64url>` (UTF-8) on load. It runs in the
+// browser with no repo on disk, so a `%%metro logo:` file path is a render error
+// there; such a line is dropped and the map opens without its logo. A logo
+// given entirely as data: URIs renders, so it is kept.
+const LOGO_LINE = /^[ \t]*%%metro[ \t]+logo[ \t]*:(.*)(?:\r?\n|$)/gim;
+
+/** @param {string} code */
+function playgroundUrl(code) {
+  const source = code.replace(LOGO_LINE, (line, value) =>
+    value
+      .split("|")
+      .map((/** @type {string} */ path) => path.trim())
+      .every((path) => !path || path.startsWith("data:"))
+      ? line
+      : "",
+  );
+  return `${base}playground/#mmd=${Buffer.from(source).toString("base64url")}`;
+}
 
 // Compare two dotted version strings (e.g. "0.7.2", "0.1") so the larger sorts
 // first (descending). Missing patch components count as 0.
@@ -142,6 +166,44 @@ export default defineConfig({
     }),
     starlight({
       plugins: [
+        codeblocks({
+          notation: {
+            comments: {
+              metro: ["%%"],
+              mmd: ["%%"],
+              mdx: ["{/* */}"],
+              lark: ["//"],
+            },
+          },
+          swatches: {
+            shape: "rounded",
+            size: "0.9em",
+            // `%%metro line:` colours sit between `|` separators.
+            byLanguage: {
+              metro: { delimiters: { before: ["|"], after: ["|"] } },
+              mmd: { delimiters: { before: ["|"], after: ["|"] } },
+            },
+          },
+          fileIcons: {
+            icons: { nextflow: NEXTFLOW_ICON },
+            files: {
+              ".nf": "nextflow",
+              "nextflow.config": "nextflow",
+              ".mmd": false,
+            },
+            languages: {
+              nextflow: { icon: "nextflow", colour: "#0DC09D" },
+              metro: { icon: false },
+              mmd: { icon: false },
+            },
+          },
+          playgrounds: {
+            metro: {
+              label: "Open in playground",
+              url: ({ code }) => playgroundUrl(code),
+            },
+          },
+        }),
         starlightLinksValidator({
           // Docs author internal links with the production `/nf-metro/` base;
           // remarkRebaseLinks rewrites that prefix to the active build base
@@ -155,6 +217,7 @@ export default defineConfig({
           // - _generated/metro/ holds <Metro>'s build-time raster/video
           //   exports (docs/formats.mdx), also static media rather than pages.
           exclude: ({ link }) =>
+            linksValidatorExclude({ link }) ||
             link.startsWith(`${base}gallery`) ||
             link.startsWith(`${base}pipelines`) ||
             link.includes("_generated/metro/") ||
@@ -169,7 +232,7 @@ export default defineConfig({
       // Site-wide OG preview; gallery/pipelines pages override with an image
       // of their own map (see their `frontmatter.head` in each page/route).
       head: ogImageMetaTags(`${site}${base}og/default.png`),
-      // Expressive Code options (grammars + color-chips plugin) are in ec.config.mjs.
+      // Expressive Code options (grammars + codeblocks EC plugin) are in ec.config.mjs.
       social: [
         {
           icon: "github",

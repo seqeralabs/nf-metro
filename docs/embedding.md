@@ -47,7 +47,7 @@ The host then sizes it with CSS:
 nf-metro render pipeline.mmd -o pipeline.svg --responsive
 ```
 
-```css
+```css title="styles.css"
 .metro-map svg {
   width: 100%;
   height: auto;
@@ -94,7 +94,7 @@ Chrome colors are the background, title, labels, section boxes, and legend.
 The renderer emits each as a CSS custom property with the theme color as the fallback, as in `fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b))`.
 A host recolors the map **without re-rendering** by setting these on a wrapping element:
 
-```css
+```css title="styles.css"
 .metro-map {
   --nfm-map-bg: #ffffff;
   --nfm-map-title-color: #222;
@@ -105,6 +105,7 @@ A host recolors the map **without re-rendering** by setting these on a wrapping 
   --nfm-map-legend-bg: #fafafa;
   --nfm-map-legend-text-color: #333;
   --nfm-map-marker-stroke: #333;
+  /* [!callout /muted/] Grayed labels use their own property, so they stay gray. */
   --nfm-map-muted-color: #999;
 }
 ```
@@ -238,11 +239,11 @@ That leaves the host two rules:
   Coordinates are absolute and share the origin.
   A marker the overlay draws at a node's manifest `(x, y)` therefore lands exactly on that node.
 
-```html
+```html title="index.html"
 <div class="metro-map" style="position: relative;">
-  <!-- base render, sized by CSS -->
+  <!-- [!callout /object/] Base render, sized by CSS. -->
   <object data="pipeline.svg" type="image/svg+xml" style="width:100%;"></object>
-  <!-- overlay, same viewBox, on top -->
+  <!-- [!callout /<svg/] Overlay with the same viewBox, on top. -->
   <svg
     viewBox="0 0 1509 759"
     style="position:absolute; inset:0; width:100%; pointer-events:none;"
@@ -272,7 +273,7 @@ Render a portable, fluid SVG and inline it:
 nf-metro render pipeline.mmd -o pipeline.svg --responsive --embed-font
 ```
 
-```html
+```html title="index.html"
 <div class="metro-map" style="max-width: 1000px;">
   <!-- paste the contents of pipeline.svg here, or: -->
   <object data="pipeline.svg" type="image/svg+xml" style="width:100%;"></object>
@@ -289,7 +290,17 @@ Most static-site generators and wikis accept the inline SVG unchanged.
 `render --format html` produces a complete page with the SVG, driver, and styling inlined and no network access needed.
 Its **Embed…** modal offers an inline `<div>` snippet that keeps interactivity without an iframe, an iframe one-liner, and a static-SVG fallback.
 The page is already responsive and scopes each map independently.
-The SVG-only sizing and namespacing flags described earlier therefore do not apply to it, and the CLI warns if you pass them with `--format html`.
+The SVG-only sizing and namespacing flags described earlier therefore do not apply to it, and nor does `--no-chrome-css`.
+The CLI notes each one it ignores when you pass it with `--format html`.
+
+The page and its snippet follow the map's mode.
+With `--mode` or `%%metro mode:` set, both use that palette everywhere.
+With no mode, both declare `color-scheme: light dark` and follow the viewer's light/dark preference, as a standalone SVG does.
+That suits a snippet pasted into a page with no opinion on theme.
+On a host with its own theme picker, pass `--no-self-color-scheme`: the snippet then leaves `color-scheme` to the host and follows its picker, like the inline SVGs in [Theming](/nf-metro/theming/#where-color-scheme-should-live).
+The page itself always declares its own, since it is a whole document.
+In an iframe with no mode, Chrome and Firefox show the page in the host's `color-scheme`, while Safari uses the viewer's own preference.
+Set `--mode` for an iframe whose look must be the same everywhere.
 Font portability **does** reach the inlined SVG, which lets an embeddable page carry its own fonts:
 
 ```bash

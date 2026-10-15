@@ -18,6 +18,7 @@ nf-metro render rnaseq.mmd -o rnaseq.webm
 `-o` repeats, so one command writes several files:
 
 ```bash frame="terminal"
+# [!callout /-o rnaseq.png/] Each repeated `-o` writes one more file.
 nf-metro render rnaseq.mmd -o rnaseq.svg -o rnaseq.png -o rnaseq.mp4
 ```
 
@@ -55,7 +56,9 @@ Fonts are the one thing an SVG cannot settle by itself, because it names a famil
 A still raster, for anywhere an SVG is turned away: a journal submission, a slide, a chat window.
 
 ```bash frame="terminal"
-nf-metro render rnaseq.mmd -o rnaseq.png --mode light --scale 2
+nf-metro render rnaseq.mmd -o rnaseq.png \
+  --mode light \ # [!annotate] Bakes one palette, `light` or `dark`.
+  --scale 2 # [!annotate] Pixels per SVG unit; `2` is retina.
 ```
 
 A rasteriser has no CSS cascade and no viewer colour scheme to consult, so the PNG path settles the picture before drawing it. It bakes one concrete palette, drops the `var()` chrome properties, and draws the labels with the bundled Inter rather than whatever the machine has installed. The same map therefore rasterises to the same bytes anywhere, which is what makes a committed PNG reviewable in a diff.
@@ -82,7 +85,7 @@ _The same map at `--scale 1`: 1799&times;696._
 nf-metro render rnaseq.mmd -o rnaseq.html
 ```
 
-Drag to pan, scroll to zoom, hover a station for a tooltip. Clicking a line in the legend isolates it, hides the stations and sections that line does not touch, and zooms to what is left. `Esc` or **Reset** restores the full view. An **Embed&hellip;** button hands you copyable inline-HTML, iframe, and static-SVG snippets.
+Drag to pan, scroll to zoom, hover a station for a tooltip. Clicking a line in the legend isolates it, hides the stations and sections that line does not touch, and zooms to what is left. `Esc` or **Reset** restores the full view. An **Embed&hellip;** button hands you copyable inline-HTML, iframe, and static-SVG snippets. The page follows the map's mode: `--mode` fixes it, and without one it follows the viewer's light/dark preference.
 
 Reach for it when the map is the thing being explored rather than a picture beside some prose.
 
@@ -91,7 +94,9 @@ Reach for it when the map is the thing being explored rather than a picture besi
 Four formats export the `--animate` motion as a loop, for the places a CSS animation will not run: a README, a slide, a conference talk.
 
 ```bash frame="terminal"
-nf-metro render rnaseq.mmd -o rnaseq.gif --duration 12 --fps 20
+nf-metro render rnaseq.mmd -o rnaseq.gif \
+  --duration 12 \ # [!annotate] Loop length in seconds.
+  --fps 20 # [!annotate] Frames per second.
 ```
 
 The same 12-second loop at 20fps, in each of the four containers:
