@@ -6792,12 +6792,13 @@ def _right_entry_over_top_geometry(
     """Resolve the seam shared by over-top planning and emission.
 
     See :func:`_route_right_entry_over_top` for the loop this describes.  The
-    bundle keeps its source mean end to end, so both the source-side and the
-    entry-side horizontals sit on ``src_center``; this line's own rank against
-    that centreline is what puts its rise one stagger off ``lead_x``.
+    source-side horizontal sits on ``src_center`` and the entry-side one on
+    ``tgt_center``, the lanes the port seated the looping lines on; this line's
+    own rank against the centreline is what puts its rise one stagger off
+    ``lead_x``.
     """
     graph = ctx.graph
-    members, src_center, _tgt_center = gather_bundle(ctx, edge)
+    members, src_center, tgt_center = gather_bundle(ctx, edge)
 
     sx, sy = src.x, src.y
     ex, ey = tgt.x, tgt.y
@@ -6882,7 +6883,7 @@ def _right_entry_over_top_geometry(
         channel_y,
         descent_x,
         mid_sy,
-        ey + src_center,
+        ey + tgt_center,
         _SourceSeam(
             _leg_direction((sx, mid_sy), (lead_x, mid_sy)),
             turn_direction,
@@ -6909,8 +6910,6 @@ def _route_right_entry_over_top(
     Built via :func:`build_concentric_bundle` from the bundle's centreline, so
     the loop cannot flip and every corner is concentric by construction.
     """
-    # A U-turn keeps the bundle centred on its source mean end-to-end (the
-    # descent's reversal is matched by the section's reversed internal order).
     members, _src_center, _tgt_center = gather_bundle(ctx, edge)
     geometry = _right_entry_over_top_geometry(ctx, edge, src, tgt)
     centerline = [

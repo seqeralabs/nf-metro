@@ -1013,20 +1013,22 @@ def _section_exit_fanout_junction(ctx: _OffsetCtx, section: Section) -> str | No
     return junction_ids[0] if len(junction_ids) == 1 else None
 
 
-def _free_perp_entry_feeder(
-    ctx: _OffsetCtx, section: Section, bundle: set[str]
+def _free_entry_feeder(
+    ctx: _OffsetCtx, section: Section, bundle: set[str], *, flow_entry: bool
 ) -> str | None:
     """The upstream feeder free to inherit *section*'s fan peel order.
 
     *section* owns a fan-out divergence, so its bundle must reach it already
     stacked in the order the fan peels off; a feeder delivering the same lines
-    in the opposite order across *section*'s perpendicular entry makes the two
-    descents cross in the drop.  Reslotting the feeder to match is only sound
-    when the feeder's own order is unconstrained -- otherwise the mismatch has
-    to be resolved on *section*'s side instead.  Returns the feeder section id
-    when one upstream section delivers the whole *bundle* into *section* through
-    a perpendicular entry port and is free: *section* is its only consumer and
-    it owns no divergence junction of its own.
+    in another order either crosses them in the drop across a perpendicular
+    entry or jogs them across the seam of a flow-side one.  Reslotting the
+    feeder to match is only sound when the feeder's own order is unconstrained
+    -- otherwise the mismatch has to be resolved on *section*'s side instead.
+    Returns the feeder section id when one upstream section delivers the whole
+    *bundle* into *section* and is free: *section* is its only consumer and it
+    owns no divergence junction of its own.  *flow_entry* selects the entry the
+    bundle arrives on: the flow-side one, from a feeder flowing the same way,
+    or a perpendicular one.
 
     Two scope limits are deliberate.  Only a horizontal-flow (LR/RL) feeder is
     eligible: a vertical-flow feeder stacks its bundle along the flow axis and
@@ -1037,8 +1039,12 @@ def _free_perp_entry_feeder(
     therefore never be missed.
     """
     graph = ctx.graph
-    perp_sides = perpendicular_port_sides(section.direction)
-    line_feeder = _section_line_feeders(ctx, section, perp_sides)
+    sides = (
+        (flow_port_sides(section.direction)[0],)
+        if flow_entry
+        else perpendicular_port_sides(section.direction)
+    )
+    line_feeder = _section_line_feeders(ctx, section, sides)
     if not bundle <= set(line_feeder):
         return None
     feeder_ids = {line_feeder[lid] for lid in bundle}
@@ -1048,6 +1054,8 @@ def _free_perp_entry_feeder(
 
     feeder = graph.sections.get(feeder_id)
     if feeder is None or not lanes_run_along_y(feeder.direction):
+        return None
+    if flow_entry and feeder.direction != section.direction:
         return None
     if feeder.entry_ports:
         return None
@@ -1118,10 +1126,14 @@ def _reorder_fanout_divergence(ctx: _OffsetCtx) -> None:
     whose peel order matches plain priority skips its own re-slot, yet a mirrored
     entry side turns the port against that trunk regardless, so this arrival
     re-slot runs whenever a free upstream feeder
-    (:func:`_free_perp_entry_feeder`) delivers the bundle.  The feeder itself
+    (:func:`_free_entry_feeder`) delivers the bundle.  The feeder itself
     keeps the plain peel order: it sits on the far side of the same corner, where
     its own exit turn already reflects its section order, so a second reflection
     would cross the bundle in the descent.
+
+    A free feeder flowing the same way into the section's flow-side entry runs
+    the bundle straight on instead, so it takes the section's own order and the
+    seam between them stays level.
 
     Non-compact LR/RL sections only -- the divergence analog of
     :func:`_reorder_reconvergence`.
@@ -1141,16 +1153,14 @@ def _reorder_fanout_divergence(ctx: _OffsetCtx) -> None:
         if peel_order is None:
             continue
 
-        config = BoundaryConfig(
-            present=tuple(_section_present_line_set(ctx, sec_id)),
-            determining=tuple(peel_order),
-        )
-        new_order = lane_order(config, ctx.line_priority)
-        if new_order is not None:
-            _apply_section_line_order(ctx, sec_id, new_order)
+        new_order = _reslot_section_lines(ctx, sec_id, peel_order)
 
-        feeder_id = _free_perp_entry_feeder(ctx, section, set(peel_order))
+        bundle = set(peel_order)
+        feeder_id = _free_entry_feeder(ctx, section, bundle, flow_entry=False)
         if feeder_id is None:
+            flow_feeder_id = _free_entry_feeder(ctx, section, bundle, flow_entry=True)
+            if flow_feeder_id is not None and new_order is not None:
+                _reslot_section_lines(ctx, flow_feeder_id, new_order)
             continue
         port_id = _perp_entry_port_carrying(graph, section, set(peel_order))
         if port_id is None:
@@ -1160,13 +1170,26 @@ def _reorder_fanout_divergence(ctx: _OffsetCtx) -> None:
         for lid, off in _deal_slots_in_order(ctx, port_id, arrival).items():
             ctx.offsets[(port_id, lid)] = off
 
-        feeder_config = BoundaryConfig(
-            present=tuple(_section_present_line_set(ctx, feeder_id)),
-            determining=tuple(peel_order),
-        )
-        feeder_order = lane_order(feeder_config, ctx.line_priority)
-        if feeder_order is not None:
-            _apply_section_line_order(ctx, feeder_id, feeder_order)
+        _reslot_section_lines(ctx, feeder_id, peel_order)
+
+
+def _reslot_section_lines(
+    ctx: _OffsetCtx, sec_id: str, determining: Sequence[str]
+) -> tuple[str, ...] | None:
+    """Re-slot *sec_id* so *determining* leads its lane order; return that order.
+
+    ``None`` means the order is plain priority and the section is left as is.
+    """
+    order = lane_order(
+        BoundaryConfig(
+            present=tuple(_section_present_line_set(ctx, sec_id)),
+            determining=tuple(determining),
+        ),
+        ctx.line_priority,
+    )
+    if order is not None:
+        _apply_section_line_order(ctx, sec_id, order)
+    return order
 
 
 def _lines_holding_offset(
@@ -3680,7 +3703,10 @@ def _convergence_feeders(
     column, then qualify when either at least two feeders bypass intervening
     sections or a single bypass and its nearer feeders descend from one
     off-target row. A single bypass joined by a flat same-row feeder does not
-    form a climbing bundle and remains in its ordinary lane order.
+    form a climbing bundle and remains in its ordinary lane order.  A feeder
+    that loops round the section into the port
+    (:func:`_loops_round_entry_section`) has no approach depth on this side, so
+    its port is left to :func:`same_row_bypass_entry`.
     """
     target_col, target_row = _resolve_section_colrow(graph, graph.stations[port_id])
     if target_col is None:
@@ -3691,7 +3717,9 @@ def _convergence_feeders(
     for edge in graph.edges_to(port_id):
         source = graph.station_for_edge_source(edge)
         source_col, source_row = _resolve_section_colrow(graph, source)
-        if source_col is None:
+        if source_col is None or _loops_round_entry_section(
+            graph, source, graph.stations[port_id]
+        ):
             return None
         bypass = abs(target_col - source_col) > 1 and _has_intervening_sections(
             graph, source_col, target_col, source_row
@@ -3761,6 +3789,23 @@ def _arrives_on_same_row_bypass(
     return channel_y > port_station.y + _SAME_Y_TOLERANCE
 
 
+def _loops_round_entry_section(
+    graph: MetroGraph, source: Station, port_station: Station
+) -> bool:
+    """Whether *source* lies past *port_station* along its section's flow.
+
+    The port faces away from such a source, so the connector has to loop round
+    the section's top or bottom and turn back into the port: a U-turn.
+    """
+    port = graph.ports.get(port_station.id)
+    if port is None:
+        return False
+    direction = graph.section_for_port(port).direction
+    flow_axis = AxisFrame.axes_for_direction(direction)[0]
+    past = getattr(source, flow_axis) - getattr(port_station, flow_axis)
+    return past * AxisFrame.flow_sign(direction) > _SAME_Y_TOLERANCE
+
+
 def _feeder_is_corridor(
     graph: MetroGraph, source: Station, port_station: Station, tol: float
 ) -> bool:
@@ -3802,17 +3847,21 @@ _Approach = Literal["flat", "below", "above"]
 
 @dataclass(frozen=True)
 class SameRowBypassEntry:
-    """A flow-side entry where same-row bypass lines join flat feeders.
+    """A flow-side entry where same-row bypass lines join other feeders.
 
     ``feeders`` names each line's same-row feeder station and ``bypass_depth``
     each bypass line's column distance to the port; every line not in
     ``bypass_depth`` arrives flat.  ``descending`` holds the bypass lines that
     come down into the port from above; the rest climb in from below.
+    ``u_turn`` holds the bypass lines whose feeder lies past the port along the
+    section's flow, so they loop round the section itself rather than detour
+    past the sections before it.
     """
 
     feeders: Mapping[str, str]
     bypass_depth: Mapping[str, int]
     descending: frozenset[str] = frozenset()
+    u_turn: frozenset[str] = frozenset()
 
     @property
     def rising(self) -> frozenset[str]:
@@ -3832,11 +3881,16 @@ def same_row_bypass_entry(
 
     Every line must reach the port from a feeder level with it on the port's
     grid row, either flat or through a same-row bypass; at least one of each is
-    needed.  A line fed more than once qualifies only when all its feeders
-    approach from the same side -- flat, from below, or from above -- since
-    feeders arriving from different sides cannot all be honoured by a single
-    lane, so such a port keeps its ordinary lane order.  A merge-fed confluence
-    is left to the routing-time band alignment that owns it (see
+    needed.  A bypass looping round the section into the port
+    (:func:`_loops_round_entry_section`) needs only a second feeder station of
+    any kind: the loop turns its lines over against every other approach, so
+    the port has an order to settle even with no flat line.  A line fed more than
+    once qualifies only when all its feeders approach from the same side --
+    flat, from below, or from above -- and either all loop round the section
+    or none do, since feeders arriving different ways cannot all be honoured
+    by a single lane, so such a port keeps its ordinary lane order.  A
+    merge-fed confluence is left to the routing-time band alignment that owns
+    it (see
     :func:`_port_fed_through_merge_junction`).  *station_offsets* are the lanes
     the bypass routes are read against.
     """
@@ -3848,6 +3902,8 @@ def same_row_bypass_entry(
     feeders: dict[str, str] = {}
     depth: dict[str, int] = {}
     bypass_edges: list[Edge] = []
+    u_turn: set[str] = set()
+    detour: set[str] = set()
     for edge in graph.edges_to(port_id):
         lid = edge.line_id
         line_sides = sides.setdefault(lid, set())
@@ -3858,26 +3914,34 @@ def same_row_bypass_entry(
             line_sides.add("below" if dy > 0 else "above")
             continue
         feeders.setdefault(lid, edge.source)
-        if source_col is not None and _arrives_on_same_row_bypass(
-            graph,
-            source,
-            port_station,
-            source_colrow=(source_col, source_row),
-            target_colrow=(target_col, target_row),
+        loops = _loops_round_entry_section(graph, source, port_station)
+        if source_col is not None and (
+            loops
+            or _arrives_on_same_row_bypass(
+                graph,
+                source,
+                port_station,
+                source_colrow=(source_col, source_row),
+                target_colrow=(target_col, target_row),
+            )
         ):
             bypass_edges.append(edge)
             depth.setdefault(lid, abs(target_col - source_col))
+            (u_turn if loops else detour).add(lid)
         else:
             line_sides.add("flat")
     flat_fed = any("flat" in line_sides for line_sides in sides.values())
-    if set(sides) != set(feeders) or not bypass_edges or not flat_fed:
+    joined = flat_fed or (bool(u_turn) and len(set(feeders.values())) > 1)
+    if set(sides) != set(feeders) or not bypass_edges or not joined:
         return None
     descending = _same_row_bypass_descents(graph, bypass_edges, station_offsets)
     for edge in bypass_edges:
         sides[edge.line_id].add("above" if edge.line_id in descending else "below")
     if any(len(line_sides) > 1 for line_sides in sides.values()):
         return None
-    return SameRowBypassEntry(feeders, depth, descending)
+    if not u_turn.isdisjoint(detour):
+        return None
+    return SameRowBypassEntry(feeders, depth, descending, frozenset(u_turn))
 
 
 def _section_flow_bundle(graph: MetroGraph, section: Section) -> frozenset[str]:
@@ -3928,6 +3992,14 @@ def _slot_same_row_bypass_entry(ctx: _OffsetCtx, port_id: str, port: Port) -> No
     lines from one source keep the order they leave it in, since a bypass
     carries its bundle round the detour unchanged.
 
+    A line looping round the section (``u_turn``) arrives on the port's outward
+    side round two corners turning the same way, so it seats beyond any detour
+    line on its side, and the loop turns its stack over: the looping lines take
+    the mirror of the order a detour on that side would give them.  The nearer
+    source, which joins the loop inside the farther ones, therefore turns in on
+    the lane farthest from the flat band, and a source's own lines arrive
+    reversed.  With no flat line the bundle packs from the top lane.
+
     Where the flat lanes are not one contiguous block, or keeping them would
     drift the section's trunk (see :func:`_keeping_flat_lanes_drifts_row_trunk`),
     the bundle packs from the top lane and each moved flat line carries its new
@@ -3958,25 +4030,35 @@ def _slot_same_row_bypass_entry(ctx: _OffsetCtx, port_id: str, port: Port) -> No
         )
 
     flat = sorted(entry.flat, key=lambda lid: (arrival[lid], priority(lid)))
-    above = top_down(entry.descending, nearest_first=False)
-    below = top_down(entry.rising, nearest_first=True)
+    detour_above = entry.descending - entry.u_turn
+    detour_below = entry.rising - entry.u_turn
+    above = [
+        *reversed(top_down(entry.descending & entry.u_turn, nearest_first=False)),
+        *top_down(detour_above, nearest_first=False),
+    ]
+    below = [
+        *top_down(detour_below, nearest_first=True),
+        *reversed(top_down(entry.rising & entry.u_turn, nearest_first=True)),
+    ]
     step = ctx.offset_step
-    new_offs = {lid: arrival[lid] for lid in flat}
-    new_offs.update(
-        {
-            lid: arrival[flat[0]] - rank * step
-            for rank, lid in enumerate(reversed(above), 1)
-        }
-    )
-    new_offs.update(
-        {lid: arrival[flat[-1]] + rank * step for rank, lid in enumerate(below, 1)}
-    )
+    new_offs: dict[str, float] = {}
+    if flat:
+        new_offs = {lid: arrival[lid] for lid in flat}
+        new_offs.update(
+            {
+                lid: arrival[flat[0]] - rank * step
+                for rank, lid in enumerate(reversed(above), 1)
+            }
+        )
+        new_offs.update(
+            {lid: arrival[flat[-1]] + rank * step for rank, lid in enumerate(below, 1)}
+        )
     contiguous = all(
         abs(arrival[right] - arrival[left] - step) <= _OFFSET_EQ_TOLERANCE
         for left, right in zip(flat, flat[1:])
     )
     section = ctx.graph.sections[port.section_id]
-    must_pack = not contiguous
+    must_pack = not flat or not contiguous
     drift_only = not must_pack and _keeping_flat_lanes_drifts_row_trunk(
         ctx, section, new_offs
     )
@@ -4849,6 +4931,11 @@ def _linear_entry_frame(
     corridor-fed or reflected entry, one whose adopted lanes would collide or
     strand a reserved lane, or one already level on its feeder lane, defers to
     the reactive trunk-anchoring path instead.
+
+    The frame runs on through any divergence junction its flow exit feeds: the
+    junction sits a few pixels past the port, so a lane it kept from before the
+    frame would draw the frame's shift as a jog on that short leg.  A section
+    downstream of the junction then reads its own frame off the shifted exit.
     """
     graph = ctx.graph
     flow_entry, flow_exit = flow_port_sides(section.direction)
@@ -4952,7 +5039,7 @@ def _linear_entry_frame(
     for rank, line_id in enumerate(after, start=1):
         assignments[line_id] = band_end + rank * ctx.offset_step
 
-    carrier_ids = tuple(
+    section_carriers = tuple(
         station_id
         for station_id in section.station_ids
         if set(graph.station_lines(station_id)) & set(assignments)
@@ -4960,6 +5047,11 @@ def _linear_entry_frame(
             not graph.stations[station_id].is_port
             or graph.ports[station_id].side in (flow_entry, flow_exit)
         )
+    )
+    carrier_ids = section_carriers + tuple(
+        junction_id
+        for junction_id, exit_port_id in ctx.divergence_exit_ports.items()
+        if exit_port_id in section_carriers
     )
     for station_id in carrier_ids:
         for line_id in graph.station_lines(station_id):

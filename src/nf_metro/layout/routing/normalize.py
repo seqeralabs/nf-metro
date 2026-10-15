@@ -1958,18 +1958,21 @@ def _bundle_divergent_distinct_traverses(
         )
         base = min(ys)
         targets = {lid: base + i * step for i, lid in enumerate(ordered)}
-        # The shared corner's arc centres line up on each lane's displacement
-        # along the vertical axis, not on its rank: a descent's X and the
-        # traverse's Y move the corner in opposite senses (an ascent's in the
-        # same sense), so a rank magnitude sizes one flank inside out.
+        # Each lane's incoming corner is concentric about the reference descent
+        # by its raw X displacement: the corner helper reads the turn sense from
+        # the waypoints, so a descent and an ascent need no sign of their own.
         reference_x = rep[ordered[0]].xa
-        travel = 1.0 if down else -1.0
-        rank_off = {lid: (rep[lid].xa - reference_x) * travel for lid in ordered}
-        moves = [
-            (m, targets[m.route.line_id], rank_off[m.route.line_id])
+        reseats = [
+            (m, targets[m.route.line_id], rep[m.route.line_id].xa - reference_x)
             for m in members
-            if abs(m.seg.y - targets[m.route.line_id]) > COORD_TOLERANCE
         ]
+        moves = [
+            (m, ty, off)
+            for m, ty, off in reseats
+            if abs(m.seg.y - ty) > COORD_TOLERANCE
+        ]
+        if not moves:
+            continue
         # Never re-band a traverse across a foreign section; the fan's own targets
         # are exempt (each traverse legitimately ends at one).
         exempt = {
@@ -1982,14 +1985,18 @@ def _bundle_divergent_distinct_traverses(
             for m, ty, _off in moves
         ):
             continue
-        # The band nests one step per rank off the innermost, so its incoming
-        # corner off the shared descent sizes concentrically; the outgoing corner
-        # is where the line peels off alone, so it keeps the base radius.
+        # The band nests one step per rank off the innermost, so every member's
+        # incoming corner off the shared descent sizes on one reference, whether
+        # its traverse moved or already sat on its slot.  The outgoing corner is
+        # where the line peels off alone, so it keeps the base radius.
         base_radius, base_radius_out = _flanking_reference_radii(
-            ((m.route, m.idx, ty, 1, (off, 0.0)) for m, ty, off in moves),
+            ((m.route, m.idx, ty, 1, (off, 0.0)) for m, ty, off in reseats),
             ctx.curve_radius,
         )
-        for m, ty, off in moves:
+        for m, ty, off in reseats:
+            if abs(m.seg.y - ty) <= COORD_TOLERANCE:
+                _resize_concentric_corner(m.route, m.idx - 1, off, base_radius)
+                continue
             _set_htrunk_y(
                 m.route,
                 m.idx,
@@ -2831,16 +2838,21 @@ def _reseat_concentric_flanking(
     if rp.curve_radii is None:
         return
     radius_out = base_radius if base_radius_out is None else base_radius_out
-    for radius_idx, offset, reference in (
-        (k - 1, offset_in, base_radius),
-        (k, offset_out, radius_out),
-    ):
-        if 0 <= radius_idx < len(rp.curve_radii):
-            rp.record_concentric_corner(radius_idx, offset, reference)
-            prev_pt, corner_pt, next_pt = pts[radius_idx : radius_idx + 3]
-            rp.curve_radii[radius_idx] = concentric_corner_radius_at(
-                prev_pt, corner_pt, next_pt, offset, reference
-            )
+    _resize_concentric_corner(rp, k - 1, offset_in, base_radius)
+    _resize_concentric_corner(rp, k, offset_out, radius_out)
+
+
+def _resize_concentric_corner(
+    rp: RoutedPath, radius_idx: int, offset: float, reference: float
+) -> None:
+    """Size one corner concentrically at *offset* off a *reference* radius."""
+    if rp.curve_radii is None or not 0 <= radius_idx < len(rp.curve_radii):
+        return
+    rp.record_concentric_corner(radius_idx, offset, reference)
+    prev_pt, corner_pt, next_pt = rp.points[radius_idx : radius_idx + 3]
+    rp.curve_radii[radius_idx] = concentric_corner_radius_at(
+        prev_pt, corner_pt, next_pt, offset, reference
+    )
 
 
 def _set_vchannel_x(
@@ -3007,19 +3019,21 @@ def _divergent_source_groups(routes: list[RoutedPath]) -> list[_Coincidence]:
 
 
 def _fanout_descent_order_key(ch: _VChannel) -> tuple[int, float]:
-    """Left-to-right seat order for a fan-out descent, by the side it turns to.
+    """Left-to-right seat order for a fan-out channel, by the side it turns to.
 
     A branch is placed on the side it later turns toward so peeling off never
-    crosses a sibling still descending: left-turners (and straight drops) rank
-    by turn-Y ascending so the earliest turn sits outermost-left; right-turners
-    mirror it.  ``direction`` is the sign of the leg leaving the descent's foot.
+    crosses a sibling that travels on along the channel: left-turners (and straight
+    runs) rank by turn depth ascending so the earliest turn sits outermost-left;
+    right-turners mirror it.  Depth is measured along the channel's travel, down
+    a descent and up an ascent.  ``direction`` is the sign of the leg leaving the
+    channel's far end.
     """
     pts = ch.route.points
     j = ch.idx + 1
     dx = pts[j + 1][0] - pts[j][0] if j + 1 < len(pts) else 0.0
     direction = -1 if dx < -COORD_TOLERANCE else (1 if dx > COORD_TOLERANCE else 0)
-    turn_y = pts[j][1]
-    return (direction, turn_y if direction <= 0 else -turn_y)
+    turn_depth = pts[j][1] if ch.down else -pts[j][1]
+    return (direction, turn_depth if direction <= 0 else -turn_depth)
 
 
 def _flanking_reference_radii(
@@ -3225,23 +3239,34 @@ def _bundle_divergent_distinct_descents(
             and not tight
         ):
             continue
-        moves = (
-            [(ch, ch.x, ch.x - base) for ch in chans]
-            if tight
-            else [
+
+        def obstructed(moves: list[tuple[_VChannel, float, float]]) -> bool:
+            return any(
+                _descent_crosses_section(ctx.graph, ch, target_x)
+                or _descent_buries_foreign_track(routes, chans, ch, target_x)
+                for ch, target_x, _rank_off in moves
+            )
+
+        def seated_in(order: Sequence[str]) -> list[tuple[_VChannel, float, float]]:
+            return [
                 (ch, base + rank * step, rank * step)
-                for rank, lid in enumerate(ordered)
+                for rank, lid in enumerate(order)
                 for ch in by_line[lid]
             ]
-        )
+
         # Never re-seat a descent into a section it does not belong to, nor onto a
-        # column another line already travels; leave the whole group on its handler
-        # channels if any target column is obstructed.
-        if any(
-            _descent_crosses_section(ctx.graph, ch, target_x)
-            or _descent_buries_foreign_track(routes, chans, ch, target_x)
-            for ch, target_x, _rank_off in moves
-        ):
+        # column another line already travels.  Where the turn order's tracks are
+        # obstructed the lines nest one step apart in the order they stand in,
+        # so no two of them are left fused on near tracks; the group keeps its
+        # handler channels only when both are obstructed.
+        standing = sorted(by_line, key=lambda lid: min(c.x for c in by_line[lid]))
+        candidates = (
+            [[(ch, ch.x, ch.x - base) for ch in chans]]
+            if tight
+            else [seated_in(ordered), seated_in(standing)]
+        )
+        moves = next((m for m in candidates if not obstructed(m)), [])
+        if not moves:
             continue
         # Rank owns both track position and arc size.  Applying it to an already
         # tight group is necessary because its independent route families can

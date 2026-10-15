@@ -1,0 +1,46 @@
+%%metro title: Over-Top Fan With Flow Feeder
+%%metro line: l0 | Call | #e6194b
+%%metro line: l1 | Bin_Trim | #3cb44b
+%%metro line: l2 | Summarise_Assemble | #4363d8
+
+graph LR
+    subgraph sec0 [Sort 0]
+        s0n3[polish]
+        s0n4[count_annotate]
+        s0n3 -->|l1| s0n4
+    end
+    subgraph sec1 [Sort_Normalize 1]
+        s1n0[bin_vcf]
+        s1n1[fastqc_export]
+        s1n2[sort]
+        s1n3[dedup_merge]
+        s1n4[call]
+        s1n0 -->|l0,l1| s1n1
+        s1n1 -->|l0,l1| s1n2
+        s1n2 -->|l0,l1| s1n3
+        s1n3 -->|l0,l1| s1n4
+    end
+    subgraph sec2 [Bin_Trim 2]
+        %%metro entry: top | l0
+        s2n0[gather_call]
+        s2n1[report_annotate]
+        s2n2[CLASSIFY_QC_CLUSTER]
+        s2n0 -->|l0,l2| s2n1
+        s2n1 -->|l2| s2n2
+    end
+    subgraph sec3 [Index 3]
+        %%metro entry: right | l1, l2
+        s3n0[call_align_classify]
+        s3n1[normalize]
+        s3n2[cluster]
+        s3n3[index_filter]
+        s3n4[filter_filter]
+        s3n0 -->|l1,l2| s3n1
+        s3n1 -->|l1,l2| s3n2
+        s3n2 -->|l1,l2| s3n3
+        s3n3 -->|l1,l2| s3n4
+    end
+    s0n4 -->|l0,l1| s1n0
+    s1n4 -->|l0| s2n0
+    s1n4 -->|l1| s3n0
+    s2n2 -->|l2| s3n0

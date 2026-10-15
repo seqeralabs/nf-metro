@@ -88,9 +88,15 @@ STRICT_RENDER_REGRESSIONS = (
 )
 
 
-def _observe(path: Path):
+def _observe(path: Path, stale: Mapping[tuple[str, str], float] | None = None):
+    """Observe *path*'s routes, first overwriting the offsets *stale* names.
+
+    *stale* hands the planner a lane the offset phase would have settled, so a
+    test can drive the planner's own repair of it.
+    """
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
     offsets = compute_station_offsets(graph)
+    offsets.update(stale or {})
     observation = observe_route_edges(graph, station_offsets=offsets)
     return graph, offsets, observation
 
@@ -765,7 +771,7 @@ def test_exit_plan_falls_back_before_changing_a_linear_entry_frame(
 def test_exit_plan_publication_is_transactional(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    path = TOPOLOGIES / "target_lane_transition.mmd"
+    path = TOPOLOGIES / "exit_lane_swap_shared_exit_port.mmd"
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
     offsets = compute_station_offsets(graph)
     original = dict(offsets)
@@ -949,8 +955,15 @@ def test_linear_entry_frame_runtime_guard_rejects_owner_drift() -> None:
         routing_offsets.validate_linear_entry_frame_ownership(offsets, ownership)
 
 
+# A junction holding ``l0`` one lane past the lane ``l3`` vacates when it ends
+# at the exit port: the slot the planner compacts away.
+PHANTOM_SLOT_JUNCTION = {("__junction_37", "l0"): 12.0}
+
+
 def test_terminated_source_lane_does_not_leave_a_phantom_slot() -> None:
-    _graph, offsets, observation = _observe(FROZEN / "seed_77.mmd")
+    _graph, offsets, observation = _observe(
+        FROZEN / "seed_77.mmd", PHANTOM_SLOT_JUNCTION
+    )
     plan = _plan_for_source(observation, "__junction_37")
 
     assert plan.disposition is ExitTurnDisposition.PLANNED
@@ -2256,7 +2269,9 @@ def test_unsupported_family_after_tentative_compaction_uses_whole_group_legacy(
         return family
 
     monkeypatch.setattr(exit_turns, "classify_inter_section_family", classify)
-    _graph, _offsets, observation = _observe(FROZEN / "seed_77.mmd")
+    _graph, _offsets, observation = _observe(
+        FROZEN / "seed_77.mmd", PHANTOM_SLOT_JUNCTION
+    )
     plan = _plan_for_source(observation, "__junction_37")
 
     assert plan.disposition is ExitTurnDisposition.LEGACY

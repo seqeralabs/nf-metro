@@ -1558,6 +1558,21 @@ gallery:
       A perpendicular feeder re-slots at a multi-feeder merge port, and the single
       re-joined line leaves the merge row before reaching its consumer one row up, so the bundle-offset
       walk stops at the off-row exit rather than carrying the slot off the row.
+  - id: entry_frame_through_junction
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      "A section whose entry lanes shift to keep its feeder's lanes exits into a
+      divergence junction: the junction takes the shifted lanes and the section the straight
+      branch reaches frames off them, so every leg through the junction runs level (#2044)."
+  - id: fan_over_top_reach_order
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      "A same-row fan reaching two columns while a nearer line joins the farther
+      branch's loop over a section into its flow-side entry: the farther branch runs
+      outermost, the joiner rides inside the loop through both corners and lands on the
+      upper lane, and no two lines cross."
   - id: junction_entry_reversed_fold
     source_dir: examples/topologies
     category: Merge & Convergence
