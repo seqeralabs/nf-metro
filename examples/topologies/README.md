@@ -2,7 +2,7 @@
 
 Example `.mmd` files demonstrating a range of pipeline topologies and the layout patterns they produce. Each example exercises different aspects of the auto-layout engine.
 
-This directory holds 298 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
+This directory holds 300 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
 
 To render one example:
 
@@ -401,6 +401,8 @@ python scripts/list_topology_fixtures.py
 | `lr_top_entry_cross_column_two_line.mmd`               | Two-line member of the same cross-column drop - the perpendicular-entry corner nests by arrival order for right-turning runs                                                                                                                                       |
 | `rl_left_exit_top_entry_overflow.mmd`                  | An RL section with a LEFT exit and a TOP entry whose port sits left of the internal run: the drop is predicted to land right of the run, so the run shifts left to meet the port and, without a matching bbox grow, escapes into the neighbouring column (#1980)   |
 | `left_exit_fan_perp_entry_landing.mmd`                 | A LEFT-exit two-line bundle dropping into a shared TOP entry whose downstream fan peels each line to a different target - the fan-out's peel order propagates to its free upstream feeder so both lines descend straight into their lanes with no crossing (#1986) |
+| `perp_entry_column_two_feeders.mmd`                    | Two feeders reaching one BOTTOM entry - the port's crossing column is dealt from the trunk its drop turns into, so every line lands on the channel it departs on and no two lines share a descent (#2073)                                                          |
+| `perp_exit_single_feeder_landing.mmd`                  | One up-and-over feeder into a BOTTOM entry - the bundle lands on the crossing its in-section drop departs from rather than stepping sideways at the box edge (#2073)                                                                                               |
 | `rl_bottom_exit_lr_top_entry_bundle.mmd`               | An RL section's BOTTOM exit feeding an LR TOP entry, the bundle turning east at the seam                                                                                                                                                                           |
 | `lr_bottom_exit_rl_top_entry_jog.mmd`                  | Six-section map whose LR BOTTOM exit drops into stacked RL TOP entries - the perpendicular drops co-align rather than jogging                                                                                                                                      |
 | `bottom_exit_junction_collinear_top_entry.mmd`         | A junction-fed BOTTOM exit dropping collinearly into a TOP entry directly below (#1428, #1509)                                                                                                                                                                     |
