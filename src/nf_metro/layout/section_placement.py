@@ -31,6 +31,7 @@ from nf_metro.layout.constants import (
     SAME_COORD_TOLERANCE,
     SECTION_HEADER_PROTRUSION,
     SECTION_X_PADDING,
+    X_SPACING,
     graph_offset_step,
 )
 from nf_metro.layout.geometry import (
@@ -1845,6 +1846,12 @@ def _position_ports_on_boundary(
             anchor = _find_downstream_bundle_y(pid, section, graph)
         if anchor is None:
             anchor = _find_connected_internal_coord(pid, section, graph, free_axis)
+            if (
+                anchor is not None
+                and free_axis == "x"
+                and lanes_run_along_x(section.direction)
+            ):
+                anchor = _flow_port_lane(pid, anchor, section, graph)
         if free_axis == "y":
             default = section.bbox_y + section.bbox_h / 2
         else:
@@ -1966,6 +1973,65 @@ def _find_downstream_bundle_y(
     return target_y
 
 
+def _flow_port_lane(
+    port_id: str, anchor: float, section: Section, graph: MetroGraph
+) -> float:
+    """Seat a vertical-flow section's TOP/BOTTOM port on its lane grid.
+
+    The feeder-mean *anchor* can fall between two lanes, so a line leaving a
+    station for the port drifts across a neighbouring lane by a fraction of the
+    pitch and skims whatever station sits there.  On the lane grid a passing
+    line clears a station by whole lanes, or runs on its lane and is bowed
+    around it by the geometric bypass.  A port centred between two or more
+    distinct feeder lanes is a symmetric convergence and keeps its midpoint.
+    """
+    from nf_metro.layout.phases._common import lane_grid_origin, snap_to_lane
+
+    feeders = _connected_internal_stations(port_id, section, graph)
+    lanes = sorted({round(graph.stations[sid].x, 3) for sid in feeders})
+    if len(lanes) >= 2 and abs(anchor - (lanes[0] + lanes[-1]) / 2) < 1.0:
+        return anchor
+    pitch = graph._resolved_x_spacing or X_SPACING
+    origin = lane_grid_origin(
+        (
+            graph.stations[sid].x
+            for sid in section.station_ids
+            if sid in graph.stations
+            and not graph.stations[sid].is_port
+            and not graph.stations[sid].is_hidden
+            and not graph.stations[sid].off_track
+        ),
+        pitch,
+    )
+    if origin is None:
+        return anchor
+    return snap_to_lane(anchor, origin, pitch)
+
+
+def _connected_internal_stations(
+    port_id: str, section: Section, graph: MetroGraph
+) -> list[str]:
+    """Internal stations joined to *port_id* by an edge, one entry per edge.
+
+    Bypass V helpers (ids starting with ``__bypass_``) are skipped so the port
+    anchors to the visible trunk rather than an off-trunk routing aid.
+    """
+    internal_ids = (
+        set(section.station_ids) - set(section.entry_ports) - set(section.exit_ports)
+    )
+    out = [
+        edge.target
+        for edge in graph.edges_from(port_id)
+        if edge.target in internal_ids and not is_bypass_v(edge.target)
+    ]
+    out.extend(
+        edge.source
+        for edge in graph.edges_to(port_id)
+        if edge.source in internal_ids and not is_bypass_v(edge.source)
+    )
+    return out
+
+
 def _find_connected_internal_coord(
     port_id: str,
     section: Section,
@@ -1975,20 +2041,13 @@ def _find_connected_internal_coord(
     """Find the coordinate to align a port with its connected internal stations.
 
     Returns the average X or Y (determined by *axis*) of all connected
-    internal stations, or None if no connections found.  Bypass V
-    helpers (ids starting with ``__bypass_``) are skipped so the port
-    anchors to the visible trunk rather than an off-trunk routing aid.
+    internal stations (:func:`_connected_internal_stations`), or None if no
+    connections found.
     """
-    internal_ids = (
-        set(section.station_ids) - set(section.entry_ports) - set(section.exit_ports)
-    )
-    vals: list[float] = []
-    for edge in graph.edges_from(port_id):
-        if edge.target in internal_ids and not is_bypass_v(edge.target):
-            vals.append(getattr(graph.stations[edge.target], axis))
-    for edge in graph.edges_to(port_id):
-        if edge.source in internal_ids and not is_bypass_v(edge.source):
-            vals.append(getattr(graph.stations[edge.source], axis))
+    vals = [
+        getattr(graph.stations[sid], axis)
+        for sid in _connected_internal_stations(port_id, section, graph)
+    ]
     if vals:
         return sum(vals) / len(vals)
     return None

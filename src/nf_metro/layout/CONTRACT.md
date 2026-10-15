@@ -365,7 +365,12 @@ in pipeline order.
 - **Postcondition**: For every section with real stations, the section
   subgraph (returned via `section_subgraphs[sec_id]`) has every real
   station assigned a local `(x, y)`, a `layer`, and a `track`. Section
-  `bbox_x/y/w/h` reflect the local content extent.
+  `bbox_x/y/w/h` reflect the local content extent. In a vertical-flow
+  (TB/BT) section every bypass V helper sits on the section's lane grid
+  along X (the X counterpart of Stage 1.2's row-grid remap), never on a
+  lane a real station holds at its own layer. A section whose flow-side
+  exit is fed from more than one lane reserves an exit runway along its
+  flow axis, in either orientation.
 - **Invariants preserved**: Ports (`is_port=True`) are not positioned.
   Inter-section edges in `graph.edges` are untouched. Junctions are not
   positioned.
@@ -485,7 +490,10 @@ in pipeline order.
 - **Precondition**: Section bboxes in global coords (Stage 2.1).
 - **Postcondition**: Every port station's `(x, y)` lies on the bbox
   edge corresponding to its side, within `GUARD_TOLERANCE`. Ports
-  start at the bbox-edge midpoint for their side.
+  start at the bbox-edge midpoint for their side. A TB/BT section's
+  flow-side (TOP/BOTTOM) port seats its feeder-mean X on the section's
+  lane grid, unless it is centred between two or more distinct feeder
+  lanes (a symmetric convergence keeps its midpoint).
 - **Invariants preserved**: Real station coords, section bboxes,
   junctions.
 - **Validate guard after**: `_guard_ports_on_boundaries`.

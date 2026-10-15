@@ -1,0 +1,33 @@
+%%metro title: TB in-section bypass on the lane grid
+%%metro line: dna | DNA | #e6194b
+%%metro line: rna | RNA | #3cb44b
+%%metro line: qc | QC | #4363d8
+%%metro line: umi | UMI | #f58231
+
+graph LR
+    subgraph prep [Preparation]
+        fastq[FASTQ]
+        trim[Trim]
+        fastq -->|dna,rna,qc,umi| trim
+    end
+    subgraph align [Alignment]
+        %%metro direction: TB
+        index[Index]
+        star[STAR]
+        dedup[Dedup]
+        index -->|rna| star
+        star -->|qc| dedup
+    end
+    subgraph report [Reporting]
+        merge[Merge]
+        stats[Stats]
+        multiqc[MultiQC]
+        merge -->|dna,rna| stats
+        merge -->|umi| multiqc
+        stats -->|dna,umi| multiqc
+    end
+    trim -->|rna| star
+    trim -->|umi| dedup
+    trim -->|dna,qc| merge
+    star -->|rna| merge
+    dedup -->|qc,umi| merge

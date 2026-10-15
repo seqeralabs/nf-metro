@@ -41,7 +41,15 @@ from nf_metro.layout.phases.junctions import (
     _resolve_source_xy,
 )
 from nf_metro.layout.route_topology import divergence_junction_sources
-from nf_metro.parser.model import Edge, MetroGraph, Port, PortSide, Section, Station
+from nf_metro.parser.model import (
+    Edge,
+    MetroGraph,
+    Port,
+    PortSide,
+    Section,
+    Station,
+    is_bypass_v,
+)
 
 
 def _set_port_y(graph: MetroGraph, port_id: str, y: float) -> None:
@@ -647,6 +655,8 @@ def _tb_trunk_x(graph: MetroGraph, section: Section) -> float | None:
     Returns the median internal-station X, or ``None`` when the section has no
     internal stations.  Internal stations in a TB/BT section stack on a single
     column, so the median ignores any port outliers and yields the trunk X.
+    Bypass V helpers are routing aids beside the trunk, not part of it, so they
+    do not vote.
     """
     internal_ids = (
         set(section.station_ids) - set(section.entry_ports) - set(section.exit_ports)
@@ -654,7 +664,9 @@ def _tb_trunk_x(graph: MetroGraph, section: Section) -> float | None:
     xs = sorted(
         graph.stations[sid].x
         for sid in internal_ids
-        if sid in graph.stations and not graph.stations[sid].is_port
+        if sid in graph.stations
+        and not graph.stations[sid].is_port
+        and not is_bypass_v(sid)
     )
     if not xs:
         return None
