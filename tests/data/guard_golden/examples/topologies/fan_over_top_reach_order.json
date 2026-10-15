@@ -1,8 +1,5 @@
 {
-  "raised": [
-    "LayoutInvariantError",
-    "the settled layout violates final invariants the renderer is about to draw. The map will render but is visibly broken; fix the layout (or the directive combination) that produced this geometry.\n  [_guard_inter_section_routes_in_row_band] render: route 'b__exit_right_1'->'c__entry_right_3' line 'l2' waypoint y=68.0 outside row-0 band [84.0..316.0]"
-  ],
+  "raised": null,
   "trace": [
     "_guard_no_same_row_backward_feed|None",
     "_guard_no_mixed_entry_directions|None",
@@ -256,6 +253,10 @@
     "_guard_inter_row_run_clearance|render",
     "_guard_trunk_bands_crossing_optimal|render",
     "_guard_inter_section_descent_edge_clearance|render",
-    "_guard_fan_bundles_coincide_or_separate|render"
+    "_guard_fan_bundles_coincide_or_separate|render",
+    "_guard_bridges|None",
+    "_guard_section_headers_clear_routes|None",
+    "_guard_section_headers_fit_box_width|None",
+    "_guard_section_headers_hold_the_reserved_band|None"
   ]
 }
