@@ -2228,13 +2228,13 @@ def arrival_approach(edge: Edge, ctx: _RoutingCtx) -> Direction | None:
     )
     points = route.points if route is not None else []
     vertical_legs = [
-        y2 - y1
-        for (x1, y1), (x2, y2) in zip(points, points[1:])
-        if abs(y2 - y1) > max(abs(x2 - x1), COORD_TOLERANCE)
+        (start, (start[0], end[1]))
+        for start, end in zip(points, points[1:])
+        if abs(end[1] - start[1]) > max(abs(end[0] - start[0]), COORD_TOLERANCE)
     ]
-    if all(abs(dy) <= ctx.curve_radius for dy in vertical_legs):
+    if all(abs(end[1] - start[1]) <= ctx.curve_radius for start, end in vertical_legs):
         return None
-    return vertical_direction(vertical_legs[-1])
+    return segment_direction(*vertical_legs[-1])
 
 
 @dataclass(frozen=True, slots=True)

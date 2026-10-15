@@ -414,7 +414,7 @@
   "inter_section_handlers.py::if abs(start[0] - end[0]) > COORD_TOLERANCE:::#2",
   "inter_section_handlers.py::if abs(tgt.x - src.x) <= ctx.curve_radius:::#1",
   "inter_section_handlers.py::if abs(tgt.x - src.x) > COORD_TOLERANCE or src.id not in ctx.graph.junctions:::#1",
-  "inter_section_handlers.py::if all(abs(dy) <= ctx.curve_radius for dy in vertical_legs):::#1",
+  "inter_section_handlers.py::if all(abs(end[1] - start[1]) <= ctx.curve_radius for start, end in vertical_legs):::#1",
   "inter_section_handlers.py::if band0_bottom <= band0_top or not _inter_row_band_fits(band0_top, band0_bottom):::#1",
   "inter_section_handlers.py::if band1_bottom <= band1_top or not _inter_row_band_fits(band1_top, band1_bottom):::#1",
   "inter_section_handlers.py::if band1_top <= band0_bottom + COORD_TOLERANCE:::#1",

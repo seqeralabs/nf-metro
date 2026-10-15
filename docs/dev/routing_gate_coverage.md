@@ -522,7 +522,7 @@ Gates with an un-exercised arm:
 | 2160 | `and membership.assignment is not None` | `->L2161`, `->L2169` |  |
 | 2161 | `and membership.plan.disposition is ExitTurnDisposition.PLANNED` | `->L2163`, `->L2169` |  |
 | 2169 | `if route is not None:` | `->L2174` |  |
-| 2235 | `if all(abs(dy) <= ctx.curve_radius for dy in vertical_legs):` | `->L2236` |  |
+| 2235 | `if all(abs(end[1] - start[1]) <= ctx.curve_radius for start, end in vertical_legs):` | `->L2236` |  |
 | 2342 | `if planned_transition is not None:` | `->L2343` |  |
 | 2563 | `if query is None:` | `->L2564` | **defensive** -- Production routing runs after layout publishes FanPlanExecution. The None arm preserves the ordinary dispatcher for direct or incomplete routing contexts. |
 | 2588 | `if ctx.station_offsets:` | `->L2590` | **defensive** -- _run_pass_c_guards always populates ctx.station_offsets before route_edges, and RAILS mode returns earlier; the empty-offsets arm never fires. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken. |
