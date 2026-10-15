@@ -94,6 +94,7 @@ from nf_metro.layout.routing.common import (
     right_normal_axis_sign,
     row_bottom_edge,
     row_top_edge,
+    section_exists_above_row,
     section_header_top,
     section_ids_of_stations,
     segment_direction,
@@ -1210,12 +1211,12 @@ def _left_exit_wrap_over_top_y(
 
     A same-row wrap dips below the target box; when the target is tall that dip
     runs far below every section before returning the full width.  Returns the
-    centre of the inter-row band ABOVE the target row -- humping the loop over the
-    target's top, never descending past the box bottom, mirroring the from-above
-    gap-above approach -- when the port is fed by this line alone, that band
-    exists, is wide enough for the traverse, and all three loop legs (source-side
-    ascent at *cx*, band traverse, target-side descent at *vx*) clear other
-    section interiors.  Returns ``None`` to keep the dip otherwise.
+    traverse Y of the band ABOVE the target row (:func:`_gap_above_channel_y`) --
+    humping the loop over the target's top, never descending past the box bottom,
+    mirroring the from-above gap-above approach -- when the port is fed by this
+    line alone, that band exists, is wide enough for the traverse, and all three
+    loop legs (source-side ascent at *cx*, band traverse, target-side descent at
+    *vx*) clear other section interiors.  Returns ``None`` to keep the dip otherwise.
 
     A port fed by more than one line keeps the dip: the band above holds a single
     channel, so pooling every feeder into it collinearly overlays them, whereas
@@ -1229,9 +1230,8 @@ def _left_exit_wrap_over_top_y(
         return None
     if len({e.line_id for e in graph.edges_to(tgt.id)}) > 1:
         return None
-    gy = _center_inter_row_channel(
-        gap_top, gap_bottom, reserved=f.ctx.reserved_bands.rows.at(tgt_row)
-    )
+    assert tgt_row is not None
+    gy = _gap_above_channel_y(f.ctx, tgt_row)
     blocked = (
         f.v_segment_crosses_other_section(cx, src.y, gy)
         or f.v_segment_crosses_other_section(vx, gy, tgt.y)
@@ -7156,6 +7156,23 @@ def _gap_above_target_y(graph: MetroGraph, tgt_row: int) -> tuple[float, float]:
     return gap_top, gap_bottom
 
 
+def _gap_above_channel_y(ctx: _RoutingCtx, tgt_row: int) -> float:
+    """Y of the traverse a route runs in the band ABOVE *tgt_row*.
+
+    Below another row the traverse centres in the inter-row gap.  The topmost
+    row has no gap above it, only the canvas-top padding that holds the title,
+    so the traverse takes the over-the-top headroom placement reserves above the
+    row (``_reserve_over_top_headroom``): clear of every header badge in the row
+    by the same margin as :func:`_right_entry_over_top_geometry`'s channel.
+    """
+    gap_top, gap_bottom = _gap_above_target_y(ctx.graph, tgt_row)
+    if not section_exists_above_row(ctx.graph, tgt_row):
+        return gap_bottom - INTER_ROW_HEADER_CLEARANCE - ctx.curve_radius
+    return _center_inter_row_channel(
+        gap_top, gap_bottom, reserved=ctx.reserved_bands.rows.at(tgt_row)
+    )
+
+
 def _right_entry_gap_above_is_clear(f: _InterFacts) -> bool:
     """Whether a RIGHT-entry feed from above can use the inter-row gap.
 
@@ -7176,9 +7193,7 @@ def _right_entry_gap_above_is_clear(f: _InterFacts) -> bool:
     # source box bottom, so the feed loops around below the target row instead.
     if not _inter_row_band_fits(gap_top, gap_bottom):
         return False
-    gy = _center_inter_row_channel(
-        gap_top, gap_bottom, reserved=f.ctx.reserved_bands.rows.at(tgt_row)
-    )
+    gy = _gap_above_channel_y(f.ctx, tgt_row)
 
     ep_section = (
         graph.sections.get(entry_port.section_id) if entry_port.section_id else None
@@ -7291,10 +7306,7 @@ def _route_right_entry_via_gap_above(
     outward side), and the horizontal never crosses a section interior
     (guaranteed by :func:`_right_entry_gap_above_is_clear` at the call site).
     """
-    gap_top, gap_bottom = _gap_above_target_y(ctx.graph, tgt_row)
-    channel_y_base = _center_inter_row_channel(
-        gap_top, gap_bottom, reserved=ctx.reserved_bands.rows.at(tgt_row)
-    )
+    channel_y_base = _gap_above_channel_y(ctx, tgt_row)
     # When two or more distinct lines converge into this one RIGHT entry port,
     # each independently picks the same descent X just right of the target
     # column and they overlay.  Open those to the gap-bundle pass so the
