@@ -1926,16 +1926,17 @@ def _bundle_divergent_distinct_traverses(
     each line turns onto may sit on an independently-sized band several px from its
     siblings, so the shared run reads as separate strokes rather than one bundle.
     Nest the near-parallel traverses one step apart, ordered so a line's
-    traverse-Y rank matches its descent-X rank through the shared corner (a
-    left-turning bundle puts its leftmost descent on top, a right-turning one
-    mirrors it), holding a constant bundle width until each line turns off.
+    traverse-Y rank matches its vertical-X rank through the shared corner (a
+    left-turning descent puts its leftmost line on top, a right-turning one
+    mirrors it, and an ascent mirrors the descent turning the same way),
+    holding a constant bundle width until each line turns off.
     """
     step = ctx.offset_step
     groups = filter(
-        _fanout_traverse_group_is_movable,
-        _fanout_traverse_legs(routes).values(),
+        lambda item: _fanout_traverse_group_is_movable(item[1]),
+        _fanout_traverse_legs(routes).items(),
     )
-    for members in groups:
+    for (_source, down), members in groups:
         by_line: dict[str, list[_TraverseLeg]] = defaultdict(list)
         for m in members:
             by_line[m.route.line_id].append(m)
@@ -1951,18 +1952,19 @@ def _bundle_divergent_distinct_traverses(
         turns = {s.xb < s.xa for s in rep.values()}
         if len(turns) != 1:
             continue
-        left_turn = next(iter(turns))
+        leftmost_on_top = next(iter(turns)) == down
         ordered = sorted(
-            rep, key=lambda lid: rep[lid].xa if left_turn else -rep[lid].xa
+            rep, key=lambda lid: rep[lid].xa if leftmost_on_top else -rep[lid].xa
         )
         base = min(ys)
         targets = {lid: base + i * step for i, lid in enumerate(ordered)}
         # The shared corner's arc centres line up on each lane's displacement
-        # along the descent axis, not on its rank: the descent's X and the
-        # traverse's Y move the corner in opposite senses, so a rank magnitude
-        # sizes one flank of the bundle inside out.
+        # along the vertical axis, not on its rank: a descent's X and the
+        # traverse's Y move the corner in opposite senses (an ascent's in the
+        # same sense), so a rank magnitude sizes one flank inside out.
         reference_x = rep[ordered[0]].xa
-        rank_off = {lid: rep[lid].xa - reference_x for lid in ordered}
+        travel = 1.0 if down else -1.0
+        rank_off = {lid: (rep[lid].xa - reference_x) * travel for lid in ordered}
         moves = [
             (m, targets[m.route.line_id], rank_off[m.route.line_id])
             for m in members

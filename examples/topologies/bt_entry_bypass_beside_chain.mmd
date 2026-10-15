@@ -1,0 +1,20 @@
+%%metro title: BT Entry Bypass Beside Chain
+%%metro line: dna | DNA | #e63946
+%%metro line: rna | RNA | #457b9d
+
+graph LR
+    subgraph source [Source]
+        reads[Reads]
+    end
+    subgraph work [Work]
+        %%metro direction: BT
+        index[Index]
+        call[Call]
+        align[Align]
+        sort[Sort]
+        index -->|rna| call
+        call -->|dna,rna| align
+        align -->|dna,rna| sort
+    end
+    reads -->|dna| sort
+    reads -->|dna,rna| align

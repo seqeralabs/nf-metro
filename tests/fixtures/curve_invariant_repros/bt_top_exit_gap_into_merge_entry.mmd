@@ -1,0 +1,30 @@
+%%metro title: BT column with a dead lane at its top exit, feeding a merge entry
+%%metro line: l0 | Line 1 | #3779b1
+%%metro line: l1 | Line 2 | #6ef362
+%%metro line: l2 | Line 3 | #a66d13
+%%metro line: l3 | Line 4 | #156075
+%%metro line: l4 | Line 5 | #c03a2b
+graph LR
+    subgraph a [A]
+        a0[A0]
+        a1[A1]
+        a0 -->|l4| a1
+    end
+    subgraph b [B]
+        %%metro direction: BT
+        b0[B0]
+        b1[B1]
+        b2[B2]
+        b3[B3]
+        b0 -->|l0,l2| b1
+        b1 -->|l1| b2
+        b2 -->|l0,l3| b3
+    end
+    subgraph c [C]
+        c0[C0]
+    end
+    a1 -->|l2| b0
+    b1 -->|l3| c0
+    b3 -->|l1| c0
+    a1 -->|l1| c0
+    b3 -->|l3| c0

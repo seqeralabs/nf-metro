@@ -38,7 +38,11 @@ from nf_metro.layout.constants import (
     NEXT_ROW_HEADER_BADGE_CLEARANCE,
     SECTION_ROUTE_CLEARANCE,
 )
-from nf_metro.layout.geometry import cotravelling_lane_clearance, lanes_run_along_x
+from nf_metro.layout.geometry import (
+    cotravelling_lane_clearance,
+    lanes_run_along_x,
+    section_bbox_span,
+)
 from nf_metro.layout.pass_metrics import canvas_edge_clearance
 from nf_metro.layout.routing.bundle import build_tapered_bundle
 from nf_metro.layout.routing.centrelines import (
@@ -4632,12 +4636,52 @@ def _top_entry_side_fan_traverse_is_clear(
         and abs(graph.station_for_edge_target(sib).x - src.x) <= ctx.curve_radius
         for sib in graph.edges_from(edge.source)
     )
-    if not aligned_sibling:
-        return False
+    return aligned_sibling and _traverse_then_turn_is_clear(graph, src, tgt, final_x)
+
+
+def _traverse_then_turn_is_clear(
+    graph: MetroGraph, src: Station, tgt: Station, final_x: float
+) -> bool:
+    """Whether running along the source's Y to *final_x*, then along *final_x*
+    to the target's Y, clears every section but the two the run joins."""
     exclude = {sid for sid in (src.section_id, tgt.section_id) if sid is not None}
-    if _h_segment_crosses_other_section(graph, src.x, final_x, src.y, exclude):
-        return False
-    return not _v_segment_crosses_other_section(graph, final_x, src.y, tgt.y, exclude)
+    return not _h_segment_crosses_other_section(
+        graph, src.x, final_x, src.y, exclude
+    ) and not _v_segment_crosses_other_section(graph, final_x, src.y, tgt.y, exclude)
+
+
+def _perp_entry_source_beyond_channel(
+    src: Station,
+    tgt: Station,
+    tgt_sec: Section | None,
+    final_x: float,
+    channel_y: float,
+    lead: Direction,
+    n: int,
+    ctx: _RoutingCtx,
+    *,
+    is_top: bool,
+) -> bool:
+    """Whether a perpendicular entry's source already stands past its channel.
+
+    The staircase climbs from the source to the channel outside the port's box
+    edge and turns twice on that riser, so the riser needs a full outer-lane
+    radius for each turn.  A source standing outside that edge at or beyond the
+    channel leaves the riser shorter than that, and its corners clamp.  Such a
+    source can traverse on its own Y to the landing column and turn once into
+    the port, provided that turn fits outside the box and both legs clear every
+    other section.
+    """
+    runway = outer_lane_radius(n, ctx.curve_radius, ctx.offset_step)
+    travel = 1.0 if is_top else -1.0
+    return (
+        tgt_sec is not None
+        and (channel_y - src.y) * travel < 2 * runway
+        and (final_x - src.x) * lead.sign >= runway
+        and (section_bbox_span(tgt_sec, "y")[0 if is_top else 1] - src.y) * travel
+        >= runway
+        and _traverse_then_turn_is_clear(ctx.graph, src, tgt, final_x)
+    )
 
 
 def _corridor_riser_x(
@@ -5425,14 +5469,21 @@ def _perp_entry_l_geometry(
                 run_start=lx0,
                 run_end=final_x,
             )
-        points = (
-            (sx, sy),
-            (lx0, sy),
-            (lx0, mid_y),
-            (final_x, mid_y),
-            (final_x, ty),
-        )
-        transition_leg = 3
+        # A fan branch nests its staircase with its siblings', so it keeps it.
+        if fan_single is None and _perp_entry_source_beyond_channel(
+            src, tgt, tgt_sec, final_x, mid_y, lead, n, ctx, is_top=is_top
+        ):
+            points = ((sx, sy), (final_x, sy), (final_x, ty))
+            transition_leg = 1
+        else:
+            points = (
+                (sx, sy),
+                (lx0, sy),
+                (lx0, mid_y),
+                (final_x, mid_y),
+                (final_x, ty),
+            )
+            transition_leg = 3
     return _perp_entry_l_record(
         points,
         tuple(members),

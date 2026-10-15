@@ -27,6 +27,8 @@ from nf_metro.layout.constants import (
 )
 from nf_metro.layout.geometry import (
     diagonal_centreline,
+    flow_port_sides,
+    lanes_run_along_y,
     segment_intersects_bbox,
     single_corner_centreline,
 )
@@ -53,6 +55,7 @@ from nf_metro.layout.routing.perp import (
 )
 from nf_metro.layout.routing.tb_handlers import (
     _compute_diagonal_placement,
+    entry_runway_placement,
 )
 from nf_metro.parser.model import (
     Edge,
@@ -73,7 +76,8 @@ def _route_entry_runway(
     than the earliest layer, a plain diagonal would hide the fact that
     the line bypasses the early-layer stations.  Instead, compress the
     diagonal into the entry region and extend a horizontal runway past
-    the bypassed stations to the target.
+    the bypassed stations to the target.  A vertical section's flow-side
+    entry is drawn by :func:`_route_flow_side_lane_change` before this runs.
     """
     graph = ctx.graph
     port = graph.ports.get(edge.source)
@@ -81,92 +85,27 @@ def _route_entry_runway(
         return None
 
     section = graph.sections.get(tgt.section_id or "")
-    if not section:
+    if (
+        not section
+        or not lanes_run_along_y(section.direction)
+        or port.side != flow_port_sides(section.direction)[0]
+    ):
         return None
-
-    # Only handle flow-side entries (LEFT for LR, RIGHT for RL).
-    # TB/BT and perpendicular entries are handled by earlier handlers.
-    if section.direction == "LR" and port.side != PortSide.LEFT:
-        return None
-    if section.direction == "RL" and port.side != PortSide.RIGHT:
-        return None
-    if section.direction not in ("LR", "RL"):
-        return None
-
-    sx, sy = src.x, src.y
-    tx, ty = tgt.x, tgt.y
 
     # Same Y means target is on the trunk track: a plain straight run suffices,
     # unless a same-row non-consumer sits between the port and the target, which
     # the straight run would rake.  Bow over such a blocker instead.
-    if abs(sy - ty) < COORD_TOLERANCE_FINE:
+    if abs(src.y - tgt.y) < COORD_TOLERANCE_FINE:
         return _route_entry_bow(edge, src, tgt, ctx, section)
 
-    # Gather the internal stations bypassed between the entry port and the
-    # target.  The runway runs flat along one of the two rows (source Y or
-    # target Y) and diagonals across to the other, so a bypassed station this
-    # line does not carry sitting on the flat-run row would be raked through
-    # its marker.  Record which rows carry such a non-consumer.  Flow direction
-    # (LR/RL) only sets which end of the x-span is the source, so ordering is
-    # kept in terms of distance from the source rather than a direction literal.
-    line = edge.line_id
-    port_ids = section.port_ids
-    lo, hi = min(sx, tx), max(sx, tx)
-    between_xs: list[float] = []
-    ty_blocker_xs: list[float] = []
-    sy_blocked = False
-    for sid in section.station_ids:
-        if sid == edge.target or sid in port_ids:
-            continue
-        st = graph.stations.get(sid)
-        if not st or st.is_port or not (lo < st.x < hi):
-            continue
-        between_xs.append(st.x)
-        if line not in graph.station_lines(sid):
-            if abs(st.y - ty) < COORD_TOLERANCE_FINE:
-                ty_blocker_xs.append(st.x)
-            elif abs(st.y - sy) < COORD_TOLERANCE_FINE:
-                sy_blocked = True
-
-    if not between_xs:
-        return None  # No intervening stations -- normal routing is fine.
-
-    if not ty_blocker_xs:
-        # Target row is clear: compress the diagonal in the entry region and
-        # run the flat runway along the target Y past the bypassed stations.
-        nearest_src = min(between_xs, key=lambda x: abs(x - sx))
-        src_min = ctx.curve_radius + MIN_STRAIGHT_PORT
-        if abs(nearest_src - sx) < src_min + ctx.diagonal_run:
-            return None  # Too tight -- fall through to default handler.
-        diag_start_x, diag_end_x = _compute_diagonal_placement(
-            sx,
-            nearest_src,
-            ctx.diagonal_run,
-            src_min,
-            0.0,
-            is_fork=edge.source in ctx.fork_stations,
-            is_join=False,
-        )
-    elif sy_blocked:
-        return None  # Both rows carry a non-consumer -- no safe runway.
-    else:
-        # Target row carries a non-consumer but the source (entry) row is
-        # clear: keep the flat run on the source Y and drop into the target
-        # only after the last bypassed station, so the descent clears its
-        # marker.
-        tgt_min = ctx.curve_radius + MIN_STRAIGHT_PORT
-        diag_start_x, diag_end_x = _compute_diagonal_placement(
-            sx, tx, ctx.diagonal_run, 0.0, tgt_min, is_fork=False, is_join=True
-        )
-        last_blocker = max(ty_blocker_xs, key=lambda x: abs(x - sx))
-        if abs(diag_start_x - sx) <= abs(last_blocker - sx):
-            return None  # Descent would clip a blocker -- let the guard warn.
-
+    placement = entry_runway_placement(edge, src, tgt, ctx, section)
+    if placement is None:
+        return None
     return RoutedPath(
         edge=edge,
         line_id=edge.line_id,
         points=diagonal_centreline(
-            section.direction, (sx, sy), (tx, ty), diag_start_x, diag_end_x
+            section.direction, (src.x, src.y), (tgt.x, tgt.y), *placement
         ),
     )
 

@@ -14,11 +14,14 @@ reaches here, so the same reduction serves any flow direction.
 Callers supply the determining edge's crossing order: fan-out divergence
 supplies its exit edge's peel order, and reconvergence supplies its entry
 edge's primary-feeder order.  The edge derivation -- which lines cross, in what
-order -- stays with each caller.
+order -- stays with each caller.  The two reductions differ only in the
+lines the edge does not constrain: :func:`lane_order` stacks them behind the
+determining lines, while :func:`peel_lane_order` leaves each on its own lane.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 
@@ -57,5 +60,48 @@ def lane_order(
         sorted(config.present, key=lambda lid: line_priority.get(lid, 0))
     )
     if order == priority_order:
+        return None
+    return order
+
+
+def peel_lane_order(
+    config: BoundaryConfig,
+    line_priority: dict[str, int],
+    *,
+    leading: Iterable[str] = (),
+    trailing: Iterable[str] = (),
+) -> tuple[str, ...] | None:
+    """A fan-out section's lane order, or ``None`` when it matches priority.
+
+    A shared exit fan fixes only the order of the lines it peels, so those
+    lines are dealt, in edge order, across the lanes they hold in priority
+    order, and every line the fan does not carry keeps its own lane.  That
+    line's lane is the one it arrives on or leaves from: pushing it past the
+    fan would jog its run beside the section and leave a dead lane wherever
+    it meets a fan line.  The exception is a line pinned to one side of the
+    bundle by a crossing elsewhere -- *leading* lines take the front lanes and
+    *trailing* lines the back, in priority order -- since from the far side
+    its turn through that crossing would pass over the bundle.  A pin takes
+    precedence over a non-fan line keeping its own lane; fan membership takes
+    precedence over either, so a line the fan carries is never pinned.
+    """
+    present = set(config.present)
+    determining = [lid for lid in config.determining if lid in present]
+    fan = set(determining)
+    pinned_front = present.intersection(leading) - fan
+    pinned_back = present.intersection(trailing) - fan - pinned_front
+    priority_order = sorted(config.present, key=lambda lid: line_priority.get(lid, 0))
+    dealt = iter(determining)
+    middle = [
+        next(dealt) if lid in fan else lid
+        for lid in priority_order
+        if lid not in pinned_front and lid not in pinned_back
+    ]
+    order = tuple(
+        [lid for lid in priority_order if lid in pinned_front]
+        + middle
+        + [lid for lid in priority_order if lid in pinned_back]
+    )
+    if order == tuple(priority_order):
         return None
     return order

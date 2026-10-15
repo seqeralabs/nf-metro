@@ -1,0 +1,33 @@
+%%metro title: TB drop into a reversed section that fans out
+%%metro line: l1 | Line 1 | #3779b1
+%%metro line: l2 | Line 2 | #a66d13
+%%metro line: l3 | Line 3 | #156075
+%%metro grid: b | 0,0
+%%metro grid: c | 0,1
+%%metro grid: d | 1,1
+%%metro grid: e | 1,2
+graph LR
+    subgraph b [B]
+        %%metro direction: TB
+        %%metro exit: bottom | l1, l2, l3
+        b0[B0]
+        b1[B1]
+        b0 -->|l1,l2,l3| b1
+    end
+    subgraph c [C]
+        %%metro entry: top | l1, l2, l3
+        c0[C0]
+        c1[C1]
+        c2[C2]
+        c0 -->|l1,l2,l3| c1
+        c1 -->|l2,l3| c2
+    end
+    subgraph d [D]
+        d0[D0]
+    end
+    subgraph e [E]
+        e0[E0]
+    end
+    b1 -->|l1,l2,l3| c0
+    c2 -->|l2| d0
+    c2 -->|l3| e0
