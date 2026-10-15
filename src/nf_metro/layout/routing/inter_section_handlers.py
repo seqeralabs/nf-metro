@@ -38,7 +38,11 @@ from nf_metro.layout.constants import (
     NEXT_ROW_HEADER_BADGE_CLEARANCE,
     SECTION_ROUTE_CLEARANCE,
 )
-from nf_metro.layout.geometry import cotravelling_lane_clearance, lanes_run_along_x
+from nf_metro.layout.geometry import (
+    cotravelling_lane_clearance,
+    lanes_run_along_x,
+    section_bbox_span,
+)
 from nf_metro.layout.pass_metrics import canvas_edge_clearance
 from nf_metro.layout.routing.bundle import build_tapered_bundle
 from nf_metro.layout.routing.centrelines import (
@@ -4608,12 +4612,18 @@ def _top_entry_side_fan_traverse_is_clear(
         and abs(graph.station_for_edge_target(sib).x - src.x) <= ctx.curve_radius
         for sib in graph.edges_from(edge.source)
     )
-    if not aligned_sibling:
-        return False
+    return aligned_sibling and _traverse_then_turn_is_clear(graph, src, tgt, final_x)
+
+
+def _traverse_then_turn_is_clear(
+    graph: MetroGraph, src: Station, tgt: Station, final_x: float
+) -> bool:
+    """Whether running along the source's Y to *final_x*, then along *final_x*
+    to the target's Y, clears every section but the two the run joins."""
     exclude = {sid for sid in (src.section_id, tgt.section_id) if sid is not None}
-    if _h_segment_crosses_other_section(graph, src.x, final_x, src.y, exclude):
-        return False
-    return not _v_segment_crosses_other_section(graph, final_x, src.y, tgt.y, exclude)
+    return not _h_segment_crosses_other_section(
+        graph, src.x, final_x, src.y, exclude
+    ) and not _v_segment_crosses_other_section(graph, final_x, src.y, tgt.y, exclude)
 
 
 def _perp_entry_source_beyond_channel(
@@ -4640,24 +4650,14 @@ def _perp_entry_source_beyond_channel(
     """
     runway = outer_lane_radius(n, ctx.curve_radius, ctx.offset_step)
     travel = 1.0 if is_top else -1.0
-    exclude = {sid for sid in (src.section_id, tgt.section_id) if sid is not None}
     return (
         tgt_sec is not None
         and (channel_y - src.y) * travel < 2 * runway
         and (final_x - src.x) * lead.sign >= runway
-        and (_perp_entry_box_edge_y(tgt_sec, is_top=is_top) - src.y) * travel >= runway
-        and not _h_segment_crosses_other_section(
-            ctx.graph, src.x, final_x, src.y, exclude
-        )
-        and not _v_segment_crosses_other_section(
-            ctx.graph, final_x, src.y, tgt.y, exclude
-        )
+        and (section_bbox_span(tgt_sec, "y")[0 if is_top else 1] - src.y) * travel
+        >= runway
+        and _traverse_then_turn_is_clear(ctx.graph, src, tgt, final_x)
     )
-
-
-def _perp_entry_box_edge_y(section: Section, *, is_top: bool) -> float:
-    """Y of the box edge a TOP or BOTTOM entry port sits on."""
-    return section.bbox_y if is_top else section.bbox_y + section.bbox_h
 
 
 def _corridor_riser_x(
