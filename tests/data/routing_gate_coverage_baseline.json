@@ -386,7 +386,6 @@
   "exit_turns.py::station_id not in graph.stations::#1",
   "exit_turns.py::target_crossing is None::#1",
   "exit_turns.py::target_crossing is None::#2",
-  "inter_section_handlers.py::and corridor.bypass_band_y >= base_y - COORD_TOLERANCE::#1",
   "inter_section_handlers.py::and f.src_row is not None::#1",
   "inter_section_handlers.py::and f.tgt_row is not None::#1",
   "inter_section_handlers.py::and gap_right - around_xmax >= SECTION_ROUTE_CLEARANCE::#1",
