@@ -1,8 +1,10 @@
-"""A bundle rising out of a junction into a BOTTOM entry port.
+"""A bundle rising into a BOTTOM entry port.
 
-The lines keep their order through every turn of the rise: a fan traverse
-turned onto from an ascent nests in the mirror order of one turned onto from a
-descent.
+* The lines keep their order through every turn of the rise: a fan traverse
+  turned onto from an ascent nests in the mirror order of one turned onto from
+  a descent.
+* A source already standing below the target's channel turns into the port
+  once, instead of climbing a riser too short for its two corners.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from nf_metro.parser.model import MetroGraph
 
 REPROS = Path(__file__).resolve().parent / "fixtures" / "curve_invariant_repros"
 RISE_FROM_JUNCTION = REPROS / "bt_bottom_entry_rise_from_junction.mmd"
+SOURCE_BEYOND_CHANNEL = REPROS / "bt_bottom_entry_source_beyond_channel.mmd"
 
 
 def _laid_out(path: Path) -> MetroGraph:
@@ -28,7 +31,9 @@ def _laid_out(path: Path) -> MetroGraph:
     return graph
 
 
-@pytest.mark.parametrize("path", [RISE_FROM_JUNCTION], ids=lambda p: p.stem)
+@pytest.mark.parametrize(
+    "path", [RISE_FROM_JUNCTION, SOURCE_BEYOND_CHANNEL], ids=lambda p: p.stem
+)
 def test_render_completes(path: Path) -> None:
     render_string(path.read_text(), source_dir=str(path.parent))
 
@@ -39,3 +44,18 @@ def test_bundle_rising_into_bottom_entry_keeps_its_order() -> None:
     routes = route_edges(graph, station_offsets=offsets)
     violations = check_bundle_order_preserved(routes)
     assert violations == [], violations[0].message()
+
+
+def test_source_beyond_channel_turns_into_bottom_entry_once() -> None:
+    graph = _laid_out(SOURCE_BEYOND_CHANNEL)
+    offsets = compute_station_offsets(graph)
+    routes = [
+        route
+        for route in route_edges(graph, station_offsets=offsets)
+        if route.edge.target == "z3__entry_bottom_3"
+    ]
+    assert {route.line_id for route in routes} == {"m0", "m1", "m2"}
+    for route in routes:
+        assert len(route.points) == 3, (route.line_id, route.points)
+        (_, sy), (cx, cy), (tx, ty) = route.points
+        assert cy == sy and cx == tx and ty < sy, (route.line_id, route.points)

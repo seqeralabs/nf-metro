@@ -447,7 +447,6 @@
   "inter_section_handlers.py::if fan is None and gap_bottom > gap_top:::#1",
   "inter_section_handlers.py::if fan is not None and corridor is not None and corridor.band_y is not None:::#2",
   "inter_section_handlers.py::if fan is not None and ep_col is not None:::#1",
-  "inter_section_handlers.py::if fan_single is None and _perp_entry_source_beyond_channel(::#1",
   "inter_section_handlers.py::if feeder is not None:::#1",
   "inter_section_handlers.py::if flank_xs:::#1",
   "inter_section_handlers.py::if gap_bottom <= gap_top:::#1",

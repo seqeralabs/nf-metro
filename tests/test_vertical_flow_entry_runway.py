@@ -13,8 +13,15 @@ from __future__ import annotations
 
 import pytest
 from conftest import parse_and_layout
+from orientation_signature import divergences
+from orientation_transform import Orientation, transform_source, transformable_reason
 
-from nf_metro.layout.geometry import AxisFrame, flow_port_sides, lanes_run_along_x
+from nf_metro.layout.geometry import (
+    AxisFrame,
+    axis_split,
+    flow_port_sides,
+    lanes_run_along_x,
+)
 from nf_metro.layout.labels import LabelPlacement, segment_strikes_label
 from nf_metro.layout.pass_metrics import station_radius_approx
 from nf_metro.layout.routing.common import apply_route_offsets
@@ -434,3 +441,90 @@ def test_flow_entry_bypass_clears_skipped_markers_and_labels(name: str) -> None:
                 f"{line_id} {port_id}->{target_id} strikes {station_id}'s label: "
                 f"{points}"
             )
+
+
+# The chain above with every direction, cell and port side stated, so that
+# reflecting it top to bottom (BT -> TB) is a meaning-preserving rewrite.
+_CHAIN_EXPLICIT_BT = """
+%%metro line: m1 | L1 | #3cb44b
+%%metro line: m2 | L2 | #4363d8
+%%metro line: m3 | L3 | #f58231
+%%metro grid: a | 0,0
+%%metro grid: b | 1,0
+%%metro grid: c | 2,0
+graph LR
+    subgraph a [A]
+        %%metro direction: LR
+        a0[A0]
+    end
+    subgraph b [B]
+        %%metro direction: BT
+        %%metro entry: bottom | m1, m3
+        %%metro exit: top | m1, m2, m3
+        b0[B0]
+        b1[B1]
+        b3[B3]
+        b0 -->|m1| b1
+        b1 -->|m2| b3
+    end
+    subgraph c [C]
+        %%metro direction: LR
+        c0[C0]
+    end
+    a0 -->|m1| b1
+    a0 -->|m3| b3
+    b1 -->|m1| c0
+    b3 -->|m2,m3| c0
+"""
+
+_FLIP_TO_TB = Orientation(2, True)
+
+
+def _flow_entry_profile(graph: MetroGraph) -> dict[tuple[str, str], tuple]:
+    """Each flow-side entry's lane decision, in the entry's own frame.
+
+    Every vertex is tagged with the lane it sits on (the feeder's landing lane,
+    the line's departure lane from the station, or neither) and, but for the
+    arrival, its distance along the flow axis from where the route leaves the
+    port.
+    """
+    drawn = _drawn(graph)
+    profile = {}
+    for port_id, target_id, line_id in _flow_entries(graph, drawn):
+        points = drawn[port_id, target_id, line_id]
+        flow_axis, _lane_axis = AxisFrame.axes_for_direction(
+            graph.sections[graph.ports[port_id].section_id].direction
+        )
+        (departure,) = [
+            pts[0]
+            for (src, _tgt, lid), pts in drawn.items()
+            if src == target_id and lid == line_id
+        ]
+        entry_flow, entry_lane = axis_split(flow_axis, points[0])
+        departure_lane = axis_split(flow_axis, departure)[1]
+
+        def lane_of(p: Point) -> str:
+            lane = axis_split(flow_axis, p)[1]
+            if abs(lane - entry_lane) < 0.5:
+                return "port"
+            if abs(lane - departure_lane) < 0.5:
+                return "station"
+            return "between"
+
+        flow_offsets = tuple(
+            round(abs(axis_split(flow_axis, p)[0] - entry_flow), 1) for p in points[:-1]
+        )
+        profile[target_id, line_id] = (tuple(map(lane_of, points)), flow_offsets)
+    return profile
+
+
+def test_flow_entry_lane_decision_survives_flipping_bt_to_tb() -> None:
+    reference = parse_and_layout(_CHAIN_EXPLICIT_BT)
+    image = parse_and_layout(transform_source(_CHAIN_EXPLICIT_BT, _FLIP_TO_TB))
+    assert transformable_reason(reference) is None
+    assert {s.direction for s in image.sections.values()} == {"LR", "TB"}
+    assert divergences(reference, image, _FLIP_TO_TB) == []
+
+    expected = _flow_entry_profile(reference)
+    assert expected[("b3", "m3")][0][-2:] == ("station", "station"), expected
+    assert _flow_entry_profile(image) == expected
