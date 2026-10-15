@@ -103,24 +103,54 @@ def _spread_diagonal_bundles(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
                 _apply_diagonal_spread(subgroup, station_id, ctx=ctx)
         spread.update(_edge_key(rp) for rp in unseen)
 
-    # Then spread any multi-line same-edge bundle the hub pass did not reach: a
+    # Then spread any parallel bundle the hub pass did not reach: a multi-line
     # bypass-V leg, an inter-section bundle landing on a shared exit port, or a
     # baked TB fan-out.  These are exactly parallel, so each spreads to the full
-    # perpendicular gap on its own geometry.
-    edge_groups: dict[tuple[str, str], list[RoutedPath]] = defaultdict(list)
-    for rp in routes:
-        if (
-            not _is_diagonal_route(rp)
-            or _edge_key(rp) in spread
-            or rp.exit_lane_transition_plan_id is not None
-        ):
-            continue
-        edge_groups[(rp.edge.source, rp.edge.target)].append(rp)
-    for (src, _tgt), group in edge_groups.items():
-        if len(group) < 2:
-            continue
-        _apply_diagonal_spread(group, src, ctx=ctx)
-        spread.update(_edge_key(rp) for rp in group)
+    # perpendicular gap on its own geometry.  A baked bundle is every diagonal
+    # sharing one end station and one span, whichever edge it belongs to, so
+    # lines of distinct edges riding one diagonal off (or into) a station spread
+    # as one bundle, as a horizontal section's hub pass spreads them.
+    for end, key_of in ((0, _source_bundle_key), (1, _target_bundle_key)):
+        bundles: dict[tuple[object, ...], list[RoutedPath]] = defaultdict(list)
+        for rp in routes:
+            if (
+                not _is_diagonal_route(rp)
+                or _edge_key(rp) in spread
+                or rp.exit_lane_transition_plan_id is not None
+            ):
+                continue
+            bundles[key_of(rp, ctx.graph)].append(rp)
+        for group in bundles.values():
+            if len(group) < 2:
+                continue
+            anchor = group[0].edge.source if end == 0 else group[0].edge.target
+            _apply_diagonal_spread(group, anchor, ctx=ctx)
+            spread.update(_edge_key(rp) for rp in group)
+
+
+def _baked_diagonal_span(rp: RoutedPath) -> tuple[float, float]:
+    """Flow-axis (Y) span of a baked diagonal, whose offsets are baked on X."""
+    return (round(rp.points[1][1], 3), round(rp.points[2][1], 3))
+
+
+def _source_bundle_key(rp: RoutedPath, graph: MetroGraph) -> tuple[object, ...]:
+    """Bundle a diagonal with every other leaving its source on the same diagonal.
+
+    A render-time route bundles with its own edge's lines only; a baked route
+    with every route from its source to the same target lane over the same span.
+    """
+    if rp.offset_regime is not OffsetRegime.BAKED:
+        return (rp.edge.source, rp.edge.target)
+    target = graph.stations[rp.edge.target]
+    return (rp.edge.source, round(target.x, 3), *_baked_diagonal_span(rp))
+
+
+def _target_bundle_key(rp: RoutedPath, graph: MetroGraph) -> tuple[object, ...]:
+    """Bundle a baked diagonal with every other entering its target on it."""
+    if rp.offset_regime is not OffsetRegime.BAKED:
+        return (id(rp),)
+    source = graph.stations[rp.edge.source]
+    return (rp.edge.target, round(source.x, 3), *_baked_diagonal_span(rp))
 
 
 def _stub_minimums(rp: RoutedPath) -> tuple[float, float]:
