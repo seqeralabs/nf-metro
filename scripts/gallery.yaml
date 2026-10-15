@@ -895,6 +895,21 @@ gallery:
       every hop, with no fork or merge anywhere along it. Each station continues
       its predecessor, so the whole chain drops straight down one lane column
       instead of zigzagging between the base columns of its lines (issue #2042)."
+  - id: tb_handoff_chain_beside_bypass
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      "A `%%metro direction: TB` chain that hands its line off at every hop, entered
+      by a three-line bundle one of whose lines bypasses the section to the next one. The
+      chain still drops down one lane column under its entry, so the section stays one
+      column wide instead of stepping diagonally across a widened box (issue #2042)."
+  - id: bt_handoff_chain_beside_bypass
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      "The `%%metro direction: BT` mirror: the bundle rises in from the bottom and the
+      hand-off chain climbs one lane column, so the line leaving the top and the line
+      bypassing below both start from a straight chain rather than a staircase (issue #2042)."
   - id: tb_column_continuation_two_lines
     source_dir: examples/topologies
     category: TB / BT Sections
@@ -1834,6 +1849,14 @@ gallery:
       converge at a local junction one column on and a single trunk carries the merged line to
       the report, instead of the two legs bowing out and running parallel the whole way to the
       distant merge (issue #1296)."
+  - id: dual_fed_merge_entry_bundle_order
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      "One line reaches a merge entry from two feeders: level from the section beside it
+      and inside a two-line bundle climbing from the TB section below. The bundle turns in
+      on concentric corners and keeps its order at the port, and the level feeder joins
+      its mate there, instead of the bundle braiding as it peels into the port (issue #2042)."
 
   # ── Inter-section Routing ──────────────────────────────────────────────────
   - id: left_exit_sink_below

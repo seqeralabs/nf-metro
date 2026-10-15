@@ -34,7 +34,6 @@
   "common.py::if k == 0 or k + 2 >= len(points):::#1",
   "common.py::if max(peel_xs) - min(peel_xs) > (n - 1) * step + COORD_TOLERANCE:::#1",
   "common.py::if moves and _section_intrudes(::#1",
-  "common.py::if moves and tail_segment_is_held(route, segment_rank, target_x):::#1",
   "common.py::if n == 0:::#1",
   "common.py::if new_gap is not None and new_gap != old_gap:::#1",
   "common.py::if not consumer.is_port:::#1",

@@ -2,7 +2,7 @@
 
 Example `.mmd` files demonstrating a range of pipeline topologies and the layout patterns they produce. Each example exercises different aspects of the auto-layout engine.
 
-This directory holds 307 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
+This directory holds 310 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
 
 To render one example:
 
@@ -479,26 +479,27 @@ python scripts/list_topology_fixtures.py
 
 ### Merge / reconvergence routing
 
-| Fixture                                | What it tests                                                                                                                                 |
-| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `exit_lane_rise_bundle_order.mmd`      | Exit port a lane above its own trunk - the climb out keeps the order the converging entry fixed, rather than crossing the pair (#1770)        |
-| `merge_around_below_leftmost.mmd`      | Merge where the continuation must route around a section sitting below and to the left of the leftmost source                                 |
-| `merge_bottom_row_bypass.mmd`          | Merge on the bottom row where one branch arrives via an inter-row bypass                                                                      |
-| `merge_leftmost_sink_branch.mmd`       | Merge where the sink section is the leftmost section in its row - tests that the merge trunk does not overshoot left                          |
-| `merge_offrow_continuation.mmd`        | Merge continuation that lands off the trunk row - tests that the continuation trunk is re-anchored to the correct row                         |
-| `merge_port_above_approach.mmd`        | Merge port approached from above - tests the above-approach routing arm for a merge entry                                                     |
-| `merge_pullaway.mmd`                   | Merge trunk pull-away across a cross-row sibling - tests that the trunk stays clear of the sibling section's bounding box                     |
-| `merge_right_entry.mmd`                | Merge feeder arriving via a cross-row RIGHT entry - tests the interaction of RIGHT-entry routing with merge-trunk continuation                |
-| `merge_right_entry_cross_row_wrap.mmd` | Merge feeder from the row above into a RIGHT entry on its left - wraps in from the port's outward side like an unmerged feeder (#2034)        |
-| `merge_trunk_out_of_range_section.mmd` | Merge trunk passing over a section outside its x-range - tests that the trunk does not clip sections it should not cross                      |
-| `merge_trunk_over_low_section.mmd`     | Merge trunk passing over a lower section - tests clear-corridor routing for trunks that cross over shorter sections                           |
-| `post_convergence_trunk.mmd`           | Trunk continuation after a convergence fold - tests that the post-convergence section inherits the correct trunk row and bundle offsets       |
-| `reconverge_reversed_fold.mmd`         | Reconvergence from a reversed fold (#705) - tests that the back-run after a reversed fold stays level and the fan/merge order is preserved    |
-| `merge_adjacent_feeder.mmd`            | A clear adjacent feeder reaching the merge directly instead of detouring onto the trunk approach                                              |
-| `merge_feeder_shared_channel_gap.mmd`  | Two merge feeders sharing one co-located descent channel between fan sources - each still gets its own gap slot (#1495)                       |
-| `merge_feeders_three_columns.mmd`      | Report feeders arriving from three separate columns - each lands on the trunk it converges onto                                               |
-| `fanin_distant_terminus.mmd`           | Same-layer fan-in siblings merging locally before running on to a distant file terminus                                                       |
-| `fanin_join_diff_length_branches.mmd`  | Sectionless four-line fan-in with branches of different lengths - the straight-diamond join does not snap onto a contested base track (#1456) |
+| Fixture                                 | What it tests                                                                                                                                                        |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `exit_lane_rise_bundle_order.mmd`       | Exit port a lane above its own trunk - the climb out keeps the order the converging entry fixed, rather than crossing the pair (#1770)                               |
+| `merge_around_below_leftmost.mmd`       | Merge where the continuation must route around a section sitting below and to the left of the leftmost source                                                        |
+| `merge_bottom_row_bypass.mmd`           | Merge on the bottom row where one branch arrives via an inter-row bypass                                                                                             |
+| `merge_leftmost_sink_branch.mmd`        | Merge where the sink section is the leftmost section in its row - tests that the merge trunk does not overshoot left                                                 |
+| `merge_offrow_continuation.mmd`         | Merge continuation that lands off the trunk row - tests that the continuation trunk is re-anchored to the correct row                                                |
+| `merge_port_above_approach.mmd`         | Merge port approached from above - tests the above-approach routing arm for a merge entry                                                                            |
+| `merge_pullaway.mmd`                    | Merge trunk pull-away across a cross-row sibling - tests that the trunk stays clear of the sibling section's bounding box                                            |
+| `merge_right_entry.mmd`                 | Merge feeder arriving via a cross-row RIGHT entry - tests the interaction of RIGHT-entry routing with merge-trunk continuation                                       |
+| `merge_right_entry_cross_row_wrap.mmd`  | Merge feeder from the row above into a RIGHT entry on its left - wraps in from the port's outward side like an unmerged feeder (#2034)                               |
+| `merge_trunk_out_of_range_section.mmd`  | Merge trunk passing over a section outside its x-range - tests that the trunk does not clip sections it should not cross                                             |
+| `merge_trunk_over_low_section.mmd`      | Merge trunk passing over a lower section - tests clear-corridor routing for trunks that cross over shorter sections                                                  |
+| `post_convergence_trunk.mmd`            | Trunk continuation after a convergence fold - tests that the post-convergence section inherits the correct trunk row and bundle offsets                              |
+| `reconverge_reversed_fold.mmd`          | Reconvergence from a reversed fold (#705) - tests that the back-run after a reversed fold stays level and the fan/merge order is preserved                           |
+| `merge_adjacent_feeder.mmd`             | A clear adjacent feeder reaching the merge directly instead of detouring onto the trunk approach                                                                     |
+| `merge_feeder_shared_channel_gap.mmd`   | Two merge feeders sharing one co-located descent channel between fan sources - each still gets its own gap slot (#1495)                                              |
+| `merge_feeders_three_columns.mmd`       | Report feeders arriving from three separate columns - each lands on the trunk it converges onto                                                                      |
+| `fanin_distant_terminus.mmd`            | Same-layer fan-in siblings merging locally before running on to a distant file terminus                                                                              |
+| `fanin_join_diff_length_branches.mmd`   | Sectionless four-line fan-in with branches of different lengths - the straight-diamond join does not snap onto a contested base track (#1456)                        |
+| `dual_fed_merge_entry_bundle_order.mmd` | A line fed into a merge entry both level and inside a bundle climbing from a TB section below - the bundle keeps its order into the port on concentric turns (#2042) |
 
 ### Off-track / rail-mode / misc routing
 
@@ -550,6 +551,8 @@ python scripts/list_topology_fixtures.py
 | `tb_convergence_straight_drop.mmd`         | A collinear feeder dropping straight into a TB convergence rather than doglegging (#1007, #1009)                                                                                                                                                |
 | `tb_passthrough_continuation.mmd`          | A pass-through TB convergence whose continuation drops straight (#1012)                                                                                                                                                                         |
 | `tb_line_change_chain.mmd`                 | A TB chain whose line changes at every hop - the chain drops straight down one lane column instead of zigzagging (#2042)                                                                                                                        |
+| `tb_handoff_chain_beside_bypass.mmd`       | A TB hand-off chain entered by a bundle one of whose lines bypasses the section - the chain holds one lane column under its entry (#2042)                                                                                                       |
+| `bt_handoff_chain_beside_bypass.mmd`       | BT mirror of the above - the bundle rises in from the bottom and the chain climbs one lane column (#2042)                                                                                                                                       |
 | `tb_perp_exit_side_neighbour.mmd`          | A TB BOTTOM exit into an LR neighbour that is beside it rather than below - the route goes down and over                                                                                                                                        |
 | `tb_two_line_vert_seam.mmd`                | Two TB sections side by side - the two-line LEFT/RIGHT entry lifts above the vertical-flow trunk head (#1054)                                                                                                                                   |
 | `tb_offtrack_fork_baseline.mmd`            | A TB asymmetric fork whose branch reaches further toward the lift side than the trunk - the off-track baseline anchors on the trunk column, not the lift-most station (#1388)                                                                   |
