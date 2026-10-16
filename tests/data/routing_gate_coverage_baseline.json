@@ -893,6 +893,7 @@
   "postprocess.py::if abs(v) < COORD_TOLERANCE_FINE:::#1",
   "postprocess.py::if any(_is_chain_predecessor(graph, ctx, r.edge.source) for r in flat_in):::#1",
   "postprocess.py::if any(_is_internal_station(graph, r.edge.target) for r in flat_out):::#1",
+  "postprocess.py::if carried is not None:::#1",
   "postprocess.py::if majority_count <= len(moved) / 2:::#1",
   "postprocess.py::if max(moved_xs) - min(moved_xs) <= 1.0:::#1",
   "postprocess.py::if multi_diag:::#1",

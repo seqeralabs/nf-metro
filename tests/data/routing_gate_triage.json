@@ -1778,5 +1778,9 @@
  "tb_handlers.py::if via.is_port or via.section_id != section.id:::#1": {
   "note": "A line enters a section once, through the bypass's own source port, which the previous gate already filters, and a chain link into an internal station starts inside the section; so the skip arm never fires. The pass arm is reached by `tests/test_flow_entry_bypass_crossings.py` (_SAME_LINE_CHAIN, _SINGLE_BYPASS, _TWO_COLUMN_CHAIN); the skip arm by no swept, test or generated map (0 of 8004).",
   "status": "defensive"
+ },
+ "postprocess.py::if carried is not None:::#1": {
+  "note": "A same-line route drawn along a diagonal the spread moved takes the same translation. Reached by the inline map `tests/test_flow_entry_bypass_crossings.py` (_SPREAD_CHAIN), a same-line bypass following a chain link shared with another line, and by 13 of 8004 generated maps. The sweep's roots exclude maps written inline in tests, so no swept fixture evaluates it.",
+  "status": "needs-review"
  }
 }
