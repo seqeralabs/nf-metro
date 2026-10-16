@@ -1985,28 +1985,68 @@ def _bundle_divergent_distinct_traverses(
             for m, ty, _off in moves
         ):
             continue
+        peel_offsets = _shared_peel_corner_offsets(reseats)
+        if peel_offsets is None:
+            continue
         # The band nests one step per rank off the innermost, so every member's
         # incoming corner off the shared descent sizes on one reference, whether
-        # its traverse moved or already sat on its slot.  The outgoing corner is
-        # where the line peels off alone, so it keeps the base radius.
+        # its traverse moved or already sat on its slot.  The same holds at the
+        # outgoing corner for the members that turn off there together.
         base_radius, base_radius_out = _flanking_reference_radii(
-            ((m.route, m.idx, ty, 1, (off, 0.0)) for m, ty, off in reseats),
+            (
+                (m.route, m.idx, ty, 1, (off, peel_offsets.get(id(m), 0.0)))
+                for m, ty, off in reseats
+            ),
             ctx.curve_radius,
         )
         for m, ty, off in reseats:
             if abs(m.seg.y - ty) <= COORD_TOLERANCE:
                 _resize_concentric_corner(m.route, m.idx - 1, off, base_radius)
+                if id(m) in peel_offsets:
+                    _resize_concentric_corner(
+                        m.route, m.idx, peel_offsets[id(m)], base_radius_out
+                    )
                 continue
             _set_htrunk_y(
                 m.route,
                 m.idx,
                 ty,
                 off,
-                0.0,
+                peel_offsets.get(id(m), 0.0),
                 base_radius=base_radius,
                 base_radius_out=base_radius_out,
             )
             _reconcile_moved_trunk_slot(m.route, m.idx, ty, ctx.graph)
+
+
+def _shared_peel_corner_offsets(
+    reseats: Sequence[tuple[_TraverseLeg, float, float]],
+) -> dict[int, float] | None:
+    """Outgoing-corner displacements of re-banded traverses that turn off together.
+
+    Keyed by ``id`` of each traverse leg whose route shares its target with
+    another member: those legs turn off the band into one port through a single
+    bundle corner, so each nests by its X displacement off the first of them.  A
+    leg turning off alone is absent and keeps the base radius.  ``None`` when the
+    re-banded Ys leave such a corner unable to share one centre.
+    """
+    by_target: dict[str, list[tuple[_TraverseLeg, float]]] = defaultdict(list)
+    for leg, target_y, _offset in reseats:
+        by_target[leg.route.edge.target].append((leg, target_y))
+    offsets: dict[int, float] = {}
+    for members in by_target.values():
+        if len(members) < 2:
+            continue
+        reference, reference_y = members[0]
+        for leg, target_y in members:
+            dx = leg.seg.xb - reference.seg.xb
+            dy = target_y - reference_y
+            run_sign = 1.0 if leg.seg.xb > leg.seg.xa else -1.0
+            turn_sign = 1.0 if leg.seg.after_y > leg.seg.y else -1.0
+            if abs(dx * turn_sign + dy * run_sign) > COORD_TOLERANCE:
+                return None
+            offsets[id(leg)] = dx
+    return offsets
 
 
 def _unify_coincident_corner_radii(
