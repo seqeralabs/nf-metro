@@ -22,6 +22,7 @@ from nf_metro.layout.constants import (
     SAME_Y_TOLERANCE,
     graph_offset_step,
 )
+from nf_metro.layout.fan_ordering import fanout_stays_on_source_row
 from nf_metro.layout.geometry import (
     AxisFrame,
     flow_entry_side,
@@ -1141,7 +1142,7 @@ def _reorder_fanout_divergence(ctx: _OffsetCtx) -> None:
     the bundle straight on instead, so it takes the section's own order and the
     seam between them stays level.
 
-    Non-compact LR/RL sections only -- the divergence analog of
+    Non-compact sections only -- the divergence analog of
     :func:`_reorder_reconvergence`.
     """
     if ctx.compact:
@@ -1150,6 +1151,13 @@ def _reorder_fanout_divergence(ctx: _OffsetCtx) -> None:
     for sec_id, section in graph.sections.items():
         jid = _section_exit_fanout_junction(ctx, section)
         if jid is None:
+            continue
+        # A vertical section's lanes stack across its flow, not across the rows
+        # a cross-row fan ranks its branches by, so only a fan that stays on
+        # the section's row has an order those lanes can take.
+        if not lanes_run_along_y(section.direction) and not fanout_stays_on_source_row(
+            graph, jid, ctx.topology
+        ):
             continue
         peel_order = fanout_divergence_peel_order(
             graph, jid, ctx.line_priority, ctx.topology
