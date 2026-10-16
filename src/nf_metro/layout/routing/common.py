@@ -1079,10 +1079,6 @@ class HTrunkSeg:
         return max(self.xa, self.xb)
 
 
-def _is_vertical_leg(a: tuple[float, float], b: tuple[float, float]) -> bool:
-    return abs(a[0] - b[0]) <= COORD_TOLERANCE and abs(a[1] - b[1]) > COORD_TOLERANCE
-
-
 def iter_horizontal_trunks(rp: RoutedPath) -> Iterator[tuple[int, HTrunkSeg]]:
     """Yield ``(waypoint_index, segment)`` for each interior horizontal trunk.
 
@@ -1099,9 +1095,13 @@ def iter_horizontal_trunks(rp: RoutedPath) -> Iterator[tuple[int, HTrunkSeg]]:
         x1, y1 = pts[k + 1]
         if abs(y1 - y0) > COORD_TOLERANCE or abs(x1 - x0) <= COORD_TOLERANCE:
             continue
-        if not (
-            _is_vertical_leg(pts[k - 1], pts[k])
-            and _is_vertical_leg(pts[k + 1], pts[k + 2])
+        if abs(pts[k - 1][0] - x0) > COORD_TOLERANCE:
+            continue
+        if abs(pts[k + 2][0] - x1) > COORD_TOLERANCE:
+            continue
+        if (
+            abs(pts[k - 1][1] - y0) <= COORD_TOLERANCE
+            or abs(pts[k + 2][1] - y1) <= COORD_TOLERANCE
         ):
             continue
         yield k, HTrunkSeg(y0, x0, x1, pts[k - 1][1], pts[k + 2][1])

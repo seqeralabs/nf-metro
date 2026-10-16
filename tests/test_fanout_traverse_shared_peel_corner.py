@@ -9,7 +9,6 @@ on at, and it has to stay concentric after the re-band.
 from __future__ import annotations
 
 import warnings
-from pathlib import Path
 
 from nf_metro.api import RenderConfig, prepare_graph, render_graph_result
 from nf_metro.themes import resolve_theme
@@ -17,12 +16,23 @@ from nf_metro.themes import resolve_theme
 # ``m2`` peels off the fan first, up into Zone 2's BOTTOM entry, so the band
 # nests ``m0``/``m1`` beneath it; both then rise together into Zone 3's LEFT
 # entry.
-SHARED_RISE = (
-    Path(__file__).resolve().parent
-    / "fixtures"
-    / "curve_invariant_repros"
-    / "fan_traverses_rise_together_into_one_port.mmd"
-).read_text()
+SHARED_RISE = """\
+%%metro line: m0 | L0 | #e6194b
+%%metro line: m1 | L1 | #3cb44b
+%%metro line: m2 | L2 | #4363d8
+graph LR
+    subgraph z2 [Zone 2]
+        %%metro direction: BT
+        q2x1[Q2X1]
+    end
+    subgraph z3 [Zone 3]
+        q3x0 -->|m0| q3x1
+    end
+    q0x0 -->|m0| q3x0
+    q0x0 -->|m1| q3x1
+    q0x2 -->|m2| q2x1
+    q2x1 -->|m2| q3x1
+"""
 
 Point = tuple[float, float]
 
