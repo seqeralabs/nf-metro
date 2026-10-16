@@ -10,6 +10,7 @@ leaves a step a few pixels deep with no room for its two corners.
 from __future__ import annotations
 
 import warnings
+from pathlib import Path
 
 from nf_metro.api import RenderConfig, prepare_graph, render_graph_result
 from nf_metro.layout.routing.common import RoutedPath, iter_horizontal_trunks
@@ -17,28 +18,12 @@ from nf_metro.themes import resolve_theme
 
 # ``l1`` peels off the junction's middle lane; ``l0`` and ``l3`` carry on along
 # their own tracks under ``s1n2`` and rise together into Target.
-SOURCE_TRACK_PAIR = """\
-%%metro line: l0 | L0 | #e6194b
-%%metro line: l1 | L1 | #3cb44b
-%%metro line: l2 | L2 | #4363d8
-%%metro line: l3 | L3 | #f58231
-%%metro line: l4 | L4 | #911eb4
-%%metro line: l5 | L5 | #46f0f0
-graph LR
-    subgraph sec0 [Source]
-        %%metro direction: TB
-        s0n3 -->|l3,l5| s0n4
-    end
-    subgraph sec2 [Target]
-        s2n0 -->|l2,l3,l4,l5| s2n1
-        s2n1 -->|l2,l3,l4,l5| s2n2
-        s2n2 -->|l0,l2,l3,l4,l5| s2n3
-    end
-    s0n3 -->|l0| s2n2
-    s0n4 -->|l1| s1n2
-    s1n2 -->|l2| s2n1
-    s0n4 -->|l3| s2n0
-"""
+SOURCE_TRACK_PAIR = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "curve_invariant_repros"
+    / "fan_bypass_pair_rides_source_tracks.mmd"
+).read_text()
 
 
 def _routes(text: str) -> list[RoutedPath]:
