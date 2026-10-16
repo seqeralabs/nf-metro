@@ -7,6 +7,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 
 from nf_metro.layout.constants import (
+    COORD_GROUP_DIGITS_FINE,
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
     CURVE_RADIUS,
@@ -17,7 +18,12 @@ from nf_metro.layout.constants import (
     MIN_STRAIGHT_PORT,
     STATION_MOVE_TOLERANCE,
 )
-from nf_metro.layout.geometry import lanes_run_along_x, segment_intersects_bbox
+from nf_metro.layout.geometry import (
+    Point,
+    lanes_run_along_x,
+    quantize_coord,
+    segment_intersects_bbox,
+)
 from nf_metro.layout.routing.common import (
     OffsetRegime,
     RoutedPath,
@@ -71,9 +77,6 @@ def _spread_diagonal_bundles(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
         (rp.points[1], rp.points[2]) if _is_diagonal_route(rp) else None
         for rp in routes
     ]
-
-    def _edge_key(rp: RoutedPath) -> tuple[str, str, str]:
-        return (rp.edge.source, rp.edge.target, rp.line_id)
 
     # Spread fan / convergence hubs first: a hub already carries most multi-line
     # bundles, and grouping a whole fan together keeps it as compact as the hub
@@ -129,14 +132,21 @@ def _spread_diagonal_bundles(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
     _carry_spread_to_same_line_copies(routes, before, spread)
 
 
-Point = tuple[float, float]
+def _edge_key(rp: RoutedPath) -> tuple[str, str, str]:
+    return (rp.edge.source, rp.edge.target, rp.line_id)
 
 
 def _diagonal_key(line_id: str, a: Point, b: Point) -> tuple[str, Point, Point]:
     return (
         line_id,
-        (round(a[0], 3), round(a[1], 3)),
-        (round(b[0], 3), round(b[1], 3)),
+        (
+            quantize_coord(a[0], COORD_GROUP_DIGITS_FINE),
+            quantize_coord(a[1], COORD_GROUP_DIGITS_FINE),
+        ),
+        (
+            quantize_coord(b[0], COORD_GROUP_DIGITS_FINE),
+            quantize_coord(b[1], COORD_GROUP_DIGITS_FINE),
+        ),
     )
 
 
@@ -157,7 +167,7 @@ def _carry_spread_to_same_line_copies(
     """
     moved: dict[tuple[str, Point, Point], tuple[Point, Point] | None] = {}
     for rp, diag in zip(routes, before):
-        if diag is None or (rp.edge.source, rp.edge.target, rp.line_id) not in spread:
+        if diag is None or _edge_key(rp) not in spread:
             continue
         after = (rp.points[1], rp.points[2])
         if after == diag:
@@ -167,7 +177,7 @@ def _carry_spread_to_same_line_copies(
     if not moved:
         return
     for rp in routes:
-        if (rp.edge.source, rp.edge.target, rp.line_id) in spread:
+        if _edge_key(rp) in spread:
             continue
         for k in range(len(rp.points) - 1):
             carried = moved.get(
