@@ -19,7 +19,7 @@
     "differentialabundance.mmd",
     "differentialabundance_default.mmd",
     "inactive_lines.mmd",
-    "topologies/bt_entry_bypass_holds_port_lane.mmd",
+    "topologies/bt_entry_bypass_steps_off_at_port.mmd",
     "topologies/bypass_label_rake.mmd",
     "topologies/bypass_label_rake_left.mmd",
     "topologies/bypass_label_rake_wide.mmd",

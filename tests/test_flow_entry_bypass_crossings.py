@@ -141,8 +141,8 @@ _CROSSING_MAPS = {
         (_TOPOLOGIES / "bt_entry_bundle_bypass.mmd").read_text(),
         "work",
     ),
-    "bt_entry_bypass_holds_port_lane": (
-        (_TOPOLOGIES / "bt_entry_bypass_holds_port_lane.mmd").read_text(),
+    "bt_entry_bypass_steps_off_at_port": (
+        (_TOPOLOGIES / "bt_entry_bypass_steps_off_at_port.mmd").read_text(),
         "align",
     ),
 }
