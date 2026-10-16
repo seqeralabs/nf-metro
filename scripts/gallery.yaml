@@ -1582,6 +1582,13 @@ gallery:
       branch's loop over a section into its flow-side entry: the farther branch runs
       outermost, the joiner rides inside the loop through both corners and lands on the
       upper lane, and no two lines cross."
+  - id: left_exit_wrap_under_own_section
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "A LEFT exit feeding a RIGHT entry up and two columns across: the wrap leads out
+      on the exit's own side, passes under its section and climbs beside the other feeder,
+      instead of running back along its trunk over the stations it has just served (#2073)."
   - id: junction_entry_reversed_fold
     source_dir: examples/topologies
     category: Merge & Convergence

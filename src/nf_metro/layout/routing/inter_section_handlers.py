@@ -3162,6 +3162,16 @@ def _is_row_level_bottom_row_climb(
     tgt_port = graph.ports.get(edge.target)
     if tgt_port is None or not tgt_port.is_entry:
         return False
+    src_port = graph.ports.get(edge.source)
+    if (
+        src_port is not None
+        and src_port.side in (PortSide.LEFT, PortSide.RIGHT)
+        and tgt_col != src_col
+        and (src_port.side is PortSide.LEFT) == (tgt_col > src_col)
+    ):
+        # The exit faces away from the target, so a run at the source's own Y
+        # would lead back across the source box.
+        return False
     return _bottom_row_climb_corridor_clear(
         graph, src_row, tgt_row, src_col, tgt_col, max_content_row=max_content_row
     )
