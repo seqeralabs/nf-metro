@@ -1079,7 +1079,7 @@ class HTrunkSeg:
         return max(self.xa, self.xb)
 
 
-def _holds_x_spans_y(a: tuple[float, float], b: tuple[float, float]) -> bool:
+def _is_vertical_leg(a: tuple[float, float], b: tuple[float, float]) -> bool:
     return abs(a[0] - b[0]) <= COORD_TOLERANCE and abs(a[1] - b[1]) > COORD_TOLERANCE
 
 
@@ -1100,8 +1100,8 @@ def iter_horizontal_trunks(rp: RoutedPath) -> Iterator[tuple[int, HTrunkSeg]]:
         if abs(y1 - y0) > COORD_TOLERANCE or abs(x1 - x0) <= COORD_TOLERANCE:
             continue
         if not (
-            _holds_x_spans_y(pts[k - 1], pts[k])
-            and _holds_x_spans_y(pts[k + 1], pts[k + 2])
+            _is_vertical_leg(pts[k - 1], pts[k])
+            and _is_vertical_leg(pts[k + 1], pts[k + 2])
         ):
             continue
         yield k, HTrunkSeg(y0, x0, x1, pts[k - 1][1], pts[k + 2][1])
