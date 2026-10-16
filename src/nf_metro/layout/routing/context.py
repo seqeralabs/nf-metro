@@ -67,6 +67,7 @@ if TYPE_CHECKING:
     from nf_metro.layout.route_plan import ExitTurnPlanId
     from nf_metro.layout.routing.convergences import ConvergencePlanExecutionQuery
     from nf_metro.layout.routing.exit_turns import ExitTurnPlanQuery
+    from nf_metro.layout.routing.perp_columns import PerpEntryColumn
     from nf_metro.layout.routing.system_emission import RouteSystemEmissionExecution
 
 _EdgeKey = tuple[str, str, str]
@@ -262,6 +263,7 @@ class _RoutingCtx:
     skip_edges: set[_EdgeKey] = field(default_factory=set)
     built_routes: list[RoutedPath] = field(default_factory=list)
     junction_fan_info: dict[_EdgeKey, tuple[int, int]] = field(default_factory=dict)
+    perp_entry_columns: Mapping[str, PerpEntryColumn] = field(default_factory=dict)
     fan_corridors: dict[str, FanCorridor] = field(default_factory=dict)
     section_trunk_y: dict[str, float] = field(default_factory=dict)
     merge_fanouts: set[str] = field(default_factory=set)
@@ -416,6 +418,8 @@ def _build_routing_context(
     validate_final_route_frames: bool = True,
 ) -> _RoutingCtx:
     """Pre-compute all shared state for edge routing."""
+    from nf_metro.layout.routing.perp_columns import settled_perp_entry_columns
+
     bands = ReservedCorridors() if reserved_bands is None else reserved_bands
     topology = build_route_topology_query(graph)
     junction_ids = graph.junction_ids
@@ -510,6 +514,11 @@ def _build_routing_context(
         curve_radius=curve_radius,
         validate_final_route_frames=validate_final_route_frames,
         junction_fan_info=junction_fan_info,
+        perp_entry_columns=(
+            {}
+            if station_offsets is None
+            else settled_perp_entry_columns(graph, station_offsets)
+        ),
         fan_corridors=fan_corridors,
         skip_edges=merge.skip_edges,
         section_trunk_y=section_trunk_y,

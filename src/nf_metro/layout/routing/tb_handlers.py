@@ -48,9 +48,9 @@ from nf_metro.layout.routing.perp import (
     _perp_entry_crossing_x,
     _perp_riser_lateral,
 )
+from nf_metro.layout.routing.perp_columns import perp_corridor_feeder
 from nf_metro.parser.model import (
     Edge,
-    Port,
     PortSide,
     Section,
     Station,
@@ -414,7 +414,7 @@ def _route_perp_entry(
     tx = tgt.x
     dx = tx - sx
 
-    corridor_feeder = _perp_corridor_feeder(edge, src, ctx)
+    corridor_feeder = perp_corridor_feeder(graph, edge.source)
     if corridor_feeder is not None:
         return _route_perp_entry_from_corridor(
             edge, src, tgt, ctx, corridor_feeder.side
@@ -784,37 +784,6 @@ def _side_lane_candidates(
                 if 0.0 < t < 1.0:
                     lanes.append(src_lane + (edge - src_lane) / t)
     return lanes
-
-
-def _perp_corridor_feeder(
-    edge: Edge, entry_st: Station, ctx: _RoutingCtx
-) -> Port | None:
-    """Return the perpendicular exit port feeding this entry over the corridor.
-
-    A TOP/BOTTOM exit port on a same-row section rises into the inter-row
-    corridor band and runs across to feed a perpendicular entry (the
-    up-and-over shape); the exit and entry ports then share the corridor Y.
-    The drop out of that entry must continue the corridor's per-line descent
-    order, so it needs the feeding exit port's side.
-
-    A perpendicular exit that drops across rows into the entry below (the
-    LR -> TB top-drop) is *not* collinear with the entry and keeps its own
-    drop convention, so it is excluded by the shared-Y test.
-
-    This mirrors the exemption in ``_guard_perp_entry_feed_not_collinear``:
-    that guard permits exactly the collinear perp-exit feed this routes.
-    """
-    for feed in ctx.graph.edges_to(edge.source):
-        port = ctx.graph.ports.get(feed.source)
-        feeder_st = ctx.graph.station_for_edge_source(feed)
-        if (
-            port is not None
-            and not port.is_entry
-            and port.side in (PortSide.TOP, PortSide.BOTTOM)
-            and abs(feeder_st.y - entry_st.y) <= COORD_TOLERANCE
-        ):
-            return port
-    return None
 
 
 def _route_perp_entry_from_corridor(

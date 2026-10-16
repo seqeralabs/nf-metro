@@ -2435,20 +2435,6 @@ gallery:
       peels each line to a different target. The fan-out's peel order propagates one hop
       upstream to its free source feeder, so both lines descend straight into their
       landing lanes with no crossing (issue #1986)."
-  - id: perp_entry_column_two_feeders
-    source_dir: examples/topologies
-    category: Inter-section Routing
-    description:
-      "Two feeders reach one BOTTOM entry. The port's crossing column is dealt from the
-      trunk its drop turns into, so each line lands on the channel it departs on and the
-      corner into the trunk nests (issue #2073)."
-  - id: perp_exit_single_feeder_landing
-    source_dir: examples/topologies
-    category: Inter-section Routing
-    description:
-      "One up-and-over feeder drops into a BOTTOM entry and lands on the crossing its
-      in-section drop departs from, so the bundle crosses the box edge without a sideways
-      step (issue #2073)."
 pipelines:
   - id: rnaseq_metro
     title: nf-core/rnaseq

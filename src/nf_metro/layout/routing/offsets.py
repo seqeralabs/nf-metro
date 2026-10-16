@@ -66,6 +66,7 @@ from nf_metro.layout.routing.invariants import (
     fan_port_and_station,
     max_interior_offset_gap,
 )
+from nf_metro.layout.routing.perp_columns import deal_perp_entry_column
 from nf_metro.layout.routing.reversal import detect_reversed_sections
 from nf_metro.layout.routing.seam import SeamOrientation, seam_orientation
 from nf_metro.parser.model import (
@@ -2682,6 +2683,14 @@ def _compute_entry_port_offsets(ctx: _OffsetCtx) -> None:
     _inherit_level_convergence_entry_offsets(ctx)
     _recenter_single_line_corridor_entry(ctx)
     _order_perp_entry_by_landing_column(ctx)
+
+
+def _deal_perp_entry_columns(ctx: _OffsetCtx) -> None:
+    """Write each multi-source perpendicular entry's dealt column onto its port."""
+    for port_id in ctx.graph.ports:
+        column = deal_perp_entry_column(ctx.graph, port_id, ctx.offsets)
+        if column is not None and column.offsets is not None:
+            ctx.offsets.update(((port_id, lid), off) for lid, off in column.offsets)
 
 
 def _compact_station_gaps(
@@ -5458,6 +5467,11 @@ def compute_station_offsets(
     14d. **Planned fan offsets** - writes each geometry-owning fan plan's
         complete lane assignment, which has the last word on the lanes it
         states.
+    14e. **Perpendicular entry columns** - deals each multi-source
+        TOP/BOTTOM entry's crossing column from the trunk it turns into
+        (:func:`perp_columns.deal_perp_entry_column`).  Runs once the trunk and
+        every feeder's lanes are final, so routing re-deriving the column from
+        the same offsets reaches the same verdict.
     15. **Linear entry-frame materialization** - inherits a flow-aligned entry
         cohort's exact upstream slots across every complete section carrier,
         assigns section-local lines only to exterior slots, and publishes the
@@ -5505,6 +5519,7 @@ def compute_station_offsets(
     _slot_entry_arrivals_on_their_approach_lane(ctx, same_y_adj)
     _close_section_dead_lanes(ctx)
     _apply_planned_fan_offsets(ctx)
+    _deal_perp_entry_columns(ctx)
     frames = _materialize_linear_entry_frames(ctx)
     _validate_linear_entry_frames(ctx, frames)
     _cache_linear_entry_pill_lines(ctx, frames)

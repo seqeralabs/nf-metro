@@ -2796,10 +2796,15 @@ def _convergent_port_groups(
     by_port = _group_channels_by(routes, spans)
 
     groups: list[_Coincidence] = []
-    for chans in by_port.values():
+    for (target, line_id, _down), chans in by_port.items():
         if len(chans) < 2:
             continue
-        ex = chans[0].route.points[-1][0]
+        column = ctx.perp_entry_columns.get(target)
+        ex = (
+            ctx.graph.stations[target].x + column.offset(line_id)
+            if column is not None and column.offsets is not None
+            else chans[0].route.points[-1][0]
+        )
         for cluster in _band_clusters(chans, EDGE_TO_BUNDLE_CLEARANCE):
             if len(cluster) < 2:
                 continue

@@ -28,20 +28,14 @@ from nf_metro.layout.routing.perp_columns import deal_perp_entry_column
 from nf_metro.themes import resolve_theme
 
 ROOT = Path(__file__).resolve().parent.parent
-TOPOLOGIES = ROOT / "examples" / "topologies"
+REGRESSIONS = ROOT / "tests" / "fixtures" / "regressions"
 
 LANDING_CASES = [
-    (TOPOLOGIES / "perp_entry_column_two_feeders.mmd", "sec4__entry_bottom_7"),
-    (TOPOLOGIES / "perp_exit_single_feeder_landing.mmd", "sec4__entry_bottom_4"),
+    (REGRESSIONS / "perp_entry_column_two_feeders.mmd", "sec4__entry_bottom_7"),
+    (REGRESSIONS / "perp_exit_single_feeder_landing.mmd", "sec4__entry_bottom_4"),
 ]
 
-CONFLICT = (
-    ROOT
-    / "tests"
-    / "fixtures"
-    / "regressions"
-    / ("perp_entry_column_feeder_conflict.mmd")
-)
+CONFLICT = REGRESSIONS / "perp_entry_column_feeder_conflict.mmd"
 CONFLICT_PORT = "sec3__entry_top_5"
 
 Point = tuple[float, float]

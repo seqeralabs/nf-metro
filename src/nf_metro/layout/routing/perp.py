@@ -99,7 +99,9 @@ def _perp_entry_crossing_x(
     A distinct-line perp entry (:func:`needs_perp_approach_fan`) fans its
     single-line feeders onto parallel approach channels by bundle index --
     :func:`_perp_approach_fan_x` -- since their feeder lanes all collapse onto
-    one column trunk.
+    one column trunk.  A port with a dealt column
+    (:class:`perp_columns.PerpEntryColumn`) is crossed on that column's channel
+    by every feeder.
 
     Otherwise, a vertical-flow (TB/BT) feeder dropping a *single* bundle crosses
     on its own section lane -- the exact X
@@ -118,6 +120,9 @@ def _perp_entry_crossing_x(
     """
     if needs_perp_approach_fan(ctx.graph, entry_port_id):
         return _perp_approach_fan_x(ctx, entry_port_id, line_id, port_x)
+    column = ctx.perp_entry_columns.get(entry_port_id)
+    if column is not None and column.offsets is not None:
+        return port_x + column.offset(line_id)
     feeders = _bundled_feeders(ctx, entry_port_id, line_id)
     if not feeders:
         return None

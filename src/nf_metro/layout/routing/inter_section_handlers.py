@@ -41,6 +41,7 @@ from nf_metro.layout.constants import (
 from nf_metro.layout.geometry import (
     cotravelling_lane_clearance,
     lanes_run_along_x,
+    lanes_run_along_y,
     section_bbox_span,
 )
 from nf_metro.layout.pass_metrics import canvas_edge_clearance
@@ -130,6 +131,7 @@ from nf_metro.layout.routing.perp import (
     _perp_entry_crossing_x,
     _perp_riser_lateral,
 )
+from nf_metro.layout.routing.perp_columns import perp_corridor_feeder
 from nf_metro.layout.routing.reserved_bands import (
     EdgeKey,
     ReservedBand,
@@ -4275,6 +4277,7 @@ class _PerpExitGeometry:
     member_offset: float
     bundle_offsets: tuple[float, ...]
     target_offsets: tuple[float, ...] | None
+    member_target_offset: float | None
     transition_leg: int | None
     aligned_drop: bool
     seam: _SourceSeam
@@ -4290,6 +4293,7 @@ def _perp_exit_record(
     transition_leg: int | None,
     *,
     aligned_drop: bool,
+    member_target_offset: float | None = None,
 ) -> _PerpExitGeometry:
     """Complete a perpendicular-exit record from its centreline.
 
@@ -4321,6 +4325,7 @@ def _perp_exit_record(
         member_offset,
         bundle_offsets,
         target_offsets,
+        member_target_offset,
         transition_leg,
         aligned_drop,
         _SourceSeam(
@@ -4459,6 +4464,7 @@ def _perp_exit_over_geometry(
             tuple(_get_offset(ctx, edge.target, lid) for lid in line_ids),
             3,
             aligned_drop=False,
+            member_target_offset=_get_offset(ctx, edge.target, edge.line_id),
         )
 
     assert tgt_port is not None
@@ -4512,14 +4518,70 @@ def _perp_exit_over_geometry(
         # ending the corridor short of the port centre keeps the two legs one
         # continuous line instead of jogging onto the port marker.
         points = ((sx, sy), (sx, cy_base), (tx, cy_base), (tx, ty))
+    landing = _perp_exit_landing_offsets(ctx, edge, tgt_sec, line_ids, src_offs)
     return _perp_exit_record(
         points,
         src_offs[edge.line_id],
         tuple(src_offs[lid] for lid in line_ids),
-        None,
-        None,
+        None if landing is None else tuple(landing[lid] for lid in line_ids),
+        None if landing is None else len(points) - 2,
         aligned_drop=False,
+        member_target_offset=None if landing is None else landing[edge.line_id],
     )
+
+
+def _perp_exit_landing_offsets(
+    ctx: _RoutingCtx,
+    edge: Edge,
+    tgt_sec: Section | None,
+    line_ids: list[str],
+    src_offs: Mapping[str, float],
+) -> dict[str, float] | None:
+    """Right-hand laterals landing an up-and-over bundle on its port crossing.
+
+    The final leg descends into a horizontal-flow section's perpendicular entry
+    on the X each line's in-section drop departs from
+    (:func:`_perp_entry_landing_x`), so the two legs meet as one stroke.  That leg
+    descends into a TOP port and ascends into a BOTTOM one, so one crossing X
+    reads as opposite laterals on the two sides.
+
+    Two kinds of port are landed so: a port whose column is dealt from its trunk
+    (:class:`perp_columns.PerpEntryColumn`), and a port this exit alone feeds,
+    whose crossing is set by this feeder's own lines.  ``None`` keeps the bundle
+    on its riser laterals all the way down: into every other port, into a port
+    continuing a corridor run at its own Y
+    (:func:`perp_columns.perp_corridor_feeder`), where the crossing is undefined,
+    and where the crossing orders the lines unlike the risers, so the bundle
+    could only land by crossing its own lines.
+    """
+    tgt_port = ctx.graph.ports[edge.target]
+    if tgt_sec is None or not lanes_run_along_y(tgt_sec.direction):
+        return None
+    column = ctx.perp_entry_columns.get(edge.target)
+    if column is None:
+        sources = {item.source for item in ctx.graph.edges_to(edge.target)}
+        corridor = perp_corridor_feeder(ctx.graph, edge.target)
+        if len(sources) != 1 or corridor is not None:
+            return None
+    elif column.offsets is None:
+        return None
+    tx = ctx.graph.stations[edge.target].x
+    landing_sign = -1.0 if tgt_port.side is PortSide.TOP else 1.0
+    landing: dict[str, float] = {}
+    for lid in line_ids:
+        crossing = _perp_entry_landing_x(ctx, edge, tgt_sec, tx, lid)
+        if crossing is None:
+            return None
+        landing[lid] = landing_sign * (crossing - tx)
+    risers = {lid: src_offs[lid] for lid in line_ids}
+    for laterals in (landing, risers):
+        if len(set(laterals.values())) != len(laterals):
+            return None
+    if sorted(line_ids, key=landing.__getitem__) != sorted(
+        line_ids, key=risers.__getitem__
+    ):
+        return None
+    return landing
 
 
 def _route_perp_exit(f: _InterFacts) -> RoutedPath | None:
@@ -4599,9 +4661,16 @@ def _route_perp_exit_over(
         )
     else:
         assert geometry.transition_leg is not None
-        target_offset = _get_offset(ctx, edge.target, edge.line_id)
+        assert geometry.member_target_offset is not None
         routes = build_tapered_bundle(
-            [(edge, edge.line_id, geometry.member_offset, target_offset)],
+            [
+                (
+                    edge,
+                    edge.line_id,
+                    geometry.member_offset,
+                    geometry.member_target_offset,
+                )
+            ],
             list(geometry.points),
             transition_leg=geometry.transition_leg,
             base_radius=ctx.curve_radius,
@@ -5489,6 +5558,7 @@ def _perp_entry_l_geometry(
                 (final_x, ty),
             )
             transition_leg = 3
+    members = _members_landing_on_column(edge, points, members, side, ctx)
     return _perp_entry_l_record(
         points,
         tuple(members),
@@ -5497,6 +5567,34 @@ def _perp_entry_l_geometry(
         fan_source_offsets,
         flanked_gap,
     )
+
+
+def _members_landing_on_column(
+    edge: Edge,
+    points: tuple[tuple[float, float], ...],
+    members: list[tuple[Edge, str, float, float]],
+    side: PortSide,
+    ctx: _RoutingCtx,
+) -> list[tuple[Edge, str, float, float]]:
+    """*members* re-seated for a staircase that climbs into a dealt column.
+
+    The landing laterals assume the final leg runs into the port from the
+    port's own side.  A staircase whose channel sits on the section's side of
+    the port reaches it running the other way, and that leg's right-hand normal
+    points the other way too, so a dealt column
+    (:class:`perp_columns.PerpEntryColumn`) lands each line on its own channel
+    only with the laterals negated.
+    """
+    entry_port_id = ctx.merge.entry_port_for.get(edge.target, edge.target)
+    column = ctx.perp_entry_columns.get(entry_port_id)
+    inward = Direction.D if side is PortSide.TOP else Direction.U
+    if (
+        column is None
+        or column.offsets is None
+        or segment_direction(points[-2], points[-1]) in (inward, None)
+    ):
+        return members
+    return [(item, lid, src, -tgt) for item, lid, src, tgt in members]
 
 
 def _perp_entry_turn_is_planned(
