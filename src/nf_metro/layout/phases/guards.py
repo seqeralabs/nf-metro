@@ -4915,7 +4915,7 @@ def _guard_perp_entry_feed_not_collinear(graph: MetroGraph, phase: str) -> None:
     A perpendicular (TOP/BOTTOM) exit port is exempt: it rises into the
     inter-row corridor band that also hosts the entry port (the up-and-over
     and drop-pair shapes), so feeder and entry legitimately share that Y.
-    ``_perp_corridor_feeder`` keys the matching entry-drop route off the same
+    ``perp_corridor_feeder`` keys the matching entry-drop route off the same
     collinear perp-exit feed this guard exempts.
     """
     for section in graph.sections.values():

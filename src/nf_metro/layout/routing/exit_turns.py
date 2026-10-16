@@ -56,6 +56,7 @@ from nf_metro.layout.routing.centrelines import (
     route_lane_transition,
 )
 from nf_metro.layout.routing.common import (
+    EXIT_SIDE_DIRECTION,
     Direction,
     OffsetRegime,
     RoutedPath,
@@ -1042,28 +1043,35 @@ def _source_turn_requirement(
             )
             <= COORD_TOLERANCE
         ):
-            axis = ctx.graph.stations[edge.target].x
+            # A dealt column puts the drop on its channel, off the port's X;
+            # ``_perp_entry_junction_straight_drop`` measures the lead-out from
+            # the junction's own column.
+            column = ctx.perp_entry_columns.get(edge.target)
+            axis = tgt.x + (
+                column.offset(edge.line_id)
+                if column is not None and column.offsets is not None
+                else 0.0
+            )
             feeder_x = (
                 ctx.graph.stations[exit_port_id].x
                 if exit_port_id is not None
                 else src.x
             )
-            if exit_port_id is not None and abs(axis - feeder_x) <= COORD_TOLERANCE:
-                # ``_perp_entry_junction_straight_drop`` prepends a lead-out
-                # only for a feeder standing off the turn column, so a feeder
-                # on the column is drawn as a bare vertical with no run to turn
-                # off.  That feeder column is the exit port's; a caller naming
-                # no port is asking only where the axis stands.
+            if exit_port_id is not None and abs(tgt.x - feeder_x) <= COORD_TOLERANCE:
+                # The emitter prepends a lead-out only for a feeder standing off
+                # the junction's column, so a feeder on it is drawn as a bare
+                # vertical with no run to turn off.  That feeder column is the
+                # exit port's; a caller naming no port is asking only where the
+                # axis stands.
                 return _SourceTurnRequirement(
                     vertical_direction(tgt.y - src.y), None, None, None, None
                 )
-            run = horizontal_direction(axis - feeder_x)
+            run = horizontal_direction(tgt.x - feeder_x)
             # The drop peels off the trunk one corner radius before the turn
             # column, or at the feeder itself when that is the nearer of the
-            # two (``_perp_entry_junction_straight_drop``).  Asking a whole
-            # radius of the shorter launch is what refuses a turn column too
-            # close to its feeder to open a full corner.
-            lead_in = min(ctx.curve_radius, abs(axis - feeder_x))
+            # two.  Asking a whole radius of the shorter launch is what refuses
+            # a turn column too close to its feeder to open a full corner.
+            lead_in = min(ctx.curve_radius, abs(tgt.x - feeder_x))
             return _SourceTurnRequirement(
                 run,
                 vertical_direction(tgt.y - src.y),
@@ -2340,12 +2348,7 @@ def _build_group_plan(
     if not outbound_edges or missing_connectors:
         reason = "missing-outbound-member"
 
-    run_direction = {
-        PortSide.RIGHT: Direction.R,
-        PortSide.LEFT: Direction.L,
-        PortSide.TOP: Direction.U,
-        PortSide.BOTTOM: Direction.D,
-    }[exit_group.side]
+    run_direction = EXIT_SIDE_DIRECTION[exit_group.side]
     source_axis = direction_axis(run_direction)
     line_ids = _ordered_unique(
         edge.line_id for edge in (outbound_edges or member_edges)

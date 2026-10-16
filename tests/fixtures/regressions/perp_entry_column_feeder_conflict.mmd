@@ -1,0 +1,64 @@
+%%metro title: Feeder order disagreeing with the trunk column
+%%metro line: l0 | Vcf | #e6194b
+%%metro line: l1 | Assemble | #3cb44b
+%%metro line: l2 | Pca_Report_Stats | #4363d8
+%%metro line: l3 | Trim | #f58231
+%%metro line: l4 | Qc | #911eb4
+
+graph LR
+    subgraph sec0 [Gather 0]
+        s0n0[bin]
+        s0n1[bin]
+        s0n2[qc]
+        s0n3[POLISH_ALIGN]
+        s0n4[gather_normalize]
+        s0n0 -->|l0| s0n2
+        s0n2 -->|l0,l2,l3| s0n3
+        s0n3 -->|l0,l2| s0n4
+        s0n0 -->|l2,l3| s0n1
+        s0n1 -->|l2,l3| s0n2
+    end
+    subgraph sec1 [Classify_Dedup 1]
+        %%metro exit: right | l0, l1, l3, l4
+        s1n0[cluster_pca]
+        s1n1[summarise]
+        s1n0 -->|l0,l1,l4| s1n1
+    end
+    subgraph sec2 [Stats 2]
+        %%metro exit: bottom | l0, l1, l2
+        s2n0[call_sort]
+        s2n1[bam]
+        s2n2[cluster_cluster_dedup]
+        s2n3[trim]
+        s2n4[QC_COUNT]
+        s2n2 -->|l0,l1| s2n3
+        s2n3 -->|l0,l1| s2n4
+        s2n0 -->|l1| s2n1
+        s2n1 -->|l1| s2n2
+        s2n0 -->|l2| s2n3
+        s2n0 -->|l4| s2n2
+        s2n2 -->|l4| s2n4
+    end
+    subgraph sec3 [Stats_Report 3]
+        %%metro entry: top | l0, l1, l2, l3
+        s3n0[dedup]
+        s3n1[summarise_classify_classify]
+        s3n2[filter]
+        s3n3[dedup_gather]
+        s3n0 -->|l0,l3| s3n1
+        s3n1 -->|l0,l3| s3n2
+        s3n2 -->|l0,l1,l3| s3n3
+        s3n0 -->|l1,l2| s3n2
+    end
+    s0n4 -->|l0| s1n0
+    s1n1 -->|l0| s2n2
+    s2n4 -->|l0,l1| s3n0
+    s1n1 -->|l0| s3n1
+    s1n1 -->|l1,l4| s2n0
+    s0n4 -->|l2| s3n0
+    s0n3 -->|l2| s2n0
+    s2n3 -->|l2| s3n0
+    s0n3 -->|l3| s1n1
+    s1n1 -->|l3| s3n0
+    s0n0 -->|l3| s2n2
+    s0n0 -->|l4| s1n0

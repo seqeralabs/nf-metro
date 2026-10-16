@@ -91,7 +91,11 @@ from nf_metro.layout.constants import (
     SAME_COORD_TOLERANCE,
     SETTLEMENT_QUANTUM,
 )
-from nf_metro.layout.geometry import measured_distance, shift_section
+from nf_metro.layout.geometry import (
+    measured_distance,
+    section_bbox_span,
+    shift_section,
+)
 from nf_metro.layout.phases.guards import PhaseInvariantError
 from nf_metro.layout.route_plan import (
     DemandAxis,
@@ -789,10 +793,7 @@ def _verify_against_input_ledger(
 
 def _box_extents(section: Section) -> tuple[tuple[float, float], tuple[float, float]]:
     """One section's box as its horizontal and vertical intervals, in that order."""
-    return (
-        (section.bbox_x, section.bbox_x + section.bbox_w),
-        (section.bbox_y, section.bbox_y + section.bbox_h),
-    )
+    return section_bbox_span(section, "x"), section_bbox_span(section, "y")
 
 
 def _axis_gaps(

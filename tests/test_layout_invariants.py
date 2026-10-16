@@ -63,6 +63,7 @@ from nf_metro.layout.geometry import (
     lanes_run_along_x,
     lanes_run_along_y,
     perpendicular_port_sides,
+    section_bbox_span,
     segment_intersects_bbox,
 )
 from nf_metro.layout.labels import (
@@ -109,7 +110,6 @@ from nf_metro.layout.phases.guards import (
 )
 from nf_metro.layout.phases.off_track import (
     _bump_off_track_clear_of_trunks,
-    _cross_bbox_edges,
     _dead_end_producer_anchor,
     _is_single_trunk_section,
     _off_track_anchor_of,
@@ -5391,7 +5391,7 @@ def test_reanchor_off_track_bbox_fit_is_reversible(fixture):
         ideal = _off_track_fit_edge(
             graph, section, axis, extreme, SECTION_Y_PADDING, toward_min=toward_min
         )
-        edge = _cross_bbox_edges(section, axis)[0 if toward_min else 1]
+        edge = section_bbox_span(section, axis)[0 if toward_min else 1]
         assert edge == pytest.approx(ideal, abs=_Y_TOL), (
             f"{fixture}/{sec_id}: bbox lift edge {edge:.1f} does not hug "
             f"the off-track band (expected {ideal:.1f}); grow-only left "

@@ -1,0 +1,53 @@
+%%metro title: Perp Entry Column Merge Feeder
+%%metro line: l0 | Pca_Bin | #e6194b
+%%metro line: l1 | Trim | #3cb44b
+%%metro line: l2 | Assemble | #4363d8
+
+graph LR
+    subgraph sec0 [Trim_Normalize_Bam 0]
+        s0n0[normalize]
+        s0n1[annotate_bin]
+        s0n0 -->|l2| s0n1
+    end
+    subgraph sec1 [Polish_Stats 1]
+        s1n0[REPORT]
+        s1n1[polish_index]
+        s1n2[normalize]
+        s1n3[index_gather]
+        s1n0 -->|l0,l1,l2| s1n1
+        s1n1 -->|l0,l1| s1n3
+        s1n1 -->|l2| s1n2
+    end
+    subgraph sec2 [Classify_Annotate 2]
+        %%metro exit: top | l0, l2
+        s2n0[index_assemble]
+        s2n1[index]
+        s2n2[index]
+        s2n3[quant]
+        s2n0 -->|l0| s2n1
+        s2n1 -->|l0| s2n2
+        s2n2 -->|l0,l2| s2n3
+    end
+    subgraph sec3 [Call 3]
+        %%metro entry: bottom | l1, l2
+        s3n0[export]
+        s3n1[dedup_dedup_pca]
+        s3n0 -->|l1,l2| s3n1
+    end
+    subgraph sec4 [Fastqc 4]
+        s4n0[annotate_bin]
+        s4n1[markdup_quant_normalize]
+        s4n2[normalize_dedup]
+        s4n0 -->|l0,l1| s4n1
+        s4n1 -->|l1| s4n2
+    end
+    s1n3 -->|l0| s2n0
+    s2n3 -->|l0| s4n0
+    s1n3 -->|l1| s3n0
+    s3n1 -->|l1| s4n0
+    s3n1 -->|l1,l2| s4n2
+    s0n1 -->|l2| s1n0
+    s1n2 -->|l2| s2n2
+    s2n3 -->|l2| s3n0
+    s0n0 -->|l2| s1n1
+    s1n2 -->|l2| s3n1

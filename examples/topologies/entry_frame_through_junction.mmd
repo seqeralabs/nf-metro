@@ -1,0 +1,45 @@
+%%metro title: Entry Frame Through Junction
+%%metro style: dark
+%%metro line: l0 | Line 1 | #3779b1
+%%metro line: l2 | Line 3 | #a66d13
+%%metro line: l3 | Line 4 | #dde6c4
+%%metro line: l4 | Line 5 | #156075
+%%metro grid: s2 | 0,0
+%%metro grid: s6 | 1,0
+%%metro grid: s11 | 2,0
+%%metro grid: s14 | 3,0
+%%metro grid: s18 | 3,1
+%%metro grid: s7 | 1,1
+graph LR
+    subgraph s2 [Section 2]
+        n2_0[N2.0]
+        n2_1[N2.1]
+        n2_0 -->|l4| n2_1
+    end
+    subgraph s6 [Section 6]
+        n6_0[N6.0]
+        n6_1[N6.1]
+        n6_0 -->|l2| n6_1
+        n6_2[N6.2]
+        n6_1 -->|l3| n6_2
+        n6_3[N6.3]
+        n6_2 -->|l3| n6_3
+    end
+    subgraph s7 [Section 7]
+        n7_0[N7.0]
+    end
+    subgraph s11 [Section 11]
+        n11_0[N11.0]
+    end
+    subgraph s14 [Section 14]
+        n14_0[N14.0]
+    end
+    subgraph s18 [Section 18]
+        n18_0[N18.0]
+    end
+    n2_1 -->|l4| n6_0
+    n6_3 -->|l4| n7_0
+    n6_3 -->|l4| n11_0
+    n11_0 -->|l0| n14_0
+    n11_0 -->|l3| n18_0
+    n11_0 -->|l4| n18_0

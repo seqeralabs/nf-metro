@@ -1,0 +1,45 @@
+%%metro title: Single up-and-over feeder landing on its port column
+%%metro line: l0 | Summarise_Polish | #e6194b
+%%metro line: l1 | Call_Polish | #3cb44b
+%%metro grid: sec1 | 0,0
+%%metro grid: sec2 | 0,1
+%%metro grid: sec3 | 2,0
+%%metro grid: sec4 | 1,0
+
+graph LR
+    subgraph sec1 [Stats 1]
+        s1n0[POLISH_BAM]
+        s1n1[filter_assemble]
+        s1n0 -->|l0| s1n1
+    end
+    subgraph sec2 [Gather 2]
+        %%metro exit: left | l1
+        s2n0[qc_index]
+        s2n1[classify_dedup_bam]
+        s2n2[gather_bam_trim]
+        s2n4[annotate_export]
+        s2n0 -->|l1| s2n1
+        s2n1 -->|l1| s2n2
+        s2n2 -->|l1| s2n4
+    end
+    subgraph sec3 [Assemble 3]
+        %%metro direction: RL
+        %%metro entry: left | l0, l1
+        %%metro exit: bottom | l0, l1
+        s3n0[call_cluster_trim]
+        s3n1[report_annotate_merge]
+        s3n0 -->|l0,l1| s3n1
+    end
+    subgraph sec4 [Pca_Gather 4]
+        %%metro entry: bottom | l0, l1
+        s4n0[CLASSIFY]
+        s4n1[normalize]
+        s4n2[export_call_fastqc]
+        s4n0 -->|l0| s4n1
+        s4n0 -->|l1| s4n2
+        s4n1 -->|l1| s4n2
+    end
+    s1n1 -->|l0| s3n0
+    s3n1 -->|l0,l1| s4n0
+    s2n4 -->|l1| s3n0
+    s3n0 -->|l1| s4n1
