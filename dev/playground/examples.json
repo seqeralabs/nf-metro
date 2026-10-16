@@ -407,6 +407,22 @@
         "mmd": "%%metro title: BT Fed From Below\n%%metro style: dark\n%%metro line: a | A | #e63946\n%%metro line: b | B | #0570b0\n\n%%metro grid: top_sec | 0,0\n%%metro grid: bot_sec | 0,1\n\ngraph LR\n    subgraph top_sec [Upper]\n        %%metro direction: BT\n        %%metro entry: bottom | a,b\n        t1[Refine]\n        t2[Report]\n        t1 -->|a,b| t2\n    end\n\n    subgraph bot_sec [Lower]\n        %%metro direction: BT\n        b1[Ingest]\n        b2[Clean]\n        b1 -->|a,b| b2\n    end\n\n    b2 -->|a,b| t1\n"
       },
       {
+        "name": "bt_entry_same_line_bypass_on_chain",
+        "mmd": "%%metro title: BT Entry Same-Line Bypass On Chain\n%%metro line: dna | DNA | #e63946\n%%metro line: rna | RNA | #457b9d\n\ngraph LR\n    subgraph source [Source]\n        reads[Reads]\n    end\n    subgraph work [Work]\n        %%metro direction: BT\n        index[Index]\n        call[Call]\n        align[Align]\n        sort[Sort]\n        index -->|rna| call\n        call -->|dna,rna| align\n        align -->|dna,rna| sort\n    end\n    reads -->|dna| sort\n    reads -->|dna,rna| align\n"
+      },
+      {
+        "name": "bt_entry_bypass_steps_off_at_port",
+        "mmd": "%%metro title: BT Entry Bypass Steps Off At Port\n%%metro line: dna | DNA | #e6194b\n%%metro line: rna | RNA | #911eb4\n\ngraph LR\n    subgraph prep [Prep]\n        reads[Reads]\n    end\n    subgraph qc [QC]\n        %%metro direction: TB\n        fastqc[FastQC]\n        trim[Trim]\n    end\n    subgraph align [Align]\n        %%metro direction: BT\n        index[Index]\n        map[Map]\n        sort[Sort]\n        quant[Quant]\n        index -->|dna| map\n        map -->|dna| sort\n        sort -->|rna| quant\n    end\n    reads -->|rna| fastqc\n    trim -->|dna| index\n    trim -->|rna| sort\n"
+      },
+      {
+        "name": "bt_entry_bundle_bypass",
+        "mmd": "%%metro title: BT Entry Bundle Bypass\n%%metro line: dna | DNA | #e63946\n%%metro line: rna | RNA | #457b9d\n%%metro line: atac | ATAC | #2a9d8f\n\ngraph LR\n    subgraph source [Source]\n        reads[Reads]\n    end\n    subgraph work [Work]\n        %%metro direction: BT\n        call[Call]\n        index[Index]\n        merge[Merge]\n        call -->|atac| index\n        index -->|atac| merge\n    end\n    reads -->|dna,rna| merge\n    reads -->|atac| call\n"
+      },
+      {
+        "name": "bt_entry_bypass_on_spread_diagonal",
+        "mmd": "%%metro title: BT Entry Bypass On Spread Diagonal\n%%metro line: dna | DNA | #e63946\n%%metro line: rna | RNA | #2a9d8f\n%%metro line: atac | ATAC | #457b9d\n\ngraph LR\n    subgraph source [Source]\n        reads[Reads]\n    end\n    subgraph work [Work]\n        %%metro direction: BT\n        align[Align]\n        call[Call]\n        sort[Sort]\n        align -->|dna| sort\n        align -->|rna| call\n        align -->|atac| call\n    end\n    reads -->|rna| call\n"
+      },
+      {
         "name": "bt_exit_top_above",
         "mmd": "%%metro title: BT Exit Top Into Section Above\n%%metro style: dark\n%%metro line: a | A | #e63946\n\n%%metro grid: dst_sec | 0,0\n%%metro grid: work | 0,1\n\ngraph LR\n    subgraph dst_sec [Output]\n        %%metro direction: LR\n        %%metro entry: bottom | a\n        o1[Report]\n        o2[Archive]\n        o1 -->|a| o2\n    end\n\n    subgraph work [Work]\n        %%metro direction: BT\n        %%metro exit: top | a\n        w1[Process]\n        w2[Collect]\n        w1 -->|a| w2\n    end\n\n    w2 -->|a| o1\n"
       },
@@ -805,6 +821,18 @@
       {
         "name": "merge_offrow_continuation",
         "mmd": "%%metro title: Off-Row Merge Continuation\n%%metro style: dark\n%%metro line: trunk | Trunk | #2db572\n%%metro line: bypass | Bypass | #e63946\n\n%%metro grid: above_src | 0,0\n%%metro grid: horiz_src | 0,1\n%%metro grid: sink | 1,1\n%%metro grid: out | 2,0\n\ngraph LR\n    subgraph above_src [Above Source]\n        %%metro exit: right | bypass\n        a1[Start A]\n        a2[Prep A]\n        a1 -->|bypass| a2\n    end\n\n    subgraph horiz_src [Horizontal Source]\n        %%metro exit: right | trunk\n        h1[Start B]\n        h2[Prep B]\n        h1 -->|trunk| h2\n    end\n\n    subgraph sink [Sink]\n        %%metro entry: left | trunk,bypass\n        %%metro exit: right | trunk\n        s1[Merge]\n        s2[Combine]\n        s1 -->|trunk,bypass| s2\n    end\n\n    subgraph out [Output]\n        o1[Report]\n    end\n\n    a2 -->|bypass| s1\n    h2 -->|trunk| s1\n    s2 -->|trunk| o1\n"
+      },
+      {
+        "name": "entry_frame_through_junction",
+        "mmd": "%%metro title: Entry Frame Through Junction\n%%metro style: dark\n%%metro line: l0 | Line 1 | #3779b1\n%%metro line: l2 | Line 3 | #a66d13\n%%metro line: l3 | Line 4 | #dde6c4\n%%metro line: l4 | Line 5 | #156075\n%%metro grid: s2 | 0,0\n%%metro grid: s6 | 1,0\n%%metro grid: s11 | 2,0\n%%metro grid: s14 | 3,0\n%%metro grid: s18 | 3,1\n%%metro grid: s7 | 1,1\ngraph LR\n    subgraph s2 [Section 2]\n        n2_0[N2.0]\n        n2_1[N2.1]\n        n2_0 -->|l4| n2_1\n    end\n    subgraph s6 [Section 6]\n        n6_0[N6.0]\n        n6_1[N6.1]\n        n6_0 -->|l2| n6_1\n        n6_2[N6.2]\n        n6_1 -->|l3| n6_2\n        n6_3[N6.3]\n        n6_2 -->|l3| n6_3\n    end\n    subgraph s7 [Section 7]\n        n7_0[N7.0]\n    end\n    subgraph s11 [Section 11]\n        n11_0[N11.0]\n    end\n    subgraph s14 [Section 14]\n        n14_0[N14.0]\n    end\n    subgraph s18 [Section 18]\n        n18_0[N18.0]\n    end\n    n2_1 -->|l4| n6_0\n    n6_3 -->|l4| n7_0\n    n6_3 -->|l4| n11_0\n    n11_0 -->|l0| n14_0\n    n11_0 -->|l3| n18_0\n    n11_0 -->|l4| n18_0\n"
+      },
+      {
+        "name": "fan_over_top_reach_order",
+        "mmd": "%%metro title: Over-Top Fan Reach Order\n%%metro style: dark\n%%metro line: l0 | L0 | #e6194b\n%%metro line: l1 | L1 | #3cb44b\n%%metro line: l2 | L2 | #4363d8\n\ngraph LR\n    subgraph a [A]\n        a0[A0]\n    end\n    subgraph b [B]\n        %%metro entry: top | l0\n        b0[B0]\n        b1[B1]\n        b2[B2]\n        b0 -->|l2| b1\n        b1 -->|l2| b2\n    end\n    subgraph c [C]\n        %%metro entry: right | l1, l2\n        c0[C0]\n        c1[C1]\n        c0 -->|l2| c1\n    end\n    a0 -->|l0| b0\n    a0 -->|l1| c0\n    b2 -->|l2| c0\n"
+      },
+      {
+        "name": "left_exit_wrap_under_own_section",
+        "mmd": "%%metro title: LEFT exit wrapping under its own section\n%%metro line: l1 | Left exit feeder | #3cb44b\n%%metro line: l2 | Middle | #4363d8\n%%metro grid: lower | 0,1\n%%metro grid: middle | 1,0\n%%metro grid: sink | 2,0\n\ngraph LR\n    subgraph lower [Lower]\n        %%metro exit: left | l1\n        w0[qc]\n        w1[classify]\n        w2[gather]\n        w0 -->|l1| w1\n        w1 -->|l1| w2\n    end\n    subgraph middle [Middle]\n        m0[index]\n        m1[count]\n        m0 -->|l2| m1\n    end\n    subgraph sink [Sink]\n        %%metro direction: RL\n        %%metro entry: right | l1\n        k0[call]\n        k1[report]\n        k0 -->|l1| k1\n    end\n    w2 -->|l1| k0\n"
       },
       {
         "name": "junction_entry_reversed_fold",
@@ -1241,6 +1269,10 @@
       {
         "name": "left_exit_fan_perp_entry_landing",
         "mmd": "%%metro title: Left-exit fan perp-entry landing\n%%metro line: g | Green | #2db572\n%%metro line: h | Blue | #3f7fdf\n%%metro grid: a | 1,0\n%%metro grid: b | 1,1\n%%metro grid: c | 1,2\n%%metro grid: d | 0,1\n\ngraph LR\n    subgraph a [Alpha]\n        %%metro exit: left | g, h\n        a1[A one]\n        a2[A two]\n        a1 -->|g,h| a2\n    end\n    subgraph b [Beta]\n        %%metro entry: top | g, h\n        %%metro exit: left | g, h\n        b1[B one]\n        b2[B two]\n        b1 -->|g,h| b2\n    end\n    subgraph c [Gamma]\n        %%metro entry: top | g\n        c1[C one]\n        c2[C two]\n        c1 -->|g| c2\n    end\n    subgraph d [Delta]\n        %%metro entry: right | h\n        d1[D one]\n        d2[D two]\n        d1 -->|h| d2\n    end\n    a2 -->|g,h| b1\n    b2 -->|g| c1\n    b2 -->|h| d1\n"
+      },
+      {
+        "name": "bottom_entry_two_feeders_own_lanes",
+        "mmd": "%%metro title: Bottom Entry Two Feeders Own Lanes\n%%metro line: cluster | Cluster | #e6194b\n%%metro line: dedup | Dedup | #3cb44b\n%%metro line: counts | Counts | #f58231\n%%metro line: bam | BAM | #4363d8\n\ngraph LR\n    subgraph trim [Trim]\n        %%metro exit: top | bam, counts\n        qc[QC]\n    end\n    subgraph normalize [Normalize]\n        %%metro entry: bottom | bam, counts\n        quant[quant]\n        align[align]\n        quant -->|bam,counts| align\n    end\n    subgraph stats [Stats]\n        summarise[summarise]\n    end\n    subgraph classify [Classify]\n        %%metro entry: bottom | cluster, bam\n        pca[pca]\n    end\n    qc -->|bam,counts| quant\n    align -->|dedup,counts| summarise\n    summarise -->|cluster| pca\n    align -->|bam| pca\n"
       }
     ]
   },
