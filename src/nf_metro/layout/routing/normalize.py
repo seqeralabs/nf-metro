@@ -2799,12 +2799,7 @@ def _convergent_port_groups(
     for (target, line_id, _down), chans in by_port.items():
         if len(chans) < 2:
             continue
-        column = ctx.perp_entry_columns.get(target)
-        ex = (
-            ctx.graph.stations[target].x + column.offset(line_id)
-            if column is not None and column.offsets is not None
-            else chans[0].route.points[-1][0]
-        )
+        ex = chans[0].route.points[-1][0]
         for cluster in _band_clusters(chans, EDGE_TO_BUNDLE_CLEARANCE):
             if len(cluster) < 2:
                 continue
