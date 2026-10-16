@@ -62,7 +62,6 @@ from nf_metro.layout.routing.common import (
     RoutedPath,
     apply_route_offsets,
     horizontal_direction,
-    resolve_section,
     segment_direction,
     vertical_direction,
 )
@@ -99,7 +98,6 @@ from nf_metro.layout.routing.inter_section_handlers import (
     _merge_entry_route_kind,
     _MergeEntryRoute,
     _perp_entry_l_geometry,
-    _perp_entry_landing_x,
     _perp_exit_geometry,
     _perp_exit_over_geometry,
     _PerpExitGeometry,
@@ -1045,13 +1043,15 @@ def _source_turn_requirement(
             )
             <= COORD_TOLERANCE
         ):
-            # ``_perp_entry_junction_straight_drop`` turns onto the port's
-            # per-line crossing, which a dealt column sets off the port's X,
-            # but measures its lead-out from the junction's own column.
-            landing = _perp_entry_landing_x(
-                ctx, edge, resolve_section(ctx.graph, tgt), tgt.x, edge.line_id
+            # A dealt column moves the drop onto its channel, off the port's
+            # X; ``_perp_entry_junction_straight_drop`` still measures the
+            # lead-out from the junction's own column.
+            column = ctx.perp_entry_columns.get(edge.target)
+            axis = tgt.x + (
+                column.offset(edge.line_id)
+                if column is not None and column.offsets is not None
+                else 0.0
             )
-            axis = tgt.x if landing is None else landing
             feeder_x = (
                 ctx.graph.stations[exit_port_id].x
                 if exit_port_id is not None
