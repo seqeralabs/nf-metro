@@ -1280,9 +1280,7 @@ def _route_right_entry_cross_row(f: _InterFacts) -> RoutedPath | None:
             edge, src, tgt, ctx, pos_n=pos_n, delta=delta, corner_x=corner_x
         )
     if f.tgt_row is not None and _right_entry_gap_above_is_clear(f):
-        return _route_right_entry_via_gap_above(
-            edge, src, tgt, f.i, f.n, ctx, f.tgt_row
-        )
+        return _route_right_entry_via_gap_above(f)
     return _route_right_entry_around_below(f)
 
 
@@ -7339,12 +7337,7 @@ def _right_entry_gap_above_is_clear(f: _InterFacts) -> bool:
 
 
 def _build_right_entry_wrap_route(
-    edge: Edge,
-    src: Station,
-    entry_port: Station,
-    i: int,
-    n: int,
-    ctx: _RoutingCtx,
+    f: _InterFacts,
     channel_y_base: float,
     normalize_exempt: bool = True,
 ) -> RoutedPath:
@@ -7362,10 +7355,11 @@ def _build_right_entry_wrap_route(
     :func:`build_concentric_bundle` nests every corner concentrically so the
     R-D-R-D-L loop cannot flip.
     """
+    edge, src, entry_port, ctx = f.edge, f.src, f.tgt, f.ctx
     ex = entry_port.x
 
     _fan, pos_n, delta, corner_x = _wrap_fan_geometry(
-        ctx, edge, src, i, n, vertical_direction(entry_port.y - src.y)
+        ctx, edge, src, f.i, f.n, vertical_direction(entry_port.y - src.y)
     )
 
     # V_down/up channel centre, just RIGHT of the target section's bbox in the
@@ -7379,7 +7373,7 @@ def _build_right_entry_wrap_route(
         else ex
     )
     vx = _right_entry_descent_x(ctx, section_right, pos_n)
-    lead_under = _left_exit_lead_under(ctx, src, pos_n, corner_x, channel_y_base)
+    lead_under = _left_exit_lead_under(f, pos_n, corner_x, channel_y_base)
 
     # R-D-R-D-L loop: down to the traverse channel, right past the target's
     # right edge, then in to the RIGHT port from its own outward side.
@@ -7410,8 +7404,7 @@ def _build_right_entry_wrap_route(
 
 
 def _left_exit_lead_under(
-    ctx: _RoutingCtx,
-    src: Station,
+    f: _InterFacts,
     pos_n: int,
     corner_x: float,
     channel_y: float,
@@ -7425,7 +7418,7 @@ def _left_exit_lead_under(
     lead-in: the port is not a LEFT exit on its box's edge, the turn column is
     not past the box, or a leg of the detour would cross another section.
     """
-    graph = ctx.graph
+    ctx, graph, src = f.ctx, f.graph, f.src
     port = graph.ports.get(src.id)
     section = graph.sections.get(src.section_id) if src.section_id else None
     if (
@@ -7446,23 +7439,15 @@ def _left_exit_lead_under(
     )
     exclude = {section.id}
     if (
-        _v_segment_crosses_other_section(graph, lx, src.y, uy, exclude)
-        or _h_segment_crosses_other_section(graph, lx, corner_x, uy, exclude)
-        or _v_segment_crosses_other_section(graph, corner_x, uy, channel_y, exclude)
+        f.v_segment_crosses_other_section(lx, src.y, uy, exclude)
+        or f.h_segment_crosses_other_section(lx, corner_x, uy, exclude)
+        or f.v_segment_crosses_other_section(corner_x, uy, channel_y, exclude)
     ):
         return None
     return lx, uy
 
 
-def _route_right_entry_via_gap_above(
-    edge: Edge,
-    src: Station,
-    entry_port: Station,
-    i: int,
-    n: int,
-    ctx: _RoutingCtx,
-    tgt_row: int,
-) -> RoutedPath:
+def _route_right_entry_via_gap_above(f: _InterFacts) -> RoutedPath:
     """Route to a RIGHT entry port via the inter-row gap ABOVE the target row.
 
     Used when the source sits in a row ABOVE the target's row.  Going UNDER
@@ -7482,6 +7467,8 @@ def _route_right_entry_via_gap_above(
     outward side), and the horizontal never crosses a section interior
     (guaranteed by :func:`_right_entry_gap_above_is_clear` at the call site).
     """
+    ctx, entry_port, tgt_row = f.ctx, f.tgt, f.tgt_row
+    assert tgt_row is not None
     channel_y_base = _gap_above_channel_y(ctx, tgt_row)
     # When two or more distinct lines converge into this one RIGHT entry port,
     # each independently picks the same descent X just right of the target
@@ -7491,14 +7478,7 @@ def _route_right_entry_via_gap_above(
     # only re-shape its self-contained loop).
     converging = len({e.line_id for e in ctx.graph.edges_to(entry_port.id)}) > 1
     return _build_right_entry_wrap_route(
-        edge,
-        src,
-        entry_port,
-        i,
-        n,
-        ctx,
-        channel_y_base,
-        normalize_exempt=not converging,
+        f, channel_y_base, normalize_exempt=not converging
     )
 
 
@@ -7849,7 +7829,7 @@ def _route_right_entry_around_below(f: _InterFacts) -> RoutedPath:
     """
     # Bypass Y below all sections in the column range so the route clears
     # every intervening section, including the target row.
-    edge, src, entry_port, ctx = f.edge, f.src, f.tgt, f.ctx
+    ctx = f.ctx
     src_col, src_row = f.src_col, f.src_row
     ep_col = f.tgt_col
     bc_src_col = src_col if src_col is not None else 0
@@ -7862,6 +7842,4 @@ def _route_right_entry_around_below(f: _InterFacts) -> RoutedPath:
         src_row=src_row,
         cross_row=True,
     )
-    return _build_right_entry_wrap_route(
-        edge, src, entry_port, f.i, f.n, ctx, channel_y_base
-    )
+    return _build_right_entry_wrap_route(f, channel_y_base)
