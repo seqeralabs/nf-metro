@@ -1,0 +1,34 @@
+%%metro line: r | R | #e6194b
+%%metro line: g | G | #3cb44b
+%%metro line: b | B | #4363d8
+%%metro grid: f | 0,0
+%%metro grid: m | 1,0
+%%metro grid: d | 2,0
+
+graph LR
+    subgraph f [Feed]
+        %%metro direction: LR
+        f0[F0]
+        f1[F1]
+        f0 -->|r,g,b| f1
+    end
+    subgraph m [Fork]
+        %%metro direction: LR
+        a[A]
+        mm[M]
+        b1[B1]
+        c1[C1]
+        z[Z]
+        a -->|r,g,b| mm
+        mm -->|g| b1
+        mm -->|b| c1
+        mm -->|r| z
+    end
+    subgraph d [Down]
+        %%metro direction: LR
+        d0[D0]
+        d1[D1]
+        d0 -->|r| d1
+    end
+    f1 -->|r,g,b| a
+    z -->|r| d0
