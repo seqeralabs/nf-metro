@@ -100,8 +100,13 @@ def _route_tb_internal(
         and (not tgt.is_port or tgt_is_trailing_exit)
     ):
         return None
+    return _section_link_route(edge, src, tgt, ctx, graph.sections[src_sec])
 
-    section = graph.sections[src_sec]
+
+def _section_link_route(
+    edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx, section: Section
+) -> RoutedPath:
+    """Route an edge between two internal stations of vertical-flow *section*."""
     sx, tx = _tb_trunk_endpoints(ctx, edge, src, tgt, section)
     sy = src.y
     ty = tgt.y
@@ -109,7 +114,7 @@ def _route_tb_internal(
 
     # Different X tracks: route with vertical runs + 45-degree diagonal
     if abs(dx) >= COORD_TOLERANCE:
-        direction = graph.sections[src_sec].direction
+        direction = section.direction
         # A feeder descending collinear with the merge's column but landing on an
         # outboard slot is displaced by a continuation that owns the trunk; bend
         # its diagonal at the source so it vacates the column immediately instead
@@ -609,9 +614,9 @@ def _route_flow_side_lane_change(
         is_fork=True,
         is_join=False,
     )
+    frame = _section_lane_frame(ctx.graph, section, ctx.positive_fan)
     src_lane, tgt_lane = (
-        station.x + _tb_x_offset(ctx, station.id, edge.line_id, section.id)
-        for station in (src, tgt)
+        _lane_coord(ctx, frame, station, edge.line_id) for station in (src, tgt)
     )
     points = diagonal_centreline(
         section.direction, (src_lane, src.y), (tgt_lane, tgt.y), *placement
@@ -676,9 +681,10 @@ def _bundle_mate_departures(
     sp = src.y
     reach = abs(tgt.y - sp)
     mates = set(graph.station_lines(src.id)) - set(line_ids)
+    frame = _section_lane_frame(graph, section, ctx.positive_fan)
 
     def lane(station: Station, line_id: str) -> float:
-        return station.x + _tb_x_offset(ctx, station.id, line_id, section.id)
+        return _lane_coord(ctx, frame, station, line_id)
 
     departures: list[_Departure] = []
     for sid in section.station_ids:
@@ -769,6 +775,7 @@ def _same_line_chain_route(
     """
     graph = ctx.graph
     sp = src.y
+    frame = _section_lane_frame(graph, section, ctx.positive_fan)
 
     def chain_into(current: Station) -> list[Edge] | None:
         for chain in graph.edges_to(current.id):
@@ -779,7 +786,7 @@ def _same_line_chain_route(
                 continue
             if not 0.0 < (via.y - sp) / (current.y - sp) < 1.0:
                 continue
-            via_lane = via.x + _tb_x_offset(ctx, via.id, edge.line_id, section.id)
+            via_lane = _lane_coord(ctx, frame, via, edge.line_id)
             if abs(via_lane - src_lane) < COORD_TOLERANCE:
                 return [chain]
             upstream = chain_into(via)
@@ -798,11 +805,9 @@ def _same_line_chain_route(
         return None
     points = [(src_lane, sp)]
     for link in chain:
-        routed = _route_tb_internal(
-            link, graph.stations[link.source], graph.stations[link.target], ctx
+        routed = _section_link_route(
+            link, graph.stations[link.source], graph.stations[link.target], ctx, section
         )
-        if routed is None:
-            return None
         points.extend(routed.points[1:])
     return [
         p
@@ -875,10 +880,17 @@ def _passed_station_footprints(
     return boxes
 
 
+def _lane_coord(
+    ctx: _RoutingCtx, frame: AxisFrame, station: Station, line_id: str
+) -> float:
+    """Lane-axis coordinate of *line_id* at *station*, read in *frame*."""
+    return station_lane_coord(frame, station, _get_offset(ctx, station.id, line_id))
+
+
 def _lane_coords(ctx: _RoutingCtx, frame: AxisFrame, station: Station) -> list[float]:
     """Lane-axis coordinates of the lines *station* carries, read in *frame*."""
     return [
-        station_lane_coord(frame, station, _get_offset(ctx, station.id, lid))
+        _lane_coord(ctx, frame, station, lid)
         for lid in ctx.graph.station_lines(station.id)
     ]
 
