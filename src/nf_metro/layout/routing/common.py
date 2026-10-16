@@ -1083,8 +1083,11 @@ def iter_horizontal_trunks(rp: RoutedPath) -> Iterator[tuple[int, HTrunkSeg]]:
     """Yield ``(waypoint_index, segment)`` for each interior horizontal trunk.
 
     A trunk is an interior horizontal leg whose two flanking neighbours are
-    both vertical, i.e. the bottom (or top) leg of a U-shaped bypass.  The
-    index is the trunk leg's first waypoint, ``points[index] -> [index+1]``.
+    both vertical, i.e. the bottom (or top) leg of a U-shaped bypass.  A
+    zero-length flank is no vertical leg: the run beside it continues the
+    horizontal leg before or after it on one level, as a bypass riding its
+    source track does.  The index is the trunk leg's first waypoint,
+    ``points[index] -> [index+1]``.
     """
     pts = rp.points
     for k in range(1, len(pts) - 2):
@@ -1095,6 +1098,11 @@ def iter_horizontal_trunks(rp: RoutedPath) -> Iterator[tuple[int, HTrunkSeg]]:
         if abs(pts[k - 1][0] - x0) > COORD_TOLERANCE:
             continue
         if abs(pts[k + 2][0] - x1) > COORD_TOLERANCE:
+            continue
+        if (
+            abs(pts[k - 1][1] - y0) <= COORD_TOLERANCE
+            or abs(pts[k + 2][1] - y1) <= COORD_TOLERANCE
+        ):
             continue
         yield k, HTrunkSeg(y0, x0, x1, pts[k - 1][1], pts[k + 2][1])
 
