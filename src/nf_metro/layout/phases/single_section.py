@@ -525,6 +525,13 @@ def _layout_single_section(
     return sub
 
 
+def _lane_sign(section: Section, graph: MetroGraph) -> float:
+    """Screen sign of *section*'s lane stacking, positive-fan sections resolved."""
+    from nf_metro.layout.routing.reversal import tb_positive_fan_sections
+
+    return section_lane_sign(section, tb_positive_fan_sections(graph))
+
+
 def _fan_in_branch_chain(sub: MetroGraph, head: str, join: str) -> list[str] | None:
     """The in-section source chain ending at *head* that feeds *join*, or ``None``.
 
@@ -564,9 +571,7 @@ def _seat_fan_in_branches_on_lane_side(
     in a section whose lanes stack the other way each such branch is reflected
     across the join.
     """
-    from nf_metro.layout.routing.reversal import tb_positive_fan_sections
-
-    lane_sign = section_lane_sign(section, tb_positive_fan_sections(graph))
+    lane_sign = _lane_sign(section, graph)
     if lane_sign > 0:
         return
     # assign_tracks seats lines in priority order, which is the section's lane
@@ -647,9 +652,7 @@ def _align_bypass_v_to_lane_side(
     if not bypass_vs:
         return
 
-    from nf_metro.layout.routing.reversal import tb_positive_fan_sections
-
-    lane_sign = section_lane_sign(section, tb_positive_fan_sections(graph))
+    lane_sign = _lane_sign(section, graph)
     real_xs = [
         s.x
         for s in sub.stations.values()
