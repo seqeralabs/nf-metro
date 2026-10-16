@@ -71,7 +71,7 @@ def _resolved_by_line(path: Path, source: str, target: str) -> dict[str, list[fl
             "examples/topologies/disjoint_sameline_trunks.mmd",
             "secC__exit_right_2",
             "secE__entry_left_7",
-            {"a": [14.0, 10.0, 10.0, 14.0], "b": [10.0, 14.0, 14.0, 10.0]},
+            {"a": [10.0, 14.0, 14.0, 10.0], "b": [14.0, 10.0, 10.0, 14.0]},
             id="disjoint_sameline_trunks",
         ),
         pytest.param(
@@ -115,9 +115,9 @@ def test_exit_turn_corner_is_anchored_apart_while_its_neighbour_re_anchors() -> 
     On ``secC__exit_right_2 -> secE__entry_left_7`` lines ``a`` and ``b`` each own
     an exit turn at their first corner (``exit_turn_segment_rank == 1``), seated by
     ``_settled_exit_turns``.  That corner is excluded from every concentric fan and
-    keeps its plan radius (``a`` 14, ``b`` 10).  The neighbouring corner owns no
+    keeps its plan radius (``a`` 10, ``b`` 14).  The neighbouring corner owns no
     exit turn, so it is a fan member and re-anchors to seat the fan's innermost lane
-    at ``CURVE_RADIUS`` (``a`` 10, ``b`` 14).  An exclusion wide enough to also drop
+    at ``CURVE_RADIUS`` (``a`` 14, ``b`` 10).  An exclusion wide enough to also drop
     that neighbour -- matching ``rank in (etsr - 1, etsr)`` rather than
     ``rank == etsr`` -- would strand it above the floor.
     """
@@ -148,8 +148,8 @@ def test_exit_turn_corner_is_anchored_apart_while_its_neighbour_re_anchors() -> 
     )
 
     resolved = {route.line_id: _resolved(route, offsets) for route in owners}
-    assert resolved["a"][0] == 14.0 and resolved["b"][0] == 10.0
-    assert resolved["a"][1] == 10.0 and resolved["b"][1] == 14.0
+    assert resolved["a"][0] == 10.0 and resolved["b"][0] == 14.0
+    assert resolved["a"][1] == 14.0 and resolved["b"][1] == 10.0
     assert min(resolved["a"][1], resolved["b"][1]) == CURVE_RADIUS
 
 

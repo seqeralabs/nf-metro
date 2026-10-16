@@ -747,6 +747,37 @@ gallery:
       "A BT section fed from below: a lower BT section's trailing TOP exit continues
       up the shared lane into an upper BT section's BOTTOM entry, a two-line bundle riding
       one column across the seam (#1044)."
+  - id: bt_entry_same_line_bypass_on_chain
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      "A line entering a BT section through its bottom port both to a chain and,
+      bypassing it, straight to the chain's last station: the same line already reaches that
+      station through the chain, so the bypass rides the chain's lane as one track instead
+      of splitting off at the port and rejoining at the target."
+  - id: bt_entry_bypass_steps_off_at_port
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      "A BT section's bottom entry bypassing two stations to one in another column:
+      the bypass steps onto its target's lane just inside the port and climbs beside the
+      skipped stations rather than through their markers.  No other line at the port leaves
+      toward that side, so the step crosses nothing."
+  - id: bt_entry_bundle_bypass
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      "A two-line bundle entering a BT section through its bottom port and bypassing
+      a chain another line serves to its last station: the bundle steps across just inside
+      the port and climbs clear of the skipped stations."
+  - id: bt_entry_bypass_on_spread_diagonal
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      "A line entering a BT section through its bottom port both to a chain and,
+      bypassing it, to the chain's last station, where the chain link is a diagonal shared
+      with another line: the diagonal spread carries the bypass along with the chain, so
+      the line stays one track instead of drawing a second copy beside it."
   - id: bt_exit_top_above
     source_dir: examples/topologies
     category: TB / BT Sections
@@ -1419,6 +1450,27 @@ gallery:
       concentric bundle until a member peels up at its turn column, rather than being split
       apart by a track reserved for a trunk that only appears further along the channel (issue
       #702)."
+  - id: samerow_bypass_joins_flat_bundle
+    source_dir: examples/topologies
+    category: Bypass Routing
+    description:
+      "A line from the same row detours below an intervening section and climbs back into a
+      shared entry port beside three lines that run straight in. The flat lines keep the lanes
+      they arrive on and the riser takes the lane below them, so no flat line steps aside at
+      the port and the riser crosses nothing (issue #2043)."
+  - id: samerow_bypass_joins_flat_bundle_rl
+    source_dir: examples/topologies
+    category: Bypass Routing
+    description:
+      "The right-to-left mirror: the same-row bypass climbs into a shared right entry port
+      below the flat bundle (issue #2043)."
+  - id: samerow_bypass_over_top_flat_bundle
+    source_dir: examples/topologies
+    category: Bypass Routing
+    description:
+      "A packed cell-mate sends the same-row bypass over the row top instead, so it comes down
+      into the shared entry port from above and takes the lane above the flat lines, again
+      crossing nothing (issue #2043)."
   - id: dogleg_exempt_distinct
     source_dir: examples/topologies
     category: Bypass Routing
@@ -1515,6 +1567,28 @@ gallery:
       A perpendicular feeder re-slots at a multi-feeder merge port, and the single
       re-joined line leaves the merge row before reaching its consumer one row up, so the bundle-offset
       walk stops at the off-row exit rather than carrying the slot off the row.
+  - id: entry_frame_through_junction
+    source_dir: examples/topologies
+    category: Merge & Convergence
+    description:
+      "A section whose entry lanes shift to keep its feeder's lanes exits into a
+      divergence junction: the junction takes the shifted lanes and the section the straight
+      branch reaches frames off them, so every leg through the junction runs level (#2044)."
+  - id: fan_over_top_reach_order
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      "A same-row fan reaching two columns while a nearer line joins the farther
+      branch's loop over a section into its flow-side entry: the farther branch runs
+      outermost, the joiner rides inside the loop through both corners and lands on the
+      upper lane, and no two lines cross."
+  - id: left_exit_wrap_under_own_section
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "A LEFT exit feeding a RIGHT entry up and two columns across: the wrap leads out
+      on the exit's own side, passes under its section and climbs into the entry, instead of
+      running back along its trunk over the stations it has just served (#2073)."
   - id: junction_entry_reversed_fold
     source_dir: examples/topologies
     category: Merge & Convergence
@@ -2377,6 +2451,15 @@ gallery:
       peels each line to a different target. The fan-out's peel order propagates one hop
       upstream to its free source feeder, so both lines descend straight into their
       landing lanes with no crossing (issue #1986)."
+  - id: bottom_entry_two_feeders_own_lanes
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "Two feeders from different sections reach one LR section's BOTTOM entry: a line
+      dropping out of the section beside it and a line running under the row from further
+      back. The port deals its channels in the order the lines turn into the trunk, so each
+      riser lands on its own lane and the pair nests through the corner instead of one riser
+      running hidden under the other (issue #2073)."
 pipelines:
   - id: rnaseq_metro
     title: nf-core/rnaseq
@@ -2468,6 +2551,9 @@ render_only:
     # here is one of those known defects, not a regression.
     - curve_invariant_repros/inter_row_corridor_overflow
     - regressions/tb_offtrack_fork_branch_collision_1390
+    - curve_invariant_repros/bt_bottom_entry_bundle_rises_from_junction
+    - curve_invariant_repros/bt_bottom_entry_source_beyond_channel_single_branch
+    - curve_invariant_repros/fan_over_top_flow_feeder
     - topologies/lr_exit_into_tb_shared_carrier_row
     - topologies/convergence_handedness_repro
     - topologies/convergence_shared_terminal_exit_turn

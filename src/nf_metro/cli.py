@@ -1364,14 +1364,15 @@ def _render_one_unsafe(
     if format_ == "html":
         # The interactive page supplies its own responsive frame, chrome, and
         # per-map class scoping, so the SVG-only sizing/namespacing flags have
-        # nothing to act on. Font portability and the dark-mode block do reach
-        # the inlined SVG, so they are threaded through.
+        # nothing to act on. Font portability, the dark-mode block and
+        # --no-self-color-scheme (for the embed snippet) are threaded through.
         ignored = [
             name
             for name, enabled in (
                 ("--responsive", responsive),
                 ("--bare", bare),
                 ("--svg-class-prefix", bool(svg_class_prefix)),
+                ("--no-chrome-css", no_chrome_css),
             )
             if enabled
         ]
@@ -1379,7 +1380,8 @@ def _render_one_unsafe(
             console.print(
                 f"[yellow]note[/] [dim]{escape(', '.join(ignored))} only affect "
                 "--format svg and are ignored for --format html (the interactive "
-                "page is already responsive and scopes each map independently).[/]"
+                "page is already responsive, scopes each map independently, and "
+                "keeps the map's adaptive colours).[/]"
             )
 
     # Tier-A layout-invariant violations on the settled geometry surface here

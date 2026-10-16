@@ -7,6 +7,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 
 from nf_metro.layout.constants import (
+    COORD_GROUP_DIGITS_FINE,
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
     CURVE_RADIUS,
@@ -17,7 +18,12 @@ from nf_metro.layout.constants import (
     MIN_STRAIGHT_PORT,
     STATION_MOVE_TOLERANCE,
 )
-from nf_metro.layout.geometry import lanes_run_along_x, segment_intersects_bbox
+from nf_metro.layout.geometry import (
+    Point,
+    lanes_run_along_x,
+    quantize_coord,
+    segment_intersects_bbox,
+)
 from nf_metro.layout.routing.common import (
     OffsetRegime,
     RoutedPath,
@@ -67,9 +73,10 @@ def _spread_diagonal_bundles(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
 
     # Track routes already spread so we don't shift one twice.
     spread: set[tuple[str, str, str]] = set()
-
-    def _edge_key(rp: RoutedPath) -> tuple[str, str, str]:
-        return (rp.edge.source, rp.edge.target, rp.line_id)
+    before = [
+        (rp.points[1], rp.points[2]) if _is_diagonal_route(rp) else None
+        for rp in routes
+    ]
 
     # Spread fan / convergence hubs first: a hub already carries most multi-line
     # bundles, and grouping a whole fan together keeps it as compact as the hub
@@ -121,6 +128,63 @@ def _spread_diagonal_bundles(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
             continue
         _apply_diagonal_spread(group, src, ctx=ctx)
         spread.update(_edge_key(rp) for rp in group)
+
+    _carry_spread_to_same_line_copies(routes, before, spread)
+
+
+def _edge_key(rp: RoutedPath) -> tuple[str, str, str]:
+    return (rp.edge.source, rp.edge.target, rp.line_id)
+
+
+def _diagonal_key(line_id: str, a: Point, b: Point) -> tuple[str, Point, Point]:
+    return (
+        line_id,
+        (
+            quantize_coord(a[0], COORD_GROUP_DIGITS_FINE),
+            quantize_coord(a[1], COORD_GROUP_DIGITS_FINE),
+        ),
+        (
+            quantize_coord(b[0], COORD_GROUP_DIGITS_FINE),
+            quantize_coord(b[1], COORD_GROUP_DIGITS_FINE),
+        ),
+    )
+
+
+def _carry_spread_to_same_line_copies(
+    routes: list[RoutedPath],
+    before: list[tuple[Point, Point] | None],
+    spread: set[tuple[str, str, str]],
+) -> None:
+    """Move a route drawn along a spread diagonal of its own line with that diagonal.
+
+    A route that runs with its own line's chain into a station
+    (``tb_handlers._same_line_chain_route``) repeats the chain link's diagonal,
+    so the two draw as one track.  The spread translates the link with its
+    bundle but not the repeat, which is not a member of that bundle, and would
+    leave the repeat a fraction of a lane from the link's neighbour.  A diagonal
+    two spread routes of one line shared beforehand but moved apart is left
+    alone, since the repeat cannot follow both.
+    """
+    moved: dict[tuple[str, Point, Point], tuple[Point, Point] | None] = {}
+    for rp, diag in zip(routes, before):
+        if diag is None or _edge_key(rp) not in spread:
+            continue
+        after = (rp.points[1], rp.points[2])
+        if after == diag:
+            continue
+        key = _diagonal_key(rp.line_id, *diag)
+        moved[key] = after if moved.get(key, after) == after else None
+    if not moved:
+        return
+    for rp in routes:
+        if _edge_key(rp) in spread:
+            continue
+        for k in range(len(rp.points) - 1):
+            carried = moved.get(
+                _diagonal_key(rp.line_id, rp.points[k], rp.points[k + 1])
+            )
+            if carried is not None:
+                rp.points[k], rp.points[k + 1] = carried
 
 
 def _stub_minimums(rp: RoutedPath) -> tuple[float, float]:

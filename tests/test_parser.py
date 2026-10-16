@@ -597,6 +597,128 @@ def test_empty_section_removed_render():
     assert "SeqKit" in svg_str
 
 
+# --- Hidden section tests ---
+
+
+def test_hidden_section():
+    """Sections whose id starts with '_' are marked as hidden."""
+    text = (
+        "%%metro line: line | My line | #756bb1\n"
+        "graph LR\n"
+        "    subgraph visible [Visible]\n"
+        "        a[A]\n"
+        "    end\n"
+        "    subgraph _hidden [Hidden]\n"
+        "        b[B]\n"
+        "    end\n"
+        "    a -->|line| b"
+    )
+    graph = parse_metro_mermaid(text)
+    assert "_hidden" in graph.sections
+    assert graph.sections["visible"].is_hidden is False
+    assert graph.sections["_hidden"].is_hidden is True
+
+
+def test_hidden_section_render():
+    """A hidden section participates in layout but its section box is not rendered."""
+    from nf_metro.layout.engine import compute_layout
+    from nf_metro.render.svg import render_svg
+    from nf_metro.themes import NFCORE_DARK_THEME
+
+    text = (
+        "%%metro line: line | My line | #756bb1\n"
+        "graph LR\n"
+        "    subgraph visible [Visible Section]\n"
+        "        a[A]\n"
+        "    end\n"
+        "    subgraph _hidden [Hidden Section]\n"
+        "        b[My station in _hidden]\n"
+        "    end\n"
+        "    a -->|line| b\n"
+    )
+
+    graph = parse_metro_mermaid(text)
+
+    compute_layout(graph)
+    svg_str = render_svg(graph, NFCORE_DARK_THEME)
+
+    # The hidden section remains part of the graph and participates in layout.
+    assert "_hidden" in graph.sections
+    assert graph.sections["_hidden"].is_hidden is True
+    assert graph.sections["_hidden"].bbox_w > 0
+    assert graph.sections["_hidden"].bbox_h > 0
+
+    # The visible section is rendered.
+    assert 'class="nf-metro-section-box" data-section-id="visible"' in svg_str
+
+    # The hidden section has no rendered section box.
+    assert 'class="nf-metro-section-box" data-section-id="_hidden"' not in svg_str
+
+    # Stations inside the hidden section are still rendered.
+    assert "My station in _hidden" in svg_str
+
+
+_HIDDEN_MIDDLE_MMD = (
+    "%%metro line: line | My line | #756bb1\n"
+    "graph LR\n"
+    "    subgraph first [First]\n"
+    "        a[A]\n"
+    "    end\n"
+    "    subgraph _middle [Middle]\n"
+    "        b[B]\n"
+    "    end\n"
+    "    subgraph last [Last]\n"
+    "        c[C]\n"
+    "    end\n"
+    "    a -->|line| b\n"
+    "    b -->|line| c\n"
+)
+
+
+def _laid_out_hidden_middle():
+    from nf_metro.layout.engine import compute_layout
+
+    graph = parse_metro_mermaid(_HIDDEN_MIDDLE_MMD)
+    compute_layout(graph)
+    return graph
+
+
+def test_hidden_section_does_not_consume_a_number():
+    graph = _laid_out_hidden_middle()
+    assert graph.sections["first"].number == 1
+    assert graph.sections["last"].number == 2
+
+
+def test_hidden_section_absent_from_manifest_regions():
+    from nf_metro.render.manifest import build_manifest
+
+    graph = _laid_out_hidden_middle()
+    manifest = build_manifest(graph, width=100, height=100, station_radius=5.0)
+    assert [region["id"] for region in manifest["regions"]] == ["first", "last"]
+    regions = {node["id"]: node.get("region") for node in manifest["nodes"]}
+    assert regions["b"] is None
+    assert regions["a"] == "first"
+
+
+def test_hidden_section_reported_by_info():
+    from nf_metro.introspect import build_info
+
+    info = build_info(_laid_out_hidden_middle())
+    hidden = {sec["id"]: sec["is_hidden"] for sec in info["sections"]}
+    assert hidden == {"first": False, "_middle": True, "last": False}
+
+
+def test_hidden_section_outlined_in_debug_overlay():
+    from nf_metro.render.svg import render_svg
+    from nf_metro.themes import NFCORE_DARK_THEME
+
+    graph = _laid_out_hidden_middle()
+    plain = render_svg(graph, NFCORE_DARK_THEME)
+    debug = render_svg(graph, NFCORE_DARK_THEME, debug=True)
+    assert ">_middle<" not in plain
+    assert ">_middle<" in debug
+
+
 # --- Hidden station tests ---
 
 

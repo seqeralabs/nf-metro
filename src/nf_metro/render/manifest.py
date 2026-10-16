@@ -77,7 +77,7 @@ def build_manifest(
     a complete, future-proof inventory of addressable nodes rather than only the
     subset that lights up today.
     """
-    real_sections = graph.real_sections
+    drawn_sections = {sid: sec for sid, sec in graph.sections.items() if sec.draws_box}
 
     nodes: list[dict[str, Any]] = []
     for station in graph.stations.values():
@@ -92,7 +92,7 @@ def build_manifest(
             "groups": graph.station_lines(station.id),
             "patterns": list(graph.process_mapping.get(station.id, [])),
         }
-        if station.section_id in real_sections:
+        if station.section_id in drawn_sections:
             entry["region"] = station.section_id
         if extra_node_data and station.id in extra_node_data:
             entry.update(extra_node_data[station.id])
@@ -107,5 +107,5 @@ def build_manifest(
             {"id": line.id, "label": line.display_name, "color": line.color}
             for line in graph.lines.values()
         ],
-        regions=[{"id": sid, "label": sec.name} for sid, sec in real_sections.items()],
+        regions=[{"id": sid, "label": sec.name} for sid, sec in drawn_sections.items()],
     )

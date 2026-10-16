@@ -56,7 +56,8 @@ When you place sections by hand with `%%metro grid: <section> | <col>,<row>`, ea
 Every cell in a column is as wide as the column's widest section.
 To pack two short sections into the horizontal space a single wide section would take, name several comma-separated sections in one cell:
 
-```
+```metro
+%% [!callout /gatk, variant_calling/] Two sections share cell 1,0.
 %%metro grid: gatk, variant_calling | 1,0
 %%metro grid: realign, reporting     | 1,1
 ```
@@ -121,6 +122,8 @@ It takes two pieces:
 1. A **`%%metro file:`** directive at the top of the file, mapping a station ID to a label:
 
    ```metro
+   %% [!callout /reads_in/] The ID of the terminus station.
+   %% [!callout /FASTQ/] The label shown on the icon.
    %%metro file: reads_in | FASTQ
    %%metro file: report_out | HTML
    ```
@@ -171,6 +174,7 @@ The label inside an icon is meant to be a short type chip such as `CSV` or `FAST
 To attach a human-readable name without overlapping the chip, add an optional third field to the directive:
 
 ```metro
+%% [!callout /Samples/] Optional name, shown below the icon.
 %%metro file: samples_in | CSV | Samples
 %%metro file: contrasts_in | YAML | Contrasts
 ```
@@ -185,6 +189,7 @@ The format label then renders as bold white text on a dark strip across the lowe
 The white document stays visible:
 
 ```metro
+%% [!callout /banner/] Draws the BAM label on a dark strip.
 %%metro files: aln_out | BAM | Alignments | banner
 ```
 
@@ -201,6 +206,8 @@ The `%%metro marker:` directive overrides one station's marker.
 Its shape and fill can then encode a tool attribute such as mandatory against optional, hardware-accelerated, or expanded in another diagram:
 
 ```metro
+%% [!callout /shape/] circle, square or pill.
+%% [!callout /fill/] open, solid or a literal color.
 %%metro marker: node_id | shape, fill
 ```
 
@@ -225,7 +232,7 @@ This two-line variant-calling pipeline uses square markers for mandatory steps, 
 Stations with no `%%metro marker:` keep the default pill.
 The feature is opt-in.
 
-## 7. Hidden stations
+## 7. Hidden stations and sections
 
 A graph sometimes needs a branching or merging point that does not represent a real pipeline step, for instance where lines diverge but no tool runs.
 A visible station there clutters the diagram with a meaningless marker.
@@ -258,6 +265,30 @@ That gives fine control over where splits happen without adding a fake step to t
 
 Use `--debug` to see hidden stations as dashed circles: `nf-metro render --debug pipeline.mmd -o debug.svg`
 
+### Hidden sections
+
+Stations outside any subgraph share one implicit section, so they cannot be placed independently of each other.
+A visible section around a single station adds a box, title and number that mean nothing in the pipeline.
+
+**Any section whose ID starts with `_` (underscore) is hidden.** It keeps its grid cell, so `%%metro grid:` places it like any other section, but nf-metro renders no box, title or number badge, and the visible sections are numbered without it.
+
+Here the "If no regions" step gets its own cell in the top row:
+
+```metro ins={1,4}
+%%metro grid: _no_regions | 1,0
+...
+graph LR
+    subgraph _no_regions [No regions]
+        noregion[If no regions]
+    end
+```
+
+<Metro src="examples/guide/06c_hidden_section.mmd" mmd={false} />
+
+The hidden section still occupies its cell, so lines between other sections route around it as they would around a visible one.
+
+Use `--debug` to see hidden sections as dashed boxes.
+
 ## 8. Highlight the active path
 
 A single map defines every line a pipeline _can_ run.
@@ -270,6 +301,7 @@ Add a fifth field, the literal `inactive`, to a `%%metro line:` directive to gra
 
 ```metro
 %%metro line: star   | STAR alignment (default)          | #2db572
+%% [!callout /inactive/] The fifth field grays the line out by default.
 %%metro line: salmon | Salmon pseudo-alignment (inactive) | #ff8c00 | solid  | inactive
 %%metro line: sv     | Structural variants (inactive)     | #e63946 | dashed | inactive
 ```
@@ -451,6 +483,7 @@ One map can then mix modes, such as a `bundle` trunk feeding a `rails` analysis 
 
 ```metro {2}
 %%metro line_spread: centered
+%% [!callout /pathways/] Overrides the default for this section.
 %%metro line_spread: rails | pathways
 ```
 
@@ -474,6 +507,8 @@ Converging them would gain nothing.
 Use the directive only to pin a specific rail grouping, such as bundling two lines onto one rail, or to force an interchange where lines share a neighbor:
 
 ```metro
+%% [!callout /markduplicates/] The shared step to draw as an interchange.
+%% [!callout /tumor/] One rail per pipe-group.
 %%metro interchange: markduplicates | tumor | normal
 ```
 
@@ -655,6 +690,7 @@ The overlay shows:
 | **Entry ports**     | Green diamonds       | Where lines enter a section, with port ID and side                        |
 | **Exit ports**      | Red diamonds         | Where lines leave a section, with port ID and side                        |
 | **Hidden stations** | Dashed circles       | Stations whose ID starts with `_`, invisible in normal rendering          |
+| **Hidden sections** | Dashed boxes         | Sections whose ID starts with `_`, invisible in normal rendering          |
 | **Edge waypoints**  | Small filled circles | Intermediate routing points along each edge path                          |
 | **Grid lines**      | Yellow dashed lines  | Boundaries between grid columns and rows, labeled with column/row indices |
 

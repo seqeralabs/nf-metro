@@ -1,0 +1,46 @@
+%%metro title: Perp Entry Column Opposite Side Fan
+%%metro style: seqera
+%%metro line: l0 | Fastqc_Qc_Normalize | #e6194b
+%%metro line: l1 | Pca | #3cb44b
+%%metro line: l2 | Annotate | #4363d8
+%%metro line: l3 | Report_Trim_Pca | #f58231
+%%metro line: l4 | Polish_Polish | #911eb4
+%%metro grid: sec0 | 1,0
+%%metro grid: sec1 | 1,1
+%%metro grid: sec2 | 0,0
+
+graph LR
+    subgraph sec0 [Polish 0]
+        %%metro direction: RL
+        %%metro exit: top | l0, l2, l3, l4
+        s0n0[bin_classify_vcf]
+        s0n1[align]
+        s0n0 -->|l0,l2,l3,l4| s0n1
+    end
+    subgraph sec1 [Assemble 1]
+        s1n0[classify]
+        s1n1[stats_normalize]
+        s1n2[stats]
+        s1n3[pca_cluster]
+        s1n0 -->|l1| s1n2
+        s1n2 -->|l1,l2,l3| s1n3
+        s1n0 -->|l3| s1n1
+        s1n1 -->|l3| s1n2
+    end
+    subgraph sec2 [Bin 2]
+        %%metro entry: bottom | l0, l1, l3, l4
+        s2n0[fastqc]
+        s2n1[stats_polish]
+        s2n2[summarise]
+        s2n3[gather_sort]
+        s2n0 -->|l1,l4| s2n1
+        s2n0 -->|l1| s2n3
+        s2n2 -->|l3,l4| s2n3
+        s2n1 -->|l4| s2n2
+    end
+    s0n1 -->|l0| s1n3
+    s1n3 -->|l0,l1| s2n0
+    s0n1 -->|l2| s1n2
+    s0n1 -->|l3| s1n0
+    s1n3 -->|l3| s2n2
+    s0n1 -->|l4| s2n0

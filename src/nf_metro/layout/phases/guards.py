@@ -1579,9 +1579,10 @@ def _guard_corridor_fed_solo_rides_trunk(
     With one present line there is no bundle to keep ordered, so the lane the
     line held in the upstream multi-line section only drags the lone consumer
     off the section trunk -- the box then reserves empty space for lines that
-    never enter it.  The vertical corridor absorbs the lane step, so both the
-    LEFT/RIGHT entry port and the consumer it feeds must ride offset 0.  Scope
-    is exactly :func:`iter_corridor_fed_solo_entries`.
+    never enter it.  The corridor's vertical leg -- off the port's Y or on a
+    same-row bypass detour -- absorbs the lane step, so both the LEFT/RIGHT
+    entry port and the consumer it feeds must ride offset 0.  Scope is exactly
+    :func:`iter_corridor_fed_solo_entries`.
 
     A section whose line forks internally checks only the entry port: its fan
     branches straddle the trunk and may each hold a lane aligning them with a
@@ -4914,7 +4915,7 @@ def _guard_perp_entry_feed_not_collinear(graph: MetroGraph, phase: str) -> None:
     A perpendicular (TOP/BOTTOM) exit port is exempt: it rises into the
     inter-row corridor band that also hosts the entry port (the up-and-over
     and drop-pair shapes), so feeder and entry legitimately share that Y.
-    ``_perp_corridor_feeder`` keys the matching entry-drop route off the same
+    ``perp_corridor_feeder`` keys the matching entry-drop route off the same
     collinear perp-exit feed this guard exempts.
     """
     for section in graph.sections.values():

@@ -1,0 +1,26 @@
+%%metro title: BT Entry Bypass Steps Off At Port
+%%metro line: dna | DNA | #e6194b
+%%metro line: rna | RNA | #911eb4
+
+graph LR
+    subgraph prep [Prep]
+        reads[Reads]
+    end
+    subgraph qc [QC]
+        %%metro direction: TB
+        fastqc[FastQC]
+        trim[Trim]
+    end
+    subgraph align [Align]
+        %%metro direction: BT
+        index[Index]
+        map[Map]
+        sort[Sort]
+        quant[Quant]
+        index -->|dna| map
+        map -->|dna| sort
+        sort -->|rna| quant
+    end
+    reads -->|rna| fastqc
+    trim -->|dna| index
+    trim -->|rna| sort

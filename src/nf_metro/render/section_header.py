@@ -9,10 +9,14 @@ clear of routes, never moving a route to do so:
    available.  It is the position a reader looks for, so an uncontested default
    is never traded away and the band above the box needs no other candidate
    scored against it.
-2. Otherwise the caption has already left that corner, so neither upright
-   position has a claim to priority over the other.  What is left to compare is
-   how much air each keeps, so both are scored by :func:`_route_clearance` and
-   the roomiest wins:
+2. Otherwise a ``nudge`` slot in the band above the box that keeps a full
+   header band (``SECTION_HEADER_PROTRUSION``) of air from every route wins, the
+   roomiest such slot first: the caption stays where a reader looks for it, and
+   a route that far off (an over-top loop passing above the band) does not
+   contest it.
+3. Failing that, neither upright position has a claim to priority over the
+   other.  What is left to compare is how much air each keeps, so both are
+   scored by :func:`_route_clearance` and the roomiest wins:
 
    - ``nudge`` - the header shifted along the band above the box to the middle
      of one of the route-clear slots that band offers, bounded to the section's
@@ -24,14 +28,14 @@ clear of routes, never moving a route to do so:
    rather than at the first position that clears, because the leftmost clear
    shift keeps exactly ``SECTION_HEADER_ROUTE_PAD`` from the stroke it stepped
    past and would lose every comparison before it was made.
-3. ``left`` / ``right`` - the title rotated to run down a vertical edge, when
+4. ``left`` / ``right`` - the title rotated to run down a vertical edge, when
    neither upright position is available.  A sideways title is harder to read
    than either of them, so it is not their peer to be scored against and stays a
    lower tier.  ``left`` anchors the badge at the bottom of the edge and reads
    upward; ``right`` anchors it at the top and reads downward.  A title longer
    than the box height overhangs past the box ends rather than being ruled out,
    since a rotated header is never wrapped.
-4. ``nudge`` unbounded - the last resort when nothing else is available; it
+5. ``nudge`` unbounded - the last resort when nothing else is available; it
    always clears, at the cost of overhanging the box to the right.
 
 A candidate is available when it clears every route by
@@ -637,10 +641,8 @@ def resolve_section_header_placement(
     # upward one). ``_right`` reads downward into always-growable canvas.
     badge_diameter = 2.0 * circle_r
     side_room = section.bbox_h >= badge_diameter
-    upright = [
-        *_band_slot_placements(section, above, block, polylines),
-        _below(x0, box_bottom, down_block),
-    ]
+    band_slots = _band_slot_placements(section, above, block, polylines)
+    upright = [*band_slots, _below(x0, box_bottom, down_block)]
     rotated = []
     if (
         side_room
@@ -661,10 +663,16 @@ def resolve_section_header_placement(
             )
         ]
 
-    # The roomiest of the upright positions, and only then a rotated one: a
-    # sideways title is harder to read than either horizontal position, so it is
-    # not a peer of them to be scored against and stays a lower tier.
-    scored = _available(upright) or _available(rotated)
+    # A band slot a full header band clear of every route, then the roomiest of
+    # the upright positions, and only then a rotated one: a sideways title is
+    # harder to read than either horizontal position, so it is not a peer of
+    # them to be scored against and stays a lower tier.
+    uncontested = [
+        item
+        for item in _available(band_slots)
+        if item.clearance >= SECTION_HEADER_PROTRUSION
+    ]
+    scored = uncontested or _available(upright) or _available(rotated)
     if scored:
         return max(scored, key=lambda item: (item.clearance, -item.rank)).placement
     return _band_shift(
@@ -684,7 +692,7 @@ def resolve_all_section_headers(
             graph, section, label_font_size, polylines, title_font_size
         )
         for section in graph.sections.values()
-        if section.bbox_w > 0 and section.bbox_h > 0 and not section.is_implicit
+        if section.bbox_w > 0 and section.bbox_h > 0 and section.draws_box
     }
 
 

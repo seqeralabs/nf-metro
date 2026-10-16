@@ -1,0 +1,42 @@
+%%metro title: Same-Row Bypass Joins a Flat Bundle (RL)
+%%metro style: dark
+%%metro line: main | Main | #e63946
+%%metro line: qc | QC | #2db572
+%%metro line: skip | Skip | #f5c542
+%%metro line: aux | Aux | #0570b0
+%%metro line: side | Side | #9b59b6
+%%metro grid: ingest | 3,0
+%%metro grid: side_step | 2,0
+%%metro grid: process | 1,0
+%%metro grid: report | 0,0
+
+graph LR
+    subgraph ingest [Ingest]
+        %%metro direction: RL
+        load[Load]
+        split[Split]
+        load -->|skip,side| split
+    end
+
+    subgraph side_step [Side Step]
+        %%metro direction: RL
+        annotate[Annotate]
+        filter[Filter]
+        annotate -->|side| filter
+    end
+
+    subgraph process [Process]
+        %%metro direction: RL
+        align[Align]
+        quant[Quantify]
+        align -->|main,qc,aux| quant
+    end
+
+    subgraph report [Report]
+        %%metro direction: RL
+        summary[Summary]
+    end
+
+    split -->|side| annotate
+    split -->|skip| summary
+    quant -->|main,qc,aux| summary

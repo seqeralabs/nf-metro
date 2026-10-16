@@ -19,10 +19,6 @@
   "note": "The lenient sign test, reached only when reject_collinear_touch is False; see that gate's verdict. Its one caller is the validator module this matrix excludes, so no sweep fixture evaluates it.",
   "status": "defensive"
  },
- "common.py::elif tgt_sec:::#1": {
-  "note": "The else (col_key=round(sx)) needs an L-shaped (dx!=0,dy!=0) inter edge whose target resolves to no section. Only exit_port->junction edges lack a target section, and junction positioning makes those axis-aligned (same-X RIGHT exit or same-Y BOTTOM exit), never L-shaped, so the else is unreachable. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
-  "status": "defensive"
- },
  "common.py::for e in graph.edges:::#1": {
   "note": "No-preference graph.edges scan loop-exit: a fan-out junction always has a sectioned incident port (its exit/entry ports carry a section_id), so the loop always returns and never exhausts graph.edges; the fall-through to the type-contract return None is the never-taken no-neighbour fallback.",
   "status": "defensive"
@@ -169,10 +165,6 @@
  },
  "common.py::if s.bbox_h <= 0:::#1": {
   "note": "Degenerate-bbox guard in _grid_row_bands: a laid-out section always has bbox_h > 0, so the skip arm only protects against a zero/negative-height section that the layout never produces.",
-  "status": "defensive"
- },
- "common.py::if safe_cap >= row_bottom:::#1": {
-  "note": "The false arm is a defensive midpoint fallback for an inter-row gap too narrow to clear both an upper-row bypass and the lower section header. Placement reserves the routing band before bypass geometry is computed, so settled corpus layouts provide enough clearance for the safe-cap arm.",
   "status": "defensive"
  },
  "common.py::if sec.bbox_w <= 0:::#1": {
@@ -515,10 +507,6 @@
   "note": "The second None check protects the manual or incomplete graph fallback after rebuilding a missing retained scaffold. Parsed render-path graphs publish one canonical scaffold during fan planning, so the fixture corpus never reaches a rebuild that can return None. Direct planner tests retain the fallback for graph construction without topology.",
   "status": "defensive"
  },
- "inter_section_handlers.py::and corridor.bypass_band_y >= base_y - COORD_TOLERANCE::#1": {
-  "note": "Safety fallback: the shared bypass band is the deepest sibling's bypass_bottom_y, so a branch's own base_y never exceeds it; the arm that would decline a shallower shared band (guarding a predicate mismatch) is unexercised in the corpus.",
-  "status": "needs-review"
- },
  "inter_section_handlers.py::and f.src_row is not None::#1": {
   "note": "LEFT-entry inter-row L-shape guard. Every LEFT-entry inter-section edge reaching this condition has a resolved source grid row (f.src_col/f.tgt_col are asserted non-None just above and the row resolves alongside), so the `f.src_row is None` short-circuit out of the L-shape branch is never taken.",
   "status": "defensive"
@@ -550,10 +538,6 @@
  "inter_section_handlers.py::if _corridor_is_viable(ctx, src, tgt):::#1": {
   "note": "Reachable only via a defective render (inter-row corridor grazes the source section); see #722.",
   "status": "needs-review"
- },
- "inter_section_handlers.py::if _h_segment_crosses_other_section(graph, src.x, final_x, src.y, exclude):::#1": {
-  "note": "Traverse-first clearance test in _top_entry_side_fan_traverse_clears (#1349). The below-side fan branch only reaches this gate when its junction also feeds an aligned straight drop; the corpus fan sits a clear row above its target, so the source-Y traverse never crosses another section and the fall-back-to-staircase arm is not exercised. Defensive.",
-  "status": "defensive"
  },
  "inter_section_handlers.py::if _would_route_around_section_below(other, ctx):::#1": {
   "note": "Competing-sibling detection in _has_around_section_sibling, routed through the dispatch table (#813). A non-bypass sibling feeding the same merge junction sits in an adjacent column or a gap with no same-row intervening section, so it dispatches to an L-shape, not the around-below loop; corpus instrumentation across the fixtures confirms the arm is never taken. Defensive.",
@@ -711,8 +695,8 @@
   "note": "Trunk-row entry bow (#1315). Exercised by tests/fixtures/regressions/entry_trunk_row_bow.mmd, which is kept out of the validate=True corpus and the gate-coverage corpus (it exercises the always-on render path only), so no clean corpus fixture takes this arm. The render-path invariant test test_entry_trunk_row_bow_clears_non_consumer covers the drawn detour.",
   "status": "defensive"
  },
- "intra_handlers.py::elif sy_blocked:::#1": {
-  "note": "Entry-runway trunk-row non-consumer bypass (#1293). Both-rows-blocked fall-through: a non-consumer sits on BOTH the entry row and the target trunk row, leaving no clear runway row. No corpus fixture has a doubly-blocked flow-side entry; defensive.",
+ "tb_handlers.py::if source_track_blocked:::#1": {
+  "note": "Entry-runway trunk-row non-consumer bypass (#1293). Both-tracks-blocked fall-through: a non-consumer sits on BOTH the entry track and the target track, leaving no clear runway track. No corpus fixture has a doubly-blocked flow-side entry; defensive.",
   "status": "defensive"
  },
  "intra_handlers.py::for bbox in footprints:::#1": {
@@ -735,12 +719,12 @@
   "note": "Trunk-row entry bow (#1315). Retry arm (the roomier side's bow rakes a marker, so the other side is tried): _bow_side_order puts the side with the farthest off-trunk marker first, and the fixed bump height clears it, so no corpus fixture falls to the second side; defensive.",
   "status": "defensive"
  },
- "intra_handlers.py::if abs(diag_start_x - sx) <= abs(last_blocker - sx):::#1": {
+ "tb_handlers.py::if abs(diag_start - sp) <= abs(last_blocker - sp):::#1": {
   "note": "Entry-runway trunk-row non-consumer bypass (#1293). Descent-clips-blocker fall-through: the join-biased diagonal cannot start past the furthest target-row non-consumer (a blocker within diagonal_run+tgt_min of the target). Corpus blockers sit far enough forward; defensive.",
   "status": "defensive"
  },
- "intra_handlers.py::if abs(nearest_src - sx) < src_min + ctx.diagonal_run:::#1": {
-  "note": "Entry-runway 'too tight' return cannot fire: |nearest_src - entry_port_x| is floored at SECTION_X_PADDING (50px, the entry port sits at section.bbox_x = min(internal_station_x) - SECTION_X_PADDING), while src_min + diagonal_run = CURVE_RADIUS(10) + MIN_STRAIGHT_PORT(5) + DIAGONAL_RUN(30) = 45px. Since 50 >= 45 the guard is always False.",
+ "tb_handlers.py::if abs(nearest_src - sp) < src_min + ctx.diagonal_run:::#1": {
+  "note": "Entry-runway 'too tight' return cannot fire for an LR/RL section: |nearest_src - entry_port_x| is floored at SECTION_X_PADDING (50px, the entry port sits at section.bbox_x = min(internal_station_x) - SECTION_X_PADDING), while src_min + diagonal_run = CURVE_RADIUS(10) + MIN_STRAIGHT_PORT(5) + DIAGONAL_RUN(30) = 45px. Since 50 >= 45 the guard is always False. A vertical section's flow-side entry reaches the same placement; no corpus fixture exercises the arm there either.",
   "status": "defensive"
  },
  "intra_handlers.py::if abs(tgt.x - src.x) >= COORD_TOLERANCE:::#1": {
@@ -775,16 +759,8 @@
   "note": "A bypass V exists to carry lines from one station to another, so by the time _bypass_v_is_one_way_step runs (only for a bypass endpoint of a routed edge) the V always has at least one predecessor and one successor edge. The empty-list return-False arm guards a malformed graph rather than a topology, so it stays un-exercised.",
   "status": "defensive"
  },
- "intra_handlers.py::if not section:::#1": {
-  "note": "_route_entry_runway only runs on an entry-port -> internal-station edge; the target of such an edge always carries a section_id that resolves, so the guard's return-None arm protects against a malformed graph rather than a topology.",
-  "status": "defensive"
- },
  "intra_handlers.py::if over_end - over_start < 2 * ctx.curve_radius:::#1": {
   "note": "Trunk-row entry bow (#1315). No-room return: the flat run over the blocker(s) is shorter than two corner radii, so the bump's corners would overlap. The blocker-span-plus-clearance always exceeds 2*CURVE_RADIUS for corpus fixtures; defensive.",
-  "status": "defensive"
- },
- "intra_handlers.py::if section.direction not in (\"LR\", \"RL\"):::#1": {
-  "note": "No TB/BT entry reaches _route_entry_runway: TB LEFT/RIGHT entries are consumed by _route_tb_lr_entry and TB/BT TOP/BOTTOM entries by _route_perp_entry (both earlier in the dispatch chain), and a BT section is never produced (the direction directive accepts only LR/RL/TB; 0/391 corpus sections are BT). Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
   "status": "defensive"
  },
  "intra_handlers.py::if segment_intersects_bbox(x1, y1, x2, y2, bbox):::#1": {
@@ -1183,10 +1159,6 @@
   "note": "Skips a section the walk already took whole. the exit_lane_settlement_without_crossings variant described on the `if was_arriving is None or was_holder is None` entry takes the else arm (a fresh section) but not the skip: there the pair's two lines run into two different downstream sections. The skip arm wants a walk with two pair edges landing in one section, for instance both lines of the pair continuing into the same downstream box, or one box reached from two frontier stations.",
   "status": "needs-review"
  },
- "offsets.py::for _ in range(max_iterations):::#1": {
-  "note": "_reconcile_horizontal_offsets iterates at most 10 times and breaks early when no change occurs. The arc L1338->(-1310) represents loop exhaustion without early-break (all 10 iterations consumed). On any valid parsed graph, the reconciliation converges in at most a handful of iterations because each iteration resolves at least one edge conflict or reaches a fixed point. The 10-iteration ceiling is a backstop against hypothetical oscillating graphs; normal topologies stabilize in 1-3 passes.",
-  "status": "defensive"
- },
  "offsets.py::if (tgt_id, lid) not in ctx.offsets:::#1": {
   "note": "The True branch (missing entry-port offset -> ok=False) is unreachable because phase 7 (_compute_entry_port_offsets) runs before this function (phase 7a) and assigns an offset for every (entry_port_id, line_id) pair in the graph. By the time _align_junction_to_entry_port runs, ctx.offsets is populated for all entry ports, so the guard never fires. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
   "status": "defensive"
@@ -1211,7 +1183,7 @@
   "note": "In the exit-only-line reorder / same-Y offset propagation; reachable only via a multi-line LR/RL section with a perpendicular (TOP/BOTTOM) exit port, which the engine lays out as a station-as-elbow + collinear overlay PhaseInvariantError (#706). Exercise with a clean fixture once #706 is fixed.",
   "status": "needs-review"
  },
- "offsets.py::if any(::#3": {
+ "offsets.py::if any(::#4": {
   "note": "This post-acceptance marker-cache guard rejects a continuing cohort whose inherited offsets are not one contiguous step sequence. _linear_entry_frame only accepts and materializes contiguous inherited levels, so authored topology cannot reach this reject arm. It protects corrupted or hand-built state.",
   "status": "defensive"
  },
@@ -1235,10 +1207,6 @@
   "note": "inbound is pre-built as {sid: set() for sid in graph.stations}, so every station id in the graph is a key. All edge endpoints are guaranteed to be in graph.stations after parsing (regular nodes via register_station, ports via add_port->add_station, junctions via add_station), so edge.target is always found in inbound and the False branch (54->56) is never taken.",
   "status": "defensive"
  },
- "offsets.py::if entry.side not in (PortSide.LEFT, PortSide.RIGHT):::#1": {
-  "note": "In _align_flat_tb_exit_to_entry: scopes the flat-seam exit/entry reconciliation to horizontal (LEFT/RIGHT) entry ports, whose per-line offsets are Y like the TB exit's. A TOP/BOTTOM entry stores X-offsets, so copying across would be a category error. No corpus fixture routes a TB LEFT/RIGHT exit directly into a TOP/BOTTOM entry at the same Y, so the skip arm is never taken; defensive against that cross-axis seam.",
-  "status": "defensive"
- },
  "offsets.py::if exit_lines == set(j_lines):::#1": {
   "note": "Reaches the realignment body of _align_junction_to_entry_port only via a TB-reversed two-line bundle fanning into a junction (the #704 boundary fix is in, so this body is now provably reachable). The junction_entry_reversed_fold fixture now ships that topology; with the bundle order carried concentrically through the reversal corners the junction offsets already match their entry ports, so the realignment body short-circuits before its offset-writing arms and they stay un-exercised corpus-wide. Defensive. Its lines-differ arm (->1147) is additionally defensive: a fan-out junction carries exactly its single exit port's fanned lines, so exit_lines == j_lines always.",
   "status": "defensive"
@@ -1252,7 +1220,7 @@
   "status": "defensive"
  },
  "offsets.py::if lid not in seen:::#1": {
-  "note": "The iterator at L554 is `sorted(set(sec_entry_lines), ...)`. The outer `set()` deduplicates the list before iteration, so each `lid` appears exactly once and `seen` never contains it when processed. The false arm (lid already in seen) is logically unreachable \u2014 the dedup happens at set construction, making the `seen` guard dead code. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
+  "note": "The iterator at L554 is `sorted(set(sec_entry_lines), ...)`. The outer `set()` deduplicates the list before iteration, so each `lid` appears exactly once and `seen` never contains it when processed. The false arm (lid already in seen) is logically unreachable — the dedup happens at set construction, making the `seen` guard dead code. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
   "status": "defensive"
  },
  "offsets.py::if local_offset is None or not (::#1": {
@@ -1317,10 +1285,6 @@
  },
  "offsets.py::if single_exit and feeding_exit is not None:::#1": {
   "note": "Reaches the realignment body of _align_junction_to_entry_port only via a TB-reversed two-line bundle fanning into a junction (the #704 boundary fix is in, so this body is now provably reachable). The junction_entry_reversed_fold fixture now ships that topology; with the bundle order carried concentrically through the reversal corners the junction offsets already match their entry ports, so the realignment body short-circuits before its offset-writing arms and they stay un-exercised corpus-wide. Defensive. Its False arm (->1147) is additionally defensive: a >=2-line junction reaching this body is always a single-exit-port-fed fan-out junction (merge junctions carry one line and are skipped by len(j_lines)<2).",
-  "status": "defensive"
- },
- "offsets.py::if source_col is None:::#1": {
-  "note": "_convergence_feeders receives resolved sources feeding a registered LEFT entry port. Each source is a sectioned port or a junction resolvable through one, so the missing-column arm protects an incomplete graph.",
   "status": "defensive"
  },
  "offsets.py::if src_port and not src_port.is_entry:::#2": {
@@ -1515,12 +1479,8 @@
   "note": "Drop-in viability test in _right_entry_drop_in_is_clear (#889). The cross-row RIGHT-entry rule fires only when the earlier bypass / plough rules ceded the edge, i.e. no section sits between source and port, so the outward-side descent runs clear; the not-clear arm covers only an exotic descent blocked by a wide same-column sibling no corpus fixture builds. Defensive.",
   "status": "defensive"
  },
- "inter_section_handlers.py::if not _inter_row_band_fits(gap_top, gap_bottom):::#1": {
-  "note": "Band-fit test in _right_entry_gap_above_is_clear (#889), reached only when the cross-row RIGHT-entry drop-in is not clear (the exotic blocked-descent case above). The corpus always takes the drop-in, so neither arm of the gap-above fallback is exercised. Defensive.",
-  "status": "defensive"
- },
- "offsets.py::if len(hubs) != 1:::#1": {
-  "note": "Guard in _is_flat_handover_hub admitting a linear entry frame whose cohort terminates at a hub. Refuses unless exactly one carrier originates the local bundle; a section with two independent origination points hands its trunk over in two places, not one. The one corpus section that reaches the relaxed path (continuation_lane_step's Results hub) has a single hub, so the multi-hub refusal stays un-exercised. Defensive.",
+ "inter_section_handlers.py::if tgt_row is None:::#1": {
+  "note": "In _left_exit_wrap_over_top_y: narrows the Optional target row for the band lookups below. A same-row wrap reaches it with both ends in placed sections, whose grid rows always resolve, so the unresolved arm cannot be taken.",
   "status": "defensive"
  },
  "offsets.py::if abs(consumer_perp - hub_perp) > COORD_TOLERANCE_FINE:::#1": {
@@ -1642,5 +1602,241 @@
  "convergences.py::if movable and abs(channel.x - reference) > COORD_TOLERANCE:::#1": {
   "note": "The seat arm fuses a feeder's final port approach onto the merge trunk's target flank before the landing states the feeder's opening column. tests/fixtures/hash_seed_determinism/seed_15.mmd reaches it (__junction_27->__merge_11 climbs into s8__entry_right_17 16px beside the trunk's flank at x=780), but the sweep's corpus roots do not include tests/fixtures/hash_seed_determinism, and seed_15 aborts on unrelated guards, so no swept fixture evaluates it.",
   "status": "needs-review"
+ },
+ "tb_handlers.py::if (late[0] - early[1]) * math.copysign(1.0, tp - sp) < room_for_two_turns:::#1": {
+  "note": "In _clear_lane_change: declines the step-aside route when the flow distance from the port to the target cannot hold a step off the port's lane, a full-radius run beside the passed stations and a step onto the target's lane. Only reached once the plain lane change and the hold-the-port-lane route both cross a passed station's pill or label, which needs passed stations, and layout already spaces a vertical section's layers for a diagonal; no map in about 7800 fuzzed vertical-bypass topologies takes it. Taking it keeps the plain lane change, which crosses that station.",
+  "status": "needs-review"
+ },
+ "tb_handlers.py::for lane in sorted(candidates, key=preference):::#1": {
+  "note": "In _clear_lane_change: the loop exhausts when no side lane inside the section box clears every passed station's pill and label, so the entry keeps the plain lane change and crosses one of them. Reached when stations on both sides leave no gap for a full stroke (for instance a passed station in the target's column with a non-consumer in the port's column on the same row, too close to the port for the step to clear its label); no map in about 7800 fuzzed vertical-bypass topologies takes it.",
+  "status": "needs-review"
+ },
+ "tb_handlers.py::if not inside[0] <= lane <= inside[1]:::#1": {
+  "note": "In _clear_lane_change: skips a side lane outside the section box, which a step past a label hung off the box's leftmost column would otherwise take. Fuzzed vertical-bypass maps reach it, but each one found also routes an aligned bundle straight through passed stations' labels on another edge, so none is a clean fixture yet.",
+  "status": "needs-review"
+ },
+ "tb_handlers.py::if min(abs(lane - tgt_lane), abs(lane - src_lane)) < COORD_TOLERANCE:::#1": {
+  "note": "In _clear_lane_change: coincidence guard. A side lane is a footprint edge offset by a lane pitch, or the lane a step must reach to clear a footprint corner; landing within a pixel of the port's or the target's lane would make one step zero-width and the route a copy of a shape already rejected. No valid topology is expected to place a footprint edge exactly there.",
+  "status": "defensive"
+ },
+ "inter_section_handlers.py::elif column.offsets is None:::#1": {
+  "note": "An up-and-over feeder into a port with a column record: a dealt column lands the bundle on its channels, a declined one keeps the riser laterals. Both arms are reached by `tests/fixtures/regressions/perp_entry_column_feeder_conflict.mmd` (declined) and `tests/fixtures/regressions/perp_entry_column_straight_drop.mmd`; a generated-map sweep reaches it (10 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "status": "needs-review"
+ },
+ "inter_section_handlers.py::if all(abs(dy) <= ctx.curve_radius for dy in vertical_steps):::#1": {
+  "note": "A flat arrival (no vertical leg longer than the curve radius) classifies as a U-turn hand-over. Reached by `tests/fixtures/regressions/perp_entry_column_feeder_conflict.mmd` and the inline maps `tests/test_layout_invariants.py` (_TRUNK_FORK_ROW_PEER) and `tests/test_samerow_bypass_entry_lanes.py` (LEVEL_RETURN_MMD); a generated-map sweep reaches it (329 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "status": "needs-review"
+ },
+ "inter_section_handlers.py::if column is None:::#1": {
+  "note": "An up-and-over feeder into a port with a column record skips the sole-feeder test. Reached by `tests/fixtures/regressions/perp_entry_column_feeder_conflict.mmd` and `tests/fixtures/regressions/perp_entry_column_straight_drop.mmd`; a generated-map sweep reaches it (10 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "status": "needs-review"
+ },
+ "inter_section_handlers.py::if crossing is None:::#1": {
+  "note": "The edge being landed is itself a bundled feeder of the port for its own line, so _perp_entry_landing_x always finds a crossing; None is reserved for a port no bundled feeder reaches. Not reached by the corpus, the test fixtures, or 8000 generated maps.",
+  "status": "defensive"
+ },
+ "inter_section_handlers.py::if len(set(laterals.values())) != len(laterals):::#1": {
+  "note": "Lines sharing one up-and-over bundle hold distinct offsets at the exit port and land on distinct crossing channels, so neither the landing nor the riser laterals tie. Not reached by the corpus, the test fixtures, or 8000 generated maps.",
+  "status": "defensive"
+ },
+ "inter_section_handlers.py::if sorted(line_ids, key=landing.__getitem__) != sorted(::#1": {
+  "note": "A bundle whose crossing order disagrees with its riser order keeps its riser laterals instead of crossing its own lines. Reached by `tests/fixtures/regressions/perp_entry_column_straight_drop.mmd`; a generated-map sweep reaches it (7 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "status": "needs-review"
+ },
+ "inter_section_handlers.py::or column.offsets is None::#1": {
+  "note": "Negating the members' laterals for a dealt column is skipped where the port's column is declined. Reached by `tests/fixtures/regressions/perp_entry_column_feeder_conflict.mmd`, `tests/fixtures/regressions/perp_entry_column_merge_feeder.mmd` and `tests/fixtures/regressions/cross_column_perp_entry_overflow.mmd`; a generated-map sweep reaches it (100 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "status": "needs-review"
+ },
+ "inter_section_handlers.py::or segment_direction(points[-2], points[-1]) in (inward, None)::#1": {
+  "note": "A route whose last leg already runs inward into the port keeps its member laterals. A generated-map sweep reaches it (8 of 8000 maps), but no committed map: needs a fixture with a dealt column fed by a route whose last leg is not the inward drop.",
+  "status": "needs-review"
+ },
+ "normalize.py::if not moves:::#1": {
+  "note": "The group is only re-banded once its bands span more than (lines - 1) offset steps, and the targets pack the lines into exactly that span from the lowest band, so the highest band always differs from its target by more than the tolerance. Not reached by the corpus, the test fixtures, or 8000 generated maps.",
+  "status": "defensive"
+ },
+ "normalize.py::if not moves:::#2": {
+  "note": "Every candidate re-seat of the descent group is obstructed, so the group keeps its handler channels. Reached by `tests/fixtures/hash_seed_determinism/seed_41.mmd`, `seed_77.mmd` and `tests/fixtures/regressions/perp_entry_column_feeder_conflict.mmd`; a generated-map sweep reaches it (363 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "status": "needs-review"
+ },
+ "offsets.py::if abs(current - target) <= _OFFSET_EQ_TOLERANCE:::#1": {
+  "note": "A fan-out peel-order slot the line already holds needs no swap. Reached by `tests/fixtures/hash_seed_determinism/seed_77.mmd`; a generated-map sweep reaches it (58 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "status": "needs-review"
+ },
+ "offsets.py::if flow_entry and feeder.direction != section.direction:::#1": {
+  "note": "A flow-side entry whose single feeder section flows the other way declines the linear entry frame. A generated-map sweep reaches it (5 of 8000 maps), but no committed map: needs a fixture with an RL feeder into an LR section's flow-side entry (or the mirror).",
+  "status": "needs-review"
+ },
+ "offsets.py::if port is None:::#1": {
+  "note": "Every caller (the U-turn classifiers in offsets.py and row_align.py) passes the station of an entry port it took from a port edge, so graph.ports always resolves it. Not reached by the corpus, the test fixtures, or 8000 generated maps.",
+  "status": "defensive"
+ },
+ "offsets.py::landing is None::#1": {
+  "note": "compute_station_offsets gives every line at every port an offset before linear entry frames are materialised, so the straight branch's landing port always holds one for the line. Not reached by the corpus, the test fixtures, or 8000 generated maps.",
+  "status": "defensive"
+ },
+ "perp_columns.py::if _side_order(laterals, direction) != _side_order(landing, drop):::#1": {
+  "note": "A multi-line feeder departing in the column's side order passes; one departing in the opposite order declines the column. The agreeing arm is reached by `tests/fixtures/regressions/perp_entry_column_two_feeders.mmd`; a generated-map sweep reaches it (36 of 8000 maps) for agreement and A generated-map sweep reaches it (19 of 8000 maps) for disagreement. The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "status": "needs-review"
+ },
+ "perp_columns.py::if any(_feeder_keeps_its_own_crossing(graph, port_id, s) for s in sources):::#1": {
+  "note": "A feeder drawn from the port's own crossing declines the column. Reached by `tests/fixtures/regressions/perp_entry_column_merge_feeder.mmd`, `..._opposite_side_fan.mmd`, `..._straight_drop.mmd` and `cross_column_perp_entry_overflow.mmd`; a generated-map sweep reaches it (34 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "status": "needs-review"
+ },
+ "perp_columns.py::if any(len(coords) != 1 for coords in lanes.values()):::#1": {
+  "note": "A line leaving the port for two stations (a fan inside the section) has no single trunk lane, so no column is dealt. Reached by the inline map `tests/test_fan_reach_order_join.py` (PEELOFF_FAN_MMD); a generated-map sweep reaches it (15 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "status": "needs-review"
+ },
+ "perp_columns.py::if column.offsets is not None and not offsets_hold(::#1": {
+  "note": "A dealt column the settled offsets no longer hold is declined at routing. A generated-map sweep reaches it (12 of 8000 maps), but no committed map: needs a fixture where a later offset pass re-slots a dealt port.",
+  "status": "needs-review"
+ },
+ "perp_columns.py::if departure is None:::#1": {
+  "note": "A multi-line feeder whose departure has no stated lateral declines the column; one with a lateral is compared. Reached by `tests/fixtures/regressions/perp_entry_column_feeder_conflict.mmd` (no lateral) and `tests/fixtures/regressions/perp_entry_column_two_feeders.mmd`; a generated-map sweep reaches it (46 of 8000 maps) / A generated-map sweep reaches it (51 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "status": "needs-review"
+ },
+ "perp_columns.py::if exit_port is None:::#1": {
+  "note": "A feeder that is itself an exit port reads its side directly; a junction feeder resolves its feeding port. Reached by `tests/fixtures/regressions/perp_entry_column_two_feeders.mmd` and `tests/fixtures/regressions/perp_entry_column_feeder_conflict.mmd`; a generated-map sweep reaches it (51 of 8000 maps) / A generated-map sweep reaches it (46 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "status": "needs-review"
+ },
+ "perp_columns.py::if exit_port.side in (PortSide.LEFT, PortSide.RIGHT):::#1": {
+  "note": "A LEFT/RIGHT departure reads lane laterals; a TOP/BOTTOM one reads riser laterals. The LEFT/RIGHT arm is reached by `tests/fixtures/regressions/perp_entry_column_two_feeders.mmd`; a generated-map sweep reaches it (49 of 8000 maps) / A generated-map sweep reaches it (3 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "status": "needs-review"
+ },
+ "perp_columns.py::if exit_port.side is PortSide.BOTTOM:::#1": {
+  "note": "A BOTTOM riser reverses its offsets, a TOP riser keeps them. A generated-map sweep reaches it (2 of 8000 maps) for BOTTOM and A generated-map sweep reaches it (1 of 8000 maps) for TOP, but no committed map: needs a fixture where a TOP/BOTTOM exit port feeds two lines into a multi-feeder perpendicular entry.",
+  "status": "needs-review"
+ },
+ "perp_columns.py::if len(feeding) != 1:::#1": {
+  "note": "A junction feeder fed by one exit port. The decline arm is reached by `tests/fixtures/regressions/perp_entry_column_feeder_conflict.mmd` (A generated-map sweep reaches it (46 of 8000 maps)); the single-port arm is not reached by the corpus, the test fixtures or any of 8000 generated maps: every junction that delivers two lines to a multi-feeder perpendicular entry and survives the earlier declines is fed by more than one port.",
+  "status": "candidate-dead"
+ },
+ "perp_columns.py::if len(line_ids) < 2:::#1": {
+  "note": "A single-line feeder cannot disagree with the column's order and is skipped; a multi-line one is compared. The multi-line arm is reached by `tests/fixtures/regressions/perp_entry_column_two_feeders.mmd` and `tests/fixtures/regressions/perp_entry_column_feeder_conflict.mmd`; a generated-map sweep reaches it (92 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "status": "needs-review"
+ },
+ "perp_columns.py::if len({round(v, _LATERAL_TIE_PLACES) for v in laterals.values()}) != len(::#1": {
+  "note": "Two lines tied at their departure cannot vouch for an order and decline the column. The untied arm is reached by `tests/fixtures/regressions/perp_entry_column_two_feeders.mmd` (A generated-map sweep reaches it (51 of 8000 maps)); the tie arm a generated-map sweep reaches it (2 of 8000 maps) but no committed map.",
+  "status": "needs-review"
+ },
+ "perp_columns.py::if not _feeders_deliver_column(graph, port_id, column, offsets):::#1": {
+  "note": "A feeder delivering its lines against the column's order declines it. Reached by `tests/fixtures/regressions/perp_entry_column_feeder_conflict.mmd`; a generated-map sweep reaches it (66 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "status": "needs-review"
+ },
+ "perp_columns.py::if not source.is_port:::#1": {
+  "note": "A TOP/BOTTOM departure from a junction (not a port) has no riser lateral. The port arm: a generated-map sweep reaches it (3 of 8000 maps). The junction arm needs a junction fed by exactly one exit port, which `if len(feeding) != 1:` shows no swept or generated map reaches.",
+  "status": "candidate-dead"
+ },
+ "perp_columns.py::if perp_corridor_feeder(graph, port_id) is not None:::#1": {
+  "note": "A port continuing a corridor run at its own Y keeps the corridor's descent order rather than a dealt column. A generated-map sweep reaches it (9 of 8000 maps), but no committed map reaches it after the earlier scope checks.",
+  "status": "needs-review"
+ },
+ "perp_columns.py::if set(lanes) != set(graph.station_lines(port_id)):::#1": {
+  "note": "An entry port carries exactly the lines of its out-edges: each line enters through it on an edge in and leaves on an edge out, so the lines leaving equal the station's lines. Not reached by the corpus, the test fixtures, or 8000 generated maps.",
+  "status": "defensive"
+ },
+ "perp_columns.py::if source.is_port:::#1": {
+  "note": "A LEFT/RIGHT departure read off a port uses the port's lane coordinate; read off a junction it uses the junction's own lane. The port arm is reached by `tests/fixtures/regressions/perp_entry_column_two_feeders.mmd` (A generated-map sweep reaches it (49 of 8000 maps)); the junction arm needs a junction fed by exactly one exit port, which `if len(feeding) != 1:` shows no swept or generated map reaches.",
+  "status": "candidate-dead"
+ },
+ "perp_columns.py::if source_id in merge_junction_ids(graph):::#1": {
+  "note": "A merge feeding the port keeps the port's own crossing. Reached by `tests/fixtures/regressions/perp_entry_column_merge_feeder.mmd` and `tests/fixtures/regressions/cross_column_perp_entry_overflow.mmd`; a generated-map sweep reaches it (15 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "status": "needs-review"
+ },
+ "perp_columns.py::if target.is_port:::#1": {
+  "note": "A perpendicular entry whose drop goes straight to another port rather than into a station. Not reached by the corpus, the test fixtures, or any of 8000 generated maps: the connector rewrite lands every entry port's out-edges on stations of its section.",
+  "status": "candidate-dead"
+ },
+ "tb_handlers.py::_clears(route, footprints)::#1": {
+  "note": "Operand of the late single-diagonal attempt in _clear_lane_change. It is evaluated only when that diagonal crosses no departing line twice, and of the 210 generated maps that reach the attempt none does (the plain lane change already failed for the same departures): not reached by the corpus, the test fixtures, or 8000 generated maps.",
+  "status": "candidate-dead"
+ },
+ "tb_handlers.py::elif not (plain_holds and _clears(points, footprints)):::#1": {
+  "note": "A flow-side lane change that crosses a passed station or a departing line twice looks for a cleared route. Reached by the inline maps `tests/test_flow_entry_bypass_crossings.py` (_LATER_DEPARTURES) and `tests/test_vertical_flow_entry_runway.py` (_BYPASS_MAPS bypass_into_shared_column_bt); a generated-map sweep reaches it (229 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "status": "needs-review"
+ },
+ "tb_handlers.py::elif not plain_holds:::#1": {
+  "note": "With no cleared route, a plain change that only strikes a station is drawn; one that crosses a departing line twice is declined. Reached by `tests/test_flow_entry_bypass_crossings.py` (_LATER_DEPARTURES); a generated-map sweep reaches it (150 of 8000 maps) / A generated-map sweep reaches it (3 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "status": "needs-review"
+ },
+ "tb_handlers.py::elif not plain_holds:::#2": {
+  "note": "A multi-line flow-side bundle whose change would cross a departing line twice is declined to the perpendicular turn-in. A generated-map sweep reaches it (40 of 8000 maps), but no committed map: needs a fixture with a two-line BOTTOM entry bypass and a later same-side departure.",
+  "status": "needs-review"
+ },
+ "tb_handlers.py::for corner in (y0, y1):::#1": {
+  "note": "Candidate side lanes are derived per footprint corner. Reached by `tests/test_flow_entry_bypass_crossings.py` (_LATER_DEPARTURES) and `tests/test_vertical_flow_entry_runway.py` (_BYPASS_MAPS bypass_into_shared_column_bt); a generated-map sweep reaches it (206 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "status": "needs-review"
+ },
+ "tb_handlers.py::for edge in (x0 - gap, x1 + gap):::#1": {
+  "note": "Candidate side lanes are derived on both sides of each footprint. Reached by `tests/test_flow_entry_bypass_crossings.py` (_LATER_DEPARTURES) and `tests/test_vertical_flow_entry_runway.py` (_BYPASS_MAPS bypass_into_shared_column_bt); a generated-map sweep reaches it (206 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "status": "needs-review"
+ },
+ "tb_handlers.py::for x0, y0, x1, y1 in footprints:::#1": {
+  "note": "Candidate side lanes are collected over the passed stations' footprints. Reached by `tests/test_flow_entry_bypass_crossings.py` (_LATER_DEPARTURES) and `tests/test_vertical_flow_entry_runway.py` (_BYPASS_MAPS bypass_into_shared_column_bt); a generated-map sweep reaches it (206 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "status": "needs-review"
+ },
+ "tb_handlers.py::if 0.0 < t < 1.0:::#1": {
+  "note": "A footprint corner within the step off the port's lane adds the lane that clears it. Reached by `tests/test_flow_entry_bypass_crossings.py` (_LATER_DEPARTURES) and `tests/test_vertical_flow_entry_runway.py` (_BYPASS_MAPS bypass_into_shared_column_bt); a generated-map sweep reaches it (206 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "status": "needs-review"
+ },
+ "tb_handlers.py::if _clears(route, footprints):::#1": {
+  "note": "A stepped-aside candidate lane is kept only if the whole route clears the footprints. Reached by `tests/test_vertical_flow_entry_runway.py` (_BYPASS_MAPS bypass_into_shared_column_bt); a generated-map sweep reaches it (62 of 8000 maps) / A generated-map sweep reaches it (54 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "status": "needs-review"
+ },
+ "tb_handlers.py::if _crossed_twice(departures, abs(early[0] - sp), src_lane, lane):::#1": {
+  "note": "A candidate side lane whose step-off crosses a departing line twice is skipped. Reached by `tests/test_flow_entry_bypass_crossings.py` (_LATER_DEPARTURES) and `tests/test_vertical_flow_entry_runway.py` (_BYPASS_MAPS bypass_into_shared_column_bt); a generated-map sweep reaches it (131 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "status": "needs-review"
+ },
+ "tb_handlers.py::if _tangles_with_departure(departures, step_back, lane, tgt_lane):::#1": {
+  "note": "A candidate whose step back overlaps a departure under way is skipped. Reached by `tests/test_flow_entry_bypass_crossings.py` (_LATER_DEPARTURES) and `tests/test_vertical_flow_entry_runway.py` (_BYPASS_MAPS bypass_into_shared_column_bt); a generated-map sweep reaches it (166 of 8000 maps) / A generated-map sweep reaches it (64 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "status": "needs-review"
+ },
+ "tb_handlers.py::if abs(via_lane - src_lane) < COORD_TOLERANCE:::#1": {
+  "note": "The chain search stops at a station on the bypass's own entry lane, or recurses upstream. Reached by `tests/test_flow_entry_bypass_crossings.py` (_SAME_LINE_CHAIN, _SINGLE_BYPASS, _TWO_COLUMN_CHAIN) and `tests/test_vertical_flow_entry_runway.py` (_BYPASS_MAPS bypass_into_shared_column_bt); a generated-map sweep reaches it (36 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "status": "needs-review"
+ },
+ "tb_handlers.py::if arrive.section_id != section.id:::#1": {
+  "note": "A station's out-edge on a line leaving the section ends on the section's own exit port, whose section_id is the section, so every departure target belongs to it. Not reached by the corpus, the test fixtures, or 8000 generated maps.",
+  "status": "defensive"
+ },
+ "tb_handlers.py::if cleared is not None:::#1": {
+  "note": "A cleared lane change replaces the plain one. Reached by `tests/test_flow_entry_bypass_crossings.py` (_LATER_DEPARTURES) and `tests/test_vertical_flow_entry_runway.py` (_BYPASS_MAPS bypass_into_shared_column_bt); a generated-map sweep reaches it (84 of 8000 maps) / A generated-map sweep reaches it (153 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "status": "needs-review"
+ },
+ "tb_handlers.py::if lateral < COORD_TOLERANCE:::#1": {
+  "note": "A flow-side entry already on its target's lane needs no lane change. A generated-map sweep reaches it (5 of 8000 maps), but no committed map: needs a fixture whose flow-side entry lands on the target station's own lane.",
+  "status": "needs-review"
+ },
+ "tb_handlers.py::if not 0.0 < (via.y - sp) / (current.y - sp) < 1.0:::#1": {
+  "note": "A chain link runs with the flow, so its source stands strictly between the port and the station it feeds; the skip arm needs a link against the flow. The pass arm is reached by `tests/test_flow_entry_bypass_crossings.py` (_SAME_LINE_CHAIN, _SINGLE_BYPASS, _TWO_COLUMN_CHAIN); the skip arm by no swept, test or generated map (0 of 8000).",
+  "status": "defensive"
+ },
+ "tb_handlers.py::if not _clears([(src_lane, sp), (src_lane, first.y)], passed):::#1": {
+  "note": "A chain route whose climb up the entry lane strikes a passed station is dropped. The pass arm is reached by `tests/test_flow_entry_bypass_crossings.py` (_SAME_LINE_CHAIN, _SINGLE_BYPASS, _TWO_COLUMN_CHAIN); a generated-map sweep reaches it (3 of 8000 maps) for the drop arm. The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "status": "needs-review"
+ },
+ "tb_handlers.py::if not _crossed_twice(departures, abs(late[0] - sp), src_lane, tgt_lane) and (::#1": {
+  "note": "The late single-diagonal attempt in _clear_lane_change. It is reached by `tests/test_flow_entry_bypass_crossings.py` (_LATER_DEPARTURES), `tests/test_vertical_flow_entry_runway.py` (_BYPASS_MAPS bypass_into_shared_column_bt) and 210 generated maps, but in every one that diagonal crosses a departing line twice, so the clears-the-footprints operand and its return are never evaluated: 0 of 8000.",
+  "status": "candidate-dead"
+ },
+ "tb_handlers.py::if not st or st.is_port:::#1": {
+  "note": "The loop skips the section's ports by id one statement earlier, and every id in section.station_ids resolves to a station, so the skip arm never fires. Not reached by the corpus, the test fixtures, or 8000 generated maps.",
+  "status": "defensive"
+ },
+ "tb_handlers.py::if route is not None:::#1": {
+  "note": "A flow-side entry the lane change declines falls back to the perpendicular L-shape. Reached by `tests/test_flow_entry_bypass_crossings.py` (_LATER_DEPARTURES); a generated-map sweep reaches it (517 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "status": "needs-review"
+ },
+ "tb_handlers.py::if slack < spread:::#1": {
+  "note": "A flow-side run too short for the parallel diagonals' spread leaves the bundle to the perpendicular turn-in. A generated-map sweep reaches it (355 of 8000 maps), but no committed map: needs a fixture with a multi-line BOTTOM entry into a BT section whose first station is one row in.",
+  "status": "needs-review"
+ },
+ "tb_handlers.py::if upstream is not None:::#1": {
+  "note": "The chain search recurses upstream until it reaches the entry lane. Reached by `tests/test_flow_entry_bypass_crossings.py` (_TWO_COLUMN_CHAIN) and `tests/test_vertical_flow_entry_runway.py` (_BYPASS_MAPS bypass_into_shared_column_bt); a generated-map sweep reaches it (21 of 8000 maps) / A generated-map sweep reaches it (7 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "status": "needs-review"
+ },
+ "tb_handlers.py::if via.is_port or via.section_id != section.id:::#1": {
+  "note": "A line enters a section once, through the bypass's own source port, which the previous gate already filters, and a chain link into an internal station starts inside the section; so the skip arm never fires. The pass arm is reached by `tests/test_flow_entry_bypass_crossings.py` (_SAME_LINE_CHAIN, _SINGLE_BYPASS, _TWO_COLUMN_CHAIN); the skip arm by no swept, test or generated map (0 of 8000).",
+  "status": "defensive"
  }
 }

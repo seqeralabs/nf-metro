@@ -443,35 +443,19 @@ def line_forks_within_section(
     return False
 
 
-def feeder_dys(graph: MetroGraph, port_id: str) -> list[float]:
-    """Signed Y distance of each feeder from *port_id*.
-
-    The raw material both the corridor filter (all feeders off the port's Y) and
-    the flat-seam filter (all feeders level with it) select on.
-    """
-    port_y = graph.stations[port_id].y
-    return [
-        graph.stations[e.source].y - port_y
-        for e in graph.edges_to(port_id)
-        if e.source in graph.stations
-    ]
-
-
-def seam_is_flat(dys: Sequence[float], tol: float) -> bool:
-    """Whether every feeder meets the port level with it, within *tol*.
-
-    A flat seam carries a feeder-to-port lane mismatch as a horizontal slope; a
-    corridor feeder (some ``dy`` past *tol*) absorbs it in a vertical leg.
-    """
-    return bool(dys) and all(abs(dy) <= tol for dy in dys)
-
-
 def _iter_solo_lr_entries(
-    graph: MetroGraph,
-) -> Iterator[tuple[str, str, str, list[float]]]:
-    """Yield ``(section_id, entry_port_id, line_id, feeder_dys)`` for each
+    graph: MetroGraph, tol: float
+) -> Iterator[tuple[str, str, str, list[bool]]]:
+    """Yield ``(section_id, entry_port_id, line_id, corridor)`` for each
     LEFT/RIGHT entry port of an LR/RL section carrying a single present line.
+
+    ``corridor`` flags, per feeder, whether it reaches the port on a vertical
+    leg (:func:`~nf_metro.layout.routing.offsets._feeder_is_corridor`): from a
+    base Y more than *tol* away, or level with the port but turning in off a
+    same-row bypass detour.
     """
+    from nf_metro.layout.routing.offsets import _feeder_is_corridor
+
     present: dict[str, set[str]] = defaultdict(set)
     for sid, st in graph.stations.items():
         if not st.is_port and st.section_id is not None:
@@ -487,9 +471,14 @@ def _iter_solo_lr_entries(
             port = graph.ports.get(pid)
             if port is None or port.side not in (PortSide.LEFT, PortSide.RIGHT):
                 continue
-            dys = feeder_dys(graph, pid)
-            if dys:
-                yield sec_id, pid, line_id, dys
+            port_station = graph.stations[pid]
+            corridor = [
+                _feeder_is_corridor(graph, source, port_station, tol)
+                for edge in graph.edges_to(pid)
+                if (source := graph.stations.get(edge.source)) is not None
+            ]
+            if corridor:
+                yield sec_id, pid, line_id, corridor
 
 
 def iter_corridor_fed_solo_entries(
@@ -499,14 +488,16 @@ def iter_corridor_fed_solo_entries(
 
     A LEFT/RIGHT entry port of an LR/RL section (lanes spread along Y) that
     carries a single present line, where every feeder reaches the port on a
-    base Y more than ``tol`` away -- a vertical corridor.  Such a section has no
-    bundle to keep ordered, so its lone consumer must ride offset 0 rather than
-    the lane the line held in the upstream multi-line section: the corridor's
-    vertical leg absorbs the lane step with no sloped segment.  A flat (same-Y)
-    seam is excluded here; see :func:`iter_flat_seam_solo_entries` for that case.
+    vertical leg -- from a base Y more than ``tol`` away, or on a same-row
+    bypass riser.  Such a section has no bundle to keep ordered, so its lone
+    consumer must ride offset 0 rather than the lane the line held in the
+    upstream multi-line section: the vertical leg absorbs the lane step with no
+    sloped segment.  A flat seam is excluded here; see
+    :func:`iter_flat_seam_solo_entries` for that case.  An entry fed both ways
+    is in neither set: its level feeder pins the lane the port can take.
     """
-    for sec_id, pid, line_id, feeder_dys in _iter_solo_lr_entries(graph):
-        if all(abs(dy) > tol for dy in feeder_dys):
+    for sec_id, pid, line_id, corridor in _iter_solo_lr_entries(graph, tol):
+        if all(corridor):
             yield sec_id, pid, line_id
 
 
@@ -515,15 +506,15 @@ def iter_flat_seam_solo_entries(
 ) -> Iterator[tuple[str, str, str]]:
     """Yield ``(section_id, entry_port_id, line_id)`` for flat-seam solos.
 
-    The same-Y complement of :func:`iter_corridor_fed_solo_entries`: a solo
-    LEFT/RIGHT entry whose every feeder arrives level with the port (within
-    ``tol``), so the junction-to-port run is horizontal.  Such a run carries the
-    lane step as a slope rather than absorbing it in a vertical leg; the caller
-    re-bases it to the trunk only when the feeder already rides the trunk, so
-    the seam lands flat instead of tilting.
+    The complement of :func:`iter_corridor_fed_solo_entries`: a solo LEFT/RIGHT
+    entry whose every feeder runs level into the port (within ``tol``, and not
+    on a same-row bypass), so the junction-to-port run is horizontal.
+    Such a run carries the lane step as a slope rather than absorbing it in a
+    vertical leg; the caller re-bases it to the trunk only when the feeder
+    already rides the trunk, so the seam lands flat instead of tilting.
     """
-    for sec_id, pid, line_id, dys in _iter_solo_lr_entries(graph):
-        if seam_is_flat(dys, tol):
+    for sec_id, pid, line_id, corridor in _iter_solo_lr_entries(graph, tol):
+        if not any(corridor):
             yield sec_id, pid, line_id
 
 

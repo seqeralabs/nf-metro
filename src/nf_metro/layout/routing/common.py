@@ -104,6 +104,34 @@ class SourceTurnout:
             raise ValueError("a source turnout has a positive finite radius")
 
 
+EXIT_SIDE_DIRECTION: Mapping[PortSide, Direction] = {
+    PortSide.RIGHT: Direction.R,
+    PortSide.LEFT: Direction.L,
+    PortSide.TOP: Direction.U,
+    PortSide.BOTTOM: Direction.D,
+}
+"""The direction a line travels leaving an exit port on each side."""
+
+
+def offsets_hold(
+    offsets: Mapping[tuple[str, str], float],
+    expected: Iterable[tuple[str, str, float]],
+    tolerance: float,
+    *,
+    missing: float | None = None,
+) -> bool:
+    """Whether *offsets* holds every ``(station, line, offset)`` in *expected*.
+
+    A slot absent from *offsets* reads as *missing*, or fails when that is
+    ``None``.
+    """
+    for station_id, line_id, offset in expected:
+        actual = offsets.get((station_id, line_id), missing)
+        if actual is None or abs(actual - offset) > tolerance:
+            return False
+    return True
+
+
 def right_normal_axis_sign(direction: Direction) -> int:
     """Return the screen-axis sign of the right-hand normal to *direction*."""
     return 1 if direction in (Direction.R, Direction.U) else -1

@@ -637,7 +637,7 @@ def test_disjoint_bypass_descents_read_their_observed_gap_allocation() -> None:
     )
     assert {route.line_id for route in descent_routes} == {"a", "b"}
 
-    built_columns = {"a": 560.0, "b": 556.0}
+    built_columns = {"a": 556.0, "b": 560.0}
     lanes = [
         (
             (route.edge.source, route.edge.target, route.line_id),
@@ -654,8 +654,8 @@ def test_disjoint_bypass_descents_read_their_observed_gap_allocation() -> None:
 
     assert all(band is not None for band in bands.values())
     assert {line_id: band.allocation for line_id, band in bands.items()} == {
-        "a": 556.0,
-        "b": 552.0,
+        "a": 552.0,
+        "b": 556.0,
     }
     assert seat_bundle_in_claimed_bands(
         corridors, lanes, rank=1, consume_allocations=True
@@ -686,8 +686,8 @@ def test_disjoint_bypass_descents_read_their_observed_gap_allocation() -> None:
     }
     assert all(band is not None for band in translated_bands.values())
     assert {line_id: band.allocation for line_id, band in translated_bands.items()} == {
-        "a": 568.0,
-        "b": 564.0,
+        "a": 564.0,
+        "b": 568.0,
     }
 
 

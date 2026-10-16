@@ -252,7 +252,12 @@ const codeTitle = title ?? src;
         mmdState !== false && (
           <details class="metro-part" open={mmdState === "open"}>
             <summary>Mermaid source</summary>
-            <Code code={source} lang="metro" title={codeTitle} />
+            <Code
+              code={source}
+              lang="metro"
+              title={codeTitle}
+              meta={fromNextflow ? undefined : 'playground="metro"'}
+            />
           </details>
         )
       }
