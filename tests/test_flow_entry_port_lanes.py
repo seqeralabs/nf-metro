@@ -9,12 +9,15 @@ instead of stepping sideways onto it.
 
 from __future__ import annotations
 
+import dataclasses
 import warnings
 from pathlib import Path
 
 import pytest
 
 from nf_metro.api import RenderConfig, prepare_graph, render_graph_result
+from nf_metro.layout.routing import offsets as offsets_module
+from nf_metro.parser.model import PortSide
 from nf_metro.themes import resolve_theme
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -53,3 +56,68 @@ def test_arriving_lines_meet_their_internal_lanes(path: Path, port_id: str) -> N
         if abs(x - departures[line_id]) > 0.5
     }
     assert not steps, steps
+
+
+PORT_ID = "z1__entry_bottom_2"
+CONSUMER_ID = "q1x0"
+STEP = offsets_module.OFFSET_STEP
+
+
+@pytest.fixture(scope="module")
+def settled():
+    """The rise-from-junction graph with its final per-station offsets."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        graph = prepare_graph(RISE.read_text(), source_dir=str(RISE.parent))
+        plan = render_graph_result(
+            graph, resolve_theme(None, graph, mode=None), RenderConfig()
+        ).plan
+    return graph, dict(plan.station_offsets)
+
+
+def _port_gap_is_consumer_lane(graph, offsets, lines=None) -> bool:
+    ctx = offsets_module._OffsetCtx(graph=graph, offsets=offsets, offset_step=STEP)
+    lines = graph.station_lines(PORT_ID) if lines is None else lines
+    return offsets_module._port_gap_is_consumer_lane(ctx, PORT_ID, list(lines))
+
+
+def test_port_gap_is_the_consumers_lane_when_lanes_match_and_close_up(settled) -> None:
+    graph, offsets = settled
+    assert _port_gap_is_consumer_lane(graph, offsets)
+
+
+def test_a_line_off_the_consumers_lane_is_not_a_consumer_lane(settled) -> None:
+    graph, offsets = settled
+    tolerance = offsets_module._OFFSET_EQ_TOLERANCE
+    inside = {**offsets, (PORT_ID, "m0"): offsets[(PORT_ID, "m0")] + tolerance / 2}
+    outside = {**offsets, (PORT_ID, "m0"): offsets[(PORT_ID, "m0")] + tolerance * 2}
+    assert _port_gap_is_consumer_lane(graph, inside)
+    assert not _port_gap_is_consumer_lane(graph, outside)
+
+
+def test_a_consumer_with_an_open_lane_of_its_own_is_not_a_consumer_lane(
+    settled,
+) -> None:
+    graph, offsets = settled
+    gapped = {**offsets, (CONSUMER_ID, "m1"): offsets[(CONSUMER_ID, "m1")] + 2 * STEP}
+    assert not _port_gap_is_consumer_lane(graph, gapped)
+
+
+def test_a_port_without_one_consumer_has_no_consumer_lane(settled) -> None:
+    graph, offsets = settled
+    assert not _port_gap_is_consumer_lane(graph, offsets, lines=["m1"])
+
+
+def test_a_horizontal_section_compacts_its_port(settled, monkeypatch) -> None:
+    graph, offsets = settled
+    section_id = graph.ports[PORT_ID].section_id
+    section = dataclasses.replace(graph.sections[section_id], direction="LR")
+    monkeypatch.setitem(graph.sections, section_id, section)
+    assert not _port_gap_is_consumer_lane(graph, offsets)
+
+
+def test_only_the_flow_side_entry_is_a_consumer_lane(settled, monkeypatch) -> None:
+    graph, offsets = settled
+    port = dataclasses.replace(graph.ports[PORT_ID], side=PortSide.LEFT)
+    monkeypatch.setitem(graph.ports, PORT_ID, port)
+    assert not _port_gap_is_consumer_lane(graph, offsets)

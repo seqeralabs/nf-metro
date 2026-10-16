@@ -8,6 +8,7 @@ lane.
 
 from __future__ import annotations
 
+import math
 import warnings
 from pathlib import Path
 
@@ -15,13 +16,24 @@ import pytest
 from orientation_transform import Orientation, all_orientations, transform_source
 
 from nf_metro.api import render_string
+from nf_metro.layout.constants import SAME_COORD_TOLERANCE
 from nf_metro.layout.engine import compute_layout
+from nf_metro.layout.geometry import AxisFrame
+from nf_metro.layout.phases import single_section
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.render.validate import parse_route_polylines
 
 FIXTURES = Path(__file__).parent / "fixtures" / "curve_invariant_repros"
 SOURCE_BEYOND_CHANNEL = FIXTURES / "bt_bottom_entry_source_beyond_channel.mmd"
 MERGE_LR = FIXTURES / "tb_lane_side_merge_lr.mmd"
+
+# Route ends closer than this to a same-line neighbour are one join; those
+# between the two bounds are a broken lane.
+LANE_JOIN_PX = 0.5
+LANE_BREAK_PX = 30.0
+# A same-direction lateral step between these bounds is a jog.
+JOG_MIN_PX = 0.05
+JOG_MAX_PX = 12.0
 
 
 def _laid_out(source: str):
@@ -78,9 +90,7 @@ def test_source_beyond_channel_merge_does_not_cross_the_trunk() -> None:
 
 
 def _lane_breaks_and_jogs(svg: str) -> tuple[int, int]:
-    """Route ends that miss a same-line neighbour by <30px, and sub-12px steps."""
-    import math
-
+    """Route ends that just miss a same-line neighbour, and small lateral steps."""
     polys = [
         (line_id, [p for sub in subpaths for p in sub])
         for line_id, subpaths in parse_route_polylines(svg)
@@ -93,7 +103,7 @@ def _lane_breaks_and_jogs(svg: str) -> tuple[int, int]:
     for pts in ends.values():
         for i, p in enumerate(pts):
             gaps = [math.dist(p, q) for j, q in enumerate(pts) if j != i]
-            if gaps and min(gaps) >= 0.5 and min(gaps) < 30:
+            if gaps and LANE_JOIN_PX <= min(gaps) < LANE_BREAK_PX:
                 breaks += 1
     jogs = 0
     for _line, pts in polys:
@@ -104,7 +114,7 @@ def _lane_breaks_and_jogs(svg: str) -> tuple[int, int]:
             if not (vertical or horizontal) or v1[0] * v3[0] + v1[1] * v3[1] <= 0:
                 continue
             lateral = abs(c[0] - b[0]) if vertical else abs(c[1] - b[1])
-            if 0.05 < lateral < 12:
+            if JOG_MIN_PX < lateral < JOG_MAX_PX:
                 jogs += 1
     return breaks, jogs
 
@@ -155,3 +165,185 @@ def test_vertical_merge_seats_branches_as_the_rotated_lr_reference(
         # Compare the lane-axis component only; the flow-axis spacing follows
         # label metrics, which a rotation does not carry.
         assert (want[0] > 0) == (got[0] > 0), (branch, want, got)
+
+
+def _seated_positions(source: str, *, seat: bool, monkeypatch) -> dict:
+    """Every station's position, with the fan-in seating pass on or off."""
+    if not seat:
+        monkeypatch.setattr(
+            single_section, "_seat_fan_in_branches_on_lane_side", lambda *a, **k: None
+        )
+    graph = _laid_out(source)
+    monkeypatch.undo()
+    return {sid: (st.x, st.y) for sid, st in graph.stations.items()}
+
+
+def _seating_moves_something(source: str, quarter_turns: int, monkeypatch) -> bool:
+    turned = transform_source(source, Orientation(quarter_turns, False))
+    with_pass = _seated_positions(turned, seat=True, monkeypatch=monkeypatch)
+    without = _seated_positions(turned, seat=False, monkeypatch=monkeypatch)
+    return with_pass != without
+
+
+_MERGE = MERGE_LR.read_text()
+# One variant per condition that stops a branch being reflected.
+SEATING_BAILS = {
+    "second_seam_line": _MERGE.replace(
+        "    f1 -->|r| a\n", "    f1 -->|r| a\n    f1 -->|g| b1\n"
+    ),
+    "branches_fork": _MERGE.replace(
+        "        mm -->|r,g,b| z\n",
+        "        mm -->|r,g,b| z\n"
+        "        w[W]\n        b1 -->|g| w\n        c1 -->|b| w\n",
+    ),
+    "branches_share_a_line": _MERGE.replace("b1 -->|g| mm", "b1 -->|g,b| mm"),
+}
+
+
+def test_seating_reflects_a_branch_in_the_baseline_map(monkeypatch) -> None:
+    assert _seating_moves_something(_MERGE, 1, monkeypatch)
+
+
+def test_seating_reflects_a_branch_fed_through_a_chain(monkeypatch) -> None:
+    chained = _MERGE.replace(
+        "        c1 -->|b| mm\n",
+        "        c0[C0]\n        c0 -->|b| c1\n        c1 -->|b| mm\n",
+    )
+    assert _seating_moves_something(chained, 1, monkeypatch)
+
+
+@pytest.mark.parametrize("name", SEATING_BAILS)
+def test_seating_leaves_the_section_alone_when_a_condition_fails(
+    name: str, monkeypatch
+) -> None:
+    assert not _seating_moves_something(SEATING_BAILS[name], 1, monkeypatch)
+
+
+def test_seating_leaves_a_section_whose_lanes_stack_forward(monkeypatch) -> None:
+    assert not _seating_moves_something(_MERGE, 0, monkeypatch)
+
+
+def test_seating_leaves_a_branch_whose_reflected_slot_is_taken(monkeypatch) -> None:
+    turned = transform_source(_MERGE, Orientation(1, False))
+    monkeypatch.setattr(single_section, "_slot_occupied", lambda *a, **k: True)
+    blocked = _seated_positions(turned, seat=True, monkeypatch=monkeypatch)
+    unseated = _seated_positions(turned, seat=False, monkeypatch=monkeypatch)
+    assert blocked == unseated
+
+
+_BRANCH_MAP = """\
+%%metro line: r | R | #e6194b
+%%metro line: g | G | #3cb44b
+
+graph LR
+    subgraph s [S]
+        a[A]
+        b[B]
+        j[J]
+        c[C]
+        k[K]
+        u[U]
+        v[V]
+        m[M]
+        p[P]
+        a -->|r| b
+        b -->|r| j
+        c -->|g| j
+        c -->|g| k
+        u -->|r| m
+        v -->|g| m
+        m -->|r| j
+        j -->|r| p
+        p -->|r| j
+    end
+"""
+
+
+def _parsed(source: str):
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return parse_metro_mermaid(source)
+
+
+def test_fan_in_branch_chain_runs_back_to_the_free_standing_head() -> None:
+    graph = _parsed(_BRANCH_MAP)
+    assert single_section._fan_in_branch_chain(graph, "b", "j") == ["b", "a"]
+    assert single_section._fan_in_branch_chain(graph, "a", "b") == ["a"]
+
+
+def test_fan_in_branch_chain_rejects_a_fork() -> None:
+    graph = _parsed(_BRANCH_MAP)
+    assert single_section._fan_in_branch_chain(graph, "c", "j") is None
+
+
+def test_fan_in_branch_chain_rejects_a_station_fed_from_two_places() -> None:
+    graph = _parsed(_BRANCH_MAP)
+    assert single_section._fan_in_branch_chain(graph, "m", "j") is None
+
+
+def test_fan_in_branch_chain_rejects_a_chain_that_loops_back_through_the_join() -> None:
+    graph = _parsed(_BRANCH_MAP)
+    assert single_section._fan_in_branch_chain(graph, "p", "j") is None
+
+
+_TWO_SECTIONS = """\
+%%metro line: r | R | #e6194b
+%%metro line: g | G | #3cb44b
+
+graph LR
+    subgraph s [S]
+        a[A]
+        b[B]
+        a -->|r| b
+        a -->|g| b
+    end
+    subgraph t [T]
+        q[Q]
+    end
+    b -->|r| q
+"""
+
+
+def test_in_section_sources_lists_each_in_edge_and_skips_ports() -> None:
+    graph = _laid_out(_TWO_SECTIONS)
+    assert single_section._in_section_sources(graph, "b") == ["a", "a"]
+    entering = [e.source for e in graph.edges_to("q")]
+    assert entering and all(graph.stations[src].is_port for src in entering)
+    assert single_section._in_section_sources(graph, "q") == []
+
+
+def _slot_probe(source: str):
+    graph = _parsed(source)
+    frame = AxisFrame.for_direction("TB", 60.0, 40.0)
+    for sid, (flow, lane) in {
+        "a": (100.0, 10.0),
+        "b": (140.0, 10.0),
+        "c": (100.0, 70.0),
+    }.items():
+        frame.primary.set(graph.stations[sid], flow)
+        frame.secondary.set(graph.stations[sid], lane)
+    return graph, frame
+
+
+@pytest.mark.parametrize(
+    ("lane", "chain", "expected"),
+    [
+        (70.0, ["a"], True),
+        (70.0 + SAME_COORD_TOLERANCE - 0.01, ["a"], True),
+        (70.0 + SAME_COORD_TOLERANCE, ["a"], False),
+        (70.0, ["a", "c"], False),
+        (10.0, ["a"], False),
+    ],
+    ids=[
+        "same_slot",
+        "inside_tolerance",
+        "at_tolerance",
+        "own_chain",
+        "other_flow_row",
+    ],
+)
+def test_slot_occupied_matches_an_outside_station_at_the_same_flow_position(
+    lane: float, chain: list[str], expected: bool
+) -> None:
+    graph, frame = _slot_probe(_BRANCH_MAP)
+    assert single_section._slot_occupied(graph, frame, "a", lane, chain) is expected

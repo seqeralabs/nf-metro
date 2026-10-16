@@ -31,6 +31,9 @@ FIXTURES = [
 
 Point = tuple[float, float]
 
+# A route this close to a station's centre runs over its marker.
+STATION_CLEARANCE_PX = 6.0
+
 
 def _distance_to_segment(p: Point, a: Point, b: Point) -> float:
     dx, dy = b[0] - a[0], b[1] - a[1]
@@ -64,7 +67,8 @@ def test_route_does_not_run_over_its_source_stations(path: Path) -> None:
         for station, (a, b) in itertools.product(
             stations, itertools.pairwise([tuple(p) for p in points])
         ):
-            if _distance_to_segment((station.x, station.y), a, b) < 6.0:
+            distance = _distance_to_segment((station.x, station.y), a, b)
+            if distance < STATION_CLEARANCE_PX:
                 overruns.append((route.edge.source, route.line_id, station.id))
                 break
     assert not overruns, overruns

@@ -29,7 +29,9 @@ from pathlib import Path
 import pytest
 
 from nf_metro.api import RenderConfig, prepare_graph, render_graph_result
-from nf_metro.layout.routing import compute_station_offsets
+from nf_metro.layout.constants import COORD_TOLERANCE
+from nf_metro.layout.routing import compute_station_offsets, exit_turns
+from nf_metro.layout.routing.families import RouteFamilyId
 from nf_metro.layout.routing.perp_columns import deal_perp_entry_column
 from nf_metro.themes import resolve_theme
 
@@ -229,3 +231,54 @@ def test_junction_straight_drop_turns_onto_the_dealt_column(tmp_path: Path) -> N
         if route.edge.source == port.id and route.line_id == "l4"
     )
     assert abs(_final_descent(drop)[0] - departure) <= 0.5
+
+
+UNDEALT_JUNCTION_DROPS = {
+    "single_feeder": JUNCTION_STRAIGHT_DROP.replace(
+        "    s3n2 -->|l3| s4n0\n", ""
+    ).replace("entry: bottom | l3, l4", "entry: bottom | l4"),
+    "declined_column": JUNCTION_STRAIGHT_DROP.replace(
+        "    s2n3 -->|l4| s4n0\n", "    s2n3 -->|l4| s4n0\n    s2n3 -->|l2| s4n0\n"
+    ).replace("entry: bottom | l3, l4", "entry: bottom | l2, l3, l4"),
+}
+
+
+def _junction_drop_turn_offsets(source: str, tmp_path: Path, monkeypatch) -> set[float]:
+    """Turn-axis minus port X for each planned drop from a junction over its port."""
+    deltas: set[float] = set()
+    real = exit_turns._source_turn_requirement
+
+    def spy(edge, family_id, source_run_direction, ctx, exit_port_id=None):
+        requirement = real(edge, family_id, source_run_direction, ctx, exit_port_id)
+        src, tgt = ctx.graph.stations[edge.source], ctx.graph.stations[edge.target]
+        if (
+            family_id is RouteFamilyId.BOTTOM_ENTRY_L_SHAPE
+            and edge.source in ctx.graph.junctions
+            and abs(src.x - tgt.x) <= COORD_TOLERANCE
+            and requirement.fixed_axis is not None
+        ):
+            deltas.add(round(requirement.fixed_axis - tgt.x, 3))
+        return requirement
+
+    monkeypatch.setattr(exit_turns, "_source_turn_requirement", spy)
+    path = tmp_path / "junction_drop.mmd"
+    path.write_text(source)
+    _layout(path)
+    return deltas
+
+
+def test_junction_straight_drop_turns_off_the_dealt_column_offset(
+    tmp_path: Path, monkeypatch
+) -> None:
+    deltas = _junction_drop_turn_offsets(JUNCTION_STRAIGHT_DROP, tmp_path, monkeypatch)
+    assert deltas and 0.0 not in deltas
+
+
+@pytest.mark.parametrize("name", UNDEALT_JUNCTION_DROPS)
+def test_junction_straight_drop_without_a_dealt_column_turns_on_the_port(
+    name: str, tmp_path: Path, monkeypatch
+) -> None:
+    deltas = _junction_drop_turn_offsets(
+        UNDEALT_JUNCTION_DROPS[name], tmp_path, monkeypatch
+    )
+    assert deltas == {0.0}
