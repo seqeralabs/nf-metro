@@ -94,11 +94,12 @@ jobs:
       # code, so the diff shows a before/after (or the base abort) for it.
       - name: Render PR-added maps with base code
         run: |
-          git worktree add --detach /tmp/base_src '${{ github.event.pull_request.base.sha }}'
-          python scripts/render_added_on_base.py \
-            /tmp/base_renders /tmp/pr_renders /tmp/base_added_renders \
-            --base-src /tmp/base_src/src \
-            || echo "::warning::could not render the PR-added maps with the base code; they show as new only"
+          {
+            git worktree add --detach /tmp/base_src '${{ github.event.pull_request.base.sha }}' &&
+            python scripts/render_added_on_base.py \
+              /tmp/base_renders /tmp/pr_renders /tmp/base_added_renders \
+              --base-src /tmp/base_src/src
+          } || echo "::warning::could not render the PR-added maps with the base code; they show as new only"
 
       - name: Generate render diff
         id: diff
