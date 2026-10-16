@@ -1148,6 +1148,8 @@ def _reorder_fanout_divergence(ctx: _OffsetCtx) -> None:
         return
     graph = ctx.graph
     for sec_id, section in graph.sections.items():
+        if section.direction not in ("LR", "RL"):
+            continue
         jid = _section_exit_fanout_junction(ctx, section)
         if jid is None:
             continue

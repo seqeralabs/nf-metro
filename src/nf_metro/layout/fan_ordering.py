@@ -179,6 +179,7 @@ def fanout_divergence_peel_order(
     row_delta: list[int] = []
     target_x: list[float] = []
     entry_side: list[PortSide | None] = []
+    claimed: dict[str, str] = {}
     converging = False
     for edge in graph.edges_from(junction_id):
         entry_id = _fan_branch_entry_port(graph, edge.target, topology)
@@ -189,11 +190,14 @@ def fanout_divergence_peel_order(
         target_col, target_row = resolve_section_colrow(graph, entry)
         if target_col is None or target_row is None:
             return None
+        if entry_id in claimed and claimed[entry_id] != edge.line_id:
+            return None
         coordinate = _section_order_coordinate(graph, entry)
         if coordinate is None:
             return None
         branch = len(line_of)
         line_of.append(edge.line_id)
+        claimed[entry_id] = edge.line_id
         reach.append(target_col - source_col)
         row_delta.append(target_row - source_row)
         target_x.append(coordinate)
@@ -225,39 +229,24 @@ def fanout_divergence_peel_order(
 
     if len(set(reach)) > 1 and set(row_delta) == {0}:
         # Every branch stays on the source row, so each leaves the shared run at
-        # its own target column.  A TOP (BOTTOM) entry puts that run above
-        # (below) the row, and the fan is ordered only when every branch peels
-        # off it towards the row: into an entry on the run's side, round to a
-        # flow-side entry facing away from the source, or -- past every other
-        # target -- into the gap before a flow-side entry facing the source.
-        # The farthest-reaching branch then runs outermost, furthest from the
-        # row, and every nearer one peels off inside the siblings that travel
-        # on.  Any other branch may leave on the far side of the run, which
-        # leaves the fan no single side to order by.
-        run_sides = {PortSide.TOP, PortSide.BOTTOM}.intersection(entry_side)
-        if len(run_sides) != 1:
-            return None
-        run_side = run_sides.pop()
-        perpendicular_reach = max(
-            abs(reach[branch]) for branch in branches if entry_side[branch] is run_side
-        )
-
-        def peels_towards_row(branch: int) -> bool:
+        # its own target column.  A fan whose branches all climb over the row --
+        # into a TOP entry, or round to a flow-side entry facing away from the
+        # source -- peels each branch down off the run above it, so the
+        # farthest-reaching branch runs outermost, on top, and every nearer one
+        # peels off inside the siblings that travel on.  Any other branch may
+        # leave below the row, which leaves the fan no single side to order by.
+        def climbs(branch: int) -> bool:
             side = entry_side[branch]
-            if side is run_side:
-                return True
-            if side not in (PortSide.LEFT, PortSide.RIGHT):
-                return False
-            faces_source = (side is PortSide.LEFT) == (reach[branch] > 0)
-            return not faces_source or abs(reach[branch]) > max(perpendicular_reach, 1)
+            return side is PortSide.TOP or (
+                (side is PortSide.RIGHT and reach[branch] > 0)
+                or (side is PortSide.LEFT and reach[branch] < 0)
+            )
 
-        if not all(map(peels_towards_row, branches)):
+        if PortSide.TOP not in entry_side or not all(map(climbs, branches)):
             return None
-        outward = -1 if run_side is PortSide.TOP else 1
         return opening_order(
             sorted(
-                branches,
-                key=lambda branch: (outward * abs(reach[branch]), priority(branch)),
+                branches, key=lambda branch: (-abs(reach[branch]), priority(branch))
             ),
             [float(abs(reach[branch])) for branch in branches],
         )

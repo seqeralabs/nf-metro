@@ -3417,12 +3417,6 @@ def _bypass_geometry(
                 gap1_mid = gap1_base + half_g1
             off1 = delta1
             gap1_x = gap1_mid + delta1
-    if abs(by - (sy + src_off)) <= COORD_TOLERANCE:
-        # The traverse runs straight on along the source track, so there is no
-        # gap1 leg to stagger: a lateral offset on that zero-length leg would
-        # shift the traverse off the track at its degenerate corner.
-        gap1_x -= off1
-        off1 = 0.0
 
     # gap2 descends on the entry's outward side: a LEFT entry is reached in the
     # gap left of the target, a RIGHT entry in the gap right of it, whichever way
