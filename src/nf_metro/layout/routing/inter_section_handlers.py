@@ -6031,6 +6031,7 @@ def _route_entry_wrap(
     entry_side: PortSide,
     normalize_exempt: bool = True,
     source_leads_down: bool = False,
+    lead_under: tuple[float, float] | None = None,
 ) -> RoutedPath:
     """Fan a single-member entry-wrap loop along its centreline.
 
@@ -6061,6 +6062,12 @@ def _route_entry_wrap(
     vertical run down the exit column (*corner_x*), collapsing the 6-point loop
     to a 5-point D-H-?-H shape.  The source stagger then rides the drop's normal
     (X) rather than the lead-in's (Y).
+
+    A LEFT exit on its section's left edge would lead in rightward back along
+    its own trunk, so *lead_under* ``(lx, uy)`` leads it out leftward to
+    column ``lx`` instead, down to ``uy`` below the source box and right under
+    it to *corner_x*, where the loop carries on unchanged.  Leading out
+    leftward flips the lead-in's normal, so its baked stagger flips with it.
     """
     sx, sy = src.x, src.y
     ex, ey = entry_port.x, entry_port.y
@@ -6071,6 +6078,18 @@ def _route_entry_wrap(
         centerline = [
             (corner_x + src_off + delta, sy),
             (corner_x + src_off + delta, channel_y),
+            (descent_x, channel_y),
+            (descent_x, ey + tgt_off + entry_delta),
+            (ex, ey + tgt_off + entry_delta),
+        ]
+    elif lead_under is not None:
+        lx, uy = lead_under
+        centerline = [
+            (sx, sy + src_off - delta),
+            (lx, sy + src_off - delta),
+            (lx, uy),
+            (corner_x, uy),
+            (corner_x, channel_y),
             (descent_x, channel_y),
             (descent_x, ey + tgt_off + entry_delta),
             (ex, ey + tgt_off + entry_delta),
@@ -7356,6 +7375,7 @@ def _build_right_entry_wrap_route(
         else ex
     )
     vx = _right_entry_descent_x(ctx, section_right, pos_n)
+    lead_under = _left_exit_lead_under(ctx, src, pos_n, corner_x, channel_y_base)
 
     # R-D-R-D-L loop: down to the traverse channel, right past the target's
     # right edge, then in to the RIGHT port from its own outward side.
@@ -7371,16 +7391,63 @@ def _build_right_entry_wrap_route(
         descent_x=vx,
         entry_side=PortSide.RIGHT,
         normalize_exempt=normalize_exempt,
+        lead_under=lead_under,
     )
     _declare_channel(route, ctx, vx, vertical_direction(entry_port.y - channel_y_base))
     if not normalize_exempt:
         # Open to the gap-bundle pass: its source-side lead-in also drops
         # through an inter-column gap, so declare that channel too or the
         # always-on gap-channel guard flags it as unmaterialised.
+        rise_from = src.y if lead_under is None else lead_under[1]
         _declare_channel(
-            route, ctx, corner_x, vertical_direction(channel_y_base - src.y)
+            route, ctx, corner_x, vertical_direction(channel_y_base - rise_from)
         )
     return route
+
+
+def _left_exit_lead_under(
+    ctx: _RoutingCtx,
+    src: Station,
+    pos_n: int,
+    corner_x: float,
+    channel_y: float,
+) -> tuple[float, float] | None:
+    """``(lx, uy)`` for a wrap leaving a LEFT exit under its own section.
+
+    A LEFT exit port on its section's left edge whose wrap turns in a column
+    right of the box would lead in back along the trunk, over every station
+    the line has just served.  It leads out leftward instead, drops below the
+    box and runs right under it to that column.  ``None`` keeps the rightward
+    lead-in: the port is not a LEFT exit on its box's edge, the turn column is
+    not past the box, or a leg of the detour would cross another section.
+    """
+    graph = ctx.graph
+    port = graph.ports.get(src.id)
+    section = graph.sections.get(src.section_id) if src.section_id else None
+    if (
+        port is None
+        or port.side is not PortSide.LEFT
+        or section is None
+        or section.bbox_w <= 0
+        or src.x > section.bbox_x + COORD_TOLERANCE
+        or corner_x < section.bbox_x + section.bbox_w
+    ):
+        return None
+    lx = _fan_stand_off_x(ctx, src, pos_n, Direction.L)
+    uy = (
+        section.bbox_y
+        + section.bbox_h
+        + SECTION_ROUTE_CLEARANCE
+        + _fan_corner_run(ctx, pos_n)
+    )
+    exclude = {section.id}
+    if (
+        _v_segment_crosses_other_section(graph, lx, src.y, uy, exclude)
+        or _h_segment_crosses_other_section(graph, lx, corner_x, uy, exclude)
+        or _v_segment_crosses_other_section(graph, corner_x, uy, channel_y, exclude)
+    ):
+        return None
+    return lx, uy
 
 
 def _route_right_entry_via_gap_above(
