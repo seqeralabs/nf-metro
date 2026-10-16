@@ -299,6 +299,25 @@ def _baked_spread_deltas(
     return deltas
 
 
+def _cross_lane_shift(p1: Point, p2: Point, ai: int, lane_offset: float) -> float:
+    """Shift along axis *ai* lifting *lane_offset* to a full gap on ``p1 -> p2``.
+
+    An offset along the lane axis under-separates a diagonal: its perpendicular
+    component is only the offset times the sine of the diagonal's angle to that
+    axis.  Moving the diagonal along the flow axis *ai* by this much restores
+    the full offset; for a 45-degree leg the scale is sqrt(2) - 1 ~ 0.414.
+    """
+    d_a = p2[ai] - p1[ai]
+    d_b = p2[1 - ai] - p1[1 - ai]
+    abs_b = abs(d_b)
+    if abs_b <= COORD_TOLERANCE_FINE:
+        return 0.0
+    scale = (math.hypot(d_a, d_b) - abs(d_a)) / abs_b
+    cross_sign = -1.0 if d_b > 0 else 1.0
+    sign = 1.0 if d_a >= 0 else -1.0
+    return cross_sign * lane_offset * scale * sign
+
+
 def _shift_diagonal(rp: RoutedPath, delta: float, ai: int) -> None:
     """Translate a route's two diagonal waypoints by *delta* along axis *ai*."""
     for idx in (1, 2):
@@ -348,15 +367,19 @@ def _apply_diagonal_spread(
 
     if baked and hub_end is None:
         deltas = _baked_spread_deltas(group, offsets, center, d_a, d_b, hypot, bi)
+    elif baked:
+        # A baked hub's branches may leave at different slopes (a bundle to a
+        # near column beside one to a far column), so each shift is sized on
+        # its own diagonal.
+        deltas = [
+            _cross_lane_shift(rp.points[1], rp.points[2], ai, off - center)
+            for rp, off in zip(group, offsets)
+        ]
     else:
-        # A Y-only offset under-separates a diagonal: its perpendicular component
-        # is only OFFSET_STEP times the sine of the diagonal's angle to the Y
-        # axis.  This scale restores the full step; for a 45-degree leg it is
-        # sqrt(2) - 1 ~ 0.414.
-        abs_b = abs(d_b)
-        scale = (hypot - abs(d_a)) / abs_b if abs_b > COORD_TOLERANCE_FINE else 0.0
-        cross_sign = -1.0 if d_b > 0 else 1.0
-        deltas = [cross_sign * (off - center) * scale * sign for off in offsets]
+        deltas = [
+            _cross_lane_shift(rep.points[1], rep.points[2], ai, off - center)
+            for off in offsets
+        ]
 
     shift = _fit_spread_translation(group, deltas, sign, ai)
 
