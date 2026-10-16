@@ -38,7 +38,7 @@ REGRESSIONS = ROOT / "tests" / "fixtures" / "regressions"
 TOPOLOGIES = ROOT / "examples" / "topologies"
 
 LANDING_CASES = [
-    (REGRESSIONS / "perp_entry_column_two_feeders.mmd", "sec4__entry_bottom_7"),
+    (REGRESSIONS / "perp_entry_column_two_feeders.mmd", "sec4__entry_bottom_3"),
     (REGRESSIONS / "perp_exit_single_feeder_landing.mmd", "sec4__entry_bottom_4"),
     (TOPOLOGIES / "bottom_entry_two_feeders_own_lanes.mmd", "classify__entry_bottom_5"),
 ]

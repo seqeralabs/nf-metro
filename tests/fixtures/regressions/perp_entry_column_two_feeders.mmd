@@ -1,68 +1,32 @@
 %%metro title: Two feeders into a bottom entry column
-%%metro line: l0 | Fastqc | #e6194b
 %%metro line: l1 | Quant_Trim_Pca | #3cb44b
 %%metro line: l2 | Gather | #4363d8
-%%metro line: l3 | Cluster_Dedup | #f58231
 %%metro line: l4 | Bin_Filter | #911eb4
-%%metro grid: sec0 | 0,2
-%%metro grid: sec1 | 0,1
 %%metro grid: sec2 | 0,0
 %%metro grid: sec3 | 0,3
 %%metro grid: sec4 | 0,4
 
 graph LR
-    subgraph sec0 [Gather_Gather_Annotate 0]
-        %%metro exit: bottom | l0, l2, l3, l4
-        s0n0[cluster]
-        s0n1[CLASSIFY_PCA_ASSEMBLE]
-        s0n2[fastqc]
-        s0n0 -->|l2,l4| s0n1
-        s0n1 -->|l2,l4| s0n2
-        s0n0 -->|l3| s0n2
-    end
-    subgraph sec1 [Sort 1]
-        s1n0[pca]
-        s1n1[annotate]
-        s1n2[polish]
-        s1n3[gather]
-        s1n2 -->|l1,l3| s1n3
-        s1n0 -->|l2,l3| s1n1
-        s1n1 -->|l2| s1n3
-        s1n1 -->|l3| s1n2
-        s1n0 -->|l4| s1n3
-    end
     subgraph sec2 [Dedup_Summarise_Count 2]
         s2n0[markdup_bin_vcf]
         s2n1[bam]
-        s2n2[polish]
-        s2n3[quant_merge]
-        s2n0 -->|l0,l1,l4| s2n1
-        s2n1 -->|l0,l2,l4| s2n2
-        s2n2 -->|l0,l2,l4| s2n3
-        s2n1 -->|l1| s2n3
+        s2n2[quant_merge]
+        s2n0 -->|l1,l2,l4| s2n1
+        s2n1 -->|l1,l2,l4| s2n2
     end
     subgraph sec3 [Sort 3]
         s3n0[bin_index]
         s3n1[filter]
         s3n2[polish]
-        s3n0 -->|l1| s3n1
-        s3n1 -->|l1,l3| s3n2
-        s3n0 -->|l2| s3n2
+        s3n0 -->|l1,l2| s3n1
+        s3n1 -->|l1,l2| s3n2
     end
     subgraph sec4 [Assemble_Assemble 4]
-        %%metro entry: bottom | l1, l2, l3, l4
+        %%metro entry: bottom | l1, l2, l4
         s4n0[pca_annotate]
         s4n1[qc_qc]
-        s4n2[report]
-        s4n0 -->|l1,l2,l3,l4| s4n1
-        s4n1 -->|l1,l2,l3,l4| s4n2
+        s4n0 -->|l1,l2,l4| s4n1
     end
-    s0n2 -->|l0| s1n3
-    s1n3 -->|l0,l1,l4| s2n0
-    s2n3 -->|l1,l2| s3n0
-    s3n2 -->|l1,l2,l3| s4n0
-    s3n2 -->|l1,l2| s4n2
-    s0n2 -->|l2,l3,l4| s1n0
-    s1n3 -->|l2| s2n1
-    s1n3 -->|l3| s3n1
-    s2n3 -->|l4| s4n0
+    s2n2 -->|l1,l2| s3n0
+    s3n2 -->|l1,l2| s4n0
+    s2n2 -->|l4| s4n0
