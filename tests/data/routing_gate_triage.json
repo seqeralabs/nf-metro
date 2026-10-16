@@ -1552,11 +1552,11 @@
   "status": "needs-review"
  },
  "inter_section_handlers.py::if crossing is None:::#1": {
-  "note": "The edge being landed is itself a bundled feeder of the port for its own line, so _perp_entry_landing_x always finds a crossing; None is reserved for a port no bundled feeder reaches. Not reached by the corpus, the branch's test maps, or 8000 generated maps.",
+  "note": "The edge being landed is itself a bundled feeder of the port for its own line, so _perp_entry_landing_x always finds a crossing; None is reserved for a port no bundled feeder reaches. Not reached by the corpus, the test fixtures, or 8000 generated maps.",
   "status": "defensive"
  },
  "inter_section_handlers.py::if len(set(laterals.values())) != len(laterals):::#1": {
-  "note": "Lines sharing one up-and-over bundle hold distinct offsets at the exit port and land on distinct crossing channels, so neither the landing nor the riser laterals tie. Not reached by the corpus, the branch's test maps, or 8000 generated maps.",
+  "note": "Lines sharing one up-and-over bundle hold distinct offsets at the exit port and land on distinct crossing channels, so neither the landing nor the riser laterals tie. Not reached by the corpus, the test fixtures, or 8000 generated maps.",
   "status": "defensive"
  },
  "inter_section_handlers.py::if sorted(line_ids, key=landing.__getitem__) != sorted(::#1": {
@@ -1572,7 +1572,7 @@
   "status": "needs-review"
  },
  "normalize.py::if not moves:::#1": {
-  "note": "The group is only re-banded once its bands span more than (lines - 1) offset steps, and the targets pack the lines into exactly that span from the lowest band, so the highest band always differs from its target by more than the tolerance. Not reached by the corpus, the branch's test maps, or 8000 generated maps.",
+  "note": "The group is only re-banded once its bands span more than (lines - 1) offset steps, and the targets pack the lines into exactly that span from the lowest band, so the highest band always differs from its target by more than the tolerance. Not reached by the corpus, the test fixtures, or 8000 generated maps.",
   "status": "defensive"
  },
  "normalize.py::if not moves:::#2": {
@@ -1588,11 +1588,11 @@
   "status": "needs-review"
  },
  "offsets.py::if port is None:::#1": {
-  "note": "Every caller (the U-turn classifiers in offsets.py and row_align.py) passes the station of an entry port it took from a port edge, so graph.ports always resolves it. Not reached by the corpus, the branch's test maps, or 8000 generated maps.",
+  "note": "Every caller (the U-turn classifiers in offsets.py and row_align.py) passes the station of an entry port it took from a port edge, so graph.ports always resolves it. Not reached by the corpus, the test fixtures, or 8000 generated maps.",
   "status": "defensive"
  },
  "offsets.py::landing is None::#1": {
-  "note": "compute_station_offsets gives every line at every port an offset before linear entry frames are materialised, so the straight branch's landing port always holds one for the line. Not reached by the corpus, the branch's test maps, or 8000 generated maps.",
+  "note": "compute_station_offsets gives every line at every port an offset before linear entry frames are materialised, so the straight branch's landing port always holds one for the line. Not reached by the corpus, the test fixtures, or 8000 generated maps.",
   "status": "defensive"
  },
  "perp_columns.py::if _side_order(laterals, direction) != _side_order(landing, drop):::#1": {
@@ -1628,7 +1628,7 @@
   "status": "needs-review"
  },
  "perp_columns.py::if len(feeding) != 1:::#1": {
-  "note": "A junction feeder fed by one exit port. The decline arm is reached by `tests/fixtures/regressions/perp_entry_column_feeder_conflict.mmd` (A generated-map sweep reaches it (46 of 8000 maps)); the single-port arm is not reached by the corpus, the branch's test maps or any of 8000 generated maps: every junction that delivers two lines to a multi-feeder perpendicular entry and survives the earlier declines is fed by more than one port.",
+  "note": "A junction feeder fed by one exit port. The decline arm is reached by `tests/fixtures/regressions/perp_entry_column_feeder_conflict.mmd` (A generated-map sweep reaches it (46 of 8000 maps)); the single-port arm is not reached by the corpus, the test fixtures or any of 8000 generated maps: every junction that delivers two lines to a multi-feeder perpendicular entry and survives the earlier declines is fed by more than one port.",
   "status": "candidate-dead"
  },
  "perp_columns.py::if len(line_ids) < 2:::#1": {
@@ -1652,7 +1652,7 @@
   "status": "needs-review"
  },
  "perp_columns.py::if set(lanes) != set(graph.station_lines(port_id)):::#1": {
-  "note": "An entry port carries exactly the lines of its out-edges: each line enters through it on an edge in and leaves on an edge out, so the lines leaving equal the station's lines. Not reached by the corpus, the branch's test maps, or 8000 generated maps.",
+  "note": "An entry port carries exactly the lines of its out-edges: each line enters through it on an edge in and leaves on an edge out, so the lines leaving equal the station's lines. Not reached by the corpus, the test fixtures, or 8000 generated maps.",
   "status": "defensive"
  },
  "perp_columns.py::if source.is_port:::#1": {
@@ -1664,11 +1664,11 @@
   "status": "needs-review"
  },
  "perp_columns.py::if target.is_port:::#1": {
-  "note": "A perpendicular entry whose drop goes straight to another port rather than into a station. Not reached by the corpus, the branch's test maps, or any of 8000 generated maps: the connector rewrite lands every entry port's out-edges on stations of its section.",
+  "note": "A perpendicular entry whose drop goes straight to another port rather than into a station. Not reached by the corpus, the test fixtures, or any of 8000 generated maps: the connector rewrite lands every entry port's out-edges on stations of its section.",
   "status": "candidate-dead"
  },
  "tb_handlers.py::_clears(route, footprints)::#1": {
-  "note": "Operand of the late single-diagonal attempt in _clear_lane_change. It is evaluated only when that diagonal crosses no departing line twice, and of the 210 generated maps that reach the attempt none does (the plain lane change already failed for the same departures): not reached by the corpus, the branch's test maps, or 8000 generated maps.",
+  "note": "Operand of the late single-diagonal attempt in _clear_lane_change. It is evaluated only when that diagonal crosses no departing line twice, and of the 210 generated maps that reach the attempt none does (the plain lane change already failed for the same departures): not reached by the corpus, the test fixtures, or 8000 generated maps.",
   "status": "candidate-dead"
  },
  "tb_handlers.py::elif not (plain_holds and _clears(points, footprints)):::#1": {
@@ -1689,10 +1689,6 @@
  },
  "tb_handlers.py::for edge in (x0 - gap, x1 + gap):::#1": {
   "note": "Candidate side lanes are derived on both sides of each footprint. Reached by `tests/test_flow_entry_bypass_crossings.py` (_LATER_DEPARTURES) and `tests/test_vertical_flow_entry_runway.py` (_BYPASS_MAPS bypass_into_shared_column_bt); a generated-map sweep reaches it (206 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
-  "status": "needs-review"
- },
- "tb_handlers.py::for link in chain:::#1": {
-  "note": "A same-line bypass is drawn along each link of the chain its line takes to the target. Reached by `tests/test_flow_entry_bypass_crossings.py` (_SAME_LINE_CHAIN, _SINGLE_BYPASS, _TWO_COLUMN_CHAIN); a generated-map sweep reaches it (33 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
   "status": "needs-review"
  },
  "tb_handlers.py::for x0, y0, x1, y1 in footprints:::#1": {
@@ -1720,20 +1716,8 @@
   "status": "needs-review"
  },
  "tb_handlers.py::if arrive.section_id != section.id:::#1": {
-  "note": "A station's out-edge on a line leaving the section ends on the section's own exit port, whose section_id is the section, so every departure target belongs to it. Not reached by the corpus, the branch's test maps, or 8000 generated maps.",
+  "note": "A station's out-edge on a line leaving the section ends on the section's own exit port, whose section_id is the section, so every departure target belongs to it. Not reached by the corpus, the test fixtures, or 8000 generated maps.",
   "status": "defensive"
- },
- "tb_handlers.py::if chain is None:::#1": {
-  "note": "A bypass whose line reaches the target through the chain it skips. Reached by `tests/test_flow_entry_bypass_crossings.py` (_SAME_LINE_CHAIN, _SINGLE_BYPASS, _TWO_COLUMN_CHAIN); a generated-map sweep reaches it (36 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
-  "status": "needs-review"
- },
- "tb_handlers.py::if chain is not None:::#1": {
-  "note": "A same-line chain route replaces the bypass diagonal. Reached by `tests/test_flow_entry_bypass_crossings.py` (_SAME_LINE_CHAIN, _SINGLE_BYPASS, _TWO_COLUMN_CHAIN); a generated-map sweep reaches it (33 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
-  "status": "needs-review"
- },
- "tb_handlers.py::if chain.line_id != edge.line_id or chain.source == edge.source:::#1": {
-  "note": "An in-edge of the target on the bypass's own line from another station is a chain link. Reached by `tests/test_flow_entry_bypass_crossings.py` (_SAME_LINE_CHAIN, _SINGLE_BYPASS, _TWO_COLUMN_CHAIN); a generated-map sweep reaches it (56 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
-  "status": "needs-review"
  },
  "tb_handlers.py::if cleared is not None:::#1": {
   "note": "A cleared lane change replaces the plain one. Reached by `tests/test_flow_entry_bypass_crossings.py` (_LATER_DEPARTURES) and `tests/test_vertical_flow_entry_runway.py` (_BYPASS_MAPS bypass_into_shared_column_bt); a generated-map sweep reaches it (84 of 8000 maps) / A generated-map sweep reaches it (153 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
@@ -1756,15 +1740,11 @@
   "status": "candidate-dead"
  },
  "tb_handlers.py::if not st or st.is_port:::#1": {
-  "note": "The loop skips the section's ports by id one statement earlier, and every id in section.station_ids resolves to a station, so the skip arm never fires. Not reached by the corpus, the branch's test maps, or 8000 generated maps.",
+  "note": "The loop skips the section's ports by id one statement earlier, and every id in section.station_ids resolves to a station, so the skip arm never fires. Not reached by the corpus, the test fixtures, or 8000 generated maps.",
   "status": "defensive"
  },
  "tb_handlers.py::if route is not None:::#1": {
   "note": "A flow-side entry the lane change declines falls back to the perpendicular L-shape. Reached by `tests/test_flow_entry_bypass_crossings.py` (_LATER_DEPARTURES); a generated-map sweep reaches it (517 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
-  "status": "needs-review"
- },
- "tb_handlers.py::if skip_line is not None and skip_line in graph.station_lines(sid):::#1": {
-  "note": "A station carrying the bypass's own line is no obstacle to the chain climb. Reached by `tests/test_flow_entry_bypass_crossings.py` (_SAME_LINE_CHAIN, _SINGLE_BYPASS, _TWO_COLUMN_CHAIN); a generated-map sweep reaches it (36 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
   "status": "needs-review"
  },
  "tb_handlers.py::if slack < spread:::#1": {
@@ -1778,9 +1758,5 @@
  "tb_handlers.py::if via.is_port or via.section_id != section.id:::#1": {
   "note": "A line enters a section once, through the bypass's own source port, which the previous gate already filters, and a chain link into an internal station starts inside the section; so the skip arm never fires. The pass arm is reached by `tests/test_flow_entry_bypass_crossings.py` (_SAME_LINE_CHAIN, _SINGLE_BYPASS, _TWO_COLUMN_CHAIN); the skip arm by no swept, test or generated map (0 of 8000).",
   "status": "defensive"
- },
- "postprocess.py::if carried is not None:::#1": {
-  "note": "A same-line route drawn along a diagonal the spread moved takes the same translation. Reached by the inline map `tests/test_flow_entry_bypass_crossings.py` (_SPREAD_CHAIN), a same-line bypass following a chain link shared with another line, and by 13 of 8000 generated maps. The sweep's roots exclude maps written inline in tests, so no swept fixture evaluates it.",
-  "status": "needs-review"
  }
 }
