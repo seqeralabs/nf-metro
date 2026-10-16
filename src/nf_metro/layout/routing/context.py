@@ -45,6 +45,10 @@ from nf_metro.layout.routing.common import (
     row_top_edge,
     vertical_flow_sections,
 )
+from nf_metro.layout.routing.perp_columns import (
+    PerpEntryColumn,
+    settled_perp_entry_columns,
+)
 from nf_metro.layout.routing.reserved_bands import ReservedCorridors
 from nf_metro.layout.routing.reversal import (
     detect_reversed_sections,
@@ -67,7 +71,6 @@ if TYPE_CHECKING:
     from nf_metro.layout.route_plan import ExitTurnPlanId
     from nf_metro.layout.routing.convergences import ConvergencePlanExecutionQuery
     from nf_metro.layout.routing.exit_turns import ExitTurnPlanQuery
-    from nf_metro.layout.routing.perp_columns import PerpEntryColumn
     from nf_metro.layout.routing.system_emission import RouteSystemEmissionExecution
 
 _EdgeKey = tuple[str, str, str]
@@ -418,8 +421,6 @@ def _build_routing_context(
     validate_final_route_frames: bool = True,
 ) -> _RoutingCtx:
     """Pre-compute all shared state for edge routing."""
-    from nf_metro.layout.routing.perp_columns import settled_perp_entry_columns
-
     bands = ReservedCorridors() if reserved_bands is None else reserved_bands
     topology = build_route_topology_query(graph)
     junction_ids = graph.junction_ids

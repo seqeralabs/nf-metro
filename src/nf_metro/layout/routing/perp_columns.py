@@ -35,25 +35,24 @@ from nf_metro.layout.geometry import (
     station_lane_coord,
 )
 from nf_metro.layout.routing.common import (
+    EXIT_SIDE_DIRECTION,
     Direction,
     junction_source_ports,
+    merge_junction_ids,
     needs_perp_approach_fan,
+    offsets_hold,
     perp_entry_consumer,
     resolve_section,
 )
-from nf_metro.layout.routing.context import _section_lane_frame, port_lane_coord
 from nf_metro.layout.routing.corners import reversed_offset
 from nf_metro.layout.routing.orientation import lateral_order_sign
 from nf_metro.parser.model import MetroGraph, Port, PortSide
 
 _Offsets = Mapping[tuple[str, str], float]
 
-_DEPARTURE = {
-    PortSide.RIGHT: Direction.R,
-    PortSide.LEFT: Direction.L,
-    PortSide.TOP: Direction.U,
-    PortSide.BOTTOM: Direction.D,
-}
+_LATERAL_TIE_PLACES = 3
+"""Decimal places two departure laterals must agree to before they count as a
+tie: finer than any offset step, coarse enough to absorb float noise."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,7 +70,12 @@ class PerpEntryColumn:
 
     def offset(self, line_id: str) -> float:
         assert self.offsets is not None
-        return dict(self.offsets)[line_id]
+        return next(offset for lid, offset in self.offsets if lid == line_id)
+
+
+def feeder_sources(graph: MetroGraph, port_id: str) -> set[str]:
+    """The distinct stations with an edge into *port_id*."""
+    return {edge.source for edge in graph.edges_to(port_id)}
 
 
 def perp_corridor_feeder(graph: MetroGraph, port_id: str) -> Port | None:
@@ -110,6 +114,8 @@ def _trunk_lanes(
 
     ``None`` unless every line leaves the port for one in-section station.
     """
+    from nf_metro.layout.routing.context import _section_lane_frame
+
     port = graph.ports[port_id]
     frame = _section_lane_frame(graph, graph.section_for_port(port))
     lanes: dict[str, set[float]] = {}
@@ -129,7 +135,8 @@ def _trunk_lanes(
     return {line_id: next(iter(coords)) for line_id, coords in lanes.items()}
 
 
-def _runs_turn_right(graph: MetroGraph, port_id: str) -> bool:
+def _consumer_is_right_of_port(graph: MetroGraph, port_id: str) -> bool:
+    """Whether the station *port_id*'s drop turns into stands at larger X."""
     consumer = perp_entry_consumer(graph, port_id)
     return (
         consumer is not None
@@ -152,10 +159,11 @@ def _departure_laterals(
     """The run direction and per-line side coordinate *line_ids* leave *source_id* on.
 
     The same lateral the exit-turn planner ranks a source by: ``y + offset`` on a
-    horizontal run, ``x`` plus the riser lateral on a TOP/BOTTOM riser.  A riser
-    dropping straight onto the port's column inherits that column.  ``None``
+    horizontal run, ``x`` plus the riser lateral on a TOP/BOTTOM riser.  ``None``
     where the departure is not one of those shapes.
     """
+    from nf_metro.layout.routing.context import _section_lane_frame, port_lane_coord
+
     source = graph.stations[source_id]
     exit_port = graph.ports.get(source_id)
     if exit_port is None:
@@ -163,9 +171,7 @@ def _departure_laterals(
         if len(feeding) != 1:
             return None
         exit_port = feeding[0]
-    if exit_port.is_entry:
-        return None
-    direction = _DEPARTURE[exit_port.side]
+    direction = EXIT_SIDE_DIRECTION[exit_port.side]
     if exit_port.side in (PortSide.LEFT, PortSide.RIGHT):
         section = graph.section_for_port(exit_port)
         if source.is_port:
@@ -214,8 +220,7 @@ def _feeder_keeps_its_own_crossing(
         return abs(source.x - graph.stations[port_id].x) <= COORD_TOLERANCE and {
             edge.target for edge in graph.edges_from(source_id)
         } == {port_id}
-    upstream = {edge.source for edge in graph.edges_to(source_id)}
-    if len(upstream) > 1:
+    if source_id in merge_junction_ids(graph):
         return True
     opposite = PortSide.BOTTOM if port.side is PortSide.TOP else PortSide.TOP
     return any(
@@ -249,7 +254,9 @@ def _feeders_deliver_column(
         if departure is None:
             return False
         direction, laterals = departure
-        if len({round(v, 3) for v in laterals.values()}) != len(laterals):
+        if len({round(v, _LATERAL_TIE_PLACES) for v in laterals.values()}) != len(
+            laterals
+        ):
             return False
         landing = {lid: column[lid] for lid in line_ids}
         if _side_order(laterals, direction) != _side_order(landing, drop):
@@ -286,7 +293,7 @@ def deal_perp_entry_column(
         or needs_perp_approach_fan(graph, port_id)
     ):
         return None
-    sources = {edge.source for edge in graph.edges_to(port_id)}
+    sources = feeder_sources(graph, port_id)
     if len(sources) < 2 or any(_feeds_on_its_own_lane(graph, s) for s in sources):
         return None
     if perp_corridor_feeder(graph, port_id) is not None:
@@ -298,7 +305,9 @@ def deal_perp_entry_column(
     if len(lines) < 2 or lanes is None:
         return None
     trunk = sorted(lines, key=lambda lid: (lanes[lid], lid))
-    high_x_first = (port.side is PortSide.TOP) == _runs_turn_right(graph, port_id)
+    high_x_first = (port.side is PortSide.TOP) == _consumer_is_right_of_port(
+        graph, port_id
+    )
     order = trunk[::-1] if high_x_first else trunk
     slots = sorted(offsets.get((port_id, lid), 0.0) for lid in order)
     column = dict(zip(order, slots, strict=True))
@@ -319,9 +328,11 @@ def settled_perp_entry_columns(
         column = deal_perp_entry_column(graph, port_id, offsets)
         if column is None:
             continue
-        if column.offsets is not None and any(
-            abs(offsets.get((port_id, lid), 0.0) - off) > COORD_TOLERANCE_FINE
-            for lid, off in column.offsets
+        if column.offsets is not None and not offsets_hold(
+            offsets,
+            ((port_id, lid, off) for lid, off in column.offsets),
+            COORD_TOLERANCE_FINE,
+            missing=0.0,
         ):
             column = PerpEntryColumn(port_id, None)
         columns[port_id] = column

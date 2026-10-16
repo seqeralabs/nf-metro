@@ -56,6 +56,7 @@ from nf_metro.layout.routing.centrelines import (
     route_lane_transition,
 )
 from nf_metro.layout.routing.common import (
+    EXIT_SIDE_DIRECTION,
     Direction,
     OffsetRegime,
     RoutedPath,
@@ -2340,12 +2341,7 @@ def _build_group_plan(
     if not outbound_edges or missing_connectors:
         reason = "missing-outbound-member"
 
-    run_direction = {
-        PortSide.RIGHT: Direction.R,
-        PortSide.LEFT: Direction.L,
-        PortSide.TOP: Direction.U,
-        PortSide.BOTTOM: Direction.D,
-    }[exit_group.side]
+    run_direction = EXIT_SIDE_DIRECTION[exit_group.side]
     source_axis = direction_axis(run_direction)
     line_ids = _ordered_unique(
         edge.line_id for edge in (outbound_edges or member_edges)

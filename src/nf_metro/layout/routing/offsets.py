@@ -43,6 +43,7 @@ from nf_metro.layout.routing.common import (
     bypass_bottom_y,
     merge_junction_ids,
     needs_perp_approach_fan,
+    offsets_hold,
     perp_entry_consumer,
     tb_right_entry_sections,
     vertical_flow_sections,
@@ -5313,12 +5314,7 @@ def capture_linear_entry_frame_ownership(
             for line_id in graph.station_lines(station_id)
             if (expected := assignments.get(line_id)) is not None
         ]
-        if any(
-            (station_id, line_id) not in station_offsets
-            or abs(station_offsets[station_id, line_id] - expected)
-            > _OFFSET_EQ_TOLERANCE
-            for station_id, line_id, expected in owned
-        ):
+        if not offsets_hold(station_offsets, owned, _OFFSET_EQ_TOLERANCE):
             continue
         frames.append(frame)
         owned_assignments.extend(

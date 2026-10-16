@@ -131,7 +131,7 @@ from nf_metro.layout.routing.perp import (
     _perp_entry_crossing_x,
     _perp_riser_lateral,
 )
-from nf_metro.layout.routing.perp_columns import perp_corridor_feeder
+from nf_metro.layout.routing.perp_columns import feeder_sources, perp_corridor_feeder
 from nf_metro.layout.routing.reserved_bands import (
     EdgeKey,
     ReservedBand,
@@ -4559,9 +4559,10 @@ def _perp_exit_landing_offsets(
         return None
     column = ctx.perp_entry_columns.get(edge.target)
     if column is None:
-        sources = {item.source for item in ctx.graph.edges_to(edge.target)}
-        corridor = perp_corridor_feeder(ctx.graph, edge.target)
-        if len(sources) != 1 or corridor is not None:
+        if (
+            len(feeder_sources(ctx.graph, edge.target)) != 1
+            or perp_corridor_feeder(ctx.graph, edge.target) is not None
+        ):
             return None
     elif column.offsets is None:
         return None
