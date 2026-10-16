@@ -146,10 +146,8 @@ def _feeds_on_its_own_lane(graph: MetroGraph, source_id: str) -> bool:
 def _departure_laterals(
     graph: MetroGraph,
     source_id: str,
-    port_id: str,
     line_ids: list[str],
     offsets: _Offsets,
-    column: Mapping[str, float],
 ) -> tuple[Direction, dict[str, float]] | None:
     """The run direction and per-line side coordinate *line_ids* leave *source_id* on.
 
@@ -181,10 +179,6 @@ def _departure_laterals(
         }
     if not source.is_port:
         return None
-    targets = {edge.target for edge in graph.edges_from(source_id)}
-    port_x = graph.stations[port_id].x
-    if targets == {port_id} and abs(source.x - port_x) <= COORD_TOLERANCE:
-        return direction, {lid: port_x + column[lid] for lid in line_ids}
     max_offset = max(
         (offsets.get((source_id, lid), 0.0) for lid in graph.station_lines(source_id)),
         default=0.0,
@@ -197,6 +191,37 @@ def _departure_laterals(
         return offset
 
     return direction, {lid: source.x + riser(lid) for lid in line_ids}
+
+
+def _feeder_keeps_its_own_crossing(
+    graph: MetroGraph, port_id: str, source_id: str
+) -> bool:
+    """Whether *source_id* reaches *port_id* on geometry a column would not move.
+
+    The column re-lands each feeder's final leg on its channel, but three
+    feeders draw more than that leg from the port's own crossing, so a column
+    moving a line off it exposes a stub or a jump there:
+
+    * a merge, whose own feeders land on the crossing;
+    * a fan-out junction fed by a perpendicular exit on the side opposite the
+      port, whose line wraps round to the port along a run its fan places;
+    * a perpendicular exit dropping straight onto the port, whose leg out of
+      its own section stays on that section's lane.
+    """
+    port = graph.ports[port_id]
+    source = graph.stations[source_id]
+    if source_id in graph.ports:
+        return abs(source.x - graph.stations[port_id].x) <= COORD_TOLERANCE and {
+            edge.target for edge in graph.edges_from(source_id)
+        } == {port_id}
+    upstream = {edge.source for edge in graph.edges_to(source_id)}
+    if len(upstream) > 1:
+        return True
+    opposite = PortSide.BOTTOM if port.side is PortSide.TOP else PortSide.TOP
+    return any(
+        exit_port.side is opposite
+        for exit_port in junction_source_ports(graph, source_id)
+    )
 
 
 def _side_order(laterals: Mapping[str, float], direction: Direction) -> list[str]:
@@ -220,9 +245,7 @@ def _feeders_deliver_column(
     for source_id, line_ids in lines_by_source.items():
         if len(line_ids) < 2:
             continue
-        departure = _departure_laterals(
-            graph, source_id, port_id, line_ids, offsets, column
-        )
+        departure = _departure_laterals(graph, source_id, line_ids, offsets)
         if departure is None:
             return False
         direction, laterals = departure
@@ -247,7 +270,9 @@ def deal_perp_entry_column(
 
     Scoped to ports two or more feeders reach, none of them the corridor run at
     the port's own Y (:func:`perp_corridor_feeder`) nor a vertical-flow section,
-    whose lanes set their crossing themselves.  A distinct-line approach fan
+    whose lanes set their crossing themselves.  A feeder drawn from the port's
+    own crossing beyond its final leg (:func:`_feeder_keeps_its_own_crossing`)
+    declines the record.  A distinct-line approach fan
     (:func:`needs_perp_approach_fan`) channels by approach instead.  The record
     is declined (``offsets`` is ``None``) wherever a feeder would have to cross
     its own lines to land on the column.
@@ -266,6 +291,8 @@ def deal_perp_entry_column(
         return None
     if perp_corridor_feeder(graph, port_id) is not None:
         return None
+    if any(_feeder_keeps_its_own_crossing(graph, port_id, s) for s in sources):
+        return PerpEntryColumn(port_id, None)
     lines = graph.station_lines(port_id)
     lanes = _trunk_lanes(graph, port_id, offsets)
     if len(lines) < 2 or lanes is None:

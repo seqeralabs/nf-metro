@@ -12,6 +12,11 @@ the crossing its own lines set.  ``perp_entry_column_feeder_conflict`` has a
 junction delivering two lines in the opposite side order to the column its
 trunk would deal; honouring that column would cross them inside the
 junction's corners, so the port keeps the column the other passes give it.
+The ``perp_entry_column_merge_feeder``, ``..._opposite_side_fan`` and
+``..._straight_drop`` fixtures each have a feeder drawn from the port's own
+crossing beyond its final leg (a merge, a fan wrapping round from the far
+side, a perpendicular exit dropping straight in), so they keep that crossing
+too.
 """
 
 from __future__ import annotations
@@ -121,6 +126,24 @@ def test_feeder_order_conflict_declines_the_column() -> None:
     column = deal_perp_entry_column(
         graph, CONFLICT_PORT, compute_station_offsets(graph)
     )
+    assert column is not None and column.offsets is None
+
+
+KEEPS_OWN_CROSSING = [
+    (REGRESSIONS / "perp_entry_column_merge_feeder.mmd", "sec3__entry_bottom_6"),
+    (REGRESSIONS / "perp_entry_column_opposite_side_fan.mmd", "sec2__entry_bottom_3"),
+    (REGRESSIONS / "perp_entry_column_straight_drop.mmd", "sec4__entry_top_6"),
+]
+
+
+@pytest.mark.parametrize(
+    ("path", "port_id"), KEEPS_OWN_CROSSING, ids=lambda v: getattr(v, "stem", v)
+)
+def test_feeder_drawn_from_the_port_crossing_declines_the_column(
+    path: Path, port_id: str
+) -> None:
+    graph, _routes = _layout(path)
+    column = deal_perp_entry_column(graph, port_id, compute_station_offsets(graph))
     assert column is not None and column.offsets is None
 
 
