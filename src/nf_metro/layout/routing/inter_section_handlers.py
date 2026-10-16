@@ -5982,8 +5982,10 @@ def _wrap_fan_geometry(
     V1 downturn stays bundled with the junction's other downturning siblings),
     an un-fanned one from its own sub-bundle.  Returns ``(fan, pos_n, delta,
     corner_x)`` -- the fan tuple (or ``None``), the bundle size, this line's
-    lateral offset, and the first-corner X (lead-in right of the source, clear
-    of its edge).
+    lateral offset, and the first-corner X (lead-in clear of the source's edge,
+    on the side its exit port faces: right of the source unless that port is
+    on its section's LEFT edge, where leading right would run back over the
+    section).
     """
     fan = (
         ctx.junction_fan_info.get((edge.source, edge.target, edge.line_id))
@@ -5993,7 +5995,13 @@ def _wrap_fan_geometry(
     pos_i, pos_n = fan if fan is not None else (i, n)
     delta = l_shape_stagger(pos_i, pos_n, vertical, ctx.offset_step)
     resolve = _fan_corner_x if fan is not None else _fan_stand_off_x
-    corner_x = resolve(ctx, src, pos_n, Direction.R)
+    exit_port = ctx.graph.ports.get(src.id)
+    lead = (
+        Direction.L
+        if exit_port is not None and exit_port.side is PortSide.LEFT
+        else Direction.R
+    )
+    corner_x = resolve(ctx, src, pos_n, lead)
     return fan, pos_n, delta, corner_x
 
 
