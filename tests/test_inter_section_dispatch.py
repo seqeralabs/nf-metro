@@ -32,8 +32,6 @@ _ROOT = Path(__file__).resolve().parents[1]
 _INTER_HANDLER_RAW_QUERY_LIMIT = 29
 # Includes offsets.py's lookups: station offsets are computed before any
 # per-edge _InterFacts exists, so that phase resolves grid cells directly.
-# The offsets phase has no InterFacts; _straight_branches_land_level resolves
-# hop-end cells directly.
 _ROUTING_RAW_QUERY_LIMIT = 60
 
 
