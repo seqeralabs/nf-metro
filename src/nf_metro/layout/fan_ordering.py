@@ -179,7 +179,6 @@ def fanout_divergence_peel_order(
     row_delta: list[int] = []
     target_x: list[float] = []
     entry_side: list[PortSide | None] = []
-    entry_lines: dict[str, set[str]] = {}
     converging = False
     for edge in graph.edges_from(junction_id):
         entry_id = _fan_branch_entry_port(graph, edge.target, topology)
@@ -195,7 +194,6 @@ def fanout_divergence_peel_order(
             return None
         branch = len(line_of)
         line_of.append(edge.line_id)
-        entry_lines.setdefault(entry_id, set()).add(edge.line_id)
         reach.append(target_col - source_col)
         row_delta.append(target_row - source_row)
         target_x.append(coordinate)
@@ -240,12 +238,6 @@ def fanout_divergence_peel_order(
         if len(run_sides) != 1:
             return None
         run_side = run_sides.pop()
-        if any(
-            port.side in (PortSide.TOP, PortSide.BOTTOM) and port.side is not run_side
-            for edge in graph.edges_to(junction_id)
-            if (port := graph.ports.get(edge.source)) is not None
-        ):
-            return None
         perpendicular_reach = max(
             abs(reach[branch]) for branch in branches if entry_side[branch] is run_side
         )
@@ -269,11 +261,6 @@ def fanout_divergence_peel_order(
             ),
             [float(abs(reach[branch])) for branch in branches],
         )
-    if any(len(lines) > 1 for lines in entry_lines.values()):
-        # Only a branch peeling off a same-row run leaves it at one corner
-        # whatever it carries; elsewhere lines sharing an entry port
-        # co-travel, and their bundle keeps declaration order.
-        return None
     if len(set(reach)) > 1 and 0 in row_delta:
         if len({value > 0 for value in row_delta if value != 0}) != 1:
             return None
