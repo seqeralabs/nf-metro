@@ -532,6 +532,15 @@ def _lane_sign(section: Section, graph: MetroGraph) -> float:
     return section_lane_sign(section, tb_positive_fan_sections(graph))
 
 
+def _in_section_sources(sub: MetroGraph, sid: str) -> list[str]:
+    """Sources of *sid*'s in-edges that are non-port stations of *sub*, per edge."""
+    return [
+        e.source
+        for e in sub.edges_to(sid)
+        if e.source in sub.stations and not sub.stations[e.source].is_port
+    ]
+
+
 def _fan_in_branch_chain(sub: MetroGraph, head: str, join: str) -> list[str] | None:
     """The in-section source chain ending at *head* that feeds *join*, or ``None``.
 
@@ -544,11 +553,7 @@ def _fan_in_branch_chain(sub: MetroGraph, head: str, join: str) -> list[str] | N
     while True:
         if len({e.target for e in sub.edges_from(current)}) != 1:
             return None
-        preds = {
-            e.source
-            for e in sub.edges_to(current)
-            if e.source in sub.stations and not sub.stations[e.source].is_port
-        }
+        preds = set(_in_section_sources(sub, current))
         if not preds:
             return chain
         if len(preds) != 1:
@@ -557,6 +562,19 @@ def _fan_in_branch_chain(sub: MetroGraph, head: str, join: str) -> list[str] | N
         if current == join or current in chain:
             return None
         chain.append(current)
+
+
+def _slot_occupied(
+    sub: MetroGraph, frame: AxisFrame, sid: str, c: float, chain: list[str]
+) -> bool:
+    """Whether a station outside *chain* sits at *sid*'s flow position and track *c*."""
+    at = frame.primary.get(sub.stations[sid])
+    return any(
+        abs(frame.primary.get(other) - at) < SAME_COORD_TOLERANCE
+        and abs(frame.secondary.get(other) - c) < SAME_COORD_TOLERANCE
+        for oid, other in sub.stations.items()
+        if oid not in chain
+    )
 
 
 def _seat_fan_in_branches_on_lane_side(
@@ -571,9 +589,6 @@ def _seat_fan_in_branches_on_lane_side(
     in a section whose lanes stack the other way each such branch is reflected
     across the join.
     """
-    lane_sign = _lane_sign(section, graph)
-    if lane_sign > 0:
-        return
     # assign_tracks seats lines in priority order, which is the section's lane
     # order only while no seam delivers an order of its own: at most one line
     # enters the section (offsets._reorder_reconvergence leaves it on priority).
@@ -584,25 +599,15 @@ def _seat_fan_in_branches_on_lane_side(
     }
     if len(seam_lines) > 1:
         return
-    axis, flow = frame.secondary, frame.primary
-
-    def occupied(sid: str, c: float, chain: list[str]) -> bool:
-        at = flow.get(sub.stations[sid])
-        return any(
-            abs(flow.get(other) - at) < SAME_COORD_TOLERANCE
-            and abs(axis.get(other) - c) < SAME_COORD_TOLERANCE
-            for oid, other in sub.stations.items()
-            if oid not in chain
-        )
+    lane_sign = _lane_sign(section, graph)
+    if lane_sign > 0:
+        return
+    axis = frame.secondary
 
     for join_id, join in sub.stations.items():
         if join.is_port or join.off_track:
             continue
-        preds = dict.fromkeys(
-            e.source
-            for e in sub.edges_to(join_id)
-            if e.source in sub.stations and not sub.stations[e.source].is_port
-        )
+        preds = dict.fromkeys(_in_section_sources(sub, join_id))
         if len(preds) < 2:
             continue
         join_c = axis.get(join)
@@ -618,7 +623,10 @@ def _seat_fan_in_branches_on_lane_side(
             if chain is None:
                 continue
             reflected = {sid: 2 * join_c - axis.get(sub.stations[sid]) for sid in chain}
-            if any(occupied(sid, c, chain) for sid, c in reflected.items()):
+            if any(
+                _slot_occupied(sub, frame, sid, c, chain)
+                for sid, c in reflected.items()
+            ):
                 continue
             for sid, c in reflected.items():
                 axis.set(sub.stations[sid], c)

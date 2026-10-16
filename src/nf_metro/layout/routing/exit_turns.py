@@ -1043,9 +1043,9 @@ def _source_turn_requirement(
             )
             <= COORD_TOLERANCE
         ):
-            # A dealt column moves the drop onto its channel, off the port's
-            # X; ``_perp_entry_junction_straight_drop`` still measures the
-            # lead-out from the junction's own column.
+            # A dealt column puts the drop on its channel, off the port's X;
+            # ``_perp_entry_junction_straight_drop`` measures the lead-out from
+            # the junction's own column.
             column = ctx.perp_entry_columns.get(edge.target)
             axis = tgt.x + (
                 column.offset(edge.line_id)

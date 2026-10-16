@@ -2,7 +2,7 @@
 
 A BOTTOM entry into a BT section (or a TOP entry into a TB one) hands its lines
 straight up (or down) the lanes of the station the drop reaches.  Where that
-station also carries a line born inside the section, the port's lanes keep that
+station also carries a line born inside the section, the port's lanes leave that
 line's slot open, so every arriving line meets its internal lane at the box edge
 instead of stepping sideways onto it.
 """

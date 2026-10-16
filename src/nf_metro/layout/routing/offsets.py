@@ -2816,7 +2816,7 @@ def _port_gap_is_consumer_lane(
     station on.  A vertical section's flow-side drop leaves the port on the
     consumer's lanes, so closing the gap there would set the arriving lines a
     slot off the lanes they continue on.  A horizontal section's entry run
-    departs from the port's own slots, so its ports keep their compaction.
+    departs from the port's own slots, so closing the gap there is correct.
     """
     graph = ctx.graph
     port = graph.ports[port_id]

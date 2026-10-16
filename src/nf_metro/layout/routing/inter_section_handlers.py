@@ -3161,14 +3161,14 @@ def _is_row_level_bottom_row_climb(
     if tgt_port is None or not tgt_port.is_entry:
         return False
     src_port = graph.ports.get(edge.source)
-    if (
+    exit_faces_away = (
         src_port is not None
         and src_port.side in (PortSide.LEFT, PortSide.RIGHT)
         and tgt_col != src_col
         and (src_port.side is PortSide.LEFT) == (tgt_col > src_col)
-    ):
-        # The exit faces away from the target, so a run at the source's own Y
-        # would lead back across the source box.
+    )
+    if exit_faces_away:
+        # A run at the source's own Y would lead back across the source box.
         return False
     return _bottom_row_climb_corridor_clear(
         graph, src_row, tgt_row, src_col, tgt_col, max_content_row=max_content_row
@@ -6068,8 +6068,8 @@ def _route_entry_wrap(
     A LEFT exit on its section's left edge would lead in rightward back along
     its own trunk, so *lead_under* ``(lx, uy)`` leads it out leftward to
     column ``lx`` instead, down to ``uy`` below the source box and right under
-    it to *corner_x*, where the loop carries on unchanged.  Leading out
-    leftward flips the lead-in's normal, so its baked stagger flips with it.
+    it to *corner_x*.  Leading out leftward flips the lead-in's normal, so its
+    baked stagger flips with it.
     """
     sx, sy = src.x, src.y
     ex, ey = entry_port.x, entry_port.y
@@ -7409,25 +7409,24 @@ def _left_exit_lead_under(
     corner_x: float,
     channel_y: float,
 ) -> tuple[float, float] | None:
-    """``(lx, uy)`` for a wrap leaving a LEFT exit under its own section.
+    """``(lx, uy)`` for a wrap leaving a LEFT exit under its own section, or ``None``.
 
-    A LEFT exit port on its section's left edge whose wrap turns in a column
-    right of the box would lead in back along the trunk, over every station
-    the line has just served.  It leads out leftward instead, drops below the
-    box and runs right under it to that column.  ``None`` keeps the rightward
-    lead-in: the port is not a LEFT exit on its box's edge, the turn column is
-    not past the box, or a leg of the detour would cross another section.
+    A rightward lead-in from a LEFT exit would run back over every station the
+    line has just served, so the wrap leads out leftward, drops below the box and
+    runs right under it to the turn column.  ``None`` (rightward lead-in) when
+    the port is not a LEFT exit on its box's edge, the turn column is not past
+    the box, or a leg of the detour would cross another section.
     """
-    ctx, graph, src = f.ctx, f.graph, f.src
-    port = graph.ports.get(src.id)
+    ctx, src, port = f.ctx, f.src, f.src_port
+    graph = f.graph
     section = graph.sections.get(src.section_id) if src.section_id else None
     if (
         port is None
         or port.side is not PortSide.LEFT
         or section is None
         or section.bbox_w <= 0
-        or src.x > section.bbox_x + COORD_TOLERANCE
-        or corner_x < section.bbox_x + section.bbox_w
+        or src.x > _section_left_edge(graph, src) + COORD_TOLERANCE
+        or corner_x < _section_right_edge(graph, src)
     ):
         return None
     lx = _fan_stand_off_x(ctx, src, pos_n, Direction.L)
