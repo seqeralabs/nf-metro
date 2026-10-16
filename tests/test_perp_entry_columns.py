@@ -175,3 +175,57 @@ def test_conflicting_junction_feed_keeps_its_lines_uncrossed() -> None:
     }
     assert set(junction) == {"l0", "l3"}
     assert _proper_crossings(junction["l0"], junction["l3"]) == 0
+
+
+JUNCTION_STRAIGHT_DROP = """\
+%%metro line: l1 | One | #3cb44b
+%%metro line: l2 | Two | #4363d8
+%%metro line: l3 | Three | #f58231
+%%metro line: l4 | Four | #911eb4
+%%metro grid: sec3 | 0,3
+%%metro grid: sec4 | 0,4
+
+graph LR
+    subgraph sec2 [Top]
+        s2n2[polish]
+        s2n3[quant_merge]
+        s2n2 -->|l4| s2n3
+    end
+    subgraph sec3 [Middle]
+        s3n0[bin_index]
+        s3n2[polish]
+    end
+    subgraph sec4 [Bottom]
+        %%metro entry: bottom | l3, l4
+        s4n0[pca_annotate]
+    end
+    s2n3 -->|l1,l2| s3n0
+    s3n2 -->|l3| s4n0
+    s2n3 -->|l4| s4n0
+"""
+
+
+def test_junction_straight_drop_turns_onto_the_dealt_column(tmp_path: Path) -> None:
+    """A junction standing over a dealt BOTTOM port turns its drop on that column.
+
+    The port's two feeders deal it a column, which puts ``l4``'s channel a lane
+    off the port's own X.  The exit-turn plan for the junction's straight drop
+    must pin the turn on that channel, where the drop is drawn.
+    """
+    path = tmp_path / "junction_straight_drop.mmd"
+    path.write_text(JUNCTION_STRAIGHT_DROP)
+    graph, routes = _layout(path)
+    port = graph.stations["sec4__entry_bottom_3"]
+    drop = next(
+        [tuple(p) for p in points]
+        for route, points in routes
+        if route.edge.source == "__junction_4"
+        and route.edge.target == port.id
+        and route.line_id == "l4"
+    )
+    departure = next(
+        points[0][0]
+        for route, points in routes
+        if route.edge.source == port.id and route.line_id == "l4"
+    )
+    assert abs(_final_descent(drop)[0] - departure) <= 0.5
