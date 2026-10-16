@@ -1,0 +1,28 @@
+%%metro title: Bottom Entry Two Feeders Own Lanes
+%%metro line: cluster | Cluster | #e6194b
+%%metro line: dedup | Dedup | #3cb44b
+%%metro line: counts | Counts | #f58231
+%%metro line: bam | BAM | #4363d8
+
+graph LR
+    subgraph trim [Trim]
+        %%metro exit: top | bam, counts
+        qc[QC]
+    end
+    subgraph normalize [Normalize]
+        %%metro entry: bottom | bam, counts
+        quant[quant]
+        align[align]
+        quant -->|bam,counts| align
+    end
+    subgraph stats [Stats]
+        summarise[summarise]
+    end
+    subgraph classify [Classify]
+        %%metro entry: bottom | cluster, bam
+        pca[pca]
+    end
+    qc -->|bam,counts| quant
+    align -->|dedup,counts| summarise
+    summarise -->|cluster| pca
+    align -->|bam| pca

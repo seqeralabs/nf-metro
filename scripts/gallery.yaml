@@ -2436,6 +2436,15 @@ gallery:
       peels each line to a different target. The fan-out's peel order propagates one hop
       upstream to its free source feeder, so both lines descend straight into their
       landing lanes with no crossing (issue #1986)."
+  - id: bottom_entry_two_feeders_own_lanes
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "Two feeders from different sections reach one LR section's BOTTOM entry: a line
+      dropping out of the section beside it and a line running under the row from further
+      back. The port deals its channels in the order the lines turn into the trunk, so each
+      riser lands on its own lane and the pair nests through the corner instead of one riser
+      running hidden under the other (issue #2073)."
 pipelines:
   - id: rnaseq_metro
     title: nf-core/rnaseq

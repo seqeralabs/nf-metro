@@ -5,8 +5,9 @@ every feeder and by the drop that turns from it into the trunk.  Each line must
 cross on the channel its in-section drop departs from, and two lines must never
 share a descent into the port.
 
-``perp_entry_column_two_feeders`` has two feeders reaching one BOTTOM entry, so
-the column is dealt from the trunk the drop turns into.
+``perp_entry_column_two_feeders`` and the gallery map
+``bottom_entry_two_feeders_own_lanes`` have two feeders reaching one BOTTOM
+entry, so the column is dealt from the trunk the drop turns into.
 ``perp_exit_single_feeder_landing`` has one up-and-over feeder, which lands on
 the crossing its own lines set.  ``perp_entry_column_feeder_conflict`` has a
 junction delivering two lines in the opposite side order to the column its
@@ -34,10 +35,12 @@ from nf_metro.themes import resolve_theme
 
 ROOT = Path(__file__).resolve().parent.parent
 REGRESSIONS = ROOT / "tests" / "fixtures" / "regressions"
+TOPOLOGIES = ROOT / "examples" / "topologies"
 
 LANDING_CASES = [
     (REGRESSIONS / "perp_entry_column_two_feeders.mmd", "sec4__entry_bottom_7"),
     (REGRESSIONS / "perp_exit_single_feeder_landing.mmd", "sec4__entry_bottom_4"),
+    (TOPOLOGIES / "bottom_entry_two_feeders_own_lanes.mmd", "classify__entry_bottom_5"),
 ]
 
 CONFLICT = REGRESSIONS / "perp_entry_column_feeder_conflict.mmd"
