@@ -87,11 +87,8 @@ def _spread_diagonal_bundles(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
     for rp in routes:
         if (
             not _is_diagonal_route(rp)
+            or rp.offset_regime is OffsetRegime.BAKED
             or rp.exit_lane_transition_plan_id is not None
-            or (
-                rp.offset_regime is OffsetRegime.BAKED
-                and not _within_vertical_section(rp, ctx)
-            )
         ):
             continue
         if rp.edge.source in ctx.fork_stations:
@@ -99,22 +96,18 @@ def _spread_diagonal_bundles(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
         if rp.edge.target in ctx.join_stations:
             join_groups[rp.edge.target].append(rp)
 
-    hubs = [(sid, group, 1) for sid, group in fork_groups.items()]
-    hubs += [(sid, group, 2) for sid, group in join_groups.items()]
-    for station_id, group, hub_end in hubs:
+    for station_id, group in list(fork_groups.items()) + list(join_groups.items()):
         unseen = [rp for rp in group if _edge_key(rp) not in spread]
         if len(unseen) < 2:
             continue
-        # Sub-group by regime and by which way each diagonal crosses the lanes,
-        # so the scale factor and sign are correct for each route.
-        by_dir: dict[tuple[bool, bool], list[RoutedPath]] = defaultdict(list)
+        # Sub-group by diagonal direction (up vs down) so the scale
+        # factor and sign are correct for each route.
+        by_dir: dict[bool, list[RoutedPath]] = defaultdict(list)
         for rp in unseen:
-            baked = rp.offset_regime is OffsetRegime.BAKED
-            lane = 0 if baked else 1
-            by_dir[(baked, rp.points[2][lane] >= rp.points[1][lane])].append(rp)
+            by_dir[rp.points[2][1] >= rp.points[1][1]].append(rp)
         for subgroup in by_dir.values():
             if len(subgroup) >= 2:
-                _apply_diagonal_spread(subgroup, station_id, ctx=ctx, hub_end=hub_end)
+                _apply_diagonal_spread(subgroup, station_id, ctx=ctx)
         spread.update(_edge_key(rp) for rp in unseen)
 
     # Then spread any multi-line same-edge bundle the hub pass did not reach: a
@@ -141,19 +134,6 @@ def _spread_diagonal_bundles(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
 
 def _edge_key(rp: RoutedPath) -> tuple[str, str, str]:
     return (rp.edge.source, rp.edge.target, rp.line_id)
-
-
-def _within_vertical_section(rp: RoutedPath, ctx: _RoutingCtx) -> bool:
-    """True if *rp* joins two stations of one vertical-flow section."""
-    src = ctx.graph.stations.get(rp.edge.source)
-    tgt = ctx.graph.stations.get(rp.edge.target)
-    return (
-        src is not None
-        and tgt is not None
-        and src.section_id is not None
-        and src.section_id == tgt.section_id
-        and src.section_id in ctx.tb_sections
-    )
 
 
 def _diagonal_key(line_id: str, a: Point, b: Point) -> tuple[str, Point, Point]:
@@ -311,7 +291,6 @@ def _apply_diagonal_spread(
     station_id: str,
     *,
     ctx: _RoutingCtx,
-    hub_end: int | None = None,
 ) -> None:
     """Spread a diagonal sub-group so its lines keep a true perpendicular gap.
 
@@ -322,15 +301,11 @@ def _apply_diagonal_spread(
     *not* use: X for the render-time Y-offset (LR) regime, Y for the baked X
     regime (TB / inter-section), so on either the lines fan to a real gap rather
     than collapsing onto one stroke.
-
-    *hub_end* names the diagonal waypoint at a fork (1) or join (2) hub.  A
-    baked hub's lines leave or reach it on lanes already baked along X, so each
-    line's offset is read there, where the lanes sit one step apart, rather
-    than at the far ends where the branches stand whole columns apart.
     """
     # Only reached from _spread_diagonal_bundles, which returns early on None.
     assert ctx.station_offsets is not None
     offsets = [ctx.station_offsets.get((station_id, rp.line_id), 0.0) for rp in group]
+    center = sum(offsets) / len(offsets)
 
     rep = group[0]
     # Baked routes carry their offset along X already, so the complementary
@@ -338,15 +313,12 @@ def _apply_diagonal_spread(
     baked = rep.offset_regime is OffsetRegime.BAKED
     ai = 1 if baked else 0
     bi = 1 - ai
-    if baked and hub_end is not None:
-        offsets = [rp.points[hub_end][bi] for rp in group]
-    center = sum(offsets) / len(offsets)
     d_a = rep.points[2][ai] - rep.points[1][ai]
     d_b = rep.points[2][bi] - rep.points[1][bi]
     sign = 1.0 if d_a >= 0 else -1.0
     hypot = math.hypot(d_a, d_b)
 
-    if baked and hub_end is None:
+    if baked:
         deltas = _baked_spread_deltas(group, offsets, center, d_a, d_b, hypot, bi)
     else:
         # A Y-only offset under-separates a diagonal: its perpendicular component
