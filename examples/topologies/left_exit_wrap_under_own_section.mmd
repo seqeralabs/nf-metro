@@ -1,18 +1,11 @@
 %%metro title: LEFT exit wrapping under its own section
-%%metro line: l0 | Upper feeder | #e6194b
 %%metro line: l1 | Left exit feeder | #3cb44b
 %%metro line: l2 | Middle | #4363d8
-%%metro grid: upper | 0,0
 %%metro grid: lower | 0,1
 %%metro grid: middle | 1,0
 %%metro grid: sink | 2,0
 
 graph LR
-    subgraph upper [Upper]
-        u0[polish]
-        u1[filter]
-        u0 -->|l0| u1
-    end
     subgraph lower [Lower]
         %%metro exit: left | l1
         w0[qc]
@@ -28,10 +21,9 @@ graph LR
     end
     subgraph sink [Sink]
         %%metro direction: RL
-        %%metro entry: right | l0, l1
+        %%metro entry: right | l1
         k0[call]
         k1[report]
-        k0 -->|l0,l1| k1
+        k0 -->|l1| k1
     end
-    u1 -->|l0| k0
     w2 -->|l1| k0

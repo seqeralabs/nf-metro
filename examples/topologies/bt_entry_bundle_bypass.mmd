@@ -1,6 +1,7 @@
 %%metro title: BT Entry Bundle Bypass
 %%metro line: dna | DNA | #e63946
 %%metro line: rna | RNA | #457b9d
+%%metro line: atac | ATAC | #2a9d8f
 
 graph LR
     subgraph source [Source]
@@ -11,8 +12,8 @@ graph LR
         call[Call]
         index[Index]
         merge[Merge]
-        call -->|dna,rna| index
-        index -->|dna,rna| merge
+        call -->|atac| index
+        index -->|atac| merge
     end
     reads -->|dna,rna| merge
-    reads -->|dna| call
+    reads -->|atac| call

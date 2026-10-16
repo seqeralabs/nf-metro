@@ -768,8 +768,8 @@ gallery:
     category: TB / BT Sections
     description:
       "A two-line bundle entering a BT section through its bottom port and bypassing
-      a chain to its last station: the bundle steps across just inside the port and passes
-      the skipped stations on their label-free side."
+      a chain another line serves to its last station: the bundle steps across just inside
+      the port and climbs clear of the skipped stations."
   - id: bt_entry_bypass_on_spread_diagonal
     source_dir: examples/topologies
     category: TB / BT Sections
@@ -1587,8 +1587,8 @@ gallery:
     category: Inter-section Routing
     description:
       "A LEFT exit feeding a RIGHT entry up and two columns across: the wrap leads out
-      on the exit's own side, passes under its section and climbs beside the other feeder,
-      instead of running back along its trunk over the stations it has just served (#2073)."
+      on the exit's own side, passes under its section and climbs into the entry, instead of
+      running back along its trunk over the stations it has just served (#2073)."
   - id: junction_entry_reversed_fold
     source_dir: examples/topologies
     category: Merge & Convergence
@@ -2552,10 +2552,9 @@ render_only:
     # here is one of those known defects, not a regression.
     - curve_invariant_repros/inter_row_corridor_overflow
     - regressions/tb_offtrack_fork_branch_collision_1390
-    - curve_invariant_repros/bt_bottom_entry_rise_from_junction
-    - curve_invariant_repros/bt_bottom_entry_source_beyond_channel
+    - curve_invariant_repros/bt_bottom_entry_bundle_rises_from_junction
+    - curve_invariant_repros/bt_bottom_entry_source_beyond_channel_single_branch
     - curve_invariant_repros/fan_over_top_flow_feeder
-    - regressions/perp_exit_single_feeder_landing
     - topologies/lr_exit_into_tb_shared_carrier_row
     - topologies/convergence_handedness_repro
     - topologies/convergence_shared_terminal_exit_turn

@@ -85,7 +85,7 @@ def test_straight_branch_runs_level_from_section_to_section() -> None:
     chain = [
         points
         for (source, target, line_id), points in polylines.items()
-        if line_id == "l3"
+        if line_id == "l0"
         and (source.startswith("s11__exit") or target.startswith("s14__entry"))
     ]
     assert len(chain) == 2

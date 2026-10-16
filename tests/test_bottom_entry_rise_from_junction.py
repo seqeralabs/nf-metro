@@ -22,7 +22,11 @@ from nf_metro.parser.model import MetroGraph
 
 REPROS = Path(__file__).resolve().parent / "fixtures" / "curve_invariant_repros"
 RISE_FROM_JUNCTION = REPROS / "bt_bottom_entry_rise_from_junction.mmd"
+BUNDLE_RISES_FROM_JUNCTION = REPROS / "bt_bottom_entry_bundle_rises_from_junction.mmd"
 SOURCE_BEYOND_CHANNEL = REPROS / "bt_bottom_entry_source_beyond_channel.mmd"
+SOURCE_BEYOND_CHANNEL_SINGLE_BRANCH = (
+    REPROS / "bt_bottom_entry_source_beyond_channel_single_branch.mmd"
+)
 
 
 def _laid_out(path: Path) -> MetroGraph:
@@ -32,7 +36,14 @@ def _laid_out(path: Path) -> MetroGraph:
 
 
 @pytest.mark.parametrize(
-    "path", [RISE_FROM_JUNCTION, SOURCE_BEYOND_CHANNEL], ids=lambda p: p.stem
+    "path",
+    [
+        RISE_FROM_JUNCTION,
+        BUNDLE_RISES_FROM_JUNCTION,
+        SOURCE_BEYOND_CHANNEL,
+        SOURCE_BEYOND_CHANNEL_SINGLE_BRANCH,
+    ],
+    ids=lambda p: p.stem,
 )
 def test_render_completes(path: Path) -> None:
     render_string(path.read_text(), source_dir=str(path.parent))
@@ -46,8 +57,13 @@ def test_bundle_rising_into_bottom_entry_keeps_its_order() -> None:
     assert violations == [], violations[0].message()
 
 
-def test_source_beyond_channel_turns_into_bottom_entry_once() -> None:
-    graph = _laid_out(SOURCE_BEYOND_CHANNEL)
+@pytest.mark.parametrize(
+    "path",
+    [SOURCE_BEYOND_CHANNEL, SOURCE_BEYOND_CHANNEL_SINGLE_BRANCH],
+    ids=lambda p: p.stem,
+)
+def test_source_beyond_channel_turns_into_bottom_entry_once(path: Path) -> None:
+    graph = _laid_out(path)
     offsets = compute_station_offsets(graph)
     routes = [
         route
