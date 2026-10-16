@@ -2788,7 +2788,9 @@ def _recompact_fan_port_bordering_stations(
         levels = distinct_offset_levels(
             ctx.offsets.get((port_id, lid), 0.0) for lid in lines
         )
-        if max_interior_offset_gap(levels, ctx.offset_step) is not None:
+        if max_interior_offset_gap(
+            levels, ctx.offset_step
+        ) is not None and not _port_gap_is_consumer_lane(ctx, port_id, lines):
             candidates.add((port.section_id, port_id))
 
     for sec_id, station_id in sorted(candidates):
@@ -2802,6 +2804,44 @@ def _recompact_fan_port_bordering_stations(
             ctx, same_y_adj, sec_layer_stations, sec_id, station_id, n_sec_stations
         )
         _propagate_touched_exit_ports_to_entries(ctx, touched)
+
+
+def _port_gap_is_consumer_lane(
+    ctx: _OffsetCtx, port_id: str, lines: Sequence[str]
+) -> bool:
+    """Whether *port_id*'s open slot is a lane its one in-section consumer fills.
+
+    The port's lines sit exactly on that station's lanes and the station's own
+    lanes close up, so the gap holds a line the section carries from that
+    station on.  A vertical section's flow-side drop leaves the port on the
+    consumer's lanes, so closing the gap there would set the arriving lines a
+    slot off the lanes they continue on.  A horizontal section's entry run
+    departs from the port's own slots, so its ports keep their compaction.
+    """
+    graph = ctx.graph
+    port = graph.ports[port_id]
+    if port.section_id is None:
+        return False
+    direction = graph.sections[port.section_id].direction
+    if not lanes_run_along_x(direction) or port.side is not flow_entry_side(direction):
+        return False
+    consumer_id = _sole_in_section_consumer(graph, port_id, port.section_id, lines)
+    if consumer_id is None:
+        return False
+    if any(
+        abs(
+            ctx.offsets.get((port_id, lid), 0.0)
+            - ctx.offsets.get((consumer_id, lid), 0.0)
+        )
+        > _OFFSET_EQ_TOLERANCE
+        for lid in lines
+    ):
+        return False
+    consumer_levels = distinct_offset_levels(
+        ctx.offsets.get((consumer_id, lid), 0.0)
+        for lid in graph.station_lines(consumer_id)
+    )
+    return max_interior_offset_gap(consumer_levels, ctx.offset_step) is None
 
 
 def _branch_leaves_junction_straight(
