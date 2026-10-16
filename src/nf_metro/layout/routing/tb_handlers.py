@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
+from typing import NamedTuple
 
 from nf_metro.layout.constants import (
     COORD_TOLERANCE,
@@ -577,7 +578,12 @@ def _route_flow_side_lane_change(
     The lines sharing the edge cross on parallel diagonals, which the diagonal
     spread pass separates by translating each along the flow axis.  ``None``
     when the run from the port to the station is too short for that spread,
-    leaving the bundle to the perpendicular turn-in.
+    leaving the bundle to the perpendicular turn-in.  Also ``None`` when every
+    lane change it could make would cross a line sharing the port twice
+    (:func:`_crossed_twice`, :func:`_tangles_with_departure`).
+
+    A single line whose own line also reaches the target through the chain it
+    skips runs with that chain instead (:func:`_same_line_chain_route`).
     """
     flow_axis, _lane_axis = AxisFrame.axes_for_direction(section.direction)
     sp, sq = axis_split(flow_axis, (src.x, src.y))
@@ -610,21 +616,203 @@ def _route_flow_side_lane_change(
     points = diagonal_centreline(
         section.direction, (src_lane, src.y), (tgt_lane, tgt.y), *placement
     )
+    departures = _bundle_mate_departures(src, tgt, ctx, section, line_ids)
+    plain_holds = not _crossed_twice(
+        departures, abs(placement[0] - sp), src_lane, tgt_lane
+    )
     if len(line_ids) == 1:
-        footprints = _passed_station_footprints(src, tgt, ctx, section)
-        if not _clears(points, footprints):
-            points = (
-                _clear_lane_change(
-                    src, tgt, ctx, section, src_lane, tgt_lane, footprints
-                )
-                or points
+        chain = _same_line_chain_route(edge, src, tgt, ctx, section, src_lane)
+        footprints = (
+            _passed_station_footprints(src, tgt, ctx, section) if chain is None else []
+        )
+        if chain is not None:
+            points = chain
+        elif not (plain_holds and _clears(points, footprints)):
+            cleared = _clear_lane_change(
+                src, tgt, ctx, section, src_lane, tgt_lane, footprints, departures
             )
+            if cleared is not None:
+                points = cleared
+            elif not plain_holds:
+                return None
+    elif not plain_holds:
+        return None
     return RoutedPath(
         edge=edge,
         line_id=edge.line_id,
         points=points,
         offset_regime=OffsetRegime.BAKED,
     )
+
+
+class _Departure(NamedTuple):
+    """A line sharing the port that leaves its lane for another station's.
+
+    Lanes are lane-axis coordinates; distances are flow-axis distances from
+    the port.
+    """
+
+    port_lane: float
+    leave_lane: float
+    arrive_lane: float
+    leave_at: float
+    arrive_at: float
+
+
+def _bundle_mate_departures(
+    src: Station,
+    tgt: Station,
+    ctx: _RoutingCtx,
+    section: Section,
+    line_ids: list[str],
+) -> list[_Departure]:
+    """Lane changes of the port's other lines that leave short of *tgt*.
+
+    Every line at port *src* outside *line_ids* that, from the port or from a
+    station nearer the port than *tgt*, runs to a station of *section* on
+    another lane.  The section's flow runs along ``y`` (lanes along ``x``).
+    """
+    graph = ctx.graph
+    sp = src.y
+    reach = abs(tgt.y - sp)
+    mates = set(graph.station_lines(src.id)) - set(line_ids)
+
+    def lane(station: Station, line_id: str) -> float:
+        return station.x + _tb_x_offset(ctx, station.id, line_id, section.id)
+
+    departures: list[_Departure] = []
+    for sid in section.station_ids:
+        leave = graph.stations[sid]
+        if (leave.is_port and sid != src.id) or abs(leave.y - sp) >= reach:
+            continue
+        for out in graph.edges_from(sid):
+            if out.line_id not in mates:
+                continue
+            arrive = graph.stations[out.target]
+            if arrive.section_id != section.id:
+                continue
+            leave_lane = lane(leave, out.line_id)
+            arrive_lane = lane(arrive, out.line_id)
+            if abs(arrive_lane - leave_lane) < COORD_TOLERANCE:
+                continue
+            departures.append(
+                _Departure(
+                    lane(src, out.line_id),
+                    leave_lane,
+                    arrive_lane,
+                    abs(leave.y - sp),
+                    abs(arrive.y - sp),
+                )
+            )
+    return departures
+
+
+def _crossed_twice(
+    departures: list[_Departure], start: float, from_lane: float, to_lane: float
+) -> bool:
+    """Whether a lane change off the port's lane meets one line twice.
+
+    The change starts *start* from the port and steps from *from_lane* over
+    the port lanes between it and *to_lane*.  A line it steps over that has not
+    yet left, and later leaves the same way for a lane beyond *to_lane*,
+    crosses it a second time.
+    """
+    sense = _sign(to_lane - from_lane)
+    lo, hi = sorted((from_lane, to_lane))
+    return any(
+        lo < d.port_lane < hi
+        and _sign(d.arrive_lane - d.leave_lane) == sense
+        and (d.arrive_lane - to_lane) * sense > 0
+        and start < d.arrive_at
+        for d in departures
+    )
+
+
+def _tangles_with_departure(
+    departures: list[_Departure],
+    span: tuple[float, float],
+    from_lane: float,
+    to_lane: float,
+) -> bool:
+    """Whether a lane change over flow distances *span* overlaps a departure.
+
+    Both diagonals cover overlapping lanes while both are under way, so with
+    different slopes they cross and cross back.
+    """
+    lo, hi = sorted((from_lane, to_lane))
+    return any(
+        min(d.leave_lane, d.arrive_lane) < hi
+        and max(d.leave_lane, d.arrive_lane) > lo
+        and d.leave_at < span[1]
+        and d.arrive_at > span[0]
+        for d in departures
+    )
+
+
+def _same_line_chain_route(
+    edge: Edge,
+    src: Station,
+    tgt: Station,
+    ctx: _RoutingCtx,
+    section: Section,
+    src_lane: float,
+) -> list[tuple[float, float]] | None:
+    """A bypass drawn along the chain its own line also takes to *tgt*, or ``None``.
+
+    When the bypass's line also reaches *tgt* through stations it skips, from
+    one standing on the lane the line enters on, the line arrives at *tgt*
+    twice.  The bypass then climbs that lane to the station and follows the
+    chain's own routes into *tgt*, so the two read as one track rather than
+    splitting at the port and rejoining at the target.  Stations passed on the
+    climb must carry the line or keep clear of the lane.  The section's flow
+    runs along ``y``.
+    """
+    graph = ctx.graph
+    sp = src.y
+
+    def chain_into(current: Station) -> list[Edge] | None:
+        for chain in graph.edges_to(current.id):
+            if chain.line_id != edge.line_id or chain.source == edge.source:
+                continue
+            via = graph.stations[chain.source]
+            if via.is_port or via.section_id != section.id:
+                continue
+            if not 0.0 < (via.y - sp) / (current.y - sp) < 1.0:
+                continue
+            via_lane = via.x + _tb_x_offset(ctx, via.id, edge.line_id, section.id)
+            if abs(via_lane - src_lane) < COORD_TOLERANCE:
+                return [chain]
+            upstream = chain_into(via)
+            if upstream is not None:
+                return [*upstream, chain]
+        return None
+
+    chain = chain_into(tgt)
+    if chain is None:
+        return None
+    first = graph.stations[chain[0].source]
+    passed = _passed_station_footprints(
+        src, first, ctx, section, skip_line=edge.line_id
+    )
+    if not _clears([(src_lane, sp), (src_lane, first.y)], passed):
+        return None
+    points = [(src_lane, sp)]
+    for link in chain:
+        routed = _route_tb_internal(
+            link, graph.stations[link.source], graph.stations[link.target], ctx
+        )
+        if routed is None:
+            return None
+        points.extend(routed.points[1:])
+    return [
+        p
+        for k, p in enumerate(points)
+        if k in (0, len(points) - 1)
+        or not (
+            abs(points[k - 1][0] - p[0]) < COORD_TOLERANCE_FINE
+            and abs(points[k + 1][0] - p[0]) < COORD_TOLERANCE_FINE
+        )
+    ]
 
 
 def _diagonal_spread(n: int, step: float, run: float, lateral: float) -> float:
@@ -641,7 +829,12 @@ _Box = tuple[float, float, float, float]
 
 
 def _passed_station_footprints(
-    src: Station, tgt: Station, ctx: _RoutingCtx, section: Section
+    src: Station,
+    tgt: Station,
+    ctx: _RoutingCtx,
+    section: Section,
+    *,
+    skip_line: str | None = None,
 ) -> list[_Box]:
     """Boxes a flow-side entry into a vertical section must keep clear of.
 
@@ -649,8 +842,9 @@ def _passed_station_footprints(
     the flow axis contributes its pill and its label; the target contributes
     its label only.  Crossing a passed station's pill reads as stopping there,
     even on the line's own lane.  Labels are seated after routing, so the box
-    assumes the preferred, low-x side of the pill.  The section's flow runs
-    along ``y`` (lanes along ``x``).
+    assumes the preferred, low-x side of the pill.  Stations carrying
+    *skip_line* contribute nothing.  The section's flow runs along ``y`` (lanes
+    along ``x``).
     """
     graph = ctx.graph
     frame = _section_lane_frame(graph, section, ctx.positive_fan)
@@ -660,6 +854,8 @@ def _passed_station_footprints(
     for sid in section.station_ids:
         st = graph.stations[sid]
         if st.is_port or st.is_hidden:
+            continue
+        if skip_line is not None and skip_line in graph.station_lines(sid):
             continue
         passed = lo < st.y < hi
         if sid != tgt.id and not passed:
@@ -704,6 +900,7 @@ def _clear_lane_change(
     src_lane: float,
     tgt_lane: float,
     footprints: list[_Box],
+    departures: list[_Departure],
 ) -> list[tuple[float, float]] | None:
     """A flow-side entry that passes beside the stations it skips, or ``None``.
 
@@ -712,6 +909,10 @@ def _clear_lane_change(
     beside the footprints and inside the section box, pass them there, and
     cross to the target's lane just before it.  Side lanes that cross another
     line's lane at the port come last, then nearer the target's lane first.
+    A route is skipped where a line sharing the port would cross it twice:
+    stepped over before it leaves the same way (:func:`_crossed_twice`), or
+    met by the step back while that line is itself changing lanes
+    (:func:`_tangles_with_departure`).
 
     The section's flow runs along ``y`` (lanes along ``x``): the route's
     flow-axis coordinates are the stations' ``y`` and its lanes are ``x``.
@@ -724,7 +925,9 @@ def _clear_lane_change(
     route = diagonal_centreline(
         section.direction, (src_lane, sp), (tgt_lane, tp), *late
     )
-    if _clears(route, footprints):
+    if not _crossed_twice(departures, abs(late[0] - sp), src_lane, tgt_lane) and (
+        _clears(route, footprints)
+    ):
         return route
 
     early = _compute_diagonal_placement(
@@ -751,6 +954,11 @@ def _clear_lane_change(
         if not inside[0] <= lane <= inside[1]:
             continue
         if min(abs(lane - tgt_lane), abs(lane - src_lane)) < COORD_TOLERANCE:
+            continue
+        if _crossed_twice(departures, abs(early[0] - sp), src_lane, lane):
+            continue
+        step_back = (abs(late[0] - sp), abs(late[1] - sp))
+        if _tangles_with_departure(departures, step_back, lane, tgt_lane):
             continue
         route = [
             (src_lane, sp),

@@ -264,39 +264,6 @@ def test_flow_entry_route_clears_stations_it_passes(name: str) -> None:
 # skips without crossing their markers (which would read as stopping there) or
 # their labels, which sit on the low-x side of each pill.
 _BYPASS_MAPS = {
-    "chain_two_columns_bt": """
-%%metro line: m1 | L1 | #3cb44b
-%%metro line: m2 | L2 | #4363d8
-
-graph LR
-    subgraph z0 [Zone 0]
-        q0x2[Q0X2]
-        q0x3[Q0X3]
-    end
-    subgraph z1 [Zone 1]
-        %%metro direction: BT
-        q1x0[Q1X0]
-        q1x1[Q1X1]
-        q1x2[Q1X2]
-        q1x0 -->|m1| q1x1
-        q1x1 -->|m1| q1x2
-    end
-    subgraph z2 [Zone 2]
-        %%metro direction: TB
-        q2x0[Q2X0]
-        q2x1[Q2X1]
-        q2x3[Q2X3]
-        q2x1 -->|m1| q2x3
-    end
-    subgraph z3 [Zone 3]
-        %%metro direction: RL
-        q3x0[Q3X0]
-    end
-    q0x2 -->|m1| q1x2
-    q0x3 -->|m1| q1x0
-    q1x0 -->|m2| q3x0
-    q1x2 -->|m1| q2x0
-""",
     "fork_after_bypassed_station_bt": """
 %%metro line: m0 | L0 | #e6194b
 %%metro line: m1 | L1 | #3cb44b
@@ -338,34 +305,6 @@ graph LR
     q2x0 -->|m1| q3x0
     q2x3 -->|m3| q3x0
 """,
-    "single_bypass_bt": """
-%%metro line: m1 | L1 | #3cb44b
-%%metro line: m2 | L2 | #4363d8
-%%metro line: m3 | L3 | #f58231
-
-graph LR
-    subgraph z0 [Zone 0]
-        q0x1[Q0X1]
-    end
-    subgraph z1 [Zone 1]
-        %%metro direction: BT
-        q1x0[Q1X0]
-        q1x1[Q1X1]
-        q1x0 -->|m1| q1x1
-    end
-    subgraph z2 [Zone 2]
-        q2x0[Q2X0]
-    end
-    subgraph z3 [Zone 3]
-        %%metro direction: TB
-        q3x0[Q3X0]
-        q3x1[Q3X1]
-        q3x0 -->|m2| q3x1
-    end
-    q0x1 -->|m1| q1x0
-    q0x1 -->|m1| q1x1
-    q1x0 -->|m3| q2x0
-""",
     "bypass_into_shared_column_bt": """
 %%metro line: m0 | L0 | #e6194b
 %%metro line: m1 | L1 | #3cb44b
@@ -398,12 +337,31 @@ graph LR
 }
 
 
+def _line_also_reaches_target(
+    graph: MetroGraph, port_id: str, target_id: str, line_id: str
+) -> bool:
+    """Whether *line_id* reaches *target_id* from a station as well as the port.
+
+    Such a bypass runs with its own line's chain through the stations it
+    skips (``test_flow_entry_bypass_crossings``), so passing them is not a
+    marker strike.
+    """
+    return any(
+        edge.line_id == line_id and edge.source != port_id
+        for edge in graph.edges_to(target_id)
+    )
+
+
 @pytest.mark.parametrize("name", sorted(_BYPASS_MAPS))
 def test_flow_entry_bypass_clears_skipped_markers_and_labels(name: str) -> None:
     graph = parse_and_layout(_BYPASS_MAPS[name])
     drawn, labels = _drawn_and_labels(graph)
     radius = station_radius_approx()
-    entries = [key for key in _flow_entries(graph, drawn) if len(drawn[key]) > 2]
+    entries = [
+        key
+        for key in _flow_entries(graph, drawn)
+        if len(drawn[key]) > 2 and not _line_also_reaches_target(graph, *key)
+    ]
     assert entries, "fixture lost its lane-changing flow-side entry"
     for port_id, target_id, line_id in entries:
         points = drawn[port_id, target_id, line_id]
