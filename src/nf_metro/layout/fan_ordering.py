@@ -152,30 +152,6 @@ def _line_opening_order(
     return order
 
 
-def fanout_stays_on_source_row(
-    graph: MetroGraph,
-    junction_id: str,
-    topology: FanTopologyQuery | None = None,
-) -> bool:
-    """Whether every branch of the fan lands in a section on the junction's row."""
-    junction = graph.stations.get(junction_id)
-    if junction is None:
-        return False
-    _source_col, source_row = resolve_section_colrow(graph, junction)
-    if source_row is None:
-        return False
-    for edge in graph.edges_from(junction_id):
-        entry_id = _fan_branch_entry_port(graph, edge.target, topology)
-        if entry_id is None:
-            return False
-        _target_col, target_row = resolve_section_colrow(
-            graph, graph.stations[entry_id]
-        )
-        if target_row != source_row:
-            return False
-    return True
-
-
 def fanout_divergence_peel_order(
     graph: MetroGraph,
     junction_id: str,
