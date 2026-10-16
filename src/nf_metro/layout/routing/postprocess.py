@@ -82,6 +82,14 @@ def _spread_diagonal_bundles(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
     # bundles, and grouping a whole fan together keeps it as compact as the hub
     # geometry allows (the section-spacing phase reserves room for whatever this
     # produces, so an over-eager per-edge spread would inflate the layout).
+    # A baked multi-line edge is a parallel bundle the per-edge pass below
+    # spreads on its own slope, so only a vertical section's single-line
+    # branches join a hub group.
+    baked_edge_lines = Counter(
+        (rp.edge.source, rp.edge.target)
+        for rp in routes
+        if rp.offset_regime is OffsetRegime.BAKED and _is_diagonal_route(rp)
+    )
     fork_groups: dict[str, list[RoutedPath]] = defaultdict(list)
     join_groups: dict[str, list[RoutedPath]] = defaultdict(list)
     for rp in routes:
@@ -90,7 +98,10 @@ def _spread_diagonal_bundles(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
             or rp.exit_lane_transition_plan_id is not None
             or (
                 rp.offset_regime is OffsetRegime.BAKED
-                and not _within_vertical_section(rp, ctx)
+                and (
+                    baked_edge_lines[(rp.edge.source, rp.edge.target)] > 1
+                    or not _within_vertical_section(rp, ctx)
+                )
             )
         ):
             continue
