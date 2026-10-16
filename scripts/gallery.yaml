@@ -770,6 +770,14 @@ gallery:
       "A two-line bundle entering a BT section through its bottom port and bypassing
       a chain to its last station: the bundle steps across just inside the port and passes
       the skipped stations on their label-free side."
+  - id: bt_entry_bypass_on_spread_diagonal
+    source_dir: examples/topologies
+    category: TB / BT Sections
+    description:
+      "A line entering a BT section through its bottom port both to a chain and,
+      bypassing it, to the chain's last station, where the chain link is a diagonal shared
+      with another line: the diagonal spread carries the bypass along with the chain, so
+      the line stays one track instead of drawing a second copy beside it."
   - id: bt_exit_top_above
     source_dir: examples/topologies
     category: TB / BT Sections
