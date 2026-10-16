@@ -129,10 +129,34 @@ graph LR
     q1x2 -->|m1| q2x0
 """
 
+# The chain link the bypass follows is a diagonal shared with another line, so
+# the diagonal spread moves it after routing.
+_SPREAD_CHAIN = """
+%%metro line: a | A | #e6194b
+%%metro line: b | B | #3cb44b
+%%metro line: c | C | #4363d8
+
+graph LR
+    subgraph feed [Feed]
+        f0[F0]
+    end
+    subgraph report [Report]
+        %%metro direction: BT
+        r0[R0]
+        r1[R1]
+        r2[R2]
+        r0 -->|a| r2
+        r0 -->|b| r1
+        r0 -->|c| r1
+    end
+    f0 -->|b| r1
+"""
+
 _SAME_LINE_MAPS = {
     "chain_from_first_station_bt": _SAME_LINE_CHAIN,
     "chain_from_port_bt": _SINGLE_BYPASS,
     "chain_across_columns_bt": _TWO_COLUMN_CHAIN,
+    "chain_on_spread_diagonal_bt": _SPREAD_CHAIN,
 }
 
 _CROSSING_MAPS = {
