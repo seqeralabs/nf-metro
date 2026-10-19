@@ -10,7 +10,7 @@ yet; both ship ahead of the wiring that will call them.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import Enum
 from itertools import permutations
@@ -36,6 +36,7 @@ from nf_metro.layout.route_plan import (
 )
 from nf_metro.layout.route_reservations import (
     CanvasRegion,
+    CanvasSide,
     ColumnGapRegion,
     CorridorOrientation,
     CorridorRegion,
@@ -2758,6 +2759,19 @@ def _problem(
             or roles[right.claim_id] != CorridorCohortClaimRole.FIXED
         )
     )
+    # Branches of one line split to different targets share a lane, and each
+    # target orders the other lines against its own branch.  Where the two
+    # targets disagree the crossing is forced, so a footprint order between a
+    # branch and another line seats nothing the endpoint orders do not.
+    movable_by_id = {item.claim_id: item for item in movable}
+    split_branch_ids = {
+        member_id
+        for equality in equalities
+        if (left := movable_by_id[equality.left_member_id]).target.edge_key[2]
+        == (right := movable_by_id[equality.right_member_id]).target.edge_key[2]
+        and left.target.edge_key[1] != right.target.edge_key[1]
+        for member_id in (left.claim_id, right.claim_id)
+    }
     directed_separations: list[CorridorDirectedSeparation] = [
         CorridorDirectedSeparation(
             f"{order.owner_id}|{lower_id}|{upper_id}",
@@ -2769,6 +2783,7 @@ def _problem(
         if order.lower.variable_id is not None and order.upper.variable_id is not None
         for lower_id in lane_ids(order.lower.variable_id)
         for upper_id in lane_ids(order.upper.variable_id)
+        if lower_id not in split_branch_ids and upper_id not in split_branch_ids
     ]
     relation_domains: list[CorridorCoordinateDomain] = []
     for order in footprint_model.orders:
@@ -2799,10 +2814,25 @@ def _problem(
                 raise CorridorCohortCompilationError(
                     f"fixed footprint order {order.owner_id} is infeasible"
                 )
+    # A lane pinned onto its own line's fixed lane has no coordinate to choose:
+    # a crossing at the pinned coordinate is the fixed lane's, forced on the
+    # lane that joins it, so it is not a placement the solver can avoid.
+    pinned = {
+        movable_claim.claim_id: fixed_claim.coordinate
+        for movable_claim in movable
+        for fixed_claim in fixed_claims
+        if _same_semantic_fixed_lane(movable_claim, fixed_claim)
+    }
     forbidden_intervals = tuple(
         replace(interval, member_id=member_id)
         for interval in footprint_model.forbidden_intervals
         for member_id in lane_ids(interval.member_id)
+        if not (
+            member_id in pinned
+            and interval.minimum_coordinate
+            < pinned[member_id]
+            < interval.maximum_coordinate
+        )
     )
     scalar_domains: list[CorridorCoordinateDomain] = []
     for request in scalar_requests:
@@ -2901,22 +2931,40 @@ def _problem(
                 scalar_witnesses[request.variable.variable_id].direction
                 for request in scalar_requests
             },
+            {item.ledger.region for item in movable},
         ),
         coordinate_axis=coordinate_axis,
     )
 
 
-def _lane_order_axis_sign(coordinate_axis: int, travel: set[Direction]) -> int:
+_CANVAS_OUTWARD_SIGN = {
+    CanvasSide.LEFT: 1,
+    CanvasSide.TOP: 1,
+    CanvasSide.RIGHT: -1,
+    CanvasSide.BOTTOM: -1,
+}
+
+
+def _lane_order_axis_sign(
+    coordinate_axis: int,
+    travel: set[Direction],
+    regions: Collection[CorridorRegion] = (),
+) -> int:
     """Screen sign of the canonical lane order along *coordinate_axis*.
 
     A bundle fans its members along the right-hand normal of its travel, so a
     component whose lanes all travel one way orders along that normal.
-    Counter-running lanes share no travel frame; they order in the frame of
-    screen-positive travel along the corridor (R for a Y-coordinate lane, D
-    for an X-coordinate one).
+    Counter-running lanes share no travel frame.  On one canvas margin they
+    order in the frame pointing back toward the sections, so seating, which
+    only lowers a lane along that frame, pushes it out into open canvas rather
+    than into the boxes the margin skirts, where no aperture can make room.
+    Elsewhere they order in the frame of screen-positive travel along the
+    corridor (R for a Y-coordinate lane, D for an X-coordinate one).
     """
     if len(travel) == 1:
         return right_normal_axis_sign(next(iter(travel)))
+    if len(regions) == 1 and isinstance(region := next(iter(regions)), CanvasRegion):
+        return _CANVAS_OUTWARD_SIGN[region.side]
     return right_normal_axis_sign(Direction.R if coordinate_axis == 1 else Direction.D)
 
 

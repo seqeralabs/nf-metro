@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Callable, Container, Iterable, Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from fractions import Fraction
 from math import isfinite
@@ -735,10 +735,35 @@ def _forced_root_order(
     return _ordered_roots_or_cycle(roots, forced, root_key)[0]
 
 
-def solve_corridor_cohorts(  # noqa: C901, PLR0915
+def solve_corridor_cohorts(
     problem: CorridorAllocationProblem,
 ) -> CorridorAllocationResult:
-    """Return the unique canonical seating for a complete witness set."""
+    """Return the unique canonical seating for a complete witness set.
+
+    Seating only lowers a root from its preferred base along the lane-order
+    frame.  A failure with a clearance shortfall is reported as it stands, for
+    an aperture to relieve.  One with none, where only lifting a lane clear of
+    a pinned neighbour seats it, has nothing an aperture can grant, so it is
+    seated in the opposite frame instead: every hard relation reads the same
+    there, and only the tie-breaks between unforced pairs and the seating
+    direction turn over.  A component that seats in neither reports its own
+    frame's failure.
+    """
+    result = _solve_in_frame(problem)
+    if (
+        result.status is not CorridorAllocationStatus.FAILURE
+        or result.clearance_shortfall is not None
+    ):
+        return result
+    reversed_result = _solve_in_frame(replace(problem, axis_sign=-problem.axis_sign))
+    if reversed_result.status is CorridorAllocationStatus.PLANNED:
+        return reversed_result
+    return result
+
+
+def _solve_in_frame(  # noqa: C901, PLR0915
+    problem: CorridorAllocationProblem,
+) -> CorridorAllocationResult:
     if not problem.witnesses_complete:
         return CorridorAllocationResult(CorridorAllocationStatus.COMPATIBILITY)
     invalid = _invalid_problem(problem)

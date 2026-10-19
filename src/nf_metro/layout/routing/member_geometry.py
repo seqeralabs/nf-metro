@@ -423,7 +423,10 @@ def _corridor_boundary_sections(
     either side; nothing here reads which end of an authored connector is its
     source or its target. A side with no direct candidate is derived by
     searching every section at that side's grid index for one that shares the
-    cross-axis span the known side already occupies.
+    cross-axis span the known side already occupies.  When neither side holds a
+    candidate (a claim fed through a sectionless junction, its implicated
+    sections all away from the gap), both sides are derived that way from the
+    candidates' cross-axis spans.
     """
     if isinstance(region, ColumnGapRegion):
         start_attr = "grid_col"
@@ -515,6 +518,20 @@ def _corridor_boundary_sections(
             for section in graph.sections.values()
             if start(section) + span(section) - 1 == negative_index
             and any(overlaps(section, positive) for positive in positive_sections)
+        )
+    elif not negative_sections and not positive_sections:
+        pool = tuple(candidates.values())
+        negative_sections = tuple(
+            section
+            for section in graph.sections.values()
+            if start(section) + span(section) - 1 == negative_index
+            and any(overlaps(section, other) for other in pool)
+        )
+        positive_sections = tuple(
+            section
+            for section in graph.sections.values()
+            if start(section) == positive_index
+            and any(overlaps(section, other) for other in pool)
         )
     if not negative_sections or not positive_sections:
         raise ValueError(
