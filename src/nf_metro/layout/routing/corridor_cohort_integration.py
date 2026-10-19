@@ -106,6 +106,7 @@ class CorridorCompatibilityReason(str, Enum):
     INCOMPLETE_WITNESSES = "incomplete-witnesses"
     NO_MIGRABLE_GEOMETRY = "no-migrable-geometry"
     UNREPRESENTED_ENDPOINT_COHORT = "unrepresented-endpoint-cohort"
+    OVERLAID_ENDPOINT_SLOTS = "overlaid-endpoint-slots"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1190,8 +1191,8 @@ def _bind_claim(
 def _bind_ledger(
     ledger: CorridorCohortLedger,
     targets: Sequence[CorridorCohortTarget],
-) -> tuple[_BoundClaim, ...]:
-    landing_coordinates = _cohort_landing_coordinates(ledger, targets)
+) -> tuple[tuple[_BoundClaim, ...], frozenset[str]]:
+    landing_coordinates, overlaid = _cohort_landing_coordinates(ledger, targets)
     by_key: defaultdict[
         tuple[str, tuple[str, str, str]], list[CorridorCohortTarget]
     ] = defaultdict(list)
@@ -1223,7 +1224,7 @@ def _bind_ledger(
         except CorridorCohortCompilationError:
             if claim.reservation_complete:
                 raise
-    return tuple(bound)
+    return tuple(bound), overlaid
 
 
 def _directly_movable(
@@ -2195,12 +2196,17 @@ def _landing_frame(
 def _cohort_landing_coordinates(
     ledger: CorridorCohortLedger,
     targets: Sequence[CorridorCohortTarget],
-) -> dict[tuple[str, tuple[str, str, str]], float]:
+) -> tuple[dict[tuple[str, tuple[str, str, str]], float], frozenset[str]]:
     """Bind each endpoint member to the port slot its own network draws into.
 
     A network rank follows route emission order, which need not ascend with the
     slots the networks draw into, so a rank is never dealt a slot by position:
     it keeps the one slot its members share.
+
+    A cohort whose distinct networks draw into one slot, or whose one network
+    draws into two, has no lane order to hold: the offsets laid its lines over
+    each other at the port.  It binds no slots and is returned among the
+    overlaid cohorts, whose components keep their drawn geometry.
     """
     expected_by_cohort = dict(ledger.endpoint_members)
     ranks_by_member: defaultdict[str, set[tuple[str, int]]] = defaultdict(set)
@@ -2219,6 +2225,7 @@ def _cohort_landing_coordinates(
         targets_by_member[target.member_id].append(target)
 
     coordinates: dict[tuple[str, tuple[str, str, str]], float] = {}
+    overlaid: set[str] = set()
     for cohort_id, expected_members in expected_by_cohort.items():
         if cohort_id in ledger.ambiguous_endpoint_cohort_ids:
             continue
@@ -2268,31 +2275,24 @@ def _cohort_landing_coordinates(
             slots_by_rank[rank_by_member[member_id]].append(
                 target.endpoint_lane_coordinate
             )
-        representative_slots: list[float] = []
-        for rank in ranks:
-            network_slots = slots_by_rank[rank]
-            if any(
-                not isclose(item, network_slots[0], abs_tol=COORD_TOLERANCE)
-                for item in network_slots[1:]
-            ):
-                raise CorridorCohortCompilationError(
-                    f"corridor endpoint cohort {cohort_id} has split network slots"
-                )
-            representative_slots.append(network_slots[0])
+        representative_slots = [slots_by_rank[rank][0] for rank in ranks]
         ordered_slots = sorted(representative_slots)
         if any(
+            not isclose(item, slots_by_rank[rank][0], abs_tol=COORD_TOLERANCE)
+            for rank in ranks
+            for item in slots_by_rank[rank][1:]
+        ) or any(
             isclose(left, right, abs_tol=COORD_TOLERANCE)
             for left, right in zip(ordered_slots, ordered_slots[1:])
         ):
-            raise CorridorCohortCompilationError(
-                f"corridor endpoint cohort {cohort_id} has tied port slots"
-            )
+            overlaid.add(cohort_id)
+            continue
         slot_by_rank = dict(zip(ranks, representative_slots))
         for member_id, target in member_targets.items():
             coordinates[(member_id, target.edge_key)] = slot_by_rank[
                 rank_by_member[member_id]
             ]
-    return coordinates
+    return coordinates, frozenset(overlaid)
 
 
 def _overlap(left: _BoundClaim, right: _BoundClaim) -> bool:
@@ -3139,12 +3139,15 @@ def _component_plan(
     scalar_requests_by_id: Mapping[str, CorridorScalarRequest],
     intervals_by_member: Mapping[str, Sequence[CorridorForbiddenInterval]],
     solve: Callable[[CorridorAllocationProblem], CorridorAllocationResult],
+    overlaid_cohort_ids: frozenset[str] = frozenset(),
 ) -> CorridorCohortComponentPlan:
     """Lower one closed component into a single per-axis solver problem.
 
     Every physical overlap group and every relation-joined scalar variable the
     closure gave this component seats in one ``CorridorAllocationProblem``, so a
-    member and a scalar joined by a typed relation always share one solve.
+    member and a scalar joined by a typed relation always share one solve.  A
+    component holding an overlaid endpoint cohort has no slot order to seat
+    against and keeps its drawn geometry.
     """
     physical_ranks = spec.physical_ranks
     component_claims = tuple(
@@ -3176,7 +3179,8 @@ def _component_plan(
     member_ids = tuple(sorted({item.ledger.member_id for item in component_claims}))
     problems: tuple[CorridorAllocationProblem, ...] = ()
     results: tuple[CorridorAllocationResult, ...] = ()
-    if has_movable or component_scalar_requests:
+    overlaid = not overlaid_cohort_ids.isdisjoint(endpoint_ids)
+    if not overlaid and (has_movable or component_scalar_requests):
         problem = _problem(
             component_claims,
             roles,
@@ -3225,7 +3229,9 @@ def _component_plan(
         )
     elif status is CorridorAllocationStatus.COMPATIBILITY:
         compatibility = CorridorCohortCompatibility(
-            CorridorCompatibilityReason.INCOMPLETE_WITNESSES
+            CorridorCompatibilityReason.OVERLAID_ENDPOINT_SLOTS
+            if overlaid
+            else CorridorCompatibilityReason.INCOMPLETE_WITNESSES
             if problems
             else CorridorCompatibilityReason.NO_MIGRABLE_GEOMETRY,
             member_ids,
@@ -3472,7 +3478,7 @@ def compile_corridor_cohort_plan(
     carries its route patches, and :func:`publish_corridor_cohort_plan` applies
     them.
     """
-    claims = _bind_ledger(ledger, targets)
+    claims, overlaid = _bind_ledger(ledger, targets)
     scalar_requests_by_id = {
         request.variable.variable_id: request for request in scalar_requests
     }
@@ -3564,6 +3570,7 @@ def compile_corridor_cohort_plan(
             scalar_requests_by_id,
             intervals_by_member,
             solve,
+            overlaid,
         )
         for rank, spec in enumerate(logical)
     ]

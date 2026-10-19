@@ -267,7 +267,8 @@ def test_endpoint_members_bind_and_rank_by_their_own_drawn_slots(
     lanes_by_cohort: dict[str, list[tuple[int, float]]] = {}
 
     def landings(ledger, targets, *args):
-        coordinates = real_landings(ledger, targets, *args)
+        coordinates, overlaid = real_landings(ledger, targets, *args)
+        assert not overlaid
         slots = {
             (target.member_id, target.edge_key): target.endpoint_lane_coordinate
             for target in targets
@@ -281,7 +282,7 @@ def test_endpoint_members_bind_and_rank_by_their_own_drawn_slots(
             slot = slots[identity]
             assert coordinate == pytest.approx(slot, abs=COORD_TOLERANCE), identity
             bound_slots.setdefault(cohorts[identity], set()).add(round(coordinate, 3))
-        return coordinates
+        return coordinates, overlaid
 
     def lane(claim, cohort_first_path_rank, local_boundary_rank, *args):
         cohort_id = claim.ledger.endpoint_cohort_id

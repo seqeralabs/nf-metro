@@ -4732,68 +4732,6 @@ def _reconcile_horizontal_offsets(ctx: _OffsetCtx, max_iterations: int = 10) -> 
     _reinherit_junction_lanes(ctx, moved)
 
 
-def _separate_shared_entry_slots(ctx: _OffsetCtx) -> None:
-    """Give each line at a LEFT/RIGHT entry port a slot of its own.
-
-    Forwarding a recompacted exit port across its seam copies one feeder's
-    offsets onto an entry port other feeders share, which can land two lines
-    on one slot; reconciliation repairs some of those, not all.  A line whose
-    feeder does not present its slot has no claim to it and steps alone to the
-    nearest free slot on its feeder's side.  Lines that all arrive flat keep
-    their order instead, each later one stepping past the one before.  Every
-    move is carried along the section bundle.
-    """
-    graph = ctx.graph
-    for port_id, port in graph.ports.items():
-        if not port.is_entry or port.side not in (PortSide.LEFT, PortSide.RIGHT):
-            continue
-        if port.section_id in ctx.tb_sections:
-            continue
-        current = {
-            lid: ctx.offsets[(port_id, lid)]
-            for lid in graph.station_lines(port_id)
-            if (port_id, lid) in ctx.offsets
-        }
-        if len(set(current.values())) == len(current):
-            continue
-        feeder_off = {
-            edge.line_id: ctx.offsets.get((edge.source, edge.line_id), 0.0)
-            for edge in graph.edges_to(port_id)
-        }
-
-        def flat(lid: str) -> bool:
-            return abs(feeder_off.get(lid, current[lid]) - current[lid]) <= (
-                _OFFSET_EQ_TOLERANCE
-            )
-
-        def shares_slot(lid: str) -> bool:
-            return any(
-                other != lid and abs(off - current[lid]) <= _OFFSET_EQ_TOLERANCE
-                for other, off in current.items()
-            )
-
-        new_offs: dict[str, float] = {}
-        for lid in sorted(current):
-            if shares_slot(lid) and not flat(lid):
-                step = (
-                    ctx.offset_step
-                    if feeder_off.get(lid, current[lid]) >= current[lid]
-                    else -ctx.offset_step
-                )
-                slot = current[lid] + step
-                while any(
-                    abs(slot - off) <= _OFFSET_EQ_TOLERANCE for off in current.values()
-                ):
-                    slot += step
-                current[lid] = new_offs[lid] = slot
-        previous: float | None = None
-        for lid in sorted(current, key=lambda lid: (current[lid], feeder_off.get(lid))):
-            if previous is not None and current[lid] < previous + ctx.offset_step:
-                current[lid] = new_offs[lid] = previous + ctx.offset_step
-            previous = current[lid]
-        _apply_offsets_along_bundle(ctx, port_id, port.section_id, new_offs)
-
-
 def _center_rail_boundary_port_bundles(ctx: _OffsetCtx) -> None:
     """Centre a rail-laid section's boundary-port bundle on the port itself.
 
@@ -5782,7 +5720,6 @@ def compute_station_offsets(
     _recompact_fan_port_bordering_stations(ctx, same_y_adj, sec_layer_stations)
     _restore_fanout_peel_order(ctx, same_y_adj)
     _reconcile_horizontal_offsets(ctx)
-    _separate_shared_entry_slots(ctx)
     _center_rail_boundary_port_bundles(ctx)
     _recenter_single_line_corridor_entry(ctx)
     _slot_entry_arrivals_on_their_approach_lane(ctx, same_y_adj)
