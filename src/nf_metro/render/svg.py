@@ -123,11 +123,7 @@ from nf_metro.layout.routing.invariants import (
     CurveInvariantError,
     assert_render_curve_invariants,
 )
-from nf_metro.layout.routing.member_geometry import seatable_claimed_run_axis
-from nf_metro.layout.routing.reserved_bands import (
-    ReservedBand,
-    build_reserved_corridors,
-)
+from nf_metro.layout.routing.reserved_bands import build_reserved_corridors
 from nf_metro.layout.routing.reversal import tb_positive_fan_sections
 from nf_metro.layout.routing.system_emission import (
     validate_published_route_attribution,
@@ -1395,11 +1391,6 @@ def _attach_published_reservation_attribution(
     validate_published_route_attribution(routes, plan)
 
 
-def _within_band(coordinate: float, band: ReservedBand) -> bool:
-    tolerance = COORD_TOLERANCE_FINE
-    return band.lo - tolerance <= coordinate <= band.hi + tolerance
-
-
 def _ledger_changes_live_derived_band(
     graph: MetroGraph,
     plan: RoutePlan,
@@ -1412,9 +1403,7 @@ def _ledger_changes_live_derived_band(
     route legs.  Canvas bypasses and top-entry columns also consume frozen
     route-system state before a claim segment exists, while standard L-shaped
     columns consume the reserved band's centre.  Those placements therefore
-    need their route-family checks in addition to the segment comparisons, and
-    an interior run that pre-freeze seating would carry into its band moves
-    even though no translation names it.
+    need their route-family checks in addition to the segment comparisons.
     """
     if any(
         (
@@ -1499,25 +1488,22 @@ def _ledger_changes_live_derived_band(
                     claim.member_id,
                     coordinate_translations,
                 )
-                seated_axis = seatable_claimed_run_axis(route, rank)
                 if ledger is not None and (
                     derived is None
                     or derived.boundary != boundary
                     or derived.lo != ledger.lo
                     or derived.hi != ledger.hi
-                    # An untranslated claim moves only where pre-freeze seating
-                    # carries its run into the band.  A run that hugs the box
-                    # edge its entry port sits on is an end segment, outside
-                    # the band by construction and never seated, so reading it
-                    # against the band would re-route for a position the
-                    # frozen pass had already chosen.
+                    # Only a translation can make a claim's coordinate a
+                    # consequence of consuming the ledger.  A run that hugs the
+                    # box edge its entry port sits on is outside the clearance
+                    # band by construction, so reading an untranslated claim
+                    # against the band would re-route for a position the frozen
+                    # pass had already chosen.
                     or (
                         allocation_coordinate != claim.allocation_coordinate
-                        and not _within_band(allocation_coordinate, ledger)
-                    )
-                    or (
-                        seated_axis is not None
-                        and not _within_band(route.points[rank][seated_axis], ledger)
+                        and not ledger.lo - COORD_TOLERANCE_FINE
+                        <= allocation_coordinate
+                        <= ledger.hi + COORD_TOLERANCE_FINE
                     )
                 ):
                     return True
@@ -1868,15 +1854,16 @@ def _corridor_grant_moved_plan_ids(plan: RoutePlan) -> frozenset[str]:
 
 
 def _assert_grant_moves_only_its_convergences(
-    drawn_routes: Sequence[RoutedPath],
+    ungranted_routes: Sequence[RoutedPath],
     granted_routes: Sequence[RoutedPath],
     granted_plan_ids: frozenset[str],
 ) -> None:
     """Reject a granted observation that moved any route outside its grant.
 
-    The observation replays the drawn pass's inputs, so every route no granted
-    convergence owns must match the drawn pass; one that differs would carry an
-    unrelated change into the render under cover of the grant.
+    Both observations replay one pass's inputs and differ only in the grant,
+    so every route no granted convergence owns must match the ungranted one;
+    one that differs would carry an unrelated change into the render under
+    cover of the grant.
     """
 
     def by_edge(
@@ -1887,17 +1874,17 @@ def _assert_grant_moves_only_its_convergences(
             for route in routes
         }
 
-    drawn = by_edge(drawn_routes)
+    ungranted = by_edge(ungranted_routes)
     granted = by_edge(granted_routes)
-    if drawn.keys() != granted.keys():
+    if ungranted.keys() != granted.keys():
         raise LayoutInvariantError(
             "the convergence corridor grant observation routed a different edge set "
-            "from the drawn pass"
+            "from the ungranted observation"
         )
     for key, route in granted.items():
         if route.convergence_plan_id in granted_plan_ids:
             continue
-        before = drawn[key].points
+        before = ungranted[key].points
         if len(before) != len(route.points) or any(
             abs(old - new) > COORD_TOLERANCE_FINE
             for old_point, new_point in zip(before, route.points)
@@ -2388,11 +2375,15 @@ def _settle_render_geometry(
     # grant re-routes from the geometry the observation started on, so its
     # routes are thrown away.  A convergence grant that moved a trunk is only
     # drawn by this observation, so its routes are kept -- once they are proven
-    # to differ from the drawn pass on the granted convergences alone.
+    # to differ on the granted convergences alone from the same observation
+    # routed without the grant.  The drawn pass is no baseline for that: where
+    # it never consumed the ledger, the observation's pre-freeze seating moves
+    # runs no grant touched.
     assert last_route_inputs is not None
+    observation_inputs = last_route_inputs
     drawn_routes = routes
     with _restoring_route_observation_geometry(graph):
-        observed_offsets = last_route_inputs.restore(graph)
+        observed_offsets = observation_inputs.restore(graph)
         observed_routes, observed_plan = _route(
             observed_offsets,
             settled_plan,
@@ -2406,6 +2397,14 @@ def _settle_render_geometry(
             if granted_plan_ids
             else None
         )
+        ungranted_routes: list[RoutedPath] = []
+        if granted_plan_ids:
+            ungranted_routes, _ungranted_plan = _route(
+                observation_inputs.restore(graph),
+                settled_plan,
+                settlement.coordinate_translations,
+                stage=SettlementStage.GENERAL_SETTLEMENT,
+            )
     aperture_requirements = _corridor_cohort_aperture_requirements(observed_plan)
     aperture_settlement: EnvelopeSettlement | None = None
     if granted_plan_ids:
@@ -2417,7 +2416,7 @@ def _settle_render_geometry(
                 "batch and does not retry"
             )
         _assert_grant_moves_only_its_convergences(
-            drawn_routes, observed_routes, granted_plan_ids
+            ungranted_routes, observed_routes, granted_plan_ids
         )
         station_offsets = observed_state.restore(graph)
         routes = observed_routes

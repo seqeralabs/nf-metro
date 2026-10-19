@@ -2176,26 +2176,6 @@ def _carry_seated_run(
     )
 
 
-def seatable_claimed_run_axis(route: RoutedPath, rank: int) -> int | None:
-    """The axis (0 = x, 1 = y) on which pre-freeze seating may move segment *rank*.
-
-    Only an axis-aligned interior run of a member whose exit-turn plan leaves
-    its turn column free is seated; end segments stay on their ports.  The
-    render-time settlement gate reads the same rule to predict which drawn
-    runs consuming the ledger will move.
-    """
-    if route.exit_turn_segment_rank is not None:
-        return None
-    if not 1 <= rank <= len(route.points) - 3:
-        return None
-    start, end = route.points[rank], route.points[rank + 1]
-    if abs(start[1] - end[1]) <= COORD_TOLERANCE:
-        return 1
-    if abs(start[0] - end[0]) <= COORD_TOLERANCE:
-        return 0
-    return None
-
-
 def _seat_claimed_segments_before_freeze(
     candidates: tuple[_MemberCandidate, ...], ctx: _RoutingCtx
 ) -> None:
@@ -2218,16 +2198,22 @@ def _seat_claimed_segments_before_freeze(
     ] = defaultdict(list)
     for candidate in candidates:
         route = candidate.route
-        for rank in range(len(route.points) - 1):
-            axis = seatable_claimed_run_axis(route, rank)
-            if axis is None:
+        if route.exit_turn_segment_rank is not None:
+            continue
+        for rank, (start, end) in enumerate(zip(route.points, route.points[1:])):
+            if not 1 <= rank <= len(route.points) - 3:
                 continue
             band = _segment_claim_band(ctx, route, rank)
             if band is None:
                 continue
-            grouped[(candidate.system_id, candidate.carrier_id, rank, axis)].append(
-                (route, rank, route.points[rank][axis], band)
-            )
+            if abs(start[1] - end[1]) <= COORD_TOLERANCE:
+                grouped[(candidate.system_id, candidate.carrier_id, rank, 1)].append(
+                    (route, rank, start[1], band)
+                )
+            elif abs(start[0] - end[0]) <= COORD_TOLERANCE:
+                grouped[(candidate.system_id, candidate.carrier_id, rank, 0)].append(
+                    (route, rank, start[0], band)
+                )
 
     for (*_identity, axis), items in grouped.items():
         travel = bundle_travel(
