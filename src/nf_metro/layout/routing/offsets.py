@@ -4737,10 +4737,11 @@ def _separate_shared_entry_slots(ctx: _OffsetCtx) -> None:
 
     Forwarding a recompacted exit port across its seam copies one feeder's
     offsets onto an entry port other feeders share, which can land two lines
-    on one slot; reconciliation repairs some of those, not all.  The lines
-    keep their order (a tie broken by the order they arrive in from their
-    feeders) and a later line steps out to the next free slot, carried along
-    the section bundle.
+    on one slot; reconciliation repairs some of those, not all.  A line whose
+    feeder does not present its slot has no claim to it and steps alone to the
+    nearest free slot on its feeder's side.  Lines that all arrive flat keep
+    their order instead, each later one stepping past the one before.  Every
+    move is carried along the section bundle.
     """
     graph = ctx.graph
     for port_id, port in graph.ports.items():
@@ -4748,31 +4749,48 @@ def _separate_shared_entry_slots(ctx: _OffsetCtx) -> None:
             continue
         if port.section_id in ctx.tb_sections:
             continue
-        lines = [
-            lid for lid in graph.station_lines(port_id) if (port_id, lid) in ctx.offsets
-        ]
-        offs = [ctx.offsets[(port_id, lid)] for lid in lines]
-        if not any(
-            abs(a - b) <= _OFFSET_EQ_TOLERANCE
-            for i, a in enumerate(offs)
-            for b in offs[i + 1 :]
-        ):
+        current = {
+            lid: ctx.offsets[(port_id, lid)]
+            for lid in graph.station_lines(port_id)
+            if (port_id, lid) in ctx.offsets
+        }
+        if len(set(current.values())) == len(current):
             continue
         feeder_off = {
             edge.line_id: ctx.offsets.get((edge.source, edge.line_id), 0.0)
             for edge in graph.edges_to(port_id)
         }
+
+        def flat(lid: str) -> bool:
+            return abs(feeder_off.get(lid, current[lid]) - current[lid]) <= (
+                _OFFSET_EQ_TOLERANCE
+            )
+
+        def shares_slot(lid: str) -> bool:
+            return any(
+                other != lid and abs(off - current[lid]) <= _OFFSET_EQ_TOLERANCE
+                for other, off in current.items()
+            )
+
         new_offs: dict[str, float] = {}
+        for lid in sorted(current):
+            if shares_slot(lid) and not flat(lid):
+                step = (
+                    ctx.offset_step
+                    if feeder_off.get(lid, current[lid]) >= current[lid]
+                    else -ctx.offset_step
+                )
+                slot = current[lid] + step
+                while any(
+                    abs(slot - off) <= _OFFSET_EQ_TOLERANCE for off in current.values()
+                ):
+                    slot += step
+                current[lid] = new_offs[lid] = slot
         previous: float | None = None
-        for lid in sorted(
-            lines,
-            key=lambda lid: (ctx.offsets[(port_id, lid)], feeder_off.get(lid, 0.0)),
-        ):
-            slot = ctx.offsets[(port_id, lid)]
-            if previous is not None and slot < previous + ctx.offset_step:
-                slot = previous + ctx.offset_step
-                new_offs[lid] = slot
-            previous = slot
+        for lid in sorted(current, key=lambda lid: (current[lid], feeder_off.get(lid))):
+            if previous is not None and current[lid] < previous + ctx.offset_step:
+                current[lid] = new_offs[lid] = previous + ctx.offset_step
+            previous = current[lid]
         _apply_offsets_along_bundle(ctx, port_id, port.section_id, new_offs)
 
 
