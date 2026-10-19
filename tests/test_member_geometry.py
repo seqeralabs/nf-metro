@@ -1098,7 +1098,7 @@ def test_reservation_reroute_keeps_identity_and_reuses_settled_template() -> Non
             ) == (channel.start, channel.end)
 
 
-def test_seed_77_shortfall_requests_one_atomic_corridor_aperture() -> None:
+def test_seed_77_compiles_atomic_single_lane_components() -> None:
     """Seed 77's corridor cohort compiles as atomic single-lane components.
 
     Its ``s5`` carrier drops in the right-hand canvas margin while the ``s7``
