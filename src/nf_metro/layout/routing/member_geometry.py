@@ -347,11 +347,17 @@ def _corridor_cohort_target(
         endpoint_lane_axis, endpoint_lane_coordinate = _entry_port_landing(
             ctx, port, route.line_id
         )
-        if route.offset_regime is OffsetRegime.BAKED and route.points:
-            # A baked lead already carries its separation, so it lands where it
-            # is drawn; the recomputed crossing follows the bundle-index rule,
-            # which the emitter overrides with per-line lanes on some sections.
-            endpoint_lane_coordinate = route.points[-1][endpoint_lane_axis]
+        if (
+            route.offset_regime is OffsetRegime.BAKED
+            and endpoint_lane_axis == 0
+            and len(route.points) >= 2
+            and abs(route.points[-2][0] - route.points[-1][0]) <= COORD_TOLERANCE
+        ):
+            # A baked vertical drop already carries its separation, so it
+            # crosses a TOP/BOTTOM port where it is drawn; the recomputed
+            # crossing follows the bundle-index rule, which the emitter
+            # overrides with per-line lanes on some sections.
+            endpoint_lane_coordinate = route.points[-1][0]
         elif route.offset_regime is OffsetRegime.DEFERRED and endpoint_lane_axis == 1:
             endpoint_lane_coordinate -= (ctx.station_offsets or {}).get(
                 (resolved.target, route.line_id),
