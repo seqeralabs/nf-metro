@@ -1,0 +1,32 @@
+%%metro title: Cohort Line Split Branches
+%%metro line: l0 | Bin_Call | #e6194b
+%%metro line: l1 | Markdup_Filter_Fastqc | #3cb44b
+%%metro line: l2 | Dedup | #4363d8
+%%metro line: l3 | Count | #f58231
+%%metro grid: sec0 | 3,0
+%%metro grid: sec1 | 2,0
+graph LR
+    subgraph sec0 [Assemble_Export 0]
+        %%metro direction: RL
+        s0n0[call_stats_classify]
+        s0n3 -->|l3| s0n4
+    end
+    subgraph sec1 [Index_Merge 1]
+        %%metro direction: RL
+        s1n0 -->|l2| s1n1
+    end
+    subgraph sec2 [Summarise 2]
+        %%metro exit: bottom | l3
+        s2n4[assemble_markdup]
+    end
+    subgraph sec3 [Stats_Trim_Bin 3]
+        %%metro entry: top | l2, l3
+        s3n0[sort]
+    end
+    s0n4 -->|l0,l3| s1n0
+    s2n4 -->|l3| s3n0
+    s0n3 -->|l0| s3n1
+    s0n4 -->|l1| s1n3
+    s0n0 -->|l2| s1n0
+    s1n3 -->|l2| s3n0
+    s0n0 -->|l2| s2n0
