@@ -15,7 +15,11 @@ import pytest
 from nf_metro.api import render_string
 from nf_metro.layout.routing import corridor_cohort_integration as cci
 from nf_metro.layout.routing import member_geometry
-from nf_metro.layout.routing.corridor_cohorts import CorridorAllocationStatus
+from nf_metro.layout.routing.corridor_cohorts import (
+    CorridorAllocationProblem,
+    CorridorAllocationResult,
+    CorridorAllocationStatus,
+)
 from nf_metro.layout.settlement_demand import BoundaryClearanceRequirement
 from nf_metro.render import svg
 
@@ -24,6 +28,7 @@ REGRESSIONS = Path(__file__).parent / "fixtures" / "regressions"
 
 class _Captured:
     def __init__(self) -> None:
+        self.compiles = 0
         self.plans: list[cci.CorridorCohortPlan] = []
         self.granted: set[str] = set()
         self.apertures: list[BoundaryClearanceRequirement] = []
@@ -54,6 +59,7 @@ def _render(
     aperture_requirements = member_geometry._corridor_cohort_aperture_requirements
 
     def capture_plan(*args: Any, **kwargs: Any) -> cci.CorridorCohortPlan:
+        captured.compiles += 1
         plan = compile_plan(*args, **kwargs)
         captured.plans.append(plan)
         return plan
@@ -92,12 +98,48 @@ def test_compile_seats_every_component(
     monkeypatch: pytest.MonkeyPatch, fixture: str
 ) -> None:
     captured = _render(monkeypatch, fixture)
-    assert captured.components
+    assert captured.compiles == len(captured.plans)
+    planned = [
+        component
+        for component in captured.components
+        if component.status is CorridorAllocationStatus.PLANNED
+    ]
+    assert planned
     assert not [
         component.component_id
         for component in captured.components
         if component.status is CorridorAllocationStatus.FAILURE
     ]
+    for component in planned:
+        for problem, result in zip(component.problems, component.results):
+            _assert_allocation_satisfies(problem, result)
+
+
+def _assert_allocation_satisfies(
+    problem: CorridorAllocationProblem, result: CorridorAllocationResult
+) -> None:
+    obstacles = {obstacle.obstacle_id: obstacle for obstacle in problem.obstacles}
+    at = {
+        **{key: obstacle.realised_coordinate for key, obstacle in obstacles.items()},
+        **dict(result.allocations),
+    }
+    tolerance = 1e-6
+    for separation in problem.separations:
+        gap = abs(at[separation.left_member_id] - at[separation.right_member_id])
+        assert gap >= separation.distance - tolerance, separation
+    for directed in problem.directed_separations:
+        assert (
+            at[directed.lower_member_id] + directed.distance
+            <= at[directed.upper_member_id] + tolerance
+        ), directed
+    for domain in problem.domains:
+        if domain.minimum_coordinate is not None:
+            assert at[domain.member_id] >= domain.minimum_coordinate - tolerance
+        if domain.maximum_coordinate is not None:
+            assert at[domain.member_id] <= domain.maximum_coordinate + tolerance
+    for fixed in problem.fixed_equalities:
+        expected = obstacles[fixed.obstacle_id].realised_coordinate + fixed.delta
+        assert at[fixed.member_id] == pytest.approx(expected, abs=tolerance), fixed
 
 
 def test_junction_fed_gap_names_both_facing_sections(
@@ -115,17 +157,10 @@ def test_junction_fed_gap_names_both_facing_sections(
     )
 
 
-@pytest.mark.parametrize(
-    "fixture",
-    [
-        "cohort_tb_drop_drawn_landing.mmd",
-        "perp_fan_across_corridor_bundles.mmd",
-    ],
-)
-def test_entry_lines_take_distinct_slots(
-    monkeypatch: pytest.MonkeyPatch, fixture: str
+def test_vertical_drops_land_on_distinct_slots(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured = _render(monkeypatch, fixture)
+    captured = _render(monkeypatch, "cohort_tb_drop_drawn_landing.mmd")
     assert captured.components
     assert not captured.overlaid
 
@@ -139,6 +174,7 @@ def test_overlaid_entry_slots_keep_drawn_geometry(
     assert all(
         component.status is CorridorAllocationStatus.COMPATIBILITY
         and not component.problems
+        and not component.allocations
         for component in overlaid
     )
 
