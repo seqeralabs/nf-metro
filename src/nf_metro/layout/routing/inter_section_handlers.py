@@ -4567,10 +4567,10 @@ def _perp_exit_landing_offsets(
         return None
     column = ctx.perp_entry_columns.get(edge.target)
     if column is None:
-        if not needs_perp_approach_fan(ctx.graph, edge.target) and (
+        if (
             len(feeder_sources(ctx.graph, edge.target)) != 1
             or perp_corridor_feeder(ctx.graph, edge.target) is not None
-        ):
+        ) and not needs_perp_approach_fan(ctx.graph, edge.target):
             return None
     elif column.offsets is None:
         return None

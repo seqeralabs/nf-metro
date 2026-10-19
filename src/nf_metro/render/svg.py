@@ -2380,10 +2380,11 @@ def _settle_render_geometry(
     # it never consumed the ledger, the observation's pre-freeze seating moves
     # runs no grant touched.
     assert last_route_inputs is not None
-    observation_inputs = last_route_inputs
     drawn_routes = routes
+    observed_state: _RouteObservationInputs | None = None
+    ungranted_routes: list[RoutedPath] = []
     with _restoring_route_observation_geometry(graph):
-        observed_offsets = observation_inputs.restore(graph)
+        observed_offsets = last_route_inputs.restore(graph)
         observed_routes, observed_plan = _route(
             observed_offsets,
             settled_plan,
@@ -2392,15 +2393,10 @@ def _settle_render_geometry(
             allow_clearance_requirements=True,
         )
         granted_plan_ids = _corridor_grant_moved_plan_ids(observed_plan)
-        observed_state = (
-            _RouteObservationInputs.capture(graph, observed_offsets)
-            if granted_plan_ids
-            else None
-        )
-        ungranted_routes: list[RoutedPath] = []
         if granted_plan_ids:
-            ungranted_routes, _ungranted_plan = _route(
-                observation_inputs.restore(graph),
+            observed_state = _RouteObservationInputs.capture(graph, observed_offsets)
+            ungranted_routes, _ = _route(
+                last_route_inputs.restore(graph),
                 settled_plan,
                 settlement.coordinate_translations,
                 stage=SettlementStage.GENERAL_SETTLEMENT,

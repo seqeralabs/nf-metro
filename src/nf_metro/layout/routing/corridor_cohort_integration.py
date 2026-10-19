@@ -35,8 +35,8 @@ from nf_metro.layout.route_plan import (
     register_settlement_stage,
 )
 from nf_metro.layout.route_reservations import (
+    CANVAS_EDGE_ON_NEGATIVE_SIDE,
     CanvasRegion,
-    CanvasSide,
     ColumnGapRegion,
     CorridorOrientation,
     CorridorRegion,
@@ -1192,7 +1192,9 @@ def _bind_ledger(
     ledger: CorridorCohortLedger,
     targets: Sequence[CorridorCohortTarget],
 ) -> tuple[tuple[_BoundClaim, ...], frozenset[str]]:
-    landing_coordinates, overlaid = _cohort_landing_coordinates(ledger, targets)
+    landing_coordinates, overlaid_cohort_ids = _cohort_landing_coordinates(
+        ledger, targets
+    )
     by_key: defaultdict[
         tuple[str, tuple[str, str, str]], list[CorridorCohortTarget]
     ] = defaultdict(list)
@@ -1224,7 +1226,7 @@ def _bind_ledger(
         except CorridorCohortCompilationError:
             if claim.reservation_complete:
                 raise
-    return tuple(bound), overlaid
+    return tuple(bound), overlaid_cohort_ids
 
 
 def _directly_movable(
@@ -2225,7 +2227,7 @@ def _cohort_landing_coordinates(
         targets_by_member[target.member_id].append(target)
 
     coordinates: dict[tuple[str, tuple[str, str, str]], float] = {}
-    overlaid: set[str] = set()
+    overlaid_cohort_ids: set[str] = set()
     for cohort_id, expected_members in expected_by_cohort.items():
         if cohort_id in ledger.ambiguous_endpoint_cohort_ids:
             continue
@@ -2277,22 +2279,24 @@ def _cohort_landing_coordinates(
             )
         representative_slots = [slots_by_rank[rank][0] for rank in ranks]
         ordered_slots = sorted(representative_slots)
-        if any(
+        split = any(
             not isclose(item, slots_by_rank[rank][0], abs_tol=COORD_TOLERANCE)
             for rank in ranks
             for item in slots_by_rank[rank][1:]
-        ) or any(
+        )
+        tied = any(
             isclose(left, right, abs_tol=COORD_TOLERANCE)
             for left, right in zip(ordered_slots, ordered_slots[1:])
-        ):
-            overlaid.add(cohort_id)
+        )
+        if split or tied:
+            overlaid_cohort_ids.add(cohort_id)
             continue
         slot_by_rank = dict(zip(ranks, representative_slots))
         for member_id, target in member_targets.items():
             coordinates[(member_id, target.edge_key)] = slot_by_rank[
                 rank_by_member[member_id]
             ]
-    return coordinates, frozenset(overlaid)
+    return coordinates, frozenset(overlaid_cohort_ids)
 
 
 def _overlap(left: _BoundClaim, right: _BoundClaim) -> bool:
@@ -2310,6 +2314,14 @@ def _same_lane(left: _BoundClaim, right: _BoundClaim) -> bool:
         and left.ledger.reservation_id == right.ledger.reservation_id
         and left.ledger.lane_rank == right.ledger.lane_rank
         and _overlap(left, right)
+    )
+
+
+def _split_branches(left: _BoundClaim, right: _BoundClaim) -> bool:
+    """Whether two claims carry one line to two different targets."""
+    return (
+        left.target.route.line_id == right.target.route.line_id
+        and left.target.edge_key[1] != right.target.edge_key[1]
     )
 
 
@@ -2675,6 +2687,12 @@ def _problem(
         and left.ledger.network_id is not None
         and left.ledger.network_id == right.ledger.network_id
     )
+    fixed_lane_pairs = [
+        (movable_claim, fixed_claim)
+        for movable_claim in movable
+        for fixed_claim in fixed_claims
+        if _same_semantic_fixed_lane(movable_claim, fixed_claim)
+    ]
     fixed_equalities = list(
         CorridorFixedEquality(
             _direction_owner(
@@ -2685,9 +2703,7 @@ def _problem(
             movable_claim.claim_id,
             fixed_claim.claim_id,
         )
-        for movable_claim in movable
-        for fixed_claim in fixed_claims
-        if _same_semantic_fixed_lane(movable_claim, fixed_claim)
+        for movable_claim, fixed_claim in fixed_lane_pairs
     )
     relation_obstacles: dict[str, CorridorObstacle] = {}
     for contact in footprint_model.contacts:
@@ -2764,14 +2780,12 @@ def _problem(
     # targets disagree the crossing is forced, so a footprint order between a
     # branch and another line seats nothing the endpoint orders do not.
     movable_by_id = {item.claim_id: item for item in movable}
-    split_branch_ids = {
-        member_id
-        for equality in equalities
-        if (left := movable_by_id[equality.left_member_id]).target.edge_key[2]
-        == (right := movable_by_id[equality.right_member_id]).target.edge_key[2]
-        and left.target.edge_key[1] != right.target.edge_key[1]
-        for member_id in (left.claim_id, right.claim_id)
-    }
+    split_branch_ids: set[str] = set()
+    for equality in equalities:
+        left = movable_by_id[equality.left_member_id]
+        right = movable_by_id[equality.right_member_id]
+        if _split_branches(left, right):
+            split_branch_ids.update((left.claim_id, right.claim_id))
     directed_separations: list[CorridorDirectedSeparation] = [
         CorridorDirectedSeparation(
             f"{order.owner_id}|{lower_id}|{upper_id}",
@@ -2819,9 +2833,7 @@ def _problem(
     # lane that joins it, so it is not a placement the solver can avoid.
     pinned = {
         movable_claim.claim_id: fixed_claim.coordinate
-        for movable_claim in movable
-        for fixed_claim in fixed_claims
-        if _same_semantic_fixed_lane(movable_claim, fixed_claim)
+        for movable_claim, fixed_claim in fixed_lane_pairs
     }
     forbidden_intervals = tuple(
         replace(interval, member_id=member_id)
@@ -2937,18 +2949,10 @@ def _problem(
     )
 
 
-_CANVAS_OUTWARD_SIGN = {
-    CanvasSide.LEFT: 1,
-    CanvasSide.TOP: 1,
-    CanvasSide.RIGHT: -1,
-    CanvasSide.BOTTOM: -1,
-}
-
-
 def _lane_order_axis_sign(
     coordinate_axis: int,
     travel: set[Direction],
-    regions: Collection[CorridorRegion] = (),
+    regions: Collection[CorridorRegion],
 ) -> int:
     """Screen sign of the canonical lane order along *coordinate_axis*.
 
@@ -2964,7 +2968,7 @@ def _lane_order_axis_sign(
     if len(travel) == 1:
         return right_normal_axis_sign(next(iter(travel)))
     if len(regions) == 1 and isinstance(region := next(iter(regions)), CanvasRegion):
-        return _CANVAS_OUTWARD_SIGN[region.side]
+        return 1 if region.side in CANVAS_EDGE_ON_NEGATIVE_SIDE else -1
     return right_normal_axis_sign(Direction.R if coordinate_axis == 1 else Direction.D)
 
 
@@ -3139,7 +3143,7 @@ def _component_plan(
     scalar_requests_by_id: Mapping[str, CorridorScalarRequest],
     intervals_by_member: Mapping[str, Sequence[CorridorForbiddenInterval]],
     solve: Callable[[CorridorAllocationProblem], CorridorAllocationResult],
-    overlaid_cohort_ids: frozenset[str] = frozenset(),
+    overlaid_cohort_ids: frozenset[str],
 ) -> CorridorCohortComponentPlan:
     """Lower one closed component into a single per-axis solver problem.
 
@@ -3179,8 +3183,8 @@ def _component_plan(
     member_ids = tuple(sorted({item.ledger.member_id for item in component_claims}))
     problems: tuple[CorridorAllocationProblem, ...] = ()
     results: tuple[CorridorAllocationResult, ...] = ()
-    overlaid = not overlaid_cohort_ids.isdisjoint(endpoint_ids)
-    if not overlaid and (has_movable or component_scalar_requests):
+    holds_overlaid_cohort = not overlaid_cohort_ids.isdisjoint(endpoint_ids)
+    if not holds_overlaid_cohort and (has_movable or component_scalar_requests):
         problem = _problem(
             component_claims,
             roles,
@@ -3228,12 +3232,14 @@ def _component_plan(
             sorted({(item.member_id, item.segment_rank) for item in allocations})
         )
     elif status is CorridorAllocationStatus.COMPATIBILITY:
+        if holds_overlaid_cohort:
+            reason = CorridorCompatibilityReason.OVERLAID_ENDPOINT_SLOTS
+        elif problems:
+            reason = CorridorCompatibilityReason.INCOMPLETE_WITNESSES
+        else:
+            reason = CorridorCompatibilityReason.NO_MIGRABLE_GEOMETRY
         compatibility = CorridorCohortCompatibility(
-            CorridorCompatibilityReason.OVERLAID_ENDPOINT_SLOTS
-            if overlaid
-            else CorridorCompatibilityReason.INCOMPLETE_WITNESSES
-            if problems
-            else CorridorCompatibilityReason.NO_MIGRABLE_GEOMETRY,
+            reason,
             member_ids,
             spec.scalar_variable_ids,
             endpoint_ids,
@@ -3478,7 +3484,7 @@ def compile_corridor_cohort_plan(
     carries its route patches, and :func:`publish_corridor_cohort_plan` applies
     them.
     """
-    claims, overlaid = _bind_ledger(ledger, targets)
+    claims, overlaid_cohort_ids = _bind_ledger(ledger, targets)
     scalar_requests_by_id = {
         request.variable.variable_id: request for request in scalar_requests
     }
@@ -3570,7 +3576,7 @@ def compile_corridor_cohort_plan(
             scalar_requests_by_id,
             intervals_by_member,
             solve,
-            overlaid,
+            overlaid_cohort_ids,
         )
         for rank, spec in enumerate(logical)
     ]

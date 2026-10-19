@@ -511,33 +511,28 @@ def _corridor_boundary_sections(
     positive_sections = tuple(
         section for section in candidates.values() if start(section) == positive_index
     )
-    if negative_sections and not positive_sections:
-        positive_sections = tuple(
+
+    def facing(
+        at_index: Callable[[Section], bool], anchors: tuple[Section, ...]
+    ) -> tuple[Section, ...]:
+        return tuple(
             section
             for section in graph.sections.values()
-            if start(section) == positive_index
-            and any(overlaps(section, negative) for negative in negative_sections)
+            if at_index(section)
+            and any(overlaps(section, anchor) for anchor in anchors)
         )
-    elif positive_sections and not negative_sections:
-        negative_sections = tuple(
-            section
-            for section in graph.sections.values()
-            if start(section) + span(section) - 1 == negative_index
-            and any(overlaps(section, positive) for positive in positive_sections)
+
+    pool = tuple(candidates.values())
+    negative_anchors = negative_sections or pool
+    positive_anchors = positive_sections or pool
+    if not positive_sections:
+        positive_sections = facing(
+            lambda section: start(section) == positive_index, negative_anchors
         )
-    elif not negative_sections and not positive_sections:
-        pool = tuple(candidates.values())
-        negative_sections = tuple(
-            section
-            for section in graph.sections.values()
-            if start(section) + span(section) - 1 == negative_index
-            and any(overlaps(section, other) for other in pool)
-        )
-        positive_sections = tuple(
-            section
-            for section in graph.sections.values()
-            if start(section) == positive_index
-            and any(overlaps(section, other) for other in pool)
+    if not negative_sections:
+        negative_sections = facing(
+            lambda section: start(section) + span(section) - 1 == negative_index,
+            positive_anchors,
         )
     if not negative_sections or not positive_sections:
         raise ValueError(

@@ -1,9 +1,8 @@
 """The corridor-cohort compile seats layouts the router already draws.
 
-Each fixture is a generated map the router draws but the compile once refused
-(aborting the render).  Every test renders through the default
-``render_string`` path and asserts the property its fix establishes, not only
-that the render completes.
+Each fixture is a minimised generated map.  Every test renders it through the
+default ``render_string`` path and asserts the seating property the compile
+must establish there, not only that the render completes.
 """
 
 from __future__ import annotations
@@ -33,6 +32,7 @@ class _Captured:
     def components(self) -> list[cci.CorridorCohortComponentPlan]:
         return [component for plan in self.plans for component in plan.components]
 
+    @property
     def overlaid(self) -> list[cci.CorridorCohortComponentPlan]:
         return [
             component
@@ -127,14 +127,14 @@ def test_entry_lines_take_distinct_slots(
 ) -> None:
     captured = _render(monkeypatch, fixture)
     assert captured.components
-    assert not captured.overlaid()
+    assert not captured.overlaid
 
 
 def test_overlaid_entry_slots_keep_drawn_geometry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured = _render(monkeypatch, "entry_slot_overlay_from_exit_forward.mmd")
-    overlaid = captured.overlaid()
+    overlaid = captured.overlaid
     assert overlaid
     assert all(
         component.status is CorridorAllocationStatus.COMPATIBILITY
@@ -146,5 +146,8 @@ def test_overlaid_entry_slots_keep_drawn_geometry(
 def test_grant_is_proven_against_its_ungranted_observation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A grant moves a trunk beside runs pre-freeze seating moves too; the
+    render's grant guard passes only when it diffs against the ungranted
+    observation."""
     captured = _render(monkeypatch, "cohort_grant_beside_seated_runs.mmd")
     assert captured.granted
