@@ -3447,8 +3447,7 @@ def _allocate_merge_ports_by_approach(ctx: _OffsetCtx) -> None:
     incoming offsets (so their feeder edges stay flat) and move only a
     mis-slotted perpendicular line: a ``below`` line is pushed just past
     the bottom of the horizontal band (one step below its largest
-    offset), an ``above`` line just past the top, each skipping any slot an
-    unclassified line (a junction drop or bypass) still holds.  Multiple perpendicular
+    offset), an ``above`` line just past the top.  Multiple perpendicular
     lines on the same side keep their incoming relative order.  Ports
     already in approach order are unchanged.  The new per-line offsets
     propagate to every downstream station in the port's section so the
@@ -3471,21 +3470,13 @@ def _allocate_merge_ports_by_approach(ctx: _OffsetCtx) -> None:
         max_horiz = max(cur[lid] for lid in horizontal)
         min_horiz = min(cur[lid] for lid in horizontal)
 
-        held = [off for lid, off in cur.items() if lid not in below + above]
-
-        def next_free(off: float, step: float) -> float:
-            while any(abs(off - other) <= _OFFSET_EQ_TOLERANCE for other in held):
-                off += step
-            held.append(off)
-            return off
-
         new_offs: dict[str, float] = {}
-        for lid in sorted(below, key=lambda lid: cur[lid]):
-            new_offs[lid] = next_free(max_horiz + ctx.offset_step, ctx.offset_step)
-            max_horiz = new_offs[lid]
-        for lid in sorted(above, key=lambda lid: cur[lid], reverse=True):
-            new_offs[lid] = next_free(min_horiz - ctx.offset_step, -ctx.offset_step)
-            min_horiz = new_offs[lid]
+        for rank, lid in enumerate(sorted(below, key=lambda lid: cur[lid]), start=1):
+            new_offs[lid] = max_horiz + rank * ctx.offset_step
+        for rank, lid in enumerate(
+            sorted(above, key=lambda lid: cur[lid], reverse=True), start=1
+        ):
+            new_offs[lid] = min_horiz - rank * ctx.offset_step
 
         if any(
             abs(new_offs[lid] - cur[lid]) > _OFFSET_EQ_TOLERANCE for lid in new_offs
