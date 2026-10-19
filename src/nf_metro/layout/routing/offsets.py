@@ -2335,28 +2335,6 @@ def _order_perp_entry_seam_lanes(ctx: _OffsetCtx) -> None:
         )
 
 
-def _sole_feeding_exit_port(graph: MetroGraph, entry_port_id: str) -> str | None:
-    """The one exit port feeding *entry_port_id* every line it carries, if any.
-
-    An entry port fed by several exit ports, or carrying lines its feeder does
-    not, packs its own bundle; one feeder's offsets copied across would land
-    on slots the other lines already hold.
-    """
-    feeding = {
-        edge.source
-        for edge in graph.edges_to(entry_port_id)
-        if (port := graph.ports.get(edge.source)) is not None and not port.is_entry
-    }
-    if len(feeding) != 1:
-        return None
-    exit_port_id = next(iter(feeding))
-    if set(graph.station_lines(exit_port_id)) != set(
-        graph.station_lines(entry_port_id)
-    ):
-        return None
-    return exit_port_id
-
-
 def _propagate_lr_rl_exit_to_entry(ctx: _OffsetCtx) -> None:
     """Propagate single LR/RL exit-port offsets onto fed LEFT/RIGHT entry ports."""
     graph = ctx.graph
@@ -2370,11 +2348,19 @@ def _propagate_lr_rl_exit_to_entry(ctx: _OffsetCtx) -> None:
             # the section reindex); copying a horizontal feeder's stored offset
             # across the seam would land the port off that lane.
             continue
-        exit_port_id = _sole_feeding_exit_port(graph, port_id)
-        if exit_port_id is None:
+        feeding_exit_ports: set[str] = set()
+        for edge in graph.edges_to(port_id):
+            src = graph.station_for_edge_source(edge)
+            if not src.is_port:
+                continue
+            src_port = graph.ports.get(edge.source)
+            if src_port and not src_port.is_entry:
+                feeding_exit_ports.add(edge.source)
+        if len(feeding_exit_ports) != 1:
             continue
-        src_port = graph.ports[exit_port_id]
-        if src_port.section_id not in ctx.lr_rl_sections:
+        exit_port_id = next(iter(feeding_exit_ports))
+        src_port = graph.ports.get(exit_port_id)
+        if not (src_port and src_port.section_id in ctx.lr_rl_sections):
             continue
         if (
             not _stores_reflected(ctx, port_obj.section_id)
@@ -2384,6 +2370,10 @@ def _propagate_lr_rl_exit_to_entry(ctx: _OffsetCtx) -> None:
             # does not store its bundle reflected: the consumer rides its own
             # arrival-order lane (set by the reindex, _reorder_reconvergence), so
             # copying the feeder's stored offset across would undo the transpose.
+            continue
+        exit_lines = set(graph.station_lines(exit_port_id))
+        entry_lines = set(graph.station_lines(port_id))
+        if exit_lines != entry_lines:
             continue
         entry_offs: dict[str, float] = {}
         for lid in graph.station_lines(port_id):
@@ -3000,8 +2990,6 @@ def _propagate_touched_exit_ports_to_entries(
             if tgt_port.side not in (PortSide.LEFT, PortSide.RIGHT):
                 continue
             if tgt_port.section_id in ctx.tb_sections:
-                continue
-            if _sole_feeding_exit_port(graph, edge.target) != sid:
                 continue
             reversed_seam = (
                 seam_orientation(graph, src_port, tgt_port) is SeamOrientation.REVERSE
@@ -4744,6 +4732,50 @@ def _reconcile_horizontal_offsets(ctx: _OffsetCtx, max_iterations: int = 10) -> 
     _reinherit_junction_lanes(ctx, moved)
 
 
+def _separate_shared_entry_slots(ctx: _OffsetCtx) -> None:
+    """Give each line at a LEFT/RIGHT entry port a slot of its own.
+
+    Forwarding a recompacted exit port across its seam copies one feeder's
+    offsets onto an entry port other feeders share, which can land two lines
+    on one slot; reconciliation repairs some of those, not all.  The lines
+    keep their order (a tie broken by the order they arrive in from their
+    feeders) and a later line steps out to the next free slot, carried along
+    the section bundle.
+    """
+    graph = ctx.graph
+    for port_id, port in graph.ports.items():
+        if not port.is_entry or port.side not in (PortSide.LEFT, PortSide.RIGHT):
+            continue
+        if port.section_id in ctx.tb_sections:
+            continue
+        lines = [
+            lid for lid in graph.station_lines(port_id) if (port_id, lid) in ctx.offsets
+        ]
+        offs = [ctx.offsets[(port_id, lid)] for lid in lines]
+        if not any(
+            abs(a - b) <= _OFFSET_EQ_TOLERANCE
+            for i, a in enumerate(offs)
+            for b in offs[i + 1 :]
+        ):
+            continue
+        feeder_off = {
+            edge.line_id: ctx.offsets.get((edge.source, edge.line_id), 0.0)
+            for edge in graph.edges_to(port_id)
+        }
+        new_offs: dict[str, float] = {}
+        previous: float | None = None
+        for lid in sorted(
+            lines,
+            key=lambda lid: (ctx.offsets[(port_id, lid)], feeder_off.get(lid, 0.0)),
+        ):
+            slot = ctx.offsets[(port_id, lid)]
+            if previous is not None and slot < previous + ctx.offset_step:
+                slot = previous + ctx.offset_step
+                new_offs[lid] = slot
+            previous = slot
+        _apply_offsets_along_bundle(ctx, port_id, port.section_id, new_offs)
+
+
 def _center_rail_boundary_port_bundles(ctx: _OffsetCtx) -> None:
     """Centre a rail-laid section's boundary-port bundle on the port itself.
 
@@ -5732,6 +5764,7 @@ def compute_station_offsets(
     _recompact_fan_port_bordering_stations(ctx, same_y_adj, sec_layer_stations)
     _restore_fanout_peel_order(ctx, same_y_adj)
     _reconcile_horizontal_offsets(ctx)
+    _separate_shared_entry_slots(ctx)
     _center_rail_boundary_port_bundles(ctx)
     _recenter_single_line_corridor_entry(ctx)
     _slot_entry_arrivals_on_their_approach_lane(ctx, same_y_adj)
