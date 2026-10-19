@@ -5368,6 +5368,7 @@ def _convergence_corridor_target(
         controlled_points=(*skeleton_points, *dependant_controlled),
         fixed_points=dependant_fixed,
         directed_runways=dependant_runways,
+        governed_member_ids=frozenset(str(member_id) for member_id in plan.member_ids),
     )
     _validate_convergence_recipe_completeness(plan, variable_id, recipe)
     legal_crossings = {_TRUNK_SKELETON_CENTRAL_RANK, *_TRUNK_SKELETON_CONNECTOR_RANKS}

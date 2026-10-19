@@ -7,6 +7,7 @@ must establish there, not only that the render completes.
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,7 @@ from nf_metro.layout.routing.corridor_cohorts import (
     CorridorAllocationStatus,
 )
 from nf_metro.layout.settlement_demand import BoundaryClearanceRequirement
+from nf_metro.parser.model import PermissiveGuardWarning
 from nf_metro.render import svg
 
 REGRESSIONS = Path(__file__).parent / "fixtures" / "regressions"
@@ -187,3 +189,22 @@ def test_grant_is_proven_against_its_ungranted_observation(
     observation."""
     captured = _render(monkeypatch, "cohort_grant_beside_seated_runs.mmd")
     assert captured.granted
+
+
+def test_grant_keeps_its_trunk_inside_the_reserved_corridor() -> None:
+    """A trunk's own covered continuation is the recipe's to move, so it does
+    not push the granted trunk out of the row-gap corridor its reservation
+    realises, at any stroke scale."""
+    path = Path(__file__).parents[1] / "examples/topologies"
+    with warnings.catch_warnings(record=True) as seen:
+        warnings.simplefilter("always")
+        render_string(
+            (path / "merge_feeder_shared_channel_gap.mmd").read_text(),
+            layout_options={"stroke_scale": 2.0},
+            source_dir=str(path),
+        )
+    assert not [
+        str(item.message)
+        for item in seen
+        if issubclass(item.category, PermissiveGuardWarning)
+    ]

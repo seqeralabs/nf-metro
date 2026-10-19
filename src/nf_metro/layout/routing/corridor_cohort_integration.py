@@ -168,6 +168,7 @@ class CorridorScalarControlRecipe:
     controlled_points: tuple[CorridorScalarControlledPoint, ...]
     fixed_points: tuple[CorridorScalarFixedPoint, ...] = ()
     directed_runways: tuple[CorridorScalarDirectedRunway, ...] = ()
+    governed_member_ids: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -1613,12 +1614,22 @@ def _member_footprint_model(
             )
             contact_pairs.add((variable_id, witness.footprint_id))
     fixed_by_lane = _witnesses_by_lane(fixed)
+    # A scalar's recipe governs its members' geometry, so a leg of one of them
+    # (a covered continuation the trunk replaces, say) is never an obstacle to
+    # the scalar's own coordinate.
+    governed_by_variable = {
+        request.variable.variable_id: request.control_recipe.governed_member_ids
+        for request in scalar_requests
+        if request.control_recipe is not None
+    }
     intervals: dict[tuple[str, str], CorridorForbiddenInterval] = {}
     for variable_id, variable_witness in carrier_by_variable.items():
         variable = variables_by_id[variable_id]
+        governed = governed_by_variable.get(variable_id, frozenset())
         for perpendicular in fixed:
             if (
                 (variable_id, perpendicular.footprint_id) in contact_pairs
+                or perpendicular.member_id in governed
                 or (variable.edge_key, perpendicular.edge_key) in forced_crossings
                 or perpendicular.axis == variable.axis
                 or perpendicular.crossing_disposition
