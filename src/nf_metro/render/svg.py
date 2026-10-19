@@ -123,7 +123,11 @@ from nf_metro.layout.routing.invariants import (
     CurveInvariantError,
     assert_render_curve_invariants,
 )
-from nf_metro.layout.routing.reserved_bands import build_reserved_corridors
+from nf_metro.layout.routing.member_geometry import seatable_claimed_run_axis
+from nf_metro.layout.routing.reserved_bands import (
+    ReservedBand,
+    build_reserved_corridors,
+)
 from nf_metro.layout.routing.reversal import tb_positive_fan_sections
 from nf_metro.layout.routing.system_emission import (
     validate_published_route_attribution,
@@ -1391,6 +1395,11 @@ def _attach_published_reservation_attribution(
     validate_published_route_attribution(routes, plan)
 
 
+def _within_band(coordinate: float, band: ReservedBand) -> bool:
+    tolerance = COORD_TOLERANCE_FINE
+    return band.lo - tolerance <= coordinate <= band.hi + tolerance
+
+
 def _ledger_changes_live_derived_band(
     graph: MetroGraph,
     plan: RoutePlan,
@@ -1403,7 +1412,9 @@ def _ledger_changes_live_derived_band(
     route legs.  Canvas bypasses and top-entry columns also consume frozen
     route-system state before a claim segment exists, while standard L-shaped
     columns consume the reserved band's centre.  Those placements therefore
-    need their route-family checks in addition to the segment comparisons.
+    need their route-family checks in addition to the segment comparisons, and
+    an interior run that pre-freeze seating would carry into its band moves
+    even though no translation names it.
     """
     if any(
         (
@@ -1488,22 +1499,25 @@ def _ledger_changes_live_derived_band(
                     claim.member_id,
                     coordinate_translations,
                 )
+                seated_axis = seatable_claimed_run_axis(route, rank)
                 if ledger is not None and (
                     derived is None
                     or derived.boundary != boundary
                     or derived.lo != ledger.lo
                     or derived.hi != ledger.hi
-                    # Only a translation can make a claim's coordinate a
-                    # consequence of consuming the ledger.  A run that hugs the
-                    # box edge its entry port sits on is outside the clearance
-                    # band by construction, so reading an untranslated claim
-                    # against the band would re-route for a position the frozen
-                    # pass had already chosen.
+                    # An untranslated claim moves only where pre-freeze seating
+                    # carries its run into the band.  A run that hugs the box
+                    # edge its entry port sits on is an end segment, outside
+                    # the band by construction and never seated, so reading it
+                    # against the band would re-route for a position the
+                    # frozen pass had already chosen.
                     or (
                         allocation_coordinate != claim.allocation_coordinate
-                        and not ledger.lo - COORD_TOLERANCE_FINE
-                        <= allocation_coordinate
-                        <= ledger.hi + COORD_TOLERANCE_FINE
+                        and not _within_band(allocation_coordinate, ledger)
+                    )
+                    or (
+                        seated_axis is not None
+                        and not _within_band(route.points[rank][seated_axis], ledger)
                     )
                 ):
                     return True
