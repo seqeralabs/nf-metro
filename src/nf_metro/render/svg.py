@@ -117,6 +117,9 @@ from nf_metro.layout.routing.corners import (
     curve_tangents,
     resolve_curve_radii,
 )
+from nf_metro.layout.routing.corridor_cohort_integration import (
+    CorridorCohortCompilationError,
+)
 from nf_metro.layout.routing.exit_turns import ExitTurnInvariantError
 from nf_metro.layout.routing.families import BYPASS_ROUTE_FAMILIES
 from nf_metro.layout.routing.invariants import (
@@ -894,6 +897,7 @@ def _build_render_plan_result(
             )
         except (
             ConvergenceInvariantError,
+            CorridorCohortCompilationError,
             CurveInvariantError,
             ExitTurnInvariantError,
             FanRouteInvariantError,

@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from nf_metro.api import render_string
+from nf_metro.layout.phases.guards import FoldThresholdError
 from nf_metro.layout.routing import corridor_cohort_integration as cci
 from nf_metro.layout.routing import member_geometry
 from nf_metro.layout.routing.corridor_cohorts import (
@@ -218,3 +219,19 @@ def test_grant_keeps_its_trunk_inside_the_reserved_corridor() -> None:
         for item in seen
         if issubclass(item.category, PermissiveGuardWarning)
     ]
+
+
+def test_fold_compressed_cohort_refusal_names_the_fold_threshold() -> None:
+    """A cohort the compile refuses on a grid the fold threshold compressed is
+    an authoring error, so it reports the threshold to raise."""
+    path = REGRESSIONS / "cohort_fold_compressed.mmd"
+    with pytest.raises(FoldThresholdError, match="Raise --fold-threshold"):
+        render_string(
+            path.read_text(),
+            layout_options={
+                "fold_threshold": 4,
+                "section_x_gap": 20.0,
+                "line_order": "span",
+            },
+            source_dir=str(path.parent),
+        )
