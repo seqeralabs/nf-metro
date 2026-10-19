@@ -865,6 +865,7 @@ def _clear_bypass_label_rakes(
     issues: Callable[[], tuple[set[str], bool, set[tuple[str, str, int]]]],
     adjust: Callable[[tuple[str, str, int], int], None],
     lever_value: Callable[[tuple[str, str, int]], int],
+    lever_key: Callable[[tuple[str, str, int | str]], tuple[int, int, int]],
     growable_target: Callable[[str], tuple[Section, int] | None],
     relay: Callable[..., None],
     reseat: Callable[[], None],
@@ -886,11 +887,14 @@ def _clear_bypass_label_rakes(
         return
     entry_obstacles = dict(graph.bypass_label_obstacles)
     graph.bypass_label_obstacles = _bypass_label_obstacles(graph)
-    rake_levers = {
-        ("gap", target[0].id, target[1])
-        for sid in _bypass_label_rakes(graph)
-        if (target := growable_target(sid)) is not None
-    }
+    rake_levers = sorted(
+        {
+            ("gap", target[0].id, target[1])
+            for sid in _bypass_label_rakes(graph)
+            if (target := growable_target(sid)) is not None
+        },
+        key=lever_key,
+    )
     struck_pre, collinear_pre, _ = issues() if rake_levers else (set(), False, ())
     if not rake_levers or collinear_pre:
         graph.bypass_label_obstacles = entry_obstacles
@@ -963,6 +967,31 @@ def _strike_lever_value(graph: MetroGraph, lever: tuple[str, str, int | str]) ->
     if kind == "off_lead":
         return sec.off_track_lead_extra.get(str(key), 0)
     return sec.label_strike_layer_gaps.get(int(key), 0)
+
+
+def _strike_lever_key(
+    graph: MetroGraph,
+) -> Callable[[tuple[str, str, int | str]], tuple[int, int, int]]:
+    """Sort key putting strike-clearance levers in model order.
+
+    The grow loops visit levers in this order, which fixes the insertion order
+    of each section's lever dicts, and the minimization pass then shrinks
+    levers in that insertion order.  Levers sort by kind, section declaration
+    rank, then layer index (``gap``) or the producer's position in the
+    section's ``station_ids`` (``off_lead``).
+    """
+    kind_rank = {"entry": 0, "exit": 1, "gap": 2, "off_lead": 3}
+    section_rank = {sid: rank for rank, sid in enumerate(graph.sections)}
+
+    def key(lever: tuple[str, str, int | str]) -> tuple[int, int, int]:
+        kind, sid, slot = lever
+        if kind == "off_lead":
+            position = graph.sections[sid].station_ids.index(str(slot))
+        else:
+            position = int(slot)
+        return kind_rank[kind], section_rank[sid], position
+
+    return key
 
 
 def _off_track_output_producers(graph: MetroGraph) -> set[str]:
@@ -1169,6 +1198,7 @@ def _apply_label_strike_clearance(
     _growable_target = partial(_strike_growable_target, graph)
     _adjust = partial(_adjust_strike_lever, graph)
     _lever_value = partial(_strike_lever_value, graph)
+    _lever_key = _strike_lever_key(graph)
 
     off_track_output_producers = _off_track_output_producers(graph)
 
@@ -1185,6 +1215,7 @@ def _apply_label_strike_clearance(
         issues=_issues,
         adjust=_adjust,
         lever_value=_lever_value,
+        lever_key=_lever_key,
         growable_target=_growable_target,
         relay=_relay,
         reseat=_reseat,
@@ -1198,13 +1229,13 @@ def _apply_label_strike_clearance(
             levers |= _levers_for_struck(sid)
         if not levers:
             break
-        for lever in levers:
+        for lever in sorted(levers, key=_lever_key):
             _adjust(lever, 1)
         _relay()
         after, collinear, after_flats = _issues()
         after_count = len(after) + len(after_flats)
         if collinear or after_count >= count:
-            for lever in levers:
+            for lever in sorted(levers, key=_lever_key):
                 _adjust(lever, -1)
             _relay()
             fallback_levers = set(levers)
@@ -1215,13 +1246,13 @@ def _apply_label_strike_clearance(
                     fallback_levers.add(("gap", section.id, layer + 1))
             if fallback_levers == levers:
                 break
-            for lever in fallback_levers:
+            for lever in sorted(fallback_levers, key=_lever_key):
                 _adjust(lever, 1)
             _relay()
             after, collinear, after_flats = _issues()
             after_count = len(after) + len(after_flats)
             if collinear or after_count >= count:
-                for lever in fallback_levers:
+                for lever in sorted(fallback_levers, key=_lever_key):
                     _adjust(lever, -1)
                 _relay()
                 break

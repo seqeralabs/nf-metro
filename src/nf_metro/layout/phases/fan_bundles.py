@@ -248,7 +248,7 @@ def _fan_reconvergence_joins(
     preds_by_id = {cid: _nonport_real_predecessors(graph, cid) for cid in candidates}
     common = {cid for cid in candidates if len(preds_by_id[cid]) >= 2}
     joins: dict[str, list[str]] = {}
-    for cand in common:
+    for cand in [sid for sid in graph.stations if sid in common]:
         if _in_section_descendants(graph, cand, section) & common:
             continue
         # An ancestor in ``common`` means the fan already fully reconverged

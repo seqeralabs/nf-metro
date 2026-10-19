@@ -1,0 +1,21 @@
+%% s1n0 is alone in its layer and sits between sec1's LEFT entry port and
+%% its RIGHT exit port, so the two sole-layer snaps compete for its Y.
+%%metro line: l0 | Report | #e6194b
+%%metro line: l1 | Markdup_Merge | #3cb44b
+%%metro grid: sec2 | 0,1
+
+graph LR
+    subgraph sec0 [Gather_Bam 0]
+        s0n0 -->|l1| s0n1
+        s0n1 -->|l1| s0n2
+        s0n2 -->|l1| s0n3
+    end
+    subgraph sec1 [Stats 1]
+        s1n0 -->|l0| s1n3
+    end
+    subgraph sec2 [Annotate_Polish_Merge 2]
+        s2n2 -->|l0,l1| s2n3
+    end
+    s0n3 -->|l0| s2n1
+    s0n0 -->|l0| s1n0
+    s1n0 -->|l0| s2n3
