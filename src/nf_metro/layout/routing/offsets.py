@@ -2335,6 +2335,28 @@ def _order_perp_entry_seam_lanes(ctx: _OffsetCtx) -> None:
         )
 
 
+def _sole_feeding_exit_port(graph: MetroGraph, entry_port_id: str) -> str | None:
+    """The one exit port feeding *entry_port_id* every line it carries, if any.
+
+    An entry port fed by several exit ports, or carrying lines its feeder does
+    not, packs its own bundle; one feeder's offsets copied across would land
+    on slots the other lines already hold.
+    """
+    feeding = {
+        edge.source
+        for edge in graph.edges_to(entry_port_id)
+        if (port := graph.ports.get(edge.source)) is not None and not port.is_entry
+    }
+    if len(feeding) != 1:
+        return None
+    exit_port_id = next(iter(feeding))
+    if set(graph.station_lines(exit_port_id)) != set(
+        graph.station_lines(entry_port_id)
+    ):
+        return None
+    return exit_port_id
+
+
 def _propagate_lr_rl_exit_to_entry(ctx: _OffsetCtx) -> None:
     """Propagate single LR/RL exit-port offsets onto fed LEFT/RIGHT entry ports."""
     graph = ctx.graph
@@ -2348,19 +2370,11 @@ def _propagate_lr_rl_exit_to_entry(ctx: _OffsetCtx) -> None:
             # the section reindex); copying a horizontal feeder's stored offset
             # across the seam would land the port off that lane.
             continue
-        feeding_exit_ports: set[str] = set()
-        for edge in graph.edges_to(port_id):
-            src = graph.station_for_edge_source(edge)
-            if not src.is_port:
-                continue
-            src_port = graph.ports.get(edge.source)
-            if src_port and not src_port.is_entry:
-                feeding_exit_ports.add(edge.source)
-        if len(feeding_exit_ports) != 1:
+        exit_port_id = _sole_feeding_exit_port(graph, port_id)
+        if exit_port_id is None:
             continue
-        exit_port_id = next(iter(feeding_exit_ports))
-        src_port = graph.ports.get(exit_port_id)
-        if not (src_port and src_port.section_id in ctx.lr_rl_sections):
+        src_port = graph.ports[exit_port_id]
+        if src_port.section_id not in ctx.lr_rl_sections:
             continue
         if (
             not _stores_reflected(ctx, port_obj.section_id)
@@ -2370,10 +2384,6 @@ def _propagate_lr_rl_exit_to_entry(ctx: _OffsetCtx) -> None:
             # does not store its bundle reflected: the consumer rides its own
             # arrival-order lane (set by the reindex, _reorder_reconvergence), so
             # copying the feeder's stored offset across would undo the transpose.
-            continue
-        exit_lines = set(graph.station_lines(exit_port_id))
-        entry_lines = set(graph.station_lines(port_id))
-        if exit_lines != entry_lines:
             continue
         entry_offs: dict[str, float] = {}
         for lid in graph.station_lines(port_id):
@@ -2991,6 +3001,8 @@ def _propagate_touched_exit_ports_to_entries(
                 continue
             if tgt_port.section_id in ctx.tb_sections:
                 continue
+            if _sole_feeding_exit_port(graph, edge.target) != sid:
+                continue
             reversed_seam = (
                 seam_orientation(graph, src_port, tgt_port) is SeamOrientation.REVERSE
             )
@@ -3447,7 +3459,8 @@ def _allocate_merge_ports_by_approach(ctx: _OffsetCtx) -> None:
     incoming offsets (so their feeder edges stay flat) and move only a
     mis-slotted perpendicular line: a ``below`` line is pushed just past
     the bottom of the horizontal band (one step below its largest
-    offset), an ``above`` line just past the top.  Multiple perpendicular
+    offset), an ``above`` line just past the top, each skipping any slot an
+    unclassified line (a junction drop or bypass) still holds.  Multiple perpendicular
     lines on the same side keep their incoming relative order.  Ports
     already in approach order are unchanged.  The new per-line offsets
     propagate to every downstream station in the port's section so the
@@ -3470,13 +3483,21 @@ def _allocate_merge_ports_by_approach(ctx: _OffsetCtx) -> None:
         max_horiz = max(cur[lid] for lid in horizontal)
         min_horiz = min(cur[lid] for lid in horizontal)
 
+        held = [off for lid, off in cur.items() if lid not in below + above]
+
+        def next_free(off: float, step: float) -> float:
+            while any(abs(off - other) <= _OFFSET_EQ_TOLERANCE for other in held):
+                off += step
+            held.append(off)
+            return off
+
         new_offs: dict[str, float] = {}
-        for rank, lid in enumerate(sorted(below, key=lambda lid: cur[lid]), start=1):
-            new_offs[lid] = max_horiz + rank * ctx.offset_step
-        for rank, lid in enumerate(
-            sorted(above, key=lambda lid: cur[lid], reverse=True), start=1
-        ):
-            new_offs[lid] = min_horiz - rank * ctx.offset_step
+        for lid in sorted(below, key=lambda lid: cur[lid]):
+            new_offs[lid] = next_free(max_horiz + ctx.offset_step, ctx.offset_step)
+            max_horiz = new_offs[lid]
+        for lid in sorted(above, key=lambda lid: cur[lid], reverse=True):
+            new_offs[lid] = next_free(min_horiz - ctx.offset_step, -ctx.offset_step)
+            min_horiz = new_offs[lid]
 
         if any(
             abs(new_offs[lid] - cur[lid]) > _OFFSET_EQ_TOLERANCE for lid in new_offs
