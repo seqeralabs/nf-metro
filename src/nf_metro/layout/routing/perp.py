@@ -83,8 +83,8 @@ def _perp_approach_fan_x(
 
     Feeders descending through different corridors carry separately indexed
     bundles, so their indices collide on the trunk.  Each bundle then keeps its
-    own order and takes a block of channels, the bundle whose source sits
-    furthest from the port outermost.
+    own order and takes a block of channels in source-Y order, the order
+    :func:`offsets._slot_perp_fan_bundle` slots the lines in the section.
     """
     rank, total = _perp_approach_fan_rank(ctx, entry_port_id, line_id)
     return port_x - (total - 1 - rank) * ctx.offset_step
@@ -95,22 +95,22 @@ def _perp_approach_fan_rank(
 ) -> tuple[int, int]:
     """``(rank, channel count)`` of *line_id* across a perp approach fan."""
     graph = ctx.graph
-    port_st = graph.stations[entry_port_id]
-    feeds = {
-        lid: next(iter(_bundled_feeders(ctx, entry_port_id, lid)), (0, 1, ""))
-        for lid in sorted({edge.line_id for edge in graph.edges_to(entry_port_id)})
-    }
+    feeds: dict[str, tuple[int, int, str]] = {}
+    for edge in graph.edges_to(entry_port_id):
+        info = ctx.bundle_info.get((edge.source, entry_port_id, edge.line_id))
+        if info is not None:
+            feeds.setdefault(edge.line_id, (info[0], info[1], edge.source))
+        else:
+            feeds.setdefault(edge.line_id, (0, 1, ""))
     counts = {count for _index, count, _source in feeds.values()}
     indices = {index for index, _count, _source in feeds.values()}
     if counts == {len(feeds)} and len(indices) == len(feeds):
         index, count, _source = feeds[line_id]
         return index, count
 
-    def reach(source: str) -> tuple[float, float, str]:
+    def reach(source: str) -> tuple[float, str]:
         src = graph.stations.get(source)
-        if src is None:
-            return (0.0, 0.0, source)
-        return (-abs(src.y - port_st.y), -abs(src.x - port_st.x), source)
+        return (0.0 if src is None else src.y, source)
 
     blocks: dict[tuple[str, int], list[tuple[int, str]]] = {}
     for lid, (index, count, source) in feeds.items():
