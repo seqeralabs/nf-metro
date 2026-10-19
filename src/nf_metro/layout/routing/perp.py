@@ -80,47 +80,11 @@ def _perp_approach_fan_x(
     outside of the bend, matching the intra-section bundle order, so the feeders
     do not cross.  The inter-section feeder drop and the intra-section drop both
     anchor on this one X.  Lines without a bundled feeder stay on the trunk.
-
-    Feeders descending through different corridors carry separately indexed
-    bundles, so their indices collide on the trunk.  Each bundle then keeps its
-    own order and takes a block of channels in source-Y order, the order
-    :func:`offsets._slot_perp_fan_bundle` slots the lines in the section.
     """
-    rank, total = _perp_approach_fan_rank(ctx, entry_port_id, line_id)
-    return port_x - (total - 1 - rank) * ctx.offset_step
-
-
-def _perp_approach_fan_rank(
-    ctx: _RoutingCtx, entry_port_id: str, line_id: str
-) -> tuple[int, int]:
-    """``(rank, channel count)`` of *line_id* across a perp approach fan."""
-    graph = ctx.graph
-    feeds: dict[str, tuple[int, int, str]] = {}
-    for edge in graph.edges_to(entry_port_id):
-        info = ctx.bundle_info.get((edge.source, entry_port_id, edge.line_id))
-        if info is not None:
-            feeds.setdefault(edge.line_id, (info[0], info[1], edge.source))
-        else:
-            feeds.setdefault(edge.line_id, (0, 1, ""))
-    counts = {count for _index, count, _source in feeds.values()}
-    indices = {index for index, _count, _source in feeds.values()}
-    if counts == {len(feeds)} and len(indices) == len(feeds):
-        index, count, _source = feeds[line_id]
-        return index, count
-
-    def reach(source: str) -> tuple[float, str]:
-        src = graph.stations.get(source)
-        return (0.0 if src is None else src.y, source)
-
-    blocks: dict[tuple[str, int], list[tuple[int, str]]] = {}
-    for lid, (index, count, source) in feeds.items():
-        blocks.setdefault((source, count), []).append((index, lid))
-    ordered = [
-        lid
-        for key in sorted(blocks, key=lambda key: reach(key[0]))
-        for _index, lid in sorted(blocks[key])
-    ]
-    return ordered.index(line_id), len(ordered)
+    index, count, _source = next(
+        iter(_bundled_feeders(ctx, entry_port_id, line_id)), (0, 1, "")
+    )
+    return port_x - (count - 1 - index) * ctx.offset_step
 
 
 def _perp_entry_crossing_x(

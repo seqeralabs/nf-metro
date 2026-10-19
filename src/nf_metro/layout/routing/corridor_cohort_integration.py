@@ -2776,16 +2776,28 @@ def _problem(
         )
     )
     # Branches of one line split to different targets share a lane, and each
-    # target orders the other lines against its own branch.  Where the two
-    # targets disagree the crossing is forced, so a footprint order between a
-    # branch and another line seats nothing the endpoint orders do not.
+    # target orders the other lines it gathers against its own branch.  A
+    # footprint order between one branch and a line its sibling's target
+    # already orders can contradict that target, and the crossing it would
+    # forbid is then forced; the endpoint order alone seats that pair.
     movable_by_id = {item.claim_id: item for item in movable}
-    split_branch_ids: set[str] = set()
+    sibling_cohorts: defaultdict[str, set[str]] = defaultdict(set)
     for equality in equalities:
         left = movable_by_id[equality.left_member_id]
         right = movable_by_id[equality.right_member_id]
-        if _split_branches(left, right):
-            split_branch_ids.update((left.claim_id, right.claim_id))
+        if not _split_branches(left, right):
+            continue
+        for branch, sibling in ((left, right), (right, left)):
+            if sibling.ledger.endpoint_cohort_id is not None:
+                sibling_cohorts[branch.claim_id].add(sibling.ledger.endpoint_cohort_id)
+
+    def ordered_by_sibling_target(branch_id: str, other_id: str) -> bool:
+        other = movable_by_id.get(other_id)
+        return (
+            other is not None
+            and other.ledger.endpoint_cohort_id in sibling_cohorts.get(branch_id, ())
+        )
+
     directed_separations: list[CorridorDirectedSeparation] = [
         CorridorDirectedSeparation(
             f"{order.owner_id}|{lower_id}|{upper_id}",
@@ -2797,7 +2809,8 @@ def _problem(
         if order.lower.variable_id is not None and order.upper.variable_id is not None
         for lower_id in lane_ids(order.lower.variable_id)
         for upper_id in lane_ids(order.upper.variable_id)
-        if lower_id not in split_branch_ids and upper_id not in split_branch_ids
+        if not ordered_by_sibling_target(lower_id, upper_id)
+        and not ordered_by_sibling_target(upper_id, lower_id)
     ]
     relation_domains: list[CorridorCoordinateDomain] = []
     for order in footprint_model.orders:

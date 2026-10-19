@@ -4570,7 +4570,7 @@ def _perp_exit_landing_offsets(
         if (
             len(feeder_sources(ctx.graph, edge.target)) != 1
             or perp_corridor_feeder(ctx.graph, edge.target) is not None
-        ) and not needs_perp_approach_fan(ctx.graph, edge.target):
+        ):
             return None
     elif column.offsets is None:
         return None
