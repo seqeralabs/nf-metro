@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="nf-metro-render-run" content="36212994309">
+<meta name="nf-metro-render-run" content="39253601309">
 <title>Render diff - PR #2015</title>
 <style>
   :root {
@@ -257,7 +257,7 @@
   <h1>Render diff - PR #2015</h1>
   <button id="scheme-toggle" class="scheme-btn">System</button>
 </div>
-<p class="summary">1 changed, 1 added out of 358 total renders. Generated 2026-09-26 02:52 UTC.</p>
+<p class="summary">1 changed, 1 added out of 373 total renders. Generated 2026-10-19 12:41 UTC.</p>
 <details class="intro">
 <summary>What is this page?</summary>
 <p>
@@ -279,8 +279,9 @@ switch between side-by-side, base-only, and PR-only views.
 <li>Intended improvements in the PR column</li>
 <li>Unintended regressions (overlapping lines, shifted labels,
     broken routing) in diagrams you did not mean to change</li>
-<li>New renders (green <em>added</em> badge) or removed renders
-    (red <em>removed</em> badge)</li>
+<li>New renders (green <em>added</em> badge), shown against what the base
+    code makes of the same file, or against the abort it raises there; or
+    removed renders (red <em>removed</em> badge)</li>
 </ul>
 </details>
 <div class="metrics">
@@ -289,7 +290,7 @@ switch between side-by-side, base-only, and PR-only views.
 <table>
 <tr><th>Render</th><th>Crossings</th><th>Near-horiz.</th><th>Lone diag.</th><th>Bends/route</th><th>Corners</th><th>Turn/route (rad)</th><th>Label strikes</th><th>Marker gap ↑</th><th>Excess gaps</th><th>Wasted canvas</th></tr>
 <tr><td><a href="#same_destination_vertical_convergence">same_destination_vertical_convergence</a></td><td class="m-better">5&rarr;4 (−1)</td><td class="m-flat">0</td><td class="m-flat">0</td><td class="m-flat">0.3</td><td class="m-flat">18</td><td class="m-flat">0.5</td><td class="m-flat">0</td><td class="m-flat">60.0</td><td class="m-flat">0</td><td class="m-flat">38%</td></tr>
-<tr><td><a href="#seed_77">seed_77</a></td><td class="m-flat">&ndash;&rarr;60</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;3</td><td class="m-flat">&ndash;&rarr;0.6</td><td class="m-flat">&ndash;&rarr;102</td><td class="m-flat">&ndash;&rarr;1.0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;60.0</td><td class="m-flat">&ndash;&rarr;1</td><td class="m-flat">&ndash;&rarr;36%</td></tr>
+<tr><td><a href="#seed_77">seed_77</a></td><td class="m-flat">&ndash;&rarr;59</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;3</td><td class="m-flat">&ndash;&rarr;0.6</td><td class="m-flat">&ndash;&rarr;100</td><td class="m-flat">&ndash;&rarr;1.0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;60.0</td><td class="m-flat">&ndash;&rarr;1</td><td class="m-flat">&ndash;&rarr;36%</td></tr>
 </table>
 </div>
 <div class="toc">
@@ -840,7 +841,10 @@ switch between side-by-side, base-only, and PR-only views.
 
 <div class="diff-entry" id="seed_77">
 <h3>Seed 77 <span class="badge badge-added">added</span></h3>
-<div class="side-only"><h4>New in PR</h4><div class="svg-wrapper"><?xml version="1.0" encoding="UTF-8"?>
+<div class="toggle-bar"><button class="active" data-mode="side-by-side">Side by side</button><button data-mode="base">Base only</button><button data-mode="pr">PR only</button></div>
+<div class="comparison">
+<div class="side side-base"><h4>Base code (map new in PR)</h4><div class="empty">Aborts on base: CurveInvariantError: [peel-off bundle braids into port] destination-tail bundle into port &#x27;s16__entry_right_18&#x27;: line &#x27;l2&#x27; runs at trunk y=336.0, but its destination order earns y=340.0 (+4 more)</div></div>
+<div class="side side-pr"><h4>PR</h4><div class="svg-wrapper"><?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
      width="3266" height="804" viewBox="0 0 3266 804">
 <defs>
@@ -998,7 +1002,7 @@ switch between side-by-side, base-only, and PR-only views.
 <path d="M1022.0,490.0 L972.0,490.0" stroke="#dde6c4" stroke-width="3.0" stroke-linecap="round" class="metro-line-l3--seed_77-pr" data-line-id="l3" />
 <path d="M430.0,494.0 L380.0,494.0" stroke="#dde6c4" stroke-width="3.0" stroke-linecap="round" class="metro-line-l3--seed_77-pr" data-line-id="l3" />
 <path d="M260.0,494.0 L210.0,494.0" stroke="#dde6c4" stroke-width="3.0" stroke-linecap="round" class="metro-line-l3--seed_77-pr" data-line-id="l3" />
-<path d="M160.0,498.0 L110.0,498.0" stroke="#dde6c4" stroke-width="3.0" stroke-linecap="round" class="metro-line-l3--seed_77-pr" data-line-id="l3" />
+<path d="M160.0,494.0 L110.0,494.0" stroke="#dde6c4" stroke-width="3.0" stroke-linecap="round" class="metro-line-l3--seed_77-pr" data-line-id="l3" />
 <path d="M2346.0,490.0 L2336.0,490.0" stroke="#dde6c4" stroke-width="3.0" stroke-linecap="round" class="metro-line-l3--seed_77-pr" data-line-id="l3" />
 <path d="M2336.0,490.0 L2198.0,490.0 Q2184.0,490.0,2184.0,504.0 L2184.0,556.0 Q2184.0,566.0,2174.0,566.0 L1982.0,566.0 Q1968.0,566.0,1968.0,552.0 L1968.0,500.0 Q1968.0,490.0,1958.0,490.0 L1942.0,490.0" stroke="#dde6c4" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-l3--seed_77-pr" data-line-id="l3" />
 <path d="M2686.0,132.0 L2696.0,124.0" stroke="#dde6c4" stroke-width="3.0" stroke-linecap="round" class="metro-line-l3--seed_77-pr" data-line-id="l3" />
@@ -1007,7 +1011,7 @@ switch between side-by-side, base-only, and PR-only views.
 <path d="M1172.0,490.0 L1162.0,490.0 Q1152.0,490.0,1152.0,500.0 L1152.0,556.0 Q1152.0,566.0,1142.0,566.0 L954.0,566.0 M950.0,566.0 L948.0,566.0 Q934.0,566.0,934.0,552.0 L934.0,500.0 Q934.0,490.0,924.0,490.0 L916.0,490.0" stroke="#dde6c4" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-l3--seed_77-pr" data-line-id="l3" />
 <path d="M972.0,490.0 L964.0,490.0" stroke="#dde6c4" stroke-width="3.0" stroke-linecap="round" class="metro-line-l3--seed_77-pr" data-line-id="l3" />
 <path d="M964.0,490.0 L964.0,490.0 Q950.0,490.0,950.0,504.0 L950.0,588.0 Q950.0,598.0,940.0,598.0 L461.0,598.0 Q451.0,598.0,451.0,588.0 L451.0,508.0 Q451.0,494.0,437.0,494.0 L430.0,494.0" stroke="#dde6c4" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-l3--seed_77-pr" data-line-id="l3" />
-<path d="M210.0,494.0 L202.82842712474618,494.0 Q200.0,494.0,198.0,496.0 L198.0,496.0 Q196.0,498.0,193.17157287525382,498.0 L160.0,498.0" stroke="#dde6c4" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-l3--seed_77-pr" data-line-id="l3" />
+<path d="M210.0,494.0 L160.0,494.0" stroke="#dde6c4" stroke-width="3.0" stroke-linecap="round" class="metro-line-l3--seed_77-pr" data-line-id="l3" />
 <path d="M2276.0,128.0 L2336.0,128.0" stroke="#a66d13" stroke-width="3.0" stroke-linecap="round" class="metro-line-l2--seed_77-pr" data-line-id="l2" />
 <path d="M1412.0,530.0 L1352.0,530.0" stroke="#a66d13" stroke-width="3.0" stroke-linecap="round" class="metro-line-l2--seed_77-pr" data-line-id="l2" />
 <path d="M1352.0,530.0 L1292.0,530.0" stroke="#a66d13" stroke-width="3.0" stroke-linecap="round" class="metro-line-l2--seed_77-pr" data-line-id="l2" />
@@ -1020,13 +1024,13 @@ switch between side-by-side, base-only, and PR-only views.
 <path d="M2796.0,490.0 L2746.0,490.0" stroke="#a66d13" stroke-width="3.0" stroke-linecap="round" class="metro-line-l2--seed_77-pr" data-line-id="l2" />
 <path d="M2158.0,494.0 L2108.0,494.0" stroke="#a66d13" stroke-width="3.0" stroke-linecap="round" class="metro-line-l2--seed_77-pr" data-line-id="l2" />
 <path d="M746.0,530.0 L742.2360679774998,530.0 Q732.2360679774998,530.0,727.7639320225003,521.0557280900008 L716.7082039324994,498.94427190999915 Q712.2360679774998,490.0,702.2360679774998,490.0 L696.0,490.0" stroke="#a66d13" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-l2--seed_77-pr" data-line-id="l2" />
-<path d="M160.0,494.0 L110.0,494.0" stroke="#a66d13" stroke-width="3.0" stroke-linecap="round" class="metro-line-l2--seed_77-pr" data-line-id="l2" />
+<path d="M160.0,498.0 L110.0,498.0" stroke="#a66d13" stroke-width="3.0" stroke-linecap="round" class="metro-line-l2--seed_77-pr" data-line-id="l2" />
 <path d="M1732.0,128.0 L1742.0,128.0" stroke="#a66d13" stroke-width="3.0" stroke-linecap="round" class="metro-line-l2--seed_77-pr" data-line-id="l2" />
 <path d="M1742.0,128.0 L1742.0,128.0 Q1752.0,128.0,1752.0,138.0 L1752.0,354.0 Q1752.0,364.0,1742.0,364.0 L674.0,364.0 Q660.0,364.0,660.0,378.0 L660.0,472.0 Q660.0,482.0,650.0,482.0 L640.0,482.0" stroke="#a66d13" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-l2--seed_77-pr" data-line-id="l2" />
 <path d="M2746.0,490.0 L2736.0,490.0" stroke="#a66d13" stroke-width="3.0" stroke-linecap="round" class="metro-line-l2--seed_77-pr" data-line-id="l2" />
 <path d="M2736.0,490.0 L2728.0,490.0 Q2718.0,490.0,2718.0,500.0 L2718.0,552.0 Q2718.0,566.0,2704.0,566.0 L2258.0,566.0 Q2244.0,566.0,2244.0,552.0 L2244.0,504.0 Q2244.0,494.0,2234.0,494.0 L2158.0,494.0" stroke="#a66d13" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-l2--seed_77-pr" data-line-id="l2" />
 <path d="M696.0,490.0 L690.0,490.0" stroke="#a66d13" stroke-width="3.0" stroke-linecap="round" class="metro-line-l2--seed_77-pr" data-line-id="l2" />
-<path d="M690.0,490.0 L690.0,490.0 Q680.0,490.0,680.0,500.0 L680.0,592.0 Q680.0,602.0,670.0,602.0 L197.0,602.0 Q187.0,602.0,187.0,592.0 L187.0,508.0 Q187.0,494.0,173.0,494.0 L160.0,494.0" stroke="#a66d13" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-l2--seed_77-pr" data-line-id="l2" />
+<path d="M690.0,490.0 L690.0,490.0 Q680.0,490.0,680.0,500.0 L680.0,592.0 Q680.0,602.0,670.0,602.0 L197.0,602.0 Q187.0,602.0,187.0,592.0 L187.0,512.0 Q187.0,498.0,173.0,498.0 L160.0,498.0" stroke="#a66d13" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-l2--seed_77-pr" data-line-id="l2" />
 <path d="M1622.0,132.0 L1682.0,132.0" stroke="#6ef362" stroke-width="3.0" stroke-linecap="round" class="metro-line-l1--seed_77-pr" data-line-id="l1" />
 <path d="M2856.0,486.0 L2796.0,486.0" stroke="#6ef362" stroke-width="3.0" stroke-linecap="round" class="metro-line-l1--seed_77-pr" data-line-id="l1" />
 <path d="M1682.0,494.0 L1622.0,494.0" stroke="#6ef362" stroke-width="3.0" stroke-linecap="round" class="metro-line-l1--seed_77-pr" data-line-id="l1" />
@@ -1337,9 +1341,7 @@ switch between side-by-side, base-only, and PR-only views.
 <circle cx="680.0" cy="490.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
 <circle cx="680.0" cy="602.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
 <circle cx="187.0" cy="602.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
-<circle cx="187.0" cy="494.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
-<circle cx="200.0" cy="494.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
-<circle cx="196.0" cy="498.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="187.0" cy="498.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
 <path d="M1732.0,115.0 L1737.0,120.0 L1732.0,125.0 L1727.0,120.0 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
 <text x="1732.0" y="112.0" font-size="7" fill="rgba(80, 180, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">s0__exit_right_0 (right)</text>
 <path d="M1942.0,115.0 L1947.0,120.0 L1942.0,125.0 L1937.0,120.0 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
@@ -1522,6 +1524,7 @@ switch between side-by-side, base-only, and PR-only views.
 <text x="108.0" y="756.0" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--seed_77-pr">Line 5</text>
 <text x="3236.0" y="796.0" font-size="8" fill="rgba(150, 150, 150, 0.6)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">created with nf-metro v2.1.0+dev</text>
 </svg></div></div>
+</div>
 </div>
 <script>
 (function() {
