@@ -2144,7 +2144,11 @@ They are design evidence, not part of this specification.
   compiles without a spurious shortfall. Its geometry (station coordinates,
   section boxes, and bypass-label obstacles) is discarded by
   `_restoring_route_observation_geometry`; routing alone, it leaves the ports
-  the label pass before it carried as they were. A
+  the label pass before it carried as they were. The one exception is a
+  convergence corridor grant that moved a trunk: only this observation draws
+  it, so the observation is adopted, once
+  `_assert_grant_moves_only_its_convergences` proves it differs on the granted
+  convergences alone from the same observation routed without the grant. A
   `CORRIDOR_COHORT_APERTURE` requirement it publishes is settled once against
   the observed plan, the grant is proven from that settlement's own
   translations to pay every measured deficit (`_assert_aperture_grant_closes`:

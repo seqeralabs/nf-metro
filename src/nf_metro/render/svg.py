@@ -2371,7 +2371,7 @@ def _settle_render_geometry(
     # observation is that pass.  It replays the inputs of the routing pass it
     # follows rather than deriving fresh ones: the label pass since then grew
     # section boxes that pass never seated the ledger's corridors against, and
-    # routing against them can leave a corridor no band that fits.  The
+    # routing against them can leave a corridor with no band that fits.  The
     # observation's geometry is restored away on exit, so an aperture grant
     # settles and re-routes the drawn geometry and the observation's routes are
     # thrown away.  A convergence grant that moved a trunk is only

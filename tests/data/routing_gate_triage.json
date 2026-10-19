@@ -2348,7 +2348,7 @@
   "status": "needs-review"
  },
  "corridor_cohorts.py::deficit is None::#1": {
-  "note": "Shortfall computation returns None for an absent deficit. Every caller passes a strictly positive Fraction (floor minus ceiling, or floor minus latest, or the minimum of positive deficits), so the absent-deficit arm is unreachable. Exercised by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once.",
+  "note": "Shortfall computation returns None for an absent deficit. Every caller passes a strictly positive Fraction (floor minus ceiling, or floor minus latest, or the minimum of positive deficits), so the absent-deficit arm is unreachable. The positive-deficit arm is driven by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once.",
   "status": "candidate-dead"
  },
  "corridor_cohorts.py::or deficit <= 0::#1": {

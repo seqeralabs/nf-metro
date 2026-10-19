@@ -1614,9 +1614,9 @@ def _member_footprint_model(
             )
             contact_pairs.add((variable_id, witness.footprint_id))
     fixed_by_lane = _witnesses_by_lane(fixed)
-    # A scalar's recipe governs its members' geometry, so a leg of one of them
-    # (a covered continuation the trunk replaces, say) is never an obstacle to
-    # the scalar's own coordinate.
+    # A scalar's own plan governs its members' geometry, so a fixed leg of one
+    # of them (a covered continuation the trunk replaces, which is never drawn)
+    # is no obstacle to the scalar's coordinate.
     governed_by_variable = {
         request.variable.variable_id: request.control_recipe.governed_member_ids
         for request in scalar_requests

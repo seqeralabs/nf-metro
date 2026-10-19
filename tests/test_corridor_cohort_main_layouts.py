@@ -134,6 +134,16 @@ def _assert_allocation_satisfies(
             at[directed.lower_member_id] + directed.distance
             <= at[directed.upper_member_id] + tolerance
         ), directed
+    for equality in problem.equalities:
+        gap = abs(at[equality.right_member_id] - at[equality.left_member_id])
+        assert gap == pytest.approx(abs(equality.delta), abs=tolerance), equality
+    for interval in problem.forbidden_intervals:
+        coordinate = at[interval.member_id]
+        assert not (
+            interval.minimum_coordinate + tolerance
+            < coordinate
+            < interval.maximum_coordinate - tolerance
+        ), interval
     for domain in problem.domains:
         if domain.minimum_coordinate is not None:
             assert at[domain.member_id] >= domain.minimum_coordinate - tolerance
