@@ -55,7 +55,7 @@ from nf_metro.layout.routing.corridor_cohort_integration import (
     claims_share_fixed_lane_identity,
 )
 from nf_metro.layout.routing.families import RouteFamilyId
-from nf_metro.parser.model import Edge, MetroGraph
+from nf_metro.parser.model import Edge, MetroGraph, PermissiveGuardWarning
 from nf_metro.render import svg
 from nf_metro.render.plan import _RENDER_GRAPH_EXCLUDED_FIELDS, RenderPlan
 
@@ -1817,7 +1817,8 @@ def test_no_solver_owner_contains_opposite_running_claims(
 
     Seed 77 compiles one cohort over both directions of several shared gaps; a
     cohort or equality owner holding both would bundle counter-running lines.
-    Scalar trunk lanes are their own cohort and carry no ledger claim.
+    Scalar trunk lanes are their own cohort and carry no ledger claim.  The map
+    trips the peel-off guard after the compiles run, so it renders permissively.
     """
     compiles = []
     original = member_geometry_routing.compile_corridor_cohort_plan
@@ -1830,7 +1831,14 @@ def test_no_solver_owner_contains_opposite_running_claims(
     monkeypatch.setattr(
         member_geometry_routing, "compile_corridor_cohort_plan", capture
     )
-    _render("tests/fixtures/hash_seed_determinism/seed_77.mmd")
+    path = ROOT / "tests/fixtures/hash_seed_determinism/seed_77.mmd"
+    graph = prepare_graph(
+        path.read_text(),
+        layout_options={"permissive": True},
+        source_dir=str(path.parent),
+    )
+    with pytest.warns(PermissiveGuardWarning):
+        svg.build_observed_render_plan(graph, resolve_theme(None, graph))
 
     assert compiles
     for ledger, plan in compiles:
