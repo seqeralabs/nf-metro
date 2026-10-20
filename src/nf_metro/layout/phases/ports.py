@@ -675,6 +675,40 @@ def _drop_x_within_section(section: Section, drop_x: float) -> bool:
     return section.bbox_x <= drop_x <= section.bbox_x + section.bbox_w
 
 
+def prune_settled_cross_column_perp_bridges(graph: MetroGraph) -> None:
+    """Drop each recorded bridge port whose feeders all descend inside its box.
+
+    Stage 3.2 and Stage 3.4 judge a feeder's descent against the section box as
+    it stands when they run, and later stages of the same pass (the Stage 3.3
+    perpendicular-entry runway shift, the edge-inset reserve) can widen that
+    box over the descent.  Run once layout has settled, so the record names
+    only ports some feeder reaches from outside the settled box.
+    """
+    graph._cross_column_perp_bridge_ports -= {
+        port_id
+        for port_id in graph._cross_column_perp_bridge_ports
+        if not _fed_from_outside_its_box(graph, port_id)
+    }
+
+
+def _fed_from_outside_its_box(graph: MetroGraph, port_id: str) -> bool:
+    """True when some feeder of *port_id* descends outside its section's box."""
+    section = graph.sections[graph.ports[port_id].section_id]
+    edges = graph.edges_to(port_id)
+    lines_by_source: dict[str, set[str]] = {}
+    for edge in edges:
+        lines_by_source.setdefault(edge.source, set()).add(edge.line_id)
+    for edge in edges:
+        source = graph.station_for_edge_source(edge)
+        if not (source.is_port or edge.source in graph.junction_ids):
+            continue
+        bundle = len(lines_by_source[edge.source])
+        descent_x = _feeder_descent_x(graph, edge, source.x, bundle)
+        if not _drop_x_within_section(section, descent_x):
+            return True
+    return False
+
+
 def _vertical_drop_source_x(
     graph: MetroGraph,
     port: Port,

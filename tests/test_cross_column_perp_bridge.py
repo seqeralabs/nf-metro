@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from nf_metro.api import RenderConfig, prepare_graph, render_graph_result, render_string
+from nf_metro.layout import engine
 from nf_metro.layout.phases.ports import _drop_x_within_section, _feeder_descent_x
 from nf_metro.layout.routing import compute_station_offsets, invariants
 from nf_metro.layout.routing.common import Direction
@@ -103,7 +104,35 @@ graph LR
     s2n3 -->|l2| s4n0
 """
 
-INLINE_MAPS = {"bridged_entry": BRIDGED_ENTRY, "declined_column": DECLINED_COLUMN}
+# Call 1's TOP entry is fed from a descent just past its box as Stage 3.2 sees
+# it; the perpendicular-entry runway shift then widens the box over that
+# descent.
+WIDENED_OVER_THE_DESCENT = """\
+%%metro line: l0 | Sort | #e6194b
+%%metro line: l1 | Merge | #3cb44b
+%%metro line: l2 | Export_Filter_Quant | #4363d8
+%%metro grid: sec1 | 0,1
+
+graph LR
+    subgraph sec0 [Export_Pca 0]
+        %%metro direction: TB
+        %%metro exit: right | l0, l1
+        s0n1 -->|l0| s0n2
+        s0n2 -->|l0,l1| s0n3
+    end
+    subgraph sec1 [Call 1]
+        s1n0 -->|l1,l2| s1n1
+    end
+    s0n1 -->|l0| s1n1
+    s0n3 -->|l1| s1n0
+"""
+WIDENED_PORT = "sec1__entry_top_1"
+
+INLINE_MAPS = {
+    "bridged_entry": BRIDGED_ENTRY,
+    "declined_column": DECLINED_COLUMN,
+    "widened_over_the_descent": WIDENED_OVER_THE_DESCENT,
+}
 
 RECORDING_FIXTURES = [
     TOPOLOGIES / "bottom_entry_two_feeders_own_lanes.mmd",
@@ -158,7 +187,7 @@ def _feeders_descending_outside(graph: MetroGraph, port_id: str) -> list[str]:
 
 
 @pytest.mark.parametrize("case", [*RECORDING_FIXTURES, *INLINE_MAPS], ids=_case_id)
-def test_bridge_record_describes_the_drawn_layout(case: Path | str) -> None:
+def test_bridge_record_describes_the_settled_layout(case: Path | str) -> None:
     graph = _laid_out(case)
     stale = [
         port_id
@@ -166,6 +195,24 @@ def test_bridge_record_describes_the_drawn_layout(case: Path | str) -> None:
         if not _feeders_descending_outside(graph, port_id)
     ]
     assert not stale, stale
+
+
+def test_a_box_widened_over_the_descent_drops_its_bridge(monkeypatch) -> None:
+    """The port is recorded while its feeder descends past the box, then dropped.
+
+    Without the settled-layout prune the record keeps the port Stage 3.2 saw
+    as bridged, so this map holds the prune to a port it really recorded.
+    """
+    monkeypatch.setattr(
+        engine, "prune_settled_cross_column_perp_bridges", lambda graph: None
+    )
+    unpruned = _laid_out("widened_over_the_descent")
+    assert WIDENED_PORT in unpruned._cross_column_perp_bridge_ports
+    monkeypatch.undo()
+
+    graph = _laid_out("widened_over_the_descent")
+    assert not _feeders_descending_outside(graph, WIDENED_PORT)
+    assert WIDENED_PORT not in graph._cross_column_perp_bridge_ports
 
 
 def _inject_bundle_flip(monkeypatch, source: str, target: str) -> None:

@@ -291,6 +291,7 @@ from nf_metro.layout.phases.ports import (  # noqa: F401
     _snap_grid_group_exit_ports,
     _snap_sole_layer_stations_to_ports,
     _space_ports_from_termini,
+    prune_settled_cross_column_perp_bridges,
 )
 from nf_metro.layout.phases.row_align import (  # noqa: F401
     _align_row_trunk_ys,
@@ -589,6 +590,10 @@ def compute_layout(
             _layout_pass(validate)
         elif validate and graph._after_final_deferred:
             _run_after_final_checkpoint(graph, section_y_gap, section_y_padding)
+
+        # After every layout pass, so it judges the settled boxes, and before the
+        # settled-route validation below reads the record.
+        prune_settled_cross_column_perp_bridges(graph)
 
         if validate and graph._final_route_guards_deferred:
             from nf_metro.layout.fan_plans import FanRouteInvariantError
