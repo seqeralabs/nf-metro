@@ -20,9 +20,9 @@ from pathlib import Path
 
 import pytest
 
-from nf_metro.api import prepare_graph, render_string
+from nf_metro.api import RenderConfig, prepare_graph, render_graph_result, render_string
 from nf_metro.layout.phases.ports import _drop_x_within_section, _feeder_descent_x
-from nf_metro.layout.routing import invariants
+from nf_metro.layout.routing import compute_station_offsets, invariants
 from nf_metro.layout.routing.common import Direction
 from nf_metro.layout.routing.invariants import (
     BundleOrderViolation,
@@ -30,7 +30,9 @@ from nf_metro.layout.routing.invariants import (
     Side,
     assert_render_curve_invariants,
 )
+from nf_metro.layout.routing.perp_columns import deal_perp_entry_column
 from nf_metro.parser.model import MetroGraph
+from nf_metro.themes import resolve_theme
 
 ROOT = Path(__file__).resolve().parent.parent
 REGRESSIONS = ROOT / "tests" / "fixtures" / "regressions"
@@ -231,3 +233,53 @@ def test_bridged_maps_render_without_a_curve_abort(case: Path | str) -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         render_string(text, source_dir=source_dir)
+
+
+@pytest.mark.parametrize(
+    ("case", "port_id", "high_x_line"),
+    [
+        (
+            REGRESSIONS / "cross_column_perp_entry_overflow.mmd",
+            "reporting__entry_top_7",
+            "germline",
+        ),
+        ("bridged_entry", BRIDGED_PORT, "a"),
+    ],
+    ids=["merge_fed", "collapsed_approach_fan"],
+)
+def test_bridged_port_lands_each_line_on_its_dealt_channel(
+    case: Path | str, port_id: str, high_x_line: str
+) -> None:
+    """The bridged port's column is dealt from its trunk, and every feeder lands on it.
+
+    The trunk's topmost lane takes the high-X channel, so the drop nests through
+    its turn toward larger X, and no two lines share a descent into the port.
+    """
+    graph = _laid_out(case)
+    offsets = compute_station_offsets(graph)
+    column = deal_perp_entry_column(graph, port_id, offsets)
+    assert column is not None and column.offsets is not None
+    assert max(column.offsets, key=lambda item: item[1])[0] == high_x_line
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        result = render_graph_result(
+            graph, resolve_theme(None, graph, mode=None), RenderConfig()
+        )
+    routes = list(zip(result.plan.routes, result.plan.route_polylines))
+    departures = {
+        route.line_id: round(points[0][0], 1)
+        for route, points in routes
+        if route.edge.source == port_id
+    }
+    landings = {
+        (route.edge.source, route.line_id): round(points[-1][0], 1)
+        for route, points in routes
+        if route.edge.target == port_id
+    }
+    assert len(set(departures.values())) == len(departures)
+    assert max(departures, key=departures.__getitem__) == high_x_line
+    assert landings
+    assert all(
+        x == departures[line_id] for (_source, line_id), x in landings.items()
+    ), (landings, departures)

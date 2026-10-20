@@ -37,6 +37,7 @@ from nf_metro.layout.geometry import (
 from nf_metro.layout.routing.common import (
     EXIT_SIDE_DIRECTION,
     Direction,
+    inter_section_corridor,
     junction_source_ports,
     merge_junction_ids,
     needs_perp_approach_fan,
@@ -107,32 +108,42 @@ def perp_corridor_feeder(graph: MetroGraph, port_id: str) -> Port | None:
     return None
 
 
-def _trunk_lanes(
+def _trunk_order(
     graph: MetroGraph, port_id: str, offsets: _Offsets
-) -> dict[str, float] | None:
-    """Each line's lane coordinate on the station the port's drop turns into.
+) -> list[str] | None:
+    """The port's lines in lane order on the stations its drop turns into.
 
-    ``None`` unless every line leaves the port for one in-section station.
+    Each line ranks by its lane on the nearest of those stations, where it
+    first turns off the drop.  ``None`` unless every line leaves the port for
+    in-section stations and each station stacks the lines it takes in that
+    order, so every turn off the drop nests.
     """
     from nf_metro.layout.routing.context import _section_lane_frame
 
     port = graph.ports[port_id]
+    port_y = graph.stations[port_id].y
     frame = _section_lane_frame(graph, graph.section_for_port(port))
-    lanes: dict[str, set[float]] = {}
+    stacks: dict[str, dict[str, float]] = {}
+    first_turn: dict[str, tuple[float, float]] = {}
     for edge in graph.edges_from(port_id):
         target = graph.station_for_edge_target(edge)
         if target.is_port:
             return None
-        lanes.setdefault(edge.line_id, set()).add(
-            station_lane_coord(
-                frame, target, offsets.get((edge.target, edge.line_id), 0.0)
-            )
+        lane = station_lane_coord(
+            frame, target, offsets.get((edge.target, edge.line_id), 0.0)
         )
-    if set(lanes) != set(graph.station_lines(port_id)):
+        stacks.setdefault(edge.target, {})[edge.line_id] = lane
+        turn = (abs(target.y - port_y), lane)
+        first_turn[edge.line_id] = min(first_turn.get(edge.line_id, turn), turn)
+    if set(first_turn) != set(graph.station_lines(port_id)):
         return None
-    if any(len(coords) != 1 for coords in lanes.values()):
-        return None
-    return {line_id: next(iter(coords)) for line_id, coords in lanes.items()}
+    order = sorted(first_turn, key=lambda lid: (first_turn[lid][1], lid))
+    rank = {lid: i for i, lid in enumerate(order)}
+    for stack in stacks.values():
+        ranks = [rank[lid] for lid in sorted(stack, key=lambda lid: (stack[lid], lid))]
+        if ranks != sorted(ranks):
+            return None
+    return order
 
 
 def _consumer_is_right_of_port(graph: MetroGraph, port_id: str) -> bool:
@@ -200,33 +211,78 @@ def _departure_laterals(
 
 
 def _feeder_keeps_its_own_crossing(
-    graph: MetroGraph, port_id: str, source_id: str
+    graph: MetroGraph,
+    port_id: str,
+    source_id: str,
+    column: Mapping[str, float],
+    offsets: _Offsets,
 ) -> bool:
-    """Whether *source_id* reaches *port_id* on geometry a column would not move.
+    """Whether *source_id* reaches *port_id* on geometry that *column* must not move.
 
     The column re-lands each feeder's final leg on its channel, but three
     feeders draw more than that leg from the port's own crossing, so a column
     moving a line off it exposes a stub or a jump there:
 
-    * a merge, whose own feeders land on the crossing;
+    * a merge, whose own feeders land on the crossing, unless another feeder
+      brings two or more lines and so vouches for the column by the order it
+      departs in (:func:`_feeders_deliver_column`);
     * a fan-out junction fed by a perpendicular exit on the side opposite the
       port, whose line wraps round to the port along a run its fan places;
     * a perpendicular exit dropping straight onto the port, whose leg out of
-      its own section stays on that section's lane.
+      its own section stays on that section's lane unless the column leaves
+      each line on the channel it drops down.
     """
     port = graph.ports[port_id]
     source = graph.stations[source_id]
     if source_id in graph.ports:
-        return abs(source.x - graph.stations[port_id].x) <= COORD_TOLERANCE and {
-            edge.target for edge in graph.edges_from(source_id)
-        } == {port_id}
+        return (
+            abs(source.x - graph.stations[port_id].x) <= COORD_TOLERANCE
+            and {edge.target for edge in graph.edges_from(source_id)} == {port_id}
+            and not _column_continues_its_drop(
+                graph, port_id, source_id, column, offsets
+            )
+        )
     if source_id in merge_junction_ids(graph):
-        return True
+        return not _brings_a_bundle(graph, port_id)
     opposite = PortSide.BOTTOM if port.side is PortSide.TOP else PortSide.TOP
     return any(
         exit_port.side is opposite
         for exit_port in junction_source_ports(graph, source_id)
     )
+
+
+def _column_continues_its_drop(
+    graph: MetroGraph,
+    port_id: str,
+    source_id: str,
+    column: Mapping[str, float],
+    offsets: _Offsets,
+) -> bool:
+    """Whether *column* crosses each line *source_id* drops on where it drops."""
+    port_x = graph.stations[port_id].x
+    line_ids = [e.line_id for e in graph.edges_to(port_id) if e.source == source_id]
+    departure = _departure_laterals(graph, source_id, line_ids, offsets)
+    return departure is not None and all(
+        abs(lateral - port_x - column[lid]) <= COORD_TOLERANCE_FINE
+        for lid, lateral in departure[1].items()
+    )
+
+
+def _brings_a_bundle(graph: MetroGraph, port_id: str) -> bool:
+    """Whether a feeder other than a merge brings *port_id* two or more lines."""
+    merges = merge_junction_ids(graph)
+    others = [e.source for e in graph.edges_to(port_id) if e.source not in merges]
+    return any(others.count(feeder) > 1 for feeder in others)
+
+
+def _approach_fan_collapses(graph: MetroGraph, port_id: str) -> bool:
+    """Whether *port_id*'s approach fan spans more than one corridor bundle.
+
+    The fan channels its feeders by their index in one shared bundle; feeders
+    indexed in separate corridors each stand last in their own and all land on
+    the port's X.
+    """
+    return len({inter_section_corridor(graph, e) for e in graph.edges_to(port_id)}) > 1
 
 
 def _side_order(laterals: Mapping[str, float], direction: Direction) -> list[str]:
@@ -280,9 +336,10 @@ def deal_perp_entry_column(
     whose lanes set their crossing themselves.  A feeder drawn from the port's
     own crossing beyond its final leg (:func:`_feeder_keeps_its_own_crossing`)
     declines the record.  A distinct-line approach fan
-    (:func:`needs_perp_approach_fan`) channels by approach instead.  The record
-    is declined (``offsets`` is ``None``) wherever a feeder would have to cross
-    its own lines to land on the column.
+    (:func:`needs_perp_approach_fan`) channels by approach instead, unless its
+    feeders are indexed in separate bundles (:func:`_approach_fan_collapses`).
+    The record is declined (``offsets`` is ``None``) wherever a feeder would
+    have to cross its own lines to land on the column.
     """
     port = graph.ports.get(port_id)
     if (
@@ -290,7 +347,10 @@ def deal_perp_entry_column(
         or not port.is_entry
         or port.side not in (PortSide.TOP, PortSide.BOTTOM)
         or not lanes_run_along_y(graph.section_for_port(port).direction)
-        or needs_perp_approach_fan(graph, port_id)
+    ):
+        return None
+    if needs_perp_approach_fan(graph, port_id) and not _approach_fan_collapses(
+        graph, port_id
     ):
         return None
     sources = feeder_sources(graph, port_id)
@@ -298,19 +358,21 @@ def deal_perp_entry_column(
         return None
     if perp_corridor_feeder(graph, port_id) is not None:
         return None
-    if any(_feeder_keeps_its_own_crossing(graph, port_id, s) for s in sources):
-        return PerpEntryColumn(port_id, None)
     lines = graph.station_lines(port_id)
-    lanes = _trunk_lanes(graph, port_id, offsets)
-    if len(lines) < 2 or lanes is None:
+    trunk = _trunk_order(graph, port_id, offsets)
+    if len(lines) < 2 or trunk is None:
         return None
-    trunk = sorted(lines, key=lambda lid: (lanes[lid], lid))
     high_x_first = (port.side is PortSide.TOP) == _consumer_is_right_of_port(
         graph, port_id
     )
     order = trunk[::-1] if high_x_first else trunk
     slots = sorted(offsets.get((port_id, lid), 0.0) for lid in order)
     column = dict(zip(order, slots, strict=True))
+    if any(
+        _feeder_keeps_its_own_crossing(graph, port_id, s, column, offsets)
+        for s in sources
+    ):
+        return PerpEntryColumn(port_id, None)
     if not _feeders_deliver_column(graph, port_id, column, offsets):
         return PerpEntryColumn(port_id, None)
     return PerpEntryColumn(port_id, tuple(column.items()))
