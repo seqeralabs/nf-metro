@@ -287,11 +287,12 @@ PHASE_FIELD_REGISTRY: dict[str, PhaseFieldSpec] = {
             "section's box, so the port holds the section's column and routing "
             "bridges the gap with an L-shaped lead-in; cleared at the start of "
             "every layout pass and filled by that pass's Stage 3.2 entry-port "
-            "and Stage 3.4 exit-port alignment, then pruned post-layout of any "
-            "port whose feeders all descend inside the settled box, since later "
-            "stages can widen a box over a descent the alignment judged outside "
-            "it; routing's render-curve invariant relaxes its hard abort "
-            "to a warning only for failures confined to lead-ins into these "
+            "and Stage 3.4 exit-port alignment, then pruned at the end of the "
+            "pass of any port whose feeders all descend inside the pass's final "
+            "box, since later stages can widen a box over a descent the "
+            "alignment judged outside it; routing's render-curve invariant, "
+            "also the geometric bypass pass's curve probe, relaxes its hard "
+            "abort to a warning only for failures confined to lead-ins into these "
             "ports, tolerating the empty default"
         ),
     ),

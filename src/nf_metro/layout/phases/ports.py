@@ -681,8 +681,9 @@ def prune_settled_cross_column_perp_bridges(graph: MetroGraph) -> None:
     Stage 3.2 and Stage 3.4 judge a feeder's descent against the section box as
     it stands when they run, and later stages of the same pass (the Stage 3.3
     perpendicular-entry runway shift, the edge-inset reserve) can widen that
-    box over the descent.  Run once layout has settled, so the record names
-    only ports some feeder reaches from outside the settled box.
+    box over the descent.  Run at the end of every layout pass, so the record
+    names only ports some feeder reaches from outside the pass's final box,
+    for the bypass pass's curve probe as well as the render.
     """
     graph._cross_column_perp_bridge_ports -= {
         port_id

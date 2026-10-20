@@ -591,10 +591,6 @@ def compute_layout(
         elif validate and graph._after_final_deferred:
             _run_after_final_checkpoint(graph, section_y_gap, section_y_padding)
 
-        # After every layout pass, so it judges the settled boxes, and before the
-        # settled-route validation below reads the record.
-        prune_settled_cross_column_perp_bridges(graph)
-
         if validate and graph._final_route_guards_deferred:
             from nf_metro.layout.fan_plans import FanRouteInvariantError
             from nf_metro.layout.routing.convergences import ConvergenceInvariantError
@@ -1346,8 +1342,8 @@ def _layout_once(
 ) -> None:
     """Run one full positioning pass at the given spacing.
 
-    Clears ``_cross_column_perp_bridge_ports`` so each pass records only its own
-    bridges.
+    Clears ``_cross_column_perp_bridge_ports`` before the pass and prunes it
+    against the pass's final boxes after, so it holds only this pass's bridges.
     """
     from nf_metro.layout.fan_plans import (
         build_fan_plan_execution,
@@ -1392,6 +1388,7 @@ def _layout_once(
         section_y_gap=section_y_gap,
         validate=validate,
     )
+    prune_settled_cross_column_perp_bridges(graph)
 
 
 def _compute_flat_layout(

@@ -215,6 +215,31 @@ def test_a_box_widened_over_the_descent_drops_its_bridge(monkeypatch) -> None:
     assert WIDENED_PORT not in graph._cross_column_perp_bridge_ports
 
 
+def test_every_layout_pass_ends_with_a_record_of_its_own_boxes(monkeypatch) -> None:
+    """The record matches each pass's boxes, not only the settled layout's.
+
+    The bypass pass scores candidate layouts with the render-curve check, which
+    reads the record before layout settles.
+    """
+    stale_after_pass: list[list[str]] = []
+    run_pass = engine._layout_once
+
+    def checked_pass(graph: MetroGraph, *args, **kwargs) -> None:
+        run_pass(graph, *args, **kwargs)
+        stale_after_pass.append(
+            [
+                port_id
+                for port_id in sorted(graph._cross_column_perp_bridge_ports)
+                if not _feeders_descending_outside(graph, port_id)
+            ]
+        )
+
+    monkeypatch.setattr(engine, "_layout_once", checked_pass)
+    _laid_out("widened_over_the_descent")
+    assert stale_after_pass
+    assert not any(stale_after_pass), stale_after_pass
+
+
 def _inject_bundle_flip(monkeypatch, source: str, target: str) -> None:
     flip = BundleOrderViolation(
         source, target, "a", "b", (0.0, 0.0), Direction.D, Direction.R,
