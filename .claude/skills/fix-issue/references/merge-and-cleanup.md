@@ -124,6 +124,10 @@ gh pr create --draft --repo seqeralabs/nf-metro --base main --title "<title>" --
 
 Fixes #<N>
 
+## Net
+
+Closes: #<a>, #<b>. Filed: #<c> (MRE, base `main`). Net: -1.
+
 ## Test plan
 - [ ] Targeted tests pass locally (including new invariant test); CI matrix runs the full suite
 - [ ] ruff check + ruff format clean on whole repo

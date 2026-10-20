@@ -34,7 +34,9 @@ handoff:
 - the run is fixing a third distinct defect class (a class is one rule broken,
   not one fixture);
 - a third fresh writer has been spawned on the candidate;
-- the same guard or failure class has recurred three times in the writer loop.
+- the same guard or failure class has recurred three times in the writer loop
+  (also the signal for the diagnostician's rewrite verdict in
+  [`diagnosis.md`](diagnosis.md)).
 
 Crossing any one of these is a stop, not a note in the ledger. Report to the
 user: what is committed and green, what is open with its blocker, and the two

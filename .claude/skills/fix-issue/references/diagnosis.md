@@ -57,6 +57,28 @@ machinery that already existed; the one that held was the fourth recurrence of
 the same failure class in the writer loop, which is the genuine signal to stop
 and report rather than patch a fifth instance.
 
+**"Rewrite" is a first-class verdict, held to the same evidence.** When the
+diagnostician can show that the existing mechanism cannot represent what the
+rule needs (the falsifying test above), the right outcome is a rewrite
+proposal, not a fifth patch and not a filed blocker. The verdict returns:
+
+- the rule, and the property of it the current machinery cannot express, with
+  the experiment that shows it;
+- the mechanism to replace: which stages, which hot-spot functions are deleted,
+  what stays;
+- the shape of the replacement: its inputs and outputs, where in the stage
+  order it runs, which oracle proves it;
+- how it lands without a flag day: oracle first, the replacement beside the old
+  path under the oracle, cut over one family step at a time, old path deleted
+  last;
+- a size estimate in PRs, and which open witnesses it would close.
+
+The coordinator writes this up as a design record (the pattern is
+`docs/dev/layout_settlement_design_record.md`), links it from the family or
+issue, and stops for the user's decision. Nothing is patched in that mechanism
+while the decision is open. A rewrite the user approves becomes steps on the
+family issue, each one a normal run of this skill.
+
 **When the issue already states its own root cause** (it names the function,
 the call site, and the acceptance bar), do not re-derive it from scratch at HIGH
 cost. Brief `fix-issue-diagnostician-mid` to *confirm or refute that specific

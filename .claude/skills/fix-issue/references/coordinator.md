@@ -201,6 +201,11 @@ returns. It reaches PR-ready completion when:
 7. Independent verification, visual review when applicable, and the pre-ready
    gate pass.
 8. The coordinator marks the draft PR ready only after those gates pass.
+9. The final report carries the run's **net line**: issues this PR closes,
+   issues this run filed, and the difference, with each number named. A run
+   that filed more than it closes says so here in one line, before the user
+   decides whether to merge. The pre-ready gate reviewer checks the line
+   against the PR body and the run's `gh issue create` calls.
 
 Reroute bounded failures until these gates pass. If missing authority,
 unavailable capability, external state, or a material user decision prevents
