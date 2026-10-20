@@ -15,6 +15,11 @@ Two properties hold the exemption to that one connection:
 
 from __future__ import annotations
 
+import ast
+import dataclasses
+import inspect
+import types
+import typing
 import warnings
 from pathlib import Path
 
@@ -114,34 +119,9 @@ RECORDING_FIXTURES = [
 ]
 
 
-def _known_abort(case: Path | str, *issues: str) -> object:
-    return pytest.param(
-        case,
-        marks=pytest.mark.xfail(
-            raises=CurveInvariantError, strict=True, reason=", ".join(issues)
-        ),
-    )
-
-
 BRIDGED_MAPS = [
     REGRESSIONS / "cross_column_perp_entry_overflow.mmd",
     "bridged_entry",
-    _known_abort(
-        REGRESSIONS / "perp_entry_column_feeder_conflict.mmd",
-        "#2131",
-        "#2130",
-        "deferred offset on __bypass_s2n4_s2n3_6 untracked",
-    ),
-    _known_abort(
-        REGRESSIONS / "perp_entry_column_opposite_side_fan.mmd",
-        "#2124",
-        "#2125",
-        "#2127",
-        "s1n2->s1n3 collinear pair untracked",
-    ),
-    _known_abort(REGRESSIONS / "perp_entry_column_straight_drop.mmd", "#2121", "#2119"),
-    _known_abort(REGRESSIONS / "perp_exit_single_feeder_landing.mmd", "#2124", "#2092"),
-    _known_abort("declined_column", "#2119"),
 ]
 
 
@@ -283,3 +263,61 @@ def test_bridged_port_lands_each_line_on_its_dealt_channel(
     assert all(
         x == departures[line_id] for (_source, line_id), x in landings.items()
     ), (landings, departures)
+
+
+EDGELESS_VIOLATIONS = {
+    "FanOpeningGeometryViolation",
+    "FusedCotravellingLanes",
+    "LooseDestinationTail",
+    "LooseSameDestinationFinalVertical",
+    "MergeBranchHang",
+    "OpposingEntryConfluenceOrderViolation",
+    "PackedCellHandoffDivergence",
+    "PeeloffBundleCrossing",
+}
+
+
+def _render_curve_violation_classes() -> set[type]:
+    tree = ast.parse(inspect.getsource(invariants.render_curve_violations))
+    checks = {
+        node.func.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id.startswith("check_")
+    }
+    classes: set[type] = set()
+    for name in checks:
+        (item,) = typing.get_args(
+            typing.get_type_hints(getattr(invariants, name))["return"]
+        )
+        is_union = isinstance(item, types.UnionType)
+        classes.update(typing.get_args(item) if is_union else (item,))
+    return classes
+
+
+def _sample(cls: type) -> object:
+    sample = object.__new__(cls)
+    for field in dataclasses.fields(cls):
+        value = ("a", "b") if field.name in invariants._EDGE_FIELDS else "a"
+        object.__setattr__(sample, field.name, value)
+    return sample
+
+
+def test_every_render_curve_violation_names_an_edge_or_is_listed_edgeless() -> None:
+    """A violation naming no edge can never be exempted on a bridged lead-in.
+
+    Every class a render-time curve check returns either names the edges the
+    exemption matches on, or is listed here as edge-less, so a new check whose
+    violations carry their edge under another name fails here.
+    """
+    classes = _render_curve_violation_classes()
+    assert classes
+    unnamed = sorted(
+        cls.__name__
+        for cls in classes
+        if not invariants._violation_edges(_sample(cls))
+        and cls.__name__ not in EDGELESS_VIOLATIONS
+    )
+    assert not unnamed, unnamed
+    assert EDGELESS_VIOLATIONS <= {cls.__name__ for cls in classes}

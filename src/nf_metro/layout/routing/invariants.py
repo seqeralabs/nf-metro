@@ -7137,25 +7137,30 @@ def assert_render_curve_invariants(
     section's column and reached by a best-effort L-shaped lead-in, a shape the
     builder cannot always make clean.  A failure every one of whose named routes
     is such a lead-in downgrades to a warning naming the actionable fix; every
-    other failure in the map still aborts.
+    other failure in the map aborts.
     """
     named_checks = render_curve_violations(
         graph, routes, offsets, curve_radius=curve_radius
     )
+    # A permissive render warns on every failure below, so nothing is bridged.
     bridged_ports: set[str] = (
         set() if graph.permissive else graph._cross_column_perp_bridge_ports
     )
     defects: list[str] = []
     bridged: list[str] = []
+    hit_ports: set[str] = set()
     for label, violations in named_checks:
-        on_bridge = [v for v in violations if _on_bridged_lead_in(v, bridged_ports)]
+        on_bridge = []
+        for violation in violations:
+            ports = _bridged_lead_in_ports(violation, bridged_ports)
+            if ports:
+                on_bridge.append(violation)
+                hit_ports |= ports
         _summarise(label, on_bridge, bridged)
         _summarise(label, [v for v in violations if v not in on_bridge], defects)
 
     if bridged:
-        sections = sorted(
-            {graph.ports[pid].section_id for pid in bridged_ports if pid in graph.ports}
-        )
+        sections = sorted({graph.ports[pid].section_id for pid in hit_ports})
         warnings.warn(
             f"section(s) {', '.join(sections)} have a perpendicular connection "
             f"bridged across grid columns; routing draws a best-effort lead-in "
@@ -7194,27 +7199,27 @@ _EDGE_FIELDS = ("edge", "edge_a", "edge_b")
 _EDGE_FIELD_PAIRS = (("source", "target"), ("edge_source", "edge_target"))
 
 
-def _violation_edges(violation: object) -> set[tuple[str, str]]:
+def _violation_edges(violation: _HasMessage) -> set[tuple[str, str]]:
     """The ``(source, target)`` edges a violation names in its fields."""
-    edges: set[tuple[str, str]] = {
-        tuple(getattr(violation, name))  # type: ignore[misc]
-        for name in _EDGE_FIELDS
-        if hasattr(violation, name)
-    }
+    edges: set[tuple[str, str]] = set()
+    for name in _EDGE_FIELDS:
+        if hasattr(violation, name):
+            source, target = getattr(violation, name)
+            edges.add((source, target))
     for src, tgt in _EDGE_FIELD_PAIRS:
         if hasattr(violation, src) and hasattr(violation, tgt):
             edges.add((getattr(violation, src), getattr(violation, tgt)))
     return edges
 
 
-def _on_bridged_lead_in(violation: object, bridged_ports: set[str]) -> bool:
-    """True when every edge the violation names leads into a bridged port.
+def _bridged_lead_in_ports(violation: _HasMessage, bridged_ports: set[str]) -> set[str]:
+    """The bridged ports *violation*'s edges lead into, when every edge does.
 
-    A violation naming no edge is never on the bridge: it cannot be pinned to
-    the best-effort lead-in, so it keeps its hard abort.
+    Empty otherwise.  A violation naming no edge is never on the bridge: it
+    cannot be pinned to the best-effort lead-in, so it keeps its hard abort.
     """
-    edges = _violation_edges(violation)
-    return bool(edges) and all(target in bridged_ports for _src, target in edges)
+    targets = {target for _source, target in _violation_edges(violation)}
+    return targets if targets and targets <= bridged_ports else set()
 
 
 def _check_spec(

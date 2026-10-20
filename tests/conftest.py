@@ -239,6 +239,17 @@ def diff_station_coords(before: Coords, after: Coords, tol: float = 1e-6) -> lis
 # --- Parse/layout helpers ---
 
 
+def known_curve_abort(*issues: str, reason: str) -> pytest.MarkDecorator:
+    """Strict xfail for a map whose render aborts on a tracked curve defect."""
+    from nf_metro.layout.routing.invariants import CurveInvariantError
+
+    return pytest.mark.xfail(
+        raises=CurveInvariantError,
+        strict=True,
+        reason=f"{', '.join(issues)}: {reason}",
+    )
+
+
 def parse_and_layout(text: str, source_dir: str = "", **kwargs) -> MetroGraph:
     """Parse Mermaid text and run the full layout pipeline.
 

@@ -21,6 +21,7 @@ import warnings
 from pathlib import Path
 
 import pytest
+from conftest import known_curve_abort
 
 import nf_metro.layout.routing.invariants as invariants
 from nf_metro.api import RenderConfig, prepare_graph, render_graph_result
@@ -222,10 +223,9 @@ graph LR
 """
 
 
-@pytest.mark.xfail(
-    raises=invariants.CurveInvariantError,
-    strict=True,
-    reason="#2119: the l1/l3 lane swap between Assemble_Export 0's exit and "
+@known_curve_abort(
+    "#2119",
+    reason="the l1/l3 lane swap between Assemble_Export 0's exit and "
     "Index_Merge 1's entry crosses the junction legs, and the declined TOP entry "
     "column crosses its drop's turn",
 )

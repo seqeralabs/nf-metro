@@ -629,13 +629,8 @@ class MetroGraph:
     marker_legend: list[MarkerLegendEntry] = field(default_factory=list)
     # Section dependency graph (populated by auto_layout)
     section_dag: SectionDAG | None = None
-    # Perpendicular (TOP/BOTTOM) entry port IDs the latest layout pass declined
-    # to align with a feeder descending outside the section's own box: the port
-    # holds the section's column and routing bridges the gap with a best-effort
-    # L-shaped lead-in.  Rebuilt by every layout pass, so it describes the
-    # geometry being drawn.  The render-curve invariant downgrades a failure to
-    # a warning only when every route it names is a lead-in into one of these
-    # ports.
+    # Perpendicular entry port IDs reached by a cross-column lead-in; read by
+    # the render-curve invariant (see ``PHASE_FIELD_REGISTRY``).
     _cross_column_perp_bridge_ports: set[str] = field(default_factory=set, repr=False)
     # Auto-laid sections whose grid cell a caller- or directive-supplied fold
     # threshold shifted versus the unbounded layout. A non-empty set lets the

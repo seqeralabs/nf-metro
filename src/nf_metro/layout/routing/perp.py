@@ -103,7 +103,7 @@ def _perp_entry_crossing_x(
     :func:`_perp_approach_fan_x` -- since their feeder lanes all collapse onto
     one column trunk.
 
-    Otherwise, a vertical-flow (TB/BT) feeder dropping a *single* bundle crosses
+    Failing both, a vertical-flow (TB/BT) feeder dropping a *single* bundle crosses
     on its own section lane -- the exact X
     :func:`inter_section_handlers._route_tb_bottom_exit` lands at,
     :func:`context._tb_x_offset` -- so the crossing tracks that lane.  Its

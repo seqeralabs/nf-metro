@@ -1341,9 +1341,8 @@ def _layout_once(
 ) -> None:
     """Run one full positioning pass at the given spacing.
 
-    Per-pass records a later reader treats as describing the drawn geometry
-    are reset here, so a pass leaves none of an earlier pass's decisions
-    behind.
+    Clears ``_cross_column_perp_bridge_ports`` so each pass records only its own
+    bridges.
     """
     from nf_metro.layout.fan_plans import (
         build_fan_plan_execution,

@@ -27,12 +27,12 @@ import warnings
 from pathlib import Path
 
 import pytest
+from conftest import known_curve_abort
 
 from nf_metro.api import RenderConfig, prepare_graph, render_graph_result
 from nf_metro.layout.constants import COORD_TOLERANCE
 from nf_metro.layout.routing import compute_station_offsets, exit_turns
 from nf_metro.layout.routing.families import RouteFamilyId
-from nf_metro.layout.routing.invariants import CurveInvariantError
 from nf_metro.layout.routing.perp_columns import deal_perp_entry_column
 from nf_metro.themes import resolve_theme
 
@@ -41,18 +41,10 @@ REGRESSIONS = ROOT / "tests" / "fixtures" / "regressions"
 TOPOLOGIES = ROOT / "examples" / "topologies"
 
 
-def _known_abort(*issues: str, reason: str) -> pytest.MarkDecorator:
-    return pytest.mark.xfail(
-        raises=CurveInvariantError,
-        strict=True,
-        reason=f"{', '.join(issues)}: {reason}",
-    )
-
-
-SINGLE_FEEDER_LANDING_ABORT = _known_abort(
+SINGLE_FEEDER_LANDING_ABORT = known_curve_abort(
     "#2124", "#2092", reason="Assemble 3's RL BOTTOM exit crosses its bundle"
 )
-FEEDER_CONFLICT_ABORT = _known_abort(
+FEEDER_CONFLICT_ABORT = known_curve_abort(
     "#2131",
     "#2130",
     reason="feeders share an approach channel into sec3; bypass overlays in "
@@ -164,7 +156,7 @@ KEEPS_OWN_CROSSING = [
     pytest.param(
         REGRESSIONS / "perp_entry_column_opposite_side_fan.mmd",
         "sec2__entry_bottom_3",
-        marks=_known_abort(
+        marks=known_curve_abort(
             "#2124",
             "#2125",
             "#2127",
@@ -175,7 +167,7 @@ KEEPS_OWN_CROSSING = [
     pytest.param(
         REGRESSIONS / "perp_entry_column_straight_drop.mmd",
         "sec4__entry_top_6",
-        marks=_known_abort(
+        marks=known_curve_abort(
             "#2121",
             "#2119",
             reason="BT TOP exit turns back through its own section into the "
@@ -325,7 +317,7 @@ def test_junction_straight_drop_turns_off_the_dealt_column_offset(
         "single_feeder",
         pytest.param(
             "declined_column",
-            marks=_known_abort(
+            marks=known_curve_abort(
                 "#2119", reason="sec4's drop crosses l3 over l2 and l4 in its turn"
             ),
         ),
