@@ -1,0 +1,95 @@
+name: Family issue
+description: One layout or routing rule the engine does not yet hold, with the open bugs it explains as witnesses and the steps that make it hold.
+title: "Family: "
+labels:
+  - family
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A family issue is the unit of work for the layout and routing backlog. It names one
+        rule, the check that states the rule, the source files the rule's machinery lives in,
+        every open bug the rule explains, and the steps that make the rule hold. A session
+        works one step (`/fix-issue <family> <step id>`) and closes the witnesses that step
+        names. `scripts/next_family_step.py <family>` prints the next runnable step.
+        File a bug with the bug template when you have one wrong render and do not yet know
+        which rule it breaks.
+  - type: textarea
+    id: rule
+    attributes:
+      label: The rule
+      description: One to three sentences, stated as an invariant the engine must hold on every map, not as a description of a fixture.
+    validations:
+      required: true
+  - type: textarea
+    id: oracle
+    attributes:
+      label: Oracle
+      description: >
+        The check that states the rule in code. Name the new check to write first as a
+        report-only (Tier C) corpus oracle, the existing checks and guards this family owns,
+        and the sweep command.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps
+      description: >
+        One PR per step, one clause of the rule per step, in the order to do them. Keep the
+        exact line shape: `- [ ] S<n> <what> (base: <branch>[, after: S<m>])`, which
+        `scripts/next_family_step.py` parses. The first step is the oracle plus sweep with no
+        render change. Caps per step: about 2,000 changed lines under `src/` and about 15
+        changed renders. A step may end in a rewrite proposal instead of a fix when the
+        diagnosis shows the machinery cannot hold the rule; the proposal is a design record,
+        the maintainer decides, and an approved rewrite becomes further steps here.
+      value: |
+        - [ ] S1 oracle: add the check as Tier C, sweep corpus and fuzz, commit the witness list; no render change (base: main)
+        - [ ] S2  (base: main, after: S1)
+    validations:
+      required: true
+  - type: textarea
+    id: witnesses
+    attributes:
+      label: Witnesses
+      description: One row per open issue this rule explains. A witness may also sit in another family; say so in the note. Add a row, not a new issue, when another family's step exposes a defect of this one.
+      value: |
+        | Issue | Defect | Fixture | Hot spot | Note |
+        |---|---|---|---|---|
+        | #  |  |  |  |  |
+    validations:
+      required: true
+  - type: textarea
+    id: hot-spots
+    attributes:
+      label: Hot spots
+      description: The functions the witnesses name, grouped by file. The diagnostician starts here; the fix leaves each one implementing the rule once, or deleted.
+    validations:
+      required: true
+  - type: textarea
+    id: base
+    attributes:
+      label: Base branch and order
+      description: Which branch the steps target and what they wait for, with the reason.
+    validations:
+      required: true
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Out of scope
+      description: The neighbouring families by name. Fallout from another family is fixed in the step if bounded and visible in a render the step adds; otherwise filed with an MRE and linked on that family as a witness.
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Done
+      value: |
+        - Every step ticked; the oracle holds on every witness, the whole corpus and the fuzz set, and is promoted to Tier A (or Tier B with a stated reason).
+        - Every witness renders correctly by eye in a merged PR's render diff.
+        - 0 new aborts against `main` on the default `render_string` path; nothing in the gallery renders worse.
+        - The hot-spot functions implement the rule once or are deleted; no per-fixture precondition was added.
+        - Each merged step reported its net: witnesses closed minus issues filed.
+    validations:
+      required: true
