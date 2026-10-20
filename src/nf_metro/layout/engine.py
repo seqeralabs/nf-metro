@@ -634,6 +634,11 @@ def _compute_layout_scaled(
 ) -> None:
     """Layout body, run under the graph's active font-scale context."""
 
+    # The obstacle boxes describe the previous pass's settled geometry, and
+    # every re-lay in this pass translates them again.  Each pass starts from
+    # unseated routes, as a first pass does, and reseats them at its end.
+    graph.bypass_label_obstacles = {}
+
     # Diagonal labels are a horizontal-trunk feature: a TB section places its
     # labels beside vertical pills, where the same tilt doesn't read, so an
     # angled graph that also has a TB section would mix tilted and horizontal
