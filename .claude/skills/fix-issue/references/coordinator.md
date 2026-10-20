@@ -88,8 +88,14 @@ right, the user has authorised the write, and the new body stands alone.
 # Worktree (always off latest origin/main, never stale local main)
 cd ~/projects/nf-metro
 git fetch origin main
-git worktree add /tmp/nf-metro-fix-<N> -b fix/<N>-<slug> --no-track origin/main
+git worktree add ~/projects/nf-metro-fix-<N> -b fix/<N>-<slug> --no-track origin/main
 ```
+
+The worktree lives beside the checkout, not under `/tmp`: the OS reclaims
+`/tmp` on reboot, and a multi-day run with its ledger there has lost its tree
+mid-session more than once. Durable notes for the run (ledger, resume note,
+fuzz results) go in `~/nf-metro-scratch/<N>/`, never in `/tmp` or the
+session scratchpad.
 
 `--no-track` matters: without it the branch takes `main` as upstream, and a bare
 `git push` then fails with "the upstream branch does not match the name of your
@@ -101,7 +107,7 @@ git push -u origin fix/<N>-<slug>
 ```
 
 All repository-changing work for the primary fix happens inside
-`/tmp/nf-metro-fix-<N>`. The coordinator performs this deterministic setup,
+`~/projects/nf-metro-fix-<N>`. The coordinator performs this deterministic setup,
 records the exact base SHA, and assigns one writer. Read-only workers may
 inspect only a frozen SHA or snapshot, not the live worktree while the writer
 is active. Do not allow a second writer until the first hands off and the
@@ -171,6 +177,15 @@ it as soon as the candidate SHA, its test evidence, and the render-diff/visual
 verdict are in hand, in parallel with a still-running CI - gate only the
 merge itself, not this review, on CI going green.
 
+**Waiting for CI is one wait, not a poll.** The test matrix takes about an
+hour. Start one background watch (`gh run watch <run-id> --exit-status` via
+`run_in_background`, or a `Monitor` on the check-runs API) and let it wake you,
+or schedule a single wakeup sized to the matrix. Never set a `/loop` to re-run
+`gh pr checks` every ten or twenty minutes: measured on one run, that produced
+twenty wake-ups in an afternoon, each re-reading the whole context, and found
+nothing actionable in most of them. Read the check-runs API for the exact SHA,
+not `gh pr checks`, which answers for a superseded head.
+
 A successful fix-issue run is not done when `/simplify` or a test worker
 returns. It reaches PR-ready completion when:
 
@@ -191,6 +206,39 @@ Reroute bounded failures until these gates pass. If missing authority,
 unavailable capability, external state, or a material user decision prevents
 completion, return the structured blocker with the accepted candidate SHA and
 remaining gate. Do not claim PR-ready completion.
+
+## Asking the user to decide
+
+A `DECIDE` that reaches the user is a visual question. Put the renders in front
+of them before the words:
+
+- Full renders of both variants, never crops. Draw a coloured box around the
+  region to look at instead of cropping to it, so they keep the whole map for
+  context.
+- One decision per message, with the counts that matter (crossings, stations
+  moved, fixtures changed) and your recommendation first.
+- Open nothing on their screen unless they asked for Preview in so many
+  words. Otherwise give the paths. When they do ask, one Preview session with
+  both renders, not one window per image.
+- A preference for one variant is not a ruling that the others are
+  unacceptable. Record the choice as the chosen path, not as a new forbidden
+  geometry, unless they say so.
+
+## Pause and resume
+
+When the user says "pause", "I need to stop", or "find a good point":
+
+1. Spawn nothing new. Tell each running writer, by `SendMessage`, to reach a
+   committed candidate and hand off within its current task; do not wait for
+   readers.
+2. Write `~/nf-metro-scratch/<N>/RESUME.md`: issue, worktree, branch, base SHA,
+   last candidate SHA, what is green, what is open with its blocker, the exact
+   brief each worker was on, and the next step. Durable location only, never
+   `/tmp` or the session scratchpad.
+3. Reply with the one-line resume prompt
+   (`/fix-issue <N>, resume from ~/nf-metro-scratch/<N>/RESUME.md`) and stop.
+
+On resume, Step 1's investigator reads `RESUME.md` first and the issue second.
 
 ## Step 12: Post-Merge Cleanup
 
@@ -261,6 +309,14 @@ handoff and to offer the split itself.
 A writer's session can also expire before its turn budget - resume can fail
 outright well under 200 turns. Treat that as expected: brief a fresh sole
 writer from the last candidate SHA rather than waiting on it.
+
+**Count writer spawns.** Re-brief the existing writer with `SendMessage`
+first; a fresh writer is for the turn budget or an expired session, and the
+ledger records which. Two sessions with nineteen writer spawns each and no
+`SendMessage` at all are the record to beat: each fresh writer re-read the
+layout modules and re-derived the state, and the fallout rounds tracked the
+spawn count. A third fresh writer on one candidate means the brief or the
+diagnosis is wrong; stop and re-plan rather than spawn a fourth.
 
 Use one candidate sequence throughout: the sole writer makes local candidate
 commit(s), runs mutation-capable hooks or generators, and hands off the exact
