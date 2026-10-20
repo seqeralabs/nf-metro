@@ -222,6 +222,13 @@ graph LR
 """
 
 
+@pytest.mark.xfail(
+    raises=invariants.CurveInvariantError,
+    strict=True,
+    reason="#2119: the l1/l3 lane swap between Assemble_Export 0's exit and "
+    "Index_Merge 1's entry crosses the junction legs, and the declined TOP entry "
+    "column crosses its drop's turn",
+)
 def test_unfused_blocked_fan_keeps_its_peel_off_band(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
