@@ -22,6 +22,7 @@ import warnings
 from pathlib import Path
 
 import pytest
+from conftest import curve_abort_softened, is_curve_abort_fixture
 
 from nf_metro.api import prepare_graph, resolve_theme
 from nf_metro.layout.constants import COORD_TOLERANCE
@@ -77,15 +78,6 @@ KNOWN_NOT_RENDERING = frozenset(
         # seam this fixture pins for #1808 aborts downstream on the unrelated
         # fan-overlay curve invariant (#1806/#1809).
         "tests/fixtures/curve_invariant_repros/riboseq_band_hop_zero_length_seam.mmd",
-        # Render-time curve defects off any bridged lead-in: an RL perpendicular
-        # exit crossing its bundle (#2124), fan traverse corners (#2125), lanes
-        # copied onto an occupied lane (#2127), feeders sharing an approach
-        # channel (#2131), bypass overlays (#2130), a TOP exit turning back
-        # through its own section (#2121) and same-line feeders crossing (#2092).
-        "tests/fixtures/regressions/perp_entry_column_feeder_conflict.mmd",
-        "tests/fixtures/regressions/perp_entry_column_opposite_side_fan.mmd",
-        "tests/fixtures/regressions/perp_entry_column_straight_drop.mmd",
-        "tests/fixtures/regressions/perp_exit_single_feeder_landing.mmd",
     }
 )
 
@@ -113,7 +105,10 @@ def _claim_overhangs(path: Path) -> dict[tuple[int, int], tuple[float, str]] | N
     the ones beyond it.
     """
     try:
-        with warnings.catch_warnings():
+        with (
+            warnings.catch_warnings(),
+            curve_abort_softened(is_curve_abort_fixture(path)),
+        ):
             warnings.simplefilter("ignore")
             graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
             observed = build_observed_render_plan(graph, resolve_theme(None, graph))

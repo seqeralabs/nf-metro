@@ -21,7 +21,7 @@ import warnings
 from pathlib import Path
 
 import pytest
-from conftest import known_curve_abort
+from conftest import curve_abort_softened, known_curve_abort
 
 import nf_metro.layout.routing.invariants as invariants
 from nf_metro.api import RenderConfig, prepare_graph, render_graph_result
@@ -223,12 +223,6 @@ graph LR
 """
 
 
-@known_curve_abort(
-    "#2119",
-    reason="the l1/l3 lane swap between Assemble_Export 0's exit and "
-    "Index_Merge 1's entry crosses the junction legs, and the declined TOP entry "
-    "column crosses its drop's turn",
-)
 def test_unfused_blocked_fan_keeps_its_peel_off_band(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -246,8 +240,21 @@ def test_unfused_blocked_fan_keeps_its_peel_off_band(
         return violations
 
     monkeypatch.setattr(invariants, "check_peeloff_concentric", spy)
-    with warnings.catch_warnings():
+    with warnings.catch_warnings(), curve_abort_softened():
         warnings.simplefilter("ignore")
         graph = prepare_graph(PEELOFF_FAN_MMD)
         render_graph_result(graph, resolve_theme(None, graph, "light"), RenderConfig())
     assert found == []
+
+
+@known_curve_abort(
+    "#2119",
+    reason="the l1/l3 lane swap between Assemble_Export 0's exit and "
+    "Index_Merge 1's entry crosses the junction legs, and the declined TOP entry "
+    "column crosses its drop's turn",
+)
+def test_peeloff_fan_map_renders_without_a_curve_abort() -> None:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        graph = prepare_graph(PEELOFF_FAN_MMD)
+        render_graph_result(graph, resolve_theme(None, graph, "light"), RenderConfig())

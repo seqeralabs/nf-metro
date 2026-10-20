@@ -14,33 +14,20 @@ import warnings
 from pathlib import Path
 
 import pytest
-from conftest import known_curve_abort
+from conftest import curve_abort_softened, is_curve_abort_fixture
 
 from nf_metro.api import RenderConfig, prepare_graph, render_graph_result
 from nf_metro.themes import resolve_theme
 
 ROOT = Path(__file__).resolve().parent.parent
-REGRESSIONS = ROOT / "tests" / "fixtures" / "regressions"
 FIXTURES = [
-    pytest.param(
-        REGRESSIONS / "perp_exit_single_feeder_landing.mmd",
-        marks=known_curve_abort(
-            "#2124", "#2092", reason="Assemble 3's RL BOTTOM exit crosses its bundle"
-        ),
-        id="perp_exit_single_feeder_landing",
-    ),
-    pytest.param(
-        ROOT / "examples" / "topologies" / "bottom_entry_two_feeders_own_lanes.mmd",
-        id="bottom_entry_two_feeders_own_lanes",
-    ),
-    pytest.param(
-        ROOT
-        / "tests"
-        / "fixtures"
-        / "curve_invariant_repros"
-        / "bt_bottom_entry_rise_from_junction.mmd",
-        id="bt_bottom_entry_rise_from_junction",
-    ),
+    ROOT / "tests" / "fixtures" / "regressions" / "perp_exit_single_feeder_landing.mmd",
+    ROOT / "examples" / "topologies" / "bottom_entry_two_feeders_own_lanes.mmd",
+    ROOT
+    / "tests"
+    / "fixtures"
+    / "curve_invariant_repros"
+    / "bt_bottom_entry_rise_from_junction.mmd",
 ]
 
 Point = tuple[float, float]
@@ -59,9 +46,9 @@ def _distance_to_segment(p: Point, a: Point, b: Point) -> float:
     return ((p[0] - cx) ** 2 + (p[1] - cy) ** 2) ** 0.5
 
 
-@pytest.mark.parametrize("path", FIXTURES)
+@pytest.mark.parametrize("path", FIXTURES, ids=lambda p: p.stem)
 def test_route_does_not_run_over_its_source_stations(path: Path) -> None:
-    with warnings.catch_warnings():
+    with warnings.catch_warnings(), curve_abort_softened(is_curve_abort_fixture(path)):
         warnings.simplefilter("ignore")
         graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
         plan = render_graph_result(

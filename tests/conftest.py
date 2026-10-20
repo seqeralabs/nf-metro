@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
+import warnings
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
+from unittest import mock
 
 import pytest
 
@@ -248,6 +253,78 @@ def known_curve_abort(*issues: str, reason: str) -> pytest.MarkDecorator:
         strict=True,
         reason=f"{', '.join(issues)}: {reason}",
     )
+
+
+# Fixtures whose render aborts on a tracked curve defect, keyed by path from the
+# repo root.  Each abort is pinned once, by test_known_curve_aborts.py; a test
+# about something else renders the fixture under ``curve_abort_softened`` so
+# its own assertions keep running.
+CURVE_ABORT_FIXTURES: dict[str, pytest.MarkDecorator] = {
+    "tests/fixtures/regressions/perp_entry_column_feeder_conflict.mmd": (
+        known_curve_abort(
+            "#2131",
+            "#2130",
+            reason="feeders share an approach channel into sec3; bypass overlays "
+            "in sec0 and sec2; deferred offset on __bypass_s2n4_s2n3_6 is "
+            "untracked",
+        )
+    ),
+    "tests/fixtures/regressions/perp_entry_column_opposite_side_fan.mmd": (
+        known_curve_abort(
+            "#2124",
+            "#2125",
+            "#2127",
+            reason="RL TOP exit and fan traverse corners cross; s1n2->s1n3 "
+            "collinear pair is untracked",
+        )
+    ),
+    "tests/fixtures/regressions/perp_entry_column_straight_drop.mmd": (
+        known_curve_abort(
+            "#2121",
+            "#2119",
+            reason="BT TOP exit turns back through its own section into the TOP "
+            "entry below",
+        )
+    ),
+    "tests/fixtures/regressions/perp_exit_single_feeder_landing.mmd": (
+        known_curve_abort(
+            "#2124", "#2092", reason="Assemble 3's RL BOTTOM exit crosses its bundle"
+        )
+    ),
+}
+
+
+def is_curve_abort_fixture(path: Path) -> bool:
+    """True when *path* is one of :data:`CURVE_ABORT_FIXTURES`."""
+    resolved = path.resolve()
+    return any((_ROOT / rel).resolve() == resolved for rel in CURVE_ABORT_FIXTURES)
+
+
+@contextlib.contextmanager
+def curve_abort_softened(active: bool = True) -> Iterator[None]:
+    """Downgrade the render-time curve abort to a warning while *active*.
+
+    Only the renderer's call is replaced: layout scores candidate geometry with
+    the same check, and every other render guard keeps its hard failure.
+    """
+    if not active:
+        yield
+        return
+
+    import nf_metro.render.svg as svg
+    from nf_metro.layout.routing.invariants import CurveInvariantError
+    from nf_metro.parser.model import PermissiveGuardWarning
+
+    check = svg.assert_render_curve_invariants
+
+    def warn_instead(*args: Any, **kwargs: Any) -> None:
+        try:
+            check(*args, **kwargs)
+        except CurveInvariantError as err:
+            warnings.warn(str(err), PermissiveGuardWarning, stacklevel=2)
+
+    with mock.patch.object(svg, "assert_render_curve_invariants", warn_instead):
+        yield
 
 
 def parse_and_layout(text: str, source_dir: str = "", **kwargs) -> MetroGraph:

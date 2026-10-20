@@ -27,9 +27,9 @@ import warnings
 from pathlib import Path
 
 import pytest
-from conftest import known_curve_abort
+from conftest import curve_abort_softened, is_curve_abort_fixture, known_curve_abort
 
-from nf_metro.api import RenderConfig, prepare_graph, render_graph_result
+from nf_metro.api import RenderConfig, prepare_graph, render_graph_result, render_string
 from nf_metro.layout.constants import COORD_TOLERANCE
 from nf_metro.layout.routing import compute_station_offsets, exit_turns
 from nf_metro.layout.routing.families import RouteFamilyId
@@ -40,24 +40,9 @@ ROOT = Path(__file__).resolve().parent.parent
 REGRESSIONS = ROOT / "tests" / "fixtures" / "regressions"
 TOPOLOGIES = ROOT / "examples" / "topologies"
 
-
-SINGLE_FEEDER_LANDING_ABORT = known_curve_abort(
-    "#2124", "#2092", reason="Assemble 3's RL BOTTOM exit crosses its bundle"
-)
-FEEDER_CONFLICT_ABORT = known_curve_abort(
-    "#2131",
-    "#2130",
-    reason="feeders share an approach channel into sec3; bypass overlays in "
-    "sec0 and sec2; deferred offset on __bypass_s2n4_s2n3_6 is untracked",
-)
-
 LANDING_CASES = [
     (REGRESSIONS / "perp_entry_column_two_feeders.mmd", "sec4__entry_bottom_3"),
-    pytest.param(
-        REGRESSIONS / "perp_exit_single_feeder_landing.mmd",
-        "sec4__entry_bottom_4",
-        marks=SINGLE_FEEDER_LANDING_ABORT,
-    ),
+    (REGRESSIONS / "perp_exit_single_feeder_landing.mmd", "sec4__entry_bottom_4"),
     (TOPOLOGIES / "bottom_entry_two_feeders_own_lanes.mmd", "classify__entry_bottom_5"),
 ]
 
@@ -67,8 +52,12 @@ CONFLICT_PORT = "sec3__entry_top_5"
 Point = tuple[float, float]
 
 
-def _layout(path: Path):
-    with warnings.catch_warnings():
+def _layout(path: Path, *, softened: bool = False):
+    """Lay out and render *path*, with a known curve abort softened."""
+    with (
+        warnings.catch_warnings(),
+        curve_abort_softened(softened or is_curve_abort_fixture(path)),
+    ):
         warnings.simplefilter("ignore")
         graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
         result = render_graph_result(
@@ -142,7 +131,6 @@ def test_two_feeder_port_deals_its_column() -> None:
     assert column is not None and column.offsets is not None
 
 
-@FEEDER_CONFLICT_ABORT
 def test_feeder_order_conflict_declines_the_column() -> None:
     graph, _routes = _layout(CONFLICT)
     column = deal_perp_entry_column(
@@ -153,27 +141,8 @@ def test_feeder_order_conflict_declines_the_column() -> None:
 
 KEEPS_OWN_CROSSING = [
     (REGRESSIONS / "perp_entry_column_merge_feeder.mmd", "sec3__entry_bottom_6"),
-    pytest.param(
-        REGRESSIONS / "perp_entry_column_opposite_side_fan.mmd",
-        "sec2__entry_bottom_3",
-        marks=known_curve_abort(
-            "#2124",
-            "#2125",
-            "#2127",
-            reason="RL TOP exit and fan traverse corners cross; s1n2->s1n3 "
-            "collinear pair is untracked",
-        ),
-    ),
-    pytest.param(
-        REGRESSIONS / "perp_entry_column_straight_drop.mmd",
-        "sec4__entry_top_6",
-        marks=known_curve_abort(
-            "#2121",
-            "#2119",
-            reason="BT TOP exit turns back through its own section into the "
-            "TOP entry below",
-        ),
-    ),
+    (REGRESSIONS / "perp_entry_column_opposite_side_fan.mmd", "sec2__entry_bottom_3"),
+    (REGRESSIONS / "perp_entry_column_straight_drop.mmd", "sec4__entry_top_6"),
 ]
 
 
@@ -204,7 +173,6 @@ def _proper_crossings(a: list[Point], b: list[Point]) -> int:
     return count
 
 
-@FEEDER_CONFLICT_ABORT
 def test_conflicting_junction_feed_keeps_its_lines_uncrossed() -> None:
     _graph, incoming, _outgoing = _port_routes(CONFLICT, CONFLICT_PORT)
     junction = {
@@ -280,7 +248,9 @@ UNDEALT_JUNCTION_DROPS = {
 }
 
 
-def _junction_drop_turn_offsets(source: str, tmp_path: Path, monkeypatch) -> set[float]:
+def _junction_drop_turn_offsets(
+    source: str, tmp_path: Path, monkeypatch, *, softened: bool = False
+) -> set[float]:
     """Turn-axis minus port X for each planned drop from a junction over its port."""
     deltas: set[float] = set()
     real = exit_turns._source_turn_requirement
@@ -300,7 +270,7 @@ def _junction_drop_turn_offsets(source: str, tmp_path: Path, monkeypatch) -> set
     monkeypatch.setattr(exit_turns, "_source_turn_requirement", spy)
     path = tmp_path / "junction_drop.mmd"
     path.write_text(source)
-    _layout(path)
+    _layout(path, softened=softened)
     return deltas
 
 
@@ -311,22 +281,31 @@ def test_junction_straight_drop_turns_off_the_dealt_column_offset(
     assert deltas and 0.0 not in deltas
 
 
-@pytest.mark.parametrize(
-    "name",
-    [
-        "single_feeder",
-        pytest.param(
-            "declined_column",
-            marks=known_curve_abort(
-                "#2119", reason="sec4's drop crosses l3 over l2 and l4 in its turn"
-            ),
-        ),
-    ],
-)
+UNDEALT_JUNCTION_ABORTS = {
+    "declined_column": known_curve_abort(
+        "#2119", reason="sec4's drop crosses l3 over l2 and l4 in its turn"
+    ),
+}
+
+
+@pytest.mark.parametrize("name", UNDEALT_JUNCTION_DROPS)
 def test_junction_straight_drop_without_a_dealt_column_turns_on_the_port(
     name: str, tmp_path: Path, monkeypatch
 ) -> None:
     deltas = _junction_drop_turn_offsets(
-        UNDEALT_JUNCTION_DROPS[name], tmp_path, monkeypatch
+        UNDEALT_JUNCTION_DROPS[name],
+        tmp_path,
+        monkeypatch,
+        softened=name in UNDEALT_JUNCTION_ABORTS,
     )
     assert deltas == {0.0}
+
+
+@pytest.mark.parametrize(
+    "name",
+    [pytest.param(name, marks=mark) for name, mark in UNDEALT_JUNCTION_ABORTS.items()],
+)
+def test_undealt_junction_drop_renders_without_a_curve_abort(name: str) -> None:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        render_string(UNDEALT_JUNCTION_DROPS[name])

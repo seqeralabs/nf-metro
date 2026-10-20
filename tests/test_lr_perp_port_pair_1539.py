@@ -14,7 +14,7 @@ from __future__ import annotations
 import warnings
 from pathlib import Path
 
-from conftest import known_curve_abort
+from conftest import curve_abort_softened, known_curve_abort
 
 from nf_metro.layout.constants import STATION_ELBOW_TOLERANCE
 from nf_metro.layout.engine import compute_layout
@@ -168,5 +168,14 @@ def test_bundle_map_renders() -> None:
     from nf_metro.api import render_string
 
     with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        assert render_string(BUNDLE_MAP)
+
+
+def test_bundle_map_clears_every_other_render_guard() -> None:
+    """With its tracked curve abort softened, the map passes every other guard."""
+    from nf_metro.api import render_string
+
+    with warnings.catch_warnings(), curve_abort_softened():
         warnings.simplefilter("ignore")
         assert render_string(BUNDLE_MAP)
