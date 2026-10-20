@@ -3507,8 +3507,8 @@ def _fan_runtime_edges(plan: FanPlan) -> tuple[ResolvedEdge, ...]:
 def _fan_boundary_station_ids(plan: FanPlan) -> tuple[str, ...]:
     """Return hubs, ports, landings, and neighbouring hand-off boundaries.
 
-    Ordered and de-duplicated, so the frame check reports the same first
-    drifted boundary in every run.
+    The order is fixed so the frame check reports the same first drifted
+    boundary in every run.
     """
     return tuple(
         dict.fromkeys(
