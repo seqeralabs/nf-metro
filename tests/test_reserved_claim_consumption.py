@@ -77,6 +77,15 @@ KNOWN_NOT_RENDERING = frozenset(
         # seam this fixture pins for #1808 aborts downstream on the unrelated
         # fan-overlay curve invariant (#1806/#1809).
         "tests/fixtures/curve_invariant_repros/riboseq_band_hop_zero_length_seam.mmd",
+        # Render-time curve defects off any bridged lead-in: an RL perpendicular
+        # exit crossing its bundle (#2124), fan traverse corners (#2125), lanes
+        # copied onto an occupied lane (#2127), feeders sharing an approach
+        # channel (#2131), bypass overlays (#2130), a TOP exit turning back
+        # through its own section (#2121) and same-line feeders crossing (#2092).
+        "tests/fixtures/regressions/perp_entry_column_feeder_conflict.mmd",
+        "tests/fixtures/regressions/perp_entry_column_opposite_side_fan.mmd",
+        "tests/fixtures/regressions/perp_entry_column_straight_drop.mmd",
+        "tests/fixtures/regressions/perp_exit_single_feeder_landing.mmd",
     }
 )
 

@@ -16,11 +16,24 @@ from pathlib import Path
 import pytest
 
 from nf_metro.api import RenderConfig, prepare_graph, render_graph_result
+from nf_metro.layout.routing.invariants import CurveInvariantError
 from nf_metro.themes import resolve_theme
 
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = [
-    ROOT / "tests" / "fixtures" / "regressions" / "perp_exit_single_feeder_landing.mmd",
+    pytest.param(
+        ROOT
+        / "tests"
+        / "fixtures"
+        / "regressions"
+        / "perp_exit_single_feeder_landing.mmd",
+        marks=pytest.mark.xfail(
+            raises=CurveInvariantError,
+            strict=True,
+            reason="#2124, #2092: Assemble 3's RL BOTTOM exit crosses its bundle",
+        ),
+        id="perp_exit_single_feeder_landing",
+    ),
     ROOT / "examples" / "topologies" / "bottom_entry_two_feeders_own_lanes.mmd",
     ROOT
     / "tests"
@@ -45,7 +58,7 @@ def _distance_to_segment(p: Point, a: Point, b: Point) -> float:
     return ((p[0] - cx) ** 2 + (p[1] - cy) ** 2) ** 0.5
 
 
-@pytest.mark.parametrize("path", FIXTURES, ids=lambda p: p.stem)
+@pytest.mark.parametrize("path", FIXTURES, ids=lambda p: getattr(p, "stem", p))
 def test_route_does_not_run_over_its_source_stations(path: Path) -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")

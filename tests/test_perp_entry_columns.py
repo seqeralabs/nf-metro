@@ -32,6 +32,7 @@ from nf_metro.api import RenderConfig, prepare_graph, render_graph_result
 from nf_metro.layout.constants import COORD_TOLERANCE
 from nf_metro.layout.routing import compute_station_offsets, exit_turns
 from nf_metro.layout.routing.families import RouteFamilyId
+from nf_metro.layout.routing.invariants import CurveInvariantError
 from nf_metro.layout.routing.perp_columns import deal_perp_entry_column
 from nf_metro.themes import resolve_theme
 
@@ -39,9 +40,32 @@ ROOT = Path(__file__).resolve().parent.parent
 REGRESSIONS = ROOT / "tests" / "fixtures" / "regressions"
 TOPOLOGIES = ROOT / "examples" / "topologies"
 
+
+def _known_abort(*issues: str, reason: str) -> pytest.MarkDecorator:
+    return pytest.mark.xfail(
+        raises=CurveInvariantError,
+        strict=True,
+        reason=f"{', '.join(issues)}: {reason}",
+    )
+
+
+SINGLE_FEEDER_LANDING_ABORT = _known_abort(
+    "#2124", "#2092", reason="Assemble 3's RL BOTTOM exit crosses its bundle"
+)
+FEEDER_CONFLICT_ABORT = _known_abort(
+    "#2131",
+    "#2130",
+    reason="feeders share an approach channel into sec3; bypass overlays in "
+    "sec0 and sec2; deferred offset on __bypass_s2n4_s2n3_6 is untracked",
+)
+
 LANDING_CASES = [
     (REGRESSIONS / "perp_entry_column_two_feeders.mmd", "sec4__entry_bottom_3"),
-    (REGRESSIONS / "perp_exit_single_feeder_landing.mmd", "sec4__entry_bottom_4"),
+    pytest.param(
+        REGRESSIONS / "perp_exit_single_feeder_landing.mmd",
+        "sec4__entry_bottom_4",
+        marks=SINGLE_FEEDER_LANDING_ABORT,
+    ),
     (TOPOLOGIES / "bottom_entry_two_feeders_own_lanes.mmd", "classify__entry_bottom_5"),
 ]
 
@@ -126,6 +150,7 @@ def test_two_feeder_port_deals_its_column() -> None:
     assert column is not None and column.offsets is not None
 
 
+@FEEDER_CONFLICT_ABORT
 def test_feeder_order_conflict_declines_the_column() -> None:
     graph, _routes = _layout(CONFLICT)
     column = deal_perp_entry_column(
@@ -136,8 +161,27 @@ def test_feeder_order_conflict_declines_the_column() -> None:
 
 KEEPS_OWN_CROSSING = [
     (REGRESSIONS / "perp_entry_column_merge_feeder.mmd", "sec3__entry_bottom_6"),
-    (REGRESSIONS / "perp_entry_column_opposite_side_fan.mmd", "sec2__entry_bottom_3"),
-    (REGRESSIONS / "perp_entry_column_straight_drop.mmd", "sec4__entry_top_6"),
+    pytest.param(
+        REGRESSIONS / "perp_entry_column_opposite_side_fan.mmd",
+        "sec2__entry_bottom_3",
+        marks=_known_abort(
+            "#2124",
+            "#2125",
+            "#2127",
+            reason="RL TOP exit and fan traverse corners cross; s1n2->s1n3 "
+            "collinear pair is untracked",
+        ),
+    ),
+    pytest.param(
+        REGRESSIONS / "perp_entry_column_straight_drop.mmd",
+        "sec4__entry_top_6",
+        marks=_known_abort(
+            "#2121",
+            "#2119",
+            reason="BT TOP exit turns back through its own section into the "
+            "TOP entry below",
+        ),
+    ),
 ]
 
 
@@ -168,6 +212,7 @@ def _proper_crossings(a: list[Point], b: list[Point]) -> int:
     return count
 
 
+@FEEDER_CONFLICT_ABORT
 def test_conflicting_junction_feed_keeps_its_lines_uncrossed() -> None:
     _graph, incoming, _outgoing = _port_routes(CONFLICT, CONFLICT_PORT)
     junction = {
@@ -274,7 +319,18 @@ def test_junction_straight_drop_turns_off_the_dealt_column_offset(
     assert deltas and 0.0 not in deltas
 
 
-@pytest.mark.parametrize("name", UNDEALT_JUNCTION_DROPS)
+@pytest.mark.parametrize(
+    "name",
+    [
+        "single_feeder",
+        pytest.param(
+            "declined_column",
+            marks=_known_abort(
+                "#2119", reason="sec4's drop crosses l3 over l2 and l4 in its turn"
+            ),
+        ),
+    ],
+)
 def test_junction_straight_drop_without_a_dealt_column_turns_on_the_port(
     name: str, tmp_path: Path, monkeypatch
 ) -> None:

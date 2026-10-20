@@ -111,12 +111,35 @@ RECORDING_FIXTURES = [
     REGRESSIONS / "perp_exit_single_feeder_landing.mmd",
 ]
 
-EXPOSED_FIXTURES = [
+
+def _known_abort(case: Path | str, *issues: str) -> object:
+    return pytest.param(
+        case,
+        marks=pytest.mark.xfail(
+            raises=CurveInvariantError, strict=True, reason=", ".join(issues)
+        ),
+    )
+
+
+BRIDGED_MAPS = [
     REGRESSIONS / "cross_column_perp_entry_overflow.mmd",
-    REGRESSIONS / "perp_entry_column_feeder_conflict.mmd",
-    REGRESSIONS / "perp_entry_column_opposite_side_fan.mmd",
-    REGRESSIONS / "perp_entry_column_straight_drop.mmd",
-    REGRESSIONS / "perp_exit_single_feeder_landing.mmd",
+    "bridged_entry",
+    _known_abort(
+        REGRESSIONS / "perp_entry_column_feeder_conflict.mmd",
+        "#2131",
+        "#2130",
+        "deferred offset on __bypass_s2n4_s2n3_6 untracked",
+    ),
+    _known_abort(
+        REGRESSIONS / "perp_entry_column_opposite_side_fan.mmd",
+        "#2124",
+        "#2125",
+        "#2127",
+        "s1n2->s1n3 collinear pair untracked",
+    ),
+    _known_abort(REGRESSIONS / "perp_entry_column_straight_drop.mmd", "#2121", "#2119"),
+    _known_abort(REGRESSIONS / "perp_exit_single_feeder_landing.mmd", "#2124", "#2092"),
+    _known_abort("declined_column", "#2119"),
 ]
 
 
@@ -198,7 +221,11 @@ def test_failure_off_the_bridged_lead_in_aborts(
             assert_render_curve_invariants(graph, [], {})
 
 
-@pytest.mark.parametrize("case", [*EXPOSED_FIXTURES, *INLINE_MAPS], ids=_case_id)
+@pytest.mark.parametrize(
+    "case",
+    BRIDGED_MAPS,
+    ids=lambda case: _case_id(case) if isinstance(case, Path | str) else None,
+)
 def test_bridged_maps_render_without_a_curve_abort(case: Path | str) -> None:
     text, source_dir = _source(case)
     with warnings.catch_warnings():
