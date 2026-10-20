@@ -638,7 +638,7 @@ def _align_tb_entry_port(
             _set_port_x(graph, port_id, descent_x)
         elif entry_section.direction in ("LR", "RL"):
             _nudge_port_from_stations(port_id, entry_section, graph)
-            graph._cross_column_perp_bridges.add(entry_section.id)
+            graph._cross_column_perp_bridge_ports.add(port_id)
 
 
 def _tb_trunk_x(graph: MetroGraph, section: Section) -> float | None:
@@ -1365,7 +1365,7 @@ def _align_drop_target_trunk(graph: MetroGraph, port_id: str, exit_x: float) -> 
     column keep their shared right edge rather than the target jutting out by
     the drop offset.
     """
-    for tgt_section in _drop_targets(graph, port_id):
+    for tgt_section, entry_port in _drop_targets(graph, port_id):
         trunk_x = _tb_trunk_x(graph, tgt_section)
         if trunk_x is None:
             continue
@@ -1375,7 +1375,7 @@ def _align_drop_target_trunk(graph: MetroGraph, port_id: str, exit_x: float) -> 
         # trunk stays on its grid column and routing bridges the cross-column
         # drop with an L-shaped inter-section lead-in instead.
         if not _drop_x_within_section(tgt_section, exit_x):
-            graph._cross_column_perp_bridges.add(tgt_section.id)
+            graph._cross_column_perp_bridge_ports.add(entry_port.id)
             continue
         delta = exit_x - trunk_x
         if abs(delta) >= SAME_COORD_TOLERANCE:
@@ -1398,7 +1398,7 @@ def _align_horizontal_drop_target(
     """
     for tgt_section, entry_port in _horizontal_drop_targets(graph, port_id):
         if not _drop_x_within_section(tgt_section, exit_x):
-            graph._cross_column_perp_bridges.add(tgt_section.id)
+            graph._cross_column_perp_bridge_ports.add(entry_port.id)
             continue
         delta = exit_x - entry_port.x
         if abs(delta) >= SAME_COORD_TOLERANCE:
@@ -1430,11 +1430,11 @@ def _shift_section_trunk(
         section.bbox_w += overrun
 
 
-def _drop_targets(graph: MetroGraph, port_id: str) -> Iterator[Section]:
-    """Yield vertical-flow (TB/BT) sections reached from a perp exit drop."""
+def _drop_targets(graph: MetroGraph, port_id: str) -> Iterator[tuple[Section, Port]]:
+    """Yield (vertical-flow TB/BT section, its perp entry port) for a drop."""
     return (
-        sec
-        for sec, _port in _perp_drop_targets(graph, port_id)
+        (sec, port)
+        for sec, port in _perp_drop_targets(graph, port_id)
         if lanes_run_along_x(sec.direction)
     )
 

@@ -6981,45 +6981,19 @@ class CurveInvariantError(RuntimeError):
     """
 
 
-def assert_render_curve_invariants(
+def render_curve_violations(
     graph: MetroGraph,
     routes: list[RoutedPath],
     offsets: dict[tuple[str, str], float],
     *,
     curve_radius: float = CURVE_RADIUS,
-) -> None:
-    """Raise :class:`CurveInvariantError` if the final render routes are defective.
+) -> list[tuple[str, Sequence[_HasMessage]]]:
+    """Every render-time curve check, labelled, with the violations it finds.
 
-    Runs the bundle-curve correctness checks on the *final* ``route_edges``
-    output -- the exact geometry the renderer is about to draw.  The
-    stage-boundary guards in :func:`compute_layout` only run under
-    ``validate=True`` (off for ``nf-metro render``), so a handler that builds a
-    bundle with an inconsistent fan (flip), a hand-picked corner radius
-    (non-concentric), or a collapsed channel could reach the canvas unchecked.
-    This closes that gap: every render path routes through here, so such a
-    curve aborts the render with a message naming the offending edge instead of
-    being drawn.
-
-    It is a **backstop**, not the primary correctness mechanism.  Every
-    inter-section route is built from a centreline through the bundle builder
-    (see ``docs/dev/inter_section_dispatch.mdx``), which makes a flip, a pinch,
-    or a collinear overlay impossible by construction.  In normal operation
-    these checks never fire; a failure means a genuinely new, un-tabled shape
-    reached the renderer built some other way, and the fix is to route it
-    through the builder too -- not to relax the check.
-
-    ``graph.permissive`` (``--permissive`` / ``%%metro permissive:``) downgrades
-    the abort to a warning, as a supported best-effort render mode.
-
-    A layout that bridges a perpendicular connection across grid columns (a
-    ``direction:`` override -- explicit or inferred -- that feeds a section's
-    perpendicular entry/drop from outside its own column) also downgrades to a
-    warning.  The run/trunk is held in its bbox, but the multi-line bundle
-    through such a forced-perpendicular drop is an unsupported shape the builder
-    cannot make clean; the render proceeds best-effort and the warning names the
-    actionable fix rather than aborting.
+    The check set :func:`assert_render_curve_invariants` enforces on every
+    render.
     """
-    named_checks: list[tuple[str, Sequence[_HasMessage]]] = [
+    return [
         (
             "bundle order (line crosses its bundle-mate)",
             check_bundle_order_preserved(routes),
@@ -7126,16 +7100,74 @@ def assert_render_curve_invariants(
             check_port_corner_within_bbox(graph, routes),
         ),
     ]
-    messages: list[str] = []
+
+
+def assert_render_curve_invariants(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+    *,
+    curve_radius: float = CURVE_RADIUS,
+) -> None:
+    """Raise :class:`CurveInvariantError` if the final render routes are defective.
+
+    Runs the bundle-curve correctness checks on the *final* ``route_edges``
+    output -- the exact geometry the renderer is about to draw.  The
+    stage-boundary guards in :func:`compute_layout` only run under
+    ``validate=True`` (off for ``nf-metro render``), so a handler that builds a
+    bundle with an inconsistent fan (flip), a hand-picked corner radius
+    (non-concentric), or a collapsed channel could reach the canvas unchecked.
+    This closes that gap: every render path routes through here, so such a
+    curve aborts the render with a message naming the offending edge instead of
+    being drawn.
+
+    It is a **backstop**, not the primary correctness mechanism.  Every
+    inter-section route is built from a centreline through the bundle builder
+    (see ``docs/dev/inter_section_dispatch.mdx``), which makes a flip, a pinch,
+    or a collinear overlay impossible by construction.  In normal operation
+    these checks never fire; a failure means a genuinely new, un-tabled shape
+    reached the renderer built some other way, and the fix is to route it
+    through the builder too -- not to relax the check.
+
+    ``graph.permissive`` (``--permissive`` / ``%%metro permissive:``) downgrades
+    the abort to a warning, as a supported best-effort render mode.
+
+    A perpendicular entry port whose feeder descends outside the section's
+    own box (``graph._cross_column_perp_bridge_ports``) is held on the
+    section's column and reached by a best-effort L-shaped lead-in, a shape the
+    builder cannot always make clean.  A failure every one of whose named routes
+    is such a lead-in downgrades to a warning naming the actionable fix; every
+    other failure in the map still aborts.
+    """
+    named_checks = render_curve_violations(
+        graph, routes, offsets, curve_radius=curve_radius
+    )
+    bridged_ports: set[str] = (
+        set() if graph.permissive else graph._cross_column_perp_bridge_ports
+    )
+    defects: list[str] = []
+    bridged: list[str] = []
     for label, violations in named_checks:
-        if violations:
-            first = violations[0]
-            extra = f" (+{len(violations) - 1} more)" if len(violations) > 1 else ""
-            messages.append(f"[{label}] {first.message()}{extra}")
-    if not messages:
+        on_bridge = [v for v in violations if _on_bridged_lead_in(v, bridged_ports)]
+        _summarise(label, on_bridge, bridged)
+        _summarise(label, [v for v in violations if v not in on_bridge], defects)
+
+    if bridged:
+        sections = sorted(
+            {graph.ports[pid].section_id for pid in bridged_ports if pid in graph.ports}
+        )
+        warnings.warn(
+            f"section(s) {', '.join(sections)} have a perpendicular connection "
+            f"bridged across grid columns; routing draws a best-effort lead-in "
+            f"and the bundle geometry along it may be imperfect. "
+            f"{FLOW_ALIGNED_PORT_ADVICE}\n  " + "\n  ".join(bridged),
+            category=LayoutGeometryWarning,
+            stacklevel=2,
+        )
+    if not defects:
         return
 
-    detail = "\n  ".join(messages)
+    detail = "\n  ".join(defects)
     msg = (
         "render aborted: a routing handler produced defective bundle curves. "
         "The handler for the named edge built the bundle with an inconsistent "
@@ -7147,18 +7179,42 @@ def assert_render_curve_invariants(
     if graph.permissive:
         warnings.warn(msg, category=PermissiveGuardWarning, stacklevel=2)
         return
-    bridged = sorted(graph._cross_column_perp_bridges)
-    if bridged:
-        warnings.warn(
-            f"section(s) {', '.join(bridged)} have a perpendicular connection "
-            f"bridged across grid columns; routing draws a best-effort lead-in "
-            f"and the bundle geometry through the drop may be imperfect. "
-            f"{FLOW_ALIGNED_PORT_ADVICE}\n  {detail}",
-            category=LayoutGeometryWarning,
-            stacklevel=2,
-        )
-        return
     raise CurveInvariantError(msg)
+
+
+def _summarise(label: str, violations: Sequence[_HasMessage], out: list[str]) -> None:
+    """Append one ``[label] first-message (+N more)`` line when non-empty."""
+    if not violations:
+        return
+    extra = f" (+{len(violations) - 1} more)" if len(violations) > 1 else ""
+    out.append(f"[{label}] {violations[0].message()}{extra}")
+
+
+_EDGE_FIELDS = ("edge", "edge_a", "edge_b")
+_EDGE_FIELD_PAIRS = (("source", "target"), ("edge_source", "edge_target"))
+
+
+def _violation_edges(violation: object) -> set[tuple[str, str]]:
+    """The ``(source, target)`` edges a violation names in its fields."""
+    edges: set[tuple[str, str]] = {
+        tuple(getattr(violation, name))  # type: ignore[misc]
+        for name in _EDGE_FIELDS
+        if hasattr(violation, name)
+    }
+    for src, tgt in _EDGE_FIELD_PAIRS:
+        if hasattr(violation, src) and hasattr(violation, tgt):
+            edges.add((getattr(violation, src), getattr(violation, tgt)))
+    return edges
+
+
+def _on_bridged_lead_in(violation: object, bridged_ports: set[str]) -> bool:
+    """True when every edge the violation names leads into a bridged port.
+
+    A violation naming no edge is never on the bridge: it cannot be pinned to
+    the best-effort lead-in, so it keeps its hard abort.
+    """
+    edges = _violation_edges(violation)
+    return bool(edges) and all(target in bridged_ports for _src, target in edges)
 
 
 def _check_spec(

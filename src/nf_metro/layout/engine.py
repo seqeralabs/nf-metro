@@ -1339,13 +1339,19 @@ def _layout_once(
     section_y_gap: float,
     validate: bool,
 ) -> None:
-    """Run one full positioning pass at the given spacing (idempotent)."""
+    """Run one full positioning pass at the given spacing.
+
+    Per-pass records a later reader treats as describing the drawn geometry
+    are reset here, so a pass leaves none of an earlier pass's decisions
+    behind.
+    """
     from nf_metro.layout.fan_plans import (
         build_fan_plan_execution,
         install_fan_plan_execution,
     )
     from nf_metro.parser.route_topology import build_route_topology_query
 
+    graph._cross_column_perp_bridge_ports.clear()
     topology = build_route_topology_query(graph)
     if topology is not None:
         install_fan_plan_execution(

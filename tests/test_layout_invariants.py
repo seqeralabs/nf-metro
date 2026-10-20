@@ -7011,6 +7011,12 @@ def _bbox_spilled_stations(graph: MetroGraph) -> list[str]:
     ]
 
 
+def _bridged_sections(graph: MetroGraph) -> set[str]:
+    return {
+        graph.ports[pid].section_id for pid in graph._cross_column_perp_bridge_ports
+    }
+
+
 def test_cross_column_perp_drop_renders_cleanly():
     """A perpendicular drop fed from a different grid column lays out cleanly.
 
@@ -7024,7 +7030,7 @@ def test_cross_column_perp_drop_renders_cleanly():
     """
     graph = _layout("topologies/cross_column_perp_drop.mmd")
 
-    assert "qc" in graph._cross_column_perp_bridges
+    assert "qc" in _bridged_sections(graph)
     assert not _bbox_spilled_stations(graph)
 
     offsets = compute_station_offsets(graph)
@@ -7046,7 +7052,7 @@ def test_cross_column_perp_entry_stays_in_bbox():
     """
     graph = _layout("regressions/cross_column_perp_entry_overflow.mmd")
 
-    assert "reporting" in graph._cross_column_perp_bridges
+    assert "reporting" in _bridged_sections(graph)
     assert not _bbox_spilled_stations(graph)
 
     offsets = compute_station_offsets(graph)
