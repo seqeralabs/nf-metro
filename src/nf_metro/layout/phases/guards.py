@@ -1189,9 +1189,10 @@ def _guard_fold_relocated_flow_ports_face_connections(
             consumer_cols[src_id].add(graph.sections[tgt_id].grid_col)
             producer_cols[tgt_id].add(graph.sections[src_id].grid_col)
 
-    for sec_id in graph._fold_compressed_sections:
-        section = graph.sections.get(sec_id)
-        if section is None or section.direction not in ("LR", "RL"):
+    for sec_id, section in graph.sections.items():
+        if sec_id not in graph._fold_compressed_sections:
+            continue
+        if section.direction not in ("LR", "RL"):
             continue
         col = section.grid_col
         for ports, cols, is_entry in (
@@ -1742,7 +1743,8 @@ def _guard_tall_anchor_stack_well_formed(graph: MetroGraph, phase: str) -> None:
     if anchor is None or graph.section_dag is None:
         return
 
-    tail = _transitive_successors(anchor, graph.section_dag.successors)
+    successors = _transitive_successors(anchor, graph.section_dag.successors)
+    tail = [sid for sid in graph.sections if sid in successors]
 
     horizontal = {"LR", "RL"}
     non_horizontal = {
@@ -2224,9 +2226,9 @@ def _guard_off_track_consumer_on_trunk(graph: MetroGraph, phase: str) -> None:
         for off_id, anchor_id in _off_track_anchor_of(graph).items()
         if any(e.target == anchor_id for e in graph.edges_from(off_id))
     }
-    for cons_id in consumers:
-        cons = graph.stations.get(cons_id)
-        if cons is None or cons.is_port or cons_id in junction_ids:
+    for cons_id in [sid for sid in graph.stations if sid in consumers]:
+        cons = graph.stations[cons_id]
+        if cons.is_port or cons_id in junction_ids:
             continue
         succs = [
             tgt
@@ -4822,7 +4824,7 @@ def _guard_fanout_junction_shares_exit_port_y(graph: MetroGraph, phase: str) -> 
         if topology is not None
         else {}
     )
-    junction_ids = divergence_ports if topology is not None else graph.junction_ids
+    junction_ids = divergence_ports if topology is not None else graph.junctions
     for jid in junction_ids:
         junction = graph.stations.get(jid)
         if junction is None:
@@ -4867,7 +4869,7 @@ def _guard_fanout_junction_resolves_upstream(graph: MetroGraph, phase: str) -> N
     junction_ids = (
         tuple(divergence.junction_id for divergence in topology.divergences)
         if topology is not None
-        else graph.junction_ids
+        else graph.junctions
     )
     for jid in junction_ids:
         junction = graph.stations.get(jid)

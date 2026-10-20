@@ -1,0 +1,55 @@
+%%metro title: Fuzz 8500941
+%%metro line: l0 | Bin_Polish | #e6194b
+%%metro line: l1 | Assemble | #3cb44b
+%%metro line: l2 | Dedup_Call | #4363d8
+%%metro line: l3 | Qc_Call | #f58231
+%%metro line: l4 | Assemble_Bam_Markdup | #911eb4
+
+graph LR
+    subgraph sec0 [Markdup 0]
+        %%metro direction: TB
+        s0n0[vcf_call]
+        s0n1[merge_normalize]
+        s0n0 -->|l0| s0n1
+        s0n0 -->|l3| s0n1
+        s0n0 -->|l4| s0n1
+    end
+    subgraph sec1 [Dedup 1]
+        s1n0[bin]
+        s1n1[cluster]
+        s1n0 -->|l1| s1n1
+        s1n0 -->|l4| s1n1
+        s1n0 -->|l4| s1n1
+    end
+    subgraph sec2 [Quant 2]
+        s2n0[annotate]
+        s2n1[INDEX_QC_BAM]
+        s2n2[bin]
+        s2n0 -->|l0| s2n1
+        s2n0 -->|l1| s2n1
+        s2n0 -->|l2| s2n1
+        s2n0 -->|l4| s2n1
+        s2n1 -->|l0| s2n2
+        s2n1 -->|l4| s2n2
+    end
+    subgraph sec3 [Markdup 3]
+        s3n0[vcf_merge_fastqc]
+        s3n1[gather]
+        s3n2[bin_annotate_index]
+        s3n1 -->|l0| s3n2
+        s3n1 -->|l2| s3n2
+        s3n0 -->|l2| s3n1
+        s3n0 -->|l4| s3n2
+    end
+    s0n1 -->|l0| s1n0
+    s0n1 -->|l1| s1n0
+    s0n1 -->|l4| s1n0
+    s1n0 -->|l0| s2n0
+    s2n2 -->|l0| s3n1
+    s1n1 -->|l1| s2n0
+    s1n1 -->|l4| s2n0
+    s0n1 -->|l1| s3n1
+    s2n1 -->|l2| s3n0
+    s0n1 -->|l3| s2n0
+    s0n1 -->|l3| s3n2
+    s2n2 -->|l4| s3n0

@@ -1,0 +1,54 @@
+%%metro title: Fuzz 8404616
+%%metro line: l0 | Polish_Call | #e6194b
+%%metro line: l1 | Pca_Fastqc_Bam | #3cb44b
+%%metro line: l2 | Fastqc_Fastqc | #4363d8
+%%metro line: l3 | Sort_Filter_Gather | #f58231
+
+graph LR
+    subgraph sec0 [Summarise 0]
+        s0n0[vcf_cluster]
+        s0n1[merge_gather]
+        s0n2[dedup_normalize]
+        s0n0 -->|l0| s0n2
+        s0n0 -->|l1,l3| s0n1
+        s0n1 -->|l1,l3| s0n2
+    end
+    subgraph sec1 [Assemble_Call 1]
+        %%metro entry: top | l0
+        %%metro exit: top | l0
+        s1n0[filter_gather]
+        s1n2[markdup]
+        s1n0 -->|l0| s1n2
+    end
+    subgraph sec2 [Bin 2]
+        %%metro entry: top | l0, l1, l3
+        s2n0[export_bam]
+        s2n1[gather_normalize]
+        s2n2[merge_vcf]
+        s2n3[bin_count_polish]
+        s2n0 -->|l0,l1,l3| s2n1
+        s2n1 -->|l0| s2n3
+        s2n1 -->|l1,l3| s2n2
+        s2n2 -->|l2,l3| s2n3
+    end
+    subgraph sec3 [Qc 3]
+        s3n0[EXPORT_MERGE]
+        s3n1[filter_align]
+        s3n0 -->|l0| s3n1
+    end
+    subgraph sec4 [Sort_Merge_Classify 4]
+        s4n0[report_sort]
+        s4n1[bin_fastqc_normalize]
+        s4n2[markdup]
+        s4n0 -->|l0,l2,l3| s4n1
+        s4n1 -->|l0,l3| s4n2
+    end
+    s0n2 -->|l0| s1n0
+    s1n2 -->|l0| s2n0
+    s2n3 -->|l0,l2| s3n0
+    s3n1 -->|l0,l1| s4n0
+    s0n2 -->|l1,l3| s2n0
+    s2n2 -->|l1| s3n1
+    s3n0 -->|l2| s4n0
+    s2n3 -->|l3| s4n0
+    s2n0 -->|l3| s3n1

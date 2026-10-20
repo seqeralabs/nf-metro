@@ -136,7 +136,7 @@ def claimed_station_ids(plan: FanPlan) -> set[str]:
     could state differently, and a station another fan owns has been ceded, so
     this plan reads that seat rather than claiming it.
     """
-    return (stated_station_ids(plan) | _fan_boundary_station_ids(plan)) - set(
+    return stated_station_ids(plan).union(_fan_boundary_station_ids(plan)) - set(
         plan.ceded_station_ids
     )
 
@@ -3504,20 +3504,26 @@ def _fan_runtime_edges(plan: FanPlan) -> tuple[ResolvedEdge, ...]:
     )
 
 
-def _fan_boundary_station_ids(plan: FanPlan) -> frozenset[str]:
-    """Return hubs, ports, landings, and neighbouring hand-off boundaries."""
-    return frozenset(
-        (
-            *plan.entry_port_ids,
-            *plan.exit_port_ids,
-            *(
-                port_id
-                for branch in plan.branches
-                for port_id in branch.landing_port_ids
-            ),
-            *(path[-1].target for path in plan.entry_handoff_paths if path),
-            *(path[0].source for path in plan.exit_handoff_paths if path),
-            *((plan.join_station_id,) if plan.join_station_id is not None else ()),
+def _fan_boundary_station_ids(plan: FanPlan) -> tuple[str, ...]:
+    """Return hubs, ports, landings, and neighbouring hand-off boundaries.
+
+    The order is fixed so the frame check reports the same first drifted
+    boundary in every run.
+    """
+    return tuple(
+        dict.fromkeys(
+            (
+                *plan.entry_port_ids,
+                *plan.exit_port_ids,
+                *(
+                    port_id
+                    for branch in plan.branches
+                    for port_id in branch.landing_port_ids
+                ),
+                *(path[-1].target for path in plan.entry_handoff_paths if path),
+                *(path[0].source for path in plan.exit_handoff_paths if path),
+                *((plan.join_station_id,) if plan.join_station_id is not None else ()),
+            )
         )
     )
 

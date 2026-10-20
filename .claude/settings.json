@@ -10,6 +10,16 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/block-full-suite-pytest.sh",
+            "timeout": 10
+          }
+        ]
       }
     ]
   }

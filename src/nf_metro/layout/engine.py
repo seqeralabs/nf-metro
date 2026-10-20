@@ -634,6 +634,11 @@ def _compute_layout_scaled(
 ) -> None:
     """Layout body, run under the graph's active font-scale context."""
 
+    # The obstacle boxes describe the previous pass's settled geometry, and
+    # every re-lay in this pass translates them again.  Each pass starts from
+    # unseated routes, as a first pass does, and reseats them at its end.
+    graph.bypass_label_obstacles = {}
+
     # Diagonal labels are a horizontal-trunk feature: a TB section places its
     # labels beside vertical pills, where the same tilt doesn't read, so an
     # angled graph that also has a TB section would mix tilted and horizontal
@@ -847,6 +852,13 @@ def _compute_layout_scaled(
         _guard_converge_siblings_merge_locally(graph, "final")
 
 
+def _has_bypass_v(graph: MetroGraph) -> bool:
+    return any(
+        v.is_hidden and v.bypasses_station_id is not None
+        for v in graph.stations.values()
+    )
+
+
 def _bypass_label_rakes(graph: MetroGraph) -> set[str]:
     # Stations whose name label a bypass-V leg crosses, per the guard's strike
     # definition: it counts a leg's crossing of the station the V routes around
@@ -859,12 +871,30 @@ def _bypass_label_rakes(graph: MetroGraph) -> set[str]:
     }
 
 
+def _seated_bypass_label_rakes(graph: MetroGraph) -> set[str]:
+    """Bypass rakes left once every V is seated against its bypassed label.
+
+    The strike-clearance probes route against unseated boxes and cannot see
+    these rakes, which are the ones :func:`_clear_bypass_label_rakes` clears.
+    The graph's boxes are restored before returning.
+    """
+    if not _has_bypass_v(graph):
+        return set()
+    unseated = graph.bypass_label_obstacles
+    graph.bypass_label_obstacles = _bypass_label_obstacles(graph)
+    try:
+        return _bypass_label_rakes(graph)
+    finally:
+        graph.bypass_label_obstacles = unseated
+
+
 def _clear_bypass_label_rakes(
     graph: MetroGraph,
     *,
     issues: Callable[[], tuple[set[str], bool, set[tuple[str, str, int]]]],
     adjust: Callable[[tuple[str, str, int], int], None],
     lever_value: Callable[[tuple[str, str, int]], int],
+    lever_key: Callable[[tuple[str, str, int | str]], tuple[int, int, int]],
     growable_target: Callable[[str], tuple[Section, int] | None],
     relay: Callable[..., None],
     reseat: Callable[[], None],
@@ -879,18 +909,18 @@ def _clear_bypass_label_rakes(
     seated boxes are local: the entry value is restored before returning, so the
     fan/convergence loop reasons about unseated routes.
     """
-    if not any(
-        v.is_hidden and v.bypasses_station_id is not None
-        for v in graph.stations.values()
-    ):
+    if not _has_bypass_v(graph):
         return
     entry_obstacles = dict(graph.bypass_label_obstacles)
     graph.bypass_label_obstacles = _bypass_label_obstacles(graph)
-    rake_levers = {
-        ("gap", target[0].id, target[1])
-        for sid in _bypass_label_rakes(graph)
-        if (target := growable_target(sid)) is not None
-    }
+    rake_levers = sorted(
+        {
+            ("gap", target[0].id, target[1])
+            for sid in _bypass_label_rakes(graph)
+            if (target := growable_target(sid)) is not None
+        },
+        key=lever_key,
+    )
     struck_pre, collinear_pre, _ = issues() if rake_levers else (set(), False, ())
     if not rake_levers or collinear_pre:
         graph.bypass_label_obstacles = entry_obstacles
@@ -965,6 +995,31 @@ def _strike_lever_value(graph: MetroGraph, lever: tuple[str, str, int | str]) ->
     return sec.label_strike_layer_gaps.get(int(key), 0)
 
 
+def _strike_lever_key(
+    graph: MetroGraph,
+) -> Callable[[tuple[str, str, int | str]], tuple[int, int, int]]:
+    """Sort key putting strike-clearance levers in model order.
+
+    The grow loops visit levers in this order, which fixes the insertion order
+    of each section's lever dicts, and the minimization pass then shrinks
+    levers in that insertion order.  Levers sort by kind, section declaration
+    rank, then layer index (``gap``) or the producer's position in the
+    section's ``station_ids`` (``off_lead``).
+    """
+    kind_rank = {"entry": 0, "exit": 1, "gap": 2, "off_lead": 3}
+    section_rank = {sid: rank for rank, sid in enumerate(graph.sections)}
+
+    def key(lever: tuple[str, str, int | str]) -> tuple[int, int, int]:
+        kind, sid, slot = lever
+        if kind == "off_lead":
+            position = graph.sections[sid].station_ids.index(str(slot))
+        else:
+            position = int(slot)
+        return kind_rank[kind], section_rank[sid], position
+
+    return key
+
+
 def _off_track_output_producers(graph: MetroGraph) -> set[str]:
     """On-track stations that feed an off-track output (a producer-fed sink).
 
@@ -980,6 +1035,29 @@ def _off_track_output_producers(graph: MetroGraph) -> set[str]:
         for off_id, anchor_id in _off_track_anchor_of(graph).items()
         if not any(e.target == anchor_id for e in graph.edges_from(off_id))
     }
+
+
+def _bypass_v_flat_lever(
+    graph: MetroGraph, section_id: str, gap_layer: int
+) -> tuple[str, str, int]:
+    """The lever that lengthens a bypass-V flat collapsed at *gap_layer*.
+
+    A layer gap pushes every station at or past its layer a column out.  Past
+    the section's last layer there is no such station: the short run is the V's
+    run-out into an exit port, which only the exit runway lengthens.
+    """
+    section = graph.sections[section_id]
+    last_layer = max(
+        (
+            graph.stations[sid].layer
+            for sid in section.station_ids
+            if not graph.stations[sid].is_port
+        ),
+        default=-1,
+    )
+    if gap_layer > last_layer:
+        return ("exit", section_id, 0)
+    return ("gap", section_id, gap_layer)
 
 
 def _strike_growable_target(
@@ -1169,12 +1247,15 @@ def _apply_label_strike_clearance(
     _growable_target = partial(_strike_growable_target, graph)
     _adjust = partial(_adjust_strike_lever, graph)
     _lever_value = partial(_strike_lever_value, graph)
+    _lever_key = _strike_lever_key(graph)
 
     off_track_output_producers = _off_track_output_producers(graph)
 
     def _issues() -> tuple[set[str], bool, set[tuple[str, str, int]]]:
         struck_, collinear_, flat_gaps_ = _label_clearance_issues(graph)
-        flat_levers_ = {("gap", sid, layer) for sid, layer in flat_gaps_}
+        flat_levers_ = {
+            _bypass_v_flat_lever(graph, sid, layer) for sid, layer in flat_gaps_
+        }
         return struck_, collinear_, flat_levers_
 
     def _levers_for_struck(sid: str) -> set[tuple[str, str, int | str]]:
@@ -1185,6 +1266,7 @@ def _apply_label_strike_clearance(
         issues=_issues,
         adjust=_adjust,
         lever_value=_lever_value,
+        lever_key=_lever_key,
         growable_target=_growable_target,
         relay=_relay,
         reseat=_reseat,
@@ -1198,38 +1280,49 @@ def _apply_label_strike_clearance(
             levers |= _levers_for_struck(sid)
         if not levers:
             break
-        for lever in levers:
+        for lever in sorted(levers, key=_lever_key):
             _adjust(lever, 1)
         _relay()
         after, collinear, after_flats = _issues()
         after_count = len(after) + len(after_flats)
         if collinear or after_count >= count:
-            for lever in levers:
+            for lever in sorted(levers, key=_lever_key):
                 _adjust(lever, -1)
             _relay()
-            fallback_levers = set(levers)
+            # Retry with the gap after each struck layer, then without the flat
+            # levers: one flat lever can be what raises the collinear overlay.
+            strike_levers: set[tuple[str, str, int | str]] = set()
+            next_gaps: set[tuple[str, str, int | str]] = set()
             for sid in struck:
+                strike_levers |= _levers_for_struck(sid)
                 target = _growable_target(sid)
                 if target is not None:
-                    section, layer = target
-                    fallback_levers.add(("gap", section.id, layer + 1))
-            if fallback_levers == levers:
-                break
-            for lever in fallback_levers:
-                _adjust(lever, 1)
-            _relay()
-            after, collinear, after_flats = _issues()
-            after_count = len(after) + len(after_flats)
-            if collinear or after_count >= count:
-                for lever in fallback_levers:
+                    next_gaps.add(("gap", target[0].id, target[1] + 1))
+            next_gaps -= levers
+            retries = (levers | next_gaps, strike_levers, strike_levers | next_gaps)
+            accepted = False
+            for retry in dict.fromkeys(
+                frozenset(r) for r in retries if r and r != levers
+            ):
+                for lever in sorted(retry, key=_lever_key):
+                    _adjust(lever, 1)
+                _relay()
+                after, collinear, after_flats = _issues()
+                after_count = len(after) + len(after_flats)
+                if not collinear and after_count < count:
+                    accepted = True
+                    break
+                for lever in sorted(retry, key=_lever_key):
                     _adjust(lever, -1)
                 _relay()
+            if not accepted:
                 break
         struck, flat_levers, count = after, after_flats, after_count
 
     # Minimization: shrink each grown lever column by column, keeping a drop only
-    # while the labels stay clear, no collinear overlay appears, and no bypass-V
-    # flat re-collapses, so every lever lands at its least load-bearing value.
+    # while the labels stay clear, no collinear overlay appears, no bypass-V
+    # flat re-collapses, and no seated bypass rake appears that was clear before
+    # the shrinking started, so every lever lands at its least load-bearing value.
     # Skipped entirely when nothing grew, so a clean layout never pays a re-lay
     # (and is never perturbed by one).
     grown: list[tuple[str, str, int | str]] = (
@@ -1255,12 +1348,18 @@ def _apply_label_strike_clearance(
         ]
     )
     if grown:
+        entry_rakes = _seated_bypass_label_rakes(graph)
         for lever in grown:
             while _lever_value(lever) > 0:
                 _adjust(lever, -1)
                 _relay()
                 still_struck, collinear, still_flat = _label_clearance_issues(graph)
-                if still_struck or collinear or still_flat:
+                if (
+                    still_struck
+                    or collinear
+                    or still_flat
+                    or _seated_bypass_label_rakes(graph) - entry_rakes
+                ):
                     _adjust(lever, 1)
                     break
         _relay(validate_layout=validate)

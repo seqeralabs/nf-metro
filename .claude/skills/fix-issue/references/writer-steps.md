@@ -60,7 +60,12 @@ new SHA.
 **CI owns the full suite.** Targeted local tests plus the CI matrix is the
 default, not a compromise: CI already runs the complete suite across the
 supported matrix on every push, and duplicating it locally per branch or per
-worker buys no signal. Run a local full suite only when it earns its cost:
+worker buys no signal. A `PreToolUse` hook
+(`.claude/hooks/block-full-suite-pytest.sh`) denies a `pytest` command that
+names no test file, so a bare `pytest`, `pytest tests/` or `pytest -n auto`
+is refused; the three cases below are run with `# full-suite-ok` appended to
+the command, which is the opt-out and the audit trail in one. Run a local full
+suite only when it earns its cost:
 
 - shared orchestration, parser model, dispatch table, or widely used helper
   changed;

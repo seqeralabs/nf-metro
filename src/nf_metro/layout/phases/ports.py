@@ -940,8 +940,10 @@ def _snap_sole_layer_stations_to_ports(graph: MetroGraph) -> None:
         # For each LEFT/RIGHT port, check its connected internal stations.
         # Skip TOP/BOTTOM ports - snapping to a boundary port Y would
         # pull stations to the section edge rather than aligning them
-        # with a horizontal predecessor.
-        for pid in port_ids:
+        # with a horizontal predecessor.  A station reached from more than
+        # one port is snapped once per port, so the visit order (entry
+        # ports, then exit ports) decides its Y: the last snap wins.
+        for pid in [*section.entry_ports, *section.exit_ports]:
             port_obj = graph.ports.get(pid)
             if not port_obj or port_obj.side not in (PortSide.LEFT, PortSide.RIGHT):
                 continue
