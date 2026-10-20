@@ -563,6 +563,10 @@ def _bypass_label_obstacles(
     that label.  Boxes are in rendered (offset-applied) coordinates and only
     cover Vs whose bypassed station carries a drawn name; the result is empty
     when no bypass V exists or the probe fails.
+
+    The probe routes against no obstacle boxes, so the boxes depend on the
+    layout alone.  Seating a V against a box can move a label, so a probe that
+    read the current boxes could flip between two answers on recompute.
     """
     from nf_metro.layout.labels import label_glyph_ink_bbox
 
@@ -573,7 +577,12 @@ def _bypass_label_obstacles(
     ]
     if not vs:
         return {}
-    probe = _probe_label_placements(graph)
+    seated = graph.bypass_label_obstacles
+    graph.bypass_label_obstacles = {}
+    try:
+        probe = _probe_label_placements(graph)
+    finally:
+        graph.bypass_label_obstacles = seated
     if probe is None:
         return {}
     _offsets, _routes, placements = probe

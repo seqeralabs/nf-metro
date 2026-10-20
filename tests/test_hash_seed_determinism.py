@@ -189,6 +189,27 @@ def test_seed_72_png_is_frozen(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+SET_ORDER_TIES = ROOT / "tests" / "data" / "hash_seed_determinism"
+
+
+def test_set_order_ties_settle_and_render_across_hash_seeds() -> None:
+    """Ties a set's iteration order could break resolve the same in every run.
+
+    Seeds 1 and 3 iterate these maps' tied sets in a different order from seed
+    0, so a tie broken by set order shows up as a difference against seed 0.
+    """
+    paths = tuple(sorted(SET_ORDER_TIES.glob("*.mmd")))
+    assert {path.stem for path in paths} == {
+        "fan_boundary_drift_report",
+        "label_strike_lever_geometry",
+        "label_strike_lever_state",
+        "sole_layer_entry_exit_snap",
+    }
+    observations = observe_paths_across_hash_seeds(paths, ("0", "1", "3"))
+    differences = observation_differences(observations)
+    assert not differences, json.dumps(differences, indent=2, sort_keys=True)
+
+
 def test_same_destination_topologies_render_and_plan_across_hash_seeds() -> None:
     paths = tuple(
         ROOT / "examples" / "topologies" / f"{stem}.mmd"
