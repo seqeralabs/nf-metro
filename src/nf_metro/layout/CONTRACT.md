@@ -315,10 +315,10 @@ so their `PhaseFieldSpec` names a lifecycle phase (`pre-layout`, `post-layout`,
 `station-offset-layout`, `rail-layout`) in place of a stage id. They carry no
 runtime check either:
 
-- `graph._cross_column_perp_bridges` - sections whose perpendicular drop was
-  bridged across grid columns, accumulated by the Stage 3.2 / 3.4 port
-  alignment; routing's render-curve invariant reads it to relax its abort to a
-  warning for those bundles.
+- `graph._cross_column_perp_bridge_ports` - perpendicular entry ports reached
+  by a cross-column lead-in, filled by the Stage 3.2 / 3.4 port alignment and
+  pruned at the end of each layout pass of any port whose feeders all descend
+  inside the pass's final box; read by routing's render-curve invariant.
 - `graph._fold_compressed_sections` - recorded at parse time for sections a
   lowered fold threshold relocated; read by the fold-exit-side guard and the
   render fold-abort chokepoint. A resolve-time flow reversal is recorded as a

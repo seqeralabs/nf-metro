@@ -53,11 +53,21 @@ history.
   column to a bar under the map on portrait viewports or ones 640px wide or
   narrower, such as phones and side-by-side editor panels. The page declares
   a device-width viewport and supports touch pan and pinch-zoom.
+- A render whose curve check fails now aborts unless the failure lies on the
+  lead-in to a perpendicular entry port whose feeder descends outside the
+  section's box. Before, one such port anywhere in a map turned every curve failure
+  in that map into a warning, so some maps that used to draw with a warning
+  now abort and name the defect
+  ([#2123](https://github.com/seqeralabs/nf-metro/issues/2123)).
 
 ### Fixed
 
 - Section number badges skip sections that draw no badge. A map mixing loose
   stations with subgraphs numbered its visible sections from 2.
+- A perpendicular (top or bottom) entry port fed through merges, or by
+  feeders arriving along two different corridors, now gives each line the
+  channel that matches its lane in the section, so the lines no longer cross
+  or overlap inside the port's own turn.
 
 ## [2.1.0] — 2026-09-15
 

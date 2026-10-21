@@ -22,6 +22,7 @@ import warnings
 from pathlib import Path
 
 import pytest
+from conftest import curve_abort_softened, is_curve_abort_fixture
 
 from nf_metro.api import prepare_graph, resolve_theme
 from nf_metro.layout.constants import COORD_TOLERANCE
@@ -104,7 +105,10 @@ def _claim_overhangs(path: Path) -> dict[tuple[int, int], tuple[float, str]] | N
     the ones beyond it.
     """
     try:
-        with warnings.catch_warnings():
+        with (
+            warnings.catch_warnings(),
+            curve_abort_softened(is_curve_abort_fixture(path)),
+        ):
             warnings.simplefilter("ignore")
             graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
             observed = build_observed_render_plan(graph, resolve_theme(None, graph))

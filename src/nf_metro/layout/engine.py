@@ -291,6 +291,7 @@ from nf_metro.layout.phases.ports import (  # noqa: F401
     _snap_grid_group_exit_ports,
     _snap_sole_layer_stations_to_ports,
     _space_ports_from_termini,
+    prune_settled_cross_column_perp_bridges,
 )
 from nf_metro.layout.phases.row_align import (  # noqa: F401
     _align_row_trunk_ys,
@@ -1438,13 +1439,18 @@ def _layout_once(
     section_y_gap: float,
     validate: bool,
 ) -> None:
-    """Run one full positioning pass at the given spacing (idempotent)."""
+    """Run one full positioning pass at the given spacing.
+
+    Clears ``_cross_column_perp_bridge_ports`` before the pass and prunes it
+    against the pass's final boxes after, so it holds only this pass's bridges.
+    """
     from nf_metro.layout.fan_plans import (
         build_fan_plan_execution,
         install_fan_plan_execution,
     )
     from nf_metro.parser.route_topology import build_route_topology_query
 
+    graph._cross_column_perp_bridge_ports.clear()
     topology = build_route_topology_query(graph)
     if topology is not None:
         install_fan_plan_execution(
@@ -1481,6 +1487,7 @@ def _layout_once(
         section_y_gap=section_y_gap,
         validate=validate,
     )
+    prune_settled_cross_column_perp_bridges(graph)
 
 
 def _compute_flat_layout(

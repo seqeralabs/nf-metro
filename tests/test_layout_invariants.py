@@ -7011,6 +7011,12 @@ def _bbox_spilled_stations(graph: MetroGraph) -> list[str]:
     ]
 
 
+def _bridged_sections(graph: MetroGraph) -> set[str]:
+    return {
+        graph.ports[pid].section_id for pid in graph._cross_column_perp_bridge_ports
+    }
+
+
 def test_cross_column_perp_drop_renders_cleanly():
     """A perpendicular drop fed from a different grid column lays out cleanly.
 
@@ -7024,7 +7030,7 @@ def test_cross_column_perp_drop_renders_cleanly():
     """
     graph = _layout("topologies/cross_column_perp_drop.mmd")
 
-    assert "qc" in graph._cross_column_perp_bridges
+    assert "qc" in _bridged_sections(graph)
     assert not _bbox_spilled_stations(graph)
 
     offsets = compute_station_offsets(graph)
@@ -7039,19 +7045,19 @@ def test_cross_column_perp_entry_stays_in_bbox():
 
     On a fold-stacked LR sink whose only feed is a perpendicular entry from a
     wider same-column neighbour (the source X sits past the sink's box), the
-    run stays on the sink's own column instead of being dragged off it.  The
-    bundle through this forced-perpendicular drop is an unsupported shape, so
-    the render relaxes the curve invariant to a warning rather than aborting,
-    but no station leaves its section bbox (#879).
+    run stays on the sink's own column instead of being dragged off it, no
+    station leaves its section bbox (#879), and the bundle nests through the
+    drop's turn into the sink's trunk.
     """
     graph = _layout("regressions/cross_column_perp_entry_overflow.mmd")
 
-    assert "reporting" in graph._cross_column_perp_bridges
+    assert "reporting" in _bridged_sections(graph)
     assert not _bbox_spilled_stations(graph)
 
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
-    with pytest.warns(UserWarning, match="bridged across grid columns"):
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
         assert_render_curve_invariants(graph, routes, offsets)
 
 

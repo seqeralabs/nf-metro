@@ -27,8 +27,9 @@ import warnings
 from pathlib import Path
 
 import pytest
+from conftest import curve_abort_softened, is_curve_abort_fixture, known_curve_abort
 
-from nf_metro.api import RenderConfig, prepare_graph, render_graph_result
+from nf_metro.api import RenderConfig, prepare_graph, render_graph_result, render_string
 from nf_metro.layout.constants import COORD_TOLERANCE
 from nf_metro.layout.routing import compute_station_offsets, exit_turns
 from nf_metro.layout.routing.families import RouteFamilyId
@@ -51,8 +52,11 @@ CONFLICT_PORT = "sec3__entry_top_5"
 Point = tuple[float, float]
 
 
-def _layout(path: Path):
-    with warnings.catch_warnings():
+def _layout(path: Path, *, softened: bool = False):
+    with (
+        warnings.catch_warnings(),
+        curve_abort_softened(softened or is_curve_abort_fixture(path)),
+    ):
         warnings.simplefilter("ignore")
         graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
         result = render_graph_result(
@@ -243,7 +247,9 @@ UNDEALT_JUNCTION_DROPS = {
 }
 
 
-def _junction_drop_turn_offsets(source: str, tmp_path: Path, monkeypatch) -> set[float]:
+def _junction_drop_turn_offsets(
+    source: str, tmp_path: Path, monkeypatch, *, softened: bool = False
+) -> set[float]:
     """Turn-axis minus port X for each planned drop from a junction over its port."""
     deltas: set[float] = set()
     real = exit_turns._source_turn_requirement
@@ -263,7 +269,7 @@ def _junction_drop_turn_offsets(source: str, tmp_path: Path, monkeypatch) -> set
     monkeypatch.setattr(exit_turns, "_source_turn_requirement", spy)
     path = tmp_path / "junction_drop.mmd"
     path.write_text(source)
-    _layout(path)
+    _layout(path, softened=softened)
     return deltas
 
 
@@ -274,11 +280,32 @@ def test_junction_straight_drop_turns_off_the_dealt_column_offset(
     assert deltas and 0.0 not in deltas
 
 
+UNDEALT_JUNCTION_ABORTS = {
+    "declined_column": known_curve_abort(
+        "#2148",
+        reason="sec4's BOTTOM entry crosses l3 over l4 and l4 over l2 in its own turn",
+    ),
+}
+
+
 @pytest.mark.parametrize("name", UNDEALT_JUNCTION_DROPS)
 def test_junction_straight_drop_without_a_dealt_column_turns_on_the_port(
     name: str, tmp_path: Path, monkeypatch
 ) -> None:
     deltas = _junction_drop_turn_offsets(
-        UNDEALT_JUNCTION_DROPS[name], tmp_path, monkeypatch
+        UNDEALT_JUNCTION_DROPS[name],
+        tmp_path,
+        monkeypatch,
+        softened=name in UNDEALT_JUNCTION_ABORTS,
     )
     assert deltas == {0.0}
+
+
+@pytest.mark.parametrize(
+    "name",
+    [pytest.param(name, marks=mark) for name, mark in UNDEALT_JUNCTION_ABORTS.items()],
+)
+def test_undealt_junction_drop_renders_without_a_curve_abort(name: str) -> None:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        render_string(UNDEALT_JUNCTION_DROPS[name])

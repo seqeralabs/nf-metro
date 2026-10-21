@@ -1588,15 +1588,15 @@
   "status": "defensive"
  },
  "perp_columns.py::if _side_order(laterals, direction) != _side_order(landing, drop):::#1": {
-  "note": "A multi-line feeder departing in the column's side order passes; one departing in the opposite order declines the column. The agreeing arm is reached by `tests/fixtures/regressions/perp_entry_column_two_feeders.mmd`; a generated-map sweep reaches it (36 of 8000 maps) for agreement and A generated-map sweep reaches it (19 of 8000 maps) for disagreement. The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "note": "A multi-line feeder departing in the column's side order passes; one departing in the opposite order declines the column. The agreeing arm is reached by `tests/fixtures/regressions/perp_entry_column_two_feeders.mmd`; a generated-map sweep reaches it (36 of 8000 maps) for agreement and A generated-map sweep reaches it (19 of 8000 maps) for disagreement. In the swept corpus `examples/topologies/top_entry_two_corridors_split_targets.mmd` reaches the agreeing arm.",
   "status": "needs-review"
  },
- "perp_columns.py::if any(_feeder_keeps_its_own_crossing(graph, port_id, s) for s in sources):::#1": {
-  "note": "A feeder drawn from the port's own crossing declines the column. Reached by `tests/fixtures/regressions/perp_entry_column_merge_feeder.mmd`, `..._opposite_side_fan.mmd`, `..._straight_drop.mmd` and `cross_column_perp_entry_overflow.mmd`; a generated-map sweep reaches it (34 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+ "perp_columns.py::if any(::#1": {
+  "note": "A feeder drawn from the port's own crossing that the dealt column would move declines the column. Reached by `tests/fixtures/regressions/perp_entry_column_merge_feeder.mmd`, `..._opposite_side_fan.mmd` and `..._straight_drop.mmd`; the column-keeping arm by `cross_column_perp_entry_overflow.mmd` (a merge-fed port with a bundled feeder) and the inline map `tests/test_cross_column_perp_bridge.py` (BRIDGED_ENTRY, a straight drop the column leaves in place). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
   "status": "needs-review"
  },
- "perp_columns.py::if any(len(coords) != 1 for coords in lanes.values()):::#1": {
-  "note": "A line leaving the port for two stations (a fan inside the section) has no single trunk lane, so no column is dealt. Reached by the inline map `tests/test_fan_reach_order_join.py` (PEELOFF_FAN_MMD); a generated-map sweep reaches it (15 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+ "perp_columns.py::if ranks != sorted(ranks):::#1": {
+  "note": "A station the drop turns into stacking its lines against the order of their first turns off the drop cannot nest every turn, so no column is dealt. A generated-map sweep reaches it (11 of 1500 maps), but no committed map: needs a fixture whose perpendicular entry drops into two stations sharing lines in opposite lane orders.",
   "status": "needs-review"
  },
  "perp_columns.py::if column.offsets is not None and not offsets_hold(::#1": {
@@ -1604,15 +1604,15 @@
   "status": "needs-review"
  },
  "perp_columns.py::if departure is None:::#1": {
-  "note": "A multi-line feeder whose departure has no stated lateral declines the column; one with a lateral is compared. Reached by `tests/fixtures/regressions/perp_entry_column_feeder_conflict.mmd` (no lateral) and `tests/fixtures/regressions/perp_entry_column_two_feeders.mmd`; a generated-map sweep reaches it (46 of 8000 maps) / A generated-map sweep reaches it (51 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "note": "A multi-line feeder whose departure has no stated lateral declines the column; one with a lateral is compared. Reached by `tests/fixtures/regressions/perp_entry_column_feeder_conflict.mmd` (no lateral) and `tests/fixtures/regressions/perp_entry_column_two_feeders.mmd`; a generated-map sweep reaches it (46 of 8000 maps) / A generated-map sweep reaches it (51 of 8000 maps). In the swept corpus `examples/topologies/top_entry_two_corridors_split_targets.mmd` reaches the with-lateral arm.",
   "status": "needs-review"
  },
  "perp_columns.py::if exit_port is None:::#1": {
-  "note": "A feeder that is itself an exit port reads its side directly; a junction feeder resolves its feeding port. Reached by `tests/fixtures/regressions/perp_entry_column_two_feeders.mmd` and `tests/fixtures/regressions/perp_entry_column_feeder_conflict.mmd`; a generated-map sweep reaches it (51 of 8000 maps) / A generated-map sweep reaches it (46 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "note": "A feeder that is itself an exit port reads its side directly; a junction feeder resolves its feeding port. Reached by `tests/fixtures/regressions/perp_entry_column_two_feeders.mmd` and `tests/fixtures/regressions/perp_entry_column_feeder_conflict.mmd`; a generated-map sweep reaches it (51 of 8000 maps) / A generated-map sweep reaches it (46 of 8000 maps). In the swept corpus `examples/topologies/top_entry_two_corridors_split_targets.mmd` reaches the exit-port arm.",
   "status": "needs-review"
  },
  "perp_columns.py::if exit_port.side in (PortSide.LEFT, PortSide.RIGHT):::#1": {
-  "note": "A LEFT/RIGHT departure reads lane laterals; a TOP/BOTTOM one reads riser laterals. The LEFT/RIGHT arm is reached by `tests/fixtures/regressions/perp_entry_column_two_feeders.mmd`; a generated-map sweep reaches it (49 of 8000 maps) / A generated-map sweep reaches it (3 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "note": "A LEFT/RIGHT departure reads lane laterals; a TOP/BOTTOM one reads riser laterals. The LEFT/RIGHT arm is reached by `tests/fixtures/regressions/perp_entry_column_two_feeders.mmd`; a generated-map sweep reaches it (49 of 8000 maps) / A generated-map sweep reaches it (3 of 8000 maps). In the swept corpus `examples/topologies/top_entry_two_corridors_split_targets.mmd` reaches the LEFT/RIGHT arm.",
   "status": "needs-review"
  },
  "perp_columns.py::if exit_port.side is PortSide.BOTTOM:::#1": {
@@ -1622,10 +1622,6 @@
  "perp_columns.py::if len(feeding) != 1:::#1": {
   "note": "A junction feeder fed by one exit port. The decline arm is reached by `tests/fixtures/regressions/perp_entry_column_feeder_conflict.mmd` (A generated-map sweep reaches it (46 of 8000 maps)); the single-port arm is not reached by the corpus, the test fixtures or any of 8000 generated maps: every junction that delivers two lines to a multi-feeder perpendicular entry and survives the earlier declines is fed by more than one port.",
   "status": "candidate-dead"
- },
- "perp_columns.py::if len(line_ids) < 2:::#1": {
-  "note": "A single-line feeder cannot disagree with the column's order and is skipped; a multi-line one is compared. The multi-line arm is reached by `tests/fixtures/regressions/perp_entry_column_two_feeders.mmd` and `tests/fixtures/regressions/perp_entry_column_feeder_conflict.mmd`; a generated-map sweep reaches it (92 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
-  "status": "needs-review"
  },
  "perp_columns.py::if len({round(v, _LATERAL_TIE_PLACES) for v in laterals.values()}) != len(::#1": {
   "note": "Two lines tied at their departure cannot vouch for an order and decline the column. The untied arm is reached by `tests/fixtures/regressions/perp_entry_column_two_feeders.mmd` (A generated-map sweep reaches it (51 of 8000 maps)); the tie arm a generated-map sweep reaches it (2 of 8000 maps) but no committed map.",
@@ -1643,16 +1639,16 @@
   "note": "A port continuing a corridor run at its own Y keeps the corridor's descent order rather than a dealt column. A generated-map sweep reaches it (9 of 8000 maps), but no committed map reaches it after the earlier scope checks.",
   "status": "needs-review"
  },
- "perp_columns.py::if set(lanes) != set(graph.station_lines(port_id)):::#1": {
+ "perp_columns.py::if set(first_turn) != set(graph.station_lines(port_id)):::#1": {
   "note": "An entry port carries exactly the lines of its out-edges: each line enters through it on an edge in and leaves on an edge out, so the lines leaving equal the station's lines. Not reached by the corpus, the test fixtures, or 8000 generated maps.",
   "status": "defensive"
  },
  "perp_columns.py::if source.is_port:::#1": {
-  "note": "A LEFT/RIGHT departure read off a port uses the port's lane coordinate; read off a junction it uses the junction's own lane. The port arm is reached by `tests/fixtures/regressions/perp_entry_column_two_feeders.mmd` (A generated-map sweep reaches it (49 of 8000 maps)); the junction arm needs a junction fed by exactly one exit port, which `if len(feeding) != 1:` shows no swept or generated map reaches.",
+  "note": "A LEFT/RIGHT departure read off a port uses the port's lane coordinate; read off a junction it uses the junction's own lane. The port arm is reached by `tests/fixtures/regressions/perp_entry_column_two_feeders.mmd` and in the swept corpus by `examples/topologies/top_entry_two_corridors_split_targets.mmd` (A generated-map sweep reaches it (49 of 8000 maps)); the junction arm needs a junction fed by exactly one exit port, which `if len(feeding) != 1:` shows no swept or generated map reaches.",
   "status": "candidate-dead"
  },
  "perp_columns.py::if source_id in merge_junction_ids(graph):::#1": {
-  "note": "A merge feeding the port keeps the port's own crossing. Reached by `tests/fixtures/regressions/perp_entry_column_merge_feeder.mmd` and `tests/fixtures/regressions/cross_column_perp_entry_overflow.mmd`; a generated-map sweep reaches it (15 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
+  "note": "A merge feeding the port keeps the port's own crossing unless another feeder brings the port two or more lines. Reached by `tests/fixtures/regressions/perp_entry_column_merge_feeder.mmd` and `tests/fixtures/regressions/cross_column_perp_entry_overflow.mmd`; a generated-map sweep reaches it (15 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
   "status": "needs-review"
  },
  "perp_columns.py::if target.is_port:::#1": {

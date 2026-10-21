@@ -15,6 +15,7 @@ import warnings
 from pathlib import Path
 
 import pytest
+from conftest import curve_abort_softened, is_curve_abort_fixture
 
 from nf_metro.api import RenderConfig, prepare_graph, render_graph_result
 from nf_metro.layout.constants import COORD_TOLERANCE
@@ -57,7 +58,11 @@ def landing():
             calls.append((f, pos_n, corner_x, channel_y, _boxes(f.graph), f.src.x))
         return real(f, pos_n, corner_x, channel_y)
 
-    with pytest.MonkeyPatch.context() as patch, warnings.catch_warnings():
+    with (
+        pytest.MonkeyPatch.context() as patch,
+        warnings.catch_warnings(),
+        curve_abort_softened(is_curve_abort_fixture(FIXTURE)),
+    ):
         warnings.simplefilter("ignore")
         patch.setattr(handlers, "_left_exit_lead_under", spy)
         graph = prepare_graph(FIXTURE.read_text(), source_dir=str(FIXTURE.parent))
