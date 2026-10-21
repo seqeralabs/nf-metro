@@ -3539,6 +3539,11 @@ def _bundle_walk(
     caller can ask which stations a re-slot would touch before deciding whether
     to make it.
 
+    Each line is carried only along its own edges.  A station that holds a moved
+    line but is reached only along other lines' edges sits on a separate stroke
+    of that line, which the re-slot has no reason to move; a station two lines
+    reach by different paths takes both.
+
     Up to the section's own exit port the run carries *new_offs* itself: the
     re-slot names the slots it wants and the stations along it answer to the
     same lane frame.  Crossing an exit the run has to *climb* re-bases it onto
