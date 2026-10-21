@@ -873,7 +873,6 @@
   "perp_columns.py::if exit_port.side in (PortSide.LEFT, PortSide.RIGHT):::#1",
   "perp_columns.py::if exit_port.side is PortSide.BOTTOM:::#1",
   "perp_columns.py::if len(feeding) != 1:::#1",
-  "perp_columns.py::if len(line_ids) < 2:::#1",
   "perp_columns.py::if len({round(v, _LATERAL_TIE_PLACES) for v in laterals.values()}) != len(::#1",
   "perp_columns.py::if not _feeders_deliver_column(graph, port_id, column, offsets):::#1",
   "perp_columns.py::if not source.is_port:::#1",

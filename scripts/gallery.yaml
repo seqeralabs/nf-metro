@@ -2460,6 +2460,16 @@ gallery:
       back. The port deals its channels in the order the lines turn into the trunk, so each
       riser lands on its own lane and the pair nests through the corner instead of one riser
       running hidden under the other (issue #2073)."
+  - id: top_entry_two_corridors_split_targets
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      "A Reporting section's TOP entry is fed along two corridors: the whole-genome line
+      over the top from Read QC and both lines climbing out of Alignment beside it. Both
+      lines turn off to Stats and the panel line continues down to Panel coverage. The port
+      deals its column in the order the lines turn off, so the bundle stays nested from the
+      climb through both turns instead of the lines swapping over the top and crossing
+      inside the entry (issue #2123)."
 pipelines:
   - id: rnaseq_metro
     title: nf-core/rnaseq
