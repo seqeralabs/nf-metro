@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="nf-metro-render-run" content="39614755588">
+<title>Render diff - PR #2147</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: light-dark(#f5f5f7, #1e1e2e);
+    --surface: light-dark(#eaeaef, #2a2a3c);
+    --border: light-dark(#c9c9d4, #3a3a4c);
+    --text: light-dark(#1e1e2e, #e0e0e0);
+    --muted: light-dark(#666, #888);
+    --accent: light-dark(#1a8575, #4ec9b0);
+    --added: light-dark(rgba(46,160,67,.25), rgba(46,160,67,.44));
+    --removed: light-dark(rgba(218,54,52,.25), rgba(218,54,52,.44));
+  }
+  [data-scheme="dark"] { color-scheme: dark; }
+  [data-scheme="light"] { color-scheme: light; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 2rem;
+    line-height: 1.5;
+  }
+  .page-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+  }
+  h1 {
+    font-size: 1.5rem;
+    color: var(--accent);
+  }
+  .scheme-btn {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 0.35rem 0.75rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
+  .scheme-btn:hover { background: var(--border); }
+  .summary {
+    color: var(--muted);
+    margin-bottom: 2rem;
+    font-size: 0.95rem;
+  }
+  .toc {
+    margin-bottom: 2rem;
+    padding: 1rem 1.5rem;
+    background: var(--surface);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  .toc h2 {
+    font-size: 1rem;
+    margin-bottom: 0.5rem;
+    color: var(--accent);
+  }
+  .toc h3 {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-top: 0.5rem;
+    margin-bottom: 0.25rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .toc ul {
+    list-style: none;
+    columns: 2;
+    column-gap: 2rem;
+  }
+  .toc li {
+    margin-bottom: 0.25rem;
+  }
+  .toc a {
+    color: var(--text);
+    text-decoration: none;
+  }
+  .toc a:hover {
+    color: var(--accent);
+    text-decoration: underline;
+  }
+  .badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    margin-left: 0.4rem;
+    vertical-align: middle;
+  }
+  .badge-changed { background: var(--border); }
+  .badge-added { background: var(--added); }
+  .badge-removed { background: var(--removed); }
+  .section-header {
+    font-size: 1.3rem;
+    color: var(--accent);
+    margin-top: 2.5rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid var(--border);
+  }
+  .diff-entry {
+    margin-bottom: 3rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .diff-entry h3 {
+    font-size: 1.1rem;
+    padding: 0.75rem 1rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .comparison {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+  }
+  .side {
+    padding: 1rem;
+    overflow-x: auto;
+  }
+  .side:first-child {
+    border-right: 1px solid var(--border);
+  }
+  .side h4 {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-bottom: 0.5rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .svg-wrapper { overflow-x: auto; }
+  .svg-wrapper svg, .side img, .side-only img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    border-radius: 4px;
+  }
+  .side-only {
+    padding: 1rem;
+  }
+  .empty {
+    color: var(--muted);
+    font-style: italic;
+    padding: 2rem;
+    text-align: center;
+  }
+  .toggle-bar {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .toggle-bar button {
+    background: var(--border);
+    color: var(--text);
+    border: none;
+    padding: 0.3rem 0.8rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+  .toggle-bar button.active {
+    background: var(--accent);
+    color: var(--bg);
+  }
+  .intro {
+    margin-bottom: 2rem;
+    padding: 1rem 1.5rem;
+    background: var(--surface);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    font-size: 0.9rem;
+    line-height: 1.6;
+  }
+  .intro summary {
+    cursor: pointer;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .intro p {
+    margin-top: 0.75rem;
+  }
+  .intro ul {
+    margin-top: 0.5rem;
+    padding-left: 1.5rem;
+  }
+  .intro li {
+    margin-bottom: 0.25rem;
+  }
+  .intro code {
+    background: var(--border);
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    font-size: 0.85em;
+  }
+  .intro a {
+    color: var(--accent);
+  }
+  .metrics {
+    margin-bottom: 2rem;
+    padding: 1rem 1.5rem;
+    background: var(--surface);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  .metrics h2 {
+    font-size: 1rem;
+    margin-bottom: 0.25rem;
+    color: var(--accent);
+  }
+  .metrics .caption {
+    color: var(--muted);
+    font-size: 0.8rem;
+    margin-bottom: 0.75rem;
+  }
+  .metrics table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.82rem;
+  }
+  .metrics th, .metrics td {
+    padding: 0.3rem 0.6rem;
+    text-align: right;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .metrics th:first-child, .metrics td:first-child {
+    text-align: left;
+  }
+  .metrics th {
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.7rem;
+  }
+  .metrics td a { color: var(--text); text-decoration: none; }
+  .metrics td a:hover { color: var(--accent); }
+  .m-flat { color: var(--muted); }
+  .m-better { color: light-dark(#1a8575, #4ec9b0); font-weight: 600; }
+  .m-worse { color: light-dark(#c0392b, #f38ba8); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="page-header">
+  <h1>Render diff - PR #2147</h1>
+  <button id="scheme-toggle" class="scheme-btn">System</button>
+</div>
+<p class="summary">1 added out of 373 total renders. Generated 2026-10-21 14:13 UTC.</p>
+<details class="intro">
+<summary>What is this page?</summary>
+<p>
+<a href="https://github.com/seqeralabs/nf-metro">nf-metro</a>
+generates metro-map-style SVG diagrams from Mermaid graph definitions.
+This page is automatically generated for every pull request and shows
+<strong>only the renders that changed</strong> compared to the
+<code>main</code> branch.
+</p>
+<p>
+Use it to check that code changes produce the intended visual result
+without unexpected side-effects on other diagrams. Each entry shows
+the <strong>base</strong> (main) render on the left and the
+<strong>PR</strong> render on the right. Use the toggle buttons to
+switch between side-by-side, base-only, and PR-only views.
+</p>
+<p><strong>What to look for:</strong></p>
+<ul>
+<li>Intended improvements in the PR column</li>
+<li>Unintended regressions (overlapping lines, shifted labels,
+    broken routing) in diagrams you did not mean to change</li>
+<li>New renders (green <em>added</em> badge), shown against what the base
+    code makes of the same file, or against the abort it raises there; or
+    removed renders (red <em>removed</em> badge)</li>
+</ul>
+</details>
+<div class="metrics">
+<h2>Layout-quality metrics</h2>
+<p class="caption">Advisory only &mdash; nothing gates on these. <span class="m-better">green</span> improved, <span class="m-worse">red</span> regressed. Lower is better except in the &uarr; column.</p>
+<table>
+<tr><th>Render</th><th>Crossings</th><th>Near-horiz.</th><th>Lone diag.</th><th>Bends/route</th><th>Corners</th><th>Turn/route (rad)</th><th>Label strikes</th><th>Marker gap ↑</th><th>Excess gaps</th><th>Wasted canvas</th></tr>
+<tr><td><a href="#top_entry_two_corridors_split_targets">top_entry_two_corridors_split_targets</a></td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;0.5</td><td class="m-flat">&ndash;&rarr;12</td><td class="m-flat">&ndash;&rarr;0.8</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;40.0</td><td class="m-flat">&ndash;&rarr;0</td><td class="m-flat">&ndash;&rarr;56%</td></tr>
+</table>
+</div>
+<div class="toc">
+<h2>Changed renders</h2>
+<h3><a href="#section-inter-section-routing">Inter-section Routing</a></h3>
+<ul>
+<li><a href="#top_entry_two_corridors_split_targets">top_entry_two_corridors_split_targets</a><span class="badge badge-added">added</span></li>
+</ul>
+</div>
+<h2 class="section-header" id="section-inter-section-routing">Inter-section Routing</h2>
+
+<div class="diff-entry" id="top_entry_two_corridors_split_targets">
+<h3>Top Entry Two Corridors Split Targets <span class="badge badge-added">added</span></h3>
+<div class="toggle-bar"><button class="active" data-mode="side-by-side">Side by side</button><button data-mode="base">Base only</button><button data-mode="pr">PR only</button></div>
+<div class="comparison">
+<div class="side side-base"><h4>Base code (map new in PR)</h4><div class="empty">Aborts on base: CurveInvariantError: [bundle order (line crosses its bundle-mate)] bundle &#x27;reporting__entry_top_3&#x27;-&gt;&#x27;qc_stats&#x27; corner (565.0,120.0) in=D out=R segment=1: expected line &#x27;wgs&#x27; on LEFT of line &#x27;panel&#x27; (matching incoming run); observed &#x27;wgs&#x27; on RIGHT of line &#x27;panel&#x27; on outgoing run (+1 more)</div></div>
+<div class="side side-pr"><h4>PR</h4><div class="svg-wrapper"><?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="777" height="340" viewBox="0 0 777 340">
+<defs>
+</defs>
+<style>.nf-metro-bg--top_entry_two_corridors_split_targets-pr { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }
+.nf-metro-title--top_entry_two_corridors_split_targets-pr { fill: var(--nfm-map-title-color, light-dark(#111111, #ffffff)); }
+.nf-metro-station-label--top_entry_two_corridors_split_targets-pr { fill: var(--nfm-map-label-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-section-box--top_entry_two_corridors_split_targets-pr { fill: var(--nfm-map-section-fill, light-dark(#ededed, #373737)); stroke: var(--nfm-map-section-stroke, light-dark(#e6e6e6, #595959)); }
+.nf-metro-section-label--top_entry_two_corridors_split_targets-pr { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-label--top_entry_two_corridors_split_targets-pr { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-underline--top_entry_two_corridors_split_targets-pr { stroke: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-legend-bg--top_entry_two_corridors_split_targets-pr { fill: var(--nfm-map-legend-bg, light-dark(rgba(255, 255, 255, 0.8), rgba(0, 0, 0, 0.3))); }
+.nf-metro-legend-text--top_entry_two_corridors_split_targets-pr { fill: var(--nfm-map-legend-text-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-marker-stroke--top_entry_two_corridors_split_targets-pr { stroke: var(--nfm-map-marker-stroke, light-dark(#333333, #f0f0f0)); }
+.nf-metro-label-halo--top_entry_two_corridors_split_targets-pr { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); stroke: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }</style>
+<rect x="0" y="0" width="777" height="340" fill="#2b2b2b" class="nf-metro-bg--top_entry_two_corridors_split_targets-pr" />
+<text x="60.0" y="30.0" font-size="24.0" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" class="nf-metro-title--top_entry_two_corridors_split_targets-pr">Whole-genome and panel sequencing</text>
+<rect x="30.0" y="74.0" width="160.0" height="100.0" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box--top_entry_two_corridors_split_targets-pr" data-section-id="qc" data-section-lines="panel,wgs" />
+<circle cx="41.0" cy="59.0" r="11" fill="#333333" class="nf-metro-section-num-circle--top_entry_two_corridors_split_targets-pr" data-section-id="qc" />
+<text x="41.0" y="59.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="qc">1</text>
+<text x="57.0" y="59.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label--top_entry_two_corridors_split_targets-pr" data-section-id="qc">Read QC</text>
+<rect x="240.0" y="74.0" width="220.0" height="100.0" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box--top_entry_two_corridors_split_targets-pr" data-section-id="align" data-section-lines="panel,wgs" />
+<circle cx="251.0" cy="189.0" r="11" fill="#333333" class="nf-metro-section-num-circle--top_entry_two_corridors_split_targets-pr" data-section-id="align" />
+<text x="251.0" y="189.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="align">2</text>
+<text x="267.0" y="189.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label--top_entry_two_corridors_split_targets-pr" data-section-id="align">Alignment</text>
+<rect x="510.0" y="74.0" width="207.0" height="140.0" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box--top_entry_two_corridors_split_targets-pr" data-section-id="reporting" data-section-lines="panel,wgs" />
+<circle cx="521.0" cy="229.0" r="11" fill="#333333" class="nf-metro-section-num-circle--top_entry_two_corridors_split_targets-pr" data-section-id="reporting" />
+<text x="521.0" y="229.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="reporting">3</text>
+<text x="537.0" y="229.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label--top_entry_two_corridors_split_targets-pr" data-section-id="reporting">Reporting</text>
+<path d="M80.0,128.0 L140.0,128.0" stroke="#d62728" stroke-width="3.0" stroke-linecap="round" class="metro-line-panel--top_entry_two_corridors_split_targets-pr" data-line-id="panel" />
+<path d="M290.0,128.0 L350.0,128.0" stroke="#d62728" stroke-width="3.0" stroke-linecap="round" class="metro-line-panel--top_entry_two_corridors_split_targets-pr" data-line-id="panel" />
+<path d="M350.0,128.0 L410.0,128.0" stroke="#d62728" stroke-width="3.0" stroke-linecap="round" class="metro-line-panel--top_entry_two_corridors_split_targets-pr" data-line-id="panel" />
+<path d="M595.0,128.0 L655.0,128.0" stroke="#d62728" stroke-width="3.0" stroke-linecap="round" class="metro-line-panel--top_entry_two_corridors_split_targets-pr" data-line-id="panel" />
+<path d="M140.0,128.0 L190.0,128.0" stroke="#d62728" stroke-width="3.0" stroke-linecap="round" class="metro-line-panel--top_entry_two_corridors_split_targets-pr" data-line-id="panel" />
+<path d="M240.0,128.0 L290.0,128.0" stroke="#d62728" stroke-width="3.0" stroke-linecap="round" class="metro-line-panel--top_entry_two_corridors_split_targets-pr" data-line-id="panel" />
+<path d="M410.0,128.0 L460.0,128.0" stroke="#d62728" stroke-width="3.0" stroke-linecap="round" class="metro-line-panel--top_entry_two_corridors_split_targets-pr" data-line-id="panel" />
+<path d="M565.0,74.0 L565.0,158.0 Q565.0,168.0,575.0,168.0 L595.0,168.0" stroke="#d62728" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-panel--top_entry_two_corridors_split_targets-pr" data-line-id="panel" />
+<path d="M565.0,74.0 L565.0,114.0 Q565.0,128.0,579.0,128.0 L595.0,128.0" stroke="#d62728" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-panel--top_entry_two_corridors_split_targets-pr" data-line-id="panel" />
+<path d="M190.0,128.0 L200.0,128.0" stroke="#d62728" stroke-width="3.0" stroke-linecap="round" class="metro-line-panel--top_entry_two_corridors_split_targets-pr" data-line-id="panel" />
+<path d="M200.0,128.0 L240.0,128.0" stroke="#d62728" stroke-width="3.0" stroke-linecap="round" class="metro-line-panel--top_entry_two_corridors_split_targets-pr" data-line-id="panel" />
+<path d="M460.0,128.0 L475.0,128.0 Q489.0,128.0,489.0,114.0 L489.0,58.0 Q489.0,48.0,499.0,48.0 L555.0,48.0 Q565.0,48.0,565.0,58.0 L565.0,74.0" stroke="#d62728" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-panel--top_entry_two_corridors_split_targets-pr" data-line-id="panel" />
+<path d="M80.0,124.0 L140.0,124.0" stroke="#0570b0" stroke-width="3.0" stroke-linecap="round" class="metro-line-wgs--top_entry_two_corridors_split_targets-pr" data-line-id="wgs" />
+<path d="M290.0,124.0 L350.0,124.0" stroke="#0570b0" stroke-width="3.0" stroke-linecap="round" class="metro-line-wgs--top_entry_two_corridors_split_targets-pr" data-line-id="wgs" />
+<path d="M350.0,124.0 L410.0,124.0" stroke="#0570b0" stroke-width="3.0" stroke-linecap="round" class="metro-line-wgs--top_entry_two_corridors_split_targets-pr" data-line-id="wgs" />
+<path d="M595.0,124.0 L655.0,124.0" stroke="#0570b0" stroke-width="3.0" stroke-linecap="round" class="metro-line-wgs--top_entry_two_corridors_split_targets-pr" data-line-id="wgs" />
+<path d="M140.0,124.0 L190.0,124.0" stroke="#0570b0" stroke-width="3.0" stroke-linecap="round" class="metro-line-wgs--top_entry_two_corridors_split_targets-pr" data-line-id="wgs" />
+<path d="M240.0,124.0 L290.0,124.0" stroke="#0570b0" stroke-width="3.0" stroke-linecap="round" class="metro-line-wgs--top_entry_two_corridors_split_targets-pr" data-line-id="wgs" />
+<path d="M80.0,124.0 L190.0,124.0" stroke="#0570b0" stroke-width="3.0" stroke-linecap="round" class="metro-line-wgs--top_entry_two_corridors_split_targets-pr" data-line-id="wgs" />
+<path d="M569.0,74.0 L569.0,114.0 Q569.0,124.0,579.0,124.0 L595.0,124.0" stroke="#0570b0" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-wgs--top_entry_two_corridors_split_targets-pr" data-line-id="wgs" />
+<path d="M410.0,124.0 L460.0,124.0" stroke="#0570b0" stroke-width="3.0" stroke-linecap="round" class="metro-line-wgs--top_entry_two_corridors_split_targets-pr" data-line-id="wgs" />
+<path d="M190.0,124.0 L200.0,124.0" stroke="#0570b0" stroke-width="3.0" stroke-linecap="round" class="metro-line-wgs--top_entry_two_corridors_split_targets-pr" data-line-id="wgs" />
+<path d="M200.0,124.0 L240.0,124.0" stroke="#0570b0" stroke-width="3.0" stroke-linecap="round" class="metro-line-wgs--top_entry_two_corridors_split_targets-pr" data-line-id="wgs" />
+<path d="M200.0,124.0 L206.0,124.0 Q216.0,124.0,216.0,114.0 L216.0,58.0 Q216.0,44.0,230.0,44.0 L555.0,44.0 Q569.0,44.0,569.0,58.0 L569.0,74.0" stroke="#0570b0" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-wgs--top_entry_two_corridors_split_targets-pr" data-line-id="wgs" />
+<path d="M460.0,124.0 L475.0,124.0 Q485.0,124.0,485.0,114.0 L485.0,58.0 Q485.0,44.0,499.0,44.0 L555.0,44.0 Q569.0,44.0,569.0,58.0 L569.0,74.0" stroke="#0570b0" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-wgs--top_entry_two_corridors_split_targets-pr" data-line-id="wgs" />
+<rect x="75.0" y="119.0" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--top_entry_two_corridors_split_targets-pr" data-station-id="fastqc" data-station-lines="panel,wgs" data-station-label="FastQC" data-section-id="qc" data-section-name="Read QC" />
+<rect x="135.0" y="119.0" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--top_entry_two_corridors_split_targets-pr" data-station-id="fastp" data-station-lines="panel,wgs" data-station-label="fastp" data-section-id="qc" data-section-name="Read QC" />
+<rect x="285.0" y="119.0" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--top_entry_two_corridors_split_targets-pr" data-station-id="bwa" data-station-lines="panel,wgs" data-station-label="BWA-MEM" data-section-id="align" data-section-name="Alignment" />
+<rect x="345.0" y="119.0" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--top_entry_two_corridors_split_targets-pr" data-station-id="markdup" data-station-lines="panel,wgs" data-station-label="MarkDuplicates" data-section-id="align" data-section-name="Alignment" />
+<rect x="405.0" y="119.0" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--top_entry_two_corridors_split_targets-pr" data-station-id="bqsr" data-station-lines="panel,wgs" data-station-label="BQSR" data-section-id="align" data-section-name="Alignment" />
+<rect x="590.0" y="119.0" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--top_entry_two_corridors_split_targets-pr" data-station-id="qc_stats" data-station-lines="panel,wgs" data-station-label="Stats" data-section-id="reporting" data-section-name="Reporting" />
+<rect x="650.0" y="119.0" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--top_entry_two_corridors_split_targets-pr" data-station-id="multiqc" data-station-lines="panel,wgs" data-station-label="MultiQC" data-section-id="reporting" data-section-name="Reporting" />
+<rect x="590.0" y="163.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--top_entry_two_corridors_split_targets-pr" data-station-id="panel_coverage" data-station-lines="panel" data-station-label="Panel coverage" data-section-id="reporting" data-section-name="Reporting" />
+<text x="80.0" y="139.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--top_entry_two_corridors_split_targets-pr" text-anchor="middle" dominant-baseline="hanging">FastQC</text>
+<text x="80.0" y="139.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="fastqc" class="nf-metro-station-label--top_entry_two_corridors_split_targets-pr">FastQC</text>
+<text x="290.0" y="139.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--top_entry_two_corridors_split_targets-pr" text-anchor="middle" dominant-baseline="hanging">BWA-MEM</text>
+<text x="290.0" y="139.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="bwa" class="nf-metro-station-label--top_entry_two_corridors_split_targets-pr">BWA-MEM</text>
+<text x="595.0" y="110.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--top_entry_two_corridors_split_targets-pr" text-anchor="middle" dominant-baseline="auto">Stats</text>
+<text x="595.0" y="110.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="qc_stats" class="nf-metro-station-label--top_entry_two_corridors_split_targets-pr">Stats</text>
+<text x="595.0" y="179.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--top_entry_two_corridors_split_targets-pr" text-anchor="middle" dominant-baseline="hanging">Panel coverage</text>
+<text x="595.0" y="179.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="panel_coverage" class="nf-metro-station-label--top_entry_two_corridors_split_targets-pr">Panel coverage</text>
+<text x="140.0" y="110.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--top_entry_two_corridors_split_targets-pr" text-anchor="middle" dominant-baseline="auto">fastp</text>
+<text x="140.0" y="110.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="fastp" class="nf-metro-station-label--top_entry_two_corridors_split_targets-pr">fastp</text>
+<text x="350.0" y="110.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--top_entry_two_corridors_split_targets-pr" text-anchor="middle" dominant-baseline="auto">MarkDuplicates</text>
+<text x="350.0" y="110.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="markdup" class="nf-metro-station-label--top_entry_two_corridors_split_targets-pr">MarkDuplicates</text>
+<text x="655.0" y="139.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--top_entry_two_corridors_split_targets-pr" text-anchor="middle" dominant-baseline="hanging">MultiQC</text>
+<text x="655.0" y="139.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="multiqc" class="nf-metro-station-label--top_entry_two_corridors_split_targets-pr">MultiQC</text>
+<text x="410.0" y="139.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--top_entry_two_corridors_split_targets-pr" text-anchor="middle" dominant-baseline="hanging">BQSR</text>
+<text x="410.0" y="139.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="bqsr" class="nf-metro-station-label--top_entry_two_corridors_split_targets-pr">BQSR</text>
+<circle cx="569.0" cy="124.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="565.0" cy="168.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="565.0" cy="128.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="216.0" cy="124.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="216.0" cy="44.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="569.0" cy="44.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="489.0" cy="128.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="489.0" cy="48.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="565.0" cy="48.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="485.0" cy="124.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="485.0" cy="44.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="569.0" cy="44.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<path d="M190.0,119.0 L195.0,124.0 L190.0,129.0 L185.0,124.0 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
+<text x="190.0" y="116.0" font-size="7" fill="rgba(80, 180, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">qc__exit_right_0 (right)</text>
+<path d="M460.0,119.0 L465.0,124.0 L460.0,129.0 L455.0,124.0 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
+<text x="460.0" y="116.0" font-size="7" fill="rgba(80, 180, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">align__exit_right_1 (right)</text>
+<path d="M240.0,119.0 L245.0,124.0 L240.0,129.0 L235.0,124.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="240.0" y="116.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">align__entry_left_2 (left)</text>
+<path d="M565.0,69.0 L570.0,74.0 L565.0,79.0 L560.0,74.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="565.0" y="66.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">reporting__entry_top_3 (top)</text>
+<path d="M200.0,119.0 L205.0,124.0 L200.0,129.0 L195.0,124.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="200.0" y="116.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">__junction_4 (?)</text>
+<path d="M215.0,54.0 L215.0,234.0" stroke="rgba(255, 255, 0, 0.5)" stroke-width="1" stroke-dasharray="6,4" />
+<text x="215.0" y="50.0" font-size="7" fill="rgba(255, 255, 0, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">col 0|1</text>
+<path d="M485.0,54.0 L485.0,234.0" stroke="rgba(255, 255, 0, 0.5)" stroke-width="1" stroke-dasharray="6,4" />
+<text x="485.0" y="50.0" font-size="7" fill="rgba(255, 255, 0, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">col 1|2</text>
+<path d="M20.0,124.0 L727.0,124.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="16.0" y="124.0" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0 grid</text>
+<path d="M20.0,164.0 L727.0,164.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<rect x="30.0" y="244.0" width="167.8" height="72.0" rx="6" ry="6" fill="rgba(0, 0, 0, 0.3)" class="nf-metro-legend-bg--top_entry_two_corridors_split_targets-pr" />
+<path d="M42.0,268.0 L66.0,268.0" stroke="#0570b0" stroke-width="3.0" stroke-linecap="round" />
+<text x="78.0" y="268.0" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--top_entry_two_corridors_split_targets-pr">Whole genome</text>
+<path d="M42.0,292.0 L66.0,292.0" stroke="#d62728" stroke-width="3.0" stroke-linecap="round" />
+<text x="78.0" y="292.0" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--top_entry_two_corridors_split_targets-pr">Targeted panel</text>
+<text x="747.0" y="332.0" font-size="8" fill="rgba(150, 150, 150, 0.6)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">created with nf-metro v2.1.0+dev</text>
+</svg></div></div>
+</div>
+</div>
+<script>
+(function() {
+  const root = document.documentElement;
+  const btn = document.getElementById('scheme-toggle');
+  const schemes = ['auto', 'dark', 'light'];
+  const labels = {'auto': 'System', 'dark': 'Dark', 'light': 'Light'};
+  let idx = 0;
+  function apply() {
+    const s = schemes[idx];
+    if (s === 'auto') {
+      root.removeAttribute('data-scheme');
+    } else {
+      root.setAttribute('data-scheme', s);
+    }
+    btn.textContent = labels[s];
+  }
+  apply();
+  btn.addEventListener('click', function() {
+    idx = (idx + 1) % schemes.length;
+    apply();
+  });
+})();
+document.querySelectorAll('.toggle-bar button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const entry = btn.closest('.diff-entry');
+    const mode = btn.dataset.mode;
+    const buttons = entry.querySelectorAll('.toggle-bar button');
+    buttons.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const comp = entry.querySelector('.comparison');
+    const sideBase = comp.querySelector('.side-base');
+    const sidePr = comp.querySelector('.side-pr');
+    if (mode === 'side-by-side') {
+      comp.style.gridTemplateColumns = '1fr 1fr';
+      sideBase.style.display = '';
+      sidePr.style.display = '';
+    } else if (mode === 'base') {
+      comp.style.gridTemplateColumns = '1fr';
+      sideBase.style.display = '';
+      sidePr.style.display = 'none';
+    } else if (mode === 'pr') {
+      comp.style.gridTemplateColumns = '1fr';
+      sideBase.style.display = 'none';
+      sidePr.style.display = '';
+    }
+  });
+});
+</script>
+</body>
+</html>
