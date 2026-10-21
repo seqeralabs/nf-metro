@@ -20,9 +20,26 @@ from nf_metro.layout.routing import invariants
 from nf_metro.layout.routing.invariants import (
     CHECK_REGISTRY,
     assert_render_curve_invariants,
+    render_curve_violations,
 )
 
 VALID_TIERS = {"A", "B", "C"}
+
+
+def _render_chokepoint_checks() -> set[str]:
+    """The ``check_*`` functions :func:`assert_render_curve_invariants` runs.
+
+    It runs exactly the set :func:`render_curve_violations` builds, so that
+    function's source names them.
+    """
+    assert render_curve_violations.__name__ in inspect.getsource(
+        assert_render_curve_invariants
+    )
+    checks = set(
+        re.findall(r"\bcheck_[a-z_]+", inspect.getsource(render_curve_violations))
+    )
+    assert checks
+    return checks
 
 
 def _defined(module, prefix: str) -> set[str]:
@@ -80,11 +97,7 @@ def test_tier_a_checks_are_exactly_the_render_chokepoint() -> None:
     """Tier A means 'already always-on'.  For routing checks that is precisely
     the set called by :func:`assert_render_curve_invariants`, so the two must
     match exactly -- a check moved in or out of the chokepoint must move tier."""
-    chokepoint = set(
-        re.findall(
-            r"\bcheck_[a-z_]+", inspect.getsource(assert_render_curve_invariants)
-        )
-    )
+    chokepoint = _render_chokepoint_checks()
     tier_a = {spec.name for spec in CHECK_REGISTRY if spec.tier == "A"}
     assert tier_a == chokepoint, (
         f"Tier-A checks {sorted(tier_a)} != chokepoint {sorted(chokepoint)}"
@@ -127,11 +140,7 @@ def test_no_registry_guard_duplicates_an_always_on_check() -> None:
     the always-on render chokepoint is pure duplication: the check runs on
     every render regardless of ``validate``.  The check is the single
     authority; the guard wrapper must not re-register it."""
-    chokepoint = set(
-        re.findall(
-            r"\bcheck_[a-z_]+", inspect.getsource(assert_render_curve_invariants)
-        )
-    )
+    chokepoint = _render_chokepoint_checks()
     offenders = {}
     for spec in GUARD_REGISTRY:
         refs = set(re.findall(r"\bcheck_[a-z_]+", inspect.getsource(spec.fn)))

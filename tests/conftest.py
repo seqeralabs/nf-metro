@@ -260,33 +260,48 @@ def known_curve_abort(*issues: str, reason: str) -> pytest.MarkDecorator:
 CURVE_ABORT_FIXTURES: dict[str, pytest.MarkDecorator] = {
     "tests/fixtures/regressions/perp_entry_column_feeder_conflict.mmd": (
         known_curve_abort(
+            "#2148",
+            "#2149",
             "#2131",
             "#2130",
-            reason="feeders share an approach channel into sec3; bypass overlays "
-            "in sec0 and sec2; deferred offset on __bypass_s2n4_s2n3_6 is "
-            "untracked",
+            "#2146",
+            reason="sec3's TOP entry crosses l0, l1 and l2 over l3 in its own "
+            "turn; __junction_7's LEFT-entry corner into sec2 crosses its lines "
+            "and draws radius 21.5 for 22.0; l1 and l3 fuse on one approach "
+            "channel into sec3; bypass helpers overlay sec0's and sec2's runs; "
+            "__bypass_s2n4_s2n3_6 applies its offset along a vertical",
         )
     ),
     "tests/fixtures/regressions/perp_entry_column_opposite_side_fan.mmd": (
         known_curve_abort(
             "#2124",
+            "#2148",
             "#2125",
             "#2127",
-            reason="RL TOP exit and fan traverse corners cross; s1n2->s1n3 "
-            "collinear pair is untracked",
+            reason="sec0's RL TOP exit seats its lines in LR order; sec2's "
+            "BOTTOM entry crosses l1 and l4 in its own turn and overlays l0 and "
+            "l4 on its drop; __junction_4's fan corners into sec1 are "
+            "non-concentric; s1n2->s1n3 lays l1 on l2's lane",
         )
     ),
     "tests/fixtures/regressions/perp_entry_column_straight_drop.mmd": (
         known_curve_abort(
             "#2121",
-            "#2119",
-            reason="BT TOP exit turns back through its own section into the TOP "
-            "entry below",
+            "#2151",
+            reason="the BT TOP exit into sec1's TOP entry crosses l0 and l1 at "
+            "both of its turns; sec4's RIGHT exit into sec5's LEFT entry "
+            "reverses l1 and l2 at the corner",
         )
     ),
     "tests/fixtures/regressions/perp_exit_single_feeder_landing.mmd": (
         known_curve_abort(
-            "#2124", "#2092", reason="Assemble 3's RL BOTTOM exit crosses its bundle"
+            "#2124",
+            "#2152",
+            "#2092",
+            "#2146",
+            reason="Assemble 3's RL BOTTOM exit crosses l0 and l1; l1's two legs "
+            "into that exit turn at radii 10 and 14 and double over; s3n0's "
+            "deferred offset applies along a vertical",
         )
     ),
 }

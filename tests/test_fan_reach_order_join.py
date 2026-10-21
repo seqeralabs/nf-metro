@@ -248,10 +248,13 @@ def test_unfused_blocked_fan_keeps_its_peel_off_band(
 
 
 @known_curve_abort(
-    "#2119",
-    reason="the l1/l3 lane swap between Assemble_Export 0's exit and "
-    "Index_Merge 1's entry crosses the junction legs, and the declined TOP entry "
-    "column crosses its drop's turn",
+    "#2148",
+    "#2149",
+    "#2125",
+    reason="sec3's TOP entry crosses l0 over l2 and l3 in its own turn and "
+    "overlays l2 and l3 on its drop; the junction-fed side entries into sec1 and "
+    "sec2 cross their bundles through non-concentric corners; l2's turn at "
+    "__junction_6 into sec1 starves to radius 1 and doubles its corner",
 )
 def test_peeloff_fan_map_renders_without_a_curve_abort() -> None:
     with warnings.catch_warnings():

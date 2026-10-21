@@ -282,7 +282,8 @@ def test_junction_straight_drop_turns_off_the_dealt_column_offset(
 
 UNDEALT_JUNCTION_ABORTS = {
     "declined_column": known_curve_abort(
-        "#2119", reason="sec4's drop crosses l3 over l2 and l4 in its turn"
+        "#2148",
+        reason="sec4's BOTTOM entry crosses l3 over l4 and l4 over l2 in its own turn",
     ),
 }
 
