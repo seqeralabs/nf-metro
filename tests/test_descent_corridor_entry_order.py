@@ -20,6 +20,7 @@ import pytest
 from nf_metro.api import RenderConfig, prepare_graph, render_graph_result
 from nf_metro.layout.labels import label_glyph_ink_bbox
 from nf_metro.layout.routing import offsets
+from nf_metro.layout.routing.common import segments_properly_cross
 from nf_metro.parser.model import MetroGraph
 from nf_metro.render.plan import RenderPlan
 from nf_metro.render.validate import parse_station_labels
@@ -29,7 +30,6 @@ TOPOLOGIES = Path(__file__).resolve().parent.parent / "examples" / "topologies"
 INNER_BYPASS = TOPOLOGIES / "descent_entry_inner_bypass.mmd"
 SAME_DESTINATION = TOPOLOGIES / "same_destination_vertical_convergence.mmd"
 
-Point = tuple[float, float]
 Box = tuple[float, float, float, float]
 
 _MARKER = re.compile(r'<(rect|circle)\b([^>]*class="nf-metro-station"[^>]*)/?>')
@@ -51,18 +51,6 @@ def _render(
     return graph, result.plan, result.content
 
 
-def _proper_crossing(a: Point, b: Point, c: Point, d: Point) -> Point | None:
-    (x1, y1), (x2, y2), (x3, y3), (x4, y4) = a, b, c, d
-    denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
-    if abs(denom) < 1e-9:
-        return None
-    t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom
-    u = -((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3)) / denom
-    if not (0.0 < t < 1.0 and 0.0 < u < 1.0):
-        return None
-    return (x1 + t * (x2 - x1), y1 + t * (y2 - y1))
-
-
 def _line_crossings_inside(plan: RenderPlan, box: Box) -> list[tuple[str, str]]:
     x0, y0, x1, y1 = box
     found = []
@@ -72,7 +60,9 @@ def _line_crossings_inside(plan: RenderPlan, box: Box) -> list[tuple[str, str]]:
             continue
         for a, b in itertools.pairwise(pa):
             for c, d in itertools.pairwise(pb):
-                point = _proper_crossing(a, b, c, d)
+                point = segments_properly_cross(
+                    a, b, c, d, reject_collinear_touch=False
+                )
                 if point is not None and x0 <= point[0] <= x1 and y0 <= point[1] <= y1:
                     found.append((ra.line_id, rb.line_id))
     return found
@@ -195,12 +185,12 @@ def test_split_check_flags_only_an_order_reversed_at_its_part(
         )
         held = {lid: ctx.offsets[(port_id, lid)] for lid in ("annotate", "trim")}
         swapped = {"annotate": held["trim"], "trim": held["annotate"]}
-        verdicts.append(
-            (
-                offsets._bundle_reslot_inverts_split(ctx, port_id, "merge", held),
-                offsets._bundle_reslot_inverts_split(ctx, port_id, "merge", swapped),
-            )
-        )
+
+        def inverts(new_offs: dict[str, float]) -> bool:
+            walk = offsets._bundle_walk(ctx, port_id, "merge", new_offs)
+            return offsets._bundle_reslot_inverts_split(ctx, port_id, new_offs, walk)
+
+        verdicts.append((inverts(held), inverts(swapped)))
 
     monkeypatch.setattr(
         offsets, "_order_flow_start_side_entry_by_descent_corridor", judge

@@ -19,6 +19,7 @@ import pytest
 
 from nf_metro.api import RenderConfig, prepare_graph, render_graph_result
 from nf_metro.layout.constants import COORD_TOLERANCE, INTER_ROW_EDGE_CLEARANCE
+from nf_metro.layout.routing.common import segments_properly_cross
 from nf_metro.parser.model import MetroGraph
 from nf_metro.render.plan import RenderPlan
 from nf_metro.themes import resolve_theme
@@ -29,8 +30,6 @@ FIXTURE = (
     / "topologies"
     / "return_trunk_over_member_run.mmd"
 )
-
-Point = tuple[float, float]
 
 LAYOUT_OPTIONS = pytest.mark.parametrize(
     "layout_options",
@@ -55,20 +54,10 @@ def _render(
     return graph, result.plan
 
 
-def _proper_crossing(a: Point, b: Point, c: Point, d: Point) -> bool:
-    (x1, y1), (x2, y2), (x3, y3), (x4, y4) = a, b, c, d
-    denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
-    if abs(denom) < 1e-9:
-        return False
-    t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom
-    u = -((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3)) / denom
-    return 0.0 < t < 1.0 and 0.0 < u < 1.0
-
-
 def _crossing_count(plan: RenderPlan) -> int:
     polylines = list(zip(plan.routes, plan.route_polylines, strict=True))
     return sum(
-        _proper_crossing(a, b, c, d)
+        segments_properly_cross(a, b, c, d, reject_collinear_touch=False) is not None
         for (ra, pa), (rb, pb) in itertools.combinations(polylines, 2)
         if ra.line_id != rb.line_id
         for a, b in itertools.pairwise(pa)
@@ -81,6 +70,7 @@ def test_trunk_takes_the_side_its_feeders_cross_least(
     layout_options: Mapping[str, object] | None,
 ) -> None:
     _graph, plan = _render(layout_options)
+    # qc's three legs cross merge's row track; merge's rise crosses the trunk.
     assert _crossing_count(plan) <= 4
 
 

@@ -2444,7 +2444,8 @@ def _inherit_level_convergence_entry_offsets(ctx: _OffsetCtx) -> None:
         levels = distinct_offset_levels(inherited.values())
         if max_interior_offset_gap(levels, ctx.offset_step) is not None:
             continue
-        if _bundle_reslot_collides(ctx, port_id, port_obj.section_id, inherited):
+        walk = _bundle_walk(ctx, port_id, port_obj.section_id, inherited)
+        if _bundle_reslot_collides(ctx, port_id, inherited, walk):
             continue
         _apply_offsets_along_bundle(ctx, port_id, port_obj.section_id, inherited)
 
@@ -3539,10 +3540,7 @@ def _bundle_walk(
     caller can ask which stations a re-slot would touch before deciding whether
     to make it.
 
-    Each line is carried only along its own edges.  A station that holds a moved
-    line but is reached only along other lines' edges sits on a separate stroke
-    of that line, which the re-slot has no reason to move; a station two lines
-    reach by different paths takes both.
+    Each line is carried only along its own edges.
 
     Up to the section's own exit port the run carries *new_offs* itself: the
     re-slot names the slots it wants and the stations along it answer to the
@@ -3650,10 +3648,10 @@ def _ranked_onto_held_slots(
 def _bundle_reslot_collides(
     ctx: _OffsetCtx,
     start_id: str,
-    sec_id: str,
     new_offs: dict[str, float],
+    walk: Sequence[tuple[str, dict[str, float]]],
 ) -> bool:
-    """Whether carrying *new_offs* along the bundle seats two lines on one slot.
+    """Whether carrying *new_offs* along *walk* seats two lines on one slot.
 
     Values imported from another bundle need not be a permutation of the slots
     in use along this one: a station the run reaches can carry a line the bundle
@@ -3663,10 +3661,7 @@ def _bundle_reslot_collides(
     graph = ctx.graph
     return any(
         abs(offs[moved] - ctx.offsets.get((sid, held), 0.0)) <= _OFFSET_EQ_TOLERANCE
-        for sid, offs in (
-            (start_id, dict(new_offs)),
-            *_bundle_walk(ctx, start_id, sec_id, new_offs),
-        )
+        for sid, offs in ((start_id, dict(new_offs)), *walk)
         for lines in (set(graph.station_lines(sid)),)
         for moved in lines & offs.keys()
         for held in lines - offs.keys()
@@ -3676,33 +3671,30 @@ def _bundle_reslot_collides(
 def _bundle_reslot_inverts_split(
     ctx: _OffsetCtx,
     start_id: str,
-    sec_id: str,
     new_offs: dict[str, float],
+    walk: Sequence[tuple[str, dict[str, float]]],
 ) -> bool:
-    """Whether carrying *new_offs* along the bundle flips two lines where they part.
+    """Whether carrying *new_offs* along *walk* flips two lines where they part.
 
-    Two lines leaving one station for stations at different heights part
-    without crossing only while the line bound lower holds the lower lane.
-    Where they part is fixed by stations already placed (a bypass bow among
-    them), so flipping an order the current lanes part cleanly in buys back a
-    crossing there, and another wherever the two meet again.
+    Two lines part at a station they leave for stations at different heights;
+    the flip is the line bound lower holding the lower lane now and the upper
+    one after the re-slot.
     """
     graph = ctx.graph
-    for sid, offs in (
-        (start_id, new_offs),
-        *_bundle_walk(ctx, start_id, sec_id, new_offs),
-    ):
+    for sid, offs in ((start_id, new_offs), *walk):
         bound: dict[str, set[float]] = {}
         for edge in graph.edges_from(sid):
             bound.setdefault(edge.line_id, set()).add(graph.stations[edge.target].y)
-        heights = {lid: ys.pop() for lid, ys in bound.items() if len(ys) == 1}
+        heights = {lid: next(iter(ys)) for lid, ys in bound.items() if len(ys) == 1}
         for a, b in combinations(sorted(heights), 2):
             part = heights[a] - heights[b]
             if abs(part) <= _SAME_Y_TOLERANCE:
                 continue
             held = {lid: ctx.offsets.get((sid, lid), 0.0) for lid in (a, b)}
             moved = {lid: offs.get(lid, held[lid]) for lid in (a, b)}
-            if (held[a] - held[b]) * part > 0 > (moved[a] - moved[b]) * part:
+            held_lean = (held[a] - held[b]) * part
+            moved_lean = (moved[a] - moved[b]) * part
+            if held_lean > 0 and moved_lean < 0:
                 return True
     return False
 
@@ -4648,11 +4640,12 @@ def _order_flow_start_side_entry_by_descent_corridor(ctx: _OffsetCtx) -> None:
             for lid, slot in zip(ordered, sorted(current.values()), strict=True):
                 if abs(slot - current[lid]) > _OFFSET_EQ_TOLERANCE:
                     new_offs[lid] = slot
-        if (
-            not new_offs
-            or _bundle_reslot_collides(ctx, port_id, port.section_id, new_offs)
-            or _bundle_reslot_inverts_split(ctx, port_id, port.section_id, new_offs)
-        ):
+        if not new_offs:
+            continue
+        walk = _bundle_walk(ctx, port_id, port.section_id, new_offs)
+        if _bundle_reslot_collides(
+            ctx, port_id, new_offs, walk
+        ) or _bundle_reslot_inverts_split(ctx, port_id, new_offs, walk):
             continue
         _apply_offsets_along_bundle(ctx, port_id, port.section_id, new_offs)
 
