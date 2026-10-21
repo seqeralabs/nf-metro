@@ -297,11 +297,11 @@ CURVE_ABORT_FIXTURES: dict[str, pytest.MarkDecorator] = {
         known_curve_abort(
             "#2124",
             "#2152",
-            "#2092",
             "#2146",
             reason="Assemble 3's RL BOTTOM exit crosses l0 and l1; l1's two legs "
-            "into that exit turn at radii 10 and 14 and double over; s3n0's "
-            "deferred offset applies along a vertical",
+            "into that exit turn at radii 10 and 14 and double over; "
+            "_route_perp_exit leaves s3n0's single-line L into the exit DEFERRED, "
+            "so its offset applies along the vertical leg",
         )
     ),
 }

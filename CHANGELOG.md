@@ -54,8 +54,8 @@ history.
   narrower, such as phones and side-by-side editor panels. The page declares
   a device-width viewport and supports touch pan and pinch-zoom.
 - A render whose curve check fails now aborts unless the failure lies on the
-  lead-in to a perpendicular entry port that really is fed across grid
-  columns. Before, one such port anywhere in a map turned every curve failure
+  lead-in to a perpendicular entry port whose feeder descends outside the
+  section's box. Before, one such port anywhere in a map turned every curve failure
   in that map into a warning, so some maps that used to draw with a warning
   now abort and name the defect
   ([#2123](https://github.com/seqeralabs/nf-metro/issues/2123)).
