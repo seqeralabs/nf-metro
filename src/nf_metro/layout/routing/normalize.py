@@ -79,6 +79,7 @@ from nf_metro.layout.routing.common import (
     seat_peeloff_port_y,
     section_ids_of_stations,
     segment_direction,
+    segments_properly_cross,
     symmetric_bundle_midpoint,
     tail_on_slot,
     tail_overlap,
@@ -4438,35 +4439,6 @@ def _separate_fused_cotravelling_runs(
         obstacles = [other for other in lanes if lane.fuses_with(other, step)]
         if not obstacles:
             continue
-        pinned_obstacles = [other for other in obstacles if other.pinned]
-        if pinned_obstacles and (
-            movable_route_ids is None
-            or lane.axis != 0
-            or all(
-                abs(lane.coord - obstacle.coord) > COORD_TOLERANCE_FINE
-                for obstacle in pinned_obstacles
-            )
-        ):
-            continue
-        primary = movable_route_ids is None or all(
-            id(run.route) in movable_route_ids for run in lane.runs
-        )
-        if (
-            not primary
-            and not pinned_obstacles
-            and any(
-                any(
-                    (id(run.route), run.idx) in fixed_segment_keys for run in other.runs
-                )
-                for other in obstacles
-            )
-        ):
-            continue
-        candidates = {
-            obstacle.coord + direction * step
-            for obstacle in obstacles
-            for direction in (-1, 1)
-        }
 
         def feasible(target: float) -> bool:
             if not _lane_move_is_grounded(lane, target, ctx):
@@ -4476,13 +4448,68 @@ def _separate_fused_cotravelling_runs(
                 moved.fuses_with(other, step) for other in lanes if other is not lane
             )
 
-        target = min(
-            (candidate for candidate in candidates if feasible(candidate)),
-            key=lambda candidate: (abs(candidate - lane.coord), candidate),
-            default=None,
+        pinned_obstacles = [other for other in obstacles if other.pinned]
+        trunk = next(
+            (
+                other
+                for other in pinned_obstacles
+                if movable_route_ids is not None
+                and lane.axis == 1
+                and abs(lane.coord - other.coord) <= COORD_TOLERANCE_FINE
+                and any(
+                    convergence_owns_segment_boundary(run.route, run.idx)
+                    for run in other.runs
+                )
+            ),
+            None,
         )
-        if target is None:
-            continue
+        if trunk is not None:
+            target = lane.coord + step
+            if not (
+                feasible(target)
+                and _member_yields_coincident_trunk(
+                    lane, trunk, routes, step, station_offsets
+                )
+            ):
+                continue
+        else:
+            if pinned_obstacles and (
+                movable_route_ids is None
+                or lane.axis != 0
+                or all(
+                    abs(lane.coord - obstacle.coord) > COORD_TOLERANCE_FINE
+                    for obstacle in pinned_obstacles
+                )
+            ):
+                continue
+            primary = movable_route_ids is None or all(
+                id(run.route) in movable_route_ids for run in lane.runs
+            )
+            if (
+                not primary
+                and not pinned_obstacles
+                and any(
+                    any(
+                        (id(run.route), run.idx) in fixed_segment_keys
+                        for run in other.runs
+                    )
+                    for other in obstacles
+                )
+            ):
+                continue
+            candidates = {
+                obstacle.coord + direction * step
+                for obstacle in obstacles
+                for direction in (-1, 1)
+            }
+            nearest = min(
+                (candidate for candidate in candidates if feasible(candidate)),
+                key=lambda candidate: (abs(candidate - lane.coord), candidate),
+                default=None,
+            )
+            if nearest is None:
+                continue
+            target = nearest
         lanes[i] = _reseat_lane(lane, target, projected=station_offsets is not None)
         relocated.add(i)
         pending.extend(
@@ -4515,6 +4542,88 @@ def _lane_move_is_grounded(lane: CorridorLane, target: float, ctx: _RoutingCtx) 
         > COORD_TOLERANCE_FINE
         for run in lane.runs
     )
+
+
+def _member_yields_coincident_trunk(
+    lane: CorridorLane,
+    trunk: CorridorLane,
+    routes: Sequence[RoutedPath],
+    step: float,
+    station_offsets: Mapping[tuple[str, str], float] | None,
+) -> bool:
+    """Whether *lane* steps past the convergence *trunk* it lies on.
+
+    Left coincident, the trunk is packed one step to the member's far side
+    (greater coordinate) once convergence settlement seats it.  The member
+    taking that step instead keeps the trunk on its trial lane, on the near
+    side, which is worth it only when fewer legs cross: both arrangements are
+    drawn and every distinct-line crossing of the two lines' moved routes
+    counted.
+    """
+    axis = lane.axis
+    along = 1 - axis
+    drawn = {
+        id(route): list(
+            apply_route_offsets(route, station_offsets)
+            if station_offsets is not None
+            else route.points
+        )
+        for route in routes
+    }
+
+    def on_trunk(point: tuple[float, float]) -> bool:
+        return abs(point[axis] - trunk.coord) <= COORD_TOLERANCE and any(
+            lo - COORD_TOLERANCE <= point[along] <= hi + COORD_TOLERANCE
+            for lo, hi in (run.span for run in trunk.runs)
+        )
+
+    def stepped(
+        points: list[tuple[float, float]], ranks: Iterable[int]
+    ) -> list[tuple[float, float]]:
+        moved = list(points)
+        for rank in ranks:
+            point = list(moved[rank])
+            point[axis] += step
+            moved[rank] = (point[0], point[1])
+        return moved
+
+    trunk_ranks = {
+        id(route): sorted(
+            {
+                rank
+                for start in range(len(points) - 1)
+                if on_trunk(points[start]) and on_trunk(points[start + 1])
+                for rank in (start, start + 1)
+            }
+        )
+        for route in routes
+        if route.line_id == trunk.line_id
+        for points in (drawn[id(route)],)
+    }
+    trunk_ranks = {key: ranks for key, ranks in trunk_ranks.items() if ranks}
+    member_ranks: defaultdict[int, set[int]] = defaultdict(set)
+    for run in lane.runs:
+        member_ranks[id(run.route)].update((run.idx, run.idx + 1))
+    line_by_route = {id(route): route.line_id for route in routes}
+
+    def crossings(shifted: Mapping[int, Iterable[int]]) -> int:
+        polylines = {
+            key: stepped(points, shifted[key]) if key in shifted else points
+            for key, points in drawn.items()
+        }
+        touched = sorted({*trunk_ranks, *member_ranks})
+        return sum(
+            segments_properly_cross(a0, a1, b0, b1, reject_collinear_touch=True)
+            is not None
+            for key in touched
+            for other, points in polylines.items()
+            if line_by_route[other] != line_by_route[key]
+            and not (other in touched and other < key)
+            for a0, a1 in itertools.pairwise(polylines[key])
+            for b0, b1 in itertools.pairwise(points)
+        )
+
+    return crossings(member_ranks) < crossings(trunk_ranks)
 
 
 def _arrangement_is_clear(

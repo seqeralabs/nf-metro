@@ -176,6 +176,7 @@ Re-seating therefore cannot split a fused fan-out into two parallel same-color r
 `check_no_fused_cotravelling_lines` is that pass's postcondition on the render chokepoint.
 
 Plans seat distinct co-traveling trunks against frozen member corridors before ownership begins.
+A member track lying exactly on a convergence trunk's horizontal lane steps one pitch past it when that leaves fewer crossings than the trunk being packed past the track, so the trunk keeps its trial lane.
 The final check includes immutable tracks and attributes a violation to its route system and exact owning plans.
 
 ## Render-time guards
