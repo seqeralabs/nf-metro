@@ -1,9 +1,7 @@
 """Each fixture in ``CURVE_ABORT_FIXTURES`` aborts on its tracked curve defect.
 
-The tests that use these fixtures for something else render them with the
-abort softened, so this module is where the abort itself stays live: each case
-is a strict xfail, and fixing the defect turns it into an XPASS that fails the
-run until the entry is removed.
+Each case is a strict xfail: fixing the defect turns it into an XPASS that
+fails the run until the entry is removed from the registry.
 """
 
 from __future__ import annotations

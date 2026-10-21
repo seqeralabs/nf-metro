@@ -543,9 +543,7 @@ def _align_tb_entry_port(
     # carried as the column each feeder descends in rather than the point it
     # leaves from, since only the former is a column the port can align to.
     incoming_edges = graph.edges_to(port_id)
-    line_ids_by_source: dict[str, set[str]] = {}
-    for edge in incoming_edges:
-        line_ids_by_source.setdefault(edge.source, set()).add(edge.line_id)
+    bundle_by_source = _feeder_bundle_sizes(incoming_edges)
 
     sources: list[tuple[float, float, str | None]] = []
     for edge in incoming_edges:
@@ -559,7 +557,7 @@ def _align_tb_entry_port(
         sources.append(
             (
                 _feeder_descent_x(
-                    graph, edge, src_xy[0], len(line_ids_by_source[edge.source])
+                    graph, edge, src_xy[0], bundle_by_source[edge.source]
                 ),
                 src_xy[1],
                 src_section_id,
@@ -675,15 +673,23 @@ def _drop_x_within_section(section: Section, drop_x: float) -> bool:
     return section.bbox_x <= drop_x <= section.bbox_x + section.bbox_w
 
 
+def _feeder_bundle_sizes(edges: list[Edge]) -> dict[str, int]:
+    """Distinct line count each source contributes to *edges*."""
+    lines_by_source: dict[str, set[str]] = {}
+    for edge in edges:
+        lines_by_source.setdefault(edge.source, set()).add(edge.line_id)
+    return {source: len(lines) for source, lines in lines_by_source.items()}
+
+
 def prune_settled_cross_column_perp_bridges(graph: MetroGraph) -> None:
     """Drop each recorded bridge port whose feeders all descend inside its box.
 
     Stage 3.2 and Stage 3.4 judge a feeder's descent against the section box as
     it stands when they run, and later stages of the same pass (the Stage 3.3
     perpendicular-entry runway shift, the edge-inset reserve) can widen that
-    box over the descent.  Run at the end of every layout pass, so the record
-    names only ports some feeder reaches from outside the pass's final box,
-    for the bypass pass's curve probe as well as the render.
+    box over the descent.  Runs per pass because the bypass pass's curve probe
+    reads the record before layout settles.  Feeder positions are final here,
+    so station x is read directly.
     """
     graph._cross_column_perp_bridge_ports -= {
         port_id
@@ -696,15 +702,14 @@ def _fed_from_outside_its_box(graph: MetroGraph, port_id: str) -> bool:
     """True when some feeder of *port_id* descends outside its section's box."""
     section = graph.sections[graph.ports[port_id].section_id]
     edges = graph.edges_to(port_id)
-    lines_by_source: dict[str, set[str]] = {}
-    for edge in edges:
-        lines_by_source.setdefault(edge.source, set()).add(edge.line_id)
+    bundle_by_source = _feeder_bundle_sizes(edges)
     for edge in edges:
         source = graph.station_for_edge_source(edge)
         if not (source.is_port or edge.source in graph.junction_ids):
             continue
-        bundle = len(lines_by_source[edge.source])
-        descent_x = _feeder_descent_x(graph, edge, source.x, bundle)
+        descent_x = _feeder_descent_x(
+            graph, edge, source.x, bundle_by_source[edge.source]
+        )
         if not _drop_x_within_section(section, descent_x):
             return True
     return False

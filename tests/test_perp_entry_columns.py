@@ -53,7 +53,6 @@ Point = tuple[float, float]
 
 
 def _layout(path: Path, *, softened: bool = False):
-    """Lay out and render *path*, with a known curve abort softened."""
     with (
         warnings.catch_warnings(),
         curve_abort_softened(softened or is_curve_abort_fixture(path)),

@@ -173,7 +173,6 @@ def test_bundle_map_renders() -> None:
 
 
 def test_bundle_map_clears_every_other_render_guard() -> None:
-    """With its tracked curve abort softened, the map passes every other guard."""
     from nf_metro.api import render_string
 
     with warnings.catch_warnings(), curve_abort_softened():

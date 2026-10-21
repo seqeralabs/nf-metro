@@ -290,8 +290,8 @@ PHASE_FIELD_REGISTRY: dict[str, PhaseFieldSpec] = {
             "and Stage 3.4 exit-port alignment, then pruned at the end of the "
             "pass of any port whose feeders all descend inside the pass's final "
             "box, since later stages can widen a box over a descent the "
-            "alignment judged outside it; routing's render-curve invariant, "
-            "also the geometric bypass pass's curve probe, relaxes its hard "
+            "alignment judged outside it; routing's render-curve invariant "
+            "(also the geometric bypass pass's curve probe) relaxes its hard "
             "abort to a warning only for failures confined to lead-ins into these "
             "ports, tolerating the empty default"
         ),

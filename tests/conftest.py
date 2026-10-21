@@ -256,9 +256,7 @@ def known_curve_abort(*issues: str, reason: str) -> pytest.MarkDecorator:
 
 
 # Fixtures whose render aborts on a tracked curve defect, keyed by path from the
-# repo root.  Each abort is pinned once, by test_known_curve_aborts.py; a test
-# about something else renders the fixture under ``curve_abort_softened`` so
-# its own assertions keep running.
+# repo root; test_known_curve_aborts.py pins each abort.
 CURVE_ABORT_FIXTURES: dict[str, pytest.MarkDecorator] = {
     "tests/fixtures/regressions/perp_entry_column_feeder_conflict.mmd": (
         known_curve_abort(
@@ -304,8 +302,8 @@ def is_curve_abort_fixture(path: Path) -> bool:
 def curve_abort_softened(active: bool = True) -> Iterator[None]:
     """Downgrade the render-time curve abort to a warning while *active*.
 
-    Only the renderer's call is replaced: layout scores candidate geometry with
-    the same check, and every other render guard keeps its hard failure.
+    Patches only the renderer's call; layout scores candidates with the same
+    check, so permissive mode would change the geometry under test.
     """
     if not active:
         yield

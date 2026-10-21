@@ -203,12 +203,12 @@ def test_a_box_widened_over_the_descent_drops_its_bridge(monkeypatch) -> None:
     Without the settled-layout prune the record keeps the port Stage 3.2 saw
     as bridged, so this map holds the prune to a port it really recorded.
     """
-    monkeypatch.setattr(
-        engine, "prune_settled_cross_column_perp_bridges", lambda graph: None
-    )
-    unpruned = _laid_out("widened_over_the_descent")
+    with monkeypatch.context() as unpatched_prune:
+        unpatched_prune.setattr(
+            engine, "prune_settled_cross_column_perp_bridges", lambda graph: None
+        )
+        unpruned = _laid_out("widened_over_the_descent")
     assert WIDENED_PORT in unpruned._cross_column_perp_bridge_ports
-    monkeypatch.undo()
 
     graph = _laid_out("widened_over_the_descent")
     assert not _feeders_descending_outside(graph, WIDENED_PORT)
