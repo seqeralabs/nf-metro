@@ -1,0 +1,30 @@
+%%metro title: Descent entry over an in-section bypass
+%%metro line: annotate | Annotate | #3cb44b
+%%metro line: trim | Trim | #4363d8
+%%metro grid: source | 0,0
+%%metro grid: polish | 1,0
+%%metro grid: merge | 0,1
+
+graph LR
+    subgraph source [Source]
+        reads[Reads]
+        sort[Sort]
+        reads -->|annotate,trim| sort
+    end
+    subgraph polish [Polish]
+        filter[Filter]
+        gather[Gather]
+        filter -->|annotate| gather
+    end
+    subgraph merge [Merge]
+        %%metro direction: RL
+        combine[Combine]
+        qc[QC]
+        classify[Classify]
+        combine -->|annotate| qc
+        qc -->|annotate| classify
+        combine -->|trim| classify
+    end
+    sort -->|annotate| filter
+    gather -->|annotate| combine
+    sort -->|trim| combine

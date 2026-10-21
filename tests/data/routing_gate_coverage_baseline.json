@@ -978,6 +978,7 @@
   "offsets.py::for _iteration in range(len(ctx.graph.sections) + 1):::#1",
   "offsets.py::for edge in graph.edges_from(port_id):::#2",
   "offsets.py::for pid in section.entry_ports:::#3",
+  "offsets.py::if (held[a] - held[b]) * part > 0 > (moved[a] - moved[b]) * part:::#1",
   "offsets.py::if (tgt_id, lid) not in ctx.offsets:::#1",
   "offsets.py::if _bundle_reslot_collides(ctx, port_id, port_obj.section_id, inherited):::#1",
   "offsets.py::if _carrier_offset_gap(graph, station_id, lanes, offset_step) is not None:::#1",

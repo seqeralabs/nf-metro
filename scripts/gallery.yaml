@@ -519,6 +519,15 @@ gallery:
       natural approach corridor, so settlement atomically refuses the natural off-slot
       proposal that would cross the planned exempt riser and retains the existing
       geometry."
+  - id: descent_entry_inner_bypass
+    source_dir: examples/topologies
+    category: Bypass Routing
+    description:
+      Two lines descend into a reversed section's side entry from different
+      corridors, and inside the section one bows under a station the other
+      stops at. The bowing line keeps the lower lane from the entry on, so it
+      parts and rejoins without crossing its neighbour, rather than nesting
+      the turn-ins at the port and crossing back on both sides of the bow.
   - id: plan_owned_distinct_lane_separation
     source_dir: examples/topologies
     category: Inter-section Routing
