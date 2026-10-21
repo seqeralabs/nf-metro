@@ -1273,6 +1273,10 @@
       {
         "name": "bottom_entry_two_feeders_own_lanes",
         "mmd": "%%metro title: Bottom Entry Two Feeders Own Lanes\n%%metro line: cluster | Cluster | #e6194b\n%%metro line: dedup | Dedup | #3cb44b\n%%metro line: counts | Counts | #f58231\n%%metro line: bam | BAM | #4363d8\n\ngraph LR\n    subgraph trim [Trim]\n        %%metro exit: top | bam, counts\n        qc[QC]\n    end\n    subgraph normalize [Normalize]\n        %%metro entry: bottom | bam, counts\n        quant[quant]\n        align[align]\n        quant -->|bam,counts| align\n    end\n    subgraph stats [Stats]\n        summarise[summarise]\n    end\n    subgraph classify [Classify]\n        %%metro entry: bottom | cluster, bam\n        pca[pca]\n    end\n    qc -->|bam,counts| quant\n    align -->|dedup,counts| summarise\n    summarise -->|cluster| pca\n    align -->|bam| pca\n"
+      },
+      {
+        "name": "top_entry_two_corridors_split_targets",
+        "mmd": "%%metro title: Whole-genome and panel sequencing\n%%metro line: wgs | Whole genome | #0570b0\n%%metro line: panel | Targeted panel | #d62728\n\ngraph LR\n    subgraph qc [Read QC]\n        fastqc[FastQC]\n        fastp[fastp]\n        fastqc -->|wgs,panel| fastp\n    end\n    subgraph align [Alignment]\n        bwa[BWA-MEM]\n        markdup[MarkDuplicates]\n        bqsr[BQSR]\n        bwa -->|wgs,panel| markdup\n        markdup -->|wgs,panel| bqsr\n    end\n    subgraph reporting [Reporting]\n        %%metro entry: top | wgs, panel\n        qc_stats[Stats]\n        multiqc[MultiQC]\n        panel_coverage[Panel coverage]\n        qc_stats -->|wgs,panel| multiqc\n    end\n    fastp -->|wgs,panel| bwa\n    fastqc -->|wgs| qc_stats\n    bqsr -->|panel| panel_coverage\n    bqsr -->|wgs,panel| qc_stats\n"
       }
     ]
   },
