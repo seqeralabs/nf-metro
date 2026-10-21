@@ -251,10 +251,12 @@ def test_unfused_blocked_fan_keeps_its_peel_off_band(
     "#2148",
     "#2149",
     "#2125",
+    "#2126",
     reason="sec3's TOP entry crosses l0 over l2 and l3 in its own turn and "
     "overlays l2 and l3 on its drop; the junction-fed side entries into sec1 and "
     "sec2 cross their bundles through non-concentric corners; l2's turn at "
-    "__junction_6 into sec1 starves to radius 1 and doubles its corner",
+    "__junction_6 into sec1's RIGHT entry rounds to radius 1 of the 10 requested "
+    "and draws its corner at both radii",
 )
 def test_peeloff_fan_map_renders_without_a_curve_abort() -> None:
     with warnings.catch_warnings():
