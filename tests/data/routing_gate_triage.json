@@ -1163,7 +1163,11 @@
   "note": "The True branch (missing entry-port offset -> ok=False) is unreachable because phase 7 (_compute_entry_port_offsets) runs before this function (phase 7a) and assigns an offset for every (entry_port_id, line_id) pair in the graph. By the time _align_junction_to_entry_port runs, ctx.offsets is populated for all entry ports, so the guard never fires. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
   "status": "defensive"
  },
- "offsets.py::if _bundle_reslot_collides(ctx, port_id, port_obj.section_id, inherited):::#1": {
+ "offsets.py::if held_lean > 0 and moved_lean < 0:::#1": {
+  "note": "Clean-part arm of _bundle_reslot_inverts_split: two lines leave a walked station for different heights and the re-slot keeps their order. Layout seats an in-section split (a bypass bow, a fork) from the pre-reslot lane order, so in the corpus every parting pair the phase 7f re-deal reaches is one it flips (descent_entry_inner_bypass), and same_destination_vertical_convergence's moved lines end where they enter. A witness needs a pair that parts without being re-dealt against each other, e.g. three re-dealt descents of which one keeps its relative slot and parts. Exercised synthetically by tests/test_descent_corridor_entry_order.py, which re-deals the held lanes; needs-review because an in-corpus witness is authorable, not because the arm is unreachable.",
+  "status": "needs-review"
+ },
+ "offsets.py::if _bundle_reslot_collides(ctx, port_id, inherited, walk):::#1": {
   "note": "The level-convergence inherit is refused when carrying the feeders' order along the bundle would seat a bundle line on the slot a section-local line already holds. No fixture in the sweep corpus (examples plus the top-level tests/fixtures) presents that collision; tests/fixtures/hash_seed_determinism/seed_77.mmd does, but the sweep does not descend into the nested seed directories, so closing the arm needs a corpus topology of its own.",
   "status": "needs-review"
  },

@@ -79,6 +79,7 @@ from nf_metro.layout.routing.common import (
     seat_peeloff_port_y,
     section_ids_of_stations,
     segment_direction,
+    segments_properly_cross,
     symmetric_bundle_midpoint,
     tail_on_slot,
     tail_overlap,
@@ -4392,12 +4393,7 @@ def _separate_fused_cotravelling_runs(
         run
         for rp in routes
         if rp.is_inter_section
-        for run in corridor_runs(
-            rp,
-            apply_route_offsets(rp, station_offsets)
-            if station_offsets is not None
-            else None,
-        )
+        for run in corridor_runs(rp, _drawn_points(rp, station_offsets))
     )
     eligible_route_ids = (
         None
@@ -4438,35 +4434,6 @@ def _separate_fused_cotravelling_runs(
         obstacles = [other for other in lanes if lane.fuses_with(other, step)]
         if not obstacles:
             continue
-        pinned_obstacles = [other for other in obstacles if other.pinned]
-        if pinned_obstacles and (
-            movable_route_ids is None
-            or lane.axis != 0
-            or all(
-                abs(lane.coord - obstacle.coord) > COORD_TOLERANCE_FINE
-                for obstacle in pinned_obstacles
-            )
-        ):
-            continue
-        primary = movable_route_ids is None or all(
-            id(run.route) in movable_route_ids for run in lane.runs
-        )
-        if (
-            not primary
-            and not pinned_obstacles
-            and any(
-                any(
-                    (id(run.route), run.idx) in fixed_segment_keys for run in other.runs
-                )
-                for other in obstacles
-            )
-        ):
-            continue
-        candidates = {
-            obstacle.coord + direction * step
-            for obstacle in obstacles
-            for direction in (-1, 1)
-        }
 
         def feasible(target: float) -> bool:
             if not _lane_move_is_grounded(lane, target, ctx):
@@ -4476,11 +4443,21 @@ def _separate_fused_cotravelling_runs(
                 moved.fuses_with(other, step) for other in lanes if other is not lane
             )
 
-        target = min(
-            (candidate for candidate in candidates if feasible(candidate)),
-            key=lambda candidate: (abs(candidate - lane.coord), candidate),
-            default=None,
-        )
+        pinned_obstacles = [other for other in obstacles if other.pinned]
+        trunk = _coincident_convergence_trunk(lane, pinned_obstacles, movable_route_ids)
+        if trunk is not None:
+            drawn = {id(rp): _drawn_points(rp, station_offsets) for rp in routes}
+            target = _trunk_step_target(lane, trunk, routes, drawn, step, feasible)
+        else:
+            target = _nearest_fused_target(
+                lane,
+                obstacles,
+                pinned_obstacles,
+                movable_route_ids,
+                fixed_segment_keys,
+                step,
+                feasible,
+            )
         if target is None:
             continue
         lanes[i] = _reseat_lane(lane, target, projected=station_offsets is not None)
@@ -4515,6 +4492,183 @@ def _lane_move_is_grounded(lane: CorridorLane, target: float, ctx: _RoutingCtx) 
         > COORD_TOLERANCE_FINE
         for run in lane.runs
     )
+
+
+def _drawn_points(
+    route: RoutedPath, station_offsets: Mapping[tuple[str, str], float] | None
+) -> list[tuple[float, float]]:
+    """*route*'s waypoints, offset-applied where the renderer draws them."""
+    if station_offsets is None:
+        return list(route.points)
+    return list(apply_route_offsets(route, station_offsets))
+
+
+def _coincident_convergence_trunk(
+    lane: CorridorLane,
+    pinned_obstacles: Sequence[CorridorLane],
+    movable_route_ids: frozenset[int] | None,
+) -> CorridorLane | None:
+    """The convergence-owned horizontal trunk *lane* lies exactly on, if any."""
+    if movable_route_ids is None or lane.axis != 1:
+        return None
+    return next(
+        (
+            other
+            for other in pinned_obstacles
+            if abs(lane.coord - other.coord) <= COORD_TOLERANCE_FINE
+            and any(
+                convergence_owns_segment_boundary(run.route, run.idx)
+                for run in other.runs
+            )
+        ),
+        None,
+    )
+
+
+def _nearest_fused_target(
+    lane: CorridorLane,
+    obstacles: Sequence[CorridorLane],
+    pinned_obstacles: Sequence[CorridorLane],
+    movable_route_ids: frozenset[int] | None,
+    fixed_segment_keys: frozenset[tuple[int, int]],
+    step: float,
+    feasible: Callable[[float], bool],
+) -> float | None:
+    """The nearest feasible full step off *lane*'s fused *obstacles*."""
+    if pinned_obstacles and (
+        movable_route_ids is None
+        or lane.axis != 0
+        or all(
+            abs(lane.coord - obstacle.coord) > COORD_TOLERANCE_FINE
+            for obstacle in pinned_obstacles
+        )
+    ):
+        return None
+    primary = movable_route_ids is None or all(
+        id(run.route) in movable_route_ids for run in lane.runs
+    )
+    if (
+        not primary
+        and not pinned_obstacles
+        and any(
+            any((id(run.route), run.idx) in fixed_segment_keys for run in other.runs)
+            for other in obstacles
+        )
+    ):
+        return None
+    candidates = {
+        obstacle.coord + direction * step
+        for obstacle in obstacles
+        for direction in (-1, 1)
+    }
+    return min(
+        (candidate for candidate in candidates if feasible(candidate)),
+        key=lambda candidate: (abs(candidate - lane.coord), candidate),
+        default=None,
+    )
+
+
+def _trunk_step_target(
+    lane: CorridorLane,
+    trunk: CorridorLane,
+    routes: Sequence[RoutedPath],
+    drawn: Mapping[int, list[tuple[float, float]]],
+    step: float,
+    feasible: Callable[[float], bool],
+) -> float | None:
+    """One step past *trunk* for *lane*, when the member yields the trunk's lane."""
+    target = lane.coord + step
+    if feasible(target) and _member_yields_coincident_trunk(
+        lane, trunk, routes, drawn, step
+    ):
+        return target
+    return None
+
+
+def _on_lane(point: tuple[float, float], lane: CorridorLane) -> bool:
+    """Whether *point* lies on *lane*'s coordinate within one of its runs."""
+    along = 1 - lane.axis
+    return abs(point[lane.axis] - lane.coord) <= COORD_TOLERANCE and any(
+        lo - COORD_TOLERANCE <= point[along] <= hi + COORD_TOLERANCE
+        for lo, hi in (run.span for run in lane.runs)
+    )
+
+
+def _lane_point_ranks(
+    points: Sequence[tuple[float, float]], lane: CorridorLane
+) -> list[int]:
+    """The ranks of *points* on every segment lying along *lane*."""
+    ranks: set[int] = set()
+    for start in range(len(points) - 1):
+        if _on_lane(points[start], lane) and _on_lane(points[start + 1], lane):
+            ranks.update((start, start + 1))
+    return sorted(ranks)
+
+
+def _stepped(
+    points: list[tuple[float, float]], ranks: Iterable[int], axis: int, step: float
+) -> list[tuple[float, float]]:
+    """*points* with the points at *ranks* moved *step* along *axis*."""
+    moved = list(points)
+    for rank in ranks:
+        point = list(moved[rank])
+        point[axis] += step
+        moved[rank] = (point[0], point[1])
+    return moved
+
+
+def _distinct_line_crossings(
+    polylines: Mapping[int, list[tuple[float, float]]],
+    line_by_route: Mapping[int, str],
+    touched: Collection[int],
+) -> int:
+    """Proper crossings between distinct lines with at least one *touched* route."""
+    ordered = sorted(touched)
+    return sum(
+        segments_properly_cross(a0, a1, b0, b1, reject_collinear_touch=True) is not None
+        for key in ordered
+        for other, points in polylines.items()
+        if line_by_route[other] != line_by_route[key]
+        and not (other in touched and other < key)
+        for a0, a1 in itertools.pairwise(polylines[key])
+        for b0, b1 in itertools.pairwise(points)
+    )
+
+
+def _member_yields_coincident_trunk(
+    lane: CorridorLane,
+    trunk: CorridorLane,
+    routes: Sequence[RoutedPath],
+    drawn: Mapping[int, list[tuple[float, float]]],
+    step: float,
+) -> bool:
+    """Whether *lane* one step past *trunk* crosses fewer legs than *trunk*
+    one step past *lane*.
+    """
+    # One step past is always toward the greater coordinate.
+    trunk_ranks: dict[int, list[int]] = {}
+    for route in routes:
+        if route.line_id != trunk.line_id:
+            continue
+        ranks = _lane_point_ranks(drawn[id(route)], trunk)
+        if ranks:
+            trunk_ranks[id(route)] = ranks
+    member_ranks: defaultdict[int, set[int]] = defaultdict(set)
+    for run in lane.runs:
+        member_ranks[id(run.route)].update((run.idx, run.idx + 1))
+    line_by_route = {id(route): route.line_id for route in routes}
+    touched = {*trunk_ranks, *member_ranks}
+
+    def crossings(shifted: Mapping[int, Iterable[int]]) -> int:
+        polylines = {
+            key: _stepped(points, shifted[key], lane.axis, step)
+            if key in shifted
+            else points
+            for key, points in drawn.items()
+        }
+        return _distinct_line_crossings(polylines, line_by_route, touched)
+
+    return crossings(member_ranks) < crossings(trunk_ranks)
 
 
 def _arrangement_is_clear(

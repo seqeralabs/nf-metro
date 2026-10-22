@@ -2193,6 +2193,11 @@ They are design evidence, not part of this specification.
   be split, and never moving a track a plan owns.
   Plan-owned trunks take the same distinct-line pitch during global convergence
   settlement, before member geometry and convergence geometry freeze.
+  Settlement packs a horizontal trunk lying on a member track one pitch to the
+  track's far (greater-coordinate) side. Where the trunk on the near side
+  crosses fewer legs, the member track takes that step itself at member
+  geometry instead, before it freezes, so the trunk keeps its trial lane and
+  settlement finds it already one pitch from the track.
   `check_no_fused_cotravelling_lines` is the final postcondition on every track,
   including a pair where both coordinates are immutable. Such a violation names
   its route system and exact owning plans, which identifies the construction
