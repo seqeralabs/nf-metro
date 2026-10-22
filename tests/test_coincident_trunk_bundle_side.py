@@ -18,18 +18,19 @@ from pathlib import Path
 import pytest
 
 from nf_metro.api import RenderConfig, prepare_graph, render_graph_result
-from nf_metro.layout.constants import COORD_TOLERANCE, INTER_ROW_EDGE_CLEARANCE
+from nf_metro.layout.constants import (
+    COORD_TOLERANCE,
+    COORD_TOLERANCE_FINE,
+    INTER_ROW_EDGE_CLEARANCE,
+)
+from nf_metro.layout.routing import normalize
 from nf_metro.layout.routing.common import segments_properly_cross
 from nf_metro.parser.model import MetroGraph
 from nf_metro.render.plan import RenderPlan
 from nf_metro.themes import resolve_theme
 
-FIXTURE = (
-    Path(__file__).resolve().parent.parent
-    / "examples"
-    / "topologies"
-    / "return_trunk_over_member_run.mmd"
-)
+ROOT = Path(__file__).resolve().parent.parent
+FIXTURE = ROOT / "examples" / "topologies" / "return_trunk_over_member_run.mmd"
 
 LAYOUT_OPTIONS = pytest.mark.parametrize(
     "layout_options",
@@ -97,3 +98,45 @@ def test_corridor_runs_keep_the_box_edge_clearance_under_annotate(
         for line_id, y in under
         if y - bottom < INTER_ROW_EDGE_CLEARANCE - COORD_TOLERANCE
     ] == []
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "trunk_lines"),
+    [
+        ("examples/topologies/return_trunk_over_member_run.mmd", {"qc"}),
+        ("examples/riboseq_metro.mmd", set()),
+        ("tests/fixtures/curve_invariant_repros/riboseq_inter_row_corridor.mmd", set()),
+    ],
+)
+def test_member_yields_only_a_lane_a_plan_states_as_its_trunk(
+    relative_path: str,
+    trunk_lines: set[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``annotation``'s riboseq run lies on a ``riboseq`` lane of two convergence
+    feeders and a plain run.  The feeders' opening corners pin that lane, but no
+    plan states it as a trunk, so settlement never packs it past the member and
+    it is no trunk for the member to yield to."""
+    coincident: list[str] = []
+    yielded_to: set[str] = set()
+    real = normalize._coincident_convergence_trunk
+
+    def spy(lane, pinned_obstacles, movable_route_ids):
+        trunk = real(lane, pinned_obstacles, movable_route_ids)
+        coincident.extend(
+            other.line_id
+            for other in pinned_obstacles
+            if lane.axis == 1 and abs(other.coord - lane.coord) <= COORD_TOLERANCE_FINE
+        )
+        if trunk is not None:
+            yielded_to.add(trunk.line_id)
+        return trunk
+
+    monkeypatch.setattr(normalize, "_coincident_convergence_trunk", spy)
+    path = ROOT / relative_path
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+        render_graph_result(graph, resolve_theme(None, graph, "light"), RenderConfig())
+    assert coincident
+    assert yielded_to == trunk_lines
