@@ -21,6 +21,7 @@ import warnings
 from pathlib import Path
 
 import pytest
+from conftest import curve_abort_softened, known_curve_abort
 
 import nf_metro.layout.routing.invariants as invariants
 from nf_metro.api import RenderConfig, prepare_graph, render_graph_result
@@ -239,8 +240,26 @@ def test_unfused_blocked_fan_keeps_its_peel_off_band(
         return violations
 
     monkeypatch.setattr(invariants, "check_peeloff_concentric", spy)
-    with warnings.catch_warnings():
+    with warnings.catch_warnings(), curve_abort_softened():
         warnings.simplefilter("ignore")
         graph = prepare_graph(PEELOFF_FAN_MMD)
         render_graph_result(graph, resolve_theme(None, graph, "light"), RenderConfig())
     assert found == []
+
+
+@known_curve_abort(
+    "#2148",
+    "#2149",
+    "#2125",
+    "#2126",
+    reason="sec3's TOP entry crosses l0 over l2 and l3 in its own turn and "
+    "overlays l2 and l3 on its drop; the junction-fed side entries into sec1 and "
+    "sec2 cross their bundles through non-concentric corners; l2's turn at "
+    "__junction_6 into sec1's RIGHT entry rounds to radius 1 of the 10 requested "
+    "and draws its corner at both radii",
+)
+def test_peeloff_fan_map_renders_without_a_curve_abort() -> None:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        graph = prepare_graph(PEELOFF_FAN_MMD)
+        render_graph_result(graph, resolve_theme(None, graph, "light"), RenderConfig())

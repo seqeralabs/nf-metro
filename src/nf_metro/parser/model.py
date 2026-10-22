@@ -629,14 +629,9 @@ class MetroGraph:
     marker_legend: list[MarkerLegendEntry] = field(default_factory=list)
     # Section dependency graph (populated by auto_layout)
     section_dag: SectionDAG | None = None
-    # Section IDs whose perpendicular (TOP/BOTTOM) connection had to be bridged
-    # across grid columns because its feeding source sits outside the section's
-    # own column.  The run/trunk is held on the section's column (in-bbox) and
-    # routing draws a best-effort L-shaped lead-in; the multi-line bundle
-    # through such a forced-perpendicular drop may not satisfy the strict
-    # render-curve invariants, so their presence relaxes that check to a
-    # warning instead of a hard render abort.
-    _cross_column_perp_bridges: set[str] = field(default_factory=set, repr=False)
+    # Perpendicular entry port IDs reached by a cross-column lead-in; read by
+    # the render-curve invariant (see ``PHASE_FIELD_REGISTRY``).
+    _cross_column_perp_bridge_ports: set[str] = field(default_factory=set, repr=False)
     # Auto-laid sections whose grid cell a caller- or directive-supplied fold
     # threshold shifted versus the unbounded layout. A non-empty set lets the
     # render chokepoint reframe a fold-induced routing abort.

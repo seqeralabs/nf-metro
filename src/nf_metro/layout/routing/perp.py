@@ -96,14 +96,14 @@ def _perp_entry_crossing_x(
     this one X so the line passes straight through the boundary rather than
     converging on the port marker and re-fanning.
 
-    A distinct-line perp entry (:func:`needs_perp_approach_fan`) fans its
-    single-line feeders onto parallel approach channels by bundle index --
+    A port with a dealt column (:class:`perp_columns.PerpEntryColumn`) is
+    crossed on that column's channel by every feeder.  Otherwise a distinct-line
+    perp entry (:func:`needs_perp_approach_fan`) fans its single-line feeders
+    onto parallel approach channels by bundle index --
     :func:`_perp_approach_fan_x` -- since their feeder lanes all collapse onto
-    one column trunk.  A port with a dealt column
-    (:class:`perp_columns.PerpEntryColumn`) is crossed on that column's channel
-    by every feeder.
+    one column trunk.
 
-    Otherwise, a vertical-flow (TB/BT) feeder dropping a *single* bundle crosses
+    Failing both, a vertical-flow (TB/BT) feeder dropping a *single* bundle crosses
     on its own section lane -- the exact X
     :func:`inter_section_handlers._route_tb_bottom_exit` lands at,
     :func:`context._tb_x_offset` -- so the crossing tracks that lane.  Its
@@ -118,11 +118,11 @@ def _perp_entry_crossing_x(
     index on that side.  Returns ``None`` when no bundled inter-section feeder
     reaches the port for this line (nothing to align to).
     """
-    if needs_perp_approach_fan(ctx.graph, entry_port_id):
-        return _perp_approach_fan_x(ctx, entry_port_id, line_id, port_x)
     column = ctx.perp_entry_columns.get(entry_port_id)
     if column is not None and column.offsets is not None:
         return port_x + column.offset(line_id)
+    if needs_perp_approach_fan(ctx.graph, entry_port_id):
+        return _perp_approach_fan_x(ctx, entry_port_id, line_id, port_x)
     feeders = _bundled_feeders(ctx, entry_port_id, line_id)
     if not feeders:
         return None

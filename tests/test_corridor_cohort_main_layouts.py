@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from conftest import curve_abort_softened, is_curve_abort_fixture
 
 from nf_metro.api import render_string
 from nf_metro.layout.phases.guards import FoldThresholdError
@@ -83,9 +84,11 @@ def _render(
     )
     monkeypatch.setattr(svg, "_corridor_grant_moved_plan_ids", capture_granted)
     path = REGRESSIONS / fixture
-    render_string(
-        path.read_text(), layout_options=layout_options, source_dir=str(path.parent)
-    )
+    with warnings.catch_warnings(), curve_abort_softened(is_curve_abort_fixture(path)):
+        warnings.simplefilter("ignore")
+        render_string(
+            path.read_text(), layout_options=layout_options, source_dir=str(path.parent)
+        )
     return captured
 
 

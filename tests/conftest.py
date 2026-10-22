@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
+import warnings
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
+from unittest import mock
 
 import pytest
 
@@ -237,6 +242,121 @@ def diff_station_coords(before: Coords, after: Coords, tol: float = 1e-6) -> lis
 
 
 # --- Parse/layout helpers ---
+
+
+def known_curve_abort(*issues: str, reason: str) -> pytest.MarkDecorator:
+    """Strict xfail for a map whose render aborts on a tracked curve defect."""
+    from nf_metro.layout.routing.invariants import CurveInvariantError
+
+    return pytest.mark.xfail(
+        raises=CurveInvariantError,
+        strict=True,
+        reason=f"{', '.join(issues)}: {reason}",
+    )
+
+
+# Fixtures whose render aborts on a tracked curve defect, keyed by path from the
+# repo root; test_known_curve_aborts.py pins each abort.
+CURVE_ABORT_FIXTURES: dict[str, pytest.MarkDecorator] = {
+    "tests/fixtures/regressions/perp_entry_column_feeder_conflict.mmd": (
+        known_curve_abort(
+            "#2148",
+            "#2149",
+            "#2131",
+            "#2130",
+            "#2146",
+            reason="sec3's TOP entry crosses l0, l1 and l2 over l3 in its own "
+            "turn; __junction_7's LEFT-entry corner into sec2 crosses its lines "
+            "and draws radius 21.5 for 22.0; l1 and l3 fuse on one approach "
+            "channel into sec3; bypass helpers overlay sec0's and sec2's runs; "
+            "__bypass_s2n4_s2n3_6 applies its offset along a vertical",
+        )
+    ),
+    "tests/fixtures/regressions/perp_entry_column_opposite_side_fan.mmd": (
+        known_curve_abort(
+            "#2124",
+            "#2148",
+            "#2125",
+            "#2127",
+            reason="sec0's RL TOP exit seats its lines in LR order; sec2's "
+            "BOTTOM entry crosses l1 and l4 in its own turn and overlays l0 and "
+            "l4 on its drop; __junction_4's fan corners into sec1 are "
+            "non-concentric; s1n2->s1n3 lays l1 on l2's lane",
+        )
+    ),
+    "tests/fixtures/regressions/perp_entry_column_straight_drop.mmd": (
+        known_curve_abort(
+            "#2121",
+            "#2151",
+            reason="the BT TOP exit into sec1's TOP entry crosses l0 and l1 at "
+            "both of its turns; sec4's RIGHT exit into sec5's LEFT entry "
+            "reverses l1 and l2 at the corner",
+        )
+    ),
+    "tests/fixtures/regressions/perp_exit_single_feeder_landing.mmd": (
+        known_curve_abort(
+            "#2124",
+            "#2152",
+            "#2146",
+            reason="Assemble 3's RL BOTTOM exit crosses l0 and l1; l1's two legs "
+            "into that exit turn at radii 10 and 14 and double over; "
+            "_route_perp_exit leaves s3n0's single-line L into the exit DEFERRED, "
+            "so its offset applies along the vertical leg",
+        )
+    ),
+    "tests/fixtures/regressions/cohort_grant_beside_seated_runs.mmd": (
+        known_curve_abort(
+            "#2149",
+            reason="__junction_6's LEFT-entry corner into sec3 pinches l0 and l1 "
+            "through non-concentric arc centres; l0 and l4 overlay on one "
+            "descent channel; l3's turn into __merge_2 rounds to radius 1 of the "
+            "10 requested",
+        )
+    ),
+    "tests/fixtures/regressions/cohort_line_split_branches.mmd": (
+        known_curve_abort(
+            "#2086",
+            "#1550",
+            reason="__junction_6's RIGHT-entry corner into sec1 crosses l3 over "
+            "l2 and pinches l0 and l3 through non-concentric arc centres; l2's "
+            "two legs from __junction_6 turn at one vertex with radii 2.6 and "
+            "18 and double over",
+        )
+    ),
+}
+
+
+def is_curve_abort_fixture(path: Path) -> bool:
+    """True when *path* is one of :data:`CURVE_ABORT_FIXTURES`."""
+    resolved = path.resolve()
+    return any((_ROOT / rel).resolve() == resolved for rel in CURVE_ABORT_FIXTURES)
+
+
+@contextlib.contextmanager
+def curve_abort_softened(active: bool = True) -> Iterator[None]:
+    """Downgrade the render-time curve abort to a warning while *active*.
+
+    Patches only the renderer's call; layout scores candidates with the same
+    check, so permissive mode would change the geometry under test.
+    """
+    if not active:
+        yield
+        return
+
+    import nf_metro.render.svg as svg
+    from nf_metro.layout.routing.invariants import CurveInvariantError
+    from nf_metro.parser.model import PermissiveGuardWarning
+
+    check = svg.assert_render_curve_invariants
+
+    def warn_instead(*args: Any, **kwargs: Any) -> None:
+        try:
+            check(*args, **kwargs)
+        except CurveInvariantError as err:
+            warnings.warn(str(err), PermissiveGuardWarning, stacklevel=2)
+
+    with mock.patch.object(svg, "assert_render_curve_invariants", warn_instead):
+        yield
 
 
 def parse_and_layout(text: str, source_dir: str = "", **kwargs) -> MetroGraph:

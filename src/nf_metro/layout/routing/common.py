@@ -2374,6 +2374,58 @@ def exempt_dogleg_lanes(
     )
 
 
+def inter_section_corridor(graph: MetroGraph, edge: Edge) -> tuple[object, ...] | None:
+    """The shared geometric corridor *edge* travels between sections.
+
+    Edges sharing a corridor descend one vertical channel position in one
+    direction, so :func:`compute_bundle_info` indexes them as one bundle.
+    ``None`` for a horizontal edge, which needs no bundling.
+    """
+    src_st, tgt_st = graph.edge_endpoints(edge)
+    sx, sy, tx, ty = src_st.x, src_st.y, tgt_st.x, tgt_st.y
+    dx = tx - sx
+    dy = ty - sy
+
+    if abs(dy) < COORD_TOLERANCE_FINE:
+        return None
+
+    v_dir = 1 if dy > 0 else -1
+
+    if abs(dx) < COORD_TOLERANCE:
+        # Vertical: group by shared X position
+        return ("V", round(sx), v_dir)
+    # L-shaped: group by the inter-column gap the vertical channel will
+    # occupy.  Use (src_col, tgt_col) when section info is available so that
+    # edges from different ports in the same column share one bundle and get
+    # proper offsets.  Fall back to round(sx) for junctions or edges without
+    # section info.
+    h_dir = 1 if dx > 0 else -1
+    src_sec = graph.sections.get(src_st.section_id) if src_st.section_id else None
+    tgt_sec = graph.sections.get(tgt_st.section_id) if tgt_st.section_id else None
+    col_key: int | tuple[int, ...]
+    if src_sec and tgt_sec and src_sec.grid_col != tgt_sec.grid_col:
+        # Include both rows: two cross-column wraps sharing a column pair
+        # but stacked in different inter-row gaps (a serpentine taller
+        # than 2x2) descend the same channel X at different Y bands and
+        # are distinct corridors, not one interleaved bundle.
+        col_key = (
+            src_sec.grid_col,
+            tgt_sec.grid_col,
+            src_sec.grid_row,
+            tgt_sec.grid_row,
+        )
+    elif tgt_sec:
+        # Source is a junction: include target column AND row so
+        # edges to different sections get separate bundles.  A
+        # junction can fan to two targets in the same column but
+        # different rows; those are distinct corridors and must not be
+        # conflated into one over-wide interleaved bundle.
+        col_key = (round(sx), tgt_sec.grid_col, tgt_sec.grid_row)
+    else:
+        col_key = round(sx)
+    return ("L", col_key, v_dir, h_dir)
+
+
 def compute_bundle_info(
     graph: MetroGraph,
     junction_ids: set[str],
@@ -2403,64 +2455,14 @@ def compute_bundle_info(
 
         inter_edges.append((edge, src.x, src.y, tgt.x, tgt.y))
 
-    # Group by corridor: edges sharing the same vertical channel
-    # Key: (route_type, rounded_channel_position, vertical_direction)
     corridor_groups: dict[
         tuple[object, ...], list[tuple[Edge, float, float, float, float]]
     ] = defaultdict(list)
 
     for item in inter_edges:
-        edge, sx, sy, tx, ty = item
-        dx = tx - sx
-        dy = ty - sy
-
-        if abs(dy) < COORD_TOLERANCE_FINE:
-            continue  # Horizontal edges don't need bundling
-
-        v_dir = 1 if dy > 0 else -1
-
-        if abs(dx) < COORD_TOLERANCE:
-            # Vertical: group by shared X position
-            key: tuple[object, ...] = ("V", round(sx), v_dir)
-        else:
-            # L-shaped: group by the inter-column gap the vertical
-            # channel will occupy.  Use (src_col, tgt_col) when
-            # section info is available so that edges from different
-            # ports in the same column share one bundle and get
-            # proper offsets.  Fall back to round(sx) for junctions
-            # or edges without section info.
-            h_dir = 1 if dx > 0 else -1
-            src_st, tgt_st = graph.edge_endpoints(edge)
-            src_sec = (
-                graph.sections.get(src_st.section_id) if src_st.section_id else None
-            )
-            tgt_sec = (
-                graph.sections.get(tgt_st.section_id) if tgt_st.section_id else None
-            )
-            col_key: int | tuple[int, ...]
-            if src_sec and tgt_sec and src_sec.grid_col != tgt_sec.grid_col:
-                # Include both rows: two cross-column wraps sharing a column pair
-                # but stacked in different inter-row gaps (a serpentine taller
-                # than 2x2) descend the same channel X at different Y bands and
-                # are distinct corridors, not one interleaved bundle.
-                col_key = (
-                    src_sec.grid_col,
-                    tgt_sec.grid_col,
-                    src_sec.grid_row,
-                    tgt_sec.grid_row,
-                )
-            elif tgt_sec:
-                # Source is a junction: include target column AND row so
-                # edges to different sections get separate bundles.  A
-                # junction can fan to two targets in the same column but
-                # different rows; those are distinct corridors and must not be
-                # conflated into one over-wide interleaved bundle.
-                col_key = (round(sx), tgt_sec.grid_col, tgt_sec.grid_row)
-            else:
-                col_key = round(sx)
-            key = ("L", col_key, v_dir, h_dir)
-
-        corridor_groups[key].append(item)
+        key = inter_section_corridor(graph, item[0])
+        if key is not None:
+            corridor_groups[key].append(item)
 
     # Assign per-line positions within each corridor
     assignments: dict[tuple[str, str, str], tuple[int, int]] = {}

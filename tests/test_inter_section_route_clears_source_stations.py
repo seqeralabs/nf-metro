@@ -14,6 +14,7 @@ import warnings
 from pathlib import Path
 
 import pytest
+from conftest import curve_abort_softened, is_curve_abort_fixture
 
 from nf_metro.api import RenderConfig, prepare_graph, render_graph_result
 from nf_metro.themes import resolve_theme
@@ -47,7 +48,7 @@ def _distance_to_segment(p: Point, a: Point, b: Point) -> float:
 
 @pytest.mark.parametrize("path", FIXTURES, ids=lambda p: p.stem)
 def test_route_does_not_run_over_its_source_stations(path: Path) -> None:
-    with warnings.catch_warnings():
+    with warnings.catch_warnings(), curve_abort_softened(is_curve_abort_fixture(path)):
         warnings.simplefilter("ignore")
         graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
         plan = render_graph_result(

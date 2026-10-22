@@ -277,17 +277,23 @@ PHASE_FIELD_REGISTRY: dict[str, PhaseFieldSpec] = {
             "and the rail path returns before the search runs and leaves it None"
         ),
     ),
-    "_cross_column_perp_bridges": PhaseFieldSpec(
-        name="_cross_column_perp_bridges",
+    "_cross_column_perp_bridge_ports": PhaseFieldSpec(
+        name="_cross_column_perp_bridge_ports",
         writer_stage="3.4",
         reader_stages=(POST_LAYOUT,),
         enforcement=FieldEnforcement.FALLBACK,
         why=(
-            "section IDs whose perpendicular drop had to be bridged across grid "
-            "columns, accumulated by the Stage 3.2 entry-port and Stage 3.4 "
-            "exit-port alignment; routing's render-curve invariant reads the set "
-            "to relax its hard abort to a warning for those forced-perpendicular "
-            "bundles, tolerating the empty default"
+            "perpendicular entry port IDs whose feeder descends outside the "
+            "section's box, so the port holds the section's column and routing "
+            "bridges the gap with an L-shaped lead-in; cleared at the start of "
+            "every layout pass and filled by that pass's Stage 3.2 entry-port "
+            "and Stage 3.4 exit-port alignment, then pruned at the end of the "
+            "pass of any port whose feeders all descend inside the pass's final "
+            "box, since later stages can widen a box over a descent the "
+            "alignment judged outside it; routing's render-curve invariant "
+            "(also the geometric bypass pass's curve probe) relaxes its hard "
+            "abort to a warning only for failures confined to lead-ins into these "
+            "ports, tolerating the empty default"
         ),
     ),
     "_fold_compressed_sections": PhaseFieldSpec(
