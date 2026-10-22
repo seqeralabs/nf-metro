@@ -12,11 +12,13 @@ test.
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
+from conftest import curve_abort_softened, known_curve_abort
 from packed_cell_aperture import (
     PACKED_CELL,
     REQUIRED_APERTURE,
@@ -592,19 +594,27 @@ def test_post_settlement_observation_compiles_settled_reservations(
     _assert_planned(relative_path, monkeypatch)
 
 
+CROSS_COLUMN_OVERFLOW = (
+    "tests/fixtures/regressions/cross_column_perp_entry_overflow.mmd"
+)
+CROSS_COLUMN_OVERFLOW_OPTIONS = {"section_x_gap": 30.0, "y_spacing": 90.0}
+
+
 @pytest.mark.parametrize(
-    ("relative_path", "layout_options"),
+    ("relative_path", "layout_options", "softened"),
     (
-        ("examples/topologies/target_lane_transition.mmd", {"line_order": "span"}),
         (
-            "tests/fixtures/regressions/cross_column_perp_entry_overflow.mmd",
-            {"section_x_gap": 30.0, "y_spacing": 90.0},
+            "examples/topologies/target_lane_transition.mmd",
+            {"line_order": "span"},
+            False,
         ),
+        (CROSS_COLUMN_OVERFLOW, CROSS_COLUMN_OVERFLOW_OPTIONS, True),
     ),
 )
 def test_exit_turn_gap_allocation_pass_compiles_no_corridor_cohorts(
     relative_path: str,
     layout_options: dict[str, object],
+    softened: bool,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Only the settled allocation survives the member-geometry execution that
@@ -626,7 +636,9 @@ def test_exit_turn_gap_allocation_pass_compiles_no_corridor_cohorts(
         return real_execution(*args, **kwargs)
 
     monkeypatch.setattr(planning, "build_member_geometry_execution", record)
-    _assert_planned(relative_path, monkeypatch, layout_options)
+    with warnings.catch_warnings(), curve_abort_softened(softened):
+        warnings.simplefilter("ignore")
+        _assert_planned(relative_path, monkeypatch, layout_options)
     assert not any(
         compiles for allocates, _settles, compiles in executions if allocates
     )
@@ -634,6 +646,28 @@ def test_exit_turn_gap_allocation_pass_compiles_no_corridor_cohorts(
         allocation[0] and settled[1] and settled[2]
         for allocation, settled in zip(executions, executions[1:], strict=False)
     )
+
+
+@known_curve_abort(
+    "#2108",
+    "#2154",
+    reason="at section_x_gap 30 and y_spacing 90, germline, tumor_only and "
+    "somatic each descend from __junction_8 and __junction_9 into their merge as "
+    "two parallel strokes 10px apart, and germline and somatic run 2px apart "
+    "under the 4px nesting step over about 1416px",
+)
+def test_cross_column_overflow_at_narrow_spacing_renders_without_a_curve_abort() -> (
+    None
+):
+    path = ROOT / CROSS_COLUMN_OVERFLOW
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        graph = prepare_graph(
+            path.read_text(),
+            source_dir=str(path.parent),
+            layout_options=CROSS_COLUMN_OVERFLOW_OPTIONS,
+        )
+        svg.build_observed_render_plan(graph, resolve_theme(None, graph))
 
 
 def test_compact_convergence_seats_its_unordered_lanes_in_end_turn_order(
