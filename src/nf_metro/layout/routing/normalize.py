@@ -4508,7 +4508,12 @@ def _coincident_convergence_trunk(
     pinned_obstacles: Sequence[CorridorLane],
     movable_route_ids: frozenset[int] | None,
 ) -> CorridorLane | None:
-    """The convergence-owned horizontal trunk *lane* lies exactly on, if any."""
+    """The horizontal convergence trunk run *lane* lies exactly on, if any.
+
+    Only a run the plan states itself counts.  A feeder's run is pinned by the
+    opening corner its plan owns beside it, but settlement packs a plan's trunk
+    run alone, so a lane of feeder runs is never packed past *lane*.
+    """
     if movable_route_ids is None or lane.axis != 1:
         return None
     return next(
@@ -4517,7 +4522,7 @@ def _coincident_convergence_trunk(
             for other in pinned_obstacles
             if abs(lane.coord - other.coord) <= COORD_TOLERANCE_FINE
             and any(
-                convergence_owns_segment_boundary(run.route, run.idx)
+                run.idx in run.route.convergence_owned_segment_ranks
                 for run in other.runs
             )
         ),
