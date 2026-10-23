@@ -2661,26 +2661,23 @@ def _problem(
             item.ledger.path_rank,
             cohort_first_path_rank.get(cohort_key, item.ledger.path_rank),
         )
-    local_boundary_ranks: dict[tuple[str, int], int] = {}
-    for cohort_id in {
-        item.ledger.endpoint_cohort_id
-        for item in movable
-        if item.ledger.endpoint_cohort_id is not None
-    }:
-        ranks = _ranks_in_slot_order(
-            {
-                item.ledger.endpoint_network_rank: item.target.endpoint_lane_coordinate
-                for item in movable
-                if item.ledger.endpoint_cohort_id == cohort_id
-                and item.ledger.endpoint_network_rank is not None
-            }
-        )
-        local_boundary_ranks.update(
-            {
-                (cohort_id, boundary_rank): local_rank
-                for local_rank, boundary_rank in enumerate(ranks)
-            }
-        )
+    # Every cohort claim ranks, fixed and counter-running alike, so a fixed lane
+    # between movable ones keeps its rank and a lane pinned onto its line's fixed
+    # lane can reach its pin.
+    slots_by_cohort: defaultdict[str, dict[int, float | None]] = defaultdict(dict)
+    for item in claims:
+        if (
+            item.ledger.endpoint_cohort_id is not None
+            and item.ledger.endpoint_network_rank is not None
+        ):
+            slots_by_cohort[item.ledger.endpoint_cohort_id][
+                item.ledger.endpoint_network_rank
+            ] = item.target.endpoint_lane_coordinate
+    local_boundary_ranks: dict[tuple[str, int], int] = {
+        (cohort_id, boundary_rank): local_rank
+        for cohort_id, slot_by_rank in slots_by_cohort.items()
+        for local_rank, boundary_rank in enumerate(_ranks_in_slot_order(slot_by_rank))
+    }
     equalities = tuple(
         CorridorEquality(
             _direction_owner(

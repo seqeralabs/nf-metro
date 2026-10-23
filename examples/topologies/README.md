@@ -2,7 +2,7 @@
 
 Example `.mmd` files demonstrating a range of pipeline topologies and the layout patterns they produce. Each example exercises different aspects of the auto-layout engine.
 
-This directory holds 309 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
+This directory holds 310 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
 
 To render one example:
 
@@ -51,6 +51,7 @@ The fixtures below are tagged with the layout class(es) they primarily exercise.
 | `exit_run_three_drop_columns.mmd`            | three lines off one exit junction turning down through three different handlers / one shared fan corner column, lanes ordered by destination row so a returning and a continuing trunk nest in the inter-row band (issue #1594)       |
 | `leftward_up_exit_turn_order.mmd`            | two lines on one leftward exit run turn upward without transposing their source-lane order, including a repeated same-line arrival from another section                                                                               |
 | `terminated_exit_lane_compaction.mmd`        | three active lines close the lane slot left by a fourth line that terminates before their shared exit                                                                                                                                 |
+| `entry_cohort_interleaved_fixed_lane.mmd`    | a fixed member landing in the port slot between two movable lanes of one LEFT entry cohort, where one movable lane is pinned onto its own line's fixed lane                                                                           |
 | `bottom_exit_stacked_right_entry_fan.mmd`    | bottom-exit bundle opening into stacked right-entry targets / planned landing order and exact offset slots                                                                                                                            |
 | `bottom_entry_fan_side_targets.mmd`          | two-line bundle at a BOTTOM perpendicular entry fanning out to side-entry targets; the entry port mirrors its trunk so the drop turns in without crossing or an S-cusp on the box edge (#1991, #1995)                                 |
 | `fan_branch_additional_outputs.mmd`          | six-way diamond whose branches also emit reporting outputs / complete branch membership beyond the join                                                                                                                               |
