@@ -697,13 +697,6 @@ gallery:
       Four lines travel through a section, but one terminates before its shared exit.
       The three active lines close the empty slot before the straight and turning branches
       leave the section.
-  - id: entry_cohort_interleaved_fixed_lane
-    source_dir: examples/topologies
-    category: Multi-line Bundles
-    description:
-      Two lines bypass Zone 1 below its row and climb into Zone 2's left entry, where a line
-      arriving from Zone 1 lands in the port slot between theirs. The climbing lanes seat two
-      pitches apart, so the one that joins its own direct feeder keeps that feeder's slot.
   - id: target_lane_transition
     source_dir: examples/topologies
     category: Multi-line Bundles

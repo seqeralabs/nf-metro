@@ -2661,8 +2661,9 @@ def _problem(
             item.ledger.path_rank,
             cohort_first_path_rank.get(cohort_key, item.ledger.path_rank),
         )
-    # Every cohort claim ranks, fixed and counter-running alike, so each holds its
-    # port slot and a lane pinned onto its line's fixed lane can reach its pin.
+    # Every cohort claim ranks, fixed and counter-running alike, so a fixed lane
+    # between movable ones keeps its rank and a lane pinned onto its line's fixed
+    # lane can reach its pin.
     slots_by_cohort: defaultdict[str, dict[int, float | None]] = defaultdict(dict)
     for item in claims:
         if (
