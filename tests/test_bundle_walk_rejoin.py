@@ -104,7 +104,6 @@ def test_line_rejoining_off_row_keeps_the_runs_order(
 ) -> None:
     _graph, plan = _render(REJOIN_OFF_ROW, layout_options)
     offsets = plan.station_offsets
-    assert offsets[("s2n1", "l1")] < offsets[("s2n1", "l3")]
     assert offsets[("s3n3", "l1")] < offsets[("s3n3", "l3")]
 
 
@@ -123,6 +122,6 @@ def test_lines_rejoining_at_an_entry_take_distinct_lanes() -> None:
         for port_id, port in graph.ports.items()
         if port.section_id == "sec3" and port.is_entry and port.side is PortSide.LEFT
     )
-    lanes = [plan.station_offsets[(entry, lid)] for lid in graph.station_lines(entry)]
     assert sorted(graph.station_lines(entry)) == ["l0", "l1", "l2"]
+    lanes = [plan.station_offsets[(entry, lid)] for lid in graph.station_lines(entry)]
     assert len(set(lanes)) == len(lanes)

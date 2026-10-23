@@ -4647,8 +4647,9 @@ def _member_yields_coincident_trunk(
     drawn: Mapping[int, list[tuple[float, float]]],
     step: float,
 ) -> bool:
-    """Whether *lane* one step past *trunk* crosses fewer legs than *trunk*
-    one step past *lane*, with *trunk*'s own lane clear for it to keep.
+    """Whether *lane* yields to *trunk*: *lane* one step past *trunk* crosses
+    fewer legs than *trunk* one step past *lane*, and *trunk*'s own lane is
+    clear for it to keep.
 
     The lane is clear when no other line's path has a point on it once *lane*
     has stepped: a line turning onto or running along it within the trunk's
@@ -4670,7 +4671,11 @@ def _member_yields_coincident_trunk(
         _on_lane(point, trunk)
         for key, points in drawn.items()
         if line_by_route[key] != trunk.line_id
-        for point in _stepped(points, member_ranks.get(key, ()), lane.axis, step)
+        for point in (
+            _stepped(points, member_ranks[key], lane.axis, step)
+            if key in member_ranks
+            else points
+        )
     ):
         return False
     touched = {*trunk_ranks, *member_ranks}
