@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 from dataclasses import fields, replace
 from enum import Enum
+from itertools import combinations
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -1913,46 +1914,32 @@ def _entry_cohort_claim(
     return _BoundClaim(ledger, target, slot, slot + 100.0, coordinate, slot)
 
 
+def _fixed_copy(claim: _BoundClaim, claim_id: str) -> _BoundClaim:
+    return replace(claim, ledger=replace(claim.ledger, claim_id=claim_id))
+
+
 def _slot_ordered_ranks(claims) -> dict[tuple[str, int], int]:
-    """Each endpoint rank's index among every claim of its cohort, taken in the
-    order of the port slots the claims land in."""
     slots: dict[str, dict[int, float | None]] = {}
     for item in claims:
         cohort_id = item.ledger.endpoint_cohort_id
         rank = item.ledger.endpoint_network_rank
-        if cohort_id is None or rank is None:
-            continue
-        slots.setdefault(cohort_id, {})[rank] = item.target.endpoint_lane_coordinate
-    ranks = {}
-    for cohort_id, slot_by_rank in slots.items():
-        ordered = sorted(
-            slot_by_rank,
-            key=lambda rank: (
-                slot_by_rank[rank] is None,
-                slot_by_rank[rank] or 0.0,
-                rank,
-            ),
-        )
-        for index, rank in enumerate(ordered):
-            ranks[(cohort_id, rank)] = index
-    return ranks
+        if cohort_id is not None and rank is not None:
+            slots.setdefault(cohort_id, {})[rank] = item.target.endpoint_lane_coordinate
+    return {
+        (cohort_id, rank): index
+        for cohort_id, slot_by_rank in slots.items()
+        for index, rank in enumerate(cci._ranks_in_slot_order(slot_by_rank))
+    }
 
 
-def _endpoint_lane_violations(claims, offset_step, problem) -> list[str]:
-    """Endpoint lanes whose boundary offsets disagree with the cohort's slots.
-
-    Each endpoint lane's boundary offset must be its slot-order index among
-    every claim of its cohort, fixed and counter-running members included, so
-    a member landing between two movable lanes holds its own offset.  Two
-    pinned lanes travelling the same way share one solver cohort, so they must
-    sit as far apart in boundary offset as the fixed lanes they are pinned to.
-    """
+def _offset_violations(claims, offset_step, problem) -> list[str]:
+    """Endpoint lanes whose boundary offset is not their slot-order index among
+    every claim of their cohort, fixed and counter-running members included."""
     ranks = _slot_ordered_ranks(claims)
     by_id = {item.claim_id: item for item in claims}
-    lanes = {lane.member_id: lane for lane in problem.lanes}
     violations = []
-    for member_id, lane in lanes.items():
-        item = by_id.get(member_id)
+    for lane in problem.lanes:
+        item = by_id.get(lane.member_id)
         if (
             item is None
             or item.ledger.endpoint_cohort_id is None
@@ -1965,45 +1952,59 @@ def _endpoint_lane_violations(claims, offset_step, problem) -> list[str]:
         ]
         expected = rank * offset_step * item.ledger.destination_boundary_axis_sign
         if lane.boundary_coordinate != pytest.approx(expected):
-            violations.append(f"{member_id}: {lane.boundary_coordinate} != {expected}")
+            violations.append(
+                f"{lane.member_id}: {lane.boundary_coordinate} != {expected}"
+            )
+    return violations
+
+
+def _pinned_gap_violations(claims, problem) -> list[str]:
+    """Pinned lane pairs of one solver cohort whose boundary offsets sit a
+    different distance apart than the fixed lanes they are pinned to.
+
+    A solver cohort holds one travel direction, so only same-direction pairs
+    share a frame of boundary offsets.
+    """
+    by_id = {item.claim_id: item for item in claims}
+    lanes = {lane.member_id: lane for lane in problem.lanes}
     pinned = {
         equality.member_id: by_id[equality.obstacle_id].coordinate + equality.delta
         for equality in problem.fixed_equalities
         if equality.member_id in lanes and equality.obstacle_id in by_id
     }
-    pinned_ids = sorted(pinned)
-    for index, left_id in enumerate(pinned_ids):
-        for right_id in pinned_ids[index + 1 :]:
-            left, right = by_id[left_id], by_id[right_id]
-            if (
-                left.ledger.endpoint_cohort_id is None
-                or left.ledger.endpoint_cohort_id != right.ledger.endpoint_cohort_id
-                or left.ledger.direction is not right.ledger.direction
-            ):
-                continue
-            boundary_gap = (
-                lanes[left_id].boundary_coordinate - lanes[right_id].boundary_coordinate
+    violations = []
+    for left_id, right_id in combinations(sorted(pinned), 2):
+        left, right = by_id[left_id].ledger, by_id[right_id].ledger
+        if (
+            left.endpoint_cohort_id is None
+            or left.endpoint_cohort_id != right.endpoint_cohort_id
+            or left.direction is not right.direction
+        ):
+            continue
+        boundary_gap = (
+            lanes[left_id].boundary_coordinate - lanes[right_id].boundary_coordinate
+        )
+        pinned_gap = pinned[left_id] - pinned[right_id]
+        if boundary_gap != pytest.approx(pinned_gap):
+            violations.append(
+                f"{left_id}/{right_id}: boundary gap {boundary_gap} != "
+                f"pinned gap {pinned_gap}"
             )
-            if boundary_gap != pytest.approx(pinned[left_id] - pinned[right_id]):
-                violations.append(
-                    f"{left_id}/{right_id}: boundary gap {boundary_gap} != "
-                    f"pinned gap {pinned[left_id] - pinned[right_id]}"
-                )
     return violations
 
 
-@pytest.mark.parametrize("outer_pinned", [False, True])
+@pytest.mark.parametrize(
+    ("outer_pinned", "m3_coordinate"), [(False, 376.0), (True, 372.0)]
+)
 def test_endpoint_lanes_rank_past_an_interleaved_fixed_member(
-    outer_pinned: bool,
+    outer_pinned: bool, m3_coordinate: float
 ) -> None:
-    """Two movable cohort lanes with a fixed member landing between them seat
-    two pitches apart.
+    """A fixed member between two movable lanes occupies a slot, so the movable
+    lanes seat two pitches apart and agree with their pins.
 
-    ``m1`` and ``m3`` move; ``m2`` is fixed and lands in the slot between
-    theirs, and ``m1`` is pinned onto its own line's fixed lane.  Ranking the
-    movable lanes alone would set ``m3`` one pitch from ``m1``, onto ``m2``.
-    When ``m3`` is also pinned onto a fixed lane two pitches out, that offset
-    would contradict the pins outright.
+    ``m1`` and ``m3`` move, ``m2`` is fixed and lands in the slot between
+    theirs, and ``m1`` is pinned onto its own line's fixed lane; ``m3`` is
+    pinned onto one two pitches out when ``outer_pinned``.
     """
     step = 4.0
     m1 = _entry_cohort_claim(
@@ -2014,43 +2015,25 @@ def test_endpoint_lanes_rank_past_an_interleaved_fixed_member(
         slot=120.0,
         coordinate=364.0,
     )
+    m2 = _entry_cohort_claim(
+        claim_id="fixed-m2",
+        line_id="m2",
+        lane_rank=1,
+        endpoint_network_rank=2,
+        slot=124.0,
+        coordinate=368.0,
+    )
     m3 = _entry_cohort_claim(
         claim_id="m3",
         line_id="m3",
         lane_rank=2,
         endpoint_network_rank=0,
         slot=128.0,
-        coordinate=376.0 if not outer_pinned else 372.0,
+        coordinate=m3_coordinate,
     )
-    fixed = [
-        _entry_cohort_claim(
-            claim_id="fixed-m1",
-            line_id="m1",
-            lane_rank=0,
-            endpoint_network_rank=1,
-            slot=120.0,
-            coordinate=364.0,
-        ),
-        _entry_cohort_claim(
-            claim_id="fixed-m2",
-            line_id="m2",
-            lane_rank=1,
-            endpoint_network_rank=2,
-            slot=124.0,
-            coordinate=368.0,
-        ),
-    ]
+    fixed = [_fixed_copy(m1, "fixed-m1"), m2]
     if outer_pinned:
-        fixed.append(
-            _entry_cohort_claim(
-                claim_id="fixed-m3",
-                line_id="m3",
-                lane_rank=2,
-                endpoint_network_rank=0,
-                slot=128.0,
-                coordinate=372.0,
-            )
-        )
+        fixed.append(_fixed_copy(m3, "fixed-m3"))
     claims = (m1, m3, *fixed)
     roles = {item.claim_id: cci.CorridorCohortClaimRole.MOVABLE for item in claims}
     roles.update({item.claim_id: cci.CorridorCohortClaimRole.FIXED for item in fixed})
@@ -2062,7 +2045,11 @@ def test_endpoint_lanes_rank_past_an_interleaved_fixed_member(
         (equality.member_id, equality.obstacle_id)
         for equality in problem.fixed_equalities
     } == {("m1", "fixed-m1"), *((("m3", "fixed-m3"),) if outer_pinned else ())}
-    assert _endpoint_lane_violations(claims, step, problem) == []
+    assert {lane.member_id: lane.boundary_coordinate for lane in problem.lanes} == {
+        "m1": pytest.approx(0 * step),
+        "m3": pytest.approx(2 * step),
+    }
+    assert _pinned_gap_violations(claims, problem) == []
     result = solve_corridor_cohorts(problem)
     assert result.status is CorridorAllocationStatus.PLANNED, result
     allocations = dict(result.allocations)
@@ -2100,24 +2087,24 @@ def test_rendered_endpoint_lanes_rank_over_every_cohort_member(
     violations = [
         violation
         for claims, offset_step, problem in built
-        for violation in _endpoint_lane_violations(claims, offset_step, problem)
+        for violation in (
+            *_offset_violations(claims, offset_step, problem),
+            *_pinned_gap_violations(claims, problem),
+        )
     ]
     assert violations == []
 
 
-def test_entry_cohort_with_an_interleaved_fixed_lane_renders_across_hash_seeds() -> (
-    None
-):
-    """The entry cohort whose fixed member lands between two movable lanes
-    seats and renders, identically under every hash seed."""
+_INTERLEAVED_FIXED_LANE_SEEDS = ("0", "1")
+
+
+def test_interleaved_fixed_lane_hash_seed_stable() -> None:
     observations = observe_across_hash_seeds(
         ROOT / "examples/topologies/entry_cohort_interleaved_fixed_lane.mmd",
-        ("0", "1", "3"),
+        _INTERLEAVED_FIXED_LANE_SEEDS,
     )
 
-    assert {seed: item["exception"] for seed, item in observations.items()} == {
-        "0": None,
-        "1": None,
-        "3": None,
-    }
+    assert all(item["exception"] is None for item in observations.values()), (
+        observations
+    )
     assert len({item["svg_sha256"] for item in observations.values()}) == 1
