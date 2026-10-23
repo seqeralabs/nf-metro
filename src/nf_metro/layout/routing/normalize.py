@@ -4648,7 +4648,11 @@ def _member_yields_coincident_trunk(
     step: float,
 ) -> bool:
     """Whether *lane* one step past *trunk* crosses fewer legs than *trunk*
-    one step past *lane*.
+    one step past *lane*, with *trunk*'s own lane clear for it to keep.
+
+    The lane is clear when no other line's path has a point on it once *lane*
+    has stepped: a line turning onto or running along it within the trunk's
+    span leaves the trunk no room to stay there.
     """
     # One step past is always toward the greater coordinate.
     trunk_ranks: dict[int, list[int]] = {}
@@ -4662,6 +4666,13 @@ def _member_yields_coincident_trunk(
     for run in lane.runs:
         member_ranks[id(run.route)].update((run.idx, run.idx + 1))
     line_by_route = {id(route): route.line_id for route in routes}
+    if any(
+        _on_lane(point, trunk)
+        for key, points in drawn.items()
+        if line_by_route[key] != trunk.line_id
+        for point in _stepped(points, member_ranks.get(key, ()), lane.axis, step)
+    ):
+        return False
     touched = {*trunk_ranks, *member_ranks}
 
     def crossings(shifted: Mapping[int, Iterable[int]]) -> int:

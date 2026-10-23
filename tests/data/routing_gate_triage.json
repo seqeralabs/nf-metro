@@ -691,10 +691,6 @@
   "note": "BOTTOM_EXIT_RIGHT_LANDINGS is selected only when every target is a RIGHT entry. The non-RIGHT arm is a defensive check that the frozen target still satisfies that contract.",
   "status": "defensive"
  },
- "intra_handlers.py::and line not in graph.station_lines(sid)::#1": {
-  "note": "Trunk-row entry bow (#1315). Exercised by tests/fixtures/regressions/entry_trunk_row_bow.mmd, which is kept out of the validate=True corpus and the gate-coverage corpus (it exercises the always-on render path only), so no clean corpus fixture takes this arm. The render-path invariant test test_entry_trunk_row_bow_clears_non_consumer covers the drawn detour.",
-  "status": "defensive"
- },
  "tb_handlers.py::if source_track_blocked:::#1": {
   "note": "Entry-runway trunk-row non-consumer bypass (#1293). Both-tracks-blocked fall-through: a non-consumer sits on BOTH the entry track and the target track, leaving no clear runway track. No corpus fixture has a doubly-blocked flow-side entry; defensive.",
   "status": "defensive"
@@ -704,14 +700,6 @@
   "status": "defensive"
  },
  "intra_handlers.py::for k in range(len(points) - 1):::#1": {
-  "note": "Trunk-row entry bow (#1315). Exercised by tests/fixtures/regressions/entry_trunk_row_bow.mmd, which is kept out of the validate=True corpus and the gate-coverage corpus (it exercises the always-on render path only), so no clean corpus fixture takes this arm. The render-path invariant test test_entry_trunk_row_bow_clears_non_consumer covers the drawn detour.",
-  "status": "defensive"
- },
- "intra_handlers.py::for sign in _bow_side_order(section_stations, blockers, sy, over_start, over_end):::#1": {
-  "note": "Trunk-row entry bow (#1315). Loop-exhausted fall-through (both sides fail the clearance check): every corpus bow clears on its first (roomier) side, so the exit past the loop that returns a plain straight run is defensive.",
-  "status": "defensive"
- },
- "intra_handlers.py::for st in section_stations:::#1": {
   "note": "Trunk-row entry bow (#1315). Exercised by tests/fixtures/regressions/entry_trunk_row_bow.mmd, which is kept out of the validate=True corpus and the gate-coverage corpus (it exercises the always-on render path only), so no clean corpus fixture takes this arm. The render-path invariant test test_entry_trunk_row_bow_clears_non_consumer covers the drawn detour.",
   "status": "defensive"
  },
@@ -751,10 +739,6 @@
   "note": "_route_fold_edge: the not-same_section precondition is never satisfied at the intra-section handlers, so the fold (False) arm is never taken: cross-section edges are consumed by _route_inter_section upstream (0/391 corpus fixtures reach this branch with differing sections), and a sectionless flat graph's serpentine fold is routed before this handler too (verified: a flat fold over the threshold does not reach the arm). The cross-row fold branch is shadowed. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
   "status": "defensive"
  },
- "intra_handlers.py::if not blockers:::#1": {
-  "note": "Trunk-row entry bow (#1315). Exercised by tests/fixtures/regressions/entry_trunk_row_bow.mmd, which is kept out of the validate=True corpus and the gate-coverage corpus (it exercises the always-on render path only), so no clean corpus fixture takes this arm. The render-path invariant test test_entry_trunk_row_bow_clears_non_consumer covers the drawn detour.",
-  "status": "defensive"
- },
  "intra_handlers.py::if not preds or not succs:::#1": {
   "note": "A bypass V exists to carry lines from one station to another, so by the time _bypass_v_is_one_way_step runs (only for a bypass endpoint of a routed edge) the V always has at least one predecessor and one successor edge. The empty-list return-False arm guards a malformed graph rather than a topology, so it stays un-exercised.",
   "status": "defensive"
@@ -769,10 +753,6 @@
  },
  "intra_handlers.py::if sibling is None:::#1": {
   "note": "Lookup guard on ctx.fork_targets ids, which are collected from graph edges and therefore always resolve in graph.stations; a missing sibling is only possible for a hand-built context whose fork map names stations the graph does not carry.",
-  "status": "defensive"
- },
- "intra_handlers.py::if st.id in blocker_ids:::#1": {
-  "note": "Trunk-row entry bow (#1315). Exercised by tests/fixtures/regressions/entry_trunk_row_bow.mmd, which is kept out of the validate=True corpus and the gate-coverage corpus (it exercises the always-on render path only), so no clean corpus fixture takes this arm. The render-path invariant test test_entry_trunk_row_bow_clears_non_consumer covers the drawn detour.",
   "status": "defensive"
  },
  "member_geometry.py::and assignment.run_direction in {Direction.R, Direction.L}::#1": {
@@ -1600,8 +1580,8 @@
   "status": "needs-review"
  },
  "offsets.py::if port is None:::#1": {
-  "note": "The flow-start side-entry descent phase reads a feeder's lead direction from its exit port or its divergence junction's exit port; any other source (a merge junction, say) has no single lead, so the port is skipped. Such a source feeding a flow-start side entry off the port's row is valid, but every corpus feeder of this shape is an exit port or a divergence junction, or arrives level and is skipped before the lead is read.",
-  "status": "needs-review"
+  "note": "Every caller (the U-turn classifiers in offsets.py and row_align.py) passes the station of an entry port it took from a port edge, so graph.ports always resolves it. Not reached by the corpus, the test fixtures, or 8000 generated maps.",
+  "status": "defensive"
  },
  "convergences.py::if movable and abs(channel.x - reference) > COORD_TOLERANCE:::#1": {
   "note": "The seat arm fuses a feeder's final port approach onto the merge trunk's target flank before the landing states the feeder's opening column. tests/fixtures/hash_seed_determinism/seed_15.mmd reaches it (__junction_27->__merge_11 climbs into s8__entry_right_17 16px beside the trunk's flank at x=780), but the sweep's corpus roots do not include tests/fixtures/hash_seed_determinism, and seed_15 aborts on unrelated guards, so no swept fixture evaluates it.",
@@ -1670,10 +1650,6 @@
  "offsets.py::if flow_entry and feeder.direction != section.direction:::#1": {
   "note": "A flow-side entry whose single feeder section flows the other way declines the linear entry frame. A generated-map sweep reaches it (5 of 8000 maps), but no committed map: needs a fixture with an RL feeder into an LR section's flow-side entry (or the mirror).",
   "status": "needs-review"
- },
- "offsets.py::if port is None:::#1": {
-  "note": "Every caller (the U-turn classifiers in offsets.py and row_align.py) passes the station of an entry port it took from a port edge, so graph.ports always resolves it. Not reached by the corpus, the test fixtures, or 8000 generated maps.",
-  "status": "defensive"
  },
  "offsets.py::landing is None::#1": {
   "note": "compute_station_offsets gives every line at every port an offset before linear entry frames are materialised, so the straight branch's landing port always holds one for the line. Not reached by the corpus, the test fixtures, or 8000 generated maps.",
@@ -2095,10 +2071,6 @@
   "note": "Equality promotion fixpoint over FIXED non-terminal claims, which exist only for incomplete reservations. A hand-built incomplete ledger drives it; no pipeline render produces one. Exercised by tests/test_corridor_cohort_integration.py::test_incomplete_component_stands_as_typed_compatibility. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
  },
- "corridor_cohort_integration.py::if minimum_deficit is not None and (::#1": {
-  "note": "Boundary classification of a forbidden interval against a scalar domain: the minimum-side arm is taken in the corpus, and the fall-through to the maximum-side test is reached by trunks granted clear of a distinct-line run. Exercised by tests/test_convergence_corridor_grants.py::test_trunk_is_granted_clear_of_every_distinct_line_run_it_co_travels and tests/test_corridor_cohort_main_layouts.py::test_grant_is_proven_against_its_ungranted_observation. needs-review because the arm is reachable, not because it is unreachable.",
-  "status": "needs-review"
- },
  "corridor_cohort_integration.py::elif maximum_deficit is not None and (::#1": {
   "note": "A forbidden interval overshoots the scalar domain's upper bound by less than it undershoots the lower bound, so it is recorded as a maximum-side boundary obstacle. The corpus's intervals all miss the upper bound, so the topology wanted is a convergence trunk bounded above with a distinct-line run just beyond that bound. needs-review because the arm is reachable and no corpus fixture takes it.",
   "status": "needs-review"
@@ -2385,10 +2357,6 @@
  },
  "corridor_cohorts.py::if sign > 0:::#1": {
   "note": "Directed separation edge orientation by seating sign; both signs need directed separations in a solve, and the swept corpus never builds one. Exercised by tests/test_corridor_cohort_integration.py::test_compiler_counts_every_solve_call and tests/test_corridor_cohort_integration.py::test_final_solve_trace_is_emitted_from_the_integration_call_site. needs-review because the arm is reachable, not because it is unreachable.",
-  "status": "needs-review"
- },
- "corridor_cohorts.py::if sign > 0:::#2": {
-  "note": "Forbidden-interval bounds in the positive seating frame. The corpus's forbidden intervals all arrive in the reversed (negative) frame, so only that arm is taken. Exercised by tests/test_corridor_cohort_main_layouts.py::test_grant_is_proven_against_its_ungranted_observation and tests/test_corridor_cohorts.py::test_forbidden_coordinate_interval_chooses_one_deterministic_side. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
  },
  "corridor_cohorts.py::if abs(::#1": {
