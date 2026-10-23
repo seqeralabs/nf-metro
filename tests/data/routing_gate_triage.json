@@ -2151,11 +2151,11 @@
   "note": "Patch preparation: an allocated segment is orthogonal on its change axis, as it was when the claim was bound.",
   "status": "defensive"
  },
- "corridor_cohort_integration.py::if (::#18": {
+ "corridor_cohort_integration.py::if (::#19": {
   "note": "Patch preparation: a landing matches its target's geometry plan, connectors, last segment, axis and finite slot, all taken from the same compile snapshot.",
   "status": "defensive"
  },
- "corridor_cohort_integration.py::if (::#19": {
+ "corridor_cohort_integration.py::if (::#20": {
   "note": "Patch preparation: a landing's last segment is orthogonal to the port axis and non-degenerate, as when the landing was planned.",
   "status": "defensive"
  },
