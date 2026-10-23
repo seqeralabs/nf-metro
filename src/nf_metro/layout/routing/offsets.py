@@ -3540,11 +3540,11 @@ def _bundle_walk(
     caller can ask which stations a re-slot would touch before deciding whether
     to make it.
 
-    Each line is carried only along its own edges.  A re-slotted line that
-    reaches a station on the run from somewhere off it rejoins the run there and
-    takes its re-slotted lane again: the lines that travelled with the run hold
-    their new lanes at that station, so leaving the rejoining one on its old
-    lane would seat it on, or across, one of theirs.
+    Each line is carried only along its own edges.  In the literal frame, a
+    re-slotted line reaching a station on the run from another source takes its
+    re-slotted lane there: the lines carried along the run hold their re-slotted
+    lanes at that station, so the arriving line on any other lane would sit on,
+    or across, one of theirs.
 
     Up to the section's own exit port the run carries *new_offs* itself: the
     re-slot names the slots it wants and the stations along it answer to the
@@ -3617,9 +3617,9 @@ def _bundle_walk(
                     if edge.source != cur
                 }
                 tgt_offs = carried | {
-                    lid: off
-                    for lid, off in new_offs.items()
-                    if lid in rejoining and lid not in arrived and lid not in carried
+                    lid: new_offs[lid]
+                    for lid in rejoining
+                    if lid in new_offs and lid not in arrived
                 }
             seen.setdefault(tgt_id, set()).update(tgt_offs)
             reached.setdefault(tgt_id, {}).update(tgt_offs)
