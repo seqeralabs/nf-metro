@@ -140,3 +140,47 @@ def test_member_yields_only_a_lane_a_plan_states_as_its_trunk(
         render_graph_result(graph, resolve_theme(None, graph, "light"), RenderConfig())
     assert coincident
     assert yielded_to == trunk_lines
+
+
+# ``l0``'s convergence trunk into Bam and ``l2``'s run into Merge_Markdup trial
+# on one corridor lane under Merge_Markdup, and ``l4`` drops into that corridor
+# and turns along the same lane on its way to Pca, inside the trunk's span.
+TRUNK_LANE_TAKEN = (
+    ROOT
+    / "tests"
+    / "fixtures"
+    / "curve_invariant_repros"
+    / "trunk_lane_taken_by_turning_line.mmd"
+)
+
+
+@pytest.mark.parametrize(
+    "layout_options",
+    [None, {"section_y_gap": 20.0, "track_gap": 3.0}],
+    ids=["default", "wide_track_gap"],
+)
+def test_member_keeps_a_trunk_lane_another_line_turns_onto(
+    layout_options: Mapping[str, object] | None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``l4`` turns onto the trunk's lane inside its span, so the trunk cannot
+    keep that lane once ``l2`` steps off it: ``l2`` does not yield."""
+    verdicts: list[tuple[str, str, bool]] = []
+    real = normalize._member_yields_coincident_trunk
+
+    def spy(lane, trunk, routes, drawn, step):
+        verdict = real(lane, trunk, routes, drawn, step)
+        verdicts.append((lane.line_id, trunk.line_id, verdict))
+        return verdict
+
+    monkeypatch.setattr(normalize, "_member_yields_coincident_trunk", spy)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        graph = prepare_graph(
+            TRUNK_LANE_TAKEN.read_text(),
+            source_dir=str(TRUNK_LANE_TAKEN.parent),
+            layout_options=layout_options,
+        )
+        render_graph_result(graph, resolve_theme(None, graph, "light"), RenderConfig())
+    assert ("l2", "l0", False) in verdicts
+    assert not any(verdict for _member, _trunk, verdict in verdicts)

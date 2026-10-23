@@ -1,0 +1,31 @@
+%%metro title: Trunk lane taken by a turning line
+%%metro diamond_style: symmetric
+%%metro stroke_scale: 1.5
+%%metro line: l0 | Pca | #e6194b
+%%metro line: l2 | Dedup | #4363d8
+%%metro line: l3 | Cluster_Classify | #f58231
+%%metro line: l4 | Export_Fastqc_Trim | #911eb4
+graph LR
+    subgraph sec0 [Filter 0]
+        s0n2 -->|l2,l3| s0n4
+    end
+    subgraph sec1 [Vcf_Assemble_Assemble 1]
+        s1n0 -->|l3| s1n1
+    end
+    subgraph sec2 [Merge_Markdup 2]
+        s2n0 -->|l4| s2n1
+    end
+    subgraph sec3 [Bam 3]
+        s3n0 -->|l4| s3n1
+        s3n1 -->|l4| s3n2
+    end
+    subgraph sec4 [Pca 4]
+        s4n1 -->|l4| s4n2
+    end
+    s0n4 -->|l3| s1n0
+    s1n1 -->|l0| s2n0
+    s2n1 -->|l0,l2| s3n0
+    s3n2 -->|l0| s4n2
+    s0n2 -->|l0| s3n2
+    s0n4 -->|l2| s2n0
+    s2n0 -->|l4| s4n1
