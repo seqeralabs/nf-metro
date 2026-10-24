@@ -2384,7 +2384,7 @@
   "status": "defensive"
  },
  "corridor_cohort_integration.py::if not all(isfinite(item) for item in coordinates):::#1": {
-  "note": "Owner-frame finiteness raise. The builder reads each coordinate from a compiled allocation, landing or grant, which the solver and patch preparation already require to be finite, so a frame it builds always passes. Reached only by a hand-built frame; tests/test_corridor_cohort_acceptance.py::test_accepted_plan_constructor_fails_closed drives it.",
+  "note": "Owner-frame finiteness raise. Accepted coordinates and longitudinal extents come from the solver and patch preparation, and a grant's source is its recipe's or variable's coordinate, all required to be finite. An endpoint landing's source coordinate is a raw route point the solver never sees; it is finite because the ledger claim it derives from must be (RouteReservationClaim rejects a non-finite allocation coordinate). A frame the builder produces therefore always passes; the raise is reached only by a hand-built frame, and tests/test_corridor_cohort_acceptance.py::test_accepted_plan_constructor_fails_closed drives it.",
   "status": "defensive"
  }
 }

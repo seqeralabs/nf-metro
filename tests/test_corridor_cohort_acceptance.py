@@ -363,6 +363,10 @@ def _nan_coordinate(record):
     return replace(record.owners[0], accepted_coordinate=math.nan)
 
 
+def _nan_source(record):
+    return replace(record.owners[0], source_coordinate=math.nan)
+
+
 def _infinite_extent(record):
     return replace(_member_segment(record), longitudinal_extent=(0.0, math.inf))
 
@@ -385,6 +389,7 @@ def _infinite_extent(record):
             id="recipe-of-another-owner",
         ),
         pytest.param(_nan_coordinate, "non-finite coordinate", id="nan-coordinate"),
+        pytest.param(_nan_source, "non-finite coordinate", id="nan-source"),
         pytest.param(_infinite_extent, "non-finite coordinate", id="infinite-extent"),
     ],
 )
