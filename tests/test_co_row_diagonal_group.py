@@ -29,6 +29,7 @@ from nf_metro.themes import resolve_theme
 
 TOPOLOGIES = Path(__file__).resolve().parent.parent / "examples" / "topologies"
 SHARED_DIAGONAL = TOPOLOGIES / "co_row_feeders_shared_diagonal.mmd"
+SHARED_DIAGONAL_BT = TOPOLOGIES / "co_column_feeders_shared_diagonal_bt.mmd"
 
 # Spread that ``_spread_diagonal_bundles`` puts between two lanes sharing one
 # diagonal, on each side of the centreline.
@@ -108,26 +109,55 @@ def _diagonal_start(points: list[tuple[float, float]]) -> float:
     raise AssertionError(f"route never leaves its source row: {points}")
 
 
-def test_co_row_feeders_dive_together_without_crossing() -> None:
-    plan, _svg = _render(SHARED_DIAGONAL.read_text(), SHARED_DIAGONAL.parent)
-    feeders = [
-        (route, points)
-        for route, points in zip(plan.routes, plan.route_polylines, strict=True)
-        if route.edge.target.startswith("sec0__exit_right")
-        and points[0][1] < points[-1][1] - COORD_TOLERANCE
-    ]
-    assert {route.line_id for route, _ in feeders} == {"l1", "l2"}
-    assert len({route.edge.source for route, _ in feeders}) == 2
-
-    (_, first), (_, second) = feeders
-    crossings = [
+def _proper_crossings(
+    first: list[tuple[float, float]], second: list[tuple[float, float]]
+) -> list[tuple[float, float]]:
+    return [
         point
         for a, b in itertools.pairwise(first)
         for c, d in itertools.pairwise(second)
         if (point := segments_properly_cross(a, b, c, d, reject_collinear_touch=False))
         is not None
     ]
-    assert crossings == []
+
+
+@pytest.mark.parametrize(
+    "path", [SHARED_DIAGONAL, SHARED_DIAGONAL_BT], ids=lambda path: path.stem
+)
+def test_feeders_of_one_exit_port_never_cross_twice(path: Path) -> None:
+    plan, _svg = _render(path.read_text(), path.parent)
+    by_port: dict[str, list[tuple[str, str, list[tuple[float, float]]]]] = {}
+    for route, points in zip(plan.routes, plan.route_polylines, strict=True):
+        if route.edge.target.startswith("sec0__exit_"):
+            by_port.setdefault(route.edge.target, []).append(
+                (route.line_id, route.edge.source, points)
+            )
+    pairs = [
+        (a_source, b_source, len(_proper_crossings(a_points, b_points)))
+        for feeders in by_port.values()
+        for (a_line, a_source, a_points), (
+            b_line,
+            b_source,
+            b_points,
+        ) in itertools.combinations(feeders, 2)
+        if a_line != b_line and a_source != b_source
+    ]
+    assert pairs
+    assert [pair for pair in pairs if pair[2] > 1] == []
+
+
+def test_co_row_feeders_dive_together() -> None:
+    plan, _svg = _render(SHARED_DIAGONAL.read_text(), SHARED_DIAGONAL.parent)
+    feeders = [
+        points
+        for route, points in zip(plan.routes, plan.route_polylines, strict=True)
+        if route.edge.target.startswith("sec0__exit_right")
+        and points[0][1] < points[-1][1] - COORD_TOLERANCE
+    ]
+    assert len(feeders) == 2
+
+    first, second = feeders
+    assert _proper_crossings(first, second) == []
     assert abs(_diagonal_start(first) - _diagonal_start(second)) <= (
         2 * _BUNDLE_SPREAD + COORD_TOLERANCE
     )
@@ -152,16 +182,20 @@ def test_group_with_a_member_another_handler_draws_is_declined(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     text = SHARED_DIAGONAL.read_text()
-    real = core._drawn_by_diagonal_fallthrough
+    real = core._co_row_feeder
 
     def helper_drawn_elsewhere(edge, ctx, rail_internal):  # type: ignore[no-untyped-def]
         if edge.source.startswith("__bypass_"):
-            return False
+            return None
         return real(edge, ctx, rail_internal)
 
-    monkeypatch.setattr(core, "_drawn_by_diagonal_fallthrough", helper_drawn_elsewhere)
+    monkeypatch.setattr(core, "_co_row_feeder", helper_drawn_elsewhere)
     declined = _render(text, SHARED_DIAGONAL.parent)[1]
     assert declined == _render_without_groups(monkeypatch, text, SHARED_DIAGONAL.parent)
+
+
+_SOURCE_ROW = 120.0
+_TARGET_ROW = 140.0
 
 
 def _feeder(
@@ -176,8 +210,8 @@ def _feeder(
         key=(source, "target", f"line_{source}"),
         source_run=source_run,
         window=DiagonalWindow(window[0], window[1], *floors),
-        source_lane=lanes[0],
-        target_lane=lanes[1],
+        source_lateral=_SOURCE_ROW + lanes[0],
+        target_lateral=_TARGET_ROW + lanes[1],
     )
 
 
@@ -185,8 +219,6 @@ def _solve(*feeders: CoRowFeeder) -> tuple[float, float] | None:
     return shared_co_row_window(
         feeders,
         flow=1.0,
-        source_row=120.0,
-        target_row=140.0,
         target_run=366.0,
         lane_step=4.0,
     )
@@ -204,8 +236,6 @@ def test_mirrored_flow_adopts_the_nearest_source_window() -> None:
     assert shared_co_row_window(
         (far, near),
         flow=-1.0,
-        source_row=120.0,
-        target_row=140.0,
         target_run=634.0,
         lane_step=4.0,
     ) == (700.0, 670.0)
@@ -232,4 +262,10 @@ def test_feeders_that_do_not_share_the_row_are_left_alone() -> None:
 def test_shared_window_below_a_member_source_floor_is_declined() -> None:
     far = _feeder("far", 88.0, (321.0, 351.0), (8.0, 8.0), floors=(220.0, 10.0))
     near = _feeder("near", 280.0, (300.0, 330.0), (4.0, 4.0))
+    assert _solve(far, near) is None
+
+
+def test_shared_window_inside_a_member_target_floor_is_declined() -> None:
+    far = _feeder("far", 88.0, (321.0, 351.0), (8.0, 8.0), floors=(10.0, 30.0))
+    near = _feeder("near", 280.0, (300.0, 340.0), (4.0, 4.0))
     assert _solve(far, near) is None

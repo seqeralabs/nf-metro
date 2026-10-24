@@ -42,7 +42,7 @@ from nf_metro.layout.routing.bundle import (
 from nf_metro.layout.routing.centrelines import (
     gather_member_edges,
 )
-from nf_metro.layout.routing.co_row import DiagonalWindow
+from nf_metro.layout.routing.co_row import CoRowFeeder, DiagonalWindow
 from nf_metro.layout.routing.common import (
     RoutedPath,
 )
@@ -640,6 +640,24 @@ def _route_diagonal(
         points=diagonal_centreline(
             direction, (src.x, src.y), (tgt.x, tgt.y), diag_start_x, diag_end_x
         ),
+    )
+
+
+def intra_co_row_feeder(
+    edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
+) -> CoRowFeeder:
+    """*edge* as a co-row feeder of the :func:`_route_diagonal` fallthrough.
+
+    The route's offsets are deferred Y shifts, so each lane is drawn at its
+    station's Y plus that station's offset for the line.
+    """
+    offsets = ctx.station_offsets or {}
+    return CoRowFeeder(
+        key=(edge.source, edge.target, edge.line_id),
+        source_run=src.x,
+        window=_diagonal_window(edge, src, tgt, ctx),
+        source_lateral=src.y + offsets.get((edge.source, edge.line_id), 0.0),
+        target_lateral=tgt.y + offsets.get((edge.target, edge.line_id), 0.0),
     )
 
 

@@ -68,14 +68,15 @@ The order in `route_edges` is:
 3. `_route_entry_runway` handles a flow-side entry port reaching a deep internal station.
    It compresses the diagonal into the entry region and runs a horizontal runway past the bypassed early-layer stations.
 4. `_route_intra_section` handles the general local case: diagonals, cross-row fold routing and straight lines.
-   Its diagonal fallthrough, `_route_diagonal`, picks each edge's own window, except for a co-row group (`co_row.py`): feeders of one target whose sources ride one row together and whose own windows would cross twice.
-   After route-system planning, and before any edge is emitted, `plan_co_row_diagonal_groups` gives such a group the window of the member whose source sits nearest the target.
-   A group is declined when any member is drawn by another handler, or when that window breaks a member's endpoint straights.
 
 This fan-out exercises all four handler families at once.
 Inter-section L-shapes connect the sections, TB-section routing applies inside the vertical connector, entry runways compress the diagonal at each section's input port, and intra-section diagonals handle the station-to-station edges within each horizontal section.
 
 <Metro src="examples/guide/04_directions.mmd" purpose="reference" />
+
+Both diagonal handlers, `_route_diagonal` and the vertical-flow `_section_link_route`, pick each edge's own window, except for a co-row group (`co_row.py`): feeders of one target whose sources ride one row (one column in a vertical-flow section) together and whose own windows would cross twice.
+After route-system planning, and before any edge is emitted, `plan_co_row_diagonal_groups` gives such a group the window of the member whose source sits nearest the target.
+A group is declined when any member is drawn by another handler, or when that window breaks a member's endpoint straights.
 
 After all edges are routed, `route_edges` runs a series of post-passes that adjust the assembled polylines as a set, covering diagonal spreading, gap and trunk slot materialization, and same-line coincidence.
 Source-turn segments, member-template gap channels, and the convergence trunks and joins the planners own are immutable during these passes.
@@ -237,7 +238,7 @@ Accept a small offset between port and station instead, and handle the geometry 
 | `inter_section_handlers.py` | handler 1 family: bypass, left/right entry wraps, around-section, inter-row corridors, stepped descent, L-shape                                                                                                                           |
 | `tb_handlers.py`            | TB section shapes dispatched by `_route_tb_section` over `_TB_SECTION_SHAPES` (`_route_tb_internal`, `_route_tb_lr_exit`, `_route_tb_lr_entry`, `_route_perp_entry`, `_route_perp_entry_from_corridor`) and `_compute_diagonal_placement` |
 | `intra_handlers.py`         | `_route_entry_runway` and `_route_intra_section` (the general intra-section fallback)                                                                                                                                                     |
-| `co_row.py`                 | shared diagonal windows for co-row feeders of one target (`plan_co_row_diagonal_groups`), read by `_route_diagonal`                                                                                                                       |
+| `co_row.py`                 | shared diagonal windows for co-row feeders of one target (`plan_co_row_diagonal_groups`), read by the diagonal handlers                                                                                                                   |
 | `bundle.py`                 | constructive bundle-curve builders (`build_concentric_bundle`, `build_tapered_bundle`, `build_offset_bundle`); fans a centerline into per-line offset paths with concentric corners                                                       |
 | `centrelines.py`            | centerline templates and bundle-gathering helpers (`gather_member_edges`, `route_along`, `route_tapered`, …) layered over `bundle.py`                                                                                                     |
 | `exit_turns.py`             | complete pre-routing exit-group plans, active-lane compaction, handler consumption, and planner-owned geometry invariants                                                                                                                 |

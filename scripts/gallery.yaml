@@ -1421,6 +1421,14 @@ gallery:
       leaves gather_dedup on the same row, and both drop into one exit port.
       The two feeders turn down on one shared diagonal instead of each picking
       its own, so green does not dive first, cross blue, and get crossed back.
+  - id: co_column_feeders_shared_diagonal_bt
+    source_dir: examples/topologies
+    category: Bypass Routing
+    description:
+      The bottom-to-top counterpart. Red bypasses fastqc_merge_sort, pca_call
+      and report up the section's column while blue leaves pca_call on the same
+      column, and both climb into one top exit port. They leave the column on
+      one shared diagonal, so blue does not cut across red and get crossed back.
   - id: bypass_label_rake_left
     source_dir: examples/topologies
     category: Bypass Routing

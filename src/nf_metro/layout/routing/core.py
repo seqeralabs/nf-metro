@@ -17,7 +17,7 @@ from nf_metro.layout.constants import (
 )
 from nf_metro.layout.route_plan import RouteSystemId
 from nf_metro.layout.route_reservations import reservation_ids_by_claimant_member
-from nf_metro.layout.routing.co_row import plan_co_row_diagonal_groups
+from nf_metro.layout.routing.co_row import CoRowFeeder, plan_co_row_diagonal_groups
 from nf_metro.layout.routing.common import (
     RoutedPath,
 )
@@ -71,12 +71,12 @@ from nf_metro.layout.routing.inter_section_handlers import (  # noqa: F401
     is_inter_section_edge,
 )
 from nf_metro.layout.routing.intra_handlers import (  # noqa: F401
-    _diagonal_window,
     _intra_section_shape_route,
     _is_side_branch_ascent,
     _route_diagonal,
     _route_entry_runway,
     _route_intra_section,
+    intra_co_row_feeder,
 )
 from nf_metro.layout.routing.normalize import (  # noqa: F401
     _align_merge_fed_confluence_to_band,
@@ -144,6 +144,7 @@ from nf_metro.layout.routing.tb_handlers import (  # noqa: F401
     _route_tb_lr_entry,
     _route_tb_lr_exit,
     _route_tb_section,
+    section_link_co_row_feeder,
 )
 from nf_metro.layout.settlement_demand import (
     BoundaryClearanceRequirement,
@@ -201,6 +202,10 @@ def _published_boundary_clearance_owner_ids(
 
 _LOCAL_EDGE_HANDLERS = (_route_tb_section, _route_entry_runway)
 
+# Co-row feeders of the diagonals drawn by the first shape of a local handler's
+# own dispatch, consulted before the chain that claims those edges.
+_SHAPE_DIAGONAL_FEEDERS = (section_link_co_row_feeder,)
+
 
 def _route_classified_edge(
     edge: Edge,
@@ -231,22 +236,22 @@ def _route_classified_edge(
     return None
 
 
-def _drawn_by_diagonal_fallthrough(
+def _co_row_feeder(
     edge: Edge, ctx: _RoutingCtx, rail_internal: Container[_EdgeKey]
-) -> bool:
-    """Whether emission will draw *edge* with :func:`_route_diagonal`.
+) -> CoRowFeeder | None:
+    """*edge* as a co-row feeder when emission draws it with a diagonal handler.
 
     Mirrors the emission loop's ownership checks and the first-match order of
     :func:`_route_classified_edge`; every handler it consults is pure.
     """
     key = (edge.source, edge.target, edge.line_id)
     if key in ctx.skip_edges or key in rail_internal:
-        return False
+        return None
     if (
         ctx.convergences is not None
         and ctx.convergences.covering_edge_for_edge(edge) is not None
     ):
-        return False
+        return None
     member = (
         ctx.route_systems.member_for_edge(edge)
         if ctx.route_systems is not None
@@ -255,14 +260,20 @@ def _drawn_by_diagonal_fallthrough(
     if member is not None and (
         member.geometry_plan is not None or member.family_id is not None
     ):
-        return False
+        return None
     source, target = ctx.graph.edge_endpoints(edge)
     if is_inter_section_edge(edge, source, target, ctx):
-        return False
-    return all(
-        handler(edge, source, target, ctx) is None
+        return None
+    for diagonal_feeder in _SHAPE_DIAGONAL_FEEDERS:
+        feeder = diagonal_feeder(edge, source, target, ctx)
+        if feeder is not None:
+            return feeder
+    if any(
+        handler(edge, source, target, ctx) is not None
         for handler in (*_LOCAL_EDGE_HANDLERS, _intra_section_shape_route)
-    )
+    ):
+        return None
+    return intra_co_row_feeder(edge, source, target, ctx)
 
 
 def _route_edges(  # noqa: C901
@@ -420,10 +431,7 @@ def _route_edges(  # noqa: C901
     )
     ctx.co_row_diagonal_groups = plan_co_row_diagonal_groups(
         ctx,
-        drawn_by_diagonal=lambda edge: _drawn_by_diagonal_fallthrough(
-            edge, ctx, rail_internal
-        ),
-        natural_window=_diagonal_window,
+        feeder_for=lambda edge: _co_row_feeder(edge, ctx, rail_internal),
     )
     execution = planning.exit_turns
     member_geometry = planning.member_geometry
