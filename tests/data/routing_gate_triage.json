@@ -19,6 +19,14 @@
   "note": "Co-row group decline when the shared window ends inside another member's target straight: the nearest member's short run fell back to the bare minimum target straight while a farther member keeps the target's join-label clearance. The 8,000-map corpus reaches it (realistic/f8403712, into fastqc_summarise), but that map aborts later with CurveInvariantError with and without the rule, and no reduction of it renders. Pinned by test_shared_window_inside_a_member_target_floor_is_declined.",
   "status": "needs-review"
  },
+ "co_row.py::if any(::#1": {
+  "note": "Co-row group decline when the shared window would run two lines from different sources closer than half a lane step apart across the diagonal, even after the diagonal spread pass slides the group to restore its target-end gap. Reachable (two sources whose lanes sit on one lateral at the source end); no swept fixture presents one. Pinned by test_shared_window_running_two_lines_together_is_declined.",
+  "status": "needs-review"
+ },
+ "co_row.py::if source_gap * target_gap < 0:::#1": {
+  "note": "_diagonal_separation skips a pair whose lanes swap sides between the source and target ends: across one shared window they cross once rather than run together, so there is no gap to keep. Reachable in a firing group that also holds a pair with a forced single crossing; no swept fixture presents one.",
+  "status": "needs-review"
+ },
  "common.py::and abs(start[0] - other_start[0]) < required - COORD_TOLERANCE_FINE::#1": {
   "note": "The same-destination approach proposal is abandoned when a proposed member column would sit closer than the co-travelling lane clearance to another vertical channel. Every shipped corpus proposal clears that distance because the member gap allocator seats each corridor against its neighbours before the proposal is built, so the refusal arm has no fixture; revisit once a corpus map needs a proposal the allocator cannot pre-separate.",
   "status": "needs-review"
@@ -1365,6 +1373,10 @@
  },
  "postprocess.py::if ox is None:::#1": {
   "note": "Null guard in _align_uncentered_siblings. The loop iterates visible non-port stations and original_x is built from every non-port station, so ox is always present; the guard never fires.",
+  "status": "defensive"
+ },
+ "postprocess.py::if len(members) >= 2:::#1": {
+  "note": "The co-row spread skips a group with fewer than two diagonal routes left to spread. Every member of a planned group is drawn by a diagonal handler on the shared window, which has a non-zero run, so a group always reaches the spread whole; the skip is a defensive guard.",
   "status": "defensive"
  },
  "rail.py::if conn is not None:::#1": {

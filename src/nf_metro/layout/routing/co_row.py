@@ -17,6 +17,7 @@ diagonal handlers.
 from __future__ import annotations
 
 import itertools
+import math
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
@@ -128,7 +129,9 @@ def shared_co_row_window(
     shared window would.  A swap counts only past half a lane step: a smaller
     one is a graze inside the drawn lane width, which the post-emission
     settling passes can also undo.  The shared window is the nearest source's,
-    declined when it breaks another member's source or target straight.
+    declined when it breaks another member's source or target straight, or
+    when it runs two lines from different sources closer than half a lane
+    step apart across the diagonal.
     """
     tolerance = lane_step / 2
     if max(flow * f.source_run for f in feeders) >= min(
@@ -154,7 +157,37 @@ def shared_co_row_window(
             or target_straight < f.window.target_floor - COORD_TOLERANCE_FINE
         ):
             return None
+    if any(
+        _diagonal_separation(a, b, shared) < tolerance
+        for a, b in itertools.combinations(feeders, 2)
+        if a.key[0] != b.key[0] and a.key[2] != b.key[2]
+    ):
+        return None
     return shared
+
+
+def _diagonal_separation(
+    first: CoRowFeeder, second: CoRowFeeder, window: tuple[float, float]
+) -> float:
+    """Closest perpendicular gap of two lanes drawn across one shared *window*.
+
+    The diagonal spread pass slides a group's lanes along the run until their
+    target-end lateral gap is a full perpendicular gap, and the source end keeps
+    its own lateral gap's share plus that slide.  Lanes that swap sides cross
+    rather than run together, so they have no gap to keep.
+    """
+    source_gap = first.source_lateral - second.source_lateral
+    target_gap = first.target_lateral - second.target_lateral
+    if source_gap * target_gap < 0:
+        return math.inf
+    run = abs(window[1] - window[0])
+    lateral = max(
+        abs(first.target_lateral - first.source_lateral),
+        abs(second.target_lateral - second.source_lateral),
+    )
+    hypot = math.hypot(run, lateral)
+    source_end = (abs(source_gap) * run + abs(target_gap) * (hypot - run)) / hypot
+    return min(abs(target_gap), source_end)
 
 
 def _run_and_lateral(station: Station, along_x: bool) -> tuple[float, float]:

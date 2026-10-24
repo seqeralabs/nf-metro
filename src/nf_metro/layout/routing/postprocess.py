@@ -78,6 +78,21 @@ def _spread_diagonal_bundles(routes: list[RoutedPath], ctx: _RoutingCtx) -> None
         for rp in routes
     ]
 
+    # A co-row group draws feeders from several sources on one shared diagonal,
+    # so it spreads as one bundle at its target before a source's fan hub can
+    # claim one member and slide it against the rest.
+    diagonal_routes = {_edge_key(rp): rp for rp in routes if _is_diagonal_route(rp)}
+    for co_row in dict.fromkeys(ctx.co_row_diagonal_groups.values()):
+        members = [
+            diagonal_routes[key]
+            for key in co_row.members
+            if key in diagonal_routes
+            and diagonal_routes[key].exit_lane_transition_plan_id is None
+        ]
+        if len(members) >= 2:
+            _apply_diagonal_spread(members, co_row.target, ctx=ctx)
+        spread.update(_edge_key(rp) for rp in members)
+
     # Spread fan / convergence hubs first: a hub already carries most multi-line
     # bundles, and grouping a whole fan together keeps it as compact as the hub
     # geometry allows (the section-spacing phase reserves room for whatever this

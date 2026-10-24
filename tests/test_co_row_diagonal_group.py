@@ -269,3 +269,9 @@ def test_shared_window_inside_a_member_target_floor_is_declined() -> None:
     far = _feeder("far", 88.0, (321.0, 351.0), (8.0, 8.0), floors=(10.0, 30.0))
     near = _feeder("near", 280.0, (300.0, 340.0), (4.0, 4.0))
     assert _solve(far, near) is None
+
+
+def test_shared_window_running_two_lines_together_is_declined() -> None:
+    far = _feeder("far", 88.0, (321.0, 351.0), (4.0, 8.0))
+    near = _feeder("near", 280.0, (300.0, 330.0), (4.0, 4.0))
+    assert _solve(far, near) is None
