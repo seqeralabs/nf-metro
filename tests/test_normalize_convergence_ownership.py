@@ -32,11 +32,14 @@ def _route(
     )
 
 
-def test_fanout_traverse_bundling_uses_complete_group_ownership() -> None:
+@pytest.mark.parametrize("ownership", ["owned", "member_owned"])
+def test_fanout_traverse_bundling_uses_complete_group_ownership(
+    ownership: str,
+) -> None:
     owned = _route(
         "owned",
         [(0.0, 0.0), (10.0, 0.0), (10.0, 40.0), (90.0, 40.0), (90.0, 90.0)],
-        owned=(3,),
+        **{ownership: (3,)},
     )
     sibling = _route(
         "sibling",

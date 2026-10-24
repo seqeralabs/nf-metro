@@ -755,8 +755,16 @@
   "note": "Lookup guard on ctx.fork_targets ids, which are collected from graph edges and therefore always resolve in graph.stations; a missing sibling is only possible for a hand-built context whose fork map names stations the graph does not carry.",
   "status": "defensive"
  },
+ "member_geometry.py::for mismatch in _owned_corner_radius_mismatches(route, plan, radius_index):::#1": {
+  "note": "validate_member_geometry_emission raises on the first owned corner radius drawn off its frozen plan. The loop body is the raise, so it is entered only when _owned_corner_radius_mismatches yields, which no corpus render does for the reason given at that helper's own radius gates.",
+  "status": "defensive"
+ },
+ "member_geometry.py::for mismatch in _owned_segment_mismatches(route, plan):::#1": {
+  "note": "validate_member_geometry_emission raises on the first owned segment drawn off its frozen plan. The loop body is the raise, so it is entered only when _owned_segment_mismatches yields, which no corpus render does. Exercised by tests/test_corridor_cohort_integration.py::test_member_geometry_emission_rejects_a_moved_owned_point.",
+  "status": "defensive"
+ },
  "member_geometry.py::if tuple(route.points[rank : rank + 2]) != plan.points[rank : rank + 2]:::#1": {
-  "note": "Post-emission assertion in validate_member_geometry_emission: an owned segment point drawn off its frozen plan. Every pass that could move one anchors route-system-owned segments, so no corpus render reaches the raise. Exercised by tests/test_corridor_cohort_integration.py::test_member_geometry_emission_rejects_a_moved_owned_point.",
+  "note": "An owned segment point drawn off its frozen plan, the check validate_member_geometry_emission and the shadow oracle share. Every pass that could move one anchors route-system-owned segments, so no corpus render reaches the mismatch arm. Exercised by tests/test_corridor_cohort_integration.py::test_member_geometry_emission_rejects_a_moved_owned_point.",
   "status": "defensive"
  },
  "member_geometry.py::and assignment.run_direction in {Direction.R, Direction.L}::#1": {

@@ -10,7 +10,6 @@ from itertools import combinations
 from pathlib import Path
 from types import SimpleNamespace
 
-import cohort_shadow_oracle
 import pytest
 from hash_seed_oracle import observe_across_hash_seeds
 
@@ -2200,6 +2199,23 @@ _JOINT_SOLVE_GRANTS = {
 }
 
 
+def _run_allocation(record: SimpleNamespace, witness_id: str, axis: int):
+    """The allocation of the member run *witness_id* names along *axis*, if any."""
+    witness = next(
+        item for item in record.model.witnesses if item.footprint_id == witness_id
+    )
+    if witness.axis != axis or not record.model.claim_ids_by_variable.get(
+        witness.coordinate_variable_id or "", ()
+    ):
+        return None
+    return next(
+        item
+        for item in record.plan.allocations
+        if (item.member_id, item.edge_key, item.segment_rank)
+        == (witness.member_id, witness.edge_key, witness.segment_rank)
+    )
+
+
 @pytest.mark.parametrize("relative_path", sorted(_JOINT_SOLVE_GRANTS))
 def test_joint_solve_grant_matches_member_allocation(
     monkeypatch: pytest.MonkeyPatch, relative_path: str
@@ -2208,9 +2224,8 @@ def test_joint_solve_grant_matches_member_allocation(
 
     A bundled trunk sits exactly its bundle delta from the run's allocation,
     and a trunk crowded by a distinct line's run clears that run's allocation
-    by the pitch its forbidden interval states.  Where either side could give
-    way, the member keeps its coordinate, so the trunk grant is the one the
-    compile decides with the members where they stand.
+    by the pitch its forbidden interval states, with the member run left at
+    the coordinate it is drawn at.
     """
     records = _capture_cohort_compiles(monkeypatch, relative_path)
 
@@ -2221,26 +2236,10 @@ def test_joint_solve_grant_matches_member_allocation(
     )
     couplings = 0
     for record in records:
-        witnesses = {item.footprint_id: item for item in record.model.witnesses}
-        allocations = {
-            (item.member_id, item.edge_key, item.segment_rank): item
-            for item in record.plan.allocations
-        }
         grants = {grant.variable_id: grant for grant in record.plan.scalar_grants}
-
-        def run_allocation(witness_id: str, axis: int):
-            witness = witnesses[witness_id]
-            if witness.axis != axis or not record.model.claim_ids_by_variable.get(
-                witness.coordinate_variable_id or "", ()
-            ):
-                return None
-            return allocations[
-                (witness.member_id, witness.edge_key, witness.segment_rank)
-            ]
-
         for bundle in record.model.bundles:
             grant = grants[bundle.variable_id]
-            allocation = run_allocation(bundle.witness_id, grant.variable.axis)
+            allocation = _run_allocation(record, bundle.witness_id, grant.variable.axis)
             if allocation is None:
                 continue
             couplings += 1
@@ -2254,7 +2253,9 @@ def test_joint_solve_grant_matches_member_allocation(
             grant = grants.get(interval.member_id)
             if grant is None:
                 continue
-            allocation = run_allocation(interval.obstacle_id, grant.variable.axis)
+            allocation = _run_allocation(
+                record, interval.obstacle_id, grant.variable.axis
+            )
             if allocation is None:
                 continue
             couplings += 1
@@ -2321,29 +2322,3 @@ def test_member_geometry_emission_rejects_a_moved_owned_point(
 
     with pytest.raises(RuntimeError, match="owned segment"):
         real_validate([route], execution)
-
-
-@pytest.mark.parametrize("relative_path", cohort_shadow_oracle.repository_maps())
-def test_shadow_oracle_failures_match_the_ratchet(relative_path: str) -> None:
-    """Every repository map the shadow oracle fails is listed, and no other.
-
-    A listed map that starts passing is removed from the list in the same
-    change, so the ratchet records exactly the maps still drawn off their plan.
-    """
-    failure = cohort_shadow_oracle.shadow_failure(ROOT / relative_path)
-    listed = relative_path in set(cohort_shadow_oracle.read_ratchet())
-
-    if listed:
-        assert failure is not None, (
-            f"{relative_path} passes the shadow oracle; remove it from "
-            f"{cohort_shadow_oracle.RATCHET_PATH.relative_to(ROOT)}"
-        )
-    else:
-        assert failure is None, failure
-
-
-def test_shadow_ratchet_lists_only_repository_maps() -> None:
-    listed = cohort_shadow_oracle.read_ratchet()
-
-    assert list(listed) == sorted(set(listed))
-    assert set(listed) <= set(cohort_shadow_oracle.repository_maps())

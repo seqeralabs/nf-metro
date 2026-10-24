@@ -51,7 +51,7 @@ Every other guard and check is reachable from `compute_layout` or rendering.
 
 The corridor-cohort shadow oracle in `tests/cohort_shadow_oracle.py` is a Tier C harness rather than a registered check.
 It renders each map with every compiled cohort plan published and the compiling observation drawn, then requires the render invariants to pass and the drawn routes to match the plan on every owned segment point and corner.
-Its ratchet, `tests/data/cohort_shadow_ratchet.txt`, holds the repository maps it fails today, and the list may only shrink.
+Its ratchet, `tests/data/cohort_shadow_ratchet.txt`, holds the repository maps it fails today.
 
 ## Registries
 

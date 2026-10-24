@@ -1729,9 +1729,9 @@ fan plan states.
 - **Lifecycle:** invariant - `validate_member_geometry_emission` checks that
   the final planned paths retain the owned segment ranks, the exact points of
   every owned segment, and the exact coordinates of every frozen gap channel
-  after normalization. Same-line fan-traverse coincidence and bypass nesting
-  anchor a route-system-owned segment as they anchor a convergence-owned one,
-  so neither moves a coordinate the plan decided.
+  after normalization. Fan-traverse coincidence and bundling and bypass
+  nesting anchor a route-system-owned segment as they anchor a
+  convergence-owned one, so none of them moves a coordinate the plan decided.
 
 ## Post-layout routing boundary: convergence planning
 

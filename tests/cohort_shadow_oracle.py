@@ -11,8 +11,8 @@ It is a test harness, not a render stage: the substitutions live only inside
 :func:`shadow_observation`, so production renders never take this path.
 
 ``tests/data/cohort_shadow_ratchet.txt`` names the repository maps the oracle
-fails today; ``test_corridor_cohort_integration.py`` holds every repository map
-to that list in both directions.  Run as a script to sweep any other corpus::
+fails today; ``test_cohort_shadow_ratchet.py`` holds every repository map to
+that list in both directions.  Run as a script to sweep any other corpus::
 
     PYTHONPATH=src python tests/cohort_shadow_oracle.py --jobs jobs.jsonl \\
         --out shadow.jsonl --nproc 8
@@ -31,6 +31,7 @@ import sys
 import warnings
 from collections.abc import Iterator, Sequence
 from contextlib import ExitStack, contextmanager
+from functools import cache
 from multiprocessing import Pool
 from pathlib import Path
 from typing import Any
@@ -56,17 +57,24 @@ class ShadowPlanDrawnMismatch(AssertionError):
     """The drawn routes differ from the plan the shadow render published."""
 
 
+@cache
 def repository_maps() -> tuple[str, ...]:
-    """Every repository map the shadow ratchet covers, repository-relative."""
+    """Every repository map the shadow ratchet covers, repository-relative.
+
+    Nextflow DAG fixtures and deliberately invalid maps are left out: the
+    ordinary render rejects both, so the oracle has no verdict on them.
+    """
     return tuple(
         sorted(
             str(path.relative_to(ROOT))
             for root in ("examples", "tests/fixtures")
             for path in (ROOT / root).rglob("*.mmd")
+            if not {"nextflow", "invalid"} & set(path.relative_to(ROOT).parts)
         )
     )
 
 
+@cache
 def read_ratchet() -> tuple[str, ...]:
     return tuple(
         line.strip()
@@ -102,32 +110,7 @@ def planned_drawn_mismatches(
         if route is None:
             mismatches.append(f"member plan {plan.id} has no drawn route")
             continue
-        for rank in plan.owned_segment_ranks:
-            planned = plan.points[rank : rank + 2]
-            actual = route.points[rank : rank + 2]
-            if len(actual) != len(planned) or any(
-                _differs(a, p)
-                for actual_point, planned_point in zip(actual, planned, strict=True)
-                for a, p in zip(actual_point, planned_point, strict=True)
-            ):
-                mismatches.append(
-                    f"member plan {plan.id} owned segment {rank} planned "
-                    f"{planned} drawn {tuple(actual)}"
-                )
-        planned_radii = plan.curve_radii or ()
-        drawn_radii = route.curve_radii or ()
-        owned = set(plan.owned_segment_ranks)
-        for radius_index, planned_radius in enumerate(planned_radii):
-            if not owned & {radius_index, radius_index + 1}:
-                continue
-            drawn_radius = (
-                drawn_radii[radius_index] if radius_index < len(drawn_radii) else None
-            )
-            if drawn_radius is None or _differs(drawn_radius, planned_radius):
-                mismatches.append(
-                    f"member plan {plan.id} owned corner {radius_index} planned "
-                    f"radius {planned_radius} drawn {drawn_radius}"
-                )
+        mismatches.extend(member_geometry.owned_geometry_mismatches(route, plan))
     accepted = route_plan.accepted_corridor_cohort_plan
     if accepted is not None:
         for frame in accepted.owners:

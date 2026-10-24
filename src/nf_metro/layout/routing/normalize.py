@@ -1759,7 +1759,7 @@ def _same_line_overlapping_traverses(
 def _fanout_traverse_group_is_movable(members: Sequence[_TraverseLeg]) -> bool:
     """Whether one normalisation decision may re-rank the complete fan."""
     return not any(
-        convergence_owns_segment_boundary(member.route, member.idx)
+        route_system_owns_segment_boundary(member.route, member.idx)
         for member in members
     )
 

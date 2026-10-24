@@ -740,6 +740,8 @@
   "member_geometry.py::elif isinstance(region, RowGapRegion):::#1",
   "member_geometry.py::for claim in claims:::#1",
   "member_geometry.py::for failure in error.failures:::#1",
+  "member_geometry.py::for mismatch in _owned_corner_radius_mismatches(route, plan, radius_index):::#1",
+  "member_geometry.py::for mismatch in _owned_segment_mismatches(route, plan):::#1",
   "member_geometry.py::for obstacle in typed_obstacles.values():::#1",
   "member_geometry.py::for request in scalar_claims:::#1",
   "member_geometry.py::for request in scalar_claims:::#2",
