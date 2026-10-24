@@ -59,6 +59,7 @@ from nf_metro.layout.routing.corridor_cohort_integration import (
 )
 from nf_metro.layout.routing.corridor_cohorts import (
     CorridorAllocationStatus,
+    CorridorForbiddenInterval,
     solve_corridor_cohorts,
 )
 from nf_metro.layout.routing.families import RouteFamilyId
@@ -1082,6 +1083,100 @@ def test_relation_spanning_two_orientation_buckets_fails_closed() -> None:
 
     with pytest.raises(CorridorCohortCompilationError, match="orientation"):
         _atomic_components(claims, physical, footprint_model)
+
+
+def test_scalar_couples_only_runs_in_the_lane_of_its_own_trunk_run() -> None:
+    """A scalar joins a member run only inside the lane its trunk run occupies.
+
+    The trunk's context claim sits in one row gap; a distinct line's run in
+    another row gap still gets a forbidden interval along the trunk's span,
+    but a component holds one ``(region, orientation)`` lane, so that run
+    stays where it is drawn rather than joining the trunk's component.
+    """
+    trunk = _bound_claim(
+        claim_id="trunk-context",
+        region=RowGapRegion(1, 2),
+        orientation=CorridorOrientation.HORIZONTAL,
+        longitudinal_start=0.0,
+        longitudinal_end=100.0,
+        coordinate=236.0,
+    )
+    near = _bound_claim(
+        claim_id="near-run",
+        region=RowGapRegion(1, 2),
+        orientation=CorridorOrientation.HORIZONTAL,
+        longitudinal_start=0.0,
+        longitudinal_end=100.0,
+        coordinate=236.0,
+    )
+    far = _bound_claim(
+        claim_id="far-run",
+        region=RowGapRegion(0, 1),
+        orientation=CorridorOrientation.HORIZONTAL,
+        longitudinal_start=0.0,
+        longitudinal_end=60.0,
+        coordinate=44.0,
+    )
+    claims = (trunk, near, far)
+    scalar = _scalar_variable("trunk", axis=1, coordinate=236.0)
+    near_carrier = _scalar_variable("member-carrier|near", axis=1, coordinate=236.0)
+    far_carrier = _scalar_variable("member-carrier|far", axis=1, coordinate=44.0)
+    witnesses = tuple(
+        _footprint_witness(
+            footprint_id=f"witness:{claim.claim_id}",
+            member_id=claim.claim_id,
+            edge_key=("source", claim.claim_id, claim.claim_id),
+            axis=1,
+            coordinate=claim.coordinate,
+            longitudinal_start=claim.longitudinal_start,
+            longitudinal_end=claim.longitudinal_end,
+            coordinate_variable_id=variable.variable_id,
+        )
+        for claim, variable in ((near, near_carrier), (far, far_carrier))
+    )
+    footprint_model = _MemberFootprintModel(
+        (scalar, near_carrier, far_carrier),
+        witnesses,
+        {
+            scalar.variable_id: (),
+            near_carrier.variable_id: (near.claim_id,),
+            far_carrier.variable_id: (far.claim_id,),
+        },
+        (),
+        (),
+        tuple(
+            CorridorForbiddenInterval(
+                scalar.variable_id,
+                witness.footprint_id,
+                witness.coordinate - 8.0,
+                witness.coordinate + 8.0,
+                (0, 0),
+            )
+            for witness in witnesses
+        ),
+        scalar_aliases={trunk.claim_id: scalar.variable_id},
+    )
+
+    components = _atomic_components(
+        claims, _physical_components(claims), footprint_model
+    )
+
+    assert {
+        (
+            tuple(
+                sorted(
+                    claims[rank].claim_id
+                    for physical_rank in component.physical_ranks
+                    for rank in _physical_components(claims)[physical_rank]
+                )
+            ),
+            component.scalar_variable_ids,
+        )
+        for component in components
+    } == {
+        ((far.claim_id,), ()),
+        (tuple(sorted((trunk.claim_id, near.claim_id))), (scalar.variable_id,)),
+    }
 
 
 # --- Member footprint relation lowering through the scalar corridor solver ---

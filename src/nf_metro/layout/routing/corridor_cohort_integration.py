@@ -2391,7 +2391,9 @@ def _atomic_components(
     a scalar variable (one with no claim at all) resolves to its own node.  A
     scalar also joins the run its bundle holds it to, the member run its
     forbidden interval keeps it clear of, and every context claim it stands
-    for.  That relation participation is the only thing that ever joins two
+    for; a run outside the lanes of those context claims is not joined, as a
+    component holds one ``(region, orientation)`` lane, and stands where it is
+    drawn.  That relation participation is the only thing that ever joins two
     scalar nodes, or a scalar node to a physical group: sharing an axis unions
     nothing by itself.
     """
@@ -2431,11 +2433,32 @@ def _atomic_components(
         *footprint_model.orders,
         *footprint_model.contacts,
     )
+    claims_by_id = {claim.claim_id: claim for claim in claims}
+
+    def lane(claim_id: str) -> tuple[CorridorRegion, CorridorOrientation]:
+        ledger = claims_by_id[claim_id].ledger
+        return ledger.region, ledger.orientation
+
+    scalar_lanes: dict[str, set[tuple[CorridorRegion, CorridorOrientation]]] = {}
+    for claim_id, variable_id in footprint_model.scalar_aliases.items():
+        scalar_lanes.setdefault(variable_id, set()).add(lane(claim_id))
+
+    def in_scalar_lane(coupling: _RunCoupling) -> bool:
+        lanes = scalar_lanes.get(coupling.scalar_id)
+        return not lanes or all(
+            lane(claim_id) in lanes
+            for claim_id in footprint_model.claim_ids_by_variable[
+                coupling.run_variable_id
+            ]
+            if claim_id in claims_by_id
+        )
+
     coupled_pairs = (
         *(relation.participant_variable_ids for relation in relations),
         *(
             (coupling.scalar_id, coupling.run_variable_id)
             for coupling in footprint_model.run_couplings
+            if in_scalar_lane(coupling)
         ),
     )
     for participant_variable_ids in coupled_pairs:

@@ -1761,9 +1761,10 @@ fan plan states.
   the compile is related to the scalar as a variable, and every immutable
   context claim drawn on the trunk's own run stands for the scalar rather than
   an obstacle at its pre-grant coordinate, so the trunk and the members it is
-  coupled to solve in one component; a run no compile moves is a fixed
-  obstacle where it is drawn. Where either side could give way the members keep
-  their coordinate and the scalar takes the grant. Where those relations
+  coupled to solve in one component; a run no compile moves, or one outside
+  the `(region, orientation)` lane of the trunk's own context claims, is a
+  fixed obstacle where it is drawn. Where either side could give way the
+  members keep their coordinate and the scalar takes the grant. Where those relations
   cover the conflict, the grant already sits where
   `_pack_cotravelling_corridor_runs` and `_separate_distinct_cotravelling_trunks`
   would seat it, so their re-seat is a no-op. The passes themselves do not know
