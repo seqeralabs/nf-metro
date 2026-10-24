@@ -1,0 +1,26 @@
+%%metro title: Co-row feeders sharing one diagonal
+%%metro line: l1 | Green | #3cb44b
+%%metro line: l2 | Blue | #4363d8
+
+graph LR
+    subgraph sec0 [A]
+        %%metro exit: right | l1, l2
+        s0n0[gather_dedup]
+        s0n1[trim]
+        s0n2[pca_filter]
+        s0n0 -->|l1,l2| s0n1
+        s0n1 -->|l2| s0n2
+    end
+    subgraph sec1 [B]
+        %%metro direction: TB
+        s1n0[call_trim]
+    end
+    subgraph sec2 [C]
+        s2n0[assemble_call]
+        s2n1[report]
+        s2n0 -->|l1,l2| s2n1
+    end
+    s0n1 -->|l1| s2n0
+    s0n2 -->|l2| s2n0
+    s0n0 -->|l2| s1n0
+    s1n0 -->|l2| s2n1

@@ -8,6 +8,7 @@ module's public routing surface.
 
 from __future__ import annotations
 
+from collections.abc import Container
 from typing import TYPE_CHECKING
 
 from nf_metro.layout.constants import (
@@ -16,6 +17,7 @@ from nf_metro.layout.constants import (
 )
 from nf_metro.layout.route_plan import RouteSystemId
 from nf_metro.layout.route_reservations import reservation_ids_by_claimant_member
+from nf_metro.layout.routing.co_row import plan_co_row_diagonal_groups
 from nf_metro.layout.routing.common import (
     RoutedPath,
 )
@@ -66,8 +68,11 @@ from nf_metro.layout.routing.inter_section_handlers import (  # noqa: F401
     _route_top_entry_l_shape,
     _v1_corner_x,
     classify_inter_section_family,
+    is_inter_section_edge,
 )
 from nf_metro.layout.routing.intra_handlers import (  # noqa: F401
+    _diagonal_window,
+    _intra_section_shape_route,
     _is_side_branch_ascent,
     _route_diagonal,
     _route_entry_runway,
@@ -194,6 +199,9 @@ def _published_boundary_clearance_owner_ids(
     return (inherited_owner_ids & planned_owner_ids) | new_owner_ids
 
 
+_LOCAL_EDGE_HANDLERS = (_route_tb_section, _route_entry_runway)
+
+
 def _route_classified_edge(
     edge: Edge,
     ctx: _RoutingCtx,
@@ -215,12 +223,46 @@ def _route_classified_edge(
             observer=observer,
             planned_family_id=selected_family,
         )
-    for handler in (_route_tb_section, _route_entry_runway, _route_intra_section):
+    for handler in (*_LOCAL_EDGE_HANDLERS, _route_intra_section):
         route = handler(edge, source, target, ctx)
         if route is None:
             continue
         return route
     return None
+
+
+def _drawn_by_diagonal_fallthrough(
+    edge: Edge, ctx: _RoutingCtx, rail_internal: Container[_EdgeKey]
+) -> bool:
+    """Whether emission will draw *edge* with :func:`_route_diagonal`.
+
+    Mirrors the emission loop's ownership checks and the first-match order of
+    :func:`_route_classified_edge`; every handler it consults is pure.
+    """
+    key = (edge.source, edge.target, edge.line_id)
+    if key in ctx.skip_edges or key in rail_internal:
+        return False
+    if (
+        ctx.convergences is not None
+        and ctx.convergences.covering_edge_for_edge(edge) is not None
+    ):
+        return False
+    member = (
+        ctx.route_systems.member_for_edge(edge)
+        if ctx.route_systems is not None
+        else None
+    )
+    if member is not None and (
+        member.geometry_plan is not None or member.family_id is not None
+    ):
+        return False
+    source, target = ctx.graph.edge_endpoints(edge)
+    if is_inter_section_edge(edge, source, target, ctx):
+        return False
+    return all(
+        handler(edge, source, target, ctx) is None
+        for handler in (*_LOCAL_EDGE_HANDLERS, _intra_section_shape_route)
+    )
 
 
 def _route_edges(  # noqa: C901
@@ -375,6 +417,13 @@ def _route_edges(  # noqa: C901
         granted_clearance_owner_ids=boundary_clearance_owner_ids,
         prior_plan=reservations,
         coordinate_translations=reservation_translations,
+    )
+    ctx.co_row_diagonal_groups = plan_co_row_diagonal_groups(
+        ctx,
+        drawn_by_diagonal=lambda edge: _drawn_by_diagonal_fallthrough(
+            edge, ctx, rail_internal
+        ),
+        natural_window=_diagonal_window,
     )
     execution = planning.exit_turns
     member_geometry = planning.member_geometry

@@ -42,6 +42,7 @@ from nf_metro.layout.routing.bundle import (
 from nf_metro.layout.routing.centrelines import (
     gather_member_edges,
 )
+from nf_metro.layout.routing.co_row import DiagonalWindow
 from nf_metro.layout.routing.common import (
     RoutedPath,
 )
@@ -434,6 +435,17 @@ _INTRA_SECTION_SHAPES = (
 )
 
 
+def _intra_section_shape_route(
+    edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
+) -> RoutedPath | None:
+    """The route of the first :data:`_INTRA_SECTION_SHAPES` entry claiming *edge*."""
+    for shape in _INTRA_SECTION_SHAPES:
+        result = shape(edge, src, tgt, ctx)
+        if result is not None:
+            return result
+    return None
+
+
 def _route_intra_section(
     edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
 ) -> RoutedPath | None:
@@ -443,10 +455,9 @@ def _route_intra_section(
     when it owns the edge or ``None`` to pass; :func:`_route_diagonal` is the
     fall-through.
     """
-    for shape in _INTRA_SECTION_SHAPES:
-        result = shape(edge, src, tgt, ctx)
-        if result is not None:
-            return result
+    result = _intra_section_shape_route(edge, src, tgt, ctx)
+    if result is not None:
+        return result
     return _route_diagonal(edge, src, tgt, ctx)
 
 
@@ -614,6 +625,28 @@ def _route_diagonal(
     edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
 ) -> RoutedPath:
     """Route with horizontal runs and a 45-degree diagonal transition."""
+    group = ctx.co_row_diagonal_groups.get((edge.source, edge.target, edge.line_id))
+    if group is not None:
+        diag_start_x, diag_end_x = group.window
+    else:
+        window = _diagonal_window(edge, src, tgt, ctx)
+        diag_start_x, diag_end_x = window.start, window.end
+
+    section = ctx.graph.sections.get(src.section_id or "")
+    direction = section.direction if section else "LR"
+    return RoutedPath(
+        edge=edge,
+        line_id=edge.line_id,
+        points=diagonal_centreline(
+            direction, (src.x, src.y), (tgt.x, tgt.y), diag_start_x, diag_end_x
+        ),
+    )
+
+
+def _diagonal_window(
+    edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
+) -> DiagonalWindow:
+    """The run-axis diagonal *edge* takes on its own, with its endpoint straights."""
     sx, sy = src.x, src.y
     tx, ty = tgt.x, tgt.y
     dx = tx - sx
@@ -751,12 +784,4 @@ def _route_diagonal(
         is_fork_flag,
         is_join_flag,
     )
-
-    direction = section.direction if section else "LR"
-    return RoutedPath(
-        edge=edge,
-        line_id=edge.line_id,
-        points=diagonal_centreline(
-            direction, (sx, sy), (tx, ty), diag_start_x, diag_end_x
-        ),
-    )
+    return DiagonalWindow(diag_start_x, diag_end_x, src_min, tgt_min)
