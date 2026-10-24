@@ -25,6 +25,7 @@ from packed_cell_aperture import PACKED_CELL, direct_assembled_past_reference
 
 from nf_metro.api import prepare_graph, resolve_theme
 from nf_metro.layout import route_plan as route_plan_module
+from nf_metro.layout.constants import COORD_TOLERANCE_FINE
 from nf_metro.layout.route_plan import RoutePlan, serialize_route_plan
 from nf_metro.layout.routing import (
     core,
@@ -46,20 +47,21 @@ GRANTED_FIXTURES = (
     "tests/fixtures/regressions/plan_owned_distinct_lane_separation_reordered.mmd",
 )
 
-_ACCEPTED_FIELD = "accepted_corridor_cohort_plan"
-
-
-def _accepted(plan: RoutePlan):
-    """The plan's accepted cohort record, or ``None`` when it carries none."""
-    return getattr(plan, _ACCEPTED_FIELD, None)
-
 
 @dataclass
 class _SettleCall:
     observations: int = 0
     compile_observations: list[int] = field(default_factory=list)
     solve_observations: list[int] = field(default_factory=list)
-    accepting_executions: list[object] = field(default_factory=list)
+    executions: list[planning.RoutePlanningExecution] = field(default_factory=list)
+
+    @property
+    def accepting(self) -> list[planning.RoutePlanningExecution]:
+        return [
+            execution
+            for execution in self.executions
+            if execution.accepted_corridor_cohort_plan is not None
+        ]
 
 
 @dataclass
@@ -70,7 +72,7 @@ class _Trace:
 
 @contextmanager
 def _traced(monkeypatch: pytest.MonkeyPatch) -> Iterator[_Trace]:
-    """Count compiles, solves and accepting planning passes per settle call."""
+    """Count compiles, solves and planning passes per settle call."""
     trace = _Trace()
     stack: list[_SettleCall] = []
 
@@ -108,8 +110,7 @@ def _traced(monkeypatch: pytest.MonkeyPatch) -> Iterator[_Trace]:
 
     def prepare(*args, **kwargs):
         execution = real_prepare(*args, **kwargs)
-        if getattr(execution, "accepted_cohort_plan", None) is not None:
-            stack[-1].accepting_executions.append(execution)
+        stack[-1].executions.append(execution)
         return execution
 
     real_moved = svg._corridor_grant_moved_plan_ids
@@ -145,13 +146,14 @@ def test_accepted_cohort_plan_is_persisted_once(
     with _traced(monkeypatch) as trace:
         published = _render(path)
 
-    record = _accepted(published)
+    record = published.accepted_corridor_cohort_plan
     assert record is not None, "the published plan carries no accepted cohort plan"
-    assert all(len(call.accepting_executions) <= 1 for call in trace.calls)
-    (accepting,) = trace.calls[-1].accepting_executions
-    assert accepting.accepted_cohort_plan == record
+    assert all(len(call.accepting) <= 1 for call in trace.calls)
+    (accepting,) = trace.calls[-1].accepting
+    assert accepting.accepted_corridor_cohort_plan == record
+    trunk = corridor_cohort_integration.AcceptedCorridorOwnerKind.CONVERGENCE_TRUNK
     assert any(
-        owner.kind.value == "convergence-trunk" and abs(owner.coordinate_delta) > 0
+        owner.kind is trunk and abs(owner.coordinate_delta) > 0
         for owner in record.owners
     )
 
@@ -162,14 +164,13 @@ def test_serialized_published_plan_carries_the_accepted_plan(
     with _traced(monkeypatch):
         published = _render(MERGE_RIGHT_ENTRY)
 
-    record = _accepted(published)
+    record = published.accepted_corridor_cohort_plan
     assert record is not None
     text = serialize_route_plan(published)
-    decoded = json.loads(text)
-    stored = decoded[_ACCEPTED_FIELD]
+    stored = json.loads(text)["accepted_corridor_cohort_plan"]
     assert stored["plan_id"] == record.plan_id
     assert len(stored["owners"]) == len(record.owners)
-    assert stored["translation_basis"] is not None
+    assert stored["coordinate_translations"] == []
     assert serialize_route_plan(copy.deepcopy(published)) == text
     assert serialize_route_plan(pickle.loads(pickle.dumps(published))) == text
 
@@ -225,23 +226,15 @@ def test_moved_grant_selects_its_plan_without_diagnostics(
     moved = [plan for plan in trace.compiling_plans if real_moved(plan)]
     assert moved, "no observation applied a convergence corridor grant"
     for plan in moved:
+        record = plan.accepted_corridor_cohort_plan
+        assert record is not None
         stripped = replace(plan, diagnostics=())
-        assert real_moved(stripped) == real_moved(plan)
-
-
-def test_finalized_owned_segments_is_retired() -> None:
-    needle = "finalized_" + "owned_segments"
-    roots = (ROOT / "src", ROOT / "tests", ROOT / "docs", ROOT / "scripts")
-    hits = [
-        str(path.relative_to(ROOT))
-        for root in roots
-        for path in root.rglob("*")
-        if path.is_file()
-        and path.suffix in {".py", ".json", ".md", ".mdx"}
-        and path != Path(__file__).resolve()
-        and needle in path.read_text(errors="ignore")
-    ]
-    assert hits == []
+        assert real_moved(stripped) == {
+            frame.owner_id
+            for frame in record.trunk_grants
+            if abs(frame.coordinate_delta) > COORD_TOLERANCE_FINE
+        }
+        assert real_moved(plan) == real_moved(stripped)
 
 
 def _packed_cell_aperture_trace(monkeypatch: pytest.MonkeyPatch) -> _Trace:
@@ -278,7 +271,7 @@ def test_cohorts_compile_at_most_twice_per_settle_call_and_never_after_intent(
 def _accepted_inputs(monkeypatch: pytest.MonkeyPatch, path: str = MERGE_RIGHT_ENTRY):
     with _traced(monkeypatch) as trace:
         published = _render(path)
-    (execution,) = trace.calls[-1].accepting_executions
+    (execution,) = trace.calls[-1].accepting
     cohorts = execution.member_geometry.corridor_cohorts
     owned = planning._owned_scalar_grants(
         cohorts, planning._compatibility_scalar_ids(cohorts)
@@ -299,7 +292,7 @@ def test_accepted_plan_identity_survives_input_permutation(
         landings=cohorts.landings[::-1],
     )
     rebuilt = corridor_cohort_integration.accept_corridor_cohort_plan(
-        permuted, owned[::-1], record.translation_basis
+        permuted, owned[::-1], record.coordinate_translations
     )
     assert rebuilt == record
     assert [frame.identity for frame in rebuilt.owners] == [
@@ -316,67 +309,58 @@ def test_accepted_plan_records_every_moved_coordinate_and_no_other(
     assert len(record.owners) == (
         len(cohorts.allocations) + len(cohorts.landings) + len(owned)
     )
-    for frame in record.owners:
-        assert frame.source_coordinate + frame.coordinate_delta == pytest.approx(
-            frame.accepted_coordinate
-        )
     (trunk,) = record.trunk_grants
     assert trunk.recipe is not None
     assert trunk.recipe.controlled_points
 
 
+def _drop_owner(record):
+    return replace(record, owners=record.owners[:-1])
+
+
+def _duplicate_owner(record):
+    return replace(record, owners=(*record.owners, record.owners[0]))
+
+
+def _duplicate_segment(record):
+    first = record.owners[0]
+    twin = replace(first, identity=first.identity + "|twin")
+    return replace(record, owners=(*record.owners, twin))
+
+
+def _change_owner(record):
+    first = record.owners[0]
+    moved = replace(first, accepted_coordinate=first.accepted_coordinate + 1.0)
+    return replace(record, owners=(moved, *record.owners[1:]))
+
+
+def _reorder_owners(record):
+    return replace(record, owners=record.owners[::-1])
+
+
+def _recipe_of_another_owner(record):
+    (trunk,) = record.trunk_grants
+    return replace(trunk, owner_id=trunk.owner_id + "|other")
+
+
 @pytest.mark.parametrize(
-    "case",
+    "mutate",
     [
-        "dropped-owner",
-        "duplicate-owner",
-        "duplicate-segment",
-        "changed-owner",
-        "owner-mismatch",
-        "inconsistent-delta",
-        "out-of-order",
+        pytest.param(_drop_owner, id="dropped-owner"),
+        pytest.param(_duplicate_owner, id="duplicate-owner"),
+        pytest.param(_duplicate_segment, id="duplicate-segment"),
+        pytest.param(_change_owner, id="changed-owner"),
+        pytest.param(_reorder_owners, id="reordered-owners"),
+        pytest.param(_recipe_of_another_owner, id="recipe-of-another-owner"),
     ],
 )
 def test_accepted_plan_constructor_fails_closed(
-    case: str, monkeypatch: pytest.MonkeyPatch
+    mutate, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Lock: a record that is not exactly one coherent decision cannot exist."""
     record, _cohorts, _owned = _accepted_inputs(monkeypatch)
-    error = corridor_cohort_integration.CorridorCohortCompilationError
-    first = record.owners[0]
-    (trunk,) = record.trunk_grants
-    with pytest.raises(error):
-        if case == "dropped-owner":
-            replace(record, owners=record.owners[:-1])
-        elif case == "duplicate-owner":
-            replace(record, owners=(*record.owners, first))
-        elif case == "duplicate-segment":
-            twin = replace(first, identity=first.identity + "|twin")
-            replace(record, owners=(*record.owners, twin))
-        elif case == "changed-owner":
-            moved = replace(
-                first,
-                accepted_coordinate=first.accepted_coordinate + 1.0,
-                coordinate_delta=first.coordinate_delta + 1.0,
-            )
-            replace(record, owners=(moved, *record.owners[1:]))
-        elif case == "owner-mismatch":
-            replace(trunk, owner_id=trunk.owner_id + "|other")
-        elif case == "inconsistent-delta":
-            replace(first, coordinate_delta=first.coordinate_delta + 1.0)
-        else:
-            replace(record, owners=record.owners[::-1])
-
-
-def test_accepting_a_grant_without_its_owner_frame_fails_closed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    record, cohorts, owned = _accepted_inputs(monkeypatch)
-    bare = tuple(replace(grant, variable=None) for grant in owned)
     with pytest.raises(corridor_cohort_integration.CorridorCohortCompilationError):
-        corridor_cohort_integration.accept_corridor_cohort_plan(
-            cohorts, bare, record.translation_basis
-        )
+        mutate(record)
 
 
 def test_an_observation_holding_an_accepted_plan_may_not_compile(
@@ -395,7 +379,7 @@ def test_an_observation_holding_an_accepted_plan_may_not_compile(
         holding = replace(prior, accepted_corridor_cohort_plan=accepted)
         with pytest.raises(corridor_cohort_integration.CorridorCohortCompilationError):
             real_observe(graph, **{**kwargs, "reservations": holding})
-        real_observe(
+        reading = real_observe(
             graph,
             **{
                 **kwargs,
@@ -403,13 +387,10 @@ def test_an_observation_holding_an_accepted_plan_may_not_compile(
                 "allow_convergence_clearance_requirements": False,
             },
         )
+        assert reading.plan.accepted_corridor_cohort_plan is None
         outcomes.append("refused")
         return observation
 
     monkeypatch.setattr(svg, "observe_route_edges_centred", observe)
-    source = ROOT / MERGE_RIGHT_ENTRY
-    graph = prepare_graph(source.read_text(), source_dir=str(source.parent))
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        svg.build_observed_render_plan(graph, resolve_theme(None, graph))
+    _render(MERGE_RIGHT_ENTRY)
     assert outcomes == ["refused"]

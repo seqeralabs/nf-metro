@@ -10,7 +10,6 @@ yet; both ship ahead of the wiring that will call them.
 from __future__ import annotations
 
 import hashlib
-import json
 from collections import Counter, defaultdict
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -34,7 +33,7 @@ from nf_metro.layout.route_plan import (
     RouteSemanticScaffold,
     SettlementStage,
     SettlementStageTrace,
-    _json_value,
+    _canonical_json,
     register_settlement_stage,
 )
 from nf_metro.layout.route_reservations import (
@@ -185,13 +184,22 @@ class CorridorScalarRequest:
 
 @dataclass(frozen=True, slots=True)
 class CorridorScalarGrant:
-    variable_id: str
-    owner_kind: CorridorScalarOwnerKind
-    owner_id: str
+    variable: CorridorScalarVariable
     coordinate: float
     coordinate_delta: float = 0.0
     control_recipe: CorridorScalarControlRecipe | None = None
-    variable: CorridorScalarVariable | None = None
+
+    @property
+    def variable_id(self) -> str:
+        return self.variable.variable_id
+
+    @property
+    def owner_kind(self) -> CorridorScalarOwnerKind:
+        return self.variable.owner_kind
+
+    @property
+    def owner_id(self) -> str:
+        return self.variable.owner_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -1039,19 +1047,14 @@ _SEGMENT_OWNER_KINDS = frozenset(
         AcceptedCorridorOwnerKind.ENDPOINT_LANDING,
     }
 )
-_COORDINATE_EPSILON = 1e-9
 
 
 @dataclass(frozen=True, slots=True)
 class AcceptedCorridorOwnerFrame:
     """One owner's source frame and the coordinate the accepted plan seats it at.
 
-    ``source_coordinate`` is where the owner stood in the observation that
-    compiled the plan, and ``coordinate_delta`` is the accepted coordinate's
-    offset from it, so a later projection reads the move without re-measuring
-    geometry.  ``identity`` is the claim, landing or scalar variable the frame
-    is keyed on; ``owner_id`` is the member or convergence plan it moves.
-    ``longitudinal_extent`` is the along-run span of a member segment.
+    ``identity`` is the claim, landing or scalar variable the frame is keyed on,
+    and ``owner_id`` the member or convergence plan it moves.
     """
 
     kind: AcceptedCorridorOwnerKind
@@ -1061,60 +1064,19 @@ class AcceptedCorridorOwnerFrame:
     axis: int
     source_coordinate: float
     accepted_coordinate: float
-    coordinate_delta: float
     longitudinal_extent: tuple[float, float] | None = None
     recipe: CorridorScalarControlRecipe | None = None
 
     def __post_init__(self) -> None:
-        numbers = (
-            self.source_coordinate,
-            self.accepted_coordinate,
-            self.coordinate_delta,
-            *(self.longitudinal_extent or ()),
-        )
-        checks = (
-            (
-                self.axis not in (0, 1) or not all(isfinite(item) for item in numbers),
-                "has no finite axis frame",
-            ),
-            (
-                not isclose(
-                    self.source_coordinate + self.coordinate_delta,
-                    self.accepted_coordinate,
-                    rel_tol=0.0,
-                    abs_tol=_COORDINATE_EPSILON,
-                ),
-                "has a delta that does not reach its accepted coordinate",
-            ),
-            (
-                self.kind in _SEGMENT_OWNER_KINDS and self.owner_id != self.segment[0],
-                "is owned by a member other than its segment's",
-            ),
-            (
-                (self.kind is AcceptedCorridorOwnerKind.MEMBER_SEGMENT)
-                != (self.longitudinal_extent is not None),
-                "has a longitudinal extent that does not match its kind",
-            ),
-            (
-                self.recipe is not None
-                and (
-                    self.kind in _SEGMENT_OWNER_KINDS
-                    or self.recipe.owner_id != self.owner_id
-                    or not isclose(
-                        self.recipe.source_coordinate,
-                        self.source_coordinate,
-                        rel_tol=0.0,
-                        abs_tol=_COORDINATE_EPSILON,
-                    )
-                ),
-                "carries a recipe belonging to another owner frame",
-            ),
-        )
-        for failed, problem in checks:
-            if failed:
-                raise CorridorCohortCompilationError(
-                    f"accepted corridor owner {self.identity} {problem}"
-                )
+        if self.recipe is not None and self.recipe.owner_id != self.owner_id:
+            raise CorridorCohortCompilationError(
+                f"accepted corridor owner {self.identity} carries a recipe "
+                "belonging to another owner"
+            )
+
+    @property
+    def coordinate_delta(self) -> float:
+        return self.accepted_coordinate - self.source_coordinate
 
 
 def _owner_order(frame: AcceptedCorridorOwnerFrame) -> tuple[str, str]:
@@ -1123,14 +1085,9 @@ def _owner_order(frame: AcceptedCorridorOwnerFrame) -> tuple[str, str]:
 
 def _accepted_plan_id(
     owners: tuple[AcceptedCorridorOwnerFrame, ...],
-    controlled_segments: tuple[CorridorCohortSegmentKey, ...],
-    translation_basis: tuple[ReservationCoordinateTranslation, ...],
+    coordinate_translations: tuple[ReservationCoordinateTranslation, ...],
 ) -> str:
-    content = json.dumps(
-        _json_value((owners, controlled_segments, translation_basis)),
-        sort_keys=True,
-        separators=(",", ":"),
-    )
+    content = _canonical_json((owners, coordinate_translations))
     return hashlib.sha256(content.encode()).hexdigest()
 
 
@@ -1139,16 +1096,14 @@ class AcceptedCorridorCohortPlan:
     """The corridor-cohort decision an observation accepted, as immutable data.
 
     Holds every coordinate the plan moves and no other: one frame per member
-    segment, endpoint landing and owned scalar grant, ordered canonically, with
-    the coordinate translations the compiling observation was seated under.
-    ``plan_id`` is the digest of that content, so a plan whose owners were
-    dropped, duplicated or altered no longer matches its identity.
+    segment, endpoint landing and owned scalar grant, with the coordinate
+    translations the compiling observation was seated under.  ``plan_id`` is the
+    digest of that content.
     """
 
     plan_id: str
     owners: tuple[AcceptedCorridorOwnerFrame, ...]
-    controlled_segments: tuple[CorridorCohortSegmentKey, ...]
-    translation_basis: tuple[ReservationCoordinateTranslation, ...] = ()
+    coordinate_translations: tuple[ReservationCoordinateTranslation, ...] = ()
 
     def __post_init__(self) -> None:
         identities = [frame.identity for frame in self.owners]
@@ -1161,19 +1116,8 @@ class AcceptedCorridorCohortPlan:
             (len(set(identities)) != len(identities), "names an owner twice"),
             (len(set(segments)) != len(segments), "claims a segment twice"),
             (
-                tuple(sorted(self.owners, key=_owner_order)) != self.owners,
-                "lists its owners out of canonical order",
-            ),
-            (
-                self.controlled_segments
-                != tuple(sorted({frame.segment for frame in self.owners})),
-                "controls segments other than its owners'",
-            ),
-            (
                 self.plan_id
-                != _accepted_plan_id(
-                    self.owners, self.controlled_segments, self.translation_basis
-                ),
+                != _accepted_plan_id(self.owners, self.coordinate_translations),
                 "does not match its identity",
             ),
         )
@@ -1184,6 +1128,10 @@ class AcceptedCorridorCohortPlan:
                 )
 
     @property
+    def controlled_segments(self) -> tuple[CorridorCohortSegmentKey, ...]:
+        return tuple(sorted({frame.segment for frame in self.owners}))
+
+    @property
     def trunk_grants(self) -> tuple[AcceptedCorridorOwnerFrame, ...]:
         return tuple(
             frame
@@ -1192,10 +1140,16 @@ class AcceptedCorridorCohortPlan:
         )
 
 
+def _segment_key(
+    item: CorridorCohortAllocation | CorridorCohortLanding | CorridorScalarVariable,
+) -> CorridorCohortSegmentKey:
+    return item.member_id, item.edge_key, item.segment_rank
+
+
 def accept_corridor_cohort_plan(
     plan: CorridorCohortPlan,
     owned_grants: Sequence[CorridorScalarGrant],
-    translation_basis: tuple[ReservationCoordinateTranslation, ...] = (),
+    coordinate_translations: tuple[ReservationCoordinateTranslation, ...],
 ) -> AcceptedCorridorCohortPlan:
     """Freeze *plan*'s owned decisions and the translations they were seated under."""
     frames = [
@@ -1203,11 +1157,10 @@ def accept_corridor_cohort_plan(
             AcceptedCorridorOwnerKind.MEMBER_SEGMENT,
             allocation.claim_id,
             allocation.member_id,
-            (allocation.member_id, allocation.edge_key, allocation.segment_rank),
+            _segment_key(allocation),
             allocation.axis,
             allocation.source_coordinate,
             allocation.coordinate,
-            allocation.coordinate - allocation.source_coordinate,
             (allocation.longitudinal_start, allocation.longitudinal_end),
         )
         for allocation in plan.allocations
@@ -1224,41 +1177,35 @@ def accept_corridor_cohort_plan(
                 )
             ),
             landing.member_id,
-            (landing.member_id, landing.edge_key, landing.segment_rank),
+            _segment_key(landing),
             landing.axis,
             landing.source_coordinate,
             landing.coordinate,
-            landing.coordinate - landing.source_coordinate,
         )
         for landing in plan.landings
     )
-    for grant in owned_grants:
-        variable = grant.variable
-        if variable is None:
-            raise CorridorCohortCompilationError(
-                f"corridor scalar grant {grant.variable_id} carries no owner frame"
-            )
-        recipe = grant.control_recipe
-        frames.append(
-            AcceptedCorridorOwnerFrame(
-                AcceptedCorridorOwnerKind(grant.owner_kind.value),
-                grant.variable_id,
-                grant.owner_id,
-                (variable.member_id, variable.edge_key, variable.segment_rank),
-                variable.axis,
-                variable.coordinate if recipe is None else recipe.source_coordinate,
-                grant.coordinate,
-                grant.coordinate_delta,
-                recipe=recipe,
-            )
+    frames.extend(
+        AcceptedCorridorOwnerFrame(
+            AcceptedCorridorOwnerKind(grant.owner_kind.value),
+            grant.variable_id,
+            grant.owner_id,
+            _segment_key(grant.variable),
+            grant.variable.axis,
+            (
+                grant.variable.coordinate
+                if grant.control_recipe is None
+                else grant.control_recipe.source_coordinate
+            ),
+            grant.coordinate,
+            recipe=grant.control_recipe,
         )
+        for grant in owned_grants
+    )
     owners = tuple(sorted(frames, key=_owner_order))
-    controlled = tuple(sorted({frame.segment for frame in owners}))
     return AcceptedCorridorCohortPlan(
-        _accepted_plan_id(owners, controlled, translation_basis),
+        _accepted_plan_id(owners, coordinate_translations),
         owners,
-        controlled,
-        translation_basis,
+        coordinate_translations,
     )
 
 
@@ -3910,13 +3857,7 @@ def compile_corridor_cohort_plan(
             request.variable.coordinate if recipe is None else recipe.source_coordinate
         )
         return CorridorScalarGrant(
-            variable_id,
-            request.variable.owner_kind,
-            request.variable.owner_id,
-            coordinate,
-            coordinate - source_coordinate,
-            recipe,
-            request.variable,
+            request.variable, coordinate, coordinate - source_coordinate, recipe
         )
 
     scalar_grants = tuple(

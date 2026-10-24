@@ -430,7 +430,7 @@ def _route_edges(  # noqa: C901
             member_geometry_plans=published_member_geometry,
             exit_turn_dispositions=planning.exit_turn_dispositions,
             corridor_cohort_ledger=planning.corridor_cohort_ledger,
-            accepted_corridor_cohort_plan=planning.accepted_cohort_plan,
+            accepted_corridor_cohort_plan=planning.accepted_corridor_cohort_plan,
         )
     # Route into the context's own list so handlers can read the routes settled
     # so far (a wrap clearing an already-placed sibling channel); it grows as

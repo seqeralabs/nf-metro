@@ -5167,15 +5167,16 @@ def _json_value(value: object) -> object:
     if isinstance(value, frozenset):
         # Set iteration order depends on the hash seed; the JSON form is the
         # one canonical key every element type shares.
-        return sorted(
-            (_json_value(item) for item in value),
-            key=lambda item: json.dumps(item, sort_keys=True, separators=(",", ":")),
-        )
+        return [_json_value(item) for item in sorted(value, key=_canonical_json)]
     if isinstance(value, (str, int, float, bool, type(None))):
         return value
     raise TypeError(f"route plan contains unsupported {type(value).__name__}")
 
 
+def _canonical_json(value: object) -> str:
+    return json.dumps(_json_value(value), sort_keys=True, separators=(",", ":"))
+
+
 def serialize_route_plan(plan: RoutePlan) -> str:
     """Return the canonical JSON representation of one immutable plan."""
-    return json.dumps(_json_value(plan), sort_keys=True, separators=(",", ":"))
+    return _canonical_json(plan)

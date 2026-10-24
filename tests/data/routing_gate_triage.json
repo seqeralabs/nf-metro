@@ -2372,19 +2372,15 @@
   "status": "defensive"
  },
  "corridor_cohort_integration.py::if failed:::#1": {
-  "note": "Owner-frame validation raise. The accepted-plan builder derives every delta from the same coordinates it stores, and takes the segment, owner and recipe from one compiled record, so a frame it builds always passes. Reached only by a hand-built or altered frame; tests/test_corridor_cohort_acceptance.py::test_accepted_plan_constructor_fails_closed drives each check.",
-  "status": "defensive"
- },
- "corridor_cohort_integration.py::if failed:::#2": {
-  "note": "Accepted-plan validation raise. The builder sorts its owners, derives the controlled segments from them and digests the same content, so a plan it builds always passes. Reached only by a hand-built or altered plan; tests/test_corridor_cohort_acceptance.py::test_accepted_plan_constructor_fails_closed drives each check.",
-  "status": "defensive"
- },
- "corridor_cohort_integration.py::if variable is None:::#1": {
-  "note": "Every grant the compile publishes carries the variable it was granted for, so the raise is reached only by a hand-built grant. tests/test_corridor_cohort_acceptance.py::test_accepting_a_grant_without_its_owner_frame_fails_closed drives it.",
+  "note": "Accepted-plan validation raise. The builder keys every owner on its own claim, landing or variable, sorts the owners and digests the same content, so a plan it builds always passes. Reached only by a hand-built or altered plan; tests/test_corridor_cohort_acceptance.py::test_accepted_plan_constructor_fails_closed drives each check.",
   "status": "defensive"
  },
  "planning.py::if (::#2": {
   "note": "Compile guard: only the aperture observation compiles, and the plan it is seated against is the ledger the last settlement consumed, which holds no accepted plan. The raise is reached only by seating a pass against a plan that carries one; tests/test_corridor_cohort_acceptance.py::test_an_observation_holding_an_accepted_plan_may_not_compile drives it.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if self.recipe is not None and self.recipe.owner_id != self.owner_id:::#1": {
+  "note": "Owner-frame recipe check. The builder takes a grant's owner and recipe from the same request, so they always agree. Reached only by a hand-built frame; tests/test_corridor_cohort_acceptance.py::test_accepted_plan_constructor_fails_closed drives it.",
   "status": "defensive"
  }
 }
