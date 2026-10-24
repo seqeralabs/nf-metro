@@ -2392,11 +2392,11 @@
   "status": "defensive"
  },
  "normalize.py::if not movable or not anchors:::#1": {
-  "note": "_renest_residual_fused_clusters skips a fused cluster with no movable lane or no immovable anchor. Its only corpus witness was tests/fixtures/curve_invariant_repros/riboseq_band_hop_zero_length_seam.mmd, which now aborts earlier, at validate_member_geometry_emission, because bypass nesting lifts a leg its member geometry plan owns; no other corpus render reaches this arm. needs-review because the arm is reachable, not because it is unreachable.",
+  "note": "_renest_residual_fused_clusters skips a fused cluster with no movable lane or no immovable anchor. No corpus map reaches this arm: tests/fixtures/curve_invariant_repros/riboseq_band_hop_zero_length_seam.mmd, the map that exercises the band-hop seam, aborts at validate_member_geometry_emission before it, because bypass nesting lifts a leg its member geometry plan owns. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
  },
  "common.py::if trunk_ys[-1] - trunk_ys[0] <= COORD_TOLERANCE:::#1": {
-  "note": "iter_port_peeloff_bundles skips a peel-off group whose tails share one trunk depth. Its only corpus witness was tests/fixtures/curve_invariant_repros/riboseq_band_hop_zero_length_seam.mmd, which now aborts earlier, at validate_member_geometry_emission, because bypass nesting lifts a leg its member geometry plan owns; no other corpus render reaches this arm. needs-review because the arm is reachable, not because it is unreachable.",
+  "note": "iter_port_peeloff_bundles skips a peel-off group whose tails share one trunk depth. No corpus map reaches this arm: tests/fixtures/curve_invariant_repros/riboseq_band_hop_zero_length_seam.mmd, the map that exercises the band-hop seam, aborts at validate_member_geometry_emission before it, because bypass nesting lifts a leg its member geometry plan owns. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
  }
 }

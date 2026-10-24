@@ -1091,7 +1091,7 @@ def _two_lane_coupling_components(
     """Close a trunk scalar crowded by runs in its own row gap and the one above.
 
     The trunk's context claim and the near run sit in one row gap; a distinct
-    line's far run in the row gap above still gets a forbidden interval along
+    line's far run in the row gap above also gets a forbidden interval along
     the trunk's span.  Returns each component's claim ids and scalar ids.
     """
     trunk = _bound_claim(
@@ -2398,7 +2398,7 @@ def test_member_geometry_emission_rejects_a_moved_owned_point(
 
     The plan owns the segment's points as much as its gap channels and corner
     radii, so translating an owned segment that is no gap channel, with its
-    radii untouched, is still a second owner deciding a planned coordinate.
+    radii untouched, is a second owner deciding a planned coordinate.
     """
     observed: list[tuple[list, object]] = []
     real_validate = member_geometry_routing.validate_member_geometry_emission
