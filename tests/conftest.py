@@ -327,6 +327,17 @@ CURVE_ABORT_FIXTURES: dict[str, pytest.MarkDecorator] = {
 }
 
 
+# Fixtures whose routing aborts before any render, keyed by path from the repo
+# root: bypass nesting lifts a leg its member geometry plan owns, so
+# validate_member_geometry_emission rejects the second owner of that coordinate
+# (#1756). test_route_plan.py pins each abort.
+ROUTE_EMISSION_ABORT_FIXTURES = frozenset(
+    {
+        "tests/fixtures/curve_invariant_repros/riboseq_band_hop_zero_length_seam.mmd",
+    }
+)
+
+
 def is_curve_abort_fixture(path: Path) -> bool:
     """True when *path* is one of :data:`CURVE_ABORT_FIXTURES`."""
     resolved = path.resolve()
