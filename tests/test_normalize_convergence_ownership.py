@@ -118,16 +118,12 @@ def test_vertical_section_obstruction_preserves_open_segment_endpoints() -> None
     )
 
 
-@pytest.mark.parametrize("ownership", ["owned", "member_owned"])
-def test_bypass_nesting_ownership_is_per_segment_boundary(
-    monkeypatch, ownership: str
-) -> None:
-    """Neither a convergence plan's leg nor a member plan's is bypass nesting's."""
+def test_bypass_nesting_ownership_is_per_segment_boundary(monkeypatch) -> None:
     wrap = _route("wrap", [(10.0, 40.0), (90.0, 40.0)])
     owned = _route(
         "owned",
         [(0.0, 80.0), (0.0, 60.0), (100.0, 60.0), (100.0, 120.0)],
-        **{ownership: (1,)},
+        owned=(1,),
     )
     movable = _route(
         "movable",

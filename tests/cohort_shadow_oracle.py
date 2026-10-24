@@ -11,8 +11,8 @@ It is a test harness, not a render stage: the substitutions live only inside
 :func:`shadow_observation`, so production renders never take this path.
 
 ``tests/data/cohort_shadow_ratchet.txt`` names the repository maps the oracle
-fails today; ``test_cohort_shadow_ratchet.py`` holds every repository map to
-that list in both directions.  Run as a script to sweep any other corpus::
+fails; ``test_cohort_shadow_ratchet.py`` holds every repository map to that
+list in both directions.  Run as a script to sweep any other corpus::
 
     PYTHONPATH=src python tests/cohort_shadow_oracle.py --jobs jobs.jsonl \\
         --out shadow.jsonl --nproc 8

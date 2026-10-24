@@ -759,14 +759,6 @@
   "note": "validate_member_geometry_emission raises on the first owned corner radius drawn off its frozen plan. The loop body is the raise, so it is entered only when _owned_corner_radius_mismatches yields, which no corpus render does for the reason given at that helper's own radius gates.",
   "status": "defensive"
  },
- "member_geometry.py::for mismatch in _owned_segment_mismatches(route, plan):::#1": {
-  "note": "validate_member_geometry_emission raises on the first owned segment drawn off its frozen plan. The loop body is the raise, so it is entered only when _owned_segment_mismatches yields, which no corpus render does. Exercised by tests/test_corridor_cohort_integration.py::test_member_geometry_emission_rejects_a_moved_owned_point.",
-  "status": "defensive"
- },
- "member_geometry.py::if tuple(route.points[rank : rank + 2]) != plan.points[rank : rank + 2]:::#1": {
-  "note": "An owned segment point drawn off its frozen plan, the check validate_member_geometry_emission and the shadow oracle share. Every pass that could move one anchors route-system-owned segments, so no corpus render reaches the mismatch arm. Exercised by tests/test_corridor_cohort_integration.py::test_member_geometry_emission_rejects_a_moved_owned_point.",
-  "status": "defensive"
- },
  "member_geometry.py::and assignment.run_direction in {Direction.R, Direction.L}::#1": {
   "note": "A replannable same-destination peel-off is sourced from a horizontal trunk assignment. Non-horizontal run directions belong to other exit-turn families and are defensively excluded.",
   "status": "defensive"
@@ -2398,5 +2390,13 @@
  "corridor_cohort_integration.py::if not all(isfinite(item) for item in coordinates):::#1": {
   "note": "Owner-frame finiteness raise. Accepted coordinates and longitudinal extents come from the solver and patch preparation, and a grant's source is its recipe's or variable's coordinate, all required to be finite. An endpoint landing's source coordinate is a raw route point the solver never sees; it is finite because the ledger claim it derives from must be (RouteReservationClaim rejects a non-finite allocation coordinate). A frame the builder produces therefore always passes; the raise is reached only by a hand-built frame, and tests/test_corridor_cohort_acceptance.py::test_accepted_plan_constructor_fails_closed drives it.",
   "status": "defensive"
+ },
+ "normalize.py::if not movable or not anchors:::#1": {
+  "note": "_renest_residual_fused_clusters skips a fused cluster with no movable lane or no immovable anchor. Its only corpus witness was tests/fixtures/curve_invariant_repros/riboseq_band_hop_zero_length_seam.mmd, which now aborts earlier, at validate_member_geometry_emission, because bypass nesting lifts a leg its member geometry plan owns; no other corpus render reaches this arm. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "common.py::if trunk_ys[-1] - trunk_ys[0] <= COORD_TOLERANCE:::#1": {
+  "note": "iter_port_peeloff_bundles skips a peel-off group whose tails share one trunk depth. Its only corpus witness was tests/fixtures/curve_invariant_repros/riboseq_band_hop_zero_length_seam.mmd, which now aborts earlier, at validate_member_geometry_emission, because bypass nesting lifts a leg its member geometry plan owns; no other corpus render reaches this arm. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
  }
 }

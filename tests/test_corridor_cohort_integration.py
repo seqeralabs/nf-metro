@@ -1085,13 +1085,14 @@ def test_relation_spanning_two_orientation_buckets_fails_closed() -> None:
         _atomic_components(claims, physical, footprint_model)
 
 
-def test_scalar_couples_only_runs_in_the_lane_of_its_own_trunk_run() -> None:
-    """A scalar joins a member run only inside the lane its trunk run occupies.
+def _two_lane_coupling_components(
+    *, aliased: bool
+) -> set[tuple[tuple[str, ...], tuple[str, ...]]]:
+    """Close a trunk scalar crowded by runs in its own row gap and the one above.
 
-    The trunk's context claim sits in one row gap; a distinct line's run in
-    another row gap still gets a forbidden interval along the trunk's span,
-    but a component holds one ``(region, orientation)`` lane, so that run
-    stays where it is drawn rather than joining the trunk's component.
+    The trunk's context claim and the near run sit in one row gap; a distinct
+    line's far run in the row gap above still gets a forbidden interval along
+    the trunk's span.  Returns each component's claim ids and scalar ids.
     """
     trunk = _bound_claim(
         claim_id="trunk-context",
@@ -1154,28 +1155,40 @@ def test_scalar_couples_only_runs_in_the_lane_of_its_own_trunk_run() -> None:
             )
             for witness in witnesses
         ),
-        scalar_aliases={trunk.claim_id: scalar.variable_id},
+        scalar_aliases=({trunk.claim_id: scalar.variable_id} if aliased else {}),
     )
+    physical = _physical_components(claims)
 
-    components = _atomic_components(
-        claims, _physical_components(claims), footprint_model
-    )
-
-    assert {
+    return {
         (
             tuple(
                 sorted(
                     claims[rank].claim_id
                     for physical_rank in component.physical_ranks
-                    for rank in _physical_components(claims)[physical_rank]
+                    for rank in physical[physical_rank]
                 )
             ),
             component.scalar_variable_ids,
         )
-        for component in components
-    } == {
-        ((far.claim_id,), ()),
-        (tuple(sorted((trunk.claim_id, near.claim_id))), (scalar.variable_id,)),
+        for component in _atomic_components(claims, physical, footprint_model)
+    }
+
+
+def test_scalar_couples_only_runs_in_the_lane_of_its_own_trunk_run() -> None:
+    """A component holds one lane, so the far run stays where it is drawn."""
+    assert _two_lane_coupling_components(aliased=True) == {
+        (("far-run",), ()),
+        (("near-run", "trunk-context"), ("trunk",)),
+    }
+
+
+def test_scalar_without_context_claims_couples_only_runs_sharing_one_lane() -> None:
+    """With no context claim to name its lane, a scalar whose coupled runs span
+    two lanes joins neither of them."""
+    assert _two_lane_coupling_components(aliased=False) == {
+        (("far-run",), ()),
+        (("near-run", "trunk-context"), ()),
+        ((), ("trunk",)),
     }
 
 

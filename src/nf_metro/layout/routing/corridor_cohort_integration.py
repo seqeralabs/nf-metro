@@ -2279,6 +2279,9 @@ def _scalar_bundles(
     return tuple(bundles)
 
 
+_CorridorLane = tuple[CorridorRegion, CorridorOrientation]
+
+
 @dataclass(frozen=True, slots=True)
 class _AtomicComponentSpec:
     """One closed corridor component.
@@ -2391,11 +2394,12 @@ def _atomic_components(
     a scalar variable (one with no claim at all) resolves to its own node.  A
     scalar also joins the run its bundle holds it to, the member run its
     forbidden interval keeps it clear of, and every context claim it stands
-    for; a run outside the lanes of those context claims is not joined, as a
-    component holds one ``(region, orientation)`` lane, and stands where it is
-    drawn.  That relation participation is the only thing that ever joins two
-    scalar nodes, or a scalar node to a physical group: sharing an axis unions
-    nothing by itself.
+    for.  A component holds one ``(region, orientation)`` lane, so a run is
+    joined only inside the lanes of those context claims or, for a scalar with
+    none, only when every run it is coupled to shares one lane; any other run
+    stays an obstacle at its compile-time coordinate.  That relation
+    participation is the only thing that ever joins two scalar nodes, or a
+    scalar node to a physical group: sharing an axis unions nothing by itself.
     """
     variables_by_id = {
         variable.variable_id: variable for variable in footprint_model.variables
@@ -2435,30 +2439,36 @@ def _atomic_components(
     )
     claims_by_id = {claim.claim_id: claim for claim in claims}
 
-    def lane(claim_id: str) -> tuple[CorridorRegion, CorridorOrientation]:
+    def lane(claim_id: str) -> _CorridorLane:
         ledger = claims_by_id[claim_id].ledger
         return ledger.region, ledger.orientation
 
-    scalar_lanes: dict[str, set[tuple[CorridorRegion, CorridorOrientation]]] = {}
-    for claim_id, variable_id in footprint_model.scalar_aliases.items():
-        scalar_lanes.setdefault(variable_id, set()).add(lane(claim_id))
-
-    def in_scalar_lane(coupling: _RunCoupling) -> bool:
-        lanes = scalar_lanes.get(coupling.scalar_id)
-        return not lanes or all(
-            lane(claim_id) in lanes
+    def run_lanes(coupling: _RunCoupling) -> set[_CorridorLane]:
+        return {
+            lane(claim_id)
             for claim_id in footprint_model.claim_ids_by_variable[
                 coupling.run_variable_id
             ]
             if claim_id in claims_by_id
-        )
+        }
+
+    alias_lanes: dict[str, set[_CorridorLane]] = {}
+    for claim_id, variable_id in footprint_model.scalar_aliases.items():
+        alias_lanes.setdefault(variable_id, set()).add(lane(claim_id))
+    coupled_lanes: dict[str, set[_CorridorLane]] = {}
+    for coupling in footprint_model.run_couplings:
+        coupled_lanes.setdefault(coupling.scalar_id, set()).update(run_lanes(coupling))
+
+    def scalar_lanes(scalar_id: str) -> set[_CorridorLane]:
+        coupled = coupled_lanes[scalar_id]
+        return alias_lanes.get(scalar_id) or (coupled if len(coupled) == 1 else set())
 
     coupled_pairs = (
         *(relation.participant_variable_ids for relation in relations),
         *(
             (coupling.scalar_id, coupling.run_variable_id)
             for coupling in footprint_model.run_couplings
-            if in_scalar_lane(coupling)
+            if run_lanes(coupling) <= scalar_lanes(coupling.scalar_id)
         ),
     )
     for participant_variable_ids in coupled_pairs:

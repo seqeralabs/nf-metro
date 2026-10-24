@@ -1,6 +1,6 @@
 # Repository maps the corridor-cohort shadow oracle (tests/cohort_shadow_oracle.py)
-# fails today. test_cohort_shadow_ratchet.py fails if a map joins this list or a
-# listed map starts passing, so the list only ever shrinks.
+# fails. test_cohort_shadow_ratchet.py fails if a map joins this list or a listed
+# map starts passing, so the list only ever shrinks.
 examples/group_labels.mmd
 examples/longread_variant_calling.mmd
 examples/riboseq_metro.mmd

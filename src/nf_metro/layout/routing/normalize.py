@@ -2650,7 +2650,7 @@ def _stack_distinct_port_descents(
 
 def _bypass_nesting_leg_is_movable(route: RoutedPath, rank: int) -> bool:
     """Whether bypass nesting owns the horizontal leg and its flanking corners."""
-    return not route_system_owns_segment_boundary(route, rank)
+    return not convergence_owns_segment_boundary(route, rank)
 
 
 def _nest_bypass_above_over_top_wrap(
