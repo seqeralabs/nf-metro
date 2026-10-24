@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import importlib.util
+from copy import deepcopy
 from dataclasses import fields, replace
 from enum import Enum
 from itertools import combinations
 from pathlib import Path
 from types import SimpleNamespace
 
+import cohort_shadow_oracle
 import pytest
 from hash_seed_oracle import observe_across_hash_seeds
 
@@ -2108,3 +2110,240 @@ def test_interleaved_fixed_lane_hash_seed_stable() -> None:
         observations
     )
     assert len({item["svg_sha256"] for item in observations.values()}) == 1
+
+
+def _capture_cohort_compiles(
+    monkeypatch: pytest.MonkeyPatch, relative_path: str
+) -> list[SimpleNamespace]:
+    """Render *relative_path*, keeping every cohort compile's model and components."""
+    current: dict[str, object] = {}
+    records: list[SimpleNamespace] = []
+    real_model = cci._member_footprint_model
+    real_components = cci._atomic_components
+    real_compile = member_geometry_routing.compile_corridor_cohort_plan
+
+    def model(*args, **kwargs):
+        current["model"] = real_model(*args, **kwargs)
+        return current["model"]
+
+    def components(claims, physical, footprint_model):
+        current["components"] = real_components(claims, physical, footprint_model)
+        current.update(claims=claims, physical=physical)
+        return current["components"]
+
+    def compile_plan(ledger, targets, **kwargs):
+        plan = real_compile(ledger, targets, **kwargs)
+        records.append(SimpleNamespace(plan=plan, **current))
+        return plan
+
+    monkeypatch.setattr(cci, "_member_footprint_model", model)
+    monkeypatch.setattr(cci, "_atomic_components", components)
+    monkeypatch.setattr(
+        member_geometry_routing, "compile_corridor_cohort_plan", compile_plan
+    )
+    _render(relative_path)
+    return records
+
+
+def _component_claim_ids(record: SimpleNamespace, component) -> set[str]:
+    return {
+        record.claims[claim_rank].claim_id
+        for physical_rank in component.physical_ranks
+        for claim_rank in record.physical[physical_rank]
+    }
+
+
+def test_trunk_scalar_shares_a_component_with_its_bundled_member(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A trunk held on its bundle solves in one component with the run it holds to.
+
+    The bundle relates the trunk scalar to a member run that is itself a movable
+    lane, so the two coordinates are one decision: solved apart, each lands on
+    the other's coordinate from before the solve.
+    """
+    records = _capture_cohort_compiles(
+        monkeypatch, "examples/topologies/merge_right_entry.mmd"
+    )
+
+    bundles = [
+        (record, bundle) for record in records for bundle in record.model.bundles
+    ]
+    assert bundles
+    for record, bundle in bundles:
+        witness = next(
+            item
+            for item in record.model.witnesses
+            if item.footprint_id == bundle.witness_id
+        )
+        assert witness.coordinate_variable_id is not None
+        run_claims = set(
+            record.model.claim_ids_by_variable[witness.coordinate_variable_id]
+        )
+        assert run_claims
+        scalar_component = next(
+            component
+            for component in record.components
+            if bundle.variable_id in component.scalar_variable_ids
+        )
+        assert run_claims <= _component_claim_ids(record, scalar_component)
+
+
+_JOINT_SOLVE_GRANTS = {
+    "examples/topologies/merge_right_entry.mmd": (346.0,),
+    "tests/fixtures/regressions/perp_entry_column_merge_feeder.mmd": (247.0,),
+    "examples/topologies/plan_owned_distinct_lane_separation.mmd": (200.0, 200.0),
+    "tests/fixtures/regressions/plan_owned_distinct_lane_separation_reordered.mmd": (
+        200.0,
+        200.0,
+    ),
+}
+
+
+@pytest.mark.parametrize("relative_path", sorted(_JOINT_SOLVE_GRANTS))
+def test_joint_solve_grant_matches_member_allocation(
+    monkeypatch: pytest.MonkeyPatch, relative_path: str
+) -> None:
+    """A trunk grant and the member run it is coupled to agree on one solve.
+
+    A bundled trunk sits exactly its bundle delta from the run's allocation,
+    and a trunk crowded by a distinct line's run clears that run's allocation
+    by the pitch its forbidden interval states.  Where either side could give
+    way, the member keeps its coordinate, so the trunk grant is the one the
+    compile decides with the members where they stand.
+    """
+    records = _capture_cohort_compiles(monkeypatch, relative_path)
+
+    first = records[0]
+    assert (
+        tuple(sorted(grant.coordinate for grant in first.plan.scalar_grants))
+        == (_JOINT_SOLVE_GRANTS[relative_path])
+    )
+    couplings = 0
+    for record in records:
+        witnesses = {item.footprint_id: item for item in record.model.witnesses}
+        allocations = {
+            (item.member_id, item.edge_key, item.segment_rank): item
+            for item in record.plan.allocations
+        }
+        grants = {grant.variable_id: grant for grant in record.plan.scalar_grants}
+
+        def run_allocation(witness_id: str, axis: int):
+            witness = witnesses[witness_id]
+            if witness.axis != axis or not record.model.claim_ids_by_variable.get(
+                witness.coordinate_variable_id or "", ()
+            ):
+                return None
+            return allocations[
+                (witness.member_id, witness.edge_key, witness.segment_rank)
+            ]
+
+        for bundle in record.model.bundles:
+            grant = grants[bundle.variable_id]
+            allocation = run_allocation(bundle.witness_id, grant.variable.axis)
+            if allocation is None:
+                continue
+            couplings += 1
+            assert allocation.coordinate == pytest.approx(
+                allocation.source_coordinate, abs=COORD_TOLERANCE
+            )
+            assert grant.coordinate == pytest.approx(
+                allocation.coordinate + bundle.delta
+            )
+        for interval in record.model.forbidden_intervals:
+            grant = grants.get(interval.member_id)
+            if grant is None:
+                continue
+            allocation = run_allocation(interval.obstacle_id, grant.variable.axis)
+            if allocation is None:
+                continue
+            couplings += 1
+            pitch = (interval.maximum_coordinate - interval.minimum_coordinate) / 2
+            assert allocation.coordinate == pytest.approx(
+                allocation.source_coordinate, abs=COORD_TOLERANCE
+            )
+            assert abs(grant.coordinate - allocation.coordinate) >= pitch - (
+                COORD_TOLERANCE
+            )
+    assert couplings
+
+
+def _owned_free_segment(plan) -> int | None:
+    """An owned segment of *plan* sharing no point with any of its gap channels."""
+    channel_ranks = {channel.segment_rank for channel in plan.gap_channels}
+    return next(
+        (
+            rank
+            for rank in plan.owned_segment_ranks
+            if 0 < rank < len(plan.points) - 2
+            and not channel_ranks & {rank - 1, rank, rank + 1}
+        ),
+        None,
+    )
+
+
+def test_member_geometry_emission_rejects_a_moved_owned_point(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pass that moves a plan-owned segment after emission fails the emission check.
+
+    The plan owns the segment's points as much as its gap channels and corner
+    radii, so translating an owned segment that is no gap channel, with its
+    radii untouched, is still a second owner deciding a planned coordinate.
+    """
+    observed: list[tuple[list, object]] = []
+    real_validate = member_geometry_routing.validate_member_geometry_emission
+
+    def spy(routes, execution):
+        real_validate(routes, execution)
+        observed.append((deepcopy(routes), execution))
+
+    monkeypatch.setattr(
+        member_geometry_routing, "validate_member_geometry_emission", spy
+    )
+    _render("tests/fixtures/topologies/shared_entry_bundle_order_repro.mmd")
+
+    candidates = [
+        (route, execution, plan, rank)
+        for routes, execution in observed
+        for route in routes
+        if (plan := execution.plan_for_edge(route.edge)) is not None
+        and (rank := _owned_free_segment(plan)) is not None
+    ]
+    assert candidates
+    route, execution, plan, rank = candidates[0]
+    start, end = route.points[rank : rank + 2]
+    axis = 1 if start[1] == end[1] else 0
+    for index in (rank, rank + 1):
+        point = list(route.points[index])
+        point[axis] += 2.0
+        route.points[index] = (point[0], point[1])
+
+    with pytest.raises(RuntimeError, match="owned segment"):
+        real_validate([route], execution)
+
+
+@pytest.mark.parametrize("relative_path", cohort_shadow_oracle.repository_maps())
+def test_shadow_oracle_failures_match_the_ratchet(relative_path: str) -> None:
+    """Every repository map the shadow oracle fails is listed, and no other.
+
+    A listed map that starts passing is removed from the list in the same
+    change, so the ratchet records exactly the maps still drawn off their plan.
+    """
+    failure = cohort_shadow_oracle.shadow_failure(ROOT / relative_path)
+    listed = relative_path in set(cohort_shadow_oracle.read_ratchet())
+
+    if listed:
+        assert failure is not None, (
+            f"{relative_path} passes the shadow oracle; remove it from "
+            f"{cohort_shadow_oracle.RATCHET_PATH.relative_to(ROOT)}"
+        )
+    else:
+        assert failure is None, failure
+
+
+def test_shadow_ratchet_lists_only_repository_maps() -> None:
+    listed = cohort_shadow_oracle.read_ratchet()
+
+    assert list(listed) == sorted(set(listed))
+    assert set(listed) <= set(cohort_shadow_oracle.repository_maps())

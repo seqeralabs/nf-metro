@@ -3143,7 +3143,12 @@ def fresh_member_route(plan: RouteMemberGeometryPlan, edge: Edge) -> RoutedPath:
 def validate_member_geometry_emission(
     routes: list[RoutedPath], execution: MemberGeometryExecution
 ) -> None:
-    """Require every emitted member to retain its owned channel geometry."""
+    """Require every emitted member to retain its owned geometry.
+
+    The plan owns each owned segment's points, every gap channel and the corner
+    radii beside them, so a later pass that moves any of them is a second owner
+    of a planned coordinate.
+    """
     for route in routes:
         plan = execution.plan_for_edge(route.edge)
         if plan is None:
@@ -3157,6 +3162,12 @@ def validate_member_geometry_emission(
             if actual != (channel.start, channel.end):
                 raise RuntimeError(
                     f"member geometry plan {plan.id} channel geometry changed"
+                )
+        for rank in plan.owned_segment_ranks:
+            if tuple(route.points[rank : rank + 2]) != plan.points[rank : rank + 2]:
+                raise RuntimeError(
+                    f"member geometry plan {plan.id} owned segment {rank} geometry "
+                    "changed"
                 )
         radii = route.curve_radii or ()
         planned_radii = plan.curve_radii or ()

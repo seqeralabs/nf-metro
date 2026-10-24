@@ -53,6 +53,10 @@ class CorridorLane:
     ``start_turn_side`` and ``end_turn_side`` are the raw-coordinate side
     (``+1``/``-1``) the route leaves the run toward at ``span_start`` and
     ``span_end``; ``0`` where the route stops there or carries straight on.
+
+    A lane that does not hold its preference gives way to the lanes an
+    equality ties it to: its root's preferred base is read from the lanes that
+    hold theirs, and from its own only where no lane of the root does.
     """
 
     member_id: str
@@ -65,6 +69,7 @@ class CorridorLane:
     semantic_rank: tuple[int, ...]
     start_turn_side: int = 0
     end_turn_side: int = 0
+    holds_preference: bool = True
 
 
 @dataclass(frozen=True)
@@ -674,14 +679,18 @@ def _seated_clear_orders(
     union_find: _WeightedUnionFind,
     seats: Mapping[int, Fraction],
     required_clearance: Callable[[str, str], Fraction],
+    yielding_seats: Mapping[int, Fraction],
 ) -> dict[frozenset[int], tuple[int, int]]:
     """Order each root pair already a clearance apart, on one side, at its seats.
 
     A lane's seat is where it sits with its root at the root's preferred base,
     so it reads a rigid cohort at its offsets rather than at coordinates it may
-    be drawn at against them.  A pair any overlapping member pair of which is
-    seated coincident, inside its clearance, or on the other side, is left
-    unordered.
+    be drawn at against them.  Against a root that holds its preference, a lane
+    of a root that gives way is read at ``yielding_seats`` instead: the seat its
+    root takes on its own domain and exclusions, so the pair keeps the side the
+    yielding root would choose with the other where it stands.  A pair any
+    overlapping member pair of which is seated coincident, inside its
+    clearance, or on the other side, is left unordered.
     """
     orders: dict[frozenset[int], tuple[int, int]] = {}
     conflicting: set[frozenset[int]] = set()
@@ -696,7 +705,11 @@ def _seated_clear_orders(
         pair = frozenset((left_root, right_root))
         if pair in conflicting:
             continue
-        gap = seats[right_index] - seats[left_index]
+        left_seat, right_seat = seats[left_index], seats[right_index]
+        if (left_index in yielding_seats) != (right_index in yielding_seats):
+            left_seat = yielding_seats.get(left_index, left_seat)
+            right_seat = yielding_seats.get(right_index, right_seat)
+        gap = right_seat - left_seat
         clear = gap != 0 and abs(gap) >= required_clearance(
             left_lane.member_id, right_lane.member_id
         )
@@ -856,7 +869,10 @@ def _solve_in_frame(  # noqa: C901, PLR0915
         root: _lower_median(
             [
                 sign * _q(lanes[index].planned_coordinate) - potentials[index]
-                for index in members
+                for index in (
+                    [index for index in members if lanes[index].holds_preference]
+                    or members
+                )
             ]
         )
         for root, members in roots.items()
@@ -1481,6 +1497,20 @@ def _solve_in_frame(  # noqa: C901, PLR0915
     fixed_orders = _fixed_lane_drawn_orders(
         lanes, union_find, preferred, fixed_root_owners
     )
+
+    def own_seat(root: int) -> Fraction:
+        try:
+            return closest_allowed(
+                root, floor=domain_floor.get(root), ceiling=domain_ceiling.get(root)
+            )
+        except _NoCoordinateInsideBounds:
+            return preferred[root]
+
+    yielding_roots = {
+        root: own_seat(root)
+        for root, members in roots.items()
+        if not any(lanes[index].holds_preference for index in members)
+    }
     seated_orders = _seated_clear_orders(
         lanes,
         union_find,
@@ -1489,6 +1519,11 @@ def _solve_in_frame(  # noqa: C901, PLR0915
             for index in range(len(lanes))
         },
         required_clearance,
+        {
+            index: yielding_roots[root] + potentials[index]
+            for index in range(len(lanes))
+            if (root := union_find.find(index)[0]) in yielding_roots
+        },
     )
     first_failure: CorridorAllocationResult | None = None
     previous_orders: Mapping[frozenset[int], tuple[int, int]] | None = None

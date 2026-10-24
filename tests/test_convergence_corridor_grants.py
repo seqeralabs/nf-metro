@@ -1516,14 +1516,14 @@ def test_trunk_is_granted_clear_of_every_distinct_line_run_it_co_travels(
             assert abs(coordinate - grant.coordinate) >= step - COORD_TOLERANCE_FINE
 
 
-def test_a_bundle_anchored_on_a_run_its_own_problem_moves_fails_closed(
+def test_a_bundle_anchored_on_its_own_trunk_fails_closed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A bundle's run is a fixed obstacle, which a lane of the same problem is not.
+    """A bundle anchored on the trunk it holds states no relation at all.
 
-    Re-anchoring merge_right_entry's bundle on the trunk's own carrier puts the
-    reference inside the scalar's problem, which the compile refuses rather than
-    seating the trunk against geometry it is itself moving.
+    Re-anchoring merge_right_entry's bundle on the trunk's own carrier would
+    hold the trunk a pitch from itself, which the compile refuses rather than
+    seating the trunk against its own geometry.
     """
     real_bundles = corridor_cohort_integration._scalar_bundles
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 from collections import Counter, defaultdict
 from collections.abc import Callable, Collection, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from itertools import permutations
 from math import isclose, isfinite
@@ -1272,11 +1272,9 @@ class _FootprintContact:
 class _FootprintBundle:
     """A scalar lane held ``delta`` from a run of its own bundle.
 
-    The run is a fixed obstacle where it currently stands, so the relation moves
-    the scalar onto the bundle and never the run onto the scalar.  The run is
-    usually a member carrier's variable footprint; that stays sound only while
-    no relation joins a scalar into a member carrier's component, so a bundle
-    whose run is movable in the scalar's own problem fails closed.
+    A run that is a lane of the same problem is an equality between the two,
+    so the scalar and the run are seated as one decision; a run no problem
+    moves is a fixed obstacle where it stands, and the scalar is held onto it.
     """
 
     owner_id: str
@@ -1294,6 +1292,9 @@ class _MemberFootprintModel:
     contacts: tuple[_FootprintContact, ...]
     forbidden_intervals: tuple[CorridorForbiddenInterval, ...] = ()
     bundles: tuple[_FootprintBundle, ...] = ()
+    scalar_aliases: Mapping[str, str] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
 
 
 def _bind_claim(
@@ -1900,7 +1901,80 @@ def _member_footprint_model(
             offset_step,
             curve_radius,
         ),
+        _scalar_context_aliases(claims, scalar_requests, scalar_carriers),
     )
+
+
+def _scalar_context_aliases(
+    claims: tuple[_BoundClaim, ...],
+    scalar_requests: Sequence[CorridorScalarRequest],
+    scalar_carriers: Mapping[str, CorridorFootprintWitness],
+) -> MappingProxyType[str, str]:
+    """The scalar each immutable context claim on its own trunk run stands for.
+
+    A convergence member drawn along its trunk reaches the ledger as an
+    immutable context claim at the trunk's coordinate.  That claim is the
+    scalar's own run, so inside a problem seating the scalar the claim is the
+    scalar rather than an obstacle where the scalar stood before the solve.
+    A claim two scalars could stand for is left an obstacle.
+    """
+    matches: defaultdict[str, set[str]] = defaultdict(set)
+    governing = (
+        (request.variable, carrier, request.control_recipe.governed_member_ids)
+        for request in scalar_requests
+        if request.control_recipe is not None
+        and (carrier := scalar_carriers.get(request.variable.variable_id)) is not None
+    )
+    for variable, carrier, governed_member_ids in governing:
+        for claim in claims:
+            if (
+                not claim.target.mutable
+                and claim.ledger.member_id in governed_member_ids
+                and claim.axis == variable.axis
+                and isclose(
+                    claim.coordinate, variable.coordinate, abs_tol=COORD_TOLERANCE
+                )
+                and _overlaps(
+                    claim.longitudinal_start,
+                    claim.longitudinal_end,
+                    carrier.longitudinal_start,
+                    carrier.longitudinal_end,
+                )
+            ):
+                matches[claim.claim_id].add(variable.variable_id)
+    return MappingProxyType(
+        {
+            claim_id: next(iter(variable_ids))
+            for claim_id, variable_ids in sorted(matches.items())
+            if len(variable_ids) == 1
+        }
+    )
+
+
+def _run_coupled_variable(
+    interval: CorridorForbiddenInterval,
+    footprint_model: _MemberFootprintModel,
+    witnesses_by_id: Mapping[str, CorridorFootprintWitness],
+    variables_by_id: Mapping[str, CorridorScalarVariable],
+) -> str | None:
+    """The member carrier whose own run a scalar's forbidden *interval* clears.
+
+    Only an interval that keeps a scalar a pitch off a parallel run that is
+    itself a member lane couples two variables; any other interval stands
+    where its obstacle is drawn.
+    """
+    witness = witnesses_by_id.get(interval.obstacle_id)
+    scalar = variables_by_id.get(interval.member_id)
+    if (
+        witness is None
+        or scalar is None
+        or witness.coordinate_variable_id is None
+        or footprint_model.claim_ids_by_variable.get(interval.member_id)
+        or not footprint_model.claim_ids_by_variable.get(witness.coordinate_variable_id)
+        or witness.axis != scalar.axis
+    ):
+        return None
+    return witness.coordinate_variable_id
 
 
 def _cotravelling_turn_off_intervals(
@@ -2284,9 +2358,11 @@ def _atomic_components(
     the start. Physical overlap seeds the union; each ``_FootprintOrder`` and
     ``_FootprintContact`` then unions the nodes its participant variables
     resolve to -- a claim-carrying variable resolves to its own claim ranks,
-    a scalar variable (one with no claim at all) resolves to its own node.
-    That relation participation is the only thing that ever joins two scalar
-    nodes, or a scalar node to a physical group: sharing an axis unions
+    a scalar variable (one with no claim at all) resolves to its own node.  A
+    scalar also joins the run its bundle holds it to, the member run its
+    forbidden interval keeps it clear of, and every context claim it stands
+    for.  That relation participation is the only thing that ever joins two
+    scalar nodes, or a scalar node to a physical group: sharing an axis unions
     nothing by itself.
     """
     variables_by_id = {
@@ -2325,14 +2401,30 @@ def _atomic_components(
         *footprint_model.orders,
         *footprint_model.contacts,
     )
-    for relation in relations:
+    witnesses_by_id = {
+        witness.footprint_id: witness for witness in footprint_model.witnesses
+    }
+    coupled_pairs = [relation.participant_variable_ids for relation in relations]
+    for bundle in footprint_model.bundles:
+        run_variable_id = witnesses_by_id[bundle.witness_id].coordinate_variable_id
+        if run_variable_id is not None:
+            coupled_pairs.append((bundle.variable_id, run_variable_id))
+    for interval in footprint_model.forbidden_intervals:
+        run_variable_id = _run_coupled_variable(
+            interval, footprint_model, witnesses_by_id, variables_by_id
+        )
+        if run_variable_id is not None:
+            coupled_pairs.append((interval.member_id, run_variable_id))
+    for participant_variable_ids in coupled_pairs:
         relation_ranks = tuple(
             rank
-            for variable_id in relation.participant_variable_ids
+            for variable_id in participant_variable_ids
             for rank in relation_nodes(variable_id)
         )
         for rank in relation_ranks[1:]:
             union.union(relation_ranks[0], rank)
+    for claim_id, variable_id in footprint_model.scalar_aliases.items():
+        union.union(scalar_node[variable_id], claim_rank_by_id[claim_id])
 
     grouped_physical: defaultdict[int, list[int]] = defaultdict(list)
     for physical_rank, group in enumerate(physical):
@@ -2746,6 +2838,174 @@ def _ranks_in_slot_order(slot_by_rank: Mapping[int, float | None]) -> list[int]:
     )
 
 
+def _network_lane_owner(claim: _BoundClaim) -> str:
+    return _direction_owner(
+        f"network-lane|{claim.ledger.network_id}|{claim.ledger.lane_rank}",
+        claim.ledger.direction,
+    )
+
+
+_Clearance = tuple[str, str, float]
+
+
+def _merged_separations(
+    clearances: Sequence[_Clearance],
+) -> tuple[CorridorSeparation, ...]:
+    """One separation per lane pair, at the widest clearance any source asks."""
+    widest: dict[frozenset[str], float] = {}
+    for left_id, right_id, distance in clearances:
+        pair = frozenset((left_id, right_id))
+        widest[pair] = max(distance, widest.get(pair, 0.0))
+    return tuple(
+        CorridorSeparation(left_id, right_id, distance)
+        for (left_id, right_id), distance in sorted(
+            (tuple(sorted(pair)), distance)
+            for pair, distance in widest.items()
+            if len(pair) == 2
+        )
+    )
+
+
+def _claim_separations(
+    claims: tuple[_BoundClaim, ...],
+    roles: Mapping[str, CorridorCohortClaimRole],
+    aliases: Mapping[str, str],
+    offset_step: float,
+    curve_radius: float,
+) -> tuple[tuple[CorridorSeparation, ...], tuple[_Clearance, ...]]:
+    """Separate every overlapping claim pair that is not fixed on both sides.
+
+    A context claim a scalar stands for is that scalar's lane, so a pair it
+    takes part in is returned as a clearance on the scalar instead.
+    """
+    separations: list[CorridorSeparation] = []
+    scalar_clearances: list[_Clearance] = []
+    for rank, left in enumerate(claims):
+        for right in claims[rank + 1 :]:
+            aliased = left.claim_id in aliases or right.claim_id in aliases
+            if not _overlap(left, right) or (
+                not aliased
+                and roles[left.claim_id] is CorridorCohortClaimRole.FIXED
+                and roles[right.claim_id] is CorridorCohortClaimRole.FIXED
+            ):
+                continue
+            distance = cotravelling_lane_clearance(
+                same_line=left.target.route.line_id == right.target.route.line_id,
+                counter_running=left.ledger.direction is not right.ledger.direction,
+                curve_radius=curve_radius,
+                offset_step=offset_step,
+            )
+            if aliased:
+                scalar_clearances.append(
+                    (
+                        aliases.get(left.claim_id, left.claim_id),
+                        aliases.get(right.claim_id, right.claim_id),
+                        distance,
+                    )
+                )
+            else:
+                separations.append(
+                    CorridorSeparation(left.claim_id, right.claim_id, distance)
+                )
+    return tuple(separations), tuple(scalar_clearances)
+
+
+def _bundle_relations(
+    bundle: _FootprintBundle,
+    witness: CorridorFootprintWitness,
+    lane_ids: Callable[[str], tuple[str, ...]],
+) -> tuple[tuple[CorridorEquality, ...], CorridorObstacle | None]:
+    """Lower *bundle* to equalities with its run's lanes, or to a fixed obstacle.
+
+    A run that is a lane of this problem is held by an equality; a run no
+    problem moves stands as an obstacle where it is drawn.
+    """
+    scalar_lane_ids = lane_ids(bundle.variable_id)
+    if not scalar_lane_ids:
+        return (), None
+    if witness.coordinate_variable_id == bundle.variable_id:
+        raise CorridorCohortCompilationError(
+            f"corridor bundle {bundle.owner_id} anchors on a run of the scalar it holds"
+        )
+    run_lane_ids = (
+        lane_ids(witness.coordinate_variable_id)
+        if witness.coordinate_variable_id is not None
+        else ()
+    )
+    if run_lane_ids:
+        return tuple(
+            CorridorEquality(bundle.owner_id, run_lane_id, scalar_lane_id, bundle.delta)
+            for run_lane_id in run_lane_ids
+            for scalar_lane_id in scalar_lane_ids
+        ), None
+    return (), CorridorObstacle(
+        bundle.owner_id,
+        witness.coordinate,
+        witness.coordinate,
+        witness.longitudinal_start,
+        witness.longitudinal_end,
+        witness.semantic_rank,
+    )
+
+
+def _run_coupled_clearances(
+    footprint_model: _MemberFootprintModel,
+    witnesses_by_id: Mapping[str, CorridorFootprintWitness],
+    scalar_witnesses: Mapping[str, CorridorFootprintWitness],
+    claims: tuple[_BoundClaim, ...],
+    lane_ids: Callable[[str], tuple[str, ...]],
+) -> tuple[frozenset[tuple[str, str]], tuple[_Clearance, ...]]:
+    """Turn each forbidden interval around a member lane into a separation.
+
+    Returns the ``(scalar, obstacle)`` keys of the intervals replaced and the
+    one-pitch clearances between the scalar and the overlapping lanes of the
+    run; an interval whose run has no lane overlapping the scalar here keeps
+    standing where the run is drawn.
+    """
+    variables_by_id = {
+        variable.variable_id: variable for variable in footprint_model.variables
+    }
+    claims_by_id = {item.claim_id: item for item in claims}
+
+    def overlapping_lanes(
+        scalar: CorridorFootprintWitness, run_variable_id: str
+    ) -> tuple[str, ...]:
+        return tuple(
+            claim_id
+            for claim_id in lane_ids(run_variable_id)
+            if _overlaps(
+                scalar.longitudinal_start,
+                scalar.longitudinal_end,
+                claims_by_id[claim_id].longitudinal_start,
+                claims_by_id[claim_id].longitudinal_end,
+            )
+        )
+
+    couplings = [
+        (interval, run_lane_ids)
+        for interval in footprint_model.forbidden_intervals
+        if (
+            run_variable_id := _run_coupled_variable(
+                interval, footprint_model, witnesses_by_id, variables_by_id
+            )
+        )
+        is not None
+        and (scalar := scalar_witnesses.get(interval.member_id)) is not None
+        and (run_lane_ids := overlapping_lanes(scalar, run_variable_id))
+    ]
+    return frozenset(
+        (interval.member_id, interval.obstacle_id) for interval, _lanes in couplings
+    ), tuple(
+        (
+            interval.member_id,
+            run_lane_id,
+            (interval.maximum_coordinate - interval.minimum_coordinate) / 2,
+        )
+        for interval, run_lane_ids in couplings
+        for run_lane_id in run_lane_ids
+    )
+
+
 def _problem(
     claims: tuple[_BoundClaim, ...],
     roles: dict[str, CorridorCohortClaimRole],
@@ -2760,16 +3020,24 @@ def _problem(
         MappingProxyType({})
     ),
 ) -> CorridorAllocationProblem:
+    scalar_by_id = {
+        request.variable.variable_id: request for request in scalar_requests
+    }
+    aliases = {
+        claim_id: variable_id
+        for claim_id, variable_id in footprint_model.scalar_aliases.items()
+        if variable_id in scalar_by_id
+    }
     movable = tuple(
         item for item in claims if roles[item.claim_id] != CorridorCohortClaimRole.FIXED
     )
     fixed_claims = tuple(
-        item for item in claims if roles[item.claim_id] is CorridorCohortClaimRole.FIXED
+        item
+        for item in claims
+        if roles[item.claim_id] is CorridorCohortClaimRole.FIXED
+        and item.claim_id not in aliases
     )
     movable_ids = {item.claim_id for item in movable}
-    scalar_by_id = {
-        request.variable.variable_id: request for request in scalar_requests
-    }
     scalar_witness_matches: defaultdict[str, list[CorridorFootprintWitness]] = (
         defaultdict(list)
     )
@@ -2849,13 +3117,21 @@ def _problem(
         for fixed_claim in fixed_claims
         if _same_semantic_fixed_lane(movable_claim, fixed_claim)
     ]
+    scalar_equalities = [
+        CorridorEquality(
+            _network_lane_owner(movable_claim),
+            aliases[context_claim.claim_id],
+            movable_claim.claim_id,
+            0.0,
+        )
+        for movable_claim in movable
+        for context_claim in claims
+        if context_claim.claim_id in aliases
+        and _same_semantic_fixed_lane(movable_claim, context_claim)
+    ]
     fixed_equalities = list(
         CorridorFixedEquality(
-            _direction_owner(
-                f"network-lane|{movable_claim.ledger.network_id}|"
-                f"{movable_claim.ledger.lane_rank}",
-                movable_claim.ledger.direction,
-            ),
+            _network_lane_owner(movable_claim),
             movable_claim.claim_id,
             fixed_claim.claim_id,
         )
@@ -2887,49 +3163,20 @@ def _problem(
             for member_id in lane_ids(variable_id)
         )
     for bundle in footprint_model.bundles:
-        bundle_lane_ids = lane_ids(bundle.variable_id)
-        if not bundle_lane_ids:
-            continue
-        witness = witnesses_by_id[bundle.witness_id]
-        if witness.coordinate_variable_id is not None and lane_ids(
-            witness.coordinate_variable_id
-        ):
-            raise CorridorCohortCompilationError(
-                f"corridor bundle {bundle.owner_id} anchors on a run this "
-                "component also moves"
+        bundle_equalities, bundle_obstacle = _bundle_relations(
+            bundle, witnesses_by_id[bundle.witness_id], lane_ids
+        )
+        scalar_equalities.extend(bundle_equalities)
+        if bundle_obstacle is not None:
+            relation_obstacles[bundle.owner_id] = bundle_obstacle
+            fixed_equalities.extend(
+                CorridorFixedEquality(
+                    bundle.owner_id, member_id, bundle.owner_id, bundle.delta
+                )
+                for member_id in lane_ids(bundle.variable_id)
             )
-        relation_obstacles[bundle.owner_id] = CorridorObstacle(
-            bundle.owner_id,
-            witness.coordinate,
-            witness.coordinate,
-            witness.longitudinal_start,
-            witness.longitudinal_end,
-            witness.semantic_rank,
-        )
-        fixed_equalities.extend(
-            CorridorFixedEquality(
-                bundle.owner_id, member_id, bundle.owner_id, bundle.delta
-            )
-            for member_id in bundle_lane_ids
-        )
-    separations = tuple(
-        CorridorSeparation(
-            left.claim_id,
-            right.claim_id,
-            cotravelling_lane_clearance(
-                same_line=left.target.route.line_id == right.target.route.line_id,
-                counter_running=left.ledger.direction is not right.ledger.direction,
-                curve_radius=curve_radius,
-                offset_step=offset_step,
-            ),
-        )
-        for rank, left in enumerate(claims)
-        for right in claims[rank + 1 :]
-        if _overlap(left, right)
-        and (
-            roles[left.claim_id] != CorridorCohortClaimRole.FIXED
-            or roles[right.claim_id] != CorridorCohortClaimRole.FIXED
-        )
+    separations, scalar_clearances = _claim_separations(
+        claims, roles, aliases, offset_step, curve_radius
     )
     # Branches of one line split to different targets share a lane, and each
     # target orders the other lines it gathers against its own branch.  A
@@ -3004,9 +3251,13 @@ def _problem(
         movable_claim.claim_id: fixed_claim.coordinate
         for movable_claim, fixed_claim in fixed_lane_pairs
     }
+    coupled_intervals, run_clearances = _run_coupled_clearances(
+        footprint_model, witnesses_by_id, scalar_witnesses, claims, lane_ids
+    )
     forbidden_intervals = tuple(
         replace(interval, member_id=member_id)
         for interval in footprint_model.forbidden_intervals
+        if (interval.member_id, interval.obstacle_id) not in coupled_intervals
         for member_id in lane_ids(interval.member_id)
         if not (
             member_id in pinned
@@ -3028,6 +3279,8 @@ def _problem(
             item.variable.variable_id,
         ),
     )
+    # A scalar gives way to the member lanes it is tied to: where both could
+    # move, the members keep the coordinate they are drawn at.
     scalar_lanes = tuple(
         CorridorLane(
             request.variable.variable_id,
@@ -3038,31 +3291,38 @@ def _problem(
             scalar_witnesses[request.variable.variable_id].longitudinal_start,
             scalar_witnesses[request.variable.variable_id].longitudinal_end,
             scalar_witnesses[request.variable.variable_id].semantic_rank,
+            holds_preference=False,
         )
         for request in ordered_requests
     )
-    scalar_separations = tuple(
-        CorridorSeparation(
-            left.variable.variable_id,
-            right.variable.variable_id,
-            cotravelling_lane_clearance(
-                same_line=(
-                    scalar_witnesses[left.variable.variable_id].line_id
-                    == scalar_witnesses[right.variable.variable_id].line_id
-                ),
-                counter_running=(
-                    scalar_witnesses[left.variable.variable_id].direction
-                    is not scalar_witnesses[right.variable.variable_id].direction
-                ),
-                curve_radius=curve_radius,
-                offset_step=offset_step,
+    ordered_ids = [request.variable.variable_id for request in ordered_requests]
+    scalar_separations = _merged_separations(
+        (
+            *scalar_clearances,
+            *run_clearances,
+            *(
+                (
+                    left_id,
+                    right_id,
+                    cotravelling_lane_clearance(
+                        same_line=(
+                            scalar_witnesses[left_id].line_id
+                            == scalar_witnesses[right_id].line_id
+                        ),
+                        counter_running=(
+                            scalar_witnesses[left_id].direction
+                            is not scalar_witnesses[right_id].direction
+                        ),
+                        curve_radius=curve_radius,
+                        offset_step=offset_step,
+                    ),
+                )
+                for rank, left_id in enumerate(ordered_ids)
+                for right_id in ordered_ids[rank + 1 :]
+                if _footprints_overlap(
+                    scalar_witnesses[left_id], scalar_witnesses[right_id]
+                )
             ),
-        )
-        for rank, left in enumerate(ordered_requests)
-        for right in ordered_requests[rank + 1 :]
-        if _footprints_overlap(
-            scalar_witnesses[left.variable.variable_id],
-            scalar_witnesses[right.variable.variable_id],
         )
     )
     member_lanes = tuple(
@@ -3097,7 +3357,7 @@ def _problem(
             *(_obstacle(item) for item in fixed_claims),
             *relation_obstacles.values(),
         ),
-        equalities,
+        (*equalities, *scalar_equalities),
         (*separations, *scalar_separations),
         (*relation_domains, *scalar_domains),
         fixed_equalities=tuple(fixed_equalities),

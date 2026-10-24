@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 import nf_metro.layout.routing.normalize as normalize
 from nf_metro.layout.routing.common import (
     RoutedPath,
@@ -17,6 +19,7 @@ def _route(
     points: list[tuple[float, float]],
     *,
     owned: tuple[int, ...] = (),
+    member_owned: tuple[int, ...] = (),
 ) -> RoutedPath:
     return RoutedPath(
         edge=Edge("fork", f"target_{line_id}", line_id),
@@ -25,6 +28,7 @@ def _route(
         is_inter_section=True,
         curve_radii=[10.0] * (len(points) - 2),
         convergence_owned_segment_ranks=owned,
+        route_system_owned_segment_ranks=member_owned,
     )
 
 
@@ -111,12 +115,16 @@ def test_vertical_section_obstruction_preserves_open_segment_endpoints() -> None
     )
 
 
-def test_bypass_nesting_ownership_is_per_segment_boundary(monkeypatch) -> None:
+@pytest.mark.parametrize("ownership", ["owned", "member_owned"])
+def test_bypass_nesting_ownership_is_per_segment_boundary(
+    monkeypatch, ownership: str
+) -> None:
+    """Neither a convergence plan's leg nor a member plan's is bypass nesting's."""
     wrap = _route("wrap", [(10.0, 40.0), (90.0, 40.0)])
     owned = _route(
         "owned",
         [(0.0, 80.0), (0.0, 60.0), (100.0, 60.0), (100.0, 120.0)],
-        owned=(1,),
+        **{ownership: (1,)},
     )
     movable = _route(
         "movable",
