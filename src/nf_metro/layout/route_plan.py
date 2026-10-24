@@ -66,6 +66,10 @@ if TYPE_CHECKING:
     )
     from nf_metro.layout.routing.common import RoutedPath
     from nf_metro.layout.routing.context import _EdgeKey, _RoutingCtx
+    from nf_metro.layout.routing.corridor_cohort_integration import (
+        AcceptedCorridorCohortPlan,
+        CorridorCohortLedger,
+    )
     from nf_metro.layout.routing.system_emission import RouteSystemEmissionExecution
     from nf_metro.layout.settlement_demand import BoundaryClearanceRequirement
 
@@ -139,8 +143,12 @@ class SettlementStage(str, Enum):
     """Stable vocabulary for observing settlement progress.
 
     A render emits only ``DISCOVERY``, ``GENERAL_SETTLEMENT``, ``COHORT_FINAL``
-    and ``VALIDATION``.  The other four members are reserved vocabulary that no
-    production path may emit, which
+    and ``VALIDATION``; the corridor-cohort aperture observation, and the
+    re-route drawing its grant, each record ``GENERAL_SETTLEMENT``.
+    ``FINAL_SOLVE`` is emitted by the corridor cohort
+    compiler when it is handed a settlement trace.  ``COHORT_INTENT``,
+    ``APERTURE_SETTLEMENT`` and ``TYPED_MATERIALIZATION`` remain reserved
+    vocabulary no production path emits, which
     ``tests/test_corridor_cohort_integration.py`` asserts.
     """
 
@@ -2452,6 +2460,12 @@ class RoutePlan:
     boundary_clearance_owner_ids: tuple[str, ...] = ()
     """Systems whose member geometry owns a settled boundary-clearance cohort."""
     settlement_trace: SettlementStageTrace = SettlementStageTrace()
+    corridor_cohort_ledger: CorridorCohortLedger | None = None
+    accepted_corridor_cohort_plan: AcceptedCorridorCohortPlan | None = None
+    """The corridor-cohort plan the observation that compiled it accepted.
+
+    Present only on the plan of an observation that ran the compiler; a pass
+    that reads it never compiles again."""
 
 
 @dataclass(slots=True)
@@ -2698,6 +2712,8 @@ class RoutePlanObserver:
     boundary_clearance_owner_ids: frozenset[str] = frozenset()
     member_geometry_plans: tuple[RouteMemberGeometryPlan, ...] = ()
     exit_turn_dispositions: tuple[tuple[ExitTurnPlanId, str | None], ...] = ()
+    corridor_cohort_ledger: CorridorCohortLedger | None = None
+    accepted_corridor_cohort_plan: AcceptedCorridorCohortPlan | None = None
     _family_by_edge: dict[_EdgeKey, RouteFamilyId] = field(default_factory=dict)
     _merge_skips: dict[_EdgeKey, _EdgeKey | None] = field(default_factory=dict)
 
@@ -2749,6 +2765,8 @@ def build_route_plan_observer(
     boundary_clearance_owner_ids: frozenset[str] = frozenset(),
     member_geometry_plans: tuple[RouteMemberGeometryPlan, ...] = (),
     exit_turn_dispositions: tuple[tuple[ExitTurnPlanId, str | None], ...] = (),
+    corridor_cohort_ledger: CorridorCohortLedger | None = None,
+    accepted_corridor_cohort_plan: AcceptedCorridorCohortPlan | None = None,
 ) -> RoutePlanObserver:
     """Create one transient observer after settled routing context construction."""
     return RoutePlanObserver(
@@ -2768,6 +2786,8 @@ def build_route_plan_observer(
         boundary_clearance_owner_ids=boundary_clearance_owner_ids,
         member_geometry_plans=member_geometry_plans,
         exit_turn_dispositions=exit_turn_dispositions,
+        corridor_cohort_ledger=corridor_cohort_ledger,
+        accepted_corridor_cohort_plan=accepted_corridor_cohort_plan,
     )
 
 
@@ -3254,6 +3274,8 @@ def _build_route_plan(
             bindings=(),
             provenance=_plan_provenance(graph, ()),
             diagnostics=fan_diagnostics,
+            corridor_cohort_ledger=observer.corridor_cohort_ledger,
+            accepted_corridor_cohort_plan=observer.accepted_corridor_cohort_plan,
         )
 
     topology = scaffold.topology
@@ -3543,6 +3565,8 @@ def _build_route_plan(
         boundary_clearance_owner_ids=tuple(
             sorted(observer.boundary_clearance_owner_ids)
         ),
+        corridor_cohort_ledger=observer.corridor_cohort_ledger,
+        accepted_corridor_cohort_plan=observer.accepted_corridor_cohort_plan,
     )
     from nf_metro.layout.route_reservations import attach_route_reservations
 
@@ -5140,11 +5164,19 @@ def _json_value(value: object) -> object:
         return value.value
     if isinstance(value, tuple):
         return [_json_value(item) for item in value]
+    if isinstance(value, frozenset):
+        # Set iteration order depends on the hash seed; the JSON form is the
+        # one canonical key every element type shares.
+        return [_json_value(item) for item in sorted(value, key=_canonical_json)]
     if isinstance(value, (str, int, float, bool, type(None))):
         return value
     raise TypeError(f"route plan contains unsupported {type(value).__name__}")
 
 
+def _canonical_json(value: object) -> str:
+    return json.dumps(_json_value(value), sort_keys=True, separators=(",", ":"))
+
+
 def serialize_route_plan(plan: RoutePlan) -> str:
     """Return the canonical JSON representation of one immutable plan."""
-    return json.dumps(_json_value(plan), sort_keys=True, separators=(",", ":"))
+    return _canonical_json(plan)

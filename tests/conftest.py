@@ -304,6 +304,26 @@ CURVE_ABORT_FIXTURES: dict[str, pytest.MarkDecorator] = {
             "so its offset applies along the vertical leg",
         )
     ),
+    "tests/fixtures/regressions/cohort_grant_beside_seated_runs.mmd": (
+        known_curve_abort(
+            "#2149",
+            "#2155",
+            reason="__junction_6's LEFT-entry corner into sec3 pinches l0 and l1 "
+            "through non-concentric arc centres; l0 and l4 overlay on one "
+            "descent channel; l3's turn into __merge_2 rounds to radius 1 of the "
+            "10 requested",
+        )
+    ),
+    "tests/fixtures/regressions/cohort_line_split_branches.mmd": (
+        known_curve_abort(
+            "#2086",
+            "#1550",
+            reason="__junction_6's RIGHT-entry corner into sec1 crosses l3 over "
+            "l2 and pinches l0 and l3 through non-concentric arc centres; l2's "
+            "two legs from __junction_6 turn at one vertex with radii 2.6 and "
+            "18 and double over",
+        )
+    ),
 }
 
 

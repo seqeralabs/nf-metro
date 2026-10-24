@@ -62,11 +62,15 @@ BASELINE_PYTHON = (3, 11)
 # sweep re-execs under this value when invoked without it.
 PINNED_HASH_SEED = "0"
 
-# The gate matrix scopes to routing *decision* modules: the dispatch handlers
-# and the post-routing passes.  ``invariants.py`` is the validator (its branches
-# only fire under ``validate=True``, a separate test surface), and ``__init__``
-# is re-exports; neither holds a topology gate.
-EXCLUDED_MODULES = {"__init__.py", "invariants.py"}
+# The gate matrix scopes to routing code a render executes: the dispatch
+# handlers, the post-routing passes and the corridor-cohort compile.
+# ``invariants.py`` is the validator (its branches only fire under
+# ``validate=True``, a separate test surface) and ``__init__`` is re-exports;
+# neither holds a topology gate the fixture corpus reaches.
+EXCLUDED_MODULES = {
+    "__init__.py",
+    "invariants.py",
+}
 
 # These fixtures naturally exercise the distinct public route-observation paths.
 # Keeping the lane explicit avoids a second routing pass over the full corpus,

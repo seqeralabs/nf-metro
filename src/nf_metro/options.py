@@ -17,6 +17,7 @@ layout engine and renderer read it. Precedence is uniform: CLI flag (when set)
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, TypeGuard
 
@@ -92,16 +93,61 @@ def coerce(opt: LayoutOption, raw: str) -> tuple[Any, str]:
             num = caster(text)
         except ValueError:
             return INVALID, "a number"
-        if not math.isfinite(num):
-            return INVALID, "a finite number"
-        if opt.sign == "nonneg" and num < 0:
-            return INVALID, "a non-negative number"
-        if opt.sign == "positive" and num <= 0:
-            return INVALID, "a positive number"
-        if opt.max_val is not None and num > opt.max_val:
-            return INVALID, f"a number <= {opt.max_val}"
-        return num, ""
+        expected = _number_violation(opt, num)
+        return (INVALID, expected) if expected else (num, "")
     return text, ""
+
+
+def _number_violation(opt: LayoutOption, num: float) -> str:
+    """Describe the range *num* falls outside for *opt*, or ``""`` if inside."""
+    if not math.isfinite(num):
+        return "a finite number"
+    if opt.sign == "nonneg" and num < 0:
+        return "a non-negative number"
+    if opt.sign == "positive" and num <= 0:
+        return "a positive number"
+    if opt.max_val is not None and num > opt.max_val:
+        return f"a number <= {opt.max_val}"
+    return ""
+
+
+def value_violation(opt: LayoutOption, value: object) -> str:
+    """Describe the valid values *value* is not one of for *opt*, or ``""``.
+
+    The typed counterpart of :func:`coerce`, for a value that arrives already
+    parsed rather than as directive text.  ``bool`` is not a number here even
+    though Python treats it as one, and an ``int`` option takes no float.
+    """
+    if opt.kind == "bool":
+        return "" if isinstance(value, bool) else "a boolean"
+    if opt.kind == "choice":
+        valid = isinstance(value, str) and value in opt.choices
+        return "" if valid else " or ".join(repr(c) for c in opt.choices)
+    if opt.kind == "str":
+        return "" if isinstance(value, str) else "a string"
+    expected = "an integer" if opt.kind == "int" else "a number"
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return expected
+    if opt.kind == "int" and isinstance(value, float):
+        return expected
+    return _number_violation(opt, float(value))
+
+
+def validate_layout_options(opts: Mapping[str, object]) -> None:
+    """Reject any registry option in *opts* whose value its entry forbids.
+
+    ``None`` means unset and passes; a key the registry does not declare is
+    left to whichever caller reads it.
+    """
+    for opt in LAYOUT_OPTIONS:
+        value = opts.get(opt.name)
+        if value is None:
+            continue
+        expected = value_violation(opt, value)
+        if expected:
+            raise ValueError(
+                f"layout option {opt.name!r} must be {expected}, got {value!r}"
+            )
 
 
 # Declaration order is the order CLI flags appear in --help.

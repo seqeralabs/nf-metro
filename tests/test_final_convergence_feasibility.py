@@ -110,6 +110,30 @@ def test_same_direction_distinct_lines_require_the_full_lane_step() -> None:
     )
 
 
+_NEAR, _FAR = 834.8499444855588, 844.8499444855587
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    (
+        (((_NEAR, 114.0), (_NEAR, 308.0)), ((_FAR, 247.0), (_FAR, 114.0))),
+        (((114.0, _NEAR), (308.0, _NEAR)), ((247.0, _FAR), (114.0, _FAR))),
+    ),
+    ids=("vertical", "horizontal"),
+)
+def test_parallel_runs_one_radius_apart_do_not_crowd_at_float_residue(
+    first: tuple[tuple[float, float], tuple[float, float]],
+    second: tuple[tuple[float, float], tuple[float, float]],
+) -> None:
+    """Two coordinates carrying fractional canvas offsets one radius apart
+    subtract to a residue below it; the separation is read at the engine's
+    resolution."""
+    assert _FAR - _NEAR < CURVE_RADIUS
+
+    assert convergences._parallel_run_separation(first, second) == CURVE_RADIUS
+    assert not convergences._parallel_segments_conflict(first, second, CURVE_RADIUS)
+
+
 @pytest.mark.parametrize(
     "field",
     ("claimant_member_ids", "source_junction_ids", "connector_ids"),

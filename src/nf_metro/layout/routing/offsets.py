@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections import ChainMap, Counter, deque
 from collections.abc import (
     Callable,
@@ -12,6 +13,7 @@ from collections.abc import (
     Sequence,
 )
 from dataclasses import dataclass, field
+from itertools import combinations
 from typing import Literal, NamedTuple
 
 from nf_metro.layout.constants import (
@@ -40,7 +42,11 @@ from nf_metro.layout.route_topology import divergence_junction_exit_ports
 from nf_metro.layout.routing.arranger import BoundaryConfig, lane_order
 from nf_metro.layout.routing.common import (
     Direction,
+    _h_segment_penetrates_section,
+    _v_segment_crosses_other_section,
     bypass_bottom_y,
+    col_left_edge,
+    col_right_edge,
     merge_junction_ids,
     needs_perp_approach_fan,
     offsets_hold,
@@ -2438,7 +2444,8 @@ def _inherit_level_convergence_entry_offsets(ctx: _OffsetCtx) -> None:
         levels = distinct_offset_levels(inherited.values())
         if max_interior_offset_gap(levels, ctx.offset_step) is not None:
             continue
-        if _bundle_reslot_collides(ctx, port_id, port_obj.section_id, inherited):
+        walk = _bundle_walk(ctx, port_id, port_obj.section_id, inherited)
+        if _bundle_reslot_collides(ctx, port_id, inherited, walk):
             continue
         _apply_offsets_along_bundle(ctx, port_id, port_obj.section_id, inherited)
 
@@ -3533,6 +3540,12 @@ def _bundle_walk(
     caller can ask which stations a re-slot would touch before deciding whether
     to make it.
 
+    Each line is carried only along its own edges.  In the literal frame, a
+    re-slotted line reaching a station on the run from another source takes its
+    re-slotted lane there: the lines carried along the run hold their re-slotted
+    lanes at that station, so the arriving line on any other lane would sit on,
+    or across, one of theirs.
+
     Up to the section's own exit port the run carries *new_offs* itself: the
     re-slot names the slots it wants and the stations along it answer to the
     same lane frame.  Crossing an exit the run has to *climb* re-bases it onto
@@ -3557,16 +3570,24 @@ def _bundle_walk(
     lane_edge_sides = perpendicular_port_sides(direction)
     flow_edge_sides = flow_port_sides(direction)
     lane_stacked_on_y = lanes_run_along_y(direction)
-    reached: list[tuple[str, dict[str, float]]] = []
-    visited = {start_id}
+    reached: dict[str, dict[str, float]] = {}
+    seen: dict[str, set[str]] = {start_id: set(new_offs)}
     # queue item: (station, row_y, offs, already-rebased-onto-own-slots)
     queue = deque([(start_id, graph.stations[start_id].y, dict(new_offs), False)])
     while queue:
         cur, row_y, offs, rebased = queue.popleft()
         cur_y = graph.stations[cur].y
+        travelling: dict[str, set[str]] = {}
         for edge in graph.edges_from(cur):
-            tgt_id = edge.target
-            if tgt_id in visited:
+            travelling.setdefault(edge.target, set()).add(edge.line_id)
+        for tgt_id, along in travelling.items():
+            arrived = seen.get(tgt_id, set())
+            carried = {
+                lid: off
+                for lid, off in offs.items()
+                if lid in along and lid not in arrived
+            }
+            if not carried:
                 continue
             tgt = graph.stations[tgt_id]
             tgt_port = graph.ports.get(tgt_id)
@@ -3587,13 +3608,23 @@ def _bundle_walk(
             crosses_exit = not in_section and not on_row
             tgt_row = tgt.y if crosses_exit else row_y
             tgt_rebased = rebased or crosses_exit
-            tgt_offs = (
-                _ranked_onto_held_slots(ctx, tgt_id, cur, offs) if tgt_rebased else offs
-            )
-            visited.add(tgt_id)
-            reached.append((tgt_id, tgt_offs))
+            if tgt_rebased:
+                tgt_offs = _ranked_onto_held_slots(ctx, tgt_id, cur, carried)
+            else:
+                rejoining = {
+                    edge.line_id
+                    for edge in graph.edges_to(tgt_id)
+                    if edge.source != cur
+                }
+                tgt_offs = carried | {
+                    lid: new_offs[lid]
+                    for lid in rejoining
+                    if lid in new_offs and lid not in arrived
+                }
+            seen.setdefault(tgt_id, set()).update(tgt_offs)
+            reached.setdefault(tgt_id, {}).update(tgt_offs)
             queue.append((tgt_id, tgt_row, tgt_offs, tgt_rebased))
-    return reached
+    return list(reached.items())
 
 
 def _ranked_onto_held_slots(
@@ -3629,10 +3660,10 @@ def _ranked_onto_held_slots(
 def _bundle_reslot_collides(
     ctx: _OffsetCtx,
     start_id: str,
-    sec_id: str,
     new_offs: dict[str, float],
+    walk: Sequence[tuple[str, dict[str, float]]],
 ) -> bool:
-    """Whether carrying *new_offs* along the bundle seats two lines on one slot.
+    """Whether carrying *new_offs* along *walk* seats two lines on one slot.
 
     Values imported from another bundle need not be a permutation of the slots
     in use along this one: a station the run reaches can carry a line the bundle
@@ -3642,14 +3673,42 @@ def _bundle_reslot_collides(
     graph = ctx.graph
     return any(
         abs(offs[moved] - ctx.offsets.get((sid, held), 0.0)) <= _OFFSET_EQ_TOLERANCE
-        for sid, offs in (
-            (start_id, dict(new_offs)),
-            *_bundle_walk(ctx, start_id, sec_id, new_offs),
-        )
+        for sid, offs in ((start_id, dict(new_offs)), *walk)
         for lines in (set(graph.station_lines(sid)),)
         for moved in lines & offs.keys()
         for held in lines - offs.keys()
     )
+
+
+def _bundle_reslot_inverts_split(
+    ctx: _OffsetCtx,
+    start_id: str,
+    new_offs: dict[str, float],
+    walk: Sequence[tuple[str, dict[str, float]]],
+) -> bool:
+    """Whether carrying *new_offs* along *walk* flips two lines where they part.
+
+    Two lines part at a station they leave for stations at different heights;
+    the flip is the line bound lower holding the lower lane now and the upper
+    one after the re-slot.
+    """
+    graph = ctx.graph
+    for sid, offs in ((start_id, new_offs), *walk):
+        bound: dict[str, set[float]] = {}
+        for edge in graph.edges_from(sid):
+            bound.setdefault(edge.line_id, set()).add(graph.stations[edge.target].y)
+        heights = {lid: next(iter(ys)) for lid, ys in bound.items() if len(ys) == 1}
+        for a, b in combinations(sorted(heights), 2):
+            part = heights[a] - heights[b]
+            if abs(part) <= _SAME_Y_TOLERANCE:
+                continue
+            held = {lid: ctx.offsets.get((sid, lid), 0.0) for lid in (a, b)}
+            moved = {lid: offs.get(lid, held[lid]) for lid in (a, b)}
+            held_lean = (held[a] - held[b]) * part
+            moved_lean = (moved[a] - moved[b]) * part
+            if held_lean > 0 and moved_lean < 0:
+                return True
+    return False
 
 
 def _is_symmetric_fork_arm(graph: MetroGraph, sid: str) -> bool:
@@ -4447,6 +4506,160 @@ def _order_top_descent_over_left_entry(ctx: _OffsetCtx) -> None:
         _apply_offsets_along_bundle(ctx, port_id, port.section_id, new_offs)
         for lid in ordered:
             _apply_offset_upstream_on_row(ctx, port_id, lid, new_offs[lid])
+
+
+_DESCENT_CORRIDOR_EPS = 2.0
+"""How far past its reach a feeder's descent is taken to run, so a descent at a
+column's own inward edge counts that column's boundary."""
+
+
+def _outward_lead_sign(ctx: _OffsetCtx, station_id: str) -> int | None:
+    """Screen-X sign a feeder leaves *station_id* along, or ``None`` if unknown.
+
+    An exit port leads out of its own side; a divergence junction leads out of
+    the exit port it fans from.  Anything else has no single lead direction.
+    """
+    port = ctx.graph.ports.get(ctx.divergence_exit_ports.get(station_id, station_id))
+    if port is None:
+        return None
+    if port.side is PortSide.RIGHT:
+        return 1
+    if port.side is PortSide.LEFT:
+        return -1
+    return None
+
+
+def _inward_column_edges(ctx: _OffsetCtx, outward: int) -> list[float]:
+    """Each grid column's inward edge X, facing *outward*.
+
+    Shared across every port queried with the same *outward* sign, so callers
+    that scan multiple ports should compute this once per sign rather than
+    once per port.
+    """
+    graph = ctx.graph
+    columns = {other.grid_col for other in graph.sections.values()}
+    return [
+        col_left_edge(graph, col, default=math.inf)
+        if outward > 0
+        else col_right_edge(graph, col, default=-math.inf)
+        for col in columns
+    ]
+
+
+def _feeder_descent_corridors(
+    ctx: _OffsetCtx,
+    port_id: str,
+    port: Port,
+    outward: int,
+    inward_edges: Sequence[float],
+) -> tuple[dict[str, int], dict[str, int]] | None:
+    """Each non-level feeder line's descent corridor at a flow-start side entry.
+
+    A feeder whose source leads out *outward* drops to the port's row down the
+    outer side of whichever reaches further out, its source or the port, and
+    turns in along that row.  The corridor is the count of *inward_edges* (see
+    :func:`_inward_column_edges`) at or before that descent along *outward*.
+    Returns the lines arriving from above and from below, or ``None`` when
+    some feeder's corridor is not decided that way: its lead is unknown or
+    points toward the port, one line arrives down two corridors, or an
+    intervening section blocks the drop or the turn-in.
+    """
+    graph = ctx.graph
+    section = graph.section_for_port(port)
+    port_station = graph.stations[port_id]
+    above: dict[str, int] = {}
+    below: dict[str, int] = {}
+    for edge in graph.edges_to(port_id):
+        source = graph.stations[edge.source]
+        rise = source.y - port_station.y
+        if abs(rise) <= _SAME_Y_TOLERANCE:
+            continue
+        if _outward_lead_sign(ctx, edge.source) != outward:
+            return None
+        reach = max(0.0, outward * (source.x - port_station.x))
+        descent_x = port_station.x + outward * (reach + _DESCENT_CORRIDOR_EPS)
+        if reach > 0:
+            exempt = {section.id, source.section_id}
+            if _v_segment_crosses_other_section(
+                graph, descent_x, source.y, port_station.y, exempt
+            ) or any(
+                _h_segment_penetrates_section(
+                    min(descent_x, port_station.x),
+                    max(descent_x, port_station.x),
+                    port_station.y,
+                    other,
+                )
+                for other in graph.sections.values()
+                if other.id not in exempt
+            ):
+                return None
+        corridor = sum(
+            1 for inward in inward_edges if outward * (descent_x - inward) >= 0
+        )
+        group = above if rise < 0 else below
+        if group.get(edge.line_id, corridor) != corridor:
+            return None
+        group[edge.line_id] = corridor
+    return above, below
+
+
+def _order_flow_start_side_entry_by_descent_corridor(ctx: _OffsetCtx) -> None:
+    """Order a flow-start side entry's descending feeders by descent corridor.
+
+    Feeders dropping into a LEFT/RIGHT entry port on the flow-start side of an
+    LR/RL section turn in along the port's row from a vertical leg outward of
+    it.  Nested turn-ins stay crossing-free only when the lane nearest the
+    approach side holds the nearest corridor: feeders from above take the top
+    lanes in corridor order, feeders from below the bottom lanes in reverse.
+    Level feeders keep their slots.  The existing slots are re-dealt in that
+    order and carried along the consumer section.
+
+    Side-symmetric through the outward sign; a port whose feeders' corridors
+    :func:`_feeder_descent_corridors` cannot decide is left to the LEFT-only
+    phases :func:`_order_top_descent_over_left_entry` and
+    :func:`_order_convergence_by_approach`, which own the shapes that lead
+    toward the port.
+    """
+    graph = ctx.graph
+    inward_edges_by_outward: dict[int, list[float]] = {}
+    for port_id, port in graph.ports.items():
+        if not port.is_entry or port.side not in (PortSide.LEFT, PortSide.RIGHT):
+            continue
+        section = graph.section_for_port(port)
+        if (
+            not lanes_run_along_y(section.direction)
+            or port.side is not flow_port_sides(section.direction)[0]
+            or port.section_id in ctx.reversed_sections
+            or len(graph.station_lines(port_id)) < 2
+        ):
+            continue
+        outward = 1 if port.side is PortSide.RIGHT else -1
+        if outward not in inward_edges_by_outward:
+            inward_edges_by_outward[outward] = _inward_column_edges(ctx, outward)
+        corridors = _feeder_descent_corridors(
+            ctx, port_id, port, outward, inward_edges_by_outward[outward]
+        )
+        if corridors is None:
+            continue
+        new_offs: dict[str, float] = {}
+        for group, nearest_first in zip(corridors, (1, -1), strict=True):
+            if len(set(group.values())) < 2:
+                continue
+            current = {lid: ctx.offsets.get((port_id, lid), 0.0) for lid in group}
+            ordered = sorted(
+                group, key=lambda lid: (nearest_first * group[lid], current[lid], lid)
+            )
+            for lid, slot in zip(ordered, sorted(current.values()), strict=True):
+                if abs(slot - current[lid]) > _OFFSET_EQ_TOLERANCE:
+                    new_offs[lid] = slot
+        if not new_offs:
+            continue
+        walk = _bundle_walk(ctx, port_id, port.section_id, new_offs)
+        if _bundle_reslot_collides(
+            ctx, port_id, new_offs, walk
+        ) or _bundle_reslot_inverts_split(ctx, port_id, new_offs, walk):
+            continue
+        _apply_offsets_along_bundle(ctx, port_id, port.section_id, new_offs)
 
 
 def _recenter_partial_fan_branches(ctx: _OffsetCtx) -> None:
@@ -5456,6 +5669,10 @@ def compute_station_offsets(
        at a LEFT entry port fed both level from its own row and by a line
        descending from a row above, the descending line takes the top lane
        so it does not dive under the level feeder.
+    7f. **Flow-start side-entry descent ordering** - at a LEFT/RIGHT entry
+       port on the flow-start side of an LR/RL section, re-deals the feeders
+       descending from above (or climbing from below) onto the port's slots
+       in the order of the corridor each drops down, so their turn-ins nest.
     8. **Horizontal reconciliation** - snaps mismatched offsets on
        same-Y edges to eliminate almost-horizontal slopes.
     8b. **Flat TB-exit/entry alignment** - on an auto-folded return row,
@@ -5543,6 +5760,7 @@ def compute_station_offsets(
     _order_convergence_entry_ports(ctx)
     _order_convergence_by_approach(ctx)
     _order_top_descent_over_left_entry(ctx)
+    _order_flow_start_side_entry_by_descent_corridor(ctx)
     _reconcile_horizontal_offsets(ctx)
     _align_flat_tb_exit_to_entry(ctx)
     _recenter_partial_fan_branches(ctx)

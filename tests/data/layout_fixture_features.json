@@ -42,7 +42,8 @@
     "guide/05f_banner_labels.mmd",
     "guide/06a_without_hidden.mmd",
     "guide/06b_with_hidden.mmd",
-    "topologies/centered_flat_skip_over_marker.mmd"
+    "topologies/centered_flat_skip_over_marker.mmd",
+    "topologies/descent_entry_inner_bypass.mmd"
   ],
   "corridor_solo": [
     "group_band_over_row_corridor.mmd",
@@ -328,6 +329,7 @@
     "topologies/cross_column_perp_drop_far_exit.mmd",
     "topologies/cross_row_gap_wrap.mmd",
     "topologies/deep_linear.mmd",
+    "topologies/descent_entry_inner_bypass.mmd",
     "topologies/disconnected_components_fold.mmd",
     "topologies/divergent_fanout_split.mmd",
     "topologies/dogleg_exempt_distinct.mmd",
@@ -444,6 +446,7 @@
     "topologies/recompacted_fanout_exit.mmd",
     "topologies/reconverge_reversed_fold.mmd",
     "topologies/render_labelwrap_row_gap.mmd",
+    "topologies/return_trunk_over_member_run.mmd",
     "topologies/reversed_section_junction_reseat.mmd",
     "topologies/right_entry_from_above.mmd",
     "topologies/right_entry_from_above_far.mmd",

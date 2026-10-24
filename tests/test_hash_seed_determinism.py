@@ -104,6 +104,9 @@ EXPECTED_EXCEPTION_SHA256 = {
 }
 
 
+RENDERING_SEEDS = frozenset({"seed_72.mmd"})
+
+
 def _defect_classes(message: str) -> tuple[str, ...]:
     """The bracketed defect classes a routing-guard abort message enumerates."""
     return tuple(re.findall(r"^\s*\[([^]]+)\]", message, re.MULTILINE))
@@ -123,7 +126,7 @@ def test_seed_render_outcomes_are_stable_across_hash_seeds() -> None:
     for by_path in observations.values():
         for path, observation in by_path.items():
             name = Path(path).name
-            if name == "seed_72.mmd":
+            if name in RENDERING_SEEDS:
                 assert observation["outcome"] == "success"
                 assert observation["exception"] is None
                 continue
