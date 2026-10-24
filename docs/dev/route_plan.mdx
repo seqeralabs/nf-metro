@@ -296,6 +296,18 @@ A negative side slack means the route lies too close to one boundary, or past it
 Observation retains both values and emits an attributed diagnostic.
 Observation itself moves no geometry.
 
+## Accepted corridor-cohort plan
+
+The corridor-cohort compiler runs at one observation per settle call, and the plan it accepts is stored on that observation's `RoutePlan` as `accepted_corridor_cohort_plan`.
+`AcceptedCorridorCohortPlan` is immutable and holds exactly the coordinates the plan moves: one `AcceptedCorridorOwnerFrame` per member segment, endpoint landing and owned scalar grant, ordered by kind then identity.
+A frame keeps its owner identity, axis, source coordinate, accepted coordinate and their delta, the along-run extent of a member segment, and the control recipe of a scalar grant.
+The plan also keeps the coordinate translations the compiling observation was seated under, and its `plan_id` is the SHA-256 digest of all of that.
+Construction fails closed on a duplicated owner or segment, an owner frame whose recipe belongs to another owner, a delta that does not reach its accepted coordinate, or an identity that does not match the content.
+
+Later readers take the decision from the record rather than from diagnostics.
+`prepare_route_system_planning` refuses to compile when the plan it is seated against already carries one.
+Only the path that adopts the compiling observation publishes the record; a plan published from any other path carries none.
+
 ## Envelope settlement
 
 `settle_route_envelopes` turns a negative capacity slack into a translation.

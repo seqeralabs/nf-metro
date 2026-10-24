@@ -109,10 +109,7 @@ from nf_metro.layout.routing import (
     compute_station_offsets,
     observe_route_edges_centred,
 )
-from nf_metro.layout.routing.convergences import (
-    CONVERGENCE_CORRIDOR_GRANT_APPLIED,
-    ConvergenceInvariantError,
-)
+from nf_metro.layout.routing.convergences import ConvergenceInvariantError
 from nf_metro.layout.routing.corners import (
     curve_tangents,
     resolve_curve_radii,
@@ -1845,15 +1842,15 @@ def _corridor_cohort_aperture_requirements(
 
 def _corridor_grant_moved_plan_ids(plan: RoutePlan) -> frozenset[str]:
     """Published convergence plans whose corridor grant moved their trunk."""
-    moved_trunk_members = {
-        item.member_id
-        for item in plan.diagnostics
-        if item.code == CONVERGENCE_CORRIDOR_GRANT_APPLIED
-    }
+    accepted = plan.accepted_corridor_cohort_plan
+    if accepted is None:
+        return frozenset()
+    published = {str(item.id) for item in plan.convergence_plans}
     return frozenset(
-        str(item.id)
-        for item in plan.convergence_plans
-        if item.primary_trunk_member_id in moved_trunk_members
+        frame.owner_id
+        for frame in accepted.trunk_grants
+        if abs(frame.coordinate_delta) > COORD_TOLERANCE_FINE
+        and frame.owner_id in published
     )
 
 

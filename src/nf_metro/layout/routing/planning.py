@@ -15,6 +15,7 @@ from nf_metro.layout.route_plan import (
     RouteSystemDisposition,
     RouteSystemId,
 )
+from nf_metro.layout.route_reservations import ReservationCoordinateTranslation
 from nf_metro.layout.routing import exit_turns as exit_turn_routing
 from nf_metro.layout.routing.context import _RoutingCtx
 from nf_metro.layout.routing.convergences import (
@@ -30,11 +31,14 @@ from nf_metro.layout.routing.convergences import (
     settle_preliminary_convergence_execution,
 )
 from nf_metro.layout.routing.corridor_cohort_integration import (
+    AcceptedCorridorCohortPlan,
+    CorridorCohortCompilationError,
     CorridorCohortLedger,
     CorridorCohortPlan,
     CorridorScalarGrant,
     CorridorScalarOwnerKind,
     CorridorScalarRequest,
+    accept_corridor_cohort_plan,
     build_corridor_cohort_ledger,
 )
 from nf_metro.layout.routing.exit_turns import ExitTurnExecution
@@ -76,6 +80,8 @@ class RoutePlanningExecution:
     Replay reads the verdict from here, which is why it is captured before the
     published record is narrowed to planned systems."""
     corridor_cohort_ledger: CorridorCohortLedger | None = None
+    accepted_cohort_plan: AcceptedCorridorCohortPlan | None = None
+    """The plan this pass's corridor-cohort compile accepted, if it compiled."""
 
 
 def _allocation_eligible_system_ids(
@@ -146,6 +152,20 @@ def _owned_scalar_grants(
         grant
         for grant in cohorts.scalar_grants
         if grant.variable_id not in compatibility_ids
+    )
+
+
+def _accepted_cohort_plan(
+    member_geometry: MemberGeometryExecution,
+    translation_basis: tuple[ReservationCoordinateTranslation, ...],
+) -> AcceptedCorridorCohortPlan | None:
+    cohorts = member_geometry.corridor_cohorts
+    if cohorts is None:
+        return None
+    return accept_corridor_cohort_plan(
+        cohorts,
+        _owned_scalar_grants(cohorts, _compatibility_scalar_ids(cohorts)),
+        translation_basis,
     )
 
 
@@ -314,6 +334,7 @@ def prepare_route_system_planning(
     allow_convergence_clearance_requirements: bool = False,
     granted_clearance_owner_ids: frozenset[str] = frozenset(),
     prior_plan: RoutePlan | None = None,
+    coordinate_translations: tuple[ReservationCoordinateTranslation, ...] = (),
 ) -> RoutePlanningExecution:
     """Run the canonical planning phases without emitting production paths.
 
@@ -371,6 +392,16 @@ def prepare_route_system_planning(
             prior_plan,
             station_offsets=station_offsets or {},
             curve_radius=ctx.curve_radius,
+        )
+    if (
+        prior_plan is not None
+        and prior_plan.accepted_corridor_cohort_plan is not None
+        and corridor_cohort_ledger is not None
+        and allow_convergence_clearance_requirements
+    ):
+        raise CorridorCohortCompilationError(
+            "an observation holding an accepted corridor cohort plan may not "
+            "compile another"
         )
 
     def prepare_member_geometry(
@@ -633,4 +664,5 @@ def prepare_route_system_planning(
         planned_system_ids,
         exit_turn_dispositions,
         corridor_cohort_ledger,
+        _accepted_cohort_plan(member_geometry, coordinate_translations),
     )

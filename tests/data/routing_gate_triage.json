@@ -1927,10 +1927,6 @@
   "note": "Reached only after _bind_claim raises (its stale-snapshot guards), which cannot occur because claims and targets derive from one snapshot.",
   "status": "defensive"
  },
- "corridor_cohort_integration.py::if finalized_owned_segments is not None:::#1": {
-  "note": "Ownership override for a finalized corridor population. CorridorCohortLedger.finalized_owned_segments is only ever assigned None (build_corridor_cohort_ledger) and no caller replaces it, so the finalized arm cannot run in the engine.",
-  "status": "candidate-dead"
- },
  "corridor_cohort_integration.py::if recipe is None:::#1": {
   "note": "Control-recipe validation exit for a scalar request without a recipe. The only production constructor of CorridorScalarRequest (convergence_corridor_requests) always passes a recipe, so a recipe-less request is never validated.",
   "status": "candidate-dead"
@@ -2039,22 +2035,6 @@
   "note": "Marks a cohort overlaid when its networks draw into tied or split port slots, so its components keep their drawn geometry. The corpus never draws two networks into one slot. Exercised by tests/test_corridor_cohort_main_layouts.py::test_overlaid_entry_slots_keep_drawn_geometry. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
  },
- "corridor_cohort_integration.py::if finalized_owned_segments is not None:::#2": {
-  "note": "Finalized-ownership branch of _roles. finalized_owned_segments is always None (see the finalized-owner gate in _directly_movable), so this arm cannot run.",
-  "status": "candidate-dead"
- },
- "corridor_cohort_integration.py::for item in claims:::#1": {
-  "note": "Loop of the finalized-ownership branch of _roles, unreachable because finalized_owned_segments is always None.",
-  "status": "candidate-dead"
- },
- "corridor_cohort_integration.py::if key not in finalized_owned_segments:::#1": {
-  "note": "Finalized-ownership check inside _roles, unreachable because finalized_owned_segments is always None.",
-  "status": "candidate-dead"
- },
- "corridor_cohort_integration.py::if (::#17": {
-  "note": "Geometry-owner conflict test of the finalized-ownership branch of _roles, unreachable because finalized_owned_segments is always None.",
-  "status": "candidate-dead"
- },
  "corridor_cohort_integration.py::if follower.claim_id in terminal_fixed:::#1": {
   "note": "Equality promotion skips a follower already fixed as terminal. Only reservations that are not complete leave a FIXED, non-terminal claim to promote, which no pipeline render produces; a hand-built incomplete ledger reaches it. Exercised by tests/test_corridor_cohort_integration.py::test_incomplete_component_stands_as_typed_compatibility. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
@@ -2151,14 +2131,6 @@
   "note": "Patch preparation: an allocated segment is orthogonal on its change axis, as it was when the claim was bound.",
   "status": "defensive"
  },
- "corridor_cohort_integration.py::if (::#19": {
-  "note": "Patch preparation: a landing matches its target's geometry plan, connectors, last segment, axis and finite slot, all taken from the same compile snapshot.",
-  "status": "defensive"
- },
- "corridor_cohort_integration.py::if (::#20": {
-  "note": "Patch preparation: a landing's last segment is orthogonal to the port axis and non-degenerate, as when the landing was planned.",
-  "status": "defensive"
- },
  "corridor_cohort_integration.py::if segment_key in coordinates and not isclose(::#1": {
   "note": "Patch preparation: two allocations on one segment agree on its coordinate because they come from one solve.",
   "status": "defensive"
@@ -2234,14 +2206,6 @@
  "corridor_cohort_integration.py::if len(granted_ids) != len(scalar_grants) or ungranted:::#1": {
   "note": "Scalar publication proof: every request is granted exactly once or belongs to a compatibility component, which the allocator guarantees.",
   "status": "defensive"
- },
- "corridor_cohort_integration.py::if ledger.finalized_owned_segments is not None:::#1": {
-  "note": "Finalized-ownership proof, unreachable because finalized_owned_segments is always None.",
-  "status": "candidate-dead"
- },
- "corridor_cohort_integration.py::if allocation_keys != ledger.finalized_owned_segments:::#1": {
-  "note": "Finalized-ownership comparison, unreachable because finalized_owned_segments is always None.",
-  "status": "candidate-dead"
  },
  "corridor_cohort_integration.py::if patches is None:::#1": {
   "note": "Patch preparation returns None only through its own stale-snapshot guards, which cannot fire (see _prepare_patches).",
@@ -2398,5 +2362,29 @@
  "corridor_cohorts.py::if result.status is CorridorAllocationStatus.PLANNED:::#1": {
   "note": "A pass whose seating is not PLANNED records its failure and tries the next order set; reached only when a seating fails. Exercised by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
+ },
+ "corridor_cohort_integration.py::if (::#18": {
+  "note": "Patch preparation: a landing matches its target's geometry plan, connectors, last segment, axis and finite slot, all taken from the same compile snapshot.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if (::#19": {
+  "note": "Patch preparation: a landing's last segment is orthogonal to the port axis and non-degenerate, as when the landing was planned.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if failed:::#1": {
+  "note": "Owner-frame validation raise. The accepted-plan builder derives every delta from the same coordinates it stores, and takes the segment, owner and recipe from one compiled record, so a frame it builds always passes. Reached only by a hand-built or altered frame; tests/test_corridor_cohort_acceptance.py::test_accepted_plan_constructor_fails_closed drives each check.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if failed:::#2": {
+  "note": "Accepted-plan validation raise. The builder sorts its owners, derives the controlled segments from them and digests the same content, so a plan it builds always passes. Reached only by a hand-built or altered plan; tests/test_corridor_cohort_acceptance.py::test_accepted_plan_constructor_fails_closed drives each check.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if variable is None:::#1": {
+  "note": "Every grant the compile publishes carries the variable it was granted for, so the raise is reached only by a hand-built grant. tests/test_corridor_cohort_acceptance.py::test_accepting_a_grant_without_its_owner_frame_fails_closed drives it.",
+  "status": "defensive"
+ },
+ "planning.py::if (::#2": {
+  "note": "Compile guard: only the aperture observation compiles, and the plan it is seated against is the ledger the last settlement consumed, which holds no accepted plan. The raise is reached only by seating a pass against a plan that carries one; tests/test_corridor_cohort_acceptance.py::test_an_observation_holding_an_accepted_plan_may_not_compile drives it.",
+  "status": "defensive"
  }
 }
