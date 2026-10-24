@@ -1719,8 +1719,8 @@ def test_incomplete_component_stands_as_typed_compatibility() -> None:
     _assert_no_silent_compatibility(plan)
 
 
-def test_unrepresented_endpoint_cohort_stands_as_typed_compatibility() -> None:
-    """An endpoint cohort with no current claim keeps its legacy geometry, typed."""
+def test_endpoint_cohort_without_claims_adds_no_component() -> None:
+    """An endpoint cohort that no claim belongs to produces no component of its own."""
     carrier_claim, carrier_target = _overlapping_member_claim(
         claim_id="carrier", reservation_complete=True, longitudinal=(0.0, 30.0)
     )
@@ -1734,19 +1734,10 @@ def test_unrepresented_endpoint_cohort_stands_as_typed_compatibility() -> None:
 
     plan = cci.compile_corridor_cohort_plan(ledger, (carrier_target,))
 
-    (compatibility_component,) = [
-        component
-        for component in plan.components
-        if component.status is cci.CorridorAllocationStatus.COMPATIBILITY
-    ]
-    provenance = compatibility_component.compatibility
-    assert provenance is not None
-    assert (
-        provenance.reason
-        is cci.CorridorCompatibilityReason.UNREPRESENTED_ENDPOINT_COHORT
-    )
-    assert provenance.endpoint_cohort_ids == ("cohort:absent",)
-    _assert_no_silent_compatibility(plan)
+    (component,) = plan.components
+    assert component.status is cci.CorridorAllocationStatus.PLANNED
+    assert component.endpoint_cohort_ids == ()
+    assert component.compatibility is None
 
 
 def test_member_geometry_corridor_handoff_returns_heterogeneous_grants(
