@@ -108,7 +108,6 @@ class CorridorCompatibilityReason(str, Enum):
 
     INCOMPLETE_WITNESSES = "incomplete-witnesses"
     NO_MIGRABLE_GEOMETRY = "no-migrable-geometry"
-    UNREPRESENTED_ENDPOINT_COHORT = "unrepresented-endpoint-cohort"
     OVERLAID_ENDPOINT_SLOTS = "overlaid-endpoint-slots"
 
 
@@ -4076,28 +4075,6 @@ def compile_corridor_cohort_plan(
         )
         for rank, spec in enumerate(logical)
     ]
-    represented = {
-        cohort_id
-        for component in components
-        for cohort_id in component.endpoint_cohort_ids
-    }
-    for cohort_id in sorted(set(dict(ledger.endpoint_members)) - represented):
-        components.append(
-            CorridorCohortComponentPlan(
-                f"corridor-component|{len(components)}",
-                (cohort_id,),
-                (),
-                (),
-                (),
-                CorridorAllocationStatus.COMPATIBILITY,
-                compatibility=CorridorCohortCompatibility(
-                    CorridorCompatibilityReason.UNREPRESENTED_ENDPOINT_COHORT,
-                    (),
-                    (),
-                    (cohort_id,),
-                ),
-            )
-        )
 
     def resolved_shortfall(
         result: CorridorAllocationResult,
