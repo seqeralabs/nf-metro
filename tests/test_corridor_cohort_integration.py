@@ -1720,7 +1720,7 @@ def test_incomplete_component_stands_as_typed_compatibility() -> None:
 
 
 def test_endpoint_cohort_without_claims_adds_no_component() -> None:
-    """An endpoint cohort no claim belongs to names no members, so no component."""
+    """An endpoint cohort that no claim belongs to produces no component of its own."""
     carrier_claim, carrier_target = _overlapping_member_claim(
         claim_id="carrier", reservation_complete=True, longitudinal=(0.0, 30.0)
     )
@@ -1734,12 +1734,10 @@ def test_endpoint_cohort_without_claims_adds_no_component() -> None:
 
     plan = cci.compile_corridor_cohort_plan(ledger, (carrier_target,))
 
-    assert all(
-        "cohort:absent" not in component.endpoint_cohort_ids
-        for component in plan.components
-    )
-    assert all(component.compatibility is None for component in plan.components)
-    _assert_no_silent_compatibility(plan)
+    (component,) = plan.components
+    assert component.status is cci.CorridorAllocationStatus.PLANNED
+    assert component.endpoint_cohort_ids == ()
+    assert component.compatibility is None
 
 
 def test_member_geometry_corridor_handoff_returns_heterogeneous_grants(
