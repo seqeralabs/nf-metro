@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+from copy import deepcopy
 from dataclasses import fields, replace
 from enum import Enum
 from itertools import combinations
@@ -58,6 +59,7 @@ from nf_metro.layout.routing.corridor_cohort_integration import (
 )
 from nf_metro.layout.routing.corridor_cohorts import (
     CorridorAllocationStatus,
+    CorridorForbiddenInterval,
     solve_corridor_cohorts,
 )
 from nf_metro.layout.routing.families import RouteFamilyId
@@ -1081,6 +1083,113 @@ def test_relation_spanning_two_orientation_buckets_fails_closed() -> None:
 
     with pytest.raises(CorridorCohortCompilationError, match="orientation"):
         _atomic_components(claims, physical, footprint_model)
+
+
+def _two_lane_coupling_components(
+    *, aliased: bool
+) -> set[tuple[tuple[str, ...], tuple[str, ...]]]:
+    """Close a trunk scalar crowded by runs in its own row gap and the one above.
+
+    The trunk's context claim and the near run sit in one row gap; a distinct
+    line's far run in the row gap above also gets a forbidden interval along
+    the trunk's span.  Returns each component's claim ids and scalar ids.
+    """
+    trunk = _bound_claim(
+        claim_id="trunk-context",
+        region=RowGapRegion(1, 2),
+        orientation=CorridorOrientation.HORIZONTAL,
+        longitudinal_start=0.0,
+        longitudinal_end=100.0,
+        coordinate=236.0,
+    )
+    near = _bound_claim(
+        claim_id="near-run",
+        region=RowGapRegion(1, 2),
+        orientation=CorridorOrientation.HORIZONTAL,
+        longitudinal_start=0.0,
+        longitudinal_end=100.0,
+        coordinate=236.0,
+    )
+    far = _bound_claim(
+        claim_id="far-run",
+        region=RowGapRegion(0, 1),
+        orientation=CorridorOrientation.HORIZONTAL,
+        longitudinal_start=0.0,
+        longitudinal_end=60.0,
+        coordinate=44.0,
+    )
+    claims = (trunk, near, far)
+    scalar = _scalar_variable("trunk", axis=1, coordinate=236.0)
+    near_carrier = _scalar_variable("member-carrier|near", axis=1, coordinate=236.0)
+    far_carrier = _scalar_variable("member-carrier|far", axis=1, coordinate=44.0)
+    witnesses = tuple(
+        _footprint_witness(
+            footprint_id=f"witness:{claim.claim_id}",
+            member_id=claim.claim_id,
+            edge_key=("source", claim.claim_id, claim.claim_id),
+            axis=1,
+            coordinate=claim.coordinate,
+            longitudinal_start=claim.longitudinal_start,
+            longitudinal_end=claim.longitudinal_end,
+            coordinate_variable_id=variable.variable_id,
+        )
+        for claim, variable in ((near, near_carrier), (far, far_carrier))
+    )
+    footprint_model = _MemberFootprintModel(
+        (scalar, near_carrier, far_carrier),
+        witnesses,
+        {
+            scalar.variable_id: (),
+            near_carrier.variable_id: (near.claim_id,),
+            far_carrier.variable_id: (far.claim_id,),
+        },
+        (),
+        (),
+        tuple(
+            CorridorForbiddenInterval(
+                scalar.variable_id,
+                witness.footprint_id,
+                witness.coordinate - 8.0,
+                witness.coordinate + 8.0,
+                (0, 0),
+            )
+            for witness in witnesses
+        ),
+        scalar_aliases=({trunk.claim_id: scalar.variable_id} if aliased else {}),
+    )
+    physical = _physical_components(claims)
+
+    return {
+        (
+            tuple(
+                sorted(
+                    claims[rank].claim_id
+                    for physical_rank in component.physical_ranks
+                    for rank in physical[physical_rank]
+                )
+            ),
+            component.scalar_variable_ids,
+        )
+        for component in _atomic_components(claims, physical, footprint_model)
+    }
+
+
+def test_scalar_couples_only_runs_in_the_lane_of_its_own_trunk_run() -> None:
+    """A component holds one lane, so the far run stays where it is drawn."""
+    assert _two_lane_coupling_components(aliased=True) == {
+        (("far-run",), ()),
+        (("near-run", "trunk-context"), ("trunk",)),
+    }
+
+
+def test_scalar_without_context_claims_couples_only_runs_sharing_one_lane() -> None:
+    """With no context claim to name its lane, a scalar whose coupled runs span
+    two lanes joins neither of them."""
+    assert _two_lane_coupling_components(aliased=False) == {
+        (("far-run",), ()),
+        (("near-run", "trunk-context"), ()),
+        ((), ("trunk",)),
+    }
 
 
 # --- Member footprint relation lowering through the scalar corridor solver ---
@@ -2108,3 +2217,216 @@ def test_interleaved_fixed_lane_hash_seed_stable() -> None:
         observations
     )
     assert len({item["svg_sha256"] for item in observations.values()}) == 1
+
+
+def _capture_cohort_compiles(
+    monkeypatch: pytest.MonkeyPatch, relative_path: str
+) -> list[SimpleNamespace]:
+    """Render *relative_path*, keeping every cohort compile's model and components."""
+    current: dict[str, object] = {}
+    records: list[SimpleNamespace] = []
+    real_model = cci._member_footprint_model
+    real_components = cci._atomic_components
+    real_compile = member_geometry_routing.compile_corridor_cohort_plan
+
+    def model(*args, **kwargs):
+        current["model"] = real_model(*args, **kwargs)
+        return current["model"]
+
+    def components(claims, physical, footprint_model):
+        current["components"] = real_components(claims, physical, footprint_model)
+        current.update(claims=claims, physical=physical)
+        return current["components"]
+
+    def compile_plan(ledger, targets, **kwargs):
+        plan = real_compile(ledger, targets, **kwargs)
+        records.append(SimpleNamespace(plan=plan, **current))
+        return plan
+
+    monkeypatch.setattr(cci, "_member_footprint_model", model)
+    monkeypatch.setattr(cci, "_atomic_components", components)
+    monkeypatch.setattr(
+        member_geometry_routing, "compile_corridor_cohort_plan", compile_plan
+    )
+    _render(relative_path)
+    return records
+
+
+def _component_claim_ids(record: SimpleNamespace, component) -> set[str]:
+    return {
+        record.claims[claim_rank].claim_id
+        for physical_rank in component.physical_ranks
+        for claim_rank in record.physical[physical_rank]
+    }
+
+
+def test_trunk_scalar_shares_a_component_with_its_bundled_member(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A trunk held on its bundle solves in one component with the run it holds to.
+
+    The bundle relates the trunk scalar to a member run that is itself a movable
+    lane, so the two coordinates are one decision: solved apart, each lands on
+    the other's coordinate from before the solve.
+    """
+    records = _capture_cohort_compiles(
+        monkeypatch, "examples/topologies/merge_right_entry.mmd"
+    )
+
+    bundles = [
+        (record, bundle) for record in records for bundle in record.model.bundles
+    ]
+    assert bundles
+    for record, bundle in bundles:
+        witness = next(
+            item
+            for item in record.model.witnesses
+            if item.footprint_id == bundle.witness_id
+        )
+        assert witness.coordinate_variable_id is not None
+        run_claims = set(
+            record.model.claim_ids_by_variable[witness.coordinate_variable_id]
+        )
+        assert run_claims
+        scalar_component = next(
+            component
+            for component in record.components
+            if bundle.variable_id in component.scalar_variable_ids
+        )
+        assert run_claims <= _component_claim_ids(record, scalar_component)
+
+
+_JOINT_SOLVE_GRANTS = {
+    "examples/topologies/merge_right_entry.mmd": (346.0,),
+    "tests/fixtures/regressions/perp_entry_column_merge_feeder.mmd": (247.0,),
+    "examples/topologies/plan_owned_distinct_lane_separation.mmd": (200.0, 200.0),
+    "tests/fixtures/regressions/plan_owned_distinct_lane_separation_reordered.mmd": (
+        200.0,
+        200.0,
+    ),
+}
+
+
+def _run_allocation(record: SimpleNamespace, witness_id: str, axis: int):
+    """The allocation of the member run *witness_id* names along *axis*, if any."""
+    witness = next(
+        item for item in record.model.witnesses if item.footprint_id == witness_id
+    )
+    if witness.axis != axis or not record.model.claim_ids_by_variable.get(
+        witness.coordinate_variable_id or "", ()
+    ):
+        return None
+    return next(
+        item
+        for item in record.plan.allocations
+        if (item.member_id, item.edge_key, item.segment_rank)
+        == (witness.member_id, witness.edge_key, witness.segment_rank)
+    )
+
+
+@pytest.mark.parametrize("relative_path", sorted(_JOINT_SOLVE_GRANTS))
+def test_joint_solve_grant_matches_member_allocation(
+    monkeypatch: pytest.MonkeyPatch, relative_path: str
+) -> None:
+    """A trunk grant and the member run it is coupled to agree on one solve.
+
+    A bundled trunk sits exactly its bundle delta from the run's allocation,
+    and a trunk crowded by a distinct line's run clears that run's allocation
+    by the pitch its forbidden interval states, with the member run left at
+    the coordinate it is drawn at.
+    """
+    records = _capture_cohort_compiles(monkeypatch, relative_path)
+
+    first = records[0]
+    assert (
+        tuple(sorted(grant.coordinate for grant in first.plan.scalar_grants))
+        == (_JOINT_SOLVE_GRANTS[relative_path])
+    )
+    couplings = 0
+    for record in records:
+        grants = {grant.variable_id: grant for grant in record.plan.scalar_grants}
+        for bundle in record.model.bundles:
+            grant = grants[bundle.variable_id]
+            allocation = _run_allocation(record, bundle.witness_id, grant.variable.axis)
+            if allocation is None:
+                continue
+            couplings += 1
+            assert allocation.coordinate == pytest.approx(
+                allocation.source_coordinate, abs=COORD_TOLERANCE
+            )
+            assert grant.coordinate == pytest.approx(
+                allocation.coordinate + bundle.delta
+            )
+        for interval in record.model.forbidden_intervals:
+            grant = grants.get(interval.member_id)
+            if grant is None:
+                continue
+            allocation = _run_allocation(
+                record, interval.obstacle_id, grant.variable.axis
+            )
+            if allocation is None:
+                continue
+            couplings += 1
+            pitch = (interval.maximum_coordinate - interval.minimum_coordinate) / 2
+            assert allocation.coordinate == pytest.approx(
+                allocation.source_coordinate, abs=COORD_TOLERANCE
+            )
+            assert abs(grant.coordinate - allocation.coordinate) >= pitch - (
+                COORD_TOLERANCE
+            )
+    assert couplings
+
+
+def _owned_free_segment(plan) -> int | None:
+    """An owned segment of *plan* sharing no point with any of its gap channels."""
+    channel_ranks = {channel.segment_rank for channel in plan.gap_channels}
+    return next(
+        (
+            rank
+            for rank in plan.owned_segment_ranks
+            if 0 < rank < len(plan.points) - 2
+            and not channel_ranks & {rank - 1, rank, rank + 1}
+        ),
+        None,
+    )
+
+
+def test_member_geometry_emission_rejects_a_moved_owned_point(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pass that moves a plan-owned segment after emission fails the emission check.
+
+    The plan owns the segment's points as much as its gap channels and corner
+    radii, so translating an owned segment that is no gap channel, with its
+    radii untouched, is a second owner deciding a planned coordinate.
+    """
+    observed: list[tuple[list, object]] = []
+    real_validate = member_geometry_routing.validate_member_geometry_emission
+
+    def spy(routes, execution):
+        real_validate(routes, execution)
+        observed.append((deepcopy(routes), execution))
+
+    monkeypatch.setattr(
+        member_geometry_routing, "validate_member_geometry_emission", spy
+    )
+    _render("tests/fixtures/topologies/shared_entry_bundle_order_repro.mmd")
+
+    candidates = [
+        (route, execution, plan, rank)
+        for routes, execution in observed
+        for route in routes
+        if (plan := execution.plan_for_edge(route.edge)) is not None
+        and (rank := _owned_free_segment(plan)) is not None
+    ]
+    assert candidates
+    route, execution, plan, rank = candidates[0]
+    start, end = route.points[rank : rank + 2]
+    axis = 1 if start[1] == end[1] else 0
+    for index in (rank, rank + 1):
+        point = list(route.points[index])
+        point[axis] += 2.0
+        route.points[index] = (point[0], point[1])
+
+    with pytest.raises(RuntimeError, match="owned segment"):
+        real_validate([route], execution)

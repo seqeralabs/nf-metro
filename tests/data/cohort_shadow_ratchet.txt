@@ -1,0 +1,25 @@
+# Repository maps the corridor-cohort shadow oracle (tests/cohort_shadow_oracle.py)
+# fails. test_cohort_shadow_ratchet.py fails if a map joins this list or a listed
+# map starts passing, so the list only ever shrinks.
+examples/group_labels.mmd
+examples/longread_variant_calling.mmd
+examples/riboseq_metro.mmd
+examples/sarek_metro.mmd
+examples/topologies/bypass_fan_in_outer_slot.mmd
+examples/topologies/convergent_offrow_exit_climb.mmd
+examples/topologies/entry_cohort_interleaved_fixed_lane.mmd
+examples/topologies/fan_over_top_reach_order.mmd
+examples/topologies/fanout_intersection_shared_channel.mmd
+examples/topologies/inter_row_exempt_band_order.mmd
+examples/topologies/reversed_section_junction_reseat.mmd
+examples/variantbenchmarking.mmd
+examples/variantbenchmarking_auto.mmd
+tests/fixtures/curve_invariant_repros/fan_over_top_flow_feeder.mmd
+tests/fixtures/curve_invariant_repros/inter_row_corridor_overflow.mmd
+tests/fixtures/curve_invariant_repros/riboseq_inter_row_corridor.mmd
+tests/fixtures/curve_invariant_repros/rl_return_row_convergence.mmd
+tests/fixtures/opposing_entry_partial_port_line.mmd
+tests/fixtures/regressions/cohort_junction_fed_gap_boundary.mmd
+tests/fixtures/regressions/cohort_reverse_frame_seating.mmd
+tests/fixtures/regressions/perp_entry_column_merge_feeder.mmd
+tests/fixtures/regressions/riboseq_row_trunk_subrun.mmd

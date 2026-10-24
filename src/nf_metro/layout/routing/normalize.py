@@ -1759,7 +1759,7 @@ def _same_line_overlapping_traverses(
 def _fanout_traverse_group_is_movable(members: Sequence[_TraverseLeg]) -> bool:
     """Whether one normalisation decision may re-rank the complete fan."""
     return not any(
-        convergence_owns_segment_boundary(member.route, member.idx)
+        route_system_owns_segment_boundary(member.route, member.idx)
         for member in members
     )
 
@@ -1772,9 +1772,10 @@ def _coincide_same_line_fanout_traverses(
     Several branches of one line leaving a source turn onto the corridor running
     back toward their targets; where those horizontal legs overlap in X they are
     one line and must draw as one stroke, splitting only where each branch turns
-    off.  A convergence-plan-owned branch owns its trunk Y and cannot move, so it
-    anchors the group and the fan-owned siblings snap onto its band; a group of
-    only fan-owned legs seats on the topmost band its reservations admit.
+    off.  A branch whose route-system plan (convergence or member geometry) owns
+    its traverse owns that Y and cannot move, so it anchors the group and the
+    unowned siblings snap onto its band; a group of only unowned legs seats on
+    the topmost band its reservations admit.
     """
     for members in _all_fanout_traverse_legs(routes).values():
         for group in _same_line_overlapping_traverses(members, ctx.offset_step):
@@ -1785,7 +1786,7 @@ def _coincide_same_line_fanout_traverses(
             for member in group:
                 bucket = (
                     anchored
-                    if convergence_owns_segment_boundary(member.route, member.idx)
+                    if route_system_owns_segment_boundary(member.route, member.idx)
                     else movable
                 )
                 bucket.append(member)

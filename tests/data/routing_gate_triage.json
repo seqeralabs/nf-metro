@@ -755,6 +755,10 @@
   "note": "Lookup guard on ctx.fork_targets ids, which are collected from graph edges and therefore always resolve in graph.stations; a missing sibling is only possible for a hand-built context whose fork map names stations the graph does not carry.",
   "status": "defensive"
  },
+ "member_geometry.py::for mismatch in _owned_corner_radius_mismatches(route, plan, radius_index):::#1": {
+  "note": "validate_member_geometry_emission raises on the first owned corner radius drawn off its frozen plan. The loop body is the raise, so it is entered only when _owned_corner_radius_mismatches yields, which no corpus render does for the reason given at that helper's own radius gates.",
+  "status": "defensive"
+ },
  "member_geometry.py::and assignment.run_direction in {Direction.R, Direction.L}::#1": {
   "note": "A replannable same-destination peel-off is sourced from a horizontal trunk assignment. Non-horizontal run directions belong to other exit-turn families and are defensively excluded.",
   "status": "defensive"
@@ -1995,11 +1999,11 @@
   "note": "Mixed-axes component check: scalar variables and claims united in one component share the orientation bucket just validated, and orientation fixes the axis.",
   "status": "defensive"
  },
- "corridor_cohort_integration.py::if (::#14": {
+ "corridor_cohort_integration.py::if (::#16": {
   "note": "Landing frame requires a mutable target with a port lane axis and coordinate and a two-point lead. Every endpoint target is published with its port frame, so the raise cannot fire.",
   "status": "defensive"
  },
- "corridor_cohort_integration.py::if (::#15": {
+ "corridor_cohort_integration.py::if (::#17": {
   "note": "Landing lead shape: the last segment of an endpoint route runs perpendicular to the port lane axis and has positive length, because it is the lead into the port.",
   "status": "defensive"
  },
@@ -2019,7 +2023,7 @@
   "note": "An eligible member has exactly one network rank in its cohort and exactly one target, because ranks are assigned per member and targets are unique per member.",
   "status": "defensive"
  },
- "corridor_cohort_integration.py::if (::#16": {
+ "corridor_cohort_integration.py::if (::#18": {
   "note": "Every target of an eligible endpoint member is published with a finite port lane axis and coordinate, so the incomplete-frame arm cannot be taken.",
   "status": "defensive"
  },
@@ -2063,8 +2067,8 @@
   "note": "Inside the contact loop, which no render enters because the contact list is always empty.",
   "status": "candidate-dead"
  },
- "corridor_cohort_integration.py::if witness.coordinate_variable_id is not None and lane_ids(::#1": {
-  "note": "A bundle that anchors on a run its own component also moves is rejected. Bundles anchor on fixed neighbour runs in every render, so the raise arm is reached only with a hand-built component. Exercised by tests/test_convergence_corridor_grants.py::test_a_bundle_anchored_on_a_run_its_own_problem_moves_fails_closed. needs-review because the arm is reachable, not because it is unreachable.",
+ "corridor_cohort_integration.py::if witness.coordinate_variable_id == bundle.variable_id:::#1": {
+  "note": "A bundle anchored on a run of the scalar it holds is rejected. Bundles anchor on member runs or fixed neighbour runs in every render, so the raise arm is reached only with a hand-built bundle. Exercised by tests/test_convergence_corridor_grants.py::test_a_bundle_anchored_on_its_own_trunk_fails_closed. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
  },
  "corridor_cohort_integration.py::elif order.lower.variable_id is None and order.upper.variable_id is None:::#1": {
@@ -2363,11 +2367,11 @@
   "note": "A pass whose seating is not PLANNED records its failure and tries the next order set; reached only when a seating fails. Exercised by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
  },
- "corridor_cohort_integration.py::if (::#18": {
+ "corridor_cohort_integration.py::if (::#20": {
   "note": "Patch preparation: a landing matches its target's geometry plan, connectors, last segment, axis and finite slot, all taken from the same compile snapshot.",
   "status": "defensive"
  },
- "corridor_cohort_integration.py::if (::#19": {
+ "corridor_cohort_integration.py::if (::#21": {
   "note": "Patch preparation: a landing's last segment is orthogonal to the port axis and non-degenerate, as when the landing was planned.",
   "status": "defensive"
  },
@@ -2386,5 +2390,13 @@
  "corridor_cohort_integration.py::if not all(isfinite(item) for item in coordinates):::#1": {
   "note": "Owner-frame finiteness raise. Accepted coordinates and longitudinal extents come from the solver and patch preparation, and a grant's source is its recipe's or variable's coordinate, all required to be finite. An endpoint landing's source coordinate is a raw route point the solver never sees; it is finite because the ledger claim it derives from must be (RouteReservationClaim rejects a non-finite allocation coordinate). A frame the builder produces therefore always passes; the raise is reached only by a hand-built frame, and tests/test_corridor_cohort_acceptance.py::test_accepted_plan_constructor_fails_closed drives it.",
   "status": "defensive"
+ },
+ "normalize.py::if not movable or not anchors:::#1": {
+  "note": "_renest_residual_fused_clusters skips a fused cluster with no movable lane or no immovable anchor. No corpus map reaches this arm: tests/fixtures/curve_invariant_repros/riboseq_band_hop_zero_length_seam.mmd, the map that exercises the band-hop seam, aborts at validate_member_geometry_emission before it, because bypass nesting lifts a leg its member geometry plan owns. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "common.py::if trunk_ys[-1] - trunk_ys[0] <= COORD_TOLERANCE:::#1": {
+  "note": "iter_port_peeloff_bundles skips a peel-off group whose tails share one trunk depth. No corpus map reaches this arm: tests/fixtures/curve_invariant_repros/riboseq_band_hop_zero_length_seam.mmd, the map that exercises the band-hop seam, aborts at validate_member_geometry_emission before it, because bypass nesting lifts a leg its member geometry plan owns. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
  }
 }

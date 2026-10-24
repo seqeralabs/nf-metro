@@ -3143,7 +3143,12 @@ def fresh_member_route(plan: RouteMemberGeometryPlan, edge: Edge) -> RoutedPath:
 def validate_member_geometry_emission(
     routes: list[RoutedPath], execution: MemberGeometryExecution
 ) -> None:
-    """Require every emitted member to retain its owned channel geometry."""
+    """Require every emitted member to retain its owned geometry.
+
+    The plan owns each owned segment's points, every gap channel and the corner
+    radii beside them, so a later pass that moves any of them is a second owner
+    of a planned coordinate.
+    """
     for route in routes:
         plan = execution.plan_for_edge(route.edge)
         if plan is None:
@@ -3158,6 +3163,8 @@ def validate_member_geometry_emission(
                 raise RuntimeError(
                     f"member geometry plan {plan.id} channel geometry changed"
                 )
+        for mismatch in _owned_segment_mismatches(route, plan):
+            raise RuntimeError(mismatch)
         radii = route.curve_radii or ()
         planned_radii = plan.curve_radii or ()
         for channel in plan.gap_channels:
@@ -3207,23 +3214,11 @@ def validate_member_geometry_emission(
                     )
         planned_offsets = dict(plan.concentric_corner_offsets_by_segment)
         planned_bases = dict(plan.concentric_corner_bases_by_segment)
-        for radius_index, planned_radius in enumerate(planned_radii):
-            corner_rank = radius_index + 1
-            if not any(
-                owned_rank in plan.owned_segment_ranks
-                for owned_rank in (corner_rank - 1, corner_rank)
-            ):
+        for radius_index in range(len(planned_radii)):
+            if not _owns_corner(plan, radius_index):
                 continue
-            if radius_index >= len(radii):
-                raise RuntimeError(
-                    f"member geometry plan {plan.id} lost owned corner radius at "
-                    f"index {radius_index}"
-                )
-            if abs(radii[radius_index] - planned_radius) > COORD_TOLERANCE_FINE:
-                raise RuntimeError(
-                    f"member geometry plan {plan.id} owned corner radius changed "
-                    f"at index {radius_index}"
-                )
+            for mismatch in _owned_corner_radius_mismatches(route, plan, radius_index):
+                raise RuntimeError(mismatch)
             for segment_rank, tuple_index in (
                 (radius_index, 1),
                 (radius_index + 1, 0),
@@ -3245,6 +3240,56 @@ def validate_member_geometry_emission(
                         f"member geometry plan {plan.id} owned corner inputs changed "
                         f"at index {radius_index}"
                     )
+
+
+def owned_geometry_mismatches(
+    route: RoutedPath, plan: RouteMemberGeometryPlan
+) -> list[str]:
+    """Every owned segment point and owned corner radius *route* draws off *plan*."""
+    return [
+        *_owned_segment_mismatches(route, plan),
+        *(
+            mismatch
+            for radius_index in range(len(plan.curve_radii or ()))
+            if _owns_corner(plan, radius_index)
+            for mismatch in _owned_corner_radius_mismatches(route, plan, radius_index)
+        ),
+    ]
+
+
+def _owns_corner(plan: RouteMemberGeometryPlan, radius_index: int) -> bool:
+    return any(
+        owned_rank in plan.owned_segment_ranks
+        for owned_rank in (radius_index, radius_index + 1)
+    )
+
+
+def _owned_segment_mismatches(
+    route: RoutedPath, plan: RouteMemberGeometryPlan
+) -> Iterator[str]:
+    for rank in plan.owned_segment_ranks:
+        if tuple(route.points[rank : rank + 2]) != plan.points[rank : rank + 2]:
+            yield (
+                f"member geometry plan {plan.id} owned segment {rank} geometry changed"
+            )
+
+
+def _owned_corner_radius_mismatches(
+    route: RoutedPath, plan: RouteMemberGeometryPlan, radius_index: int
+) -> Iterator[str]:
+    radii = route.curve_radii or ()
+    planned_radius = (plan.curve_radii or ())[radius_index]
+    if radius_index >= len(radii):
+        yield (
+            f"member geometry plan {plan.id} lost owned corner radius at "
+            f"index {radius_index}"
+        )
+        return
+    if abs(radii[radius_index] - planned_radius) > COORD_TOLERANCE_FINE:
+        yield (
+            f"member geometry plan {plan.id} owned corner radius changed "
+            f"at index {radius_index}"
+        )
 
 
 def plan_corridor_cohorts(

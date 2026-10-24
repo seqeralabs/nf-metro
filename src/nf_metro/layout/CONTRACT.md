@@ -1727,8 +1727,13 @@ fan plan states.
 - **Related tests**: `tests/test_member_geometry.py`,
   `tests/test_route_system_emission.py`, and `tests/test_route_plan.py`.
 - **Lifecycle:** invariant - `validate_member_geometry_emission` checks that
-  the final planned paths retain the owned segment ranks and exact coordinates
-  of every frozen gap channel after normalization.
+  the final planned paths retain the owned segment ranks, the exact points of
+  every owned segment, and the exact coordinates of every frozen gap channel
+  after normalization. Fan-traverse coincidence and bundling anchor a
+  route-system-owned segment as they anchor a convergence-owned one, so
+  neither moves a coordinate the plan decided. Bypass nesting anchors only a
+  convergence-owned leg: a member-plan-owned leg it lifts fails this check
+  and aborts the render.
 
 ## Post-layout routing boundary: convergence planning
 
@@ -1751,10 +1756,19 @@ fan plan states.
   port, and either one named inter-row gap or a separation already inside
   `BUNDLE_TO_BUNDLE_CLEARANCE`. On a pass that compiles corridor cohorts the
   compile states the same conflicts as relations on each trunk's scalar
-  request: a bundle-pitch fixed equality to the nearest bundled member run, a
-  one-pitch forbidden interval around every same-direction distinct-line member
-  run along the trunk once one of them crowds it, and a forbidden interval
-  around a distinct line's turn-off leg across the trunk. Where those relations
+  request: a bundle-pitch equality to the nearest bundled member run, a
+  one-pitch separation from every same-direction distinct-line member run along
+  the trunk once one of them crowds it, and a forbidden interval around a
+  distinct line's turn-off leg across the trunk. A member run that is a lane of
+  the compile is related to the scalar as a variable, and every immutable
+  context claim drawn on the trunk's own run stands for the scalar rather than
+  an obstacle at its pre-grant coordinate, so the trunk and the members it is
+  coupled to solve in one component; a run no compile moves, or one outside
+  the `(region, orientation)` lane of the trunk's own context claims (for a
+  trunk with none, outside the one lane all its coupled runs share), stands
+  in the trunk's problem as a fixed obstacle at its compile-time coordinate,
+  even where its own component moves it. Where either side could give way the
+  members keep their coordinate and the scalar takes the grant. Where those relations
   cover the conflict, the grant already sits where
   `_pack_cotravelling_corridor_runs` and `_separate_distinct_cotravelling_trunks`
   would seat it, so their re-seat is a no-op. The passes themselves do not know
