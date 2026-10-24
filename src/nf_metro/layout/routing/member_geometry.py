@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import copy
 import math
 import operator
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from functools import partial
 from types import MappingProxyType
 from typing import TYPE_CHECKING, TypeVar
 
@@ -49,9 +51,11 @@ from nf_metro.layout.routing.common import (
     RoutedPath,
     SourceTurnout,
     _points_coincide,
+    apply_route_offsets,
     column_gap_edges,
     convergence_owns_segment_boundary,
     feasible_same_destination_approach_proposals,
+    is_orthogonal_turn,
     iter_plannable_short_same_destination_bundles,
     same_destination_approach_slots,
     segment_direction,
@@ -72,8 +76,11 @@ from nf_metro.layout.routing.corridor_cohort_integration import (
     CorridorCohortLedger,
     CorridorCohortPlan,
     CorridorCohortTarget,
+    CorridorCornerSizer,
+    CorridorCornerSizing,
     CorridorScalarRequest,
     _network_id,
+    _no_corner_sizing,
     compile_corridor_cohort_plan,
 )
 from nf_metro.layout.routing.families import RouteFamilyId
@@ -82,6 +89,7 @@ from nf_metro.layout.routing.inter_section_handlers import (
     _route_inter_section,
     packed_cell_handoff_carrier,
 )
+from nf_metro.layout.routing.invariants import concentric_corner_fans
 from nf_metro.layout.routing.normalize import (
     _bundle_divergent_distinct_traverses,
     _bundle_same_destination_tails,
@@ -773,6 +781,7 @@ def _compile_corridor_cohorts(
     allow_clearance_requirements: bool,
     additional_targets: Sequence[CorridorCohortTarget] = (),
     scalar_requests: Sequence[CorridorScalarRequest] = (),
+    corner_sizer: CorridorCornerSizer = _no_corner_sizing,
 ) -> tuple[
     CorridorCohortPlan | None,
     dict[ResolvedEdge, tuple[int, ...]],
@@ -792,6 +801,7 @@ def _compile_corridor_cohorts(
             ledger,
             targets,
             scalar_requests=scalar_requests,
+            corner_sizer=corner_sizer,
         )
     except CorridorCohortCompilationError as error:
         if not allow_clearance_requirements:
@@ -2941,6 +2951,14 @@ def build_member_geometry_execution(
                     allow_clearance_requirements=allow_clearance_requirements,
                     additional_targets=corridor_targets,
                     scalar_requests=corridor_scalar_requests,
+                    corner_sizer=partial(
+                        _size_patched_corners,
+                        normalization_population,
+                        candidate_route_ids,
+                        graph,
+                        ctx.curve_radius,
+                        ctx.station_offsets or {},
+                    ),
                 )
             )
             _validate_corridor_cohort_outcome(corridor_cohorts, corridor_requirements)
@@ -3308,4 +3326,187 @@ def plan_corridor_cohorts(
     """
     return compile_corridor_cohort_plan(
         ledger, targets, scalar_requests=scalar_requests
+    )
+
+
+_EndCornerKey = tuple[str, str, Direction, Direction]
+_CornerState = tuple[
+    tuple[float, ...] | None,
+    tuple[tuple[int, tuple[float | None, float | None]], ...],
+    tuple[tuple[int, tuple[float | None, float | None]], ...],
+    SourceTurnout | None,
+]
+
+
+def _corner_state(route: RoutedPath) -> _CornerState:
+    return (
+        None if route.curve_radii is None else tuple(route.curve_radii),
+        tuple(sorted(route.concentric_corner_offsets_by_segment.items())),
+        tuple(sorted(route.concentric_corner_bases_by_segment.items())),
+        route.source_turnout,
+    )
+
+
+def _corner_sizing_copy(route: RoutedPath) -> RoutedPath:
+    """*route* holding its own copy of every container a corner rule writes into."""
+    sized = copy.copy(route)
+    sized.points = list(route.points)
+    sized.curve_radii = None if route.curve_radii is None else list(route.curve_radii)
+    sized.concentric_corner_offsets_by_segment = dict(
+        route.concentric_corner_offsets_by_segment
+    )
+    sized.concentric_corner_bases_by_segment = dict(
+        route.concentric_corner_bases_by_segment
+    )
+    return sized
+
+
+def _moved_corner_ranks(
+    before: Sequence[tuple[float, float]], after: Sequence[tuple[float, float]]
+) -> frozenset[int]:
+    moved = {
+        rank
+        for rank, (old, new) in enumerate(zip(before, after, strict=True))
+        if tuple(old) != tuple(new)
+    }
+    return frozenset(
+        rank for rank in range(1, len(after) - 1) if moved & {rank - 1, rank, rank + 1}
+    )
+
+
+def _end_corner_keys(
+    route: RoutedPath, station_offsets: Mapping[tuple[str, str], float]
+) -> tuple[tuple[_EndCornerKey, int], ...]:
+    """The source and target corner cohort keys :func:`_rederive_semantic_end_corners`
+    files *route*'s first and last orthogonal corners under, with their ranks."""
+    points = apply_route_offsets(route, station_offsets)
+    corners = [
+        (rank, incoming, outgoing)
+        for rank in range(1, len(points) - 1)
+        if (incoming := segment_direction(points[rank - 1], points[rank])) is not None
+        and (outgoing := segment_direction(points[rank], points[rank + 1])) is not None
+        and incoming is not outgoing
+        and is_orthogonal_turn(points[rank - 1], points[rank], points[rank + 1])
+    ]
+    if not corners:
+        return ()
+    (first, first_in, first_out), (last, last_in, last_out) = corners[0], corners[-1]
+    return (
+        (("source", route.edge.source, first_in, first_out), first),
+        (("target", route.edge.target, last_in, last_out), last),
+    )
+
+
+def _departure(route: RoutedPath) -> tuple[str, Direction | None]:
+    return route.edge.source, segment_direction(route.points[0], route.points[1])
+
+
+def _corner_sizing_scope(
+    copies: Sequence[RoutedPath],
+    moved_by_copy: Mapping[int, frozenset[int]],
+    station_offsets: Mapping[tuple[str, str], float],
+) -> frozenset[int]:
+    """The copies sharing a corner cohort with a moved corner of a patched copy.
+
+    Each corner rule groups corners its own way: the end-corner rule by end
+    station and turn, the fan rule by shared arc centre, and the source-turnout
+    rule by source junction and departure.  A copy joins when it shares any one
+    of those groups with a moved corner, so a rule's result is adopted for a
+    whole cohort it re-sized and for nothing else.
+    """
+    moved_keys = {
+        key
+        for sized in copies
+        if id(sized) in moved_by_copy
+        for key, rank in _end_corner_keys(sized, station_offsets)
+        if rank in moved_by_copy[id(sized)]
+    }
+    scope = set(moved_by_copy)
+    scope.update(
+        id(sized)
+        for sized in copies
+        if any(
+            key in moved_keys for key, _rank in _end_corner_keys(sized, station_offsets)
+        )
+    )
+    for fan in concentric_corner_fans(list(copies), station_offsets):
+        if any(
+            observation.rank in moved_by_copy.get(id(observation.route), ())
+            for observation in fan
+        ):
+            scope.update(id(observation.route) for observation in fan)
+    departures = {
+        _departure(sized)
+        for sized in copies
+        if id(sized) in moved_by_copy and len(sized.points) > 1
+    }
+    scope.update(
+        id(sized)
+        for sized in copies
+        if len(sized.points) > 1 and _departure(sized) in departures
+    )
+    return frozenset(scope)
+
+
+def _size_patched_corners(
+    population: Sequence[RoutedPath],
+    mutable_route_ids: frozenset[int],
+    graph: MetroGraph,
+    curve_radius: float,
+    station_offsets: Mapping[tuple[str, str], float],
+    patched: Sequence[tuple[RoutedPath, Sequence[tuple[float, float]]]],
+) -> tuple[CorridorCornerSizing, ...]:
+    """Size the corners a corridor-cohort patch moves with the freeze's own rules.
+
+    The three corner rules run in the freeze's order on copies of *population*
+    holding the patched points, so no live route is written.  The rules read
+    the radii they re-size, so re-running one over a cohort no patch moved
+    drifts it: nothing is sized unless a patch moves a corner, and only routes
+    sharing a corner cohort with a moved corner adopt the result.  An immutable
+    route is never sized, and a move that would re-size an immutable route's
+    radius leaves every corner unsized.
+    """
+    patched_points = {id(route): points for route, points in patched}
+    moved = {
+        id(route): _moved_corner_ranks(route.points, patched_points[id(route)])
+        for route in population
+        if id(route) in patched_points
+    }
+    if not any(moved.values()):
+        return ()
+    copies = [_corner_sizing_copy(route) for route in population]
+    for route, sized in zip(population, copies, strict=True):
+        if id(route) in patched_points:
+            sized.points = list(patched_points[id(route)])
+        # _plan_source_turnouts only ever sets a turnout, and the freeze runs it
+        # on fresh templates that carry none.
+        sized.source_turnout = None
+    _rederive_semantic_end_corners(
+        copies, curve_radius, station_offsets, respect_owned_corners=False
+    )
+    _plan_source_turnouts(copies, graph, curve_radius)
+    _reanchor_concentric_corner_fans(copies, station_offsets, curve_radius)
+    scope = _corner_sizing_scope(
+        copies,
+        {
+            id(sized): moved[id(route)]
+            for route, sized in zip(population, copies, strict=True)
+            if id(route) in moved
+        },
+        station_offsets,
+    )
+    changed = [
+        (route, _corner_state(sized))
+        for route, sized in zip(population, copies, strict=True)
+        if id(sized) in scope and _corner_state(sized) != _corner_state(route)
+    ]
+    if any(
+        id(route) not in mutable_route_ids and state[0] != _corner_state(route)[0]
+        for route, state in changed
+    ):
+        return ()
+    return tuple(
+        CorridorCornerSizing(route, *state)
+        for route, state in changed
+        if id(route) in mutable_route_ids
     )

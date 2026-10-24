@@ -51,11 +51,11 @@ from nf_metro.layout.route_reservations import (
 from nf_metro.layout.routing.common import (
     Direction,
     RoutedPath,
+    SourceTurnout,
     planner_owns_segment,
     right_normal_axis_sign,
     segment_direction,
 )
-from nf_metro.layout.routing.corners import concentric_corner_radius_at
 from nf_metro.layout.routing.corridor_cohorts import (
     CorridorAllocationFailureReason,
     CorridorAllocationProblem,
@@ -1010,12 +1010,50 @@ class CorridorCohortComponentPlan:
     compatibility: CorridorCohortCompatibility | None = None
 
 
+CornerInputs = tuple[tuple[int, tuple[float | None, float | None]], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class CorridorCornerSizing:
+    """The corner state the plan's corner rules give one route at patched points.
+
+    Radii, the concentric corner inputs that describe them, and the source
+    turnout are sized together, so a patch adopts all of them or none.
+    """
+
+    route: RoutedPath
+    radii: tuple[float, ...] | None
+    corner_offsets: CornerInputs
+    corner_bases: CornerInputs
+    source_turnout: SourceTurnout | None
+
+
+CorridorCornerSizer = Callable[
+    [Sequence[tuple[RoutedPath, Sequence[tuple[float, float]]]]],
+    Sequence[CorridorCornerSizing],
+]
+"""Sizes the corners the patched points move, from ``(route, patched points)``.
+
+Returns a sizing for every route whose corner state the move changes, mates
+the patch does not move included, and nothing when no corner moves.
+"""
+
+
+def _no_corner_sizing(
+    _patched: Sequence[tuple[RoutedPath, Sequence[tuple[float, float]]]],
+) -> tuple[CorridorCornerSizing, ...]:
+    return ()
+
+
 @dataclass(slots=True)
 class _RoutePatch:
     route: RoutedPath
     points: list[tuple[float, float]]
     radii: list[float] | None
     owned: tuple[int, ...]
+    corner_offsets: dict[int, tuple[float | None, float | None]]
+    corner_bases: dict[int, tuple[float | None, float | None]]
+    source_turnout: SourceTurnout | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -3753,57 +3791,6 @@ def _component_plan(
     )
 
 
-def _corner_input_candidates(
-    route: RoutedPath, radius_rank: int
-) -> tuple[tuple[float | None, float | None], tuple[float | None, float | None]]:
-    return (
-        (
-            route.concentric_corner_offsets_by_segment.get(radius_rank, (None, None))[
-                1
-            ],
-            route.concentric_corner_bases_by_segment.get(radius_rank, (None, None))[1],
-        ),
-        (
-            route.concentric_corner_offsets_by_segment.get(
-                radius_rank + 1, (None, None)
-            )[0],
-            route.concentric_corner_bases_by_segment.get(radius_rank + 1, (None, None))[
-                0
-            ],
-        ),
-    )
-
-
-def _corner_input(
-    candidates: tuple[
-        tuple[float | None, float | None], tuple[float | None, float | None]
-    ],
-) -> tuple[float, float] | None:
-    complete = tuple(
-        (offset, base)
-        for offset, base in candidates
-        if offset is not None and base is not None
-    )
-    if any((offset is None) != (base is None) for offset, base in candidates) or (
-        complete
-        and any(
-            not isclose(offset, complete[0][0], abs_tol=COORD_TOLERANCE)
-            or not isclose(base, complete[0][1], abs_tol=COORD_TOLERANCE)
-            for offset, base in complete[1:]
-        )
-    ):
-        return None
-    return complete[0] if complete else None
-
-
-def _has_corner_input(
-    candidates: tuple[
-        tuple[float | None, float | None], tuple[float | None, float | None]
-    ],
-) -> bool:
-    return any(offset is not None or base is not None for offset, base in candidates)
-
-
 def _prepare_patches(
     allocations: tuple[CorridorCohortAllocation, ...],
     landings: tuple[CorridorCohortLanding, ...],
@@ -3858,7 +3845,6 @@ def _prepare_patches(
                 return None
         points = list(route.points)
         coordinates: dict[tuple[int, int], float] = {}
-        affected_corners: set[int] = set()
         for change in member_changes:
             segment_key = change.segment_rank, change.axis
             if segment_key in coordinates and not isclose(
@@ -3883,26 +3869,6 @@ def _prepare_patches(
                 point = list(points[point_rank])
                 point[axis] = coordinate
                 points[point_rank] = point[0], point[1]
-            affected_corners.update((segment_rank - 1, segment_rank))
-        radii = None if route.curve_radii is None else list(route.curve_radii)
-        if radii is not None:
-            for radius_rank in affected_corners:
-                if not 0 <= radius_rank < len(radii):
-                    continue
-                candidates = _corner_input_candidates(route, radius_rank)
-                if not _has_corner_input(candidates):
-                    continue
-                if radius_rank + 2 >= len(points):
-                    return None
-                corner_input = _corner_input(candidates)
-                if corner_input is None:
-                    return None
-                radii[radius_rank] = concentric_corner_radius_at(
-                    points[radius_rank],
-                    points[radius_rank + 1],
-                    points[radius_rank + 2],
-                    *corner_input,
-                )
         owned = tuple(
             sorted(
                 {
@@ -3912,15 +3878,80 @@ def _prepare_patches(
                 }
             )
         )
-        patches.append(_RoutePatch(route, points, radii, owned))
+        patches.append(_unsized_patch(route, points, owned))
     return tuple(patches)
 
 
 def _commit_patches(patches: tuple[_RoutePatch, ...]) -> None:
     for patch in patches:
-        patch.route.points[:] = patch.points
-        patch.route.curve_radii = patch.radii
-        patch.route.route_system_owned_segment_ranks = patch.owned
+        route = patch.route
+        route.points[:] = patch.points
+        route.curve_radii = None if patch.radii is None else list(patch.radii)
+        route.concentric_corner_offsets_by_segment = dict(patch.corner_offsets)
+        route.concentric_corner_bases_by_segment = dict(patch.corner_bases)
+        route.source_turnout = patch.source_turnout
+        route.route_system_owned_segment_ranks = patch.owned
+
+
+def _unsized_patch(
+    route: RoutedPath, points: list[tuple[float, float]], owned: tuple[int, ...]
+) -> _RoutePatch:
+    return _RoutePatch(
+        route,
+        points,
+        None if route.curve_radii is None else list(route.curve_radii),
+        owned,
+        dict(route.concentric_corner_offsets_by_segment),
+        dict(route.concentric_corner_bases_by_segment),
+        route.source_turnout,
+    )
+
+
+def _sized_patch(patch: _RoutePatch, sizing: CorridorCornerSizing) -> _RoutePatch:
+    resized_ranks = {
+        rank
+        for index, (before, after) in enumerate(
+            zip(patch.radii or (), sizing.radii or (), strict=False)
+        )
+        if before != after
+        for rank in (index, index + 1)
+    }
+    return _RoutePatch(
+        patch.route,
+        patch.points,
+        None if sizing.radii is None else list(sizing.radii),
+        tuple(sorted({*patch.owned, *resized_ranks})),
+        dict(sizing.corner_offsets),
+        dict(sizing.corner_bases),
+        sizing.source_turnout,
+    )
+
+
+def _size_patches(
+    patches: tuple[_RoutePatch, ...], corner_sizer: CorridorCornerSizer
+) -> tuple[_RoutePatch, ...]:
+    """*patches* with their corners sized, plus a radius-only patch per mate."""
+    sizing_by_route = {
+        id(sizing.route): sizing
+        for sizing in corner_sizer(
+            tuple((patch.route, patch.points) for patch in patches)
+        )
+    }
+    sized: list[_RoutePatch] = []
+    for patch in patches:
+        sizing = sizing_by_route.pop(id(patch.route), None)
+        sized.append(patch if sizing is None else _sized_patch(patch, sizing))
+    for sizing in sizing_by_route.values():
+        mate = sizing.route
+        sized.append(
+            _sized_patch(
+                _unsized_patch(
+                    mate, list(mate.points), mate.route_system_owned_segment_ranks
+                ),
+                sizing,
+            )
+        )
+    return tuple(sized)
 
 
 def _finalize_allocation_geometry(
@@ -3971,6 +4002,7 @@ def compile_corridor_cohort_plan(
     *,
     scalar_requests: Sequence[CorridorScalarRequest] = (),
     settlement_trace: SettlementStageTrace | None = None,
+    corner_sizer: CorridorCornerSizer = _no_corner_sizing,
 ) -> CorridorCohortPlan:
     """Solve every cohort from one route snapshot without publishing geometry.
 
@@ -3978,7 +4010,9 @@ def compile_corridor_cohort_plan(
     solver: each closed component solves exactly once, through the ``solve``
     closure below. Solving is separated from publication: the returned plan
     carries its route patches, and :func:`publish_corridor_cohort_plan` applies
-    them.
+    them.  *corner_sizer* sizes the corners those patches move, so each patch
+    carries the radii its points need and a mate re-sized beside a moved corner
+    carries its own radius-only patch.
     """
     claims, overlaid_cohort_ids = _bind_ledger(ledger, targets)
     scalar_requests_by_id = {
@@ -4209,6 +4243,7 @@ def compile_corridor_cohort_plan(
         raise CorridorCohortCompilationError(
             "corridor cohort publication does not match its source snapshot"
         )
+    patches = _size_patches(patches, corner_sizer)
     finalized_allocations = _finalize_allocation_geometry(
         allocations,
         patches,

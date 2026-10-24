@@ -1212,6 +1212,9 @@ def _mutable_route(
         fan_route_emitter=None,
         exit_turn_axis_id=None,
         exit_turn_segment_rank=None,
+        concentric_corner_offsets_by_segment={},
+        concentric_corner_bases_by_segment={},
+        source_turnout=None,
     )
 
 
