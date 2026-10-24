@@ -390,6 +390,7 @@
   "corridor_cohort_integration.py::if longitudinal_end - longitudinal_start <= COORD_TOLERANCE:::#1",
   "corridor_cohort_integration.py::if missing:::#1",
   "corridor_cohort_integration.py::if not (::#3",
+  "corridor_cohort_integration.py::if not all(isfinite(item) for item in coordinates):::#1",
   "corridor_cohort_integration.py::if not complete:::#1",
   "corridor_cohort_integration.py::if not component_failures:::#1",
   "corridor_cohort_integration.py::if order.lower.coordinate + order.distance > order.upper.coordinate:::#1",

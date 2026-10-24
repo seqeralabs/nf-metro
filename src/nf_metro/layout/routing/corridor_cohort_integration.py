@@ -1068,6 +1068,15 @@ class AcceptedCorridorOwnerFrame:
     recipe: CorridorScalarControlRecipe | None = None
 
     def __post_init__(self) -> None:
+        coordinates = (
+            self.source_coordinate,
+            self.accepted_coordinate,
+            *(self.longitudinal_extent or ()),
+        )
+        if not all(isfinite(item) for item in coordinates):
+            raise CorridorCohortCompilationError(
+                f"accepted corridor owner {self.identity} has a non-finite coordinate"
+            )
         if self.recipe is not None and self.recipe.owner_id != self.owner_id:
             raise CorridorCohortCompilationError(
                 f"accepted corridor owner {self.identity} carries a recipe "

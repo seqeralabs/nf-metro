@@ -2372,7 +2372,7 @@
   "status": "defensive"
  },
  "corridor_cohort_integration.py::if failed:::#1": {
-  "note": "Accepted-plan validation raise. The builder keys every owner on its own claim, landing or variable, sorts the owners and digests the same content, so a plan it builds always passes. Reached only by a hand-built or altered plan; tests/test_corridor_cohort_acceptance.py::test_accepted_plan_constructor_fails_closed drives each check.",
+  "note": "Accepted-plan validation raise for a duplicate owner identity, a duplicate segment claim, or a plan_id that does not match the content. The builder digests the content it builds, and no corpus plan names an owner or claims a segment twice, so none fires. Reached only by a hand-built or altered plan; tests/test_corridor_cohort_acceptance.py::test_accepted_plan_constructor_fails_closed drives each check.",
   "status": "defensive"
  },
  "planning.py::if (::#2": {
@@ -2381,6 +2381,10 @@
  },
  "corridor_cohort_integration.py::if self.recipe is not None and self.recipe.owner_id != self.owner_id:::#1": {
   "note": "Owner-frame recipe check. The builder takes a grant's owner and recipe from the same request, so they always agree. Reached only by a hand-built frame; tests/test_corridor_cohort_acceptance.py::test_accepted_plan_constructor_fails_closed drives it.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if not all(isfinite(item) for item in coordinates):::#1": {
+  "note": "Owner-frame finiteness raise. The builder reads each coordinate from a compiled allocation, landing or grant, which the solver and patch preparation already require to be finite, so a frame it builds always passes. Reached only by a hand-built frame; tests/test_corridor_cohort_acceptance.py::test_accepted_plan_constructor_fails_closed drives it.",
   "status": "defensive"
  }
 }

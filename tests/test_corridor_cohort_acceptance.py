@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import os
 import pickle
 import subprocess
@@ -314,18 +315,33 @@ def test_accepted_plan_records_every_moved_coordinate_and_no_other(
     assert trunk.recipe.controlled_points
 
 
+def _rebuilt(record, owners):
+    """A record over *owners* carrying a digest that matches them."""
+    translations = record.coordinate_translations
+    return corridor_cohort_integration.AcceptedCorridorCohortPlan(
+        corridor_cohort_integration._accepted_plan_id(owners, translations),
+        owners,
+        translations,
+    )
+
+
+def _member_segment(record):
+    kind = corridor_cohort_integration.AcceptedCorridorOwnerKind.MEMBER_SEGMENT
+    return next(frame for frame in record.owners if frame.kind is kind)
+
+
 def _drop_owner(record):
     return replace(record, owners=record.owners[:-1])
 
 
 def _duplicate_owner(record):
-    return replace(record, owners=(*record.owners, record.owners[0]))
+    return _rebuilt(record, (*record.owners, record.owners[0]))
 
 
 def _duplicate_segment(record):
-    first = record.owners[0]
+    first = _member_segment(record)
     twin = replace(first, identity=first.identity + "|twin")
-    return replace(record, owners=(*record.owners, twin))
+    return _rebuilt(record, (*record.owners, twin))
 
 
 def _change_owner(record):
@@ -343,23 +359,43 @@ def _recipe_of_another_owner(record):
     return replace(trunk, owner_id=trunk.owner_id + "|other")
 
 
+def _nan_coordinate(record):
+    return replace(record.owners[0], accepted_coordinate=math.nan)
+
+
+def _infinite_extent(record):
+    return replace(_member_segment(record), longitudinal_extent=(0.0, math.inf))
+
+
 @pytest.mark.parametrize(
-    "mutate",
+    ("mutate", "message"),
     [
-        pytest.param(_drop_owner, id="dropped-owner"),
-        pytest.param(_duplicate_owner, id="duplicate-owner"),
-        pytest.param(_duplicate_segment, id="duplicate-segment"),
-        pytest.param(_change_owner, id="changed-owner"),
-        pytest.param(_reorder_owners, id="reordered-owners"),
-        pytest.param(_recipe_of_another_owner, id="recipe-of-another-owner"),
+        pytest.param(_drop_owner, "does not match its identity", id="dropped-owner"),
+        pytest.param(_duplicate_owner, "names an owner twice", id="duplicate-owner"),
+        pytest.param(
+            _duplicate_segment, "claims a segment twice", id="duplicate-segment"
+        ),
+        pytest.param(_change_owner, "does not match its identity", id="changed-owner"),
+        pytest.param(
+            _reorder_owners, "does not match its identity", id="reordered-owners"
+        ),
+        pytest.param(
+            _recipe_of_another_owner,
+            "recipe belonging to another owner",
+            id="recipe-of-another-owner",
+        ),
+        pytest.param(_nan_coordinate, "non-finite coordinate", id="nan-coordinate"),
+        pytest.param(_infinite_extent, "non-finite coordinate", id="infinite-extent"),
     ],
 )
 def test_accepted_plan_constructor_fails_closed(
-    mutate, monkeypatch: pytest.MonkeyPatch
+    mutate, message: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Lock: a record that is not exactly one coherent decision cannot exist."""
     record, _cohorts, _owned = _accepted_inputs(monkeypatch)
-    with pytest.raises(corridor_cohort_integration.CorridorCohortCompilationError):
+    with pytest.raises(
+        corridor_cohort_integration.CorridorCohortCompilationError, match=message
+    ):
         mutate(record)
 
 

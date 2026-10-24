@@ -302,7 +302,7 @@ The corridor-cohort compiler runs at one observation per settle call, and the pl
 `AcceptedCorridorCohortPlan` is immutable and holds exactly the coordinates the plan moves: one `AcceptedCorridorOwnerFrame` per member segment, endpoint landing and owned scalar grant, ordered by kind then identity.
 A frame keeps its owner identity, axis, source and accepted coordinates, the along-run extent of a member segment, and the control recipe of a scalar grant.
 The plan also keeps the coordinate translations the compiling observation was seated under, and its `plan_id` is the SHA-256 digest of all of that.
-Construction rejects any record that is not one coherent decision.
+Construction rejects a `plan_id` that does not match the content, a duplicate owner identity, a duplicate segment claim, a recipe belonging to another owner, and a non-finite coordinate.
 
 Later readers take the moved convergence grants from the record.
 `prepare_route_system_planning` refuses to compile when the plan it is seated against already carries one.

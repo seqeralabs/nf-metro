@@ -2142,10 +2142,11 @@ They are design evidence, not part of this specification.
   band that fits. It is the only pass that runs the corridor-cohort
   compiler, because only a ledger already settled to its minimum widths
   compiles without a spurious shortfall. The plan it accepts is stored on that
-  observation's `RoutePlan` as `accepted_corridor_cohort_plan`, which the grant
-  check above reads, and `prepare_route_system_planning` refuses to compile on a
-  pass seated against a plan that carries one. Its geometry (station
-  coordinates, section boxes, and bypass-label obstacles) is discarded by
+  observation's `RoutePlan` as `accepted_corridor_cohort_plan`, from which the
+  observation reads the convergences a grant moved, and
+  `prepare_route_system_planning` refuses to compile on a pass seated against a
+  plan that carries one. Its geometry (station coordinates, section boxes, and
+  bypass-label obstacles) is discarded by
   `_restoring_route_observation_geometry`; routing alone, it leaves the ports
   the label pass before it carried as they were. The one exception is a
   convergence corridor grant that moved a trunk: only this observation draws
