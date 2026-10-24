@@ -15,6 +15,7 @@ from pathlib import Path
 
 import networkx as nx
 import pytest
+from conftest import ROUTE_EMISSION_ABORT_FIXTURES
 from layout_metrics import compute_metrics
 
 import nf_metro.layout.routing.inter_section_handlers as inter_section_handlers
@@ -68,7 +69,9 @@ ROUTABLE_CORPUS = tuple(
     path
     for base in (ROOT / "examples", ROOT / "tests" / "fixtures")
     for path in sorted(base.rglob("*.mmd"))
-    if "nextflow" not in path.parts and "invalid" not in path.parts
+    if "nextflow" not in path.parts
+    and "invalid" not in path.parts
+    and str(path.relative_to(ROOT)) not in ROUTE_EMISSION_ABORT_FIXTURES
 )
 
 _REORDERABLE = """\
@@ -769,6 +772,18 @@ print(json.dumps(result, sort_keys=True, separators=(',', ':')))
         )
         outputs.append(result.stdout)
     assert len(set(outputs)) == 1
+
+
+@pytest.mark.parametrize("relative_path", sorted(ROUTE_EMISSION_ABORT_FIXTURES))
+def test_route_emission_abort_fixture_aborts_on_its_owned_segment(
+    relative_path: str,
+) -> None:
+    with (
+        warnings.catch_warnings(),
+        pytest.raises(RuntimeError, match=r"owned segment \d+ geometry changed"),
+    ):
+        warnings.simplefilter("ignore")
+        _observe(ROOT / relative_path)
 
 
 def test_every_routable_corpus_connector_and_leg_has_exact_plan_coverage() -> None:
