@@ -60,6 +60,7 @@ from nf_metro.layout.routing.corridor_cohort_integration import (
     CorridorScalarGrant,
     CorridorScalarOwnerKind,
     CorridorScalarRequest,
+    CorridorScalarVariable,
     _validate_control_recipe,
     build_corridor_footprint_witnesses,
 )
@@ -603,9 +604,7 @@ def _grant(request: CorridorScalarRequest, coordinate: float) -> CorridorScalarG
     recipe = request.control_recipe
     assert recipe is not None
     return CorridorScalarGrant(
-        request.variable.variable_id,
-        request.variable.owner_kind,
-        request.variable.owner_id,
+        request.variable,
         coordinate,
         coordinate - recipe.source_coordinate,
         recipe,
@@ -877,13 +876,24 @@ def _duplicate_request(requests, grants):
 def _extra_grant(requests, grants):
     return requests, (
         *grants,
-        replace(grants[0], variable_id="convergence-trunk|invented"),
+        _with_variable(grants[0], variable_id="convergence-trunk|invented"),
     )
+
+
+def _with_variable(grant: CorridorScalarGrant, **changes) -> CorridorScalarGrant:
+    return replace(grant, variable=replace(grant.variable, **changes))
 
 
 def _with_first(**changes) -> Callable:
     def mutate(requests, grants):
         return requests, (replace(grants[0], **changes), *grants[1:])
+
+    return mutate
+
+
+def _with_first_variable(**changes) -> Callable:
+    def mutate(requests, grants):
+        return requests, (_with_variable(grants[0], **changes), *grants[1:])
 
     return mutate
 
@@ -927,12 +937,12 @@ def _below_domain(requests, grants):
             id="inconsistent-delta",
         ),
         pytest.param(
-            _with_first(owner_id="convergence-plan|invented"),
+            _with_first_variable(owner_id="convergence-plan|invented"),
             "wrong owner",
             id="wrong-owner-id",
         ),
         pytest.param(
-            _with_first(owner_kind=CorridorScalarOwnerKind.MEMBER_CARRIER),
+            _with_first_variable(owner_kind=CorridorScalarOwnerKind.MEMBER_CARRIER),
             "wrong owner",
             id="wrong-owner-kind",
         ),
@@ -1442,16 +1452,24 @@ def test_only_a_trunk_grant_binds_its_plan_through_settlement() -> None:
     so it can neither stand in for the trunk's nor overwrite it.
     """
     owner_id = "convergence-plan|shared"
+
+    def variable(variable_id: str, kind: CorridorScalarOwnerKind, coordinate: float):
+        return CorridorScalarVariable(
+            variable_id, kind, owner_id, "member", ("a", "b", "l"), (), 1, 0, coordinate
+        )
+
     trunk = CorridorScalarGrant(
-        "convergence-trunk|shared",
-        CorridorScalarOwnerKind.CONVERGENCE_TRUNK,
-        owner_id,
+        variable(
+            "convergence-trunk|shared",
+            CorridorScalarOwnerKind.CONVERGENCE_TRUNK,
+            200.0,
+        ),
         200.0,
     )
     carrier = CorridorScalarGrant(
-        "member-carrier|shared",
-        CorridorScalarOwnerKind.MEMBER_CARRIER,
-        owner_id,
+        variable(
+            "member-carrier|shared", CorridorScalarOwnerKind.MEMBER_CARRIER, 196.0
+        ),
         196.0,
     )
     cohorts = corridor_cohort_integration.CorridorCohortPlan(

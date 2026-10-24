@@ -374,6 +374,7 @@ def _route_edges(  # noqa: C901
         ),
         granted_clearance_owner_ids=boundary_clearance_owner_ids,
         prior_plan=reservations,
+        coordinate_translations=reservation_translations,
     )
     execution = planning.exit_turns
     member_geometry = planning.member_geometry
@@ -429,6 +430,7 @@ def _route_edges(  # noqa: C901
             member_geometry_plans=published_member_geometry,
             exit_turn_dispositions=planning.exit_turn_dispositions,
             corridor_cohort_ledger=planning.corridor_cohort_ledger,
+            accepted_corridor_cohort_plan=planning.accepted_corridor_cohort_plan,
         )
     # Route into the context's own list so handlers can read the routes settled
     # so far (a wrap clearing an already-placed sibling channel); it grows as

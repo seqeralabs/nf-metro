@@ -1100,7 +1100,6 @@ def test_seed_77_compiles_atomic_single_lane_components() -> None:
     assert provisional_plan is not None
     ledger = provisional_plan.corridor_cohort_ledger
     assert ledger is not None
-    assert ledger.finalized_owned_segments is None
     regions = {
         (claim.edge_key, claim.segment_rank): claim.region for claim in ledger.claims
     }

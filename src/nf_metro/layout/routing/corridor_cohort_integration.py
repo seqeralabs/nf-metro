@@ -9,6 +9,7 @@ yet; both ship ahead of the wiring that will call them.
 
 from __future__ import annotations
 
+import hashlib
 from collections import Counter, defaultdict
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -32,6 +33,7 @@ from nf_metro.layout.route_plan import (
     RouteSemanticScaffold,
     SettlementStage,
     SettlementStageTrace,
+    _canonical_json,
     register_settlement_stage,
 )
 from nf_metro.layout.route_reservations import (
@@ -40,6 +42,7 @@ from nf_metro.layout.route_reservations import (
     ColumnGapRegion,
     CorridorOrientation,
     CorridorRegion,
+    ReservationCoordinateTranslation,
     RouteReservation,
     RowGapRegion,
     _reservation_content_id,
@@ -47,7 +50,6 @@ from nf_metro.layout.route_reservations import (
 from nf_metro.layout.routing.common import (
     Direction,
     RoutedPath,
-    convergence_owns_segment_boundary,
     planner_owns_segment,
     right_normal_axis_sign,
     segment_direction,
@@ -182,12 +184,22 @@ class CorridorScalarRequest:
 
 @dataclass(frozen=True, slots=True)
 class CorridorScalarGrant:
-    variable_id: str
-    owner_kind: CorridorScalarOwnerKind
-    owner_id: str
+    variable: CorridorScalarVariable
     coordinate: float
     coordinate_delta: float = 0.0
     control_recipe: CorridorScalarControlRecipe | None = None
+
+    @property
+    def variable_id(self) -> str:
+        return self.variable.variable_id
+
+    @property
+    def owner_kind(self) -> CorridorScalarOwnerKind:
+        return self.variable.owner_kind
+
+    @property
+    def owner_id(self) -> str:
+        return self.variable.owner_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -283,7 +295,6 @@ class CorridorCohortLedger:
     ambiguous_endpoint_cohort_ids: frozenset[str]
     offset_step: float
     curve_radius: float = CURVE_RADIUS
-    finalized_owned_segments: frozenset[CorridorCohortSegmentKey] | None = None
     forced_crossings: frozenset[tuple[tuple[str, str, str], tuple[str, str, str]]] = (
         frozenset()
     )
@@ -775,7 +786,6 @@ def build_corridor_cohort_ledger(
         | frozenset(ambiguous_path_rank_cohorts),
         offset_step=graph_offset_step(graph),
         curve_radius=curve_radius,
-        finalized_owned_segments=None,
         forced_crossings=_forced_loop_crossings(graph),
     )
 
@@ -957,6 +967,7 @@ class CorridorCohortAllocation:
     longitudinal_start: float
     longitudinal_end: float
     coordinate: float
+    source_coordinate: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -968,6 +979,7 @@ class CorridorCohortLanding:
     segment_rank: int
     axis: int
     coordinate: float
+    source_coordinate: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -1020,6 +1032,190 @@ class CorridorCohortPlan:
     def solve_call_count(self) -> int:
         """How many solver problems the compile ran, one per non-empty component."""
         return sum(len(component.problems) for component in self.components)
+
+
+class AcceptedCorridorOwnerKind(str, Enum):
+    MEMBER_SEGMENT = "member-segment"
+    ENDPOINT_LANDING = "endpoint-landing"
+    MEMBER_CARRIER = CorridorScalarOwnerKind.MEMBER_CARRIER.value
+    CONVERGENCE_TRUNK = CorridorScalarOwnerKind.CONVERGENCE_TRUNK.value
+
+
+_SEGMENT_OWNER_KINDS = frozenset(
+    {
+        AcceptedCorridorOwnerKind.MEMBER_SEGMENT,
+        AcceptedCorridorOwnerKind.ENDPOINT_LANDING,
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptedCorridorOwnerFrame:
+    """One owner's source frame and the coordinate the accepted plan seats it at.
+
+    ``identity`` is the claim, landing or scalar variable the frame is keyed on,
+    and ``owner_id`` the member or convergence plan it moves.
+    """
+
+    kind: AcceptedCorridorOwnerKind
+    identity: str
+    owner_id: str
+    segment: CorridorCohortSegmentKey
+    axis: int
+    source_coordinate: float
+    accepted_coordinate: float
+    longitudinal_extent: tuple[float, float] | None = None
+    recipe: CorridorScalarControlRecipe | None = None
+
+    def __post_init__(self) -> None:
+        coordinates = (
+            self.source_coordinate,
+            self.accepted_coordinate,
+            *(self.longitudinal_extent or ()),
+        )
+        if not all(isfinite(item) for item in coordinates):
+            raise CorridorCohortCompilationError(
+                f"accepted corridor owner {self.identity} has a non-finite coordinate"
+            )
+        if self.recipe is not None and self.recipe.owner_id != self.owner_id:
+            raise CorridorCohortCompilationError(
+                f"accepted corridor owner {self.identity} carries a recipe "
+                "belonging to another owner"
+            )
+
+    @property
+    def coordinate_delta(self) -> float:
+        return self.accepted_coordinate - self.source_coordinate
+
+
+def _owner_order(frame: AcceptedCorridorOwnerFrame) -> tuple[str, str]:
+    return frame.kind.value, frame.identity
+
+
+def _accepted_plan_id(
+    owners: tuple[AcceptedCorridorOwnerFrame, ...],
+    coordinate_translations: tuple[ReservationCoordinateTranslation, ...],
+) -> str:
+    content = _canonical_json((owners, coordinate_translations))
+    return hashlib.sha256(content.encode()).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptedCorridorCohortPlan:
+    """The corridor-cohort decision an observation accepted, as immutable data.
+
+    Holds every coordinate the plan moves and no other: one frame per member
+    segment, endpoint landing and owned scalar grant, with the coordinate
+    translations the compiling observation was seated under.  ``plan_id`` is the
+    digest of that content.
+    """
+
+    plan_id: str
+    owners: tuple[AcceptedCorridorOwnerFrame, ...]
+    coordinate_translations: tuple[ReservationCoordinateTranslation, ...] = ()
+
+    def __post_init__(self) -> None:
+        identities = [frame.identity for frame in self.owners]
+        segments = [
+            (frame.kind, frame.segment)
+            for frame in self.owners
+            if frame.kind in _SEGMENT_OWNER_KINDS
+        ]
+        checks = (
+            (len(set(identities)) != len(identities), "names an owner twice"),
+            (len(set(segments)) != len(segments), "claims a segment twice"),
+            (
+                self.plan_id
+                != _accepted_plan_id(self.owners, self.coordinate_translations),
+                "does not match its identity",
+            ),
+        )
+        for failed, problem in checks:
+            if failed:
+                raise CorridorCohortCompilationError(
+                    f"accepted corridor cohort plan {problem}"
+                )
+
+    @property
+    def controlled_segments(self) -> tuple[CorridorCohortSegmentKey, ...]:
+        return tuple(sorted({frame.segment for frame in self.owners}))
+
+    @property
+    def trunk_grants(self) -> tuple[AcceptedCorridorOwnerFrame, ...]:
+        return tuple(
+            frame
+            for frame in self.owners
+            if frame.kind is AcceptedCorridorOwnerKind.CONVERGENCE_TRUNK
+        )
+
+
+def _segment_key(
+    item: CorridorCohortAllocation | CorridorCohortLanding | CorridorScalarVariable,
+) -> CorridorCohortSegmentKey:
+    return item.member_id, item.edge_key, item.segment_rank
+
+
+def accept_corridor_cohort_plan(
+    plan: CorridorCohortPlan,
+    owned_grants: Sequence[CorridorScalarGrant],
+    coordinate_translations: tuple[ReservationCoordinateTranslation, ...],
+) -> AcceptedCorridorCohortPlan:
+    """Freeze *plan*'s owned decisions and the translations they were seated under."""
+    frames = [
+        AcceptedCorridorOwnerFrame(
+            AcceptedCorridorOwnerKind.MEMBER_SEGMENT,
+            allocation.claim_id,
+            allocation.member_id,
+            _segment_key(allocation),
+            allocation.axis,
+            allocation.source_coordinate,
+            allocation.coordinate,
+            (allocation.longitudinal_start, allocation.longitudinal_end),
+        )
+        for allocation in plan.allocations
+    ]
+    frames.extend(
+        AcceptedCorridorOwnerFrame(
+            AcceptedCorridorOwnerKind.ENDPOINT_LANDING,
+            "|".join(
+                (
+                    "landing",
+                    landing.member_id,
+                    *landing.edge_key,
+                    str(landing.segment_rank),
+                )
+            ),
+            landing.member_id,
+            _segment_key(landing),
+            landing.axis,
+            landing.source_coordinate,
+            landing.coordinate,
+        )
+        for landing in plan.landings
+    )
+    frames.extend(
+        AcceptedCorridorOwnerFrame(
+            AcceptedCorridorOwnerKind(grant.owner_kind.value),
+            grant.variable_id,
+            grant.owner_id,
+            _segment_key(grant.variable),
+            grant.variable.axis,
+            (
+                grant.variable.coordinate
+                if grant.control_recipe is None
+                else grant.control_recipe.source_coordinate
+            ),
+            grant.coordinate,
+            recipe=grant.control_recipe,
+        )
+        for grant in owned_grants
+    )
+    owners = tuple(sorted(frames, key=_owner_order))
+    return AcceptedCorridorCohortPlan(
+        _accepted_plan_id(owners, coordinate_translations),
+        owners,
+        coordinate_translations,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1230,18 +1426,8 @@ def _bind_ledger(
     return tuple(bound), overlaid_cohort_ids
 
 
-def _directly_movable(
-    claim: _BoundClaim,
-    finalized_owned_segments: frozenset[CorridorCohortSegmentKey] | None,
-) -> bool:
+def _directly_movable(claim: _BoundClaim) -> bool:
     """Whether normalisation is free to relocate *claim*'s current segment."""
-    key = (
-        claim.ledger.member_id,
-        claim.target.edge_key,
-        claim.ledger.segment_rank,
-    )
-    if finalized_owned_segments is not None:
-        return key in finalized_owned_segments
     return (
         claim.target.mutable
         and claim.ledger.reservation_complete
@@ -1351,7 +1537,6 @@ def _member_footprint_model(
     claims: tuple[_BoundClaim, ...],
     targets: Sequence[CorridorCohortTarget],
     scalar_requests: Sequence[CorridorScalarRequest],
-    finalized_owned_segments: frozenset[CorridorCohortSegmentKey] | None,
     offset_step: float,
     curve_radius: float,
     forced_crossings: frozenset[tuple[tuple[str, str, str], tuple[str, str, str]]],
@@ -1372,7 +1557,7 @@ def _member_footprint_model(
     for claim in claims:
         key = claim.ledger.member_id, claim.target.edge_key, claim.ledger.segment_rank
         regions_by_segment[key].add(claim.ledger.region)
-        if _directly_movable(claim, finalized_owned_segments):
+        if _directly_movable(claim):
             by_segment[key].append(claim)
 
     variables: list[CorridorScalarVariable] = []
@@ -2364,44 +2549,7 @@ def _same_semantic_fixed_lane(left: _BoundClaim, right: _BoundClaim) -> bool:
 
 def _roles(
     claims: tuple[_BoundClaim, ...],
-    finalized_owned_segments: frozenset[CorridorCohortSegmentKey] | None,
 ) -> dict[str, CorridorCohortClaimRole]:
-    if finalized_owned_segments is not None:
-        for item in claims:
-            key = (
-                item.ledger.member_id,
-                item.target.edge_key,
-                item.ledger.segment_rank,
-            )
-            if key not in finalized_owned_segments:
-                continue
-            route = item.target.route
-            if (
-                not item.target.mutable
-                or convergence_owns_segment_boundary(route, item.ledger.segment_rank)
-                or route.fan_route_emitter is not None
-                or (
-                    route.exit_turn_axis_id is not None
-                    and route.exit_turn_segment_rank == item.ledger.segment_rank
-                )
-            ):
-                raise CorridorCohortCompilationError(
-                    f"finalized corridor claim {item.claim_id} conflicts with "
-                    "another geometry owner"
-                )
-        return {
-            item.claim_id: (
-                CorridorCohortClaimRole.MOVABLE
-                if (
-                    item.ledger.member_id,
-                    item.target.edge_key,
-                    item.ledger.segment_rank,
-                )
-                in finalized_owned_segments
-                else CorridorCohortClaimRole.FIXED
-            )
-            for item in claims
-        }
     terminal_fixed = {
         item.claim_id
         for item in claims
@@ -3113,6 +3261,7 @@ def _allocation(claim: _BoundClaim, coordinate: float) -> CorridorCohortAllocati
         claim.longitudinal_start,
         claim.longitudinal_end,
         coordinate,
+        claim.coordinate,
     )
 
 
@@ -3132,6 +3281,7 @@ def _landing_from_claim(claim: _BoundClaim) -> CorridorCohortLanding:
         segment_rank,
         axis,
         coordinate,
+        target.route.points[segment_rank][axis],
     )
 
 
@@ -3192,7 +3342,7 @@ def _component_plan(
             }
         )
     )
-    roles = _roles(component_claims, ledger.finalized_owned_segments)
+    roles = _roles(component_claims)
     complete = _component_complete(component_claims, endpoint_ids, ledger)
     physical_claims = tuple(
         tuple(claims[item] for item in physical[group]) for group in physical_ranks
@@ -3517,7 +3667,6 @@ def compile_corridor_cohort_plan(
         claims,
         targets,
         scalar_requests,
-        ledger.finalized_owned_segments,
         ledger.offset_step,
         ledger.curve_radius,
         ledger.forced_crossings,
@@ -3717,12 +3866,7 @@ def compile_corridor_cohort_plan(
             request.variable.coordinate if recipe is None else recipe.source_coordinate
         )
         return CorridorScalarGrant(
-            variable_id,
-            request.variable.owner_kind,
-            request.variable.owner_id,
-            coordinate,
-            coordinate - source_coordinate,
-            recipe,
+            request.variable, coordinate, coordinate - source_coordinate, recipe
         )
 
     scalar_grants = tuple(
@@ -3745,20 +3889,6 @@ def compile_corridor_cohort_plan(
             "corridor scalar publication does not realize its complete grant"
         )
     landings = _planned_landings(claims, allocations)
-    if ledger.finalized_owned_segments is not None:
-        allocation_keys = {
-            (item.member_id, item.edge_key, item.segment_rank) for item in allocations
-        }
-        allocation_keys.update(
-            (item.member_id, item.edge_key, item.segment_rank) for item in landings
-        )
-        if allocation_keys != ledger.finalized_owned_segments:
-            missing = ledger.finalized_owned_segments - allocation_keys
-            added = allocation_keys - ledger.finalized_owned_segments
-            raise CorridorCohortCompilationError(
-                "finalized corridor cohort realization changed ownership: "
-                f"missing={sorted(missing)}, added={sorted(added)}"
-            )
     protected = tuple(
         sorted(
             {
