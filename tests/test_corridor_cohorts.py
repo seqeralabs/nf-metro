@@ -12,6 +12,7 @@ from nf_metro.layout.routing.corridor_cohorts import (
     CorridorAllocationProblem,
     CorridorAllocationStatus,
     CorridorCoordinateDomain,
+    CorridorCornerOrderTier,
     CorridorDirectedSeparation,
     CorridorEquality,
     CorridorFixedEquality,
@@ -1825,3 +1826,153 @@ def test_contradictory_equalities_are_attributed_without_mutating_input() -> Non
     assert result.blocking_obstacle_ids == ()
     assert result.blocking_equality_owner_ids == ("network:ab",)
     assert (problem.lanes, problem.obstacles, problem.equalities) == before
+
+
+def _corner_order(lower_id: str, upper_id: str) -> CorridorDirectedSeparation:
+    return CorridorDirectedSeparation(
+        f"corner:{lower_id}|{upper_id}", lower_id, upper_id, 4.0
+    )
+
+
+def _shared_corner_problem() -> CorridorAllocationProblem:
+    """``m0`` splits to two targets beside ``m2``, all three turning one corner.
+
+    ``m0`` runs at 356 on both branches and ``m2`` at 360 on the side it turns
+    from; ``m2``'s lead rises across ``m0-far``'s run, so a footprint order
+    seats ``m2`` above ``m0-far`` instead.
+    """
+    return CorridorAllocationProblem(
+        (
+            _lane("m2", "m2", "m2", 360.0, 360.0, span=(271.0, 420.0), line_rank=16),
+            _lane(
+                "m0-near",
+                "m0-near",
+                "m0-near",
+                356.0,
+                356.0,
+                span=(275.0, 416.0),
+                line_rank=18,
+            ),
+            _lane("m0-far", "far", "far", 0.0, 356.0, span=(275.0, 521.0), line_rank=0),
+        ),
+        equalities=(CorridorEquality("lane:m0", "m0-near", "m0-far", 0.0),),
+        directed_separations=(
+            CorridorDirectedSeparation("footprint:m2-lead", "m2", "m0-far", 4.0),
+        ),
+        corner_orders=(_corner_order("m0-near", "m2"), _corner_order("m0-far", "m2")),
+        clearance=4.0,
+        coordinate_axis=1,
+    )
+
+
+def test_corner_orders_seat_over_the_footprint_order_they_contradict() -> None:
+    problem = _shared_corner_problem()
+
+    result = solve_corridor_cohorts(problem)
+    plain = solve_corridor_cohorts(replace(problem, corner_orders=()))
+
+    assert result.corner_tier is CorridorCornerOrderTier.CORNER_ORDERS
+    assert dict(result.allocations) == {
+        "m0-far": 356.0,
+        "m0-near": 356.0,
+        "m2": 360.0,
+    }
+    assert plain.corner_tier is CorridorCornerOrderTier.NONE
+    assert dict(plain.allocations)["m2"] == 352.0
+
+
+def test_a_footprint_order_a_chain_of_corner_orders_contradicts_gives_way() -> None:
+    span = (0.0, 50.0)
+    problem = CorridorAllocationProblem(
+        tuple(
+            _lane(member_id, member_id, member_id, at, at, span=span, line_rank=rank)
+            for rank, (member_id, at) in enumerate(
+                (("a", 100.0), ("b", 104.0), ("c", 108.0))
+            )
+        ),
+        directed_separations=(
+            CorridorDirectedSeparation("footprint:c|a", "c", "a", 4.0),
+        ),
+        corner_orders=(_corner_order("a", "b"), _corner_order("b", "c")),
+        clearance=4.0,
+    )
+
+    result = solve_corridor_cohorts(problem)
+
+    assert result.corner_tier is CorridorCornerOrderTier.CORNER_ORDERS
+    assert dict(result.allocations) == {"a": 100.0, "b": 104.0, "c": 108.0}
+
+
+def _rigid_pair_and_free_lane(
+    *orders: CorridorDirectedSeparation,
+    footprint: tuple[CorridorDirectedSeparation, ...] = (),
+    domains: tuple[CorridorCoordinateDomain, ...] = (),
+) -> CorridorAllocationProblem:
+    """``a`` and ``b`` one cohort a pitch apart, ``c`` free above them."""
+    span = (0.0, 50.0)
+    return CorridorAllocationProblem(
+        (
+            _lane("a", "ab", "ab", 0.0, 100.0, span=span, line_rank=0),
+            _lane("b", "ab", "ab", 4.0, 104.0, span=span, line_rank=1),
+            _lane("c", "c", "c", 110.0, 110.0, span=span, line_rank=2),
+        ),
+        domains=domains,
+        directed_separations=footprint,
+        corner_orders=orders,
+        clearance=4.0,
+    )
+
+
+def test_corner_orders_blocked_by_a_footprint_order_seat_without_it() -> None:
+    """The footprint order holds ``c`` below ``b`` and so below ``a``, which the
+    corner orders put below ``c``; the cohort offset, not an equality, joins
+    ``a`` and ``b``, so only the failure names the order to drop."""
+    problem = _rigid_pair_and_free_lane(
+        _corner_order("a", "c"),
+        footprint=(CorridorDirectedSeparation("footprint:c|b", "c", "b", 4.0),),
+    )
+
+    result = solve_corridor_cohorts(problem)
+
+    assert result.corner_tier is CorridorCornerOrderTier.RELAXED_ORDERS
+    assert dict(result.allocations) == {"a": 100.0, "b": 104.0, "c": 110.0}
+
+
+@pytest.mark.parametrize(
+    "problem",
+    [
+        pytest.param(
+            _rigid_pair_and_free_lane(_corner_order("a", "c"), _corner_order("c", "b")),
+            id="no-footprint-order-to-drop",
+        ),
+        pytest.param(
+            _rigid_pair_and_free_lane(
+                _corner_order("a", "c"),
+                footprint=(CorridorDirectedSeparation("footprint:c|b", "c", "b", 4.0),),
+                domains=(
+                    CorridorCoordinateDomain("a", minimum_coordinate=100.0),
+                    CorridorCoordinateDomain("c", maximum_coordinate=100.0),
+                ),
+            ),
+            id="relaxed-orders-fail",
+        ),
+    ],
+)
+def test_guard_corner_orders_that_cannot_seat_return_the_plain_result(
+    problem: CorridorAllocationProblem,
+) -> None:
+    result = solve_corridor_cohorts(problem)
+    plain = solve_corridor_cohorts(replace(problem, corner_orders=()))
+
+    assert result.corner_tier is CorridorCornerOrderTier.GAVE_WAY
+    assert replace(result, corner_tier=CorridorCornerOrderTier.NONE) == plain
+
+
+def test_guard_a_corner_order_naming_no_lane_is_invalid() -> None:
+    problem = _rigid_pair_and_free_lane(_corner_order("a", "ghost"))
+
+    result = solve_corridor_cohorts(problem)
+
+    assert result.status is CorridorAllocationStatus.FAILURE
+    assert result.reason is CorridorAllocationFailureReason.INVALID
+    assert result.blocking_order_owner_ids == ("corner:a|ghost",)

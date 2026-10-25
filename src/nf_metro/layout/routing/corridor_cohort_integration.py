@@ -2380,6 +2380,38 @@ def _physical_components(
     return tuple(tuple(ranks) for _, ranks in sorted(grouped.items()))
 
 
+@dataclass(frozen=True, slots=True)
+class _CornerNeighbour:
+    """A claimed segment, as the run it turns into or out of sees it."""
+
+    coordinate: float
+    direction: Direction
+    physical_groups: frozenset[int]
+
+
+def _corner_neighbours(
+    claims: tuple[_BoundClaim, ...],
+    physical: tuple[tuple[int, ...], ...],
+) -> dict[tuple[str, int], _CornerNeighbour]:
+    """Every claimed member segment, keyed by member and segment rank.
+
+    *physical* is the :func:`_physical_components` grouping of *claims*; a
+    segment claimed in several regions lies in each of their groups.
+    """
+    groups: defaultdict[tuple[str, int], set[int]] = defaultdict(set)
+    for group_rank, ranks in enumerate(physical):
+        for rank in ranks:
+            ledger = claims[rank].ledger
+            groups[(ledger.member_id, ledger.segment_rank)].add(group_rank)
+    neighbours: dict[tuple[str, int], _CornerNeighbour] = {}
+    for claim in claims:
+        key = claim.ledger.member_id, claim.ledger.segment_rank
+        neighbours[key] = _CornerNeighbour(
+            claim.coordinate, claim.ledger.direction, frozenset(groups[key])
+        )
+    return neighbours
+
+
 def _validate_atomic_component_orientation(
     component: _AtomicComponentSpec,
     claims: tuple[_BoundClaim, ...],
@@ -3131,6 +3163,99 @@ def _run_coupled_clearances(
     )
 
 
+def _corner_turn_side(
+    left: _BoundClaim,
+    right: _BoundClaim,
+    span_end: int,
+    neighbours: Mapping[tuple[str, int], _CornerNeighbour],
+) -> int:
+    """The sign *right*'s coordinate takes over *left*'s from one shared corner.
+
+    *span_end* names the low (``0``) or high (``1``) end of the pair's runs.
+    Their neighbouring claims there turn together when they lie in one physical
+    group and run one way, and each lane keeps its side of travel across the
+    turn.  ``0`` where they do not, or lie at one coordinate.
+    """
+    adjacent: list[_CornerNeighbour | None] = []
+    for claim in (left, right):
+        low_end_is_start = claim.ledger.direction.sign > 0
+        step = -1 if (span_end == 0) == low_end_is_start else 1
+        adjacent.append(
+            neighbours.get((claim.ledger.member_id, claim.ledger.segment_rank + step))
+        )
+    left_neighbour, right_neighbour = adjacent
+    if (
+        left_neighbour is None
+        or right_neighbour is None
+        or left_neighbour.direction is not right_neighbour.direction
+        or not left_neighbour.physical_groups & right_neighbour.physical_groups
+    ):
+        return 0
+    gap = right_neighbour.coordinate - left_neighbour.coordinate
+    if abs(gap) <= COORD_TOLERANCE:
+        return 0
+    return (
+        (1 if gap > 0 else -1)
+        * right_normal_axis_sign(left_neighbour.direction)
+        * right_normal_axis_sign(left.ledger.direction)
+    )
+
+
+def _corner_orders(
+    movable: tuple[_BoundClaim, ...],
+    separations: Sequence[CorridorSeparation],
+    clearance: float,
+    neighbours: Mapping[tuple[str, int], _CornerNeighbour],
+) -> tuple[CorridorDirectedSeparation, ...]:
+    """Order each pair of runs that turn together as they turn at that corner.
+
+    A pair is ordered only where the snapshot already holds that order: at a
+    crossed corner the crossing is the adjacent run's to keep.  A pair of one
+    endpoint cohort is seated rigidly by its slot order, and a pair whose two
+    ends disagree crosses whichever order it takes, so neither is ordered.
+    """
+    distances = {
+        frozenset((item.left_member_id, item.right_member_id)): item.distance
+        for item in separations
+    }
+    orders: list[CorridorDirectedSeparation] = []
+    for rank, left in enumerate(movable):
+        for right in movable[rank + 1 :]:
+            distance = distances.get(
+                frozenset((left.claim_id, right.claim_id)), clearance
+            )
+            if (
+                left.ledger.direction is not right.ledger.direction
+                or not _overlap(left, right)
+                or distance <= COORD_TOLERANCE
+                or (
+                    left.ledger.endpoint_cohort_id is not None
+                    and left.ledger.endpoint_cohort_id
+                    == right.ledger.endpoint_cohort_id
+                )
+            ):
+                continue
+            sides = {
+                _corner_turn_side(left, right, span_end, neighbours)
+                for span_end in (0, 1)
+            } - {0}
+            if len(sides) != 1:
+                continue
+            side = sides.pop()
+            if side * (right.coordinate - left.coordinate) <= COORD_TOLERANCE:
+                continue
+            lower, upper = (left, right) if side > 0 else (right, left)
+            orders.append(
+                CorridorDirectedSeparation(
+                    f"corner-order|{lower.claim_id}|{upper.claim_id}",
+                    lower.claim_id,
+                    upper.claim_id,
+                    distance,
+                )
+            )
+    return tuple(orders)
+
+
 def _problem(
     claims: tuple[_BoundClaim, ...],
     roles: dict[str, CorridorCohortClaimRole],
@@ -3142,6 +3267,9 @@ def _problem(
     *,
     scalar_requests: tuple[CorridorScalarRequest, ...] = (),
     intervals_by_member: Mapping[str, Sequence[CorridorForbiddenInterval]] = (
+        MappingProxyType({})
+    ),
+    corner_neighbours: Mapping[tuple[str, int], _CornerNeighbour] = (
         MappingProxyType({})
     ),
 ) -> CorridorAllocationProblem:
@@ -3481,6 +3609,9 @@ def _problem(
             {item.ledger.region for item in movable},
         ),
         coordinate_axis=coordinate_axis,
+        corner_orders=_corner_orders(
+            movable, separations, offset_step, corner_neighbours
+        ),
     )
 
 
@@ -3724,6 +3855,7 @@ def _component_plan(
     intervals_by_member: Mapping[str, Sequence[CorridorForbiddenInterval]],
     solve: Callable[[CorridorAllocationProblem], CorridorAllocationResult],
     overlaid_cohort_ids: frozenset[str],
+    corner_neighbours: Mapping[tuple[str, int], _CornerNeighbour],
 ) -> CorridorCohortComponentPlan:
     """Lower one closed component into a single per-axis solver problem.
 
@@ -3781,6 +3913,7 @@ def _component_plan(
             witnesses_by_id,
             scalar_requests=component_scalar_requests,
             intervals_by_member=intervals_by_member,
+            corner_neighbours=corner_neighbours,
         )
         problems = (problem,)
         results = (solve(problem),)
@@ -4156,6 +4289,7 @@ def compile_corridor_cohort_plan(
         )
     physical = _physical_components(claims)
     logical = _atomic_components(claims, physical, footprint_model)
+    corner_neighbours = _corner_neighbours(claims, physical)
     components = [
         _component_plan(
             rank,
@@ -4169,6 +4303,7 @@ def compile_corridor_cohort_plan(
             intervals_by_member,
             solve,
             overlaid_cohort_ids,
+            corner_neighbours,
         )
         for rank, spec in enumerate(logical)
     ]

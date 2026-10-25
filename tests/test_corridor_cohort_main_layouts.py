@@ -22,6 +22,7 @@ from nf_metro.layout.routing.corridor_cohorts import (
     CorridorAllocationProblem,
     CorridorAllocationResult,
     CorridorAllocationStatus,
+    CorridorCornerOrderTier,
 )
 from nf_metro.layout.settlement_demand import BoundaryClearanceRequirement
 from nf_metro.parser.model import PermissiveGuardWarning
@@ -156,6 +157,29 @@ def _assert_allocation_satisfies(
     for fixed in problem.fixed_equalities:
         expected = obstacles[fixed.obstacle_id].realised_coordinate + fixed.delta
         assert at[fixed.member_id] == pytest.approx(expected, abs=tolerance), fixed
+
+
+def test_lanes_turning_together_seat_in_their_corner_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``m4`` and ``m2`` descend together and turn onto the run to ``z1``'s
+    bottom entry beside ``m2``'s branch to ``z3``: every compile seats that run
+    in the order the descent turns it."""
+    captured = _render(monkeypatch, "cohort_corner_turn_order.mmd")
+    cornered = [
+        (problem, result)
+        for component in captured.components
+        for problem, result in zip(component.problems, component.results)
+        if problem.corner_orders
+    ]
+    assert cornered
+    for problem, result in cornered:
+        assert result.corner_tier is CorridorCornerOrderTier.CORNER_ORDERS
+        at = dict(result.allocations)
+        for order in problem.corner_orders:
+            assert at[order.lower_member_id] + order.distance <= (
+                at[order.upper_member_id] + 1e-6
+            ), order
 
 
 def test_junction_fed_gap_names_both_facing_sections(

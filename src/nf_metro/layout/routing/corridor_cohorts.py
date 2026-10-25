@@ -46,6 +46,15 @@ class CorridorAllocationFailureReason(Enum):
     INVALID = "invalid"
 
 
+class CorridorCornerOrderTier(Enum):
+    """The problem a solve took its result from, given corner orders."""
+
+    NONE = "none"
+    CORNER_ORDERS = "corner-orders"
+    RELAXED_ORDERS = "relaxed-orders"
+    GAVE_WAY = "gave-way"
+
+
 @dataclass(frozen=True)
 class CorridorLane:
     """One straight corridor run.
@@ -159,6 +168,13 @@ class CorridorAllocationProblem:
     witnesses_complete: bool = True
     axis_sign: int = 1
     coordinate_axis: int = 0
+    corner_orders: tuple[CorridorDirectedSeparation, ...] = ()
+    """Orders the lanes prefer where they turn together at one corner.
+
+    Unlike ``directed_separations`` these are a preference: a directed
+    separation they contradict gives way to them, and a problem they cannot
+    seat is solved without them (see :func:`solve_corridor_cohorts`).
+    """
 
 
 @dataclass(frozen=True)
@@ -172,6 +188,7 @@ class CorridorAllocationResult:
     blocking_order_owner_ids: tuple[str, ...] = ()
     blocking_endpoint_owner_ids: tuple[str, ...] = ()
     clearance_shortfall: CorridorClearanceShortfall | None = None
+    corner_tier: CorridorCornerOrderTier = CorridorCornerOrderTier.NONE
 
 
 def _q(value: float) -> Fraction:
@@ -275,7 +292,8 @@ def _invalid_problem(
     numeric.extend(equality.delta for equality in problem.equalities)
     numeric.extend(equality.delta for equality in problem.fixed_equalities)
     numeric.extend(separation.distance for separation in problem.separations)
-    numeric.extend(separation.distance for separation in problem.directed_separations)
+    directed_separations = (*problem.directed_separations, *problem.corner_orders)
+    numeric.extend(separation.distance for separation in directed_separations)
     numeric.extend(
         coordinate
         for domain in problem.domains
@@ -364,7 +382,7 @@ def _invalid_problem(
     }
     invalid_directed_separations = {
         separation.owner_id
-        for separation in problem.directed_separations
+        for separation in directed_separations
         if not separation.owner_id
         or separation.lower_member_id not in by_id
         or separation.upper_member_id not in by_id
@@ -373,7 +391,7 @@ def _invalid_problem(
     }
     invalid_directed_members = {
         member_id
-        for separation in problem.directed_separations
+        for separation in directed_separations
         if separation.owner_id in invalid_directed_separations
         for member_id in (separation.lower_member_id, separation.upper_member_id)
         if member_id in by_id
@@ -748,10 +766,97 @@ def _forced_root_order(
     return _ordered_roots_or_cycle(roots, forced, root_key)[0]
 
 
+def _corner_contradicted_order_owners(
+    problem: CorridorAllocationProblem,
+) -> frozenset[str]:
+    """Owners of the directed separations the corner orders contradict.
+
+    Lanes a zero-delta equality joins are one lane here, so a directed
+    separation is contradicted when a chain of corner orders puts its upper
+    lane below its lower one.
+    """
+    parent = {lane.member_id: lane.member_id for lane in problem.lanes}
+
+    def find(member_id: str) -> str:
+        while parent[member_id] != member_id:
+            parent[member_id] = parent[parent[member_id]]
+            member_id = parent[member_id]
+        return member_id
+
+    for equality in problem.equalities:
+        if _q(equality.delta) == 0:
+            parent[find(equality.left_member_id)] = find(equality.right_member_id)
+    above: defaultdict[str, set[str]] = defaultdict(set)
+    for order in problem.corner_orders:
+        above[find(order.lower_member_id)].add(find(order.upper_member_id))
+
+    def ordered_above(start: str) -> set[str]:
+        reached: set[str] = set()
+        frontier = above[start]
+        while frontier - reached:
+            reached |= frontier
+            frontier = set().union(*(above[item] for item in frontier))
+        return reached
+
+    return frozenset(
+        separation.owner_id
+        for separation in problem.directed_separations
+        if find(separation.lower_member_id)
+        in ordered_above(find(separation.upper_member_id))
+    )
+
+
 def solve_corridor_cohorts(
     problem: CorridorAllocationProblem,
 ) -> CorridorAllocationResult:
     """Return the unique canonical seating for a complete witness set.
+
+    Corner orders are seated first, every directed separation they contradict
+    giving way to them.  Where that fails, the problem is seated once more
+    without the directed separations both of whose lanes the failure blocks,
+    and where that fails too, as though it held no corner orders.  The result
+    names the tier it came from.
+    """
+    plain = replace(problem, corner_orders=())
+    if not problem.corner_orders or not problem.witnesses_complete:
+        return _solve_in_either_frame(plain)
+    invalid = _invalid_problem(problem)
+    if invalid is not None:
+        return invalid
+    contradicted = _corner_contradicted_order_owners(problem)
+    kept = tuple(
+        separation
+        for separation in problem.directed_separations
+        if separation.owner_id not in contradicted
+    )
+    cornered = replace(plain, directed_separations=(*kept, *problem.corner_orders))
+    result = _solve_in_either_frame(cornered)
+    if (
+        result.status is not CorridorAllocationStatus.FAILURE
+        or result.reason is CorridorAllocationFailureReason.INVALID
+    ):
+        return replace(result, corner_tier=CorridorCornerOrderTier.CORNER_ORDERS)
+    blocked = set(result.blocking_member_ids)
+    relaxed = tuple(
+        separation
+        for separation in kept
+        if not {separation.lower_member_id, separation.upper_member_id} <= blocked
+    )
+    if len(relaxed) < len(kept):
+        retried = _solve_in_either_frame(
+            replace(cornered, directed_separations=(*relaxed, *problem.corner_orders))
+        )
+        if retried.status is CorridorAllocationStatus.PLANNED:
+            return replace(retried, corner_tier=CorridorCornerOrderTier.RELAXED_ORDERS)
+    return replace(
+        _solve_in_either_frame(plain), corner_tier=CorridorCornerOrderTier.GAVE_WAY
+    )
+
+
+def _solve_in_either_frame(
+    problem: CorridorAllocationProblem,
+) -> CorridorAllocationResult:
+    """Seat *problem* in its own lane-order frame, or failing that the opposite.
 
     Seating only lowers a root from its preferred base along the lane-order
     frame.  A failure with a clearance shortfall is reported as it stands, for
@@ -1554,6 +1659,7 @@ __all__ = [
     "CorridorAllocationStatus",
     "CorridorClearanceShortfall",
     "CorridorCoordinateDomain",
+    "CorridorCornerOrderTier",
     "CorridorDirectedSeparation",
     "CorridorEquality",
     "CorridorFixedEquality",
