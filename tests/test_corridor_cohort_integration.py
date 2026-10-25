@@ -1842,6 +1842,39 @@ def test_two_claims_on_one_member_segment_fail_closed() -> None:
         )
 
 
+def test_overlaid_cohort_component_with_an_incomplete_claim_keeps_its_overlay() -> None:
+    """A tied entry slot keeps the component's drawn geometry before any seating
+    check runs, so an incomplete claim beside it does not raise.
+    """
+    first = _cohort_member("a", "cohort:x")
+    second_claim, second_target = _cohort_member("b", "cohort:x")
+    second = (replace(second_claim, endpoint_network_rank=1), second_target)
+    incomplete = _overlapping_member_claim(
+        claim_id="incomplete", reservation_complete=False, longitudinal=(10.0, 40.0)
+    )
+    ledger = CorridorCohortLedger(
+        claims=(first[0], second[0], incomplete[0]),
+        endpoint_members=(("cohort:x", frozenset({"a", "b"})),),
+        eligible_member_ids=frozenset({"a", "b", "incomplete"}),
+        ambiguous_endpoint_cohort_ids=frozenset(),
+        offset_step=10.0,
+    )
+
+    plan = cci.compile_corridor_cohort_plan(
+        ledger, (first[1], second[1], incomplete[1])
+    )
+
+    (component,) = plan.components
+    assert component.status is cci.CorridorAllocationStatus.COMPATIBILITY
+    assert component.compatibility is not None
+    assert (
+        component.compatibility.reason
+        is cci.CorridorCompatibilityReason.OVERLAID_ENDPOINT_SLOTS
+    )
+    assert component.problems == ()
+    assert plan.allocations == ()
+
+
 def test_endpoint_cohort_split_across_components_stays_typed_compatibility() -> None:
     """A cohort whose members sit in different lanes splits across solver
     components: each component keeps its drawn geometry as typed compatibility.

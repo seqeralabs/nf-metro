@@ -3467,7 +3467,7 @@ def _lane_order_axis_sign(
     return right_normal_axis_sign(Direction.R if coordinate_axis == 1 else Direction.D)
 
 
-def _require_valid_witnesses(
+def _require_seatable_claims(
     rank: int,
     claims: tuple[_BoundClaim, ...],
     endpoint_ids: tuple[str, ...],
@@ -3734,7 +3734,7 @@ def _component_plan(
     results: tuple[CorridorAllocationResult, ...] = ()
     holds_overlaid_cohort = not overlaid_cohort_ids.isdisjoint(endpoint_ids)
     if not holds_overlaid_cohort and (has_movable or component_scalar_requests):
-        _require_valid_witnesses(rank, component_claims, endpoint_ids, ledger)
+        _require_seatable_claims(rank, component_claims, endpoint_ids, ledger)
         complete = _endpoint_cohorts_whole(
             rank, component_claims, endpoint_ids, ledger, claims
         )
