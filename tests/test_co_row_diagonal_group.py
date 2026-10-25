@@ -437,6 +437,12 @@ def test_lanes_stepping_unequally_leave_the_row_together_at_one_slope() -> None:
     assert _solve(far, near) == ((300.0, 337.5), (300.0, 330.0))
 
 
+def test_nearest_window_with_no_run_is_shared() -> None:
+    far = _feeder("far", 88.0, (321.0, 351.0), (8.0, 8.0))
+    near = _feeder("near", 280.0, (300.0, 300.0), (4.0, 4.0))
+    assert _solve(far, near) == ((300.0, 300.0),) * 2
+
+
 def test_group_with_a_lane_stepping_the_other_way_is_declined() -> None:
     far = _feeder("far", 88.0, (321.0, 351.0), (8.0, 8.0))
     near = _feeder("near", 280.0, (300.0, 330.0), (4.0, 0.0))

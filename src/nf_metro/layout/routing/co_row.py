@@ -231,9 +231,9 @@ def _can_share(
         for f in feeders
     )
     run = abs(windows[0][1] - windows[0][0])
-    slope = abs(_lateral_step(feeders[0])) / run
+    step = abs(_lateral_step(feeders[0]))
     keeps_apart = all(
-        _diagonal_separation(a, b, slope) >= tolerance
+        _diagonal_separation(a, b, run, step) >= tolerance
         for a, b in pairs
         if a.key[2] != b.key[2]
     )
@@ -293,9 +293,9 @@ def _diagonals_meet(first: _Lane, second: _Lane, tolerance: float) -> bool:
 
 
 def _diagonal_separation(
-    first: CoRowFeeder, second: CoRowFeeder, slope: float
+    first: CoRowFeeder, second: CoRowFeeder, run: float, step: float
 ) -> float:
-    """Closest perpendicular gap of two parallel lanes crossing at *slope*.
+    """Closest perpendicular gap of two parallel lanes stepping *step* over *run*.
 
     The diagonal spread pass slides a group's lanes along the run until their
     target-end lateral gap is a full perpendicular gap, and the source end keeps
@@ -306,8 +306,8 @@ def _diagonal_separation(
     target_gap = first.target_lateral - second.target_lateral
     if source_gap * target_gap < 0:
         return math.inf
-    secant = math.hypot(1.0, slope)
-    source_end = (abs(source_gap) + abs(target_gap) * (secant - 1.0)) / secant
+    hypot = math.hypot(run, step)
+    source_end = (abs(source_gap) * run + abs(target_gap) * (hypot - run)) / hypot
     return min(abs(target_gap), source_end)
 
 
