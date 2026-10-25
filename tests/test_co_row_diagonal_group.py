@@ -30,7 +30,11 @@ from nf_metro.themes import resolve_theme
 
 TOPOLOGIES = Path(__file__).resolve().parent.parent / "examples" / "topologies"
 SHARED_DIAGONAL = TOPOLOGIES / "co_row_feeders_shared_diagonal.mmd"
-SHARED_DIAGONAL_BT = TOPOLOGIES / "co_column_feeders_shared_diagonal_bt.mmd"
+SHARED_DIAGONAL_BT = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "co_column_feeders_shared_diagonal_bt.mmd"
+)
 
 # An entry-port feeder and a bypass-helper feeder of one station leave one row
 # in opposite lane order to the one they arrive in, so they cross exactly once

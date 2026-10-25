@@ -1421,15 +1421,6 @@ gallery:
       row, and both climb into one exit port. The two feeders rise on one
       shared diagonal instead of each picking its own, so blue does not climb
       first, cross red, and get crossed back.
-  - id: co_column_feeders_shared_diagonal_bt
-    source_dir: examples/topologies
-    category: Bypass Routing
-    description:
-      The bottom-to-top counterpart. Red bypasses sort, call and report up the
-      section's column while blue leaves call on the same column, and both
-      climb into one top exit port. They leave the column on one shared
-      diagonal, placed past the diagonal blue takes from call to report so red
-      crosses that one steeply rather than sliding along it.
   - id: bypass_label_rake_left
     source_dir: examples/topologies
     category: Bypass Routing
