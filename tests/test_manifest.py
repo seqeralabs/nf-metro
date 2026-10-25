@@ -16,7 +16,12 @@ import xml.etree.ElementTree as ET
 
 import jsonschema
 import pytest
-from conftest import compute_corpus_layout, content_corpus, parse_and_layout
+from conftest import (
+    compute_corpus_layout,
+    content_corpus,
+    corpus_params,
+    parse_and_layout,
+)
 
 from nf_metro.layout.routing.offsets import compute_station_offsets
 from nf_metro.live.mapping import stations_for_process
@@ -253,7 +258,7 @@ def test_cdata_survives_bracket_sequence() -> None:
     assert a["patterns"] == ["FOO]]>BAR"]
 
 
-@pytest.mark.parametrize("fixture_id,path,is_nextflow", content_corpus())
+@pytest.mark.parametrize("fixture_id,path,is_nextflow", corpus_params(content_corpus()))
 def test_corpus_manifest_roundtrips(fixture_id, path, is_nextflow) -> None:
     """Every gallery/topology fixture renders an SVG whose manifest reads back
     and whose node ids all appear as data-node-id handles."""
