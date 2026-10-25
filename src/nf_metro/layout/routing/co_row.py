@@ -159,7 +159,7 @@ def shared_co_row_window(
     ):
         return None
     nearest = max(feeders, key=lambda f: flow * f.source_run)
-    windows = _at_one_slope(feeders, _own_window(nearest), nearest)
+    windows = _at_one_slope(feeders, nearest)
     if windows is None or not _can_share(feeders, windows, flow, target_run, tolerance):
         return None
     others = neighbours()
@@ -178,19 +178,17 @@ def _lateral_step(feeder: CoRowFeeder) -> float:
 
 
 def _at_one_slope(
-    feeders: Sequence[CoRowFeeder],
-    window: tuple[float, float],
-    reference: CoRowFeeder,
+    feeders: Sequence[CoRowFeeder], reference: CoRowFeeder
 ) -> tuple[tuple[float, float], ...] | None:
-    """*window* per feeder, at the slope *reference*'s lane takes across it.
+    """*reference*'s window per feeder, at the slope its lane takes across it.
 
-    Every window starts where *window* does and runs as far along the flow as
+    Every window starts where *reference*'s does and runs as far along the flow as
     its feeder's lane steps across at that slope, so the lanes leave the row
     together and stay parallel.  ``None`` when a lane steps the other way or
     not at all.
     """
     step = _lateral_step(reference)
-    start, end = window
+    window = start, end = _own_window(reference)
     windows = []
     for feeder in feeders:
         own = _lateral_step(feeder)

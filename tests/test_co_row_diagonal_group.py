@@ -12,6 +12,7 @@ from __future__ import annotations
 import itertools
 import math
 import warnings
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -237,6 +238,32 @@ graph LR
 """
 
 
+_PlanInspector = Callable[
+    [_RoutingCtx, dict[tuple[str, str, str], CoRowDiagonalGroup]], None
+]
+
+
+def _inspect_plans(monkeypatch: pytest.MonkeyPatch, inspect: _PlanInspector) -> None:
+    """Call *inspect* with each routing pass's context and planned groups."""
+    real = core.plan_co_row_diagonal_groups
+
+    def planned(ctx, **kwargs):  # type: ignore[no-untyped-def]
+        groups = real(ctx, **kwargs)
+        inspect(ctx, groups)
+        return groups
+
+    monkeypatch.setattr(core, "plan_co_row_diagonal_groups", planned)
+
+
+def _render_with_groups(
+    monkeypatch: pytest.MonkeyPatch, path: Path
+) -> tuple[RenderPlan, list[CoRowDiagonalGroup]]:
+    passes: list[dict[tuple[str, str, str], CoRowDiagonalGroup]] = []
+    _inspect_plans(monkeypatch, lambda _ctx, groups: passes.append(groups))
+    plan, _svg = _render(path.read_text(), path.parent)
+    return plan, list(dict.fromkeys(passes[-1].values()))
+
+
 def _drawn_as_planned(edge: Edge, ctx: _RoutingCtx) -> bool:
     """Whether the handler that draws *edge* is the one whose builder plans it."""
     source, target = ctx.graph.edge_endpoints(edge)
@@ -258,31 +285,31 @@ def test_group_is_its_whole_row_and_each_member_is_drawn_as_planned(
 ) -> None:
     rows_with_a_foreign_sibling = 0
     bad_groups: list[CoRowDiagonalGroup] = []
-    real = core.plan_co_row_diagonal_groups
 
-    def check(ctx, **kwargs):  # type: ignore[no-untyped-def]
+    def check(
+        ctx: _RoutingCtx, planned: dict[tuple[str, str, str], CoRowDiagonalGroup]
+    ) -> None:
         nonlocal rows_with_a_foreign_sibling
-        groups = real(ctx, **kwargs)
+        groups = list(dict.fromkeys(planned.values()))
         for *_where, row in _co_row_candidates(ctx):
             keys = {(edge.source, edge.target, edge.line_id) for edge, _ in row}
             if not all(_drawn_as_planned(edge, ctx) for edge, _ in row):
                 rows_with_a_foreign_sibling += 1
             bad_groups.extend(
                 group
-                for group in dict.fromkeys(groups.values())
+                for group in groups
                 if set(group.members) & keys and set(group.members) != keys
             )
         bad_groups.extend(
             group
-            for group in dict.fromkeys(groups.values())
+            for group in groups
             if not all(
                 _drawn_as_planned(ctx.edge_by_key[member], ctx)
                 for member in group.members
             )
         )
-        return groups
 
-    monkeypatch.setattr(core, "plan_co_row_diagonal_groups", check)
+    _inspect_plans(monkeypatch, check)
     _render(text, TOPOLOGIES)
     assert rows_with_a_foreign_sibling
     assert bad_groups == []
@@ -320,21 +347,6 @@ def test_shared_diagonal_crosses_a_neighbouring_diagonal_steeply() -> None:
     ]
     assert angles
     assert min(angles) >= 20.0
-
-
-def _render_with_groups(
-    monkeypatch: pytest.MonkeyPatch, path: Path
-) -> tuple[RenderPlan, list[CoRowDiagonalGroup]]:
-    planned: list[dict[tuple[str, str, str], CoRowDiagonalGroup]] = []
-    real = core.plan_co_row_diagonal_groups
-
-    def capture(*args, **kwargs):  # type: ignore[no-untyped-def]
-        planned.append(real(*args, **kwargs))
-        return planned[-1]
-
-    monkeypatch.setattr(core, "plan_co_row_diagonal_groups", capture)
-    plan, _svg = _render(path.read_text(), path.parent)
-    return plan, list(dict.fromkeys(planned[-1].values()))
 
 
 def _distance_to_line(
