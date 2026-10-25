@@ -2711,7 +2711,7 @@ def _run_coordinates(plan: cci.CorridorCohortPlan) -> dict[str, float]:
     }
 
 
-def _split_line_beside_a_lead(lead_descent_x: float = 271.0):
+def _split_line_beside_a_lead(m2_descent_x: float = 271.0):
     """``m0`` splits to ``z1`` and ``z2`` beside ``m2``; all three descend
     together and turn right onto one run.
 
@@ -2722,7 +2722,7 @@ def _split_line_beside_a_lead(lead_descent_x: float = 271.0):
         _descend_then_run(
             "m2",
             "z1",
-            [(260.0, 124.0), (lead_descent_x, 124.0), (lead_descent_x, 360.0)]
+            [(260.0, 124.0), (m2_descent_x, 124.0), (m2_descent_x, 360.0)]
             + [(420.0, 360.0), (420.0, 330.0)],
             lane_rank=0,
             path_rank=0,
@@ -2762,7 +2762,7 @@ def test_a_lane_keeps_the_side_of_the_run_it_turns_off() -> None:
 
 def _two_split_lines_beside_a_lead():
     """``l0`` and ``l1`` split to ``sec2`` and ``sec1`` beside ``l3``, the three
-    descending right to left and turning right onto one run.
+    descending side by side, ``l3`` leftmost, and turning right onto one run.
 
     ``l3``'s lead rises inside the runs of ``l0`` and ``l1`` to ``sec2``, so
     footprint orders seat ``l3`` above both.
@@ -2815,6 +2815,7 @@ def _two_split_lines_beside_a_lead():
 
 
 def test_three_lines_keep_their_descent_order_onto_a_run() -> None:
+    """``l3``, leftmost on the descent, runs lowest after the turn."""
     plan = _compile_turning_routes(*_two_split_lines_beside_a_lead())
 
     assert _run_coordinates(plan) == {
@@ -2861,7 +2862,7 @@ def test_guard_a_corner_the_snapshot_crosses_is_not_ordered() -> None:
     """``m2`` descends right of ``m0`` yet runs below it, so it crosses ``m0`` at
     the corner already: no corner order binds, and the footprint order seats
     ``m2`` above ``m0->z2``."""
-    plan = _compile_turning_routes(*_split_line_beside_a_lead(lead_descent_x=279.0))
+    plan = _compile_turning_routes(*_split_line_beside_a_lead(m2_descent_x=279.0))
 
     assert _run_corner_orders(plan) == set()
     assert _run_coordinates(plan)["m2->z1"] == pytest.approx(352.0)

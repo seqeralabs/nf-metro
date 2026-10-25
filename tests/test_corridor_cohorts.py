@@ -1903,6 +1903,32 @@ def test_a_footprint_order_a_chain_of_corner_orders_contradicts_gives_way() -> N
     assert dict(result.allocations) == {"a": 100.0, "b": 104.0, "c": 108.0}
 
 
+def test_lanes_an_offset_equality_ties_do_not_stand_as_one_for_the_yield() -> None:
+    """``b`` sits a pitch above ``a`` by an equality, not on it: the corner order
+    ``c < a`` therefore says nothing about ``b < c`` directly, which only the
+    failure shows it contradicts."""
+    span = (0.0, 50.0)
+    problem = CorridorAllocationProblem(
+        tuple(
+            _lane(member_id, member_id, member_id, at, at, span=span, line_rank=rank)
+            for rank, (member_id, at) in enumerate(
+                (("a", 100.0), ("b", 104.0), ("c", 96.0))
+            )
+        ),
+        equalities=(CorridorEquality("bundle:a|b", "a", "b", 4.0),),
+        directed_separations=(
+            CorridorDirectedSeparation("footprint:b|c", "b", "c", 4.0),
+        ),
+        corner_orders=(_corner_order("c", "a"),),
+        clearance=4.0,
+    )
+
+    result = solve_corridor_cohorts(problem)
+
+    assert result.corner_tier is CorridorCornerOrderTier.RELAXED_ORDERS
+    assert dict(result.allocations) == {"a": 100.0, "b": 104.0, "c": 96.0}
+
+
 def _rigid_pair_and_free_lane(
     *orders: CorridorDirectedSeparation,
     footprint: tuple[CorridorDirectedSeparation, ...] = (),
@@ -1976,3 +2002,24 @@ def test_guard_a_corner_order_naming_no_lane_is_invalid() -> None:
     assert result.status is CorridorAllocationStatus.FAILURE
     assert result.reason is CorridorAllocationFailureReason.INVALID
     assert result.blocking_order_owner_ids == ("corner:a|ghost",)
+
+
+def test_guard_an_invalid_cornered_problem_returns_without_giving_way() -> None:
+    """Two lanes no semantic key tells apart are invalid whatever the orders, so
+    the corner tier's own INVALID result stands for the plain problem's."""
+    span = (0.0, 50.0)
+    problem = CorridorAllocationProblem(
+        (
+            _lane("a", "a", "a", 100.0, 100.0, span=span, line_rank=0),
+            _lane("b", "b", "b", 100.0, 100.0, span=span, line_rank=0),
+        ),
+        corner_orders=(_corner_order("a", "b"),),
+        clearance=4.0,
+    )
+
+    result = solve_corridor_cohorts(problem)
+    plain = solve_corridor_cohorts(replace(problem, corner_orders=()))
+
+    assert result.reason is CorridorAllocationFailureReason.INVALID
+    assert result.corner_tier is CorridorCornerOrderTier.CORNER_ORDERS
+    assert replace(result, corner_tier=CorridorCornerOrderTier.NONE) == plain
