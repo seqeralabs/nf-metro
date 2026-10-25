@@ -1034,6 +1034,38 @@ class _SemanticEndCorner(NamedTuple):
     outgoing: tuple[int, int]
 
 
+SemanticEndCornerKey = tuple[str, str, Direction, Direction]
+
+
+def semantic_end_corners(
+    route: RoutedPath, points: Sequence[tuple[float, float]]
+) -> tuple[tuple[SemanticEndCornerKey, int], ...]:
+    """*route*'s first and last orthogonal corners on *points*, with their ranks.
+
+    Each is keyed by its kind (``"source"`` or ``"target"``), the station at
+    that end of the route, and its incoming and outgoing directions: the
+    cohort key :func:`_rederive_semantic_end_corners` sizes corners under.
+    """
+    corners: list[tuple[int, Direction, Direction]] = []
+    for rank in range(1, len(points) - 1):
+        incoming = segment_direction(points[rank - 1], points[rank])
+        outgoing = segment_direction(points[rank], points[rank + 1])
+        if (
+            incoming is not None
+            and outgoing is not None
+            and incoming is not outgoing
+            and is_orthogonal_turn(points[rank - 1], points[rank], points[rank + 1])
+        ):
+            corners.append((rank, incoming, outgoing))
+    if not corners:
+        return ()
+    (first, first_in, first_out), (last, last_in, last_out) = corners[0], corners[-1]
+    return (
+        (("source", route.edge.source, first_in, first_out), first),
+        (("target", route.edge.target, last_in, last_out), last),
+    )
+
+
 def _rederive_semantic_end_corners(
     routes: list[RoutedPath],
     curve_radius: float,
@@ -1043,37 +1075,22 @@ def _rederive_semantic_end_corners(
 ) -> None:
     """Size wholesale-translated source and landing corner cohorts."""
     cohorts: defaultdict[
-        tuple[str, str, Direction, Direction],
+        SemanticEndCornerKey,
         list[_SemanticEndCorner],
     ] = defaultdict(list)
     for route in routes:
         if route.curve_radii is None or len(route.points) < 3:
             continue
         points = apply_route_offsets(route, station_offsets)
-        corners: list[tuple[int, Direction, Direction]] = []
-        for rank in range(1, len(points) - 1):
-            incoming = segment_direction(points[rank - 1], points[rank])
-            outgoing = segment_direction(points[rank], points[rank + 1])
-            if (
-                incoming is not None
-                and outgoing is not None
-                and incoming is not outgoing
-                and is_orthogonal_turn(points[rank - 1], points[rank], points[rank + 1])
-            ):
-                corners.append((rank, incoming, outgoing))
-        if not corners:
-            continue
-        for kind, owner, (rank, incoming, outgoing) in (
-            ("source", route.edge.source, corners[0]),
-            ("target", route.edge.target, corners[-1]),
-        ):
+        for key, rank in semantic_end_corners(route, points):
+            kind, _owner, incoming, outgoing = key
             if (
                 kind == "source" and route.exit_lane_transition_plan_id is not None
             ) or (kind == "target" and route.exit_turn_segment_rank == rank):
                 continue
             if respect_owned_corners and planner_owns_segment_or_boundary(route, rank):
                 continue
-            cohorts[kind, owner, incoming, outgoing].append(
+            cohorts[key].append(
                 _SemanticEndCorner(
                     route,
                     rank,

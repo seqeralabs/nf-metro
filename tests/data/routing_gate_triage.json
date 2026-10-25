@@ -2107,10 +2107,6 @@
   "note": "A COMPATIBILITY component holding an overlaid cohort reports the overlaid-slots reason. The corpus has no overlaid cohort (two networks drawing into one port slot). Exercised by tests/test_corridor_cohort_main_layouts.py::test_overlaid_entry_slots_keep_drawn_geometry. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
  },
- "corridor_cohort_integration.py::if any((offset is None) != (base is None) for offset, base in candidates) or (::#1": {
-  "note": "A segment's concentric corner offsets and bases are both present or both absent and agree across its two corners, because they are written together by the bundle builder.",
-  "status": "defensive"
- },
  "corridor_cohort_integration.py::if target is None or not target.mutable:::#1": {
   "note": "Patch preparation: every changed route belongs to a mutable target, since allocations are minted only for mutable targets.",
   "status": "defensive"
@@ -2145,14 +2141,6 @@
  },
  "corridor_cohort_integration.py::if abs(start[axis] - end[axis]) > COORD_TOLERANCE:::#1": {
   "note": "Patch preparation: a coordinate change applies to an orthogonal segment, as validated when the claim was bound.",
-  "status": "defensive"
- },
- "corridor_cohort_integration.py::if radius_rank + 2 >= len(points):::#1": {
-  "note": "Patch preparation: an affected corner has two following points, since corners lie between segments of the route.",
-  "status": "defensive"
- },
- "corridor_cohort_integration.py::if corner_input is None:::#1": {
-  "note": "Patch preparation: a corner with any concentric input has a complete, consistent one (see _corner_input).",
   "status": "defensive"
  },
  "corridor_cohort_integration.py::for patch in patches:::#1": {
@@ -2397,6 +2385,10 @@
  },
  "common.py::if trunk_ys[-1] - trunk_ys[0] <= COORD_TOLERANCE:::#1": {
   "note": "iter_port_peeloff_bundles skips a peel-off group whose tails share one trunk depth. No corpus map reaches this arm: tests/fixtures/curve_invariant_repros/riboseq_band_hop_zero_length_seam.mmd, the map that exercises the band-hop seam, aborts at validate_member_geometry_emission before it, because bypass nesting lifts a leg its member geometry plan owns. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "member_geometry.py::if _resizes_an_immutable_radius(changed, mutable_route_ids):::#1": {
+  "note": "Corner sizing of a corridor-cohort patch declines when a corner rule, re-run at the patched points, would change the radius of an immutable convergence-context route sharing a cohort with a moved corner: the plan may not re-size a route it does not own, so it leaves every corner unsized rather than raising (a raise in the compile aborts the render). No swept corpus reaches it. An immutable route whose concentric inputs change but whose radius does not is skipped without declining (the 8,000-map corpus reaches that).",
   "status": "needs-review"
  }
 }
