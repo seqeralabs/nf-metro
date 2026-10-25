@@ -1046,6 +1046,10 @@ def _no_corner_sizing(
     return ()
 
 
+def _same_route(route: RoutedPath) -> RoutedPath:
+    return route
+
+
 @dataclass(slots=True)
 class _RoutePatch:
     route: RoutedPath
@@ -4066,6 +4070,7 @@ def compile_corridor_cohort_plan(
     scalar_requests: Sequence[CorridorScalarRequest] = (),
     settlement_trace: SettlementStageTrace | None = None,
     corner_sizer: CorridorCornerSizer = _no_corner_sizing,
+    live_route: Callable[[RoutedPath], RoutedPath] = _same_route,
 ) -> CorridorCohortPlan:
     """Solve every cohort from one route snapshot without publishing geometry.
 
@@ -4076,6 +4081,11 @@ def compile_corridor_cohort_plan(
     them.  *corner_sizer* sizes the corners those patches move, so each patch
     carries the radii its points need and a mate re-sized beside a moved corner
     carries its own radius-only patch.
+
+    When the targets and the sizer read copies of the routes rather than the
+    routes themselves, *live_route* maps each copy to the route it stands for,
+    and every returned patch, a mate's included, names that route, so
+    publishing writes the routes the render draws.
     """
     claims, overlaid_cohort_ids = _bind_ledger(ledger, targets)
     scalar_requests_by_id = {
@@ -4316,6 +4326,7 @@ def compile_corridor_cohort_plan(
         raise CorridorCohortCompilationError(
             "corridor cohort publication does not realize its complete grant"
         )
+    patches = tuple(replace(patch, route=live_route(patch.route)) for patch in patches)
     finalized_by_claim = {
         allocation.claim_id: allocation for allocation in finalized_allocations
     }

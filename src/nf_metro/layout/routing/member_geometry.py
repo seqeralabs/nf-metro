@@ -76,11 +76,9 @@ from nf_metro.layout.routing.corridor_cohort_integration import (
     CorridorCohortLedger,
     CorridorCohortPlan,
     CorridorCohortTarget,
-    CorridorCornerSizer,
     CorridorCornerSizing,
     CorridorScalarRequest,
     _network_id,
-    _no_corner_sizing,
     compile_corridor_cohort_plan,
 )
 from nf_metro.layout.routing.families import RouteFamilyId
@@ -772,6 +770,55 @@ def _corridor_cohort_aperture_requirements(
     )
 
 
+def _peeloff_seated_snapshot(
+    targets: Sequence[CorridorCohortTarget],
+    population: Sequence[RoutedPath],
+    ctx: _RoutingCtx,
+) -> tuple[
+    tuple[CorridorCohortTarget, ...], tuple[RoutedPath, ...], dict[int, RoutedPath]
+]:
+    """Copies of *targets* and *population* with each peel-off riser on its slot.
+
+    After emission, :func:`_reconcile_port_peeloff_risers` re-seats every
+    peel-off riser the freeze leaves unowned onto the slot its settled trunk
+    depth earns.  The same rule runs here over copies of the distinct target
+    routes, in target order, so the compile reads the riser coordinate that
+    pass draws and no live route moves.  An immutable target's copy is
+    re-seated too, as cohort context only: neither :func:`_prepare_patches`
+    nor the corner sizer ever patches or sizes an immutable route.
+
+    Returns the targets on their copies, the copied population, and each
+    copy's live route keyed by the copy's id.
+    """
+    live_by_id = {
+        id(route): route
+        for route in (*population, *(target.route for target in targets))
+    }
+    copies = {
+        route_id: _corner_sizing_copy(route) for route_id, route in live_by_id.items()
+    }
+    _reconcile_port_peeloff_risers(
+        list(
+            {id(target.route): copies[id(target.route)] for target in targets}.values()
+        ),
+        ctx,
+    )
+    return (
+        tuple(replace(target, route=copies[id(target.route)]) for target in targets),
+        tuple(copies[id(route)] for route in population),
+        {id(copies[route_id]): route for route_id, route in live_by_id.items()},
+    )
+
+
+def _live_route(
+    live_by_copy_id: Mapping[int, RoutedPath], route: RoutedPath
+) -> RoutedPath:
+    live = live_by_copy_id.get(id(route))
+    if live is None:
+        raise RuntimeError("corridor cohort patch names a route outside its snapshot")
+    return live
+
+
 def _compile_corridor_cohorts(
     ledger: CorridorCohortLedger | None,
     candidates: Sequence[_MemberCandidate],
@@ -782,7 +829,7 @@ def _compile_corridor_cohorts(
     allow_clearance_requirements: bool,
     additional_targets: Sequence[CorridorCohortTarget] = (),
     scalar_requests: Sequence[CorridorScalarRequest] = (),
-    corner_sizer: CorridorCornerSizer = _no_corner_sizing,
+    sizing_population: Sequence[RoutedPath] = (),
 ) -> tuple[
     CorridorCohortPlan | None,
     dict[ResolvedEdge, tuple[int, ...]],
@@ -797,12 +844,28 @@ def _compile_corridor_cohorts(
         ctx,
     )
     targets = (*member_targets, *additional_targets)
+    seated_targets, seated_population, live_by_copy_id = _peeloff_seated_snapshot(
+        targets, sizing_population, ctx
+    )
+    candidate_route_ids = {id(candidate.route) for candidate in candidates}
     try:
         cohort_plan = compile_corridor_cohort_plan(
             ledger,
-            targets,
+            seated_targets,
             scalar_requests=scalar_requests,
-            corner_sizer=corner_sizer,
+            corner_sizer=partial(
+                _size_patched_corners,
+                seated_population,
+                frozenset(
+                    copy_id
+                    for copy_id, route in live_by_copy_id.items()
+                    if id(route) in candidate_route_ids
+                ),
+                ctx.graph,
+                ctx.curve_radius,
+                ctx.station_offsets or {},
+            ),
+            live_route=partial(_live_route, live_by_copy_id),
         )
     except CorridorCohortCompilationError as error:
         if not allow_clearance_requirements:
@@ -2952,14 +3015,7 @@ def build_member_geometry_execution(
                     allow_clearance_requirements=allow_clearance_requirements,
                     additional_targets=corridor_targets,
                     scalar_requests=corridor_scalar_requests,
-                    corner_sizer=partial(
-                        _size_patched_corners,
-                        normalization_population,
-                        candidate_route_ids,
-                        graph,
-                        ctx.curve_radius,
-                        ctx.station_offsets or {},
-                    ),
+                    sizing_population=normalization_population,
                 )
             )
             _validate_corridor_cohort_outcome(corridor_cohorts, corridor_requirements)

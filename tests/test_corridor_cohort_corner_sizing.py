@@ -38,6 +38,23 @@ class _Compile:
         }
         self.plan: cci.CorridorCohortPlan | None = None
 
+    def read_route(self, patch: cci._RoutePatch) -> RoutedPath:
+        """The route the compile read for *patch*'s route.
+
+        A patch names the live route, while the compile reads the targets'
+        snapshot copies; a radius-only mate is read as it is.
+        """
+        targets = {_edge_key(target.route): target.route for target in self.targets}
+        return targets.get(_edge_key(patch.route), patch.route)
+
+    def moves_a_point(self, patch: cci._RoutePatch) -> bool:
+        return any(
+            tuple(old) != tuple(new)
+            for old, new in zip(
+                self.read_route(patch).points, patch.points, strict=True
+            )
+        )
+
     @property
     def patches(self) -> dict[EdgeKey, cci._RoutePatch]:
         assert self.plan is not None
@@ -61,13 +78,6 @@ def _patch_state(patch: cci._RoutePatch) -> tuple[Any, ...]:
         tuple(sorted(patch.corner_offsets.items())),
         tuple(sorted(patch.corner_bases.items())),
         patch.source_turnout,
-    )
-
-
-def _moves_a_point(patch: cci._RoutePatch) -> bool:
-    return any(
-        tuple(old) != tuple(new)
-        for old, new in zip(patch.route.points, patch.points, strict=True)
     )
 
 
@@ -122,7 +132,8 @@ def test_moved_landing_corner_nests_concentrically_with_its_mate(
     moved = [
         record
         for record in compiles
-        if truth_key in record.patches and _moves_a_point(record.patches[truth_key])
+        if truth_key in record.patches
+        and record.moves_a_point(record.patches[truth_key])
     ]
     assert moved
 
@@ -159,7 +170,7 @@ def test_unpatched_mate_in_a_moved_corner_cohort_is_resized(
     moved = [
         record
         for record in compiles
-        if any(_moves_a_point(patch) for patch in record.patches.values())
+        if any(record.moves_a_point(patch) for patch in record.patches.values())
     ]
     assert moved
 
@@ -190,13 +201,13 @@ def test_compile_moving_no_corner_keeps_every_corner(
         record
         for record in _compiles(monkeypatch, relative_path)
         if record.patches
-        and not any(_moves_a_point(patch) for patch in record.patches.values())
+        and not any(record.moves_a_point(patch) for patch in record.patches.values())
     ]
     assert still
 
     for record in still:
         for key, patch in record.patches.items():
-            assert _patch_state(patch) == _corner_state(patch.route), key
+            assert _patch_state(patch) == _corner_state(record.read_route(patch)), key
 
 
 @pytest.mark.parametrize(
@@ -290,11 +301,9 @@ def test_immutable_route_is_never_sized(
     cohort mates included."""
     for record in _compiles(monkeypatch, relative_path):
         immutable = {
-            id(target.route) for target in record.targets if not target.mutable
+            _edge_key(target.route) for target in record.targets if not target.mutable
         }
-        assert not [
-            key for key, patch in record.patches.items() if id(patch.route) in immutable
-        ]
+        assert not immutable & set(record.patches)
 
     for population, mutable, *rest in _sizing_calls(monkeypatch, relative_path):
         size = member_geometry._size_patched_corners
