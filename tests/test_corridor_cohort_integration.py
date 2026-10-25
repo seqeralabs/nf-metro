@@ -1355,6 +1355,7 @@ def test_problem_rejects_an_infeasible_fixed_fixed_footprint_order() -> None:
             8.0,
             footprint_model,
             {},
+            corner_neighbours={},
         )
 
 
@@ -2310,7 +2311,9 @@ def test_endpoint_lanes_rank_past_an_interleaved_fixed_member(
     roles.update({item.claim_id: cci.CorridorCohortClaimRole.FIXED for item in fixed})
     footprint_model = _MemberFootprintModel((), (), {}, (), (), ())
 
-    problem = cci._problem(claims, roles, True, step, 8.0, footprint_model, {})
+    problem = cci._problem(
+        claims, roles, True, step, 8.0, footprint_model, {}, corner_neighbours={}
+    )
 
     assert {
         (equality.member_id, equality.obstacle_id)
@@ -2868,12 +2871,23 @@ def test_guard_a_corner_the_snapshot_crosses_is_not_ordered() -> None:
     assert _run_coordinates(plan)["m2->z1"] == pytest.approx(352.0)
 
 
-def _run_claim(member_id: str, coordinate: float, cohort: str | None = None):
+def _run_claim(
+    member_id: str,
+    coordinate: float,
+    cohort: str | None = None,
+    direction: Direction = Direction.R,
+):
     ledger = _identity_claim(
         claim_id=member_id,
         reservation_id="reservation:run",
         network_id=f"network:{member_id}",
         endpoint_cohort_id=cohort,
+        direction=direction,
+        orientation=(
+            CorridorOrientation.HORIZONTAL
+            if direction in (Direction.L, Direction.R)
+            else CorridorOrientation.VERTICAL
+        ),
         segment_rank=2,
     )
     target = _footprint_target(member_id, member_id, [(0.0, 0.0), (1.0, 0.0)])
@@ -2958,6 +2972,36 @@ def test_guard_corner_orders_bind_only_lanes_turning_together_uncrossed(
             neighbours[(member_id, rank)] = cci._CornerNeighbour(
                 coordinate, direction, frozenset({group})
             )
+
+    emitted = cci._corner_orders(claims, (), 4.0, neighbours)
+
+    assert [(item.lower_member_id, item.upper_member_id) for item in emitted] == orders
+
+
+@pytest.mark.parametrize(
+    ("run", "neighbour", "a_at", "b_at", "orders"),
+    [
+        pytest.param(Direction.R, _D, 356.0, 360.0, [("a", "b")], id="down-then-right"),
+        pytest.param(Direction.L, _D, 360.0, 356.0, [("b", "a")], id="down-then-left"),
+        pytest.param(
+            Direction.D, Direction.L, 360.0, 356.0, [("b", "a")], id="left-then-down"
+        ),
+    ],
+)
+def test_guard_corner_orders_turn_with_the_run_direction(
+    run, neighbour, a_at, b_at, orders
+) -> None:
+    """``a``'s neighbouring claim lies at 275 and ``b``'s at 271 on one run that
+    turns onto *run*; each lane keeps its side of travel across the turn, so
+    which of them takes the lower coordinate follows *run*'s direction."""
+    claims = (
+        _run_claim("a", a_at, direction=run),
+        _run_claim("b", b_at, direction=run),
+    )
+    neighbours = {
+        ("a", 1): cci._CornerNeighbour(275.0, neighbour, frozenset({0})),
+        ("b", 1): cci._CornerNeighbour(271.0, neighbour, frozenset({0})),
+    }
 
     emitted = cci._corner_orders(claims, (), 4.0, neighbours)
 

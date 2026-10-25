@@ -47,7 +47,14 @@ class CorridorAllocationFailureReason(Enum):
 
 
 class CorridorCornerOrderTier(Enum):
-    """The problem a solve took its result from, given corner orders."""
+    """Which corner orders a seating held.
+
+    ``NONE``: no corner orders applied, because the problem holds none, its
+    witnesses are incomplete, or it is invalid.  ``CORNER_ORDERS``: every
+    corner order held.  ``RELAXED_ORDERS``: every corner order held without the
+    directed separations the corner-order failure blocked.  ``GAVE_WAY``: no
+    corner order applied, the problem seated as though it held none.
+    """
 
     NONE = "none"
     CORNER_ORDERS = "corner-orders"
@@ -171,9 +178,8 @@ class CorridorAllocationProblem:
     corner_orders: tuple[CorridorDirectedSeparation, ...] = ()
     """Orders the lanes prefer where they turn together at one corner.
 
-    Unlike ``directed_separations`` these are a preference: a directed
-    separation they contradict gives way to them, and a problem they cannot
-    seat is solved without them (see :func:`solve_corridor_cohorts`).
+    A preference, unlike ``directed_separations``: a directed separation they
+    contradict is dropped while they hold.
     """
 
 
@@ -292,8 +298,8 @@ def _invalid_problem(
     numeric.extend(equality.delta for equality in problem.equalities)
     numeric.extend(equality.delta for equality in problem.fixed_equalities)
     numeric.extend(separation.distance for separation in problem.separations)
-    directed_separations = (*problem.directed_separations, *problem.corner_orders)
-    numeric.extend(separation.distance for separation in directed_separations)
+    all_directed = (*problem.directed_separations, *problem.corner_orders)
+    numeric.extend(separation.distance for separation in all_directed)
     numeric.extend(
         coordinate
         for domain in problem.domains
@@ -382,7 +388,7 @@ def _invalid_problem(
     }
     invalid_directed_separations = {
         separation.owner_id
-        for separation in directed_separations
+        for separation in all_directed
         if not separation.owner_id
         or separation.lower_member_id not in by_id
         or separation.upper_member_id not in by_id
@@ -391,7 +397,7 @@ def _invalid_problem(
     }
     invalid_directed_members = {
         member_id
-        for separation in directed_separations
+        for separation in all_directed
         if separation.owner_id in invalid_directed_separations
         for member_id in (separation.lower_member_id, separation.upper_member_id)
         if member_id in by_id
@@ -811,11 +817,15 @@ def solve_corridor_cohorts(
 ) -> CorridorAllocationResult:
     """Return the unique canonical seating for a complete witness set.
 
-    Corner orders are seated first, every directed separation they contradict
-    giving way to them.  Where that fails, the problem is seated once more
-    without the directed separations both of whose lanes the failure blocks,
-    and where that fails too, as though it held no corner orders.  The result
-    names the tier it came from.
+    Corner orders rank the seatings, and the result's ``corner_tier`` names
+    the first that plans:
+
+    1. every corner order, without the directed separations they contradict;
+    2. the same, also without each directed separation both of whose lanes
+       the first seating's failure blocks;
+    3. no corner orders.
+
+    An invalid problem is reported without a seating to fall back on.
     """
     plain = replace(problem, corner_orders=())
     if not problem.corner_orders or not problem.witnesses_complete:
@@ -831,10 +841,9 @@ def solve_corridor_cohorts(
     )
     cornered = replace(plain, directed_separations=(*kept, *problem.corner_orders))
     result = _solve_in_either_frame(cornered)
-    if (
-        result.status is not CorridorAllocationStatus.FAILURE
-        or result.reason is CorridorAllocationFailureReason.INVALID
-    ):
+    if result.reason is CorridorAllocationFailureReason.INVALID:
+        return result
+    if result.status is not CorridorAllocationStatus.FAILURE:
         return replace(result, corner_tier=CorridorCornerOrderTier.CORNER_ORDERS)
     blocked = set(result.blocking_member_ids)
     relaxed = tuple(

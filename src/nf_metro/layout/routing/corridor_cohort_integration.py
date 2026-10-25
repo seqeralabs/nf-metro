@@ -1073,7 +1073,12 @@ class CorridorCohortPlan:
 
     @property
     def solve_call_count(self) -> int:
-        """How many solver problems the compile ran, one per non-empty component."""
+        """How many solver problems the compile built, one per non-empty component.
+
+        ``solve_corridor_cohorts`` may seat one problem up to three times when
+        it holds corner orders; each result's ``corner_tier`` names the seating
+        it kept.
+        """
         return sum(len(component.problems) for component in self.components)
 
 
@@ -3170,24 +3175,20 @@ def _run_coupled_clearances(
 def _corner_turn_side(
     left: _BoundClaim,
     right: _BoundClaim,
-    span_end: int,
+    step: int,
     neighbours: Mapping[tuple[str, int], _CornerNeighbour],
 ) -> int:
     """The sign *right*'s coordinate takes over *left*'s from one shared corner.
 
-    *span_end* names the low (``0``) or high (``1``) end of the pair's runs.
+    *step* (``-1`` or ``+1``) picks the neighbouring segment rank on both runs.
     Their neighbouring claims there turn together when they lie in one physical
     group and run one way, and each lane keeps its side of travel across the
     turn.  ``0`` where they do not, or lie at one coordinate.
     """
-    adjacent: list[_CornerNeighbour | None] = []
-    for claim in (left, right):
-        low_end_is_start = claim.ledger.direction.sign > 0
-        step = -1 if (span_end == 0) == low_end_is_start else 1
-        adjacent.append(
-            neighbours.get((claim.ledger.member_id, claim.ledger.segment_rank + step))
-        )
-    left_neighbour, right_neighbour = adjacent
+    left_neighbour, right_neighbour = (
+        neighbours.get((claim.ledger.member_id, claim.ledger.segment_rank + step))
+        for claim in (left, right)
+    )
     if (
         left_neighbour is None
         or right_neighbour is None
@@ -3240,8 +3241,7 @@ def _corner_orders(
             ):
                 continue
             sides = {
-                _corner_turn_side(left, right, span_end, neighbours)
-                for span_end in (0, 1)
+                _corner_turn_side(left, right, step, neighbours) for step in (-1, 1)
             } - {0}
             if len(sides) != 1:
                 continue
@@ -3273,9 +3273,7 @@ def _problem(
     intervals_by_member: Mapping[str, Sequence[CorridorForbiddenInterval]] = (
         MappingProxyType({})
     ),
-    corner_neighbours: Mapping[tuple[str, int], _CornerNeighbour] = (
-        MappingProxyType({})
-    ),
+    corner_neighbours: Mapping[tuple[str, int], _CornerNeighbour],
 ) -> CorridorAllocationProblem:
     scalar_by_id = {
         request.variable.variable_id: request for request in scalar_requests
@@ -4208,8 +4206,8 @@ def compile_corridor_cohort_plan(
     """Solve every cohort from one route snapshot without publishing geometry.
 
     This is the one production integration call site for the corridor cohort
-    solver: each closed component solves exactly once, through the ``solve``
-    closure below. Solving is separated from publication: the returned plan
+    solver: each closed component builds one problem and calls the ``solve``
+    closure below once for it. Solving is separated from publication: the returned plan
     carries its route patches, and :func:`publish_corridor_cohort_plan` applies
     them.  *corner_sizer* sizes the corners those patches move, so each patch
     carries the radii its points need and a mate re-sized beside a moved corner

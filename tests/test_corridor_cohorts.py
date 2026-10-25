@@ -2006,7 +2006,7 @@ def test_guard_a_corner_order_naming_no_lane_is_invalid() -> None:
 
 def test_guard_an_invalid_cornered_problem_returns_without_giving_way() -> None:
     """Two lanes no semantic key tells apart are invalid whatever the orders, so
-    the corner tier's own INVALID result stands for the plain problem's."""
+    the first seating's INVALID result is the plain problem's, held by no tier."""
     span = (0.0, 50.0)
     problem = CorridorAllocationProblem(
         (
@@ -2021,5 +2021,4 @@ def test_guard_an_invalid_cornered_problem_returns_without_giving_way() -> None:
     plain = solve_corridor_cohorts(replace(problem, corner_orders=()))
 
     assert result.reason is CorridorAllocationFailureReason.INVALID
-    assert result.corner_tier is CorridorCornerOrderTier.CORNER_ORDERS
-    assert replace(result, corner_tier=CorridorCornerOrderTier.NONE) == plain
+    assert result == plain
