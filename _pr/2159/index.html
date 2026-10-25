@@ -1,0 +1,900 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="nf-metro-render-run" content="40183375451">
+<title>Render diff - PR #2159</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: light-dark(#f5f5f7, #1e1e2e);
+    --surface: light-dark(#eaeaef, #2a2a3c);
+    --border: light-dark(#c9c9d4, #3a3a4c);
+    --text: light-dark(#1e1e2e, #e0e0e0);
+    --muted: light-dark(#666, #888);
+    --accent: light-dark(#1a8575, #4ec9b0);
+    --added: light-dark(rgba(46,160,67,.25), rgba(46,160,67,.44));
+    --removed: light-dark(rgba(218,54,52,.25), rgba(218,54,52,.44));
+  }
+  [data-scheme="dark"] { color-scheme: dark; }
+  [data-scheme="light"] { color-scheme: light; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 2rem;
+    line-height: 1.5;
+  }
+  .page-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+  }
+  h1 {
+    font-size: 1.5rem;
+    color: var(--accent);
+  }
+  .scheme-btn {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 0.35rem 0.75rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
+  .scheme-btn:hover { background: var(--border); }
+  .summary {
+    color: var(--muted);
+    margin-bottom: 2rem;
+    font-size: 0.95rem;
+  }
+  .toc {
+    margin-bottom: 2rem;
+    padding: 1rem 1.5rem;
+    background: var(--surface);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  .toc h2 {
+    font-size: 1rem;
+    margin-bottom: 0.5rem;
+    color: var(--accent);
+  }
+  .toc h3 {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-top: 0.5rem;
+    margin-bottom: 0.25rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .toc ul {
+    list-style: none;
+    columns: 2;
+    column-gap: 2rem;
+  }
+  .toc li {
+    margin-bottom: 0.25rem;
+  }
+  .toc a {
+    color: var(--text);
+    text-decoration: none;
+  }
+  .toc a:hover {
+    color: var(--accent);
+    text-decoration: underline;
+  }
+  .badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    margin-left: 0.4rem;
+    vertical-align: middle;
+  }
+  .badge-changed { background: var(--border); }
+  .badge-added { background: var(--added); }
+  .badge-removed { background: var(--removed); }
+  .section-header {
+    font-size: 1.3rem;
+    color: var(--accent);
+    margin-top: 2.5rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid var(--border);
+  }
+  .diff-entry {
+    margin-bottom: 3rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .diff-entry h3 {
+    font-size: 1.1rem;
+    padding: 0.75rem 1rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .comparison {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+  }
+  .side {
+    padding: 1rem;
+    overflow-x: auto;
+  }
+  .side:first-child {
+    border-right: 1px solid var(--border);
+  }
+  .side h4 {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-bottom: 0.5rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .svg-wrapper { overflow-x: auto; }
+  .svg-wrapper svg, .side img, .side-only img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    border-radius: 4px;
+  }
+  .side-only {
+    padding: 1rem;
+  }
+  .empty {
+    color: var(--muted);
+    font-style: italic;
+    padding: 2rem;
+    text-align: center;
+  }
+  .toggle-bar {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .toggle-bar button {
+    background: var(--border);
+    color: var(--text);
+    border: none;
+    padding: 0.3rem 0.8rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+  .toggle-bar button.active {
+    background: var(--accent);
+    color: var(--bg);
+  }
+  .intro {
+    margin-bottom: 2rem;
+    padding: 1rem 1.5rem;
+    background: var(--surface);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    font-size: 0.9rem;
+    line-height: 1.6;
+  }
+  .intro summary {
+    cursor: pointer;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .intro p {
+    margin-top: 0.75rem;
+  }
+  .intro ul {
+    margin-top: 0.5rem;
+    padding-left: 1.5rem;
+  }
+  .intro li {
+    margin-bottom: 0.25rem;
+  }
+  .intro code {
+    background: var(--border);
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    font-size: 0.85em;
+  }
+  .intro a {
+    color: var(--accent);
+  }
+  .metrics {
+    margin-bottom: 2rem;
+    padding: 1rem 1.5rem;
+    background: var(--surface);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  .metrics h2 {
+    font-size: 1rem;
+    margin-bottom: 0.25rem;
+    color: var(--accent);
+  }
+  .metrics .caption {
+    color: var(--muted);
+    font-size: 0.8rem;
+    margin-bottom: 0.75rem;
+  }
+  .metrics table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.82rem;
+  }
+  .metrics th, .metrics td {
+    padding: 0.3rem 0.6rem;
+    text-align: right;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .metrics th:first-child, .metrics td:first-child {
+    text-align: left;
+  }
+  .metrics th {
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.7rem;
+  }
+  .metrics td a { color: var(--text); text-decoration: none; }
+  .metrics td a:hover { color: var(--accent); }
+  .m-flat { color: var(--muted); }
+  .m-better { color: light-dark(#1a8575, #4ec9b0); font-weight: 600; }
+  .m-worse { color: light-dark(#c0392b, #f38ba8); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="page-header">
+  <h1>Render diff - PR #2159</h1>
+  <button id="scheme-toggle" class="scheme-btn">System</button>
+</div>
+<p class="summary">2 added out of 375 total renders. Generated 2026-10-25 10:07 UTC.</p>
+<details class="intro">
+<summary>What is this page?</summary>
+<p>
+<a href="https://github.com/seqeralabs/nf-metro">nf-metro</a>
+generates metro-map-style SVG diagrams from Mermaid graph definitions.
+This page is automatically generated for every pull request and shows
+<strong>only the renders that changed</strong> compared to the
+<code>main</code> branch.
+</p>
+<p>
+Use it to check that code changes produce the intended visual result
+without unexpected side-effects on other diagrams. Each entry shows
+the <strong>base</strong> (main) render on the left and the
+<strong>PR</strong> render on the right. Use the toggle buttons to
+switch between side-by-side, base-only, and PR-only views.
+</p>
+<p><strong>What to look for:</strong></p>
+<ul>
+<li>Intended improvements in the PR column</li>
+<li>Unintended regressions (overlapping lines, shifted labels,
+    broken routing) in diagrams you did not mean to change</li>
+<li>New renders (green <em>added</em> badge), shown against what the base
+    code makes of the same file, or against the abort it raises there; or
+    removed renders (red <em>removed</em> badge)</li>
+</ul>
+</details>
+<div class="metrics">
+<h2>Layout-quality metrics</h2>
+<p class="caption">Advisory only &mdash; nothing gates on these. <span class="m-better">green</span> improved, <span class="m-worse">red</span> regressed. Lower is better except in the &uarr; column.</p>
+<table>
+<tr><th>Render</th><th>Crossings</th><th>Near-horiz.</th><th>Lone diag.</th><th>Bends/route</th><th>Corners</th><th>Turn/route (rad)</th><th>Label strikes</th><th>Marker gap ↑</th><th>Excess gaps</th><th>Wasted canvas</th></tr>
+<tr><td><a href="#halloween_light">halloween_light</a></td><td class="m-flat">0</td><td class="m-flat">0</td><td class="m-flat">0</td><td class="m-flat">0.3</td><td class="m-flat">8</td><td class="m-flat">0.3</td><td class="m-flat">0</td><td class="m-flat">36.0</td><td class="m-flat">0</td><td class="m-flat">59%</td></tr>
+<tr><td><a href="#halloween_pipeline">halloween_pipeline</a></td><td class="m-flat">3</td><td class="m-flat">0</td><td class="m-flat">0</td><td class="m-flat">0.3</td><td class="m-flat">14</td><td class="m-flat">0.4</td><td class="m-flat">0</td><td class="m-flat">28.0</td><td class="m-flat">0</td><td class="m-flat">62%</td></tr>
+</table>
+</div>
+<div class="toc">
+<h2>Changed renders</h2>
+<h3><a href="#section-feature-showcase">Feature Showcase</a></h3>
+<ul>
+<li><a href="#halloween_light">halloween_light</a><span class="badge badge-added">added</span></li>
+<li><a href="#halloween_pipeline">halloween_pipeline</a><span class="badge badge-added">added</span></li>
+</ul>
+</div>
+<h2 class="section-header" id="section-feature-showcase">Feature Showcase</h2>
+
+<div class="diff-entry" id="halloween_light">
+<h3>Halloween Light <span class="badge badge-added">added</span></h3>
+<div class="toggle-bar"><button class="active" data-mode="side-by-side">Side by side</button><button data-mode="base">Base only</button><button data-mode="pr">PR only</button></div>
+<div class="comparison">
+<div class="side side-base"><h4>Base code (map new in PR)</h4><div class="svg-wrapper"><?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="952" height="400" viewBox="0 0 952 400">
+<defs>
+</defs>
+<style>.nf-metro-bg--halloween_light-base { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }
+.nf-metro-title--halloween_light-base { fill: var(--nfm-map-title-color, light-dark(#111111, #ffffff)); }
+.nf-metro-station-label--halloween_light-base { fill: var(--nfm-map-label-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-section-box--halloween_light-base { fill: var(--nfm-map-section-fill, light-dark(#ededed, #373737)); stroke: var(--nfm-map-section-stroke, light-dark(#e6e6e6, #595959)); }
+.nf-metro-section-label--halloween_light-base { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-label--halloween_light-base { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-underline--halloween_light-base { stroke: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-legend-bg--halloween_light-base { fill: var(--nfm-map-legend-bg, light-dark(rgba(255, 255, 255, 0.8), rgba(0, 0, 0, 0.3))); }
+.nf-metro-legend-text--halloween_light-base { fill: var(--nfm-map-legend-text-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-marker-stroke--halloween_light-base { stroke: var(--nfm-map-marker-stroke, light-dark(#333333, #f0f0f0)); }
+.nf-metro-label-halo--halloween_light-base { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); stroke: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }</style>
+<rect x="0" y="0" width="952" height="400" fill="#f5f5f5" class="nf-metro-bg--halloween_light-base" />
+<text x="60.0" y="30.0" font-size="24.0" fill="#111111" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" class="nf-metro-title--halloween_light-base">Trick-or-Treat Variant Calling</text>
+<rect x="30.0" y="70.0" width="290.5" height="100.0" rx="8" ry="8" fill="#ededed" stroke="#e6e6e6" stroke-width="1.0" class="nf-metro-section-box--halloween_light-base" data-section-id="doorstep" data-section-lines="candy,treat,trick" />
+<circle cx="41.0" cy="55.0" r="11" fill="#333333" class="nf-metro-section-num-circle--halloween_light-base" data-section-id="doorstep" />
+<text x="41.0" y="55.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="doorstep">1</text>
+<text x="57.0" y="55.0" font-size="16.0" fill="#666666" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label--halloween_light-base" data-section-id="doorstep">Doorstep</text>
+<rect x="370.5" y="70.0" width="287.0" height="180.0" rx="8" ry="8" fill="#ededed" stroke="#e6e6e6" stroke-width="1.0" class="nf-metro-section-box--halloween_light-base" data-section-id="bag" data-section-lines="candy,treat,trick" />
+<circle cx="381.5" cy="55.0" r="11" fill="#333333" class="nf-metro-section-num-circle--halloween_light-base" data-section-id="bag" />
+<text x="381.5" y="55.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="bag">2</text>
+<text x="397.5" y="55.0" font-size="16.0" fill="#666666" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label--halloween_light-base" data-section-id="bag">Candy Bag</text>
+<rect x="707.5" y="70.0" width="185.0" height="100.0" rx="8" ry="8" fill="#ededed" stroke="#e6e6e6" stroke-width="1.0" class="nf-metro-section-box--halloween_light-base" data-section-id="sorting" data-section-lines="candy,treat,trick" />
+<circle cx="718.5" cy="55.0" r="11" fill="#333333" class="nf-metro-section-num-circle--halloween_light-base" data-section-id="sorting" />
+<text x="718.5" y="55.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="sorting">3</text>
+<text x="734.5" y="55.0" font-size="16.0" fill="#666666" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label--halloween_light-base" data-section-id="sorting">Sorting the Haul</text>
+<path d="M83.5,128.0 L168.5,128.0" stroke="#e0a100" stroke-width="3.0" stroke-linecap="round" class="metro-line-candy--halloween_light-base" data-line-id="candy" stroke-dasharray="8,4" />
+<path d="M168.5,128.0 L253.5,128.0" stroke="#e0a100" stroke-width="3.0" stroke-linecap="round" class="metro-line-candy--halloween_light-base" data-line-id="candy" stroke-dasharray="8,4" />
+<path d="M757.5,128.0 L842.5,128.0" stroke="#e0a100" stroke-width="3.0" stroke-linecap="round" class="metro-line-candy--halloween_light-base" data-line-id="candy" stroke-dasharray="8,4" />
+<path d="M253.5,128.0 L320.5,128.0" stroke="#e0a100" stroke-width="3.0" stroke-linecap="round" class="metro-line-candy--halloween_light-base" data-line-id="candy" stroke-dasharray="8,4" />
+<path d="M370.5,128.0 L374.5,128.0 Q384.5,128.0,388.34615384615387,137.23076923076923 L410.65384615384613,190.76923076923077 Q414.5,200.0,424.5,200.0 L471.5,200.0" stroke="#e0a100" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-candy--halloween_light-base" data-line-id="candy" stroke-dasharray="8,4" />
+<path d="M471.5,200.0 L603.5,200.0 Q613.5,200.0,617.3461538461538,190.76923076923077 L639.6538461538462,137.23076923076923 Q643.5,128.0,653.5,128.0 L657.5,128.0" stroke="#e0a100" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-candy--halloween_light-base" data-line-id="candy" stroke-dasharray="8,4" />
+<path d="M707.5,128.0 L757.5,128.0" stroke="#e0a100" stroke-width="3.0" stroke-linecap="round" class="metro-line-candy--halloween_light-base" data-line-id="candy" stroke-dasharray="8,4" />
+<path d="M320.5,128.0 L370.5,128.0" stroke="#e0a100" stroke-width="3.0" stroke-linecap="round" class="metro-line-candy--halloween_light-base" data-line-id="candy" stroke-dasharray="8,4" />
+<path d="M657.5,128.0 L707.5,128.0" stroke="#e0a100" stroke-width="3.0" stroke-linecap="round" class="metro-line-candy--halloween_light-base" data-line-id="candy" stroke-dasharray="8,4" />
+<path d="M83.5,124.0 L168.5,124.0" stroke="#7a4b94" stroke-width="3.0" stroke-linecap="round" class="metro-line-treat--halloween_light-base" data-line-id="treat" />
+<path d="M168.5,124.0 L253.5,124.0" stroke="#7a4b94" stroke-width="3.0" stroke-linecap="round" class="metro-line-treat--halloween_light-base" data-line-id="treat" />
+<path d="M471.5,164.0 L556.5,164.0" stroke="#7a4b94" stroke-width="3.0" stroke-linecap="round" class="metro-line-treat--halloween_light-base" data-line-id="treat" />
+<path d="M253.5,124.0 L320.5,124.0" stroke="#7a4b94" stroke-width="3.0" stroke-linecap="round" class="metro-line-treat--halloween_light-base" data-line-id="treat" />
+<path d="M370.5,124.0 L376.5,124.0 Q386.5,124.0,392.5,132.0 L410.5,156.0 Q416.5,164.0,426.5,164.0 L471.5,164.0" stroke="#7a4b94" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-treat--halloween_light-base" data-line-id="treat" />
+<path d="M556.5,164.0 L601.5,164.0 Q611.5,164.0,617.5,156.0 L635.5,132.0 Q641.5,124.0,651.5,124.0 L657.5,124.0" stroke="#7a4b94" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-treat--halloween_light-base" data-line-id="treat" />
+<path d="M707.5,124.0 L757.5,124.0" stroke="#7a4b94" stroke-width="3.0" stroke-linecap="round" class="metro-line-treat--halloween_light-base" data-line-id="treat" />
+<path d="M320.5,124.0 L370.5,124.0" stroke="#7a4b94" stroke-width="3.0" stroke-linecap="round" class="metro-line-treat--halloween_light-base" data-line-id="treat" />
+<path d="M657.5,124.0 L707.5,124.0" stroke="#7a4b94" stroke-width="3.0" stroke-linecap="round" class="metro-line-treat--halloween_light-base" data-line-id="treat" />
+<path d="M83.5,120.0 L168.5,120.0" stroke="#c2410c" stroke-width="3.0" stroke-linecap="round" class="metro-line-trick--halloween_light-base" data-line-id="trick" />
+<path d="M168.5,120.0 L253.5,120.0" stroke="#c2410c" stroke-width="3.0" stroke-linecap="round" class="metro-line-trick--halloween_light-base" data-line-id="trick" />
+<path d="M471.5,120.0 L556.5,120.0" stroke="#c2410c" stroke-width="3.0" stroke-linecap="round" class="metro-line-trick--halloween_light-base" data-line-id="trick" />
+<path d="M253.5,120.0 L320.5,120.0" stroke="#c2410c" stroke-width="3.0" stroke-linecap="round" class="metro-line-trick--halloween_light-base" data-line-id="trick" />
+<path d="M370.5,120.0 L471.5,120.0" stroke="#c2410c" stroke-width="3.0" stroke-linecap="round" class="metro-line-trick--halloween_light-base" data-line-id="trick" />
+<path d="M556.5,120.0 L657.5,120.0" stroke="#c2410c" stroke-width="3.0" stroke-linecap="round" class="metro-line-trick--halloween_light-base" data-line-id="trick" />
+<path d="M707.5,120.0 L757.5,120.0" stroke="#c2410c" stroke-width="3.0" stroke-linecap="round" class="metro-line-trick--halloween_light-base" data-line-id="trick" />
+<path d="M320.5,120.0 L370.5,120.0" stroke="#c2410c" stroke-width="3.0" stroke-linecap="round" class="metro-line-trick--halloween_light-base" data-line-id="trick" />
+<path d="M657.5,120.0 L707.5,120.0" stroke="#c2410c" stroke-width="3.0" stroke-linecap="round" class="metro-line-trick--halloween_light-base" data-line-id="trick" />
+<rect x="78.5" y="115.0" width="10.0" height="18.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--halloween_light-base" data-station-id="knock" data-station-lines="candy,treat,trick" data-station-label="Knock Knock" data-section-id="doorstep" data-section-name="Doorstep" />
+<rect x="163.5" y="115.0" width="10.0" height="18.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--halloween_light-base" data-station-id="bwa" data-station-lines="candy,treat,trick" data-station-label="BWA-MEM2" data-section-id="doorstep" data-section-name="Doorstep" />
+<rect x="248.5" y="115.0" width="10.0" height="18.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--halloween_light-base" data-station-id="markdup" data-station-lines="candy,treat,trick" data-station-label="MarkDuplicates" data-section-id="doorstep" data-section-name="Doorstep" />
+<rect x="466.5" y="115.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--halloween_light-base" data-station-id="mutect" data-station-lines="trick" data-station-label="Mutect2" data-section-id="bag" data-section-name="Candy Bag" />
+<rect x="466.5" y="159.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--halloween_light-base" data-station-id="haplo" data-station-lines="treat" data-station-label="DeepVariant" data-section-id="bag" data-section-name="Candy Bag" />
+<rect x="466.5" y="195.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--halloween_light-base" data-station-id="mosdepth" data-station-lines="candy" data-station-label="mosdepth" data-section-id="bag" data-section-name="Candy Bag" />
+<rect x="551.5" y="115.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--halloween_light-base" data-station-id="filter" data-station-lines="trick" data-station-label="FilterCalls" data-section-id="bag" data-section-name="Candy Bag" />
+<rect x="551.5" y="159.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--halloween_light-base" data-station-id="genotype" data-station-lines="treat" data-station-label="GLnexus" data-section-id="bag" data-section-name="Candy Bag" />
+<rect x="752.5" y="115.0" width="10.0" height="18.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--halloween_light-base" data-station-id="vep" data-station-lines="candy,treat,trick" data-station-label="VEP" data-section-id="sorting" data-section-name="Sorting the Haul" />
+<rect x="837.5" y="123.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--halloween_light-base" data-station-id="multiqc" data-station-lines="candy" data-station-label="MultiQC" data-section-id="sorting" data-section-name="Sorting the Haul" />
+<text x="83.5" y="139.0" font-size="13.0" fill="#f5f5f5" stroke="#f5f5f5" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_light-base" text-anchor="middle" dominant-baseline="hanging">Knock Knock</text>
+<text x="83.5" y="139.0" font-size="13.0" fill="#333333" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="knock" class="nf-metro-station-label--halloween_light-base">Knock Knock</text>
+<text x="471.5" y="131.0" font-size="13.0" fill="#f5f5f5" stroke="#f5f5f5" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_light-base" text-anchor="middle" dominant-baseline="hanging">Mutect2</text>
+<text x="471.5" y="131.0" font-size="13.0" fill="#333333" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="mutect" class="nf-metro-station-label--halloween_light-base">Mutect2</text>
+<text x="471.5" y="172.8" font-size="13.0" fill="#f5f5f5" stroke="#f5f5f5" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_light-base" text-anchor="middle" dominant-baseline="hanging">DeepVariant</text>
+<text x="471.5" y="172.8" font-size="13.0" fill="#333333" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="haplo" class="nf-metro-station-label--halloween_light-base">DeepVariant</text>
+<text x="471.5" y="211.0" font-size="13.0" fill="#f5f5f5" stroke="#f5f5f5" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_light-base" text-anchor="middle" dominant-baseline="hanging">mosdepth</text>
+<text x="471.5" y="211.0" font-size="13.0" fill="#333333" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="mosdepth" class="nf-metro-station-label--halloween_light-base">mosdepth</text>
+<text x="757.5" y="139.0" font-size="13.0" fill="#f5f5f5" stroke="#f5f5f5" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_light-base" text-anchor="middle" dominant-baseline="hanging">VEP</text>
+<text x="757.5" y="139.0" font-size="13.0" fill="#333333" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="vep" class="nf-metro-station-label--halloween_light-base">VEP</text>
+<text x="168.5" y="106.0" font-size="13.0" fill="#f5f5f5" stroke="#f5f5f5" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_light-base" text-anchor="middle" dominant-baseline="auto">BWA-MEM2</text>
+<text x="168.5" y="106.0" font-size="13.0" fill="#333333" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="bwa" class="nf-metro-station-label--halloween_light-base">BWA-MEM2</text>
+<text x="556.5" y="106.0" font-size="13.0" fill="#f5f5f5" stroke="#f5f5f5" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_light-base" text-anchor="middle" dominant-baseline="auto">FilterCalls</text>
+<text x="556.5" y="106.0" font-size="13.0" fill="#333333" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="filter" class="nf-metro-station-label--halloween_light-base">FilterCalls</text>
+<text x="556.5" y="175.0" font-size="13.0" fill="#f5f5f5" stroke="#f5f5f5" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_light-base" text-anchor="middle" dominant-baseline="hanging">GLnexus</text>
+<text x="556.5" y="175.0" font-size="13.0" fill="#333333" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="genotype" class="nf-metro-station-label--halloween_light-base">GLnexus</text>
+<text x="842.5" y="114.0" font-size="13.0" fill="#f5f5f5" stroke="#f5f5f5" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_light-base" text-anchor="middle" dominant-baseline="auto">MultiQC</text>
+<text x="842.5" y="114.0" font-size="13.0" fill="#333333" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="multiqc" class="nf-metro-station-label--halloween_light-base">MultiQC</text>
+<text x="253.5" y="139.0" font-size="13.0" fill="#f5f5f5" stroke="#f5f5f5" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_light-base" text-anchor="middle" dominant-baseline="hanging">MarkDuplicates</text>
+<text x="253.5" y="139.0" font-size="13.0" fill="#333333" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="markdup" class="nf-metro-station-label--halloween_light-base">MarkDuplicates</text>
+<circle cx="386.5" cy="124.0" r="3.0" fill="rgba(200, 80, 0, 0.8)" />
+<circle cx="416.5" cy="164.0" r="3.0" fill="rgba(200, 80, 0, 0.8)" />
+<circle cx="384.5" cy="128.0" r="3.0" fill="rgba(200, 80, 0, 0.8)" />
+<circle cx="414.5" cy="200.0" r="3.0" fill="rgba(200, 80, 0, 0.8)" />
+<circle cx="611.5" cy="164.0" r="3.0" fill="rgba(200, 80, 0, 0.8)" />
+<circle cx="641.5" cy="124.0" r="3.0" fill="rgba(200, 80, 0, 0.8)" />
+<circle cx="613.5" cy="200.0" r="3.0" fill="rgba(200, 80, 0, 0.8)" />
+<circle cx="643.5" cy="128.0" r="3.0" fill="rgba(200, 80, 0, 0.8)" />
+<path d="M320.5,115.0 L325.5,120.0 L320.5,125.0 L315.5,120.0 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
+<text x="320.5" y="112.0" font-size="7" fill="rgba(80, 180, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">doorstep__exit_right_0 (right)</text>
+<path d="M657.5,115.0 L662.5,120.0 L657.5,125.0 L652.5,120.0 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
+<text x="657.5" y="112.0" font-size="7" fill="rgba(80, 180, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">bag__exit_right_1 (right)</text>
+<path d="M370.5,115.0 L375.5,120.0 L370.5,125.0 L365.5,120.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="370.5" y="112.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">bag__entry_left_2 (left)</text>
+<path d="M707.5,115.0 L712.5,120.0 L707.5,125.0 L702.5,120.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="707.5" y="112.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">sorting__entry_left_3 (left)</text>
+<path d="M345.5,50.0 L345.5,270.0" stroke="rgba(0, 100, 200, 0.7)" stroke-width="1" stroke-dasharray="6,4" />
+<text x="345.5" y="46.0" font-size="7" fill="rgba(0, 100, 200, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">col 0|1</text>
+<path d="M682.5,50.0 L682.5,270.0" stroke="rgba(0, 100, 200, 0.7)" stroke-width="1" stroke-dasharray="6,4" />
+<text x="682.5" y="46.0" font-size="7" fill="rgba(0, 100, 200, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">col 1|2</text>
+<path d="M20.0,120.0 L902.5,120.0" stroke="rgba(0, 140, 90, 0.8)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="16.0" y="120.0" font-size="7" fill="rgba(0, 140, 90, 0.8)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0 grid</text>
+<path d="M20.0,160.0 L902.5,160.0" stroke="rgba(0, 140, 90, 0.8)" stroke-width="0.75" stroke-dasharray="4,6" />
+<path d="M20.0,200.0 L902.5,200.0" stroke="rgba(0, 140, 90, 0.8)" stroke-width="0.75" stroke-dasharray="4,6" />
+<rect x="30.0" y="280.0" width="183.20000000000002" height="96.0" rx="6" ry="6" fill="rgba(255, 255, 255, 0.8)" class="nf-metro-legend-bg--halloween_light-base" />
+<path d="M42.0,304.0 L66.0,304.0" stroke="#c2410c" stroke-width="3.0" stroke-linecap="round" />
+<text x="78.0" y="304.0" font-size="14.0" fill="#333333" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--halloween_light-base">Trick (somatic)</text>
+<path d="M42.0,328.0 L66.0,328.0" stroke="#7a4b94" stroke-width="3.0" stroke-linecap="round" />
+<text x="78.0" y="328.0" font-size="14.0" fill="#333333" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--halloween_light-base">Treat (germline)</text>
+<path d="M42.0,352.0 L66.0,352.0" stroke="#e0a100" stroke-width="3.0" stroke-linecap="round" stroke-dasharray="8,4" />
+<text x="78.0" y="352.0" font-size="14.0" fill="#333333" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--halloween_light-base">Candy Corn (QC)</text>
+<text x="922.0" y="392.0" font-size="8" fill="rgba(150, 150, 150, 0.6)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">created with nf-metro v2.1.0+dev</text>
+</svg></div></div>
+<div class="side side-pr"><h4>PR</h4><div class="svg-wrapper"><?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="952" height="400" viewBox="0 0 952 400">
+<defs>
+</defs>
+<style>.nf-metro-bg--halloween_light-pr { fill: var(--nfm-map-bg, light-dark(#fbf3e4, #14101c)); }
+.nf-metro-title--halloween_light-pr { fill: var(--nfm-map-title-color, light-dark(#c2410c, #ff7518)); }
+.nf-metro-station-label--halloween_light-pr { fill: var(--nfm-map-label-color, light-dark(#2a1a33, #f3e6d0)); }
+.nf-metro-section-box--halloween_light-pr { fill: var(--nfm-map-section-fill, light-dark(#f3e5cc, #211830)); stroke: var(--nfm-map-section-stroke, light-dark(#e2c9a0, #4a2f5e)); }
+.nf-metro-section-label--halloween_light-pr { fill: var(--nfm-map-section-label-color, light-dark(#7a4b94, #b48ad6)); }
+.nf-metro-group-label--halloween_light-pr { fill: var(--nfm-map-section-label-color, light-dark(#7a4b94, #b48ad6)); }
+.nf-metro-group-underline--halloween_light-pr { stroke: var(--nfm-map-section-label-color, light-dark(#7a4b94, #b48ad6)); }
+.nf-metro-legend-bg--halloween_light-pr { fill: var(--nfm-map-legend-bg, light-dark(rgba(251, 243, 228, 0.9), rgba(10, 6, 16, 0.6))); }
+.nf-metro-legend-text--halloween_light-pr { fill: var(--nfm-map-legend-text-color, light-dark(#2a1a33, #f3e6d0)); }
+.nf-metro-marker-stroke--halloween_light-pr { stroke: var(--nfm-map-marker-stroke, light-dark(#2a1a33, #ffb35c)); }
+.nf-metro-label-halo--halloween_light-pr { fill: var(--nfm-map-bg, light-dark(#fbf3e4, #14101c)); stroke: var(--nfm-map-bg, light-dark(#fbf3e4, #14101c)); }</style>
+<rect x="0" y="0" width="952" height="400" fill="#fbf3e4" class="nf-metro-bg--halloween_light-pr" />
+<text x="60.0" y="30.0" font-size="24.0" fill="#c2410c" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" class="nf-metro-title--halloween_light-pr">Trick-or-Treat Variant Calling</text>
+<rect x="30.0" y="70.0" width="290.5" height="100.0" rx="8" ry="8" fill="#f3e5cc" stroke="#e2c9a0" stroke-width="1.0" class="nf-metro-section-box--halloween_light-pr" data-section-id="doorstep" data-section-lines="candy,treat,trick" />
+<circle cx="41.0" cy="55.0" r="11" fill="#2a1a33" class="nf-metro-section-num-circle--halloween_light-pr" data-section-id="doorstep" />
+<text x="41.0" y="55.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="doorstep">1</text>
+<text x="57.0" y="55.0" font-size="16.0" fill="#7a4b94" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label--halloween_light-pr" data-section-id="doorstep">Doorstep</text>
+<rect x="370.5" y="70.0" width="287.0" height="180.0" rx="8" ry="8" fill="#f3e5cc" stroke="#e2c9a0" stroke-width="1.0" class="nf-metro-section-box--halloween_light-pr" data-section-id="bag" data-section-lines="candy,treat,trick" />
+<circle cx="381.5" cy="55.0" r="11" fill="#2a1a33" class="nf-metro-section-num-circle--halloween_light-pr" data-section-id="bag" />
+<text x="381.5" y="55.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="bag">2</text>
+<text x="397.5" y="55.0" font-size="16.0" fill="#7a4b94" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label--halloween_light-pr" data-section-id="bag">Candy Bag</text>
+<rect x="707.5" y="70.0" width="185.0" height="100.0" rx="8" ry="8" fill="#f3e5cc" stroke="#e2c9a0" stroke-width="1.0" class="nf-metro-section-box--halloween_light-pr" data-section-id="sorting" data-section-lines="candy,treat,trick" />
+<circle cx="718.5" cy="55.0" r="11" fill="#2a1a33" class="nf-metro-section-num-circle--halloween_light-pr" data-section-id="sorting" />
+<text x="718.5" y="55.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="sorting">3</text>
+<text x="734.5" y="55.0" font-size="16.0" fill="#7a4b94" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label--halloween_light-pr" data-section-id="sorting">Sorting the Haul</text>
+<path d="M83.5,128.0 L168.5,128.0" stroke="#e0a100" stroke-width="3.0" stroke-linecap="round" class="metro-line-candy--halloween_light-pr" data-line-id="candy" stroke-dasharray="8,4" />
+<path d="M168.5,128.0 L253.5,128.0" stroke="#e0a100" stroke-width="3.0" stroke-linecap="round" class="metro-line-candy--halloween_light-pr" data-line-id="candy" stroke-dasharray="8,4" />
+<path d="M757.5,128.0 L842.5,128.0" stroke="#e0a100" stroke-width="3.0" stroke-linecap="round" class="metro-line-candy--halloween_light-pr" data-line-id="candy" stroke-dasharray="8,4" />
+<path d="M253.5,128.0 L320.5,128.0" stroke="#e0a100" stroke-width="3.0" stroke-linecap="round" class="metro-line-candy--halloween_light-pr" data-line-id="candy" stroke-dasharray="8,4" />
+<path d="M370.5,128.0 L374.5,128.0 Q384.5,128.0,388.34615384615387,137.23076923076923 L410.65384615384613,190.76923076923077 Q414.5,200.0,424.5,200.0 L471.5,200.0" stroke="#e0a100" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-candy--halloween_light-pr" data-line-id="candy" stroke-dasharray="8,4" />
+<path d="M471.5,200.0 L603.5,200.0 Q613.5,200.0,617.3461538461538,190.76923076923077 L639.6538461538462,137.23076923076923 Q643.5,128.0,653.5,128.0 L657.5,128.0" stroke="#e0a100" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-candy--halloween_light-pr" data-line-id="candy" stroke-dasharray="8,4" />
+<path d="M707.5,128.0 L757.5,128.0" stroke="#e0a100" stroke-width="3.0" stroke-linecap="round" class="metro-line-candy--halloween_light-pr" data-line-id="candy" stroke-dasharray="8,4" />
+<path d="M320.5,128.0 L370.5,128.0" stroke="#e0a100" stroke-width="3.0" stroke-linecap="round" class="metro-line-candy--halloween_light-pr" data-line-id="candy" stroke-dasharray="8,4" />
+<path d="M657.5,128.0 L707.5,128.0" stroke="#e0a100" stroke-width="3.0" stroke-linecap="round" class="metro-line-candy--halloween_light-pr" data-line-id="candy" stroke-dasharray="8,4" />
+<path d="M83.5,124.0 L168.5,124.0" stroke="#7a4b94" stroke-width="3.0" stroke-linecap="round" class="metro-line-treat--halloween_light-pr" data-line-id="treat" />
+<path d="M168.5,124.0 L253.5,124.0" stroke="#7a4b94" stroke-width="3.0" stroke-linecap="round" class="metro-line-treat--halloween_light-pr" data-line-id="treat" />
+<path d="M471.5,164.0 L556.5,164.0" stroke="#7a4b94" stroke-width="3.0" stroke-linecap="round" class="metro-line-treat--halloween_light-pr" data-line-id="treat" />
+<path d="M253.5,124.0 L320.5,124.0" stroke="#7a4b94" stroke-width="3.0" stroke-linecap="round" class="metro-line-treat--halloween_light-pr" data-line-id="treat" />
+<path d="M370.5,124.0 L376.5,124.0 Q386.5,124.0,392.5,132.0 L410.5,156.0 Q416.5,164.0,426.5,164.0 L471.5,164.0" stroke="#7a4b94" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-treat--halloween_light-pr" data-line-id="treat" />
+<path d="M556.5,164.0 L601.5,164.0 Q611.5,164.0,617.5,156.0 L635.5,132.0 Q641.5,124.0,651.5,124.0 L657.5,124.0" stroke="#7a4b94" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-treat--halloween_light-pr" data-line-id="treat" />
+<path d="M707.5,124.0 L757.5,124.0" stroke="#7a4b94" stroke-width="3.0" stroke-linecap="round" class="metro-line-treat--halloween_light-pr" data-line-id="treat" />
+<path d="M320.5,124.0 L370.5,124.0" stroke="#7a4b94" stroke-width="3.0" stroke-linecap="round" class="metro-line-treat--halloween_light-pr" data-line-id="treat" />
+<path d="M657.5,124.0 L707.5,124.0" stroke="#7a4b94" stroke-width="3.0" stroke-linecap="round" class="metro-line-treat--halloween_light-pr" data-line-id="treat" />
+<path d="M83.5,120.0 L168.5,120.0" stroke="#c2410c" stroke-width="3.0" stroke-linecap="round" class="metro-line-trick--halloween_light-pr" data-line-id="trick" />
+<path d="M168.5,120.0 L253.5,120.0" stroke="#c2410c" stroke-width="3.0" stroke-linecap="round" class="metro-line-trick--halloween_light-pr" data-line-id="trick" />
+<path d="M471.5,120.0 L556.5,120.0" stroke="#c2410c" stroke-width="3.0" stroke-linecap="round" class="metro-line-trick--halloween_light-pr" data-line-id="trick" />
+<path d="M253.5,120.0 L320.5,120.0" stroke="#c2410c" stroke-width="3.0" stroke-linecap="round" class="metro-line-trick--halloween_light-pr" data-line-id="trick" />
+<path d="M370.5,120.0 L471.5,120.0" stroke="#c2410c" stroke-width="3.0" stroke-linecap="round" class="metro-line-trick--halloween_light-pr" data-line-id="trick" />
+<path d="M556.5,120.0 L657.5,120.0" stroke="#c2410c" stroke-width="3.0" stroke-linecap="round" class="metro-line-trick--halloween_light-pr" data-line-id="trick" />
+<path d="M707.5,120.0 L757.5,120.0" stroke="#c2410c" stroke-width="3.0" stroke-linecap="round" class="metro-line-trick--halloween_light-pr" data-line-id="trick" />
+<path d="M320.5,120.0 L370.5,120.0" stroke="#c2410c" stroke-width="3.0" stroke-linecap="round" class="metro-line-trick--halloween_light-pr" data-line-id="trick" />
+<path d="M657.5,120.0 L707.5,120.0" stroke="#c2410c" stroke-width="3.0" stroke-linecap="round" class="metro-line-trick--halloween_light-pr" data-line-id="trick" />
+<rect x="78.5" y="115.0" width="10.0" height="18.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#2a1a33" stroke-width="1.5" class="nf-metro-station--halloween_light-pr" data-station-id="knock" data-station-lines="candy,treat,trick" data-station-label="Knock Knock" data-section-id="doorstep" data-section-name="Doorstep" />
+<rect x="163.5" y="115.0" width="10.0" height="18.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#2a1a33" stroke-width="1.5" class="nf-metro-station--halloween_light-pr" data-station-id="bwa" data-station-lines="candy,treat,trick" data-station-label="BWA-MEM2" data-section-id="doorstep" data-section-name="Doorstep" />
+<rect x="248.5" y="115.0" width="10.0" height="18.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#2a1a33" stroke-width="1.5" class="nf-metro-station--halloween_light-pr" data-station-id="markdup" data-station-lines="candy,treat,trick" data-station-label="MarkDuplicates" data-section-id="doorstep" data-section-name="Doorstep" />
+<rect x="466.5" y="115.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#2a1a33" stroke-width="1.5" class="nf-metro-station--halloween_light-pr" data-station-id="mutect" data-station-lines="trick" data-station-label="Mutect2" data-section-id="bag" data-section-name="Candy Bag" />
+<rect x="466.5" y="159.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#2a1a33" stroke-width="1.5" class="nf-metro-station--halloween_light-pr" data-station-id="haplo" data-station-lines="treat" data-station-label="DeepVariant" data-section-id="bag" data-section-name="Candy Bag" />
+<rect x="466.5" y="195.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#2a1a33" stroke-width="1.5" class="nf-metro-station--halloween_light-pr" data-station-id="mosdepth" data-station-lines="candy" data-station-label="mosdepth" data-section-id="bag" data-section-name="Candy Bag" />
+<rect x="551.5" y="115.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#2a1a33" stroke-width="1.5" class="nf-metro-station--halloween_light-pr" data-station-id="filter" data-station-lines="trick" data-station-label="FilterCalls" data-section-id="bag" data-section-name="Candy Bag" />
+<rect x="551.5" y="159.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#2a1a33" stroke-width="1.5" class="nf-metro-station--halloween_light-pr" data-station-id="genotype" data-station-lines="treat" data-station-label="GLnexus" data-section-id="bag" data-section-name="Candy Bag" />
+<rect x="752.5" y="115.0" width="10.0" height="18.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#2a1a33" stroke-width="1.5" class="nf-metro-station--halloween_light-pr" data-station-id="vep" data-station-lines="candy,treat,trick" data-station-label="VEP" data-section-id="sorting" data-section-name="Sorting the Haul" />
+<rect x="837.5" y="123.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#2a1a33" stroke-width="1.5" class="nf-metro-station--halloween_light-pr" data-station-id="multiqc" data-station-lines="candy" data-station-label="MultiQC" data-section-id="sorting" data-section-name="Sorting the Haul" />
+<text x="83.5" y="139.0" font-size="13.0" fill="#fbf3e4" stroke="#fbf3e4" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_light-pr" text-anchor="middle" dominant-baseline="hanging">Knock Knock</text>
+<text x="83.5" y="139.0" font-size="13.0" fill="#2a1a33" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="knock" class="nf-metro-station-label--halloween_light-pr">Knock Knock</text>
+<text x="471.5" y="131.0" font-size="13.0" fill="#fbf3e4" stroke="#fbf3e4" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_light-pr" text-anchor="middle" dominant-baseline="hanging">Mutect2</text>
+<text x="471.5" y="131.0" font-size="13.0" fill="#2a1a33" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="mutect" class="nf-metro-station-label--halloween_light-pr">Mutect2</text>
+<text x="471.5" y="172.8" font-size="13.0" fill="#fbf3e4" stroke="#fbf3e4" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_light-pr" text-anchor="middle" dominant-baseline="hanging">DeepVariant</text>
+<text x="471.5" y="172.8" font-size="13.0" fill="#2a1a33" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="haplo" class="nf-metro-station-label--halloween_light-pr">DeepVariant</text>
+<text x="471.5" y="211.0" font-size="13.0" fill="#fbf3e4" stroke="#fbf3e4" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_light-pr" text-anchor="middle" dominant-baseline="hanging">mosdepth</text>
+<text x="471.5" y="211.0" font-size="13.0" fill="#2a1a33" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="mosdepth" class="nf-metro-station-label--halloween_light-pr">mosdepth</text>
+<text x="757.5" y="139.0" font-size="13.0" fill="#fbf3e4" stroke="#fbf3e4" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_light-pr" text-anchor="middle" dominant-baseline="hanging">VEP</text>
+<text x="757.5" y="139.0" font-size="13.0" fill="#2a1a33" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="vep" class="nf-metro-station-label--halloween_light-pr">VEP</text>
+<text x="168.5" y="106.0" font-size="13.0" fill="#fbf3e4" stroke="#fbf3e4" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_light-pr" text-anchor="middle" dominant-baseline="auto">BWA-MEM2</text>
+<text x="168.5" y="106.0" font-size="13.0" fill="#2a1a33" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="bwa" class="nf-metro-station-label--halloween_light-pr">BWA-MEM2</text>
+<text x="556.5" y="106.0" font-size="13.0" fill="#fbf3e4" stroke="#fbf3e4" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_light-pr" text-anchor="middle" dominant-baseline="auto">FilterCalls</text>
+<text x="556.5" y="106.0" font-size="13.0" fill="#2a1a33" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="filter" class="nf-metro-station-label--halloween_light-pr">FilterCalls</text>
+<text x="556.5" y="175.0" font-size="13.0" fill="#fbf3e4" stroke="#fbf3e4" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_light-pr" text-anchor="middle" dominant-baseline="hanging">GLnexus</text>
+<text x="556.5" y="175.0" font-size="13.0" fill="#2a1a33" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="genotype" class="nf-metro-station-label--halloween_light-pr">GLnexus</text>
+<text x="842.5" y="114.0" font-size="13.0" fill="#fbf3e4" stroke="#fbf3e4" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_light-pr" text-anchor="middle" dominant-baseline="auto">MultiQC</text>
+<text x="842.5" y="114.0" font-size="13.0" fill="#2a1a33" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="multiqc" class="nf-metro-station-label--halloween_light-pr">MultiQC</text>
+<text x="253.5" y="139.0" font-size="13.0" fill="#fbf3e4" stroke="#fbf3e4" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_light-pr" text-anchor="middle" dominant-baseline="hanging">MarkDuplicates</text>
+<text x="253.5" y="139.0" font-size="13.0" fill="#2a1a33" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="markdup" class="nf-metro-station-label--halloween_light-pr">MarkDuplicates</text>
+<circle cx="386.5" cy="124.0" r="3.0" fill="rgba(200, 80, 0, 0.8)" />
+<circle cx="416.5" cy="164.0" r="3.0" fill="rgba(200, 80, 0, 0.8)" />
+<circle cx="384.5" cy="128.0" r="3.0" fill="rgba(200, 80, 0, 0.8)" />
+<circle cx="414.5" cy="200.0" r="3.0" fill="rgba(200, 80, 0, 0.8)" />
+<circle cx="611.5" cy="164.0" r="3.0" fill="rgba(200, 80, 0, 0.8)" />
+<circle cx="641.5" cy="124.0" r="3.0" fill="rgba(200, 80, 0, 0.8)" />
+<circle cx="613.5" cy="200.0" r="3.0" fill="rgba(200, 80, 0, 0.8)" />
+<circle cx="643.5" cy="128.0" r="3.0" fill="rgba(200, 80, 0, 0.8)" />
+<path d="M320.5,115.0 L325.5,120.0 L320.5,125.0 L315.5,120.0 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
+<text x="320.5" y="112.0" font-size="7" fill="rgba(80, 180, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">doorstep__exit_right_0 (right)</text>
+<path d="M657.5,115.0 L662.5,120.0 L657.5,125.0 L652.5,120.0 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
+<text x="657.5" y="112.0" font-size="7" fill="rgba(80, 180, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">bag__exit_right_1 (right)</text>
+<path d="M370.5,115.0 L375.5,120.0 L370.5,125.0 L365.5,120.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="370.5" y="112.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">bag__entry_left_2 (left)</text>
+<path d="M707.5,115.0 L712.5,120.0 L707.5,125.0 L702.5,120.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="707.5" y="112.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">sorting__entry_left_3 (left)</text>
+<path d="M345.5,50.0 L345.5,270.0" stroke="rgba(0, 100, 200, 0.7)" stroke-width="1" stroke-dasharray="6,4" />
+<text x="345.5" y="46.0" font-size="7" fill="rgba(0, 100, 200, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">col 0|1</text>
+<path d="M682.5,50.0 L682.5,270.0" stroke="rgba(0, 100, 200, 0.7)" stroke-width="1" stroke-dasharray="6,4" />
+<text x="682.5" y="46.0" font-size="7" fill="rgba(0, 100, 200, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">col 1|2</text>
+<path d="M20.0,120.0 L902.5,120.0" stroke="rgba(0, 140, 90, 0.8)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="16.0" y="120.0" font-size="7" fill="rgba(0, 140, 90, 0.8)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0 grid</text>
+<path d="M20.0,160.0 L902.5,160.0" stroke="rgba(0, 140, 90, 0.8)" stroke-width="0.75" stroke-dasharray="4,6" />
+<path d="M20.0,200.0 L902.5,200.0" stroke="rgba(0, 140, 90, 0.8)" stroke-width="0.75" stroke-dasharray="4,6" />
+<rect x="30.0" y="280.0" width="183.20000000000002" height="96.0" rx="6" ry="6" fill="rgba(251, 243, 228, 0.9)" class="nf-metro-legend-bg--halloween_light-pr" />
+<path d="M42.0,304.0 L66.0,304.0" stroke="#c2410c" stroke-width="3.0" stroke-linecap="round" />
+<text x="78.0" y="304.0" font-size="14.0" fill="#2a1a33" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--halloween_light-pr">Trick (somatic)</text>
+<path d="M42.0,328.0 L66.0,328.0" stroke="#7a4b94" stroke-width="3.0" stroke-linecap="round" />
+<text x="78.0" y="328.0" font-size="14.0" fill="#2a1a33" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--halloween_light-pr">Treat (germline)</text>
+<path d="M42.0,352.0 L66.0,352.0" stroke="#e0a100" stroke-width="3.0" stroke-linecap="round" stroke-dasharray="8,4" />
+<text x="78.0" y="352.0" font-size="14.0" fill="#2a1a33" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--halloween_light-pr">Candy Corn (QC)</text>
+<text x="922.0" y="392.0" font-size="8" fill="rgba(150, 150, 150, 0.6)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">created with nf-metro v2.1.0+dev</text>
+</svg></div></div>
+</div>
+</div>
+
+<div class="diff-entry" id="halloween_pipeline">
+<h3>Halloween Pipeline <span class="badge badge-added">added</span></h3>
+<div class="toggle-bar"><button class="active" data-mode="side-by-side">Side by side</button><button data-mode="base">Base only</button><button data-mode="pr">PR only</button></div>
+<div class="comparison">
+<div class="side side-base"><h4>Base code (map new in PR)</h4><div class="svg-wrapper"><?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="937" height="417" viewBox="0 0 937 417">
+<defs>
+</defs>
+<style>.nf-metro-bg--halloween_pipeline-base { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }
+.nf-metro-title--halloween_pipeline-base { fill: var(--nfm-map-title-color, light-dark(#111111, #ffffff)); }
+.nf-metro-station-label--halloween_pipeline-base { fill: var(--nfm-map-label-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-section-box--halloween_pipeline-base { fill: var(--nfm-map-section-fill, light-dark(#ededed, #373737)); stroke: var(--nfm-map-section-stroke, light-dark(#e6e6e6, #595959)); }
+.nf-metro-section-label--halloween_pipeline-base { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-label--halloween_pipeline-base { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-underline--halloween_pipeline-base { stroke: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-legend-bg--halloween_pipeline-base { fill: var(--nfm-map-legend-bg, light-dark(rgba(255, 255, 255, 0.8), rgba(0, 0, 0, 0.3))); }
+.nf-metro-legend-text--halloween_pipeline-base { fill: var(--nfm-map-legend-text-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-marker-stroke--halloween_pipeline-base { stroke: var(--nfm-map-marker-stroke, light-dark(#333333, #f0f0f0)); }
+.nf-metro-label-halo--halloween_pipeline-base { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); stroke: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }</style>
+<rect x="0" y="0" width="937" height="417" fill="#2b2b2b" class="nf-metro-bg--halloween_pipeline-base" />
+<text x="60.0" y="30.0" font-size="24.0" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" class="nf-metro-title--halloween_pipeline-base">Haunted Genome Assembly</text>
+<rect x="30.0" y="70.0" width="257.0" height="147.0" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box--halloween_pipeline-base" data-section-id="graveyard" data-section-lines="brew,ghost,pumpkin,slime" />
+<circle cx="41.0" cy="55.0" r="11" fill="#333333" class="nf-metro-section-num-circle--halloween_pipeline-base" data-section-id="graveyard" />
+<text x="41.0" y="55.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="graveyard">1</text>
+<text x="57.0" y="55.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label--halloween_pipeline-base" data-section-id="graveyard">Graveyard Sampling</text>
+<rect x="337.0" y="70.0" width="232.0" height="147.0" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box--halloween_pipeline-base" data-section-id="cauldron" data-section-lines="brew,ghost,pumpkin" />
+<circle cx="348.0" cy="55.0" r="11" fill="#333333" class="nf-metro-section-num-circle--halloween_pipeline-base" data-section-id="cauldron" />
+<text x="348.0" y="55.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="cauldron">2</text>
+<text x="364.0" y="55.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label--halloween_pipeline-base" data-section-id="cauldron">The Cauldron</text>
+<rect x="621.0" y="70.0" width="256.0" height="147.0" rx="8" ry="8" fill="#373737" stroke="#595959" stroke-width="1.0" class="nf-metro-section-box--halloween_pipeline-base" data-section-id="seance" data-section-lines="brew,ghost,pumpkin,slime" />
+<circle cx="632.0" cy="55.0" r="11" fill="#333333" class="nf-metro-section-num-circle--halloween_pipeline-base" data-section-id="seance" />
+<text x="632.0" y="55.0" font-size="12" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="seance">3</text>
+<text x="648.0" y="55.0" font-size="16.0" fill="#c8c8c8" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label--halloween_pipeline-base" data-section-id="seance">The Seance</text>
+<path d="M97.0,132.0 L150.0,132.0 Q160.0,132.0,165.38035452921866,140.42922209577588 L184.61964547078134,170.57077790422412 Q190.0,179.0,200.0,179.0 L201.0,179.0" stroke="#e8e6f0" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-ghost--halloween_pipeline-base" data-line-id="ghost" stroke-dasharray="8,4" />
+<path d="M423.0,179.0 L483.0,179.0" stroke="#e8e6f0" stroke-width="3.0" stroke-linecap="round" class="metro-line-ghost--halloween_pipeline-base" data-line-id="ghost" stroke-dasharray="8,4" />
+<path d="M671.0,132.0 L731.0,132.0" stroke="#e8e6f0" stroke-width="3.0" stroke-linecap="round" class="metro-line-ghost--halloween_pipeline-base" data-line-id="ghost" stroke-dasharray="8,4" />
+<path d="M731.0,132.0 L827.0,132.0" stroke="#e8e6f0" stroke-width="3.0" stroke-linecap="round" class="metro-line-ghost--halloween_pipeline-base" data-line-id="ghost" stroke-dasharray="8,4" />
+<path d="M201.0,179.0 L232.0,179.0 Q242.0,179.0,247.38035452921866,170.57077790422412 L266.61964547078134,140.42922209577588 Q272.0,132.0,282.0,132.0 L287.0,132.0" stroke="#e8e6f0" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-ghost--halloween_pipeline-base" data-line-id="ghost" stroke-dasharray="8,4" />
+<path d="M337.0,132.0 L342.0,132.0 Q352.0,132.0,357.38035452921866,140.42922209577588 L376.61964547078134,170.57077790422412 Q382.0,179.0,392.0,179.0 L423.0,179.0" stroke="#e8e6f0" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-ghost--halloween_pipeline-base" data-line-id="ghost" stroke-dasharray="8,4" />
+<path d="M483.0,179.0 L514.0,179.0 Q524.0,179.0,529.3803545292186,170.57077790422412 L548.6196454707814,140.42922209577588 Q554.0,132.0,564.0,132.0 L569.0,132.0" stroke="#e8e6f0" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-ghost--halloween_pipeline-base" data-line-id="ghost" stroke-dasharray="8,4" />
+<path d="M621.0,132.0 L671.0,132.0" stroke="#e8e6f0" stroke-width="3.0" stroke-linecap="round" class="metro-line-ghost--halloween_pipeline-base" data-line-id="ghost" stroke-dasharray="8,4" />
+<path d="M287.0,132.0 L297.0,132.0" stroke="#e8e6f0" stroke-width="3.0" stroke-linecap="round" class="metro-line-ghost--halloween_pipeline-base" data-line-id="ghost" stroke-dasharray="8,4" />
+<path d="M297.0,132.0 L337.0,132.0" stroke="#e8e6f0" stroke-width="3.0" stroke-linecap="round" class="metro-line-ghost--halloween_pipeline-base" data-line-id="ghost" stroke-dasharray="8,4" />
+<path d="M569.0,132.0 L621.0,132.0" stroke="#e8e6f0" stroke-width="3.0" stroke-linecap="round" class="metro-line-ghost--halloween_pipeline-base" data-line-id="ghost" stroke-dasharray="8,4" />
+<path d="M97.0,128.0 L201.0,128.0" stroke="#9b4dca" stroke-width="3.0" stroke-linecap="round" class="metro-line-brew--halloween_pipeline-base" data-line-id="brew" />
+<path d="M423.0,128.0 L483.0,128.0" stroke="#9b4dca" stroke-width="3.0" stroke-linecap="round" class="metro-line-brew--halloween_pipeline-base" data-line-id="brew" />
+<path d="M671.0,128.0 L731.0,128.0" stroke="#9b4dca" stroke-width="3.0" stroke-linecap="round" class="metro-line-brew--halloween_pipeline-base" data-line-id="brew" />
+<path d="M731.0,128.0 L827.0,128.0" stroke="#9b4dca" stroke-width="3.0" stroke-linecap="round" class="metro-line-brew--halloween_pipeline-base" data-line-id="brew" />
+<path d="M201.0,128.0 L287.0,128.0" stroke="#9b4dca" stroke-width="3.0" stroke-linecap="round" class="metro-line-brew--halloween_pipeline-base" data-line-id="brew" />
+<path d="M337.0,128.0 L423.0,128.0" stroke="#9b4dca" stroke-width="3.0" stroke-linecap="round" class="metro-line-brew--halloween_pipeline-base" data-line-id="brew" />
+<path d="M483.0,128.0 L569.0,128.0" stroke="#9b4dca" stroke-width="3.0" stroke-linecap="round" class="metro-line-brew--halloween_pipeline-base" data-line-id="brew" />
+<path d="M621.0,128.0 L671.0,128.0" stroke="#9b4dca" stroke-width="3.0" stroke-linecap="round" class="metro-line-brew--halloween_pipeline-base" data-line-id="brew" />
+<path d="M287.0,128.0 L297.0,128.0" stroke="#9b4dca" stroke-width="3.0" stroke-linecap="round" class="metro-line-brew--halloween_pipeline-base" data-line-id="brew" />
+<path d="M297.0,128.0 L337.0,128.0" stroke="#9b4dca" stroke-width="3.0" stroke-linecap="round" class="metro-line-brew--halloween_pipeline-base" data-line-id="brew" />
+<path d="M569.0,128.0 L621.0,128.0" stroke="#9b4dca" stroke-width="3.0" stroke-linecap="round" class="metro-line-brew--halloween_pipeline-base" data-line-id="brew" />
+<path d="M97.0,124.0 L201.0,124.0" stroke="#ff7518" stroke-width="3.0" stroke-linecap="round" class="metro-line-pumpkin--halloween_pipeline-base" data-line-id="pumpkin" />
+<path d="M423.0,124.0 L483.0,124.0" stroke="#ff7518" stroke-width="3.0" stroke-linecap="round" class="metro-line-pumpkin--halloween_pipeline-base" data-line-id="pumpkin" />
+<path d="M671.0,124.0 L731.0,124.0" stroke="#ff7518" stroke-width="3.0" stroke-linecap="round" class="metro-line-pumpkin--halloween_pipeline-base" data-line-id="pumpkin" />
+<path d="M731.0,124.0 L827.0,124.0" stroke="#ff7518" stroke-width="3.0" stroke-linecap="round" class="metro-line-pumpkin--halloween_pipeline-base" data-line-id="pumpkin" />
+<path d="M201.0,124.0 L287.0,124.0" stroke="#ff7518" stroke-width="3.0" stroke-linecap="round" class="metro-line-pumpkin--halloween_pipeline-base" data-line-id="pumpkin" />
+<path d="M337.0,124.0 L423.0,124.0" stroke="#ff7518" stroke-width="3.0" stroke-linecap="round" class="metro-line-pumpkin--halloween_pipeline-base" data-line-id="pumpkin" />
+<path d="M483.0,124.0 L569.0,124.0" stroke="#ff7518" stroke-width="3.0" stroke-linecap="round" class="metro-line-pumpkin--halloween_pipeline-base" data-line-id="pumpkin" />
+<path d="M621.0,124.0 L671.0,124.0" stroke="#ff7518" stroke-width="3.0" stroke-linecap="round" class="metro-line-pumpkin--halloween_pipeline-base" data-line-id="pumpkin" />
+<path d="M287.0,124.0 L297.0,124.0" stroke="#ff7518" stroke-width="3.0" stroke-linecap="round" class="metro-line-pumpkin--halloween_pipeline-base" data-line-id="pumpkin" />
+<path d="M297.0,124.0 L337.0,124.0" stroke="#ff7518" stroke-width="3.0" stroke-linecap="round" class="metro-line-pumpkin--halloween_pipeline-base" data-line-id="pumpkin" />
+<path d="M569.0,124.0 L621.0,124.0" stroke="#ff7518" stroke-width="3.0" stroke-linecap="round" class="metro-line-pumpkin--halloween_pipeline-base" data-line-id="pumpkin" />
+<path d="M97.0,120.0 L201.0,120.0" stroke="#7fff00" stroke-width="3.0" stroke-linecap="round" class="metro-line-slime--halloween_pipeline-base" data-line-id="slime" stroke-dasharray="2,4" />
+<path d="M671.0,136.0 L731.0,136.0" stroke="#7fff00" stroke-width="3.0" stroke-linecap="round" class="metro-line-slime--halloween_pipeline-base" data-line-id="slime" stroke-dasharray="2,4" />
+<path d="M731.0,136.0 L743.5,136.0 Q753.5,136.0,759.5,144.0 L777.5,168.0 Q783.5,176.0,793.5,176.0 L827.0,176.0" stroke="#7fff00" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-slime--halloween_pipeline-base" data-line-id="slime" stroke-dasharray="2,4" />
+<path d="M201.0,120.0 L287.0,120.0" stroke="#7fff00" stroke-width="3.0" stroke-linecap="round" class="metro-line-slime--halloween_pipeline-base" data-line-id="slime" stroke-dasharray="2,4" />
+<path d="M621.0,136.0 L671.0,136.0" stroke="#7fff00" stroke-width="3.0" stroke-linecap="round" class="metro-line-slime--halloween_pipeline-base" data-line-id="slime" stroke-dasharray="2,4" />
+<path d="M287.0,120.0 L297.0,120.0" stroke="#7fff00" stroke-width="3.0" stroke-linecap="round" class="metro-line-slime--halloween_pipeline-base" data-line-id="slime" stroke-dasharray="2,4" />
+<path d="M297.0,120.0 L311.0,120.0 Q321.0,120.0,321.0,130.0 L321.0,233.0 Q321.0,243.0,331.0,243.0 L585.0,243.0 Q595.0,243.0,595.0,233.0 L595.0,146.0 Q595.0,136.0,605.0,136.0 L621.0,136.0" stroke="#7fff00" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-slime--halloween_pipeline-base" data-line-id="slime" stroke-dasharray="2,4" />
+<rect x="92.0" y="115.0" width="10.0" height="22.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--halloween_pipeline-base" data-station-id="exhume" data-station-lines="brew,ghost,pumpkin,slime" data-station-label="Exhume Samples" data-section-id="graveyard" data-section-name="Graveyard Sampling" />
+<rect x="196.0" y="115.0" width="10.0" height="18.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--halloween_pipeline-base" data-station-id="fastqc" data-station-lines="brew,pumpkin,slime" data-station-label="FastQC" data-section-id="graveyard" data-section-name="Graveyard Sampling" />
+<rect x="196.0" y="174.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--halloween_pipeline-base" data-station-id="nanoplot" data-station-lines="ghost" data-station-label="NanoPlot" data-section-id="graveyard" data-section-name="Graveyard Sampling" />
+<rect x="418.0" y="119.0" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--halloween_pipeline-base" data-station-id="fastp" data-station-lines="brew,pumpkin" data-station-label="fastp" data-section-id="cauldron" data-section-name="The Cauldron" />
+<rect x="418.0" y="174.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--halloween_pipeline-base" data-station-id="porechop" data-station-lines="ghost" data-station-label="Porechop" data-section-id="cauldron" data-section-name="The Cauldron" />
+<rect x="478.0" y="119.0" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--halloween_pipeline-base" data-station-id="spades" data-station-lines="brew,pumpkin" data-station-label="SPAdes" data-section-id="cauldron" data-section-name="The Cauldron" />
+<rect x="478.0" y="174.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--halloween_pipeline-base" data-station-id="flye" data-station-lines="ghost" data-station-label="Flye" data-section-id="cauldron" data-section-name="The Cauldron" />
+<rect x="666.0" y="119.0" width="10.0" height="22.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--halloween_pipeline-base" data-station-id="quast" data-station-lines="brew,ghost,pumpkin,slime" data-station-label="QUAST" data-section-id="seance" data-section-name="The Seance" />
+<rect x="726.0" y="119.0" width="10.0" height="22.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--halloween_pipeline-base" data-station-id="busco" data-station-lines="brew,ghost,pumpkin,slime" data-station-label="BUSCO" data-section-id="seance" data-section-name="The Seance" />
+<rect x="822.0" y="119.0" width="10.0" height="18.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--halloween_pipeline-base" data-station-id="prokka" data-station-lines="brew,ghost,pumpkin" data-station-label="Prokka" data-section-id="seance" data-section-name="The Seance" />
+<rect x="822.0" y="171.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--halloween_pipeline-base" data-station-id="multiqc" data-station-lines="slime" data-station-label="MultiQC" data-section-id="seance" data-section-name="The Seance" />
+<text x="97.0" y="106.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_pipeline-base" text-anchor="middle" dominant-baseline="auto">Exhume Samples</text>
+<text x="97.0" y="106.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="exhume" class="nf-metro-station-label--halloween_pipeline-base">Exhume Samples</text>
+<text x="671.0" y="110.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_pipeline-base" text-anchor="middle" dominant-baseline="auto">QUAST</text>
+<text x="671.0" y="110.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="quast" class="nf-metro-station-label--halloween_pipeline-base">QUAST</text>
+<text x="423.0" y="139.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_pipeline-base" text-anchor="middle" dominant-baseline="hanging">fastp</text>
+<text x="423.0" y="139.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="fastp" class="nf-metro-station-label--halloween_pipeline-base">fastp</text>
+<text x="423.0" y="190.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_pipeline-base" text-anchor="middle" dominant-baseline="hanging">Porechop</text>
+<text x="423.0" y="190.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="porechop" class="nf-metro-station-label--halloween_pipeline-base">Porechop</text>
+<text x="201.0" y="109.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_pipeline-base" text-anchor="middle" dominant-baseline="auto">FastQC</text>
+<text x="201.0" y="109.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="fastqc" class="nf-metro-station-label--halloween_pipeline-base">FastQC</text>
+<text x="731.0" y="147.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_pipeline-base" text-anchor="middle" dominant-baseline="hanging">BUSCO</text>
+<text x="731.0" y="147.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="busco" class="nf-metro-station-label--halloween_pipeline-base">BUSCO</text>
+<text x="201.0" y="190.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_pipeline-base" text-anchor="middle" dominant-baseline="hanging">NanoPlot</text>
+<text x="201.0" y="190.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="nanoplot" class="nf-metro-station-label--halloween_pipeline-base">NanoPlot</text>
+<text x="483.0" y="110.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_pipeline-base" text-anchor="middle" dominant-baseline="auto">SPAdes</text>
+<text x="483.0" y="110.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="spades" class="nf-metro-station-label--halloween_pipeline-base">SPAdes</text>
+<text x="483.0" y="190.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_pipeline-base" text-anchor="middle" dominant-baseline="hanging">Flye</text>
+<text x="483.0" y="190.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="flye" class="nf-metro-station-label--halloween_pipeline-base">Flye</text>
+<text x="827.0" y="187.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_pipeline-base" text-anchor="middle" dominant-baseline="hanging">MultiQC</text>
+<text x="827.0" y="187.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="multiqc" class="nf-metro-station-label--halloween_pipeline-base">MultiQC</text>
+<text x="827.0" y="110.0" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_pipeline-base" text-anchor="middle" dominant-baseline="auto">Prokka</text>
+<text x="827.0" y="110.0" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="prokka" class="nf-metro-station-label--halloween_pipeline-base">Prokka</text>
+<circle cx="160.0" cy="132.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="190.0" cy="179.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="753.5" cy="136.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="783.5" cy="176.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="242.0" cy="179.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="272.0" cy="132.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="352.0" cy="132.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="382.0" cy="179.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="524.0" cy="179.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="554.0" cy="132.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="321.0" cy="120.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="321.0" cy="243.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="595.0" cy="243.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="595.0" cy="136.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<path d="M287.0,115.0 L292.0,120.0 L287.0,125.0 L282.0,120.0 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
+<text x="287.0" y="112.0" font-size="7" fill="rgba(80, 180, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">graveyard__exit_right_0 (right)</text>
+<path d="M569.0,115.0 L574.0,120.0 L569.0,125.0 L564.0,120.0 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
+<text x="569.0" y="112.0" font-size="7" fill="rgba(80, 180, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">cauldron__exit_right_1 (right)</text>
+<path d="M337.0,115.0 L342.0,120.0 L337.0,125.0 L332.0,120.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="337.0" y="112.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">cauldron__entry_left_2 (left)</text>
+<path d="M621.0,115.0 L626.0,120.0 L621.0,125.0 L616.0,120.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="621.0" y="112.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">seance__entry_left_3 (left)</text>
+<path d="M297.0,115.0 L302.0,120.0 L297.0,125.0 L292.0,120.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="297.0" y="112.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">__junction_4 (?)</text>
+<path d="M312.0,50.0 L312.0,237.0" stroke="rgba(255, 255, 0, 0.5)" stroke-width="1" stroke-dasharray="6,4" />
+<text x="312.0" y="46.0" font-size="7" fill="rgba(255, 255, 0, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">col 0|1</text>
+<path d="M595.0,50.0 L595.0,237.0" stroke="rgba(255, 255, 0, 0.5)" stroke-width="1" stroke-dasharray="6,4" />
+<text x="595.0" y="46.0" font-size="7" fill="rgba(255, 255, 0, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">col 1|2</text>
+<path d="M20.0,120.0 L887.0,120.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="16.0" y="120.0" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0 grid</text>
+<path d="M20.0,160.0 L887.0,160.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<path d="M20.0,167.0 L887.0,167.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<rect x="30.0" y="273.0" width="267.90000000000003" height="120.0" rx="6" ry="6" fill="rgba(0, 0, 0, 0.3)" class="nf-metro-legend-bg--halloween_pipeline-base" />
+<path d="M42.0,297.0 L66.0,297.0" stroke="#7fff00" stroke-width="3.0" stroke-linecap="round" stroke-dasharray="2,4" />
+<text x="78.0" y="297.0" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--halloween_pipeline-base">Slime Trail (QC)</text>
+<path d="M42.0,321.0 L66.0,321.0" stroke="#ff7518" stroke-width="3.0" stroke-linecap="round" />
+<text x="78.0" y="321.0" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--halloween_pipeline-base">Pumpkin Patch (short reads)</text>
+<path d="M42.0,345.0 L66.0,345.0" stroke="#9b4dca" stroke-width="3.0" stroke-linecap="round" />
+<text x="78.0" y="345.0" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--halloween_pipeline-base">Witch's Brew (plasmids)</text>
+<path d="M42.0,369.0 L66.0,369.0" stroke="#e8e6f0" stroke-width="3.0" stroke-linecap="round" stroke-dasharray="8,4" />
+<text x="78.0" y="369.0" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--halloween_pipeline-base">Ghost Reads (long reads)</text>
+<text x="907.0" y="409.0" font-size="8" fill="rgba(150, 150, 150, 0.6)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">created with nf-metro v2.1.0+dev</text>
+</svg></div></div>
+<div class="side side-pr"><h4>PR</h4><div class="svg-wrapper"><?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="937" height="417" viewBox="0 0 937 417">
+<defs>
+</defs>
+<style>.nf-metro-bg--halloween_pipeline-pr { fill: var(--nfm-map-bg, light-dark(#fbf3e4, #14101c)); }
+.nf-metro-title--halloween_pipeline-pr { fill: var(--nfm-map-title-color, light-dark(#c2410c, #ff7518)); }
+.nf-metro-station-label--halloween_pipeline-pr { fill: var(--nfm-map-label-color, light-dark(#2a1a33, #f3e6d0)); }
+.nf-metro-section-box--halloween_pipeline-pr { fill: var(--nfm-map-section-fill, light-dark(#f3e5cc, #211830)); stroke: var(--nfm-map-section-stroke, light-dark(#e2c9a0, #4a2f5e)); }
+.nf-metro-section-label--halloween_pipeline-pr { fill: var(--nfm-map-section-label-color, light-dark(#7a4b94, #b48ad6)); }
+.nf-metro-group-label--halloween_pipeline-pr { fill: var(--nfm-map-section-label-color, light-dark(#7a4b94, #b48ad6)); }
+.nf-metro-group-underline--halloween_pipeline-pr { stroke: var(--nfm-map-section-label-color, light-dark(#7a4b94, #b48ad6)); }
+.nf-metro-legend-bg--halloween_pipeline-pr { fill: var(--nfm-map-legend-bg, light-dark(rgba(251, 243, 228, 0.9), rgba(10, 6, 16, 0.6))); }
+.nf-metro-legend-text--halloween_pipeline-pr { fill: var(--nfm-map-legend-text-color, light-dark(#2a1a33, #f3e6d0)); }
+.nf-metro-marker-stroke--halloween_pipeline-pr { stroke: var(--nfm-map-marker-stroke, light-dark(#2a1a33, #ffb35c)); }
+.nf-metro-label-halo--halloween_pipeline-pr { fill: var(--nfm-map-bg, light-dark(#fbf3e4, #14101c)); stroke: var(--nfm-map-bg, light-dark(#fbf3e4, #14101c)); }</style>
+<rect x="0" y="0" width="937" height="417" fill="#14101c" class="nf-metro-bg--halloween_pipeline-pr" />
+<text x="60.0" y="30.0" font-size="24.0" fill="#ff7518" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" class="nf-metro-title--halloween_pipeline-pr">Haunted Genome Assembly</text>
+<rect x="30.0" y="70.0" width="257.0" height="147.0" rx="8" ry="8" fill="#211830" stroke="#4a2f5e" stroke-width="1.0" class="nf-metro-section-box--halloween_pipeline-pr" data-section-id="graveyard" data-section-lines="brew,ghost,pumpkin,slime" />
+<circle cx="41.0" cy="55.0" r="11" fill="#1a1022" class="nf-metro-section-num-circle--halloween_pipeline-pr" data-section-id="graveyard" />
+<text x="41.0" y="55.0" font-size="12" fill="#fff1d6" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="graveyard">1</text>
+<text x="57.0" y="55.0" font-size="16.0" fill="#b48ad6" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label--halloween_pipeline-pr" data-section-id="graveyard">Graveyard Sampling</text>
+<rect x="337.0" y="70.0" width="232.0" height="147.0" rx="8" ry="8" fill="#211830" stroke="#4a2f5e" stroke-width="1.0" class="nf-metro-section-box--halloween_pipeline-pr" data-section-id="cauldron" data-section-lines="brew,ghost,pumpkin" />
+<circle cx="348.0" cy="55.0" r="11" fill="#1a1022" class="nf-metro-section-num-circle--halloween_pipeline-pr" data-section-id="cauldron" />
+<text x="348.0" y="55.0" font-size="12" fill="#fff1d6" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="cauldron">2</text>
+<text x="364.0" y="55.0" font-size="16.0" fill="#b48ad6" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label--halloween_pipeline-pr" data-section-id="cauldron">The Cauldron</text>
+<rect x="621.0" y="70.0" width="256.0" height="147.0" rx="8" ry="8" fill="#211830" stroke="#4a2f5e" stroke-width="1.0" class="nf-metro-section-box--halloween_pipeline-pr" data-section-id="seance" data-section-lines="brew,ghost,pumpkin,slime" />
+<circle cx="632.0" cy="55.0" r="11" fill="#1a1022" class="nf-metro-section-num-circle--halloween_pipeline-pr" data-section-id="seance" />
+<text x="632.0" y="55.0" font-size="12" fill="#fff1d6" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em" data-section-id="seance">3</text>
+<text x="648.0" y="55.0" font-size="16.0" fill="#b48ad6" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" dy="0.3em" class="nf-metro-section-label--halloween_pipeline-pr" data-section-id="seance">The Seance</text>
+<path d="M97.0,132.0 L150.0,132.0 Q160.0,132.0,165.38035452921866,140.42922209577588 L184.61964547078134,170.57077790422412 Q190.0,179.0,200.0,179.0 L201.0,179.0" stroke="#e8e6f0" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-ghost--halloween_pipeline-pr" data-line-id="ghost" stroke-dasharray="8,4" />
+<path d="M423.0,179.0 L483.0,179.0" stroke="#e8e6f0" stroke-width="3.0" stroke-linecap="round" class="metro-line-ghost--halloween_pipeline-pr" data-line-id="ghost" stroke-dasharray="8,4" />
+<path d="M671.0,132.0 L731.0,132.0" stroke="#e8e6f0" stroke-width="3.0" stroke-linecap="round" class="metro-line-ghost--halloween_pipeline-pr" data-line-id="ghost" stroke-dasharray="8,4" />
+<path d="M731.0,132.0 L827.0,132.0" stroke="#e8e6f0" stroke-width="3.0" stroke-linecap="round" class="metro-line-ghost--halloween_pipeline-pr" data-line-id="ghost" stroke-dasharray="8,4" />
+<path d="M201.0,179.0 L232.0,179.0 Q242.0,179.0,247.38035452921866,170.57077790422412 L266.61964547078134,140.42922209577588 Q272.0,132.0,282.0,132.0 L287.0,132.0" stroke="#e8e6f0" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-ghost--halloween_pipeline-pr" data-line-id="ghost" stroke-dasharray="8,4" />
+<path d="M337.0,132.0 L342.0,132.0 Q352.0,132.0,357.38035452921866,140.42922209577588 L376.61964547078134,170.57077790422412 Q382.0,179.0,392.0,179.0 L423.0,179.0" stroke="#e8e6f0" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-ghost--halloween_pipeline-pr" data-line-id="ghost" stroke-dasharray="8,4" />
+<path d="M483.0,179.0 L514.0,179.0 Q524.0,179.0,529.3803545292186,170.57077790422412 L548.6196454707814,140.42922209577588 Q554.0,132.0,564.0,132.0 L569.0,132.0" stroke="#e8e6f0" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-ghost--halloween_pipeline-pr" data-line-id="ghost" stroke-dasharray="8,4" />
+<path d="M621.0,132.0 L671.0,132.0" stroke="#e8e6f0" stroke-width="3.0" stroke-linecap="round" class="metro-line-ghost--halloween_pipeline-pr" data-line-id="ghost" stroke-dasharray="8,4" />
+<path d="M287.0,132.0 L297.0,132.0" stroke="#e8e6f0" stroke-width="3.0" stroke-linecap="round" class="metro-line-ghost--halloween_pipeline-pr" data-line-id="ghost" stroke-dasharray="8,4" />
+<path d="M297.0,132.0 L337.0,132.0" stroke="#e8e6f0" stroke-width="3.0" stroke-linecap="round" class="metro-line-ghost--halloween_pipeline-pr" data-line-id="ghost" stroke-dasharray="8,4" />
+<path d="M569.0,132.0 L621.0,132.0" stroke="#e8e6f0" stroke-width="3.0" stroke-linecap="round" class="metro-line-ghost--halloween_pipeline-pr" data-line-id="ghost" stroke-dasharray="8,4" />
+<path d="M97.0,128.0 L201.0,128.0" stroke="#9b4dca" stroke-width="3.0" stroke-linecap="round" class="metro-line-brew--halloween_pipeline-pr" data-line-id="brew" />
+<path d="M423.0,128.0 L483.0,128.0" stroke="#9b4dca" stroke-width="3.0" stroke-linecap="round" class="metro-line-brew--halloween_pipeline-pr" data-line-id="brew" />
+<path d="M671.0,128.0 L731.0,128.0" stroke="#9b4dca" stroke-width="3.0" stroke-linecap="round" class="metro-line-brew--halloween_pipeline-pr" data-line-id="brew" />
+<path d="M731.0,128.0 L827.0,128.0" stroke="#9b4dca" stroke-width="3.0" stroke-linecap="round" class="metro-line-brew--halloween_pipeline-pr" data-line-id="brew" />
+<path d="M201.0,128.0 L287.0,128.0" stroke="#9b4dca" stroke-width="3.0" stroke-linecap="round" class="metro-line-brew--halloween_pipeline-pr" data-line-id="brew" />
+<path d="M337.0,128.0 L423.0,128.0" stroke="#9b4dca" stroke-width="3.0" stroke-linecap="round" class="metro-line-brew--halloween_pipeline-pr" data-line-id="brew" />
+<path d="M483.0,128.0 L569.0,128.0" stroke="#9b4dca" stroke-width="3.0" stroke-linecap="round" class="metro-line-brew--halloween_pipeline-pr" data-line-id="brew" />
+<path d="M621.0,128.0 L671.0,128.0" stroke="#9b4dca" stroke-width="3.0" stroke-linecap="round" class="metro-line-brew--halloween_pipeline-pr" data-line-id="brew" />
+<path d="M287.0,128.0 L297.0,128.0" stroke="#9b4dca" stroke-width="3.0" stroke-linecap="round" class="metro-line-brew--halloween_pipeline-pr" data-line-id="brew" />
+<path d="M297.0,128.0 L337.0,128.0" stroke="#9b4dca" stroke-width="3.0" stroke-linecap="round" class="metro-line-brew--halloween_pipeline-pr" data-line-id="brew" />
+<path d="M569.0,128.0 L621.0,128.0" stroke="#9b4dca" stroke-width="3.0" stroke-linecap="round" class="metro-line-brew--halloween_pipeline-pr" data-line-id="brew" />
+<path d="M97.0,124.0 L201.0,124.0" stroke="#ff7518" stroke-width="3.0" stroke-linecap="round" class="metro-line-pumpkin--halloween_pipeline-pr" data-line-id="pumpkin" />
+<path d="M423.0,124.0 L483.0,124.0" stroke="#ff7518" stroke-width="3.0" stroke-linecap="round" class="metro-line-pumpkin--halloween_pipeline-pr" data-line-id="pumpkin" />
+<path d="M671.0,124.0 L731.0,124.0" stroke="#ff7518" stroke-width="3.0" stroke-linecap="round" class="metro-line-pumpkin--halloween_pipeline-pr" data-line-id="pumpkin" />
+<path d="M731.0,124.0 L827.0,124.0" stroke="#ff7518" stroke-width="3.0" stroke-linecap="round" class="metro-line-pumpkin--halloween_pipeline-pr" data-line-id="pumpkin" />
+<path d="M201.0,124.0 L287.0,124.0" stroke="#ff7518" stroke-width="3.0" stroke-linecap="round" class="metro-line-pumpkin--halloween_pipeline-pr" data-line-id="pumpkin" />
+<path d="M337.0,124.0 L423.0,124.0" stroke="#ff7518" stroke-width="3.0" stroke-linecap="round" class="metro-line-pumpkin--halloween_pipeline-pr" data-line-id="pumpkin" />
+<path d="M483.0,124.0 L569.0,124.0" stroke="#ff7518" stroke-width="3.0" stroke-linecap="round" class="metro-line-pumpkin--halloween_pipeline-pr" data-line-id="pumpkin" />
+<path d="M621.0,124.0 L671.0,124.0" stroke="#ff7518" stroke-width="3.0" stroke-linecap="round" class="metro-line-pumpkin--halloween_pipeline-pr" data-line-id="pumpkin" />
+<path d="M287.0,124.0 L297.0,124.0" stroke="#ff7518" stroke-width="3.0" stroke-linecap="round" class="metro-line-pumpkin--halloween_pipeline-pr" data-line-id="pumpkin" />
+<path d="M297.0,124.0 L337.0,124.0" stroke="#ff7518" stroke-width="3.0" stroke-linecap="round" class="metro-line-pumpkin--halloween_pipeline-pr" data-line-id="pumpkin" />
+<path d="M569.0,124.0 L621.0,124.0" stroke="#ff7518" stroke-width="3.0" stroke-linecap="round" class="metro-line-pumpkin--halloween_pipeline-pr" data-line-id="pumpkin" />
+<path d="M97.0,120.0 L201.0,120.0" stroke="#7fff00" stroke-width="3.0" stroke-linecap="round" class="metro-line-slime--halloween_pipeline-pr" data-line-id="slime" stroke-dasharray="2,4" />
+<path d="M671.0,136.0 L731.0,136.0" stroke="#7fff00" stroke-width="3.0" stroke-linecap="round" class="metro-line-slime--halloween_pipeline-pr" data-line-id="slime" stroke-dasharray="2,4" />
+<path d="M731.0,136.0 L743.5,136.0 Q753.5,136.0,759.5,144.0 L777.5,168.0 Q783.5,176.0,793.5,176.0 L827.0,176.0" stroke="#7fff00" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-slime--halloween_pipeline-pr" data-line-id="slime" stroke-dasharray="2,4" />
+<path d="M201.0,120.0 L287.0,120.0" stroke="#7fff00" stroke-width="3.0" stroke-linecap="round" class="metro-line-slime--halloween_pipeline-pr" data-line-id="slime" stroke-dasharray="2,4" />
+<path d="M621.0,136.0 L671.0,136.0" stroke="#7fff00" stroke-width="3.0" stroke-linecap="round" class="metro-line-slime--halloween_pipeline-pr" data-line-id="slime" stroke-dasharray="2,4" />
+<path d="M287.0,120.0 L297.0,120.0" stroke="#7fff00" stroke-width="3.0" stroke-linecap="round" class="metro-line-slime--halloween_pipeline-pr" data-line-id="slime" stroke-dasharray="2,4" />
+<path d="M297.0,120.0 L311.0,120.0 Q321.0,120.0,321.0,130.0 L321.0,233.0 Q321.0,243.0,331.0,243.0 L585.0,243.0 Q595.0,243.0,595.0,233.0 L595.0,146.0 Q595.0,136.0,605.0,136.0 L621.0,136.0" stroke="#7fff00" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-slime--halloween_pipeline-pr" data-line-id="slime" stroke-dasharray="2,4" />
+<rect x="92.0" y="115.0" width="10.0" height="22.0" rx="5.0" ry="5.0" fill="#fff1d6" stroke="#1a1022" stroke-width="1.5" class="nf-metro-station--halloween_pipeline-pr" data-station-id="exhume" data-station-lines="brew,ghost,pumpkin,slime" data-station-label="Exhume Samples" data-section-id="graveyard" data-section-name="Graveyard Sampling" />
+<rect x="196.0" y="115.0" width="10.0" height="18.0" rx="5.0" ry="5.0" fill="#fff1d6" stroke="#1a1022" stroke-width="1.5" class="nf-metro-station--halloween_pipeline-pr" data-station-id="fastqc" data-station-lines="brew,pumpkin,slime" data-station-label="FastQC" data-section-id="graveyard" data-section-name="Graveyard Sampling" />
+<rect x="196.0" y="174.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#fff1d6" stroke="#1a1022" stroke-width="1.5" class="nf-metro-station--halloween_pipeline-pr" data-station-id="nanoplot" data-station-lines="ghost" data-station-label="NanoPlot" data-section-id="graveyard" data-section-name="Graveyard Sampling" />
+<rect x="418.0" y="119.0" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#fff1d6" stroke="#1a1022" stroke-width="1.5" class="nf-metro-station--halloween_pipeline-pr" data-station-id="fastp" data-station-lines="brew,pumpkin" data-station-label="fastp" data-section-id="cauldron" data-section-name="The Cauldron" />
+<rect x="418.0" y="174.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#fff1d6" stroke="#1a1022" stroke-width="1.5" class="nf-metro-station--halloween_pipeline-pr" data-station-id="porechop" data-station-lines="ghost" data-station-label="Porechop" data-section-id="cauldron" data-section-name="The Cauldron" />
+<rect x="478.0" y="119.0" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#fff1d6" stroke="#1a1022" stroke-width="1.5" class="nf-metro-station--halloween_pipeline-pr" data-station-id="spades" data-station-lines="brew,pumpkin" data-station-label="SPAdes" data-section-id="cauldron" data-section-name="The Cauldron" />
+<rect x="478.0" y="174.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#fff1d6" stroke="#1a1022" stroke-width="1.5" class="nf-metro-station--halloween_pipeline-pr" data-station-id="flye" data-station-lines="ghost" data-station-label="Flye" data-section-id="cauldron" data-section-name="The Cauldron" />
+<rect x="666.0" y="119.0" width="10.0" height="22.0" rx="5.0" ry="5.0" fill="#fff1d6" stroke="#1a1022" stroke-width="1.5" class="nf-metro-station--halloween_pipeline-pr" data-station-id="quast" data-station-lines="brew,ghost,pumpkin,slime" data-station-label="QUAST" data-section-id="seance" data-section-name="The Seance" />
+<rect x="726.0" y="119.0" width="10.0" height="22.0" rx="5.0" ry="5.0" fill="#fff1d6" stroke="#1a1022" stroke-width="1.5" class="nf-metro-station--halloween_pipeline-pr" data-station-id="busco" data-station-lines="brew,ghost,pumpkin,slime" data-station-label="BUSCO" data-section-id="seance" data-section-name="The Seance" />
+<rect x="822.0" y="119.0" width="10.0" height="18.0" rx="5.0" ry="5.0" fill="#fff1d6" stroke="#1a1022" stroke-width="1.5" class="nf-metro-station--halloween_pipeline-pr" data-station-id="prokka" data-station-lines="brew,ghost,pumpkin" data-station-label="Prokka" data-section-id="seance" data-section-name="The Seance" />
+<rect x="822.0" y="171.0" width="10.0" height="10.0" rx="5.0" ry="5.0" fill="#fff1d6" stroke="#1a1022" stroke-width="1.5" class="nf-metro-station--halloween_pipeline-pr" data-station-id="multiqc" data-station-lines="slime" data-station-label="MultiQC" data-section-id="seance" data-section-name="The Seance" />
+<text x="97.0" y="106.0" font-size="13.0" fill="#14101c" stroke="#14101c" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_pipeline-pr" text-anchor="middle" dominant-baseline="auto">Exhume Samples</text>
+<text x="97.0" y="106.0" font-size="13.0" fill="#f3e6d0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="exhume" class="nf-metro-station-label--halloween_pipeline-pr">Exhume Samples</text>
+<text x="671.0" y="110.0" font-size="13.0" fill="#14101c" stroke="#14101c" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_pipeline-pr" text-anchor="middle" dominant-baseline="auto">QUAST</text>
+<text x="671.0" y="110.0" font-size="13.0" fill="#f3e6d0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="quast" class="nf-metro-station-label--halloween_pipeline-pr">QUAST</text>
+<text x="423.0" y="139.0" font-size="13.0" fill="#14101c" stroke="#14101c" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_pipeline-pr" text-anchor="middle" dominant-baseline="hanging">fastp</text>
+<text x="423.0" y="139.0" font-size="13.0" fill="#f3e6d0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="fastp" class="nf-metro-station-label--halloween_pipeline-pr">fastp</text>
+<text x="423.0" y="190.0" font-size="13.0" fill="#14101c" stroke="#14101c" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_pipeline-pr" text-anchor="middle" dominant-baseline="hanging">Porechop</text>
+<text x="423.0" y="190.0" font-size="13.0" fill="#f3e6d0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="porechop" class="nf-metro-station-label--halloween_pipeline-pr">Porechop</text>
+<text x="201.0" y="109.0" font-size="13.0" fill="#14101c" stroke="#14101c" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_pipeline-pr" text-anchor="middle" dominant-baseline="auto">FastQC</text>
+<text x="201.0" y="109.0" font-size="13.0" fill="#f3e6d0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="fastqc" class="nf-metro-station-label--halloween_pipeline-pr">FastQC</text>
+<text x="731.0" y="147.0" font-size="13.0" fill="#14101c" stroke="#14101c" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_pipeline-pr" text-anchor="middle" dominant-baseline="hanging">BUSCO</text>
+<text x="731.0" y="147.0" font-size="13.0" fill="#f3e6d0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="busco" class="nf-metro-station-label--halloween_pipeline-pr">BUSCO</text>
+<text x="201.0" y="190.0" font-size="13.0" fill="#14101c" stroke="#14101c" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_pipeline-pr" text-anchor="middle" dominant-baseline="hanging">NanoPlot</text>
+<text x="201.0" y="190.0" font-size="13.0" fill="#f3e6d0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="nanoplot" class="nf-metro-station-label--halloween_pipeline-pr">NanoPlot</text>
+<text x="483.0" y="110.0" font-size="13.0" fill="#14101c" stroke="#14101c" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_pipeline-pr" text-anchor="middle" dominant-baseline="auto">SPAdes</text>
+<text x="483.0" y="110.0" font-size="13.0" fill="#f3e6d0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="spades" class="nf-metro-station-label--halloween_pipeline-pr">SPAdes</text>
+<text x="483.0" y="190.0" font-size="13.0" fill="#14101c" stroke="#14101c" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_pipeline-pr" text-anchor="middle" dominant-baseline="hanging">Flye</text>
+<text x="483.0" y="190.0" font-size="13.0" fill="#f3e6d0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="flye" class="nf-metro-station-label--halloween_pipeline-pr">Flye</text>
+<text x="827.0" y="187.0" font-size="13.0" fill="#14101c" stroke="#14101c" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_pipeline-pr" text-anchor="middle" dominant-baseline="hanging">MultiQC</text>
+<text x="827.0" y="187.0" font-size="13.0" fill="#f3e6d0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="multiqc" class="nf-metro-station-label--halloween_pipeline-pr">MultiQC</text>
+<text x="827.0" y="110.0" font-size="13.0" fill="#14101c" stroke="#14101c" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--halloween_pipeline-pr" text-anchor="middle" dominant-baseline="auto">Prokka</text>
+<text x="827.0" y="110.0" font-size="13.0" fill="#f3e6d0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="prokka" class="nf-metro-station-label--halloween_pipeline-pr">Prokka</text>
+<circle cx="160.0" cy="132.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="190.0" cy="179.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="753.5" cy="136.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="783.5" cy="176.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="242.0" cy="179.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="272.0" cy="132.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="352.0" cy="132.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="382.0" cy="179.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="524.0" cy="179.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="554.0" cy="132.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="321.0" cy="120.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="321.0" cy="243.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="595.0" cy="243.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="595.0" cy="136.0" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<path d="M287.0,115.0 L292.0,120.0 L287.0,125.0 L282.0,120.0 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
+<text x="287.0" y="112.0" font-size="7" fill="rgba(80, 180, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">graveyard__exit_right_0 (right)</text>
+<path d="M569.0,115.0 L574.0,120.0 L569.0,125.0 L564.0,120.0 Z" fill="rgba(80, 180, 255, 0.7)" stroke="none" />
+<text x="569.0" y="112.0" font-size="7" fill="rgba(80, 180, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">cauldron__exit_right_1 (right)</text>
+<path d="M337.0,115.0 L342.0,120.0 L337.0,125.0 L332.0,120.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="337.0" y="112.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">cauldron__entry_left_2 (left)</text>
+<path d="M621.0,115.0 L626.0,120.0 L621.0,125.0 L616.0,120.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="621.0" y="112.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">seance__entry_left_3 (left)</text>
+<path d="M297.0,115.0 L302.0,120.0 L297.0,125.0 L292.0,120.0 Z" fill="rgba(255, 80, 80, 0.7)" stroke="none" />
+<text x="297.0" y="112.0" font-size="7" fill="rgba(255, 80, 80, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">__junction_4 (?)</text>
+<path d="M312.0,50.0 L312.0,237.0" stroke="rgba(255, 255, 0, 0.5)" stroke-width="1" stroke-dasharray="6,4" />
+<text x="312.0" y="46.0" font-size="7" fill="rgba(255, 255, 0, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">col 0|1</text>
+<path d="M595.0,50.0 L595.0,237.0" stroke="rgba(255, 255, 0, 0.5)" stroke-width="1" stroke-dasharray="6,4" />
+<text x="595.0" y="46.0" font-size="7" fill="rgba(255, 255, 0, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">col 1|2</text>
+<path d="M20.0,120.0 L887.0,120.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="16.0" y="120.0" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0 grid</text>
+<path d="M20.0,160.0 L887.0,160.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<path d="M20.0,167.0 L887.0,167.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<rect x="30.0" y="273.0" width="267.90000000000003" height="120.0" rx="6" ry="6" fill="rgba(10, 6, 16, 0.6)" class="nf-metro-legend-bg--halloween_pipeline-pr" />
+<path d="M42.0,297.0 L66.0,297.0" stroke="#7fff00" stroke-width="3.0" stroke-linecap="round" stroke-dasharray="2,4" />
+<text x="78.0" y="297.0" font-size="14.0" fill="#f3e6d0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--halloween_pipeline-pr">Slime Trail (QC)</text>
+<path d="M42.0,321.0 L66.0,321.0" stroke="#ff7518" stroke-width="3.0" stroke-linecap="round" />
+<text x="78.0" y="321.0" font-size="14.0" fill="#f3e6d0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--halloween_pipeline-pr">Pumpkin Patch (short reads)</text>
+<path d="M42.0,345.0 L66.0,345.0" stroke="#9b4dca" stroke-width="3.0" stroke-linecap="round" />
+<text x="78.0" y="345.0" font-size="14.0" fill="#f3e6d0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--halloween_pipeline-pr">Witch's Brew (plasmids)</text>
+<path d="M42.0,369.0 L66.0,369.0" stroke="#e8e6f0" stroke-width="3.0" stroke-linecap="round" stroke-dasharray="8,4" />
+<text x="78.0" y="369.0" font-size="14.0" fill="#f3e6d0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--halloween_pipeline-pr">Ghost Reads (long reads)</text>
+<text x="907.0" y="409.0" font-size="8" fill="rgba(150, 150, 150, 0.6)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">created with nf-metro v2.1.0+dev</text>
+</svg></div></div>
+</div>
+</div>
+<script>
+(function() {
+  const root = document.documentElement;
+  const btn = document.getElementById('scheme-toggle');
+  const schemes = ['auto', 'dark', 'light'];
+  const labels = {'auto': 'System', 'dark': 'Dark', 'light': 'Light'};
+  let idx = 0;
+  function apply() {
+    const s = schemes[idx];
+    if (s === 'auto') {
+      root.removeAttribute('data-scheme');
+    } else {
+      root.setAttribute('data-scheme', s);
+    }
+    btn.textContent = labels[s];
+  }
+  apply();
+  btn.addEventListener('click', function() {
+    idx = (idx + 1) % schemes.length;
+    apply();
+  });
+})();
+document.querySelectorAll('.toggle-bar button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const entry = btn.closest('.diff-entry');
+    const mode = btn.dataset.mode;
+    const buttons = entry.querySelectorAll('.toggle-bar button');
+    buttons.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const comp = entry.querySelector('.comparison');
+    const sideBase = comp.querySelector('.side-base');
+    const sidePr = comp.querySelector('.side-pr');
+    if (mode === 'side-by-side') {
+      comp.style.gridTemplateColumns = '1fr 1fr';
+      sideBase.style.display = '';
+      sidePr.style.display = '';
+    } else if (mode === 'base') {
+      comp.style.gridTemplateColumns = '1fr';
+      sideBase.style.display = '';
+      sidePr.style.display = 'none';
+    } else if (mode === 'pr') {
+      comp.style.gridTemplateColumns = '1fr';
+      sideBase.style.display = 'none';
+      sidePr.style.display = '';
+    }
+  });
+});
+</script>
+</body>
+</html>
