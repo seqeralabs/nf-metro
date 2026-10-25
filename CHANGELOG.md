@@ -17,6 +17,10 @@ history.
 
 ### Added
 
+- A `halloween` seasonal theme (`%%metro style: halloween`, `--theme
+  halloween`), with light and dark variants like the other brands: pumpkin
+  title, bone stations and labels, purple section chrome. It changes only the
+  chrome; line colours still come from each `%%metro line:` directive.
 - Hidden sections: a subgraph whose ID starts with `_` keeps its grid cell
   but draws no box, title or number badge, mirroring hidden stations. Use it
   to place stations independently without a visible section. Existing maps
