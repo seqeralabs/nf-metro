@@ -3507,11 +3507,46 @@ def _lane_order_axis_sign(
     return right_normal_axis_sign(Direction.R if coordinate_axis == 1 else Direction.D)
 
 
-def _component_complete(
+def _require_seatable_claims(
+    rank: int,
     claims: tuple[_BoundClaim, ...],
     endpoint_ids: tuple[str, ...],
     ledger: CorridorCohortLedger,
+) -> None:
+    """Raise when a component's claims cannot be seated against one another."""
+    ambiguous = ledger.ambiguous_endpoint_cohort_ids.intersection(endpoint_ids)
+    if ambiguous:
+        raise CorridorCohortCompilationError(
+            f"corridor component {rank} holds ambiguous endpoint cohorts "
+            f"{sorted(ambiguous)}"
+        )
+    for item in claims:
+        if not item.ledger.reservation_complete:
+            raise CorridorCohortCompilationError(
+                f"corridor component {rank} seats claim {item.claim_id} of an "
+                f"incomplete reservation"
+            )
+    segments = {(item.ledger.member_id, item.ledger.segment_rank) for item in claims}
+    if len(segments) != len(claims):
+        raise CorridorCohortCompilationError(
+            f"corridor component {rank} holds two claims on one member segment"
+        )
+
+
+def _endpoint_cohorts_whole(
+    rank: int,
+    claims: tuple[_BoundClaim, ...],
+    endpoint_ids: tuple[str, ...],
+    ledger: CorridorCohortLedger,
+    bound: set[tuple[str | None, str]],
 ) -> bool:
+    """Whether *claims* hold every member of each endpoint cohort they touch.
+
+    A member of the cohort whose claims all sit in other components splits the
+    cohort across solver problems, which returns False.  A member the cohort
+    never expected, or one it expects that has no bound claim anywhere, is a
+    ledger inconsistency and raises.
+    """
     expected = dict(ledger.endpoint_members)
     eligible_by_endpoint: defaultdict[str, set[str]] = defaultdict(set)
     for claim in ledger.claims:
@@ -3525,16 +3560,24 @@ def _component_complete(
     for item in claims:
         if item.ledger.endpoint_cohort_id is not None:
             observed[item.ledger.endpoint_cohort_id].add(item.ledger.member_id)
-    return (
-        not ledger.ambiguous_endpoint_cohort_ids.intersection(endpoint_ids)
-        and all(
-            observed[item] == expected[item].intersection(eligible_by_endpoint[item])
-            for item in endpoint_ids
-        )
-        and all(item.ledger.reservation_complete for item in claims)
-        and len({(item.ledger.member_id, item.ledger.segment_rank) for item in claims})
-        == len(claims)
-    )
+    whole = True
+    for cohort_id in endpoint_ids:
+        wanted = expected[cohort_id].intersection(eligible_by_endpoint[cohort_id])
+        extra = observed[cohort_id] - wanted
+        if extra:
+            raise CorridorCohortCompilationError(
+                f"corridor component {rank} holds members {sorted(extra)} outside "
+                f"endpoint cohort {cohort_id}"
+            )
+        missing = wanted - observed[cohort_id]
+        for member_id in sorted(missing):
+            if (cohort_id, member_id) not in bound:
+                raise CorridorCohortCompilationError(
+                    f"corridor component {rank} expects member {member_id} of "
+                    f"endpoint cohort {cohort_id}, which has no bound claim"
+                )
+        whole = whole and not missing
+    return whole
 
 
 def _footprints_overlap(
@@ -3709,7 +3752,6 @@ def _component_plan(
         )
     )
     roles = _roles(component_claims)
-    complete = _component_complete(component_claims, endpoint_ids, ledger)
     physical_claims = tuple(
         tuple(claims[item] for item in physical[group]) for group in physical_ranks
     )
@@ -3722,6 +3764,13 @@ def _component_plan(
     results: tuple[CorridorAllocationResult, ...] = ()
     holds_overlaid_cohort = not overlaid_cohort_ids.isdisjoint(endpoint_ids)
     if not holds_overlaid_cohort and (has_movable or component_scalar_requests):
+        _require_seatable_claims(rank, component_claims, endpoint_ids, ledger)
+        bound = {
+            (item.ledger.endpoint_cohort_id, item.ledger.member_id) for item in claims
+        }
+        complete = _endpoint_cohorts_whole(
+            rank, component_claims, endpoint_ids, ledger, bound
+        )
         problem = _problem(
             component_claims,
             roles,
@@ -3735,11 +3784,13 @@ def _component_plan(
         )
         problems = (problem,)
         results = (solve(problem),)
-    wholly_owned = (
-        not holds_overlaid_cohort
-        and not problems
-        and all(_is_terminal_fixed(item) for item in component_claims)
-    )
+    skipped = not holds_overlaid_cohort and not problems
+    if skipped and not all(_is_terminal_fixed(item) for item in component_claims):
+        raise CorridorCohortCompilationError(
+            f"corridor component {rank} has nothing to solve and claims "
+            f"segments no plan owns"
+        )
+    wholly_owned = skipped
     if wholly_owned:
         status = CorridorAllocationStatus.PLANNED
     else:
