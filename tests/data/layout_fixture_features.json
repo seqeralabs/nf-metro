@@ -43,7 +43,8 @@
     "guide/06a_without_hidden.mmd",
     "guide/06b_with_hidden.mmd",
     "topologies/centered_flat_skip_over_marker.mmd",
-    "topologies/descent_entry_inner_bypass.mmd"
+    "topologies/descent_entry_inner_bypass.mmd",
+    "co_column_feeders_shared_diagonal_bt.mmd"
   ],
   "corridor_solo": [
     "group_band_over_row_corridor.mmd",

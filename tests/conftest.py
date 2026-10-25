@@ -160,6 +160,50 @@ def content_corpus() -> list[tuple[str, Path, bool]]:
     return items
 
 
+# Corpus ids whose validated layout aborts on the final render guards, keyed by
+# ``content_corpus`` id. The co-column BT witness is a test-only fixture, not a
+# gallery render.
+KNOWN_FINAL_GUARD_ABORTS: dict[str, str] = {
+    "tests/co_column_feeders_shared_diagonal_bt": (
+        "#1792: _guard_no_line_crosses_non_consumer (l0 on the s0n1->s0n0 bypass "
+        "crosses s0n2's marker) and _guard_fan_merge_no_partition_crossing "
+        "(l2/l0 cross at s0n0) fire; the defects are intrinsic to the test-only "
+        "BT co-column witness"
+    ),
+}
+
+
+def corpus_params(
+    corpus: list[tuple[str, Path, bool]], *, unpacked: bool = True
+) -> list:
+    """Parametrize list for a ``content_corpus`` sweep that validates the layout.
+
+    Corpus entries in :data:`KNOWN_FINAL_GUARD_ABORTS` are strict xfails on
+    ``LayoutInvariantError``. *unpacked* spreads each entry across three
+    arguments; otherwise the whole tuple is one argument.
+    """
+    from nf_metro.layout.phases.guards import LayoutInvariantError
+
+    params = []
+    for entry in corpus:
+        reason = KNOWN_FINAL_GUARD_ABORTS.get(entry[0])
+        marks = (
+            []
+            if reason is None
+            else [
+                pytest.mark.xfail(
+                    raises=LayoutInvariantError, strict=True, reason=reason
+                )
+            ]
+        )
+        params.append(
+            pytest.param(*entry, marks=marks)
+            if unpacked
+            else pytest.param(entry, marks=marks)
+        )
+    return params
+
+
 def compute_corpus_layout(path: Path, is_nextflow: bool) -> MetroGraph:
     """Parse a corpus ``.mmd`` (converting from a Nextflow DAG first when
     ``is_nextflow``) and run the validated layout, returning the graph."""
