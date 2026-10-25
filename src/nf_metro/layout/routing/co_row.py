@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from nf_metro.layout.constants import COORD_TOLERANCE, COORD_TOLERANCE_FINE
-from nf_metro.layout.geometry import lanes_run_along_y
+from nf_metro.layout.geometry import AxisFrame, axis_split
 
 if TYPE_CHECKING:
     from nf_metro.layout.routing.context import _EdgeKey, _RoutingCtx
@@ -190,8 +190,31 @@ def _diagonal_separation(
     return min(abs(target_gap), source_end)
 
 
-def _run_and_lateral(station: Station, along_x: bool) -> tuple[float, float]:
-    return (station.x, station.y) if along_x else (station.y, station.x)
+def run_and_lateral(station: Station, direction: str) -> tuple[float, float]:
+    """*station*'s coordinates along and across a *direction* flow."""
+    return axis_split(
+        AxisFrame.axes_for_direction(direction)[0], (station.x, station.y)
+    )
+
+
+def co_row_feeder(
+    edge: Edge,
+    src: Station,
+    direction: str,
+    window: DiagonalWindow,
+    lanes: tuple[float, float],
+) -> CoRowFeeder:
+    """*edge* drawn across *window* in a *direction* flow.
+
+    *lanes* are the laterals its lane is drawn at, at its source and target.
+    """
+    return CoRowFeeder(
+        key=(edge.source, edge.target, edge.line_id),
+        source_run=run_and_lateral(src, direction)[0],
+        window=window,
+        source_lateral=lanes[0],
+        target_lateral=lanes[1],
+    )
 
 
 def _co_row_candidates(
@@ -210,9 +233,9 @@ def _co_row_candidates(
     for edge in graph.edges:
         src, tgt = graph.edge_endpoints(edge)
         section = graph.sections.get(src.section_id or "")
-        along_x = section is None or lanes_run_along_y(section.direction)
-        src_run, src_lateral = _run_and_lateral(src, along_x)
-        tgt_run, tgt_lateral = _run_and_lateral(tgt, along_x)
+        direction = section.direction if section is not None else "LR"
+        src_run, src_lateral = run_and_lateral(src, direction)
+        tgt_run, tgt_lateral = run_and_lateral(tgt, direction)
         if (
             abs(tgt_lateral - src_lateral) < COORD_TOLERANCE
             or abs(tgt_run - src_run) < COORD_TOLERANCE

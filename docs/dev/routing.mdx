@@ -67,7 +67,9 @@ The order in `route_edges` is:
    The perpendicular-entry corridor variant, `_route_perp_entry_from_corridor`, routes the same way.
 3. `_route_entry_runway` handles a flow-side entry port reaching a deep internal station.
    It compresses the diagonal into the entry region and runs a horizontal runway past the bypassed early-layer stations.
-4. `_route_intra_section` handles the general local case: diagonals, cross-row fold routing and straight lines.
+4. The `_INTRA_SECTION_SHAPES` tuple handles the general local case: cross-row fold routing, perpendicular exits and straight lines, with `_route_diagonal` as the fall-through.
+
+These local handlers form one first-match table, `_LOCAL_EDGE_DISPATCH` in `core.py`.
 
 This fan-out exercises all four handler families at once.
 Inter-section L-shapes connect the sections, TB-section routing applies inside the vertical connector, entry runways compress the diagonal at each section's input port, and intra-section diagonals handle the station-to-station edges within each horizontal section.
@@ -237,7 +239,7 @@ Accept a small offset between port and station instead, and handle the geometry 
 | `member_geometry.py`        | canonical-order member template construction, one-time gap-slot materialization, immutable gap-channel publication, exact planned production copies, and template/emission validation                                                     |
 | `inter_section_handlers.py` | handler 1 family: bypass, left/right entry wraps, around-section, inter-row corridors, stepped descent, L-shape                                                                                                                           |
 | `tb_handlers.py`            | TB section shapes dispatched by `_route_tb_section` over `_TB_SECTION_SHAPES` (`_route_tb_internal`, `_route_tb_lr_exit`, `_route_tb_lr_entry`, `_route_perp_entry`, `_route_perp_entry_from_corridor`) and `_compute_diagonal_placement` |
-| `intra_handlers.py`         | `_route_entry_runway` and `_route_intra_section` (the general intra-section fallback)                                                                                                                                                     |
+| `intra_handlers.py`         | `_route_entry_runway`, the `_INTRA_SECTION_SHAPES` tuple and `_route_diagonal` (the general intra-section fallback)                                                                                                                       |
 | `co_row.py`                 | shared diagonal windows for co-row feeders of one target (`plan_co_row_diagonal_groups`), read by the diagonal handlers                                                                                                                   |
 | `bundle.py`                 | constructive bundle-curve builders (`build_concentric_bundle`, `build_tapered_bundle`, `build_offset_bundle`); fans a centerline into per-line offset paths with concentric corners                                                       |
 | `centrelines.py`            | centerline templates and bundle-gathering helpers (`gather_member_edges`, `route_along`, `route_tapered`, …) layered over `bundle.py`                                                                                                     |

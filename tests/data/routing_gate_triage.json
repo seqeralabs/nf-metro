@@ -500,11 +500,15 @@
   "status": "needs-review"
  },
  "core.py::if result is not None:::#1": {
-  "note": "Append-guard after the priority-ordered handler chain. The final handler _route_intra_section is total: its three early returns and its _route_diagonal fallback (annotated -> RoutedPath, single return statement) always yield a RoutedPath, so result is never None and every edge appends. The None arm is unreachable.",
+  "note": "Append-guard after the priority-ordered handler chain. The last entry of _LOCAL_EDGE_DISPATCH, _route_diagonal, is total (annotated -> RoutedPath, single return statement), so result is never None and every edge appends. The None arm is unreachable.",
   "status": "defensive"
  },
- "core.py::if (::#1": {
-  "note": "_co_row_feeder's convergence-cover check, mirroring the emission loop's skip of an edge a planned convergence draws. Co-row candidates are feeders of one target from one section's sources on one row; a convergence covers inter-section merge legs, which the member and inter-section checks around it already turn away. No swept fixture, 8,000-map corpus map or option-fuzz job presents a covered candidate member, so the decline arm is a defensive mirror of emission ownership.",
+ "core.py::for handler, _builder in _LOCAL_EDGE_DISPATCH:::#1": {
+  "note": "_route_classified_edge's first-match walk of _LOCAL_EDGE_DISPATCH. Its last handler, _route_diagonal, is total (annotated -> RoutedPath), so the walk always returns from inside the loop and the loop-exhausted arm is unreachable.",
+  "status": "defensive"
+ },
+ "core.py::for handler, builder in _LOCAL_EDGE_DISPATCH:::#1": {
+  "note": "_co_row_feeder's first-match walk of _LOCAL_EDGE_DISPATCH. The last entry's builder, intra_co_row_feeder, always returns a feeder (annotated -> CoRowFeeder), so the walk always returns from inside the loop and the loop-exhausted arm is unreachable.",
   "status": "defensive"
  },
  "core.py::if is_inter_section_edge(edge, source, target, ctx):::#1": {

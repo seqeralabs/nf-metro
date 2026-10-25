@@ -34,7 +34,7 @@ from nf_metro.layout.routing.bundle import (
 from nf_metro.layout.routing.centrelines import (
     gather_member_edges,
 )
-from nf_metro.layout.routing.co_row import CoRowFeeder, DiagonalWindow
+from nf_metro.layout.routing.co_row import CoRowFeeder, DiagonalWindow, co_row_feeder
 from nf_metro.layout.routing.common import (
     OffsetRegime,
     RoutedPath,
@@ -151,7 +151,7 @@ def _section_link_diagonal(
     # A feeder descending collinear with the merge's column but landing on an
     # outboard slot is displaced by a continuation that owns the trunk; bend
     # its diagonal at the source so it vacates the column immediately instead
-    # of running down the trunk-owner's lane and overlapping it (issue #1012).
+    # of running down the trunk-owner's lane and overlapping it.
     bias_to_source = (
         edge.target in ctx.join_stations
         and abs(sx - tgt.x) < COORD_TOLERANCE
@@ -179,13 +179,7 @@ def section_link_co_row_feeder(
     sx, tx, own = _section_link_diagonal(edge, src, tgt, section, ctx)
     if own is None:
         return None
-    return CoRowFeeder(
-        key=(edge.source, edge.target, edge.line_id),
-        source_run=src.y,
-        window=own,
-        source_lateral=sx,
-        target_lateral=tx,
-    )
+    return co_row_feeder(edge, src, section.direction, own, (sx, tx))
 
 
 def _compute_diagonal_placement(

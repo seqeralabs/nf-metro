@@ -1,11 +1,11 @@
-"""Intra-section routing: entry runway, shape dispatch, and in-section diagonals.
+"""Intra-section routing: entry runway, intra-section shapes, and in-section diagonals.
 
-``_route_intra_section`` is an ordered dispatch over the distinct shapes an
-edge inside (or leaving) a section can take -- a fold gutter, a perpendicular
-exit, two straight cases -- with the horizontal-diagonal-horizontal run as the
-fall-through.  ``_route_entry_runway`` is a sibling shape kept as its own
-ordered local handler in ``core.py`` because it claims an edge before the
-section's internal handlers run.
+``_INTRA_SECTION_SHAPES`` orders the distinct shapes an edge inside (or
+leaving) a section can take -- a fold gutter, a perpendicular exit, two straight
+cases -- and :func:`_route_diagonal`'s horizontal-diagonal-horizontal run is the
+fall-through.  ``core._LOCAL_EDGE_DISPATCH`` walks them after
+``_route_entry_runway``, which claims an edge before the section's internal
+shapes run.
 """
 
 from __future__ import annotations
@@ -42,7 +42,12 @@ from nf_metro.layout.routing.bundle import (
 from nf_metro.layout.routing.centrelines import (
     gather_member_edges,
 )
-from nf_metro.layout.routing.co_row import CoRowFeeder, DiagonalWindow
+from nf_metro.layout.routing.co_row import (
+    CoRowFeeder,
+    DiagonalWindow,
+    co_row_feeder,
+    run_and_lateral,
+)
 from nf_metro.layout.routing.common import (
     RoutedPath,
 )
@@ -435,32 +440,6 @@ _INTRA_SECTION_SHAPES = (
 )
 
 
-def _intra_section_shape_route(
-    edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
-) -> RoutedPath | None:
-    """The route of the first :data:`_INTRA_SECTION_SHAPES` entry claiming *edge*."""
-    for shape in _INTRA_SECTION_SHAPES:
-        result = shape(edge, src, tgt, ctx)
-        if result is not None:
-            return result
-    return None
-
-
-def _route_intra_section(
-    edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
-) -> RoutedPath | None:
-    """Route an intra-section edge via the first shape that claims it.
-
-    Each shape in :data:`_INTRA_SECTION_SHAPES` returns a :class:`RoutedPath`
-    when it owns the edge or ``None`` to pass; :func:`_route_diagonal` is the
-    fall-through.
-    """
-    result = _intra_section_shape_route(edge, src, tgt, ctx)
-    if result is not None:
-        return result
-    return _route_diagonal(edge, src, tgt, ctx)
-
-
 def _is_side_branch_ascent(
     edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
 ) -> bool:
@@ -632,32 +611,45 @@ def _route_diagonal(
         window = _diagonal_window(edge, src, tgt, ctx)
         diag_start_x, diag_end_x = window.start, window.end
 
-    section = ctx.graph.sections.get(src.section_id or "")
-    direction = section.direction if section else "LR"
     return RoutedPath(
         edge=edge,
         line_id=edge.line_id,
         points=diagonal_centreline(
-            direction, (src.x, src.y), (tgt.x, tgt.y), diag_start_x, diag_end_x
+            _diagonal_direction(src, ctx),
+            (src.x, src.y),
+            (tgt.x, tgt.y),
+            diag_start_x,
+            diag_end_x,
         ),
     )
+
+
+def _diagonal_direction(src: Station, ctx: _RoutingCtx) -> str:
+    section = ctx.graph.sections.get(src.section_id or "")
+    return section.direction if section else "LR"
 
 
 def intra_co_row_feeder(
     edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
 ) -> CoRowFeeder:
-    """*edge* as a co-row feeder of the :func:`_route_diagonal` fallthrough.
+    """*edge* as a co-row feeder of :func:`_route_diagonal`.
 
-    The route's offsets are deferred Y shifts, so each lane is drawn at its
-    station's Y plus that station's offset for the line.
+    The route's offsets are deferred lateral shifts, so each lane is drawn at
+    its station's lateral plus that station's offset for the line.
     """
+    direction = _diagonal_direction(src, ctx)
     offsets = ctx.station_offsets or {}
-    return CoRowFeeder(
-        key=(edge.source, edge.target, edge.line_id),
-        source_run=src.x,
-        window=_diagonal_window(edge, src, tgt, ctx),
-        source_lateral=src.y + offsets.get((edge.source, edge.line_id), 0.0),
-        target_lateral=tgt.y + offsets.get((edge.target, edge.line_id), 0.0),
+    src_lane = run_and_lateral(src, direction)[1]
+    tgt_lane = run_and_lateral(tgt, direction)[1]
+    return co_row_feeder(
+        edge,
+        src,
+        direction,
+        _diagonal_window(edge, src, tgt, ctx),
+        (
+            src_lane + offsets.get((edge.source, edge.line_id), 0.0),
+            tgt_lane + offsets.get((edge.target, edge.line_id), 0.0),
+        ),
     )
 
 
