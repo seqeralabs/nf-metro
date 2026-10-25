@@ -5,7 +5,8 @@ and, unless a convergence grant moved a trunk, draws a different observation.
 This oracle renders a map the way the plan is meant to be drawn instead: every
 compiled plan is published at its compile site, the compiling observation is
 the one drawn, and the drawn routes are then held to the published plan on
-every owned segment point and corner, after the render invariants have run.
+every owned segment point and corner, and on every corner the plan sized,
+after the render invariants have run.
 
 It is a test harness, not a render stage: the substitutions live only inside
 :func:`shadow_observation`, so production renders never take this path.
@@ -29,7 +30,7 @@ import os
 import signal
 import sys
 import warnings
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
 from functools import cache
 from multiprocessing import Pool
@@ -133,20 +134,59 @@ def planned_drawn_mismatches(
     return mismatches
 
 
+def sized_radius_mismatches(
+    routes: Sequence[RoutedPath],
+    sized_radii: Mapping[tuple[tuple[str, str, str], int], float],
+) -> list[str]:
+    """Every corner the compile sized that the drawn *routes* place off its radius.
+
+    A corner the cohort plan re-sizes is the plan's decision whether or not a
+    member plan owns the segments beside it, a radius-only mate's included.
+    """
+    drawn = _routes_by_edge(routes)
+    mismatches: list[str] = []
+    for (edge, index), radius in sized_radii.items():
+        route = drawn.get(edge)
+        radii = () if route is None else tuple(route.curve_radii or ())
+        if index >= len(radii) or _differs(radii[index], radius):
+            mismatches.append(
+                f"sized corner {index} of {edge} planned radius {radius} drawn "
+                f"{radii[index] if index < len(radii) else None}"
+            )
+    return mismatches
+
+
 @contextmanager
 def shadow_observation() -> Iterator[None]:
     """Render with every cohort plan published and its compiling observation drawn.
 
     The grant-only comparison against an ungranted replay fails by
     construction once the compiling observation is drawn, so it stands down;
-    the planned-equals-drawn check over the settled geometry replaces it.
+    the planned-equals-drawn check over the settled geometry replaces it.  The
+    drawn observation is the last compile's, so the corners its patches sized
+    are the ones the drawn routes are held to.
     """
     real_compile = member_geometry.compile_corridor_cohort_plan
     real_moved = svg._corridor_grant_moved_plan_ids
     real_drawable = svg._assert_settled_geometry_is_drawable
+    sized_radii: dict[tuple[tuple[str, str, str], int], float] = {}
 
     def compile_and_publish(*args: Any, **kwargs: Any) -> cci.CorridorCohortPlan:
         plan = real_compile(*args, **kwargs)
+        sized_radii.clear()
+        for patch in plan.route_patches:
+            route = patch.route
+            own = route.curve_radii or ()
+            sized_radii.update(
+                {
+                    (
+                        (route.edge.source, route.edge.target, route.line_id),
+                        index,
+                    ): radius
+                    for index, radius in enumerate(patch.radii or ())
+                    if index >= len(own) or own[index] != radius
+                }
+            )
         cci.publish_corridor_cohort_plan(plan)
         return plan
 
@@ -163,7 +203,10 @@ def shadow_observation() -> Iterator[None]:
 
     def drawable_as_planned(graph: Any, settled: Any) -> None:
         real_drawable(graph, settled)
-        mismatches = planned_drawn_mismatches(settled.routes, settled.route_plan)
+        mismatches = [
+            *planned_drawn_mismatches(settled.routes, settled.route_plan),
+            *sized_radius_mismatches(settled.routes, sized_radii),
+        ]
         if mismatches:
             raise ShadowPlanDrawnMismatch(
                 f"{len(mismatches)} owned coordinate(s) drawn off the plan: "
