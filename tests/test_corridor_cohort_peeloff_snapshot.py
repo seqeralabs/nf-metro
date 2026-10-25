@@ -128,13 +128,16 @@ def _route_state(route: RoutedPath) -> tuple[Any, ...]:
         "examples/topologies/fan_over_top_reach_order.mmd",
         "tests/fixtures/curve_invariant_repros/inter_row_corridor_overflow.mmd",
         "tests/fixtures/regressions/riboseq_row_trunk_subrun.mmd",
+        "examples/topologies/entry_cohort_interleaved_fixed_lane.mmd",
     ],
 )
 def test_peeloff_snapshot_leaves_the_live_routes_untouched(
     monkeypatch: pytest.MonkeyPatch, relative_path: str
 ) -> None:
     """Seating the snapshot's risers writes no live route, and every patch the
-    compile returns, a re-sized mate's included, names a live route."""
+    compile returns names a live route.  The interleaved fixed-lane entry
+    cohort compiles radius-only patches for re-sized mates, so it holds a
+    mate's patch to its live route too."""
     calls: list[tuple[bool, bool]] = []
     compile_cohorts = member_geometry._compile_corridor_cohorts
 

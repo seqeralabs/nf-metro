@@ -789,7 +789,6 @@
   "member_geometry.py::if ledger is None:::#1",
   "member_geometry.py::if len(claims) + len(scalar_claims) != len(shortfall.claim_ids):::#1",
   "member_geometry.py::if len(system_ids) != 1:::#1",
-  "member_geometry.py::if live is None:::#1",
   "member_geometry.py::if membership is None or membership.assignment is None:::#1",
   "member_geometry.py::if membership is None or membership.axis is None:::#1",
   "member_geometry.py::if movable_run:::#1",

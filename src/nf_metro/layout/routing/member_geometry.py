@@ -810,15 +810,6 @@ def _peeloff_seated_snapshot(
     )
 
 
-def _live_route(
-    live_by_copy_id: Mapping[int, RoutedPath], route: RoutedPath
-) -> RoutedPath:
-    live = live_by_copy_id.get(id(route))
-    if live is None:
-        raise RuntimeError("corridor cohort patch names a route outside its snapshot")
-    return live
-
-
 def _compile_corridor_cohorts(
     ledger: CorridorCohortLedger | None,
     candidates: Sequence[_MemberCandidate],
@@ -865,7 +856,7 @@ def _compile_corridor_cohorts(
                 ctx.curve_radius,
                 ctx.station_offsets or {},
             ),
-            live_route=partial(_live_route, live_by_copy_id),
+            live_route=lambda route: live_by_copy_id[id(route)],
         )
     except CorridorCohortCompilationError as error:
         if not allow_clearance_requirements:

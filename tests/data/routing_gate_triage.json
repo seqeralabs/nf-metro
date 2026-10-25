@@ -2390,9 +2390,5 @@
  "member_geometry.py::if _resizes_an_immutable_radius(changed, mutable_route_ids):::#1": {
   "note": "Corner sizing of a corridor-cohort patch declines when a corner rule, re-run at the patched points, would change the radius of an immutable convergence-context route sharing a cohort with a moved corner: the plan may not re-size a route it does not own, so it leaves every corner unsized rather than raising (a raise in the compile aborts the render). No swept corpus reaches it. An immutable route whose concentric inputs change but whose radius does not is skipped without declining (the 8,000-map corpus reaches that).",
   "status": "needs-review"
- },
- "member_geometry.py::if live is None:::#1": {
-  "note": "Wiring guard on the corridor-cohort compile's peel-off-seated snapshot. Every patch the compile returns names either a target's copy or a copy from the corner sizer's population, and _peeloff_seated_snapshot maps every one of those copies to its live route, so the raise arm is unreachable. It raises RuntimeError rather than CorridorCohortCompilationError so a broken mapping aborts the render instead of becoming an aperture requirement.",
-  "status": "defensive"
  }
 }
