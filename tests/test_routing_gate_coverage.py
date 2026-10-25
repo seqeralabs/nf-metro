@@ -167,7 +167,6 @@ OBSERVER_GATES = [
     "core.py::if observe_plan:::#2",
     "core.py::if observer is not None:::#1",
     "core.py::if observer is not None:::#2",
-    "core.py::if observer is not None:::#3",
     "inter_section_handlers.py::if observer is not None and route is not None:::#1",
 ]
 

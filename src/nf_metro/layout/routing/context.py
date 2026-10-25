@@ -69,6 +69,7 @@ from nf_metro.parser.route_topology import (
 
 if TYPE_CHECKING:
     from nf_metro.layout.route_plan import ExitTurnPlanId
+    from nf_metro.layout.routing.co_row import CoRowDiagonalGroup
     from nf_metro.layout.routing.convergences import ConvergencePlanExecutionQuery
     from nf_metro.layout.routing.exit_turns import ExitTurnPlanQuery
     from nf_metro.layout.routing.system_emission import RouteSystemEmissionExecution
@@ -265,6 +266,9 @@ class _RoutingCtx:
     route_systems: RouteSystemEmissionExecution | None = None
     skip_edges: set[_EdgeKey] = field(default_factory=set)
     built_routes: list[RoutedPath] = field(default_factory=list)
+    co_row_diagonal_groups: Mapping[_EdgeKey, CoRowDiagonalGroup] = field(
+        default_factory=dict
+    )
     junction_fan_info: dict[_EdgeKey, tuple[int, int]] = field(default_factory=dict)
     perp_entry_columns: Mapping[str, PerpEntryColumn] = field(default_factory=dict)
     fan_corridors: dict[str, FanCorridor] = field(default_factory=dict)

@@ -1413,6 +1413,14 @@ gallery:
       A foreign line dips below a station to bypass its marker, then climbs back
       to the trunk past the wide 'Quantification' label. The router lengthens the dip's flat
       run so the climb seats clear of the glyphs (`_clear_bypass_v_label_strikes`).
+  - id: co_row_feeders_shared_diagonal
+    source_dir: examples/topologies
+    category: Bypass Routing
+    description:
+      Red bypasses BAM_ALIGN on stats' row while blue leaves stats on the same
+      row, and both climb into one exit port. The two feeders rise on one
+      shared diagonal instead of each picking its own, so blue does not climb
+      first, cross red, and get crossed back.
   - id: bypass_label_rake_left
     source_dir: examples/topologies
     category: Bypass Routing

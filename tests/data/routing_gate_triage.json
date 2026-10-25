@@ -11,6 +11,18 @@
   "note": "The lane-change step reads its run direction off the connector's own two endpoints rather than assuming an axis. segment_direction returns None for a leg that is diagonal or collapsed, which the straight-connector families that reach this helper never hand it: both settle their endpoints on one row or one column before routing, so no fixture can present a diagonal pair here.",
   "status": "defensive"
  },
+ "co_row.py::if _can_share(feeders, windows, flow, target_run, tolerance) and not (::#1": {
+  "note": "shared_co_row_window declines a group whose window, slid past the neighbouring diagonals a moved member would meet, breaks a member's straights, no longer untangles the group, runs two lanes together, or lands on another neighbour. Reachable: a neighbour diagonal ending close to the target leaves too little target straight (pinned by test_shared_window_that_cannot_clear_a_neighbour_is_declined); no swept fixture presents one.",
+  "status": "needs-review"
+ },
+ "co_row.py::if own * step <= 0:::#1": {
+  "note": "_at_one_slope declines a group holding a lane that steps the other way from the nearest member's, or not at all, since no one slope carries both. Reachable only in a group of three or more, where two other members still untangle (pinned by test_group_with_a_lane_stepping_the_other_way_is_declined); no swept fixture presents one.",
+  "status": "needs-review"
+ },
+ "co_row.py::if source_gap * target_gap < 0:::#1": {
+  "note": "_diagonal_separation skips a pair whose lanes swap sides between the source and target ends: across one shared window they cross once rather than run together, so there is no gap to keep. Reachable in a firing group that also holds a pair with a forced single crossing; no swept fixture presents one.",
+  "status": "needs-review"
+ },
  "common.py::and abs(start[0] - other_start[0]) < required - COORD_TOLERANCE_FINE::#1": {
   "note": "The same-destination approach proposal is abandoned when a proposed member column would sit closer than the co-travelling lane clearance to another vertical channel. Every shipped corpus proposal clears that distance because the member gap allocator seats each corridor against its neighbours before the proposal is built, so the refusal arm has no fixture; revisit once a corpus map needs a proposal the allocator cannot pre-separate.",
   "status": "needs-review"
@@ -484,7 +496,19 @@
   "status": "needs-review"
  },
  "core.py::if result is not None:::#1": {
-  "note": "Append-guard after the priority-ordered handler chain. The final handler _route_intra_section is total: its three early returns and its _route_diagonal fallback (annotated -> RoutedPath, single return statement) always yield a RoutedPath, so result is never None and every edge appends. The None arm is unreachable.",
+  "note": "Append-guard after the priority-ordered handler chain. The last entry of _LOCAL_EDGE_DISPATCH, _route_diagonal, is total (annotated -> RoutedPath, single return statement), so result is never None and every edge appends. The None arm is unreachable.",
+  "status": "defensive"
+ },
+ "core.py::for handler, _builder in _LOCAL_EDGE_DISPATCH:::#1": {
+  "note": "_route_classified_edge's first-match walk of _LOCAL_EDGE_DISPATCH. Its last handler, _route_diagonal, is total (annotated -> RoutedPath), so the walk always returns from inside the loop and the loop-exhausted arm is unreachable.",
+  "status": "defensive"
+ },
+ "core.py::for handler, builder in _LOCAL_EDGE_DISPATCH:::#1": {
+  "note": "_co_row_feeder's first-match walk of _LOCAL_EDGE_DISPATCH. The last entry's builder, intra_co_row_feeder, always returns a feeder (annotated -> CoRowFeeder), so the walk always returns from inside the loop and the loop-exhausted arm is unreachable.",
+  "status": "defensive"
+ },
+ "core.py::if is_inter_section_edge(edge, source, target, ctx):::#1": {
+  "note": "_co_row_feeder's inter-section check, mirroring _route_classified_edge's classify_inter_section_family. A port-or-junction to port-or-junction candidate member is a route-system member whose frozen family the preceding member check already declines, so this arm is reached only when no route-system execution is published. No swept fixture, 8,000-map corpus map or option-fuzz job reaches it.",
   "status": "defensive"
  },
  "corners.py::if corner_idx < 0 or corner_idx >= n_corners:::#1": {
@@ -716,7 +740,7 @@
   "status": "defensive"
  },
  "intra_handlers.py::if abs(tgt.x - src.x) >= COORD_TOLERANCE:::#1": {
-  "note": "_route_near_zero_gap_straight: a same-section, non-TB intra edge with |tgt.x - src.x| < COORD_TOLERANCE (1px) and non-zero dy is not constructible, so the straight-return (False) arm is never taken: layering assigns increasing X along edges so the minimum |dx| at _route_intra_section across the corpus is 50px (port spacing / off-track output lead). TB same-track edges that could reach |dx|=0 are intercepted by _route_tb_internal before this handler. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
+  "note": "_route_near_zero_gap_straight: a same-section, non-TB intra edge with |tgt.x - src.x| < COORD_TOLERANCE (1px) and non-zero dy is not constructible, so the straight-return (False) arm is never taken: layering assigns increasing X along edges so the minimum |dx| reaching the intra-section shapes across the corpus is 50px (port spacing / off-track output lead). TB same-track edges that could reach |dx|=0 are intercepted by _route_tb_internal before this handler. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
   "status": "defensive"
  },
  "intra_handlers.py::if dy < -COORD_TOLERANCE_FINE:::#1": {
@@ -1365,6 +1389,10 @@
  },
  "postprocess.py::if ox is None:::#1": {
   "note": "Null guard in _align_uncentered_siblings. The loop iterates visible non-port stations and original_x is built from every non-port station, so ox is always present; the guard never fires.",
+  "status": "defensive"
+ },
+ "postprocess.py::if len(members) >= 2:::#1": {
+  "note": "The co-row spread skips a group with fewer than two diagonal routes left to spread. Every member of a planned group is drawn by a diagonal handler on the shared window, which has a non-zero run, so a group always reaches the spread whole; the skip is a defensive guard.",
   "status": "defensive"
  },
  "rail.py::if conn is not None:::#1": {

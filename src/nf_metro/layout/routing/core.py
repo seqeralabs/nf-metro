@@ -8,6 +8,9 @@ module's public routing surface.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Container
+from dataclasses import dataclass
+from enum import Enum, auto
 from typing import TYPE_CHECKING
 
 from nf_metro.layout.constants import (
@@ -16,6 +19,7 @@ from nf_metro.layout.constants import (
 )
 from nf_metro.layout.route_plan import RouteSystemId
 from nf_metro.layout.route_reservations import reservation_ids_by_claimant_member
+from nf_metro.layout.routing.co_row import CoRowFeeder, plan_co_row_diagonal_groups
 from nf_metro.layout.routing.common import (
     RoutedPath,
 )
@@ -66,12 +70,14 @@ from nf_metro.layout.routing.inter_section_handlers import (  # noqa: F401
     _route_top_entry_l_shape,
     _v1_corner_x,
     classify_inter_section_family,
+    is_inter_section_edge,
 )
 from nf_metro.layout.routing.intra_handlers import (  # noqa: F401
+    _INTRA_SECTION_SHAPES,
     _is_side_branch_ascent,
     _route_diagonal,
     _route_entry_runway,
-    _route_intra_section,
+    intra_co_row_feeder,
 )
 from nf_metro.layout.routing.normalize import (  # noqa: F401
     _align_merge_fed_confluence_to_band,
@@ -139,6 +145,7 @@ from nf_metro.layout.routing.tb_handlers import (  # noqa: F401
     _route_tb_lr_entry,
     _route_tb_lr_exit,
     _route_tb_section,
+    section_link_co_row_feeder,
 )
 from nf_metro.layout.settlement_demand import (
     BoundaryClearanceRequirement,
@@ -148,6 +155,7 @@ from nf_metro.parser.model import (
     Edge,
     LineSpread,
     MetroGraph,
+    Station,
 )
 
 if TYPE_CHECKING:
@@ -194,6 +202,60 @@ def _published_boundary_clearance_owner_ids(
     return (inherited_owner_ids & planned_owner_ids) | new_owner_ids
 
 
+_LocalHandler = Callable[[Edge, Station, Station, _RoutingCtx], RoutedPath | None]
+_FeederBuilder = Callable[[Edge, Station, Station, _RoutingCtx], CoRowFeeder | None]
+
+# First match wins.  A builder answers for its handler when that handler draws
+# the edge as a co-row diagonal: ``section_link_co_row_feeder`` describes
+# ``_route_tb_internal``, the first of ``_route_tb_section``'s shapes, and
+# ``_route_diagonal`` is total, so the chain never falls off the end.
+_LOCAL_EDGE_DISPATCH: tuple[tuple[_LocalHandler, _FeederBuilder | None], ...] = (
+    (_route_tb_section, section_link_co_row_feeder),
+    (_route_entry_runway, None),
+    *((shape, None) for shape in _INTRA_SECTION_SHAPES),
+    (_route_diagonal, intra_co_row_feeder),
+)
+
+
+class _SkipReason(Enum):
+    MERGED = auto()
+    CONVERGENCE = auto()
+    RAIL = auto()
+
+
+@dataclass(frozen=True, slots=True)
+class _EmissionSkip:
+    """Why emission draws no route for an edge.
+
+    *covering* is the planned convergence edge that draws it instead.
+    """
+
+    reason: _SkipReason
+    covering: _EdgeKey | None = None
+
+
+def _emission_skip(
+    edge: Edge, ctx: _RoutingCtx, rail_internal: Container[_EdgeKey]
+) -> _EmissionSkip | None:
+    """Why emission leaves *edge* to another owner, or ``None`` when it routes it."""
+    key = (edge.source, edge.target, edge.line_id)
+    if key in ctx.skip_edges:
+        return _EmissionSkip(_SkipReason.MERGED)
+    covering = (
+        ctx.convergences.covering_edge_for_edge(edge)
+        if ctx.convergences is not None
+        else None
+    )
+    if covering is not None:
+        return _EmissionSkip(
+            _SkipReason.CONVERGENCE,
+            (covering.source, covering.target, covering.line_id),
+        )
+    if key in rail_internal:
+        return _EmissionSkip(_SkipReason.RAIL)
+    return None
+
+
 def _route_classified_edge(
     edge: Edge,
     ctx: _RoutingCtx,
@@ -215,11 +277,42 @@ def _route_classified_edge(
             observer=observer,
             planned_family_id=selected_family,
         )
-    for handler in (_route_tb_section, _route_entry_runway, _route_intra_section):
+    for handler, _builder in _LOCAL_EDGE_DISPATCH:
         route = handler(edge, source, target, ctx)
-        if route is None:
-            continue
-        return route
+        if route is not None:
+            return route
+    return None
+
+
+def _co_row_feeder(
+    edge: Edge, ctx: _RoutingCtx, rail_internal: Container[_EdgeKey]
+) -> CoRowFeeder | None:
+    """*edge* as a co-row feeder when emission draws it as a local diagonal.
+
+    Walks the emission's ownership checks and :data:`_LOCAL_EDGE_DISPATCH`;
+    every handler it consults is pure.
+    """
+    if _emission_skip(edge, ctx, rail_internal) is not None:
+        return None
+    member = (
+        ctx.route_systems.member_for_edge(edge)
+        if ctx.route_systems is not None
+        else None
+    )
+    if member is not None and (
+        member.geometry_plan is not None or member.family_id is not None
+    ):
+        return None
+    source, target = ctx.graph.edge_endpoints(edge)
+    if is_inter_section_edge(edge, source, target, ctx):
+        return None
+    for handler, builder in _LOCAL_EDGE_DISPATCH:
+        if builder is not None:
+            feeder = builder(edge, source, target, ctx)
+            if feeder is not None:
+                return feeder
+        if handler(edge, source, target, ctx) is not None:
+            return None
     return None
 
 
@@ -376,6 +469,10 @@ def _route_edges(  # noqa: C901
         prior_plan=reservations,
         coordinate_translations=reservation_translations,
     )
+    ctx.co_row_diagonal_groups = plan_co_row_diagonal_groups(
+        ctx,
+        feeder_for=lambda edge: _co_row_feeder(edge, ctx, rail_internal),
+    )
     execution = planning.exit_turns
     member_geometry = planning.member_geometry
     convergence_execution = planning.convergences
@@ -443,37 +540,17 @@ def _route_edges(  # noqa: C901
         planned_family_id: RouteFamilyId | None = None,
         geometry_plan: RouteMemberGeometryPlan | None = None,
     ) -> None:
-        if (
-            edge.source,
-            edge.target,
-            edge.line_id,
-        ) in ctx.skip_edges:
-            if observer is not None:
-                observer.record_merge_skip(
-                    (edge.source, edge.target, edge.line_id),
-                    observer.covering_edge((edge.source, edge.target, edge.line_id)),
-                )
-            return
-        planned_covering_edge = (
-            ctx.convergences.covering_edge_for_edge(edge)
-            if ctx.convergences is not None
-            else None
-        )
-        if planned_covering_edge is not None:
-            if observer is not None:
-                observer.record_merge_skip(
-                    (edge.source, edge.target, edge.line_id),
-                    (
-                        planned_covering_edge.source,
-                        planned_covering_edge.target,
-                        planned_covering_edge.line_id,
-                    ),
-                )
-            return
-        if (edge.source, edge.target, edge.line_id) in rail_internal:
-            return
-
         edge_key = (edge.source, edge.target, edge.line_id)
+        skip = _emission_skip(edge, ctx, rail_internal)
+        if skip is not None:
+            if observer is not None:
+                if skip.reason is _SkipReason.MERGED:
+                    observer.record_merge_skip(
+                        edge_key, observer.covering_edge(edge_key)
+                    )
+                elif skip.reason is _SkipReason.CONVERGENCE:
+                    observer.record_merge_skip(edge_key, skip.covering)
+            return
 
         result = (
             fresh_member_route(geometry_plan, edge)

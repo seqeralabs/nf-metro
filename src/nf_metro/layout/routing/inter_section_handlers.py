@@ -2176,6 +2176,15 @@ def _route_inter_section(
     return route
 
 
+def is_inter_section_edge(
+    edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
+) -> bool:
+    """Whether both ends of *edge* are boundary ports or junctions."""
+    return (src.is_port or edge.source in ctx.junction_ids) and (
+        tgt.is_port or edge.target in ctx.junction_ids
+    )
+
+
 def classify_inter_section_family(
     edge: Edge,
     src: Station,
@@ -2183,10 +2192,7 @@ def classify_inter_section_family(
     ctx: _RoutingCtx,
 ) -> RouteFamilyId | None:
     """Return the production family selected before its builder is invoked."""
-    is_inter = (src.is_port or edge.source in ctx.junction_ids) and (
-        tgt.is_port or edge.target in ctx.junction_ids
-    )
-    if not is_inter:
+    if not is_inter_section_edge(edge, src, tgt, ctx):
         return None
     facts = _build_inter_facts(edge, src, tgt, ctx)
     rule = _match_inter_section_rule(facts)

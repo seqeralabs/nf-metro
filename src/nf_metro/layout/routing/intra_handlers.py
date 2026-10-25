@@ -1,11 +1,11 @@
-"""Intra-section routing: entry runway, shape dispatch, and in-section diagonals.
+"""Intra-section routing: entry runway, intra-section shapes, and in-section diagonals.
 
-``_route_intra_section`` is an ordered dispatch over the distinct shapes an
-edge inside (or leaving) a section can take -- a fold gutter, a perpendicular
-exit, two straight cases -- with the horizontal-diagonal-horizontal run as the
-fall-through.  ``_route_entry_runway`` is a sibling shape kept as its own
-ordered local handler in ``core.py`` because it claims an edge before the
-section's internal handlers run.
+``_INTRA_SECTION_SHAPES`` orders the distinct shapes an edge inside (or
+leaving) a section can take -- a fold gutter, a perpendicular exit, two straight
+cases -- and :func:`_route_diagonal`'s horizontal-diagonal-horizontal run is the
+fall-through.  ``core._LOCAL_EDGE_DISPATCH`` walks them after
+``_route_entry_runway``, which claims an edge before the section's internal
+shapes run.
 """
 
 from __future__ import annotations
@@ -41,6 +41,12 @@ from nf_metro.layout.routing.bundle import (
 )
 from nf_metro.layout.routing.centrelines import (
     gather_member_edges,
+)
+from nf_metro.layout.routing.co_row import (
+    CoRowFeeder,
+    DiagonalWindow,
+    co_row_feeder,
+    run_and_lateral,
 )
 from nf_metro.layout.routing.common import (
     RoutedPath,
@@ -434,22 +440,6 @@ _INTRA_SECTION_SHAPES = (
 )
 
 
-def _route_intra_section(
-    edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
-) -> RoutedPath | None:
-    """Route an intra-section edge via the first shape that claims it.
-
-    Each shape in :data:`_INTRA_SECTION_SHAPES` returns a :class:`RoutedPath`
-    when it owns the edge or ``None`` to pass; :func:`_route_diagonal` is the
-    fall-through.
-    """
-    for shape in _INTRA_SECTION_SHAPES:
-        result = shape(edge, src, tgt, ctx)
-        if result is not None:
-            return result
-    return _route_diagonal(edge, src, tgt, ctx)
-
-
 def _is_side_branch_ascent(
     edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
 ) -> bool:
@@ -614,6 +604,60 @@ def _route_diagonal(
     edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
 ) -> RoutedPath:
     """Route with horizontal runs and a 45-degree diagonal transition."""
+    key = (edge.source, edge.target, edge.line_id)
+    group = ctx.co_row_diagonal_groups.get(key)
+    if group is not None:
+        diag_start_x, diag_end_x = group.window_for(key)
+    else:
+        window = _diagonal_window(edge, src, tgt, ctx)
+        diag_start_x, diag_end_x = window.start, window.end
+
+    return RoutedPath(
+        edge=edge,
+        line_id=edge.line_id,
+        points=diagonal_centreline(
+            _diagonal_direction(src, ctx),
+            (src.x, src.y),
+            (tgt.x, tgt.y),
+            diag_start_x,
+            diag_end_x,
+        ),
+    )
+
+
+def _diagonal_direction(src: Station, ctx: _RoutingCtx) -> str:
+    section = ctx.graph.sections.get(src.section_id or "")
+    return section.direction if section else "LR"
+
+
+def intra_co_row_feeder(
+    edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
+) -> CoRowFeeder:
+    """*edge* as a co-row feeder of :func:`_route_diagonal`.
+
+    The route's offsets are deferred lateral shifts, so each lane is drawn at
+    its station's lateral plus that station's offset for the line.
+    """
+    direction = _diagonal_direction(src, ctx)
+    offsets = ctx.station_offsets or {}
+    src_lane = run_and_lateral(src, direction)[1]
+    tgt_lane = run_and_lateral(tgt, direction)[1]
+    return co_row_feeder(
+        edge,
+        src,
+        direction,
+        _diagonal_window(edge, src, tgt, ctx),
+        (
+            src_lane + offsets.get((edge.source, edge.line_id), 0.0),
+            tgt_lane + offsets.get((edge.target, edge.line_id), 0.0),
+        ),
+    )
+
+
+def _diagonal_window(
+    edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
+) -> DiagonalWindow:
+    """The run-axis diagonal *edge* takes on its own, with its endpoint straights."""
     sx, sy = src.x, src.y
     tx, ty = tgt.x, tgt.y
     dx = tx - sx
@@ -751,12 +795,4 @@ def _route_diagonal(
         is_fork_flag,
         is_join_flag,
     )
-
-    direction = section.direction if section else "LR"
-    return RoutedPath(
-        edge=edge,
-        line_id=edge.line_id,
-        points=diagonal_centreline(
-            direction, (sx, sy), (tx, ty), diag_start_x, diag_end_x
-        ),
-    )
+    return DiagonalWindow(diag_start_x, diag_end_x, src_min, tgt_min)
