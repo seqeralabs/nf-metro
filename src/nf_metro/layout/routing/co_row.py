@@ -136,8 +136,9 @@ def shared_co_row_window(
     step apart across the diagonal.
 
     A member moved onto that window may meet another diagonal of the section
-    (*neighbours*) where both are diagonal, crossing it at a shallow angle or
-    running alongside it, where on its own straight it would cross steeply.
+    (*neighbours*) stepping the same way, where both are diagonal: it crosses
+    that diagonal at a shallow angle or runs alongside it, where on its own
+    straight it would cross steeply.
     The window then slides toward the target past those diagonals, under the
     same checks, or the group is declined.
     """
@@ -221,12 +222,21 @@ def _past_neighbours(
 
 
 def _diagonals_meet(first: _Lane, second: _Lane, tolerance: float) -> bool:
-    """Whether two lanes cross or close within *tolerance* where both are diagonal."""
+    """Whether two lanes stepping the same way meet where both are diagonal.
+
+    Meeting is crossing or closing within *tolerance*.  Lanes stepping opposite
+    ways cross at the sum of their slopes, steeper than either straight would.
+    """
     low = max(min(first.start, first.end), min(second.start, second.end))
     high = min(max(first.start, first.end), max(second.start, second.end))
     near = first.before(low) - second.before(low)
     far = first.before(high) - second.before(high)
-    return high > low and (near * far <= 0 or min(abs(near), abs(far)) < tolerance)
+    same_way = (first.target - first.source) * (second.target - second.source) > 0
+    return (
+        high > low
+        and same_way
+        and (near * far <= 0 or min(abs(near), abs(far)) < tolerance)
+    )
 
 
 def _diagonal_separation(

@@ -56,8 +56,8 @@ Gates with an un-exercised arm:
 
 | Line | Gate | Un-exercised arm(s) | Triage |
 | ---: | --- | --- | --- |
-| 157 | `if _can_share(feeders, shared, flow, target_run, tolerance) and not (` | `->L161` | **needs-review** -- shared_co_row_window declines a group whose window, slid past the neighbouring diagonals a moved member would meet, breaks a member's straights, no longer untangles the group, runs two lanes together, or lands on another neighbour. Reachable: a neighbour diagonal ending close to the target leaves too little target straight (pinned by test_shared_window_that_cannot_clear_a_neighbour_is_declined); no swept fixture presents one. |
-| 244 | `if source_gap * target_gap < 0:` | `->L245` | **needs-review** -- _diagonal_separation skips a pair whose lanes swap sides between the source and target ends: across one shared window they cross once rather than run together, so there is no gap to keep. Reachable in a firing group that also holds a pair with a forced single crossing; no swept fixture presents one. |
+| 158 | `if _can_share(feeders, shared, flow, target_run, tolerance) and not (` | `->L162` | **needs-review** -- shared_co_row_window declines a group whose window, slid past the neighbouring diagonals a moved member would meet, breaks a member's straights, no longer untangles the group, runs two lanes together, or lands on another neighbour. Reachable: a neighbour diagonal ending close to the target leaves too little target straight (pinned by test_shared_window_that_cannot_clear_a_neighbour_is_declined); no swept fixture presents one. |
+| 254 | `if source_gap * target_gap < 0:` | `->L255` | **needs-review** -- _diagonal_separation skips a pair whose lanes swap sides between the source and target ends: across one shared window they cross once rather than run together, so there is no gap to keep. Reachable in a firing group that also holds a pair with a forced single crossing; no swept fixture presents one. |
 
 ## `common.py`
 

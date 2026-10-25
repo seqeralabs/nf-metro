@@ -349,3 +349,8 @@ def test_shared_window_that_cannot_clear_a_neighbour_is_declined() -> None:
 def test_neighbour_diagonal_outside_the_shared_window_is_left_alone() -> None:
     neighbour = _neighbour((250.0, 280.0), (-30.0, 0.0))
     assert _solve_beside(neighbour, target_run=366.0) == (300.0, 330.0)
+
+
+def test_neighbour_diagonal_stepping_the_other_way_is_left_alone() -> None:
+    neighbour = _neighbour((300.0, 330.0), (30.0, 0.0))
+    assert _solve_beside(neighbour, target_run=366.0) == (300.0, 330.0)
