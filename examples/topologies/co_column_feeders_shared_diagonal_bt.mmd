@@ -7,8 +7,8 @@ graph LR
     subgraph sec0 [Bam]
         %%metro direction: BT
         s0n0[polish]
-        s0n1[fastqc_merge_sort]
-        s0n2[pca_call]
+        s0n1[sort]
+        s0n2[call]
         s0n3[report]
         s0n1 -->|l1| s0n3
         s0n0 -->|l2| s0n1
@@ -17,11 +17,9 @@ graph LR
     end
     subgraph sec2 [Trim]
         s2n0[align]
-        s2n2[trim]
         s2n4[summarise]
-        s2n0 -->|l0| s2n2
-        s2n2 -->|l0,l1,l2| s2n4
+        s2n0 -->|l0,l2| s2n4
     end
     s0n0 -->|l0| s2n0
-    s0n3 -->|l1,l2| s2n2
+    s0n3 -->|l2| s2n0
     s0n2 -->|l2| s2n4

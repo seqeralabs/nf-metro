@@ -10,6 +10,7 @@ exactly as its members would alone.
 from __future__ import annotations
 
 import itertools
+import math
 import warnings
 from pathlib import Path
 
@@ -30,10 +31,6 @@ from nf_metro.themes import resolve_theme
 TOPOLOGIES = Path(__file__).resolve().parent.parent / "examples" / "topologies"
 SHARED_DIAGONAL = TOPOLOGIES / "co_row_feeders_shared_diagonal.mmd"
 SHARED_DIAGONAL_BT = TOPOLOGIES / "co_column_feeders_shared_diagonal_bt.mmd"
-
-# Spread that ``_spread_diagonal_bundles`` puts between two lanes sharing one
-# diagonal, on each side of the centreline.
-_BUNDLE_SPREAD = 0.6
 
 # An entry-port feeder and a bypass-helper feeder of one station leave one row
 # in opposite lane order to the one they arrive in, so they cross exactly once
@@ -101,12 +98,16 @@ def _render_without_groups(
         return _render(text, source_dir)[1]
 
 
-def _diagonal_start(points: list[tuple[float, float]]) -> float:
-    source_y = points[0][1]
-    for here, after in itertools.pairwise(points):
-        if abs(after[1] - source_y) > COORD_TOLERANCE:
-            return here[0]
-    raise AssertionError(f"route never leaves its source row: {points}")
+def _diagonal_span(points: list[tuple[float, float]]) -> tuple[float, float]:
+    """The x-span over which a route moves from its source row to its target row."""
+    source_y, target_y = points[0][1], points[-1][1]
+    leave = next(
+        here[0]
+        for here, after in itertools.pairwise(points)
+        if abs(after[1] - source_y) > COORD_TOLERANCE
+    )
+    arrive = next(x for x, y in points if abs(y - target_y) <= COORD_TOLERANCE)
+    return leave, arrive
 
 
 def _proper_crossings(
@@ -146,21 +147,21 @@ def test_feeders_of_one_exit_port_never_cross_twice(path: Path) -> None:
     assert [pair for pair in pairs if pair[2] > 1] == []
 
 
-def test_co_row_feeders_dive_together() -> None:
+def test_co_row_feeders_turn_together() -> None:
     plan, _svg = _render(SHARED_DIAGONAL.read_text(), SHARED_DIAGONAL.parent)
     feeders = [
         points
         for route, points in zip(plan.routes, plan.route_polylines, strict=True)
         if route.edge.target.startswith("sec0__exit_right")
-        and points[0][1] < points[-1][1] - COORD_TOLERANCE
+        and abs(points[0][1] - points[-1][1]) > COORD_TOLERANCE
     ]
     assert len(feeders) == 2
 
     first, second = feeders
     assert _proper_crossings(first, second) == []
-    assert abs(_diagonal_start(first) - _diagonal_start(second)) <= (
-        2 * _BUNDLE_SPREAD + COORD_TOLERANCE
-    )
+    first_span, second_span = _diagonal_span(first), _diagonal_span(second)
+    overlap = min(first_span[1], second_span[1]) - max(first_span[0], second_span[0])
+    assert overlap >= min(span[1] - span[0] for span in (first_span, second_span)) / 2
 
 
 @pytest.mark.parametrize(
@@ -192,6 +193,40 @@ def test_group_with_a_member_another_handler_draws_is_declined(
     monkeypatch.setattr(core, "_co_row_feeder", helper_drawn_elsewhere)
     declined = _render(text, SHARED_DIAGONAL.parent)[1]
     assert declined == _render_without_groups(monkeypatch, text, SHARED_DIAGONAL.parent)
+
+
+def _crossing_angles(
+    first: list[tuple[float, float]], second: list[tuple[float, float]]
+) -> list[float]:
+    def heading(a: tuple[float, float], b: tuple[float, float]) -> float:
+        return math.degrees(math.atan2(b[1] - a[1], b[0] - a[0])) % 180
+
+    angles = []
+    for a, b in itertools.pairwise(first):
+        for c, d in itertools.pairwise(second):
+            if segments_properly_cross(a, b, c, d, reject_collinear_touch=False):
+                turn = abs(heading(a, b) - heading(c, d))
+                angles.append(min(turn, 180 - turn))
+    return angles
+
+
+def test_shared_diagonal_crosses_a_neighbouring_diagonal_steeply() -> None:
+    plan, _svg = _render(SHARED_DIAGONAL_BT.read_text(), SHARED_DIAGONAL_BT.parent)
+    routes = list(zip(plan.routes, plan.route_polylines, strict=True))
+    feeders = [
+        (route, points)
+        for route, points in routes
+        if route.edge.target.startswith("sec0__exit_")
+    ]
+    angles = [
+        angle
+        for feeder, feeder_points in feeders
+        for route, points in routes
+        if route.line_id != feeder.line_id
+        for angle in _crossing_angles(feeder_points, points)
+    ]
+    assert angles
+    assert min(angles) >= 20.0
 
 
 _SOURCE_ROW = 120.0
@@ -275,3 +310,42 @@ def test_shared_window_running_two_lines_together_is_declined() -> None:
     far = _feeder("far", 88.0, (321.0, 351.0), (4.0, 8.0))
     near = _feeder("near", 280.0, (300.0, 330.0), (4.0, 4.0))
     assert _solve(far, near) is None
+
+
+def _neighbour(window: tuple[float, float], lanes: tuple[float, float]) -> CoRowFeeder:
+    return CoRowFeeder(
+        key=("near", "other", "line_near"),
+        source_run=280.0,
+        window=DiagonalWindow(window[0], window[1], 10.0, 10.0),
+        source_lateral=_SOURCE_ROW + lanes[0],
+        target_lateral=_SOURCE_ROW + lanes[1],
+    )
+
+
+def _solve_beside(
+    neighbour: CoRowFeeder, *, target_run: float
+) -> tuple[float, float] | None:
+    far = _feeder("far", 88.0, (321.0, 351.0), (8.0, 8.0))
+    near = _feeder("near", 280.0, (300.0, 330.0), (4.0, 4.0))
+    return shared_co_row_window(
+        (far, near),
+        flow=1.0,
+        target_run=target_run,
+        lane_step=4.0,
+        neighbours=lambda: (neighbour,),
+    )
+
+
+def test_shared_window_slides_past_a_neighbouring_diagonal() -> None:
+    neighbour = _neighbour((300.0, 330.0), (0.0, 30.0))
+    assert _solve_beside(neighbour, target_run=400.0) == (330.0, 360.0)
+
+
+def test_shared_window_that_cannot_clear_a_neighbour_is_declined() -> None:
+    neighbour = _neighbour((300.0, 330.0), (0.0, 30.0))
+    assert _solve_beside(neighbour, target_run=366.0) is None
+
+
+def test_neighbour_diagonal_outside_the_shared_window_is_left_alone() -> None:
+    neighbour = _neighbour((250.0, 280.0), (-30.0, 0.0))
+    assert _solve_beside(neighbour, target_run=366.0) == (300.0, 330.0)

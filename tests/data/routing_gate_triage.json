@@ -11,16 +11,8 @@
   "note": "The lane-change step reads its run direction off the connector's own two endpoints rather than assuming an axis. segment_direction returns None for a leg that is diagonal or collapsed, which the straight-connector families that reach this helper never hand it: both settle their endpoints on one row or one column before routing, so no fixture can present a diagonal pair here.",
   "status": "defensive"
  },
- "co_row.py::source_straight < f.window.source_floor - COORD_TOLERANCE_FINE::#1": {
-  "note": "Co-row group decline when the shared window (the nearest source's) starts inside another member's source straight. Every other member's source sits farther back than the nearest one, so this needs a member whose own floor (fork label clearance, terminus lead, off-track lead) exceeds its longer run to the shared start. Reachable but rare: no swept fixture, map in the 8,000-map corpus or option-fuzz job declines on it. Pinned by test_shared_window_below_a_member_source_floor_is_declined.",
-  "status": "needs-review"
- },
- "co_row.py::or target_straight < f.window.target_floor - COORD_TOLERANCE_FINE::#1": {
-  "note": "Co-row group decline when the shared window ends inside another member's target straight: the nearest member's short run fell back to the bare minimum target straight while a farther member keeps the target's join-label clearance. The 8,000-map corpus reaches it (realistic/f8403712, into fastqc_summarise), but that map aborts later with CurveInvariantError with and without the rule, and no reduction of it renders. Pinned by test_shared_window_inside_a_member_target_floor_is_declined.",
-  "status": "needs-review"
- },
- "co_row.py::if any(::#1": {
-  "note": "Co-row group decline when the shared window would run two lines from different sources closer than half a lane step apart across the diagonal, even after the diagonal spread pass slides the group to restore its target-end gap. Reachable (two sources whose lanes sit on one lateral at the source end); no swept fixture presents one. Pinned by test_shared_window_running_two_lines_together_is_declined.",
+ "co_row.py::if _can_share(feeders, shared, flow, target_run, tolerance) and not (::#1": {
+  "note": "shared_co_row_window declines a group whose window, slid past the neighbouring diagonals a moved member would meet, breaks a member's straights, no longer untangles the group, runs two lanes together, or lands on another neighbour. Reachable: a neighbour diagonal ending close to the target leaves too little target straight (pinned by test_shared_window_that_cannot_clear_a_neighbour_is_declined); no swept fixture presents one.",
   "status": "needs-review"
  },
  "co_row.py::if source_gap * target_gap < 0:::#1": {
@@ -723,6 +715,18 @@
   "note": "Entry-runway trunk-row non-consumer bypass (#1293). Both-tracks-blocked fall-through: a non-consumer sits on BOTH the entry track and the target track, leaving no clear runway track. No corpus fixture has a doubly-blocked flow-side entry; defensive.",
   "status": "defensive"
  },
+ "intra_handlers.py::for bbox in footprints:::#1": {
+  "note": "Trunk-row entry bow (#1315). Exercised by tests/fixtures/regressions/entry_trunk_row_bow.mmd, which is kept out of the validate=True corpus and the gate-coverage corpus (it exercises the always-on render path only), so no clean corpus fixture takes this arm. The render-path invariant test test_entry_trunk_row_bow_clears_non_consumer covers the drawn detour.",
+  "status": "defensive"
+ },
+ "intra_handlers.py::for k in range(len(points) - 1):::#1": {
+  "note": "Trunk-row entry bow (#1315). Exercised by tests/fixtures/regressions/entry_trunk_row_bow.mmd, which is kept out of the validate=True corpus and the gate-coverage corpus (it exercises the always-on render path only), so no clean corpus fixture takes this arm. The render-path invariant test test_entry_trunk_row_bow_clears_non_consumer covers the drawn detour.",
+  "status": "defensive"
+ },
+ "intra_handlers.py::if _bow_clears_markers(points, section_stations):::#1": {
+  "note": "Trunk-row entry bow (#1315). Retry arm (the roomier side's bow rakes a marker, so the other side is tried): _bow_side_order puts the side with the farthest off-trunk marker first, and the fixed bump height clears it, so no corpus fixture falls to the second side; defensive.",
+  "status": "defensive"
+ },
  "tb_handlers.py::if abs(diag_start - sp) <= abs(last_blocker - sp):::#1": {
   "note": "Entry-runway trunk-row non-consumer bypass (#1293). Descent-clips-blocker fall-through: the join-biased diagonal cannot start past the furthest target-row non-consumer (a blocker within diagonal_run+tgt_min of the target). Corpus blockers sit far enough forward; defensive.",
   "status": "defensive"
@@ -761,6 +765,10 @@
  },
  "intra_handlers.py::if over_end - over_start < 2 * ctx.curve_radius:::#1": {
   "note": "Trunk-row entry bow (#1315). No-room return: the flat run over the blocker(s) is shorter than two corner radii, so the bump's corners would overlap. The blocker-span-plus-clearance always exceeds 2*CURVE_RADIUS for corpus fixtures; defensive.",
+  "status": "defensive"
+ },
+ "intra_handlers.py::if segment_intersects_bbox(x1, y1, x2, y2, bbox):::#1": {
+  "note": "Trunk-row entry bow (#1315). Exercised by tests/fixtures/regressions/entry_trunk_row_bow.mmd, which is kept out of the validate=True corpus and the gate-coverage corpus (it exercises the always-on render path only), so no clean corpus fixture takes this arm. The render-path invariant test test_entry_trunk_row_bow_clears_non_consumer covers the drawn detour.",
   "status": "defensive"
  },
  "intra_handlers.py::if sibling is None:::#1": {
@@ -1834,10 +1842,6 @@
  "tb_handlers.py::if via.is_port or via.section_id != section.id:::#1": {
   "note": "A line enters a section once, through the bypass's own source port, which the previous gate already filters, and a chain link into an internal station starts inside the section; so the skip arm never fires. The pass arm is reached by `tests/test_flow_entry_bypass_crossings.py` (_SAME_LINE_CHAIN, _SINGLE_BYPASS, _TWO_COLUMN_CHAIN); the skip arm by no swept, test or generated map (0 of 8000).",
   "status": "defensive"
- },
- "tb_handlers.py::if own is None:::#1": {
-  "note": "section_link_co_row_feeder declines a vertical-flow link that _section_link_route draws as a straight drop (both lanes share one X), so a co-column candidate row holding such a link is declined whole. Reachable when a straight continuation and a diagonal feeder share a target and a source column; no swept fixture presents one.",
-  "status": "needs-review"
  },
  "corridor_cohort_integration.py::if (self.anchor_role_id is None) == (self.anchor_coordinate is None):::#1": {
   "note": "Constructor invariant of the directed runway: it is anchored to a controlled role or to a fixed coordinate, never both and never neither. The one production constructor (add_runway in convergences.py) always passes anchor_coordinate and no anchor_role_id, so the raise arm stays un-exercised.",

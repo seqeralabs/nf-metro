@@ -21,6 +21,7 @@ import math
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING
 
 from nf_metro.layout.constants import COORD_TOLERANCE, COORD_TOLERANCE_FINE
@@ -121,6 +122,7 @@ def shared_co_row_window(
     flow: float,
     target_run: float,
     lane_step: float,
+    neighbours: Callable[[], Sequence[CoRowFeeder]] = tuple,
 ) -> tuple[float, float] | None:
     """The window *feeders* share, or ``None`` when they keep their own.
 
@@ -132,6 +134,12 @@ def shared_co_row_window(
     declined when it breaks another member's source or target straight, or
     when it runs two lines from different sources closer than half a lane
     step apart across the diagonal.
+
+    A member moved onto that window may meet another diagonal of the section
+    (*neighbours*) where both are diagonal, crossing it at a shallow angle or
+    running alongside it, where on its own straight it would cross steeply.
+    The window then slides toward the target past those diagonals, under the
+    same checks, or the group is declined.
     """
     tolerance = lane_step / 2
     if max(flow * f.source_run for f in feeders) >= min(
@@ -140,30 +148,85 @@ def shared_co_row_window(
         return None
     nearest = max(feeders, key=lambda f: flow * f.source_run)
     shared = _own_window(nearest)
-    if not any(
+    if not _can_share(feeders, shared, flow, target_run, tolerance):
+        return None
+    others = neighbours()
+    if not _meets_a_neighbour(feeders, shared, others, flow, tolerance):
+        return shared
+    shared = _past_neighbours(shared, others, flow)
+    if _can_share(feeders, shared, flow, target_run, tolerance) and not (
+        _meets_a_neighbour(feeders, shared, others, flow, tolerance)
+    ):
+        return shared
+    return None
+
+
+def _can_share(
+    feeders: Sequence[CoRowFeeder],
+    shared: tuple[float, float],
+    flow: float,
+    target_run: float,
+    tolerance: float,
+) -> bool:
+    pairs = [
+        (a, b) for a, b in itertools.combinations(feeders, 2) if a.key[0] != b.key[0]
+    ]
+    untangles = any(
         _crossings(
             _lane(a, _own_window(a), flow), _lane(b, _own_window(b), flow), tolerance
         )
         > _crossings(_lane(a, shared, flow), _lane(b, shared, flow), tolerance)
-        for a, b in itertools.combinations(feeders, 2)
-        if a.key[0] != b.key[0]
-    ):
-        return None
-    for f in feeders:
-        source_straight = flow * (shared[0] - f.source_run)
-        target_straight = flow * (target_run - shared[1])
-        if (
-            source_straight < f.window.source_floor - COORD_TOLERANCE_FINE
-            or target_straight < f.window.target_floor - COORD_TOLERANCE_FINE
-        ):
-            return None
-    if any(
-        _diagonal_separation(a, b, shared) < tolerance
-        for a, b in itertools.combinations(feeders, 2)
-        if a.key[0] != b.key[0] and a.key[2] != b.key[2]
-    ):
-        return None
-    return shared
+        for a, b in pairs
+    )
+    keeps_straights = all(
+        flow * (shared[0] - f.source_run)
+        >= f.window.source_floor - COORD_TOLERANCE_FINE
+        and flow * (target_run - shared[1])
+        >= f.window.target_floor - COORD_TOLERANCE_FINE
+        for f in feeders
+    )
+    keeps_apart = all(
+        _diagonal_separation(a, b, shared) >= tolerance
+        for a, b in pairs
+        if a.key[2] != b.key[2]
+    )
+    return untangles and keeps_straights and keeps_apart
+
+
+def _meets_a_neighbour(
+    feeders: Sequence[CoRowFeeder],
+    window: tuple[float, float],
+    neighbours: Sequence[CoRowFeeder],
+    flow: float,
+    tolerance: float,
+) -> bool:
+    moved = [_lane(f, window, flow) for f in feeders if _own_window(f) != window]
+    others = [_lane(n, _own_window(n), flow) for n in neighbours]
+    return any(
+        _diagonals_meet(lane, other, tolerance) for lane in moved for other in others
+    )
+
+
+def _past_neighbours(
+    window: tuple[float, float], neighbours: Sequence[CoRowFeeder], flow: float
+) -> tuple[float, float]:
+    """*window* slid along the flow until it starts where overlapping diagonals end."""
+    start, end = sorted((flow * window[0], flow * window[1]))
+    spans = [sorted((flow * n.window.start, flow * n.window.end)) for n in neighbours]
+    clear = max(
+        (high for low, high in spans if low < end and high > start), default=start
+    )
+    shift = flow * (clear - start)
+    return window[0] + shift, window[1] + shift
+
+
+def _diagonals_meet(first: _Lane, second: _Lane, tolerance: float) -> bool:
+    """Whether two lanes cross or close within *tolerance* where both are diagonal."""
+    low = max(min(first.start, first.end), min(second.start, second.end))
+    high = min(max(first.start, first.end), max(second.start, second.end))
+    near = first.before(low) - second.before(low)
+    far = first.before(high) - second.before(high)
+    return high > low and (near * far <= 0 or min(abs(near), abs(far)) < tolerance)
 
 
 def _diagonal_separation(
@@ -285,6 +348,9 @@ def plan_co_row_diagonal_groups(
                 flow=flow,
                 target_run=target_run,
                 lane_step=ctx.offset_step,
+                neighbours=partial(
+                    _section_diagonals, ctx, row[0][0], feeder_for, feeders
+                ),
             )
             if window is None:
                 continue
@@ -297,3 +363,21 @@ def plan_co_row_diagonal_groups(
             for f in feeders:
                 groups[f.key] = group
     return groups
+
+
+def _section_diagonals(
+    ctx: _RoutingCtx,
+    member: Edge,
+    feeder_for: Callable[[Edge], CoRowFeeder | None],
+    members: Sequence[CoRowFeeder],
+) -> list[CoRowFeeder]:
+    """The local diagonals leaving *member*'s section that are not in *members*."""
+    graph = ctx.graph
+    section_id = graph.stations[member.source].section_id
+    keys = {f.key for f in members}
+    feeders = (
+        feeder_for(edge)
+        for edge in graph.edges
+        if graph.stations[edge.source].section_id == section_id
+    )
+    return [f for f in feeders if f is not None and f.key not in keys]

@@ -78,7 +78,8 @@ Inter-section L-shapes connect the sections, TB-section routing applies inside t
 
 Both diagonal handlers, `_route_diagonal` and the vertical-flow `_section_link_route`, pick each edge's own window, except for a co-row group (`co_row.py`): feeders of one target whose sources ride one row (one column in a vertical-flow section) together and whose own windows would cross twice.
 After route-system planning, and before any edge is emitted, `plan_co_row_diagonal_groups` gives such a group the window of the member whose source sits nearest the target.
-A group is declined when any member is drawn by another handler, or when that window breaks a member's endpoint straights.
+When that window would put a moved member onto another diagonal of the section, where the two would cross at a shallow angle or run together, the window slides toward the target past that diagonal.
+A group is declined when any member is drawn by another handler, or when its window breaks a member's endpoint straights.
 
 After all edges are routed, `route_edges` runs a series of post-passes that adjust the assembled polylines as a set, covering diagonal spreading, gap and trunk slot materialization, and same-line coincidence.
 Source-turn segments, member-template gap channels, and the convergence trunks and joins the planners own are immutable during these passes.
