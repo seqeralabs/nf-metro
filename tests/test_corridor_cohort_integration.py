@@ -1355,6 +1355,7 @@ def test_problem_rejects_an_infeasible_fixed_fixed_footprint_order() -> None:
             8.0,
             footprint_model,
             {},
+            corner_neighbours={},
         )
 
 
@@ -2310,7 +2311,9 @@ def test_endpoint_lanes_rank_past_an_interleaved_fixed_member(
     roles.update({item.claim_id: cci.CorridorCohortClaimRole.FIXED for item in fixed})
     footprint_model = _MemberFootprintModel((), (), {}, (), (), ())
 
-    problem = cci._problem(claims, roles, True, step, 8.0, footprint_model, {})
+    problem = cci._problem(
+        claims, roles, True, step, 8.0, footprint_model, {}, corner_neighbours={}
+    )
 
     assert {
         (equality.member_id, equality.obstacle_id)
@@ -2592,3 +2595,414 @@ def test_member_geometry_emission_rejects_a_moved_owned_point(
 
     with pytest.raises(RuntimeError, match="owned segment"):
         real_validate([route], execution)
+
+
+# --- Corner orders from the run a lane pair turns off together ---
+
+_TURN_RESERVATIONS = (
+    (
+        1,
+        "reservation:descent",
+        ColumnGapRegion(0, 1),
+        CorridorOrientation.VERTICAL,
+        Direction.D,
+    ),
+    (
+        2,
+        "reservation:run",
+        RowGapRegion(1, 2),
+        CorridorOrientation.HORIZONTAL,
+        Direction.R,
+    ),
+)
+
+
+def _descend_then_run(
+    line_id: str,
+    target_id: str,
+    points: list[tuple[float, float]],
+    *,
+    lane_rank: int,
+    path_rank: int,
+    slot: float | None = None,
+    slot_rank: int | None = None,
+) -> tuple[tuple[CorridorCohortLedgerClaim, ...], CorridorCohortTarget]:
+    """A route claimed on its column-gap descent (segment 1) and the row-gap
+    run it turns right onto (segment 2).
+
+    A route given a *slot* lands in ``cohort:<target_id>``, so its run is that
+    cohort's destination claim.
+    """
+    member_id = f"{line_id}->{target_id}"
+    edge_key = ("junction", target_id, line_id)
+    cohort_id = None if slot is None else f"cohort:{target_id}"
+    claims = tuple(
+        CorridorCohortLedgerClaim(
+            claim_id=f"{reservation_id}|{member_id}",
+            reservation_id=reservation_id,
+            reservation_rank=segment_rank,
+            claim_rank=path_rank,
+            region=region,
+            orientation=orientation,
+            direction=direction,
+            lane_rank=lane_rank,
+            member_id=member_id,
+            member_geometry_plan_id=f"plan:{member_id}",
+            edge_key=edge_key,
+            family_id=RouteFamilyId.SAME_Y_STRAIGHT,
+            connector_ids=(f"connector:{member_id}",),
+            segment_rank=segment_rank,
+            path_rank=path_rank,
+            endpoint_cohort_id=cohort_id if segment_rank == 2 else None,
+            endpoint_network_rank=slot_rank if segment_rank == 2 else None,
+            destination_boundary_carrier=False,
+            destination_boundary_axis_sign=(
+                1 if cohort_id is not None and segment_rank == 2 else None
+            ),
+            network_id=f"network:{line_id}",
+            reservation_complete=True,
+        )
+        for segment_rank, reservation_id, region, orientation, direction in (
+            _TURN_RESERVATIONS
+        )
+    )
+    target = CorridorCohortTarget(
+        member_id,
+        f"plan:{member_id}",
+        edge_key,
+        RouteFamilyId.SAME_Y_STRAIGHT,
+        (f"connector:{member_id}",),
+        _mutable_route(
+            source="junction", target=target_id, line_id=line_id, points=points
+        ),
+        True,
+        endpoint_lane_axis=None if slot is None else 1,
+        endpoint_lane_coordinate=slot,
+        network_id=f"network:{line_id}",
+    )
+    return claims, target
+
+
+def _compile_turning_routes(
+    *members: tuple[tuple[CorridorCohortLedgerClaim, ...], CorridorCohortTarget],
+) -> cci.CorridorCohortPlan:
+    cohorts: dict[str, set[str]] = {}
+    for claims, _target in members:
+        for claim in claims:
+            if claim.endpoint_cohort_id is not None:
+                cohorts.setdefault(claim.endpoint_cohort_id, set()).add(claim.member_id)
+    ledger = CorridorCohortLedger(
+        claims=tuple(claim for claims, _target in members for claim in claims),
+        endpoint_members=tuple(
+            (cohort_id, frozenset(member_ids))
+            for cohort_id, member_ids in sorted(cohorts.items())
+        ),
+        eligible_member_ids=frozenset(target.member_id for _claims, target in members),
+        ambiguous_endpoint_cohort_ids=frozenset(),
+        offset_step=4.0,
+    )
+    return cci.compile_corridor_cohort_plan(
+        ledger, tuple(target for _claims, target in members)
+    )
+
+
+def _run_coordinates(plan: cci.CorridorCohortPlan) -> dict[str, float]:
+    return {
+        allocation.member_id: allocation.coordinate
+        for allocation in plan.allocations
+        if allocation.segment_rank == 2
+    }
+
+
+def _split_line_beside_a_lead(m2_descent_x: float = 271.0):
+    """``m0`` splits to ``z1`` and ``z2`` beside ``m2``; all three descend
+    together and turn right onto one run.
+
+    ``m2``'s lead to ``z1`` rises inside ``m0->z2``'s run, so a footprint order
+    seats ``m2`` above it, while ``m2`` turns off the descent below ``m0``.
+    """
+    return (
+        _descend_then_run(
+            "m2",
+            "z1",
+            [(260.0, 124.0), (m2_descent_x, 124.0), (m2_descent_x, 360.0)]
+            + [(420.0, 360.0), (420.0, 330.0)],
+            lane_rank=0,
+            path_rank=0,
+        ),
+        _descend_then_run(
+            "m0",
+            "z1",
+            [(260.0, 120.0), (275.0, 120.0), (275.0, 356.0)]
+            + [(416.0, 356.0), (416.0, 330.0)],
+            lane_rank=1,
+            path_rank=1,
+        ),
+        _descend_then_run(
+            "m0",
+            "z2",
+            [(260.0, 120.0), (275.0, 120.0), (275.0, 356.0), (521.0, 356.0)]
+            + [(521.0, 120.0), (546.0, 120.0)],
+            lane_rank=1,
+            path_rank=2,
+            slot=120.0,
+            slot_rank=0,
+        ),
+    )
+
+
+def test_a_lane_keeps_the_side_of_the_run_it_turns_off() -> None:
+    """``m2`` descends left of ``m0`` and so runs below it after the turn,
+    whatever order the footprint of ``m2``'s lead asks for."""
+    plan = _compile_turning_routes(*_split_line_beside_a_lead())
+
+    assert _run_coordinates(plan) == {
+        "m2->z1": pytest.approx(360.0),
+        "m0->z1": pytest.approx(356.0),
+        "m0->z2": pytest.approx(356.0),
+    }
+
+
+def _two_split_lines_beside_a_lead():
+    """``l0`` and ``l1`` split to ``sec2`` and ``sec1`` beside ``l3``, the three
+    descending side by side, ``l3`` leftmost, and turning right onto one run.
+
+    ``l3``'s lead rises inside the runs of ``l0`` and ``l1`` to ``sec2``, so
+    footprint orders seat ``l3`` above both.
+    """
+
+    def route(x: float, y: float, run_y: float, *tail: tuple[float, float]):
+        return [(380.0, y), (x, y), (x, run_y), *tail]
+
+    return (
+        _descend_then_run(
+            "l0",
+            "sec2",
+            route(398.0, 120.0, 436.0, (847.5, 436.0), (847.5, 120.0), (867.5, 120.0)),
+            lane_rank=0,
+            path_rank=0,
+            slot=120.0,
+            slot_rank=0,
+        ),
+        _descend_then_run(
+            "l1",
+            "sec2",
+            route(394.0, 124.0, 440.0, (851.5, 440.0), (851.5, 124.0), (867.5, 124.0)),
+            lane_rank=1,
+            path_rank=1,
+            slot=124.0,
+            slot_rank=1,
+        ),
+        _descend_then_run(
+            "l0",
+            "sec1",
+            route(398.0, 120.0, 436.0, (660.5, 436.0), (660.5, 410.0)),
+            lane_rank=0,
+            path_rank=2,
+        ),
+        _descend_then_run(
+            "l1",
+            "sec1",
+            route(394.0, 124.0, 440.0, (664.5, 440.0), (664.5, 410.0)),
+            lane_rank=1,
+            path_rank=3,
+        ),
+        _descend_then_run(
+            "l3",
+            "sec1",
+            route(390.0, 128.0, 444.0, (668.5, 444.0), (668.5, 410.0)),
+            lane_rank=2,
+            path_rank=4,
+        ),
+    )
+
+
+def test_three_lines_keep_their_descent_order_onto_a_run() -> None:
+    """``l3``, leftmost on the descent, runs lowest after the turn."""
+    plan = _compile_turning_routes(*_two_split_lines_beside_a_lead())
+
+    assert _run_coordinates(plan) == {
+        "l0->sec2": pytest.approx(436.0),
+        "l1->sec2": pytest.approx(440.0),
+        "l0->sec1": pytest.approx(436.0),
+        "l1->sec1": pytest.approx(440.0),
+        "l3->sec1": pytest.approx(444.0),
+    }
+
+
+def _run_corner_orders(plan: cci.CorridorCohortPlan) -> set[tuple[str, str]]:
+    def member(claim_id: str) -> str:
+        return claim_id.removeprefix("reservation:run|")
+
+    return {
+        (member(order.lower_member_id), member(order.upper_member_id))
+        for component in plan.components
+        for problem in component.problems
+        if problem.coordinate_axis == 1
+        for order in problem.corner_orders
+    }
+
+
+def test_guard_lanes_of_one_endpoint_cohort_are_left_to_their_slot_order() -> None:
+    """``l0`` and ``l1`` to ``sec2`` turn together too, but their cohort's slots
+    already order them rigidly: every other run pair is ordered, that one not."""
+    plan = _compile_turning_routes(*_two_split_lines_beside_a_lead())
+
+    orders = _run_corner_orders(plan)
+
+    assert orders == {
+        ("l0->sec2", "l1->sec1"),
+        ("l0->sec2", "l3->sec1"),
+        ("l1->sec2", "l3->sec1"),
+        ("l0->sec1", "l1->sec2"),
+        ("l0->sec1", "l1->sec1"),
+        ("l0->sec1", "l3->sec1"),
+        ("l1->sec1", "l3->sec1"),
+    }
+
+
+def test_guard_a_corner_the_snapshot_crosses_is_not_ordered() -> None:
+    """``m2`` descends right of ``m0`` yet runs below it, so it crosses ``m0`` at
+    the corner already: no corner order binds, and the footprint order seats
+    ``m2`` above ``m0->z2``."""
+    plan = _compile_turning_routes(*_split_line_beside_a_lead(m2_descent_x=279.0))
+
+    assert _run_corner_orders(plan) == set()
+    assert _run_coordinates(plan)["m2->z1"] == pytest.approx(352.0)
+
+
+def _run_claim(
+    member_id: str,
+    coordinate: float,
+    cohort: str | None = None,
+    direction: Direction = Direction.R,
+):
+    ledger = _identity_claim(
+        claim_id=member_id,
+        reservation_id="reservation:run",
+        network_id=f"network:{member_id}",
+        endpoint_cohort_id=cohort,
+        direction=direction,
+        orientation=(
+            CorridorOrientation.HORIZONTAL
+            if direction in (Direction.L, Direction.R)
+            else CorridorOrientation.VERTICAL
+        ),
+        segment_rank=2,
+    )
+    target = _footprint_target(member_id, member_id, [(0.0, 0.0), (1.0, 0.0)])
+    return _BoundClaim(ledger, target, 0.0, 100.0, coordinate, None)
+
+
+_D, _U = Direction.D, Direction.U
+
+
+@pytest.mark.parametrize(
+    ("low", "high", "cohort", "orders"),
+    [
+        pytest.param(
+            ((275.0, _D, 0), (271.0, _D, 0)),
+            None,
+            None,
+            [("a", "b")],
+            id="turned-together",
+        ),
+        pytest.param(
+            ((275.0, _D, 0), (271.0, _D, 0)),
+            ((416.0, _U, 0), (420.0, _U, 0)),
+            None,
+            [("a", "b")],
+            id="both-ends-agree",
+        ),
+        pytest.param(
+            ((275.0, _D, 0), (271.0, _D, 0)),
+            ((420.0, _U, 0), (416.0, _U, 0)),
+            None,
+            [],
+            id="ends-disagree",
+        ),
+        pytest.param(
+            ((275.0, _D, 0), (271.0, _D, 1)),
+            None,
+            None,
+            [],
+            id="separate-groups",
+        ),
+        pytest.param(
+            ((275.0, _D, 0), (271.0, _U, 0)),
+            None,
+            None,
+            [],
+            id="neighbours-run-opposite-ways",
+        ),
+        pytest.param(
+            ((275.0, _D, 0), (274.5, _D, 0)),
+            None,
+            None,
+            [],
+            id="neighbours-tie",
+        ),
+        pytest.param(
+            ((271.0, _D, 0), (275.0, _D, 0)),
+            None,
+            None,
+            [],
+            id="crossed-snapshot",
+        ),
+        pytest.param(
+            ((275.0, _D, 0), (271.0, _D, 0)),
+            None,
+            "cohort:x",
+            [],
+            id="one-endpoint-cohort",
+        ),
+    ],
+)
+def test_guard_corner_orders_bind_only_lanes_turning_together_uncrossed(
+    low, high, cohort, orders
+) -> None:
+    """``a`` runs at 356 and ``b`` at 360, rightward; *low* and *high* are their
+    neighbouring claims at the run's left and right ends, each a coordinate,
+    direction and physical group."""
+    claims = (_run_claim("a", 356.0, cohort), _run_claim("b", 360.0, cohort))
+    neighbours = {}
+    for rank, ends in ((1, low), (3, high)):
+        for member_id, end in zip(("a", "b"), ends or ()):
+            coordinate, direction, group = end
+            neighbours[(member_id, rank)] = cci._CornerNeighbour(
+                coordinate, direction, frozenset({group})
+            )
+
+    emitted = cci._corner_orders(claims, (), 4.0, neighbours)
+
+    assert [(item.lower_member_id, item.upper_member_id) for item in emitted] == orders
+
+
+@pytest.mark.parametrize(
+    ("run", "neighbour", "a_at", "b_at", "orders"),
+    [
+        pytest.param(Direction.R, _D, 356.0, 360.0, [("a", "b")], id="down-then-right"),
+        pytest.param(Direction.L, _D, 360.0, 356.0, [("b", "a")], id="down-then-left"),
+        pytest.param(
+            Direction.D, Direction.L, 360.0, 356.0, [("b", "a")], id="left-then-down"
+        ),
+    ],
+)
+def test_guard_corner_orders_turn_with_the_run_direction(
+    run, neighbour, a_at, b_at, orders
+) -> None:
+    """``a``'s neighbouring claim lies at 275 and ``b``'s at 271 on one run that
+    turns onto *run*; each lane keeps its side of travel across the turn, so
+    which of them takes the lower coordinate follows *run*'s direction."""
+    claims = (
+        _run_claim("a", a_at, direction=run),
+        _run_claim("b", b_at, direction=run),
+    )
+    neighbours = {
+        ("a", 1): cci._CornerNeighbour(275.0, neighbour, frozenset({0})),
+        ("b", 1): cci._CornerNeighbour(271.0, neighbour, frozenset({0})),
+    }
+
+    emitted = cci._corner_orders(claims, (), 4.0, neighbours)
+
+    assert [(item.lower_member_id, item.upper_member_id) for item in emitted] == orders

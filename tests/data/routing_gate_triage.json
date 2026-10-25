@@ -2211,6 +2211,38 @@
   "note": "The final-solve settlement trace is recorded only when the caller passes a settlement trace, which the engine does for a plan-observed render. The sweep's observation probes do not carry one into this call. Exercised by tests/test_corridor_cohort_integration.py::test_final_solve_trace_is_emitted_from_the_integration_call_site. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
  },
+ "corridor_cohorts.py::if _q(equality.delta) == 0:::#1": {
+  "note": "Only a zero-delta equality makes two lanes one for the corner-order yield; a non-zero delta (a scalar held off its bundle's run) never shares a problem with corner orders in the swept corpus. Exercised by tests/test_corridor_cohorts.py::test_lanes_an_offset_equality_ties_do_not_stand_as_one_for_the_yield. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::while frontier - reached:::#1": {
+  "note": "The yield walks the corner orders above a directed separation's upper lane, so it runs only when one problem holds corner orders and a footprint order together. No render in the sweep's roots builds one; tests/fixtures/regressions/cohort_corner_turn_order.mmd does, outside them. Exercised by tests/test_corridor_cohorts.py::test_corner_orders_seat_over_the_footprint_order_they_contradict and tests/test_corridor_cohorts.py::test_a_footprint_order_a_chain_of_corner_orders_contradicts_gives_way. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if invalid is not None:::#1": {
+  "note": "Rejects an invalid problem holding corner orders before any seating; the compile draws both lanes of every corner order from the problem's own movable claims, so only a hand-built malformed problem reaches the arm. Exercised by tests/test_corridor_cohorts.py::test_guard_a_corner_order_naming_no_lane_is_invalid. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if result.status is not CorridorAllocationStatus.FAILURE:::#1": {
+  "note": "The corner tier fails to seat, so the solve retries without the footprint orders the failure blocks and then gives way. No render in the sweep's roots fails it. Corpus renders outside the sweep's roots do (fuzz f8400939 under y_spacing 25, section_x_gap 20 and compact_offsets retries and seats; realistic f8401251 and f8404122, and fuzz f8401312 under its o2 options, give way), but none can join the swept fixtures: f8400939 fails a validate-time invariant, f8401251 and f8404122 would grow the shadow ratchet, and f8401312's ordinary render aborts. Exercised by tests/test_corridor_cohorts.py::test_corner_orders_blocked_by_a_footprint_order_seat_without_it and tests/test_corridor_cohorts.py::test_guard_corner_orders_that_cannot_seat_return_the_plain_result. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::result.status is not CorridorAllocationStatus.FAILURE::#1": {
+  "note": "The first-frame solve reports FAILURE, so the shortfall and retry checks run. Every corpus first-frame solve plans or reports compatibility, so the arm needs a component that cannot seat. Exercised by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if result.reason is CorridorAllocationFailureReason.INVALID:::#1": {
+  "note": "The first seating's INVALID failure is returned as the plain problem's, held by no tier: it names lanes no semantic key separates, which the plain problem rejects alike, so it is not solved again. No render in the sweep's roots builds such lanes. Exercised by tests/test_corridor_cohorts.py::test_guard_an_invalid_cornered_problem_returns_without_giving_way. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if len(relaxed) < len(kept):::#1": {
+  "note": "After a failed corner tier the retry runs only when the failure blocks both lanes of a footprint order; otherwise the solve gives way at once. No render in the sweep's roots fails a corner tier. Corpus renders outside the sweep's roots do (fuzz f8400939 under y_spacing 25, section_x_gap 20 and compact_offsets retries and seats; realistic f8401251 and f8404122, and fuzz f8401312 under its o2 options, give way), but none can join the swept fixtures: f8400939 fails a validate-time invariant, f8401251 and f8404122 would grow the shadow ratchet, and f8401312's ordinary render aborts. Exercised by tests/test_corridor_cohorts.py::test_corner_orders_blocked_by_a_footprint_order_seat_without_it and tests/test_corridor_cohorts.py::test_guard_corner_orders_that_cannot_seat_return_the_plain_result[no-footprint-order-to-drop]. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if retried.status is CorridorAllocationStatus.PLANNED:::#1": {
+  "note": "The retry without the blocking footprint orders seats and is returned, or fails and the solve gives way. No render in the sweep's roots reaches the retry. Corpus renders outside the sweep's roots do (fuzz f8400939 under y_spacing 25, section_x_gap 20 and compact_offsets retries and seats; realistic f8401251 and f8404122, and fuzz f8401312 under its o2 options, give way), but none can join the swept fixtures: f8400939 fails a validate-time invariant, f8401251 and f8404122 would grow the shadow ratchet, and f8401312's ordinary render aborts. Exercised by tests/test_corridor_cohorts.py::test_corner_orders_blocked_by_a_footprint_order_seat_without_it and tests/test_corridor_cohorts.py::test_guard_corner_orders_that_cannot_seat_return_the_plain_result[relaxed-orders-fail]. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
  "corridor_cohorts.py::if (::#1": {
   "note": "Rejects a malformed problem (empty semantic rank, duplicate or unknown ids, non-finite numbers). The engine builds well-formed problems, so the INVALID arm is reached only by hand-built problems. Exercised by tests/test_corridor_cohorts.py::test_empty_lane_or_obstacle_semantic_rank_is_invalid and tests/test_corridor_cohorts.py::test_one_cohort_cannot_span_distinct_endpoint_owners. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
@@ -2243,10 +2275,6 @@
   "note": "Two seatings of one root pair that disagree on order mark the pair conflicting. Corpus seatings are consistent per pair. Exercised by tests/test_corridor_cohorts.py::test_a_pair_seated_clear_on_both_sides_is_left_to_semantic_rank. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
  },
- "corridor_cohorts.py::result.status is not CorridorAllocationStatus.FAILURE::#1": {
-  "note": "The first-frame solve reports FAILURE, so the shortfall and retry checks run. Every corpus first-frame solve plans or reports compatibility, so the arm needs a component that cannot seat. Exercised by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once. needs-review because the arm is reachable, not because it is unreachable.",
-  "status": "needs-review"
- },
  "corridor_cohorts.py::or result.clearance_shortfall is not None::#1": {
   "note": "After a failed first-frame solve, a clearance shortfall is returned for an aperture to relieve and a shortfall-free failure is retried in the opposite frame. Both outcomes need a failed first-frame solve, which the corpus never produces. Exercised by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
@@ -2255,7 +2283,7 @@
   "note": "After the opposite-frame retry, a PLANNED retry is returned and a failing retry yields the first frame's failure. Both need a failed first-frame solve, which the corpus never produces. Exercised by tests/test_corridor_cohorts.py::test_a_failure_no_order_can_seat_reports_the_fullest_orders and tests/test_corridor_cohorts.py::test_contradicting_directed_separations_fail_closed_whatever_gives_way. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
  },
- "corridor_cohorts.py::if invalid is not None:::#1": {
+ "corridor_cohorts.py::if invalid is not None:::#2": {
   "note": "Rejects an invalid problem before solving; reached only by hand-built malformed problems. Exercised by tests/test_corridor_cohorts.py::test_empty_lane_or_obstacle_semantic_rank_is_invalid and tests/test_corridor_cohorts.py::test_one_cohort_cannot_span_distinct_endpoint_owners. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
  },
@@ -2295,20 +2323,12 @@
   "note": "Domain floor above ceiling on a root is an INFEASIBLE failure; the corpus's domains are satisfiable. Exercised by tests/test_corridor_cohorts.py::test_coordinate_domains_constrain_the_joint_solve_and_attribute_conflicts and tests/test_corridor_cohorts.py::test_non_boundary_domain_conflict_has_no_clearance_shortfall. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
  },
- "corridor_cohorts.py::for directed_separation in sorted(::#1": {
-  "note": "Directed separations are processed only when footprint orders relate two movable variables seated in one problem, which no swept render builds. Exercised by tests/test_corridor_cohort_integration.py::test_compiler_counts_every_solve_call and tests/test_corridor_cohort_integration.py::test_final_solve_trace_is_emitted_from_the_integration_call_site. needs-review because the arm is reachable, not because it is unreachable.",
-  "status": "needs-review"
- },
  "corridor_cohorts.py::if lower_root == upper_root:::#1": {
   "note": "A directed separation between two lanes already rigidly united into one root. It needs a footprint order between a lead and a carrier tied together by an equality (one network lane), which no corpus topology builds. needs-review because the arm is reachable and no corpus fixture takes it.",
   "status": "needs-review"
  },
  "corridor_cohorts.py::if raw_delta < required:::#1": {
   "note": "The same-root directed separation check (see the gate above): feasible or not, it needs a footprint order between two rigidly tied lanes. needs-review because the arm is reachable and no corpus fixture takes it.",
-  "status": "needs-review"
- },
- "corridor_cohorts.py::if sign > 0:::#1": {
-  "note": "Directed separation edge orientation by seating sign; both signs need directed separations in a solve, and the swept corpus never builds one. Exercised by tests/test_corridor_cohort_integration.py::test_compiler_counts_every_solve_call and tests/test_corridor_cohort_integration.py::test_final_solve_trace_is_emitted_from_the_integration_call_site. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
  },
  "corridor_cohorts.py::if abs(::#1": {
@@ -2355,11 +2375,11 @@
   "note": "A pass whose seating is not PLANNED records its failure and tries the next order set; reached only when a seating fails. Exercised by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
  },
- "corridor_cohort_integration.py::if (::#20": {
+ "corridor_cohort_integration.py::if (::#22": {
   "note": "Patch preparation: a landing matches its target's geometry plan, connectors, last segment, axis and finite slot, all taken from the same compile snapshot.",
   "status": "defensive"
  },
- "corridor_cohort_integration.py::if (::#21": {
+ "corridor_cohort_integration.py::if (::#23": {
   "note": "Patch preparation: a landing's last segment is orthogonal to the port axis and non-degenerate, as when the landing was planned.",
   "status": "defensive"
  },
@@ -2378,6 +2398,10 @@
  "corridor_cohort_integration.py::if not all(isfinite(item) for item in coordinates):::#1": {
   "note": "Owner-frame finiteness raise. Accepted coordinates and longitudinal extents come from the solver and patch preparation, and a grant's source is its recipe's or variable's coordinate, all required to be finite. An endpoint landing's source coordinate is a raw route point the solver never sees; it is finite because the ledger claim it derives from must be (RouteReservationClaim rejects a non-finite allocation coordinate). A frame the builder produces therefore always passes; the raise is reached only by a hand-built frame, and tests/test_corridor_cohort_acceptance.py::test_accepted_plan_constructor_fails_closed drives it.",
   "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if abs(gap) <= COORD_TOLERANCE:::#1": {
+  "note": "Two lanes whose neighbouring claims turn together within a pixel of each other have no side to keep across the corner, so they give no corner order. Same-line pairs never reach it (their zero pair clearance skips them first), and no swept render draws two lines' turning claims on one track. Exercised by tests/test_corridor_cohort_integration.py::test_guard_corner_orders_bind_only_lanes_turning_together_uncrossed[neighbours-tie]. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
  },
  "normalize.py::if not movable or not anchors:::#1": {
   "note": "_renest_residual_fused_clusters skips a fused cluster with no movable lane or no immovable anchor. No corpus map reaches this arm: tests/fixtures/curve_invariant_repros/riboseq_band_hop_zero_length_seam.mmd, the map that exercises the band-hop seam, aborts at validate_member_geometry_emission before it, because bypass nesting lifts a leg its member geometry plan owns. needs-review because the arm is reachable, not because it is unreachable.",
