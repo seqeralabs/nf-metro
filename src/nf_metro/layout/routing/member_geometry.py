@@ -55,7 +55,6 @@ from nf_metro.layout.routing.common import (
     column_gap_edges,
     convergence_owns_segment_boundary,
     feasible_same_destination_approach_proposals,
-    is_orthogonal_turn,
     iter_plannable_short_same_destination_bundles,
     same_destination_approach_slots,
     segment_direction,
@@ -71,6 +70,7 @@ from nf_metro.layout.routing.corners import (
     resolve_curve_radius_at,
 )
 from nf_metro.layout.routing.corridor_cohort_integration import (
+    CornerInputs,
     CorridorCohortCompilationError,
     CorridorCohortFailure,
     CorridorCohortLedger,
@@ -114,6 +114,7 @@ from nf_metro.layout.routing.normalize import (
     _stagger_convergent_distinct_lines,
     _unify_coincident_corner_radii,
     _VChannel,
+    semantic_end_corners,
 )
 from nf_metro.layout.routing.orientation import direction_axis, lateral_order_sign
 from nf_metro.layout.routing.perp import _perp_entry_crossing_x
@@ -3329,12 +3330,8 @@ def plan_corridor_cohorts(
     )
 
 
-_EndCornerKey = tuple[str, str, Direction, Direction]
 _CornerState = tuple[
-    tuple[float, ...] | None,
-    tuple[tuple[int, tuple[float | None, float | None]], ...],
-    tuple[tuple[int, tuple[float | None, float | None]], ...],
-    SourceTurnout | None,
+    tuple[float, ...] | None, CornerInputs, CornerInputs, SourceTurnout | None
 ]
 
 
@@ -3374,29 +3371,6 @@ def _moved_corner_ranks(
     )
 
 
-def _end_corner_keys(
-    route: RoutedPath, station_offsets: Mapping[tuple[str, str], float]
-) -> tuple[tuple[_EndCornerKey, int], ...]:
-    """The source and target corner cohort keys :func:`_rederive_semantic_end_corners`
-    files *route*'s first and last orthogonal corners under, with their ranks."""
-    points = apply_route_offsets(route, station_offsets)
-    corners = [
-        (rank, incoming, outgoing)
-        for rank in range(1, len(points) - 1)
-        if (incoming := segment_direction(points[rank - 1], points[rank])) is not None
-        and (outgoing := segment_direction(points[rank], points[rank + 1])) is not None
-        and incoming is not outgoing
-        and is_orthogonal_turn(points[rank - 1], points[rank], points[rank + 1])
-    ]
-    if not corners:
-        return ()
-    (first, first_in, first_out), (last, last_in, last_out) = corners[0], corners[-1]
-    return (
-        (("source", route.edge.source, first_in, first_out), first),
-        (("target", route.edge.target, last_in, last_out), last),
-    )
-
-
 def _departure(route: RoutedPath) -> tuple[str, Direction | None]:
     return route.edge.source, segment_direction(route.points[0], route.points[1])
 
@@ -3414,20 +3388,23 @@ def _corner_sizing_scope(
     of those groups with a moved corner, so a rule's result is adopted for a
     whole cohort it re-sized and for nothing else.
     """
+    end_corners = {
+        id(sized): semantic_end_corners(
+            sized, apply_route_offsets(sized, station_offsets)
+        )
+        for sized in copies
+    }
     moved_keys = {
         key
-        for sized in copies
-        if id(sized) in moved_by_copy
-        for key, rank in _end_corner_keys(sized, station_offsets)
-        if rank in moved_by_copy[id(sized)]
+        for sized_id, moved_ranks in moved_by_copy.items()
+        for key, rank in end_corners[sized_id]
+        if rank in moved_ranks
     }
     scope = set(moved_by_copy)
     scope.update(
-        id(sized)
-        for sized in copies
-        if any(
-            key in moved_keys for key, _rank in _end_corner_keys(sized, station_offsets)
-        )
+        sized_id
+        for sized_id, corners in end_corners.items()
+        if any(key in moved_keys for key, _rank in corners)
     )
     for fan in concentric_corner_fans(list(copies), station_offsets):
         if any(
@@ -3448,6 +3425,23 @@ def _corner_sizing_scope(
     return frozenset(scope)
 
 
+def _resizes_an_immutable_radius(
+    changed: Sequence[tuple[RoutedPath, _CornerState, _CornerState]],
+    mutable_route_ids: frozenset[int],
+) -> bool:
+    """Whether a re-sized cohort changes the radius of a route the plan does not own.
+
+    The plan may not re-size an immutable route, and sizing the rest of its
+    cohort without it would leave the cohort non-concentric, so the caller
+    declines the whole move.  A change to an immutable route's corner inputs
+    alone leaves its drawn corner as it is and does not decline.
+    """
+    return any(
+        id(route) not in mutable_route_ids and sized[0] != own[0]
+        for route, own, sized in changed
+    )
+
+
 def _size_patched_corners(
     population: Sequence[RoutedPath],
     mutable_route_ids: frozenset[int],
@@ -3462,9 +3456,13 @@ def _size_patched_corners(
     holding the patched points, so no live route is written.  The rules read
     the radii they re-size, so re-running one over a cohort no patch moved
     drifts it: nothing is sized unless a patch moves a corner, and only routes
-    sharing a corner cohort with a moved corner adopt the result.  An immutable
-    route is never sized, and a move that would re-size an immutable route's
-    radius leaves every corner unsized.
+    sharing a corner cohort with a moved corner adopt the result.
+
+    Returns a sizing per mutable route whose corner state changes.  Returns
+    nothing both when no corner moves and when the move is declined because
+    it would re-size an immutable route (see
+    :func:`_resizes_an_immutable_radius`); either way every patch keeps the
+    corner state its route already has.
     """
     patched_points = {id(route): points for route, points in patched}
     moved = {
@@ -3496,17 +3494,15 @@ def _size_patched_corners(
         station_offsets,
     )
     changed = [
-        (route, _corner_state(sized))
+        (route, own, sized_state)
         for route, sized in zip(population, copies, strict=True)
-        if id(sized) in scope and _corner_state(sized) != _corner_state(route)
+        if id(sized) in scope
+        and (own := _corner_state(route)) != (sized_state := _corner_state(sized))
     ]
-    if any(
-        id(route) not in mutable_route_ids and state[0] != _corner_state(route)[0]
-        for route, state in changed
-    ):
+    if _resizes_an_immutable_radius(changed, mutable_route_ids):
         return ()
     return tuple(
-        CorridorCornerSizing(route, *state)
-        for route, state in changed
+        CorridorCornerSizing(route, *sized_state)
+        for route, _own, sized_state in changed
         if id(route) in mutable_route_ids
     )

@@ -2387,7 +2387,7 @@
   "note": "iter_port_peeloff_bundles skips a peel-off group whose tails share one trunk depth. No corpus map reaches this arm: tests/fixtures/curve_invariant_repros/riboseq_band_hop_zero_length_seam.mmd, the map that exercises the band-hop seam, aborts at validate_member_geometry_emission before it, because bypass nesting lifts a leg its member geometry plan owns. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
  },
- "member_geometry.py::if any(::#5": {
+ "member_geometry.py::if _resizes_an_immutable_radius(changed, mutable_route_ids):::#1": {
   "note": "Corner sizing of a corridor-cohort patch declines when a corner rule, re-run at the patched points, would change the radius of an immutable convergence-context route sharing a cohort with a moved corner: the plan may not re-size a route it does not own, so it leaves every corner unsized rather than raising (a raise in the compile aborts the render). No swept corpus reaches it. An immutable route whose concentric inputs change but whose radius does not is skipped without declining (the 8,000-map corpus reaches that).",
   "status": "needs-review"
  }

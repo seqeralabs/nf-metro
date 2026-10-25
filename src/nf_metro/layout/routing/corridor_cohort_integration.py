@@ -1035,7 +1035,9 @@ CorridorCornerSizer = Callable[
 """Sizes the corners the patched points move, from ``(route, patched points)``.
 
 Returns a sizing for every route whose corner state the move changes, mates
-the patch does not move included, and nothing when no corner moves.
+the patch does not move included.  Returns nothing when no corner moves, and
+when the sizer declines a move it may not size (one that would re-size a route
+the plan does not own); every patch then keeps its route's own corner state.
 """
 
 
@@ -3908,6 +3910,9 @@ def _unsized_patch(
 
 
 def _sized_patch(patch: _RoutePatch, sizing: CorridorCornerSizing) -> _RoutePatch:
+    # A re-sized corner is the plan's decision, so the segments either side of
+    # it join the owned ranks: once published, the passes reading route-system
+    # ownership treat that corner as fixed, a radius-only mate's included.
     resized_ranks = {
         rank
         for index, (before, after) in enumerate(

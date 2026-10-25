@@ -22,6 +22,7 @@ from nf_metro.api import render_string
 from nf_metro.layout.routing import corridor_cohort_integration as cci
 from nf_metro.layout.routing import member_geometry
 from nf_metro.layout.routing.common import RoutedPath
+from nf_metro.layout.routing.member_geometry import _corner_state
 
 ROOT = Path(__file__).resolve().parents[1]
 EdgeKey = tuple[str, str, str]
@@ -36,7 +37,7 @@ class _Compile:
         self.plan: cci.CorridorCohortPlan | None = None
 
     @property
-    def patches(self) -> dict[EdgeKey, Any]:
+    def patches(self) -> dict[EdgeKey, cci._RoutePatch]:
         assert self.plan is not None
         return {_edge_key(patch.route): patch for patch in self.plan.route_patches}
 
@@ -52,16 +53,16 @@ def _edge_key(route: RoutedPath) -> EdgeKey:
     return route.edge.source, route.edge.target, route.line_id
 
 
-def _corner_state(route: RoutedPath) -> tuple[Any, ...]:
+def _patch_state(patch: cci._RoutePatch) -> tuple[Any, ...]:
     return (
-        None if route.curve_radii is None else tuple(route.curve_radii),
-        tuple(sorted(route.concentric_corner_offsets_by_segment.items())),
-        tuple(sorted(route.concentric_corner_bases_by_segment.items())),
-        route.source_turnout,
+        None if patch.radii is None else tuple(patch.radii),
+        tuple(sorted(patch.corner_offsets.items())),
+        tuple(sorted(patch.corner_bases.items())),
+        patch.source_turnout,
     )
 
 
-def _moves_a_corner(patch: Any) -> bool:
+def _moves_a_point(patch: cci._RoutePatch) -> bool:
     return any(
         tuple(old) != tuple(new)
         for old, new in zip(patch.route.points, patch.points, strict=True)
@@ -119,7 +120,7 @@ def test_moved_landing_corner_nests_concentrically_with_its_mate(
     moved = [
         record
         for record in compiles
-        if truth_key in record.patches and _moves_a_corner(record.patches[truth_key])
+        if truth_key in record.patches and _moves_a_point(record.patches[truth_key])
     ]
     assert moved
 
@@ -156,7 +157,7 @@ def test_unpatched_mate_in_a_moved_corner_cohort_is_resized(
     moved = [
         record
         for record in compiles
-        if any(_moves_a_corner(patch) for patch in record.patches.values())
+        if any(_moves_a_point(patch) for patch in record.patches.values())
     ]
     assert moved
 
@@ -187,23 +188,13 @@ def test_compile_moving_no_corner_keeps_every_corner(
         record
         for record in _compiles(monkeypatch, relative_path)
         if record.patches
-        and not any(_moves_a_corner(patch) for patch in record.patches.values())
+        and not any(_moves_a_point(patch) for patch in record.patches.values())
     ]
     assert still
 
     for record in still:
-        assert not [
-            key
-            for key, patch in record.patches.items()
-            if patch.radii != patch.route.curve_radii
-        ]
         for key, patch in record.patches.items():
-            assert (
-                None if patch.radii is None else tuple(patch.radii),
-                tuple(sorted(patch.corner_offsets.items())),
-                tuple(sorted(patch.corner_bases.items())),
-                patch.source_turnout,
-            ) == _corner_state(patch.route), key
+            assert _patch_state(patch) == _corner_state(patch.route), key
 
 
 @pytest.mark.parametrize(
@@ -251,12 +242,14 @@ def test_immutable_route_is_never_sized(monkeypatch: pytest.MonkeyPatch) -> None
     """A convergence context route is fixed before the cohorts compile, so a
     corner rule may not re-size it: no patch targets one, and a cohort that
     would change an immutable route's radius is left unsized altogether."""
-    calls: list[tuple[Any, ...]] = []
+    sizing_calls: list[tuple[Any, ...]] = []
     size = member_geometry._size_patched_corners
 
     def record_call(*args: Any) -> tuple[cci.CorridorCornerSizing, ...]:
-        calls.append(args)
-        return size(*args)
+        result = size(*args)
+        if result:
+            sizing_calls.append(args)
+        return result
 
     monkeypatch.setattr(member_geometry, "_size_patched_corners", record_call)
     compiles = _compiles(monkeypatch, "examples/variantbenchmarking.mmd")
@@ -265,12 +258,9 @@ def test_immutable_route_is_never_sized(monkeypatch: pytest.MonkeyPatch) -> None
             id(target.route) for target in record.targets if not target.mutable
         }
         assert not [
-            _edge_key(patch.route)
-            for patch in record.plan.route_patches  # type: ignore[union-attr]
-            if id(patch.route) in immutable
+            key for key, patch in record.patches.items() if id(patch.route) in immutable
         ]
 
-    sizing_calls = [args for args in calls if size(*args)]
     assert sizing_calls
     population, _mutable, *rest = sizing_calls[0]
     assert size(population, frozenset(), *rest) == ()
