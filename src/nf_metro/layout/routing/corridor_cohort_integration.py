@@ -107,7 +107,6 @@ class CorridorCompatibilityReason(str, Enum):
     """Why a whole corridor component keeps its legacy geometry unmigrated."""
 
     INCOMPLETE_WITNESSES = "incomplete-witnesses"
-    NO_MIGRABLE_GEOMETRY = "no-migrable-geometry"
     OVERLAID_ENDPOINT_SLOTS = "overlaid-endpoint-slots"
 
 
@@ -2734,15 +2733,17 @@ def _same_semantic_fixed_lane(left: _BoundClaim, right: _BoundClaim) -> bool:
     )
 
 
+def _is_terminal_fixed(claim: _BoundClaim) -> bool:
+    """Whether the claim's segment is immutable or already owned by another plan."""
+    return not claim.target.mutable or planner_owns_segment(
+        claim.target.route, claim.ledger.segment_rank
+    )
+
+
 def _roles(
     claims: tuple[_BoundClaim, ...],
 ) -> dict[str, CorridorCohortClaimRole]:
-    terminal_fixed = {
-        item.claim_id
-        for item in claims
-        if not item.target.mutable
-        or planner_owns_segment(item.target.route, item.ledger.segment_rank)
-    }
+    terminal_fixed = {item.claim_id for item in claims if _is_terminal_fixed(item)}
     roles = {
         item.claim_id: (
             CorridorCohortClaimRole.MOVABLE
@@ -3687,16 +3688,16 @@ def _component_plan(
     closure gave this component seats in one ``CorridorAllocationProblem``, so a
     member and a scalar joined by a typed relation always share one solve.  A
     component holding an overlaid endpoint cohort has no slot order to seat
-    against and keeps its drawn geometry.
+    against and keeps its drawn geometry.  A component whose claims all lie on
+    segments another plan already owns has nothing to allocate and is planned
+    without a solve.
     """
     physical_ranks = spec.physical_ranks
     component_claims = tuple(
         claims[item] for group in physical_ranks for item in physical[group]
     )
     component_scalar_requests = tuple(
-        scalar_requests_by_id[variable_id]
-        for variable_id in spec.scalar_variable_ids
-        if variable_id in scalar_requests_by_id
+        scalar_requests_by_id[variable_id] for variable_id in spec.scalar_variable_ids
     )
     endpoint_ids = tuple(
         sorted(
@@ -3734,25 +3735,33 @@ def _component_plan(
         )
         problems = (problem,)
         results = (solve(problem),)
-    status = (
-        CorridorAllocationStatus.PLANNED
-        if results
-        and all(item.status is CorridorAllocationStatus.PLANNED for item in results)
-        else CorridorAllocationStatus.FAILURE
-        if any(item.status is CorridorAllocationStatus.FAILURE for item in results)
-        else CorridorAllocationStatus.COMPATIBILITY
+    wholly_owned = (
+        not holds_overlaid_cohort
+        and not problems
+        and all(_is_terminal_fixed(item) for item in component_claims)
     )
-    if status is CorridorAllocationStatus.PLANNED and not (
-        _planned_allocations_are_atomic_and_clear(
-            component_claims,
-            physical_claims,
-            roles,
-            problems,
-            results,
-            frozenset(spec.scalar_variable_ids),
+    if wholly_owned:
+        status = CorridorAllocationStatus.PLANNED
+    else:
+        status = (
+            CorridorAllocationStatus.PLANNED
+            if results
+            and all(item.status is CorridorAllocationStatus.PLANNED for item in results)
+            else CorridorAllocationStatus.FAILURE
+            if any(item.status is CorridorAllocationStatus.FAILURE for item in results)
+            else CorridorAllocationStatus.COMPATIBILITY
         )
-    ):
-        status = CorridorAllocationStatus.FAILURE
+        if status is CorridorAllocationStatus.PLANNED and not (
+            _planned_allocations_are_atomic_and_clear(
+                component_claims,
+                physical_claims,
+                roles,
+                problems,
+                results,
+                frozenset(spec.scalar_variable_ids),
+            )
+        ):
+            status = CorridorAllocationStatus.FAILURE
     allocations: tuple[CorridorCohortAllocation, ...] = ()
     protected: tuple[tuple[str, int], ...] = ()
     compatibility: CorridorCohortCompatibility | None = None
@@ -3770,10 +3779,8 @@ def _component_plan(
     elif status is CorridorAllocationStatus.COMPATIBILITY:
         if holds_overlaid_cohort:
             reason = CorridorCompatibilityReason.OVERLAID_ENDPOINT_SLOTS
-        elif problems:
-            reason = CorridorCompatibilityReason.INCOMPLETE_WITNESSES
         else:
-            reason = CorridorCompatibilityReason.NO_MIGRABLE_GEOMETRY
+            reason = CorridorCompatibilityReason.INCOMPLETE_WITNESSES
         compatibility = CorridorCohortCompatibility(
             reason,
             member_ids,
