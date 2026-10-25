@@ -1212,6 +1212,9 @@ def _mutable_route(
         fan_route_emitter=None,
         exit_turn_axis_id=None,
         exit_turn_segment_rank=None,
+        concentric_corner_offsets_by_segment={},
+        concentric_corner_bases_by_segment={},
+        source_turnout=None,
     )
 
 
@@ -1719,8 +1722,81 @@ def test_incomplete_component_stands_as_typed_compatibility() -> None:
     _assert_no_silent_compatibility(plan)
 
 
-def test_unrepresented_endpoint_cohort_stands_as_typed_compatibility() -> None:
-    """An endpoint cohort with no current claim keeps its legacy geometry, typed."""
+def _ledger_of(
+    *claims: tuple[CorridorCohortLedgerClaim, CorridorCohortTarget],
+) -> CorridorCohortLedger:
+    return CorridorCohortLedger(
+        claims=tuple(claim for claim, _target in claims),
+        endpoint_members=(),
+        eligible_member_ids=frozenset(claim.member_id for claim, _target in claims),
+        ambiguous_endpoint_cohort_ids=frozenset(),
+        offset_step=10.0,
+    )
+
+
+def test_component_on_segments_another_plan_owns_is_planned_without_a_solve() -> None:
+    """Every claim sits on a segment a route system already owns, so nothing is
+    left to allocate: the component is planned, solves nothing and grants nothing.
+    """
+    claims = [
+        _overlapping_member_claim(
+            claim_id=claim_id, reservation_complete=True, longitudinal=span
+        )
+        for claim_id, span in (("owned-a", (0.0, 30.0)), ("owned-b", (10.0, 40.0)))
+    ]
+    for _claim, target in claims:
+        target.route.route_system_owned_segment_ranks = (0,)
+
+    plan = cci.compile_corridor_cohort_plan(
+        _ledger_of(*claims), tuple(target for _claim, target in claims)
+    )
+
+    (component,) = plan.components
+    assert component.status is cci.CorridorAllocationStatus.PLANNED
+    assert component.compatibility is None
+    assert component.problems == ()
+    assert component.results == ()
+    assert component.allocations == ()
+    assert {role for _claim_id, role in component.claim_roles} == {
+        cci.CorridorCohortClaimRole.FIXED
+    }
+    assert plan.allocations == ()
+
+
+@pytest.mark.parametrize("peer_owned", [False, True])
+def test_fixed_component_with_an_incomplete_reservation_is_incomplete_witnesses(
+    peer_owned: bool,
+) -> None:
+    """A claim fixed only because its reservation is incomplete is not owned by
+    another plan: the component keeps its drawn geometry as typed compatibility.
+    """
+    incomplete = _overlapping_member_claim(
+        claim_id="incomplete", reservation_complete=False, longitudinal=(0.0, 30.0)
+    )
+    peer = _overlapping_member_claim(
+        claim_id="peer", reservation_complete=True, longitudinal=(10.0, 40.0)
+    )
+    peer[1].route.route_system_owned_segment_ranks = (0,)
+    claims = (incomplete, peer) if peer_owned else (incomplete,)
+
+    plan = cci.compile_corridor_cohort_plan(
+        _ledger_of(*claims), tuple(target for _claim, target in claims)
+    )
+
+    (component,) = plan.components
+    assert component.status is cci.CorridorAllocationStatus.COMPATIBILITY
+    assert component.compatibility is not None
+    assert (
+        component.compatibility.reason
+        is cci.CorridorCompatibilityReason.INCOMPLETE_WITNESSES
+    )
+    assert component.problems == ()
+    assert plan.allocations == ()
+    _assert_no_silent_compatibility(plan)
+
+
+def test_endpoint_cohort_without_claims_adds_no_component() -> None:
+    """An endpoint cohort that no claim belongs to produces no component of its own."""
     carrier_claim, carrier_target = _overlapping_member_claim(
         claim_id="carrier", reservation_complete=True, longitudinal=(0.0, 30.0)
     )
@@ -1734,19 +1810,10 @@ def test_unrepresented_endpoint_cohort_stands_as_typed_compatibility() -> None:
 
     plan = cci.compile_corridor_cohort_plan(ledger, (carrier_target,))
 
-    (compatibility_component,) = [
-        component
-        for component in plan.components
-        if component.status is cci.CorridorAllocationStatus.COMPATIBILITY
-    ]
-    provenance = compatibility_component.compatibility
-    assert provenance is not None
-    assert (
-        provenance.reason
-        is cci.CorridorCompatibilityReason.UNREPRESENTED_ENDPOINT_COHORT
-    )
-    assert provenance.endpoint_cohort_ids == ("cohort:absent",)
-    _assert_no_silent_compatibility(plan)
+    (component,) = plan.components
+    assert component.status is cci.CorridorAllocationStatus.PLANNED
+    assert component.endpoint_cohort_ids == ()
+    assert component.compatibility is None
 
 
 def test_member_geometry_corridor_handoff_returns_heterogeneous_grants(
