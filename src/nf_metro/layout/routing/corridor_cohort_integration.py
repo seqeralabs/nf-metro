@@ -3513,13 +3513,7 @@ def _require_seatable_claims(
     endpoint_ids: tuple[str, ...],
     ledger: CorridorCohortLedger,
 ) -> None:
-    """Raise when a component's claims cannot be seated against one another.
-
-    An ambiguous endpoint cohort has no single slot order, an incomplete
-    reservation has no whole route to move, and two claims on one member
-    segment cannot both own it.  None of these is a representation limit: each
-    is a ledger the compiler must not have produced.
-    """
+    """Raise when a component's claims cannot be seated against one another."""
     ambiguous = ledger.ambiguous_endpoint_cohort_ids.intersection(endpoint_ids)
     if ambiguous:
         raise CorridorCohortCompilationError(
@@ -3532,9 +3526,8 @@ def _require_seatable_claims(
                 f"corridor component {rank} seats claim {item.claim_id} of an "
                 f"incomplete reservation"
             )
-    if len({(item.ledger.member_id, item.ledger.segment_rank) for item in claims}) != (
-        len(claims)
-    ):
+    segments = {(item.ledger.member_id, item.ledger.segment_rank) for item in claims}
+    if len(segments) != len(claims):
         raise CorridorCohortCompilationError(
             f"corridor component {rank} holds two claims on one member segment"
         )
@@ -3545,7 +3538,7 @@ def _endpoint_cohorts_whole(
     claims: tuple[_BoundClaim, ...],
     endpoint_ids: tuple[str, ...],
     ledger: CorridorCohortLedger,
-    all_claims: tuple[_BoundClaim, ...],
+    bound: set[tuple[str | None, str]],
 ) -> bool:
     """Whether *claims* hold every member of each endpoint cohort they touch.
 
@@ -3576,17 +3569,14 @@ def _endpoint_cohorts_whole(
                 f"corridor component {rank} holds members {sorted(extra)} outside "
                 f"endpoint cohort {cohort_id}"
             )
-        for member_id in sorted(wanted - observed[cohort_id]):
-            if not any(
-                item.ledger.endpoint_cohort_id == cohort_id
-                and item.ledger.member_id == member_id
-                for item in all_claims
-            ):
+        missing = wanted - observed[cohort_id]
+        for member_id in sorted(missing):
+            if (cohort_id, member_id) not in bound:
                 raise CorridorCohortCompilationError(
                     f"corridor component {rank} expects member {member_id} of "
                     f"endpoint cohort {cohort_id}, which has no bound claim"
                 )
-            whole = False
+        whole = whole and not missing
     return whole
 
 
@@ -3775,8 +3765,11 @@ def _component_plan(
     holds_overlaid_cohort = not overlaid_cohort_ids.isdisjoint(endpoint_ids)
     if not holds_overlaid_cohort and (has_movable or component_scalar_requests):
         _require_seatable_claims(rank, component_claims, endpoint_ids, ledger)
+        bound = {
+            (item.ledger.endpoint_cohort_id, item.ledger.member_id) for item in claims
+        }
         complete = _endpoint_cohorts_whole(
-            rank, component_claims, endpoint_ids, ledger, claims
+            rank, component_claims, endpoint_ids, ledger, bound
         )
         problem = _problem(
             component_claims,
@@ -3791,16 +3784,13 @@ def _component_plan(
         )
         problems = (problem,)
         results = (solve(problem),)
-    wholly_owned = (
-        not holds_overlaid_cohort
-        and not problems
-        and all(_is_terminal_fixed(item) for item in component_claims)
-    )
-    if not holds_overlaid_cohort and not problems and not wholly_owned:
+    skipped = not holds_overlaid_cohort and not problems
+    if skipped and not all(_is_terminal_fixed(item) for item in component_claims):
         raise CorridorCohortCompilationError(
             f"corridor component {rank} has nothing to solve and claims "
             f"segments no plan owns"
         )
+    wholly_owned = skipped
     if wholly_owned:
         status = CorridorAllocationStatus.PLANNED
     else:

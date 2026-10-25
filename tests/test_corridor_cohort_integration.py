@@ -1725,42 +1725,35 @@ def test_component_on_segments_another_plan_owns_is_planned_without_a_solve() ->
     assert plan.allocations == ()
 
 
-@pytest.mark.parametrize("peer_owned", [False, True])
-def test_fixed_component_with_an_incomplete_reservation_fails_closed(
-    peer_owned: bool,
+@pytest.mark.parametrize(
+    ("peer", "match"),
+    [
+        (None, "nothing to solve"),
+        ("owned", "nothing to solve"),
+        ("movable", "incomplete reservation"),
+    ],
+)
+def test_component_with_an_incomplete_reservation_fails_closed(
+    peer: str | None, match: str
 ) -> None:
-    """A claim fixed only because its reservation is incomplete is not owned by
-    another plan, so a component of nothing else has no solve and no owner.
+    """An incomplete reservation is no plan's segment and has no whole route to
+    move, so it raises alone, beside an owned peer or beside a movable one.
     """
     incomplete = _overlapping_member_claim(
         claim_id="incomplete", reservation_complete=False, longitudinal=(0.0, 30.0)
     )
-    peer = _overlapping_member_claim(
-        claim_id="peer", reservation_complete=True, longitudinal=(10.0, 40.0)
-    )
-    peer[1].route.route_system_owned_segment_ranks = (0,)
-    claims = (incomplete, peer) if peer_owned else (incomplete,)
+    claims = [incomplete]
+    if peer is not None:
+        peer_claim = _overlapping_member_claim(
+            claim_id="peer", reservation_complete=True, longitudinal=(10.0, 40.0)
+        )
+        if peer == "owned":
+            peer_claim[1].route.route_system_owned_segment_ranks = (0,)
+        claims.append(peer_claim)
 
-    with pytest.raises(cci.CorridorCohortCompilationError, match="nothing to solve"):
+    with pytest.raises(cci.CorridorCohortCompilationError, match=match):
         cci.compile_corridor_cohort_plan(
             _ledger_of(*claims), tuple(target for _claim, target in claims)
-        )
-
-
-def test_incomplete_reservation_beside_a_movable_claim_fails_closed() -> None:
-    """The complete peer never migrates alone: an incomplete claim in its
-    component raises rather than leaving the group to a legacy owner.
-    """
-    complete = _overlapping_member_claim(
-        claim_id="complete", reservation_complete=True, longitudinal=(0.0, 30.0)
-    )
-    incomplete = _overlapping_member_claim(
-        claim_id="incomplete", reservation_complete=False, longitudinal=(10.0, 40.0)
-    )
-
-    with pytest.raises(cci.CorridorCohortCompilationError, match="incomplete"):
-        cci.compile_corridor_cohort_plan(
-            _ledger_of(complete, incomplete), (complete[1], incomplete[1])
         )
 
 
@@ -1800,32 +1793,30 @@ def _cohort_ledger(
     )
 
 
-def test_ambiguous_endpoint_cohort_fails_closed() -> None:
+@pytest.mark.parametrize(
+    ("expected", "ambiguous", "ghost", "match"),
+    [
+        (frozenset({"a"}), True, False, "ambiguous"),
+        (frozenset({"other"}), False, False, "outside"),
+        (frozenset({"a", "ghost"}), False, True, "no bound claim"),
+    ],
+)
+def test_inconsistent_endpoint_cohort_fails_closed(
+    expected: frozenset[str], ambiguous: bool, ghost: bool, match: str
+) -> None:
     member = _cohort_member("a", "cohort:x")
-    ledger = _cohort_ledger((member,), expected=frozenset({"a"}), ambiguous=True)
-
-    with pytest.raises(cci.CorridorCohortCompilationError, match="ambiguous"):
-        cci.compile_corridor_cohort_plan(ledger, (member[1],))
-
-
-def test_member_outside_its_endpoint_cohort_fails_closed() -> None:
-    member = _cohort_member("a", "cohort:x")
-    ledger = _cohort_ledger((member,), expected=frozenset({"other"}))
-
-    with pytest.raises(cci.CorridorCohortCompilationError, match="outside"):
-        cci.compile_corridor_cohort_plan(ledger, (member[1],))
-
-
-def test_expected_cohort_member_without_a_bound_claim_fails_closed() -> None:
-    member = _cohort_member("a", "cohort:x")
-    ghost_claim, ghost_target = _cohort_member("ghost", "cohort:x")
-    unbound = replace(ghost_claim, edge_key=None, family_id=None)
+    targets = [member[1]]
+    extra_claims: tuple[CorridorCohortLedgerClaim, ...] = ()
+    if ghost:
+        ghost_claim, ghost_target = _cohort_member("ghost", "cohort:x")
+        extra_claims = (replace(ghost_claim, edge_key=None, family_id=None),)
+        targets.append(ghost_target)
     ledger = _cohort_ledger(
-        (member,), expected=frozenset({"a", "ghost"}), extra_claims=(unbound,)
+        (member,), expected=expected, ambiguous=ambiguous, extra_claims=extra_claims
     )
 
-    with pytest.raises(cci.CorridorCohortCompilationError, match="no bound claim"):
-        cci.compile_corridor_cohort_plan(ledger, (member[1], ghost_target))
+    with pytest.raises(cci.CorridorCohortCompilationError, match=match):
+        cci.compile_corridor_cohort_plan(ledger, tuple(targets))
 
 
 def test_two_claims_on_one_member_segment_fail_closed() -> None:
@@ -1846,9 +1837,7 @@ def test_two_claims_on_one_member_segment_fail_closed() -> None:
 
 
 def test_overlaid_cohort_component_with_an_incomplete_claim_keeps_its_overlay() -> None:
-    """A tied entry slot keeps the component's drawn geometry before any seating
-    check runs, so an incomplete claim beside it does not raise.
-    """
+    """A tied entry slot exempts its component from the seating checks."""
     first = _cohort_member("a", "cohort:x")
     second_claim, second_target = _cohort_member("b", "cohort:x")
     second = (replace(second_claim, endpoint_network_rank=1), second_target)
@@ -1878,7 +1867,7 @@ def test_overlaid_cohort_component_with_an_incomplete_claim_keeps_its_overlay() 
     assert plan.allocations == ()
 
 
-def test_endpoint_cohort_split_across_components_stays_typed_compatibility() -> None:
+def test_endpoint_cohort_split_across_components_is_typed_compatibility() -> None:
     """A cohort whose members sit in different lanes splits across solver
     components: each component keeps its drawn geometry as typed compatibility.
     """
