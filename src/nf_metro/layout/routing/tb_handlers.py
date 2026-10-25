@@ -126,8 +126,9 @@ def _section_link_route(
 
     # Different X tracks: route with vertical runs + 45-degree diagonal
     if own is not None:
-        group = ctx.co_row_diagonal_groups.get((edge.source, edge.target, edge.line_id))
-        window = group.window if group is not None else (own.start, own.end)
+        key = (edge.source, edge.target, edge.line_id)
+        group = ctx.co_row_diagonal_groups.get(key)
+        window = group.window_for(key) if group is not None else (own.start, own.end)
         return _route_tb_diagonal(
             edge, (sx, src.y), (tx, tgt.y), window, section.direction
         )

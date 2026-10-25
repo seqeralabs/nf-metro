@@ -604,9 +604,10 @@ def _route_diagonal(
     edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
 ) -> RoutedPath:
     """Route with horizontal runs and a 45-degree diagonal transition."""
-    group = ctx.co_row_diagonal_groups.get((edge.source, edge.target, edge.line_id))
+    key = (edge.source, edge.target, edge.line_id)
+    group = ctx.co_row_diagonal_groups.get(key)
     if group is not None:
-        diag_start_x, diag_end_x = group.window
+        diag_start_x, diag_end_x = group.window_for(key)
     else:
         window = _diagonal_window(edge, src, tgt, ctx)
         diag_start_x, diag_end_x = window.start, window.end
