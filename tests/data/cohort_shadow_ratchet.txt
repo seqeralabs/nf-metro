@@ -4,13 +4,9 @@
 examples/group_labels.mmd
 examples/riboseq_metro.mmd
 examples/sarek_metro.mmd
-examples/topologies/fan_over_top_reach_order.mmd
 examples/topologies/fanout_intersection_shared_channel.mmd
 examples/topologies/inter_row_exempt_band_order.mmd
 examples/topologies/reversed_section_junction_reseat.mmd
-tests/fixtures/curve_invariant_repros/fan_over_top_flow_feeder.mmd
-tests/fixtures/curve_invariant_repros/inter_row_corridor_overflow.mmd
 tests/fixtures/curve_invariant_repros/riboseq_inter_row_corridor.mmd
 tests/fixtures/curve_invariant_repros/rl_return_row_convergence.mmd
 tests/fixtures/regressions/perp_entry_column_merge_feeder.mmd
-tests/fixtures/regressions/riboseq_row_trunk_subrun.mmd
