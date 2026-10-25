@@ -3380,13 +3380,20 @@ def _corner_sizing_scope(
     moved_by_copy: Mapping[int, frozenset[int]],
     station_offsets: Mapping[tuple[str, str], float],
 ) -> frozenset[int]:
-    """The copies sharing a corner cohort with a moved corner of a patched copy.
+    """The copies whose re-sized corners a patch adopts.
 
-    Each corner rule groups corners its own way: the end-corner rule by end
-    station and turn, the fan rule by shared arc centre, and the source-turnout
-    rule by source junction and departure.  A copy joins when it shares any one
-    of those groups with a moved corner, so a rule's result is adopted for a
-    whole cohort it re-sized and for nothing else.
+    Every patched copy is in scope, whether or not its own corners moved.  Any
+    other copy joins when it shares a group with a patched copy, read the way
+    each corner rule groups corners, each read as a superset of its rule:
+
+    * an end-corner key (end station and turn, from
+      :func:`semantic_end_corners`) of a corner a patch moved, without the
+      exit-lane and exit-turn corners the rule itself skips;
+    * an arc-centre fan holding a corner a patch moved;
+    * a departure (source station and first direction) of any patched copy,
+      which covers the source-turnout rule's junction groups.
+
+    A copy sharing none of these with a patched copy keeps its own sizing.
     """
     end_corners = {
         id(sized): semantic_end_corners(

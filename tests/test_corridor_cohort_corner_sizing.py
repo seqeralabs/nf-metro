@@ -14,8 +14,10 @@ import math
 import warnings
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
+import cohort_shadow_oracle
 import pytest
 
 from nf_metro.api import render_string
@@ -238,22 +240,55 @@ def test_sizing_leaves_the_live_routes_untouched(
             ), _edge_key(target.route)
 
 
-def test_immutable_route_is_never_sized(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A convergence context route is fixed before the cohorts compile, so a
-    corner rule may not re-size it: no patch targets one, and a cohort that
-    would change an immutable route's radius is left unsized altogether."""
-    sizing_calls: list[tuple[Any, ...]] = []
+def _sizing_calls(
+    monkeypatch: pytest.MonkeyPatch, relative_path: str
+) -> list[tuple[Any, ...]]:
+    """The arguments of every sizer call on *relative_path* that sized a corner."""
+    calls: list[tuple[Any, ...]] = []
     size = member_geometry._size_patched_corners
 
     def record_call(*args: Any) -> tuple[cci.CorridorCornerSizing, ...]:
         result = size(*args)
         if result:
-            sizing_calls.append(args)
+            calls.append(args)
         return result
 
     monkeypatch.setattr(member_geometry, "_size_patched_corners", record_call)
-    compiles = _compiles(monkeypatch, "examples/variantbenchmarking.mmd")
-    for record in compiles:
+    _compiles(monkeypatch, relative_path)
+    monkeypatch.setattr(member_geometry, "_size_patched_corners", size)
+    assert calls, f"{relative_path} sized no corner"
+    return calls
+
+
+def _sizings_by_edge(
+    sizings: Sequence[cci.CorridorCornerSizing],
+) -> dict[EdgeKey, tuple[Any, ...]]:
+    return {
+        _edge_key(sizing.route): (
+            sizing.radii,
+            sizing.corner_offsets,
+            sizing.corner_bases,
+            sizing.source_turnout,
+        )
+        for sizing in sizings
+    }
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    [
+        "examples/variantbenchmarking.mmd",
+        "examples/topologies/entry_cohort_interleaved_fixed_lane.mmd",
+    ],
+)
+def test_immutable_route_is_never_sized(
+    monkeypatch: pytest.MonkeyPatch, relative_path: str
+) -> None:
+    """A convergence context route is fixed before the cohorts compile, so a
+    corner rule may not re-size it: no patch targets one, and a move that would
+    change an immutable route's radius is left unsized altogether, its mutable
+    cohort mates included."""
+    for record in _compiles(monkeypatch, relative_path):
         immutable = {
             id(target.route) for target in record.targets if not target.mutable
         }
@@ -261,6 +296,70 @@ def test_immutable_route_is_never_sized(monkeypatch: pytest.MonkeyPatch) -> None
             key for key, patch in record.patches.items() if id(patch.route) in immutable
         ]
 
-    assert sizing_calls
-    population, _mutable, *rest = sizing_calls[0]
-    assert size(population, frozenset(), *rest) == ()
+    for population, mutable, *rest in _sizing_calls(monkeypatch, relative_path):
+        size = member_geometry._size_patched_corners
+        resized = [
+            sizing
+            for sizing in size(population, mutable, *rest)
+            if sizing.radii != tuple(sizing.route.curve_radii or ())
+        ]
+        assert resized
+        assert size(population, mutable - {id(resized[0].route)}, *rest) == ()
+
+
+def test_sizing_leaves_cohorts_no_moved_corner_touches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The corner rules read the radii they size, so they would re-size any
+    cohort whose corners sit off its own sizing.  Preprocess's exit fan into
+    normalization shares no cohort with the moved benchmarking descents: with
+    its test lead's source corner seated 4px off, the rules re-size that fan,
+    yet the move adopts exactly what it adopts with the fan left as drawn."""
+    distractor = ("preprocess__exit_right_1", "normalization__entry_left_7", "test")
+    population, mutable, *rest = _sizing_calls(
+        monkeypatch, "examples/variantbenchmarking.mmd"
+    )[0]
+    (index,) = [
+        rank for rank, route in enumerate(population) if _edge_key(route) == distractor
+    ]
+    original = population[index]
+    off_sizing = member_geometry._corner_sizing_copy(original)
+    assert off_sizing.curve_radii is not None
+    off_sizing.curve_radii[0] += 4.0
+    perturbed = [*population[:index], off_sizing, *population[index + 1 :]]
+    perturbed_mutable = (mutable - {id(original)}) | {id(off_sizing)}
+    size = member_geometry._size_patched_corners
+
+    with monkeypatch.context() as unscoped:
+        unscoped.setattr(
+            member_geometry,
+            "_corner_sizing_scope",
+            lambda copies, *_args: frozenset(id(copy) for copy in copies),
+        )
+        assert distractor in _sizings_by_edge(size(perturbed, perturbed_mutable, *rest))
+
+    assert _sizings_by_edge(size(perturbed, perturbed_mutable, *rest)) == (
+        _sizings_by_edge(size(population, mutable, *rest))
+    )
+
+
+def test_oracle_reports_a_sized_corner_drawn_off_its_radius() -> None:
+    """The shadow oracle holds each corner the plan sized, a radius-only mate's
+    included, to its sized radius on the drawn route."""
+    mate = ("z1__exit_right_1", "z2__entry_left_3", "m2")
+    drawn = cast(
+        RoutedPath,
+        SimpleNamespace(
+            edge=SimpleNamespace(source=mate[0], target=mate[1]),
+            line_id=mate[2],
+            curve_radii=[14.0, 16.0],
+        ),
+    )
+
+    mismatches = cohort_shadow_oracle.sized_radius_mismatches
+
+    assert mismatches([drawn], {(mate, 1): 16.0}) == []
+    (mismatch,) = mismatches([drawn], {(mate, 1): 14.0})
+    assert "planned radius 14.0 drawn 16.0" in mismatch
+    (undrawn,) = mismatches([], {(mate, 1): 14.0})
+    assert "drawn None" in undrawn
