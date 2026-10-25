@@ -44,7 +44,8 @@
     "guide/06b_with_hidden.mmd",
     "topologies/centered_flat_skip_over_marker.mmd",
     "topologies/descent_entry_inner_bypass.mmd",
-    "co_column_feeders_shared_diagonal_bt.mmd"
+    "co_column_feeders_shared_diagonal_bt.mmd",
+    "topologies/co_row_feeders_shared_diagonal.mmd"
   ],
   "corridor_solo": [
     "group_band_over_row_corridor.mmd",
@@ -523,7 +524,8 @@
     "uneven_diamond.mmd",
     "variantbenchmarking.mmd",
     "variantbenchmarking_auto.mmd",
-    "variantprioritization.mmd"
+    "variantprioritization.mmd",
+    "topologies/co_row_feeders_shared_diagonal.mmd"
   ],
   "vertical_passthrough": [
     "guide/04_directions.mmd",
