@@ -2213,6 +2213,21 @@ def _match_inter_section_rule(f: _InterFacts) -> _Rule | None:
     return None
 
 
+def _dispatch_draft_points(
+    edge: Edge, ctx: _RoutingCtx
+) -> Sequence[tuple[float, float]]:
+    """The points of the route inter-section *edge*'s dispatch rule draws."""
+    src, tgt = ctx.graph.edge_endpoints(edge)
+    f = _build_inter_facts(edge, src, tgt, ctx)
+    rule = _match_inter_section_rule(f)
+    route = (
+        rule.route(f)
+        if rule is not None
+        else _route_l_shape(edge, src, tgt, f.i, f.n, ctx)
+    )
+    return route.points if route is not None else []
+
+
 def arrival_approach(edge: Edge, ctx: _RoutingCtx) -> Direction | None:
     """The way inter-section *edge* travels on its last vertical leg.
 
@@ -2223,15 +2238,7 @@ def arrival_approach(edge: Edge, ctx: _RoutingCtx) -> Direction | None:
     are all shorter than a curve radius only shifts its line's lane on the way,
     so it arrives level too.
     """
-    src, tgt = ctx.graph.edge_endpoints(edge)
-    f = _build_inter_facts(edge, src, tgt, ctx)
-    rule = _match_inter_section_rule(f)
-    route = (
-        rule.route(f)
-        if rule is not None
-        else _route_l_shape(edge, src, tgt, f.i, f.n, ctx)
-    )
-    points = route.points if route is not None else []
+    points = _dispatch_draft_points(edge, ctx)
     vertical_steps = [
         end[1] - start[1]
         for start, end in zip(points, points[1:])
@@ -2240,6 +2247,51 @@ def arrival_approach(edge: Edge, ctx: _RoutingCtx) -> Direction | None:
     if all(abs(dy) <= ctx.curve_radius for dy in vertical_steps):
         return None
     return Direction.D if vertical_steps[-1] > 0 else Direction.U
+
+
+@dataclass(frozen=True, slots=True)
+class ArrivalLeg:
+    """Where an inter-section dispatch draft lands and how it gets there.
+
+    ``first_dx`` is the first sideways step, ``None`` when the draft never
+    moves sideways.  ``riser_y`` is the start of the draft's last vertical
+    step, ``None`` when no vertical step is longer than a curve radius (the
+    draft then only shifts lanes on the way and arrives level).  ``lead_dx`` is
+    the sideways component of the step leading into that riser, ``None`` when
+    the riser starts the draft.  Any step steeper than it is wide counts as
+    vertical, however short, so a riser is the step that turns into the port.
+    """
+
+    end_y: float
+    first_dx: float | None
+    riser_y: float | None
+    lead_dx: float | None
+
+
+def arrival_leg(edge: Edge, ctx: _RoutingCtx) -> ArrivalLeg | None:
+    """The :class:`ArrivalLeg` of the route *edge*'s dispatch rule draws.
+
+    The same draft :func:`arrival_approach` reads; ``None`` when the rule
+    draws nothing.
+    """
+    points = _dispatch_draft_points(edge, ctx)
+    if not points:
+        return None
+    steps = [(a, b) for a, b in zip(points, points[1:]) if a != b]
+    first_dx = next((b[0] - a[0] for a, b in steps if abs(b[0] - a[0]) > 1e-6), None)
+    vertical = [
+        i
+        for i, (a, b) in enumerate(steps)
+        if abs(b[1] - a[1]) > max(abs(b[0] - a[0]), 1e-6)
+    ]
+    riser_y = lead_dx = None
+    if any(abs(steps[i][1][1] - steps[i][0][1]) > ctx.curve_radius for i in vertical):
+        last = vertical[-1]
+        riser_y = steps[last][0][1]
+        if last:
+            lead = steps[last - 1]
+            lead_dx = lead[1][0] - lead[0][0]
+    return ArrivalLeg(points[-1][1], first_dx, riser_y, lead_dx)
 
 
 @dataclass(frozen=True, slots=True)
