@@ -54,7 +54,9 @@ def test_far_packed_cell_branch_reuses_near_sibling_corridor() -> None:
     annotation = routes[("__junction_10", "annot__entry_left_9", "reference")]
     qc_section = graph.sections["qc"]
 
-    assert annotation[:3] == pytest.approx(qc[:3])
+    assert [c for p in annotation[:3] for c in p] == pytest.approx(
+        [c for p in qc[:3] for c in p]
+    )
     assert annotation[3] == pytest.approx(qc[3])
     gap_left, gap_right = column_gap_edges(graph, 1, 2, row=0)
     assert gap_left <= min(qc[3][0], annotation[3][0])
