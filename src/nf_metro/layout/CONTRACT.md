@@ -2171,9 +2171,10 @@ They are design evidence, not part of this specification.
   plan. It is drawn whenever it accepted a plan and published no requirement,
   and the published plan is the ledger the last settlement consumed, projected
   through its translations, carrying the accepted record. Where neither holds,
-  the drawn pass stands: with no settlement re-route it consumed no ledger, so
-  the observation is no replay of it. A drawn observation can replay inputs
-  from before the group-caption band was reserved, so the publish step
+  the observation is not drawn: without a settlement re-route the drawn pass
+  consumed no ledger, so the observation is no replay of it, and without an
+  accepted plan it has no record to publish. A drawn observation can replay
+  inputs from before the group-caption band was reserved, so the publish step
   reserves the band again after placing labels; the reservation only grows a
   box. An observation that is not drawn has its geometry (station
   coordinates, section boxes, and bypass-label obstacles) discarded by

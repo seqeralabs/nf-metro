@@ -2479,8 +2479,8 @@ def _settle_render_geometry(
             sized_for=settled_plan,
             coordinate_translations=translations,
         )
-        # Republishing a ledger drops the overrides the settlement re-route and
-        # the drawn observation each reported.
+        # The republished ledger carries neither re-route's overrides, or only
+        # the observation's own when it is the ledger; carry both, once.
         route_plan = _with_disposition_overrides(
             replace(
                 route_plan,
