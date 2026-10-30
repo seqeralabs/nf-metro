@@ -135,8 +135,11 @@ def test_horizontal_exit_drop_turns_once_onto_the_port_column() -> None:
     port = graph.ports["annotation__entry_top_2"]
     assert port.x == pytest.approx(exit_st.x + outer_lane_radius(1), abs=1.0)
     descent = next(r for r in routes if r.edge.target == port.id)
-    assert apply_route_offsets(descent, offsets) == pytest.approx(
-        [(exit_st.x, exit_st.y), (port.x, exit_st.y), (port.x, port.y)], abs=1.0
+    expected = [(exit_st.x, exit_st.y), (port.x, exit_st.y), (port.x, port.y)]
+    actual = apply_route_offsets(descent, offsets)
+    assert len(actual) == len(expected)
+    assert [c for p in actual for c in p] == pytest.approx(
+        [c for p in expected for c in p], abs=1.0
     )
 
 
