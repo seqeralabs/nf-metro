@@ -33,11 +33,15 @@ RL_RETURN = "tests/fixtures/curve_invariant_repros/rl_return_row_convergence.mmd
 PORT = "dst__entry_left_0"
 
 
-def _graph(*edges: tuple[str, str, str]) -> MetroGraph:
-    """One LR section whose LEFT entry ``PORT`` the given edges may feed."""
+def _graph(
+    *edges: tuple[str, str, str],
+    side: PortSide = PortSide.LEFT,
+    direction: str = "LR",
+) -> MetroGraph:
+    """One section whose entry ``PORT`` the given edges may feed."""
     graph = MetroGraph()
-    graph.add_section(Section(id="dst", name="Dst", direction="LR"))
-    graph.add_port(Port(id=PORT, section_id="dst", side=PortSide.LEFT))
+    graph.add_section(Section(id="dst", name="Dst", direction=direction))
+    graph.add_port(Port(id=PORT, section_id="dst", side=side))
     for source, target, line in edges:
         graph.add_edge(Edge(source, target, line))
     return graph
@@ -133,6 +137,21 @@ def test_a_port_one_source_feeds_two_lines_decides_no_order(offsets):
     assert _top_to_bottom(_plan_trunk_band(band, ctx)) == _top_to_bottom(
         _plan_trunk_band(band)
     )
+
+
+@pytest.mark.parametrize(
+    ("side", "direction"),
+    [(PortSide.TOP, "LR"), (PortSide.LEFT, "TB")],
+    ids=["top-entry", "tb-side-entry"],
+)
+def test_a_port_whose_lanes_do_not_stack_on_y_decides_no_order(side, direction):
+    """Only a side entry of a section whose lanes stack on Y turns the band's
+    vertical order into its lane order."""
+    graph = _graph(("sa", PORT, "a"), ("sb", PORT, "b"), side=side, direction=direction)
+    band = [_trunk("a", "sa", PORT), _trunk("b", "sb", PORT)]
+    ctx = _ctx(graph, {"a": 4.0, "b": -4.0})
+
+    assert _band_port_constraints(_coincident_trunk_slots(band), ctx) == []
 
 
 def test_a_port_order_that_packs_more_tracks_keeps_the_free_order():

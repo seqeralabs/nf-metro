@@ -4035,10 +4035,9 @@ def _band_port_constraints(
 
     Reads only the graph, the slots' own edges and the station offsets.
     """
-    offsets = ctx.station_offsets if ctx is not None else None
-    if ctx is None or not offsets or len(slots) < 2:
+    if ctx is None or not ctx.station_offsets:
         return []
-    graph = ctx.graph
+    graph, offsets = ctx.graph, ctx.station_offsets
     sign_x = slots[0][0].sign_x
     reach = [_slot_entry_reach(graph, sg) for sg in slots]
     out: list[tuple[int, int]] = []
@@ -4090,15 +4089,14 @@ def _slot_entry_reach(graph: MetroGraph, slot: list[_HTrunk]) -> dict[str, set[s
 def _port_decides_lane_order(graph: MetroGraph, port_id: str) -> bool:
     """Whether *port_id* is a side entry whose lanes stack on Y and no source
     sends it more than one line."""
-    if not is_side_entry_port(graph, port_id):
-        return False
-    port = graph.ports[port_id]
-    if not lanes_run_along_y(graph.section_for_port(port).direction):
-        return False
     lines_by_source: defaultdict[str, set[str]] = defaultdict(set)
     for edge in graph.edges_to(port_id):
         lines_by_source[edge.source].add(edge.line_id)
-    return all(len(lines) < 2 for lines in lines_by_source.values())
+    return (
+        is_side_entry_port(graph, port_id)
+        and lanes_run_along_y(graph.section_for_port(graph.ports[port_id]).direction)
+        and all(len(lines) < 2 for lines in lines_by_source.values())
+    )
 
 
 def _ranked_band_order(
@@ -4161,26 +4159,22 @@ def _ranked_band_order(
         return [pos[id(sg)] for sg in slots]
 
     def _interleaved(pos: list[int]) -> bool:
-        for i, j in shared_pairs:
-            lo, hi = sorted((pos[i], pos[j]))
-            if any(
-                lo < pos[k] < hi
-                and frozenset((k, i)) not in shared
-                and frozenset((k, j)) not in shared
-                for k in range(len(slots))
-            ):
-                return True
-        return False
+        return any(
+            min(pos[i], pos[j]) < pos[k] < max(pos[i], pos[j])
+            and frozenset((k, i)) not in shared
+            and frozenset((k, j)) not in shared
+            for i, j in shared_pairs
+            for k in range(len(slots))
+        )
 
     free_pos, ported_pos = _positions(free), _positions(ported)
-    if (
-        any(
-            (free_pos[i] < free_pos[j]) != (ported_pos[i] < ported_pos[j])
-            for i, j in shared_pairs
-        )
-        or (_interleaved(ported_pos) and not _interleaved(free_pos))
-        or max(_tracks(ported)) > max(_tracks(free))
-    ):
+    reverses_shared = any(
+        (free_pos[i] < free_pos[j]) != (ported_pos[i] < ported_pos[j])
+        for i, j in shared_pairs
+    )
+    splits_shared = _interleaved(ported_pos) and not _interleaved(free_pos)
+    taller = max(_tracks(ported)) > max(_tracks(free))
+    if reverses_shared or splits_shared or taller:
         return free, []
     return ported, constraints
 
