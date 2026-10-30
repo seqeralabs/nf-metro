@@ -257,3 +257,16 @@ def test_port_ordered_bands_pass_the_trunk_band_guard(relative_path: str) -> Non
     )
     path = ROOT / relative_path
     assert render_string(path.read_text(), source_dir=str(path.parent))
+
+
+def test_port_ordered_maps_settle_identically_across_hash_seeds() -> None:
+    """The port order is read from the graph's edge lists and the slots, so
+    every hash seed settles and renders these maps alike."""
+    from hash_seed_oracle import (
+        observation_differences,
+        observe_paths_across_hash_seeds,
+    )
+
+    paths = tuple(ROOT / path for path in (*RIBOSEQ_MAPS, RL_RETURN))
+    differences = observation_differences(observe_paths_across_hash_seeds(paths))
+    assert not differences, differences
