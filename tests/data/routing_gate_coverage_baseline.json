@@ -1116,7 +1116,6 @@
   "planning.py::if plan.curve_radii is None or ctx.exit_turns is None:::#1",
   "planning.py::if scaffold is None:::#1",
   "planning.py::if station_offsets is not None:::#1",
-  "planning.py::if station_offsets is not None:::#2",
   "postprocess.py::if abs(dx_diag) <= COORD_TOLERANCE_FINE:::#1",
   "postprocess.py::if abs(in_flat) < 1 or abs(out_flat) < 1:::#1",
   "postprocess.py::if abs(other.y - station.y) > 1:::#1",

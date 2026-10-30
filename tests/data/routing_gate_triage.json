@@ -1331,7 +1331,7 @@
   "note": "Boundary settlement is adopted only after every pending exit-turn plan has resolved. A settled cohort with pending owners would mix planning generations and is defensively withheld.",
   "status": "defensive"
  },
- "planning.py::if station_offsets is not None:::#2": {
+ "planning.py::if station_offsets is not None:::#1": {
   "note": "Production observed routing supplies a mutable station-offset map before replaying settled turns. The null arm supports the offsetless observation probe and requires no cache refresh.",
   "status": "defensive"
  },

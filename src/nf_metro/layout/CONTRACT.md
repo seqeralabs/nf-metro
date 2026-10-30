@@ -2159,14 +2159,27 @@ They are design evidence, not part of this specification.
   observation's `RoutePlan` as `accepted_corridor_cohort_plan`, from which the
   observation reads the convergences a grant moved, and
   `prepare_route_system_planning` refuses to compile on a pass seated against a
-  plan that carries one. Its geometry (station coordinates, section boxes, and
-  bypass-label obstacles) is discarded by
+  plan that carries one. The observation is drawn in two cases. A convergence
+  corridor grant that moved a trunk is drawn by this observation alone, so it
+  is adopted with its own plan once `_assert_grant_moves_only_its_convergences`
+  proves it differs on the granted convergences alone from the same
+  observation routed without the grant; a grant observation that also
+  publishes a requirement is an invariant failure. Otherwise, where envelope
+  settlement re-routed (a translation, or a live-derived band the ledger
+  changes at zero translation), the last routing pass consumed the same
+  ledger, so the observation is that pass's replay seated by the accepted
+  plan. It is drawn whenever it accepted a plan and published no requirement,
+  and the published plan is the ledger the last settlement consumed, projected
+  through its translations, carrying the accepted record. Where neither holds,
+  the observation is not drawn: without a settlement re-route the drawn pass
+  consumed no ledger, so the observation is no replay of it, and without an
+  accepted plan it has no record to publish. A drawn observation can replay
+  inputs from before the group-caption band was reserved, so the publish step
+  reserves the band again after placing labels; the reservation only grows a
+  box. An observation that is not drawn has its geometry (station
+  coordinates, section boxes, and bypass-label obstacles) discarded by
   `_restoring_route_observation_geometry`; routing alone, it leaves the ports
-  the label pass before it carried as they were. The one exception is a
-  convergence corridor grant that moved a trunk: only this observation draws
-  it, so the observation is adopted, once
-  `_assert_grant_moves_only_its_convergences` proves it differs on the granted
-  convergences alone from the same observation routed without the grant. A
+  the label pass before it carried as they were. A
   `CORRIDOR_COHORT_APERTURE` requirement it publishes is settled once against
   the observed plan, the grant is proven from that settlement's own
   translations to pay every measured deficit (`_assert_aperture_grant_closes`:

@@ -345,6 +345,15 @@ def prepare_route_system_planning(
     """
     station_offsets = ctx.station_offsets
     initial_station_offsets = dict(station_offsets or {})
+
+    def restore_initial_station_offsets() -> None:
+        # Building exit turns moves station offsets, and every rebuild after
+        # the provisional one is a function of the offsets this pass was handed.
+        if station_offsets is not None:
+            station_offsets.clear()
+            station_offsets.update(initial_station_offsets)
+        ctx.station_offsets = station_offsets
+
     provisional_exit_turns = exit_turn_routing.build_exit_turn_execution(
         graph,
         ctx,
@@ -512,10 +521,7 @@ def prepare_route_system_planning(
             allocation_exit_turns, pending_plan_ids, compile_corridor_cohorts=False
         )
         ctx.settled_exit_turns = allocation_geometry.settled_exit_turns
-        if station_offsets is not None:
-            station_offsets.clear()
-            station_offsets.update(initial_station_offsets)
-        ctx.station_offsets = station_offsets
+        restore_initial_station_offsets()
         exit_turns = exit_turn_routing.build_exit_turn_execution(
             graph,
             ctx,
@@ -548,6 +554,7 @@ def prepare_route_system_planning(
             ctx,
         )
     elif ctx.prior_exit_turn_dispositions is not None:
+        restore_initial_station_offsets()
         exit_turns = exit_turn_routing.build_exit_turn_execution(graph, ctx)
         family_by_edge, convergences, preliminary_planned_ids, member_geometry = (
             prepare_member_geometry(exit_turns, pending_plan_ids)
@@ -580,10 +587,7 @@ def prepare_route_system_planning(
             is not None
         )
         ctx.settled_exit_turns = member_geometry.settled_exit_turns
-        if station_offsets is not None:
-            station_offsets.clear()
-            station_offsets.update(initial_station_offsets)
-        ctx.station_offsets = station_offsets
+        restore_initial_station_offsets()
         exit_turns = exit_turn_routing.build_exit_turn_execution(
             graph,
             ctx,
