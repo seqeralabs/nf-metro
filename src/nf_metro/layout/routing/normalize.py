@@ -4035,8 +4035,6 @@ def _band_port_constraints(
     """
     if ctx is None or not ctx.station_offsets:
         return []
-    if len({sg[0].route.line_id for sg in slots}) < 2:
-        return []
     graph, offsets = ctx.graph, ctx.station_offsets
     sign_x = slots[0][0].sign_x
     reach = [_slot_entry_reach(graph, sg) for sg in slots]
