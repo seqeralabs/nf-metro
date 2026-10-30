@@ -224,18 +224,21 @@ def _route_state(route: RoutedPath) -> tuple[Any, ...]:
 
 
 @pytest.mark.parametrize(
-    ("source", "moved_copies"),
+    ("source", "expect_moved"),
     [
-        ("examples/topologies/fan_over_top_reach_order.mmd", 0),
-        ("tests/fixtures/curve_invariant_repros/inter_row_corridor_overflow.mmd", 0),
-        ("tests/fixtures/regressions/riboseq_row_trunk_subrun.mmd", 0),
-        ("examples/topologies/entry_cohort_interleaved_fixed_lane.mmd", 0),
-        (CLEARANCE_HELD_CORRIDOR, 1),
+        ("examples/topologies/fan_over_top_reach_order.mmd", False),
+        (
+            "tests/fixtures/curve_invariant_repros/inter_row_corridor_overflow.mmd",
+            False,
+        ),
+        ("tests/fixtures/regressions/riboseq_row_trunk_subrun.mmd", False),
+        ("examples/topologies/entry_cohort_interleaved_fixed_lane.mmd", False),
+        (CLEARANCE_HELD_CORRIDOR, True),
     ],
     ids=["fan_over_top", "corridor_overflow", "trunk_subrun", "fixed_lane", "held"],
 )
 def test_peeloff_snapshot_leaves_the_live_routes_untouched(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, source: str, moved_copies: int
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, source: str, expect_moved: bool
 ) -> None:
     """Seating the snapshot writes no live route, and every patch the compile
     returns names a live route.  The interleaved fixed-lane entry cohort
@@ -297,7 +300,8 @@ def test_peeloff_snapshot_leaves_the_live_routes_untouched(
     assert calls
     assert all(untouched for untouched, _live in calls)
     assert all(live for _untouched, live in calls)
-    assert max(moved) >= moved_copies
+    if expect_moved:
+        assert max(moved) > 0
 
 
 def test_compile_accepts_the_runs_the_clearance_hold_draws(tmp_path: Path) -> None:

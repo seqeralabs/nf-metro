@@ -77,8 +77,6 @@ from nf_metro.layout.routing.corridor_cohort_integration import (
     CorridorCohortPlan,
     CorridorCohortTarget,
     CorridorCornerSizing,
-    CorridorScalarControlledPoint,
-    CorridorScalarFixedPoint,
     CorridorScalarRequest,
     _network_id,
     compile_corridor_cohort_plan,
@@ -783,25 +781,15 @@ def _post_emission_seated_snapshot(
 ]:
     """Copies of *targets* and *population* seated by the post-emission rules.
 
-    After emission, :func:`_reconcile_port_peeloff_risers` re-seats every
-    peel-off riser the freeze leaves unowned onto the slot its settled trunk
-    depth earns, then :func:`_separate_fused_cotravelling_runs` and
-    :func:`_hold_runs_in_corridor_clearance` settle the corridor runs.  The same
-    rules run here, in that order, over copies, so the compile reads the
-    coordinates those passes draw and no live route moves.  The riser rule sees
-    the distinct target copies in target order; the corridor rules see every
-    copy.  An immutable target's copy is re-seated too, as cohort context only:
-    neither :func:`_prepare_patches` nor the corner sizer ever patches or sizes
-    an immutable route.
-
-    The corridor rules hold two kinds of copy where they stand.  A route a
-    scalar request's control recipe names is drawn where its grant puts it, not
-    where the rules would.  A copy :func:`_materialize_trunk_slots` would
-    restack is drawn after that restack and the hold have both moved it, so the
-    hold's move on the unrestacked copy is not the drawn one; the restack runs
-    on scratch copies only, to find them.  A compile with scalar requests skips
-    the separation: its grant is drawn, so a lane the separation moved would
-    reach the render.
+    :func:`_reconcile_port_peeloff_risers` runs over the distinct target copies
+    in target order, then :func:`_separate_fused_cotravelling_runs` and
+    :func:`_hold_runs_in_corridor_clearance` over every copy, the order they run
+    after emission, so the compile reads the coordinates those passes draw and
+    no live route moves.  An immutable target's copy is re-seated too, as cohort
+    context only: neither :func:`_prepare_patches` nor the corner sizer ever
+    patches or sizes an immutable route.  The corridor rules hold every route a
+    scalar request's control recipe names where it stands: its grant, not those
+    rules, decides where it is drawn.
 
     Returns the targets on their copies, the copied population, and each
     copy's live route keyed by the copy's id.
@@ -823,21 +811,20 @@ def _post_emission_seated_snapshot(
         (target.member_id, target.edge_key): copies[id(target.route)]
         for target in targets
     }
-    recipes = [
-        request.control_recipe
-        for request in scalar_requests
-        if request.control_recipe is not None
-    ]
-    recipe_points: list[CorridorScalarControlledPoint | CorridorScalarFixedPoint] = [
-        *(point for recipe in recipes for point in recipe.controlled_points),
-        *(point for recipe in recipes for point in recipe.fixed_points),
-    ]
     anchored = {
         id(route)
-        for point in recipe_points
-        if (route := copy_by_member.get((point.member_id, point.edge_key))) is not None
+        for request in scalar_requests
+        if (recipe := request.control_recipe) is not None
+        for key in (
+            *((point.member_id, point.edge_key) for point in recipe.controlled_points),
+            *((point.member_id, point.edge_key) for point in recipe.fixed_points),
+        )
+        if (route := copy_by_member.get(key)) is not None
     }
     seated = list(copies.values())
+    # The trunk-slot restack is drawn before the hold, so the hold's move on an
+    # unrestacked copy is not the drawn one; the restack runs on scratch copies
+    # only, to find the routes it moves, which are then held.
     scratch = {id(route): _corner_sizing_copy(route) for route in seated}
     _materialize_trunk_slots(
         list(scratch.values()),
@@ -853,6 +840,8 @@ def _post_emission_seated_snapshot(
         if id(route) in anchored
         for rank in range(len(route.points) - 1)
     )
+    # A scalar request's grant is drawn, so a lane the separation moved would
+    # reach the render.
     if not scalar_requests:
         _separate_fused_cotravelling_runs(
             seated,
