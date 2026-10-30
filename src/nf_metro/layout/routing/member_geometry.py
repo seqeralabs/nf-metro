@@ -824,7 +824,7 @@ def _post_emission_seated_snapshot(
     seated = list(copies.values())
     # The trunk-slot restack is drawn before the hold, so the hold's move on an
     # unrestacked copy is not the drawn one; the restack runs on scratch copies
-    # only, to find the routes it moves, which are then held.
+    # only, to find the routes it moves, which are then fixed where they stand.
     scratch = {id(route): _corner_sizing_copy(route) for route in seated}
     _materialize_trunk_slots(
         list(scratch.values()),

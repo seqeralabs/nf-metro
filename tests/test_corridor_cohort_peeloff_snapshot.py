@@ -314,17 +314,27 @@ def test_compile_accepts_the_runs_the_clearance_hold_draws(tmp_path: Path) -> No
 def test_compile_holds_a_trunk_slot_restacked_bundle_where_it_is_drawn(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A bundle the trunk-slot pass would restack is not held on the snapshot.
+    """A bundle the trunk-slot pass would restack keeps its place on the snapshot.
 
     The drawn geometry is the trunk-slot restack followed by the hold, which
-    cancel; holding the unrestacked copy alone would plan l0 to l2 a step off
-    where they are drawn.
+    cancel, so the plan accepts l0 to l2 where they are drawn.
     """
+    bundle = {
+        ("sec1__exit_right_1", "sec2__entry_top_3", line) for line in ("l0", "l1", "l2")
+    }
     mismatches: list[str] = []
+    owned: set[EdgeKey] = set()
     planned_drawn = cohort_shadow_oracle.planned_drawn_mismatches
 
-    def record(*args: Any) -> list[str]:
-        found = planned_drawn(*args)
+    def record(routes: Sequence[RoutedPath], route_plan: Any) -> list[str]:
+        accepted = route_plan.accepted_corridor_cohort_plan
+        owned.update(
+            _edge_key(route)
+            for route in routes
+            if accepted is not None
+            and any(frame.segment[1] == _edge_key(route) for frame in accepted.owners)
+        )
+        found = planned_drawn(routes, route_plan)
         mismatches.extend(found)
         return found
 
@@ -333,9 +343,7 @@ def test_compile_holds_a_trunk_slot_restacked_bundle_where_it_is_drawn(
         _map_path(TRUNK_SLOT_RESTACKED_BUNDLE, tmp_path)
     )
 
+    assert bundle <= owned
     assert not [
-        mismatch
-        for mismatch in mismatches
-        for line in ("l0", "l1", "l2")
-        if f"('sec1__exit_right_1', 'sec2__entry_top_3', '{line}')" in mismatch
+        mismatch for mismatch in mismatches for key in bundle if str(key) in mismatch
     ]
