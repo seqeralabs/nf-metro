@@ -4032,10 +4032,10 @@ def _band_port_constraints(
     the way the port is entered.  The first such port in id order decides a
     pair.  A port that one source feeds two lines directly carries a bundle
     whose order its source pins, so it decides nothing.
-
-    Reads only the graph, the slots' own edges and the station offsets.
     """
     if ctx is None or not ctx.station_offsets:
+        return []
+    if len({sg[0].route.line_id for sg in slots}) < 2:
         return []
     graph, offsets = ctx.graph, ctx.station_offsets
     sign_x = slots[0][0].sign_x
@@ -4132,7 +4132,7 @@ def _ranked_band_order(
         # the smallest tuple, so a crossing- and looseness-optimal band keeps
         # the widest-reaching slot outermost.
         s2d = perm if dips else list(reversed(perm))
-        looseness = _band_looseness(s2d, _tracks(perm), span_of)
+        looseness = _band_looseness(s2d, _pack_band_tracks(s2d, span_of), span_of)
         return (
             _band_order_crossings(perm, feats),
             looseness,
@@ -4141,8 +4141,12 @@ def _ranked_band_order(
 
     perms = [list(p) for p in itertools.permutations(h_ttb)]
     free = min(perms, key=_key)
-    admitted = [p for p in perms if _honours_port_order(p, slots, constraints)]
-    if not constraints or not admitted:
+    admitted = (
+        [p for p in perms if _honours_port_order(p, slots, constraints)]
+        if constraints
+        else []
+    )
+    if not admitted:
         return free, []
     ported = min(admitted, key=_key)
     sources = [{t.route.edge.source for t in sg} for sg in slots]
@@ -4215,7 +4219,7 @@ def _plan_trunk_band(
         heuristic = _heuristic_slot_order(slot_groups)
         return heuristic, *_packed_track_map(heuristic, span_of)
     constraints = _band_port_constraints(slot_groups, ctx)
-    best_ttb, _held = _ranked_band_order(band, slot_groups, span_of, constraints)
+    best_ttb = _ranked_band_order(band, slot_groups, span_of, constraints)[0]
     order = list(reversed(best_ttb)) if band[0].dips_down else best_ttb
     return order, *_packed_track_map(order, span_of)
 
