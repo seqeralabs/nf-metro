@@ -2174,7 +2174,11 @@ They are design evidence, not part of this specification.
   no negative-side box, and at least the deficit, which the quantised
   allocation may exceed), and a
   re-route consuming the observed plan draws the result, which is adopted and
-  published. There is no retry or fixpoint search. A requirement surviving the
+  published. That re-route starts every non-port station at the x the last
+  routing pass read (`_RouteObservationInputs.restore_station_x`), translated
+  by the grant: routing's centring is the only writer of non-port x since that
+  pass, and it is not idempotent, so a re-route from the drawn output would
+  centre a station a second time. There is no retry or fixpoint search. A requirement surviving the
   first strict observation, any deficit surviving final settlement, or an
   aperture deficit its grant does not pay is an invariant failure; a render
   settles at most one aperture batch.

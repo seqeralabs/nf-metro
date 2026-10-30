@@ -1972,6 +1972,18 @@ class _RouteObservationInputs:
         graph.bypass_label_obstacles = self.bypass_label_obstacles
         return dict(self.station_offsets)
 
+    def restore_station_x(self, graph: MetroGraph) -> None:
+        """Write the captured x back onto every non-port station of *graph*.
+
+        Routing centres stations along x and is the only writer of non-port x
+        since the capture, so this undoes that pass's centring and nothing else;
+        ports, section boxes and y are left as later passes put them.
+        """
+        for sid, (x, _y) in self.station_positions.items():
+            station = graph.stations[sid]
+            if not station.is_port:
+                station.x = x
+
 
 class _SettledRenderGeometry(NamedTuple):
     """What :func:`_settle_render_geometry` derives from a laid-out graph."""
@@ -2043,8 +2055,11 @@ def _settle_render_geometry(
       settled once against that observed plan,
       :func:`_assert_aperture_grant_closes` proves from the settlement's own
       translations that the grant pays every measured deficit, and a re-route
-      consuming the plan draws the result.  Any deficit the grant leaves is an
-      invariant failure rather than a second batch.  A convergence corridor
+      consuming the plan draws the result.  That re-route starts every
+      non-port station at the x the last routing pass read, translated by the
+      grant, so it re-derives that pass's centring rather than centring its
+      output a second time.  Any deficit the grant leaves is an invariant
+      failure rather than a second batch.  A convergence corridor
       grant that moved a trunk is materialised by that same observation, so
       its geometry is kept instead of discarded, once
       :func:`_assert_grant_moves_only_its_convergences` proves it differs from
@@ -2374,14 +2389,15 @@ def _settle_render_geometry(
     # section boxes that pass never seated the ledger's corridors against, and
     # routing against them can leave a corridor with no band that fits.  The
     # observation's geometry is restored away on exit, so an aperture grant
-    # settles and re-routes the drawn geometry and the observation's routes are
-    # thrown away.  A convergence grant that moved a trunk is only
-    # drawn by this observation, so its routes are kept -- once they are proven
-    # to differ on the granted convergences alone from the same observation
-    # routed without the grant.  The drawn pass is no baseline for that: where
-    # it never consumed the ledger, the observation's pre-freeze seating moves
-    # runs no grant touched.
+    # settles and re-routes the drawn geometry, starting non-port stations at
+    # the x the drawn pass read, and the observation's routes are thrown away.
+    # A convergence grant that moved a trunk is only drawn by this observation,
+    # so its routes are kept -- once they are proven to differ on the granted
+    # convergences alone from the same observation routed without the grant.
+    # The drawn pass is no baseline for that: where it never consumed the
+    # ledger, the observation's pre-freeze seating moves runs no grant touched.
     assert last_route_inputs is not None
+    drawn_inputs = last_route_inputs
     drawn_routes = routes
     observed_state: _RouteObservationInputs | None = None
     ungranted_routes: list[RoutedPath] = []
@@ -2429,6 +2445,9 @@ def _settle_render_geometry(
             sized_for=settled_plan,
         )
     elif aperture_requirements:
+        # Centring is not idempotent: routed again from its own output, a
+        # centred station moves again.
+        drawn_inputs.restore_station_x(graph)
         owed = tuple(
             (requirement, demand)
             for requirement in aperture_requirements
