@@ -139,6 +139,30 @@ def test_a_port_one_source_feeds_two_lines_decides_no_order(offsets):
     )
 
 
+def test_a_refused_port_passes_the_pair_to_the_next_port_both_lines_enter():
+    """``sa`` feeds ``a`` and ``c`` into ``PORT`` together, so ``PORT`` decides
+    nothing; ``a`` and ``b`` also both enter ``zz``'s left entry, which puts
+    ``a`` on the larger offset and so its slot on top, against the free order."""
+    graph = _graph(
+        ("sa", PORT, "a"),
+        ("sa", PORT, "c"),
+        ("sb", PORT, "b"),
+        ("sa", "zz__entry_left_0", "a"),
+        ("sb", "zz__entry_left_0", "b"),
+    )
+    graph.add_section(Section(id="zz", name="Zz", direction="LR"))
+    graph.add_port(Port(id="zz__entry_left_0", section_id="zz", side=PortSide.LEFT))
+    band = [_trunk("a", "sa", PORT), _trunk("b", "sb", PORT)]
+    ctx = _ctx(graph, {"a": -4.0, "b": 4.0})
+    ctx.station_offsets.update(
+        {("zz__entry_left_0", "a"): 4.0, ("zz__entry_left_0", "b"): -4.0}
+    )
+
+    assert _band_port_constraints(_coincident_trunk_slots(band), ctx) == [(0, 1)]
+    assert _top_to_bottom(_plan_trunk_band(band)) == ["b", "a"]
+    assert _top_to_bottom(_plan_trunk_band(band, ctx)) == ["a", "b"]
+
+
 @pytest.mark.parametrize(
     ("side", "direction"),
     [(PortSide.TOP, "LR"), (PortSide.LEFT, "TB")],
