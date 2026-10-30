@@ -1863,6 +1863,20 @@ def _disposition_overrides(plan: RoutePlan) -> tuple[RoutePlanDiagnostic, ...]:
     )
 
 
+def _with_disposition_overrides(
+    plan: RoutePlan, overrides: Iterable[RoutePlanDiagnostic]
+) -> RoutePlan:
+    """*plan* also carrying each of *overrides* it does not already hold.
+
+    Two re-routes of one pass's inputs report equal overrides, so each is
+    carried once.
+    """
+    carried = tuple(
+        dict.fromkeys(item for item in overrides if item not in plan.diagnostics)
+    )
+    return replace(plan, diagnostics=plan.diagnostics + carried) if carried else plan
+
+
 def _assert_grant_moves_only_its_convergences(
     ungranted_routes: Sequence[RoutedPath],
     granted_routes: Sequence[RoutedPath],
@@ -2199,7 +2213,9 @@ def _settle_render_geometry(
         The published plan is *ledger* adopted onto the labelled geometry, so it
         is built only after the label pass has grown the boxes it reads;
         *sized_for* is the ledger the settlement behind *routes* allocated
-        against, which the re-route delta is measured from.
+        against, which the re-route delta is measured from.  The group bands
+        are reserved again after labelling, because *routes* can come from an
+        observation that replayed inputs from before the first reservation.
         """
         labels = _place(station_offsets, routes)
         _reserve_group_band_space(graph, theme, station_offsets, labels)
@@ -2293,7 +2309,7 @@ def _settle_render_geometry(
             graph, frozen_plan.boundary_clearance_requirements
         )
 
-    grant_settlement: EnvelopeSettlement | None = None
+    rerouted_settlement: EnvelopeSettlement | None = None
     adopted_dispositions: tuple[RoutePlanDiagnostic, ...] = ()
     settled_plan = frozen_plan
     drawn_plan = frozen_plan
@@ -2306,7 +2322,7 @@ def _settle_render_geometry(
         frozen_routes,
         settlement.coordinate_translations,
     ):
-        grant_settlement = settlement
+        rerouted_settlement = settlement
         pending_clearance = bool(frozen_plan.boundary_clearance_requirements)
         station_offsets, routes, routed_plan = _resettle(
             frozen_plan,
@@ -2380,10 +2396,7 @@ def _settle_render_geometry(
         adopted_dispositions = (
             () if pending_clearance else _disposition_overrides(routed_plan)
         )
-        if adopted_dispositions:
-            route_plan = replace(
-                route_plan, diagnostics=route_plan.diagnostics + adopted_dispositions
-            )
+        route_plan = _with_disposition_overrides(route_plan, adopted_dispositions)
         _attach_published_reservation_attribution(routes, route_plan)
         drawn_plan = routed_plan
 
@@ -2421,7 +2434,7 @@ def _settle_render_geometry(
         )
         granted_plan_ids = _corridor_grant_moved_plan_ids(observed_plan)
         adopt_observation = bool(granted_plan_ids) or (
-            grant_settlement is not None
+            rerouted_settlement is not None
             and observed_plan.accepted_corridor_cohort_plan is not None
             and not observed_plan.boundary_clearance_requirements
         )
@@ -2451,38 +2464,29 @@ def _settle_render_geometry(
         station_offsets = observed_state.restore(graph)
         routes = observed_routes
         carried_ports = ()
+        ledger, translations = (
+            (observed_plan, ())
+            if granted_plan_ids
+            else (settled_plan, settlement.coordinate_translations)
+        )
         labels, route_plan = _publish_observed_routes(
             station_offsets,
             routes,
             observed_plan,
             decided_routes=drawn_routes,
             decided_plan=drawn_plan,
-            ledger=observed_plan if granted_plan_ids else settled_plan,
+            ledger=ledger,
             sized_for=settled_plan,
-            coordinate_translations=(
-                () if granted_plan_ids else settlement.coordinate_translations
-            ),
+            coordinate_translations=translations,
         )
-        if not granted_plan_ids:
-            route_plan = replace(
+        # Republishing a ledger drops the overrides the settlement re-route and
+        # the drawn observation each reported.
+        route_plan = _with_disposition_overrides(
+            replace(
                 route_plan,
-                accepted_corridor_cohort_plan=(
-                    observed_plan.accepted_corridor_cohort_plan
-                ),
-            )
-        # Republishing the ledger drops the overrides both settlement re-routes
-        # reported, the drawn observation's included.
-        route_plan = replace(
-            route_plan,
-            diagnostics=route_plan.diagnostics
-            + tuple(
-                dict.fromkeys(
-                    item
-                    for item in adopted_dispositions
-                    + _disposition_overrides(observed_plan)
-                    if item not in route_plan.diagnostics
-                )
+                accepted_corridor_cohort_plan=observed_plan.accepted_corridor_cohort_plan,
             ),
+            adopted_dispositions + _disposition_overrides(observed_plan),
         )
     elif aperture_requirements:
         drawn_inputs.restore_station_x(graph)
@@ -2520,8 +2524,8 @@ def _settle_render_geometry(
     if carried_ports:
         hold_port_anchored_edges(graph, carried_from, carried_ports)
     route_plan = attach_settlement_diagnostics(route_plan, settlement)
-    if grant_settlement is not None and grant_settlement is not settlement:
-        route_plan = attach_settlement_diagnostics(route_plan, grant_settlement)
+    if rerouted_settlement is not None and rerouted_settlement is not settlement:
+        route_plan = attach_settlement_diagnostics(route_plan, rerouted_settlement)
     if aperture_settlement is not None:
         route_plan = attach_settlement_diagnostics(route_plan, aperture_settlement)
     route_polylines = [apply_route_offsets(route, station_offsets) for route in routes]
@@ -5458,10 +5462,11 @@ def _reserve_group_band_space(
     station_offsets: dict[tuple[str, str], float],
     labels: list[LabelPlacement],
 ) -> None:
-    """Grow section boxes for their ``below`` group bands, before settlement.
+    """Grow section boxes for their ``below`` group bands.
 
     Settlement translates whole rows rigidly, so a band holds its offset inside
-    its own box and one reservation covers the drawn geometry.
+    its own box and one reservation covers the drawn geometry.  It only grows a
+    box, so repeating it on geometry that already holds its bands is a no-op.
     """
     bands = _resolve_group_bands(graph, theme, station_offsets, labels)
     if bands:

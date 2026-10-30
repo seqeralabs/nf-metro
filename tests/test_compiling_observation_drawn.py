@@ -21,11 +21,9 @@ from nf_metro.layout.routing.common import RoutedPath
 
 ROOT = Path(__file__).parents[1]
 
-# The prior-disposition exit-turn rebuild reads station offsets, so it has to
-# start from the offsets the observation was handed, as the other rebuilds do.
-# These two maps settle a re-route that otherwise sees offsets the provisional
-# build already moved, and abort on a re-route that differs from the pass it
-# settled.
+# The prior-disposition exit-turn rebuild must start from the offsets the
+# observation was handed; from offsets the provisional build already moved, the
+# re-route differs from the pass it settles.
 OFFSET_REBUILD_REPROS = {
     "four_line_bypass": """\
 %%metro line: l0 | Assemble | #e6194b
