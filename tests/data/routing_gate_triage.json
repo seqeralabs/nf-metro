@@ -2064,7 +2064,7 @@
   "status": "defensive"
  },
  "corridor_cohort_integration.py::if split or tied:::#1": {
-  "note": "Marks a cohort overlaid when its networks draw into tied or split port slots, so its components keep their drawn geometry. The corpus never draws two networks into one slot. Exercised by tests/test_corridor_cohort_main_layouts.py::test_overlaid_entry_slots_keep_drawn_geometry. needs-review because the arm is reachable, not because it is unreachable.",
+  "note": "Marks a cohort overlaid when its networks draw into tied or split port slots, so its components keep their drawn geometry. The corpus never draws two networks into one slot. Exercised by tests/test_corridor_cohort_main_layouts.py::test_overlaid_entry_slots_keep_drawn_geometry on tests/fixtures/regressions/entry_slot_overlay_tied_feeders.mmd. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
  },
  "corridor_cohort_integration.py::if follower.claim_id in terminal_fixed:::#1": {
@@ -2132,7 +2132,7 @@
   "status": "needs-review"
  },
  "corridor_cohort_integration.py::if holds_overlaid_cohort:::#1": {
-  "note": "A COMPATIBILITY component holding an overlaid cohort reports the overlaid-slots reason. The corpus has no overlaid cohort (two networks drawing into one port slot). Exercised by tests/test_corridor_cohort_main_layouts.py::test_overlaid_entry_slots_keep_drawn_geometry. needs-review because the arm is reachable, not because it is unreachable.",
+  "note": "A COMPATIBILITY component holding an overlaid cohort reports the overlaid-slots reason. The corpus has no overlaid cohort (two networks drawing into one port slot). Exercised by tests/test_corridor_cohort_main_layouts.py::test_overlaid_entry_slots_keep_drawn_geometry on tests/fixtures/regressions/entry_slot_overlay_tied_feeders.mmd. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
  },
  "corridor_cohort_integration.py::if target is None or not target.mutable:::#1": {

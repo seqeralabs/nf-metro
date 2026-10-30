@@ -205,10 +205,18 @@ def test_vertical_drops_land_on_distinct_slots(
     assert not captured.overlaid
 
 
-def test_overlaid_entry_slots_keep_drawn_geometry(
+def test_approach_ordered_entry_slots_do_not_overlay(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured = _render(monkeypatch, "entry_slot_overlay_from_exit_forward.mmd")
+    assert captured.components
+    assert not captured.overlaid
+
+
+def test_overlaid_entry_slots_keep_drawn_geometry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _render(monkeypatch, "entry_slot_overlay_tied_feeders.mmd")
     overlaid = captured.overlaid
     assert overlaid
     assert all(
