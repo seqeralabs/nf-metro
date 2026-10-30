@@ -4,7 +4,6 @@
 examples/group_labels.mmd
 examples/riboseq_metro.mmd
 examples/sarek_metro.mmd
-examples/topologies/fanout_intersection_shared_channel.mmd
 examples/topologies/inter_row_exempt_band_order.mmd
 examples/topologies/reversed_section_junction_reseat.mmd
 tests/fixtures/curve_invariant_repros/riboseq_inter_row_corridor.mmd

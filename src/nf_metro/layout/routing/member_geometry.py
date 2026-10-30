@@ -770,22 +770,26 @@ def _corridor_cohort_aperture_requirements(
     )
 
 
-def _peeloff_seated_snapshot(
+def _post_emission_seated_snapshot(
     targets: Sequence[CorridorCohortTarget],
     population: Sequence[RoutedPath],
     ctx: _RoutingCtx,
+    *,
+    scalar_requests: Sequence[CorridorScalarRequest],
 ) -> tuple[
     tuple[CorridorCohortTarget, ...], tuple[RoutedPath, ...], dict[int, RoutedPath]
 ]:
-    """Copies of *targets* and *population* with each peel-off riser on its slot.
+    """Copies of *targets* and *population* seated by the post-emission rules.
 
-    After emission, :func:`_reconcile_port_peeloff_risers` re-seats every
-    peel-off riser the freeze leaves unowned onto the slot its settled trunk
-    depth earns.  The same rule runs here over copies of the distinct target
-    routes, in target order, so the compile reads the riser coordinate that
-    pass draws and no live route moves.  An immutable target's copy is
-    re-seated too, as cohort context only: neither :func:`_prepare_patches`
-    nor the corner sizer ever patches or sizes an immutable route.
+    :func:`_reconcile_port_peeloff_risers` runs over the distinct target copies
+    in target order, then :func:`_separate_fused_cotravelling_runs` and
+    :func:`_hold_runs_in_corridor_clearance` over every copy, the order they run
+    after emission, so the compile reads the coordinates those passes draw and
+    no live route moves.  An immutable target's copy is re-seated too, as cohort
+    context only: neither :func:`_prepare_patches` nor the corner sizer ever
+    patches or sizes an immutable route.  The corridor rules hold every route a
+    scalar request's control recipe names where it stands: its grant, not those
+    rules, decides where it is drawn.
 
     Returns the targets on their copies, the copied population, and each
     copy's live route keyed by the copy's id.
@@ -803,6 +807,49 @@ def _peeloff_seated_snapshot(
         ),
         ctx,
     )
+    copy_by_member = {
+        (target.member_id, target.edge_key): copies[id(target.route)]
+        for target in targets
+    }
+    anchored = {
+        id(route)
+        for request in scalar_requests
+        if (recipe := request.control_recipe) is not None
+        for key in (
+            *((point.member_id, point.edge_key) for point in recipe.controlled_points),
+            *((point.member_id, point.edge_key) for point in recipe.fixed_points),
+        )
+        if (route := copy_by_member.get(key)) is not None
+    }
+    seated = list(copies.values())
+    # The trunk-slot restack is drawn before the hold, so the hold's move on an
+    # unrestacked copy is not the drawn one; the restack runs on scratch copies
+    # only, to find the routes it moves, which are then fixed where they stand.
+    scratch = {id(route): _corner_sizing_copy(route) for route in seated}
+    _materialize_trunk_slots(
+        list(scratch.values()),
+        ctx,
+        fixed_route_ids=frozenset(id(scratch[route_id]) for route_id in anchored),
+    )
+    anchored |= {
+        id(route) for route in seated if scratch[id(route)].points != route.points
+    }
+    fixed_segment_keys = frozenset(
+        (id(route), rank)
+        for route in seated
+        if id(route) in anchored
+        for rank in range(len(route.points) - 1)
+    )
+    # A scalar request's grant is drawn, so a lane the separation moved would
+    # reach the render.
+    if not scalar_requests:
+        _separate_fused_cotravelling_runs(
+            seated,
+            ctx,
+            station_offsets=ctx.station_offsets,
+            fixed_segment_keys=fixed_segment_keys,
+        )
+    _hold_runs_in_corridor_clearance(seated, ctx, fixed_segment_keys=fixed_segment_keys)
     return (
         tuple(replace(target, route=copies[id(target.route)]) for target in targets),
         tuple(copies[id(route)] for route in population),
@@ -835,8 +882,8 @@ def _compile_corridor_cohorts(
         ctx,
     )
     targets = (*member_targets, *additional_targets)
-    seated_targets, seated_population, live_by_copy_id = _peeloff_seated_snapshot(
-        targets, sizing_population, ctx
+    seated_targets, seated_population, live_by_copy_id = _post_emission_seated_snapshot(
+        targets, sizing_population, ctx, scalar_requests=scalar_requests
     )
     candidate_route_ids = {id(candidate.route) for candidate in candidates}
     try:

@@ -890,7 +890,6 @@
   "normalize.py::if band is not None:::#1",
   "normalize.py::if below_ok and above_ok and (cross_below is None) != (cross_above is None):::#1",
   "normalize.py::if blocked or settled:::#1",
-  "normalize.py::if ca != cb:::#1",
   "normalize.py::if channel is None:::#1",
   "normalize.py::if channel.idx == 0:::#1",
   "normalize.py::if clearance <= 0:::#1",
