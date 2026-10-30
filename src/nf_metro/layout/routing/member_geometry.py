@@ -3553,11 +3553,15 @@ def _size_patched_corners(
 ) -> tuple[CorridorCornerSizing, ...]:
     """Size the corners a corridor-cohort patch moves with the freeze's own rules.
 
-    The three corner rules run in the freeze's order on copies of *population*
-    holding the patched points, so no live route is written.  The rules read
-    the radii they re-size, so re-running one over a cohort no patch moved
-    drifts it: nothing is sized unless a patch moves a corner, and only routes
-    sharing a corner cohort with a moved corner adopt the result.
+    The freeze's three corner rules run in its order on copies of *population*
+    holding the patched points, so no live route is written, followed by the
+    coincident-radius unification the freeze applies once every owner has
+    settled (:func:`settle_member_geometry_corner_cohorts`).  That unification
+    runs over the mutable routes' copies only, the routes a patch may re-size;
+    the immutable routes keep the radii they are drawn with.  The rules read the
+    radii they re-size, so re-running one over a cohort no patch moved drifts
+    it: nothing is sized unless a patch moves a corner, and only routes sharing
+    a corner cohort with a moved corner adopt the result.
 
     Returns a sizing per mutable route whose corner state changes.  Returns
     nothing both when no corner moves and when the move is declined because
@@ -3585,6 +3589,14 @@ def _size_patched_corners(
     )
     _plan_source_turnouts(copies, graph, curve_radius)
     _reanchor_concentric_corner_fans(copies, station_offsets, curve_radius)
+    _unify_coincident_corner_radii(
+        [
+            sized
+            for route, sized in zip(population, copies, strict=True)
+            if id(route) in mutable_route_ids
+        ],
+        include_owned=True,
+    )
     scope = _corner_sizing_scope(
         copies,
         {
