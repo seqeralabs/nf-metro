@@ -82,6 +82,7 @@ from nf_metro.layout.route_plan import (
     RouteFamilyId,
     RouteMemberGeometryPlan,
     RoutePlan,
+    RoutePlanDiagnostic,
     RouteSystem,
     SettlementStage,
     SettlementStageTrace,
@@ -1854,6 +1855,14 @@ def _corridor_grant_moved_plan_ids(plan: RoutePlan) -> frozenset[str]:
     )
 
 
+def _disposition_overrides(plan: RoutePlan) -> tuple[RoutePlanDiagnostic, ...]:
+    return tuple(
+        item
+        for item in plan.diagnostics
+        if item.code == "exit-turn-disposition-adopted"
+    )
+
+
 def _assert_grant_moves_only_its_convergences(
     ungranted_routes: Sequence[RoutedPath],
     granted_routes: Sequence[RoutedPath],
@@ -2050,18 +2059,21 @@ def _settle_render_geometry(
       settlement consumed runs the corridor-cohort compiler, the only pass that
       does, because only a ledger already settled to its minimum widths compiles
       without a spurious shortfall.  It replays the inputs of the last routing
-      pass, which seated that ledger's corridors, and its geometry is
-      discarded.  A ``CORRIDOR_COHORT_APERTURE`` requirement it publishes is
-      settled once against that observed plan,
-      :func:`_assert_aperture_grant_closes` proves from the settlement's own
-      translations that the grant pays every measured deficit, and a re-route
-      consuming the plan, starting from the station x the last routing pass
-      read translated by the grant, draws the result.  Any deficit the grant
-      leaves is an invariant failure rather than a second batch.  A convergence
-      corridor grant that moved a trunk is materialised by that same
-      observation, so its geometry is kept instead of discarded, once
-      :func:`_assert_grant_moves_only_its_convergences` proves it differs from
-      the drawn pass on the granted convergences alone.
+      pass, which seated that ledger's corridors.  A convergence corridor grant
+      that moved a trunk is materialised by this observation alone, so it is
+      drawn once :func:`_assert_grant_moves_only_its_convergences` proves it
+      differs from the same observation routed without the grant on the
+      granted convergences alone.  Otherwise it is drawn where a settlement
+      re-route ran and it accepted a plan and published no requirement: that
+      re-route consumed the same ledger, so the observation is it seated by
+      the plan.  Any other observation's geometry is discarded.  A
+      ``CORRIDOR_COHORT_APERTURE`` requirement it publishes is settled once
+      against that observed plan, :func:`_assert_aperture_grant_closes` proves
+      from the settlement's own translations that the grant pays every
+      measured deficit, and a re-route consuming the plan, starting from the
+      station x the last routing pass read translated by the grant, draws the
+      result.  Any deficit the grant leaves is an invariant failure rather
+      than a second batch.
 
     Rail-mode sections run a separate layout pipeline whose per-line centrelines
     are anchored during ``compute_layout`` and cannot be re-derived from a
@@ -2190,6 +2202,7 @@ def _settle_render_geometry(
         against, which the re-route delta is measured from.
         """
         labels = _place(station_offsets, routes)
+        _reserve_group_band_space(graph, theme, station_offsets, labels)
         assert_render_curve_invariants(graph, routes, station_offsets)
         _assert_settlement_decisions_frozen(
             decided_routes, decided_plan, routes, realised_plan
@@ -2281,6 +2294,7 @@ def _settle_render_geometry(
         )
 
     grant_settlement: EnvelopeSettlement | None = None
+    adopted_dispositions: tuple[RoutePlanDiagnostic, ...] = ()
     settled_plan = frozen_plan
     drawn_plan = frozen_plan
     settlement = settle_route_envelopes(
@@ -2364,13 +2378,7 @@ def _settle_render_geometry(
         # forward the one class that names a decision the re-route was itself
         # forced to discard (_adopt_prior_dispositions).
         adopted_dispositions = (
-            ()
-            if pending_clearance
-            else tuple(
-                item
-                for item in routed_plan.diagnostics
-                if item.code == "exit-turn-disposition-adopted"
-            )
+            () if pending_clearance else _disposition_overrides(routed_plan)
         )
         if adopted_dispositions:
             route_plan = replace(
@@ -2394,6 +2402,9 @@ def _settle_render_geometry(
     # convergences alone from the same observation routed without the grant.
     # The drawn pass is no baseline for that: where it never consumed the
     # ledger, the observation's pre-freeze seating moves runs no grant touched.
+    # Where a settlement re-route did consume it, the observation is that
+    # re-route seated by the plan it accepted, so it is drawn and the settled
+    # ledger, carrying the accepted record, is published.
     assert last_route_inputs is not None
     drawn_inputs = last_route_inputs
     drawn_routes = routes
@@ -2409,8 +2420,14 @@ def _settle_render_geometry(
             allow_clearance_requirements=True,
         )
         granted_plan_ids = _corridor_grant_moved_plan_ids(observed_plan)
-        if granted_plan_ids:
+        adopt_observation = bool(granted_plan_ids) or (
+            grant_settlement is not None
+            and observed_plan.accepted_corridor_cohort_plan is not None
+            and not observed_plan.boundary_clearance_requirements
+        )
+        if adopt_observation:
             observed_state = _RouteObservationInputs.capture(graph, observed_offsets)
+        if granted_plan_ids:
             ungranted_routes, _ = _route(
                 last_route_inputs.restore(graph),
                 settled_plan,
@@ -2419,7 +2436,7 @@ def _settle_render_geometry(
             )
     aperture_requirements = _corridor_cohort_aperture_requirements(observed_plan)
     aperture_settlement: EnvelopeSettlement | None = None
-    if granted_plan_ids:
+    if adopt_observation:
         assert observed_state is not None
         if observed_plan.boundary_clearance_requirements:
             raise LayoutInvariantError(
@@ -2427,9 +2444,10 @@ def _settle_render_geometry(
                 "published a boundary clearance requirement; a render settles one "
                 "batch and does not retry"
             )
-        _assert_grant_moves_only_its_convergences(
-            ungranted_routes, observed_routes, granted_plan_ids
-        )
+        if granted_plan_ids:
+            _assert_grant_moves_only_its_convergences(
+                ungranted_routes, observed_routes, granted_plan_ids
+            )
         station_offsets = observed_state.restore(graph)
         routes = observed_routes
         carried_ports = ()
@@ -2439,8 +2457,32 @@ def _settle_render_geometry(
             observed_plan,
             decided_routes=drawn_routes,
             decided_plan=drawn_plan,
-            ledger=observed_plan,
+            ledger=observed_plan if granted_plan_ids else settled_plan,
             sized_for=settled_plan,
+            coordinate_translations=(
+                () if granted_plan_ids else settlement.coordinate_translations
+            ),
+        )
+        if not granted_plan_ids:
+            route_plan = replace(
+                route_plan,
+                accepted_corridor_cohort_plan=(
+                    observed_plan.accepted_corridor_cohort_plan
+                ),
+            )
+        # Republishing the ledger drops the overrides both settlement re-routes
+        # reported, the drawn observation's included.
+        route_plan = replace(
+            route_plan,
+            diagnostics=route_plan.diagnostics
+            + tuple(
+                dict.fromkeys(
+                    item
+                    for item in adopted_dispositions
+                    + _disposition_overrides(observed_plan)
+                    if item not in route_plan.diagnostics
+                )
+            ),
         )
     elif aperture_requirements:
         drawn_inputs.restore_station_x(graph)
