@@ -5923,6 +5923,24 @@ def _held_corner_radius(
     return radii[index] if radii and 0 <= index < len(radii) else fallback
 
 
+def _clamps_flanking_corner(
+    points: list[tuple[float, float]], desired: list[float], index: int
+) -> bool:
+    """Whether a corner flanking *index* resolves short of its declared radius.
+
+    Neighbouring corners split their shared leg in proportion to their declared
+    radii, so raising the corner at *index* on a leg with no slack shortens the
+    corner beside it even when *index* itself resolves in full.
+    """
+    corners = min(len(points) - 2, len(desired))
+    return any(
+        resolve_curve_radius_at(points, desired, neighbour)
+        < desired[neighbour] - COORD_TOLERANCE_FINE
+        for neighbour in (index - 1, index + 1)
+        if 0 <= neighbour < corners
+    )
+
+
 def _reanchor_concentric_corner_fans(
     population: list[RoutedPath],
     offsets: Mapping[tuple[str, str], float],
@@ -6036,6 +6054,7 @@ def _reanchor_concentric_corner_fans(
                         - radius
                     )
                     > COORD_TOLERANCE_FINE
+                    or _clamps_flanking_corner(observation.points, desired, index)
                 ):
                     return False
             return True
