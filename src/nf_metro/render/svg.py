@@ -2055,13 +2055,11 @@ def _settle_render_geometry(
       settled once against that observed plan,
       :func:`_assert_aperture_grant_closes` proves from the settlement's own
       translations that the grant pays every measured deficit, and a re-route
-      consuming the plan draws the result.  That re-route starts every
-      non-port station at the x the last routing pass read, translated by the
-      grant, so it re-derives that pass's centring rather than centring its
-      output a second time.  Any deficit the grant leaves is an invariant
-      failure rather than a second batch.  A convergence corridor
-      grant that moved a trunk is materialised by that same observation, so
-      its geometry is kept instead of discarded, once
+      consuming the plan, starting from the station x the last routing pass
+      read translated by the grant, draws the result.  Any deficit the grant
+      leaves is an invariant failure rather than a second batch.  A convergence
+      corridor grant that moved a trunk is materialised by that same
+      observation, so its geometry is kept instead of discarded, once
       :func:`_assert_grant_moves_only_its_convergences` proves it differs from
       the drawn pass on the granted convergences alone.
 
@@ -2445,8 +2443,6 @@ def _settle_render_geometry(
             sized_for=settled_plan,
         )
     elif aperture_requirements:
-        # Centring is not idempotent: routed again from its own output, a
-        # centred station moves again.
         drawn_inputs.restore_station_x(graph)
         owed = tuple(
             (requirement, demand)

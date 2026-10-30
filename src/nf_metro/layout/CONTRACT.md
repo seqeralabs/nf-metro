@@ -2170,16 +2170,16 @@ They are design evidence, not part of this specification.
   `CORRIDOR_COHORT_APERTURE` requirement it publishes is settled once against
   the observed plan, the grant is proven from that settlement's own
   translations to pay every measured deficit (`_assert_aperture_grant_closes`:
-  the translation at the requirement's boundary carries every positive-side box,
-  no negative-side box, and at least the deficit, which the quantised
-  allocation may exceed), and a
-  re-route consuming the observed plan draws the result, which is adopted and
-  published. That re-route starts every non-port station at the x the last
-  routing pass read (`_RouteObservationInputs.restore_station_x`), translated
-  by the grant: routing's centring is the only writer of non-port x since that
-  pass, and it is not idempotent, so a re-route from the drawn output would
-  centre a station a second time. There is no retry or fixpoint search. A requirement surviving the
-  first strict observation, any deficit surviving final settlement, or an
+  the translation at the requirement's boundary carries every positive-side
+  box, no negative-side box, and at least the deficit, which the quantised
+  allocation may exceed), and a re-route consuming the observed plan draws the
+  result, which is adopted and published. That re-route starts every non-port
+  station at the x the last routing pass read
+  (`_RouteObservationInputs.restore_station_x`), translated by the grant:
+  routing's centring is the only writer of non-port x since that pass, and it
+  is not idempotent, so a re-route from the drawn output would centre a station
+  a second time. There is no retry or fixpoint search. A requirement surviving
+  the first strict observation, any deficit surviving final settlement, or an
   aperture deficit its grant does not pay is an invariant failure; a render
   settles at most one aperture batch.
   `attach_reroute_ledger_delta` compares each corridor's description together

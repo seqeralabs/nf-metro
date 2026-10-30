@@ -116,7 +116,7 @@ def test_aperture_reroute_reads_the_drawn_inputs_translated_by_the_grant(
 
     assert rendered.lstrip().startswith("<")
     assert len(trace.aperture_grants) == 1, (
-        "the map no longer takes the aperture re-route, so this test witnesses "
+        "the map does not take the aperture re-route, so this test witnesses "
         "nothing; find another map that owes a corridor-cohort aperture after "
         "a drawn pass that centres a station"
     )
