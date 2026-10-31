@@ -45,7 +45,8 @@
     "topologies/centered_flat_skip_over_marker.mmd",
     "topologies/descent_entry_inner_bypass.mmd",
     "co_column_feeders_shared_diagonal_bt.mmd",
-    "topologies/co_row_feeders_shared_diagonal.mmd"
+    "topologies/co_row_feeders_shared_diagonal.mmd",
+    "topologies/member_channel_runway_candidate_outside_band.mmd"
   ],
   "corridor_solo": [
     "group_band_over_row_corridor.mmd",
@@ -525,7 +526,8 @@
     "variantbenchmarking.mmd",
     "variantbenchmarking_auto.mmd",
     "variantprioritization.mmd",
-    "topologies/co_row_feeders_shared_diagonal.mmd"
+    "topologies/co_row_feeders_shared_diagonal.mmd",
+    "topologies/member_channel_runway_candidate_outside_band.mmd"
   ],
   "vertical_passthrough": [
     "guide/04_directions.mmd",

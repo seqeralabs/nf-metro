@@ -1,0 +1,49 @@
+%%metro title: Member Channel Runway Candidate Outside Its Band
+%%metro line: l0 | Call | #e6194b
+%%metro line: l1 | Report_Polish | #3cb44b
+%%metro line: l2 | Stats_Export_Annotate | #4363d8
+
+graph LR
+    subgraph sec0 [Gather_Sort_Summarise 0]
+        s0n0[gather_markdup]
+        s0n1[report]
+        s0n2[CALL]
+        s0n3[bam]
+        s0n0 -->|l1| s0n1
+        s0n1 -->|l1| s0n2
+        s0n2 -->|l1| s0n3
+    end
+    subgraph sec1 [Trim_Dedup_Count 1]
+        s1n0[sort_filter]
+        s1n1[QC]
+        s1n0 -->|l1| s1n1
+    end
+    subgraph sec2 [Vcf 2]
+        s2n0[index]
+        s2n2[trim]
+        s2n0 -->|l0| s2n2
+    end
+    subgraph sec3 [Qc_Classify 3]
+        s3n0[call]
+        s3n1[pca_report]
+        s3n0 -->|l1| s3n1
+    end
+    subgraph sec4 [Vcf 4]
+        s4n0[stats]
+        s4n1[report_gather]
+        s4n2[merge_assemble_vcf]
+        s4n3[bam]
+        s4n0 -->|l1,l2| s4n1
+        s4n1 -->|l1,l2| s4n2
+        s4n2 -->|l1,l2| s4n3
+    end
+    s2n2 -->|l0| s4n0
+    s2n2 -->|l0| s3n1
+    s3n1 -->|l0,l1,l2| s4n0
+    s2n2 -->|l0| s3n0
+    s3n0 -->|l0| s4n0
+    s0n3 -->|l1| s1n0
+    s1n1 -->|l1| s2n0
+    s2n0 -->|l1| s3n0
+    s1n0 -->|l1| s3n0
+    s3n1 -->|l1| s4n3
