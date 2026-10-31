@@ -10,6 +10,7 @@ The rest pin the cases where re-dealing a port's lanes would do harm.
 from __future__ import annotations
 
 import warnings
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,9 @@ import cohort_shadow_oracle
 import pytest
 
 from nf_metro.api import render_string
+from nf_metro.layout.geometry import AxisFrame
+from nf_metro.layout.routing import offsets as offsets_module
+from nf_metro.layout.routing.inter_section_handlers import ArrivalLeg, arrival_leg_of
 from nf_metro.render import svg
 
 REGRESSIONS = Path(__file__).parent / "fixtures" / "regressions"
@@ -67,19 +71,9 @@ def _render_offsets(
     return seen["offsets"]
 
 
-@pytest.mark.parametrize(("fixture", "port_id", "order"), _APPROACH_ORDERED)
-def test_side_entry_lanes_follow_feeder_approach(
-    monkeypatch: pytest.MonkeyPatch,
-    fixture: str,
-    port_id: str,
-    order: tuple[str, ...],
-) -> None:
-    offsets = _render_offsets(monkeypatch, REGRESSIONS / fixture)
-
-    lanes = [offsets[(port_id, lid)] for lid in order]
-    assert lanes == sorted(set(lanes)), dict(zip(order, lanes))
-
-
+# Risers tied on one leg keep their incoming relative order; a port where a
+# feeder's own lines would swap, or whose feeder is drawn off the lane its
+# offset names, keeps its lanes.
 _KEPT_ORDER = [
     pytest.param(
         "approach_order_tied_risers.mmd",
@@ -102,16 +96,15 @@ _KEPT_ORDER = [
 ]
 
 
-@pytest.mark.parametrize(("fixture", "port_id", "order"), _KEPT_ORDER)
-def test_side_entry_lane_order_where_a_re_deal_would_harm(
+@pytest.mark.parametrize(
+    ("fixture", "port_id", "order"), _APPROACH_ORDERED + _KEPT_ORDER
+)
+def test_side_entry_lane_order(
     monkeypatch: pytest.MonkeyPatch,
     fixture: str,
     port_id: str,
     order: tuple[str, ...],
 ) -> None:
-    """Risers tied on one leg keep their incoming relative order; a port where
-    a feeder's own lines would swap, or whose feeder is drawn off the lane its
-    offset names, keeps its lanes."""
     offsets = _render_offsets(monkeypatch, REGRESSIONS / fixture)
 
     lanes = [offsets[(port_id, lid)] for lid in order]
@@ -146,3 +139,64 @@ def test_coincident_corner_cohort_is_drawn_as_planned() -> None:
     path = REGRESSIONS / "approach_order_coincident_corners.mmd"
 
     assert cohort_shadow_oracle.shadow_failure(path) is None
+
+
+def test_bottom_entry_of_a_vertical_flow_is_judged_in_its_own_frame(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A BOTTOM entry of a BT section runs the same rule, read on its lane
+    axis (x); here the re-deal would turn a multi-line feeder's bundle over,
+    so the port keeps its lanes."""
+    verdicts: list[tuple[str, bool]] = []
+    turns_over = offsets_module._turns_a_feeder_over
+
+    def record(ctx: Any, port: Any, *args: Any) -> bool:
+        verdict = turns_over(ctx, port, *args)
+        verdicts.append((port.id, verdict))
+        return verdict
+
+    monkeypatch.setattr(offsets_module, "_turns_a_feeder_over", record)
+    _render_offsets(
+        monkeypatch, REGRESSIONS / "approach_order_bottom_entry_refused.mmd"
+    )
+
+    assert ("sec5__entry_bottom_5", True) in verdicts
+
+
+_DRAFT = [
+    (0.0, 0.0),
+    (40.0, 0.0),
+    (50.0, 10.0),
+    (50.0, 60.0),
+    (60.0, 70.0),
+    (100.0, 70.0),
+]
+
+
+@pytest.mark.parametrize("transpose", [False, True], ids=["x-flow", "y-flow"])
+@pytest.mark.parametrize("flow_sign", [1.0, -1.0], ids=["flow+", "flow-"])
+@pytest.mark.parametrize("lane_sign", [1.0, -1.0], ids=["lane+", "lane-"])
+def test_arrival_leg_is_read_the_same_in_every_rotated_frame(
+    transpose: bool, flow_sign: float, lane_sign: float
+) -> None:
+    """A draft and each of its seven dihedral images, read in the matching
+    section frame, give one leg; flipping the flow axis flips only the
+    flow-axis steps, which the port side's inward sign flips with them."""
+    radius = 10.0
+    base = arrival_leg_of(_DRAFT, AxisFrame.for_direction("LR", 1.0, 1.0), radius)
+    assert base == ArrivalLeg(70.0, 40.0, 10.0, 10.0)
+
+    image = [(flow_sign * along, lane_sign * lane) for along, lane in _DRAFT]
+    if transpose:
+        image = [(lane, along) for along, lane in image]
+    frame = replace(
+        AxisFrame.for_direction("TB" if transpose else "LR", 1.0, 1.0),
+        secondary_sign=lane_sign,
+    )
+
+    assert arrival_leg_of(image, frame, radius) == ArrivalLeg(
+        base.end_lane,
+        flow_sign * base.first_along,
+        base.riser_lane,
+        flow_sign * base.lead_along,
+    )
