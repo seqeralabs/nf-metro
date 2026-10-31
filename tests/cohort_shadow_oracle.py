@@ -160,10 +160,11 @@ def sized_radius_mismatches(
 def shadow_observation() -> Iterator[None]:
     """Render with every cohort plan published, drawing the compiling observation.
 
-    The observation is drawn under production's conditions.  The grant-only
-    comparison against an ungranted replay fails by construction once the
-    compiling observation is drawn, so it stands down;
-    the planned-equals-drawn check over the settled geometry replaces it.  The
+    The observation is drawn under production's conditions.  Every compiled
+    plan is published at its compile site, and the drawn observation's own plan
+    is the ledger, so the grant-only comparison against an ungranted replay
+    would run on every drawn observation and stands down; the
+    planned-equals-drawn check over the settled geometry replaces it.  The
     drawn observation is the last compile's, so the corners its patches sized
     are the ones the drawn routes are held to.
     """
