@@ -3553,6 +3553,7 @@ def _draft_feeder_arrivals(
     Lanes are read live, so a port re-slotted earlier in the phase is measured
     on its new lanes against drafts drawn on the old ones.
     """
+    from nf_metro.layout.routing.exit_turns import ExitTurnInvariantError
     from nf_metro.layout.routing.inter_section_handlers import arrival_leg
 
     inward = _entry_inward(port)
@@ -3560,8 +3561,9 @@ def _draft_feeder_arrivals(
     for edge in edges:
         try:
             leg = arrival_leg(edge, draft_ctx, frame)
-        except Exception:
-            # A feeder whose draft cannot be built gives no approach to order by.
+        except (AssertionError, ExitTurnInvariantError):
+            # A draft whose geometry cannot be built (a failed handler assertion
+            # or a zero-length leg) gives no approach to order by.
             return None
         if leg is None:
             return None

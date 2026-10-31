@@ -19,8 +19,13 @@ import pytest
 
 from nf_metro.api import render_string
 from nf_metro.layout.geometry import AxisFrame, flow_entry_side
+from nf_metro.layout.routing import inter_section_handlers
 from nf_metro.layout.routing import offsets as offsets_module
 from nf_metro.layout.routing.context import _section_lane_frame
+from nf_metro.layout.routing.corridor_cohort_integration import (
+    CorridorCohortCompilationError,
+)
+from nf_metro.layout.routing.exit_turns import ExitTurnInvariantError
 from nf_metro.layout.routing.inter_section_handlers import ArrivalLeg, arrival_leg_of
 from nf_metro.layout.routing.invariants import CurveInvariantError
 from nf_metro.parser.model import Edge, MetroGraph, Port, Section, Station
@@ -158,6 +163,46 @@ def test_carry_that_puts_two_lines_on_one_lane_is_not_dealt(
 
     lanes = [offsets[("sec3__entry_left_6", lid)] for lid in ("l3", "l1", "l4")]
     assert lanes == sorted(set(lanes)), lanes
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [AssertionError("draft"), ExitTurnInvariantError("draft")],
+    ids=["handler-assertion", "zero-length-leg"],
+)
+def test_port_whose_draft_cannot_be_built_keeps_its_order(
+    monkeypatch: pytest.MonkeyPatch, failure: Exception
+) -> None:
+    """A feeder draft that fails on its own geometry leaves the port with the
+    lanes it had.  Left interleaved, this map's corridor cohort cannot be
+    seated, so the render aborts after the offsets are settled."""
+
+    def fail(*args: Any) -> None:
+        raise failure
+
+    monkeypatch.setattr(inter_section_handlers, "arrival_leg", fail)
+    offsets = _render_offsets(
+        monkeypatch,
+        REGRESSIONS / "approach_order_interleaved_feeders.mmd",
+        aborts=CorridorCohortCompilationError,
+    )
+
+    lanes = [offsets[("z3__entry_left_5", lid)] for lid in ("m0", "m2", "m1")]
+    assert lanes != sorted(set(lanes)), lanes
+
+
+def test_unexpected_draft_failure_is_not_swallowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail(*args: Any) -> None:
+        raise KeyError("draft")
+
+    monkeypatch.setattr(inter_section_handlers, "arrival_leg", fail)
+
+    with pytest.raises(KeyError):
+        _render_offsets(
+            monkeypatch, REGRESSIONS / "approach_order_interleaved_feeders.mmd"
+        )
 
 
 def test_junction_feeder_lanes_are_not_narrowed(
