@@ -2150,10 +2150,13 @@ They are design evidence, not part of this specification.
   a replay of the last routing pass against the ledger the last settlement
   consumed, with its translations, that may publish clearance requirements.
   The replay reads exactly that pass's inputs (station coordinates, section
-  boxes, bypass-label obstacles and station offsets), not the geometry the
-  label pass after it grew: that pass seated the ledger's corridors against
-  those inputs, and a box the ledger never saw can leave a corridor with no
-  band that fits. It is the only pass that runs the corridor-cohort
+  boxes, bypass-label obstacles, station offsets and the reserved bands it
+  seated corridors in), not the geometry the label pass after it grew: that
+  pass seated its corridors against those inputs, and a box the ledger never
+  saw can leave a corridor with no band that fits. The bands are the ones a
+  settlement re-route measured from the ledger it consumed, and none where
+  settlement moved nothing and nothing was re-routed; the replay without the
+  grant reads the same ones. It is the only pass that runs the corridor-cohort
   compiler, because only a ledger already settled to its minimum widths
   compiles without a spurious shortfall. The plan it accepts is stored on that
   observation's `RoutePlan` as `accepted_corridor_cohort_plan`, from which the
@@ -2164,16 +2167,15 @@ They are design evidence, not part of this specification.
   is adopted with its own plan once `_assert_grant_moves_only_its_convergences`
   proves it differs on the granted convergences alone from the same
   observation routed without the grant; a grant observation that also
-  publishes a requirement is an invariant failure. Otherwise, where envelope
-  settlement re-routed (a translation, or a live-derived band the ledger
-  changes at zero translation), the last routing pass consumed the same
-  ledger, so the observation is that pass's replay seated by the accepted
-  plan. It is drawn whenever it accepted a plan and published no requirement,
-  and the published plan is the ledger the last settlement consumed, projected
-  through its translations, carrying the accepted record. Where neither holds,
-  the observation is not drawn: without a settlement re-route the drawn pass
-  consumed no ledger, so the observation is no replay of it, and without an
-  accepted plan it has no record to publish. A drawn observation can replay
+  publishes a requirement is an invariant failure. Otherwise the observation
+  is the last routing pass replayed and seated by the accepted plan, whether
+  or not envelope settlement re-routed before it (a translation, or a
+  live-derived band the ledger changes at zero translation). It is drawn
+  whenever it accepted a plan and published no requirement, and the published
+  plan is the ledger the last settlement consumed, projected through its
+  translations, carrying the accepted record. An observation that accepted no
+  plan has no record to publish, and one that published a requirement is
+  settled below, so neither is drawn. A drawn observation can replay
   inputs from before the group-caption band was reserved, so the publish step
   reserves the band again after placing labels; the reservation only grows a
   box. An observation that is not drawn has its geometry (station

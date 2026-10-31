@@ -135,7 +135,10 @@ from nf_metro.layout.routing.postprocess import (  # noqa: F401
     _spread_diagonal_bundles,
     _StationMoveCandidate,
 )
-from nf_metro.layout.routing.reserved_bands import build_reserved_corridors
+from nf_metro.layout.routing.reserved_bands import (
+    ReservedCorridors,
+    build_reserved_corridors,
+)
 from nf_metro.layout.routing.tb_handlers import (  # noqa: F401
     _compute_diagonal_placement,
     _perp_entry_drop_delta,
@@ -326,6 +329,7 @@ def _route_edges(  # noqa: C901
     offset_step: float | None = None,
     reservations: RoutePlan | None = None,
     reservation_translations: tuple[ReservationCoordinateTranslation, ...] = (),
+    reserved_bands: ReservedCorridors | None = None,
     validate_final_route_frames: bool = True,
     allow_convergence_clearance_requirements: bool = False,
 ) -> tuple[list[RoutedPath], dict[str, float], RoutePlan | None]:
@@ -335,6 +339,9 @@ def _route_edges(  # noqa: C901
     :func:`route_edges_centred` (applies the moves).  The ``moves`` are the
     per-station X-targets the bubble-centring pass produced as ``{station_id:
     x}`` requests; the route points are adjusted in place either way.
+
+    Corridors are seated in *reserved_bands* when given, and otherwise in the
+    bands *reservations* reserves, projected through *reservation_translations*.
     """
     observer: RoutePlanObserver | None
     if graph.line_spread is LineSpread.RAILS:
@@ -433,8 +440,8 @@ def _route_edges(  # noqa: C901
         offset_step=offset_step,
         validate_final_route_frames=validate_final_route_frames,
         reserved_bands=(
-            None
-            if reservations is None
+            reserved_bands
+            if reserved_bands is not None or reservations is None
             else build_reserved_corridors(graph, reservations, reservation_translations)
         ),
         prior_exit_turn_dispositions=(
@@ -912,9 +919,14 @@ def observe_route_edges_centred(
     offset_step: float | None = None,
     reservations: RoutePlan | None = None,
     reservation_translations: tuple[ReservationCoordinateTranslation, ...] = (),
+    reserved_bands: ReservedCorridors | None = None,
     allow_convergence_clearance_requirements: bool = False,
 ) -> RouteObservation:
-    """Route drawn geometry and return its context-local semantic observation."""
+    """Route drawn geometry and return its context-local semantic observation.
+
+    *reserved_bands*, when given, are the corridors routing seats in instead
+    of the bands *reservations* reserves.
+    """
     from nf_metro.layout.route_plan import RouteObservation
 
     routes, moves, plan = _route_edges(
@@ -926,6 +938,7 @@ def observe_route_edges_centred(
         offset_step=offset_step,
         reservations=reservations,
         reservation_translations=reservation_translations,
+        reserved_bands=reserved_bands,
         allow_convergence_clearance_requirements=(
             allow_convergence_clearance_requirements
         ),
