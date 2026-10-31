@@ -29,7 +29,7 @@ from conftest import (
 )
 
 from nf_metro.api import prepare_graph, resolve_theme
-from nf_metro.layout.constants import COORD_TOLERANCE
+from nf_metro.layout.constants import COORD_TOLERANCE, COORD_TOLERANCE_FINE
 from nf_metro.layout.route_plan import build_route_plan_query
 from nf_metro.layout.route_reservations import (
     ColumnGapRegion,
@@ -106,6 +106,12 @@ DRAWN_PASS_OUT_OF_BAND_CLAIMS: frozenset[tuple[str, int, int]] = frozenset(
         ("tests/fixtures/regressions/cohort_grant_beside_seated_runs.mmd", 17, 2),
     }
 )
+
+# How far outside its band each exempt claim is drawn.  The exemption covers
+# exactly this overhang, so a claim that drifts further out reddens
+# ``test_drawn_pass_exemptions_are_the_measured_overhang`` instead of hiding
+# behind the exemption.
+DRAWN_PASS_OUT_OF_BAND_OVERHANG_PX = 2.0
 
 
 def _claim_overhangs(path: Path) -> dict[tuple[int, int], tuple[float, str]] | None:
@@ -233,6 +239,32 @@ def test_claims_drawn_within_one_tolerance_of_their_band_are_the_recorded_ones(
             )
             if short <= COORD_TOLERANCE
         )
+    )
+
+
+@pytest.mark.parametrize(
+    ("rel", "path_rank", "segment_rank"), sorted(DRAWN_PASS_OUT_OF_BAND_CLAIMS)
+)
+def test_drawn_pass_exemptions_are_the_measured_overhang(
+    rel: str, path_rank: int, segment_rank: int
+) -> None:
+    """Each exempt claim is drawn out of band, by exactly the recorded overhang.
+
+    An exemption that no longer fires is stale, and one whose claim has moved
+    further out than recorded is growing; both fail here rather than passing
+    silently through the skip in the bound above.
+    """
+    overhangs = _claim_overhangs(_ROOT / rel)
+    assert overhangs is not None, f"{rel} does not render"
+    assert (path_rank, segment_rank) in overhangs, (
+        f"{rel} claim (path {path_rank}, segment {segment_rank}) is drawn in "
+        "its band, so its DRAWN_PASS_OUT_OF_BAND_CLAIMS entry is stale"
+    )
+    short, message = overhangs[path_rank, segment_rank]
+    assert short > COORD_TOLERANCE, message
+    assert abs(short - DRAWN_PASS_OUT_OF_BAND_OVERHANG_PX) <= COORD_TOLERANCE_FINE, (
+        f"drawn {short:.2f}px outside its band, recorded "
+        f"{DRAWN_PASS_OUT_OF_BAND_OVERHANG_PX:.2f}px: {message}"
     )
 
 
