@@ -1,4 +1,4 @@
-"""A multi-feeder side entry deals its lanes in the order its feeders approach.
+"""A multi-feeder flow-side entry deals its lanes in the order its feeders approach.
 
 Each fixture is a generated map whose side entry port is fed by two or more
 stations whose lines interleave in the port's lane order.  Left in that order,
@@ -22,6 +22,7 @@ from nf_metro.layout.geometry import AxisFrame, flow_entry_side
 from nf_metro.layout.routing import offsets as offsets_module
 from nf_metro.layout.routing.context import _section_lane_frame
 from nf_metro.layout.routing.inter_section_handlers import ArrivalLeg, arrival_leg_of
+from nf_metro.layout.routing.invariants import CurveInvariantError
 from nf_metro.parser.model import Edge, MetroGraph, Port, Section, Station
 from nf_metro.render import svg
 
@@ -53,8 +54,13 @@ def _render_offsets(
     monkeypatch: pytest.MonkeyPatch,
     path: Path,
     layout_options: dict[str, Any] | None = None,
+    aborts: type[Exception] | None = None,
 ) -> dict[tuple[str, str], float]:
-    """Render *path* and return the station offsets the drawing used."""
+    """Render *path* and return the station offsets the drawing used.
+
+    A map that aborts later in the render with *aborts* still gives the offsets
+    its layout phases settled on.
+    """
     seen: dict[str, Any] = {}
     compute = svg.compute_station_offsets
 
@@ -65,18 +71,24 @@ def _render_offsets(
     monkeypatch.setattr(svg, "compute_station_offsets", capture)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        render_string(
-            path.read_text(),
-            layout_options=layout_options,
-            source_dir=str(path.parent),
-        )
+        try:
+            render_string(
+                path.read_text(),
+                layout_options=layout_options,
+                source_dir=str(path.parent),
+            )
+        except Exception as exc:
+            if aborts is None or not isinstance(exc, aborts):
+                raise
     return seen["offsets"]
 
 
-# Risers tied on one leg keep their incoming relative order.  A port keeps its
-# lanes where a feeder's own lines would swap, a feeder is drawn off the lane
-# its offset names, or carrying the re-deal on would cross lines between the
-# stations it reaches or sit a line between the lanes of a station it skips.
+# A port keeps its lanes where its feeders do not interleave, where risers
+# tied on one leg keep their incoming relative order, where a multi-line
+# feeder's bundle would be reordered or turned over, where a feeder is drawn
+# off the lane its offset names, or where carrying the re-deal on would cross
+# lines between the stations it reaches or sit a line between the lanes of a
+# station it skips.
 _KEPT_ORDER = [
     pytest.param(
         "approach_order_tied_risers.mmd",
@@ -85,9 +97,15 @@ _KEPT_ORDER = [
         id="tied-risers-keep-their-order",
     ),
     pytest.param(
-        "approach_order_feeder_keeps_its_order.mmd",
-        "z3__entry_right_5",
-        ("m0", "m1", "m2"),
+        "approach_order_feeders_not_interleaved.mmd",
+        "sec3__entry_bottom_7",
+        ("l2", "l3"),
+        id="feeders-do-not-interleave",
+    ),
+    pytest.param(
+        "approach_order_multi_line_feeder.mmd",
+        "z2__entry_left_2",
+        ("m1", "m2"),
         id="multi-line-feeder-keeps-its-order",
     ),
     pytest.param(
@@ -124,6 +142,22 @@ def test_side_entry_lane_order(
 
     lanes = [offsets[(port_id, lid)] for lid in order]
     assert lanes == sorted(set(lanes)), dict(zip(order, lanes))
+
+
+def test_carry_that_puts_two_lines_on_one_lane_is_not_dealt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Re-dealing this port would carry two lines onto one lane of a station
+    downstream, so it keeps its order.  The render aborts later on a defective
+    bundle curve whether or not the port is re-dealt."""
+    offsets = _render_offsets(
+        monkeypatch,
+        REGRESSIONS / "approach_order_carry_shares_a_lane.mmd",
+        aborts=CurveInvariantError,
+    )
+
+    lanes = [offsets[("sec3__entry_left_6", lid)] for lid in ("l3", "l1", "l4")]
+    assert lanes == sorted(set(lanes)), lanes
 
 
 def test_junction_feeder_lanes_are_not_narrowed(
