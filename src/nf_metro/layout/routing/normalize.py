@@ -317,10 +317,7 @@ def _layout_gap_bundle(
     # per-line slotting: multiple segments sharing one line_id (a fan
     # whose line feeds several targets) overlay at a single x rather
     # than each claiming an OFFSET_STEP slot.
-    line_orders = [
-        _convergence_line_order(c, ctx.graph) or _port_ordered_line_order(c, ctx)
-        for _, c in bundles
-    ]
+    line_orders = [_gap_bundle_line_order(c, ctx) for _, c in bundles]
     # Skip a lone bundle carrying a single distinct line: nothing to
     # re-bundle and centring risks disturbing wrap geometry.
     if len(bundles) == 1 and len(line_orders[0]) <= 1:
@@ -589,9 +586,7 @@ def _separate_opposing_gap_bundles(
             settled.extend(chans)
             continue
 
-        order = _convergence_line_order(chans, ctx.graph) or _port_ordered_line_order(
-            chans, ctx
-        )
+        order = _gap_bundle_line_order(chans, ctx)
         rank = {line_id: i for i, line_id in enumerate(order)}
         for ch in chans:
             new_x = ch.x + delta
@@ -4140,13 +4135,24 @@ def _port_decides_lane_order(
     for edge in graph.edges_to(port_id):
         lines_by_source[edge.source].add(edge.line_id)
     port = graph.ports[port_id]
-    direction = graph.section_for_port(port).direction
     return (
         port.is_entry
-        and port.side in flow_port_sides(direction)
+        and port.side
+        in flow_port_sides(direction := graph.section_for_port(port).direction)
         and AxisFrame.axes_for_direction(direction)[1] == lane_axis.value
         and all(len(lines) < 2 for lines in lines_by_source.values())
     )
+
+
+def _shared_source_pairs(
+    sources: Sequence[set[str]], lines: Sequence[str]
+) -> list[tuple[int, int]]:
+    """Index pairs of distinct lines whose *sources* intersect."""
+    return [
+        (i, j)
+        for i, j in itertools.combinations(range(len(lines)), 2)
+        if lines[i] != lines[j] and sources[i] & sources[j]
+    ]
 
 
 def _port_order_refused(
@@ -4225,13 +4231,10 @@ def _ranked_band_order(
     if not admitted:
         return free, []
     ported = min(admitted, key=_key)
-    sources = [{t.route.edge.source for t in sg} for sg in slots]
-    shared_pairs = [
-        (i, j)
-        for i, j in itertools.combinations(range(len(slots)), 2)
-        if slots[i][0].route.line_id != slots[j][0].route.line_id
-        and sources[i] & sources[j]
-    ]
+    shared_pairs = _shared_source_pairs(
+        [{t.route.edge.source for t in sg} for sg in slots],
+        [sg[0].route.line_id for sg in slots],
+    )
 
     def _positions(perm: list[list[_HTrunk]]) -> list[int]:
         pos = {id(sg): k for k, sg in enumerate(perm)}
@@ -5456,6 +5459,14 @@ def _line_pair_costs(chans: list[_VChannel]) -> Callable[[str, str], tuple[int, 
     return costs
 
 
+def _gap_bundle_line_order(chans: list[_VChannel], ctx: _RoutingCtx) -> list[str]:
+    """A gap bundle's left-to-right line order: the shared-entry convergence
+    order where it applies, else the entry-port-ordered one."""
+    return _convergence_line_order(chans, ctx.graph) or _port_ordered_line_order(
+        chans, ctx
+    )
+
+
 def _port_ordered_line_order(chans: list[_VChannel], ctx: _RoutingCtx) -> list[str]:
     """Left-to-right line order of one gap-bundle corridor, in the lane order
     of the entry ports its lines turn into (:func:`_port_lane_order_pairs`).
@@ -5501,14 +5512,13 @@ def _port_ordered_line_order(chans: list[_VChannel], ctx: _RoutingCtx) -> list[s
     if not admitted:
         return free
     ported = min(admitted, key=_key)
-    sources = [{ch.route.edge.source for ch in by_line[line]} for line in free]
-    shared_pairs = [
-        (i, j)
-        for i, j in itertools.combinations(range(len(free)), 2)
-        if sources[i] & sources[j]
-    ]
-    ported_pos = [ported.index(k) for k in range(len(free))]
-    if _port_order_refused(range(len(free)), ported_pos, shared_pairs):
+    shared_pairs = _shared_source_pairs(
+        [{ch.route.edge.source for ch in by_line[line]} for line in free], free
+    )
+    ported_pos = [0] * len(free)
+    for pos, k in enumerate(ported):
+        ported_pos[k] = pos
+    if _port_order_refused(list(range(len(free))), ported_pos, shared_pairs):
         return free
     return [free[k] for k in ported]
 

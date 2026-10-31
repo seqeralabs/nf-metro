@@ -14,9 +14,9 @@ import warnings
 from types import SimpleNamespace
 
 import pytest
+from port_order_context import OFFSET_STEP, port_order_ctx
 
 from nf_metro.api import prepare_graph, resolve_theme
-from nf_metro.layout.constants import CURVE_RADIUS
 from nf_metro.layout.routing.common import Direction, RoutedPath
 from nf_metro.layout.routing.normalize import (
     _band_port_constraints,
@@ -29,41 +29,22 @@ from nf_metro.layout.routing.normalize import (
     _slot_entry_reach,
     _VChannel,
 )
-from nf_metro.layout.routing.reserved_bands import ReservedCorridors
 from nf_metro.parser.model import Edge, MetroGraph, Port, PortSide, Section
 from nf_metro.render.svg import build_observed_render_plan
 
 PORT = "dst__entry_0"
 OTHER_PORT = "alt__entry_0"
-STEP = 4.0
+
+Leg = tuple[str, str, str]
 
 
-def _graph(
-    *edges: tuple[str, str, str],
-    side: PortSide,
-    direction: str,
-) -> MetroGraph:
+def _graph(*edges: tuple[str, str, str], side: PortSide, direction: str) -> MetroGraph:
     graph = MetroGraph()
     graph.add_section(Section(id="dst", name="Dst", direction=direction))
     graph.add_port(Port(id=PORT, section_id="dst", side=side))
     for source, target, line in edges:
         graph.add_edge(Edge(source, target, line))
     return graph
-
-
-def _ctx(
-    graph: MetroGraph,
-    offsets: dict[tuple[str, str], float],
-    positive_fan: set[str] | None = None,
-) -> SimpleNamespace:
-    return SimpleNamespace(
-        graph=graph,
-        station_offsets=offsets,
-        positive_fan=positive_fan or set(),
-        offset_step=STEP,
-        curve_radius=CURVE_RADIUS,
-        reserved_bands=ReservedCorridors(),
-    )
 
 
 def _port_offsets(**by_line: float) -> dict[tuple[str, str], float]:
@@ -104,51 +85,86 @@ def _trunk(line: str, source: str, target: str, travel: Direction) -> _HTrunk:
     )
 
 
+def _bundle(
+    *legs: Leg,
+    offsets: dict[tuple[str, str], float],
+    side: PortSide = PortSide.TOP,
+    positive_fan: bool = False,
+    extra_edges: tuple[tuple[str, str, str], ...] = (),
+) -> tuple[MetroGraph, list[_VChannel], SimpleNamespace]:
+    """A TB section entered on *side* and a descending gap bundle with one
+    channel per ``(line, source, target)`` leg, 4px apart from x=210.  A
+    second TB section's TOP entry ``OTHER_PORT`` is there for legs to reach."""
+    edges = [(source, target, line) for line, source, target in legs]
+    graph = _graph(*edges, *extra_edges, side=side, direction="TB")
+    graph.add_section(Section(id="alt", name="Alt", direction="TB"))
+    graph.add_port(Port(id=OTHER_PORT, section_id="alt", side=PortSide.TOP))
+    chans = [_channel(*leg, 210.0 + OFFSET_STEP * k) for k, leg in enumerate(legs)]
+    ctx = port_order_ctx(graph, offsets, {"dst"} if positive_fan else None)
+    return graph, chans, ctx
+
+
+def _gap_pairs(
+    graph: MetroGraph, chans: list[_VChannel], ctx: SimpleNamespace
+) -> list[tuple[int, int]]:
+    """Port pairs over a bundle with one channel per line, indexed like *chans*."""
+    return _port_lane_order_pairs(
+        [ch.route.line_id for ch in chans],
+        [_slot_entry_reach(graph, [ch]) for ch in chans],
+        Direction.D if chans[0].down else Direction.U,
+        ctx,
+    )
+
+
 def _pairs(
     direction: str, side: PortSide, travel: Direction, positive_fan: bool = False
 ) -> list[tuple[int, int]]:
     graph = _graph(("sa", PORT, "a"), ("sb", PORT, "b"), side=side, direction=direction)
-    ctx = _ctx(graph, _port_offsets(a=4.0, b=8.0), {"dst"} if positive_fan else None)
+    ctx = port_order_ctx(
+        graph, _port_offsets(a=4.0, b=8.0), {"dst"} if positive_fan else None
+    )
     if travel in (Direction.R, Direction.L):
         slots = _coincident_trunk_slots(
             [_trunk("a", "sa", PORT, travel), _trunk("b", "sb", PORT, travel)]
         )
         return _band_port_constraints(slots, ctx)
     down = travel is Direction.D
-    reach = [
-        _slot_entry_reach(graph, [_channel("a", "sa", PORT, 10.0, down=down)]),
-        _slot_entry_reach(graph, [_channel("b", "sb", PORT, 14.0, down=down)]),
-    ]
-    return _port_lane_order_pairs(["a", "b"], reach, travel, ctx)
+    return _gap_pairs(
+        graph,
+        [
+            _channel("a", "sa", PORT, 10.0, down=down),
+            _channel("b", "sb", PORT, 14.0, down=down),
+        ],
+        ctx,
+    )
 
 
 A_FIRST, B_FIRST = [(0, 1)], [(1, 0)]
-
-# Offsets a=4, b=8.  LR/RL and BT, and a TB section drawing on its +x side,
-# place a before b along the port edge; a default TB section places b first.
-# The entered side keeps travel straight through (LEFT on R, TOP on D, ...)
-# or turns it back on itself, which swaps the line on each side.
+HORIZONTAL_ROWS = [
+    (PortSide.LEFT, Direction.R, A_FIRST),
+    (PortSide.LEFT, Direction.L, B_FIRST),
+    (PortSide.RIGHT, Direction.R, B_FIRST),
+    (PortSide.RIGHT, Direction.L, A_FIRST),
+]
+VERTICAL_ROWS = [
+    (PortSide.TOP, Direction.D, A_FIRST),
+    (PortSide.TOP, Direction.U, B_FIRST),
+    (PortSide.BOTTOM, Direction.D, B_FIRST),
+    (PortSide.BOTTOM, Direction.U, A_FIRST),
+]
+# Offsets a=4, b=8 place a first along the port edge in every section but a
+# default TB one, whose lanes stack toward -x and so reverse every pair.
 ROTATION_TABLE = [
-    ("LR", False, PortSide.LEFT, Direction.R, A_FIRST),
-    ("LR", False, PortSide.LEFT, Direction.L, B_FIRST),
-    ("LR", False, PortSide.RIGHT, Direction.R, B_FIRST),
-    ("LR", False, PortSide.RIGHT, Direction.L, A_FIRST),
-    ("RL", False, PortSide.LEFT, Direction.R, A_FIRST),
-    ("RL", False, PortSide.LEFT, Direction.L, B_FIRST),
-    ("RL", False, PortSide.RIGHT, Direction.R, B_FIRST),
-    ("RL", False, PortSide.RIGHT, Direction.L, A_FIRST),
+    *((d, False, *row) for d in ("LR", "RL") for row in HORIZONTAL_ROWS),
+    *(
+        (d, fan, *row)
+        for d, fan in (("TB", True), ("BT", False))
+        for row in VERTICAL_ROWS
+    ),
     ("TB", False, PortSide.TOP, Direction.D, B_FIRST),
     ("TB", False, PortSide.TOP, Direction.U, A_FIRST),
     ("TB", False, PortSide.BOTTOM, Direction.D, A_FIRST),
     ("TB", False, PortSide.BOTTOM, Direction.U, B_FIRST),
-    ("TB", True, PortSide.TOP, Direction.D, A_FIRST),
-    ("TB", True, PortSide.TOP, Direction.U, B_FIRST),
-    ("TB", True, PortSide.BOTTOM, Direction.D, B_FIRST),
-    ("TB", True, PortSide.BOTTOM, Direction.U, A_FIRST),
-    ("BT", False, PortSide.TOP, Direction.D, A_FIRST),
-    ("BT", False, PortSide.TOP, Direction.U, B_FIRST),
-    ("BT", False, PortSide.BOTTOM, Direction.D, B_FIRST),
-    ("BT", False, PortSide.BOTTOM, Direction.U, A_FIRST),
 ]
 
 
@@ -168,25 +184,6 @@ def test_each_line_keeps_its_side_of_travel_from_bundle_to_port(
     assert _pairs(direction, side, travel, positive_fan) == expected
 
 
-QUARTER_TURN = {
-    PortSide.LEFT: PortSide.TOP,
-    PortSide.RIGHT: PortSide.BOTTOM,
-    Direction.R: Direction.D,
-    Direction.L: Direction.U,
-}
-
-
-@pytest.mark.parametrize("side", [PortSide.LEFT, PortSide.RIGHT])
-@pytest.mark.parametrize("travel", [Direction.R, Direction.L])
-def test_a_vertical_bundle_reads_the_quarter_turn_of_the_horizontal_rule(side, travel):
-    """Turning an LR band a quarter clockwise gives a default TB bundle, and the
-    top-to-bottom order maps onto right-to-left, so every pair reverses."""
-    horizontal = _pairs("LR", side, travel)
-    vertical = _pairs("TB", QUARTER_TURN[side], QUARTER_TURN[travel])
-    assert horizontal
-    assert vertical == [(j, i) for i, j in horizontal]
-
-
 @pytest.mark.parametrize(
     ("side", "direction"),
     [(PortSide.LEFT, "LR"), (PortSide.TOP, "LR"), (PortSide.LEFT, "TB")],
@@ -197,127 +194,84 @@ def test_a_port_whose_lanes_cross_the_bundle_decides_no_order(side, direction):
     X, which is a TOP/BOTTOM flow entry of a TB/BT section."""
     graph = _graph(("sa", PORT, "a"), ("sb", PORT, "b"), side=side, direction=direction)
     reach = [{PORT: {"sa"}}, {PORT: {"sb"}}]
-    ctx = _ctx(graph, _port_offsets(a=4.0, b=8.0))
+    ctx = port_order_ctx(graph, _port_offsets(a=4.0, b=8.0))
 
     assert _port_lane_order_pairs(["a", "b"], reach, Direction.D, ctx) == []
 
 
-def _bundle_xs(chans: list[_VChannel], ctx: SimpleNamespace) -> list[str]:
-    _layout_gap_bundle([(chans[0].down, chans)], 200.0, 260.0, ctx)
-    return [ch.route.line_id for ch in sorted(chans, key=lambda ch: ch.x)]
-
-
 @pytest.mark.parametrize(
-    ("side", "expected"),
-    [(PortSide.TOP, ["b", "a"]), (PortSide.BOTTOM, ["a", "b"])],
+    ("side", "positive_fan", "expected"),
+    [
+        (PortSide.TOP, False, ["b", "a"]),
+        (PortSide.BOTTOM, False, ["a", "b"]),
+        (PortSide.TOP, True, ["a", "b"]),
+        (PortSide.BOTTOM, True, ["b", "a"]),
+    ],
+    ids=["top", "bottom", "top+fan", "bottom+fan"],
 )
-def test_a_gap_bundle_lays_out_in_its_entry_port_order(side, expected):
+def test_a_gap_bundle_lays_out_in_its_entry_port_order(side, positive_fan, expected):
     """``a`` and ``b`` tie on crossings, so the free order keeps ``a`` left.
     Descending into a default TB section's TOP entry keeps ``b`` on the left
     of travel, where the port has it; a BOTTOM entry turns the lines back up
-    and swaps that side."""
-    graph = _graph(("sa", PORT, "a"), ("sb", PORT, "b"), side=side, direction="TB")
-    chans = [_channel("a", "sa", PORT, 210.0), _channel("b", "sb", PORT, 214.0)]
+    and swaps that side.  A section drawing its lanes on the +x side puts
+    ``a`` left at the port instead."""
+    _, chans, ctx = _bundle(
+        ("a", "sa", PORT),
+        ("b", "sb", PORT),
+        offsets=_port_offsets(a=4.0, b=8.0),
+        side=side,
+        positive_fan=positive_fan,
+    )
     assert _distinct_line_order(chans) == ["a", "b"]
 
-    ctx = _ctx(graph, _port_offsets(a=4.0, b=8.0))
-    assert _bundle_xs(chans, ctx) == expected
-
-
-def test_the_bundle_reads_the_lane_side_its_section_draws_on():
-    """A TB section drawing its lanes on the +x side puts ``a`` left at the port,
-    so the same raw offsets order the bundle the other way."""
-    graph = _graph(
-        ("sa", PORT, "a"), ("sb", PORT, "b"), side=PortSide.TOP, direction="TB"
-    )
-    chans = [_channel("a", "sa", PORT, 210.0), _channel("b", "sb", PORT, 214.0)]
-    offsets = _port_offsets(a=8.0, b=4.0)
-
-    assert _port_ordered_line_order(chans, _ctx(graph, offsets)) == ["a", "b"]
-    assert _port_ordered_line_order(chans, _ctx(graph, offsets, {"dst"})) == [
-        "b",
-        "a",
-    ]
+    _layout_gap_bundle([(True, chans)], 200.0, 260.0, ctx)
+    assert [ch.route.line_id for ch in sorted(chans, key=lambda ch: ch.x)] == expected
 
 
 def test_a_port_one_source_feeds_two_lines_decides_no_order():
     """``sa`` sends ``a`` and ``c`` into the port as one bundle whose order
     ``sa`` pins, so the port's lane order is not the gap bundle's to follow."""
-    graph = _graph(
-        ("sa", PORT, "a"),
-        ("sa", PORT, "c"),
-        ("sb", PORT, "b"),
-        side=PortSide.TOP,
-        direction="TB",
+    graph, chans, ctx = _bundle(
+        ("a", "sa", PORT),
+        ("b", "sb", PORT),
+        offsets=_port_offsets(a=4.0, b=8.0, c=12.0),
+        extra_edges=(("sa", PORT, "c"),),
     )
-    chans = [_channel("a", "sa", PORT, 210.0), _channel("b", "sb", PORT, 214.0)]
-    ctx = _ctx(graph, _port_offsets(a=4.0, b=8.0, c=12.0))
 
+    assert _gap_pairs(graph, chans, ctx) == []
     assert _port_ordered_line_order(chans, ctx) == ["a", "b"]
 
 
-def test_a_port_order_reversing_two_lines_from_one_source_keeps_the_free_order():
-    """``a`` and ``c`` leave ``s1`` together.  The port puts ``b`` left of
-    ``a``; the cheapest order doing so swaps ``a`` and ``c``, which twists the
-    pair at their source, so the bundle keeps its free order."""
-    graph = _graph(
-        ("s1", PORT, "a"),
-        ("s2", PORT, "b"),
-        ("s1", "elsewhere", "c"),
-        side=PortSide.TOP,
-        direction="TB",
-    )
-    chans = [
-        _channel("a", "s1", PORT, 210.0),
-        _channel("c", "s1", "elsewhere", 214.0),
-        _channel("b", "s2", PORT, 218.0),
-    ]
-    ctx = _ctx(graph, _port_offsets(a=4.0, b=8.0))
+@pytest.mark.parametrize(
+    ("legs", "offsets", "pair"),
+    [
+        (
+            (("a", "s1", PORT), ("c", "s1", "elsewhere"), ("b", "s2", PORT)),
+            _port_offsets(a=4.0, b=8.0),
+            (2, 0),
+        ),
+        (
+            (("a", "s1", PORT), ("c", "s1", OTHER_PORT), ("b", "s2", OTHER_PORT)),
+            {(OTHER_PORT, "c"): 4.0, (OTHER_PORT, "b"): 8.0},
+            (2, 1),
+        ),
+    ],
+    ids=["reverses-shared", "splits-shared"],
+)
+def test_a_port_order_twisting_two_lines_from_one_source_keeps_the_free_order(
+    legs, offsets, pair
+):
+    """``a`` and ``c`` leave ``s1`` together and ``b`` sits outside them.  The
+    port puts ``b`` before ``a`` (or ``c``), and the cheapest order doing so
+    reverses ``a`` and ``c`` at their source (or wedges ``b`` between them),
+    so the bundle keeps its free order."""
+    graph, chans, ctx = _bundle(*legs, offsets=offsets)
 
     assert _distinct_line_order(chans) == ["a", "c", "b"]
-    assert _port_lane_order_pairs(
-        ["a", "c", "b"],
-        [_slot_entry_reach(graph, [ch]) for ch in chans],
-        Direction.D,
-        ctx,
-    ) == [(2, 0)]
+    assert _gap_pairs(graph, chans, ctx) == [pair]
     assert _port_ordered_line_order(chans, ctx) == ["a", "c", "b"]
 
 
-def test_a_port_order_splitting_two_lines_from_one_source_keeps_the_free_order():
-    """``a`` and ``c`` leave ``s1`` together and ``b`` sits outside them.  A
-    second port puts ``b`` left of ``c``; every order doing so without
-    reversing the pair wedges ``b`` between them, so the bundle keeps its free
-    order."""
-    graph = _graph(
-        ("s1", PORT, "a"),
-        ("s1", OTHER_PORT, "c"),
-        ("s2", OTHER_PORT, "b"),
-        side=PortSide.TOP,
-        direction="TB",
-    )
-    graph.add_section(Section(id="alt", name="Alt", direction="TB"))
-    graph.add_port(Port(id=OTHER_PORT, section_id="alt", side=PortSide.TOP))
-    chans = [
-        _channel("a", "s1", PORT, 210.0),
-        _channel("c", "s1", OTHER_PORT, 214.0),
-        _channel("b", "s2", OTHER_PORT, 218.0),
-    ]
-    ctx = _ctx(graph, {(OTHER_PORT, "c"): 4.0, (OTHER_PORT, "b"): 8.0})
-
-    assert _distinct_line_order(chans) == ["a", "c", "b"]
-    assert _port_lane_order_pairs(
-        ["a", "c", "b"],
-        [_slot_entry_reach(graph, [ch]) for ch in chans],
-        Direction.D,
-        ctx,
-    ) == [(2, 1)]
-    assert _port_ordered_line_order(chans, ctx) == ["a", "c", "b"]
-
-
-# A BT section's BOTTOM entry fed by m1 off one junction and by m2 through a
-# merge from another, with the two lines rising side by side in the column
-# east of Zone 2 before they part.
 BT_BOTTOM_ENTRY_MAP = """\
 %%metro line: m0 | L0 | #e6194b
 %%metro line: m1 | L1 | #3cb44b
@@ -405,7 +359,7 @@ def test_lines_rising_together_into_a_bt_bottom_entry_hold_its_lane_order():
         if m2[0] == "m2"
         and m2[4]
         and min(m1[3], m2[3]) - max(m1[2], m2[2]) > 1.0
-        and abs(m1[1] - m2[1]) <= 2 * STEP + 0.01
+        and abs(m1[1] - m2[1]) <= 2 * OFFSET_STEP + 0.01
     ]
     assert len(side_by_side) >= 2
     assert all((x1 < x2) == port_m1_left for x1, x2 in side_by_side), side_by_side
