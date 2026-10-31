@@ -1,0 +1,49 @@
+%%metro title: Fuzz 8403812
+%%metro line: l0 | Normalize_Markdup | #e6194b
+%%metro line: l1 | Filter | #3cb44b
+%%metro line: l2 | Stats | #4363d8
+%%metro grid: sec0 | 0,0
+%%metro grid: sec1 | 1,0
+%%metro grid: sec2 | 2,0
+%%metro grid: sec3 | 3,0
+
+graph LR
+    subgraph sec0 [Align 0]
+        s0n0[dedup]
+        s0n1[call]
+        s0n3[merge]
+        s0n4[pca_sort]
+        s0n0 -->|l0,l1| s0n1
+        s0n1 -->|l0,l1| s0n4
+        s0n0 -->|l1| s0n3
+        s0n1 -->|l2| s0n3
+        s0n3 -->|l2| s0n4
+    end
+    subgraph sec1 [Annotate_Index 1]
+        s1n0[classify_stats]
+        s1n1[quant_stats_classify]
+        s1n0 -->|l0| s1n1
+    end
+    subgraph sec2 [Trim_Sort 2]
+        %%metro entry: right | l0, l2
+        s2n0[report]
+        s2n1[ALIGN]
+        s2n2[gather]
+        s2n0 -->|l0,l2| s2n1
+        s2n1 -->|l0,l2| s2n2
+    end
+    subgraph sec3 [Gather 3]
+        s3n0[markdup_align_index]
+        s3n1[fastqc_dedup]
+        s3n2[BAM_ALIGN]
+        s3n0 -->|l0,l1,l2| s3n1
+        s3n1 -->|l1,l2| s3n2
+        s3n0 -->|l2| s3n2
+    end
+    s0n4 -->|l0| s1n0
+    s1n1 -->|l0,l2| s2n0
+    s2n2 -->|l0,l2| s3n0
+    s0n4 -->|l1,l2| s1n1
+    s1n1 -->|l1| s3n0
+    s0n3 -->|l1| s1n1
+    s0n4 -->|l2| s3n0

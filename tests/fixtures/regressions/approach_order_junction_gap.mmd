@@ -1,0 +1,58 @@
+%%metro title: Fuzz 8404929
+%%metro style: nfcore
+%%metro line: l0 | Merge_Normalize | #e6194b
+%%metro line: l1 | Pca | #3cb44b
+%%metro line: l2 | Summarise | #4363d8
+%%metro line: l3 | Bam_Count | #f58231
+%%metro grid: sec0 | 0,0
+%%metro grid: sec1 | 1,0
+%%metro grid: sec2 | 0,1
+%%metro grid: sec3 | 1,1
+%%metro grid: sec4 | 0,2
+
+graph LR
+    subgraph sec0 [Call_Filter 0]
+        %%metro exit: right | l1, l2, l3
+        s0n0[sort_sort]
+        s0n1[trim_trim]
+        s0n0 -->|l1,l2| s0n1
+    end
+    subgraph sec1 [Stats 1]
+        s1n0[align]
+        s1n1[bin]
+        s1n2[pca]
+        s1n0 -->|l1,l3| s1n1
+        s1n1 -->|l1,l3| s1n2
+        s1n0 -->|l2| s1n2
+    end
+    subgraph sec2 [Align_Qc 2]
+        s2n0[count_report_pca]
+        s2n1[sort_index]
+        s2n2[filter_polish_index]
+        s2n3[INDEX_GATHER_CLUSTER]
+        s2n0 -->|l0,l3| s2n1
+        s2n1 -->|l0| s2n2
+        s2n2 -->|l0,l1| s2n3
+        s2n1 -->|l3| s2n3
+    end
+    subgraph sec3 [Call_Normalize 3]
+        s3n0[annotate_annotate]
+        s3n2[dedup_trim_sort]
+        s3n3[fastqc]
+        s3n0 -->|l0| s3n2
+        s3n2 -->|l0| s3n3
+    end
+    subgraph sec4 [Bin_Sort_Summarise 4]
+        s4n0[pca_bam]
+        s4n1[cluster_annotate_polish]
+        s4n2[assemble]
+        s4n0 -->|l2,l3| s4n1
+        s4n1 -->|l2,l3| s4n2
+    end
+    s2n3 -->|l0| s3n0
+    s0n1 -->|l1,l2,l3| s1n0
+    s1n2 -->|l1| s2n2
+    s2n3 -->|l1,l3| s4n0
+    s1n2 -->|l2| s3n3
+    s3n3 -->|l2| s4n0
+    s1n2 -->|l3| s2n0
