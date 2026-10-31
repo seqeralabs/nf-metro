@@ -3969,7 +3969,10 @@ def _band_order_deficits(
     (:func:`_ranked_band_order`) is scored over the orders those admit, and Ys
     expressing none of them are a deficit at any crossing count.  *strict*
     also counts a port-ordered slot pair realized at one Y: the coincidence
-    leaves their order unstated, so only a restack expresses it.
+    leaves their order unstated, so only a restack expresses it.  *strict*
+    also reports the free rule's deficit for a port-ordered band, so the port
+    order adds restack triggers but never removes one; the restack still lays
+    the band out in the port order.
     """
     out: list[tuple[float, int, int]] = []
     for sign in (1, -1):
@@ -3993,7 +3996,16 @@ def _band_order_deficits(
             <= COORD_TOLERANCE
             for a, b in held
         )
-        if best < cur or not honoured or fused:
+        free_deficit = (
+            strict
+            and bool(held)
+            and min(
+                _band_order_crossings(list(p), feats)
+                for p in itertools.permutations(slots)
+            )
+            < min(_band_order_crossings(o, feats) for o in expressed)
+        )
+        if best < cur or not honoured or fused or free_deficit:
             out.append((min(t.y for t in band), cur, best))
     return out
 
@@ -4208,8 +4220,8 @@ def _plan_trunk_band(
     With *ctx*, slots whose lines go on into one entry port take the order
     that port's lanes need (:func:`_band_port_constraints`) unless it costs
     the band more than that (:func:`_ranked_band_order`).  The order is a
-    function of the band and the graph alone, so every pass that restacks
-    the band reaches the same one.
+    function of the band, the graph and the station offsets alone, so every
+    pass that restacks the band reaches the same one.
     """
     slot_groups = _coincident_trunk_slots(band)
     span_of: _SpanOf = {id(sg): _slot_span(sg) for sg in slot_groups}
