@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from port_order_context import port_order_ctx
 
 from nf_metro.api import render_string
 from nf_metro.layout.engine import compute_layout
@@ -48,10 +49,7 @@ def _graph(
 
 
 def _ctx(graph: MetroGraph, offsets: dict[str, float]) -> SimpleNamespace:
-    return SimpleNamespace(
-        graph=graph,
-        station_offsets={(PORT, line): off for line, off in offsets.items()},
-    )
+    return port_order_ctx(graph, {(PORT, line): off for line, off in offsets.items()})
 
 
 def _trunk(

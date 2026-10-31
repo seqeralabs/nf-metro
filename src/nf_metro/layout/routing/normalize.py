@@ -24,16 +24,18 @@ from nf_metro.layout.constants import (
     graph_offset_step,
 )
 from nf_metro.layout.geometry import (
+    AxisFrame,
     cotravelling_lane_clearance,
     cotravelling_lanes_fuse,
-    lanes_run_along_y,
+    flow_port_sides,
     spans_share_corridor,
 )
-from nf_metro.layout.route_plan import ExitTurnPlanId
+from nf_metro.layout.route_plan import DemandAxis, ExitTurnPlanId
 from nf_metro.layout.routing.centrelines import (
     fan_offsets,
 )
 from nf_metro.layout.routing.common import (
+    ENTRY_SIDE_DIRECTION,
     CorridorLane,
     Direction,
     GapSlot,
@@ -92,6 +94,7 @@ from nf_metro.layout.routing.context import (
     _MergeRouting,
     _resolve_section_col,
     _RoutingCtx,
+    port_lane_coord,
 )
 from nf_metro.layout.routing.corners import (
     _corner_travel_units,
@@ -111,7 +114,11 @@ from nf_metro.layout.routing.families import (
 from nf_metro.layout.routing.offsets import (
     cross_row_convergence_channel_order,
 )
-from nf_metro.layout.routing.orientation import direction_vector
+from nf_metro.layout.routing.orientation import (
+    direction_vector,
+    lateral_axis,
+    lateral_order_sign,
+)
 from nf_metro.layout.routing.reserved_bands import (
     ReservedBand,
     corridor_clearance_band,
@@ -310,10 +317,7 @@ def _layout_gap_bundle(
     # per-line slotting: multiple segments sharing one line_id (a fan
     # whose line feeds several targets) overlay at a single x rather
     # than each claiming an OFFSET_STEP slot.
-    line_orders = [
-        _convergence_line_order(c, ctx.graph) or _distinct_line_order(c)
-        for _, c in bundles
-    ]
+    line_orders = [_gap_bundle_line_order(c, ctx) for _, c in bundles]
     # Skip a lone bundle carrying a single distinct line: nothing to
     # re-bundle and centring risks disturbing wrap geometry.
     if len(bundles) == 1 and len(line_orders[0]) <= 1:
@@ -469,7 +473,7 @@ def _anchor_same_direction_fixed_channels(
         if not anchors:
             continue
         combined = [*anchors, *chans]
-        order = _distinct_line_order(combined)
+        order = _port_ordered_line_order(combined, ctx)
         rank = {line_id: i for i, line_id in enumerate(order)}
         bases = [
             anchor.x - rank[anchor.route.line_id] * ctx.offset_step
@@ -582,7 +586,7 @@ def _separate_opposing_gap_bundles(
             settled.extend(chans)
             continue
 
-        order = _convergence_line_order(chans, ctx.graph) or _distinct_line_order(chans)
+        order = _gap_bundle_line_order(chans, ctx)
         rank = {line_id: i for i, line_id in enumerate(order)}
         for ch in chans:
             new_x = ch.x + delta
@@ -4034,43 +4038,69 @@ def _honours_port_order(
 def _band_port_constraints(
     slots: list[list[_HTrunk]], ctx: _RoutingCtx | None
 ) -> list[tuple[int, int]]:
-    """Slot pairs ``(a, b)`` an entry port's lane order puts *a* above *b*.
-
-    Two slots of distinct lines that both reach one LEFT/RIGHT entry of a
-    lanes-along-Y section from disjoint sources (:func:`_slot_entry_reach`)
-    turn off the band, run along one descent and turn into that port.  The two
-    turns nest the same lane outermost, so the band's top-to-bottom order is
-    fixed by which line holds the larger port offset and whether the band runs
-    the way the port is entered.  The first such port in id order decides a
-    pair.  A port that one source feeds two lines directly carries a bundle
-    whose order its source pins, so it decides nothing.
-    """
+    """Slot pairs ``(a, b)`` an entry port's lane order puts *a* above *b*
+    (:func:`_port_lane_order_pairs` along the band's travel)."""
     if ctx is None or not ctx.station_offsets:
         return []
-    graph, offsets = ctx.graph, ctx.station_offsets
-    sign_x = slots[0][0].sign_x
-    reach = [_slot_entry_reach(graph, sg) for sg in slots]
+    travel = Direction.R if slots[0][0].sign_x > 0 else Direction.L
+    return _port_lane_order_pairs(
+        [sg[0].route.line_id for sg in slots],
+        [_slot_entry_reach(ctx.graph, sg) for sg in slots],
+        travel,
+        ctx,
+    )
+
+
+def _port_lane_order_pairs(
+    lines: Sequence[str],
+    reach: Sequence[Mapping[str, set[str]]],
+    travel: Direction,
+    ctx: _RoutingCtx,
+) -> list[tuple[int, int]]:
+    """Index pairs ``(a, b)`` an entry port's lane order puts first along the
+    bundle's lateral screen axis.
+
+    Two distinct lines of a bundle running in *travel* that both reach one
+    entry port from disjoint sources (*reach*, per line, as
+    :func:`_slot_entry_reach` gives it) turn off the bundle and into that port
+    without crossing, so each keeps its side of the direction of travel: the
+    line right of the other where it enters the port is right of it all along
+    the bundle.  Only a port whose lanes run along the bundle's lateral axis
+    decides (:func:`_port_decides_lane_order`), and the first such port in id
+    order decides a pair.
+    """
+    graph, offsets = ctx.graph, ctx.station_offsets or {}
+    lane_axis = lateral_axis(travel)
     out: list[tuple[int, int]] = []
-    for i, j in itertools.combinations(range(len(slots)), 2):
-        line_i, line_j = slots[i][0].route.line_id, slots[j][0].route.line_id
+    for i, j in itertools.combinations(range(len(lines)), 2):
+        line_i, line_j = lines[i], lines[j]
         if line_i == line_j:
             continue
         for port_id in sorted(reach[i].keys() & reach[j].keys()):
             if reach[i][port_id] & reach[j][port_id]:
                 continue
-            if not _port_decides_lane_order(graph, port_id):
+            if not _port_decides_lane_order(graph, port_id, lane_axis):
                 continue
-            off_i = offsets.get((port_id, line_i))
-            off_j = offsets.get((port_id, line_j))
-            if off_i is None or off_j is None or abs(off_i - off_j) <= COORD_TOLERANCE:
+            if (port_id, line_i) not in offsets or (port_id, line_j) not in offsets:
                 continue
-            run_in = 1 if graph.ports[port_id].side is PortSide.LEFT else -1
-            out.append((i, j) if (off_i > off_j) != (sign_x == run_in) else (j, i))
+            port = graph.stations[port_id]
+            coord_i, coord_j = (
+                port_lane_coord(graph, port, line, offsets, ctx.positive_fan)
+                for line in (line_i, line_j)
+            )
+            if abs(coord_i - coord_j) <= COORD_TOLERANCE:
+                continue
+            sign = lateral_order_sign(travel) * lateral_order_sign(
+                ENTRY_SIDE_DIRECTION[graph.ports[port_id].side]
+            )
+            out.append((i, j) if sign * coord_i < sign * coord_j else (j, i))
             break
     return out
 
 
-def _slot_entry_reach(graph: MetroGraph, slot: list[_HTrunk]) -> dict[str, set[str]]:
+def _slot_entry_reach(
+    graph: MetroGraph, slot: Sequence[_HTrunk] | Sequence[_VChannel]
+) -> dict[str, set[str]]:
     """``{port id: trunk sources}`` for the ports one slot's line leads to.
 
     A trunk reaches its own edge's target and every target its source sends
@@ -4096,17 +4126,59 @@ def _slot_entry_reach(graph: MetroGraph, slot: list[_HTrunk]) -> dict[str, set[s
     return reach
 
 
-def _port_decides_lane_order(graph: MetroGraph, port_id: str) -> bool:
-    """Whether *port_id* is a side entry whose lanes stack on Y and no source
-    sends it more than one line."""
+def _port_decides_lane_order(
+    graph: MetroGraph, port_id: str, lane_axis: DemandAxis
+) -> bool:
+    """Whether *port_id* is a flow-side entry whose lanes run along *lane_axis*
+    and no source sends it more than one line."""
     lines_by_source: defaultdict[str, set[str]] = defaultdict(set)
     for edge in graph.edges_to(port_id):
         lines_by_source[edge.source].add(edge.line_id)
+    port = graph.ports[port_id]
     return (
-        is_side_entry_port(graph, port_id)
-        and lanes_run_along_y(graph.section_for_port(graph.ports[port_id]).direction)
+        port.is_entry
+        and port.side
+        in flow_port_sides(direction := graph.section_for_port(port).direction)
+        and AxisFrame.axes_for_direction(direction)[1] == lane_axis.value
         and all(len(lines) < 2 for lines in lines_by_source.values())
     )
+
+
+def _shared_source_pairs(
+    sources: Sequence[set[str]], lines: Sequence[str]
+) -> list[tuple[int, int]]:
+    """Index pairs of distinct lines whose *sources* intersect."""
+    return [
+        (i, j)
+        for i, j in itertools.combinations(range(len(lines)), 2)
+        if lines[i] != lines[j] and sources[i] & sources[j]
+    ]
+
+
+def _port_order_refused(
+    free_pos: Sequence[int],
+    ported_pos: Sequence[int],
+    shared_pairs: Sequence[tuple[int, int]],
+) -> bool:
+    """Whether the port order reverses a pair of lanes leaving one source
+    station, or wedges an unrelated lane between such a pair where the free
+    order does not.  Positions are indexed like the pairs."""
+    shared = {frozenset(pair) for pair in shared_pairs}
+
+    def _interleaved(pos: Sequence[int]) -> bool:
+        return any(
+            min(pos[i], pos[j]) < pos[k] < max(pos[i], pos[j])
+            and frozenset((k, i)) not in shared
+            and frozenset((k, j)) not in shared
+            for i, j in shared_pairs
+            for k in range(len(pos))
+        )
+
+    reverses_shared = any(
+        (free_pos[i] < free_pos[j]) != (ported_pos[i] < ported_pos[j])
+        for i, j in shared_pairs
+    )
+    return reverses_shared or (_interleaved(ported_pos) and not _interleaved(free_pos))
 
 
 def _ranked_band_order(
@@ -4159,36 +4231,19 @@ def _ranked_band_order(
     if not admitted:
         return free, []
     ported = min(admitted, key=_key)
-    sources = [{t.route.edge.source for t in sg} for sg in slots]
-    shared_pairs = [
-        (i, j)
-        for i, j in itertools.combinations(range(len(slots)), 2)
-        if slots[i][0].route.line_id != slots[j][0].route.line_id
-        and sources[i] & sources[j]
-    ]
-    shared = {frozenset(pair) for pair in shared_pairs}
+    shared_pairs = _shared_source_pairs(
+        [{t.route.edge.source for t in sg} for sg in slots],
+        [sg[0].route.line_id for sg in slots],
+    )
 
     def _positions(perm: list[list[_HTrunk]]) -> list[int]:
         pos = {id(sg): k for k, sg in enumerate(perm)}
         return [pos[id(sg)] for sg in slots]
 
-    def _interleaved(pos: list[int]) -> bool:
-        return any(
-            min(pos[i], pos[j]) < pos[k] < max(pos[i], pos[j])
-            and frozenset((k, i)) not in shared
-            and frozenset((k, j)) not in shared
-            for i, j in shared_pairs
-            for k in range(len(slots))
-        )
-
-    free_pos, ported_pos = _positions(free), _positions(ported)
-    reverses_shared = any(
-        (free_pos[i] < free_pos[j]) != (ported_pos[i] < ported_pos[j])
-        for i, j in shared_pairs
-    )
-    splits_shared = _interleaved(ported_pos) and not _interleaved(free_pos)
     taller = max(_tracks(ported)) > max(_tracks(free))
-    if reverses_shared or splits_shared or taller:
+    if taller or _port_order_refused(
+        _positions(free), _positions(ported), shared_pairs
+    ):
         return free, []
     return ported, constraints
 
@@ -5311,6 +5366,32 @@ def _distinct_line_order(chans: list[_VChannel]) -> list[str]:
     and mirrors the rule for UP bundles (subworkflows: the deeper
     preprocess_reporting sits to the RIGHT).
     """
+    cost = _line_pair_costs(chans)
+    rep_x: dict[str, float] = {}
+    for ch in chans:
+        lid = ch.route.line_id
+        rep_x[lid] = min(rep_x.get(lid, ch.x), ch.x)
+
+    def cmp(a: str, b: str) -> int:
+        # Avoid fan-side weaves first, then deep-end divergence crossings: a
+        # crossover at the divergence reads as one clean fork, while a weave
+        # at the fan reads as a tangle.
+        (aa, ca), (ab, cb) = cost(a, b), cost(b, a)
+        if aa != ab:
+            return -1 if aa < ab else 1
+        if ca != cb:
+            return -1 if ca < cb else 1
+        if rep_x[a] != rep_x[b]:
+            return -1 if rep_x[a] < rep_x[b] else 1
+        return -1 if a < b else (1 if a > b else 0)
+
+    return sorted(rep_x, key=functools.cmp_to_key(cmp))
+
+
+def _line_pair_costs(chans: list[_VChannel]) -> Callable[[str, str], tuple[int, int]]:
+    """``(approach, peel)`` crossings when line *a* sits left of line *b* in one
+    gap-bundle corridor: the fan-side weave and deep-end divergence terms
+    :func:`_distinct_line_order` ranks a pair by."""
     down = chans[0].down if chans else True
     # The deep-end crossing model nests by the trunk's travel direction, not the
     # vertical's: a leftward bypass leads its DOWN trunk LEFT, so the rightward
@@ -5320,12 +5401,11 @@ def _distinct_line_order(chans: list[_VChannel]) -> list[str]:
     lead_right = _corridor_leadout_right(chans, down)
 
     # Per line: the deep turn-off depths of each segment (always y_hi), the
-    # deepest reach, a representative x for stable tie-breaking, and the
-    # source-side approach Y of each segment (y_lo for a DOWN bundle, y_hi for
-    # UP) plus the line's vertical-span extremes for the approach-side test.
+    # deepest reach, and the source-side approach Y of each segment (y_lo for a
+    # DOWN bundle, y_hi for UP) plus the line's vertical-span extremes for the
+    # approach-side test.
     turns: dict[str, list[float]] = defaultdict(list)
     deepest: dict[str, float] = {}
-    rep_x: dict[str, float] = {}
     approach: dict[str, list[float]] = defaultdict(list)
     span_lo: dict[str, float] = {}
     span_hi: dict[str, float] = {}
@@ -5333,7 +5413,6 @@ def _distinct_line_order(chans: list[_VChannel]) -> list[str]:
         lid = ch.route.line_id
         turns[lid].append(ch.y_hi)
         deepest[lid] = max(deepest.get(lid, ch.y_hi), ch.y_hi)
-        rep_x[lid] = min(rep_x.get(lid, ch.x), ch.x)
         approach[lid].append(ch.y_lo if down else ch.y_hi)
         span_lo[lid] = min(span_lo.get(lid, ch.y_lo), ch.y_lo)
         span_hi[lid] = max(span_hi.get(lid, ch.y_hi), ch.y_hi)
@@ -5374,23 +5453,74 @@ def _distinct_line_order(chans: list[_VChannel]) -> list[str]:
             if lo + COORD_TOLERANCE < y < hi - COORD_TOLERANCE
         )
 
-    def cmp(a: str, b: str) -> int:
-        # Avoid fan-side weaves first, then deep-end divergence crossings: a
-        # crossover at the divergence reads as one clean fork, while a weave
-        # at the fan reads as a tangle.
-        aa = approach_crossings_if_left(a, b)
-        ab = approach_crossings_if_left(b, a)
-        if aa != ab:
-            return -1 if aa < ab else 1
-        ca = peel_crossings_if_left(a, b)
-        cb = peel_crossings_if_left(b, a)
-        if ca != cb:
-            return -1 if ca < cb else 1
-        if rep_x[a] != rep_x[b]:
-            return -1 if rep_x[a] < rep_x[b] else 1
-        return -1 if a < b else (1 if a > b else 0)
+    def costs(a: str, b: str) -> tuple[int, int]:
+        return approach_crossings_if_left(a, b), peel_crossings_if_left(a, b)
 
-    return sorted(turns, key=functools.cmp_to_key(cmp))
+    return costs
+
+
+def _gap_bundle_line_order(chans: list[_VChannel], ctx: _RoutingCtx) -> list[str]:
+    """A gap bundle's left-to-right line order: the shared-entry convergence
+    order where it applies, else the entry-port-ordered one."""
+    return _convergence_line_order(chans, ctx.graph) or _port_ordered_line_order(
+        chans, ctx
+    )
+
+
+def _port_ordered_line_order(chans: list[_VChannel], ctx: _RoutingCtx) -> list[str]:
+    """Left-to-right line order of one gap-bundle corridor, in the lane order
+    of the entry ports its lines turn into (:func:`_port_lane_order_pairs`).
+
+    The free order (:func:`_distinct_line_order`) stands when it already
+    honours every port pair.  Otherwise the order honouring them with the
+    fewest fan-side weaves, then deep-end crossings, then the least departure
+    from the free order replaces it, unless it reverses or splits lines leaving
+    one source station (:func:`_port_order_refused`).
+    """
+    free = _distinct_line_order(chans)
+    if len(free) < 2 or len(free) > _MAX_BAND_PERMUTE or not ctx.station_offsets:
+        return free
+    by_line: defaultdict[str, list[_VChannel]] = defaultdict(list)
+    for ch in chans:
+        by_line[ch.route.line_id].append(ch)
+    constraints = _port_lane_order_pairs(
+        free,
+        [_slot_entry_reach(ctx.graph, by_line[line]) for line in free],
+        Direction.D if chans[0].down else Direction.U,
+        ctx,
+    )
+    if all(i < j for i, j in constraints):
+        return free
+
+    def _honours(perm: tuple[int, ...]) -> bool:
+        pos = {k: p for p, k in enumerate(perm)}
+        return all(pos[i] < pos[j] for i, j in constraints)
+
+    cost = _line_pair_costs(chans)
+
+    def _key(perm: tuple[int, ...]) -> tuple[int, ...]:
+        pairs = [
+            cost(free[perm[p]], free[perm[q]])
+            for p in range(len(perm))
+            for q in range(p + 1, len(perm))
+        ]
+        return sum(c[0] for c in pairs), sum(c[1] for c in pairs), *perm
+
+    admitted = [
+        perm for perm in itertools.permutations(range(len(free))) if _honours(perm)
+    ]
+    if not admitted:
+        return free
+    ported = min(admitted, key=_key)
+    shared_pairs = _shared_source_pairs(
+        [{ch.route.edge.source for ch in by_line[line]} for line in free], free
+    )
+    ported_pos = [0] * len(free)
+    for pos, k in enumerate(ported):
+        ported_pos[k] = pos
+    if _port_order_refused(list(range(len(free))), ported_pos, shared_pairs):
+        return free
+    return [free[k] for k in ported]
 
 
 def _restack_channel(
