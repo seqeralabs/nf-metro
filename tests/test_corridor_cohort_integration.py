@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import importlib.util
+from copy import deepcopy
 from dataclasses import fields, replace
 from enum import Enum
+from itertools import combinations
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from hash_seed_oracle import observe_across_hash_seeds
 
 from nf_metro.api import prepare_graph, resolve_theme
+from nf_metro.layout.constants import COORD_TOLERANCE
 from nf_metro.layout.route_plan import (
     SETTLEMENT_STAGE_ORDER,
     ConvergenceDisposition,
@@ -24,8 +29,41 @@ from nf_metro.layout.route_plan import (
     SharedReferenceKind,
     register_settlement_stage,
 )
-from nf_metro.layout.route_reservations import CorridorRegionKind, FinalCanvasGeometry
-from nf_metro.parser.model import Edge, MetroGraph
+from nf_metro.layout.route_reservations import (
+    ColumnGapRegion,
+    CorridorOrientation,
+    CorridorRegion,
+    CorridorRegionKind,
+    FinalCanvasGeometry,
+    RowGapRegion,
+)
+from nf_metro.layout.routing import corridor_cohort_integration as cci
+from nf_metro.layout.routing import member_geometry as member_geometry_routing
+from nf_metro.layout.routing.common import Direction, graph_offset_step
+from nf_metro.layout.routing.corridor_cohort_integration import (
+    CorridorCohortCompilationError,
+    CorridorCohortLedger,
+    CorridorCohortLedgerClaim,
+    CorridorCohortTarget,
+    CorridorScalarOwnerKind,
+    CorridorScalarVariable,
+    _atomic_components,
+    _BoundClaim,
+    _FootprintContact,
+    _FootprintOrder,
+    _FootprintTerm,
+    _MemberFootprintModel,
+    _physical_components,
+    build_corridor_footprint_witnesses,
+    claims_share_fixed_lane_identity,
+)
+from nf_metro.layout.routing.corridor_cohorts import (
+    CorridorAllocationStatus,
+    CorridorForbiddenInterval,
+    solve_corridor_cohorts,
+)
+from nf_metro.layout.routing.families import RouteFamilyId
+from nf_metro.parser.model import Edge, MetroGraph, PermissiveGuardWarning
 from nf_metro.render import svg
 from nf_metro.render.plan import _RENDER_GRAPH_EXCLUDED_FIELDS, RenderPlan
 
@@ -52,7 +90,6 @@ def build_gallery():
 RESERVED_STAGES = {
     SettlementStage.COHORT_INTENT,
     SettlementStage.APERTURE_SETTLEMENT,
-    SettlementStage.FINAL_SOLVE,
     SettlementStage.TYPED_MATERIALIZATION,
 }
 
@@ -70,6 +107,7 @@ def _render(relative_path: str):
             "examples/simple_pipeline.mmd",
             (
                 SettlementStage.DISCOVERY,
+                SettlementStage.GENERAL_SETTLEMENT,
                 SettlementStage.COHORT_FINAL,
                 SettlementStage.VALIDATION,
             ),
@@ -78,6 +116,7 @@ def _render(relative_path: str):
             "examples/rnaseq_auto.mmd",
             (
                 SettlementStage.DISCOVERY,
+                SettlementStage.GENERAL_SETTLEMENT,
                 SettlementStage.GENERAL_SETTLEMENT,
                 SettlementStage.COHORT_FINAL,
                 SettlementStage.VALIDATION,
@@ -645,3 +684,2325 @@ def test_final_trace_registration_follows_reservation_realisation(
     _render("examples/simple_pipeline.mmd")
 
     assert events[-3:] == ["realise", "cohort-final", "validation"]
+
+
+# --- Owner-typed corridor records and the footprint relation graph ---
+
+
+def _footprint_target(
+    member_id: str, line_id: str, points: list[tuple[float, float]]
+) -> CorridorCohortTarget:
+    edge_key = (f"{member_id}:source", f"{member_id}:target", line_id)
+    return CorridorCohortTarget(
+        member_id,
+        f"plan:{member_id}",
+        edge_key,
+        RouteFamilyId.MERGE_TRUNK,
+        (f"connector:{member_id}",),
+        SimpleNamespace(
+            edge=SimpleNamespace(source=edge_key[0], target=edge_key[1]),
+            line_id=line_id,
+            points=points,
+        ),
+        False,
+    )
+
+
+def test_footprint_witnesses_publish_typed_scalar_ownership_deterministically() -> None:
+    target = _footprint_target(
+        "scalar",
+        "trunk",
+        [(0.0, 4.0), (10.0, 4.0), (10.0, 20.0)],
+    )
+    variable = CorridorScalarVariable(
+        "variable:scalar",
+        CorridorScalarOwnerKind.CONVERGENCE_TRUNK,
+        "convergence:scalar",
+        target.member_id,
+        target.edge_key,
+        target.connector_ids,
+        1,
+        0,
+        10.0,
+    )
+
+    witnesses = build_corridor_footprint_witnesses((target,), (variable,))
+
+    assert tuple(item.segment_rank for item in witnesses) == (0, 1)
+    assert witnesses[0].end_variable_id == variable.variable_id
+    assert witnesses[1].coordinate_variable_id == variable.variable_id
+    assert witnesses[1].owner_id == target.member_geometry_plan_id
+
+
+def test_semantic_ledger_claims_store_no_observed_geometry() -> None:
+    field_names = {field.name for field in fields(CorridorCohortLedgerClaim)}
+
+    assert "coordinate" not in field_names
+    assert "longitudinal_start" not in field_names
+    assert "longitudinal_end" not in field_names
+
+
+def _identity_claim(
+    *,
+    claim_id: str,
+    reservation_id: str,
+    network_id: str | None,
+    endpoint_cohort_id: str | None,
+    direction: Direction = Direction.R,
+    region: CorridorRegion = RowGapRegion(0, 1),
+    orientation: CorridorOrientation = CorridorOrientation.HORIZONTAL,
+    lane_rank: int | None = 0,
+    segment_rank: int = 0,
+    endpoint_network_rank: int | None = None,
+) -> CorridorCohortLedgerClaim:
+    return CorridorCohortLedgerClaim(
+        claim_id=claim_id,
+        reservation_id=reservation_id,
+        reservation_rank=0,
+        claim_rank=0,
+        region=region,
+        orientation=orientation,
+        direction=direction,
+        lane_rank=lane_rank,
+        member_id=claim_id,
+        member_geometry_plan_id=f"plan:{claim_id}",
+        edge_key=(f"{claim_id}:source", f"{claim_id}:target", "line"),
+        family_id=RouteFamilyId.SAME_Y_STRAIGHT,
+        connector_ids=(f"connector:{claim_id}",),
+        segment_rank=segment_rank,
+        path_rank=0,
+        endpoint_cohort_id=endpoint_cohort_id,
+        endpoint_network_rank=endpoint_network_rank,
+        destination_boundary_carrier=endpoint_cohort_id is not None,
+        destination_boundary_axis_sign=None,
+        network_id=network_id,
+        reservation_complete=True,
+    )
+
+
+def test_opposite_running_peer_is_not_a_fixed_equality() -> None:
+    """Two claims that run in opposite directions never share a fixed lane.
+
+    ``claims_share_fixed_lane_identity`` takes no coordinates, so it has
+    nothing to fall back on: the direction mismatch alone must decide it.
+    """
+    movable = _identity_claim(
+        claim_id="movable",
+        reservation_id="reservation:shared",
+        network_id="network",
+        endpoint_cohort_id="endpoint",
+    )
+    fixed = _identity_claim(
+        claim_id="fixed",
+        reservation_id="reservation:shared",
+        network_id="network",
+        endpoint_cohort_id=None,
+        direction=Direction.L,
+    )
+
+    assert not claims_share_fixed_lane_identity(movable, fixed)
+
+
+def test_coordinate_proximity_without_a_shared_network_is_not_a_fixed_equality() -> (
+    None
+):
+    """Two claims from different networks never share a fixed lane.
+
+    ``claims_share_fixed_lane_identity`` takes no coordinates, so a route
+    that later happens to land both claims at the same point cannot make
+    this true: only shared witness identity can.
+    """
+    movable = _identity_claim(
+        claim_id="movable",
+        reservation_id="reservation:movable",
+        network_id="network:movable",
+        endpoint_cohort_id="endpoint",
+    )
+    fixed = _identity_claim(
+        claim_id="fixed",
+        reservation_id="reservation:fixed",
+        network_id="network:fixed",
+        endpoint_cohort_id=None,
+    )
+
+    assert not claims_share_fixed_lane_identity(movable, fixed)
+
+
+# --- Atomic component closure over typed footprint relations ---
+
+
+def _bound_claim(
+    *,
+    claim_id: str,
+    region: CorridorRegion,
+    orientation: CorridorOrientation,
+    longitudinal_start: float,
+    longitudinal_end: float,
+    coordinate: float = 0.0,
+) -> _BoundClaim:
+    ledger = replace(
+        _identity_claim(
+            claim_id=claim_id,
+            reservation_id=f"reservation:{claim_id}",
+            network_id=None,
+            endpoint_cohort_id=None,
+        ),
+        region=region,
+        orientation=orientation,
+    )
+    target = _footprint_target(claim_id, "line", [(0.0, 0.0), (1.0, 0.0)])
+    return _BoundClaim(
+        ledger, target, longitudinal_start, longitudinal_end, coordinate, None
+    )
+
+
+def _scalar_variable(
+    variable_id: str, *, axis: int, coordinate: float = 0.0
+) -> CorridorScalarVariable:
+    return CorridorScalarVariable(
+        variable_id,
+        CorridorScalarOwnerKind.CONVERGENCE_TRUNK,
+        f"convergence:{variable_id}",
+        f"member:{variable_id}",
+        (f"{variable_id}:source", f"{variable_id}:target", "line"),
+        (f"connector:{variable_id}",),
+        0,
+        axis,
+        coordinate,
+    )
+
+
+def _order(owner_id: str, participant_variable_ids: tuple[str, ...]) -> _FootprintOrder:
+    return _FootprintOrder(
+        owner_id,
+        _FootprintTerm(participant_variable_ids[0], None, f"witness:{owner_id}:lower"),
+        _FootprintTerm(None, 0.0, f"witness:{owner_id}:upper"),
+        1.0,
+        participant_variable_ids,
+        (f"witness:{owner_id}",),
+        (),
+    )
+
+
+def _contact(
+    owner_id: str, participant_variable_ids: tuple[str, ...]
+) -> _FootprintContact:
+    return _FootprintContact(
+        owner_id,
+        participant_variable_ids,
+        (f"witness:{owner_id}",),
+        "network",
+        (),
+        (),
+    )
+
+
+def test_seed77_closes_one_snapshot_into_complete_atomic_components() -> None:
+    """One closure snapshot groups overlap and relation-linked nodes together
+    and leaves an untouched physical group standing alone.
+
+    Asserts directly on the closure output
+    (``_AtomicComponentSpec.physical_ranks`` / ``.scalar_variable_ids``).
+    """
+    overlap_a = _bound_claim(
+        claim_id="overlap-a",
+        region=RowGapRegion(0, 1),
+        orientation=CorridorOrientation.HORIZONTAL,
+        longitudinal_start=0.0,
+        longitudinal_end=10.0,
+    )
+    overlap_b = _bound_claim(
+        claim_id="overlap-b",
+        region=RowGapRegion(0, 1),
+        orientation=CorridorOrientation.HORIZONTAL,
+        longitudinal_start=5.0,
+        longitudinal_end=15.0,
+    )
+    isolated_same_axis = _bound_claim(
+        claim_id="isolated-same-axis",
+        region=RowGapRegion(0, 1),
+        orientation=CorridorOrientation.HORIZONTAL,
+        longitudinal_start=20.0,
+        longitudinal_end=30.0,
+    )
+    isolated_other_axis = _bound_claim(
+        claim_id="isolated-other-axis",
+        region=ColumnGapRegion(0, 1),
+        orientation=CorridorOrientation.VERTICAL,
+        longitudinal_start=0.0,
+        longitudinal_end=10.0,
+    )
+    claims = (overlap_a, overlap_b, isolated_same_axis, isolated_other_axis)
+
+    carrier_variable = _scalar_variable("member-carrier|overlap-a", axis=1)
+    scalar_variable = _scalar_variable("convergence-trunk|scalar", axis=1)
+    footprint_model = _MemberFootprintModel(
+        (carrier_variable, scalar_variable),
+        (),
+        {
+            carrier_variable.variable_id: (overlap_a.claim_id,),
+            scalar_variable.variable_id: (),
+        },
+        (
+            _order(
+                "relation:carrier-scalar",
+                (carrier_variable.variable_id, scalar_variable.variable_id),
+            ),
+        ),
+        (),
+    )
+
+    physical = _physical_components(claims)
+    components = _atomic_components(claims, physical, footprint_model)
+
+    rank_by_claim_id = {claim.claim_id: rank for rank, claim in enumerate(claims)}
+    overlap_group = next(
+        group for group in physical if rank_by_claim_id["overlap-a"] in group
+    )
+    same_axis_group = next(
+        group for group in physical if rank_by_claim_id["isolated-same-axis"] in group
+    )
+    other_axis_group = next(
+        group for group in physical if rank_by_claim_id["isolated-other-axis"] in group
+    )
+    assert set(overlap_group) == {
+        rank_by_claim_id["overlap-a"],
+        rank_by_claim_id["overlap-b"],
+    }
+    assert same_axis_group == (rank_by_claim_id["isolated-same-axis"],)
+    assert other_axis_group == (rank_by_claim_id["isolated-other-axis"],)
+
+    components_by_physical_rank = {
+        rank: component for component in components for rank in component.physical_ranks
+    }
+    overlap_group_rank = physical.index(overlap_group)
+    same_axis_group_rank = physical.index(same_axis_group)
+    other_axis_group_rank = physical.index(other_axis_group)
+
+    joined = components_by_physical_rank[overlap_group_rank]
+    assert joined.physical_ranks == (overlap_group_rank,)
+    assert joined.scalar_variable_ids == (scalar_variable.variable_id,)
+
+    standalone_same_axis = components_by_physical_rank[same_axis_group_rank]
+    assert standalone_same_axis.physical_ranks == (same_axis_group_rank,)
+    assert standalone_same_axis.scalar_variable_ids == ()
+
+    standalone_other_axis = components_by_physical_rank[other_axis_group_rank]
+    assert standalone_other_axis.physical_ranks == (other_axis_group_rank,)
+    assert standalone_other_axis.scalar_variable_ids == ()
+
+    assert len(components) == 3
+
+
+def test_contact_only_scalar_nodes_close_into_one_component_without_claims() -> None:
+    """A contact relation must join two scalar-only nodes even though
+    neither has claim ranks.
+    """
+    scalar_a = _scalar_variable("scalar-a", axis=0)
+    scalar_b = _scalar_variable("scalar-b", axis=0)
+    footprint_model = _MemberFootprintModel(
+        (scalar_a, scalar_b),
+        (),
+        {scalar_a.variable_id: (), scalar_b.variable_id: ()},
+        (),
+        (_contact("relation:contact", (scalar_a.variable_id, scalar_b.variable_id)),),
+    )
+
+    components = _atomic_components((), (), footprint_model)
+
+    assert len(components) == 1
+    assert components[0].physical_ranks == ()
+    assert set(components[0].scalar_variable_ids) == {
+        scalar_a.variable_id,
+        scalar_b.variable_id,
+    }
+
+
+def test_same_axis_scalar_variables_without_a_relation_stay_separate() -> None:
+    """Sharing an axis must never union two scalar nodes by itself."""
+    scalar_a = _scalar_variable("scalar-a", axis=0, coordinate=0.0)
+    scalar_b = _scalar_variable("scalar-b", axis=0, coordinate=10.0)
+    footprint_model = _MemberFootprintModel(
+        (scalar_a, scalar_b),
+        (),
+        {scalar_a.variable_id: (), scalar_b.variable_id: ()},
+        (),
+        (),
+    )
+
+    components = _atomic_components((), (), footprint_model)
+
+    assert len(components) == 2
+    assert {component.scalar_variable_ids for component in components} == {
+        (scalar_a.variable_id,),
+        (scalar_b.variable_id,),
+    }
+
+
+def test_relation_spanning_two_orientation_buckets_fails_closed() -> None:
+    """A relation naming claims from two ``(region, orientation)`` buckets
+    must raise rather than silently merge them into one component.
+
+    Physical-overlap bucketing alone cannot stop this: a relation can name
+    participants that live in different buckets, so closure needs its own
+    guard.
+    """
+    horizontal = _bound_claim(
+        claim_id="horizontal",
+        region=RowGapRegion(0, 1),
+        orientation=CorridorOrientation.HORIZONTAL,
+        longitudinal_start=0.0,
+        longitudinal_end=10.0,
+    )
+    vertical = _bound_claim(
+        claim_id="vertical",
+        region=ColumnGapRegion(0, 1),
+        orientation=CorridorOrientation.VERTICAL,
+        longitudinal_start=0.0,
+        longitudinal_end=10.0,
+    )
+    claims = (horizontal, vertical)
+    horizontal_variable = _scalar_variable("member-carrier|horizontal", axis=1)
+    vertical_variable = _scalar_variable("member-carrier|vertical", axis=0)
+    footprint_model = _MemberFootprintModel(
+        (horizontal_variable, vertical_variable),
+        (),
+        {
+            horizontal_variable.variable_id: (horizontal.claim_id,),
+            vertical_variable.variable_id: (vertical.claim_id,),
+        },
+        (
+            _order(
+                "relation:cross-orientation",
+                (horizontal_variable.variable_id, vertical_variable.variable_id),
+            ),
+        ),
+        (),
+    )
+    physical = _physical_components(claims)
+
+    with pytest.raises(CorridorCohortCompilationError, match="orientation"):
+        _atomic_components(claims, physical, footprint_model)
+
+
+def _two_lane_coupling_components(
+    *, aliased: bool
+) -> set[tuple[tuple[str, ...], tuple[str, ...]]]:
+    """Close a trunk scalar crowded by runs in its own row gap and the one above.
+
+    The trunk's context claim and the near run sit in one row gap; a distinct
+    line's far run in the row gap above also gets a forbidden interval along
+    the trunk's span.  Returns each component's claim ids and scalar ids.
+    """
+    trunk = _bound_claim(
+        claim_id="trunk-context",
+        region=RowGapRegion(1, 2),
+        orientation=CorridorOrientation.HORIZONTAL,
+        longitudinal_start=0.0,
+        longitudinal_end=100.0,
+        coordinate=236.0,
+    )
+    near = _bound_claim(
+        claim_id="near-run",
+        region=RowGapRegion(1, 2),
+        orientation=CorridorOrientation.HORIZONTAL,
+        longitudinal_start=0.0,
+        longitudinal_end=100.0,
+        coordinate=236.0,
+    )
+    far = _bound_claim(
+        claim_id="far-run",
+        region=RowGapRegion(0, 1),
+        orientation=CorridorOrientation.HORIZONTAL,
+        longitudinal_start=0.0,
+        longitudinal_end=60.0,
+        coordinate=44.0,
+    )
+    claims = (trunk, near, far)
+    scalar = _scalar_variable("trunk", axis=1, coordinate=236.0)
+    near_carrier = _scalar_variable("member-carrier|near", axis=1, coordinate=236.0)
+    far_carrier = _scalar_variable("member-carrier|far", axis=1, coordinate=44.0)
+    witnesses = tuple(
+        _footprint_witness(
+            footprint_id=f"witness:{claim.claim_id}",
+            member_id=claim.claim_id,
+            edge_key=("source", claim.claim_id, claim.claim_id),
+            axis=1,
+            coordinate=claim.coordinate,
+            longitudinal_start=claim.longitudinal_start,
+            longitudinal_end=claim.longitudinal_end,
+            coordinate_variable_id=variable.variable_id,
+        )
+        for claim, variable in ((near, near_carrier), (far, far_carrier))
+    )
+    footprint_model = _MemberFootprintModel(
+        (scalar, near_carrier, far_carrier),
+        witnesses,
+        {
+            scalar.variable_id: (),
+            near_carrier.variable_id: (near.claim_id,),
+            far_carrier.variable_id: (far.claim_id,),
+        },
+        (),
+        (),
+        tuple(
+            CorridorForbiddenInterval(
+                scalar.variable_id,
+                witness.footprint_id,
+                witness.coordinate - 8.0,
+                witness.coordinate + 8.0,
+                (0, 0),
+            )
+            for witness in witnesses
+        ),
+        scalar_aliases=({trunk.claim_id: scalar.variable_id} if aliased else {}),
+    )
+    physical = _physical_components(claims)
+
+    return {
+        (
+            tuple(
+                sorted(
+                    claims[rank].claim_id
+                    for physical_rank in component.physical_ranks
+                    for rank in physical[physical_rank]
+                )
+            ),
+            component.scalar_variable_ids,
+        )
+        for component in _atomic_components(claims, physical, footprint_model)
+    }
+
+
+def test_scalar_couples_only_runs_in_the_lane_of_its_own_trunk_run() -> None:
+    """A component holds one lane, so the far run stays where it is drawn."""
+    assert _two_lane_coupling_components(aliased=True) == {
+        (("far-run",), ()),
+        (("near-run", "trunk-context"), ("trunk",)),
+    }
+
+
+def test_scalar_without_context_claims_couples_only_runs_sharing_one_lane() -> None:
+    """With no context claim to name its lane, a scalar whose coupled runs span
+    two lanes joins neither of them."""
+    assert _two_lane_coupling_components(aliased=False) == {
+        (("far-run",), ()),
+        (("near-run", "trunk-context"), ()),
+        ((), ("trunk",)),
+    }
+
+
+# --- Member footprint relation lowering through the scalar corridor solver ---
+
+
+def _mutable_route(
+    *,
+    source: str,
+    target: str,
+    line_id: str,
+    points: list[tuple[float, float]],
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        edge=SimpleNamespace(source=source, target=target),
+        line_id=line_id,
+        points=points,
+        curve_radii=None,
+        route_system_owned_segment_ranks=(),
+        convergence_owned_segment_ranks=(),
+        fan_route_emitter=None,
+        exit_turn_axis_id=None,
+        exit_turn_segment_rank=None,
+        concentric_corner_offsets_by_segment={},
+        concentric_corner_bases_by_segment={},
+        source_turnout=None,
+    )
+
+
+def test_fixed_endpoint_landing_is_planned_clear_of_an_unclaimed_fixed_lead() -> None:
+    """A landing carrier plans at its own port slot, never snapped onto a
+    collinear fixed lead that belongs to a different network.
+
+    The carrier drops vertically and lands rightward at ``y=40``; an immutable
+    lead in a different network runs horizontally along the same ``y=40`` but
+    starts well to the right. Because the two claims share no network identity
+    they cannot form a ``CorridorFixedEquality``, so nothing may pull the
+    carrier onto the lead: the carrier keeps its own coordinates, the lead is
+    an obstacle rather than a member, and its geometry is left untouched.
+    """
+    carrier_claim = _identity_claim(
+        claim_id="carrier",
+        reservation_id="reservation:carrier",
+        network_id="network:carrier",
+        endpoint_cohort_id="cohort:landing",
+        direction=Direction.D,
+        region=ColumnGapRegion(0, 1),
+        orientation=CorridorOrientation.VERTICAL,
+        endpoint_network_rank=0,
+    )
+    fixed_claim = _identity_claim(
+        claim_id="fixed",
+        reservation_id="reservation:fixed",
+        network_id="network:fixed",
+        endpoint_cohort_id=None,
+    )
+    carrier_edge = carrier_claim.edge_key
+    fixed_edge = fixed_claim.edge_key
+    assert carrier_edge is not None and fixed_edge is not None
+    carrier_route = _mutable_route(
+        source=carrier_edge[0],
+        target=carrier_edge[1],
+        line_id=carrier_edge[2],
+        points=[(0.0, 0.0), (0.0, 40.0), (30.0, 40.0)],
+    )
+    fixed_route = _mutable_route(
+        source=fixed_edge[0],
+        target=fixed_edge[1],
+        line_id=fixed_edge[2],
+        points=[(60.0, 40.0), (90.0, 40.0)],
+    )
+    # The different-network precondition is what makes the assertions
+    # non-vacuous: a shared identity would let a fixed equality snap the two
+    # collinear claims together regardless of the lowering under test.
+    assert not claims_share_fixed_lane_identity(carrier_claim, fixed_claim)
+
+    ledger = CorridorCohortLedger(
+        claims=(carrier_claim, fixed_claim),
+        endpoint_members=(("cohort:landing", frozenset({"carrier"})),),
+        eligible_member_ids=frozenset({"carrier"}),
+        ambiguous_endpoint_cohort_ids=frozenset(),
+        offset_step=10.0,
+    )
+    carrier_target = CorridorCohortTarget(
+        "carrier",
+        "plan:carrier",
+        carrier_edge,
+        RouteFamilyId.SAME_Y_STRAIGHT,
+        ("connector:carrier",),
+        carrier_route,
+        True,
+        endpoint_lane_axis=1,
+        endpoint_lane_coordinate=40.0,
+        network_id="network:carrier",
+    )
+    fixed_target = CorridorCohortTarget(
+        "fixed",
+        "plan:fixed",
+        fixed_edge,
+        RouteFamilyId.SAME_Y_STRAIGHT,
+        ("connector:fixed",),
+        fixed_route,
+        False,
+        network_id="network:fixed",
+    )
+    targets = (carrier_target, fixed_target)
+
+    fixed_points_before = tuple(fixed_route.points)
+
+    plan = cci.compile_corridor_cohort_plan(ledger, targets)
+    cci.publish_corridor_cohort_plan(plan)
+
+    (landing,) = plan.landings
+    assert landing.member_id == "carrier"
+    assert landing.axis == 1
+    assert landing.coordinate == pytest.approx(40.0)
+
+    (carrier_allocation,) = [
+        allocation
+        for allocation in plan.allocations
+        if allocation.member_id == "carrier"
+    ]
+    assert carrier_allocation.axis == 0
+    assert carrier_allocation.coordinate == pytest.approx(0.0)
+
+    landing_segment = carrier_route.points[-2:]
+    assert landing_segment[0][1] == pytest.approx(landing_segment[1][1])
+    assert fixed_route.points[0][1] == pytest.approx(fixed_route.points[1][1])
+    assert landing_segment[0][1] == pytest.approx(fixed_route.points[0][1])
+
+    landing_x_max = max(point[0] for point in landing_segment)
+    fixed_x_min = min(point[0] for point in fixed_route.points)
+    assert landing_x_max + COORD_TOLERANCE <= fixed_x_min
+
+    assert all(allocation.member_id != "fixed" for allocation in plan.allocations)
+    assert tuple(fixed_route.points) == fixed_points_before
+
+
+def test_problem_rejects_an_infeasible_fixed_fixed_footprint_order() -> None:
+    """A footprint order whose two ends are both fixed and overlap fails closed.
+
+    Both ``_FootprintOrder`` constructors in ``_member_footprint_model`` bind at
+    least one variable term today, so the fixed-fixed branch of ``_problem`` is
+    unreachable through the live builders. This drives it directly to prove the
+    guard raises rather than silently rotting into dead code.
+    """
+    order = _FootprintOrder(
+        "relation:fixed-fixed",
+        _FootprintTerm(None, 10.0, "witness:lower"),
+        _FootprintTerm(None, 0.0, "witness:upper"),
+        5.0,
+        (),
+        ("witness:fixed",),
+        (),
+    )
+    footprint_model = _MemberFootprintModel((), (), {}, (order,), (), ())
+
+    with pytest.raises(CorridorCohortCompilationError, match="infeasible"):
+        cci._problem(
+            (),
+            {},
+            True,
+            10.0,
+            8.0,
+            footprint_model,
+            {},
+            corner_neighbours={},
+        )
+
+
+def _footprint_witness(
+    *,
+    footprint_id: str,
+    member_id: str,
+    edge_key: tuple[str, str, str],
+    axis: int,
+    coordinate: float,
+    longitudinal_start: float,
+    longitudinal_end: float,
+    coordinate_variable_id: str,
+) -> cci.CorridorFootprintWitness:
+    return cci.CorridorFootprintWitness(
+        footprint_id=footprint_id,
+        owner_id=f"plan:{member_id}",
+        member_id=member_id,
+        edge_key=edge_key,
+        connector_ids=(f"connector:{member_id}",),
+        segment_rank=0,
+        axis=axis,
+        coordinate=coordinate,
+        longitudinal_start=longitudinal_start,
+        longitudinal_end=longitudinal_end,
+        direction=Direction.R,
+        line_id=edge_key[2],
+        network_id=None,
+        regions=(),
+        semantic_rank=(0, 0),
+        crossing_disposition=cci.CorridorCrossingDisposition.FIXED_DOGLEG,
+        coordinate_variable_id=coordinate_variable_id,
+    )
+
+
+def _member_scalar_relation_scenario():
+    """One movable member carrier plus one convergence scalar request that a
+    single ``_FootprintOrder`` joins into one atomic component.
+
+    Returns the compile inputs and the synthetic ``_MemberFootprintModel`` a
+    monkeypatched ``_member_footprint_model`` publishes, so the relation the live
+    witness builder does not yet mint is present at the compiler boundary.
+    """
+    carrier_claim = _identity_claim(
+        claim_id="carrier",
+        reservation_id="reservation:carrier",
+        network_id="network:carrier",
+        endpoint_cohort_id=None,
+        direction=Direction.R,
+        region=RowGapRegion(0, 1),
+        orientation=CorridorOrientation.HORIZONTAL,
+    )
+    carrier_edge = carrier_claim.edge_key
+    assert carrier_edge is not None
+    carrier_route = _mutable_route(
+        source=carrier_edge[0],
+        target=carrier_edge[1],
+        line_id=carrier_edge[2],
+        points=[(0.0, 10.0), (30.0, 10.0)],
+    )
+    carrier_target = CorridorCohortTarget(
+        "carrier",
+        "plan:carrier",
+        carrier_edge,
+        RouteFamilyId.SAME_Y_STRAIGHT,
+        ("connector:carrier",),
+        carrier_route,
+        True,
+        network_id="network:carrier",
+    )
+    ledger = CorridorCohortLedger(
+        claims=(carrier_claim,),
+        endpoint_members=(),
+        eligible_member_ids=frozenset({"carrier"}),
+        ambiguous_endpoint_cohort_ids=frozenset(),
+        offset_step=10.0,
+    )
+
+    scalar_edge = ("scalar:source", "scalar:target", "line")
+    scalar_variable = CorridorScalarVariable(
+        "convergence-trunk|scalar",
+        CorridorScalarOwnerKind.CONVERGENCE_TRUNK,
+        "convergence:scalar",
+        "member:scalar",
+        scalar_edge,
+        ("connector:member:scalar",),
+        0,
+        1,
+        25.0,
+    )
+    scalar_request = cci.CorridorScalarRequest(
+        scalar_variable,
+        preferred_coordinate=25.0,
+        domain=cci.CorridorCoordinateDomain(scalar_variable.variable_id),
+    )
+
+    carrier_variable_id = f"member-carrier|carrier|{carrier_edge}|segment:0"
+    carrier_variable = CorridorScalarVariable(
+        carrier_variable_id,
+        CorridorScalarOwnerKind.MEMBER_CARRIER,
+        "plan:carrier",
+        "carrier",
+        carrier_edge,
+        ("connector:carrier",),
+        0,
+        1,
+        10.0,
+    )
+    carrier_witness = _footprint_witness(
+        footprint_id="witness:carrier",
+        member_id="carrier",
+        edge_key=carrier_edge,
+        axis=1,
+        coordinate=10.0,
+        longitudinal_start=0.0,
+        longitudinal_end=30.0,
+        coordinate_variable_id=carrier_variable_id,
+    )
+    scalar_witness = _footprint_witness(
+        footprint_id="witness:scalar",
+        member_id="member:scalar",
+        edge_key=scalar_edge,
+        axis=1,
+        coordinate=25.0,
+        longitudinal_start=5.0,
+        longitudinal_end=20.0,
+        coordinate_variable_id=scalar_variable.variable_id,
+    )
+    order = _FootprintOrder(
+        "relation:carrier-scalar",
+        _FootprintTerm(carrier_variable_id, None, "witness:carrier"),
+        _FootprintTerm(scalar_variable.variable_id, None, "witness:scalar"),
+        5.0,
+        (carrier_variable_id, scalar_variable.variable_id),
+        ("witness:carrier", "witness:scalar"),
+        (),
+    )
+    footprint_model = _MemberFootprintModel(
+        (carrier_variable, scalar_variable),
+        (carrier_witness, scalar_witness),
+        {
+            carrier_variable_id: (carrier_claim.claim_id,),
+            scalar_variable.variable_id: (),
+        },
+        (order,),
+        (),
+        (),
+    )
+    return ledger, (carrier_target,), (scalar_request,), footprint_model
+
+
+def test_member_and_scalar_relation_occupy_one_problem(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A member carrier and a convergence scalar joined by one ``_FootprintOrder``
+    lower into one ``CorridorAllocationProblem`` solved once for their axis.
+
+    The live witness builder does not yet mint a member<->scalar order, so the
+    synthetic footprint model stands in for that relation at the compiler
+    boundary. The defect this locks is the split solve: the member reaches its
+    own component problem while the scalar is swept into a separate per-axis
+    problem, so no one problem names both and the solver runs twice.
+    """
+    ledger, targets, scalar_requests, footprint_model = (
+        _member_scalar_relation_scenario()
+    )
+    monkeypatch.setattr(
+        cci, "_member_footprint_model", lambda *args, **kwargs: footprint_model
+    )
+    solved_problems: list[cci.CorridorAllocationProblem] = []
+    real_solve = cci.solve_corridor_cohorts
+
+    def spy_solve(problem):
+        solved_problems.append(problem)
+        return real_solve(problem)
+
+    monkeypatch.setattr(cci, "solve_corridor_cohorts", spy_solve)
+
+    plan = cci.compile_corridor_cohort_plan(
+        ledger, targets, scalar_requests=scalar_requests
+    )
+
+    scalar_variable_id = scalar_requests[0].variable.variable_id
+    problems_with_carrier = [
+        problem
+        for problem in solved_problems
+        if any(lane.member_id == "carrier" for lane in problem.lanes)
+    ]
+    problems_with_scalar = [
+        problem
+        for problem in solved_problems
+        if any(lane.member_id == scalar_variable_id for lane in problem.lanes)
+    ]
+    joint_problems = [
+        problem
+        for problem in solved_problems
+        if {"carrier", scalar_variable_id}.issubset(
+            {lane.member_id for lane in problem.lanes}
+        )
+    ]
+
+    assert len(problems_with_carrier) == 1
+    assert len(problems_with_scalar) == 1
+    assert len(joint_problems) == 1
+    assert len(solved_problems) == 1
+
+    joint = joint_problems[0]
+    assert any(
+        separation.lower_member_id == "carrier"
+        and separation.upper_member_id == scalar_variable_id
+        for separation in joint.directed_separations
+    )
+
+    grant = next(
+        item for item in plan.scalar_grants if item.variable_id == scalar_variable_id
+    )
+    assert grant.owner_kind is CorridorScalarOwnerKind.CONVERGENCE_TRUNK
+
+
+def test_no_separate_scalar_solve_path_exists() -> None:
+    """The convergence sweep is deleted, not merely bypassed.
+
+    A second solve path is the anti-pattern this issue removes; a test that reds
+    if it reappears keeps the compiler down to its one integration call site.
+    """
+    assert not hasattr(cci, "_scalar_component_plan")
+
+
+def test_compiler_counts_every_solve_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One relation-joined component solves once, and the count is published."""
+    ledger, targets, scalar_requests, footprint_model = (
+        _member_scalar_relation_scenario()
+    )
+    monkeypatch.setattr(
+        cci, "_member_footprint_model", lambda *args, **kwargs: footprint_model
+    )
+    real_solve = cci.solve_corridor_cohorts
+    calls = 0
+
+    def counting_solve(problem):
+        nonlocal calls
+        calls += 1
+        return real_solve(problem)
+
+    monkeypatch.setattr(cci, "solve_corridor_cohorts", counting_solve)
+
+    plan = cci.compile_corridor_cohort_plan(
+        ledger, targets, scalar_requests=scalar_requests
+    )
+
+    assert plan.solve_call_count == 1
+    assert calls == plan.solve_call_count
+
+
+def test_final_solve_trace_is_emitted_from_the_integration_call_site(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The one integration call site records ``FINAL_SOLVE`` on a passed trace."""
+    ledger, targets, scalar_requests, footprint_model = (
+        _member_scalar_relation_scenario()
+    )
+    monkeypatch.setattr(
+        cci, "_member_footprint_model", lambda *args, **kwargs: footprint_model
+    )
+    trace = SettlementStageTrace()
+    trace = register_settlement_stage(
+        trace, SettlementStage.DISCOVERY, geometry_fingerprint="discovery"
+    )
+    trace = register_settlement_stage(
+        trace, SettlementStage.APERTURE_SETTLEMENT, geometry_fingerprint="aperture"
+    )
+
+    plan = cci.compile_corridor_cohort_plan(
+        ledger, targets, scalar_requests=scalar_requests, settlement_trace=trace
+    )
+
+    assert plan.settlement_trace is not None
+    assert plan.settlement_trace.records[-1].stage is SettlementStage.FINAL_SOLVE
+    assert plan.settlement_trace.records[-1].route_observation_rank is None
+
+
+def _assert_no_silent_compatibility(plan: cci.CorridorCohortPlan) -> None:
+    """Every compatibility disposition names its whole group and migrates nothing."""
+    for component in plan.components:
+        if component.status is not cci.CorridorAllocationStatus.COMPATIBILITY:
+            continue
+        assert component.compatibility is not None
+        assert component.allocations == ()
+
+
+def _overlapping_member_claim(
+    *,
+    claim_id: str,
+    reservation_complete: bool,
+    longitudinal: tuple[float, float],
+) -> tuple[CorridorCohortLedgerClaim, CorridorCohortTarget]:
+    claim = replace(
+        _identity_claim(
+            claim_id=claim_id,
+            reservation_id=f"reservation:{claim_id}",
+            network_id=f"network:{claim_id}",
+            endpoint_cohort_id=None,
+            direction=Direction.R,
+            region=RowGapRegion(0, 1),
+            orientation=CorridorOrientation.HORIZONTAL,
+        ),
+        reservation_complete=reservation_complete,
+    )
+    edge = claim.edge_key
+    assert edge is not None
+    route = _mutable_route(
+        source=edge[0],
+        target=edge[1],
+        line_id=edge[2],
+        points=[(longitudinal[0], 10.0), (longitudinal[1], 10.0)],
+    )
+    target = CorridorCohortTarget(
+        claim_id,
+        f"plan:{claim_id}",
+        edge,
+        RouteFamilyId.SAME_Y_STRAIGHT,
+        (f"connector:{claim_id}",),
+        route,
+        True,
+        network_id=f"network:{claim_id}",
+    )
+    return claim, target
+
+
+def _ledger_of(
+    *claims: tuple[CorridorCohortLedgerClaim, CorridorCohortTarget],
+) -> CorridorCohortLedger:
+    return CorridorCohortLedger(
+        claims=tuple(claim for claim, _target in claims),
+        endpoint_members=(),
+        eligible_member_ids=frozenset(claim.member_id for claim, _target in claims),
+        ambiguous_endpoint_cohort_ids=frozenset(),
+        offset_step=10.0,
+    )
+
+
+def test_component_on_segments_another_plan_owns_is_planned_without_a_solve() -> None:
+    """Every claim sits on a segment a route system already owns, so nothing is
+    left to allocate: the component is planned, solves nothing and grants nothing.
+    """
+    claims = [
+        _overlapping_member_claim(
+            claim_id=claim_id, reservation_complete=True, longitudinal=span
+        )
+        for claim_id, span in (("owned-a", (0.0, 30.0)), ("owned-b", (10.0, 40.0)))
+    ]
+    for _claim, target in claims:
+        target.route.route_system_owned_segment_ranks = (0,)
+
+    plan = cci.compile_corridor_cohort_plan(
+        _ledger_of(*claims), tuple(target for _claim, target in claims)
+    )
+
+    (component,) = plan.components
+    assert component.status is cci.CorridorAllocationStatus.PLANNED
+    assert component.compatibility is None
+    assert component.problems == ()
+    assert component.results == ()
+    assert component.allocations == ()
+    assert {role for _claim_id, role in component.claim_roles} == {
+        cci.CorridorCohortClaimRole.FIXED
+    }
+    assert plan.allocations == ()
+
+
+@pytest.mark.parametrize(
+    ("peer", "match"),
+    [
+        (None, "nothing to solve"),
+        ("owned", "nothing to solve"),
+        ("movable", "incomplete reservation"),
+    ],
+)
+def test_component_with_an_incomplete_reservation_fails_closed(
+    peer: str | None, match: str
+) -> None:
+    """An incomplete reservation is no plan's segment and has no whole route to
+    move, so it raises alone, beside an owned peer or beside a movable one.
+    """
+    incomplete = _overlapping_member_claim(
+        claim_id="incomplete", reservation_complete=False, longitudinal=(0.0, 30.0)
+    )
+    claims = [incomplete]
+    if peer is not None:
+        peer_claim = _overlapping_member_claim(
+            claim_id="peer", reservation_complete=True, longitudinal=(10.0, 40.0)
+        )
+        if peer == "owned":
+            peer_claim[1].route.route_system_owned_segment_ranks = (0,)
+        claims.append(peer_claim)
+
+    with pytest.raises(cci.CorridorCohortCompilationError, match=match):
+        cci.compile_corridor_cohort_plan(
+            _ledger_of(*claims), tuple(target for _claim, target in claims)
+        )
+
+
+def _cohort_member(
+    claim_id: str, cohort_id: str, *, region: CorridorRegion = RowGapRegion(0, 1)
+) -> tuple[CorridorCohortLedgerClaim, CorridorCohortTarget]:
+    claim, target = _overlapping_member_claim(
+        claim_id=claim_id, reservation_complete=True, longitudinal=(0.0, 30.0)
+    )
+    return (
+        replace(
+            claim,
+            endpoint_cohort_id=cohort_id,
+            endpoint_network_rank=0,
+            region=region,
+        ),
+        replace(target, endpoint_lane_axis=1, endpoint_lane_coordinate=10.0),
+    )
+
+
+def _cohort_ledger(
+    members: tuple[tuple[CorridorCohortLedgerClaim, CorridorCohortTarget], ...],
+    *,
+    expected: frozenset[str],
+    ambiguous: bool = False,
+    extra_claims: tuple[CorridorCohortLedgerClaim, ...] = (),
+) -> CorridorCohortLedger:
+    claims = (*(claim for claim, _target in members), *extra_claims)
+    return CorridorCohortLedger(
+        claims=claims,
+        endpoint_members=(("cohort:x", expected),),
+        eligible_member_ids=frozenset(claim.member_id for claim in claims),
+        ambiguous_endpoint_cohort_ids=(
+            frozenset({"cohort:x"}) if ambiguous else frozenset()
+        ),
+        offset_step=10.0,
+    )
+
+
+@pytest.mark.parametrize(
+    ("expected", "ambiguous", "ghost", "match"),
+    [
+        (frozenset({"a"}), True, False, "ambiguous"),
+        (frozenset({"other"}), False, False, "outside"),
+        (frozenset({"a", "ghost"}), False, True, "no bound claim"),
+    ],
+)
+def test_inconsistent_endpoint_cohort_fails_closed(
+    expected: frozenset[str], ambiguous: bool, ghost: bool, match: str
+) -> None:
+    member = _cohort_member("a", "cohort:x")
+    targets = [member[1]]
+    extra_claims: tuple[CorridorCohortLedgerClaim, ...] = ()
+    if ghost:
+        ghost_claim, ghost_target = _cohort_member("ghost", "cohort:x")
+        extra_claims = (replace(ghost_claim, edge_key=None, family_id=None),)
+        targets.append(ghost_target)
+    ledger = _cohort_ledger(
+        (member,), expected=expected, ambiguous=ambiguous, extra_claims=extra_claims
+    )
+
+    with pytest.raises(cci.CorridorCohortCompilationError, match=match):
+        cci.compile_corridor_cohort_plan(ledger, tuple(targets))
+
+
+def test_two_claims_on_one_member_segment_fail_closed() -> None:
+    first = _overlapping_member_claim(
+        claim_id="a", reservation_complete=True, longitudinal=(0.0, 30.0)
+    )
+    other = _overlapping_member_claim(
+        claim_id="a-twin", reservation_complete=True, longitudinal=(10.0, 40.0)
+    )
+    twin_claim = replace(other[0], member_id="a")
+    twin_target = replace(other[1], member_id="a")
+
+    with pytest.raises(cci.CorridorCohortCompilationError, match="two claims"):
+        cci.compile_corridor_cohort_plan(
+            _ledger_of(first, (twin_claim, twin_target)),
+            (first[1], twin_target),
+        )
+
+
+def test_overlaid_cohort_component_with_an_incomplete_claim_keeps_its_overlay() -> None:
+    """A tied entry slot exempts its component from the seating checks."""
+    first = _cohort_member("a", "cohort:x")
+    second_claim, second_target = _cohort_member("b", "cohort:x")
+    second = (replace(second_claim, endpoint_network_rank=1), second_target)
+    incomplete = _overlapping_member_claim(
+        claim_id="incomplete", reservation_complete=False, longitudinal=(10.0, 40.0)
+    )
+    ledger = CorridorCohortLedger(
+        claims=(first[0], second[0], incomplete[0]),
+        endpoint_members=(("cohort:x", frozenset({"a", "b"})),),
+        eligible_member_ids=frozenset({"a", "b", "incomplete"}),
+        ambiguous_endpoint_cohort_ids=frozenset(),
+        offset_step=10.0,
+    )
+
+    plan = cci.compile_corridor_cohort_plan(
+        ledger, (first[1], second[1], incomplete[1])
+    )
+
+    (component,) = plan.components
+    assert component.status is cci.CorridorAllocationStatus.COMPATIBILITY
+    assert component.compatibility is not None
+    assert (
+        component.compatibility.reason
+        is cci.CorridorCompatibilityReason.OVERLAID_ENDPOINT_SLOTS
+    )
+    assert component.problems == ()
+    assert plan.allocations == ()
+
+
+def test_endpoint_cohort_split_across_components_is_typed_compatibility() -> None:
+    """A cohort whose members sit in different lanes splits across solver
+    components: each component keeps its drawn geometry as typed compatibility.
+    """
+    first = _cohort_member("a", "cohort:x")
+    second = _cohort_member("b", "cohort:x", region=RowGapRegion(1, 2))
+    ledger = _cohort_ledger((first, second), expected=frozenset({"a", "b"}))
+
+    plan = cci.compile_corridor_cohort_plan(ledger, (first[1], second[1]))
+
+    assert len(plan.components) == 2
+    for component in plan.components:
+        assert component.status is cci.CorridorAllocationStatus.COMPATIBILITY
+        assert component.compatibility is not None
+        assert (
+            component.compatibility.reason
+            is cci.CorridorCompatibilityReason.INCOMPLETE_WITNESSES
+        )
+        assert component.allocations == ()
+    assert plan.allocations == ()
+    _assert_no_silent_compatibility(plan)
+
+
+def test_endpoint_cohort_without_claims_adds_no_component() -> None:
+    """An endpoint cohort that no claim belongs to produces no component of its own."""
+    carrier_claim, carrier_target = _overlapping_member_claim(
+        claim_id="carrier", reservation_complete=True, longitudinal=(0.0, 30.0)
+    )
+    ledger = CorridorCohortLedger(
+        claims=(carrier_claim,),
+        endpoint_members=(("cohort:absent", frozenset({"ghost"})),),
+        eligible_member_ids=frozenset({"carrier"}),
+        ambiguous_endpoint_cohort_ids=frozenset(),
+        offset_step=10.0,
+    )
+
+    plan = cci.compile_corridor_cohort_plan(ledger, (carrier_target,))
+
+    (component,) = plan.components
+    assert component.status is cci.CorridorAllocationStatus.PLANNED
+    assert component.endpoint_cohort_ids == ()
+    assert component.compatibility is None
+
+
+def test_member_geometry_corridor_handoff_returns_heterogeneous_grants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The member-geometry handoff compiles complete requests and receives grants
+    without applying the convergence grants."""
+    from nf_metro.layout.routing import member_geometry
+
+    ledger, targets, scalar_requests, footprint_model = (
+        _member_scalar_relation_scenario()
+    )
+    monkeypatch.setattr(
+        cci, "_member_footprint_model", lambda *args, **kwargs: footprint_model
+    )
+
+    plan = member_geometry.plan_corridor_cohorts(
+        ledger, targets, scalar_requests=scalar_requests
+    )
+
+    scalar_variable_id = scalar_requests[0].variable.variable_id
+    assert any(grant.variable_id == scalar_variable_id for grant in plan.scalar_grants)
+    assert plan.route_patches
+
+
+def test_unwitnessed_blocking_obstacle_raises_instead_of_losing_its_shortfall(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A clearance shortfall naming an obstacle with no footprint provenance
+    fails closed rather than silently collapsing to no shortfall at all.
+
+    A component whose solve fails always makes ``compile_corridor_cohort_plan``
+    raise; what matters here is which message it raises with. Treating
+    "unwitnessed" the same as "no shortfall" would report a generic failure
+    with no obstacle identity, so the raised message must name the missing
+    obstacle explicitly to prove the shortfall was not silently discarded.
+    """
+    claim = _identity_claim(
+        claim_id="carrier",
+        reservation_id="reservation:carrier",
+        network_id="network",
+        endpoint_cohort_id=None,
+    )
+    route = _mutable_route(
+        source="carrier:source",
+        target="carrier:target",
+        line_id="line",
+        points=[(0.0, 10.0), (30.0, 10.0)],
+    )
+    target = CorridorCohortTarget(
+        "carrier",
+        "plan:carrier",
+        ("carrier:source", "carrier:target", "line"),
+        RouteFamilyId.SAME_Y_STRAIGHT,
+        ("connector:carrier",),
+        route,
+        True,
+    )
+    ledger = CorridorCohortLedger(
+        claims=(claim,),
+        endpoint_members=(),
+        eligible_member_ids=frozenset({"carrier"}),
+        ambiguous_endpoint_cohort_ids=frozenset(),
+        offset_step=10.0,
+    )
+
+    def fake_solve(
+        problem: cci.CorridorAllocationProblem,
+    ) -> cci.CorridorAllocationResult:
+        return cci.CorridorAllocationResult(
+            status=cci.CorridorAllocationStatus.FAILURE,
+            reason=cci.CorridorAllocationFailureReason.INFEASIBLE,
+            blocking_member_ids=("carrier",),
+            clearance_shortfall=cci.CorridorClearanceShortfall(
+                claim_ids=("carrier",),
+                blocking_obstacle_ids=("obstacle-missing",),
+                deficit=5.0,
+                axis=0,
+                required_shift_sign=1,
+            ),
+        )
+
+    monkeypatch.setattr(cci, "solve_corridor_cohorts", fake_solve)
+
+    with pytest.raises(CorridorCohortCompilationError, match="unwitnessed obstacles"):
+        cci.compile_corridor_cohort_plan(ledger, (target,))
+
+
+def test_shortfall_without_a_directed_shift_sign_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A clearance shortfall with no directed boundary side fails closed the
+    same way an unwitnessed obstacle does, rather than reaching the aperture
+    producer with a shift sign it cannot act on.
+    """
+    claim = _identity_claim(
+        claim_id="carrier",
+        reservation_id="reservation:carrier",
+        network_id="network",
+        endpoint_cohort_id=None,
+    )
+    route = _mutable_route(
+        source="carrier:source",
+        target="carrier:target",
+        line_id="line",
+        points=[(0.0, 10.0), (30.0, 10.0)],
+    )
+    target = CorridorCohortTarget(
+        "carrier",
+        "plan:carrier",
+        ("carrier:source", "carrier:target", "line"),
+        RouteFamilyId.SAME_Y_STRAIGHT,
+        ("connector:carrier",),
+        route,
+        True,
+    )
+    ledger = CorridorCohortLedger(
+        claims=(claim,),
+        endpoint_members=(),
+        eligible_member_ids=frozenset({"carrier"}),
+        ambiguous_endpoint_cohort_ids=frozenset(),
+        offset_step=10.0,
+    )
+
+    def fake_solve(
+        problem: cci.CorridorAllocationProblem,
+    ) -> cci.CorridorAllocationResult:
+        return cci.CorridorAllocationResult(
+            status=cci.CorridorAllocationStatus.FAILURE,
+            reason=cci.CorridorAllocationFailureReason.INFEASIBLE,
+            blocking_member_ids=("carrier",),
+            clearance_shortfall=cci.CorridorClearanceShortfall(
+                claim_ids=("carrier",),
+                blocking_obstacle_ids=(),
+                deficit=5.0,
+                axis=0,
+                required_shift_sign=0,
+            ),
+        )
+
+    monkeypatch.setattr(cci, "solve_corridor_cohorts", fake_solve)
+
+    with pytest.raises(CorridorCohortCompilationError, match="directed boundary side"):
+        cci.compile_corridor_cohort_plan(ledger, (target,))
+
+
+def _top_entry_drops(routes, port_id: str) -> dict[str, tuple[float, int]]:
+    """Each line's drop X into *port_id* and the travel sign of its run there."""
+    drops = {}
+    for route in routes:
+        if route.edge.target != port_id:
+            continue
+        (run_start, run_end), (drop_start, drop_end) = zip(
+            route.points[-3:-1], route.points[-2:], strict=True
+        )
+        assert run_start[1] == run_end[1]
+        assert drop_start[0] == drop_end[0]
+        drops[route.line_id] = (
+            drop_start[0],
+            1 if run_end[0] > run_start[0] else -1,
+        )
+    return drops
+
+
+def test_opposing_bypass_lines_hold_separated_direction_qualified_lanes() -> None:
+    """Opposite-running bypasses into one top entry keep their own lanes.
+
+    ``ribo`` arrives running right and ``rnaseq`` running left.  Counter-running
+    lines never share a bundle, so each drops into the port on its own lane, one
+    pitch apart, in the order its travel direction earns.
+    """
+    graph, observed = _render("examples/topologies/opposing_bypass_corridor.mmd")
+    drops = _top_entry_drops(observed.plan.routes, "orf_calling__entry_top_9")
+
+    assert drops == {"ribo": (692.0, 1), "rnaseq": (696.0, -1)}
+    assert drops["rnaseq"][0] - drops["ribo"][0] == graph_offset_step(graph)
+
+
+def test_no_solver_owner_contains_opposite_running_claims(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No solver cohort or lane equality binds claims travelling opposite ways.
+
+    Seed 77 compiles one cohort over both directions of several shared gaps; a
+    cohort or equality owner holding both would bundle counter-running lines.
+    Scalar trunk lanes are their own cohort and carry no ledger claim.  The map
+    trips the peel-off guard after the compiles run, so it renders permissively.
+    """
+    compiles = []
+    original = member_geometry_routing.compile_corridor_cohort_plan
+
+    def capture(ledger, targets, **kwargs):
+        plan = original(ledger, targets, **kwargs)
+        compiles.append((ledger, plan))
+        return plan
+
+    monkeypatch.setattr(
+        member_geometry_routing, "compile_corridor_cohort_plan", capture
+    )
+    path = ROOT / "tests/fixtures/hash_seed_determinism/seed_77.mmd"
+    graph = prepare_graph(
+        path.read_text(),
+        layout_options={"permissive": True},
+        source_dir=str(path.parent),
+    )
+    with pytest.warns(PermissiveGuardWarning):
+        svg.build_observed_render_plan(graph, resolve_theme(None, graph))
+
+    assert compiles
+    for ledger, plan in compiles:
+        direction_by_claim = {
+            claim.claim_id: claim.direction for claim in ledger.claims
+        }
+        assert {claim.direction for claim in ledger.claims} >= {
+            Direction.U,
+            Direction.D,
+        }
+        for component in plan.components:
+            for problem in component.problems:
+                directions_by_owner: dict[str, set[Direction]] = {}
+                for lane in problem.lanes:
+                    if lane.member_id in direction_by_claim:
+                        directions_by_owner.setdefault(
+                            f"cohort|{lane.cohort_id}", set()
+                        ).add(direction_by_claim[lane.member_id])
+                for equality in problem.equalities:
+                    directions_by_owner.setdefault(
+                        f"equality|{equality.owner_id}", set()
+                    ).update(
+                        (
+                            direction_by_claim[equality.left_member_id],
+                            direction_by_claim[equality.right_member_id],
+                        )
+                    )
+                assert all(
+                    len(directions) == 1 for directions in directions_by_owner.values()
+                ), directions_by_owner
+
+
+# --- Endpoint cohort lane ranks over fixed members ---
+
+
+def _entry_cohort_claim(
+    *,
+    claim_id: str,
+    line_id: str,
+    lane_rank: int,
+    endpoint_network_rank: int,
+    slot: float,
+    coordinate: float,
+) -> _BoundClaim:
+    """One upward run of a LEFT-entry cohort, ``slot`` its port landing Y."""
+    ledger = replace(
+        _identity_claim(
+            claim_id=claim_id,
+            reservation_id="reservation:gap",
+            network_id=f"network:{line_id}",
+            endpoint_cohort_id="cohort:entry",
+            direction=Direction.U,
+            region=ColumnGapRegion(1, 2),
+            orientation=CorridorOrientation.VERTICAL,
+            lane_rank=lane_rank,
+            endpoint_network_rank=endpoint_network_rank,
+        ),
+        destination_boundary_axis_sign=1,
+    )
+    target = replace(
+        _footprint_target(
+            claim_id, line_id, [(coordinate, slot + 100.0), (coordinate, slot)]
+        ),
+        endpoint_lane_axis=1,
+        endpoint_lane_coordinate=slot,
+    )
+    return _BoundClaim(ledger, target, slot, slot + 100.0, coordinate, slot)
+
+
+def _fixed_copy(claim: _BoundClaim, claim_id: str) -> _BoundClaim:
+    return replace(claim, ledger=replace(claim.ledger, claim_id=claim_id))
+
+
+def _slot_ordered_ranks(claims) -> dict[tuple[str, int], int]:
+    slots: dict[str, dict[int, float | None]] = {}
+    for item in claims:
+        cohort_id = item.ledger.endpoint_cohort_id
+        rank = item.ledger.endpoint_network_rank
+        if cohort_id is not None and rank is not None:
+            slots.setdefault(cohort_id, {})[rank] = item.target.endpoint_lane_coordinate
+    return {
+        (cohort_id, rank): index
+        for cohort_id, slot_by_rank in slots.items()
+        for index, rank in enumerate(cci._ranks_in_slot_order(slot_by_rank))
+    }
+
+
+def _offset_violations(claims, offset_step, problem) -> list[str]:
+    """Endpoint lanes whose boundary offset is not their slot-order index among
+    every claim of their cohort, fixed and counter-running members included."""
+    ranks = _slot_ordered_ranks(claims)
+    by_id = {item.claim_id: item for item in claims}
+    violations = []
+    for lane in problem.lanes:
+        item = by_id.get(lane.member_id)
+        if (
+            item is None
+            or item.ledger.endpoint_cohort_id is None
+            or item.ledger.endpoint_network_rank is None
+            or item.ledger.destination_boundary_axis_sign is None
+        ):
+            continue
+        rank = ranks[
+            (item.ledger.endpoint_cohort_id, item.ledger.endpoint_network_rank)
+        ]
+        expected = rank * offset_step * item.ledger.destination_boundary_axis_sign
+        if lane.boundary_coordinate != pytest.approx(expected):
+            violations.append(
+                f"{lane.member_id}: {lane.boundary_coordinate} != {expected}"
+            )
+    return violations
+
+
+def _pinned_gap_violations(claims, problem) -> list[str]:
+    """Pinned lane pairs of one solver cohort whose boundary offsets sit a
+    different distance apart than the fixed lanes they are pinned to.
+
+    A solver cohort holds one travel direction, so only same-direction pairs
+    share a frame of boundary offsets.
+    """
+    by_id = {item.claim_id: item for item in claims}
+    lanes = {lane.member_id: lane for lane in problem.lanes}
+    pinned = {
+        equality.member_id: by_id[equality.obstacle_id].coordinate + equality.delta
+        for equality in problem.fixed_equalities
+        if equality.member_id in lanes and equality.obstacle_id in by_id
+    }
+    violations = []
+    for left_id, right_id in combinations(sorted(pinned), 2):
+        left, right = by_id[left_id].ledger, by_id[right_id].ledger
+        if (
+            left.endpoint_cohort_id is None
+            or left.endpoint_cohort_id != right.endpoint_cohort_id
+            or left.direction is not right.direction
+        ):
+            continue
+        boundary_gap = (
+            lanes[left_id].boundary_coordinate - lanes[right_id].boundary_coordinate
+        )
+        pinned_gap = pinned[left_id] - pinned[right_id]
+        if boundary_gap != pytest.approx(pinned_gap):
+            violations.append(
+                f"{left_id}/{right_id}: boundary gap {boundary_gap} != "
+                f"pinned gap {pinned_gap}"
+            )
+    return violations
+
+
+@pytest.mark.parametrize(
+    ("outer_pinned", "m3_coordinate"), [(False, 376.0), (True, 372.0)]
+)
+def test_endpoint_lanes_rank_past_an_interleaved_fixed_member(
+    outer_pinned: bool, m3_coordinate: float
+) -> None:
+    """A fixed member between two movable lanes occupies a slot, so the movable
+    lanes seat two pitches apart and agree with their pins.
+
+    ``m1`` and ``m3`` move, ``m2`` is fixed and lands in the slot between
+    theirs, and ``m1`` is pinned onto its own line's fixed lane; ``m3`` is
+    pinned onto one two pitches out when ``outer_pinned``.
+    """
+    step = 4.0
+    m1 = _entry_cohort_claim(
+        claim_id="m1",
+        line_id="m1",
+        lane_rank=0,
+        endpoint_network_rank=1,
+        slot=120.0,
+        coordinate=364.0,
+    )
+    m2 = _entry_cohort_claim(
+        claim_id="fixed-m2",
+        line_id="m2",
+        lane_rank=1,
+        endpoint_network_rank=2,
+        slot=124.0,
+        coordinate=368.0,
+    )
+    m3 = _entry_cohort_claim(
+        claim_id="m3",
+        line_id="m3",
+        lane_rank=2,
+        endpoint_network_rank=0,
+        slot=128.0,
+        coordinate=m3_coordinate,
+    )
+    fixed = [_fixed_copy(m1, "fixed-m1"), m2]
+    if outer_pinned:
+        fixed.append(_fixed_copy(m3, "fixed-m3"))
+    claims = (m1, m3, *fixed)
+    roles = {item.claim_id: cci.CorridorCohortClaimRole.MOVABLE for item in claims}
+    roles.update({item.claim_id: cci.CorridorCohortClaimRole.FIXED for item in fixed})
+    footprint_model = _MemberFootprintModel((), (), {}, (), (), ())
+
+    problem = cci._problem(
+        claims, roles, True, step, 8.0, footprint_model, {}, corner_neighbours={}
+    )
+
+    assert {
+        (equality.member_id, equality.obstacle_id)
+        for equality in problem.fixed_equalities
+    } == {("m1", "fixed-m1"), *((("m3", "fixed-m3"),) if outer_pinned else ())}
+    assert {lane.member_id: lane.boundary_coordinate for lane in problem.lanes} == {
+        "m1": pytest.approx(0 * step),
+        "m3": pytest.approx(2 * step),
+    }
+    assert _pinned_gap_violations(claims, problem) == []
+    result = solve_corridor_cohorts(problem)
+    assert result.status is CorridorAllocationStatus.PLANNED, result
+    allocations = dict(result.allocations)
+    assert allocations["m1"] == pytest.approx(364.0)
+    assert allocations["m3"] == pytest.approx(364.0 + 2 * step)
+
+
+_ENDPOINT_RANK_FIXTURES = (
+    "examples/topologies/entry_cohort_interleaved_fixed_lane.mmd",
+    "examples/topologies/convergent_offrow_exit_climb.mmd",
+    "tests/fixtures/curve_invariant_repros/ascent_fan_blocked_turn_order.mmd",
+    "examples/genomic_pipeline.mmd",
+    "examples/variantbenchmarking.mmd",
+)
+
+
+@pytest.mark.parametrize("relative_path", _ENDPOINT_RANK_FIXTURES)
+def test_rendered_endpoint_lanes_rank_over_every_cohort_member(
+    relative_path: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every built allocation problem ranks its endpoint lanes over the whole
+    cohort, and every pinned lane pair agrees with its fixed lanes."""
+    built = []
+    original = cci._problem
+
+    def capture(claims, roles, complete, offset_step, *args, **kwargs):
+        problem = original(claims, roles, complete, offset_step, *args, **kwargs)
+        built.append((claims, offset_step, problem))
+        return problem
+
+    monkeypatch.setattr(cci, "_problem", capture)
+    _render(relative_path)
+
+    assert built
+    violations = [
+        violation
+        for claims, offset_step, problem in built
+        for violation in (
+            *_offset_violations(claims, offset_step, problem),
+            *_pinned_gap_violations(claims, problem),
+        )
+    ]
+    assert violations == []
+
+
+_INTERLEAVED_FIXED_LANE_SEEDS = ("0", "1")
+
+
+def test_interleaved_fixed_lane_hash_seed_stable() -> None:
+    observations = observe_across_hash_seeds(
+        ROOT / "examples/topologies/entry_cohort_interleaved_fixed_lane.mmd",
+        _INTERLEAVED_FIXED_LANE_SEEDS,
+    )
+
+    assert all(item["exception"] is None for item in observations.values()), (
+        observations
+    )
+    assert len({item["svg_sha256"] for item in observations.values()}) == 1
+
+
+def _capture_cohort_compiles(
+    monkeypatch: pytest.MonkeyPatch, relative_path: str
+) -> list[SimpleNamespace]:
+    """Render *relative_path*, keeping every cohort compile's model and components."""
+    current: dict[str, object] = {}
+    records: list[SimpleNamespace] = []
+    real_model = cci._member_footprint_model
+    real_components = cci._atomic_components
+    real_compile = member_geometry_routing.compile_corridor_cohort_plan
+
+    def model(*args, **kwargs):
+        current["model"] = real_model(*args, **kwargs)
+        return current["model"]
+
+    def components(claims, physical, footprint_model):
+        current["components"] = real_components(claims, physical, footprint_model)
+        current.update(claims=claims, physical=physical)
+        return current["components"]
+
+    def compile_plan(ledger, targets, **kwargs):
+        plan = real_compile(ledger, targets, **kwargs)
+        records.append(SimpleNamespace(plan=plan, **current))
+        return plan
+
+    monkeypatch.setattr(cci, "_member_footprint_model", model)
+    monkeypatch.setattr(cci, "_atomic_components", components)
+    monkeypatch.setattr(
+        member_geometry_routing, "compile_corridor_cohort_plan", compile_plan
+    )
+    _render(relative_path)
+    return records
+
+
+def _component_claim_ids(record: SimpleNamespace, component) -> set[str]:
+    return {
+        record.claims[claim_rank].claim_id
+        for physical_rank in component.physical_ranks
+        for claim_rank in record.physical[physical_rank]
+    }
+
+
+def test_trunk_scalar_shares_a_component_with_its_bundled_member(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A trunk held on its bundle solves in one component with the run it holds to.
+
+    The bundle relates the trunk scalar to a member run that is itself a movable
+    lane, so the two coordinates are one decision: solved apart, each lands on
+    the other's coordinate from before the solve.
+    """
+    records = _capture_cohort_compiles(
+        monkeypatch, "examples/topologies/merge_right_entry.mmd"
+    )
+
+    bundles = [
+        (record, bundle) for record in records for bundle in record.model.bundles
+    ]
+    assert bundles
+    for record, bundle in bundles:
+        witness = next(
+            item
+            for item in record.model.witnesses
+            if item.footprint_id == bundle.witness_id
+        )
+        assert witness.coordinate_variable_id is not None
+        run_claims = set(
+            record.model.claim_ids_by_variable[witness.coordinate_variable_id]
+        )
+        assert run_claims
+        scalar_component = next(
+            component
+            for component in record.components
+            if bundle.variable_id in component.scalar_variable_ids
+        )
+        assert run_claims <= _component_claim_ids(record, scalar_component)
+
+
+_JOINT_SOLVE_GRANTS = {
+    "examples/topologies/merge_right_entry.mmd": (346.0,),
+    "tests/fixtures/regressions/perp_entry_column_merge_feeder.mmd": (247.0,),
+    "examples/topologies/plan_owned_distinct_lane_separation.mmd": (200.0, 200.0),
+    "tests/fixtures/regressions/plan_owned_distinct_lane_separation_reordered.mmd": (
+        200.0,
+        200.0,
+    ),
+}
+
+
+def _run_allocation(record: SimpleNamespace, witness_id: str, axis: int):
+    """The allocation of the member run *witness_id* names along *axis*, if any."""
+    witness = next(
+        item for item in record.model.witnesses if item.footprint_id == witness_id
+    )
+    if witness.axis != axis or not record.model.claim_ids_by_variable.get(
+        witness.coordinate_variable_id or "", ()
+    ):
+        return None
+    return next(
+        item
+        for item in record.plan.allocations
+        if (item.member_id, item.edge_key, item.segment_rank)
+        == (witness.member_id, witness.edge_key, witness.segment_rank)
+    )
+
+
+@pytest.mark.parametrize("relative_path", sorted(_JOINT_SOLVE_GRANTS))
+def test_joint_solve_grant_matches_member_allocation(
+    monkeypatch: pytest.MonkeyPatch, relative_path: str
+) -> None:
+    """A trunk grant and the member run it is coupled to agree on one solve.
+
+    A bundled trunk sits exactly its bundle delta from the run's allocation,
+    and a trunk crowded by a distinct line's run clears that run's allocation
+    by the pitch its forbidden interval states, with the member run left at
+    the coordinate it is drawn at.
+    """
+    records = _capture_cohort_compiles(monkeypatch, relative_path)
+
+    first = records[0]
+    assert (
+        tuple(sorted(grant.coordinate for grant in first.plan.scalar_grants))
+        == (_JOINT_SOLVE_GRANTS[relative_path])
+    )
+    couplings = 0
+    for record in records:
+        grants = {grant.variable_id: grant for grant in record.plan.scalar_grants}
+        for bundle in record.model.bundles:
+            grant = grants[bundle.variable_id]
+            allocation = _run_allocation(record, bundle.witness_id, grant.variable.axis)
+            if allocation is None:
+                continue
+            couplings += 1
+            assert allocation.coordinate == pytest.approx(
+                allocation.source_coordinate, abs=COORD_TOLERANCE
+            )
+            assert grant.coordinate == pytest.approx(
+                allocation.coordinate + bundle.delta
+            )
+        for interval in record.model.forbidden_intervals:
+            grant = grants.get(interval.member_id)
+            if grant is None:
+                continue
+            allocation = _run_allocation(
+                record, interval.obstacle_id, grant.variable.axis
+            )
+            if allocation is None:
+                continue
+            couplings += 1
+            pitch = (interval.maximum_coordinate - interval.minimum_coordinate) / 2
+            assert allocation.coordinate == pytest.approx(
+                allocation.source_coordinate, abs=COORD_TOLERANCE
+            )
+            assert abs(grant.coordinate - allocation.coordinate) >= pitch - (
+                COORD_TOLERANCE
+            )
+    assert couplings
+
+
+def _owned_free_segment(plan) -> int | None:
+    """An owned segment of *plan* sharing no point with any of its gap channels."""
+    channel_ranks = {channel.segment_rank for channel in plan.gap_channels}
+    return next(
+        (
+            rank
+            for rank in plan.owned_segment_ranks
+            if 0 < rank < len(plan.points) - 2
+            and not channel_ranks & {rank - 1, rank, rank + 1}
+        ),
+        None,
+    )
+
+
+def test_member_geometry_emission_rejects_a_moved_owned_point(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pass that moves a plan-owned segment after emission fails the emission check.
+
+    The plan owns the segment's points as much as its gap channels and corner
+    radii, so translating an owned segment that is no gap channel, with its
+    radii untouched, is a second owner deciding a planned coordinate.
+    """
+    observed: list[tuple[list, object]] = []
+    real_validate = member_geometry_routing.validate_member_geometry_emission
+
+    def spy(routes, execution):
+        real_validate(routes, execution)
+        observed.append((deepcopy(routes), execution))
+
+    monkeypatch.setattr(
+        member_geometry_routing, "validate_member_geometry_emission", spy
+    )
+    _render("tests/fixtures/topologies/shared_entry_bundle_order_repro.mmd")
+
+    candidates = [
+        (route, execution, plan, rank)
+        for routes, execution in observed
+        for route in routes
+        if (plan := execution.plan_for_edge(route.edge)) is not None
+        and (rank := _owned_free_segment(plan)) is not None
+    ]
+    assert candidates
+    route, execution, plan, rank = candidates[0]
+    start, end = route.points[rank : rank + 2]
+    axis = 1 if start[1] == end[1] else 0
+    for index in (rank, rank + 1):
+        point = list(route.points[index])
+        point[axis] += 2.0
+        route.points[index] = (point[0], point[1])
+
+    with pytest.raises(RuntimeError, match="owned segment"):
+        real_validate([route], execution)
+
+
+# --- Corner orders from the run a lane pair turns off together ---
+
+_TURN_RESERVATIONS = (
+    (
+        1,
+        "reservation:descent",
+        ColumnGapRegion(0, 1),
+        CorridorOrientation.VERTICAL,
+        Direction.D,
+    ),
+    (
+        2,
+        "reservation:run",
+        RowGapRegion(1, 2),
+        CorridorOrientation.HORIZONTAL,
+        Direction.R,
+    ),
+)
+
+
+def _descend_then_run(
+    line_id: str,
+    target_id: str,
+    points: list[tuple[float, float]],
+    *,
+    lane_rank: int,
+    path_rank: int,
+    slot: float | None = None,
+    slot_rank: int | None = None,
+) -> tuple[tuple[CorridorCohortLedgerClaim, ...], CorridorCohortTarget]:
+    """A route claimed on its column-gap descent (segment 1) and the row-gap
+    run it turns right onto (segment 2).
+
+    A route given a *slot* lands in ``cohort:<target_id>``, so its run is that
+    cohort's destination claim.
+    """
+    member_id = f"{line_id}->{target_id}"
+    edge_key = ("junction", target_id, line_id)
+    cohort_id = None if slot is None else f"cohort:{target_id}"
+    claims = tuple(
+        CorridorCohortLedgerClaim(
+            claim_id=f"{reservation_id}|{member_id}",
+            reservation_id=reservation_id,
+            reservation_rank=segment_rank,
+            claim_rank=path_rank,
+            region=region,
+            orientation=orientation,
+            direction=direction,
+            lane_rank=lane_rank,
+            member_id=member_id,
+            member_geometry_plan_id=f"plan:{member_id}",
+            edge_key=edge_key,
+            family_id=RouteFamilyId.SAME_Y_STRAIGHT,
+            connector_ids=(f"connector:{member_id}",),
+            segment_rank=segment_rank,
+            path_rank=path_rank,
+            endpoint_cohort_id=cohort_id if segment_rank == 2 else None,
+            endpoint_network_rank=slot_rank if segment_rank == 2 else None,
+            destination_boundary_carrier=False,
+            destination_boundary_axis_sign=(
+                1 if cohort_id is not None and segment_rank == 2 else None
+            ),
+            network_id=f"network:{line_id}",
+            reservation_complete=True,
+        )
+        for segment_rank, reservation_id, region, orientation, direction in (
+            _TURN_RESERVATIONS
+        )
+    )
+    target = CorridorCohortTarget(
+        member_id,
+        f"plan:{member_id}",
+        edge_key,
+        RouteFamilyId.SAME_Y_STRAIGHT,
+        (f"connector:{member_id}",),
+        _mutable_route(
+            source="junction", target=target_id, line_id=line_id, points=points
+        ),
+        True,
+        endpoint_lane_axis=None if slot is None else 1,
+        endpoint_lane_coordinate=slot,
+        network_id=f"network:{line_id}",
+    )
+    return claims, target
+
+
+def _compile_turning_routes(
+    *members: tuple[tuple[CorridorCohortLedgerClaim, ...], CorridorCohortTarget],
+) -> cci.CorridorCohortPlan:
+    cohorts: dict[str, set[str]] = {}
+    for claims, _target in members:
+        for claim in claims:
+            if claim.endpoint_cohort_id is not None:
+                cohorts.setdefault(claim.endpoint_cohort_id, set()).add(claim.member_id)
+    ledger = CorridorCohortLedger(
+        claims=tuple(claim for claims, _target in members for claim in claims),
+        endpoint_members=tuple(
+            (cohort_id, frozenset(member_ids))
+            for cohort_id, member_ids in sorted(cohorts.items())
+        ),
+        eligible_member_ids=frozenset(target.member_id for _claims, target in members),
+        ambiguous_endpoint_cohort_ids=frozenset(),
+        offset_step=4.0,
+    )
+    return cci.compile_corridor_cohort_plan(
+        ledger, tuple(target for _claims, target in members)
+    )
+
+
+def _run_coordinates(plan: cci.CorridorCohortPlan) -> dict[str, float]:
+    return {
+        allocation.member_id: allocation.coordinate
+        for allocation in plan.allocations
+        if allocation.segment_rank == 2
+    }
+
+
+def _split_line_beside_a_lead(m2_descent_x: float = 271.0):
+    """``m0`` splits to ``z1`` and ``z2`` beside ``m2``; all three descend
+    together and turn right onto one run.
+
+    ``m2``'s lead to ``z1`` rises inside ``m0->z2``'s run, so a footprint order
+    seats ``m2`` above it, while ``m2`` turns off the descent below ``m0``.
+    """
+    return (
+        _descend_then_run(
+            "m2",
+            "z1",
+            [(260.0, 124.0), (m2_descent_x, 124.0), (m2_descent_x, 360.0)]
+            + [(420.0, 360.0), (420.0, 330.0)],
+            lane_rank=0,
+            path_rank=0,
+        ),
+        _descend_then_run(
+            "m0",
+            "z1",
+            [(260.0, 120.0), (275.0, 120.0), (275.0, 356.0)]
+            + [(416.0, 356.0), (416.0, 330.0)],
+            lane_rank=1,
+            path_rank=1,
+        ),
+        _descend_then_run(
+            "m0",
+            "z2",
+            [(260.0, 120.0), (275.0, 120.0), (275.0, 356.0), (521.0, 356.0)]
+            + [(521.0, 120.0), (546.0, 120.0)],
+            lane_rank=1,
+            path_rank=2,
+            slot=120.0,
+            slot_rank=0,
+        ),
+    )
+
+
+def test_a_lane_keeps_the_side_of_the_run_it_turns_off() -> None:
+    """``m2`` descends left of ``m0`` and so runs below it after the turn,
+    whatever order the footprint of ``m2``'s lead asks for."""
+    plan = _compile_turning_routes(*_split_line_beside_a_lead())
+
+    assert _run_coordinates(plan) == {
+        "m2->z1": pytest.approx(360.0),
+        "m0->z1": pytest.approx(356.0),
+        "m0->z2": pytest.approx(356.0),
+    }
+
+
+def _two_split_lines_beside_a_lead():
+    """``l0`` and ``l1`` split to ``sec2`` and ``sec1`` beside ``l3``, the three
+    descending side by side, ``l3`` leftmost, and turning right onto one run.
+
+    ``l3``'s lead rises inside the runs of ``l0`` and ``l1`` to ``sec2``, so
+    footprint orders seat ``l3`` above both.
+    """
+
+    def route(x: float, y: float, run_y: float, *tail: tuple[float, float]):
+        return [(380.0, y), (x, y), (x, run_y), *tail]
+
+    return (
+        _descend_then_run(
+            "l0",
+            "sec2",
+            route(398.0, 120.0, 436.0, (847.5, 436.0), (847.5, 120.0), (867.5, 120.0)),
+            lane_rank=0,
+            path_rank=0,
+            slot=120.0,
+            slot_rank=0,
+        ),
+        _descend_then_run(
+            "l1",
+            "sec2",
+            route(394.0, 124.0, 440.0, (851.5, 440.0), (851.5, 124.0), (867.5, 124.0)),
+            lane_rank=1,
+            path_rank=1,
+            slot=124.0,
+            slot_rank=1,
+        ),
+        _descend_then_run(
+            "l0",
+            "sec1",
+            route(398.0, 120.0, 436.0, (660.5, 436.0), (660.5, 410.0)),
+            lane_rank=0,
+            path_rank=2,
+        ),
+        _descend_then_run(
+            "l1",
+            "sec1",
+            route(394.0, 124.0, 440.0, (664.5, 440.0), (664.5, 410.0)),
+            lane_rank=1,
+            path_rank=3,
+        ),
+        _descend_then_run(
+            "l3",
+            "sec1",
+            route(390.0, 128.0, 444.0, (668.5, 444.0), (668.5, 410.0)),
+            lane_rank=2,
+            path_rank=4,
+        ),
+    )
+
+
+def test_three_lines_keep_their_descent_order_onto_a_run() -> None:
+    """``l3``, leftmost on the descent, runs lowest after the turn."""
+    plan = _compile_turning_routes(*_two_split_lines_beside_a_lead())
+
+    assert _run_coordinates(plan) == {
+        "l0->sec2": pytest.approx(436.0),
+        "l1->sec2": pytest.approx(440.0),
+        "l0->sec1": pytest.approx(436.0),
+        "l1->sec1": pytest.approx(440.0),
+        "l3->sec1": pytest.approx(444.0),
+    }
+
+
+def _run_corner_orders(plan: cci.CorridorCohortPlan) -> set[tuple[str, str]]:
+    def member(claim_id: str) -> str:
+        return claim_id.removeprefix("reservation:run|")
+
+    return {
+        (member(order.lower_member_id), member(order.upper_member_id))
+        for component in plan.components
+        for problem in component.problems
+        if problem.coordinate_axis == 1
+        for order in problem.corner_orders
+    }
+
+
+def test_guard_lanes_of_one_endpoint_cohort_are_left_to_their_slot_order() -> None:
+    """``l0`` and ``l1`` to ``sec2`` turn together too, but their cohort's slots
+    already order them rigidly: every other run pair is ordered, that one not."""
+    plan = _compile_turning_routes(*_two_split_lines_beside_a_lead())
+
+    orders = _run_corner_orders(plan)
+
+    assert orders == {
+        ("l0->sec2", "l1->sec1"),
+        ("l0->sec2", "l3->sec1"),
+        ("l1->sec2", "l3->sec1"),
+        ("l0->sec1", "l1->sec2"),
+        ("l0->sec1", "l1->sec1"),
+        ("l0->sec1", "l3->sec1"),
+        ("l1->sec1", "l3->sec1"),
+    }
+
+
+def test_guard_a_corner_the_snapshot_crosses_is_not_ordered() -> None:
+    """``m2`` descends right of ``m0`` yet runs below it, so it crosses ``m0`` at
+    the corner already: no corner order binds, and the footprint order seats
+    ``m2`` above ``m0->z2``."""
+    plan = _compile_turning_routes(*_split_line_beside_a_lead(m2_descent_x=279.0))
+
+    assert _run_corner_orders(plan) == set()
+    assert _run_coordinates(plan)["m2->z1"] == pytest.approx(352.0)
+
+
+def _run_claim(
+    member_id: str,
+    coordinate: float,
+    cohort: str | None = None,
+    direction: Direction = Direction.R,
+):
+    ledger = _identity_claim(
+        claim_id=member_id,
+        reservation_id="reservation:run",
+        network_id=f"network:{member_id}",
+        endpoint_cohort_id=cohort,
+        direction=direction,
+        orientation=(
+            CorridorOrientation.HORIZONTAL
+            if direction in (Direction.L, Direction.R)
+            else CorridorOrientation.VERTICAL
+        ),
+        segment_rank=2,
+    )
+    target = _footprint_target(member_id, member_id, [(0.0, 0.0), (1.0, 0.0)])
+    return _BoundClaim(ledger, target, 0.0, 100.0, coordinate, None)
+
+
+_D, _U = Direction.D, Direction.U
+
+
+@pytest.mark.parametrize(
+    ("low", "high", "cohort", "orders"),
+    [
+        pytest.param(
+            ((275.0, _D, 0), (271.0, _D, 0)),
+            None,
+            None,
+            [("a", "b")],
+            id="turned-together",
+        ),
+        pytest.param(
+            ((275.0, _D, 0), (271.0, _D, 0)),
+            ((416.0, _U, 0), (420.0, _U, 0)),
+            None,
+            [("a", "b")],
+            id="both-ends-agree",
+        ),
+        pytest.param(
+            ((275.0, _D, 0), (271.0, _D, 0)),
+            ((420.0, _U, 0), (416.0, _U, 0)),
+            None,
+            [],
+            id="ends-disagree",
+        ),
+        pytest.param(
+            ((275.0, _D, 0), (271.0, _D, 1)),
+            None,
+            None,
+            [],
+            id="separate-groups",
+        ),
+        pytest.param(
+            ((275.0, _D, 0), (271.0, _U, 0)),
+            None,
+            None,
+            [],
+            id="neighbours-run-opposite-ways",
+        ),
+        pytest.param(
+            ((275.0, _D, 0), (274.5, _D, 0)),
+            None,
+            None,
+            [],
+            id="neighbours-tie",
+        ),
+        pytest.param(
+            ((271.0, _D, 0), (275.0, _D, 0)),
+            None,
+            None,
+            [],
+            id="crossed-snapshot",
+        ),
+        pytest.param(
+            ((275.0, _D, 0), (271.0, _D, 0)),
+            None,
+            "cohort:x",
+            [],
+            id="one-endpoint-cohort",
+        ),
+    ],
+)
+def test_guard_corner_orders_bind_only_lanes_turning_together_uncrossed(
+    low, high, cohort, orders
+) -> None:
+    """``a`` runs at 356 and ``b`` at 360, rightward; *low* and *high* are their
+    neighbouring claims at the run's left and right ends, each a coordinate,
+    direction and physical group."""
+    claims = (_run_claim("a", 356.0, cohort), _run_claim("b", 360.0, cohort))
+    neighbours = {}
+    for rank, ends in ((1, low), (3, high)):
+        for member_id, end in zip(("a", "b"), ends or ()):
+            coordinate, direction, group = end
+            neighbours[(member_id, rank)] = cci._CornerNeighbour(
+                coordinate, direction, frozenset({group})
+            )
+
+    emitted = cci._corner_orders(claims, (), 4.0, neighbours)
+
+    assert [(item.lower_member_id, item.upper_member_id) for item in emitted] == orders
+
+
+@pytest.mark.parametrize(
+    ("run", "neighbour", "a_at", "b_at", "orders"),
+    [
+        pytest.param(Direction.R, _D, 356.0, 360.0, [("a", "b")], id="down-then-right"),
+        pytest.param(Direction.L, _D, 360.0, 356.0, [("b", "a")], id="down-then-left"),
+        pytest.param(
+            Direction.D, Direction.L, 360.0, 356.0, [("b", "a")], id="left-then-down"
+        ),
+    ],
+)
+def test_guard_corner_orders_turn_with_the_run_direction(
+    run, neighbour, a_at, b_at, orders
+) -> None:
+    """``a``'s neighbouring claim lies at 275 and ``b``'s at 271 on one run that
+    turns onto *run*; each lane keeps its side of travel across the turn, so
+    which of them takes the lower coordinate follows *run*'s direction."""
+    claims = (
+        _run_claim("a", a_at, direction=run),
+        _run_claim("b", b_at, direction=run),
+    )
+    neighbours = {
+        ("a", 1): cci._CornerNeighbour(275.0, neighbour, frozenset({0})),
+        ("b", 1): cci._CornerNeighbour(271.0, neighbour, frozenset({0})),
+    }
+
+    emitted = cci._corner_orders(claims, (), 4.0, neighbours)
+
+    assert [(item.lower_member_id, item.upper_member_id) for item in emitted] == orders

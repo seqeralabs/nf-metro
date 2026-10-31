@@ -1,0 +1,69 @@
+%%metro title: Fuzz 8400197
+%%metro line: l0 | Qc_Assemble | #e6194b
+%%metro line: l1 | Vcf_Classify_Annotate | #3cb44b
+%%metro line: l2 | Sort_Filter | #4363d8
+%%metro grid: sec0 | 0,0
+%%metro grid: sec1 | 1,0
+%%metro grid: sec2 | 2,0
+%%metro grid: sec3 | 0,1
+%%metro grid: sec4 | 1,1
+%%metro grid: sec5 | 2,1
+
+graph LR
+    subgraph sec0 [Align_Export 0]
+        s0n0[qc]
+        s0n1[call_qc]
+        s0n2[report]
+        s0n3[classify]
+        s0n0 -->|l1| s0n1
+        s0n1 -->|l1| s0n3
+        s0n1 -->|l2| s0n2
+        s0n2 -->|l2| s0n3
+    end
+    subgraph sec1 [Normalize_Index_Cluster 1]
+        s1n0[annotate_cluster]
+        s1n1[export]
+        s1n2[pca_sort]
+        s1n1 -->|l1,l2| s1n2
+        s1n0 -->|l2| s1n1
+    end
+    subgraph sec2 [Dedup 2]
+        s2n0[polish]
+        s2n3[align]
+        s2n4[quant]
+        s2n3 -->|l1,l2| s2n4
+        s2n0 -->|l2| s2n3
+    end
+    subgraph sec3 [Align 3]
+        s3n0[bin_annotate]
+        s3n1[bam_quant]
+        s3n2[dedup]
+        s3n3[index]
+        s3n0 -->|l0| s3n3
+        s3n0 -->|l2| s3n1
+        s3n1 -->|l2| s3n2
+        s3n2 -->|l2| s3n3
+    end
+    subgraph sec4 [Filter 4]
+        %%metro direction: TB
+        s4n0[assemble_pca]
+        s4n2[summarise_stats]
+        s4n4[report_pca_cluster]
+        s4n0 -->|l1| s4n2
+        s4n2 -->|l1| s4n4
+    end
+    subgraph sec5 [Polish 5]
+        %%metro direction: BT
+        s5n0[call_trim]
+        s5n1[index_qc]
+        s5n0 -->|l2| s5n1
+    end
+    s3n3 -->|l0,l2| s5n0
+    s0n3 -->|l1| s1n1
+    s1n2 -->|l1| s3n3
+    s3n3 -->|l1| s4n0
+    s4n4 -->|l1| s5n1
+    s0n3 -->|l1| s2n3
+    s0n3 -->|l2| s1n0
+    s1n2 -->|l2| s2n0
+    s2n4 -->|l2| s3n0

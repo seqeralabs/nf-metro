@@ -160,6 +160,50 @@ def content_corpus() -> list[tuple[str, Path, bool]]:
     return items
 
 
+# Corpus ids whose validated layout aborts on the final render guards, keyed by
+# ``content_corpus`` id. The co-column BT witness is a test-only fixture, not a
+# gallery render.
+KNOWN_FINAL_GUARD_ABORTS: dict[str, str] = {
+    "tests/co_column_feeders_shared_diagonal_bt": (
+        "#1792: _guard_no_line_crosses_non_consumer (l0 on the s0n1->s0n0 bypass "
+        "crosses s0n2's marker) and _guard_fan_merge_no_partition_crossing "
+        "(l2/l0 cross at s0n0) fire; the defects are intrinsic to the test-only "
+        "BT co-column witness"
+    ),
+}
+
+
+def corpus_params(
+    corpus: list[tuple[str, Path, bool]], *, unpacked: bool = True
+) -> list:
+    """Parametrize list for a ``content_corpus`` sweep that validates the layout.
+
+    Corpus entries in :data:`KNOWN_FINAL_GUARD_ABORTS` are strict xfails on
+    ``LayoutInvariantError``. *unpacked* spreads each entry across three
+    arguments; otherwise the whole tuple is one argument.
+    """
+    from nf_metro.layout.phases.guards import LayoutInvariantError
+
+    params = []
+    for entry in corpus:
+        reason = KNOWN_FINAL_GUARD_ABORTS.get(entry[0])
+        marks = (
+            []
+            if reason is None
+            else [
+                pytest.mark.xfail(
+                    raises=LayoutInvariantError, strict=True, reason=reason
+                )
+            ]
+        )
+        params.append(
+            pytest.param(*entry, marks=marks)
+            if unpacked
+            else pytest.param(entry, marks=marks)
+        )
+    return params
+
+
 def compute_corpus_layout(path: Path, is_nextflow: bool) -> MetroGraph:
     """Parse a corpus ``.mmd`` (converting from a Nextflow DAG first when
     ``is_nextflow``) and run the validated layout, returning the graph."""
@@ -304,7 +348,38 @@ CURVE_ABORT_FIXTURES: dict[str, pytest.MarkDecorator] = {
             "so its offset applies along the vertical leg",
         )
     ),
+    "tests/fixtures/regressions/cohort_grant_beside_seated_runs.mmd": (
+        known_curve_abort(
+            "#2149",
+            "#2155",
+            reason="__junction_6's LEFT-entry corner into sec3 pinches l0 and l1 "
+            "through non-concentric arc centres; l0 and l4 overlay on one "
+            "descent channel; l3's turn into __merge_2 rounds to radius 1 of the "
+            "10 requested",
+        )
+    ),
+    "tests/fixtures/regressions/cohort_line_split_branches.mmd": (
+        known_curve_abort(
+            "#2086",
+            "#1550",
+            reason="__junction_6's RIGHT-entry corner into sec1 crosses l3 over "
+            "l2 and pinches l0 and l3 through non-concentric arc centres; l2's "
+            "two legs from __junction_6 turn at one vertex with radii 2.6 and "
+            "18 and double over",
+        )
+    ),
 }
+
+
+# Fixtures whose routing aborts before any render, keyed by path from the repo
+# root: bypass nesting lifts a leg its member geometry plan owns, so
+# validate_member_geometry_emission rejects the second owner of that coordinate
+# (#1756). test_route_plan.py pins each abort.
+ROUTE_EMISSION_ABORT_FIXTURES = frozenset(
+    {
+        "tests/fixtures/curve_invariant_repros/riboseq_band_hop_zero_length_seam.mmd",
+    }
+)
 
 
 def is_curve_abort_fixture(path: Path) -> bool:

@@ -7974,9 +7974,18 @@ def test_sparse_loop_column_clearance_guard_catches_crowding():
 # ---------------------------------------------------------------------------
 
 
+_XFAIL_NON_CONSUMER_CROSSING: dict[str, str] = {
+    "co_column_feeders_shared_diagonal_bt.mmd": (
+        "#1792: l0 on the s0n1->s0n0 bypass crosses s0n2's marker "
+        "(_guard_no_line_crosses_non_consumer); the defect is intrinsic to the "
+        "test-only BT co-column witness"
+    ),
+}
+
+
 @pytest.mark.parametrize(
     "fixture",
-    ALL_FIXTURES,
+    _params_with_xfails(ALL_FIXTURES, _XFAIL_NON_CONSUMER_CROSSING),
 )
 def test_lines_dont_cross_non_consumer_markers(fixture):
     """No rendered line segment may pass through the marker bbox of

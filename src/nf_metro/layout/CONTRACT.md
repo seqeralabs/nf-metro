@@ -1727,8 +1727,13 @@ fan plan states.
 - **Related tests**: `tests/test_member_geometry.py`,
   `tests/test_route_system_emission.py`, and `tests/test_route_plan.py`.
 - **Lifecycle:** invariant - `validate_member_geometry_emission` checks that
-  the final planned paths retain the owned segment ranks and exact coordinates
-  of every frozen gap channel after normalization.
+  the final planned paths retain the owned segment ranks, the exact points of
+  every owned segment, and the exact coordinates of every frozen gap channel
+  after normalization. Fan-traverse coincidence and bundling anchor a
+  route-system-owned segment as they anchor a convergence-owned one, so
+  neither moves a coordinate the plan decided. Bypass nesting anchors only a
+  convergence-owned leg: a member-plan-owned leg it lifts fails this check
+  and aborts the render.
 
 ## Post-layout routing boundary: convergence planning
 
@@ -1749,7 +1754,31 @@ fan plan states.
   Two runs count as one bundle only on local evidence: one route system, one
   travel direction, an overlapping span, a shared carrier junction or entry
   port, and either one named inter-row gap or a separation already inside
-  `BUNDLE_TO_BUNDLE_CLEARANCE`.
+  `BUNDLE_TO_BUNDLE_CLEARANCE`. On a pass that compiles corridor cohorts the
+  compile states the same conflicts as relations on each trunk's scalar
+  request: a bundle-pitch equality to the nearest bundled member run, a
+  one-pitch separation from every same-direction distinct-line member run along
+  the trunk once one of them crowds it, and a forbidden interval around a
+  distinct line's turn-off leg across the trunk. A member run that is a lane of
+  the compile is related to the scalar as a variable, and every immutable
+  context claim drawn on the trunk's own run stands for the scalar rather than
+  an obstacle at its pre-grant coordinate, so the trunk and the members it is
+  coupled to solve in one component; a run no compile moves, or one outside
+  the `(region, orientation)` lane of the trunk's own context claims (for a
+  trunk with none, outside the one lane all its coupled runs share), stands
+  in the trunk's problem as a fixed obstacle at its compile-time coordinate,
+  even where its own component moves it. Where either side could give way the
+  members keep their coordinate and the scalar takes the grant. Where those relations
+  cover the conflict, the grant already sits where
+  `_pack_cotravelling_corridor_runs` and `_separate_distinct_cotravelling_trunks`
+  would seat it, so their re-seat is a no-op. The passes themselves do not know
+  about grants: where a relation does not cover a conflict they still move the
+  trunk, and `_assert_grants_survive_settlement` then fails the render closed
+  rather than drawing a trunk off its published grant. The relations tie a
+  trunk only to member runs; trunk-to-trunk packing and separation, which the
+  passes perform by counting already-seated trunks as neighbours, has no typed
+  relation, so a compiled round where it would move a granted trunk fails
+  closed.
 - **Precondition**: The semantic route scaffold, exit-turn decisions, station
   offsets, layout coordinates, topology resolution, merge
   classification, and stable member family IDs are settled. Final global
@@ -2117,9 +2146,57 @@ They are design evidence, not part of this specification.
   strict plan that may not publish another requirement, settle that plan once
   for drawn positive-side containment, then re-route while consuming it. The
   final decision-freeze check compares the strict plan with that consuming
-  re-route. There is no retry or fixpoint search. A requirement surviving the
-  first strict observation, or any deficit surviving final settlement, is an
-  invariant failure.
+  re-route. After either sequence the render takes one aperture observation:
+  a replay of the last routing pass against the ledger the last settlement
+  consumed, with its translations, that may publish clearance requirements.
+  The replay reads exactly that pass's inputs (station coordinates, section
+  boxes, bypass-label obstacles, station offsets and the reserved bands it
+  seated corridors in), not the boxes the label pass after it grows: that
+  pass seated its corridors against the inputs it read, and a box the ledger
+  never saw can leave a corridor with no band that fits. The bands are the ones a
+  settlement re-route measured from the ledger it consumed, and none where
+  settlement moved nothing and nothing was re-routed; the replay without the
+  grant reads the same ones. It is the only pass that runs the corridor-cohort
+  compiler, because only a ledger already settled to its minimum widths
+  compiles without a spurious shortfall. The plan it accepts is stored on that
+  observation's `RoutePlan` as `accepted_corridor_cohort_plan`, from which the
+  observation reads the convergences a grant moved, and
+  `prepare_route_system_planning` refuses to compile on a pass seated against a
+  plan that carries one. The observation is drawn in two cases. A convergence
+  corridor grant that moved a trunk is drawn by this observation alone, so it
+  is adopted with its own plan once `_assert_grant_moves_only_its_convergences`
+  proves it differs on the granted convergences alone from the same
+  observation routed without the grant; a grant observation that also
+  publishes a requirement is an invariant failure. Otherwise the observation
+  is the last routing pass replayed and seated by the accepted plan, whether
+  or not envelope settlement re-routed before it (a translation, or a
+  live-derived band the ledger changes at zero translation). It is drawn
+  whenever it accepted a plan and published no requirement, and the published
+  plan is the ledger the last settlement consumed, projected through its
+  translations, carrying the accepted record. An observation that accepted no
+  plan has no record to publish, and one that published a requirement is
+  settled below, so neither is drawn. A drawn observation can replay
+  inputs from before the group-caption band was reserved, so the publish step
+  reserves the band again after placing labels; the reservation only grows a
+  box. An observation that is not drawn has its geometry (station
+  coordinates, section boxes, and bypass-label obstacles) discarded by
+  `_restoring_route_observation_geometry`; routing alone, it leaves the ports
+  the label pass before it carried as they were. A
+  `CORRIDOR_COHORT_APERTURE` requirement it publishes is settled once against
+  the observed plan, the grant is proven from that settlement's own
+  translations to pay every measured deficit (`_assert_aperture_grant_closes`:
+  the translation at the requirement's boundary carries every positive-side
+  box, no negative-side box, and at least the deficit, which the quantised
+  allocation may exceed), and a re-route consuming the observed plan draws the
+  result, which is adopted and published. That re-route starts every non-port
+  station at the x the last routing pass read
+  (`_RouteObservationInputs.restore_station_x`), translated by the grant:
+  routing's centring is the only writer of non-port x since that pass, and it
+  is not idempotent, so a re-route from the drawn output would centre a station
+  a second time. There is no retry or fixpoint search. A requirement surviving
+  the first strict observation, any deficit surviving final settlement, or an
+  aperture deficit its grant does not pay is an invariant failure; a render
+  settles at most one aperture batch.
   `attach_reroute_ledger_delta` compares each corridor's description together
   with the width it asks for, since a boundary whose corridor survives at a
   different `minimum_width` is one the translations were sized wrongly for.
@@ -2153,6 +2230,11 @@ They are design evidence, not part of this specification.
   be split, and never moving a track a plan owns.
   Plan-owned trunks take the same distinct-line pitch during global convergence
   settlement, before member geometry and convergence geometry freeze.
+  Settlement packs a horizontal trunk lying on a member track one pitch to the
+  track's far (greater-coordinate) side. Where the trunk on the near side
+  crosses fewer legs, the member track takes that step itself at member
+  geometry instead, before it freezes, so the trunk keeps its trial lane and
+  settlement finds it already one pitch from the track.
   `check_no_fused_cotravelling_lines` is the final postcondition on every track,
   including a pair where both coordinates are immutable. Such a violation names
   its route system and exact owning plans, which identifies the construction
@@ -2335,11 +2417,14 @@ every other stage. The stage decides it, so no caller can disagree with it.
 The render path (`_settle_render_geometry` and the publish step in
 `render/svg.py`) records `DISCOVERY` for the first route observation and
 `GENERAL_SETTLEMENT` for each re-observation a carried port, a header-collision
-reconcile, or an envelope-settlement translation forces. `COHORT_INTENT`,
-`APERTURE_SETTLEMENT`, `FINAL_SOLVE` and `TYPED_MATERIALIZATION` are positions
-the vocabulary reserves between them and the closing pair; no render records
-one, which `tests/test_corridor_cohort_integration.py` asserts alongside the
-frozen order.
+reconcile, or an envelope-settlement translation forces. The aperture
+observation and the re-route drawing an aperture grant are `GENERAL_SETTLEMENT`
+re-observations too, and the aperture observation keeps its record when its
+geometry is discarded, so every route observation has exactly one record.
+`COHORT_INTENT`, `APERTURE_SETTLEMENT`, `FINAL_SOLVE` and
+`TYPED_MATERIALIZATION` are positions the vocabulary reserves between them and
+the closing pair; no render records one, which
+`tests/test_corridor_cohort_integration.py` asserts alongside the frozen order.
 
 `COHORT_FINAL` sits *after* both closing acts, not between them: the final
 canvas geometry is published first (`_FinalPublishedGeometry` - canvas width and

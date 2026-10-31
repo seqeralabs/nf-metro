@@ -11,8 +11,16 @@
   "note": "The lane-change step reads its run direction off the connector's own two endpoints rather than assuming an axis. segment_direction returns None for a leg that is diagonal or collapsed, which the straight-connector families that reach this helper never hand it: both settle their endpoints on one row or one column before routing, so no fixture can present a diagonal pair here.",
   "status": "defensive"
  },
- "common.py::and abs(start[0] - other_start[0]) < required - COORD_TOLERANCE_FINE::#1": {
-  "note": "The same-destination approach proposal is abandoned when a proposed member column would sit closer than the co-travelling lane clearance to another vertical channel. Every shipped corpus proposal clears that distance because the member gap allocator seats each corridor against its neighbours before the proposal is built, so the refusal arm has no fixture; revisit once a corpus map needs a proposal the allocator cannot pre-separate.",
+ "co_row.py::if _can_share(feeders, windows, flow, target_run, tolerance) and not (::#1": {
+  "note": "shared_co_row_window declines a group whose window, slid past the neighbouring diagonals a moved member would meet, breaks a member's straights, no longer untangles the group, runs two lanes together, or lands on another neighbour. Reachable: a neighbour diagonal ending close to the target leaves too little target straight (pinned by test_shared_window_that_cannot_clear_a_neighbour_is_declined); no swept fixture presents one.",
+  "status": "needs-review"
+ },
+ "co_row.py::if own * step <= 0:::#1": {
+  "note": "_at_one_slope declines a group holding a lane that steps the other way from the nearest member's, or not at all, since no one slope carries both. Reachable only in a group of three or more, where two other members still untangle (pinned by test_group_with_a_lane_stepping_the_other_way_is_declined); no swept fixture presents one.",
+  "status": "needs-review"
+ },
+ "co_row.py::if source_gap * target_gap < 0:::#1": {
+  "note": "_diagonal_separation skips a pair whose lanes swap sides between the source and target ends: across one shared window they cross once rather than run together, so there is no gap to keep. Reachable in a firing group that also holds a pair with a forced single crossing; no swept fixture presents one.",
   "status": "needs-review"
  },
  "common.py::elif (d1 > 0) == (d2 > 0) or (d3 > 0) == (d4 > 0):::#1": {
@@ -29,10 +37,6 @@
  },
  "common.py::for port in junction_source_ports(graph, station.id):::#1": {
   "note": "Upstream loop-exit in resolve_section: every fan-out junction is emitted with an exit_port->junction edge whose source port carries a section id, so junction_source_ports always yields a sectioned port and the loop returns; the fall-through to the type-contract return None is the never-taken no-upstream fallback.",
-  "status": "defensive"
- },
- "common.py::if (::#2": {
-  "note": "Cohort shape rejection in _iter_same_destination_cohorts, shared by both same-destination iterators: the members must land on distinct adjacent lanes within one offset step of each other. Each member's port_y is the lane its peel-off tail rides into the port, i.e. the slot the entry-port allocator dealt that line, and the cohort is already complete over the port's lines one gate earlier. Swept over the whole corpus, the only LEFT/RIGHT entry port where two lines share a stored lane offset is rail_inter_section.mmd's two__entry_left_1, where rail mode stores no offsets at all and the long iterator's own graph.station_is_rail screen drops rails first; no tail-bearing route pair anywhere shares a port arrival Y, and a complete n-line side-entry port occupies one contiguous band at one step pitch so its extent cannot exceed (n-1)*step. The rejection therefore only fires for directly supplied geometry, as the synthetic bundle tests build.",
   "status": "defensive"
  },
  "common.py::if abs(denominator) <= COORD_TOLERANCE:::#1": {
@@ -113,10 +117,6 @@
  },
  "common.py::if moves and _section_intrudes(::#1": {
   "note": "Refusal when the slot column's riser would run within EDGE_TO_BUNDLE_CLEARANCE of a section box that is neither the route's source nor its target section. `moves` is live here: same_destination_short_overlap moves the assembly tail 13px and 17px across proposals and the audit tail 4px, and same_destination_vertical_convergence moves the upper tail 4px. The refusal is un-exercised because those risers run inside open inter-section corridor, not because no corpus tail moves. The arm wants a cohort whose tighter slot column pushes a riser up against a neighbouring section's bbox.",
-  "status": "needs-review"
- },
- "common.py::if moves and tail_segment_is_held(route, segment_rank, target_x):::#1": {
-  "note": "Ownership refusal in feasible_same_destination_approach_proposals: a member whose tail must move onto its slot is refused when the move is not this pass's to make. `moves` is live in the corpus -- instrumenting the call site the way the matrix exercises it (compute_layout plus render_svg, PYTHONHASHSEED=0), same_destination_short_overlap carries the assembly tail 13px and 17px off its slot across proposals and the audit tail 4px, and same_destination_vertical_convergence carries the upper tail 4px. The gate is therefore reached with a true left operand and still falls through: for every corpus mover the ownership terms are all false, because the tail segment is this pass's own to move. The arm wants a moving member whose segment another owner already holds -- a planner-owned exit turn outside the replannable set, a convergence- or route-system-owned segment boundary, a fan-route emitter, or a standing route reservation. Exercised synthetically by tests/test_same_destination_vertical_bundle.py::test_new_plan_owned_riser_conflict_refuses_tail_move_atomically, which builds the off-slot bundle against a conflicting owner; needs-review because an in-corpus witness is authorable, not because the arm is unreachable.",
   "status": "needs-review"
  },
  "common.py::if n == 0:::#1": {
@@ -484,7 +484,19 @@
   "status": "needs-review"
  },
  "core.py::if result is not None:::#1": {
-  "note": "Append-guard after the priority-ordered handler chain. The final handler _route_intra_section is total: its three early returns and its _route_diagonal fallback (annotated -> RoutedPath, single return statement) always yield a RoutedPath, so result is never None and every edge appends. The None arm is unreachable.",
+  "note": "Append-guard after the priority-ordered handler chain. The last entry of _LOCAL_EDGE_DISPATCH, _route_diagonal, is total (annotated -> RoutedPath, single return statement), so result is never None and every edge appends. The None arm is unreachable.",
+  "status": "defensive"
+ },
+ "core.py::for handler, _builder in _LOCAL_EDGE_DISPATCH:::#1": {
+  "note": "_route_classified_edge's first-match walk of _LOCAL_EDGE_DISPATCH. Its last handler, _route_diagonal, is total (annotated -> RoutedPath), so the walk always returns from inside the loop and the loop-exhausted arm is unreachable.",
+  "status": "defensive"
+ },
+ "core.py::for handler, builder in _LOCAL_EDGE_DISPATCH:::#1": {
+  "note": "_co_row_feeder's first-match walk of _LOCAL_EDGE_DISPATCH. The last entry's builder, intra_co_row_feeder, always returns a feeder (annotated -> CoRowFeeder), so the walk always returns from inside the loop and the loop-exhausted arm is unreachable.",
+  "status": "defensive"
+ },
+ "core.py::if is_inter_section_edge(edge, source, target, ctx):::#1": {
+  "note": "_co_row_feeder's inter-section check, mirroring _route_classified_edge's classify_inter_section_family. A port-or-junction to port-or-junction candidate member is a route-system member whose frozen family the preceding member check already declines, so this arm is reached only when no route-system execution is published. No swept fixture, 8,000-map corpus map or option-fuzz job reaches it.",
   "status": "defensive"
  },
  "corners.py::if corner_idx < 0 or corner_idx >= n_corners:::#1": {
@@ -554,10 +566,6 @@
  "inter_section_handlers.py::if col_left <= 0.0:::#1": {
   "note": "col_left_edge's 0.0 default only fires for a column with no sections; the target's own column always holds its section.",
   "status": "defensive"
- },
- "inter_section_handlers.py::if ctx.exit_turns is None:::#3": {
-  "note": "_perp_entry_turn_is_planned answers False for the pre-plan context the exit-turn planner probes emitters with; ctx.exit_turns is bound only for emission. That context does reach these emitters -- the same guard in _seat_bypass_descent takes its None arm on packed_cell_right_exit_left_entry_wrap -- but no corpus probe reaches the TOP/BOTTOM-entry L-shape records this predicate feeds.",
-  "status": "needs-review"
  },
  "inter_section_handlers.py::if ctx.station_offsets:::#1": {
   "note": "_run_pass_c_guards always populates ctx.station_offsets before route_edges, and RAILS mode returns earlier; the empty-offsets arm never fires. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
@@ -691,32 +699,8 @@
   "note": "BOTTOM_EXIT_RIGHT_LANDINGS is selected only when every target is a RIGHT entry. The non-RIGHT arm is a defensive check that the frozen target still satisfies that contract.",
   "status": "defensive"
  },
- "intra_handlers.py::and line not in graph.station_lines(sid)::#1": {
-  "note": "Trunk-row entry bow (#1315). Exercised by tests/fixtures/regressions/entry_trunk_row_bow.mmd, which is kept out of the validate=True corpus and the gate-coverage corpus (it exercises the always-on render path only), so no clean corpus fixture takes this arm. The render-path invariant test test_entry_trunk_row_bow_clears_non_consumer covers the drawn detour.",
-  "status": "defensive"
- },
  "tb_handlers.py::if source_track_blocked:::#1": {
   "note": "Entry-runway trunk-row non-consumer bypass (#1293). Both-tracks-blocked fall-through: a non-consumer sits on BOTH the entry track and the target track, leaving no clear runway track. No corpus fixture has a doubly-blocked flow-side entry; defensive.",
-  "status": "defensive"
- },
- "intra_handlers.py::for bbox in footprints:::#1": {
-  "note": "Trunk-row entry bow (#1315). Exercised by tests/fixtures/regressions/entry_trunk_row_bow.mmd, which is kept out of the validate=True corpus and the gate-coverage corpus (it exercises the always-on render path only), so no clean corpus fixture takes this arm. The render-path invariant test test_entry_trunk_row_bow_clears_non_consumer covers the drawn detour.",
-  "status": "defensive"
- },
- "intra_handlers.py::for k in range(len(points) - 1):::#1": {
-  "note": "Trunk-row entry bow (#1315). Exercised by tests/fixtures/regressions/entry_trunk_row_bow.mmd, which is kept out of the validate=True corpus and the gate-coverage corpus (it exercises the always-on render path only), so no clean corpus fixture takes this arm. The render-path invariant test test_entry_trunk_row_bow_clears_non_consumer covers the drawn detour.",
-  "status": "defensive"
- },
- "intra_handlers.py::for sign in _bow_side_order(section_stations, blockers, sy, over_start, over_end):::#1": {
-  "note": "Trunk-row entry bow (#1315). Loop-exhausted fall-through (both sides fail the clearance check): every corpus bow clears on its first (roomier) side, so the exit past the loop that returns a plain straight run is defensive.",
-  "status": "defensive"
- },
- "intra_handlers.py::for st in section_stations:::#1": {
-  "note": "Trunk-row entry bow (#1315). Exercised by tests/fixtures/regressions/entry_trunk_row_bow.mmd, which is kept out of the validate=True corpus and the gate-coverage corpus (it exercises the always-on render path only), so no clean corpus fixture takes this arm. The render-path invariant test test_entry_trunk_row_bow_clears_non_consumer covers the drawn detour.",
-  "status": "defensive"
- },
- "intra_handlers.py::if _bow_clears_markers(points, section_stations):::#1": {
-  "note": "Trunk-row entry bow (#1315). Retry arm (the roomier side's bow rakes a marker, so the other side is tried): _bow_side_order puts the side with the farthest off-trunk marker first, and the fixed bump height clears it, so no corpus fixture falls to the second side; defensive.",
   "status": "defensive"
  },
  "tb_handlers.py::if abs(diag_start - sp) <= abs(last_blocker - sp):::#1": {
@@ -728,7 +712,7 @@
   "status": "defensive"
  },
  "intra_handlers.py::if abs(tgt.x - src.x) >= COORD_TOLERANCE:::#1": {
-  "note": "_route_near_zero_gap_straight: a same-section, non-TB intra edge with |tgt.x - src.x| < COORD_TOLERANCE (1px) and non-zero dy is not constructible, so the straight-return (False) arm is never taken: layering assigns increasing X along edges so the minimum |dx| at _route_intra_section across the corpus is 50px (port spacing / off-track output lead). TB same-track edges that could reach |dx|=0 are intercepted by _route_tb_internal before this handler. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
+  "note": "_route_near_zero_gap_straight: a same-section, non-TB intra edge with |tgt.x - src.x| < COORD_TOLERANCE (1px) and non-zero dy is not constructible, so the straight-return (False) arm is never taken: layering assigns increasing X along edges so the minimum |dx| reaching the intra-section shapes across the corpus is 50px (port spacing / off-track output lead). TB same-track edges that could reach |dx|=0 are intercepted by _route_tb_internal before this handler. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
   "status": "defensive"
  },
  "intra_handlers.py::if dy < -COORD_TOLERANCE_FINE:::#1": {
@@ -751,10 +735,6 @@
   "note": "_route_fold_edge: the not-same_section precondition is never satisfied at the intra-section handlers, so the fold (False) arm is never taken: cross-section edges are consumed by _route_inter_section upstream (0/391 corpus fixtures reach this branch with differing sections), and a sectionless flat graph's serpentine fold is routed before this handler too (verified: a flat fold over the threshold does not reach the arm). The cross-row fold branch is shadowed. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
   "status": "defensive"
  },
- "intra_handlers.py::if not blockers:::#1": {
-  "note": "Trunk-row entry bow (#1315). Exercised by tests/fixtures/regressions/entry_trunk_row_bow.mmd, which is kept out of the validate=True corpus and the gate-coverage corpus (it exercises the always-on render path only), so no clean corpus fixture takes this arm. The render-path invariant test test_entry_trunk_row_bow_clears_non_consumer covers the drawn detour.",
-  "status": "defensive"
- },
  "intra_handlers.py::if not preds or not succs:::#1": {
   "note": "A bypass V exists to carry lines from one station to another, so by the time _bypass_v_is_one_way_step runs (only for a bypass endpoint of a routed edge) the V always has at least one predecessor and one successor edge. The empty-list return-False arm guards a malformed graph rather than a topology, so it stays un-exercised.",
   "status": "defensive"
@@ -763,16 +743,12 @@
   "note": "Trunk-row entry bow (#1315). No-room return: the flat run over the blocker(s) is shorter than two corner radii, so the bump's corners would overlap. The blocker-span-plus-clearance always exceeds 2*CURVE_RADIUS for corpus fixtures; defensive.",
   "status": "defensive"
  },
- "intra_handlers.py::if segment_intersects_bbox(x1, y1, x2, y2, bbox):::#1": {
-  "note": "Trunk-row entry bow (#1315). Exercised by tests/fixtures/regressions/entry_trunk_row_bow.mmd, which is kept out of the validate=True corpus and the gate-coverage corpus (it exercises the always-on render path only), so no clean corpus fixture takes this arm. The render-path invariant test test_entry_trunk_row_bow_clears_non_consumer covers the drawn detour.",
-  "status": "defensive"
- },
  "intra_handlers.py::if sibling is None:::#1": {
   "note": "Lookup guard on ctx.fork_targets ids, which are collected from graph edges and therefore always resolve in graph.stations; a missing sibling is only possible for a hand-built context whose fork map names stations the graph does not carry.",
   "status": "defensive"
  },
- "intra_handlers.py::if st.id in blocker_ids:::#1": {
-  "note": "Trunk-row entry bow (#1315). Exercised by tests/fixtures/regressions/entry_trunk_row_bow.mmd, which is kept out of the validate=True corpus and the gate-coverage corpus (it exercises the always-on render path only), so no clean corpus fixture takes this arm. The render-path invariant test test_entry_trunk_row_bow_clears_non_consumer covers the drawn detour.",
+ "member_geometry.py::for mismatch in _owned_corner_radius_mismatches(route, plan, radius_index):::#1": {
+  "note": "validate_member_geometry_emission raises on the first owned corner radius drawn off its frozen plan. The loop body is the raise, so it is entered only when _owned_corner_radius_mismatches yields, which no corpus render does for the reason given at that helper's own radius gates.",
   "status": "defensive"
  },
  "member_geometry.py::and assignment.run_direction in {Direction.R, Direction.L}::#1": {
@@ -831,10 +807,6 @@
   "note": "The same validator's concentric-inputs flank: the offset/base pair recorded for an owned corner's two segment ranks must still match the plan's. fresh_member_route copies both maps wholesale and only record_concentric_corner rewrites them, which the same ownership bar keeps off owned boundaries. Distinct from the radius-value raise above in that a pass could in principle re-record the inputs and still land on the planned radius; both are construction-bug guards.",
   "status": "defensive"
  },
- "member_geometry.py::if allow_clearance_requirements or shortfall > COORD_TOLERANCE:::#1": {
-  "note": "The apply pass runs only after the measured shortfall has been granted and removed. Seeing an outstanding shortfall while requirements are disabled would mean boundary settlement failed to move the target.",
-  "status": "defensive"
- },
  "member_geometry.py::if any(::#2": {
   "note": "A continuing source trunk is accepted only when its first runway can hold the largest concentric turnout. Resolver spacing guarantees this; the short-runway rejection is covered by focused turnout tests.",
   "status": "defensive"
@@ -850,10 +822,6 @@
  "member_geometry.py::if boundary < 1:::#1": {
   "note": "The short-overlap target sits below at least one grid row, so its upper row boundary is positive. A row-zero target has no upper boundary to enlarge and is defensively declined.",
   "status": "defensive"
- },
- "member_geometry.py::if bounds.band is not None and not bounds.band.lo <= candidate <= bounds.band.hi:::#1": {
-  "note": "_candidate_clears_runway's band rejection, unreachable while `if band is not None:::#1` never populates a band on this path. Reachable.",
-  "status": "needs-review"
  },
  "member_geometry.py::if context is not None:::#1": {
   "note": "_convergence_context_route returns None only when ctx.edge_by_key has no entry for the key, and edge_by_key is built from every graph.edge while the key comes from scaffold.edge_order, which is derived from the same edges. Same never-taken lookup as the sibling `if edge is None` guard on the non-convergence path (0 of 141 fixtures).",
@@ -885,6 +853,10 @@
  },
  "member_geometry.py::if membership is None or membership.assignment is None:::#1": {
   "note": "A route without exit-turn membership is supported: it can participate in a feasible same-destination cohort while declining the optional settled-turn ownership refresh. A membership with no assignment is malformed, but the collapsed gate also covers the valid no-membership case. Reachable; wants a minimal fixture.",
+  "status": "needs-review"
+ },
+ "member_geometry.py::if not clearance_granted or shortfall > COORD_TOLERANCE:::#1": {
+  "note": "An allow pass reaches this with a short same-destination cohort that holds no clearance grant and has no shortfall to publish, so it has nothing to seat. same_destination_short_overlap takes it under x_spacing=60/y_spacing=40, track_gap=6 and x_spacing=80/section_y_gap=70, but no fixture does under the default options this corpus renders. Reachable; wants a fixture whose authored spacing leaves the cohort clear of its shortfall.",
   "status": "needs-review"
  },
  "member_geometry.py::if membership is None or membership.axis is None:::#1": {
@@ -926,10 +898,6 @@
  "member_geometry.py::or route.curve_radii is None::#1": {
   "note": "Every materialized exit-turn plan reaching corner-cohort settlement carries its frozen radius tuple. A missing tuple denotes incomplete direct or corrupted plan state; the guard prevents the optional metadata from being indexed.",
   "status": "defensive"
- },
- "member_geometry.py::or route.curve_radii[rank] >= curve_radius - COORD_TOLERANCE_FINE::#1": {
-  "note": "_restore_clear_planned_landing_radii only has work for a member whose landing corner was sized below the standard curve radius. Instrumenting the pass across the whole corpus: 2294 multi-line exit-turn members reach this operand and every one already carries the full radius at its exit_turn_segment_rank (a further 5880 short-circuit on the rank/radii operands ahead of it), so the operand always short-circuits to continue. The arm wants a settled multi-line exit-turn plan in which a clearance-limited concentric sizing shrank one member's landing corner. Per the triage doc's correction-pass rule this is a missing witness, not a guard a valid graph cannot violate.",
-  "status": "needs-review"
  },
  "normalize.py::elif above_ok:::#1": {
   "note": "Distinct-line dogleg move-up/skip branch: unreachable because the below branch is always taken (t.y == hit.y, below_ok true); covers both the move-up and the gap-too-tight continue.",
@@ -1015,6 +983,10 @@
   "note": "In _coincide_same_line_fanout_traverses: a fan-owned traverse is snapped onto its convergence-plan-owned sibling's band, but the movable member's own reserved claim band may forbid that Y. The corpus fan-owned traverses carry no claim band that conflicts with the anchor, so the target always lands on the reference and the skip arm is never taken. Defensive against a movable member whose reservation excludes the anchor's band.",
   "status": "defensive"
  },
+ "normalize.py::if anchors:::#1": {
+  "note": "The anchor arm of _stack_trunk_bands: a channel stack holding a convergence context trunk. Reachable but defective: an option sweep (23,313 one-option-at-a-time renders plus 5,996 random multi-option renders over examples/ and tests/fixtures/) reaches it on 14 renders of two inputs and no others. One is the riboseq inter-row corridor (tests/fixtures/curve_invariant_repros/riboseq_inter_row_corridor.mmd): at --label-angle 10 the render completes (exercised by test_trunk_slot_materialisation_leaves_convergence_context_in_place), but its angled station labels overlap (star_hybrid/ribocode and six more; the final label-overlap phase guard rejects it); the two multi-option renders that complete both include --label-angle 10 and fail a final or Stage 6.4 phase guard too. The other is examples/riboseq_metro.mmd: at --font-scale 0.8 or --x-spacing 40 the render completes, but under validation its topmost section box sits above the title-band floor (the final title-band phase guard rejects it, as it does the example at default options). Every other render that reaches the arm, on either input, aborts later on a curve or fan-route invariant. No reaching render passes validation, so none can ship as a gallery fixture. The routing it exercises is clean; each input's guard failure needs its own bug before the arm can be fixtured.",
+  "status": "needs-review"
+ },
  "normalize.py::if any(moved.fuses_with(other, step) for other in lanes if other is not lane):::#1": {
   "note": "In _tighten_overwide_movable_lanes: the tighter slot one step from a lane's nearest co-traveller is abandoned when it would fuse with another lane. The corpus's one tightening move (riboseq_inter_row_corridor's rnaseq) draws clear, so the would-fuse abandon arm is never taken. Defensive against a slot boxed in by a third lane.",
   "status": "defensive"
@@ -1082,6 +1054,10 @@
  "normalize.py::if len({id(t.route) for t in grp}) < 2:::#2": {
   "note": "Single-route-group skip in _suboptimal_trunk_bands, validate-only: called from the _guard_* validator and a unit test, not the production render path the validate=False sweep exercises. Defensive.",
   "status": "defensive"
+ },
+ "normalize.py::if max(anchored_tops) - min(anchored_tops) > COORD_TOLERANCE:::#1": {
+  "note": "Neither arm runs on the default examples/ corpus, which never reaches an anchored stack (see the if-anchors entry above). The abandon arm of _stack_trunk_bands' anchor seating: a channel stack holding two or more convergence context trunks whose fixed Ys no single stack top seats together. A stack with one anchor always has a top that seats it, and no fixture or option combination builds a stack with two: an option sweep (23,313 one-option-at-a-time renders plus 5,996 random multi-option renders over examples/ and tests/fixtures/) reaches an anchored stack on 14 renders, every one with a single anchor. The arm keeps a second anchor from being restacked should two ever share a stack.",
+  "status": "candidate-dead"
  },
  "normalize.py::if not _lane_move_is_grounded(lane, target, ctx):::#2": {
   "note": "In _tighten_overwide_movable_lanes: the tighter slot is abandoned when it enters a section or overruns a claim band. The corpus's one tightening move (riboseq_inter_row_corridor's rnaseq) is grounded, so the not-grounded abandon arm is never taken. Defensive against a bundle whose inner slot is blocked by a section or reservation.",
@@ -1159,16 +1135,16 @@
   "note": "The True branch (missing entry-port offset -> ok=False) is unreachable because phase 7 (_compute_entry_port_offsets) runs before this function (phase 7a) and assigns an offset for every (entry_port_id, line_id) pair in the graph. By the time _align_junction_to_entry_port runs, ctx.offsets is populated for all entry ports, so the guard never fires. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
   "status": "defensive"
  },
- "offsets.py::if _bundle_reslot_collides(ctx, port_id, port_obj.section_id, inherited):::#1": {
+ "offsets.py::if held_lean > 0 and moved_lean < 0:::#1": {
+  "note": "Clean-part arm of _bundle_reslot_inverts_split: two lines leave a walked station for different heights and the re-slot keeps their order. Layout seats an in-section split (a bypass bow, a fork) from the pre-reslot lane order, so in the corpus every parting pair the phase 7f re-deal reaches is one it flips (descent_entry_inner_bypass), and same_destination_vertical_convergence's moved lines end where they enter. A witness needs a pair that parts without being re-dealt against each other, e.g. three re-dealt descents of which one keeps its relative slot and parts. Exercised synthetically by tests/test_descent_corridor_entry_order.py, which re-deals the held lanes; needs-review because an in-corpus witness is authorable, not because the arm is unreachable.",
+  "status": "needs-review"
+ },
+ "offsets.py::if _bundle_reslot_collides(ctx, port_id, inherited, walk):::#1": {
   "note": "The level-convergence inherit is refused when carrying the feeders' order along the bundle would seat a bundle line on the slot a section-local line already holds. No fixture in the sweep corpus (examples plus the top-level tests/fixtures) presents that collision; tests/fixtures/hash_seed_determinism/seed_77.mmd does, but the sweep does not descend into the nested seed directories, so closing the arm needs a corpus topology of its own.",
   "status": "needs-review"
  },
  "offsets.py::if _exchange_pair_at(ctx, station_id, first, second):::#1": {
   "note": "Extends the frontier only where the exchange actually applied. the exit_lane_settlement_without_crossings variant described on the `if was_arriving is None or was_holder is None` entry takes the True arm. The False arm needs _exchange_pair_at to decline, i.e. a station that carries both lines, since the check above passed, yet has no stored offset for one of them. Whether ctx.offsets can be that sparse at such a station is the same open question the `if arriving is None or holding is None` entry records; I could not settle it either way.",
-  "status": "needs-review"
- },
- "offsets.py::if _offsets_exchanged(::#1": {
-  "note": "Whether the propagated swap really exchanged the pair's slots at this exit port. Both arms are un-exercised because the guard above always continues today. the exit_lane_settlement_without_crossings variant described on the `if was_arriving is None or was_holder is None` entry reaches this gate and takes its True arm. The False arm needs an exit port the swap left alone: a section with a second exit port carrying the pair, or a port where the two lines already held equal offsets, neither of which that variant produces.",
   "status": "needs-review"
  },
  "offsets.py::if abs(exit_st.y - j_st.y) <= _SAME_Y_TOLERANCE:::#1": {
@@ -1179,7 +1155,7 @@
   "note": "In the exit-only-line reorder / same-Y offset propagation; reachable only via a multi-line LR/RL section with a perpendicular (TOP/BOTTOM) exit port, which the engine lays out as a station-as-elbow + collinear overlay PhaseInvariantError (#706). Exercise with a clean fixture once #706 is fixed.",
   "status": "needs-review"
  },
- "offsets.py::if any(::#4": {
+ "offsets.py::if any(::#5": {
   "note": "This post-acceptance marker-cache guard rejects a continuing cohort whose inherited offsets are not one contiguous step sequence. _linear_entry_frame only accepts and materializes contiguous inherited levels, so authored topology cannot reach this reject arm. It protects corrupted or hand-built state.",
   "status": "defensive"
  },
@@ -1303,23 +1279,15 @@
   "note": "A registered LEFT entry port always has an owning section with a grid column after placement. The missing-target-column return protects a malformed or partially laid-out graph.",
   "status": "defensive"
  },
- "perp.py::if entry_port is None or not entry_port.is_entry:::#1": {
-  "note": "_aligned_horizontal_drop_entry only fires for a TOP/BOTTOM exit on a horizontal-flow section (the rest of _perp_riser_lateral's callers are caught earlier).  The return-None arm is taken when such an exit feeds a junction or several targets rather than one entry port; corpus instrumentation across every examples/ fixture finds no horizontal-flow perp exit feeding a non-single-entry, so the arm is never taken and the riser falls back to the perp reflection.",
-  "status": "defensive"
- },
  "perp.py::if needs_perp_approach_fan(graph, entry_port.id):::#1": {
   "note": "_aligned_horizontal_drop_entry exempts a distinct-line approach fan, whose intra drop fans onto per-line channels (_perp_approach_fan_x) rather than the entry's single per-line offset.  Reaching it needs a horizontal-flow perp exit dropping straight into a single approach-fan entry; corpus instrumentation finds none, so the arm is never taken and the riser keeps the perp reflection.",
-  "status": "defensive"
- },
- "perp.py::if not feeders:::#1": {
-  "note": "No-feeder guard in _perp_entry_crossing_x: the helper is called only from _route_perp_entry when a multi-line bundle shares the port with a per-line stagger, and a TOP/BOTTOM entry port in that case is always reached by a bundled inter-section feeder (dy!=0, so compute_bundle_info indexes it).  The empty-feeders return-None arm is a contract guard, never taken across the corpus.",
   "status": "defensive"
  },
  "planning.py::if not pending_plan_ids and member_geometry.settled_exit_turns:::#1": {
   "note": "Boundary settlement is adopted only after every pending exit-turn plan has resolved. A settled cohort with pending owners would mix planning generations and is defensively withheld.",
   "status": "defensive"
  },
- "planning.py::if station_offsets is not None:::#2": {
+ "planning.py::if station_offsets is not None:::#1": {
   "note": "Production observed routing supplies a mutable station-offset map before replaying settled turns. The null arm supports the offsetless observation probe and requires no cache refresh.",
   "status": "defensive"
  },
@@ -1377,6 +1345,10 @@
  },
  "postprocess.py::if ox is None:::#1": {
   "note": "Null guard in _align_uncentered_siblings. The loop iterates visible non-port stations and original_x is built from every non-port station, so ox is always present; the guard never fires.",
+  "status": "defensive"
+ },
+ "postprocess.py::if len(members) >= 2:::#1": {
+  "note": "The co-row spread skips a group with fewer than two diagonal routes left to spread. Every member of a planned group is drawn by a diagonal handler on the shared window, which has a non-zero run, so a group always reaches the spread whole; the skip is a defensive guard.",
   "status": "defensive"
  },
  "rail.py::if conn is not None:::#1": {
@@ -1487,10 +1459,6 @@
   "note": "Guard in _is_flat_handover_hub: the hub's originating lines must run flat, so a consumer off the hub's trunk row (a peel-off, drawing a real turn) is refused. The corpus's one relaxed section hands over on a level row, so the off-row refusal stays un-exercised. Defensive.",
   "status": "defensive"
  },
- "normalize.py::if not is_side_entry_port(ctx.graph, port_id):::#1": {
-  "note": "A peel-off tail whose merge-resolved terminal port is not a LEFT/RIGHT entry is skipped in _align_merge_fed_confluence_to_band. Every corpus peel-off tail resolves to a side entry port, so the reject arm has no fixture; it needs a tail whose merge chain ends at a top/bottom or exit port.",
-  "status": "needs-review"
- },
  "normalize.py::if trunk_ys[-1] - trunk_ys[0] <= COORD_TOLERANCE:::#1": {
   "note": "Equal-depth guard on a merge-fed confluence: every corpus confluence rides its shared band at distinct depths, so the same-Y reject arm has no fixture.",
   "status": "needs-review"
@@ -1510,6 +1478,94 @@
  "normalize.py::if blocked or settled:::#1": {
   "note": "A merge-fed confluence is re-seated only when a free leg is off its band-earned slot and unblocked. The move arm (rather than this skip) is reachable and is reached by test_merge_confluence_band_order_1835's inlined riboseq annotation/riboseq bundle into orf_calling, where _restack_channel fires and resolves the crossing. That map is excluded from the corpus fixture roots because it trips an unrelated symmetric-diamond centreline abort under validate=True (#1836), so no corpus fixture exercises this arm yet; committing that map as a real topology fixture is blocked on #1836.",
   "status": "needs-review"
+ },
+ "convergences.py::if axis is None or plan.primary_trunk_member_id is None:::#1": {
+  "note": "`_convergence_corridor_target`'s fail-closed guard on the production path through `convergence_corridor_requests`. It only receives plans already filtered to `owns_geometry and trunk_axis is not None`, so `axis` is never None and such a plan always names a `primary_trunk_member_id`; the None-return arm is unreachable for a valid convergence.",
+  "status": "defensive"
+ },
+ "convergences.py::if axis.axis is DemandAxis.X:::#2": {
+  "note": "`_convergence_corridor_region`: the true arm names a row-boundary (horizontal-trunk) corridor; the corpus only exercises the column-boundary else arm, so no swept fixture takes it. A TB/row-boundary convergence trunk would. Reachable, awaiting such a fixture.",
+  "status": "needs-review"
+ },
+ "convergences.py::if edge is None:::#1": {
+  "note": "`_convergence_corridor_target`: a trunk member's ownership edge is always a live key in `ctx.edge_by_key`, so the missing-edge return is unreachable for a valid plan.",
+  "status": "defensive"
+ },
+ "convergences.py::if exposed is None:::#1": {
+  "note": "`convergence_corridor_requests` raises when `_convergence_corridor_target` returns None, but every eligible plan (`owns_geometry and trunk_axis`) yields a complete trunk identity, so the raise is a fail-closed guard no valid topology reaches.",
+  "status": "defensive"
+ },
+ "convergences.py::if len(set(owner_ids)) != len(owner_ids):::#1": {
+  "note": "`convergence_corridor_requests`: each eligible plan contributes one unique `str(plan.id)` owner, so the duplicate-owner raise is a fail-closed guard no valid topology reaches.",
+  "status": "defensive"
+ },
+ "convergences.py::if minimum_coordinate is not None:::#1": {
+  "note": "`_convergence_corridor_preference`: the true arm fires only for a corridor band bounded below (finite `band.lo`). Every corridor band the corpus produces is unbounded below, so no swept fixture takes it; a fixture with a bounded-below trunk band would. Reachable, awaiting such a fixture.",
+  "status": "needs-review"
+ },
+ "convergences.py::if named != _convergence_recipe_role_ids(plan, variable_id):::#1": {
+  "note": "`_validate_convergence_recipe_completeness`'s fail-closed completeness oracle, reached through `convergence_corridor_requests`. A planned convergence's recipe always names exactly its enumerated role ids, so the incomplete-recipe raise is unreachable for a valid plan.",
+  "status": "defensive"
+ },
+ "convergences.py::if not _points_coincide(points[-1], run[0]):::#1": {
+  "note": "The trunk-skeleton polyline closure guard, reached through `convergence_corridor_requests`. Consecutive trunk runs are constructed to share endpoints, so the non-closing raise is a fail-closed guard no valid topology reaches.",
+  "status": "defensive"
+ },
+ "convergences.py::if ownership is None:::#1": {
+  "note": "`_convergence_corridor_target`: a planned convergence's `endpoint_ownership` always contains its `primary_trunk_member_id`, so the None-return arm is unreachable for a valid plan.",
+  "status": "defensive"
+ },
+ "member_geometry.py::if id(route) in candidate_route_ids:::#1": {
+  "note": "Skipping a convergence-context route that is also a mutable member candidate while collecting the corridor-cohort context candidates. The collect arm runs on every aperture observation that carries a planned convergence leg (22 corpus fixtures, e.g. examples/genomic_pipeline.mmd). The skip arm cannot fire: build_member_geometry_execution builds each context route fresh from _route_template for a PLANNED convergence edge and moves on before that edge can become a candidate, so no context route object is ever in candidate_route_ids.",
+  "status": "defensive"
+ },
+ "member_geometry.py::if family is None or resolved not in scaffold.member_id_by_edge:::#1": {
+  "note": "Dropping a convergence-context route with no route family or no scaffold member id. The keep arm runs on the 22 corpus fixtures whose aperture observation carries a planned convergence leg (e.g. examples/genomic_pipeline.mmd). The drop arm cannot fire: _convergence_context_route returns no route for an edge without a family, and every context route comes from a scaffold edge, which the scaffold assigns a member id.",
+  "status": "defensive"
+ },
+ "member_geometry.py::if corridor_cohorts is not None and requirements:::#1": {
+  "note": "The corridor-cohort outcome validator's plan-and-requirement exclusion. Its pass arm runs on every aperture observation (381 corpus fixtures). The raise arm is a wiring-regression guard: _compile_corridor_cohorts returns either a compiled plan with no requirement or, when the compile fails, no plan and the aperture requirements that failure resolves, so no graph publishes both.",
+  "status": "defensive"
+ },
+ "member_geometry.py::if requirement.kind is not aperture:::#1": {
+  "note": "The corridor-cohort outcome validator's requirement-kind check. Its pass arm runs whenever a compile publishes an aperture requirement, which no corpus input does; tests/test_corridor_cohort_tail_compile.py and tests/test_member_geometry.py drive it on examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd under a directed separation its column-2 corridor cannot afford (tests/packed_cell_aperture.py), which publishes one aperture requirement at column boundary 2. The raise arm is a wiring-regression guard: every requirement the compile publishes is built by _corridor_cohort_aperture_requirements, which constructs only CORRIDOR_COHORT_APERTURE requirements.",
+  "status": "defensive"
+ },
+ "member_geometry.py::if both_sides:::#1": {
+  "note": "The corridor-cohort outcome validator's disjoint-sides check. Its pass arm runs whenever a compile publishes an aperture requirement, which no corpus input does; tests/test_corridor_cohort_tail_compile.py and tests/test_member_geometry.py drive it on examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd under a directed separation its column-2 corridor cannot afford (tests/packed_cell_aperture.py), which publishes one aperture requirement at column boundary 2. The raise arm cannot fire: the requirement's region is an adjacent grid boundary (the producer rejects any other), and _corridor_boundary_sections puts a section on the negative side only when it ends at the lower index and on the positive side only when it starts at the next one, which no section of positive span does at once.",
+  "status": "defensive"
+ },
+ "member_geometry.py::for requirement in requirements:::#1": {
+  "note": "The corridor-cohort outcome validator's loop over the requirements a compile publishes. Its empty arm runs on every aperture observation. Reached only when a corridor-cohort compile that may publish clearance requirements fails with a typed clearance shortfall. No corpus input presents one: every lane pair the render draws a clearance apart compiles in its drawn order, and a one-option-at-a-time plus random option sweep of every examples/ and tests/fixtures input (29,309 renders) compiles every aperture observation PLANNED. tests/test_corridor_cohort_tail_compile.py and tests/test_member_geometry.py drive it on examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd under a directed separation its column-2 corridor cannot afford (tests/packed_cell_aperture.py), which publishes one aperture requirement at column boundary 2.",
+  "status": "needs-review"
+ },
+ "member_geometry.py::for failure in error.failures:::#1": {
+  "note": "_corridor_cohort_aperture_requirements' loop over a failed compile's components. Reached only when a corridor-cohort compile that may publish clearance requirements fails with a typed clearance shortfall. No corpus input presents one: every lane pair the render draws a clearance apart compiles in its drawn order, and a one-option-at-a-time plus random option sweep of every examples/ and tests/fixtures input (29,309 renders) compiles every aperture observation PLANNED. tests/test_corridor_cohort_tail_compile.py and tests/test_member_geometry.py drive it on examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd under a directed separation its column-2 corridor cannot afford (tests/packed_cell_aperture.py), which publishes one aperture requirement at column boundary 2.",
+  "status": "needs-review"
+ },
+ "member_geometry.py::for claim in claims:::#1": {
+  "note": "_corridor_cohort_aperture_requirements collecting the sections a shortfall's claims sit in. Reached only when a corridor-cohort compile that may publish clearance requirements fails with a typed clearance shortfall. No corpus input presents one: every lane pair the render draws a clearance apart compiles in its drawn order, and a one-option-at-a-time plus random option sweep of every examples/ and tests/fixtures input (29,309 renders) compiles every aperture observation PLANNED. tests/test_corridor_cohort_tail_compile.py and tests/test_member_geometry.py drive it on examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd under a directed separation its column-2 corridor cannot afford (tests/packed_cell_aperture.py), which publishes one aperture requirement at column boundary 2.",
+  "status": "needs-review"
+ },
+ "member_geometry.py::for obstacle in typed_obstacles.values():::#1": {
+  "note": "_corridor_cohort_aperture_requirements collecting the sections a shortfall's blockers sit in. Reached only when a corridor-cohort compile that may publish clearance requirements fails with a typed clearance shortfall. No corpus input presents one: every lane pair the render draws a clearance apart compiles in its drawn order, and a one-option-at-a-time plus random option sweep of every examples/ and tests/fixtures input (29,309 renders) compiles every aperture observation PLANNED. tests/test_corridor_cohort_tail_compile.py and tests/test_member_geometry.py drive it on examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd under a directed separation its column-2 corridor cannot afford (tests/packed_cell_aperture.py), which publishes one aperture requirement at column boundary 2.",
+  "status": "needs-review"
+ },
+ "member_geometry.py::for station_id in (edge_key[0], edge_key[1]):::#1": {
+  "note": "_local_section_ids, called only by _corridor_cohort_aperture_requirements. Reached only when a corridor-cohort compile that may publish clearance requirements fails with a typed clearance shortfall. No corpus input presents one: every lane pair the render draws a clearance apart compiles in its drawn order, and a one-option-at-a-time plus random option sweep of every examples/ and tests/fixtures input (29,309 renders) compiles every aperture observation PLANNED. tests/test_corridor_cohort_tail_compile.py and tests/test_member_geometry.py drive it on examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd under a directed separation its column-2 corridor cannot afford (tests/packed_cell_aperture.py), which publishes one aperture requirement at column boundary 2.",
+  "status": "needs-review"
+ },
+ "member_geometry.py::if station is not None and station.section_id is not None:::#1": {
+  "note": "_local_section_ids skipping a junction endpoint, called only by _corridor_cohort_aperture_requirements. Reached only when a corridor-cohort compile that may publish clearance requirements fails with a typed clearance shortfall. No corpus input presents one: every lane pair the render draws a clearance apart compiles in its drawn order, and a one-option-at-a-time plus random option sweep of every examples/ and tests/fixtures input (29,309 renders) compiles every aperture observation PLANNED. tests/test_corridor_cohort_tail_compile.py and tests/test_member_geometry.py drive it on examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd under a directed separation its column-2 corridor cannot afford (tests/packed_cell_aperture.py), which publishes one aperture requirement at column boundary 2.",
+  "status": "needs-review"
+ },
+ "offsets.py::if group.get(edge.line_id, corridor) != corridor:::#1": {
+  "note": "The flow-start side-entry descent phase skips a port where one line arrives down two different descent corridors from the same side: the line holds one lane at the port, which cannot nest inside both turn-ins. Reachable in principle (two authored networks of one line descending into one flow-start side entry from sources at different reach), but no corpus fixture presents it.",
+  "status": "needs-review"
+ },
+ "offsets.py::if port is None:::#1": {
+  "note": "Every caller (the U-turn classifiers in offsets.py and row_align.py) passes the station of an entry port it took from a port edge, so graph.ports always resolves it. Not reached by the corpus, the test fixtures, or 8000 generated maps.",
+  "status": "defensive"
  },
  "convergences.py::if movable and abs(channel.x - reference) > COORD_TOLERANCE:::#1": {
   "note": "The seat arm fuses a feeder's final port approach onto the merge trunk's target flank before the landing states the feeder's opening column. tests/fixtures/hash_seed_determinism/seed_15.mmd reaches it (__junction_27->__merge_11 climbs into s8__entry_right_17 16px beside the trunk's flank at x=780), but the sweep's corpus roots do not include tests/fixtures/hash_seed_determinism, and seed_15 aborts on unrelated guards, so no swept fixture evaluates it.",
@@ -1578,10 +1634,6 @@
  "offsets.py::if flow_entry and feeder.direction != section.direction:::#1": {
   "note": "A flow-side entry whose single feeder section flows the other way declines the linear entry frame. A generated-map sweep reaches it (5 of 8000 maps), but no committed map: needs a fixture with an RL feeder into an LR section's flow-side entry (or the mirror).",
   "status": "needs-review"
- },
- "offsets.py::if port is None:::#1": {
-  "note": "Every caller (the U-turn classifiers in offsets.py and row_align.py) passes the station of an entry port it took from a port edge, so graph.ports always resolves it. Not reached by the corpus, the test fixtures, or 8000 generated maps.",
-  "status": "defensive"
  },
  "offsets.py::landing is None::#1": {
   "note": "compute_station_offsets gives every line at every port an offset before linear entry frames are materialised, so the straight branch's landing port always holds one for the line. Not reached by the corpus, the test fixtures, or 8000 generated maps.",
@@ -1655,40 +1707,12 @@
   "note": "A perpendicular entry whose drop goes straight to another port rather than into a station. Not reached by the corpus, the test fixtures, or any of 8000 generated maps: the connector rewrite lands every entry port's out-edges on stations of its section.",
   "status": "candidate-dead"
  },
- "tb_handlers.py::_clears(route, footprints)::#1": {
-  "note": "Operand of the late single-diagonal attempt in _clear_lane_change. It is evaluated only when that diagonal crosses no departing line twice, and of the 210 generated maps that reach the attempt none does (the plain lane change already failed for the same departures): not reached by the corpus, the test fixtures, or 8000 generated maps.",
-  "status": "candidate-dead"
- },
- "tb_handlers.py::elif not (plain_holds and _clears(points, footprints)):::#1": {
-  "note": "A flow-side lane change that crosses a passed station or a departing line twice looks for a cleared route. Reached by the inline maps `tests/test_flow_entry_bypass_crossings.py` (_LATER_DEPARTURES) and `tests/test_vertical_flow_entry_runway.py` (_BYPASS_MAPS bypass_into_shared_column_bt); a generated-map sweep reaches it (229 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
-  "status": "needs-review"
- },
  "tb_handlers.py::elif not plain_holds:::#1": {
   "note": "With no cleared route, a plain change that only strikes a station is drawn; one that crosses a departing line twice is declined. Reached by `tests/test_flow_entry_bypass_crossings.py` (_LATER_DEPARTURES); a generated-map sweep reaches it (150 of 8000 maps) / A generated-map sweep reaches it (3 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
   "status": "needs-review"
  },
  "tb_handlers.py::elif not plain_holds:::#2": {
   "note": "A multi-line flow-side bundle whose change would cross a departing line twice is declined to the perpendicular turn-in. A generated-map sweep reaches it (40 of 8000 maps), but no committed map: needs a fixture with a two-line BOTTOM entry bypass and a later same-side departure.",
-  "status": "needs-review"
- },
- "tb_handlers.py::for corner in (y0, y1):::#1": {
-  "note": "Candidate side lanes are derived per footprint corner. Reached by `tests/test_flow_entry_bypass_crossings.py` (_LATER_DEPARTURES) and `tests/test_vertical_flow_entry_runway.py` (_BYPASS_MAPS bypass_into_shared_column_bt); a generated-map sweep reaches it (206 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
-  "status": "needs-review"
- },
- "tb_handlers.py::for edge in (x0 - gap, x1 + gap):::#1": {
-  "note": "Candidate side lanes are derived on both sides of each footprint. Reached by `tests/test_flow_entry_bypass_crossings.py` (_LATER_DEPARTURES) and `tests/test_vertical_flow_entry_runway.py` (_BYPASS_MAPS bypass_into_shared_column_bt); a generated-map sweep reaches it (206 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
-  "status": "needs-review"
- },
- "tb_handlers.py::for x0, y0, x1, y1 in footprints:::#1": {
-  "note": "Candidate side lanes are collected over the passed stations' footprints. Reached by `tests/test_flow_entry_bypass_crossings.py` (_LATER_DEPARTURES) and `tests/test_vertical_flow_entry_runway.py` (_BYPASS_MAPS bypass_into_shared_column_bt); a generated-map sweep reaches it (206 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
-  "status": "needs-review"
- },
- "tb_handlers.py::if 0.0 < t < 1.0:::#1": {
-  "note": "A footprint corner within the step off the port's lane adds the lane that clears it. Reached by `tests/test_flow_entry_bypass_crossings.py` (_LATER_DEPARTURES) and `tests/test_vertical_flow_entry_runway.py` (_BYPASS_MAPS bypass_into_shared_column_bt); a generated-map sweep reaches it (206 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
-  "status": "needs-review"
- },
- "tb_handlers.py::if _clears(route, footprints):::#1": {
-  "note": "A stepped-aside candidate lane is kept only if the whole route clears the footprints. Reached by `tests/test_vertical_flow_entry_runway.py` (_BYPASS_MAPS bypass_into_shared_column_bt); a generated-map sweep reaches it (62 of 8000 maps) / A generated-map sweep reaches it (54 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
   "status": "needs-review"
  },
  "tb_handlers.py::if _crossed_twice(departures, abs(early[0] - sp), src_lane, lane):::#1": {
@@ -1745,6 +1769,594 @@
  },
  "tb_handlers.py::if via.is_port or via.section_id != section.id:::#1": {
   "note": "A line enters a section once, through the bypass's own source port, which the previous gate already filters, and a chain link into an internal station starts inside the section; so the skip arm never fires. The pass arm is reached by `tests/test_flow_entry_bypass_crossings.py` (_SAME_LINE_CHAIN, _SINGLE_BYPASS, _TWO_COLUMN_CHAIN); the skip arm by no swept, test or generated map (0 of 8000).",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if (self.anchor_role_id is None) == (self.anchor_coordinate is None):::#1": {
+  "note": "Constructor invariant of the directed runway: it is anchored to a controlled role or to a fixed coordinate, never both and never neither. The one production constructor (add_runway in convergences.py) always passes anchor_coordinate and no anchor_role_id, so the raise arm stays un-exercised.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if section is None or section.grid_col < 0 or section.grid_row < 0:::#1": {
+  "note": "Destination-carrier test returns False for a port whose section is missing or unplaced. Every entry port names a section in graph.sections and layout places every section on the grid before routing, so the guard never fires.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if content_id != reservation.id or len(set(reservation.claimant_member_ids)) != len(::#1": {
+  "note": "Reservation integrity check: a reservation id is the content hash of its own fields and its claimant list is built from distinct members, so a mismatching id or a duplicate claimant cannot occur for a reservation the route plan minted.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if len(candidates) != 1:::#1": {
+  "note": "A claimant resolves through exactly one emission binding because the route plan binds each emission member once. The None arm rejects a claimant with zero or several bindings, which the plan never produces.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::while member_id not in seen:::#1": {
+  "note": "The covering-member walk ends at an emitted binding or at a binding with no carrier. Coverage is one hop from a merge-skipped member to its emitted merge trunk, so the chain is acyclic and the cycle-exit arm cannot run.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if len(candidates) != 1:::#2": {
+  "note": "A member on the covering walk has exactly one binding because the route plan binds each emission member once; the None arm is the zero-or-many rejection.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if binding.covering_member_id is None:::#1": {
+  "note": "A non-emitted binding without a carrier is an UNROUTED member. The plan builder gives a member that kind only together with a recorded diagnostic for an inconsistent observation (no final route, several final routes, or no resolved carrier), and no corpus fixture produces one for an endpoint member.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if any(::#1": {
+  "note": "An endpoint cohort is marked ambiguous when one of its members has no emitted path rank. Every endpoint member is emitted or covered by an emitted trunk, so each has a rank, and the arm is reached only through the unrouted-binding cases guarded in this function.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if len(set(first_path_rank_by_line.values())) != len(first_path_rank_by_line):::#1": {
+  "note": "Two lines of one entry port would share a first emitted path rank, which marks the cohort ambiguous. Path ranks index the final route list, so a tie needs one emitted route covering entry hops of two different lines (a merge trunk shared across lines). No corpus fixture builds such a cover and the planner's cross-line coverage is unconfirmed, so the arm is parked for review. needs-review because the arm is reachable and no corpus fixture takes it.",
+  "status": "needs-review"
+ },
+ "corridor_cohort_integration.py::if len(target_keys) != len(set(target_keys)):::#1": {
+  "note": "Footprint population check: targets are published one per (member, edge) identity, so a duplicated identity cannot occur.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if key in variables_by_segment:::#1": {
+  "note": "Each route segment has at most one scalar owner: member carriers are keyed by segment and each convergence trunk request names its own segment, so two owners of one segment cannot be built.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if variable.axis not in (0, 1) or not isfinite(variable.coordinate):::#1": {
+  "note": "Non-finite or off-axis scalar variable guard. Production scalar variables carry finite geometry read from routed points, so the raise arm is reached only by a directly constructed non-finite variable. Exercised by tests/test_convergence_corridor_grants.py::test_nonfinite_scalar_coordinate_fails_closed. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohort_integration.py::if (::#2": {
+  "note": "Partial affine control guard: both endpoints of a controlled segment must name the same variable and offset. The recipe builder registers the two endpoints of a lateral segment together, so a segment with a single controlled endpoint is never described.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if coordinate_control is None:::#1": {
+  "note": "Narrowing guard after the partial-control check. Reaching it requires some explicit control to be present while the first one is None, but the preceding raise already rejects any mix of present and absent controls, so this arm is unreachable.",
+  "status": "candidate-dead"
+ },
+ "corridor_cohort_integration.py::if endpoint_variable is not None and endpoint_variable.axis != 1 - axis:::#1": {
+  "note": "Endpoint controller axis check: a scalar that controls a segment end moves the coordinate perpendicular to the segment, which is how the recipe builder declares every dependant (control_axis is the lateral axis). A same-axis controller is never declared.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if coordinate_variable is not None and coordinate_variable.axis != axis:::#1": {
+  "note": "Segment coordinate variable axis check: a coordinate variable is attached to the segment it was built from and takes that segment's axis, so the mismatch raise cannot fire.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if (self.variable_id is None) == (self.coordinate is None):::#1": {
+  "note": "Constructor invariant of a footprint term: exactly one of variable or fixed coordinate. The two production constructors each pass exactly one.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if (::#3": {
+  "note": "Stale-snapshot detector in _bind_claim: the ledger claim is minted from the same plan and route set the targets are published from, so identity, geometry plan, family and connector ids always agree. The raise is tolerated for incomplete reservations by _bind_ledger and fatal for complete ones.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::abs(start[axis] - end[axis]) > COORD_TOLERANCE::#1": {
+  "note": "Stale-snapshot detector: a bound segment is orthogonal because the claim was minted from a segment of that orientation and no earlier pass reorients it.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::or direction is not claim.direction::#1": {
+  "note": "Stale-snapshot detector: the bound segment runs in the direction the claim recorded, since the claim was minted from that very segment.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if landing_axis != longitudinal_axis:::#1": {
+  "note": "Landing frame axis check: the endpoint lead's axis is derived from the port side and is perpendicular to the claim's run by construction of the destination claim.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if segment_direction(start, (prospective_end[0], prospective_end[1])) is not (::#1": {
+  "note": "Landing reversal check: the landing slot lies beyond the run's start in the claim's direction because slots come from the port frame the run is routed toward.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if longitudinal_end - longitudinal_start <= COORD_TOLERANCE:::#1": {
+  "note": "Claims are minted only for segments with positive length and landings only shorten them to the port slot beyond the start, so a non-positive span cannot occur.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if any(len(items) != 1 for items in by_key.values()):::#1": {
+  "note": "Bound population check: targets are unique per (member, edge) identity, so ambiguous route bindings cannot occur.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if claim.edge_key is None or claim.family_id is None:::#1": {
+  "note": "A claim lacks an edge key or family only when its member is absent from the plan, which belongs to an incomplete reservation. Reservations are minted from plan members, so every claim names a plan member.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if len(matches) != 1:::#1": {
+  "note": "A claim matches exactly one target because targets are unique per (member, edge) and the claim's edge key comes from the same member. The no-match arm belongs to incomplete reservations, which the route plan does not mint.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if claim.reservation_complete:::#1": {
+  "note": "Reached only after a claim fails to match one target (the gate above), which the plan's own member-keyed targets exclude.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if claim.reservation_complete:::#2": {
+  "note": "Reached only after _bind_claim raises (its stale-snapshot guards), which cannot occur because claims and targets derive from one snapshot.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if recipe is None:::#1": {
+  "note": "Control-recipe validation exit for a scalar request without a recipe. The only production constructor of CorridorScalarRequest (convergence_corridor_requests) always passes a recipe, so a recipe-less request is never validated.",
+  "status": "candidate-dead"
+ },
+ "corridor_cohort_integration.py::if (::#5": {
+  "note": "Control source check: the recipe's owner and source coordinate are copied from the request's own variable by the convergence recipe builder, so the two always agree.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if (::#6": {
+  "note": "Controlled and fixed points must sit on the target route at the declared coordinate, with unique roles. The recipe builder reads each point from the routed geometry, so the raise arm is reached only by a hand-built recipe with a point off its target. Exercised by tests/test_convergence_corridor_grants.py::test_recipe_fails_closed_on_a_fixed_point_off_its_target. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohort_integration.py::if (::#7": {
+  "note": "Directed runway validity: the recipe builder registers the controlled role first and passes a valid axis, sign and non-negative finite minimum distance, so the raise arm cannot fire.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if any(::#2": {
+  "note": "Directly movable claims on one segment come from the one routed segment, so they share axis, coordinate and geometry plan; the conflicting-claims raise cannot fire.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if len(variable_ids) != len(set(variable_ids)):::#1": {
+  "note": "Scalar population check: member carrier ids embed (member, edge, segment) and request variable ids are unique per convergence plan, so duplicate variable ids cannot occur.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if (::#8": {
+  "note": "Scalar request validity: the convergence request builder sets the domain's member id to the variable id and derives a finite preference and finite bounds from routed geometry.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if controller_carrier is None:::#1": {
+  "note": "Every scalar variable that controls a lead endpoint is a member carrier built in the same pass, so its carrier lookup cannot miss.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if controller.axis != 1 - lead.axis:::#1": {
+  "note": "A lead's endpoint controller is perpendicular to the lead by the dependant recipe, so the mixed-axes raise cannot fire.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::elif isclose(::#1": {
+  "note": "The controller's coordinate equals one end of the lead it controls, because the lead's endpoint is the controlled point. The lost-owner raise guards that equality.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if fixed_endpoint > controller.coordinate:::#2": {
+  "note": "Order orientation: the arm places the controller above the lead's fixed endpoint and the candidate carrier below it. The corpus orients every footprint order the other way. Exercised by tests/test_corridor_cohort_main_layouts.py::test_compile_seats_every_component. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohort_integration.py::if (::#10": {
+  "note": "Contact between a movable carrier and a fixed witness on the same segment. The carrier's own witness has a coordinate variable and is excluded from the fixed set, and a segment has one witness, so no fixed witness can share a carrier's edge, segment and axis unless a second member reuses the same (source, target, line) edge key; the contact structure is built by no corpus render.",
+  "status": "candidate-dead"
+ },
+ "corridor_cohort_integration.py::if carrier.axis != 1:::#1": {
+  "note": "A vertical scalar carrier is skipped when collecting neighbour runs for forbidden intervals; the arm needs a trunk whose carrier runs perpendicular to rows, which only a trunk drawn onto an entry port yields. Exercised by tests/test_convergence_corridor_grants.py::test_trunk_on_an_entry_port_cannot_be_drawn_off_it and tests/test_corridor_cohort_tail_compile.py::test_endpoint_section_lead_is_not_filed_in_a_neighbouring_gap. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohort_integration.py::if trunk_run is None or trunk is None or trunk_run.axis != 1:::#1": {
+  "note": "A scalar trunk without a horizontal carrier or without its published target is skipped when forming footprint bundles; the arm needs a vertical carrier, which only a trunk drawn onto an entry port yields. Exercised by tests/test_convergence_corridor_grants.py::test_trunk_on_an_entry_port_cannot_be_drawn_off_it and tests/test_corridor_cohort_tail_compile.py::test_endpoint_section_lead_is_not_filed_in_a_neighbouring_gap. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohort_integration.py::if any(::#3": {
+  "note": "Bundle placement declines when a second distinct-line neighbour already sits closer than one pitch to the slot the trunk would take beside its nearest neighbour. The corpus bundles a trunk only with neighbours whose slots are clear, so the topology wanted is a trunk co-travelling with two other lines on one side at less than one offset step apart. needs-review because the arm is reachable and no corpus fixture takes it.",
+  "status": "needs-review"
+ },
+ "corridor_cohort_integration.py::if len(lanes) > 1:::#1": {
+  "note": "A relation component whose participants sit in two (region, orientation) buckets is rejected. Typed relations are built within one bucket, so the raise arm is reached only by a relation spanning two buckets. Exercised by tests/test_corridor_cohort_integration.py::test_relation_spanning_two_orientation_buckets_fails_closed. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohort_integration.py::if len(axes) > 1:::#1": {
+  "note": "Mixed-axes component check: scalar variables and claims united in one component share the orientation bucket just validated, and orientation fixes the axis.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if (::#16": {
+  "note": "Landing frame requires a mutable target with a port lane axis and coordinate and a two-point lead. Every endpoint target is published with its port frame, so the raise cannot fire.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if (::#17": {
+  "note": "Landing lead shape: the last segment of an endpoint route runs perpendicular to the port lane axis and has positive length, because it is the lead into the port.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if landing_coordinate is None or not isfinite(landing_coordinate):::#1": {
+  "note": "The landing coordinate is the target's port-slot coordinate or an overlay slot, both finite by construction of the port frame.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::and claim.endpoint_network_rank is not None::#1": {
+  "note": "Skips a claim with a cohort id but no network rank. A rank is missing only for a cohort marked ambiguous at ledger build, which needs the unrouted-binding or shared-carrier cases guarded in build_corridor_cohort_ledger.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if cohort_id in ledger.ambiguous_endpoint_cohort_ids:::#1": {
+  "note": "Skips cohorts the ledger marked ambiguous. A member joins one cohort because its target port yields one endpoint group, and the path-rank ambiguity cases are guarded in build_corridor_cohort_ledger, so the set is empty.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if len(member_ranks) != 1 or len(candidates) != 1:::#1": {
+  "note": "An eligible member has exactly one network rank in its cohort and exactly one target, because ranks are assigned per member and targets are unique per member.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if (::#18": {
+  "note": "Every target of an eligible endpoint member is published with a finite port lane axis and coordinate, so the incomplete-frame arm cannot be taken.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if not complete:::#1": {
+  "note": "Raise for an incomplete eligible frame, reached only through the two guards above.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if len(axes) != 1:::#1": {
+  "note": "Members of one cohort share one entry port and therefore one port axis, so the mixed-axes raise cannot fire.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if follower.claim_id in terminal_fixed:::#1": {
+  "note": "Equality promotion skips a follower already fixed as terminal. Only reservations that are not complete leave a FIXED, non-terminal claim to promote, which no pipeline render produces; a hand-built incomplete ledger reaches it. Exercised by tests/test_corridor_cohort_integration.py::test_incomplete_component_stands_as_typed_compatibility. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohort_integration.py::if follower.ledger.network_id is None:::#1": {
+  "note": "Equality promotion skips a follower with no network id, which needs a FIXED non-terminal claim of an incomplete reservation whose member lacks a single network. Reservations are minted from plan members that carry one, so the arm is not taken.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if any(::#4": {
+  "note": "Equality promotion fixpoint over FIXED non-terminal claims, which exist only for incomplete reservations. A hand-built incomplete ledger drives it; no pipeline render produces one. Exercised by tests/test_corridor_cohort_integration.py::test_incomplete_component_stands_as_typed_compatibility. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohort_integration.py::elif maximum_deficit is not None and (::#1": {
+  "note": "A forbidden interval overshoots the scalar domain's upper bound by less than it undershoots the lower bound, so it is recorded as a maximum-side boundary obstacle. The corpus's intervals all miss the upper bound, so the topology wanted is a convergence trunk bounded above with a distinct-line run just beyond that bound. needs-review because the arm is reachable and no corpus fixture takes it.",
+  "status": "needs-review"
+ },
+ "corridor_cohort_integration.py::if len(matches) != 1:::#2": {
+  "note": "Exactly one footprint witness belongs to each scalar variable because witnesses are built one per route segment and a scalar variable owns one segment.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::for contact in footprint_model.contacts:::#1": {
+  "note": "Footprint contacts are produced only from a fixed witness sharing a carrier's segment (see the contact gate in the footprint-order builder), which no render builds, so the contact list is empty and the loop body is unreachable.",
+  "status": "candidate-dead"
+ },
+ "corridor_cohort_integration.py::if len(fixed_witnesses) != 1:::#1": {
+  "note": "Inside the contact loop, which no render enters because the contact list is always empty.",
+  "status": "candidate-dead"
+ },
+ "corridor_cohort_integration.py::if witness.coordinate_variable_id == bundle.variable_id:::#1": {
+  "note": "A bundle anchored on a run of the scalar it holds is rejected. Bundles anchor on member runs or fixed neighbour runs in every render, so the raise arm is reached only with a hand-built bundle. Exercised by tests/test_convergence_corridor_grants.py::test_a_bundle_anchored_on_its_own_trunk_fails_closed. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohort_integration.py::elif order.lower.variable_id is None and order.upper.variable_id is None:::#1": {
+  "note": "Order between two fixed terms. The production order builders always put at least one variable term in an order (_FootprintOrder is built from a controller or a carrier variable), so a fixed-fixed order exists only when constructed directly. Exercised by tests/test_corridor_cohort_integration.py::test_problem_rejects_an_infeasible_fixed_fixed_footprint_order.",
+  "status": "candidate-dead"
+ },
+ "corridor_cohort_integration.py::if order.lower.coordinate + order.distance > order.upper.coordinate:::#1": {
+  "note": "Feasibility test for a fixed-fixed footprint order, reachable only when such an order is constructed directly (see the gate above). Exercised by tests/test_corridor_cohort_integration.py::test_problem_rejects_an_infeasible_fixed_fixed_footprint_order.",
+  "status": "candidate-dead"
+ },
+ "corridor_cohort_integration.py::and claim.endpoint_network_rank is not None::#2": {
+  "note": "Cohort completeness counts a claim with a cohort id and a network rank. A claim lacks a rank only in a cohort marked ambiguous, which the ledger builder's guards exclude.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::and claim.member_id in ledger.eligible_member_ids::#1": {
+  "note": "Cohort completeness filters a claim to eligible members. Every claim of a complete reservation names an eligible member by definition of eligibility.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if len(allocated) != len(set(allocated)) or set(allocated) != expected:::#1": {
+  "note": "Post-solve proof that allocations are unique and cover exactly the movable claims and scalar variables. The solver emits one allocation per lane, so the check holds by construction.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if abs(::#1": {
+  "note": "Post-solve proof that opposite-direction overlapping lanes are separated by their required clearance. The solver seats every lane pair at or beyond its clearance, so the check holds by construction.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if status is CorridorAllocationStatus.PLANNED and not (::#1": {
+  "note": "Downgrades a PLANNED result to FAILURE when the post-solve proof fails. The proof holds for every solver output, so the downgrade is never taken.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::elif status is CorridorAllocationStatus.COMPATIBILITY:::#1": {
+  "note": "A FAILURE result flows through the status chain to the compile error; the compiler aborts a render rather than publishing a failure, so the corpus cannot hold one. Exercised by tests/test_corridor_cohort_integration.py::test_shortfall_without_a_directed_shift_sign_raises and tests/test_corridor_cohort_integration.py::test_unwitnessed_blocking_obstacle_raises_instead_of_losing_its_shortfall. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohort_integration.py::if target is None or not target.mutable:::#1": {
+  "note": "Patch preparation: every changed route belongs to a mutable target, since allocations are minted only for mutable targets.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::target.member_geometry_plan_id != change.member_geometry_plan_id::#1": {
+  "note": "Patch preparation: an allocation's geometry plan matches its target's, because both come from the same compile snapshot.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::or target.family_id is not change.family_id::#1": {
+  "note": "Patch preparation: an allocation's family matches its target's, because both come from the same compile snapshot.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::or target.connector_ids != change.connector_ids::#1": {
+  "note": "Patch preparation: an allocation's connector ids match its target's, because both come from the same compile snapshot.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::or change.segment_rank + 1 >= len(route.points)::#1": {
+  "note": "Patch preparation: an allocation's segment lies inside its route, because the claim was bound from that segment.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if abs(start[change.axis] - end[change.axis]) > COORD_TOLERANCE:::#1": {
+  "note": "Patch preparation: an allocated segment is orthogonal on its change axis, as it was when the claim was bound.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if segment_key in coordinates and not isclose(::#1": {
+  "note": "Patch preparation: two allocations on one segment agree on its coordinate because they come from one solve.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if segment_key in coordinates and not isclose(::#2": {
+  "note": "Patch preparation: an allocation and a landing on one segment agree on its coordinate because the landing slot is solved with the allocation.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if abs(start[axis] - end[axis]) > COORD_TOLERANCE:::#1": {
+  "note": "Patch preparation: a coordinate change applies to an orthogonal segment, as validated when the claim was bound.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::for patch in patches:::#1": {
+  "note": "Applying route patches is performed only by publish_corridor_cohort_plan, which has no engine caller, so both arms run only under the unit test that publishes a plan. Exercised by tests/test_corridor_cohort_integration.py::test_fixed_endpoint_landing_is_planned_clear_of_an_unclaimed_fixed_lead. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohort_integration.py::if target is None:::#1": {
+  "note": "Finalizing allocation geometry: every allocation's target exists in the compile snapshot.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if points is None or allocation.segment_rank + 1 >= len(points):::#1": {
+  "note": "Finalizing allocation geometry: a patched route exists for every allocation and holds its segment.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if not (::#3": {
+  "note": "Finalizing allocation geometry: a patched segment realizes the allocated coordinate on both ends, since patch preparation set it there.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if shortfall is None:::#1": {
+  "note": "A FAILURE result without a clearance shortfall passes through the failure recorder, and one with a shortfall is validated. A corpus render cannot reach it because a failing compile aborts. Exercised by tests/test_corridor_cohort_integration.py::test_shortfall_without_a_directed_shift_sign_raises and tests/test_corridor_cohort_integration.py::test_unwitnessed_blocking_obstacle_raises_instead_of_losing_its_shortfall. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohort_integration.py::if shortfall.required_shift_sign not in (-1, 1):::#1": {
+  "note": "A clearance shortfall must name a directed boundary side. The solver always sets a sign of plus or minus one when it reports a shortfall, so the raise is reached only by a hand-built result. Exercised by tests/test_corridor_cohort_integration.py::test_shortfall_without_a_directed_shift_sign_raises and tests/test_corridor_cohort_integration.py::test_unwitnessed_blocking_obstacle_raises_instead_of_losing_its_shortfall. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohort_integration.py::if missing:::#1": {
+  "note": "A clearance shortfall must name only obstacles with recorded provenance. Solver obstacle ids all derive from witnessed obstacles, so the raise is reached only by a hand-built result. Exercised by tests/test_corridor_cohort_integration.py::test_unwitnessed_blocking_obstacle_raises_instead_of_losing_its_shortfall and tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohort_integration.py::if component.status is not CorridorAllocationStatus.FAILURE:::#1": {
+  "note": "Failure recording visits only FAILURE components. A failing component aborts the render, so the recorder runs only under unit tests that compile an infeasible problem. Exercised by tests/test_corridor_cohort_integration.py::test_shortfall_without_a_directed_shift_sign_raises and tests/test_corridor_cohort_integration.py::test_unwitnessed_blocking_obstacle_raises_instead_of_losing_its_shortfall. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohort_integration.py::for result_rank, result in enumerate(component.results):::#1": {
+  "note": "Failure recording iterates the results of a FAILURE component, reached only when a compile fails. Exercised by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohort_integration.py::result.status is not CorridorAllocationStatus.FAILURE::#1": {
+  "note": "A FAILURE component holding a non-failing result beside the failing one, so the recorder skips the non-failing result. It needs a component solved as several problems where one seats and another cannot, which no test or fixture builds. needs-review because the arm is reachable and no corpus fixture takes it.",
+  "status": "needs-review"
+ },
+ "corridor_cohort_integration.py::or result.reason is None::#1": {
+  "note": "A FAILURE result always carries a reason because the solver builds failures through _failure with a reason, so the reasonless skip is not taken.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if not component_failures:::#1": {
+  "note": "Adds an INVALID failure record for a FAILURE component whose results record no reason, which the solver's failure construction rules out.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if failures:::#1": {
+  "note": "A compile with recorded failures raises the cohort allocation failure. The corpus holds no failing compile, so the raise runs only under unit tests with infeasible problems. Exercised by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohort_integration.py::if len(granted_ids) != len(scalar_grants) or ungranted:::#1": {
+  "note": "Scalar publication proof: every request is granted exactly once or belongs to a compatibility component, which the allocator guarantees.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if patches is None:::#1": {
+  "note": "Patch preparation returns None only through its own stale-snapshot guards, which cannot fire (see _prepare_patches).",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if finalized_allocations is None:::#1": {
+  "note": "Finalized geometry returns None only through its own realization guards, which cannot fire (see _finalize_allocation_geometry).",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if trace is not None:::#1": {
+  "note": "The final-solve settlement trace is recorded only when the caller passes a settlement trace, which the engine does for a plan-observed render. The sweep's observation probes do not carry one into this call. Exercised by tests/test_corridor_cohort_integration.py::test_final_solve_trace_is_emitted_from_the_integration_call_site. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if _q(equality.delta) == 0:::#1": {
+  "note": "Only a zero-delta equality makes two lanes one for the corner-order yield; a non-zero delta (a scalar held off its bundle's run) never shares a problem with corner orders in the swept corpus. Exercised by tests/test_corridor_cohorts.py::test_lanes_an_offset_equality_ties_do_not_stand_as_one_for_the_yield. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::while frontier - reached:::#1": {
+  "note": "The yield walks the corner orders above a directed separation's upper lane, so it runs only when one problem holds corner orders and a footprint order together. No render in the sweep's roots builds one; tests/fixtures/regressions/cohort_corner_turn_order.mmd does, outside them. Exercised by tests/test_corridor_cohorts.py::test_corner_orders_seat_over_the_footprint_order_they_contradict and tests/test_corridor_cohorts.py::test_a_footprint_order_a_chain_of_corner_orders_contradicts_gives_way. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if invalid is not None:::#1": {
+  "note": "Rejects an invalid problem holding corner orders before any seating; the compile draws both lanes of every corner order from the problem's own movable claims, so only a hand-built malformed problem reaches the arm. Exercised by tests/test_corridor_cohorts.py::test_guard_a_corner_order_naming_no_lane_is_invalid. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if result.status is not CorridorAllocationStatus.FAILURE:::#1": {
+  "note": "The corner tier fails to seat, so the solve retries without the footprint orders the failure blocks and then gives way. No render in the sweep's roots fails it. Corpus renders outside the sweep's roots do (fuzz f8400939 under y_spacing 25, section_x_gap 20 and compact_offsets retries and seats; realistic f8401251 and f8404122, and fuzz f8401312 under its o2 options, give way), but none can join the swept fixtures: f8400939 fails a validate-time invariant, f8401251 and f8404122 would grow the shadow ratchet, and f8401312's ordinary render aborts. Exercised by tests/test_corridor_cohorts.py::test_corner_orders_blocked_by_a_footprint_order_seat_without_it and tests/test_corridor_cohorts.py::test_guard_corner_orders_that_cannot_seat_return_the_plain_result. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::result.status is not CorridorAllocationStatus.FAILURE::#1": {
+  "note": "The first-frame solve reports FAILURE, so the shortfall and retry checks run. Every corpus first-frame solve plans or reports compatibility, so the arm needs a component that cannot seat. Exercised by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if result.reason is CorridorAllocationFailureReason.INVALID:::#1": {
+  "note": "The first seating's INVALID failure is returned as the plain problem's, held by no tier: it names lanes no semantic key separates, which the plain problem rejects alike, so it is not solved again. No render in the sweep's roots builds such lanes. Exercised by tests/test_corridor_cohorts.py::test_guard_an_invalid_cornered_problem_returns_without_giving_way. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if len(relaxed) < len(kept):::#1": {
+  "note": "After a failed corner tier the retry runs only when the failure blocks both lanes of a footprint order; otherwise the solve gives way at once. No render in the sweep's roots fails a corner tier. Corpus renders outside the sweep's roots do (fuzz f8400939 under y_spacing 25, section_x_gap 20 and compact_offsets retries and seats; realistic f8401251 and f8404122, and fuzz f8401312 under its o2 options, give way), but none can join the swept fixtures: f8400939 fails a validate-time invariant, f8401251 and f8404122 would grow the shadow ratchet, and f8401312's ordinary render aborts. Exercised by tests/test_corridor_cohorts.py::test_corner_orders_blocked_by_a_footprint_order_seat_without_it and tests/test_corridor_cohorts.py::test_guard_corner_orders_that_cannot_seat_return_the_plain_result[no-footprint-order-to-drop]. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if retried.status is CorridorAllocationStatus.PLANNED:::#1": {
+  "note": "The retry without the blocking footprint orders seats and is returned, or fails and the solve gives way. No render in the sweep's roots reaches the retry. Corpus renders outside the sweep's roots do (fuzz f8400939 under y_spacing 25, section_x_gap 20 and compact_offsets retries and seats; realistic f8401251 and f8404122, and fuzz f8401312 under its o2 options, give way), but none can join the swept fixtures: f8400939 fails a validate-time invariant, f8401251 and f8404122 would grow the shadow ratchet, and f8401312's ordinary render aborts. Exercised by tests/test_corridor_cohorts.py::test_corner_orders_blocked_by_a_footprint_order_seat_without_it and tests/test_corridor_cohorts.py::test_guard_corner_orders_that_cannot_seat_return_the_plain_result[relaxed-orders-fail]. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if (::#1": {
+  "note": "Rejects a malformed problem (empty semantic rank, duplicate or unknown ids, non-finite numbers). The engine builds well-formed problems, so the INVALID arm is reached only by hand-built problems. Exercised by tests/test_corridor_cohorts.py::test_empty_lane_or_obstacle_semantic_rank_is_invalid and tests/test_corridor_cohorts.py::test_one_cohort_cannot_span_distinct_endpoint_owners. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if after not in successors[before]:::#1": {
+  "note": "De-duplication of order edges. The edges are keys of a dict, so each (before, after) pair is unique and the membership test is always true.",
+  "status": "candidate-dead"
+ },
+ "corridor_cohorts.py::if len(ordered) == len(roots):::#1": {
+  "note": "Root ordering cycle, the case where a topological order cannot cover every root. Directed separations that contradict each other are the only source, and the corpus has none. Exercised by tests/test_corridor_cohorts.py::test_contradicting_directed_separations_fail_closed_whatever_gives_way and tests/test_corridor_cohorts.py::test_directed_separation_cycle_fails_with_owner_provenance. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::while pending:::#2": {
+  "note": "Cycle search ends without finding a cycle through the start root: an unresolved root that sits downstream of a cycle but not on it. It needs directed separations forming a cycle plus a tail root, which the unit cycle tests omit. needs-review because the arm is reachable and no corpus fixture takes it.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if current == start:::#1": {
+  "note": "Cycle search returns when a path comes back to its start; reached only when directed separations cycle. Exercised by tests/test_corridor_cohorts.py::test_contradicting_directed_separations_fail_closed_whatever_gives_way and tests/test_corridor_cohorts.py::test_directed_separation_cycle_fails_with_owner_provenance. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if current in visited or current not in unresolved:::#1": {
+  "note": "Cycle search skips a node already visited, which needs two distinct paths to one node (a diamond) inside a cycle of directed separations. A resolved node cannot be a successor of an unresolved one, so the other operand never fires. needs-review because the arm is reachable and no corpus fixture takes it.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if existing is not None and existing != order:::#1": {
+  "note": "Two seatings of one root pair that disagree on order mark the pair conflicting. Corpus seatings are consistent per pair. Exercised by tests/test_corridor_cohorts.py::test_a_pair_seated_clear_on_both_sides_is_left_to_semantic_rank. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::or result.clearance_shortfall is not None::#1": {
+  "note": "After a failed first-frame solve, a clearance shortfall is returned for an aperture to relieve and a shortfall-free failure is retried in the opposite frame. Both outcomes need a failed first-frame solve, which the corpus never produces. Exercised by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if reversed_result.status is CorridorAllocationStatus.PLANNED:::#1": {
+  "note": "After the opposite-frame retry, a PLANNED retry is returned and a failing retry yields the first frame's failure. Both need a failed first-frame solve, which the corpus never produces. Exercised by tests/test_corridor_cohorts.py::test_a_failure_no_order_can_seat_reports_the_fullest_orders and tests/test_corridor_cohorts.py::test_contradicting_directed_separations_fail_closed_whatever_gives_way. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if invalid is not None:::#2": {
+  "note": "Rejects an invalid problem before solving; reached only by hand-built malformed problems. Exercised by tests/test_corridor_cohorts.py::test_empty_lane_or_obstacle_semantic_rank_is_invalid and tests/test_corridor_cohorts.py::test_one_cohort_cannot_span_distinct_endpoint_owners. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if not problem.lanes:::#1": {
+  "note": "A problem with no lanes plans trivially. Components are formed around at least one movable claim or scalar variable, so an empty-lane problem is never compiled.",
+  "status": "defensive"
+ },
+ "corridor_cohorts.py::if not union_find.union(anchor, member, delta):::#1": {
+  "note": "Cohort members are united with their cohort anchor at their own boundary offsets, and each member joins once; distinct cohorts have disjoint members, so the union cannot contradict.",
+  "status": "defensive"
+ },
+ "corridor_cohorts.py::if not union_find.union(left, right, sign * _q(equality.delta)):::#1": {
+  "note": "Equalities that contradict the weighted union-find yield a CONTRADICTION failure; the engine's equalities are consistent, so only hand-built equalities reach it. Exercised by tests/test_corridor_cohorts.py::test_contradictory_equalities_are_attributed_without_mutating_input. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if len(fixed_coordinates) != 1:::#1": {
+  "note": "A rigid root pinned by fixed equalities to two obstacles at different coordinates is infeasible. It needs a movable lane tied to two fixed lanes that sit at different coordinates, which no corpus topology and no test builds. needs-review because the arm is reachable and no corpus fixture takes it.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::deficit is None::#1": {
+  "note": "Shortfall computation returns None for an absent deficit. Every caller passes a strictly positive Fraction (floor minus ceiling, or floor minus latest, or the minimum of positive deficits), so the absent-deficit arm is unreachable. The positive-deficit arm is driven by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once.",
+  "status": "candidate-dead"
+ },
+ "corridor_cohorts.py::or deficit <= 0::#1": {
+  "note": "Shortfall computation returns None for a non-positive deficit. Every caller passes a strictly positive deficit (see the absent-deficit gate), so the arm is unreachable. Exercised by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once.",
+  "status": "candidate-dead"
+ },
+ "corridor_cohorts.py::or not boundary_obstacle_ids::#1": {
+  "note": "A conflict with no boundary obstacle carries no shortfall; reached by domain conflicts between non-boundary obstacles. Exercised by tests/test_corridor_cohorts.py::test_a_failure_no_order_can_seat_reports_the_fullest_orders and tests/test_corridor_cohorts.py::test_non_boundary_domain_conflict_has_no_clearance_shortfall. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::or len(signs) != 1::#1": {
+  "note": "A conflict whose boundary obstacles point to different shift signs carries no shortfall; reached by overlapping boundary obstacles of opposite sign. Exercised by tests/test_corridor_cohorts.py::test_a_failure_no_order_can_seat_reports_the_fullest_orders and tests/test_corridor_cohorts.py::test_coordinate_domains_constrain_the_joint_solve_and_attribute_conflicts. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if conflicting_domain_roots:::#1": {
+  "note": "Domain floor above ceiling on a root is an INFEASIBLE failure; the corpus's domains are satisfiable. Exercised by tests/test_corridor_cohorts.py::test_coordinate_domains_constrain_the_joint_solve_and_attribute_conflicts and tests/test_corridor_cohorts.py::test_non_boundary_domain_conflict_has_no_clearance_shortfall. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if lower_root == upper_root:::#1": {
+  "note": "A directed separation between two lanes already rigidly united into one root. It needs a footprint order between a lead and a carrier tied together by an equality (one network lane), which no corpus topology builds. needs-review because the arm is reachable and no corpus fixture takes it.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if raw_delta < required:::#1": {
+  "note": "The same-root directed separation check (see the gate above): feasible or not, it needs a footprint order between two rigidly tied lanes. needs-review because the arm is reachable and no corpus fixture takes it.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if abs(::#1": {
+  "note": "Overlapping lanes of one rigid root closer than the required clearance. It needs two lanes tied by an equality at a delta below clearance (an endpoint cohort whose offsets undercut it), which no corpus topology or test builds. needs-review because the arm is reachable and no corpus fixture takes it.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::elif root_key[left_root] == root_key[right_root]:::#1": {
+  "note": "Two distinct roots with identical semantic ordering keys cannot be ordered and fail INVALID. Whether the plan can mint two overlapping movable roots with tied semantic rank and tied seating is unconfirmed; no test or fixture builds it. needs-review because the arm is reachable and no corpus fixture takes it.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if floor is not None and ceiling is not None and floor > ceiling:::#1": {
+  "note": "A root whose floor exceeds its ceiling raises while choosing a coordinate; the corpus's bounds are satisfiable for every root. Exercised by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::elif before_feasible:::#1": {
+  "note": "A forbidden interval whose before side lies below the root's floor skips to the after-side test; it needs a floor-bounded root beside a forbidden interval, which only failing or retried solves build. Exercised by tests/test_corridor_cohorts.py::test_infeasible_forbidden_interval_reports_its_named_obstacle and tests/test_member_geometry.py::test_seed_77_shortfall_requests_one_atomic_corridor_aperture. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if after_feasible:::#1": {
+  "note": "A forbidden interval whose after side is infeasible and whose before side is infeasible too, so the squeeze deficit is computed and the root fails. It needs a root bounded on both sides with a distinct-line run spanning the whole window, which no test or fixture builds. needs-review because the arm is reachable and no corpus fixture takes it.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if cyclic_roots:::#1": {
+  "note": "A cyclic set of root orders is an INFEASIBLE failure; the corpus's orders are acyclic. Exercised by tests/test_corridor_cohorts.py::test_contradicting_directed_separations_fail_closed_whatever_gives_way and tests/test_corridor_cohorts.py::test_directed_separation_cycle_fails_with_owner_provenance. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if floor is not None and floor > latest[root]:::#1": {
+  "note": "A predecessor's separation lifts a root's floor above the latest ceiling-derived coordinate. It needs a bounded root behind a separated predecessor in a tight window, which no test or fixture builds. needs-review because the arm is reachable and no corpus fixture takes it.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::for pair_orders in (::#1": {
+  "note": "The pair-order passes finish without a PLANNED seating and return the first failure; reached only when no order seats the component. Exercised by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if pair_orders == previous_orders:::#1": {
+  "note": "A pass whose pair orders equal the previous pass is skipped; reached when seated orders and end-turn orders coincide. Exercised by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if not forced_order:::#1": {
+  "note": "A pass with no forced root order (cyclic separations) is skipped; reached only when the orders cycle. Exercised by tests/test_corridor_cohorts.py::test_contradicting_directed_separations_fail_closed_whatever_gives_way and tests/test_corridor_cohorts.py::test_directed_separation_cycle_fails_with_owner_provenance. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if result.status is CorridorAllocationStatus.PLANNED:::#1": {
+  "note": "A pass whose seating is not PLANNED records its failure and tries the next order set; reached only when a seating fails. Exercised by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohort_integration.py::if (::#22": {
+  "note": "Patch preparation: a landing matches its target's geometry plan, connectors, last segment, axis and finite slot, all taken from the same compile snapshot.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if (::#23": {
+  "note": "Patch preparation: a landing's last segment is orthogonal to the port axis and non-degenerate, as when the landing was planned.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if failed:::#1": {
+  "note": "Accepted-plan validation raise for a duplicate owner identity, a duplicate segment claim, or a plan_id that does not match the content. The builder digests the content it builds, and no corpus plan names an owner or claims a segment twice, so none fires. Reached only by a hand-built or altered plan; tests/test_corridor_cohort_acceptance.py::test_accepted_plan_constructor_fails_closed drives each check.",
+  "status": "defensive"
+ },
+ "planning.py::if (::#2": {
+  "note": "Compile guard: only the aperture observation compiles, and the plan it is seated against is the ledger the last settlement consumed, which holds no accepted plan. The raise is reached only by seating a pass against a plan that carries one; tests/test_corridor_cohort_acceptance.py::test_an_observation_holding_an_accepted_plan_may_not_compile drives it.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if self.recipe is not None and self.recipe.owner_id != self.owner_id:::#1": {
+  "note": "Owner-frame recipe check. The builder takes a grant's owner and recipe from the same request, so they always agree. Reached only by a hand-built frame; tests/test_corridor_cohort_acceptance.py::test_accepted_plan_constructor_fails_closed drives it.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if not all(isfinite(item) for item in coordinates):::#1": {
+  "note": "Owner-frame finiteness raise. Accepted coordinates and longitudinal extents come from the solver and patch preparation, and a grant's source is its recipe's or variable's coordinate, all required to be finite. An endpoint landing's source coordinate is a raw route point the solver never sees; it is finite because the ledger claim it derives from must be (RouteReservationClaim rejects a non-finite allocation coordinate). A frame the builder produces therefore always passes; the raise is reached only by a hand-built frame, and tests/test_corridor_cohort_acceptance.py::test_accepted_plan_constructor_fails_closed drives it.",
+  "status": "defensive"
+ },
+ "corridor_cohort_integration.py::if abs(gap) <= COORD_TOLERANCE:::#1": {
+  "note": "Two lanes whose neighbouring claims turn together within a pixel of each other have no side to keep across the corner, so they give no corner order. Same-line pairs never reach it (their zero pair clearance skips them first), and no swept render draws two lines' turning claims on one track. Exercised by tests/test_corridor_cohort_integration.py::test_guard_corner_orders_bind_only_lanes_turning_together_uncrossed[neighbours-tie]. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "normalize.py::if not movable or not anchors:::#1": {
+  "note": "_renest_residual_fused_clusters skips a fused cluster with no movable lane or no immovable anchor. No corpus map reaches this arm: tests/fixtures/curve_invariant_repros/riboseq_band_hop_zero_length_seam.mmd, the map that exercises the band-hop seam, aborts at validate_member_geometry_emission before it, because bypass nesting lifts a leg its member geometry plan owns. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "common.py::if trunk_ys[-1] - trunk_ys[0] <= COORD_TOLERANCE:::#1": {
+  "note": "iter_port_peeloff_bundles skips a peel-off group whose tails share one trunk depth. No corpus map reaches this arm: tests/fixtures/curve_invariant_repros/riboseq_band_hop_zero_length_seam.mmd, the map that exercises the band-hop seam, aborts at validate_member_geometry_emission before it, because bypass nesting lifts a leg its member geometry plan owns. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "member_geometry.py::if _resizes_an_immutable_radius(changed, mutable_route_ids):::#1": {
+  "note": "Corner sizing of a corridor-cohort patch declines when a corner rule, re-run at the patched points, would change the radius of an immutable convergence-context route sharing a cohort with a moved corner: the plan may not re-size a route it does not own, so it leaves every corner unsized rather than raising (a raise in the compile aborts the render). No swept corpus reaches it. An immutable route whose concentric inputs change but whose radius does not is skipped without declining (the 8,000-map corpus reaches that).",
+  "status": "needs-review"
+ },
+ "normalize.py::if ctx is None or not ctx.station_offsets:::#1": {
+  "note": "_band_port_constraints reads entry-port lane orders from the routing context's station offsets. Every trunk-slot pass and the trunk-band guard route with a context that carries compute_station_offsets' non-empty map, so the bail-out arm serves only callers without a context (the unit tests' free-order baseline).",
   "status": "defensive"
  }
 }

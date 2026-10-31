@@ -68,6 +68,10 @@ history.
   feeders arriving along two different corridors, now gives each line the
   channel that matches its lane in the section, so the lines no longer cross
   or overlap inside the port's own turn.
+- Lines from different stations on one row (one column in a top-to-bottom or
+  bottom-to-top section) that turn into the same station or exit port now
+  turn together on one diagonal. A line bypassing a station could turn first,
+  cross the line it was travelling with, and be crossed back.
 
 ## [2.1.0] — 2026-09-15
 

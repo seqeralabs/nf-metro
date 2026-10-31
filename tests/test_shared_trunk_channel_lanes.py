@@ -23,7 +23,12 @@ from types import SimpleNamespace
 import pytest
 
 from nf_metro.api import prepare_graph, resolve_theme
-from nf_metro.layout.constants import COORD_TOLERANCE, CURVE_RADIUS, OFFSET_STEP
+from nf_metro.layout.constants import (
+    COORD_TOLERANCE,
+    CURVE_RADIUS,
+    OFFSET_STEP,
+    graph_offset_step,
+)
 from nf_metro.layout.geometry import cotravelling_lane_clearance
 from nf_metro.layout.route_plan import (
     ConvergenceContinuation,
@@ -198,6 +203,44 @@ def test_a_trunk_returning_to_an_entry_port_joins_the_member_run_already_there()
     assert shared, "the fixture no longer routes a member through the trunk's corridor"
     for coordinate, _lo, _hi in shared:
         assert coordinate == pytest.approx(axis.coordinate)
+
+
+def test_a_trunk_packs_onto_a_distinct_line_run_at_the_graphs_own_pitch() -> None:
+    """A narrowed stroke nests a bundle's lanes closer, and packing follows it.
+
+    At ``stroke_scale: 0.5`` genomeassembly's ``assemblies`` trunk shares its
+    corridor and carriers with the frozen ``hic_reads`` member, so the two are
+    lanes of one bundle held the graph's own step apart.
+    """
+    path = ROOT / "examples" / "genomeassembly.mmd"
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        graph = prepare_graph(
+            path.read_text(),
+            source_dir=str(path.parent),
+            layout_options={"stroke_scale": 0.5},
+        )
+        plan = build_observed_render_plan(graph, resolve_theme(None, graph)).route_plan
+    assert plan is not None
+    step = graph_offset_step(graph)
+    assert step != OFFSET_STEP
+    trunk = next(
+        item.trunk_axis
+        for item in plan.convergence_plans
+        if item.line_ids == ("assemblies",)
+        and item.trunk_axis is not None
+        and "scaffolding__entry_left_5" in item.target_entry_port_ids
+    )
+    (member_run,) = (
+        run
+        for member in plan.member_geometry_plans
+        if member.edge.line_id == "hic_reads"
+        and member.edge.target == "scaffolding__entry_left_5"
+        for run in zip(member.points[1:-2], member.points[2:-1], strict=True)
+        if run[0][1] == run[1][1]
+    )
+
+    assert member_run[0][1] - trunk.coordinate == pytest.approx(step)
 
 
 def _planned_plan(

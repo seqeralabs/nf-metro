@@ -2,7 +2,7 @@
 
 Example `.mmd` files demonstrating a range of pipeline topologies and the layout patterns they produce. Each example exercises different aspects of the auto-layout engine.
 
-This directory holds 307 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
+This directory holds 312 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
 
 To render one example:
 
@@ -51,6 +51,7 @@ The fixtures below are tagged with the layout class(es) they primarily exercise.
 | `exit_run_three_drop_columns.mmd`            | three lines off one exit junction turning down through three different handlers / one shared fan corner column, lanes ordered by destination row so a returning and a continuing trunk nest in the inter-row band (issue #1594)       |
 | `leftward_up_exit_turn_order.mmd`            | two lines on one leftward exit run turn upward without transposing their source-lane order, including a repeated same-line arrival from another section                                                                               |
 | `terminated_exit_lane_compaction.mmd`        | three active lines close the lane slot left by a fourth line that terminates before their shared exit                                                                                                                                 |
+| `entry_cohort_interleaved_fixed_lane.mmd`    | a fixed member landing in the port slot between two movable lanes of one LEFT entry cohort, where one movable lane is pinned onto its own line's fixed lane                                                                           |
 | `bottom_exit_stacked_right_entry_fan.mmd`    | bottom-exit bundle opening into stacked right-entry targets / planned landing order and exact offset slots                                                                                                                            |
 | `bottom_entry_fan_side_targets.mmd`          | two-line bundle at a BOTTOM perpendicular entry fanning out to side-entry targets; the entry port mirrors its trunk so the drop turns in without crossing or an S-cusp on the box edge (#1991, #1995)                                 |
 | `fan_branch_additional_outputs.mmd`          | six-way diamond whose branches also emit reporting outputs / complete branch membership beyond the join                                                                                                                               |
@@ -58,6 +59,8 @@ The fixtures below are tagged with the layout class(es) they primarily exercise.
 | `seed72_cross_family_fan.mmd`                | fan whose branches use different routing families / structural ownership separated from dedicated route emission                                                                                                                      |
 | `recompacted_fanout_exit.mmd`                | three-line fan-out with exit-port and junction offsets recompacted into one contiguous 4 px frame                                                                                                                                     |
 | `same_destination_short_overlap.mmd`         | same-direction H-V-H feeders whose final vertical overlap is shorter than two curve radii and must be left in place                                                                                                                   |
+| `descent_entry_inner_bypass.mmd`             | two descents into a reversed section's side entry, one bowing under a station the other stops at; the bowing line keeps the lower lane so it never crosses back (issue #2095)                                                         |
+| `return_trunk_over_member_run.mmd`           | a convergence trunk and a same-system member run both landing on a corridor floor; the member steps a lane down so the trunk keeps the floor on the side its feeders cross least (issue #2095)                                        |
 | `same_destination_vertical_convergence.mmd`  | the reproducer published in #1764; multi-row same-direction convergence onto one side-entry port, adjacent final approaches, and the #1746 settlement of an approach bundle across a planned exempt multi-row riser                   |
 | `interchange_lane_reorder.mmd`               | auto-interchange / interleaving-lane reorder (issue #779)                                                                                                                                                                             |
 | `mismatched_tracks.mmd`                      | per-line track mismatch between sections                                                                                                                                                                                              |
@@ -69,6 +72,7 @@ The fixtures below are tagged with the layout class(es) they primarily exercise.
 | `tb_off_track_output_row.mmd`                | `direction: TB` trunk feeding off-track outputs; each output hangs off its producer via an S (flow-axis lead, diagonal, flat tail) on the non-label side, not perpendicular or in a neighbour's label lane (issue #1384)              |
 | `upward_bypass.mmd`                          | tall section bypass (upward gap)                                                                                                                                                                                                      |
 | `bypass_label_rake.mmd`                      | bypass V climbs clear of a wide bypassed-station label                                                                                                                                                                                |
+| `co_row_feeders_shared_diagonal.mmd`         | bypass-helper feeder and a same-row feeder of one exit port climb on one shared diagonal, so neither crosses the other twice (issue #1792)                                                                                            |
 | `rnaseq_lite.mmd`                            | realistic pipeline / TB+LR mix / diamond                                                                                                                                                                                              |
 | `variant_calling.mmd`                        | realistic pipeline / asymmetric fork-join / 4-way fan-in                                                                                                                                                                              |
 | `funcprofiler_upstream.mmd`                  | dense fan-out + fan-in / known almost-horizontal defect                                                                                                                                                                               |
@@ -337,7 +341,7 @@ A single-row long-read variant-calling map. The annotation section carries only 
 
 ## Regression Catalogue
 
-The 210 fixtures below are targeted regression guards: each was added to pin a
+The 228 fixtures below are targeted regression guards: each was added to pin a
 specific routing or layout fix and is not individually gallery-illustrated.
 They participate in the full topology validation suite (`pytest
 tests/test_topology_validation.py`) alongside the illustrated fixtures
@@ -631,15 +635,16 @@ python scripts/list_topology_fixtures.py
 
 ### Inter-row corridors and drop channels
 
-| Fixture                                     | What it tests                                                                                              |
-| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `inter_row_drop_section_clearance.mmd`      | An inter-row drop channel squeezed between packed sections above and below, centred in the gap it has      |
-| `inter_row_drop_section_clearance_row1.mmd` | The same drop where the row-1 sections hug the channel instead                                             |
-| `inter_row_exempt_band_order.mmd`           | An inter-row trunk band whose members are all exempt - reordering it removes crossings                     |
-| `opposing_bypass_corridor.mmd`              | Two bypass corridors running in opposite directions through the same inter-row gap, separated by direction |
-| `opposing_return_row_pair.mmd`              | A pair of opposed return-row routes out of one collecting section                                          |
-| `straight_drop_below.mmd`                   | A straight drop into the section directly below, with a LEFT-exit departure at the port seam               |
-| `peeloff_straight_drop_near_wall.mmd`       | A peel-off dropping straight into a section below, close to the section wall (#1521)                       |
+| Fixture                                            | What it tests                                                                                                                                                        |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `inter_row_drop_section_clearance.mmd`             | An inter-row drop channel squeezed between packed sections above and below, centred in the gap it has                                                                |
+| `inter_row_drop_section_clearance_row1.mmd`        | The same drop where the row-1 sections hug the channel instead                                                                                                       |
+| `inter_row_exempt_band_order.mmd`                  | An inter-row trunk band whose members are all exempt - reordering it removes crossings                                                                               |
+| `opposing_bypass_corridor.mmd`                     | Two bypass corridors running in opposite directions through the same inter-row gap, separated by direction                                                           |
+| `opposing_return_row_pair.mmd`                     | A pair of opposed return-row routes out of one collecting section                                                                                                    |
+| `straight_drop_below.mmd`                          | A straight drop into the section directly below, with a LEFT-exit departure at the port seam                                                                         |
+| `peeloff_straight_drop_near_wall.mmd`              | A peel-off dropping straight into a section below, close to the section wall (#1521)                                                                                 |
+| `member_channel_runway_candidate_outside_band.mmd` | A member bundle's vertical channel seated inside its reserved column band, where some corner-runway candidates for the channel fall outside the band and are refused |
 
 ### Orientation and seam-rotation orbits
 

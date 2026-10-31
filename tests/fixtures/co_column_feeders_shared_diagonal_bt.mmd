@@ -1,0 +1,25 @@
+%%metro title: Co-column feeders sharing one diagonal
+%%metro line: l0 | Red | #e6194b
+%%metro line: l1 | Green | #3cb44b
+%%metro line: l2 | Blue | #4363d8
+
+graph LR
+    subgraph sec0 [Bam]
+        %%metro direction: BT
+        s0n0[polish]
+        s0n1[sort]
+        s0n2[call]
+        s0n3[report]
+        s0n1 -->|l1| s0n3
+        s0n0 -->|l2| s0n1
+        s0n1 -->|l2| s0n2
+        s0n2 -->|l2| s0n3
+    end
+    subgraph sec2 [Trim]
+        s2n0[align]
+        s2n4[summarise]
+        s2n0 -->|l0,l2| s2n4
+    end
+    s0n0 -->|l0| s2n0
+    s0n3 -->|l2| s2n0
+    s0n2 -->|l2| s2n4

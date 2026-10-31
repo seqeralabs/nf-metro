@@ -1,0 +1,543 @@
+"""Feeders of one target that ride one source row together share one diagonal.
+
+Each feeder is its own edge, so each picks its own diagonal window.  When a
+line on the far side of the drop dives first it crosses its neighbour's
+straight, and the neighbour crosses it back on the target row.  The group must
+dive together instead, and a group whose lanes never cross twice must render
+exactly as its members would alone.
+"""
+
+from __future__ import annotations
+
+import itertools
+import math
+import warnings
+from collections.abc import Callable
+from pathlib import Path
+
+import pytest
+
+from nf_metro.api import RenderConfig, prepare_graph, render_graph_result
+from nf_metro.layout.constants import COORD_TOLERANCE
+from nf_metro.layout.routing import core
+from nf_metro.layout.routing.co_row import (
+    CoRowDiagonalGroup,
+    CoRowFeeder,
+    DiagonalWindow,
+    _co_row_candidates,
+    shared_co_row_window,
+)
+from nf_metro.layout.routing.common import segments_properly_cross
+from nf_metro.layout.routing.context import _RoutingCtx
+from nf_metro.parser.model import Edge
+from nf_metro.render.plan import RenderPlan
+from nf_metro.themes import resolve_theme
+
+TOPOLOGIES = Path(__file__).resolve().parent.parent / "examples" / "topologies"
+SHARED_DIAGONAL = TOPOLOGIES / "co_row_feeders_shared_diagonal.mmd"
+SHARED_DIAGONAL_BT = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "co_column_feeders_shared_diagonal_bt.mmd"
+)
+
+# An entry-port feeder and a bypass-helper feeder of one station leave one row
+# in opposite lane order to the one they arrive in, so they cross exactly once
+# whatever their windows.
+SINGLE_FORCED_CROSSING = """\
+%%metro title: Co-row feeders with one forced crossing
+%%metro line: l0 | Polish_Pca | #e6194b
+%%metro line: l1 | Normalize | #3cb44b
+%%metro line: l2 | Annotate | #4363d8
+%%metro line: l3 | Qc | #f58231
+%%metro line: l4 | Gather_Call | #911eb4
+
+graph LR
+    subgraph sec0 [Dedup_Vcf_Sort 0]
+        %%metro exit: right | l0, l1, l2, l3, l4
+        s0n0[dedup_fastqc]
+        s0n1[align_normalize_assemble]
+        s0n0 -->|l0,l1,l3| s0n1
+    end
+    subgraph sec1 [Summarise_Index_Filter 1]
+        %%metro exit: top | l0, l1, l2, l3, l4
+        s1n0[assemble_cluster_count]
+        s1n1[BAM]
+        s1n2[dedup_index]
+        s1n0 -->|l0| s1n2
+        s1n0 -->|l1,l3,l4| s1n1
+        s1n1 -->|l1,l3,l4| s1n2
+    end
+    subgraph sec2 [Summarise_Index 2]
+        s2n0[markdup_index]
+        s2n1[gather]
+        s2n2[count_cluster]
+        s2n3[vcf_markdup]
+        s2n4[classify]
+        s2n0 -->|l0,l3,l4| s2n1
+        s2n1 -->|l0| s2n2
+        s2n0 -->|l2| s2n3
+        s2n3 -->|l2,l3| s2n4
+        s2n1 -->|l3| s2n3
+    end
+    s0n1 -->|l0,l1,l3,l4| s1n0
+    s1n2 -->|l0,l2,l3,l4| s2n0
+    s1n2 -->|l0| s2n4
+    s1n0 -->|l1| s2n0
+    s0n1 -->|l2| s1n2
+    s1n0 -->|l3| s2n4
+"""
+
+
+def _render(text: str, source_dir: Path) -> tuple[RenderPlan, str]:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        graph = prepare_graph(text, source_dir=str(source_dir))
+        result = render_graph_result(
+            graph, resolve_theme(None, graph, "light"), RenderConfig()
+        )
+    return result.plan, result.content
+
+
+def _render_without_groups(
+    monkeypatch: pytest.MonkeyPatch, text: str, source_dir: Path
+) -> str:
+    with monkeypatch.context() as patch:
+        patch.setattr(core, "plan_co_row_diagonal_groups", lambda *_a, **_k: {})
+        return _render(text, source_dir)[1]
+
+
+def _diagonal_span(points: list[tuple[float, float]]) -> tuple[float, float]:
+    """The x-span over which a route moves from its source row to its target row."""
+    source_y, target_y = points[0][1], points[-1][1]
+    leave = next(
+        here[0]
+        for here, after in itertools.pairwise(points)
+        if abs(after[1] - source_y) > COORD_TOLERANCE
+    )
+    arrive = next(x for x, y in points if abs(y - target_y) <= COORD_TOLERANCE)
+    return leave, arrive
+
+
+def _proper_crossings(
+    first: list[tuple[float, float]], second: list[tuple[float, float]]
+) -> list[tuple[float, float]]:
+    return [
+        point
+        for a, b in itertools.pairwise(first)
+        for c, d in itertools.pairwise(second)
+        if (point := segments_properly_cross(a, b, c, d, reject_collinear_touch=False))
+        is not None
+    ]
+
+
+@pytest.mark.parametrize(
+    "path", [SHARED_DIAGONAL, SHARED_DIAGONAL_BT], ids=lambda path: path.stem
+)
+def test_feeders_of_one_exit_port_never_cross_twice(path: Path) -> None:
+    plan, _svg = _render(path.read_text(), path.parent)
+    by_port: dict[str, list[tuple[str, str, list[tuple[float, float]]]]] = {}
+    for route, points in zip(plan.routes, plan.route_polylines, strict=True):
+        if route.edge.target.startswith("sec0__exit_"):
+            by_port.setdefault(route.edge.target, []).append(
+                (route.line_id, route.edge.source, points)
+            )
+    pairs = [
+        (a_source, b_source, len(_proper_crossings(a_points, b_points)))
+        for feeders in by_port.values()
+        for (a_line, a_source, a_points), (
+            b_line,
+            b_source,
+            b_points,
+        ) in itertools.combinations(feeders, 2)
+        if a_line != b_line and a_source != b_source
+    ]
+    assert pairs
+    assert [pair for pair in pairs if pair[2] > 1] == []
+
+
+def test_co_row_feeders_turn_together() -> None:
+    plan, _svg = _render(SHARED_DIAGONAL.read_text(), SHARED_DIAGONAL.parent)
+    feeders = [
+        points
+        for route, points in zip(plan.routes, plan.route_polylines, strict=True)
+        if route.edge.target.startswith("sec0__exit_right")
+        and abs(points[0][1] - points[-1][1]) > COORD_TOLERANCE
+    ]
+    assert len(feeders) == 2
+
+    first, second = feeders
+    assert _proper_crossings(first, second) == []
+    first_span, second_span = _diagonal_span(first), _diagonal_span(second)
+    overlap = min(first_span[1], second_span[1]) - max(first_span[0], second_span[0])
+    assert overlap >= min(span[1] - span[0] for span in (first_span, second_span)) / 2
+
+
+@pytest.mark.parametrize(
+    ("text", "source_dir"),
+    [
+        (SINGLE_FORCED_CROSSING, TOPOLOGIES),
+    ],
+    ids=["single_forced_crossing"],
+)
+def test_feeders_that_never_cross_twice_render_unchanged(
+    monkeypatch: pytest.MonkeyPatch, text: str, source_dir: Path
+) -> None:
+    assert _render(text, source_dir)[1] == _render_without_groups(
+        monkeypatch, text, source_dir
+    )
+
+
+# A same-row feeder of ``s2n2`` enters through the section's left port, which
+# ``_route_entry_runway`` draws; its two diagonal siblings would share a window
+# on their own.
+ENTRY_RUNWAY_SIBLING = """\
+%%metro title: Co-row feeders beside an entry runway
+%%metro line: l0 | Red | #e6194b
+%%metro line: l1 | Green | #3cb44b
+%%metro line: l2 | Blue | #4363d8
+graph LR
+    subgraph sec0 [Trim]
+        s0n0 -->|l2| s0n2
+    end
+    subgraph sec1 [Bin]
+        s1n0[summarise]
+    end
+    subgraph sec2 [Quant]
+        s2n0 -->|l0| s2n2
+        s2n0 -->|l1| s2n1
+        s2n1 -->|l1| s2n2
+    end
+    s1n2 -->|l0| s2n0
+    s0n4 -->|l1| s2n0
+    s0n0 -->|l1| s2n2
+    s0n4 -->|l2| s1n0
+    s0n4 -->|l2| s2n2
+"""
+
+# Both feeders of ``s2n4`` would be diagonals if routed alone, but
+# ``_route_tb_section`` draws the entry-port one.
+TB_SECTION_SIBLING = """\
+%%metro title: Entry-port feeder beside a vertical-flow link
+%%metro line: l0 | Red | #e6194b
+%%metro line: l1 | Green | #3cb44b
+
+graph LR
+    subgraph sec0 [Source]
+        s0n4[bin]
+    end
+    subgraph sec2 [Vertical]
+        %%metro direction: BT
+        s2n0 -->|l0| s2n1
+        s2n1 -->|l0| s2n2
+        s2n2 -->|l0| s2n4
+        s2n1 -->|l0| s2n3
+        s2n0 -->|l0| s2n4
+    end
+    s0n4 -->|l1| s2n4
+"""
+
+
+_PlanInspector = Callable[
+    [_RoutingCtx, dict[tuple[str, str, str], CoRowDiagonalGroup]], None
+]
+
+
+def _inspect_plans(monkeypatch: pytest.MonkeyPatch, inspect: _PlanInspector) -> None:
+    """Call *inspect* with each routing pass's context and planned groups."""
+    real = core.plan_co_row_diagonal_groups
+
+    def planned(ctx, **kwargs):  # type: ignore[no-untyped-def]
+        groups = real(ctx, **kwargs)
+        inspect(ctx, groups)
+        return groups
+
+    monkeypatch.setattr(core, "plan_co_row_diagonal_groups", planned)
+
+
+def _render_with_groups(
+    monkeypatch: pytest.MonkeyPatch, path: Path
+) -> tuple[RenderPlan, list[CoRowDiagonalGroup]]:
+    passes: list[dict[tuple[str, str, str], CoRowDiagonalGroup]] = []
+    _inspect_plans(monkeypatch, lambda _ctx, groups: passes.append(groups))
+    plan, _svg = _render(path.read_text(), path.parent)
+    return plan, list(dict.fromkeys(passes[-1].values()))
+
+
+def _drawn_as_planned(edge: Edge, ctx: _RoutingCtx) -> bool:
+    """Whether the handler that draws *edge* is the one whose builder plans it."""
+    source, target = ctx.graph.edge_endpoints(edge)
+    for handler, builder in core._LOCAL_EDGE_DISPATCH:
+        if handler(edge, source, target, ctx) is not None:
+            return (
+                builder is not None and builder(edge, source, target, ctx) is not None
+            )
+    return False
+
+
+@pytest.mark.parametrize(
+    "text",
+    [ENTRY_RUNWAY_SIBLING, TB_SECTION_SIBLING],
+    ids=["entry_runway_sibling", "tb_section_sibling"],
+)
+def test_group_is_its_whole_row_and_each_member_is_drawn_as_planned(
+    monkeypatch: pytest.MonkeyPatch, text: str
+) -> None:
+    rows_with_a_foreign_sibling = 0
+    bad_groups: list[CoRowDiagonalGroup] = []
+
+    def check(
+        ctx: _RoutingCtx, planned: dict[tuple[str, str, str], CoRowDiagonalGroup]
+    ) -> None:
+        nonlocal rows_with_a_foreign_sibling
+        groups = list(dict.fromkeys(planned.values()))
+        for *_where, row in _co_row_candidates(ctx):
+            keys = {(edge.source, edge.target, edge.line_id) for edge, _ in row}
+            if not all(_drawn_as_planned(edge, ctx) for edge, _ in row):
+                rows_with_a_foreign_sibling += 1
+            bad_groups.extend(
+                group
+                for group in groups
+                if set(group.members) & keys and set(group.members) != keys
+            )
+        bad_groups.extend(
+            group
+            for group in groups
+            if not all(
+                _drawn_as_planned(ctx.edge_by_key[member], ctx)
+                for member in group.members
+            )
+        )
+
+    _inspect_plans(monkeypatch, check)
+    _render(text, TOPOLOGIES)
+    assert rows_with_a_foreign_sibling
+    assert bad_groups == []
+
+
+def _crossing_angles(
+    first: list[tuple[float, float]], second: list[tuple[float, float]]
+) -> list[float]:
+    def heading(a: tuple[float, float], b: tuple[float, float]) -> float:
+        return math.degrees(math.atan2(b[1] - a[1], b[0] - a[0])) % 180
+
+    angles = []
+    for a, b in itertools.pairwise(first):
+        for c, d in itertools.pairwise(second):
+            if segments_properly_cross(a, b, c, d, reject_collinear_touch=False):
+                turn = abs(heading(a, b) - heading(c, d))
+                angles.append(min(turn, 180 - turn))
+    return angles
+
+
+def test_shared_diagonal_crosses_a_neighbouring_diagonal_steeply() -> None:
+    plan, _svg = _render(SHARED_DIAGONAL_BT.read_text(), SHARED_DIAGONAL_BT.parent)
+    routes = list(zip(plan.routes, plan.route_polylines, strict=True))
+    feeders = [
+        (route, points)
+        for route, points in routes
+        if route.edge.target.startswith("sec0__exit_")
+    ]
+    angles = [
+        angle
+        for feeder, feeder_points in feeders
+        for route, points in routes
+        if route.line_id != feeder.line_id
+        for angle in _crossing_angles(feeder_points, points)
+    ]
+    assert angles
+    assert min(angles) >= 20.0
+
+
+def _distance_to_line(
+    point: tuple[float, float], a: tuple[float, float], b: tuple[float, float]
+) -> float:
+    return abs(
+        (b[0] - a[0]) * (point[1] - a[1]) - (b[1] - a[1]) * (point[0] - a[0])
+    ) / math.dist(a, b)
+
+
+def _heading(a: tuple[float, float], b: tuple[float, float]) -> float:
+    return math.degrees(math.atan2(b[1] - a[1], b[0] - a[0]))
+
+
+@pytest.mark.parametrize(
+    "path", [SHARED_DIAGONAL, SHARED_DIAGONAL_BT], ids=lambda path: path.stem
+)
+def test_shared_diagonal_keeps_the_end_spacing_of_its_lanes(
+    monkeypatch: pytest.MonkeyPatch, path: Path
+) -> None:
+    plan, groups = _render_with_groups(monkeypatch, path)
+    assert groups
+    drawn = {
+        (route.edge.source, route.edge.target, route.line_id): points
+        for route, points in zip(plan.routes, plan.route_polylines, strict=True)
+    }
+    pairs = [
+        (drawn[a], drawn[b])
+        for group in groups
+        for a, b in itertools.combinations(group.members, 2)
+        if a[2] != b[2]
+    ]
+    assert pairs
+    for first, second in pairs:
+        assert len(first) == len(second) == 4
+        source_gap = _distance_to_line(second[1], first[0], first[1])
+        target_gap = _distance_to_line(second[2], first[2], first[3])
+        assert _heading(first[1], first[2]) == pytest.approx(
+            _heading(second[1], second[2]), abs=0.1
+        )
+        assert (
+            _distance_to_line(second[1], first[1], first[2])
+            >= min(source_gap, target_gap) - COORD_TOLERANCE
+        )
+
+
+_SOURCE_ROW = 120.0
+_TARGET_ROW = 140.0
+
+
+def _feeder(
+    source: str,
+    source_run: float,
+    window: tuple[float, float],
+    lanes: tuple[float, float],
+    *,
+    floors: tuple[float, float] = (10.0, 10.0),
+) -> CoRowFeeder:
+    return CoRowFeeder(
+        key=(source, "target", f"line_{source}"),
+        source_run=source_run,
+        window=DiagonalWindow(window[0], window[1], *floors),
+        source_lateral=_SOURCE_ROW + lanes[0],
+        target_lateral=_TARGET_ROW + lanes[1],
+    )
+
+
+def _solve(*feeders: CoRowFeeder) -> tuple[float, float] | None:
+    return shared_co_row_window(
+        feeders,
+        flow=1.0,
+        target_run=366.0,
+        lane_step=4.0,
+    )
+
+
+def test_far_side_line_diving_first_adopts_the_nearest_source_window() -> None:
+    far = _feeder("far", 88.0, (321.0, 351.0), (8.0, 8.0))
+    near = _feeder("near", 280.0, (300.0, 330.0), (4.0, 4.0))
+    assert _solve(far, near) == ((300.0, 330.0),) * 2
+
+
+def test_mirrored_flow_adopts_the_nearest_source_window() -> None:
+    far = _feeder("far", 912.0, (679.0, 649.0), (8.0, 8.0))
+    near = _feeder("near", 720.0, (700.0, 670.0), (4.0, 4.0))
+    assert (
+        shared_co_row_window(
+            (far, near),
+            flow=-1.0,
+            target_run=634.0,
+            lane_step=4.0,
+        )
+        == ((700.0, 670.0),) * 2
+    )
+
+
+def test_lanes_stepping_unequally_leave_the_row_together_at_one_slope() -> None:
+    far = _feeder("far", 88.0, (321.0, 351.0), (8.0, 8.0))
+    near = _feeder("near", 280.0, (300.0, 330.0), (4.0, 0.0))
+    assert _solve(far, near) == ((300.0, 337.5), (300.0, 330.0))
+
+
+def test_nearest_window_with_no_run_is_shared() -> None:
+    far = _feeder("far", 88.0, (321.0, 351.0), (8.0, 8.0))
+    near = _feeder("near", 280.0, (300.0, 300.0), (4.0, 4.0))
+    assert _solve(far, near) == ((300.0, 300.0),) * 2
+
+
+def test_group_with_a_lane_stepping_the_other_way_is_declined() -> None:
+    far = _feeder("far", 88.0, (321.0, 351.0), (8.0, 8.0))
+    near = _feeder("near", 280.0, (300.0, 330.0), (4.0, 0.0))
+    back = _feeder("back", 200.0, (310.0, 340.0), (6.0, -30.0))
+    assert _solve(far, near) is not None
+    assert _solve(far, near, back) is None
+
+
+def test_near_side_line_diving_first_only_splays() -> None:
+    far = _feeder("far", 88.0, (321.0, 351.0), (4.0, 4.0))
+    near = _feeder("near", 280.0, (300.0, 330.0), (8.0, 8.0))
+    assert _solve(far, near) is None
+
+
+def test_lane_order_inverted_between_the_rows_is_left_alone() -> None:
+    far = _feeder("far", 88.0, (321.0, 351.0), (0.0, 8.0))
+    near = _feeder("near", 280.0, (300.0, 330.0), (4.0, 4.0))
+    assert _solve(far, near) is None
+
+
+def test_feeders_that_do_not_share_the_row_are_left_alone() -> None:
+    far = _feeder("far", 88.0, (321.0, 351.0), (8.0, 8.0))
+    near = _feeder("near", 310.0, (300.0, 330.0), (4.0, 4.0))
+    assert _solve(far, near) is None
+
+
+def test_shared_window_below_a_member_source_floor_is_declined() -> None:
+    far = _feeder("far", 88.0, (321.0, 351.0), (8.0, 8.0), floors=(220.0, 10.0))
+    near = _feeder("near", 280.0, (300.0, 330.0), (4.0, 4.0))
+    assert _solve(far, near) is None
+
+
+def test_shared_window_inside_a_member_target_floor_is_declined() -> None:
+    far = _feeder("far", 88.0, (321.0, 351.0), (8.0, 8.0), floors=(10.0, 30.0))
+    near = _feeder("near", 280.0, (300.0, 340.0), (4.0, 4.0))
+    assert _solve(far, near) is None
+
+
+def test_shared_window_running_two_lines_together_is_declined() -> None:
+    far = _feeder("far", 88.0, (321.0, 351.0), (4.0, 8.0))
+    near = _feeder("near", 280.0, (300.0, 330.0), (4.0, 4.0))
+    assert _solve(far, near) is None
+
+
+def _neighbour(window: tuple[float, float], lanes: tuple[float, float]) -> CoRowFeeder:
+    return CoRowFeeder(
+        key=("near", "other", "line_near"),
+        source_run=280.0,
+        window=DiagonalWindow(window[0], window[1], 10.0, 10.0),
+        source_lateral=_SOURCE_ROW + lanes[0],
+        target_lateral=_SOURCE_ROW + lanes[1],
+    )
+
+
+def _solve_beside(
+    neighbour: CoRowFeeder, *, target_run: float
+) -> tuple[float, float] | None:
+    far = _feeder("far", 88.0, (321.0, 351.0), (8.0, 8.0))
+    near = _feeder("near", 280.0, (300.0, 330.0), (4.0, 4.0))
+    return shared_co_row_window(
+        (far, near),
+        flow=1.0,
+        target_run=target_run,
+        lane_step=4.0,
+        neighbours=lambda: (neighbour,),
+    )
+
+
+def test_shared_window_slides_past_a_neighbouring_diagonal() -> None:
+    neighbour = _neighbour((300.0, 330.0), (0.0, 30.0))
+    assert _solve_beside(neighbour, target_run=400.0) == ((330.0, 360.0),) * 2
+
+
+def test_shared_window_that_cannot_clear_a_neighbour_is_declined() -> None:
+    neighbour = _neighbour((300.0, 330.0), (0.0, 30.0))
+    assert _solve_beside(neighbour, target_run=366.0) is None
+
+
+def test_neighbour_diagonal_outside_the_shared_window_is_left_alone() -> None:
+    neighbour = _neighbour((250.0, 280.0), (-30.0, 0.0))
+    assert _solve_beside(neighbour, target_run=366.0) == ((300.0, 330.0),) * 2
+
+
+def test_neighbour_diagonal_stepping_the_other_way_is_left_alone() -> None:
+    neighbour = _neighbour((300.0, 330.0), (30.0, 0.0))
+    assert _solve_beside(neighbour, target_run=366.0) == ((300.0, 330.0),) * 2

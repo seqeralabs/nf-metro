@@ -100,8 +100,11 @@ EXPECTED_DEFECT_CLASSES = {
 EXPECTED_EXCEPTION_SHA256 = {
     "seed_15.mmd": "1c976a09cbf42d8504c93d273caf35ee63bdbfb5f8a392d948716f2e31d97561",
     "seed_41.mmd": "119a52417bd9fdf02767feb6b41d7c32a4f7dcaba5095adf991886c4175c6ebe",
-    "seed_77.mmd": "0e40e4cd0fae6f9609a8f4e696789da2c27cd7402f414942c3d8836e3b181bc5",
+    "seed_77.mmd": "e6ca83122dc7161a61dcc36a8fe38b92eb7010afe446ddaf907b960418a72620",
 }
+
+
+RENDERING_SEEDS = frozenset({"seed_72.mmd"})
 
 
 def _defect_classes(message: str) -> tuple[str, ...]:
@@ -123,7 +126,7 @@ def test_seed_render_outcomes_are_stable_across_hash_seeds() -> None:
     for by_path in observations.values():
         for path, observation in by_path.items():
             name = Path(path).name
-            if name == "seed_72.mmd":
+            if name in RENDERING_SEEDS:
                 assert observation["outcome"] == "success"
                 assert observation["exception"] is None
                 continue

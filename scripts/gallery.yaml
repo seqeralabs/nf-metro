@@ -519,6 +519,31 @@ gallery:
       natural approach corridor, so settlement atomically refuses the natural off-slot
       proposal that would cross the planned exempt riser and retains the existing
       geometry."
+  - id: descent_entry_inner_bypass
+    source_dir: examples/topologies
+    category: Bypass Routing
+    description:
+      Two lines descend into a reversed section's side entry from different
+      corridors, and inside the section one bows under a station the other
+      stops at. The bowing line keeps the lower lane from the entry on, so it
+      parts and rejoins without crossing its neighbour, rather than nesting
+      the turn-ins at the port and crossing back on both sides of the bow.
+  - id: return_trunk_over_member_run
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      QC's return trunk to Export and Merge's skip to Summarise share the
+      corridor under Annotate, and both would sit on its floor. Merge steps one
+      lane down so the trunk keeps the floor above it, crossing only Merge's
+      rise into Summarise rather than having both QC descents cross Merge's
+      run.
+  - id: member_channel_runway_candidate_outside_band
+    source_dir: examples/topologies
+    category: Inter-section Routing
+    description:
+      Two single routes share a narrow vertical channel between Vcf 2 and
+      Qc_Classify 3. The engine keeps each lane inside the channel reserved
+      for it, rejecting any lane position that would fall outside it.
   - id: plan_owned_distinct_lane_separation
     source_dir: examples/topologies
     category: Inter-section Routing
@@ -1395,6 +1420,14 @@ gallery:
       A foreign line dips below a station to bypass its marker, then climbs back
       to the trunk past the wide 'Quantification' label. The router lengthens the dip's flat
       run so the climb seats clear of the glyphs (`_clear_bypass_v_label_strikes`).
+  - id: co_row_feeders_shared_diagonal
+    source_dir: examples/topologies
+    category: Bypass Routing
+    description:
+      Red bypasses BAM_ALIGN on stats' row while blue leaves stats on the same
+      row, and both climb into one exit port. The two feeders rise on one
+      shared diagonal instead of each picking its own, so blue does not climb
+      first, cross red, and get crossed back.
   - id: bypass_label_rake_left
     source_dir: examples/topologies
     category: Bypass Routing

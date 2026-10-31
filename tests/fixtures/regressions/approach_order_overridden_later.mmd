@@ -1,0 +1,41 @@
+%%metro title: Fuzz 8400913
+%%metro style: seqera
+%%metro line: l0 | Call | #e6194b
+%%metro line: l1 | Normalize_Cluster_Summarise | #3cb44b
+%%metro line: l2 | Trim_Annotate | #4363d8
+
+graph LR
+    subgraph sec0 [Export 0]
+        s0n0[annotate_index]
+        s0n1[dedup_normalize]
+        s0n2[summarise_cluster]
+        s0n3[align]
+        s0n0 -->|l2| s0n1
+        s0n1 -->|l2| s0n2
+        s0n2 -->|l2| s0n3
+    end
+    subgraph sec1 [Export 1]
+        %%metro direction: BT
+        s1n0[normalize]
+        s1n1[quant_trim]
+        s1n2[call_index]
+        s1n1 -->|l0,l2| s1n2
+        s1n0 -->|l2| s1n1
+    end
+    subgraph sec2 [Cluster_Filter_Trim 2]
+        s2n0[trim]
+        s2n1[quant_count]
+        s2n0 -->|l2| s2n1
+    end
+    subgraph sec3 [Gather_Dedup 3]
+        s3n0[MERGE]
+        s3n1[merge_call]
+        s3n2[assemble_qc_normalize]
+        s3n1 -->|l0,l2| s3n2
+        s3n0 -->|l2| s3n1
+    end
+    s1n2 -->|l0,l2| s2n0
+    s1n1 -->|l0| s3n2
+    s1n1 -->|l0| s3n1
+    s2n1 -->|l1,l2| s3n0
+    s0n3 -->|l2| s1n0
