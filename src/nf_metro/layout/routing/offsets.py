@@ -75,7 +75,10 @@ from nf_metro.layout.routing.invariants import (
     max_interior_offset_gap,
 )
 from nf_metro.layout.routing.perp_columns import deal_perp_entry_column
-from nf_metro.layout.routing.reversal import detect_reversed_sections
+from nf_metro.layout.routing.reversal import (
+    detect_reversed_sections,
+    tb_positive_fan_sections,
+)
 from nf_metro.layout.routing.seam import SeamOrientation, seam_orientation
 from nf_metro.parser.model import (
     Edge,
@@ -3493,19 +3496,28 @@ def _allocate_merge_ports_by_approach(ctx: _OffsetCtx) -> None:
 
 
 class _FeederArrival(NamedTuple):
-    """One feeder edge's draft into a side entry port, read for phase 7b'.
+    """One feeder edge's draft into a flow-side entry port, read for phase 7b'.
 
-    ``riser_y`` is where the riser turning into the port starts (the line's
-    own lane for a level arrival); ``near`` says the run leading into it heads
-    towards the port rather than away.  ``heading`` is the sign of the draft's
-    first sideways step.
+    Lane readings are taken in the port section's frame
+    (:class:`~nf_metro.layout.routing.inter_section_handlers.ArrivalLeg`).
+    ``riser_lane`` is where the riser turning into the port starts (the line's
+    own lane for a level arrival), and ``near`` says the run leading into it
+    heads into the section rather than away.  ``on_lane`` says the draft lands
+    on the line's current port lane.  ``heading`` is the sign of the draft's
+    first flow-axis step.
     """
 
     edge: Edge
-    riser_y: float
+    riser_lane: float
     near: bool
     on_lane: bool
     heading: float | None
+
+
+def _entry_inward(port: Port) -> float:
+    """+1 when *port* is entered travelling up its flow axis (a LEFT or TOP
+    side), -1 when travelling down it."""
+    return 1.0 if port.side in (PortSide.LEFT, PortSide.TOP) else -1.0
 
 
 def _feeder_lines(edges: Sequence[Edge]) -> dict[str, list[str]]:
@@ -3521,6 +3533,7 @@ def _feeder_lines(edges: Sequence[Edge]) -> dict[str, list[str]]:
 def _feeders_interleave(
     cur: Mapping[str, float], feeders: Mapping[str, Sequence[str]]
 ) -> bool:
+    """Whether some feeder's lines are not adjacent in the port's lane order."""
     slot_order = sorted(cur, key=cur.__getitem__)
     for lines in feeders.values():
         ranks = sorted(slot_order.index(lid) for lid in lines if lid in cur)
@@ -3532,6 +3545,8 @@ def _feeders_interleave(
 def _draft_feeder_arrivals(
     ctx: _OffsetCtx,
     port: Port,
+    frame: AxisFrame,
+    port_lane: float,
     edges: Sequence[Edge],
     draft_ctx: _RoutingCtx,
 ) -> list[_FeederArrival] | None:
@@ -3542,26 +3557,29 @@ def _draft_feeder_arrivals(
     """
     from nf_metro.layout.routing.inter_section_handlers import arrival_leg
 
-    port_y = ctx.graph.stations[port.id].y
-    inward = 1.0 if port.side is PortSide.LEFT else -1.0
+    inward = _entry_inward(port)
     arrivals = []
     for edge in edges:
         try:
-            leg = arrival_leg(edge, draft_ctx)
+            leg = arrival_leg(edge, draft_ctx, frame)
         except Exception:
             # A feeder whose draft cannot be built gives no approach to order by.
             return None
         if leg is None:
             return None
-        lane_y = port_y + ctx.offsets.get((port.id, edge.line_id), 0.0)
-        if leg.riser_y is None:
-            riser_y, near = lane_y, True
+        lane = port_lane + ctx.offsets.get((port.id, edge.line_id), 0.0)
+        if leg.riser_lane is None:
+            riser_lane, near = lane, True
         else:
-            riser_y = leg.riser_y
-            near = leg.lead_dx is None or leg.lead_dx * inward >= 0
-        heading = None if leg.first_dx is None else math.copysign(1.0, leg.first_dx)
+            riser_lane = leg.riser_lane
+            near = leg.lead_along is None or leg.lead_along * inward >= 0
+        heading = (
+            None if leg.first_along is None else math.copysign(1.0, leg.first_along)
+        )
         arrivals.append(
-            _FeederArrival(edge, riser_y, near, abs(leg.end_y - lane_y) <= 0.5, heading)
+            _FeederArrival(
+                edge, riser_lane, near, abs(leg.end_lane - lane) <= 0.5, heading
+            )
         )
     return arrivals
 
@@ -3575,10 +3593,11 @@ def _nest_risers(
 ) -> list[str] | None:
     """Deal risers on one side of a port from the port outward, or ``None``.
 
-    *sign* is +1 for risers climbing from below, -1 for risers coming down.  A
-    riser from deeper than another's start crosses it unless the shallower one
-    turns in towards the port (it then takes the lane nearer the port) or away
-    (it then takes the far lane).  Ties keep the incoming lane order.
+    *sign* is +1 for risers starting beyond the port's high-offset side, -1
+    for those starting beyond its low-offset side.  A riser from deeper than
+    another's start crosses it unless the shallower one turns in towards the
+    port (it then takes the lane nearer the port) or away (it then takes the
+    far lane).  Ties keep the incoming lane order.
     """
     depth = {lid: sign * riser[lid][0] for lid in lines}
     before: dict[str, set[str]] = {lid: set() for lid in lines}
@@ -3606,40 +3625,46 @@ def _nest_risers(
 
 def _approach_lane_order(
     arrivals: Sequence[_FeederArrival],
-    port_y: float,
+    port_lane: float,
     cur: Mapping[str, float],
     priority: Mapping[str, int],
 ) -> list[str] | None:
-    """Port lanes top to bottom so no feeder's riser crosses another's.
+    """Port lines in ascending offset so no feeder's riser crosses another's.
 
-    ``None`` when the arrivals cover other lines than the port carries, a line
-    is fed from both sides of the port, or the risers cannot nest.  A line fed
-    twice is placed by the riser starting nearest the port.
+    *port_lane* and the arrivals' riser starts are frame lane readings, which
+    grow with the stored offset, so the order deals straight onto the port's
+    slots.  ``None`` when the arrivals cover other lines than the port carries,
+    a line is fed from both sides of the port, or the risers cannot nest.  A
+    line fed twice is placed by the riser starting nearest the port.
     """
     risers: dict[str, list[tuple[float, bool]]] = {}
     for arrival in arrivals:
         risers.setdefault(arrival.edge.line_id, []).append(
-            (arrival.riser_y, arrival.near)
+            (arrival.riser_lane, arrival.near)
         )
     if set(risers) != set(cur):
         return None
-    rising = [
-        lid for lid, legs in risers.items() if all(y >= port_y - 1e-6 for y, _ in legs)
+    high = [
+        lid
+        for lid, legs in risers.items()
+        if all(lane >= port_lane - 1e-6 for lane, _ in legs)
     ]
-    falling = [
-        lid for lid, legs in risers.items() if all(y < port_y - 1e-6 for y, _ in legs)
+    low = [
+        lid
+        for lid, legs in risers.items()
+        if all(lane < port_lane - 1e-6 for lane, _ in legs)
     ]
-    if len(rising) + len(falling) != len(risers):
+    if len(high) + len(low) != len(risers):
         return None
     nearest = {
-        lid: min(legs, key=lambda leg: abs(leg[0] - port_y))
+        lid: min(legs, key=lambda leg: abs(leg[0] - port_lane))
         for lid, legs in risers.items()
     }
-    below = _nest_risers(rising, nearest, cur, priority, 1.0)
-    above = _nest_risers(falling, nearest, cur, priority, -1.0)
-    if below is None or above is None:
+    from_high = _nest_risers(high, nearest, cur, priority, 1.0)
+    from_low = _nest_risers(low, nearest, cur, priority, -1.0)
+    if from_high is None or from_low is None:
         return None
-    return [*reversed(above), *below]
+    return [*reversed(from_low), *from_high]
 
 
 def _reorders_a_feeder(
@@ -3667,13 +3692,15 @@ def _turns_a_feeder_over(
     is the source station's order when the draft leaves the source heading the
     way the port is entered, and its reverse otherwise.
     """
-    inward = 1.0 if port.side is PortSide.LEFT else -1.0
+    inward = _entry_inward(port)
     heading = {(a.edge.source, a.edge.line_id): a.heading for a in arrivals}
     for src, lines in feeders.items():
         if len(lines) < 2:
             continue
         headings = {heading[(src, lid)] for lid in lines}
-        direction = headings.pop() if len(headings) == 1 else None
+        if len(headings) != 1:
+            return True
+        (direction,) = headings
         if direction is None:
             return True
         new = [lid for lid in order if lid in lines]
@@ -3692,12 +3719,10 @@ def _carry_shares_a_lane(
 ) -> bool:
     """Whether carrying *new_offs* from *port* leaves two lines on one lane."""
     graph = ctx.graph
-    trial = ChainMap(
-        {(port.id, lid): off for lid, off in new_offs.items()}, ctx.offsets
-    )
+    written = {(port.id, lid): off for lid, off in new_offs.items()}
     touched = [port.id]
     for tgt_id, offs in _bundle_walk(ctx, port.id, port.section_id, new_offs):
-        trial.maps[0].update(
+        written.update(
             {
                 (tgt_id, lid): offs[lid]
                 for lid in graph.station_lines(tgt_id)
@@ -3705,6 +3730,7 @@ def _carry_shares_a_lane(
             }
         )
         touched.append(tgt_id)
+    trial = ChainMap(written, ctx.offsets)
     for sid in touched:
         lanes = [
             round(trial[(sid, lid)], 6)
@@ -3740,23 +3766,19 @@ def _narrows_a_junction_feeder(
 
 
 def _order_entry_ports_by_approach(ctx: _OffsetCtx) -> None:
-    """Deal a multi-feeder side entry's lanes in its feeders' approach order.
+    """Deal a multi-feeder flow-side entry's lanes in its feeders' approach order.
 
-    At a LEFT/RIGHT entry port of a lane-stacked section fed from two or more
+    At an entry port on a flow-axis side of its section (LEFT/RIGHT of a
+    horizontal flow, TOP/BOTTOM of a vertical one) fed from two or more
     stations whose lines interleave in the port's lane order, each feeder's
-    dispatch draft says where its riser into the port starts and whether the
-    run before it heads towards the port.  The lanes are re-dealt so the
-    risers climbing from below and those coming down from above each nest
+    dispatch draft, read in the section's frame, says where its riser into the
+    port starts and whether the run before it heads into the section.  The
+    lanes are re-dealt so the risers from either side of the port each nest
     without crossing, and the new order is carried along the bundle.
 
-    A port is left as it is when any of these would not hold:
-
-    * every feeder's draft lands on its own current port lane (a draft that
-      does not cannot say where its line arrives);
-    * each multi-line feeder keeps its relative order, and the order its
-      source station carries on the side its draft travels;
-    * every station the carry reaches keeps one lane per line;
-    * no junction feeder's adjacent lines move closer together.
+    A port is left alone when a feeder's draft does not land on its own lane,
+    a re-deal would reorder or turn over a multi-line feeder, the carry would
+    put two lines on one lane, or a junction feeder's lines would move closer.
 
     Drafts are drawn once per call on the offsets the phase started from, so
     every port is judged against the same routing; the vetoed ports are those
@@ -3766,11 +3788,12 @@ def _order_entry_ports_by_approach(ctx: _OffsetCtx) -> None:
         return
     graph = ctx.graph
     draft_ctx: _RoutingCtx | None = None
+    positive_fan: set[str] | None = None
     for port_id, port in graph.ports.items():
-        if not port.is_entry or port.side not in (PortSide.LEFT, PortSide.RIGHT):
+        if not port.is_entry:
             continue
         section = graph.sections.get(port.section_id)
-        if section is None or not lanes_run_along_y(section.direction):
+        if section is None or port.side not in flow_port_sides(section.direction):
             continue
         edges = list(graph.edges_to(port_id))
         feeders = _feeder_lines(edges)
@@ -3786,12 +3809,14 @@ def _order_entry_ports_by_approach(ctx: _OffsetCtx) -> None:
             draft_ctx = _build_routing_context(
                 graph, DIAGONAL_RUN, CURVE_RADIUS, dict(ctx.offsets)
             )
-        arrivals = _draft_feeder_arrivals(ctx, port, edges, draft_ctx)
+        if positive_fan is None:
+            positive_fan = tb_positive_fan_sections(graph)
+        frame = _section_lane_frame(graph, section, positive_fan)
+        port_lane = frame.secondary_sign * frame.secondary.get(graph.stations[port_id])
+        arrivals = _draft_feeder_arrivals(ctx, port, frame, port_lane, edges, draft_ctx)
         if arrivals is None:
             continue
-        order = _approach_lane_order(
-            arrivals, graph.stations[port_id].y, cur, ctx.line_priority
-        )
+        order = _approach_lane_order(arrivals, port_lane, cur, ctx.line_priority)
         if order is None:
             continue
         new_offs = _deal_slots_in_order(ctx, port_id, order)
@@ -5979,7 +6004,7 @@ def compute_station_offsets(
        entry ports, re-slots a perpendicular re-joining line to the
        bundle slot nearest its approach side (non-compact only).
     7b'. **Approach-derived entry-port order** - at a multi-feeder
-       LEFT/RIGHT entry port whose feeders' lines interleave, deals the lanes
+       flow-side entry port whose feeders' lines interleave, deals the lanes
        in the order the feeders' risers turn in without crossing.  A port
        whose order a later phase overrides is left alone and every phase
        re-run (non-compact only).
