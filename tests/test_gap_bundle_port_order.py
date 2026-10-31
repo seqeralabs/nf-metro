@@ -19,6 +19,7 @@ from port_order_context import OFFSET_STEP, port_order_ctx
 from nf_metro.api import prepare_graph, resolve_theme
 from nf_metro.layout.routing.common import Direction, RoutedPath
 from nf_metro.layout.routing.normalize import (
+    _anchor_same_direction_fixed_channels,
     _band_port_constraints,
     _coincident_trunk_slots,
     _distinct_line_order,
@@ -26,6 +27,7 @@ from nf_metro.layout.routing.normalize import (
     _layout_gap_bundle,
     _port_lane_order_pairs,
     _port_ordered_line_order,
+    _separate_opposing_gap_bundles,
     _slot_entry_reach,
     _VChannel,
 )
@@ -363,3 +365,57 @@ def test_lines_rising_together_into_a_bt_bottom_entry_hold_its_lane_order():
     ]
     assert len(side_by_side) >= 2
     assert all((x1 < x2) == port_m1_left for x1, x2 in side_by_side), side_by_side
+
+
+@pytest.mark.parametrize(
+    ("side", "direction", "travel"),
+    [(PortSide.LEFT, "LR", Direction.R), (PortSide.TOP, "TB", Direction.D)],
+    ids=["band", "gap-bundle"],
+)
+def test_a_line_without_a_port_offset_decides_no_order(side, direction, travel):
+    """Only ``a`` holds an offset at the port, so the port has no lane order
+    to rank ``b`` against."""
+    graph = _graph(("sa", PORT, "a"), ("sb", PORT, "b"), side=side, direction=direction)
+    ctx = port_order_ctx(graph, _port_offsets(a=4.0))
+    if travel is Direction.R:
+        slots = _coincident_trunk_slots(
+            [_trunk("a", "sa", PORT, travel), _trunk("b", "sb", PORT, travel)]
+        )
+        assert _band_port_constraints(slots, ctx) == []
+    else:
+        reach = [{PORT: {"sa"}}, {PORT: {"sb"}}]
+        assert _port_lane_order_pairs(["a", "b"], reach, travel, ctx) == []
+
+
+def test_a_bundle_anchored_on_a_fixed_channel_stacks_in_its_entry_port_order():
+    """``a`` is fixed at x=210 and ``b`` extends its bundle.  The free order
+    seats ``b`` right of ``a``; the default TB section's TOP entry holds ``b``
+    left of ``a``, so ``b`` seats one step left of the anchor."""
+    _, (fixed_a, movable_b), ctx = _bundle(
+        ("a", "sa", PORT), ("b", "sb", PORT), offsets=_port_offsets(a=4.0, b=8.0)
+    )
+    movable_b.x = 230.0
+    _anchor_same_direction_fixed_channels([(True, [movable_b])], [fixed_a], ctx)
+    assert movable_b.x == 210.0 - OFFSET_STEP
+
+
+def test_a_bundle_moved_clear_of_a_counter_running_channel_nests_in_port_order():
+    """``a`` and ``b`` translate clear of the rising ``z`` and their corners
+    nest in the TOP entry's order, so swapping the port order swaps the
+    corner radii the two lines take."""
+
+    def radii(offsets):
+        _, chans, ctx = _bundle(("a", "sa", PORT), ("b", "sb", PORT), offsets=offsets)
+        for ch in chans:
+            ch.route.curve_radii = [10.0, 10.0]
+        rising = _channel("z", "sz", "elsewhere", 212.0, down=False)
+        _separate_opposing_gap_bundles([(True, chans)], [rising], 100.0, 400.0, ctx)
+        assert all(
+            abs(ch.x - (210.0 + OFFSET_STEP * k)) > 1.0 for k, ch in enumerate(chans)
+        )
+        return {ch.route.line_id: tuple(ch.route.curve_radii) for ch in chans}
+
+    port_b_left = radii(_port_offsets(a=4.0, b=8.0))
+    port_a_left = radii(_port_offsets(a=8.0, b=4.0))
+    assert port_b_left["a"] != port_a_left["a"]
+    assert port_b_left == {"a": port_a_left["b"], "b": port_a_left["a"]}
