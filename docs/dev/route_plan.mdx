@@ -327,7 +327,7 @@ The compile sizes them with the freeze's own corner rules, run on copies of the 
 Each patch carries its route's radii, concentric corner inputs and source turnout, and an unpatched route sharing a corner cohort with a moved corner gets a radius-only patch.
 Nothing is sized when no corner moves, because the rules read the radii they re-size, and an immutable context route is never sized.
 
-`tests/cohort_shadow_oracle.py` renders a map the way the plan is meant to be drawn: every compiled plan is published at its compile site, the compiling observation is drawn, and the drawn routes are held to the published plan on every owned segment point and corner.
+`tests/cohort_shadow_oracle.py` draws the compiling observation under production's conditions, but publishes every compiled plan at its compile site and takes the observation's own plan as the ledger; the drawn routes are then held to the published plan on every owned segment point and corner.
 `tests/data/cohort_shadow_ratchet.txt` lists the repository maps that oracle fails.
 
 ## Envelope settlement

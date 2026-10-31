@@ -1,12 +1,12 @@
 """Tier C shadow oracle for the corridor-cohort plan.
 
 The render path compiles the corridor cohorts inside one routing observation
-and, unless a convergence grant moved a trunk, draws a different observation.
-This oracle renders a map the way the plan is meant to be drawn instead: every
-compiled plan is published at its compile site, the compiling observation is
-the one drawn, and the drawn routes are then held to the published plan on
-every owned segment point and corner, and on every corner the plan sized,
-after the render invariants have run.
+and draws that observation where it accepted a plan and owes no clearance, or
+a convergence grant moved a trunk. This oracle draws it under the same
+conditions, but publishes every compiled plan at its compile site and takes
+the observation's own plan as the ledger; the drawn routes are then held to
+the published plan on every owned segment point and corner, and on every
+corner the plan sized, after the render invariants have run.
 
 It is a test harness, not a render stage: the substitutions live only inside
 :func:`shadow_observation`, so production renders never take this path.
@@ -158,11 +158,13 @@ def sized_radius_mismatches(
 
 @contextmanager
 def shadow_observation() -> Iterator[None]:
-    """Render with every cohort plan published and its compiling observation drawn.
+    """Render with every cohort plan published, drawing the compiling observation.
 
-    The grant-only comparison against an ungranted replay fails by
-    construction once the compiling observation is drawn, so it stands down;
-    the planned-equals-drawn check over the settled geometry replaces it.  The
+    The observation is drawn under production's conditions.  Every compiled
+    plan is published at its compile site, and the drawn observation's own plan
+    is the ledger, so the grant-only comparison against an ungranted replay
+    would run on every drawn observation and stands down; the
+    planned-equals-drawn check over the settled geometry replaces it.  The
     drawn observation is the last compile's, so the corners its patches sized
     are the ones the drawn routes are held to.
     """
