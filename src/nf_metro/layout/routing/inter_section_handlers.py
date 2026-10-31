@@ -39,6 +39,8 @@ from nf_metro.layout.constants import (
     SECTION_ROUTE_CLEARANCE,
 )
 from nf_metro.layout.geometry import (
+    AxisFrame,
+    axis_split,
     cotravelling_lane_clearance,
     lanes_run_along_x,
     lanes_run_along_y,
@@ -2213,6 +2215,21 @@ def _match_inter_section_rule(f: _InterFacts) -> _Rule | None:
     return None
 
 
+def _dispatch_draft_points(
+    edge: Edge, ctx: _RoutingCtx
+) -> Sequence[tuple[float, float]]:
+    """The points of the route inter-section *edge*'s dispatch rule draws."""
+    src, tgt = ctx.graph.edge_endpoints(edge)
+    f = _build_inter_facts(edge, src, tgt, ctx)
+    rule = _match_inter_section_rule(f)
+    route = (
+        rule.route(f)
+        if rule is not None
+        else _route_l_shape(edge, src, tgt, f.i, f.n, ctx)
+    )
+    return route.points if route is not None else []
+
+
 def arrival_approach(edge: Edge, ctx: _RoutingCtx) -> Direction | None:
     """The way inter-section *edge* travels on its last vertical leg.
 
@@ -2223,15 +2240,7 @@ def arrival_approach(edge: Edge, ctx: _RoutingCtx) -> Direction | None:
     are all shorter than a curve radius only shifts its line's lane on the way,
     so it arrives level too.
     """
-    src, tgt = ctx.graph.edge_endpoints(edge)
-    f = _build_inter_facts(edge, src, tgt, ctx)
-    rule = _match_inter_section_rule(f)
-    route = (
-        rule.route(f)
-        if rule is not None
-        else _route_l_shape(edge, src, tgt, f.i, f.n, ctx)
-    )
-    points = route.points if route is not None else []
+    points = _dispatch_draft_points(edge, ctx)
     vertical_steps = [
         end[1] - start[1]
         for start, end in zip(points, points[1:])
@@ -2240,6 +2249,66 @@ def arrival_approach(edge: Edge, ctx: _RoutingCtx) -> Direction | None:
     if all(abs(dy) <= ctx.curve_radius for dy in vertical_steps):
         return None
     return Direction.D if vertical_steps[-1] > 0 else Direction.U
+
+
+@dataclass(frozen=True, slots=True)
+class ArrivalLeg:
+    """Where an inter-section dispatch draft lands and how it gets there.
+
+    Read in a section's frame: *along* is the flow-axis coordinate and *lane*
+    the lane-axis coordinate times the frame's lane sign, so a lane reading
+    grows with the stored lane offset on every orientation.
+
+    ``first_along`` is the draft's first step along the flow axis, ``None``
+    when it never moves that way.  ``riser_lane`` is the start of its last
+    step across the lanes, ``None`` when no such step is longer than a curve
+    radius (the draft then only shifts lanes on the way and arrives level).
+    ``lead_along`` is the flow-axis component of the step leading into that
+    riser, ``None`` when the riser starts the draft.  Any step steeper across
+    the lanes than along them counts as a riser step, however short, so a
+    riser is the step that turns into the port.
+    """
+
+    end_lane: float
+    first_along: float | None
+    riser_lane: float | None
+    lead_along: float | None
+
+
+def arrival_leg_of(
+    points: Sequence[tuple[float, float]], frame: AxisFrame, curve_radius: float
+) -> ArrivalLeg | None:
+    """The :class:`ArrivalLeg` of a drawn polyline, ``None`` when it is empty."""
+    if not points:
+        return None
+    sign = frame.secondary_sign
+    framed = [
+        (along, sign * lane)
+        for along, lane in (axis_split(frame.primary.name, p) for p in points)
+    ]
+    steps = [(a, b) for a, b in zip(framed, framed[1:]) if a != b]
+    first_along = next((b[0] - a[0] for a, b in steps if abs(b[0] - a[0]) > 1e-6), None)
+    risers = [
+        i
+        for i, (a, b) in enumerate(steps)
+        if abs(b[1] - a[1]) > max(abs(b[0] - a[0]), 1e-6)
+    ]
+    riser_lane = lead_along = None
+    if any(abs(steps[i][1][1] - steps[i][0][1]) > curve_radius for i in risers):
+        last = risers[-1]
+        riser_lane = steps[last][0][1]
+        if last:
+            lead = steps[last - 1]
+            lead_along = lead[1][0] - lead[0][0]
+    return ArrivalLeg(framed[-1][1], first_along, riser_lane, lead_along)
+
+
+def arrival_leg(edge: Edge, ctx: _RoutingCtx, frame: AxisFrame) -> ArrivalLeg | None:
+    """The :class:`ArrivalLeg` of the route *edge*'s dispatch rule draws.
+
+    The same draft :func:`arrival_approach` reads, taken in *frame*.
+    """
+    return arrival_leg_of(_dispatch_draft_points(edge, ctx), frame, ctx.curve_radius)
 
 
 @dataclass(frozen=True, slots=True)

@@ -13,7 +13,7 @@ from collections.abc import (
     Sequence,
 )
 from dataclasses import dataclass, field
-from itertools import combinations
+from itertools import combinations, product
 from typing import Literal, NamedTuple
 
 from nf_metro.layout.constants import (
@@ -31,6 +31,7 @@ from nf_metro.layout.geometry import (
     lanes_run_along_x,
     lanes_run_along_y,
     perpendicular_port_sides,
+    port_free_axis,
     station_lane_coord,
 )
 from nf_metro.layout.phases._common import (
@@ -60,6 +61,7 @@ from nf_metro.layout.routing.context import (
     _has_intervening_sections,
     _hop_needs_bypass,
     _resolve_section_colrow,
+    _RoutingCtx,
     _section_lane_frame,
     fanout_divergence_peel_order,
     is_near_vertical_junction_right_entry,
@@ -84,6 +86,7 @@ from nf_metro.parser.model import (
     PortSide,
     Section,
     Station,
+    is_bypass_v,
 )
 from nf_metro.parser.provenance import DecisionReason
 from nf_metro.parser.route_topology import (
@@ -119,6 +122,10 @@ class _OffsetCtx:
     # Section -> flat-frame component root, populated by section-local re-indexing
     frame_roots: dict[str, str] = field(default_factory=dict)
     fan_owned_offsets: dict[tuple[str, str], float] = field(default_factory=dict)
+    # Entry ports phase 7b' leaves alone, and the lane order it gave each
+    # port it re-slotted.
+    approach_vetoed: frozenset[str] = frozenset()
+    approach_orders: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -3487,6 +3494,548 @@ def _allocate_merge_ports_by_approach(ctx: _OffsetCtx) -> None:
             _apply_offsets_along_bundle(ctx, port_id, sec_id, new_offs)
 
 
+class _FeederArrival(NamedTuple):
+    """One feeder edge's draft into a flow-side entry port, read for phase 7b'.
+
+    Lane readings are taken in the port section's frame
+    (:class:`~nf_metro.layout.routing.inter_section_handlers.ArrivalLeg`).
+    ``riser_lane`` is where the riser turning into the port starts (the line's
+    own lane for a level arrival), and ``near`` says the run leading into it
+    heads into the section rather than away.  ``on_lane`` says the draft lands
+    on the line's current port lane.  ``heading`` is the sign of the draft's
+    first flow-axis step.
+    """
+
+    edge: Edge
+    riser_lane: float
+    near: bool
+    on_lane: bool
+    heading: float | None
+
+
+def _entry_inward(port: Port) -> float:
+    """+1 when *port* is entered travelling up its flow axis (a LEFT or TOP
+    side), -1 when travelling down it."""
+    return 1.0 if port.side in (PortSide.LEFT, PortSide.TOP) else -1.0
+
+
+def _feeder_lines(edges: Sequence[Edge]) -> dict[str, list[str]]:
+    """Each feeder station's lines into a port, in edge order."""
+    feeders: dict[str, list[str]] = {}
+    for edge in edges:
+        lines = feeders.setdefault(edge.source, [])
+        if edge.line_id not in lines:
+            lines.append(edge.line_id)
+    return feeders
+
+
+def _feeders_interleave(
+    cur: Mapping[str, float], feeders: Mapping[str, Sequence[str]]
+) -> bool:
+    slot_order = sorted(cur, key=cur.__getitem__)
+    for lines in feeders.values():
+        ranks = sorted(slot_order.index(lid) for lid in lines if lid in cur)
+        if ranks and ranks[-1] - ranks[0] + 1 != len(ranks):
+            return True
+    return False
+
+
+def _draft_feeder_arrivals(
+    ctx: _OffsetCtx,
+    port: Port,
+    frame: AxisFrame,
+    port_lane: float,
+    edges: Sequence[Edge],
+    draft_ctx: _RoutingCtx,
+) -> list[_FeederArrival] | None:
+    """Each feeder edge's arrival into *port*, or ``None`` if one has no draft.
+
+    Lanes are read live, so a port re-slotted earlier in the phase is measured
+    on its new lanes against drafts drawn on the old ones.
+    """
+    from nf_metro.layout.routing.exit_turns import ExitTurnInvariantError
+    from nf_metro.layout.routing.inter_section_handlers import arrival_leg
+
+    inward = _entry_inward(port)
+    arrivals = []
+    for edge in edges:
+        try:
+            leg = arrival_leg(edge, draft_ctx, frame)
+        except (AssertionError, ExitTurnInvariantError):
+            # A draft whose geometry cannot be built (a failed handler assertion
+            # or a zero-length leg) gives no approach to order by.
+            return None
+        if leg is None:
+            return None
+        lane = port_lane + ctx.offsets.get((port.id, edge.line_id), 0.0)
+        if leg.riser_lane is None:
+            riser_lane, near = lane, True
+        else:
+            riser_lane = leg.riser_lane
+            near = leg.lead_along is None or leg.lead_along * inward >= 0
+        heading = (
+            None if leg.first_along is None else math.copysign(1.0, leg.first_along)
+        )
+        arrivals.append(
+            _FeederArrival(
+                edge, riser_lane, near, abs(leg.end_lane - lane) <= 0.5, heading
+            )
+        )
+    return arrivals
+
+
+def _nest_risers(
+    lines: Sequence[str],
+    riser: Mapping[str, tuple[float, bool]],
+    cur: Mapping[str, float],
+    priority: Mapping[str, int],
+    sign: float,
+) -> list[str] | None:
+    """Deal risers on one side of a port from the port outward, or ``None``.
+
+    *sign* is +1 for risers starting beyond the port's high-offset side, -1
+    for those starting beyond its low-offset side.  A riser from deeper than
+    another's start crosses it unless the shallower one turns in towards the
+    port (it then takes the lane nearer the port) or away (it then takes the
+    far lane).  Ties keep the incoming lane order.
+    """
+    depth = {lid: sign * riser[lid][0] for lid in lines}
+    before: dict[str, set[str]] = {lid: set() for lid in lines}
+    for a in lines:
+        for b in lines:
+            if a != b and depth[a] < depth[b] - 1e-6:
+                if riser[a][1]:
+                    before[b].add(a)
+                else:
+                    before[a].add(b)
+    dealt: list[str] = []
+    left = list(lines)
+    while left:
+        ready = [lid for lid in left if not before[lid].intersection(left)]
+        if not ready:
+            return None
+        pick = min(
+            ready,
+            key=lambda lid: (depth[lid], sign * cur[lid], priority.get(lid, 0)),
+        )
+        dealt.append(pick)
+        left.remove(pick)
+    return dealt
+
+
+def _approach_lane_order(
+    arrivals: Sequence[_FeederArrival],
+    port_lane: float,
+    cur: Mapping[str, float],
+    priority: Mapping[str, int],
+) -> list[str] | None:
+    """Port lines in ascending offset so no feeder's riser crosses another's.
+
+    ``None`` when the arrivals cover other lines than the port carries,
+    a line is fed from both sides of the port, or the risers cannot nest.  A
+    line fed twice is placed by the riser starting nearest the port.
+    """
+    risers: dict[str, list[tuple[float, bool]]] = {}
+    for arrival in arrivals:
+        risers.setdefault(arrival.edge.line_id, []).append(
+            (arrival.riser_lane, arrival.near)
+        )
+    if set(risers) != set(cur):
+        return None
+    high = [
+        lid
+        for lid, legs in risers.items()
+        if all(lane >= port_lane - 1e-6 for lane, _ in legs)
+    ]
+    low = [
+        lid
+        for lid, legs in risers.items()
+        if all(lane < port_lane - 1e-6 for lane, _ in legs)
+    ]
+    if len(high) + len(low) != len(risers):
+        return None
+    nearest = {
+        lid: min(legs, key=lambda leg: abs(leg[0] - port_lane))
+        for lid, legs in risers.items()
+    }
+    from_high = _nest_risers(high, nearest, cur, priority, 1.0)
+    from_low = _nest_risers(low, nearest, cur, priority, -1.0)
+    if from_high is None or from_low is None:
+        return None
+    return [*reversed(from_low), *from_high]
+
+
+def _reorders_a_feeder(
+    feeders: Mapping[str, Sequence[str]],
+    order: Sequence[str],
+    cur: Mapping[str, float],
+) -> bool:
+    return any(
+        len(lines) > 1
+        and sorted(lines, key=cur.__getitem__) != [lid for lid in order if lid in lines]
+        for lines in feeders.values()
+    )
+
+
+def _turns_a_feeder_over(
+    ctx: _OffsetCtx,
+    port: Port,
+    feeders: Mapping[str, Sequence[str]],
+    order: Sequence[str],
+    arrivals: Sequence[_FeederArrival],
+) -> bool:
+    """A multi-line feeder whose port order is not the one its bundle carries.
+
+    A concentric bundle keeps each line on its side of travel, so the port order
+    is the source station's order when the draft leaves the source heading the
+    way the port is entered, and its reverse otherwise.
+    """
+    inward = _entry_inward(port)
+    heading = {(a.edge.source, a.edge.line_id): a.heading for a in arrivals}
+    for src, lines in feeders.items():
+        if len(lines) < 2:
+            continue
+        direction = heading[(src, lines[0])]
+        if direction is None or any(heading[(src, lid)] != direction for lid in lines):
+            return True
+        new = [lid for lid in order if lid in lines]
+        at_source = sorted(
+            lines, key=lambda lid: (ctx.offsets.get((src, lid), 0.0), new.index(lid))
+        )
+        if direction * inward <= 0:
+            at_source.reverse()
+        if new != at_source:
+            return True
+    return False
+
+
+def _carry_trial(
+    ctx: _OffsetCtx, port: Port, new_offs: Mapping[str, float]
+) -> tuple[list[str], ChainMap[tuple[str, str], float]]:
+    """The stations carrying *new_offs* from *port* reaches, and the offsets
+    they would hold, without writing either."""
+    graph = ctx.graph
+    written = {(port.id, lid): off for lid, off in new_offs.items()}
+    touched = [port.id]
+    for tgt_id, offs in _bundle_walk(ctx, port.id, port.section_id, new_offs):
+        written.update(
+            {
+                (tgt_id, lid): offs[lid]
+                for lid in graph.station_lines(tgt_id)
+                if lid in offs
+            }
+        )
+        touched.append(tgt_id)
+    return touched, ChainMap(written, ctx.offsets)
+
+
+def _carry_shares_a_lane(
+    graph: MetroGraph,
+    touched: Sequence[str],
+    trial: Mapping[tuple[str, str], float],
+) -> bool:
+    """Whether a station the carry reaches would hold two lines on one lane."""
+    for sid in touched:
+        lanes = [
+            round(trial[(sid, lid)], 6)
+            for lid in graph.station_lines(sid)
+            if (sid, lid) in trial
+        ]
+        if len(lanes) != len(set(lanes)):
+            return True
+    return False
+
+
+class _CarryFrame:
+    """Stations read in a port section's frame for the carry refusals.
+
+    A station stacks on the frame when its own lanes run along the frame's lane
+    axis (a LEFT/RIGHT port, or a station of a section, stacks on y); only then
+    does its stored offset move it across the lanes.  Lane readings carry the
+    frame's lane sign, as :class:`ArrivalLeg` does.  *touched* are the stations
+    the carry from *port_id* reaches.
+    """
+
+    def __init__(
+        self,
+        graph: MetroGraph,
+        frame: AxisFrame,
+        positive_fan: set[str],
+        port_id: str,
+        touched: Sequence[str],
+    ) -> None:
+        self.graph = graph
+        self.frame = frame
+        self.port_id = port_id
+        self.touched = list(dict.fromkeys(touched))
+        self._positive_fan = positive_fan
+        self._signs: dict[str, float | None] = {}
+
+    def stacking_sign(self, sid: str) -> float | None:
+        """*sid*'s lane sign when it stacks on the frame, ``0.0`` when its
+        lanes run across the frame's, ``None`` when it belongs to no section."""
+        if sid not in self._signs:
+            self._signs[sid] = self._stacking_sign(sid)
+        return self._signs[sid]
+
+    def _stacking_sign(self, sid: str) -> float | None:
+        graph = self.graph
+        station = graph.stations[sid]
+        section = graph.sections.get(station.section_id or "")
+        if section is None:
+            return None
+        own = _section_lane_frame(graph, section, self._positive_fan)
+        port = graph.ports.get(sid)
+        axis = own.secondary.name if port is None else port_free_axis(port.side)
+        if axis != self.frame.secondary.name:
+            return 0.0
+        return own.secondary_sign if own.secondary.name == axis else 1.0
+
+    def stacks(self, sid: str) -> bool:
+        return not is_bypass_v(sid) and bool(self.stacking_sign(sid))
+
+    def along(self, sid: str) -> float:
+        return self.frame.primary.get(self.graph.stations[sid])
+
+    def across(self, sid: str) -> float:
+        return self.frame.secondary.get(self.graph.stations[sid])
+
+    def lane(
+        self, sid: str, lid: str, offsets: Mapping[tuple[str, str], float]
+    ) -> float | None:
+        sign = self.stacking_sign(sid)
+        if sign is None:
+            return None
+        coord = self.across(sid) + sign * offsets.get((sid, lid), 0.0)
+        return self.frame.secondary_sign * coord
+
+
+def _line_neighbours(
+    graph: MetroGraph, sid: str, lid: str, outgoing: bool
+) -> list[str]:
+    """*lid*'s next (or previous) stations from *sid*, looking through bypass
+    waypoints: a bypass dip is the line going round a station, not a turn."""
+    found: list[str] = []
+    stack, seen = [sid], {sid}
+    while stack:
+        cur = stack.pop()
+        for edge in graph.edges_from(cur) if outgoing else graph.edges_to(cur):
+            if edge.line_id != lid:
+                continue
+            nbr = edge.target if outgoing else edge.source
+            if is_bypass_v(nbr) and nbr not in seen:
+                seen.add(nbr)
+                stack.append(nbr)
+            elif nbr not in found:
+                found.append(nbr)
+    return found
+
+
+def _carry_order_flips(
+    view: _CarryFrame, offsets: Mapping[tuple[str, str], float]
+) -> set[tuple[str | bool, ...]]:
+    """Line pairs whose lane order at a carried station disagrees with the
+    order they hold at the neighbours they run to or come from on one side.
+
+    Each disagreement is a crossing between the station and that neighbour.
+    The port's own feeder side is left out: the approach order judges it.
+    """
+    graph = view.graph
+    flips: set[tuple[str | bool, ...]] = set()
+    for sid in view.touched:
+        if not view.stacks(sid):
+            continue
+        for outgoing in (False, True):
+            if not outgoing and sid == view.port_id:
+                continue
+            nbrs = {
+                lid: found
+                for lid in graph.station_lines(sid)
+                if (found := _line_neighbours(graph, sid, lid, outgoing))
+            }
+            at = {
+                lid: lane
+                for lid in nbrs
+                if (lane := view.lane(sid, lid, offsets)) is not None
+            }
+            for a, b in combinations(at, 2):
+                if abs(at[a] - at[b]) <= 1e-6:
+                    continue
+                for na, nb in product(nbrs[a], nbrs[b]):
+                    da = view.along(na) - view.along(sid)
+                    db = view.along(nb) - view.along(sid)
+                    if (da > 1 and db < -1) or (da < -1 and db > 1):
+                        continue
+                    to_a = view.lane(na, a, offsets)
+                    to_b = view.lane(nb, b, offsets)
+                    if to_a is None or to_b is None or abs(to_a - to_b) <= 0.5:
+                        continue
+                    if (to_a - to_b) * (at[a] - at[b]) >= 0:
+                        continue
+                    if na == nb:
+                        edge = (sid, na) if outgoing else (na, sid)
+                        flips.add((*edge, a, b))
+                    else:
+                        flips.add((outgoing, sid, a, na, b, nb))
+    return flips
+
+
+def _carry_sandwiches(
+    view: _CarryFrame, offsets: Mapping[tuple[str, str], float]
+) -> set[tuple[str, str]]:
+    """``(line, station)`` pairs where a carried line skips a station the bundle
+    serves and, on that station's row, sits strictly between two of its lanes.
+
+    The skipped station lies between the line's two stations along the flow
+    and is fed from the first and feeds the second on other lines, so its
+    marker spans the lane the skipping line rides.
+    """
+    graph = view.graph
+    found: set[tuple[str, str]] = set()
+    for u in view.touched:
+        if not view.stacks(u):
+            continue
+        after_u = {edge.target for edge in graph.edges_from(u)}
+        for lid in graph.station_lines(u):
+            for w in _line_neighbours(graph, u, lid, outgoing=True):
+                if not view.stacks(w):
+                    continue
+                lo, hi = sorted((view.along(u), view.along(w)))
+                before_w = {edge.source for edge in graph.edges_to(w)}
+                for v in after_u & before_w:
+                    v_lines = graph.station_lines(v)
+                    if (
+                        v in (u, w)
+                        or v in graph.ports
+                        or v in graph.junctions
+                        or lid in v_lines
+                        or not view.stacks(v)
+                        or not lo + 1e-6 < view.along(v) < hi - 1e-6
+                    ):
+                        continue
+                    lanes = [offsets.get((v, k), 0.0) for k in v_lines]
+                    if not lanes:
+                        continue
+                    lowest, highest = min(lanes), max(lanes)
+                    for end in (u, w):
+                        if (
+                            abs(view.across(end) - view.across(v)) <= _SAME_Y_TOLERANCE
+                            and lowest < offsets.get((end, lid), 0.0) < highest
+                        ):
+                            found.add((lid, v))
+    return found
+
+
+def _carry_adds_crossings_or_sandwiches(
+    view: _CarryFrame,
+    cur: Mapping[tuple[str, str], float],
+    trial: Mapping[tuple[str, str], float],
+) -> bool:
+    return any(
+        (n := len(count(view, trial))) > 0 and n > len(count(view, cur))
+        for count in (_carry_order_flips, _carry_sandwiches)
+    )
+
+
+def _narrows_a_junction_feeder(
+    graph: MetroGraph,
+    feeders: Mapping[str, Sequence[str]],
+    cur: Mapping[str, float],
+    new_offs: Mapping[str, float],
+) -> bool:
+    """Whether a junction feeder's adjacent lines would sit closer at the port.
+
+    A junction's corners are sized for the spread it feeds; narrowing the pair
+    turns a fan into a bundle that translates through corners sized apart.
+    """
+    for src, lines in feeders.items():
+        if src not in graph.junctions or len(lines) < 2:
+            continue
+        ranked = sorted(lines, key=cur.__getitem__)
+        if any(
+            abs(new_offs[b] - new_offs[a]) < abs(cur[b] - cur[a]) - 1e-6
+            for a, b in zip(ranked, ranked[1:])
+        ):
+            return True
+    return False
+
+
+def _order_entry_ports_by_approach(ctx: _OffsetCtx) -> None:
+    """Deal a multi-feeder flow-side entry's lanes in its feeders' approach order.
+
+    At an entry port on a flow-axis side of its section (LEFT/RIGHT of a
+    horizontal flow, TOP/BOTTOM of a vertical one) fed from two or more
+    stations whose lines interleave in the port's lane order, each feeder's
+    dispatch draft, read in the section's frame, says where its riser into the
+    port starts and whether the run before it heads into the section.  The
+    lanes are re-dealt so the risers from either side of the port each nest
+    without crossing, and the new order is carried along the bundle.
+
+    A port is left alone when a feeder's draft does not land on its own lane,
+    a re-deal would reorder or turn over a multi-line feeder, a junction
+    feeder's lines would move closer, or the carry would put two lines on one
+    lane, add crossings between the stations it reaches and their neighbours,
+    or sit a line that skips a station between two of that station's lanes.
+
+    Drafts are drawn once per call on the offsets the phase started from, so
+    every port is judged against the same routing; the vetoed ports are those
+    whose order a later phase overrode (:func:`compute_station_offsets`).
+    """
+    if ctx.compact:
+        return
+    graph = ctx.graph
+    draft_ctx: _RoutingCtx | None = None
+    for port_id, port in graph.ports.items():
+        if not port.is_entry:
+            continue
+        section = graph.sections.get(port.section_id)
+        if section is None or port.side not in flow_port_sides(section.direction):
+            continue
+        edges = list(graph.edges_to(port_id))
+        feeders = _feeder_lines(edges)
+        if len(feeders) < 2:
+            continue
+        cur = {
+            lid: ctx.offsets.get((port_id, lid), 0.0)
+            for lid in graph.station_lines(port_id)
+        }
+        if not _feeders_interleave(cur, feeders) or port_id in ctx.approach_vetoed:
+            continue
+        if draft_ctx is None:
+            draft_ctx = _build_routing_context(
+                graph, DIAGONAL_RUN, CURVE_RADIUS, dict(ctx.offsets)
+            )
+        frame = _section_lane_frame(graph, section, draft_ctx.positive_fan)
+        port_lane = frame.secondary_sign * frame.secondary.get(graph.stations[port_id])
+        arrivals = _draft_feeder_arrivals(ctx, port, frame, port_lane, edges, draft_ctx)
+        if arrivals is None:
+            continue
+        order = _approach_lane_order(arrivals, port_lane, cur, ctx.line_priority)
+        if order is None:
+            continue
+        new_offs = _deal_slots_in_order(ctx, port_id, order)
+        if all(abs(new_offs[lid] - cur[lid]) <= 1e-6 for lid in new_offs):
+            continue
+        if (
+            not all(arrival.on_lane for arrival in arrivals)
+            or _reorders_a_feeder(feeders, order, cur)
+            or _turns_a_feeder_over(ctx, port, feeders, order, arrivals)
+            or _narrows_a_junction_feeder(graph, feeders, cur, new_offs)
+        ):
+            continue
+        touched, trial = _carry_trial(ctx, port, new_offs)
+        if _carry_shares_a_lane(graph, touched, trial) or (
+            _carry_adds_crossings_or_sandwiches(
+                _CarryFrame(graph, frame, draft_ctx.positive_fan, port_id, touched),
+                ctx.offsets,
+                trial,
+            )
+        ):
+            continue
+        ctx.approach_orders[port_id] = tuple(order)
+        _apply_offsets_along_bundle(ctx, port_id, port.section_id, new_offs)
+
+
 def _apply_offsets_along_bundle(
     ctx: _OffsetCtx,
     start_id: str,
@@ -5656,6 +6205,11 @@ def compute_station_offsets(
     7b. **Merge-port approach-side allocation** - at multi-feeder LR/RL
        entry ports, re-slots a perpendicular re-joining line to the
        bundle slot nearest its approach side (non-compact only).
+    7b'. **Approach-derived entry-port order** - at a multi-feeder
+       flow-side entry port whose feeders' lines interleave, deals the lanes
+       in the order the feeders' risers turn in without crossing.  A port
+       whose order a later phase overrides is left alone and every phase
+       re-run (non-compact only).
     7c. **Convergence entry-port ordering** - at a LEFT entry port fed by
        a bypass trunk from two or more source columns, slots the bundle by
        approach depth so its risers turn in concentrically; at any LR/RL
@@ -5732,14 +6286,46 @@ def compute_station_offsets(
 
     Returns dict mapping (station_id, line_id) -> y_offset.
     """
-    graph._linear_entry_pill_lines_cache.clear()
     # Rail mode bakes absolute rail Ys into the route points and the pill
     # span, so per-line offsets are not used; return an empty map.
     if graph.line_spread is LineSpread.RAILS:
+        graph._linear_entry_pill_lines_cache.clear()
         return {}
 
     resolved = offset_step if offset_step is not None else graph_offset_step(graph)
+    vetoed: frozenset[str] = frozenset()
+    while True:
+        ctx = _run_offset_phases(graph, resolved, vetoed)
+        overridden = _overridden_approach_orders(ctx)
+        if not overridden:
+            return ctx.offsets
+        vetoed |= overridden
+
+
+def _overridden_approach_orders(ctx: _OffsetCtx) -> frozenset[str]:
+    """Ports whose phase 7b' lane order a later phase overrode.
+
+    Each run vetoes only ports the previous ones re-slotted, and a vetoed port
+    is never re-slotted, so re-running until none is overridden terminates.
+    """
+    overridden = set()
+    for port_id, order in ctx.approach_orders.items():
+        keys = [(port_id, lid) for lid in order]
+        if any(key not in ctx.offsets for key in keys) or any(
+            ctx.offsets[b] <= ctx.offsets[a] + _OFFSET_EQ_TOLERANCE
+            for a, b in zip(keys, keys[1:])
+        ):
+            overridden.add(port_id)
+    return frozenset(overridden)
+
+
+def _run_offset_phases(
+    graph: MetroGraph, resolved: float, approach_vetoed: frozenset[str]
+) -> _OffsetCtx:
+    """Run every :func:`compute_station_offsets` phase once, in order."""
+    graph._linear_entry_pill_lines_cache.clear()
     ctx = _build_offset_ctx(graph, resolved)
+    ctx.approach_vetoed = approach_vetoed
     # Section/layer indexes over graph structure, not per-line offsets, so
     # they stay valid across every phase below and are built once here for
     # both compaction passes (phase 4 and phase 12) to share.
@@ -5757,6 +6343,7 @@ def compute_station_offsets(
     _compute_entry_port_offsets(ctx)
     _align_junction_to_entry_port(ctx)
     _allocate_merge_ports_by_approach(ctx)
+    _order_entry_ports_by_approach(ctx)
     _order_convergence_entry_ports(ctx)
     _order_convergence_by_approach(ctx)
     _order_top_descent_over_left_entry(ctx)
@@ -5777,7 +6364,7 @@ def compute_station_offsets(
     frames = _materialize_linear_entry_frames(ctx)
     _validate_linear_entry_frames(ctx, frames)
     _cache_linear_entry_pill_lines(ctx, frames)
-    return ctx.offsets
+    return ctx
 
 
 def _reverse_offsets_from_roots(ctx: _OffsetCtx, roots: set[str]) -> None:
