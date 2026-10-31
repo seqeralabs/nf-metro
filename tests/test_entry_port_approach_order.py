@@ -27,7 +27,6 @@ from nf_metro.layout.routing.corridor_cohort_integration import (
 )
 from nf_metro.layout.routing.exit_turns import ExitTurnInvariantError
 from nf_metro.layout.routing.inter_section_handlers import ArrivalLeg, arrival_leg_of
-from nf_metro.layout.routing.invariants import CurveInvariantError
 from nf_metro.parser.model import Edge, MetroGraph, Port, Section, Station
 from nf_metro.render import svg
 
@@ -149,20 +148,44 @@ def test_side_entry_lane_order(
     assert lanes == sorted(set(lanes)), dict(zip(order, lanes))
 
 
+# The lanes approach_order_interleaved_feeders.mmd gives its entry port before
+# any re-deal.
+_FEEDER_LINES = ("m0", "m1", "m2")
+_FEEDER_LANES = {"m0": 0.0, "m1": 4.0, "m2": 8.0}
+
+
 def test_carry_that_puts_two_lines_on_one_lane_is_not_dealt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Re-dealing this port would carry two lines onto one lane of a station
-    downstream, so it keeps its order.  The render aborts later on a defective
-    bundle curve whether or not the port is re-dealt."""
+    """A re-deal whose carry puts two lines on one lane of a station it reaches
+    is refused, so the port keeps its lanes.  Left interleaved, this map's
+    corridor cohort cannot be seated, so the render aborts after the offsets
+    are settled."""
+    monkeypatch.setattr(offsets_module, "_carry_shares_a_lane", lambda *args: True)
+
     offsets = _render_offsets(
         monkeypatch,
-        REGRESSIONS / "approach_order_carry_shares_a_lane.mmd",
-        aborts=CurveInvariantError,
+        REGRESSIONS / "approach_order_interleaved_feeders.mmd",
+        aborts=CorridorCohortCompilationError,
     )
 
-    lanes = [offsets[("sec3__entry_left_6", lid)] for lid in ("l3", "l1", "l4")]
-    assert lanes == sorted(set(lanes)), lanes
+    assert {lid: offsets[("z3__entry_left_5", lid)] for lid in _FEEDER_LINES} == (
+        _FEEDER_LANES
+    )
+
+
+def test_carry_shares_a_lane_reads_the_lanes_a_carry_would_hold() -> None:
+    graph = MetroGraph()
+    for source, target, line in [("a", "b", "l0"), ("a", "b", "l1"), ("b", "c", "l0")]:
+        graph.add_edge(Edge(source, target, line))
+
+    def shares(trial: _Lanes) -> bool:
+        return offsets_module._carry_shares_a_lane(graph, ["a", "b", "c"], trial)
+
+    assert shares({("a", "l0"): 4.0, ("a", "l1"): 4.0})
+    assert shares({("b", "l0"): 8.0, ("b", "l1"): 8.0000001})
+    assert not shares({("a", "l0"): 4.0, ("a", "l1"): 8.0, ("c", "l0"): 4.0})
+    assert not shares({("a", "l0"): 4.0, ("b", "l1"): 4.0})
 
 
 @pytest.mark.parametrize(
@@ -187,8 +210,9 @@ def test_port_whose_draft_cannot_be_built_keeps_its_order(
         aborts=CorridorCohortCompilationError,
     )
 
-    lanes = [offsets[("z3__entry_left_5", lid)] for lid in ("m0", "m2", "m1")]
-    assert lanes != sorted(set(lanes)), lanes
+    assert {lid: offsets[("z3__entry_left_5", lid)] for lid in _FEEDER_LINES} == (
+        _FEEDER_LANES
+    )
 
 
 def test_unexpected_draft_failure_is_not_swallowed(
