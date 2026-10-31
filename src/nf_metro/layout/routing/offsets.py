@@ -2793,9 +2793,9 @@ def _recompact_fan_port_bordering_stations(
 
     Each seed is one write.  A seed whose write would break a lane order phase
     7b' decided is not committed, and is counted: the decided order wins.
-    7b' judged each seed alone on its re-deal
-    (:func:`_compaction_seed_reordering`), so this only meets a seed whose
-    section phases 8-10 or an earlier seed changed since.
+    7b' judged each seed alone, on its re-deal's offsets
+    (:func:`_compaction_seed_reordering`); here a seed meets the offsets that
+    phases 8-10 and the earlier seeds left, and a tie breaks an order too.
     """
     if ctx.compact:
         return
