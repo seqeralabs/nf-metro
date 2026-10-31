@@ -237,17 +237,27 @@ def test_junction_feeder_lanes_are_not_narrowed(
     _render_offsets(monkeypatch, REGRESSIONS / "approach_order_junction_gap.mmd")
 
 
-def test_overridden_port_order_is_not_carried(
+def test_re_deal_a_phase_12_seed_would_reorder_is_refused(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A port order a later phase overrides would leave its carry stranded on
-    the stations it reached, here a dead lane between a station's two lines."""
+    """A re-deal phase 12's seed compaction would reorder is refused up front:
+    carried, it would leave a dead lane between a station's two lines."""
+    verdicts: list[tuple[str, str | None]] = []
+    judge = offsets_module._trial_overrides_an_owner
+
+    def record(ctx: Any, port: Any, *args: Any) -> str | None:
+        verdict = judge(ctx, port, *args)
+        verdicts.append((port.id, verdict))
+        return verdict
+
+    monkeypatch.setattr(offsets_module, "_trial_overrides_an_owner", record)
     offsets = _render_offsets(
         monkeypatch,
         REGRESSIONS / "approach_order_overridden_later.mmd",
         {"line_order": "span", "row_align": "top"},
     )
 
+    assert ("sec3__entry_left_4", "compaction") in verdicts
     assert abs(offsets[("s3n1", "l0")] - offsets[("s3n1", "l2")]) == 4.0
 
 
