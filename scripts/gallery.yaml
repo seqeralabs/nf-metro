@@ -541,10 +541,9 @@ gallery:
     source_dir: examples/topologies
     category: Inter-section Routing
     description:
-      Look at the red and green vertical lines between Vcf 2 and Qc_Classify
-      3. Each is a single route, and the engine keeps its lane inside the
-      narrow channel reserved for it, rejecting any lane position that would
-      fall outside that channel.
+      Two single routes share a narrow vertical channel between Vcf 2 and
+      Qc_Classify 3. The engine keeps each lane inside the channel reserved
+      for it, rejecting any lane position that would fall outside it.
   - id: plan_owned_distinct_lane_separation
     source_dir: examples/topologies
     category: Inter-section Routing
