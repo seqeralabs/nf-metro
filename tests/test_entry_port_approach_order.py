@@ -71,9 +71,10 @@ def _render_offsets(
     return seen["offsets"]
 
 
-# Risers tied on one leg keep their incoming relative order; a port where a
-# feeder's own lines would swap, or whose feeder is drawn off the lane its
-# offset names, keeps its lanes.
+# Risers tied on one leg keep their incoming relative order.  A port keeps its
+# lanes where a feeder's own lines would swap, a feeder is drawn off the lane
+# its offset names, or carrying the re-deal on would cross lines between the
+# stations it reaches or sit a line between the lanes of a station it skips.
 _KEPT_ORDER = [
     pytest.param(
         "approach_order_tied_risers.mmd",
@@ -92,6 +93,18 @@ _KEPT_ORDER = [
         "sec2__entry_left_3",
         ("l0", "l1", "l2", "l3"),
         id="draft-lands-off-its-lane",
+    ),
+    pytest.param(
+        "approach_order_carry_crossing.mmd",
+        "sec3__entry_left_5",
+        ("l0", "l1", "l2"),
+        id="carry-would-cross-downstream",
+    ),
+    pytest.param(
+        "approach_order_carry_sandwich.mmd",
+        "sec2__entry_left_3",
+        ("l0", "l1", "l2"),
+        id="carry-would-sandwich-a-skipping-line",
     ),
 ]
 

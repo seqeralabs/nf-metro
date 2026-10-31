@@ -1,0 +1,71 @@
+%%metro title: Fuzz 8500183
+%%metro line: l0 | Count | #e6194b
+%%metro line: l1 | Index_Classify_Stats | #3cb44b
+%%metro line: l2 | Fastqc_Dedup | #4363d8
+
+graph LR
+    subgraph sec0 [Count 0]
+        %%metro direction: BT
+        %%metro exit: bottom | l0, l1, l2
+        s0n0[assemble_index]
+        s0n1[bam]
+        s0n2[filter_bin]
+        s0n3[align]
+        s0n4[index]
+        s0n0 -->|l2| s0n1
+        s0n1 -->|l2| s0n2
+        s0n2 -->|l2| s0n3
+        s0n3 -->|l2| s0n4
+    end
+    subgraph sec1 [Vcf 1]
+        %%metro direction: TB
+        s1n0[count_quant_dedup]
+        s1n1[merge]
+        s1n2[merge_export]
+        s1n3[filter_normalize]
+        s1n0 -->|l0| s1n1
+        s1n1 -->|l0| s1n2
+        s1n2 -->|l0| s1n3
+    end
+    subgraph sec2 [Filter_Quant 2]
+        s2n0[sort_count]
+        s2n1[fastqc]
+        s2n2[merge_gather]
+        s2n3[gather]
+        s2n0 -->|l0| s2n2
+        s2n2 -->|l0| s2n3
+        s2n2 -->|l1| s2n3
+        s2n2 -->|l2| s2n3
+        s2n0 -->|l1| s2n1
+        s2n0 -->|l2| s2n1
+        s2n1 -->|l1| s2n2
+        s2n1 -->|l2| s2n2
+        s2n0 -->|l1| s2n3
+    end
+    subgraph sec3 [Export 3]
+        s3n0[annotate]
+        s3n1[QC]
+        s3n2[cluster_assemble]
+        s3n3[assemble]
+        s3n0 -->|l0| s3n1
+        s3n0 -->|l1| s3n1
+        s3n0 -->|l2| s3n1
+        s3n1 -->|l0| s3n2
+        s3n1 -->|l1| s3n2
+        s3n1 -->|l0| s3n2
+        s3n2 -->|l0| s3n3
+        s3n2 -->|l1| s3n3
+        s3n0 -->|l1| s3n2
+        s3n1 -->|l2| s3n3
+        s3n0 -->|l2| s3n3
+    end
+    s1n3 -->|l0| s2n0
+    s2n3 -->|l0| s3n0
+    s2n3 -->|l1| s3n0
+    s2n3 -->|l2| s3n0
+    s0n3 -->|l0| s3n0
+    s0n4 -->|l1| s2n0
+    s2n1 -->|l1| s3n0
+    s0n2 -->|l1| s3n2
+    s0n4 -->|l2| s1n0
+    s1n0 -->|l2| s2n0
