@@ -75,10 +75,7 @@ from nf_metro.layout.routing.invariants import (
     max_interior_offset_gap,
 )
 from nf_metro.layout.routing.perp_columns import deal_perp_entry_column
-from nf_metro.layout.routing.reversal import (
-    detect_reversed_sections,
-    tb_positive_fan_sections,
-)
+from nf_metro.layout.routing.reversal import detect_reversed_sections
 from nf_metro.layout.routing.seam import SeamOrientation, seam_orientation
 from nf_metro.parser.model import (
     Edge,
@@ -3788,7 +3785,6 @@ def _order_entry_ports_by_approach(ctx: _OffsetCtx) -> None:
         return
     graph = ctx.graph
     draft_ctx: _RoutingCtx | None = None
-    positive_fan: set[str] | None = None
     for port_id, port in graph.ports.items():
         if not port.is_entry:
             continue
@@ -3809,9 +3805,7 @@ def _order_entry_ports_by_approach(ctx: _OffsetCtx) -> None:
             draft_ctx = _build_routing_context(
                 graph, DIAGONAL_RUN, CURVE_RADIUS, dict(ctx.offsets)
             )
-        if positive_fan is None:
-            positive_fan = tb_positive_fan_sections(graph)
-        frame = _section_lane_frame(graph, section, positive_fan)
+        frame = _section_lane_frame(graph, section)
         port_lane = frame.secondary_sign * frame.secondary.get(graph.stations[port_id])
         arrivals = _draft_feeder_arrivals(ctx, port, frame, port_lane, edges, draft_ctx)
         if arrivals is None:
