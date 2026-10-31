@@ -4100,7 +4100,7 @@ def _order_entry_ports_by_approach(
         _apply_offsets_along_bundle(ctx, port_id, port.section_id, new_offs)
 
 
-_OwnerRefusal = Literal["claim", "reversal", "compaction", "fan-plan"]
+_OwnerRefusal = Literal["claim", "decided", "reversal", "compaction", "fan-plan"]
 
 
 def _lane_order(
@@ -4131,6 +4131,8 @@ def _trial_overrides_an_owner(
 
     - ``claim``: a station the carry reaches is an entry port the order family
       (7c-7f) claimed, and the carry changes its order.
+    - ``decided``: a station the carry reaches is a port 7b' already re-dealt
+      in this pass, and the carry would break that order.
     - ``reversal``: phase 10 reverses *port*'s section (*drop_reversed*).
     - ``compaction``: a phase 12 seed, compacted on the re-deal
       (:func:`_compaction_seed_reordering`), would reorder *port*.
@@ -4147,6 +4149,10 @@ def _trial_overrides_an_owner(
         held = _lane_order(graph, sid, trial, set(claim))
         if held != [lid for lid in claim if lid in held]:
             return "claim"
+    for sid in touched:
+        decided = ctx.approach_orders.get(sid)
+        if decided is not None and _breaks_order(trial, sid, decided):
+            return "decided"
     if port.section_id in drop_reversed:
         return "reversal"
     if (
@@ -6530,6 +6536,7 @@ def _run_offset_phases(graph: MetroGraph, resolved: float) -> _OffsetCtx:
     _order_flow_start_side_entry_by_descent_corridor(ctx)
     _claim_family_port_orders(ctx, before_family)
     _order_entry_ports_by_approach(ctx, same_y_adj, sec_layer_stations)
+    _hold_decided_orders(ctx, "7b'")
     _reconcile_horizontal_offsets(ctx)
     _hold_decided_orders(ctx, "8")
     _align_flat_tb_exit_to_entry(ctx)
@@ -6587,21 +6594,28 @@ def _claim_family_port_orders(
 def _first_broken_decided_order(ctx: _OffsetCtx) -> str | None:
     """The first port whose 7b' order *ctx*'s offsets no longer hold."""
     for port_id, order in ctx.approach_orders.items():
-        keys = [(port_id, lid) for lid in order]
-        if any(key not in ctx.offsets for key in keys) or any(
-            ctx.offsets[b] <= ctx.offsets[a] + _OFFSET_EQ_TOLERANCE
-            for a, b in zip(keys, keys[1:])
-        ):
+        if _breaks_order(ctx.offsets, port_id, order):
             return port_id
     return None
+
+
+def _breaks_order(
+    offsets: Mapping[tuple[str, str], float], port_id: str, order: Sequence[str]
+) -> bool:
+    """Whether *offsets* fail to hold *order*'s lines on strictly rising lanes."""
+    keys = [(port_id, lid) for lid in order]
+    return any(key not in offsets for key in keys) or any(
+        offsets[b] <= offsets[a] + _OFFSET_EQ_TOLERANCE for a, b in zip(keys, keys[1:])
+    )
 
 
 def _hold_decided_orders(ctx: _OffsetCtx, phase: str) -> None:
     """Fail closed if *phase* broke a lane order 7b' decided.
 
-    7b' refuses every re-deal a phase it runs before is known to override
-    (:func:`_trial_overrides_an_owner`), so no phase checked here may move a
-    decided order.
+    7b' refuses every re-deal a later phase is known to override, and every
+    carry that would break an order it decided earlier in the same pass
+    (:func:`_trial_overrides_an_owner`), so no phase checked here, 7b'
+    included, may move a decided order.
     """
     port_id = _first_broken_decided_order(ctx)
     if port_id is not None:

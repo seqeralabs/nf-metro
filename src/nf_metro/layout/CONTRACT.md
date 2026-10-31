@@ -1592,8 +1592,9 @@ the planned-fan offsets that follow them own the lanes a fan plan states.
   same-row bypass ports, 7e's top-descent ports) is claimed with the order it
   holds after the family.
 - **Postcondition**: A port is re-dealt only when no other phase owns its
-  order. The re-deal is refused when its carry changes a claimed port's order,
-  when phase 10 reverses the port's section, when any phase 12 compaction seed
+  order. The re-deal is refused when its carry changes a claimed port's order
+  or breaks an order 7b' decided earlier in the same pass, when phase 10
+  reverses the port's section, when any phase 12 compaction seed
   (`_fan_port_compaction_seeds`, the seeds phase 12 itself takes), compacted
   on its own copy of the re-dealt offsets, would reorder the port, or when a
   geometry-owning fan plan's lanes at the port would reorder it. Each refusal
@@ -1602,8 +1603,8 @@ the planned-fan offsets that follow them own the lanes a fan plan states.
   run. Phase 12 compacts seed by seed and 14b exchanges arrival by arrival,
   each committing a write only when every decided order still holds; a
   declined write is counted in `decided_order_declines` (the decided order
-  wins). Phases 8, 8b, 9, 10, 12a, 13, 14, 14a, 14c, 14d, 14e and 15 fail
-  closed with `DecidedLaneOrderError` naming the phase and port.
+  wins). Phases 7b' itself, 8, 8b, 9, 10, 12a, 13, 14, 14a, 14c, 14d, 14e and
+  15 fail closed with `DecidedLaneOrderError` naming the phase and port.
 - **Related tests**: `tests/test_port_order_single_owner.py`,
   `tests/test_entry_port_approach_order.py`.
 - **Lifecycle:** invariant - the published offset map holds every lane order
