@@ -405,8 +405,12 @@ def _render(
 
 # -- drawn-route seam check -------------------------------------------------
 
-_INWARD = {"LEFT": (1.0, 0.0), "RIGHT": (-1.0, 0.0), "TOP": (0.0, 1.0)}
-_INWARD["BOTTOM"] = (0.0, -1.0)
+_INWARD: dict[str, Point] = {
+    "LEFT": (1.0, 0.0),
+    "RIGHT": (-1.0, 0.0),
+    "TOP": (0.0, 1.0),
+    "BOTTOM": (0.0, -1.0),
+}
 _TOL = 0.5
 
 
@@ -494,10 +498,11 @@ def _seam_defects(
                         connectors[tgt].setdefault(lid, run)
                     elif passes_through(tgt):
                         stack.append((tgt, run))
-        outward = tuple(-c for c in _INWARD[exit_port.side.name])
+        in_x, in_y = _INWARD[exit_port.side.name]
+        outward = (-in_x, -in_y)
         for entry_id, lines in connectors.items():
             inward = _INWARD[graph.ports[entry_id].side.name]
-            for kind, a, b in _pair_defects(lines, outward, inward):  # type: ignore[arg-type]
+            for kind, a, b in _pair_defects(lines, outward, inward):
                 defects.append(("connector", kind, exit_id, entry_id, a, b))
 
     for port_id, port in graph.ports.items():
