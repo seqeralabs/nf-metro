@@ -4139,12 +4139,11 @@ def _port_decides_lane_order(
     lines_by_source: defaultdict[str, set[str]] = defaultdict(set)
     for edge in graph.edges_to(port_id):
         lines_by_source[edge.source].add(edge.line_id)
-    port = graph.ports.get(port_id)
-    if port is None or not port.is_entry:
-        return False
+    port = graph.ports[port_id]
     direction = graph.section_for_port(port).direction
     return (
-        port.side in flow_port_sides(direction)
+        port.is_entry
+        and port.side in flow_port_sides(direction)
         and AxisFrame.axes_for_direction(direction)[1] == lane_axis.value
         and all(len(lines) < 2 for lines in lines_by_source.values())
     )

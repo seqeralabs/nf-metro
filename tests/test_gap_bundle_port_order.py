@@ -275,6 +275,12 @@ def test_a_port_order_reversing_two_lines_from_one_source_keeps_the_free_order()
     ctx = _ctx(graph, _port_offsets(a=4.0, b=8.0))
 
     assert _distinct_line_order(chans) == ["a", "c", "b"]
+    assert _port_lane_order_pairs(
+        ["a", "c", "b"],
+        [_slot_entry_reach(graph, [ch]) for ch in chans],
+        Direction.D,
+        ctx,
+    ) == [(2, 0)]
     assert _port_ordered_line_order(chans, ctx) == ["a", "c", "b"]
 
 
