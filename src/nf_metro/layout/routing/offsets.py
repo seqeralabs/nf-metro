@@ -13,7 +13,7 @@ from collections.abc import (
     Sequence,
 )
 from dataclasses import dataclass, field
-from itertools import combinations
+from itertools import combinations, product
 from typing import Literal, NamedTuple
 
 from nf_metro.layout.constants import (
@@ -31,6 +31,7 @@ from nf_metro.layout.geometry import (
     lanes_run_along_x,
     lanes_run_along_y,
     perpendicular_port_sides,
+    port_free_axis,
     station_lane_coord,
 )
 from nf_metro.layout.phases._common import (
@@ -3531,7 +3532,6 @@ def _feeder_lines(edges: Sequence[Edge]) -> dict[str, list[str]]:
 def _feeders_interleave(
     cur: Mapping[str, float], feeders: Mapping[str, Sequence[str]]
 ) -> bool:
-    """Whether some feeder's lines are not adjacent in the port's lane order."""
     slot_order = sorted(cur, key=cur.__getitem__)
     for lines in feeders.values():
         ranks = sorted(slot_order.index(lid) for lid in lines if lid in cur)
@@ -3629,9 +3629,7 @@ def _approach_lane_order(
 ) -> list[str] | None:
     """Port lines in ascending offset so no feeder's riser crosses another's.
 
-    *port_lane* and the arrivals' riser starts are frame lane readings, which
-    grow with the stored offset, so the order deals straight onto the port's
-    slots.  ``None`` when the arrivals cover other lines than the port carries,
+    ``None`` when the arrivals cover other lines than the port carries,
     a line is fed from both sides of the port, or the risers cannot nest.  A
     line fed twice is placed by the riser starting nearest the port.
     """
@@ -3695,11 +3693,8 @@ def _turns_a_feeder_over(
     for src, lines in feeders.items():
         if len(lines) < 2:
             continue
-        headings = {heading[(src, lid)] for lid in lines}
-        if len(headings) != 1:
-            return True
-        (direction,) = headings
-        if direction is None:
+        direction = heading[(src, lines[0])]
+        if direction is None or any(heading[(src, lid)] != direction for lid in lines):
             return True
         new = [lid for lid in order if lid in lines]
         at_source = sorted(
@@ -3755,14 +3750,22 @@ class _CarryFrame:
     A station stacks on the frame when its own lanes run along the frame's lane
     axis (a LEFT/RIGHT port, or a station of a section, stacks on y); only then
     does its stored offset move it across the lanes.  Lane readings carry the
-    frame's lane sign, as :class:`ArrivalLeg` does.
+    frame's lane sign, as :class:`ArrivalLeg` does.  *touched* are the stations
+    the carry from *port_id* reaches.
     """
 
     def __init__(
-        self, graph: MetroGraph, frame: AxisFrame, positive_fan: set[str]
+        self,
+        graph: MetroGraph,
+        frame: AxisFrame,
+        positive_fan: set[str],
+        port_id: str,
+        touched: Sequence[str],
     ) -> None:
         self.graph = graph
         self.frame = frame
+        self.port_id = port_id
+        self.touched = list(dict.fromkeys(touched))
         self._positive_fan = positive_fan
         self._signs: dict[str, float | None] = {}
 
@@ -3781,17 +3784,13 @@ class _CarryFrame:
             return None
         own = _section_lane_frame(graph, section, self._positive_fan)
         port = graph.ports.get(sid)
-        axis = (
-            own.secondary.name
-            if port is None
-            else ("y" if port.side in (PortSide.LEFT, PortSide.RIGHT) else "x")
-        )
+        axis = own.secondary.name if port is None else port_free_axis(port.side)
         if axis != self.frame.secondary.name:
             return 0.0
         return own.secondary_sign if own.secondary.name == axis else 1.0
 
     def stacks(self, sid: str) -> bool:
-        return bool(self.stacking_sign(sid))
+        return not is_bypass_v(sid) and bool(self.stacking_sign(sid))
 
     def along(self, sid: str) -> float:
         return self.frame.primary.get(self.graph.stations[sid])
@@ -3831,11 +3830,8 @@ def _line_neighbours(
 
 
 def _carry_order_flips(
-    view: _CarryFrame,
-    port_id: str,
-    touched: Sequence[str],
-    offsets: Mapping[tuple[str, str], float],
-) -> set[tuple[str, ...]]:
+    view: _CarryFrame, offsets: Mapping[tuple[str, str], float]
+) -> set[tuple[str | bool, ...]]:
     """Line pairs whose lane order at a carried station disagrees with the
     order they hold at the neighbours they run to or come from on one side.
 
@@ -3843,49 +3839,47 @@ def _carry_order_flips(
     The port's own feeder side is left out: the approach order judges it.
     """
     graph = view.graph
-    flips: set[tuple[str, ...]] = set()
-    for sid in dict.fromkeys(touched):
-        if not view.stacks(sid) or is_bypass_v(sid):
+    flips: set[tuple[str | bool, ...]] = set()
+    for sid in view.touched:
+        if not view.stacks(sid):
             continue
         for outgoing in (False, True):
-            if not outgoing and sid == port_id:
+            if not outgoing and sid == view.port_id:
                 continue
             nbrs = {
-                lid: _line_neighbours(graph, sid, lid, outgoing)
+                lid: found
                 for lid in graph.station_lines(sid)
+                if (found := _line_neighbours(graph, sid, lid, outgoing))
             }
-            ranked = sorted(lid for lid, found in nbrs.items() if found)
-            for i, a in enumerate(ranked):
-                for b in ranked[i + 1 :]:
-                    at_a = view.lane(sid, a, offsets)
-                    at_b = view.lane(sid, b, offsets)
-                    if at_a is None or at_b is None or abs(at_a - at_b) <= 1e-6:
+            at = {
+                lid: lane
+                for lid in nbrs
+                if (lane := view.lane(sid, lid, offsets)) is not None
+            }
+            for a, b in combinations(at, 2):
+                if abs(at[a] - at[b]) <= 1e-6:
+                    continue
+                for na, nb in product(nbrs[a], nbrs[b]):
+                    da = view.along(na) - view.along(sid)
+                    db = view.along(nb) - view.along(sid)
+                    if (da > 1 and db < -1) or (da < -1 and db > 1):
                         continue
-                    for na in nbrs[a]:
-                        for nb in nbrs[b]:
-                            da = view.along(na) - view.along(sid)
-                            db = view.along(nb) - view.along(sid)
-                            if (da > 1 and db < -1) or (da < -1 and db > 1):
-                                continue
-                            to_a = view.lane(na, a, offsets)
-                            to_b = view.lane(nb, b, offsets)
-                            if to_a is None or to_b is None or abs(to_a - to_b) <= 0.5:
-                                continue
-                            if (to_a - to_b) * (at_a - at_b) >= 0:
-                                continue
-                            if na == nb:
-                                edge = (sid, na) if outgoing else (na, sid)
-                                flips.add(("edge", *edge, a, b))
-                            else:
-                                side = "out" if outgoing else "in"
-                                flips.add((side, sid, a, na, b, nb))
+                    to_a = view.lane(na, a, offsets)
+                    to_b = view.lane(nb, b, offsets)
+                    if to_a is None or to_b is None or abs(to_a - to_b) <= 0.5:
+                        continue
+                    if (to_a - to_b) * (at[a] - at[b]) >= 0:
+                        continue
+                    if na == nb:
+                        edge = (sid, na) if outgoing else (na, sid)
+                        flips.add((*edge, a, b))
+                    else:
+                        flips.add((outgoing, sid, a, na, b, nb))
     return flips
 
 
 def _carry_sandwiches(
-    view: _CarryFrame,
-    touched: Sequence[str],
-    offsets: Mapping[tuple[str, str], float],
+    view: _CarryFrame, offsets: Mapping[tuple[str, str], float]
 ) -> set[tuple[str, str]]:
     """``(line, station)`` pairs where a carried line skips a station the bundle
     serves and, on that station's row, sits strictly between two of its lanes.
@@ -3896,8 +3890,8 @@ def _carry_sandwiches(
     """
     graph = view.graph
     found: set[tuple[str, str]] = set()
-    for u in set(touched):
-        if is_bypass_v(u) or not view.stacks(u):
+    for u in view.touched:
+        if not view.stacks(u):
             continue
         after_u = {edge.target for edge in graph.edges_from(u)}
         for lid in graph.station_lines(u):
@@ -3907,40 +3901,37 @@ def _carry_sandwiches(
                 lo, hi = sorted((view.along(u), view.along(w)))
                 before_w = {edge.source for edge in graph.edges_to(w)}
                 for v in after_u & before_w:
+                    v_lines = graph.station_lines(v)
                     if (
                         v in (u, w)
-                        or is_bypass_v(v)
                         or v in graph.ports
                         or v in graph.junctions
-                        or lid in graph.station_lines(v)
+                        or lid in v_lines
                         or not view.stacks(v)
                         or not lo + 1e-6 < view.along(v) < hi - 1e-6
                     ):
                         continue
-                    lanes = [offsets.get((v, k), 0.0) for k in graph.station_lines(v)]
+                    lanes = [offsets.get((v, k), 0.0) for k in v_lines]
                     if not lanes:
                         continue
+                    lowest, highest = min(lanes), max(lanes)
                     for end in (u, w):
-                        if abs(
-                            view.across(end) - view.across(v)
-                        ) <= _SAME_Y_TOLERANCE and min(lanes) < offsets.get(
-                            (end, lid), 0.0
-                        ) < max(lanes):
+                        if (
+                            abs(view.across(end) - view.across(v)) <= _SAME_Y_TOLERANCE
+                            and lowest < offsets.get((end, lid), 0.0) < highest
+                        ):
                             found.add((lid, v))
     return found
 
 
 def _carry_adds_crossings_or_sandwiches(
     view: _CarryFrame,
-    port_id: str,
-    touched: Sequence[str],
     cur: Mapping[tuple[str, str], float],
     trial: Mapping[tuple[str, str], float],
 ) -> bool:
-    return len(_carry_order_flips(view, port_id, touched, trial)) > len(
-        _carry_order_flips(view, port_id, touched, cur)
-    ) or len(_carry_sandwiches(view, touched, trial)) > len(
-        _carry_sandwiches(view, touched, cur)
+    return any(
+        (n := len(count(view, trial))) > 0 and n > len(count(view, cur))
+        for count in (_carry_order_flips, _carry_sandwiches)
     )
 
 
@@ -3983,8 +3974,6 @@ def _order_entry_ports_by_approach(ctx: _OffsetCtx) -> None:
     feeder's lines would move closer, or the carry would put two lines on one
     lane, add crossings between the stations it reaches and their neighbours,
     or sit a line that skips a station between two of that station's lanes.
-    The carry checks read only station positions and offsets, and count
-    against what the current offsets already have there.
 
     Drafts are drawn once per call on the offsets the phase started from, so
     every port is judged against the same routing; the vetoed ports are those
@@ -4035,9 +4024,7 @@ def _order_entry_ports_by_approach(ctx: _OffsetCtx) -> None:
         touched, trial = _carry_trial(ctx, port, new_offs)
         if _carry_shares_a_lane(graph, touched, trial) or (
             _carry_adds_crossings_or_sandwiches(
-                _CarryFrame(graph, frame, draft_ctx.positive_fan),
-                port_id,
-                touched,
+                _CarryFrame(graph, frame, draft_ctx.positive_fan, port_id, touched),
                 ctx.offsets,
                 trial,
             )

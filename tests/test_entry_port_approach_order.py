@@ -18,9 +18,11 @@ import cohort_shadow_oracle
 import pytest
 
 from nf_metro.api import render_string
-from nf_metro.layout.geometry import AxisFrame
+from nf_metro.layout.geometry import AxisFrame, flow_entry_side
 from nf_metro.layout.routing import offsets as offsets_module
+from nf_metro.layout.routing.context import _section_lane_frame
 from nf_metro.layout.routing.inter_section_handlers import ArrivalLeg, arrival_leg_of
+from nf_metro.parser.model import Edge, MetroGraph, Port, Section, Station
 from nf_metro.render import svg
 
 REGRESSIONS = Path(__file__).parent / "fixtures" / "regressions"
@@ -213,3 +215,92 @@ def test_arrival_leg_is_read_the_same_in_every_rotated_frame(
         base.riser_lane,
         flow_sign * base.lead_along,
     )
+
+
+_Lanes = dict[tuple[str, str], float]
+
+# A carry from entry port "p" in (along, lane) coordinates: each station's
+# position, each line's edges, the stations the carry reaches, and the offsets
+# held before and after it.
+_FLIP_CARRY = {
+    "stations": {"p": (0, 0), "m": (100, 0), "n1": (200, 60), "n2": (200, 0)},
+    "edges": [
+        ("p", "m", "a"),
+        ("p", "m", "b"),
+        ("m", "n1", "a"),
+        ("m", "n2", "b"),
+    ],
+    "touched": ["p", "m"],
+    "cur": {("p", "a"): 10, ("m", "a"): 10},
+    "trial": {("p", "b"): 10, ("m", "b"): 10},
+    "counts": (1, 0),
+}
+_SANDWICH_CARRY = {
+    "stations": {"p": (0, 0), "u": (100, 0), "v": (200, 0), "w": (300, 0)},
+    "edges": [
+        ("p", "u", "c"),
+        ("u", "w", "c"),
+        ("u", "v", "a"),
+        ("v", "w", "b"),
+    ],
+    "touched": ["p", "u"],
+    "cur": {("v", "b"): 20, ("p", "c"): 30, ("u", "c"): 30},
+    "trial": {("v", "b"): 20, ("p", "c"): 10, ("u", "c"): 10},
+    "counts": (0, 1),
+}
+
+
+def _carry_view(
+    carry: dict[str, Any], direction: str, positive_fan: set[str]
+) -> offsets_module._CarryFrame:
+    """The carry drawn in a section of *direction*: its coordinates are the
+    canonical (along, lane) pairs laid on that frame's axes and signs."""
+    graph = MetroGraph()
+    section = Section(id="s", name="s", direction=direction)
+    graph.add_section(section)
+    frame = _section_lane_frame(graph, section, positive_fan)
+    for sid, (along, lane) in carry["stations"].items():
+        pos = (frame.primary_sign * along, frame.secondary_sign * lane)
+        x, y = pos if frame.primary.name == "x" else pos[::-1]
+        if sid == "p":
+            graph.add_port(Port("p", "s", flow_entry_side(direction)))
+            graph.stations[sid].x, graph.stations[sid].y = x, y
+        else:
+            graph.register_station(Station(sid, sid, "s", x=x, y=y))
+    for source, target, line in carry["edges"]:
+        graph.add_edge(Edge(source, target, line))
+    return offsets_module._CarryFrame(graph, frame, positive_fan, "p", carry["touched"])
+
+
+@pytest.mark.parametrize(
+    ("direction", "positive_fan"),
+    [
+        pytest.param("LR", set(), id="LR"),
+        pytest.param("RL", set(), id="RL"),
+        pytest.param("TB", set(), id="TB"),
+        pytest.param("TB", {"s"}, id="TB-positive-fan"),
+        pytest.param("BT", set(), id="BT"),
+    ],
+)
+@pytest.mark.parametrize(
+    "carry", [_FLIP_CARRY, _SANDWICH_CARRY], ids=["order-flip", "sandwich"]
+)
+def test_carry_refusals_count_the_same_in_every_frame(
+    carry: dict[str, Any], direction: str, positive_fan: set[str]
+) -> None:
+    """A carry that crosses two lines or sandwiches a skipping line is counted
+    once, and its prior offsets none, in every frame a section can have: the
+    refusal reads lanes through the frame, not through raw x or y."""
+    view = _carry_view(carry, direction, positive_fan)
+    cur: _Lanes = carry["cur"]
+    trial: _Lanes = carry["trial"]
+
+    def counts(offsets: _Lanes) -> tuple[int, int]:
+        return (
+            len(offsets_module._carry_order_flips(view, offsets)),
+            len(offsets_module._carry_sandwiches(view, offsets)),
+        )
+
+    assert counts(cur) == (0, 0)
+    assert counts(trial) == carry["counts"]
+    assert offsets_module._carry_adds_crossings_or_sandwiches(view, cur, trial)
