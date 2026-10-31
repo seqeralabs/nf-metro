@@ -26,6 +26,7 @@ from nf_metro.layout.constants import (
 from nf_metro.layout.geometry import (
     cotravelling_lane_clearance,
     cotravelling_lanes_fuse,
+    lanes_run_along_y,
     spans_share_corridor,
 )
 from nf_metro.layout.route_plan import ExitTurnPlanId
@@ -3515,7 +3516,7 @@ def _materialize_trunk_slots(
         # reorder would remove: no single handler sees the whole channel to
         # check that.
         all_exempt = not any(not t.route.normalize_exempt for t in grp)
-        if all_exempt and not _band_order_deficits(grp):
+        if all_exempt and not _band_order_deficits(grp, ctx, strict=True):
             continue
         # Opposite-direction flows that share one inter-row channel must not be
         # smooshed into one tight bundle (issue #484): a leftward and a rightward
@@ -3578,7 +3579,7 @@ def _stack_trunk_bands(
     one that seats it at its current Y, and a stack whose anchors no single top
     seats together is abandoned.
     """
-    planned = [_plan_trunk_band(b) for b in bands]
+    planned = [_plan_trunk_band(b, ctx) for b in bands]
     gap = BUNDLE_TO_BUNDLE_CLEARANCE
     total = sum((n - 1) * step for _o, _t, n in planned) + gap * (len(bands) - 1)
     anchors = [t for b in bands for t in b if id(t.route) in fixed_route_ids]
@@ -3950,7 +3951,9 @@ def _expressed_band_orders(
         yield [sg for cluster in combo for sg in cluster]
 
 
-def _band_order_deficits(grp: list[_HTrunk]) -> list[tuple[float, int, int]]:
+def _band_order_deficits(
+    grp: list[_HTrunk], ctx: _RoutingCtx | None = None, *, strict: bool = False
+) -> list[tuple[float, int, int]]:
     """``(band y, current crossings, best achievable)`` per suboptimal band.
 
     One channel group splits into a same-direction band per traversal sign; a
@@ -3961,6 +3964,15 @@ def _band_order_deficits(grp: list[_HTrunk]) -> list[tuple[float, int, int]]:
     The band is scored at the cheapest order its Ys express, so a deficit is
     one no arrangement of its coincident slots can absorb: only moving a slot
     past a distinctly-placed one reaches ``best``.
+
+    With *ctx*, a band whose plan honours entry-port lane orders
+    (:func:`_ranked_band_order`) is scored over the orders those admit, and Ys
+    expressing none of them are a deficit at any crossing count.  *strict*
+    also counts a port-ordered slot pair realized at one Y: the coincidence
+    leaves their order unstated, so only a restack expresses it.  *strict*
+    also reports the free rule's deficit for a port-ordered band, so the port
+    order adds restack triggers but never removes one; the restack still lays
+    the band out in the port order.
     """
     out: list[tuple[float, int, int]] = []
     for sign in (1, -1):
@@ -3968,22 +3980,222 @@ def _band_order_deficits(grp: list[_HTrunk]) -> list[tuple[float, int, int]]:
         slots = _coincident_trunk_slots(band)
         if len(slots) < 2 or len(slots) > _MAX_BAND_PERMUTE:
             continue
+        held = _held_port_constraints(band, slots, ctx)
         feats = {id(sg): _trunk_slot_features(sg) for sg in slots}
         realized = sorted(slots, key=lambda sg: min(t.y for t in sg))
-        cur = min(
-            _band_order_crossings(order, feats)
-            for order in _expressed_band_orders(realized)
-        )
+        expressed = list(_expressed_band_orders(realized))
+        honoured = [o for o in expressed if _honours_port_order(o, slots, held)]
+        cur = min(_band_order_crossings(o, feats) for o in honoured or expressed)
         best = min(
-            _band_order_crossings(list(p), feats) for p in itertools.permutations(slots)
+            _band_order_crossings(list(p), feats)
+            for p in itertools.permutations(slots)
+            if _honours_port_order(list(p), slots, held)
         )
-        if best < cur:
+        fused = strict and any(
+            abs(min(t.y for t in slots[a]) - min(t.y for t in slots[b]))
+            <= COORD_TOLERANCE
+            for a, b in held
+        )
+        free_deficit = (
+            strict
+            and bool(held)
+            and min(
+                _band_order_crossings(list(p), feats)
+                for p in itertools.permutations(slots)
+            )
+            < min(_band_order_crossings(o, feats) for o in expressed)
+        )
+        if best < cur or not honoured or fused or free_deficit:
             out.append((min(t.y for t in band), cur, best))
     return out
 
 
+def _held_port_constraints(
+    band: list[_HTrunk], slots: list[list[_HTrunk]], ctx: _RoutingCtx | None
+) -> list[tuple[int, int]]:
+    """The entry-port slot constraints *band*'s plan honours, else ``[]``."""
+    constraints = _band_port_constraints(slots, ctx)
+    if not constraints:
+        return []
+    span_of: _SpanOf = {id(sg): _slot_span(sg) for sg in slots}
+    return _ranked_band_order(band, slots, span_of, constraints)[1]
+
+
+def _honours_port_order(
+    order_top_to_bottom: list[list[_HTrunk]],
+    slots: list[list[_HTrunk]],
+    constraints: list[tuple[int, int]],
+) -> bool:
+    """Whether every ``(a, b)`` constraint has ``slots[a]`` above ``slots[b]``."""
+    pos = {id(sg): k for k, sg in enumerate(order_top_to_bottom)}
+    return all(pos[id(slots[a])] < pos[id(slots[b])] for a, b in constraints)
+
+
+def _band_port_constraints(
+    slots: list[list[_HTrunk]], ctx: _RoutingCtx | None
+) -> list[tuple[int, int]]:
+    """Slot pairs ``(a, b)`` an entry port's lane order puts *a* above *b*.
+
+    Two slots of distinct lines that both reach one LEFT/RIGHT entry of a
+    lanes-along-Y section from disjoint sources (:func:`_slot_entry_reach`)
+    turn off the band, run along one descent and turn into that port.  The two
+    turns nest the same lane outermost, so the band's top-to-bottom order is
+    fixed by which line holds the larger port offset and whether the band runs
+    the way the port is entered.  The first such port in id order decides a
+    pair.  A port that one source feeds two lines directly carries a bundle
+    whose order its source pins, so it decides nothing.
+    """
+    if ctx is None or not ctx.station_offsets:
+        return []
+    graph, offsets = ctx.graph, ctx.station_offsets
+    sign_x = slots[0][0].sign_x
+    reach = [_slot_entry_reach(graph, sg) for sg in slots]
+    out: list[tuple[int, int]] = []
+    for i, j in itertools.combinations(range(len(slots)), 2):
+        line_i, line_j = slots[i][0].route.line_id, slots[j][0].route.line_id
+        if line_i == line_j:
+            continue
+        for port_id in sorted(reach[i].keys() & reach[j].keys()):
+            if reach[i][port_id] & reach[j][port_id]:
+                continue
+            if not _port_decides_lane_order(graph, port_id):
+                continue
+            off_i = offsets.get((port_id, line_i))
+            off_j = offsets.get((port_id, line_j))
+            if off_i is None or off_j is None or abs(off_i - off_j) <= COORD_TOLERANCE:
+                continue
+            run_in = 1 if graph.ports[port_id].side is PortSide.LEFT else -1
+            out.append((i, j) if (off_i > off_j) != (sign_x == run_in) else (j, i))
+            break
+    return out
+
+
+def _slot_entry_reach(graph: MetroGraph, slot: list[_HTrunk]) -> dict[str, set[str]]:
+    """``{port id: trunk sources}`` for the ports one slot's line leads to.
+
+    A trunk reaches its own edge's target and every target its source sends
+    the same line to, each taken as the port it is or the port a single
+    same-line edge leads to from it (one merge or junction hop).
+    """
+    reach: dict[str, set[str]] = {}
+    for trunk in slot:
+        edge = trunk.route.edge
+        line = trunk.route.line_id
+        targets = [edge.target] + [
+            e.target for e in graph.edges_from(edge.source) if e.line_id == line
+        ]
+        for target in targets:
+            if target not in graph.ports:
+                onward = [
+                    e.target for e in graph.edges_from(target) if e.line_id == line
+                ]
+                if len(onward) != 1 or onward[0] not in graph.ports:
+                    continue
+                target = onward[0]
+            reach.setdefault(target, set()).add(edge.source)
+    return reach
+
+
+def _port_decides_lane_order(graph: MetroGraph, port_id: str) -> bool:
+    """Whether *port_id* is a side entry whose lanes stack on Y and no source
+    sends it more than one line."""
+    lines_by_source: defaultdict[str, set[str]] = defaultdict(set)
+    for edge in graph.edges_to(port_id):
+        lines_by_source[edge.source].add(edge.line_id)
+    return (
+        is_side_entry_port(graph, port_id)
+        and lanes_run_along_y(graph.section_for_port(graph.ports[port_id]).direction)
+        and all(len(lines) < 2 for lines in lines_by_source.values())
+    )
+
+
+def _ranked_band_order(
+    band: list[_HTrunk],
+    slots: list[list[_HTrunk]],
+    span_of: _SpanOf,
+    constraints: list[tuple[int, int]],
+) -> tuple[list[list[_HTrunk]], list[tuple[int, int]]]:
+    """The band's best top-to-bottom slot order and the constraints it honours.
+
+    Orders rank by crossings, then packed looseness, then heuristic position
+    (see :func:`_plan_trunk_band`).  The best order honouring *constraints*
+    replaces the free best unless it reverses two slots that leave one source
+    station, wedges an unrelated slot between such a pair where the free order
+    does not, or packs onto more tracks: each of those costs the band more
+    than the port order it buys.
+    """
+    heuristic = _heuristic_slot_order(slots)
+    # `_restack_trunk_band` lays slot 0 at the channel-interior extreme: the
+    # BOTTOM (largest y) for a downward dip, the TOP for an upward dip.  Score
+    # crossings in top-to-bottom space, then convert the winner back to slots.
+    dips = band[0].dips_down
+    h_ttb = list(reversed(heuristic)) if dips else heuristic
+    h_rank = {id(sg): r for r, sg in enumerate(h_ttb)}
+    feats = {id(sg): _trunk_slot_features(sg) for sg in slots}
+
+    def _tracks(perm: list[list[_HTrunk]]) -> list[int]:
+        return _pack_band_tracks(perm if dips else list(reversed(perm)), span_of)
+
+    def _key(perm: list[list[_HTrunk]]) -> tuple[float, ...]:
+        # Crossings first; then packed looseness so tight bundles beat split
+        # ones; then heuristic position.  The heuristic scores (.., 0, 1, ..),
+        # the smallest tuple, so a crossing- and looseness-optimal band keeps
+        # the widest-reaching slot outermost.
+        s2d = perm if dips else list(reversed(perm))
+        looseness = _band_looseness(s2d, _pack_band_tracks(s2d, span_of), span_of)
+        return (
+            _band_order_crossings(perm, feats),
+            looseness,
+            *(h_rank[id(sg)] for sg in perm),
+        )
+
+    perms = [list(p) for p in itertools.permutations(h_ttb)]
+    free = min(perms, key=_key)
+    admitted = (
+        [p for p in perms if _honours_port_order(p, slots, constraints)]
+        if constraints
+        else []
+    )
+    if not admitted:
+        return free, []
+    ported = min(admitted, key=_key)
+    sources = [{t.route.edge.source for t in sg} for sg in slots]
+    shared_pairs = [
+        (i, j)
+        for i, j in itertools.combinations(range(len(slots)), 2)
+        if slots[i][0].route.line_id != slots[j][0].route.line_id
+        and sources[i] & sources[j]
+    ]
+    shared = {frozenset(pair) for pair in shared_pairs}
+
+    def _positions(perm: list[list[_HTrunk]]) -> list[int]:
+        pos = {id(sg): k for k, sg in enumerate(perm)}
+        return [pos[id(sg)] for sg in slots]
+
+    def _interleaved(pos: list[int]) -> bool:
+        return any(
+            min(pos[i], pos[j]) < pos[k] < max(pos[i], pos[j])
+            and frozenset((k, i)) not in shared
+            and frozenset((k, j)) not in shared
+            for i, j in shared_pairs
+            for k in range(len(slots))
+        )
+
+    free_pos, ported_pos = _positions(free), _positions(ported)
+    reverses_shared = any(
+        (free_pos[i] < free_pos[j]) != (ported_pos[i] < ported_pos[j])
+        for i, j in shared_pairs
+    )
+    splits_shared = _interleaved(ported_pos) and not _interleaved(free_pos)
+    taller = max(_tracks(ported)) > max(_tracks(free))
+    if reverses_shared or splits_shared or taller:
+        return free, []
+    return ported, constraints
+
+
 def _plan_trunk_band(
     band: list[_HTrunk],
+    ctx: _RoutingCtx | None = None,
 ) -> tuple[list[list[_HTrunk]], dict[int, int], int]:
     """Order one same-direction band into concentric slots and pack its tracks.
 
@@ -4004,44 +4216,34 @@ def _plan_trunk_band(
     OUTERMOST.  A fully-overlapping bundle packs to one concentric stack whose
     looseness is zero for every order, so the width-only tie-break alone
     decides it.
+
+    With *ctx*, slots whose lines go on into one entry port take the order
+    that port's lanes need (:func:`_band_port_constraints`) unless it costs
+    the band more than that (:func:`_ranked_band_order`).  The order is a
+    function of the band, the graph and the station offsets alone, so every
+    pass that restacks the band reaches the same one.
     """
     slot_groups = _coincident_trunk_slots(band)
     span_of: _SpanOf = {id(sg): _slot_span(sg) for sg in slot_groups}
-    heuristic = sorted(
-        slot_groups,
+    if len(slot_groups) < 2 or len(slot_groups) > _MAX_BAND_PERMUTE:
+        heuristic = _heuristic_slot_order(slot_groups)
+        return heuristic, *_packed_track_map(heuristic, span_of)
+    constraints = _band_port_constraints(slot_groups, ctx)
+    best_ttb = _ranked_band_order(band, slot_groups, span_of, constraints)[0]
+    order = list(reversed(best_ttb)) if band[0].dips_down else best_ttb
+    return order, *_packed_track_map(order, span_of)
+
+
+def _heuristic_slot_order(slots: list[list[_HTrunk]]) -> list[list[_HTrunk]]:
+    """Slots widest-reaching first, then leftmost, then highest."""
+    return sorted(
+        slots,
         key=lambda sg: (
             -max(t.x_hi - t.x_lo for t in sg),
             min(t.x_lo for t in sg),
             min(t.y for t in sg),
         ),
     )
-    if len(slot_groups) < 2 or len(slot_groups) > _MAX_BAND_PERMUTE:
-        return heuristic, *_packed_track_map(heuristic, span_of)
-
-    # `_restack_trunk_band` lays slot 0 at the channel-interior extreme: the
-    # BOTTOM (largest y) for a downward dip, the TOP for an upward dip.  Score
-    # crossings in top-to-bottom space, then convert the winner back to slots.
-    dips = band[0].dips_down
-    h_ttb = list(reversed(heuristic)) if dips else heuristic
-    h_rank = {id(sg): r for r, sg in enumerate(h_ttb)}
-    feats = {id(sg): _trunk_slot_features(sg) for sg in slot_groups}
-
-    def _key(perm: list[list[_HTrunk]]) -> tuple[float, ...]:
-        # Crossings first; then packed looseness so tight bundles beat split
-        # ones; then heuristic position.  The heuristic scores (.., 0, 1, ..),
-        # the smallest tuple, so a crossing- and looseness-optimal band keeps
-        # the widest-reaching slot outermost.
-        s2d = perm if dips else list(reversed(perm))
-        looseness = _band_looseness(s2d, _pack_band_tracks(s2d, span_of), span_of)
-        return (
-            _band_order_crossings(perm, feats),
-            looseness,
-            *(h_rank[id(sg)] for sg in perm),
-        )
-
-    best_ttb = min((list(p) for p in itertools.permutations(h_ttb)), key=_key)
-    order = list(reversed(best_ttb)) if dips else best_ttb
-    return order, *_packed_track_map(order, span_of)
 
 
 def _suboptimal_trunk_bands(
@@ -4076,7 +4278,7 @@ def _suboptimal_trunk_bands(
     for grp in groups:
         if len({id(t.route) for t in grp}) < 2:
             continue
-        out.extend(_band_order_deficits(grp))
+        out.extend(_band_order_deficits(grp, ctx))
     return out
 
 
