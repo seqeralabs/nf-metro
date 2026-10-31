@@ -1570,11 +1570,44 @@ in pipeline order.
 ## Post-layout offset boundary: late per-line offset phases
 
 `compute_station_offsets` (`layout/routing/offsets.py`) assigns one lane per
-`(station, line)` in numbered phases; its docstring lists every phase in order.
-The two below are recorded here because they move lanes a whole section at a
-time, after each base, station, port, junction and rail-boundary phase has
-settled, and because the planned-fan offsets that follow them own the lanes a
-fan plan states.
+`(station, line)` in numbered phases, each run once per call; its docstring
+lists every phase in order. Phase 7b' is recorded here because it decides an
+entry port's lane order that every later phase must hold. Phases 14b and 14c
+are recorded because they move lanes a whole section at a time, after each
+base, station, port, junction and rail-boundary phase has settled, and because
+the planned-fan offsets that follow them own the lanes a fan plan states.
+
+### Phase 7b': approach-derived entry-port order
+
+- **Purpose**: At a multi-feeder flow-side entry port whose feeders' lines
+  interleave, deal the lanes in the order the feeders' risers turn in without
+  crossing, and carry that order along the bundle.
+- **Helpers**: `_order_entry_ports_by_approach` decides each port;
+  `_trial_overrides_an_owner` refuses a re-deal another phase owns;
+  `_claim_family_port_orders` records the entry-port order family's claims;
+  `_hold_decided_orders` and `_commit_unless_a_decided_order_breaks` hold the
+  decided orders through the later phases.
+- **Precondition**: Non-compact mode. The entry-port order family (7c, 7d, 7e,
+  7f) has run, and each entry port it moved or judged (7c's convergence and
+  same-row bypass ports, 7e's top-descent ports) is claimed with the order it
+  holds after the family.
+- **Postcondition**: A port is re-dealt only when no other phase owns its
+  order. The re-deal is refused when its carry changes a claimed port's order,
+  when phase 10 reverses the port's section, when any phase 12 compaction seed
+  (`_fan_port_compaction_seeds`, the seeds phase 12 itself takes), compacted
+  on its own copy of the re-dealt offsets, would reorder the port, or when a
+  geometry-owning fan plan's lanes at the port would reorder it. Each refusal
+  reads offsets only: no routing, compile or solve.
+- **Invariants preserved**: Every order 7b' decides holds to the end of the
+  run. Phase 12 compacts seed by seed and 14b exchanges arrival by arrival,
+  each committing a write only when every decided order still holds; a
+  declined write is counted in `decided_order_declines` (the decided order
+  wins). Phases 8, 8b, 9, 10, 12a, 13, 14, 14a, 14c, 14d, 14e and 15 fail
+  closed with `DecidedLaneOrderError` naming the phase and port.
+- **Related tests**: `tests/test_port_order_single_owner.py`,
+  `tests/test_entry_port_approach_order.py`.
+- **Lifecycle:** invariant - the published offset map holds every lane order
+  7b' decided.
 
 ### Phase 14b: entry-arrival lane slotting
 
@@ -1599,14 +1632,20 @@ fan plan states.
   the swap propagates along the section's horizontal runs. Outside the section
   the exchange continues until the pair stops travelling together, so the
   bundle's lead-in order at the divergence junction and its peel order at the
-  destination agree. Every station keeps one lane per line it carries.
+  destination agree. Every station keeps one lane per line it carries. An
+  exchange never writes a lane order phase 7b' decided: the walk beyond the
+  exit does not take a section holding a decided port that only one line of
+  the pair reaches from where the walk is, and an exchange that would still
+  break a decided order (the pair entering such a section together) is
+  declined whole and counted.
 - **Invariants preserved**: Station, port and junction coordinates; the number
   of lanes each station spreads; the order of every line outside the exchanged
   pair. The approach lane is read as a stored lane offset, which names the same
   lane at the consumer only while the feeder's trunk is level with it, so a
   stepped seam is declined rather than converted through screen coordinates.
 - **Related tests**:
-  `test_entry_arrival_permutes_lanes_rather_than_sharing_one`.
+  `test_entry_arrival_permutes_lanes_rather_than_sharing_one`,
+  `test_exchange_does_not_enter_a_decided_section_one_line_reaches`.
 - **Lifecycle:** invariant - the arriving line holds its approach lane in the
   published offset map: phase 14c can only relabel a whole section's levels
   rigidly, which preserves the exchange.

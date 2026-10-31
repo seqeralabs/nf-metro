@@ -123,13 +123,14 @@ class _OffsetCtx:
     # Section -> flat-frame component root, populated by section-local re-indexing
     frame_roots: dict[str, str] = field(default_factory=dict)
     fan_owned_offsets: dict[tuple[str, str], float] = field(default_factory=dict)
-    # Entry ports the order family (7c-7f) judged, the order each such port or
-    # any port the family moved holds once the family has run, the lane order
-    # 7b' gave each port it re-slotted, and the writes phases 12 and 14b
-    # declined to keep those orders.
+    # Entry ports the order family (7c-7f) judged, whether or not it moved them.
     order_family_ports: set[str] = field(default_factory=set)
+    # Lane order of each entry port the family judged or moved, after the family.
     port_order_claims: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # Lane order 7b' gave each port it re-slotted.
     approach_orders: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # Writes declined because they would break an ``approach_orders`` entry,
+    # per phase.
     decided_order_declines: Counter[str] = field(default_factory=Counter)
 
 
@@ -2791,9 +2792,10 @@ def _recompact_fan_port_bordering_stations(
     and recompacts just those, via :func:`_compact_one_seed_with_retry`.
 
     Each seed is one write.  A seed whose write would break a lane order phase
-    7b' decided is not committed, and is counted: the decided order wins,
-    since 7b' already refused every re-deal one of these seeds would reorder
-    (:func:`_compaction_seed_reordering`).
+    7b' decided is not committed, and is counted: the decided order wins.
+    7b' judged each seed alone on its re-deal
+    (:func:`_compaction_seed_reordering`), so this only meets a seed whose
+    section phases 8-10 or an earlier seed changed since.
     """
     if ctx.compact:
         return
@@ -5208,7 +5210,8 @@ def _top_descent_order(ctx: _OffsetCtx, port_id: str, port: Port) -> list[str] |
     Lines by the grid row they arrive from, top row first, where the port is
     fed level from its own row and descending from a row above; ``None``
     outside 7e's case (a convergence bundle, a single feeder across a
-    reversing seam, a feeder right of the port's column, or no descent).
+    reversing seam, a feeder right of the port's column, fewer than two
+    lines, or no descent).
     """
     graph = ctx.graph
     if _convergence_feeders(graph, port_id) is not None:
