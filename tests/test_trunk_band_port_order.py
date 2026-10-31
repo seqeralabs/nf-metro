@@ -210,6 +210,22 @@ def test_port_ordered_slots_at_one_y_are_a_restack_deficit_only_when_strict():
     assert _band_order_deficits(band, ctx, strict=True) == [(100.0, 0, 0)]
 
 
+def test_a_port_order_costing_crossings_keeps_the_free_restack_trigger():
+    """``b``'s risers cross ``a``'s run when ``b`` sits below it, which the port
+    order asks for.  The band honours that order, so the guard finds nothing
+    to improve, but the restack gate still fires where the free rule would."""
+    graph = _graph(("sa", PORT, "a"), ("sb", PORT, "b"))
+    band = [
+        _trunk("a", "sa", PORT, y=100.0, x_lo=0.0, x_hi=300.0),
+        _trunk("b", "sb", PORT, y=104.0, x_lo=0.0, x_hi=100.0),
+    ]
+    ctx = _ctx(graph, {"a": 4.0, "b": -4.0})
+
+    assert _band_order_deficits(band) == [(100.0, 1, 0)]
+    assert _band_order_deficits(band, ctx) == []
+    assert _band_order_deficits(band, ctx, strict=True) == [(100.0, 1, 1)]
+
+
 def test_a_band_stacked_against_its_port_order_is_a_deficit():
     """Crossings cannot tell the two stackings apart; the port order can."""
     graph = _graph(("sa", PORT, "a"), ("sb", PORT, "b"))
