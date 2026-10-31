@@ -1,12 +1,12 @@
 """Tier C shadow oracle for the corridor-cohort plan.
 
 The render path compiles the corridor cohorts inside one routing observation
-and, unless a convergence grant moved a trunk, draws a different observation.
-This oracle renders a map the way the plan is meant to be drawn instead: every
-compiled plan is published at its compile site, the compiling observation is
-the one drawn, and the drawn routes are then held to the published plan on
-every owned segment point and corner, and on every corner the plan sized,
-after the render invariants have run.
+and draws that observation where it accepted a plan and owes no clearance, or
+a convergence grant moved a trunk. This oracle renders every map that way:
+every compiled plan is published at its compile site, the compiling
+observation is the one drawn, and the drawn routes are then held to the
+published plan on every owned segment point and corner, and on every corner
+the plan sized, after the render invariants have run.
 
 It is a test harness, not a render stage: the substitutions live only inside
 :func:`shadow_observation`, so production renders never take this path.
