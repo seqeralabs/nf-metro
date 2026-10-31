@@ -97,9 +97,10 @@ WITHIN_TOLERANCE_OVERHANGS: frozenset[tuple[str, int, int]] = frozenset(
     }
 )
 
-# The engine's own drawn pass seats this riser outside its reserved band, and the
-# map aborts in production, so the overhang is that pass's geometry rather than a
-# claim a plan positioned.  Exempt by identity, from the bound below only.
+# Claims exempt from the in-band bound below, and from nothing else.  The
+# engine's drawn pass seats this riser outside its reserved band, and the map
+# fails the curve invariant, so the overhang is that pass's own geometry rather
+# than a claim a plan positioned.
 DRAWN_PASS_OUT_OF_BAND_CLAIMS: frozenset[tuple[str, int, int]] = frozenset(
     {
         ("tests/fixtures/regressions/cohort_grant_beside_seated_runs.mmd", 17, 2),

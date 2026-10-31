@@ -123,10 +123,12 @@ graph LR
 """
 
 
-def _render(text: str) -> str:
+def _render(text: str, source_dir: Path | None = None) -> str:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        return render_string(text)
+        return render_string(
+            text, source_dir="" if source_dir is None else str(source_dir)
+        )
 
 
 def _points_by_edge(
@@ -247,7 +249,8 @@ UNSETTLED_MAPS = {
     "genomeassembly": ROOT / "examples" / "genomeassembly.mmd",
 }
 
-# Unsettled, and its compile grants a convergence corridor that moves a trunk.
+# A map no envelope settlement re-routes whose compile grants a convergence
+# corridor that moves a trunk, so its ungranted replay runs too.
 UNSETTLED_CONVERGENCE_GRANT = """\
 %%metro line: m0 | L0 | #e6194b
 %%metro line: m1 | L1 | #3cb44b
@@ -303,19 +306,21 @@ def _observe_last_settle(
 ) -> tuple[list[_Observed], svg._SettledRenderGeometry]:
     """Render *text*; return the last settle call's observations and result."""
     observed: list[_Observed] = []
-    bands_read: list[ReservedCorridors] = []
-    settled: list[svg._SettledRenderGeometry] = []
+    bands_read: ReservedCorridors | None = None
+    settled: svg._SettledRenderGeometry | None = None
     real_observe = svg.observe_route_edges_centred
     real_context = routing_core._build_routing_context
     real_settle = svg._settle_render_geometry
 
     def context(*args, **kwargs):
+        nonlocal bands_read
         bands = kwargs.get("reserved_bands")
-        bands_read.append(ReservedCorridors() if bands is None else bands)
+        bands_read = ReservedCorridors() if bands is None else bands
         return real_context(*args, **kwargs)
 
     def observe(graph, **kwargs):
-        bands_read.clear()
+        nonlocal bands_read
+        bands_read = None
         observation = real_observe(graph, **kwargs)
         observed.append(
             _Observed(
@@ -323,24 +328,23 @@ def _observe_last_settle(
                 kwargs.get("allow_convergence_clearance_requirements", False),
                 _points_by_edge(observation.routes),
                 observation.plan,
-                bands_read[0] if len(bands_read) == 1 else None,
+                bands_read,
             )
         )
         return observation
 
     def settle(*args, **kwargs):
+        nonlocal settled
         observed.clear()
-        result = real_settle(*args, **kwargs)
-        settled.append(result)
-        return result
+        settled = real_settle(*args, **kwargs)
+        return settled
 
     monkeypatch.setattr(routing_core, "_build_routing_context", context)
     monkeypatch.setattr(svg, "observe_route_edges_centred", observe)
     monkeypatch.setattr(svg, "_settle_render_geometry", settle)
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        render_string(text, source_dir=str(source_dir))
-    return observed, settled[-1]
+    _render(text, source_dir)
+    assert settled is not None
+    return observed, settled
 
 
 def _compiling_index(observed: list[_Observed]) -> int:

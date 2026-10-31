@@ -2151,9 +2151,9 @@ They are design evidence, not part of this specification.
   consumed, with its translations, that may publish clearance requirements.
   The replay reads exactly that pass's inputs (station coordinates, section
   boxes, bypass-label obstacles, station offsets and the reserved bands it
-  seated corridors in), not the geometry the label pass after it grew: that
-  pass seated its corridors against those inputs, and a box the ledger never
-  saw can leave a corridor with no band that fits. The bands are the ones a
+  seated corridors in), not the boxes the label pass after it grows: that
+  pass seated its corridors against the inputs it read, and a box the ledger
+  never saw can leave a corridor with no band that fits. The bands are the ones a
   settlement re-route measured from the ledger it consumed, and none where
   settlement moved nothing and nothing was re-routed; the replay without the
   grant reads the same ones. It is the only pass that runs the corridor-cohort

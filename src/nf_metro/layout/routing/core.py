@@ -880,8 +880,6 @@ def route_edges_centred(
     station_offsets: dict[tuple[str, str], float] | None = None,
     *,
     offset_step: float | None = None,
-    reservations: RoutePlan | None = None,
-    reservation_translations: tuple[ReservationCoordinateTranslation, ...] = (),
 ) -> list[RoutedPath]:
     """Route, then settle the bubble-centred markers onto ``graph.stations``.
 
@@ -903,8 +901,6 @@ def route_edges_centred(
         station_offsets,
         observe_plan=False,
         offset_step=offset_step,
-        reservations=reservations,
-        reservation_translations=reservation_translations,
     )
     _settle_station_moves(graph, moves)
     return routes

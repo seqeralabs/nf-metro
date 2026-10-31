@@ -2095,14 +2095,13 @@ def _settle_render_geometry(
       the granted convergences alone.  Otherwise it is drawn whenever it
       accepted a plan and published no requirement, as the last routing pass
       replayed and seated by that plan.  Any other observation's geometry is
-      discarded.  A
-      ``CORRIDOR_COHORT_APERTURE`` requirement it publishes is settled once
-      against that observed plan, :func:`_assert_aperture_grant_closes` proves
-      from the settlement's own translations that the grant pays every
-      measured deficit, and a re-route consuming the plan, starting from the
-      station x the last routing pass read translated by the grant, draws the
-      result.  Any deficit the grant leaves is an invariant failure rather
-      than a second batch.
+      discarded.  A ``CORRIDOR_COHORT_APERTURE`` requirement it publishes is
+      settled once against that observed plan,
+      :func:`_assert_aperture_grant_closes` proves from the settlement's own
+      translations that the grant pays every measured deficit, and a re-route
+      consuming the plan, starting from the station x the last routing pass
+      read translated by the grant, draws the result.  Any deficit the grant
+      leaves is an invariant failure rather than a second batch.
 
     Rail-mode sections run a separate layout pipeline whose per-line centrelines
     are anchored during ``compute_layout`` and cannot be re-derived from a
@@ -2430,10 +2429,10 @@ def _settle_render_geometry(
     # The corridor-cohort compiler runs only on a pass that both holds a prior
     # ledger and may publish a clearance requirement, and only a ledger settled
     # to its minimum widths compiles without a spurious aperture shortfall; this
-    # observation is that pass.  It replays the inputs of the routing pass it
-    # follows rather than deriving fresh ones: the label pass since then grew
-    # section boxes that pass never seated the ledger's corridors against, and
-    # routing against them can leave a corridor with no band that fits.  The
+    # observation is that pass.  It replays the inputs the routing pass it
+    # follows read, not the section boxes the label pass after that one grows:
+    # that pass seated its corridors against the boxes it read, and routing
+    # against grown ones can leave a corridor with no band that fits.  The
     # reserved bands are among those inputs, so the observation and its
     # ungranted replay seat corridors in exactly the bands the drawn pass did,
     # none where no settlement re-route consumed the ledger; bands the drawn
