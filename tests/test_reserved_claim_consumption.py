@@ -9,8 +9,10 @@ positive_side_clearance]``.  A claimed corridor drawn outside that band was
 positioned by a geometry-derived fallback instead of its reservation, which is
 exactly what the reservation ledger exists to forbid.
 
-The whole corpus satisfies that, and every fixture is held to it with no
-exceptions. The slack is a
+Every claim in the corpus is held to that bound except those listed in
+``DRAWN_PASS_OUT_OF_BAND_CLAIMS``, whose measured overhang is pinned by
+``test_drawn_pass_exemptions_are_the_measured_overhang``; adding an exception
+is a decision to be argued for. The slack is a
 :func:`~nf_metro.layout.route_reservations.measured_distance`, so a run drawn
 flush against a band edge scores as flush rather than as overrunning it by the
 floating-point residue from subtracting two canvas coordinates.
