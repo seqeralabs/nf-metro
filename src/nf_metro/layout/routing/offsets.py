@@ -12,7 +12,8 @@ from collections.abc import (
     Mapping,
     Sequence,
 )
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from functools import partial
 from itertools import combinations, product
 from typing import Literal, NamedTuple
 
@@ -122,10 +123,15 @@ class _OffsetCtx:
     # Section -> flat-frame component root, populated by section-local re-indexing
     frame_roots: dict[str, str] = field(default_factory=dict)
     fan_owned_offsets: dict[tuple[str, str], float] = field(default_factory=dict)
-    # Entry ports phase 7b' leaves alone, and the lane order it gave each
-    # port it re-slotted.
-    approach_vetoed: frozenset[str] = frozenset()
+    # Entry ports the order family (7c-7f) judged, whether or not it moved them.
+    order_family_ports: set[str] = field(default_factory=set)
+    # Lane order of each entry port the family judged or moved, after the family.
+    port_order_claims: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # Lane order 7b' gave each port it re-slotted.
     approach_orders: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # Writes declined because they would break an ``approach_orders`` entry,
+    # per phase.
+    decided_order_declines: Counter[str] = field(default_factory=Counter)
 
 
 @dataclass(frozen=True)
@@ -143,6 +149,18 @@ class _LinearEntryFrame:
 
 class LaneFrameInvariantError(RuntimeError):
     """A materialized linear entry frame violated its ownership contract."""
+
+
+class DecidedLaneOrderError(RuntimeError):
+    """A phase after 7b' broke a lane order 7b' decided at an entry port."""
+
+    def __init__(self, phase: str, port_id: str) -> None:
+        super().__init__(
+            f"offset phase {phase} broke the lane order phase 7b' decided "
+            f"at {port_id!r}"
+        )
+        self.phase = phase
+        self.port_id = port_id
 
 
 @dataclass(frozen=True)
@@ -2772,9 +2790,30 @@ def _recompact_fan_port_bordering_stations(
     the exact precondition
     :func:`invariants.check_station_bundle_contiguous_at_fan_port` checks --
     and recompacts just those, via :func:`_compact_one_seed_with_retry`.
+
+    Each seed is one write.  A seed whose write would break a lane order phase
+    7b' decided is not committed, and is counted: the decided order wins.
+    7b' judged each seed alone, on its re-deal's offsets
+    (:func:`_compaction_seed_reordering`); here a seed meets the offsets that
+    phases 8-10 and the earlier seeds left, and a tie breaks an order too.
     """
     if ctx.compact:
         return
+    for seed in _fan_port_compaction_seeds(ctx):
+        _commit_unless_a_decided_order_breaks(
+            ctx,
+            "12",
+            partial(
+                _recompact_seed,
+                seed=seed,
+                same_y_adj=same_y_adj,
+                sec_layer_stations=sec_layer_stations,
+            ),
+        )
+
+
+def _fan_port_compaction_seeds(ctx: _OffsetCtx) -> list[tuple[str, str]]:
+    """Phase 12's ``(section, station)`` seeds on *ctx*'s offsets, in order."""
     graph = ctx.graph
     candidates: set[tuple[str, str]] = set()
     for edge in graph.edges:
@@ -2806,18 +2845,28 @@ def _recompact_fan_port_bordering_stations(
             levels, ctx.offset_step
         ) is not None and not _port_gap_is_consumer_lane(ctx, port_id, lines):
             candidates.add((port.section_id, port_id))
+    return sorted(candidates)
 
-    for sec_id, station_id in sorted(candidates):
-        section = graph.sections.get(sec_id)
-        if section is None:
-            continue
-        n_sec_stations = sum(
-            1 for sid in section.station_ids if not graph.stations[sid].is_port
-        )
-        touched = _compact_one_seed_with_retry(
-            ctx, same_y_adj, sec_layer_stations, sec_id, station_id, n_sec_stations
-        )
-        _propagate_touched_exit_ports_to_entries(ctx, touched)
+
+def _recompact_seed(
+    ctx: _OffsetCtx,
+    seed: tuple[str, str],
+    same_y_adj: dict[str, dict[str, list[tuple[str, str]]]],
+    sec_layer_stations: dict[str, dict[int, list[str]]],
+) -> None:
+    """Close one phase 12 seed's gaps and forward the exit ports it moved."""
+    graph = ctx.graph
+    sec_id, station_id = seed
+    section = graph.sections.get(sec_id)
+    if section is None:
+        return
+    n_sec_stations = sum(
+        1 for sid in section.station_ids if not graph.stations[sid].is_port
+    )
+    touched = _compact_one_seed_with_retry(
+        ctx, same_y_adj, sec_layer_stations, sec_id, station_id, n_sec_stations
+    )
+    _propagate_touched_exit_ports_to_entries(ctx, touched)
 
 
 def _port_gap_is_consumer_lane(
@@ -3960,7 +4009,11 @@ def _narrows_a_junction_feeder(
     return False
 
 
-def _order_entry_ports_by_approach(ctx: _OffsetCtx) -> None:
+def _order_entry_ports_by_approach(
+    ctx: _OffsetCtx,
+    same_y_adj: dict[str, dict[str, list[tuple[str, str]]]],
+    sec_layer_stations: dict[str, dict[int, list[str]]],
+) -> None:
     """Deal a multi-feeder flow-side entry's lanes in its feeders' approach order.
 
     At an entry port on a flow-axis side of its section (LEFT/RIGHT of a
@@ -3976,15 +4029,18 @@ def _order_entry_ports_by_approach(ctx: _OffsetCtx) -> None:
     feeder's lines would move closer, or the carry would put two lines on one
     lane, add crossings between the stations it reaches and their neighbours,
     or sit a line that skips a station between two of that station's lanes.
+    It is also left alone where another phase owns its order
+    (:func:`_trial_overrides_an_owner`), so every order this phase decides
+    holds to the end of the run.
 
     Drafts are drawn once per call on the offsets the phase started from, so
-    every port is judged against the same routing; the vetoed ports are those
-    whose order a later phase overrode (:func:`compute_station_offsets`).
+    every port is judged against the same routing.
     """
     if ctx.compact:
         return
     graph = ctx.graph
     draft_ctx: _RoutingCtx | None = None
+    drop_reversed: set[str] | None = None
     for port_id, port in graph.ports.items():
         if not port.is_entry:
             continue
@@ -3999,7 +4055,7 @@ def _order_entry_ports_by_approach(ctx: _OffsetCtx) -> None:
             lid: ctx.offsets.get((port_id, lid), 0.0)
             for lid in graph.station_lines(port_id)
         }
-        if not _feeders_interleave(cur, feeders) or port_id in ctx.approach_vetoed:
+        if not _feeders_interleave(cur, feeders):
             continue
         if draft_ctx is None:
             draft_ctx = _build_routing_context(
@@ -4032,8 +4088,117 @@ def _order_entry_ports_by_approach(ctx: _OffsetCtx) -> None:
             )
         ):
             continue
+        if drop_reversed is None:
+            drop_reversed = _sections_downstream_of(
+                graph, _junction_drop_reversal_roots(graph)
+            )
+        if _trial_overrides_an_owner(
+            ctx, port, touched, trial, drop_reversed, same_y_adj, sec_layer_stations
+        ):
+            continue
         ctx.approach_orders[port_id] = tuple(order)
         _apply_offsets_along_bundle(ctx, port_id, port.section_id, new_offs)
+
+
+_OwnerRefusal = Literal["claim", "decided", "reversal", "compaction", "fan-plan"]
+
+
+def _lane_order(
+    graph: MetroGraph,
+    station_id: str,
+    offsets: Mapping[tuple[str, str], float],
+    lines: Container[str] | None = None,
+) -> list[str]:
+    """*station_id*'s lines (or those of them in *lines*) by lane."""
+    held = [
+        lid
+        for lid in graph.station_lines(station_id)
+        if (lines is None or lid in lines) and (station_id, lid) in offsets
+    ]
+    return sorted(held, key=lambda lid: offsets[(station_id, lid)])
+
+
+def _trial_overrides_an_owner(
+    ctx: _OffsetCtx,
+    port: Port,
+    touched: Sequence[str],
+    trial: Mapping[tuple[str, str], float],
+    drop_reversed: Container[str],
+    same_y_adj: dict[str, dict[str, list[tuple[str, str]]]],
+    sec_layer_stations: dict[str, dict[int, list[str]]],
+) -> _OwnerRefusal | None:
+    """Which owner of a lane order a 7b' re-deal of *port* would override.
+
+    - ``claim``: a station the carry reaches is an entry port the order family
+      (7c-7f) claimed, and the carry changes its order.
+    - ``decided``: a station the carry reaches is a port 7b' already re-dealt
+      in this pass, and the carry would break that order.
+    - ``reversal``: phase 10 reverses *port*'s section (*drop_reversed*).
+    - ``compaction``: a phase 12 seed, compacted on the re-deal
+      (:func:`_compaction_seed_reordering`), would reorder *port*.
+    - ``fan-plan``: a geometry-owning fan plan's lanes at *port* would reorder
+      it.
+
+    Each owner's rule is read on the offsets alone, without routing.
+    """
+    graph = ctx.graph
+    for sid in touched:
+        claim = ctx.port_order_claims.get(sid)
+        if claim is None:
+            continue
+        held = _lane_order(graph, sid, trial, set(claim))
+        if held != [lid for lid in claim if lid in held]:
+            return "claim"
+    for sid in touched:
+        decided = ctx.approach_orders.get(sid)
+        if decided is not None and _breaks_order(trial, sid, decided):
+            return "decided"
+    if port.section_id in drop_reversed:
+        return "reversal"
+    if (
+        _compaction_seed_reordering(ctx, port.id, trial, same_y_adj, sec_layer_stations)
+        is not None
+    ):
+        return "compaction"
+    at_port = {
+        (port.id, lid): trial[(port.id, lid)]
+        for lid in graph.station_lines(port.id)
+        if (port.id, lid) in trial
+    }
+    planned = {
+        key: ctx.fan_owned_offsets[key]
+        for key in at_port
+        if key in ctx.fan_owned_offsets
+    }
+    if planned and _lane_order(graph, port.id, at_port | planned) != _lane_order(
+        graph, port.id, at_port
+    ):
+        return "fan-plan"
+    return None
+
+
+def _compaction_seed_reordering(
+    ctx: _OffsetCtx,
+    port_id: str,
+    trial: Mapping[tuple[str, str], float],
+    same_y_adj: dict[str, dict[str, list[tuple[str, str]]]],
+    sec_layer_stations: dict[str, dict[int, list[str]]],
+) -> tuple[str, str] | None:
+    """The first phase 12 seed whose compaction would reorder *port_id*.
+
+    Every seed phase 12 would take on the *trial* offsets is compacted on its
+    own copy of them, whether or not the re-deal's carry reaches it: phase 12
+    runs after phases 8-10, so which seeds it meets, and in what state, is not
+    known here, and each one alone is enough to undo the order.
+    """
+    order = _lane_order(ctx.graph, port_id, trial)
+    on_trial = replace(ctx, offsets=dict(trial))
+    for seed in _fan_port_compaction_seeds(on_trial):
+        compacted = replace(ctx, offsets=dict(trial))
+        _recompact_seed(compacted, seed, same_y_adj, sec_layer_stations)
+        if _lane_order(ctx.graph, port_id, compacted.offsets) != order:
+            return seed
+    return None
 
 
 def _apply_offsets_along_bundle(
@@ -4698,6 +4863,7 @@ def _slot_same_row_bypass_entry(ctx: _OffsetCtx, port_id: str, port: Port) -> No
     entry = same_row_bypass_entry(ctx.graph, port_id, ctx.offsets)
     if entry is None:
         return
+    ctx.order_family_ports.add(port_id)
     arrival = {
         lid: ctx.offsets.get((feeder, lid), 0.0)
         for lid, feeder in entry.feeders.items()
@@ -4889,6 +5055,7 @@ def _order_convergence_entry_ports(ctx: _OffsetCtx) -> None:
         if feeders is None:
             _slot_same_row_bypass_entry(ctx, port_id, port)
             continue
+        ctx.order_family_ports.add(port_id)
         line_col = {lid: col for lid, col, _ in feeders}
         ordered = sorted(
             line_col, key=lambda lid: (-line_col[lid], ctx.line_priority.get(lid, 0))
@@ -5009,26 +5176,12 @@ def _order_top_descent_over_left_entry(ctx: _OffsetCtx) -> None:
         return
     graph = ctx.graph
     for port_id, port in _left_entry_lr_ports(ctx):
-        if _convergence_feeders(graph, port_id) is not None:
+        ordered = _top_descent_order(ctx, port_id, port)
+        if ordered is None:
             continue
-        section = graph.sections[port.section_id]
-        line_feeder = _section_line_feeders(ctx, section)
-        feeder_ids = set(line_feeder.values())
-        if len(feeder_ids) == 1:
-            seam = _feeder_seam_ports(ctx, section.id, next(iter(feeder_ids)))
-            if (
-                seam is not None
-                and seam_orientation(graph, *seam) is SeamOrientation.REVERSE
-            ):
-                continue
-        line_row = _left_entry_feeder_rows(ctx, port_id, section.grid_col)
-        if line_row is None or len(line_row) < 2:
-            continue
-        if min(line_row.values()) >= section.grid_row:
-            continue
-        ordered = sorted(
-            line_row, key=lambda lid: (line_row[lid], ctx.line_priority.get(lid, 0))
-        )
+        merge_fed = _port_fed_through_merge_junction(graph, port_id)
+        if not merge_fed:
+            ctx.order_family_ports.add(port_id)
         cur = {lid: ctx.offsets.get((port_id, lid), 0.0) for lid in ordered}
         base = min(cur.values())
         # A feeder whose flat approach rides a symmetric fork arm must keep its
@@ -5050,11 +5203,43 @@ def _order_top_descent_over_left_entry(ctx: _OffsetCtx) -> None:
         # the classification skips above: the corpus's merge-fed ports reach here
         # through that detection, so an earlier exit strands those branches
         # un-exercised and reds the routing gate-coverage ratchet.
-        if _port_fed_through_merge_junction(graph, port_id):
+        if merge_fed:
             continue
         _apply_offsets_along_bundle(ctx, port_id, port.section_id, new_offs)
         for lid in ordered:
             _apply_offset_upstream_on_row(ctx, port_id, lid, new_offs[lid])
+
+
+def _top_descent_order(ctx: _OffsetCtx, port_id: str, port: Port) -> list[str] | None:
+    """The top-descent lane order phase 7e deals at a LEFT entry *port_id*.
+
+    Lines by the grid row they arrive from, top row first, where the port is
+    fed level from its own row and descending from a row above; ``None``
+    outside 7e's case (a convergence bundle, a single feeder across a
+    reversing seam, a feeder right of the port's column, fewer than two
+    lines, or no descent).
+    """
+    graph = ctx.graph
+    if _convergence_feeders(graph, port_id) is not None:
+        return None
+    section = graph.sections[port.section_id]
+    line_feeder = _section_line_feeders(ctx, section)
+    feeder_ids = set(line_feeder.values())
+    if len(feeder_ids) == 1:
+        seam = _feeder_seam_ports(ctx, section.id, next(iter(feeder_ids)))
+        if (
+            seam is not None
+            and seam_orientation(graph, *seam) is SeamOrientation.REVERSE
+        ):
+            return None
+    line_row = _left_entry_feeder_rows(ctx, port_id, section.grid_col)
+    if line_row is None or len(line_row) < 2:
+        return None
+    if min(line_row.values()) >= section.grid_row:
+        return None
+    return sorted(
+        line_row, key=lambda lid: (line_row[lid], ctx.line_priority.get(lid, 0))
+    )
 
 
 _DESCENT_CORRIDOR_EPS = 2.0
@@ -5398,6 +5583,9 @@ def _slot_entry_arrivals_on_their_approach_lane(
     the run in stay flat.  The swap propagates along the section's horizontal
     runs, so the line that gave up the approach lane carries its new slot for
     the rest of its chain.
+
+    An exchange never writes a lane order phase 7b' decided: one that would is
+    declined whole and counted, so the decided order wins.
     """
     if ctx.compact:
         return
@@ -5410,8 +5598,17 @@ def _slot_entry_arrivals_on_their_approach_lane(
             if graph.ports[port_id].side is not flow_entry:
                 continue
             for line_id in graph.station_lines(port_id):
-                _slot_one_entry_arrival(
-                    ctx, same_y_adj, section, port_id, line_id, flow_exit
+                _commit_unless_a_decided_order_breaks(
+                    ctx,
+                    "14b",
+                    partial(
+                        _slot_one_entry_arrival,
+                        same_y_adj=same_y_adj,
+                        section=section,
+                        port_id=port_id,
+                        line_id=line_id,
+                        flow_exit=flow_exit,
+                    ),
                 )
 
 
@@ -5539,22 +5736,31 @@ def _exchange_pair_beyond_exit(
     hold one, so every station keeps the lanes it had: the exchange stays a
     permutation the whole way out.  It stops where the pair stops travelling
     together, which is where each line's own lane is free again.
+
+    A section holding a port whose lane order phase 7b' decided is not taken
+    when only one line of the pair reaches it from the station the walk is at:
+    there the pair has already split, and taking the section would rewrite
+    the decided order to follow an exchange made upstream of the split.
     """
     graph = ctx.graph
     pair = {first, second}
+    decided_sections = {graph.ports[pid].section_id for pid in ctx.approach_orders}
     frontier = [exit_port_id]
     seen_stations = {*section.station_ids, exit_port_id}
     seen_sections = {section.id}
     while frontier:
-        for edge in graph.edges_from(frontier.pop()):
-            if edge.line_id not in pair:
-                continue
+        edges = [e for e in graph.edges_from(frontier.pop()) if e.line_id in pair]
+        reach = {lid: {e.target for e in edges if e.line_id == lid} for lid in pair}
+        together = reach[first] & reach[second]
+        for edge in edges:
             target = graph.stations.get(edge.target)
             if target is None:
                 continue
             if target.section_id is None:
                 reached: tuple[str, ...] = (edge.target,)
             elif target.section_id in seen_sections:
+                continue
+            elif target.section_id in decided_sections and edge.target not in together:
                 continue
             else:
                 seen_sections.add(target.section_id)
@@ -6171,11 +6377,12 @@ def compute_station_offsets(
     bundles across all sections - when a line splits off and later
     rejoins, it returns to its reserved slot rather than shifting.
 
-    Runs in ordered phases, one per call in the body below.  Each phase's
-    own docstring carries its conditions; the notes here are the ordering
-    constraints that are not visible from a single phase.  The labels are
-    identifiers rather than positions -- ``CONTRACT.md`` documents 14b and 14c
-    under those names, and there is no phase 11.
+    Runs in ordered phases, once each, one per call in
+    :func:`_run_offset_phases`.  Each phase's own docstring carries its
+    conditions; the notes here are the ordering constraints that are not
+    visible from a single phase.  The labels are identifiers rather than
+    positions -- ``CONTRACT.md`` documents 7b', 14b and 14c under those names,
+    7b' runs after 7f, and there is no phase 11.
 
     1. **Base offsets** - global priority (or compact-mode) assignment.
     2. **Section-local re-indexing** - closes priority gaps within
@@ -6205,11 +6412,6 @@ def compute_station_offsets(
     7b. **Merge-port approach-side allocation** - at multi-feeder LR/RL
        entry ports, re-slots a perpendicular re-joining line to the
        bundle slot nearest its approach side (non-compact only).
-    7b'. **Approach-derived entry-port order** - at a multi-feeder
-       flow-side entry port whose feeders' lines interleave, deals the lanes
-       in the order the feeders' risers turn in without crossing.  A port
-       whose order a later phase overrides is left alone and every phase
-       re-run (non-compact only).
     7c. **Convergence entry-port ordering** - at a LEFT entry port fed by
        a bypass trunk from two or more source columns, slots the bundle by
        approach depth so its risers turn in concentrically; at any LR/RL
@@ -6227,6 +6429,16 @@ def compute_station_offsets(
        port on the flow-start side of an LR/RL section, re-deals the feeders
        descending from above (or climbing from below) onto the port's slots
        in the order of the corridor each drops down, so their turn-ins nest.
+       7c-7f are the entry-port order family: each port one of them moves or
+       judges is claimed with the order it holds once they have run.
+    7b'. **Approach-derived entry-port order** - at a multi-feeder
+       flow-side entry port whose feeders' lines interleave, deals the lanes
+       in the order the feeders' risers turn in without crossing.  Runs after
+       the order family and leaves a port alone where a claimed order, phase
+       10's reversal, a phase 12 seed or a fan plan owns it, so each port's
+       order has one owner; every later phase holds the order it decides
+       (phases 12 and 14b decline a write that would break it, the rest fail
+       closed) (non-compact only).
     8. **Horizontal reconciliation** - snaps mismatched offsets on
        same-Y edges to eliminate almost-horizontal slopes.
     8b. **Flat TB-exit/entry alignment** - on an auto-folded return row,
@@ -6293,42 +6505,16 @@ def compute_station_offsets(
         return {}
 
     resolved = offset_step if offset_step is not None else graph_offset_step(graph)
-    vetoed: frozenset[str] = frozenset()
-    while True:
-        ctx = _run_offset_phases(graph, resolved, vetoed)
-        overridden = _overridden_approach_orders(ctx)
-        if not overridden:
-            return ctx.offsets
-        vetoed |= overridden
+    return _run_offset_phases(graph, resolved).offsets
 
 
-def _overridden_approach_orders(ctx: _OffsetCtx) -> frozenset[str]:
-    """Ports whose phase 7b' lane order a later phase overrode.
-
-    Each run vetoes only ports the previous ones re-slotted, and a vetoed port
-    is never re-slotted, so re-running until none is overridden terminates.
-    """
-    overridden = set()
-    for port_id, order in ctx.approach_orders.items():
-        keys = [(port_id, lid) for lid in order]
-        if any(key not in ctx.offsets for key in keys) or any(
-            ctx.offsets[b] <= ctx.offsets[a] + _OFFSET_EQ_TOLERANCE
-            for a, b in zip(keys, keys[1:])
-        ):
-            overridden.add(port_id)
-    return frozenset(overridden)
-
-
-def _run_offset_phases(
-    graph: MetroGraph, resolved: float, approach_vetoed: frozenset[str]
-) -> _OffsetCtx:
+def _run_offset_phases(graph: MetroGraph, resolved: float) -> _OffsetCtx:
     """Run every :func:`compute_station_offsets` phase once, in order."""
     graph._linear_entry_pill_lines_cache.clear()
     ctx = _build_offset_ctx(graph, resolved)
-    ctx.approach_vetoed = approach_vetoed
     # Section/layer indexes over graph structure, not per-line offsets, so
     # they stay valid across every phase below and are built once here for
-    # both compaction passes (phase 4 and phase 12) to share.
+    # both compaction passes (phase 4 and phase 12) and 7b' to share.
     same_y_adj = _build_same_y_adj(graph)
     sec_layer_stations = _build_sec_layer_stations(graph)
     _compute_base_offsets(ctx)
@@ -6343,28 +6529,116 @@ def _run_offset_phases(
     _compute_entry_port_offsets(ctx)
     _align_junction_to_entry_port(ctx)
     _allocate_merge_ports_by_approach(ctx)
-    _order_entry_ports_by_approach(ctx)
+    before_family = dict(ctx.offsets)
     _order_convergence_entry_ports(ctx)
     _order_convergence_by_approach(ctx)
     _order_top_descent_over_left_entry(ctx)
     _order_flow_start_side_entry_by_descent_corridor(ctx)
+    _claim_family_port_orders(ctx, before_family)
+    _order_entry_ports_by_approach(ctx, same_y_adj, sec_layer_stations)
+    _hold_decided_orders(ctx, "7b'")
     _reconcile_horizontal_offsets(ctx)
+    _hold_decided_orders(ctx, "8")
     _align_flat_tb_exit_to_entry(ctx)
+    _hold_decided_orders(ctx, "8b")
     _recenter_partial_fan_branches(ctx)
+    _hold_decided_orders(ctx, "9")
     _reverse_near_vertical_junction_right_entry_offsets(ctx)
+    _hold_decided_orders(ctx, "10")
     _recompact_fan_port_bordering_stations(ctx, same_y_adj, sec_layer_stations)
     _restore_fanout_peel_order(ctx, same_y_adj)
+    _hold_decided_orders(ctx, "12a")
     _reconcile_horizontal_offsets(ctx)
+    _hold_decided_orders(ctx, "13")
     _center_rail_boundary_port_bundles(ctx)
+    _hold_decided_orders(ctx, "14")
     _recenter_single_line_corridor_entry(ctx)
+    _hold_decided_orders(ctx, "14a")
     _slot_entry_arrivals_on_their_approach_lane(ctx, same_y_adj)
     _close_section_dead_lanes(ctx)
+    _hold_decided_orders(ctx, "14c")
     _apply_planned_fan_offsets(ctx)
+    _hold_decided_orders(ctx, "14d")
     _deal_perp_entry_columns(ctx)
+    _hold_decided_orders(ctx, "14e")
     frames = _materialize_linear_entry_frames(ctx)
+    _hold_decided_orders(ctx, "15")
     _validate_linear_entry_frames(ctx, frames)
     _cache_linear_entry_pill_lines(ctx, frames)
     return ctx
+
+
+def _claim_family_port_orders(
+    ctx: _OffsetCtx, before_family: Mapping[tuple[str, str], float]
+) -> None:
+    """Record the order of each entry port the order family (7c-7f) owns.
+
+    The family owns every entry port it moved and every port its own
+    evaluation judged (``ctx.order_family_ports``), whether or not it moved
+    it; 7b' may not change the order either holds now.
+    """
+    graph = ctx.graph
+    for port_id, port in graph.ports.items():
+        if not port.is_entry:
+            continue
+        moved = any(
+            abs(ctx.offsets.get(key, 0.0) - before_family.get(key, 0.0)) > 1e-6
+            for key in ((port_id, lid) for lid in graph.station_lines(port_id))
+        )
+        if moved or port_id in ctx.order_family_ports:
+            ctx.port_order_claims[port_id] = tuple(
+                _lane_order(graph, port_id, ctx.offsets)
+            )
+
+
+def _first_broken_decided_order(ctx: _OffsetCtx) -> str | None:
+    """The first port whose 7b' order *ctx*'s offsets no longer hold."""
+    for port_id, order in ctx.approach_orders.items():
+        if _breaks_order(ctx.offsets, port_id, order):
+            return port_id
+    return None
+
+
+def _breaks_order(
+    offsets: Mapping[tuple[str, str], float], port_id: str, order: Sequence[str]
+) -> bool:
+    """Whether *offsets* fail to hold *order*'s lines on strictly rising lanes."""
+    keys = [(port_id, lid) for lid in order]
+    return any(key not in offsets for key in keys) or any(
+        offsets[b] <= offsets[a] + _OFFSET_EQ_TOLERANCE for a, b in zip(keys, keys[1:])
+    )
+
+
+def _hold_decided_orders(ctx: _OffsetCtx, phase: str) -> None:
+    """Fail closed if *phase* broke a lane order 7b' decided.
+
+    7b' refuses every re-deal a later phase is known to override, and every
+    carry that would break an order it decided earlier in the same pass
+    (:func:`_trial_overrides_an_owner`), so no phase checked here, 7b'
+    included, may move a decided order.
+    """
+    port_id = _first_broken_decided_order(ctx)
+    if port_id is not None:
+        raise DecidedLaneOrderError(phase, port_id)
+
+
+def _commit_unless_a_decided_order_breaks(
+    ctx: _OffsetCtx, site: str, write: Callable[[_OffsetCtx], object]
+) -> None:
+    """Apply *write* to *ctx*'s offsets unless it breaks a 7b' lane order.
+
+    *write* runs on its own copy of the offsets, committed only if every
+    decided order still holds; a declined write is counted under *site*.
+    """
+    if not ctx.approach_orders:
+        write(ctx)
+        return
+    trial = replace(ctx, offsets=dict(ctx.offsets))
+    write(trial)
+    if _first_broken_decided_order(trial) is not None:
+        ctx.decided_order_declines[site] += 1
+        return
+    ctx.offsets.update(trial.offsets)
 
 
 def _reverse_offsets_from_roots(ctx: _OffsetCtx, roots: set[str]) -> None:
@@ -6387,16 +6661,7 @@ def _reverse_offsets_from_roots(ctx: _OffsetCtx, roots: set[str]) -> None:
     if not roots:
         return
 
-    affected = set(roots)
-    dag = ctx.graph.section_dag
-    if dag is not None:
-        stack = list(roots)
-        while stack:
-            for succ in dag.successors.get(stack.pop(), ()):
-                if succ not in affected:
-                    affected.add(succ)
-                    stack.append(succ)
-
+    affected = _sections_downstream_of(ctx.graph, roots)
     for sid, station in ctx.graph.stations.items():
         if station.section_id not in affected:
             continue
@@ -6429,12 +6694,27 @@ def _reverse_near_vertical_junction_right_entry_offsets(ctx: _OffsetCtx) -> None
     port sides or grid rows, so the seam-orientation classifier cannot derive it
     coordinate-free; this pass stays as a coordinate-aware residual.
     """
-    graph = ctx.graph
-    _reverse_offsets_from_roots(
-        ctx,
-        {
-            port.section_id
-            for port in graph.ports.values()
-            if is_near_vertical_junction_right_entry(graph, port)
-        },
-    )
+    _reverse_offsets_from_roots(ctx, _junction_drop_reversal_roots(ctx.graph))
+
+
+def _junction_drop_reversal_roots(graph: MetroGraph) -> set[str]:
+    """Sections a fan-out junction drops into near-vertically (phase 10)."""
+    return {
+        port.section_id
+        for port in graph.ports.values()
+        if is_near_vertical_junction_right_entry(graph, port)
+    }
+
+
+def _sections_downstream_of(graph: MetroGraph, roots: Iterable[str]) -> set[str]:
+    """*roots* and every section downstream of them in the section DAG."""
+    affected = set(roots)
+    dag = graph.section_dag
+    if dag is not None:
+        stack = list(affected)
+        while stack:
+            for succ in dag.successors.get(stack.pop(), ()):
+                if succ not in affected:
+                    affected.add(succ)
+                    stack.append(succ)
+    return affected
