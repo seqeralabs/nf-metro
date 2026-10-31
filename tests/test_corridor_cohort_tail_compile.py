@@ -535,6 +535,45 @@ def test_unowned_lane_pair_seats_on_the_side_its_end_turns_take(
         assert seated == pytest.approx(expected)
 
 
+@pytest.mark.parametrize(
+    "relative_path",
+    (
+        "examples/riboseq_metro.mmd",
+        "tests/fixtures/curve_invariant_repros/riboseq_inter_row_corridor.mmd",
+    ),
+)
+def test_merge_fed_confluence_descent_compiles_where_it_is_drawn(
+    relative_path: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``annotation`` enters section 4 directly while ``riboseq`` arrives
+    through a merge junction whose convergence owns its west descent, so the
+    merge-fed confluence alignment re-seats ``annotation``'s free descent
+    outboard of ``riboseq``'s.  The last compile reads the same descent."""
+    compiled = []
+    real_compile = member_geometry.compile_corridor_cohort_plan
+
+    def record(*args, **kwargs):
+        cohort_plan = real_compile(*args, **kwargs)
+        compiled.append(cohort_plan)
+        return cohort_plan
+
+    monkeypatch.setattr(member_geometry, "compile_corridor_cohort_plan", record)
+    _graph, observed, _plans = _tail_render(relative_path, monkeypatch)
+    edge_key = RIBOSEQ_TOP_CORRIDOR_EDGES[2]
+    drawn = next(
+        route.points
+        for route in observed.plan.routes
+        if (route.edge.source, route.edge.target, route.line_id) == edge_key
+    )
+    descent = [
+        allocation.coordinate
+        for allocation in compiled[-1].allocations
+        if allocation.edge_key == edge_key and allocation.segment_rank == 3
+    ]
+    assert drawn[3][0] == pytest.approx(30.0) == drawn[4][0]
+    assert descent == pytest.approx([drawn[3][0]])
+
+
 def test_endpoint_section_lead_is_not_filed_in_a_neighbouring_gap(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

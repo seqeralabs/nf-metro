@@ -1,12 +1,15 @@
 """The corridor-cohort compile reads the geometry the post-emission passes draw.
 
-After emission, ``_reconcile_port_peeloff_risers`` re-seats every peel-off
-riser the freeze leaves unowned onto the slot its settled trunk depth earns,
-then ``_separate_fused_cotravelling_runs`` and
-``_hold_runs_in_corridor_clearance`` settle the corridor runs.  The compile
-reads a snapshot in which those rules have already run, on copies, so the
-coordinates it accepts are the ones drawn while no live route moves before a
-plan is published.
+After emission, ``_materialize_trunk_slots`` restacks every trunk band,
+``_reconcile_port_peeloff_risers`` re-seats every peel-off riser the freeze
+leaves unowned onto the slot its settled trunk depth earns, the fan-out
+traverse passes fuse and nest the corridor runs, and
+``_separate_fused_cotravelling_runs``,
+``_align_merge_fed_confluence_to_band`` and
+``_hold_runs_in_corridor_clearance`` settle them.  The compile reads a
+snapshot in which those rules have already run, on copies, so the coordinates
+it accepts are the ones drawn while no live route moves before a plan is
+published.
 """
 
 from __future__ import annotations
@@ -212,6 +215,68 @@ def test_compiled_peeloff_riser_agrees_with_the_drawn_riser(
     assert {key: drawn[key] for key in expected} == expected
 
 
+@pytest.mark.parametrize(
+    ("relative_path", "expected"),
+    [
+        (
+            "examples/topologies/inter_row_exempt_band_order.mmd",
+            {
+                ("lvl__exit_right_0", "report__entry_left_2", "riboseq"): 207.0,
+                ("src__exit_right_1", "model__entry_left_3", "rnaseq"): 203.0,
+            },
+        ),
+        (
+            "examples/topologies/reversed_section_junction_reseat.mmd",
+            {
+                ("__junction_9", "report_a__entry_bottom_6", "a"): 200.0,
+                ("__junction_9", "report_b__entry_top_7", "b"): 196.0,
+            },
+        ),
+    ],
+    ids=["inter_row_exempt", "reversed_section"],
+)
+def test_compiled_trunk_band_agrees_with_the_drawn_band(
+    monkeypatch: pytest.MonkeyPatch, relative_path: str, expected: dict[EdgeKey, float]
+) -> None:
+    """Two trunks share one row-gap band that the trunk-slot pass restacks
+    after emission; the cohort-final compile accepts each trunk on the track
+    it is drawn on."""
+    plans: list[cci.CorridorCohortPlan] = []
+    drawn: dict[EdgeKey, float] = {}
+    compile_plan = member_geometry.compile_corridor_cohort_plan
+    drawable = svg._assert_settled_geometry_is_drawable
+
+    def capture_plan(*args: Any, **kwargs: Any) -> cci.CorridorCohortPlan:
+        plan = compile_plan(*args, **kwargs)
+        plans.append(plan)
+        return plan
+
+    def capture_drawn(graph: Any, settled: Any) -> None:
+        drawable(graph, settled)
+        drawn.update(
+            {
+                _edge_key(route): route.points[2][1]
+                for route in settled.routes
+                if _edge_key(route) in expected
+            }
+        )
+
+    monkeypatch.setattr(member_geometry, "compile_corridor_cohort_plan", capture_plan)
+    monkeypatch.setattr(svg, "_assert_settled_geometry_is_drawable", capture_drawn)
+    _render(ROOT / relative_path)
+
+    assert plans
+    trunks = {
+        allocation.edge_key: allocation.coordinate
+        for allocation in plans[-1].allocations
+        if allocation.axis == 1
+        and allocation.edge_key in expected
+        and allocation.segment_rank == 2
+    }
+    assert trunks == expected
+    assert {key: drawn[key] for key in expected} == expected
+
+
 def _route_state(route: RoutedPath) -> tuple[Any, ...]:
     return (
         tuple(map(tuple, route.points)),
@@ -220,6 +285,8 @@ def _route_state(route: RoutedPath) -> tuple[Any, ...]:
         tuple(sorted(route.concentric_corner_bases_by_segment.items())),
         route.source_turnout,
         route.route_system_owned_segment_ranks,
+        tuple(route.gap_slots),
+        route.trunk_slot,
     )
 
 
@@ -234,8 +301,18 @@ def _route_state(route: RoutedPath) -> tuple[Any, ...]:
         ("tests/fixtures/regressions/riboseq_row_trunk_subrun.mmd", False),
         ("examples/topologies/entry_cohort_interleaved_fixed_lane.mmd", False),
         (CLEARANCE_HELD_CORRIDOR, True),
+        ("examples/topologies/inter_row_exempt_band_order.mmd", True),
+        ("examples/riboseq_metro.mmd", True),
     ],
-    ids=["fan_over_top", "corridor_overflow", "trunk_subrun", "fixed_lane", "held"],
+    ids=[
+        "fan_over_top",
+        "corridor_overflow",
+        "trunk_subrun",
+        "fixed_lane",
+        "held",
+        "restacked_band",
+        "riboseq",
+    ],
 )
 def test_peeloff_snapshot_leaves_the_live_routes_untouched(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, source: str, expect_moved: bool
@@ -243,10 +320,14 @@ def test_peeloff_snapshot_leaves_the_live_routes_untouched(
     """Seating the snapshot writes no live route, and every patch the compile
     returns names a live route.  The interleaved fixed-lane entry cohort
     compiles radius-only patches for re-sized mates, so it holds a mate's patch
-    to its live route too.  On the held corridor the snapshot does move
-    compiled copies off their live routes, so the copies are not the routes."""
+    to its live route too.  On the held corridor, the restacked band and
+    riboseq the snapshot does move compiled copies off their live routes, so
+    the copies are not the routes.  The segment ownership the snapshot lends
+    its copies while it replays the passes is gone by the compile, which reads
+    each copy's ownership as its live route's."""
     calls: list[tuple[bool, bool]] = []
     moved: list[int] = []
+    owned_agrees: list[bool] = []
     compile_cohorts = member_geometry._compile_corridor_cohorts
     compile_plan = member_geometry.compile_corridor_cohort_plan
 
@@ -257,6 +338,13 @@ def test_peeloff_snapshot_leaves_the_live_routes_untouched(
         moved.append(
             sum(
                 target.route.points != live_route(target.route).points
+                for target in targets
+            )
+        )
+        owned_agrees.append(
+            all(
+                target.route.route_system_owned_segment_ranks
+                == live_route(target.route).route_system_owned_segment_ranks
                 for target in targets
             )
         )
@@ -300,6 +388,8 @@ def test_peeloff_snapshot_leaves_the_live_routes_untouched(
     assert calls
     assert all(untouched for untouched, _live in calls)
     assert all(live for _untouched, live in calls)
+    assert owned_agrees
+    assert all(owned_agrees)
     if expect_moved:
         assert max(moved) > 0
 
@@ -347,3 +437,129 @@ def test_compile_holds_a_trunk_slot_restacked_bundle_where_it_is_drawn(
     assert not [
         mismatch for mismatch in mismatches for key in bundle if str(key) in mismatch
     ]
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    [
+        "examples/topologies/merge_around_below_leftmost.mmd",
+        "tests/fixtures/regressions/perp_entry_column_merge_feeder.mmd",
+    ],
+    ids=["merge_around", "perp_entry_column"],
+)
+def test_recipe_named_copies_reach_the_compile_where_they_stand(
+    monkeypatch: pytest.MonkeyPatch, relative_path: str
+) -> None:
+    """A scalar request's grant decides where every route its control recipe
+    names is drawn, so no pass the snapshot replays moves such a copy and the
+    compile reads each one on its live route's points.  On these maps an
+    unanchored restack moves a named copy that the traverse passes then move
+    back, so each replayed pass is checked, not only the compile's input."""
+    named_routes: set[int] = set()
+    source_of: dict[int, RoutedPath] = {}
+    pass_moves: list[tuple[str, EdgeKey]] = []
+    compiled: list[tuple[EdgeKey, bool]] = []
+    snapshot = member_geometry._post_emission_seated_snapshot
+    sizing_copy = member_geometry._corner_sizing_copy
+    compile_plan = member_geometry.compile_corridor_cohort_plan
+
+    def recipe_routes(
+        targets: Sequence[Any], scalar_requests: Sequence[Any]
+    ) -> list[Any]:
+        by_member = {(target.member_id, target.edge_key): target for target in targets}
+        return [
+            target
+            for request in scalar_requests
+            if (recipe := request.control_recipe) is not None
+            for point in (*recipe.controlled_points, *recipe.fixed_points)
+            if (target := by_member.get((point.member_id, point.edge_key))) is not None
+        ]
+
+    def copy_route(route: RoutedPath) -> RoutedPath:
+        copied = sizing_copy(route)
+        source_of[id(copied)] = source_of.get(id(route), route)
+        return copied
+
+    def seat(targets: Sequence[Any], *args: Any, **kwargs: Any) -> Any:
+        named_routes.update(
+            id(target.route)
+            for target in recipe_routes(targets, kwargs["scalar_requests"])
+        )
+        try:
+            return snapshot(targets, *args, **kwargs)
+        finally:
+            named_routes.clear()
+            source_of.clear()
+
+    def watched(name: str) -> None:
+        replayed = getattr(member_geometry, name)
+
+        def run(routes: list[RoutedPath], ctx: Any, **kwargs: Any) -> None:
+            before = [
+                (route, list(route.points))
+                for route in routes
+                if id(source_of.get(id(route), route)) in named_routes
+            ]
+            replayed(routes, ctx, **kwargs)
+            pass_moves.extend(
+                (name, _edge_key(route))
+                for route, points in before
+                if route.points != points
+            )
+
+        monkeypatch.setattr(member_geometry, name, run)
+
+    def check(
+        ledger: Any, targets: Sequence[Any], **kwargs: Any
+    ) -> cci.CorridorCohortPlan:
+        live_route = kwargs["live_route"]
+        compiled.extend(
+            (
+                target.edge_key,
+                target.route.points == live_route(target.route).points,
+            )
+            for target in recipe_routes(targets, kwargs.get("scalar_requests", ()))
+        )
+        return compile_plan(ledger, targets, **kwargs)
+
+    for name in (
+        "_materialize_trunk_slots",
+        "_coincide_same_line_fanout_traverses",
+        "_bundle_divergent_distinct_traverses",
+    ):
+        watched(name)
+    monkeypatch.setattr(member_geometry, "_corner_sizing_copy", copy_route)
+    monkeypatch.setattr(member_geometry, "_post_emission_seated_snapshot", seat)
+    monkeypatch.setattr(member_geometry, "compile_corridor_cohort_plan", check)
+    _render(ROOT / relative_path)
+
+    assert compiled
+    assert pass_moves == []
+    assert [key for key, unmoved in compiled if not unmoved] == []
+
+
+def test_free_confluence_descent_reads_the_freeze_ownership(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``l2`` reaches ``sec2``'s left entry on a descent at x 472 that the
+    freeze will own, so the merge-fed confluence alignment the snapshot
+    replays leaves it there, as it does on the live routes."""
+    edge_key = ("__junction_5", "sec2__entry_left_3", "l2")
+    descents: list[tuple[float, float]] = []
+    compile_plan = member_geometry.compile_corridor_cohort_plan
+
+    def record(
+        ledger: Any, targets: Sequence[Any], **kwargs: Any
+    ) -> cci.CorridorCohortPlan:
+        descents.extend(
+            (target.route.points[3][0], target.route.points[4][0])
+            for target in targets
+            if target.edge_key == edge_key
+        )
+        return compile_plan(ledger, targets, **kwargs)
+
+    monkeypatch.setattr(member_geometry, "compile_corridor_cohort_plan", record)
+    _render(ROOT / "tests/fixtures/regressions/cohort_reverse_frame_seating.mmd")
+
+    assert descents
+    assert set(descents) == {(472.0, 472.0)}

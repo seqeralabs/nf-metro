@@ -7,6 +7,7 @@ import math
 import operator
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field, replace
 from functools import partial
 from types import MappingProxyType
@@ -89,6 +90,7 @@ from nf_metro.layout.routing.inter_section_handlers import (
 )
 from nf_metro.layout.routing.invariants import concentric_corner_fans
 from nf_metro.layout.routing.normalize import (
+    _align_merge_fed_confluence_to_band,
     _bundle_divergent_distinct_traverses,
     _bundle_same_destination_tails,
     _coincide_fanout_opening_descents,
@@ -770,26 +772,57 @@ def _corridor_cohort_aperture_requirements(
     )
 
 
+@contextmanager
+def _lending_segment_ownership(
+    lent: Iterable[tuple[RoutedPath, Iterable[int]]],
+) -> Iterator[None]:
+    """Each route owning its segment ranks plus the ranks lent to it, for the
+    duration of the block; its own ranks are restored on exit."""
+    held: dict[int, tuple[RoutedPath, tuple[int, ...]]] = {}
+    try:
+        for route, ranks in lent:
+            held.setdefault(id(route), (route, route.route_system_owned_segment_ranks))
+            route.route_system_owned_segment_ranks = tuple(
+                sorted({*route.route_system_owned_segment_ranks, *ranks})
+            )
+        yield
+    finally:
+        for route, ranks in held.values():
+            route.route_system_owned_segment_ranks = ranks
+
+
 def _post_emission_seated_snapshot(
     targets: Sequence[CorridorCohortTarget],
     population: Sequence[RoutedPath],
     ctx: _RoutingCtx,
     *,
     scalar_requests: Sequence[CorridorScalarRequest],
+    complete_path_system_ids: frozenset[RouteSystemId] = frozenset(),
 ) -> tuple[
     tuple[CorridorCohortTarget, ...], tuple[RoutedPath, ...], dict[int, RoutedPath]
 ]:
     """Copies of *targets* and *population* seated by the post-emission rules.
 
-    :func:`_reconcile_port_peeloff_risers` runs over the distinct target copies
-    in target order, then :func:`_separate_fused_cotravelling_runs` and
-    :func:`_hold_runs_in_corridor_clearance` over every copy, the order they run
-    after emission, so the compile reads the coordinates those passes draw and
-    no live route moves.  An immutable target's copy is re-seated too, as cohort
-    context only: neither :func:`_prepare_patches` nor the corner sizer ever
-    patches or sizes an immutable route.  The corridor rules hold every route a
-    scalar request's control recipe names where it stands: its grant, not those
-    rules, decides where it is drawn.
+    Over the distinct target copies in target order, :func:`_materialize_trunk_slots`
+    restacks the trunk bands, :func:`_reconcile_port_peeloff_risers` re-seats
+    the peel-off risers, and :func:`_coincide_same_line_fanout_traverses` and
+    :func:`_bundle_divergent_distinct_traverses` fuse and nest the fan-out
+    traverses.  Over every copy, :func:`_separate_fused_cotravelling_runs`,
+    :func:`_align_merge_fed_confluence_to_band` and
+    :func:`_hold_runs_in_corridor_clearance` then settle the corridor runs.
+    That is the order those passes run after emission, so the compile reads
+    the coordinates they draw and no live route moves.  The snapshot predicts
+    those passes from their input; it is not a fixpoint of them.
+
+    After emission those passes read the segments the freeze owns as fixed,
+    so the restack, the traverse passes and the confluence alignment run with
+    each mutable target's copy owning the ranks the freeze will own.  An
+    immutable target's copy is re-seated as cohort context only: neither
+    :func:`_prepare_patches` nor the corner sizer ever patches or sizes an
+    immutable route.  Such a copy, and every route a scalar request's control
+    recipe names, anchors the restack and the traverse passes, owning every
+    rank: a recipe-named route's grant, not those rules, decides where it is
+    drawn.
 
     Returns the targets on their copies, the copied population, and each
     copy's live route keyed by the copy's id.
@@ -801,17 +834,14 @@ def _post_emission_seated_snapshot(
     copies = {
         route_id: _corner_sizing_copy(route) for route_id, route in live_by_id.items()
     }
-    _reconcile_port_peeloff_risers(
-        list(
-            {id(target.route): copies[id(target.route)] for target in targets}.values()
-        ),
-        ctx,
+    target_copies = list(
+        {id(target.route): copies[id(target.route)] for target in targets}.values()
     )
     copy_by_member = {
         (target.member_id, target.edge_key): copies[id(target.route)]
         for target in targets
     }
-    anchored = {
+    recipe_named = {
         id(route)
         for request in scalar_requests
         if (recipe := request.control_recipe) is not None
@@ -821,10 +851,45 @@ def _post_emission_seated_snapshot(
         )
         if (route := copy_by_member.get(key)) is not None
     }
+    anchors = recipe_named | {
+        id(copies[id(target.route)]) for target in targets if not target.mutable
+    }
+    anchor_copies = [route for route in target_copies if id(route) in anchors]
+
+    def freeze_ownership(
+        whole_routes: Sequence[RoutedPath],
+    ) -> AbstractContextManager[None]:
+        return _lending_segment_ownership(
+            (
+                *(
+                    (
+                        copies[id(target.route)],
+                        _freeze_owned_segment_ranks(
+                            copies[id(target.route)],
+                            ctx.graph,
+                            owns_complete_path=target.system_id
+                            in complete_path_system_ids,
+                        ),
+                    )
+                    for target in targets
+                    if target.mutable
+                ),
+                *((route, range(len(route.points) - 1)) for route in whole_routes),
+            )
+        )
+
+    with freeze_ownership(anchor_copies):
+        _materialize_trunk_slots(target_copies, ctx, fixed_route_ids=frozenset(anchors))
+    _reconcile_port_peeloff_risers(target_copies, ctx)
+    with freeze_ownership(anchor_copies):
+        _coincide_same_line_fanout_traverses(target_copies, ctx)
+        _bundle_divergent_distinct_traverses(target_copies, ctx)
+    anchored = set(recipe_named)
     seated = list(copies.values())
-    # The trunk-slot restack is drawn before the hold, so the hold's move on an
-    # unrestacked copy is not the drawn one; the restack runs on scratch copies
-    # only, to find the routes it moves, which are then fixed where they stand.
+    # The trunk-slot restack is drawn before the hold, so the hold's move on a
+    # copy that a restack over every copy would move is not the drawn one;
+    # that restack runs on scratch copies only, to find those routes, which
+    # are then fixed where they stand.
     scratch = {id(route): _corner_sizing_copy(route) for route in seated}
     _materialize_trunk_slots(
         list(scratch.values()),
@@ -849,6 +914,8 @@ def _post_emission_seated_snapshot(
             station_offsets=ctx.station_offsets,
             fixed_segment_keys=fixed_segment_keys,
         )
+    with freeze_ownership(()):
+        _align_merge_fed_confluence_to_band(seated, ctx)
     _hold_runs_in_corridor_clearance(seated, ctx, fixed_segment_keys=fixed_segment_keys)
     return (
         tuple(replace(target, route=copies[id(target.route)]) for target in targets),
@@ -868,6 +935,7 @@ def _compile_corridor_cohorts(
     additional_targets: Sequence[CorridorCohortTarget] = (),
     scalar_requests: Sequence[CorridorScalarRequest] = (),
     sizing_population: Sequence[RoutedPath] = (),
+    complete_path_system_ids: frozenset[RouteSystemId] = frozenset(),
 ) -> tuple[
     CorridorCohortPlan | None,
     dict[ResolvedEdge, tuple[int, ...]],
@@ -883,7 +951,11 @@ def _compile_corridor_cohorts(
     )
     targets = (*member_targets, *additional_targets)
     seated_targets, seated_population, live_by_copy_id = _post_emission_seated_snapshot(
-        targets, sizing_population, ctx, scalar_requests=scalar_requests
+        targets,
+        sizing_population,
+        ctx,
+        scalar_requests=scalar_requests,
+        complete_path_system_ids=complete_path_system_ids,
     )
     candidate_route_ids = {id(candidate.route) for candidate in candidates}
     try:
@@ -1575,28 +1647,15 @@ def _semantic_corner_template(
     )
 
 
-def _freeze_plan(
-    scaffold: RouteSemanticScaffold,
-    candidate: _MemberCandidate,
-    ctx: _RoutingCtx,
-    reservation_ids_by_member: Mapping[EmissionMemberId, tuple[str, ...]],
-    *,
-    owns_complete_path: bool = False,
-) -> RouteMemberGeometryPlan:
-    route = candidate.route
-    family_id = candidate.family_id
-    system_id = candidate.system_id
-    resolved = ResolvedEdge(route.edge.source, route.edge.target, route.line_id)
-    member_id = scaffold.member_id_by_edge[resolved]
+def _located_gap_channels(
+    route: RoutedPath, graph: MetroGraph
+) -> tuple[tuple[RouteMemberGapChannel, ...], tuple[GapSlot, ...]]:
+    """*route*'s distinct located gap channels, and its slots localized."""
     channels: list[RouteMemberGapChannel] = []
     channel_claims: set[tuple[int, int, int | None, Direction]] = set()
     localized_slots: list[GapSlot] = []
     for slot in route.gap_slots:
-        located = _locate_slot_channel_with_slot(
-            route,
-            slot,
-            ctx.graph,
-        )
+        located = _locate_slot_channel_with_slot(route, slot, graph)
         if located is None:
             localized_slots.append(slot)
             continue
@@ -1621,6 +1680,34 @@ def _freeze_plan(
                 localized_slot.direction,
             )
         )
+    return tuple(channels), tuple(localized_slots)
+
+
+def _freeze_owned_segment_ranks(
+    route: RoutedPath, graph: MetroGraph, *, owns_complete_path: bool
+) -> tuple[int, ...]:
+    """The ranks :attr:`RouteMemberGeometryPlan.owned_segment_ranks` reports for
+    the plan :func:`_freeze_plan` captures from *route*."""
+    if owns_complete_path:
+        return tuple(range(len(route.points) - 1))
+    channels, _slots = _located_gap_channels(route, graph)
+    return tuple(dict.fromkeys(channel.segment_rank for channel in channels))
+
+
+def _freeze_plan(
+    scaffold: RouteSemanticScaffold,
+    candidate: _MemberCandidate,
+    ctx: _RoutingCtx,
+    reservation_ids_by_member: Mapping[EmissionMemberId, tuple[str, ...]],
+    *,
+    owns_complete_path: bool = False,
+) -> RouteMemberGeometryPlan:
+    route = candidate.route
+    family_id = candidate.family_id
+    system_id = candidate.system_id
+    resolved = ResolvedEdge(route.edge.source, route.edge.target, route.line_id)
+    member_id = scaffold.member_id_by_edge[resolved]
+    channels, localized_slots = _located_gap_channels(route, ctx.graph)
     plan_id = _member_geometry_plan_id(scaffold, candidate)
     corner_offsets, corner_bases = _complete_concentric_corner_description(route)
     return RouteMemberGeometryPlan(
@@ -1634,9 +1721,9 @@ def _freeze_plan(
         None if route.curve_radii is None else tuple(route.curve_radii),
         route.offset_regime,
         route.normalize_exempt,
-        tuple(localized_slots),
+        localized_slots,
         route.trunk_slot,
-        tuple(channels),
+        channels,
         tuple(sorted(corner_offsets.items())),
         tuple(sorted(corner_bases.items())),
         exit_turn_plan_id=_typed_id(ExitTurnPlanId, route.exit_turn_plan_id),
@@ -3054,6 +3141,7 @@ def build_member_geometry_execution(
                     additional_targets=corridor_targets,
                     scalar_requests=corridor_scalar_requests,
                     sizing_population=normalization_population,
+                    complete_path_system_ids=complete_path_system_ids,
                 )
             )
             _validate_corridor_cohort_outcome(corridor_cohorts, corridor_requirements)
@@ -3442,6 +3530,7 @@ def _corner_sizing_copy(route: RoutedPath) -> RoutedPath:
     """*route* holding its own copy of every container a corner rule writes into."""
     sized = copy.copy(route)
     sized.points = list(route.points)
+    sized.gap_slots = list(route.gap_slots)
     sized.curve_radii = None if route.curve_radii is None else list(route.curve_radii)
     sized.concentric_corner_offsets_by_segment = dict(
         route.concentric_corner_offsets_by_segment
