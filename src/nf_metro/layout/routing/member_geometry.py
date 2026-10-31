@@ -819,9 +819,10 @@ def _post_emission_seated_snapshot(
     each mutable target's copy owning the ranks the freeze will own.  An
     immutable target's copy is re-seated as cohort context only: neither
     :func:`_prepare_patches` nor the corner sizer ever patches or sizes an
-    immutable route.  It anchors the restack and the traverse passes, owning
-    every rank, as does every route a scalar request's control recipe names:
-    its grant, not those rules, decides where it is drawn.
+    immutable route.  Such a copy, and every route a scalar request's control
+    recipe names, anchors the restack and the traverse passes, owning every
+    rank: a recipe-named route's grant, not those rules, decides where it is
+    drawn.
 
     Returns the targets on their copies, the copied population, and each
     copy's live route keyed by the copy's id.
@@ -885,9 +886,10 @@ def _post_emission_seated_snapshot(
         _bundle_divergent_distinct_traverses(target_copies, ctx)
     anchored = set(recipe_named)
     seated = list(copies.values())
-    # The trunk-slot restack is drawn before the hold, so the hold's move on an
-    # unrestacked copy is not the drawn one; the restack runs on scratch copies
-    # only, to find the routes it moves, which are then fixed where they stand.
+    # The trunk-slot restack is drawn before the hold, so the hold's move on a
+    # copy that a restack over every copy would move is not the drawn one;
+    # that restack runs on scratch copies only, to find those routes, which
+    # are then fixed where they stand.
     scratch = {id(route): _corner_sizing_copy(route) for route in seated}
     _materialize_trunk_slots(
         list(scratch.values()),
