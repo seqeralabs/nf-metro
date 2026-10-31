@@ -190,7 +190,7 @@ def test_every_eligible_trunk_is_a_closed_six_point_skeleton_across_both_corpora
             else:
                 assert central_start[longitudinal] > central_end[longitudinal]
     # Eligible convergence trunks across the examples and test fixture corpora.
-    assert seen_trunks == 33
+    assert seen_trunks == 34
 
 
 def test_left_running_trunk_central_run_is_oriented_against_the_listing() -> None:

@@ -1,9 +1,10 @@
-"""A settlement re-route draws the observation that compiles its cohort plan.
+"""A render draws the observation that compiles its cohort plan.
 
-Envelope settlement re-routes against the ledger it consumed, and the
-corridor-cohort compile is one more observation of those same inputs.  Where
-that observation accepts a plan and owes no boundary clearance, it is the
-geometry the render draws and the plan it publishes carries the accepted record.
+The corridor-cohort compile is one more observation of the inputs the last
+routing pass read, including the reserved bands that pass seated corridors in.
+Where that observation accepts a plan and owes no boundary clearance, it is the
+geometry the render draws and the plan it publishes carries the accepted record,
+whether or not envelope settlement re-routed before it.
 """
 
 from __future__ import annotations
@@ -11,13 +12,16 @@ from __future__ import annotations
 import warnings
 from dataclasses import replace
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 
+import nf_metro.layout.routing.core as routing_core
 import nf_metro.render.svg as svg
 from nf_metro.api import prepare_graph, render_string, resolve_theme
 from nf_metro.layout.route_plan import RoutePlan, RoutePlanDiagnostic
 from nf_metro.layout.routing.common import RoutedPath
+from nf_metro.layout.routing.reserved_bands import ReservedCorridors
 
 ROOT = Path(__file__).parents[1]
 
@@ -119,10 +123,12 @@ graph LR
 """
 
 
-def _render(text: str) -> str:
+def _render(text: str, source_dir: Path | None = None) -> str:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        return render_string(text)
+        return render_string(
+            text, source_dir="" if source_dir is None else str(source_dir)
+        )
 
 
 def _points_by_edge(
@@ -232,3 +238,167 @@ def test_a_drawn_observation_publishes_the_disposition_overrides_of_both_reroute
         if item.code == "exit-turn-disposition-adopted"
     ]
     assert carried == reported
+
+
+# Maps no envelope settlement re-routes: the only observations consuming a ledger
+# are the compiling one and, for a convergence grant, its ungranted replay.
+UNSETTLED_MAPS = {
+    "01_minimal": ROOT / "examples" / "guide" / "01_minimal.mmd",
+    "02_sections": ROOT / "examples" / "guide" / "02_sections.mmd",
+    "07_track_gap": ROOT / "examples" / "guide" / "07_track_gap.mmd",
+    "genomeassembly": ROOT / "examples" / "genomeassembly.mmd",
+}
+
+# A map no envelope settlement re-routes whose compile grants a convergence
+# corridor that moves a trunk, so its ungranted replay runs too.
+UNSETTLED_CONVERGENCE_GRANT = """\
+%%metro line: m0 | L0 | #e6194b
+%%metro line: m1 | L1 | #3cb44b
+%%metro line: m2 | L2 | #4363d8
+%%metro line: m3 | L3 | #f58231
+
+graph LR
+    subgraph z0 [Zone 0]
+        q0x0[Q0X0]
+        q0x1[Q0X1]
+        q0x2[Q0X2]
+        q0x0 -->|m2| q0x1
+        q0x0 -->|m0| q0x2
+        q0x1 -->|m2| q0x2
+    end
+    subgraph z1 [Zone 1]
+        %%metro direction: BT
+        q1x0[Q1X0]
+        q1x1[Q1X1]
+        q1x0 -->|m0,m1| q1x1
+    end
+    subgraph z2 [Zone 2]
+        %%metro direction: TB
+        q2x0[Q2X0]
+        q2x1[Q2X1]
+        q2x0 -->|m2,m3| q2x1
+    end
+    subgraph z3 [Zone 3]
+        %%metro direction: BT
+        q3x0[Q3X0]
+        q3x1[Q3X1]
+        q3x0 -->|m2,m3| q3x1
+    end
+    q0x0 -->|m1,m3| q1x1
+    q0x2 -->|m0,m1,m3| q1x0
+    q0x2 -->|m2| q2x0
+    q1x0 -->|m3| q3x1
+    q1x1 -->|m0,m2,m3| q2x0
+    q2x1 -->|m2,m3| q3x0
+"""
+
+
+class _Observed(NamedTuple):
+    consumes_ledger: bool
+    compiles: bool
+    points: dict[tuple[str, str, str], list[tuple[float, float]]]
+    plan: RoutePlan
+    bands: ReservedCorridors | None
+
+
+def _observe_last_settle(
+    monkeypatch: pytest.MonkeyPatch, text: str, source_dir: Path
+) -> tuple[list[_Observed], svg._SettledRenderGeometry]:
+    """Render *text*; return the last settle call's observations and result."""
+    observed: list[_Observed] = []
+    bands_read: ReservedCorridors | None = None
+    settled: svg._SettledRenderGeometry | None = None
+    real_observe = svg.observe_route_edges_centred
+    real_context = routing_core._build_routing_context
+    real_settle = svg._settle_render_geometry
+
+    def context(*args, **kwargs):
+        nonlocal bands_read
+        bands = kwargs.get("reserved_bands")
+        bands_read = ReservedCorridors() if bands is None else bands
+        return real_context(*args, **kwargs)
+
+    def observe(graph, **kwargs):
+        nonlocal bands_read
+        bands_read = None
+        observation = real_observe(graph, **kwargs)
+        observed.append(
+            _Observed(
+                kwargs.get("reservations") is not None,
+                kwargs.get("allow_convergence_clearance_requirements", False),
+                _points_by_edge(observation.routes),
+                observation.plan,
+                bands_read,
+            )
+        )
+        return observation
+
+    def settle(*args, **kwargs):
+        nonlocal settled
+        observed.clear()
+        settled = real_settle(*args, **kwargs)
+        return settled
+
+    monkeypatch.setattr(routing_core, "_build_routing_context", context)
+    monkeypatch.setattr(svg, "observe_route_edges_centred", observe)
+    monkeypatch.setattr(svg, "_settle_render_geometry", settle)
+    _render(text, source_dir)
+    assert settled is not None
+    return observed, settled
+
+
+def _compiling_index(observed: list[_Observed]) -> int:
+    return next(
+        index
+        for index, item in enumerate(observed)
+        if item.consumes_ledger and item.compiles
+    )
+
+
+@pytest.mark.parametrize("name", sorted(UNSETTLED_MAPS))
+def test_an_unsettled_render_draws_its_compiling_observation(
+    name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = UNSETTLED_MAPS[name]
+    observed, settled = _observe_last_settle(monkeypatch, path.read_text(), path.parent)
+
+    compiling = _compiling_index(observed)
+    assert not any(item.consumes_ledger for item in observed[:compiling])
+    observation = observed[compiling]
+    accepted = observation.plan.accepted_corridor_cohort_plan
+    assert accepted is not None
+    assert not observation.plan.boundary_clearance_requirements
+
+    assert _points_by_edge(settled.routes) == observation.points
+    assert settled.route_plan.accepted_corridor_cohort_plan == accepted
+
+
+@pytest.mark.parametrize(
+    "name", [*sorted(UNSETTLED_MAPS), "convergence_grant", "settled_fan_out"]
+)
+def test_the_compiling_observation_seats_the_bands_its_replayed_pass_seated(
+    name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The compile and its ungranted replay read the reserved bands the last
+    routing pass read: none where no settlement re-route consumed a ledger,
+    and that re-route's own where one did.
+    """
+    if name == "convergence_grant":
+        text, source_dir = UNSETTLED_CONVERGENCE_GRANT, ROOT
+    else:
+        path = (
+            ROOT / "examples" / "guide" / "03_fan_out.mmd"
+            if name == "settled_fan_out"
+            else UNSETTLED_MAPS[name]
+        )
+        text, source_dir = path.read_text(), path.parent
+    observed, _ = _observe_last_settle(monkeypatch, text, source_dir)
+
+    compiling = _compiling_index(observed)
+    assert not observed[compiling].plan.boundary_clearance_requirements
+    replayed = observed[compiling - 1]
+    assert replayed.bands is not None
+    if name == "convergence_grant":
+        assert len(observed) == compiling + 2
+    for item in observed[compiling:]:
+        assert item.bands == replayed.bands

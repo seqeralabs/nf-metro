@@ -124,7 +124,10 @@ from nf_metro.layout.routing.invariants import (
     CurveInvariantError,
     assert_render_curve_invariants,
 )
-from nf_metro.layout.routing.reserved_bands import build_reserved_corridors
+from nf_metro.layout.routing.reserved_bands import (
+    ReservedCorridors,
+    build_reserved_corridors,
+)
 from nf_metro.layout.routing.reversal import tb_positive_fan_sections
 from nf_metro.layout.routing.system_emission import (
     validate_published_route_attribution,
@@ -1958,16 +1961,25 @@ def _assert_aperture_grant_closes(
 
 @dataclass(frozen=True)
 class _RouteObservationInputs:
-    """The layout state one route observation read, kept so it can be replayed."""
+    """The layout state one route observation read, kept so it can be replayed.
+
+    ``reserved_bands`` are the corridors that observation seated its routes in,
+    measured against the captured geometry, so a replay seats in them as they
+    are rather than measuring a ledger the observation never consumed.
+    """
 
     station_positions: dict[str, tuple[float, float]]
     section_boxes: dict[str, tuple[float, float, float, float]]
     bypass_label_obstacles: dict[str, tuple[float, float, float, float]]
     station_offsets: dict[tuple[str, str], float]
+    reserved_bands: ReservedCorridors
 
     @classmethod
     def capture(
-        cls, graph: MetroGraph, station_offsets: dict[tuple[str, str], float]
+        cls,
+        graph: MetroGraph,
+        station_offsets: dict[tuple[str, str], float],
+        reserved_bands: ReservedCorridors,
     ) -> _RouteObservationInputs:
         return cls(
             {sid: (st.x, st.y) for sid, st in graph.stations.items()},
@@ -1977,6 +1989,7 @@ class _RouteObservationInputs:
             },
             graph.bypass_label_obstacles,
             dict(station_offsets),
+            reserved_bands,
         )
 
     def restore(self, graph: MetroGraph) -> dict[tuple[str, str], float]:
@@ -2069,25 +2082,26 @@ def _settle_render_geometry(
       requirement settles it together with the corridors, then observes a strict
       plan that may not publish another requirement, settles that plan once more
       for drawn positive-side containment, and re-routes consuming it.
-    - *Aperture*: after either, one re-observation against the ledger the last
+    - *Aperture*: last, one re-observation against the ledger the last
       settlement consumed runs the corridor-cohort compiler, the only pass that
       does, because only a ledger already settled to its minimum widths compiles
       without a spurious shortfall.  It replays the inputs of the last routing
-      pass, which seated that ledger's corridors.  A convergence corridor grant
-      that moved a trunk is materialised by this observation alone, so it is
-      drawn once :func:`_assert_grant_moves_only_its_convergences` proves it
-      differs from the same observation routed without the grant on the
-      granted convergences alone.  Otherwise it is drawn where a settlement
-      re-route ran and it accepted a plan and published no requirement: that
-      re-route consumed the same ledger, so the observation is it seated by
-      the plan.  Any other observation's geometry is discarded.  A
-      ``CORRIDOR_COHORT_APERTURE`` requirement it publishes is settled once
-      against that observed plan, :func:`_assert_aperture_grant_closes` proves
-      from the settlement's own translations that the grant pays every
-      measured deficit, and a re-route consuming the plan, starting from the
-      station x the last routing pass read translated by the grant, draws the
-      result.  Any deficit the grant leaves is an invariant failure rather
-      than a second batch.
+      pass, including the reserved bands that pass seated its corridors in:
+      those of the ledger a settlement re-route consumed, and none where
+      settlement moved nothing and so re-routed nothing.  A convergence
+      corridor grant that moved a trunk is materialised by this observation
+      alone, so it is drawn once :func:`_assert_grant_moves_only_its_convergences`
+      proves it differs from the same observation routed without the grant on
+      the granted convergences alone.  Otherwise it is drawn whenever it
+      accepted a plan and published no requirement, as the last routing pass
+      replayed and seated by that plan.  Any other observation's geometry is
+      discarded.  A ``CORRIDOR_COHORT_APERTURE`` requirement it publishes is
+      settled once against that observed plan,
+      :func:`_assert_aperture_grant_closes` proves from the settlement's own
+      translations that the grant pays every measured deficit, and a re-route
+      consuming the plan, starting from the station x the last routing pass
+      read translated by the grant, draws the result.  Any deficit the grant
+      leaves is an invariant failure rather than a second batch.
 
     Rail-mode sections run a separate layout pipeline whose per-line centrelines
     are anchored during ``compute_layout`` and cannot be re-derived from a
@@ -2154,15 +2168,27 @@ def _settle_render_geometry(
         *,
         stage: SettlementStage,
         allow_clearance_requirements: bool = False,
+        reserved_bands: ReservedCorridors | None = None,
     ) -> tuple[list[RoutedPath], RoutePlan]:
         nonlocal settlement_trace, last_route_inputs
-        last_route_inputs = _RouteObservationInputs.capture(graph, station_offsets)
+        if reserved_bands is None:
+            reserved_bands = (
+                ReservedCorridors()
+                if reservations is None
+                else build_reserved_corridors(
+                    graph, reservations, reservation_translations
+                )
+            )
+        last_route_inputs = _RouteObservationInputs.capture(
+            graph, station_offsets, reserved_bands
+        )
         observation = observe_route_edges_centred(
             graph,
             station_offsets=station_offsets,
             offset_step=offset_step,
             reservations=reservations,
             reservation_translations=reservation_translations,
+            reserved_bands=reserved_bands,
             allow_convergence_clearance_requirements=allow_clearance_requirements,
         )
         settlement_trace = register_settlement_stage(
@@ -2403,49 +2429,56 @@ def _settle_render_geometry(
     # The corridor-cohort compiler runs only on a pass that both holds a prior
     # ledger and may publish a clearance requirement, and only a ledger settled
     # to its minimum widths compiles without a spurious aperture shortfall; this
-    # observation is that pass.  It replays the inputs of the routing pass it
-    # follows rather than deriving fresh ones: the label pass since then grew
-    # section boxes that pass never seated the ledger's corridors against, and
-    # routing against them can leave a corridor with no band that fits.  The
+    # observation is that pass.  It replays the inputs the routing pass it
+    # follows read, not the section boxes the label pass after that one grows:
+    # that pass seated its corridors against the boxes it read, and routing
+    # against grown ones can leave a corridor with no band that fits.  The
+    # reserved bands are among those inputs, so the observation and its
+    # ungranted replay seat corridors in exactly the bands the drawn pass did,
+    # none where no settlement re-route consumed the ledger; bands the drawn
+    # pass never read would move runs the plan never decided.  The
     # observation's geometry is restored away on exit, so an aperture grant
     # settles and re-routes the drawn geometry, starting non-port stations at
     # the x the drawn pass read, and the observation's routes are thrown away.
     # A convergence grant that moved a trunk is only drawn by this observation,
     # so its routes are kept -- once they are proven to differ on the granted
     # convergences alone from the same observation routed without the grant.
-    # The drawn pass is no baseline for that: where it never consumed the
-    # ledger, the observation's pre-freeze seating moves runs no grant touched.
-    # Where a settlement re-route did consume it, the observation is that
-    # re-route seated by the plan it accepted, so it is drawn and the settled
-    # ledger, carrying the accepted record, is published.
+    # The drawn pass is no baseline for that, since it need not have planned
+    # against the ledger the observation compiles.  Without such a grant, an
+    # observation that accepted a plan and owes no clearance is the drawn pass
+    # replayed and seated by that plan, so it is drawn and the settled ledger,
+    # carrying the accepted record, is published.
     assert last_route_inputs is not None
     drawn_inputs = last_route_inputs
     drawn_routes = routes
     observed_state: _RouteObservationInputs | None = None
     ungranted_routes: list[RoutedPath] = []
     with _restoring_route_observation_geometry(graph):
-        observed_offsets = last_route_inputs.restore(graph)
+        observed_offsets = drawn_inputs.restore(graph)
         observed_routes, observed_plan = _route(
             observed_offsets,
             settled_plan,
             settlement.coordinate_translations,
             stage=SettlementStage.GENERAL_SETTLEMENT,
             allow_clearance_requirements=True,
+            reserved_bands=drawn_inputs.reserved_bands,
         )
         granted_plan_ids = _corridor_grant_moved_plan_ids(observed_plan)
         adopt_observation = bool(granted_plan_ids) or (
-            rerouted_settlement is not None
-            and observed_plan.accepted_corridor_cohort_plan is not None
+            observed_plan.accepted_corridor_cohort_plan is not None
             and not observed_plan.boundary_clearance_requirements
         )
         if adopt_observation:
-            observed_state = _RouteObservationInputs.capture(graph, observed_offsets)
+            observed_state = _RouteObservationInputs.capture(
+                graph, observed_offsets, drawn_inputs.reserved_bands
+            )
         if granted_plan_ids:
             ungranted_routes, _ = _route(
-                last_route_inputs.restore(graph),
+                drawn_inputs.restore(graph),
                 settled_plan,
                 settlement.coordinate_translations,
                 stage=SettlementStage.GENERAL_SETTLEMENT,
+                reserved_bands=drawn_inputs.reserved_bands,
             )
     aperture_requirements = _corridor_cohort_aperture_requirements(observed_plan)
     aperture_settlement: EnvelopeSettlement | None = None

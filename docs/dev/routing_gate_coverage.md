@@ -392,17 +392,17 @@ Gates with an un-exercised arm:
 
 | Line | Gate | Un-exercised arm(s) | Triage |
 | ---: | --- | --- | --- |
-| 280 | `for handler, _builder in _LOCAL_EDGE_DISPATCH:` | `->L284` | **defensive** -- _route_classified_edge's first-match walk of _LOCAL_EDGE_DISPATCH. Its last handler, _route_diagonal, is total (annotated -> RoutedPath), so the walk always returns from inside the loop and the loop-exhausted arm is unreachable. |
-| 307 | `if is_inter_section_edge(edge, source, target, ctx):` | `->L308` | **defensive** -- _co_row_feeder's inter-section check, mirroring _route_classified_edge's classify_inter_section_family. A port-or-junction to port-or-junction candidate member is a route-system member whose frozen family the preceding member check already declines, so this arm is reached only when no route-system execution is published. No swept fixture, 8,000-map corpus map or option-fuzz job reaches it. |
-| 309 | `for handler, builder in _LOCAL_EDGE_DISPATCH:` | `->L316` | **defensive** -- _co_row_feeder's first-match walk of _LOCAL_EDGE_DISPATCH. The last entry's builder, intra_co_row_feeder, always returns a feeder (annotated -> CoRowFeeder), so the walk always returns from inside the loop and the loop-exhausted arm is unreachable. |
-| 353 | `if scaffold is None:` | `->L360` |  |
-| 375 | `if rail_execution is not None:` | `->L379` |  |
-| 568 | `if result is not None:` | `->L-538` | **defensive** -- Append-guard after the priority-ordered handler chain. The last entry of _LOCAL_EDGE_DISPATCH, _route_diagonal, is total (annotated -> RoutedPath, single return statement), so result is never None and every edge appends. The None arm is unreachable. |
-| 570 | `if system_execution is not None:` | `->L572` |  |
-| 590 | `if system.system_id != expected.system_id:` | `->L593` |  |
-| 611 | `if system_execution is not None and next_system_rank != len(` | `->L614` |  |
-| 739 | `if system_execution is not None:` | `->L747` |  |
-| 771 | `if validate_final_route_frames:` | `->L773` |  |
+| 283 | `for handler, _builder in _LOCAL_EDGE_DISPATCH:` | `->L287` | **defensive** -- _route_classified_edge's first-match walk of _LOCAL_EDGE_DISPATCH. Its last handler, _route_diagonal, is total (annotated -> RoutedPath), so the walk always returns from inside the loop and the loop-exhausted arm is unreachable. |
+| 310 | `if is_inter_section_edge(edge, source, target, ctx):` | `->L311` | **defensive** -- _co_row_feeder's inter-section check, mirroring _route_classified_edge's classify_inter_section_family. A port-or-junction to port-or-junction candidate member is a route-system member whose frozen family the preceding member check already declines, so this arm is reached only when no route-system execution is published. No swept fixture, 8,000-map corpus map or option-fuzz job reaches it. |
+| 312 | `for handler, builder in _LOCAL_EDGE_DISPATCH:` | `->L319` | **defensive** -- _co_row_feeder's first-match walk of _LOCAL_EDGE_DISPATCH. The last entry's builder, intra_co_row_feeder, always returns a feeder (annotated -> CoRowFeeder), so the walk always returns from inside the loop and the loop-exhausted arm is unreachable. |
+| 360 | `if scaffold is None:` | `->L367` |  |
+| 382 | `if rail_execution is not None:` | `->L386` |  |
+| 575 | `if result is not None:` | `->L-545` | **defensive** -- Append-guard after the priority-ordered handler chain. The last entry of _LOCAL_EDGE_DISPATCH, _route_diagonal, is total (annotated -> RoutedPath, single return statement), so result is never None and every edge appends. The None arm is unreachable. |
+| 577 | `if system_execution is not None:` | `->L579` |  |
+| 597 | `if system.system_id != expected.system_id:` | `->L600` |  |
+| 618 | `if system_execution is not None and next_system_rank != len(` | `->L621` |  |
+| 746 | `if system_execution is not None:` | `->L754` |  |
+| 778 | `if validate_final_route_frames:` | `->L780` |  |
 
 ## `corners.py`
 

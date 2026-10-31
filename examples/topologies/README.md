@@ -2,7 +2,7 @@
 
 Example `.mmd` files demonstrating a range of pipeline topologies and the layout patterns they produce. Each example exercises different aspects of the auto-layout engine.
 
-This directory holds 310 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
+This directory holds 312 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
 
 To render one example:
 
@@ -341,7 +341,7 @@ A single-row long-read variant-calling map. The annotation section carries only 
 
 ## Regression Catalogue
 
-The 210 fixtures below are targeted regression guards: each was added to pin a
+The 228 fixtures below are targeted regression guards: each was added to pin a
 specific routing or layout fix and is not individually gallery-illustrated.
 They participate in the full topology validation suite (`pytest
 tests/test_topology_validation.py`) alongside the illustrated fixtures
@@ -635,15 +635,16 @@ python scripts/list_topology_fixtures.py
 
 ### Inter-row corridors and drop channels
 
-| Fixture                                     | What it tests                                                                                              |
-| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `inter_row_drop_section_clearance.mmd`      | An inter-row drop channel squeezed between packed sections above and below, centred in the gap it has      |
-| `inter_row_drop_section_clearance_row1.mmd` | The same drop where the row-1 sections hug the channel instead                                             |
-| `inter_row_exempt_band_order.mmd`           | An inter-row trunk band whose members are all exempt - reordering it removes crossings                     |
-| `opposing_bypass_corridor.mmd`              | Two bypass corridors running in opposite directions through the same inter-row gap, separated by direction |
-| `opposing_return_row_pair.mmd`              | A pair of opposed return-row routes out of one collecting section                                          |
-| `straight_drop_below.mmd`                   | A straight drop into the section directly below, with a LEFT-exit departure at the port seam               |
-| `peeloff_straight_drop_near_wall.mmd`       | A peel-off dropping straight into a section below, close to the section wall (#1521)                       |
+| Fixture                                            | What it tests                                                                                                                                                        |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `inter_row_drop_section_clearance.mmd`             | An inter-row drop channel squeezed between packed sections above and below, centred in the gap it has                                                                |
+| `inter_row_drop_section_clearance_row1.mmd`        | The same drop where the row-1 sections hug the channel instead                                                                                                       |
+| `inter_row_exempt_band_order.mmd`                  | An inter-row trunk band whose members are all exempt - reordering it removes crossings                                                                               |
+| `opposing_bypass_corridor.mmd`                     | Two bypass corridors running in opposite directions through the same inter-row gap, separated by direction                                                           |
+| `opposing_return_row_pair.mmd`                     | A pair of opposed return-row routes out of one collecting section                                                                                                    |
+| `straight_drop_below.mmd`                          | A straight drop into the section directly below, with a LEFT-exit departure at the port seam                                                                         |
+| `peeloff_straight_drop_near_wall.mmd`              | A peel-off dropping straight into a section below, close to the section wall (#1521)                                                                                 |
+| `member_channel_runway_candidate_outside_band.mmd` | A member bundle's vertical channel seated inside its reserved column band, where some corner-runway candidates for the channel fall outside the band and are refused |
 
 ### Orientation and seam-rotation orbits
 
