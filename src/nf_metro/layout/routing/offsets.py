@@ -4090,7 +4090,7 @@ def _order_entry_ports_by_approach(
             continue
         if drop_reversed is None:
             drop_reversed = _sections_downstream_of(
-                graph, _near_vertical_reversal_roots(graph)
+                graph, _junction_drop_reversal_roots(graph)
             )
         if _trial_overrides_an_owner(
             ctx, port, touched, trial, drop_reversed, same_y_adj, sec_layer_stations
@@ -6680,10 +6680,10 @@ def _reverse_near_vertical_junction_right_entry_offsets(ctx: _OffsetCtx) -> None
     port sides or grid rows, so the seam-orientation classifier cannot derive it
     coordinate-free; this pass stays as a coordinate-aware residual.
     """
-    _reverse_offsets_from_roots(ctx, _near_vertical_reversal_roots(ctx.graph))
+    _reverse_offsets_from_roots(ctx, _junction_drop_reversal_roots(ctx.graph))
 
 
-def _near_vertical_reversal_roots(graph: MetroGraph) -> set[str]:
+def _junction_drop_reversal_roots(graph: MetroGraph) -> set[str]:
     """Sections a fan-out junction drops into near-vertically (phase 10)."""
     return {
         port.section_id
