@@ -112,6 +112,14 @@ EXIT_SIDE_DIRECTION: Mapping[PortSide, Direction] = {
 }
 """The direction a line travels leaving an exit port on each side."""
 
+ENTRY_SIDE_DIRECTION: Mapping[PortSide, Direction] = {
+    PortSide.LEFT: Direction.R,
+    PortSide.RIGHT: Direction.L,
+    PortSide.TOP: Direction.D,
+    PortSide.BOTTOM: Direction.U,
+}
+"""The direction a line travels entering an entry port on each side."""
+
 
 def offsets_hold(
     offsets: Mapping[tuple[str, str], float],

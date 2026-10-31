@@ -51,6 +51,7 @@ def _ctx(graph: MetroGraph, offsets: dict[str, float]) -> SimpleNamespace:
     return SimpleNamespace(
         graph=graph,
         station_offsets={(PORT, line): off for line, off in offsets.items()},
+        positive_fan=set(),
     )
 
 

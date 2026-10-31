@@ -49,6 +49,7 @@ from nf_metro.layout.route_reservations import (
     _reservation_content_id,
 )
 from nf_metro.layout.routing.common import (
+    ENTRY_SIDE_DIRECTION,
     Direction,
     RoutedPath,
     SourceTurnout,
@@ -79,12 +80,6 @@ from nf_metro.parser.route_topology import ConnectorId
 
 CorridorCohortSegmentKey = tuple[str, tuple[str, str, str], int]
 CorridorFootprintSegmentKey = tuple[str, tuple[str, str, str], int]
-_PORT_LEAD_DIRECTION = {
-    PortSide.LEFT: Direction.R,
-    PortSide.RIGHT: Direction.L,
-    PortSide.TOP: Direction.D,
-    PortSide.BOTTOM: Direction.U,
-}
 
 
 class CorridorCohortClaimRole(str, Enum):
@@ -425,7 +420,7 @@ def _claim_is_destination_boundary_carrier(
 
 def _destination_claim_axis_sign(side: PortSide, direction: Direction) -> int:
     return right_normal_axis_sign(direction) // right_normal_axis_sign(
-        _PORT_LEAD_DIRECTION[side]
+        ENTRY_SIDE_DIRECTION[side]
     )
 
 
