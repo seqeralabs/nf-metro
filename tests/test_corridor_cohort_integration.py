@@ -3090,10 +3090,10 @@ def test_patch_keeps_an_allocation_within_the_solve_quantum_as_its_source(
     assert _riser_patch_xs(("port", source, allocated)) == [expected]
 
 
-def test_patch_writes_a_skewed_segment_even_within_the_solve_quantum() -> None:
-    """A segment whose ends differ is written at both ends, so they snap to the
-    one allocated coordinate."""
-    xs = _riser_patch_xs(("port", 337.34999999999997, 337.35), source_end=337.35)
+def test_patch_writes_a_segment_whose_far_end_is_beyond_the_solve_quantum() -> None:
+    """A segment is at its source only when both ends are, so a skewed one is
+    written at both ends and they snap to the one allocated coordinate."""
+    xs = _riser_patch_xs(("port", 337.35, 337.35), source_end=337.35 + 1e-6)
 
     assert xs == [337.35]
 

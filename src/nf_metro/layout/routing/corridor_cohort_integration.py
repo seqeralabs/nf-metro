@@ -4059,10 +4059,8 @@ def _prepare_patches(
             start, end = points[segment_rank : segment_rank + 2]
             if abs(start[axis] - end[axis]) > COORD_TOLERANCE:
                 return None
-            if (
-                start[axis] != end[axis]
-                or abs(coordinate - start[axis]) > SOLVE_QUANTUM
-            ):
+            reach = max(abs(coordinate - start[axis]), abs(coordinate - end[axis]))
+            if reach > SOLVE_QUANTUM:
                 moved_destinations.add(key[1][1])
             for point_rank in (segment_rank, segment_rank + 1):
                 point = list(points[point_rank])
