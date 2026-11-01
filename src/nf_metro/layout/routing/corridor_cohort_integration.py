@@ -2971,6 +2971,105 @@ def _ranks_in_slot_order(slot_by_rank: Mapping[int, float | None]) -> list[int]:
     )
 
 
+def _pinned_endpoint_cohorts(
+    movable: tuple[_BoundClaim, ...],
+    equalities: Sequence[CorridorEquality],
+    fixed_lane_pairs: Sequence[tuple[_BoundClaim, _BoundClaim]],
+) -> frozenset[str]:
+    """Endpoint cohorts with a member held on its own line's fixed lane,
+    directly or through a chain of same-lane equalities."""
+    rank_by_id = {item.claim_id: rank for rank, item in enumerate(movable)}
+    union = _UnionFind(len(movable))
+    for equality in equalities:
+        union.union(
+            rank_by_id[equality.left_member_id], rank_by_id[equality.right_member_id]
+        )
+    pinned_roots = {
+        union.find(rank_by_id[movable_claim.claim_id])
+        for movable_claim, _fixed_claim in fixed_lane_pairs
+    }
+    return frozenset(
+        item.ledger.endpoint_cohort_id
+        for rank, item in enumerate(movable)
+        if item.ledger.endpoint_cohort_id is not None
+        and union.find(rank) in pinned_roots
+    )
+
+
+def _fixed_lanes_between(
+    lower: _BoundClaim, upper: _BoundClaim, fixed_claims: Sequence[_BoundClaim]
+) -> int:
+    """Distinct fixed lanes from outside the members' cohort drawn strictly
+    between two cohort members, beside both on a span they share."""
+    if (
+        lower.axis != upper.axis
+        or lower.ledger.direction is not upper.ledger.direction
+        or not _overlap(lower, upper)
+    ):
+        return 0
+    low, high = sorted((lower.coordinate, upper.coordinate))
+    shared_start = max(lower.longitudinal_start, upper.longitudinal_start)
+    shared_end = min(lower.longitudinal_end, upper.longitudinal_end)
+    between = sorted(
+        item.coordinate
+        for item in fixed_claims
+        if item.axis == lower.axis
+        and item.ledger.endpoint_cohort_id != lower.ledger.endpoint_cohort_id
+        and low + COORD_TOLERANCE < item.coordinate < high - COORD_TOLERANCE
+        and _overlaps(
+            item.longitudinal_start, item.longitudinal_end, shared_start, shared_end
+        )
+    )
+    return sum(
+        1
+        for rank, coordinate in enumerate(between)
+        if rank == 0 or coordinate - between[rank - 1] > COORD_TOLERANCE
+    )
+
+
+def _local_boundary_ranks(
+    claims: tuple[_BoundClaim, ...],
+    fixed_claims: tuple[_BoundClaim, ...],
+    pinned_cohorts: frozenset[str],
+) -> dict[tuple[str, int], int]:
+    """Each endpoint cohort rank's local boundary rank, dealt in port-slot order.
+
+    Every cohort claim ranks, fixed and counter-running alike, so a fixed lane
+    between movable ones keeps its step and a lane pinned onto its line's fixed
+    lane can reach its pin.  A pinned cohort cannot move off a fixed lane from
+    outside it either, so each one drawn between two consecutive members holds
+    a step of its own there.
+    """
+    members: defaultdict[str, defaultdict[int, list[_BoundClaim]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    for item in claims:
+        cohort_id = item.ledger.endpoint_cohort_id
+        network_rank = item.ledger.endpoint_network_rank
+        if cohort_id is not None and network_rank is not None:
+            members[cohort_id][network_rank].append(item)
+    local_ranks: dict[tuple[str, int], int] = {}
+    for cohort_id, by_rank in members.items():
+        order = _ranks_in_slot_order(
+            {
+                rank: items[-1].target.endpoint_lane_coordinate
+                for rank, items in by_rank.items()
+            }
+        )
+        local_rank = 0
+        local_ranks[(cohort_id, order[0])] = local_rank
+        for lower_rank, upper_rank in zip(order, order[1:]):
+            local_rank += 1
+            if cohort_id in pinned_cohorts:
+                local_rank += max(
+                    _fixed_lanes_between(lower, upper, fixed_claims)
+                    for lower in by_rank[lower_rank]
+                    for upper in by_rank[upper_rank]
+                )
+            local_ranks[(cohort_id, upper_rank)] = local_rank
+    return local_ranks
+
+
 def _network_lane_owner(claim: _BoundClaim) -> str:
     return _direction_owner(
         f"network-lane|{claim.ledger.network_id}|{claim.ledger.lane_rank}",
@@ -3329,23 +3428,6 @@ def _problem(
             item.ledger.path_rank,
             cohort_first_path_rank.get(cohort_key, item.ledger.path_rank),
         )
-    # Every cohort claim ranks, fixed and counter-running alike, so a fixed lane
-    # between movable ones keeps its rank and a lane pinned onto its line's fixed
-    # lane can reach its pin.
-    slots_by_cohort: defaultdict[str, dict[int, float | None]] = defaultdict(dict)
-    for item in claims:
-        if (
-            item.ledger.endpoint_cohort_id is not None
-            and item.ledger.endpoint_network_rank is not None
-        ):
-            slots_by_cohort[item.ledger.endpoint_cohort_id][
-                item.ledger.endpoint_network_rank
-            ] = item.target.endpoint_lane_coordinate
-    local_boundary_ranks: dict[tuple[str, int], int] = {
-        (cohort_id, boundary_rank): local_rank
-        for cohort_id, slot_by_rank in slots_by_cohort.items()
-        for local_rank, boundary_rank in enumerate(_ranks_in_slot_order(slot_by_rank))
-    }
     equalities = tuple(
         CorridorEquality(
             _direction_owner(
@@ -3369,6 +3451,11 @@ def _problem(
         for fixed_claim in fixed_claims
         if _same_semantic_fixed_lane(movable_claim, fixed_claim)
     ]
+    local_boundary_ranks = _local_boundary_ranks(
+        claims,
+        fixed_claims,
+        _pinned_endpoint_cohorts(movable, equalities, fixed_lane_pairs),
+    )
     aliased_claims = tuple(item for item in claims if item.claim_id in aliases)
     scalar_equalities = [
         CorridorEquality(
