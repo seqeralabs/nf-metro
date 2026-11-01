@@ -58,6 +58,7 @@ from nf_metro.layout.routing.corridor_cohort_integration import (
     claims_share_fixed_lane_identity,
 )
 from nf_metro.layout.routing.corridor_cohorts import (
+    SOLVE_QUANTUM,
     CorridorAllocationStatus,
     CorridorForbiddenInterval,
     solve_corridor_cohorts,
@@ -1298,7 +1299,7 @@ def test_fixed_endpoint_landing_is_planned_clear_of_an_unclaimed_fixed_lead() ->
 
     fixed_points_before = tuple(fixed_route.points)
 
-    plan = cci.compile_corridor_cohort_plan(ledger, targets)
+    plan = cci.compile_corridor_cohort_plan(ledger, targets, entry_port_for={})
     cci.publish_corridor_cohort_plan(plan)
 
     (landing,) = plan.landings
@@ -1535,7 +1536,10 @@ def test_member_and_scalar_relation_occupy_one_problem(
     monkeypatch.setattr(cci, "solve_corridor_cohorts", spy_solve)
 
     plan = cci.compile_corridor_cohort_plan(
-        ledger, targets, scalar_requests=scalar_requests
+        ledger,
+        targets,
+        scalar_requests=scalar_requests,
+        entry_port_for={},
     )
 
     scalar_variable_id = scalar_requests[0].variable.variable_id
@@ -1603,7 +1607,10 @@ def test_compiler_counts_every_solve_call(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(cci, "solve_corridor_cohorts", counting_solve)
 
     plan = cci.compile_corridor_cohort_plan(
-        ledger, targets, scalar_requests=scalar_requests
+        ledger,
+        targets,
+        scalar_requests=scalar_requests,
+        entry_port_for={},
     )
 
     assert plan.solve_call_count == 1
@@ -1629,7 +1636,11 @@ def test_final_solve_trace_is_emitted_from_the_integration_call_site(
     )
 
     plan = cci.compile_corridor_cohort_plan(
-        ledger, targets, scalar_requests=scalar_requests, settlement_trace=trace
+        ledger,
+        targets,
+        scalar_requests=scalar_requests,
+        settlement_trace=trace,
+        entry_port_for={},
     )
 
     assert plan.settlement_trace is not None
@@ -1711,7 +1722,9 @@ def test_component_on_segments_another_plan_owns_is_planned_without_a_solve() ->
         target.route.route_system_owned_segment_ranks = (0,)
 
     plan = cci.compile_corridor_cohort_plan(
-        _ledger_of(*claims), tuple(target for _claim, target in claims)
+        _ledger_of(*claims),
+        tuple(target for _claim, target in claims),
+        entry_port_for={},
     )
 
     (component,) = plan.components
@@ -1754,7 +1767,9 @@ def test_component_with_an_incomplete_reservation_fails_closed(
 
     with pytest.raises(cci.CorridorCohortCompilationError, match=match):
         cci.compile_corridor_cohort_plan(
-            _ledger_of(*claims), tuple(target for _claim, target in claims)
+            _ledger_of(*claims),
+            tuple(target for _claim, target in claims),
+            entry_port_for={},
         )
 
 
@@ -1817,7 +1832,7 @@ def test_inconsistent_endpoint_cohort_fails_closed(
     )
 
     with pytest.raises(cci.CorridorCohortCompilationError, match=match):
-        cci.compile_corridor_cohort_plan(ledger, tuple(targets))
+        cci.compile_corridor_cohort_plan(ledger, tuple(targets), entry_port_for={})
 
 
 def test_two_claims_on_one_member_segment_fail_closed() -> None:
@@ -1834,6 +1849,7 @@ def test_two_claims_on_one_member_segment_fail_closed() -> None:
         cci.compile_corridor_cohort_plan(
             _ledger_of(first, (twin_claim, twin_target)),
             (first[1], twin_target),
+            entry_port_for={},
         )
 
 
@@ -1854,7 +1870,9 @@ def test_overlaid_cohort_component_with_an_incomplete_claim_keeps_its_overlay() 
     )
 
     plan = cci.compile_corridor_cohort_plan(
-        ledger, (first[1], second[1], incomplete[1])
+        ledger,
+        (first[1], second[1], incomplete[1]),
+        entry_port_for={},
     )
 
     (component,) = plan.components
@@ -1876,7 +1894,9 @@ def test_endpoint_cohort_split_across_components_is_typed_compatibility() -> Non
     second = _cohort_member("b", "cohort:x", region=RowGapRegion(1, 2))
     ledger = _cohort_ledger((first, second), expected=frozenset({"a", "b"}))
 
-    plan = cci.compile_corridor_cohort_plan(ledger, (first[1], second[1]))
+    plan = cci.compile_corridor_cohort_plan(
+        ledger, (first[1], second[1]), entry_port_for={}
+    )
 
     assert len(plan.components) == 2
     for component in plan.components:
@@ -1904,7 +1924,9 @@ def test_endpoint_cohort_without_claims_adds_no_component() -> None:
         offset_step=10.0,
     )
 
-    plan = cci.compile_corridor_cohort_plan(ledger, (carrier_target,))
+    plan = cci.compile_corridor_cohort_plan(
+        ledger, (carrier_target,), entry_port_for={}
+    )
 
     (component,) = plan.components
     assert component.status is cci.CorridorAllocationStatus.PLANNED
@@ -1927,7 +1949,10 @@ def test_member_geometry_corridor_handoff_returns_heterogeneous_grants(
     )
 
     plan = member_geometry.plan_corridor_cohorts(
-        ledger, targets, scalar_requests=scalar_requests
+        ledger,
+        targets,
+        scalar_requests=scalar_requests,
+        entry_port_for={},
     )
 
     scalar_variable_id = scalar_requests[0].variable.variable_id
@@ -1995,7 +2020,7 @@ def test_unwitnessed_blocking_obstacle_raises_instead_of_losing_its_shortfall(
     monkeypatch.setattr(cci, "solve_corridor_cohorts", fake_solve)
 
     with pytest.raises(CorridorCohortCompilationError, match="unwitnessed obstacles"):
-        cci.compile_corridor_cohort_plan(ledger, (target,))
+        cci.compile_corridor_cohort_plan(ledger, (target,), entry_port_for={})
 
 
 def test_shortfall_without_a_directed_shift_sign_raises(
@@ -2053,7 +2078,7 @@ def test_shortfall_without_a_directed_shift_sign_raises(
     monkeypatch.setattr(cci, "solve_corridor_cohorts", fake_solve)
 
     with pytest.raises(CorridorCohortCompilationError, match="directed boundary side"):
-        cci.compile_corridor_cohort_plan(ledger, (target,))
+        cci.compile_corridor_cohort_plan(ledger, (target,), entry_port_for={})
 
 
 def _top_entry_drops(routes, port_id: str) -> dict[str, tuple[float, int]]:
@@ -2702,7 +2727,9 @@ def _compile_turning_routes(
         offset_step=4.0,
     )
     return cci.compile_corridor_cohort_plan(
-        ledger, tuple(target for _claims, target in members)
+        ledger,
+        tuple(target for _claims, target in members),
+        entry_port_for={},
     )
 
 
@@ -3006,3 +3033,119 @@ def test_guard_corner_orders_turn_with_the_run_direction(
     emitted = cci._corner_orders(claims, (), 4.0, neighbours)
 
     assert [(item.lower_member_id, item.upper_member_id) for item in emitted] == orders
+
+
+def _riser_patch_xs(
+    *risers: tuple[str, float, float],
+    source_end: float | None = None,
+    entry_port_for: dict[str, str] | None = None,
+) -> list[tuple[float, float]]:
+    """The x of each riser's two end points after patching it to its allocation.
+
+    A riser is ``(destination, source x, allocated x)``; *source_end* skews the
+    first riser's far end.
+    """
+    targets = []
+    allocations = []
+    for index, (destination, source, allocated) in enumerate(risers):
+        edge_key = (f"a{index}:source", destination, "l0")
+        route = _mutable_route(
+            source=edge_key[0],
+            target=edge_key[1],
+            line_id=edge_key[2],
+            points=[
+                (0.0, 10.0),
+                (source, 10.0),
+                (source if index or source_end is None else source_end, 40.0),
+                (source + 30.0, 40.0),
+            ],
+        )
+        targets.append(
+            CorridorCohortTarget(
+                f"a{index}",
+                f"plan:a{index}",
+                edge_key,
+                RouteFamilyId.MERGE_TRUNK,
+                (f"connector:a{index}",),
+                route,
+                True,
+            )
+        )
+        allocations.append(
+            cci.CorridorCohortAllocation(
+                claim_id=f"claim:a{index}",
+                member_id=f"a{index}",
+                member_geometry_plan_id=f"plan:a{index}",
+                edge_key=edge_key,
+                family_id=RouteFamilyId.MERGE_TRUNK,
+                connector_ids=(f"connector:a{index}",),
+                segment_rank=1,
+                axis=0,
+                longitudinal_start=10.0,
+                longitudinal_end=40.0,
+                coordinate=allocated,
+                source_coordinate=source,
+            )
+        )
+    patches = cci._prepare_patches(
+        tuple(allocations), (), tuple(targets), entry_port_for=entry_port_for or {}
+    )
+    assert patches is not None
+    assert all(1 in patch.owned for patch in patches)
+    return [(patch.points[1][0], patch.points[2][0]) for patch in patches]
+
+
+@pytest.mark.parametrize(
+    ("source", "allocated", "expected"),
+    [
+        pytest.param(337.34999999999997, 337.35, 337.34999999999997, id="float-noise"),
+        pytest.param(
+            100.0, 100.0 + SOLVE_QUANTUM / 2, 100.0, id="within-the-solve-quantum"
+        ),
+        pytest.param(
+            100.0,
+            100.0 + 2 * SOLVE_QUANTUM,
+            100.0 + 2 * SOLVE_QUANTUM,
+            id="beyond-the-solve-quantum",
+        ),
+        pytest.param(337.34999999999997, 341.35, 341.35, id="moved"),
+    ],
+)
+def test_patch_keeps_an_allocation_within_the_solve_quantum_as_its_source(
+    source: float, allocated: float, expected: float
+) -> None:
+    """The solve reads coordinates only to SOLVE_QUANTUM, so an allocation that
+    close to its source is the source: the patch keeps the source's float form,
+    which the exact-equality ownership checks compare against."""
+    assert _riser_patch_xs(("port", source, allocated)) == [(expected, expected)]
+
+
+def test_patch_writes_a_segment_whose_far_end_is_beyond_the_solve_quantum() -> None:
+    """A segment is at its source only when both ends are, so a skewed one is
+    written at both ends and they snap to the one allocated coordinate."""
+    xs = _riser_patch_xs(("port", 337.35, 337.35), source_end=337.35 + 1e-6)
+
+    assert xs == [(337.35, 337.35)]
+
+
+def test_patch_writes_every_route_into_an_entry_port_a_route_moves_into() -> None:
+    """The lanes of one entry port are staggered and seated from their routes'
+    written floats together, so a route within the quantum is written with its
+    mates, whichever merge junction it reaches the port through."""
+    xs = _riser_patch_xs(
+        ("junction-1", 337.34999999999997, 337.35),
+        ("junction-2", 100.0, 108.0),
+        entry_port_for={"junction-1": "port", "junction-2": "port"},
+    )
+
+    assert xs == [(337.35, 337.35), (108.0, 108.0)]
+
+
+def test_patch_keeps_a_route_into_an_entry_port_no_route_moves_into() -> None:
+    xs = _riser_patch_xs(
+        ("junction-1", 337.34999999999997, 337.35),
+        ("junction-2", 100.0, 108.0),
+        entry_port_for={"junction-1": "port-1", "junction-2": "port-2"},
+    )
+
+    assert xs == [(337.34999999999997, 337.34999999999997), (108.0, 108.0)]

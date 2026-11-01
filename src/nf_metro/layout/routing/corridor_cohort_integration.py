@@ -58,6 +58,7 @@ from nf_metro.layout.routing.common import (
     segment_direction,
 )
 from nf_metro.layout.routing.corridor_cohorts import (
+    SOLVE_QUANTUM,
     CorridorAllocationFailureReason,
     CorridorAllocationProblem,
     CorridorAllocationResult,
@@ -3985,6 +3986,8 @@ def _prepare_patches(
     allocations: tuple[CorridorCohortAllocation, ...],
     landings: tuple[CorridorCohortLanding, ...],
     targets: Sequence[CorridorCohortTarget],
+    *,
+    entry_port_for: Mapping[str, str],
 ) -> tuple[_RoutePatch, ...] | None:
     targets_by_key = {(target.member_id, target.edge_key): target for target in targets}
     changes: defaultdict[
@@ -3997,7 +4000,10 @@ def _prepare_patches(
     ] = defaultdict(list)
     for landing in landings:
         landings_by_key[(landing.member_id, landing.edge_key)].append(landing)
-    patches: list[_RoutePatch] = []
+    staged: list[
+        tuple[RoutedPath, list[tuple[float, float]], tuple[int, ...], str]
+    ] = []
+    moved_ports: set[str] = set()
     for key in dict.fromkeys((*changes, *landings_by_key)):
         member_changes = changes[key]
         member_landings = landings_by_key[key]
@@ -4055,6 +4061,9 @@ def _prepare_patches(
             start, end = points[segment_rank : segment_rank + 2]
             if abs(start[axis] - end[axis]) > COORD_TOLERANCE:
                 return None
+            reach = max(abs(coordinate - start[axis]), abs(coordinate - end[axis]))
+            if reach > SOLVE_QUANTUM:
+                moved_ports.add(entry_port_for.get(key[1][1], key[1][1]))
             for point_rank in (segment_rank, segment_rank + 1):
                 point = list(points[point_rank])
                 point[axis] = coordinate
@@ -4068,8 +4077,18 @@ def _prepare_patches(
                 }
             )
         )
-        patches.append(_unsized_patch(route, points, owned))
-    return tuple(patches)
+        staged.append((route, points, owned, entry_port_for.get(key[1][1], key[1][1])))
+    # The solve reads coordinates only to SOLVE_QUANTUM, so a route whose every
+    # result is that close to its source keeps the source's float form, which
+    # the exact-equality ownership checks compare against. The routes into one
+    # entry port are written together or not at all: the passes that stagger
+    # and seat a port's lanes derive each from its neighbours' written floats.
+    return tuple(
+        _unsized_patch(
+            route, points if port in moved_ports else list(route.points), owned
+        )
+        for route, points, owned, port in staged
+    )
 
 
 def _commit_patches(patches: tuple[_RoutePatch, ...]) -> None:
@@ -4197,6 +4216,7 @@ def compile_corridor_cohort_plan(
     settlement_trace: SettlementStageTrace | None = None,
     corner_sizer: CorridorCornerSizer = _no_corner_sizing,
     live_route: Callable[[RoutedPath], RoutedPath] = _same_route,
+    entry_port_for: Mapping[str, str],
 ) -> CorridorCohortPlan:
     """Solve every cohort from one route snapshot without publishing geometry.
 
@@ -4212,6 +4232,9 @@ def compile_corridor_cohort_plan(
     routes themselves, *live_route* maps each copy to the route it stands for,
     and every returned patch, a mate's included, names that route, so
     publishing writes the routes the render draws.
+
+    *entry_port_for* maps a merge junction to the entry port it feeds, so the
+    routes converging on one port are written as one group.
     """
     claims, overlaid_cohort_ids = _bind_ledger(ledger, targets)
     scalar_requests_by_id = {
@@ -4439,7 +4462,9 @@ def compile_corridor_cohort_plan(
             }
         )
     )
-    patches = _prepare_patches(allocations, landings, targets)
+    patches = _prepare_patches(
+        allocations, landings, targets, entry_port_for=entry_port_for
+    )
     if patches is None:
         raise CorridorCohortCompilationError(
             "corridor cohort publication does not match its source snapshot"

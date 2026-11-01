@@ -197,15 +197,19 @@ class CorridorAllocationResult:
     corner_tier: CorridorCornerOrderTier = CorridorCornerOrderTier.NONE
 
 
+_SOLVE_QUANTUM_DIGITS = 9
+SOLVE_QUANTUM = 10.0**-_SOLVE_QUANTUM_DIGITS
+
+
 def _q(value: float) -> Fraction:
-    """*value* as an exact rational, with float noise below 1e-9 dropped.
+    """*value* as an exact rational, with float noise below SOLVE_QUANTUM dropped.
 
     Coordinates are sums of a pitch that need not be binary-exact (a 3.6px
     lane step), so two lanes drawn one pitch apart can differ by
-    ``698.8000000000001 - 695.2``; read exactly, that sub-nanometre residue
+    ``698.8000000000001 - 695.2``; read exactly, that sub-quantum residue
     is a distinct separation and a spurious contradiction.
     """
-    return Fraction(str(round(value, 9)))
+    return Fraction(str(round(value, _SOLVE_QUANTUM_DIGITS)))
 
 
 def _overlaps(a_start: float, a_end: float, b_start: float, b_end: float) -> bool:
