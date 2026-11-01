@@ -331,6 +331,9 @@ runtime check either:
   station-offset computation holds; read by routing's fan, gap, band,
   exit-turn and seating consumers and the bundle-order curve check, empty when
   no departure is recorded.
+- `graph._departure_record_keys` - the departure-record keys the layout's
+  first positioning pass ended with; every later pass must end with the same
+  keys or raises `DepartureRecordDriftError`.
 - `graph._linear_entry_pill_lines_cache` - accepted linear-entry cohorts
   projected by each station-offset computation. Marker bbox, label, and render
   consumers use the cohort with the offset map produced by that computation;
@@ -1595,7 +1598,7 @@ the planned-fan offsets that follow them own the lanes a fan plan states.
   `_claim_family_port_orders` records the entry-port order family's claims;
   `_hold_decided_orders` and `_commit_unless_a_decided_order_breaks` hold the
   decided orders through the later phases. `_feeder_departure_orders` and
-  `_single_feeder_departure_order` (rule W) write `DepartureLaneOrder`
+  `_single_feeder_departure_order` write `DepartureLaneOrder`
   records (`layout/departure_order.py`); `_record_carry_is_full` stops a
   record port's carry at the port; `_decision_overrides_an_owner` judges a
   record decision.
@@ -1615,18 +1618,20 @@ the planned-fan offsets that follow them own the lanes a fan plan states.
   (one line of each reordered pair also leaves it for another target) may
   reach the port in an order its bundle does not carry concentrically; the
   departure then takes a `DepartureLaneOrder`, a permutation of that natural
-  order, and the lines change sides once, at the fork. Rule W gives one to a
-  single junction feeder whose lines shared with a sibling departure peel off
-  beyond the port: those take the lanes on the fork's side, the grid read
+  order, and the lines change sides once, at the fork. A single junction
+  feeder gets one too where its lines shared with a sibling departure peel
+  off beyond the port: those take the lanes on the fork's side, the grid read
   along the port's inward axis. A record port is decided once per positioning
   pass, in the first offsets run after Stage 5.1, into
-  `graph._departure_order_plan`; later runs of the pass replay the decision.
+  `graph._departure_order_plan`; later runs of the pass replay the decision,
+  and a pass that ends holding other records than the layout's first pass
+  raises `DepartureRecordDriftError`.
   Its order is carried along the bundle only when the carry adds no
   crossing, sandwich or same-row marker strike, and leaves no carried exit
   holding a pair in the other order to the perpendicular entry its connector
   feeds (`_perpendicular_seam_flips`: that entry's order belongs to its own
-  feeders); it is judged by the owners
-  above on the offsets phase 8 would leave it with, and refused
+  feeders); it is judged by the owners above on the offsets phase 8 would
+  leave it with, and refused
   (`reconcile`) when phase 8 would break it. Junction fan positions, gap
   ranks, `_distinct_line_order`, the trunk-band constraints, exit-turn axes,
   settled exit-turn lane ranks, the gap-bundle seat by port slot order and

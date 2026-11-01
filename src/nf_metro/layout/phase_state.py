@@ -334,6 +334,18 @@ PHASE_FIELD_REGISTRY: dict[str, PhaseFieldSpec] = {
             "record"
         ),
     ),
+    "_departure_record_keys": PhaseFieldSpec(
+        name="_departure_record_keys",
+        writer_stage=PRE_LAYOUT,
+        reader_stages=(POST_LAYOUT,),
+        enforcement=FieldEnforcement.FALLBACK,
+        why=(
+            "the departure-record keys the layout's first positioning pass "
+            "ended with: cleared when compute_layout starts, set at the end of "
+            "the first pass, and compared at the end of every later pass, which "
+            "fails closed on a difference"
+        ),
+    ),
     "_linear_entry_pill_lines_cache": PhaseFieldSpec(
         name="_linear_entry_pill_lines_cache",
         writer_stage=STATION_OFFSET_LAYOUT,

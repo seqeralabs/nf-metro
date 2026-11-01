@@ -21,7 +21,9 @@ import pytest
 from nf_metro.api import render_string
 from nf_metro.layout.departure_order import (
     DepartureLaneOrder,
+    DepartureRecordDriftError,
     PortOrderDecision,
+    hold_departure_records,
     relabel_departures,
 )
 from nf_metro.layout.routing import offsets as offsets_module
@@ -101,7 +103,7 @@ def test_a_fork_whose_lines_part_renders_with_its_departure_record(
 ) -> None:
     """The junction sends both lines on to another section as well, so they
     part there; the port needs them in the opposite order to the one their
-    bundle carries, and the departure records the swap rather than aborting."""
+    bundle carries, and the departure records the swap."""
     drawn = _draw(monkeypatch, path)
 
     assert drawn.graph is not None
@@ -146,7 +148,7 @@ def test_lines_that_leave_a_junction_together_take_no_record(
 ) -> None:
     """Two lines that leave the junction only for the port travel on together:
     reordering them would be a lane swap along the run, so no record is
-    written and the map draws as it would without the record."""
+    written."""
     verdicts: list[bool] = []
     parts = offsets_module._parts_at_fork
 
@@ -279,11 +281,11 @@ def test_the_port_stop_fork_keeps_its_order_at_the_port(
 def test_a_carry_that_reorders_a_perpendicular_seam_takes_no_record(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Rule W's carry would move one line across another at Zone 2's exit,
-    whose connector feeds Zone 3's BOTTOM entry; that entry's other feeder
-    holds its order, so the seam would change order between the sections.
-    The carry stops at the port instead, and rule W, which needs the whole
-    section to take the order, writes no record."""
+    """A single-feeder departure's carry would move one line across another at
+    Zone 2's exit, whose connector feeds Zone 3's BOTTOM entry.  That entry's
+    other feeder holds its order, so the seam would change order between the
+    sections: the carry stops at the port, and the departure, whose order the
+    whole section has to take, gets no record."""
     added: list[set[tuple[str, str, str, str]]] = []
     flips = offsets_module._perpendicular_seam_flips
 
@@ -301,3 +303,17 @@ def test_a_carry_that_reorders_a_perpendicular_seam_takes_no_record(
         for exit_id, entry_id, _a, _b in found
     )
     assert not any(drawn.runs)
+
+
+def test_a_pass_that_ends_with_other_records_than_the_first_fails_closed() -> None:
+    graph = MetroGraph()
+    record = _record(("b", "a"), ("a", "b"))
+    graph._departure_lane_orders = {record.key: record}
+    hold_departure_records(graph)
+    hold_departure_records(graph)
+
+    graph._departure_lane_orders = {}
+    with pytest.raises(DepartureRecordDriftError) as raised:
+        hold_departure_records(graph)
+
+    assert raised.value.changed == (("j", "port"),)

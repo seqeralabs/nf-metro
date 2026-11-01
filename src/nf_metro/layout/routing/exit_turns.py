@@ -2014,13 +2014,10 @@ def _departure_ranked_seeds(
     ranked = []
     for seed in seeds:
         record = records.get((seed.edge.source, seed.edge.target))
-        if (
-            record is not None
-            and seed.edge.line_id in record.lines
-            and all(line_id in rank for line_id in record.lines)
-        ):
-            seed = replace(seed, lane_rank=rank[record.natural_line(seed.edge.line_id)])
-        ranked.append(seed)
+        natural = (
+            None if record is None else record.natural_rank(seed.edge.line_id, rank)
+        )
+        ranked.append(seed if natural is None else replace(seed, lane_rank=natural))
     return tuple(ranked)
 
 

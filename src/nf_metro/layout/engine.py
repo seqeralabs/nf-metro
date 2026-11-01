@@ -541,6 +541,7 @@ def compute_layout(
     # the graph so per-stage call sites can snapshot without signature churn.
     # Off by default: when unset, each _snap call is a single attribute read.
     graph._phase_snapshots_enabled = phase_snapshots_enabled()
+    graph._departure_record_keys = None
 
     from nf_metro.layout.pass_metrics import font_scale_context, stroke_scale_context
 
@@ -1444,9 +1445,13 @@ def _layout_once(
     Clears ``_cross_column_perp_bridge_ports`` before the pass and prunes it
     against the pass's final boxes after, so it holds only this pass's bridges.
     Starts an empty departure-order plan, which offsets phase 7b' fills once
-    per pass.
+    per pass, and fails closed if the pass ends holding other departure
+    records than the layout's first pass did.
     """
-    from nf_metro.layout.departure_order import DepartureOrderPlan
+    from nf_metro.layout.departure_order import (
+        DepartureOrderPlan,
+        hold_departure_records,
+    )
     from nf_metro.layout.fan_plans import (
         build_fan_plan_execution,
         install_fan_plan_execution,
@@ -1492,6 +1497,7 @@ def _layout_once(
         validate=validate,
     )
     prune_settled_cross_column_perp_bridges(graph)
+    hold_departure_records(graph)
 
 
 def _compute_flat_layout(

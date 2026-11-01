@@ -1335,27 +1335,36 @@ def _corridor_hold_shift(
     return 0.0 if allowed is None else allowed.hold(0.0)
 
 
-def _departure_lane_rank(route: RoutedPath, lane_rank: int, ctx: _RoutingCtx) -> int:
+def _departure_lane_rank(
+    route: RoutedPath,
+    lane_rank: int,
+    ctx: _RoutingCtx,
+    source_ranks: dict[str, dict[str, int]],
+) -> int:
     """*lane_rank* moved by as many source lanes as separate *route*'s line
-    from the line whose lane a recorded departure gives it."""
-    record = ctx.graph._departure_lane_orders.get(
-        (route.edge.source, route.edge.target)
-    )
-    if record is None or route.line_id not in record.lines:
+    from the line whose lane a recorded departure gives it.
+
+    *source_ranks* caches each source station's lines by lane."""
+    source = route.edge.source
+    record = ctx.graph._departure_lane_orders.get((source, route.edge.target))
+    if record is None:
         return lane_rank
-    source, offsets = route.edge.source, ctx.station_offsets or {}
-    held = sorted(
-        (
-            line_id
-            for line_id in ctx.graph.station_lines(source)
-            if (source, line_id) in offsets
-        ),
-        key=lambda line_id: offsets[(source, line_id)],
-    )
-    natural = record.natural_line(route.line_id)
-    if route.line_id not in held or natural not in held:
+    if source not in source_ranks:
+        offsets = ctx.station_offsets or {}
+        held = sorted(
+            (
+                line_id
+                for line_id in ctx.graph.station_lines(source)
+                if (source, line_id) in offsets
+            ),
+            key=lambda line_id: offsets[(source, line_id)],
+        )
+        source_ranks[source] = {line_id: i for i, line_id in enumerate(held)}
+    rank = source_ranks[source]
+    natural = record.natural_rank(route.line_id, rank)
+    if natural is None:
         return lane_rank
-    return lane_rank + held.index(natural) - held.index(route.line_id)
+    return lane_rank + natural - rank[route.line_id]
 
 
 def _settled_exit_turns(
@@ -1367,6 +1376,7 @@ def _settled_exit_turns(
     if ctx.exit_turns is None or not pending_plan_ids:
         return MappingProxyType({})
     candidates: list[_SettledTurnCandidate] = []
+    source_ranks: dict[str, dict[str, int]] = {}
 
     for route in routes:
         membership = ctx.exit_turns.membership_for_edge(route.edge)
@@ -1402,7 +1412,9 @@ def _settled_exit_turns(
                 ),
                 entry_group_id=assignment.entry_group_id,
                 rank=rank,
-                lane_rank=_departure_lane_rank(route, assignment.source_lane_rank, ctx),
+                lane_rank=_departure_lane_rank(
+                    route, assignment.source_lane_rank, ctx, source_ranks
+                ),
                 launch_coordinate=launch_coordinate,
                 required_runway=(
                     assignment.minimum_runway

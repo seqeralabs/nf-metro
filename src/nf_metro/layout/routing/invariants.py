@@ -102,6 +102,7 @@ from nf_metro.layout.routing.common import (
     port_peeloff_tail,
     resolve_section,
     same_destination_approach_slots,
+    segment_direction,
     segments_properly_cross,
     tail_on_slot,
     trunk_segment_crossings,
@@ -393,13 +394,15 @@ def _opening_turn(pts: Sequence[tuple[float, float]]) -> _OpeningTurn | None:
     opening = opening_horizontal_vertical(pts)
     if opening is None:
         return None
-    (x0, y0), (x1, y1), (_x2, y2) = opening
-    run_dir = horizontal_direction(x1 - x0)
+    (_x0, y0), (x1, _y1), _end = opening
+    run_dir = segment_direction(opening[0], opening[1])
+    turn_dir = segment_direction(opening[1], opening[2])
+    assert run_dir is not None and turn_dir is not None
     return _OpeningTurn(
         run_y=y0,
         turn_x=x1,
         run_dir=run_dir,
-        turn_dir=vertical_direction(y2 - y1),
+        turn_dir=turn_dir,
         corridor_y=_reversed_corridor_y(pts, run_dir),
     )
 

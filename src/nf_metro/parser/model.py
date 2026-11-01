@@ -520,6 +520,9 @@ class MetroGraph:
     _departure_lane_orders: dict[tuple[str, str], DepartureLaneOrder] = field(
         default_factory=dict, compare=False, repr=False
     )
+    _departure_record_keys: frozenset[tuple[str, str]] | None = field(
+        default=None, compare=False, repr=False
+    )
     groups: list[StationGroup] = field(default_factory=list)
     grid_overrides: dict[str, tuple[int, int, int, int]] = field(default_factory=dict)
     layout_provenance: LayoutProvenance = field(

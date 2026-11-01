@@ -16,11 +16,18 @@ decision rather than re-deciding it.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
+
+if TYPE_CHECKING:
+    from nf_metro.parser.model import MetroGraph
 
 _T = TypeVar("_T")
+
+# The stage after which junctions stand where routing will find them, so a
+# departure's order can be decided.
+JUNCTIONS_POSITIONED = "5.1"
 
 
 @dataclass(frozen=True)
@@ -28,10 +35,11 @@ class DepartureLaneOrder:
     """On the departure *station_id* -> *target_id*, each recorded line takes
     the lane its natural order gives another.
 
-    ``takes_lane_of`` holds ``(line, natural line)`` pairs: *line* rides the
-    lane *natural line* would hold.  The natural order is the source station's
-    order carried concentrically into the port, as rule C's feeder check reads
-    it, so the permutation is stated relative to the direction of travel.
+    ``takes_lane_of`` holds ``(line, natural line)`` pairs, in departure
+    order: *line* rides the lane *natural line* would hold.  The natural order
+    is the source station's order carried concentrically into the port
+    (``_natural_port_order`` in the offsets phases), so the permutation is
+    stated relative to the direction of travel.
     """
 
     station_id: str
@@ -44,12 +52,18 @@ class DepartureLaneOrder:
 
     @property
     def lines(self) -> tuple[str, ...]:
-        """The recorded lines in their departure order."""
         return tuple(line for line, _ in self.takes_lane_of)
 
     def natural_line(self, line: str) -> str:
         """The line whose natural lane *line* takes."""
         return dict(self.takes_lane_of)[line]
+
+    def natural_rank(self, line: str, rank: Mapping[str, int]) -> int | None:
+        """The *rank* of the line whose lane *line* takes, or ``None`` when
+        *line* is not recorded or *rank* misses a recorded line."""
+        if line not in self.lines or any(other not in rank for other in self.lines):
+            return None
+        return rank[self.natural_line(line)]
 
     def reorders(self, a: str, b: str) -> bool:
         """Whether *a* and *b* both depart here, in the opposite order to
@@ -105,9 +119,47 @@ class DepartureOrderPlan:
     """One positioning pass's 7b' decisions, keyed by entry port.
 
     A port maps to ``None`` when the pass decided it takes no record.  The plan
-    is *sealed* once the pass's first offsets run after Stage 5.1 completes, so
-    no later run of the pass decides a port anew.
+    is *sealed* once the pass's first offsets run after junction positioning
+    completes, so no later run of the pass decides a port anew; those runs
+    replay the decisions.
     """
 
     decisions: dict[str, PortOrderDecision | None] = field(default_factory=dict)
     sealed: bool = False
+
+    def deciding(self, stages: Sequence[str]) -> bool:
+        """Whether an offsets run at *stages* decides ports."""
+        return not self.sealed and JUNCTIONS_POSITIONED in stages
+
+    def seal(self, stages: Sequence[str]) -> None:
+        """Seal the plan once a run at *stages* has decided."""
+        if JUNCTIONS_POSITIONED in stages:
+            self.sealed = True
+
+
+class DepartureRecordDriftError(RuntimeError):
+    """A positioning pass ended holding other departure records than an
+    earlier pass of the same layout.
+
+    Each pass decides its records from the graph and its own positions, so a
+    record one pass keeps and another drops would leave its trace (spacing,
+    bypass helpers) on a layout the final pass draws without it.  The layout
+    fails closed rather than choosing between the passes.
+    """
+
+    def __init__(self, changed: Iterable[tuple[str, str]]) -> None:
+        self.changed = tuple(sorted(changed))
+        super().__init__(
+            "departure lane-order records differ between positioning passes: "
+            + ", ".join(f"{source} -> {target}" for source, target in self.changed)
+        )
+
+
+def hold_departure_records(graph: MetroGraph) -> None:
+    """Fail closed when the pass just ended holds other departure records
+    than the first pass of this layout did."""
+    held = frozenset(graph._departure_lane_orders)
+    if graph._departure_record_keys is None:
+        graph._departure_record_keys = held
+    elif held != graph._departure_record_keys:
+        raise DepartureRecordDriftError(held ^ graph._departure_record_keys)

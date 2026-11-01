@@ -328,21 +328,21 @@ def _seat_by_port_slots(
         first.setdefault(ch.route.line_id, seats[id(ch)])
     by_column = sorted(first, key=first.__getitem__)
     for ch in chans:
-        _restack_channel(
-            ch,
-            seats[id(ch)],
-            by_column.index(ch.route.line_id),
-            len(by_column),
-            ctx.offset_step,
-            ctx.curve_radius,
+        _seat_channel(
+            ch, seats[id(ch)], by_column.index(ch.route.line_id), len(by_column), ctx
         )
-        ch.x = seats[id(ch)]
         if ch.idx not in ch.route.port_slot_seated_ranks:
             ch.route.port_slot_seated_ranks = (
                 *ch.route.port_slot_seated_ranks,
                 ch.idx,
             )
     return True
+
+
+def _seat_channel(ch: _VChannel, x: float, i: int, n: int, ctx: _RoutingCtx) -> None:
+    """Seat *ch* at column *x* as slot *i* of an *n*-line bundle."""
+    _restack_channel(ch, x, i, n, ctx.offset_step, ctx.curve_radius)
+    ch.x = x
 
 
 def _segment_claim_band(
@@ -412,14 +412,18 @@ def _layout_gap_bundle(
     to sit in the two columns, which is a different and wider set of blockers.
 
     A bundle landing on a recorded departure's entry port among pinned lines
-    is seated by that port's slot order first (:func:`_seat_by_port_slots`).
+    is seated by that port's slot order first (:func:`_seat_by_port_slots`),
+    and the remaining bundles take each seated line's column as its pin.
     """
     if pins:
-        bundles = [
-            (down, chans)
-            for down, chans in bundles
-            if not _seat_by_port_slots(down, chans, pins, ctx)
-        ]
+        unseated: list[tuple[bool, list[_VChannel]]] = []
+        seated = dict(pins)
+        for down, chans in bundles:
+            if _seat_by_port_slots(down, chans, pins, ctx):
+                seated.update({(down, ch.route.line_id): ch.x for ch in chans})
+            else:
+                unseated.append((down, chans))
+        bundles, pins = unseated, seated
     step = ctx.offset_step
     # Stable left-to-right order: by current bundle centre.
     bundles.sort(key=lambda b: sum(c.x for c in b[1]) / len(b[1]))
@@ -469,8 +473,7 @@ def _layout_gap_bundle(
         ):
             continue
         for ch, (li, nx) in targets:
-            _restack_channel(ch, nx, li, n, step, ctx.curve_radius)
-            ch.x = nx
+            _seat_channel(ch, nx, li, n, ctx)
 
 
 def _required_channel_clearance(
@@ -4128,11 +4131,11 @@ def _held_port_constraints(
     band: list[_HTrunk], slots: list[list[_HTrunk]], ctx: _RoutingCtx | None
 ) -> list[tuple[int, int]]:
     """The entry-port slot constraints *band*'s plan honours, else ``[]``."""
-    constraints = _band_port_constraints(slots, ctx)
+    recorded = _recorded_band_pairs(slots, ctx)
+    constraints = _band_port_constraints(slots, ctx, recorded)
     if not constraints:
         return []
     span_of: _SpanOf = {id(sg): _slot_span(sg) for sg in slots}
-    recorded = _recorded_band_pairs(slots, ctx)
     return _ranked_band_order(band, slots, span_of, constraints, recorded)[1]
 
 
@@ -4147,7 +4150,9 @@ def _honours_port_order(
 
 
 def _band_port_constraints(
-    slots: list[list[_HTrunk]], ctx: _RoutingCtx | None
+    slots: list[list[_HTrunk]],
+    ctx: _RoutingCtx | None,
+    recorded: list[tuple[int, int]] | None = None,
 ) -> list[tuple[int, int]]:
     """Slot pairs ``(a, b)`` an entry port's lane order puts *a* above *b*
     (:func:`_port_lane_order_pairs` along the band's travel), with every
@@ -4162,7 +4167,8 @@ def _band_port_constraints(
         travel,
         ctx,
     )
-    recorded = _recorded_band_pairs(slots, ctx)
+    if recorded is None:
+        recorded = _recorded_band_pairs(slots, ctx)
     held = {frozenset(pair) for pair in recorded}
     return [pair for pair in pairs if frozenset(pair) not in held] + recorded
 
@@ -4182,23 +4188,24 @@ def _recorded_band_pairs(
         return []
     travel = Direction.R if slots[0][0].sign_x > 0 else Direction.L
     lane_axis = lateral_axis(travel).value
+    records = {
+        key: record
+        for key, record in ctx.graph._departure_lane_orders.items()
+        if (port := ctx.graph.ports.get(record.target_id)) is not None
+        and port_free_axis(port.side) == lane_axis
+    }
+    slot_lines: list[dict[tuple[str, str], str]] = []
+    for slot in slots:
+        lines: dict[tuple[str, str], str] = {}
+        for trunk in slot:
+            key = (trunk.route.edge.source, trunk.route.edge.target)
+            if key in records:
+                lines.setdefault(key, trunk.route.line_id)
+        slot_lines.append(lines)
     decided: dict[frozenset[int], tuple[int, int]] = {}
     for i, j in itertools.combinations(range(len(slots)), 2):
-        for key, record in ctx.graph._departure_lane_orders.items():
-            port = ctx.graph.ports.get(record.target_id)
-            if port is None or port_free_axis(port.side) != lane_axis:
-                continue
-            line_i, line_j = (
-                next(
-                    (
-                        t.route.line_id
-                        for t in slots[k]
-                        if (t.route.edge.source, t.route.edge.target) == key
-                    ),
-                    None,
-                )
-                for k in (i, j)
-            )
+        for key, record in records.items():
+            line_i, line_j = slot_lines[i].get(key), slot_lines[j].get(key)
             if (
                 line_i is None
                 or line_j is None
@@ -4498,8 +4505,8 @@ def _plan_trunk_band(
     if len(slot_groups) < 2 or len(slot_groups) > _MAX_BAND_PERMUTE:
         heuristic = _heuristic_slot_order(slot_groups)
         return heuristic, *_packed_track_map(heuristic, span_of)
-    constraints = _band_port_constraints(slot_groups, ctx)
     recorded = _recorded_band_pairs(slot_groups, ctx)
+    constraints = _band_port_constraints(slot_groups, ctx, recorded)
     best_ttb = _ranked_band_order(band, slot_groups, span_of, constraints, recorded)[0]
     order = list(reversed(best_ttb)) if band[0].dips_down else best_ttb
     return order, *_packed_track_map(order, span_of)
@@ -5654,9 +5661,9 @@ def _recorded_departure_line_order(
 def _far_corner(ch: _VChannel, fork_y: float) -> tuple[float, int] | None:
     """``(depth, side)`` of *ch*'s corner at the end away from the fork.
 
-    *side* is the sign of the run the corner turns into; *depth* rises the
-    further the corner sits from the channel's other end.  ``None`` when that
-    end has no run.
+    *side* is the sign of the run the corner turns into; *depth* is the
+    corner's coordinate along the channel, measured in the direction leading
+    away from the channel's other end.  ``None`` when that end has no run.
     """
     pts = ch.route.points
     a, b = ch.idx, ch.idx + 1
