@@ -46,6 +46,15 @@ class DepartureLaneOrder:
     target_id: str
     takes_lane_of: tuple[tuple[str, str], ...]
 
+    def __post_init__(self) -> None:
+        lines = [line for line, _ in self.takes_lane_of]
+        natural = [line for _, line in self.takes_lane_of]
+        if len(set(lines)) != len(lines) or set(lines) != set(natural):
+            raise ValueError(
+                f"departure {self.station_id} -> {self.target_id} lane order is "
+                f"not a permutation of its lines: {self.takes_lane_of}"
+            )
+
     @property
     def key(self) -> tuple[str, str]:
         return (self.station_id, self.target_id)
@@ -79,6 +88,19 @@ def departure_records(
     records: Iterable[DepartureLaneOrder],
 ) -> dict[tuple[str, str], DepartureLaneOrder]:
     return {record.key: record for record in records}
+
+
+def departure_turn_rank(
+    records: Mapping[tuple[str, str], DepartureLaneOrder],
+    departure: tuple[str, str],
+    line: str,
+    rank: Mapping[str, int],
+) -> int:
+    """The *rank* *line* takes on *departure*: that of the line whose lane it
+    takes where *records* holds the departure, otherwise its own."""
+    record = records.get(departure)
+    natural = None if record is None else record.natural_rank(line, rank)
+    return rank[line] if natural is None else natural
 
 
 def relabel_departures(

@@ -43,6 +43,7 @@ from nf_metro.layout.routing.common import (
 from nf_metro.layout.routing.corridor_cohort_integration import (
     CorridorCohortCompilationError,
 )
+from nf_metro.layout.routing.exit_turns import DepartureTurnAxisError
 from nf_metro.layout.routing.invariants import (
     BundleOrderViolation,
     CurveInvariantError,
@@ -65,6 +66,60 @@ REJOINING_ROTATION = REGRESSIONS / "departure_order_rejoining_rotation.mmd"
 LEVEL_EXIT_FEEDER = REGRESSIONS / "departure_order_level_exit_feeder.mmd"
 CARRY_REPLAY = REGRESSIONS / "departure_order_carry_replay.mmd"
 CARRY_PER_PASS = FORK_TWO_FEEDERS
+SHARED_TURN_AXIS = """\
+%%metro line: l0 | Annotate | #e6194b
+%%metro line: l1 | Report_Polish | #3cb44b
+%%metro grid: sec0 | 0,0
+%%metro grid: sec1 | 1,0
+%%metro grid: sec2 | 2,0
+
+graph LR
+    subgraph sec0 [Merge 0]
+        %%metro direction: TB
+        s0n0[call_fastqc_quant]
+        s0n1[trim_count_align]
+        s0n2[CLUSTER_DEDUP]
+        s0n3[summarise]
+        s0n4[call_trim_summarise]
+        s0n0 -->|l0| s0n2
+        s0n2 -->|l0| s0n3
+        s0n3 -->|l0| s0n4
+        s0n0 -->|l1| s0n1
+        s0n1 -->|l1| s0n2
+        s0n2 -->|l1| s0n4
+    end
+    subgraph sec1 [Count 1]
+        %%metro exit: right | l0, l1
+        s1n0[GATHER]
+        s1n1[polish]
+        s1n2[bam]
+        s1n3[report]
+        s1n4[TRIM]
+        s1n0 -->|l0| s1n1
+        s1n0 -->|l1| s1n1
+        s1n1 -->|l0| s1n2
+        s1n1 -->|l1| s1n2
+        s1n2 -->|l0| s1n3
+        s1n2 -->|l1| s1n3
+        s1n3 -->|l0| s1n4
+        s1n3 -->|l0| s1n4
+        s1n3 -->|l1| s1n4
+    end
+    subgraph sec2 [Quant_Assemble_Summarise 2]
+        %%metro entry: right | l0, l1
+        s2n0[cluster_quant_export]
+        s2n1[vcf]
+        s2n0 -->|l0| s2n1
+        s2n0 -->|l1| s2n1
+    end
+    s0n4 -->|l0| s1n0
+    s0n4 -->|l1| s1n0
+    s1n4 -->|l0| s2n0
+    s1n4 -->|l0| s2n0
+    s1n4 -->|l1| s2n0
+    s0n4 -->|l0| s1n3
+    s0n4 -->|l0| s2n0
+"""
 
 
 class _Drawn:
@@ -183,32 +238,27 @@ def test_a_recorded_departure_turns_each_line_on_the_axis_of_the_lane_it_takes(
         assert axis.rank == record.natural_rank(line, ranks)
 
 
-def _swap_first_pair(record: DepartureLaneOrder) -> DepartureLaneOrder:
-    (line, natural), *rest = record.takes_lane_of
-    return dataclasses.replace(record, takes_lane_of=((line, line), *rest))
-
-
 @pytest.mark.parametrize(
-    ("carried", "message"),
+    ("misstatement", "message"),
     [
-        (lambda record: (), "inconsistent assignment geometry"),
-        (lambda record: (_swap_first_pair(record),), "not a permutation"),
-        (
-            lambda record: (dataclasses.replace(record, target_id="elsewhere"),),
-            "not a permutation",
-        ),
+        ("dropped", "inconsistent assignment geometry"),
+        ("foreign-target", "inconsistent departure orders"),
     ],
-    ids=["dropped", "not-a-permutation", "foreign-target"],
 )
 def test_an_exit_turn_plan_that_misstates_its_departure_record_fails_closed(
-    carried: Any, message: str
+    misstatement: str, message: str
 ) -> None:
     route_plan, exit_turn = _junction_exit_turn(FORK_PORT_STOP, "__junction_4")
     (record,) = exit_turn.departure_orders
+    carried = (
+        ()
+        if misstatement == "dropped"
+        else (dataclasses.replace(record, target_id="elsewhere"),)
+    )
     misstated = dataclasses.replace(
         route_plan,
         exit_turn_plans=tuple(
-            dataclasses.replace(item, departure_orders=carried(record))
+            dataclasses.replace(item, departure_orders=carried)
             if item is exit_turn
             else item
             for item in route_plan.exit_turn_plans
@@ -217,6 +267,27 @@ def test_an_exit_turn_plan_that_misstates_its_departure_record_fails_closed(
 
     with pytest.raises(ValueError, match=message):
         build_route_plan_query(misstated)
+
+
+@pytest.mark.parametrize(
+    "takes_lane_of",
+    [(("a", "a"), ("b", "a")), (("a", "b"), ("b", "c"))],
+    ids=["line-twice", "lines-differ-from-natural"],
+)
+def test_a_departure_order_must_permute_its_lines(
+    takes_lane_of: tuple[tuple[str, str], ...],
+) -> None:
+    with pytest.raises(ValueError, match="not a permutation"):
+        DepartureLaneOrder("j", "port", takes_lane_of)
+
+
+def test_a_fork_whose_parting_line_turns_beside_its_record_fails_closed() -> None:
+    """At ``__junction_4`` l0 takes l1's lane to sec1, so it turns on l1's
+    axis, while l0 also leaves for sec2 on its own lane, turning the same way:
+    one line would need two axes of one turn cohort."""
+    with warnings.catch_warnings(), pytest.raises(DepartureTurnAxisError):
+        warnings.simplefilter("ignore")
+        render_string(SHARED_TURN_AXIS)
 
 
 def test_the_recorded_pair_crosses_only_on_its_departures_first_segment(
@@ -396,10 +467,8 @@ def test_a_carry_that_reorders_a_perpendicular_seam_takes_no_record(
     whole section has to take, gets no record.  The swapped pair parts beyond
     the port (m1 for Q3X0, m4 for Q3X2), so the carry is what refuses it.
 
-    The map aborts in corridor-cohort allocation, and
-    ``KNOWN_NOT_RENDERING`` in ``tests/test_reserved_claim_consumption.py``
-    lists it for that reason; asserting the abort here reddens when it renders,
-    so that entry cannot outlive it."""
+    The map aborts in corridor-cohort allocation; ``KNOWN_NOT_RENDERING`` in
+    ``tests/test_reserved_claim_consumption.py`` lists it until it renders."""
     added: list[set[tuple[str, str, str, str]]] = []
     flips = offsets_module._perpendicular_seam_flips
 
