@@ -2382,7 +2382,8 @@ def _cohort_beside_a_fixed_lane(
     ``m2``'s fixed lane, outside the cohort, runs between them beside both.
 
     ``pin`` holds ``m1`` at 364 on its own line's fixed lane ``"direct"``ly or
-    ``"through-equality"`` with a same-lane run of its line, or not at all.
+    ``"through-equality"`` with a same-lane run of its line, holds ``m4``
+    ``"outer"`` instead, or holds neither.
     """
     m1 = _entry_cohort_claim(
         claim_id="m1",
@@ -2415,6 +2416,8 @@ def _cohort_beside_a_fixed_lane(
     fixed = [lane_m2]
     if pin == "direct":
         fixed.append(_fixed_copy(m1, "fixed-m1"))
+    elif pin == "outer":
+        fixed.append(_fixed_copy(m4, "fixed-m4"))
     elif pin == "through-equality":
         feed = _entry_cohort_claim(
             claim_id="m1-feed",
@@ -2449,8 +2452,16 @@ def _cohort_beside_a_fixed_lane(
         (372.0, 380.0, 376.0),
         (376.0, 380.0, 380.0),
         (376.0, 384.0, 380.0),
+        (368.0, 368.0, 372.0),
     ],
-    ids=["packed", "two-pitch", "two-pitch-far", "three-pitch", "three-pitch-far"],
+    ids=[
+        "packed",
+        "two-pitch",
+        "two-pitch-far",
+        "three-pitch",
+        "three-pitch-far",
+        "on-the-lane",
+    ],
 )
 def test_pinned_endpoint_cohort_seats_past_a_fixed_lane_between_its_members(
     pin: str,
@@ -2476,6 +2487,23 @@ def test_pinned_endpoint_cohort_seats_past_a_fixed_lane_between_its_members(
     assert allocations["m1"] == pytest.approx(364.0)
     assert allocations["m4"] == pytest.approx(m4_seat)
     assert abs(allocations["m4"] - fixed_coordinate) >= 4.0
+
+
+@pytest.mark.parametrize("rotated", [False, True], ids=["left-entry", "top-entry"])
+def test_pinned_endpoint_cohort_seats_inward_past_a_fixed_lane(rotated: bool) -> None:
+    """Pinned on its outer member ``m4``, the cohort seats ``m1`` on the first
+    pitch in from the pin that clears ``m2``'s fixed lane on ``m1``'s side."""
+    claims, problem = _cohort_beside_a_fixed_lane("outer", rotated, 372.0, 380.0)
+
+    boundaries = {lane.member_id: lane.boundary_coordinate for lane in problem.lanes}
+    assert boundaries["m1"] == pytest.approx(0.0)
+    assert boundaries["m4"] == pytest.approx(12.0)
+    assert _pinned_gap_violations(claims, problem) == []
+    result = solve_corridor_cohorts(problem)
+    assert result.status is CorridorAllocationStatus.PLANNED, result
+    allocations = dict(result.allocations)
+    assert allocations["m1"] == pytest.approx(368.0)
+    assert allocations["m4"] == pytest.approx(380.0)
 
 
 @pytest.mark.parametrize("rotated", [False, True], ids=["left-entry", "top-entry"])
