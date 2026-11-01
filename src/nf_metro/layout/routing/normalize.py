@@ -28,6 +28,7 @@ from nf_metro.layout.geometry import (
     cotravelling_lane_clearance,
     cotravelling_lanes_fuse,
     flow_port_sides,
+    port_free_axis,
     spans_share_corridor,
 )
 from nf_metro.layout.route_plan import DemandAxis, ExitTurnPlanId
@@ -244,6 +245,106 @@ def _anchored_bundle_midpoint(
     return mid
 
 
+def _port_slot_seats(
+    chans: list[_VChannel],
+    down: bool,
+    pins: Mapping[tuple[bool, str], float],
+    ctx: _RoutingCtx,
+) -> dict[int, float] | None:
+    """Columns seating *chans* by the slot order of the entry port they land
+    on, keyed by ``id(channel)``, or ``None``.
+
+    Applies to a bundle whose every channel is a landing leg into one entry
+    port a recorded departure enters, holding at least one pinned line, where
+    two or more of that port's lines are pinned in this direction.  Pinned and
+    movable lines rank together by the port's slots; the pinned columns give
+    the step, which must be one bundle step, and its sign, so no frame sign
+    enters and a movable line can sit between pinned ones.
+    """
+    graph = ctx.graph
+    targets = {ch.route.edge.target for ch in chans}
+    if len(targets) != 1:
+        return None
+    port_id = next(iter(targets))
+    port = graph.ports.get(port_id)
+    if port is None or not port.is_entry:
+        return None
+    if any(len(ch.route.points) - ch.idx not in (2, 3) for ch in chans):
+        return None
+    records = graph._departure_lane_orders
+    if not any((ch.route.edge.source, port_id) in records for ch in chans):
+        return None
+    offsets = ctx.station_offsets or {}
+    moving = {ch.route.line_id for ch in chans}
+    pinned = {
+        line_id: column
+        for (pin_down, line_id), column in pins.items()
+        if pin_down is down and (port_id, line_id) in offsets
+    }
+    if len(pinned) < 2 or not moving & pinned.keys():
+        return None
+    if any((port_id, line_id) not in offsets for line_id in moving):
+        return None
+    lines = sorted(moving | pinned.keys(), key=lambda lid: offsets[(port_id, lid)])
+    rank = {line_id: index for index, line_id in enumerate(lines)}
+    anchors = sorted(pinned, key=rank.__getitem__)
+    steps = {
+        round((pinned[b] - pinned[a]) / (rank[b] - rank[a]), 6)
+        for a, b in zip(anchors, anchors[1:])
+    }
+    if len(steps) != 1:
+        return None
+    step = steps.pop()
+    if abs(abs(step) - ctx.offset_step) > COORD_TOLERANCE:
+        return None
+    origin = anchors[0]
+    return {
+        id(ch): pinned[origin] + (rank[ch.route.line_id] - rank[origin]) * step
+        for ch in chans
+    }
+
+
+def _seat_by_port_slots(
+    down: bool,
+    chans: list[_VChannel],
+    pins: Mapping[tuple[bool, str], float],
+    ctx: _RoutingCtx,
+) -> bool:
+    """Seat *chans* at :func:`_port_slot_seats`' columns; ``False`` when they
+    do not apply or a column would run through a section.
+
+    Corner radii restack by left-to-right position, which is what
+    :func:`_restack_channel`'s index means.  Each seated segment is marked on
+    its route, so the claim-band seating leaves it nested between the
+    planner-owned columns it was ranked against.
+    """
+    seats = _port_slot_seats(chans, down, pins, ctx)
+    if seats is None or any(
+        _section_intrudes(ctx.graph, seats[id(ch)], ch.y_lo, ch.y_hi) for ch in chans
+    ):
+        return False
+    first: dict[str, float] = {}
+    for ch in chans:
+        first.setdefault(ch.route.line_id, seats[id(ch)])
+    left_to_right = sorted(first, key=first.__getitem__)
+    for ch in chans:
+        _restack_channel(
+            ch,
+            seats[id(ch)],
+            left_to_right.index(ch.route.line_id),
+            len(left_to_right),
+            ctx.offset_step,
+            ctx.curve_radius,
+        )
+        ch.x = seats[id(ch)]
+        if ch.idx not in ch.route.port_slot_seated_ranks:
+            ch.route.port_slot_seated_ranks = (
+                *ch.route.port_slot_seated_ranks,
+                ch.idx,
+            )
+    return True
+
+
 def _segment_claim_band(
     ctx: _RoutingCtx, route: RoutedPath, idx: int
 ) -> ReservedBand | None:
@@ -309,7 +410,16 @@ def _layout_gap_bundle(
     claim's own band, which settlement sized for exactly this bundle over the
     corridor's own span -- the shared gap edges name whichever sections happen
     to sit in the two columns, which is a different and wider set of blockers.
+
+    A bundle landing on a recorded departure's entry port among pinned lines
+    is seated by that port's slot order first (:func:`_seat_by_port_slots`).
     """
+    if pins:
+        bundles = [
+            (down, chans)
+            for down, chans in bundles
+            if not _seat_by_port_slots(down, chans, pins, ctx)
+        ]
     step = ctx.offset_step
     # Stable left-to-right order: by current bundle centre.
     bundles.sort(key=lambda b: sum(c.x for c in b[1]) / len(b[1]))
@@ -4022,7 +4132,8 @@ def _held_port_constraints(
     if not constraints:
         return []
     span_of: _SpanOf = {id(sg): _slot_span(sg) for sg in slots}
-    return _ranked_band_order(band, slots, span_of, constraints)[1]
+    recorded = _recorded_band_pairs(slots, ctx)
+    return _ranked_band_order(band, slots, span_of, constraints, recorded)[1]
 
 
 def _honours_port_order(
@@ -4039,16 +4150,95 @@ def _band_port_constraints(
     slots: list[list[_HTrunk]], ctx: _RoutingCtx | None
 ) -> list[tuple[int, int]]:
     """Slot pairs ``(a, b)`` an entry port's lane order puts *a* above *b*
-    (:func:`_port_lane_order_pairs` along the band's travel)."""
+    (:func:`_port_lane_order_pairs` along the band's travel), with every
+    pair a recorded departure decides (:func:`_recorded_band_pairs`) in place
+    of any other constraint on the same two slots."""
     if ctx is None or not ctx.station_offsets:
         return []
     travel = Direction.R if slots[0][0].sign_x > 0 else Direction.L
-    return _port_lane_order_pairs(
+    pairs = _port_lane_order_pairs(
         [sg[0].route.line_id for sg in slots],
         [_slot_entry_reach(ctx.graph, sg) for sg in slots],
         travel,
         ctx,
     )
+    recorded = _recorded_band_pairs(slots, ctx)
+    held = {frozenset(pair) for pair in recorded}
+    return [pair for pair in pairs if frozenset(pair) not in held] + recorded
+
+
+def _recorded_band_pairs(
+    slots: list[list[_HTrunk]], ctx: _RoutingCtx | None
+) -> list[tuple[int, int]]:
+    """Slot pairs ``(a, b)`` whose lines leave one recorded departure
+    (:class:`~nf_metro.layout.departure_order.DepartureLaneOrder`), ordered
+    as the port the departure enters holds them.
+
+    The record decided that order at the fork, so the band carries it whatever
+    else it would prefer (:func:`_ranked_band_order`).  Only a port whose
+    lanes run along the band's lateral axis decides.
+    """
+    if ctx is None or not ctx.station_offsets or not ctx.graph._departure_lane_orders:
+        return []
+    travel = Direction.R if slots[0][0].sign_x > 0 else Direction.L
+    lane_axis = lateral_axis(travel).value
+    decided: dict[frozenset[int], tuple[int, int]] = {}
+    for i, j in itertools.combinations(range(len(slots)), 2):
+        for key, record in ctx.graph._departure_lane_orders.items():
+            port = ctx.graph.ports.get(record.target_id)
+            if port is None or port_free_axis(port.side) != lane_axis:
+                continue
+            line_i, line_j = (
+                next(
+                    (
+                        t.route.line_id
+                        for t in slots[k]
+                        if (t.route.edge.source, t.route.edge.target) == key
+                    ),
+                    None,
+                )
+                for k in (i, j)
+            )
+            if (
+                line_i is None
+                or line_j is None
+                or line_i == line_j
+                or not {line_i, line_j} <= set(record.lines)
+            ):
+                continue
+            pair = _entry_order_pair(
+                ctx, record.target_id, (i, line_i), (j, line_j), travel
+            )
+            if pair is not None:
+                decided[frozenset((i, j))] = pair
+    return list(decided.values())
+
+
+def _entry_order_pair(
+    ctx: _RoutingCtx,
+    port_id: str,
+    first: tuple[int, str],
+    second: tuple[int, str],
+    travel: Direction,
+) -> tuple[int, int] | None:
+    """``(a, b)`` with *a* the index whose line *port_id*'s lanes put first
+    along the lateral screen axis of a bundle running in *travel*, or ``None``
+    when the port holds the two lines on one lane or not at all."""
+    graph, offsets = ctx.graph, ctx.station_offsets or {}
+    (i, line_i), (j, line_j) = first, second
+    if (port_id, line_i) not in offsets or (port_id, line_j) not in offsets:
+        return None
+    port = graph.stations[port_id]
+    coord_i, coord_j = (
+        port_lane_coord(graph, port, line, offsets, ctx.positive_fan)
+        for line in (line_i, line_j)
+    )
+    if abs(coord_i - coord_j) <= COORD_TOLERANCE:
+        return None
+    sign = lateral_order_sign(travel) * lateral_order_sign(
+        ENTRY_SIDE_DIRECTION[graph.ports[port_id].side]
+    )
+    return (i, j) if sign * coord_i < sign * coord_j else (j, i)
 
 
 def _port_lane_order_pairs(
@@ -4069,7 +4259,7 @@ def _port_lane_order_pairs(
     decides (:func:`_port_decides_lane_order`), and the first such port in id
     order decides a pair.
     """
-    graph, offsets = ctx.graph, ctx.station_offsets or {}
+    graph = ctx.graph
     lane_axis = lateral_axis(travel)
     out: list[tuple[int, int]] = []
     for i, j in itertools.combinations(range(len(lines)), 2):
@@ -4081,19 +4271,10 @@ def _port_lane_order_pairs(
                 continue
             if not _port_decides_lane_order(graph, port_id, lane_axis):
                 continue
-            if (port_id, line_i) not in offsets or (port_id, line_j) not in offsets:
+            pair = _entry_order_pair(ctx, port_id, (i, line_i), (j, line_j), travel)
+            if pair is None:
                 continue
-            port = graph.stations[port_id]
-            coord_i, coord_j = (
-                port_lane_coord(graph, port, line, offsets, ctx.positive_fan)
-                for line in (line_i, line_j)
-            )
-            if abs(coord_i - coord_j) <= COORD_TOLERANCE:
-                continue
-            sign = lateral_order_sign(travel) * lateral_order_sign(
-                ENTRY_SIDE_DIRECTION[graph.ports[port_id].side]
-            )
-            out.append((i, j) if sign * coord_i < sign * coord_j else (j, i))
+            out.append(pair)
             break
     return out
 
@@ -4186,8 +4367,42 @@ def _ranked_band_order(
     slots: list[list[_HTrunk]],
     span_of: _SpanOf,
     constraints: list[tuple[int, int]],
+    recorded: Sequence[tuple[int, int]] = (),
 ) -> tuple[list[list[_HTrunk]], list[tuple[int, int]]]:
     """The band's best top-to-bottom slot order and the constraints it honours.
+
+    The *recorded* constraints (:func:`_recorded_band_pairs`) bind: where the
+    best order (:func:`_cheapest_band_order`) breaks one, the best order
+    honouring the recorded ones alone stands, else the first order of the
+    best one's permutations that honours them.
+    """
+    order, honoured = _cheapest_band_order(band, slots, span_of, constraints)
+    if not recorded or _honours_port_order(order, slots, list(recorded)):
+        return order, honoured
+    held_order, held = _cheapest_band_order(band, slots, span_of, list(recorded))
+    if _honours_port_order(held_order, slots, list(recorded)):
+        return held_order, held
+    honouring = next(
+        (
+            list(perm)
+            for perm in itertools.permutations(order)
+            if _honours_port_order(list(perm), slots, list(recorded))
+        ),
+        None,
+    )
+    if honouring is None:
+        return order, honoured
+    return honouring, list(recorded)
+
+
+def _cheapest_band_order(
+    band: list[_HTrunk],
+    slots: list[list[_HTrunk]],
+    span_of: _SpanOf,
+    constraints: list[tuple[int, int]],
+) -> tuple[list[list[_HTrunk]], list[tuple[int, int]]]:
+    """The band's cheapest top-to-bottom slot order and the constraints it
+    honours.
 
     Orders rank by crossings, then packed looseness, then heuristic position
     (see :func:`_plan_trunk_band`).  The best order honouring *constraints*
@@ -4284,7 +4499,8 @@ def _plan_trunk_band(
         heuristic = _heuristic_slot_order(slot_groups)
         return heuristic, *_packed_track_map(heuristic, span_of)
     constraints = _band_port_constraints(slot_groups, ctx)
-    best_ttb = _ranked_band_order(band, slot_groups, span_of, constraints)[0]
+    recorded = _recorded_band_pairs(slot_groups, ctx)
+    best_ttb = _ranked_band_order(band, slot_groups, span_of, constraints, recorded)[0]
     order = list(reversed(best_ttb)) if band[0].dips_down else best_ttb
     return order, *_packed_track_map(order, span_of)
 
@@ -5304,7 +5520,7 @@ def _convergence_line_order(
     offset_step = graph_offset_step(graph)
     if not trunk_depths_contiguous(trunk_ys, len(src_cols), offset_step):
         return None
-    return sorted(_distinct_line_order(chans), key=lambda lid: trunk_depth[lid])
+    return sorted(_distinct_line_order(chans, graph), key=lambda lid: trunk_depth[lid])
 
 
 def _corridor_leadout_right(chans: list[_VChannel], default: bool) -> bool:
@@ -5340,7 +5556,7 @@ def _corridor_leadout_right(chans: list[_VChannel], default: bool) -> bool:
     return votes.count(True) >= votes.count(False)
 
 
-def _distinct_line_order(chans: list[_VChannel]) -> list[str]:
+def _distinct_line_order(chans: list[_VChannel], graph: MetroGraph) -> list[str]:
     """Left-to-right order of the distinct lines in one gap-bundle corridor.
 
     Channels sharing a ``line_id`` collapse to a single slot, so the order
@@ -5365,6 +5581,9 @@ def _distinct_line_order(chans: list[_VChannel]) -> list[str]:
     that strictly reduces crossings (genomeassembly: hic before assemblies),
     and mirrors the rule for UP bundles (subworkflows: the deeper
     preprocess_reporting sits to the RIGHT).
+
+    A recorded departure's lines then take the slots its own lines hold, in
+    the order :func:`_recorded_departure_line_order` gives them.
     """
     cost = _line_pair_costs(chans)
     rep_x: dict[str, float] = {}
@@ -5385,7 +5604,73 @@ def _distinct_line_order(chans: list[_VChannel]) -> list[str]:
             return -1 if rep_x[a] < rep_x[b] else 1
         return -1 if a < b else (1 if a > b else 0)
 
-    return sorted(rep_x, key=functools.cmp_to_key(cmp))
+    order = sorted(rep_x, key=functools.cmp_to_key(cmp))
+    return _recorded_departure_line_order(order, chans, graph)
+
+
+def _recorded_departure_line_order(
+    order: list[str], chans: list[_VChannel], graph: MetroGraph
+) -> list[str]:
+    """*order* with each recorded departure's lines reseated among their slots.
+
+    A recorded departure's lines cross once, at the fork, and are concentric
+    from there with the corner at the channel's far end, away from the fork:
+    the corner's inner line sits on the side its run leaves toward.  Read
+    from the channels' own route points, so no frame sign enters.
+    """
+    records = graph._departure_lane_orders
+    present: dict[tuple[str, str], list[_VChannel]] = {}
+    for ch in chans:
+        key = (ch.route.edge.source, ch.route.edge.target)
+        if key in records:
+            present.setdefault(key, []).append(ch)
+    for key, members in present.items():
+        record = records[key]
+        if not set(record.lines) <= {ch.route.line_id for ch in members} or not all(
+            lid in order for lid in record.lines
+        ):
+            continue
+        fork = graph.stations[key[0]]
+        far: dict[str, tuple[float, int]] = {}
+        for ch in members:
+            end = _far_corner(ch, fork.y)
+            if end is not None:
+                far.setdefault(ch.route.line_id, end)
+        if (
+            set(far) != set(record.lines)
+            or len({side for _, side in far.values()}) != 1
+        ):
+            continue
+        inner_first = sorted(record.lines, key=lambda lid: far[lid][0])
+        leaves_right = next(iter(far.values()))[1] > 0
+        left_to_right = inner_first[::-1] if leaves_right else inner_first
+        slots = sorted(order.index(lid) for lid in record.lines)
+        order = list(order)
+        for slot, lid in zip(slots, left_to_right, strict=True):
+            order[slot] = lid
+    return order
+
+
+def _far_corner(ch: _VChannel, fork_y: float) -> tuple[float, int] | None:
+    """``(depth, side)`` of *ch*'s corner at the end away from the fork.
+
+    *side* is the sign of the run the corner turns into; *depth* rises the
+    further the corner sits from the channel's other end.  ``None`` when that
+    end has no run.
+    """
+    pts = ch.route.points
+    a, b = ch.idx, ch.idx + 1
+    if abs(pts[a][1] - fork_y) <= abs(pts[b][1] - fork_y):
+        far, beyond, near = b, b + 1, a
+    else:
+        far, beyond, near = a, a - 1, b
+    if not 0 <= beyond < len(pts):
+        return None
+    side = pts[beyond][0] - pts[far][0]
+    if abs(side) < 1e-6:
+        return None
+    inward = 1.0 if pts[near][1] > pts[far][1] else -1.0
+    return -inward * pts[far][1], (1 if side > 0 else -1)
 
 
 def _line_pair_costs(chans: list[_VChannel]) -> Callable[[str, str], tuple[int, int]]:
@@ -5477,7 +5762,7 @@ def _port_ordered_line_order(chans: list[_VChannel], ctx: _RoutingCtx) -> list[s
     from the free order replaces it, unless it reverses or splits lines leaving
     one source station (:func:`_port_order_refused`).
     """
-    free = _distinct_line_order(chans)
+    free = _distinct_line_order(chans, ctx.graph)
     if len(free) < 2 or len(free) > _MAX_BAND_PERMUTE or not ctx.station_offsets:
         return free
     by_line: defaultdict[str, list[_VChannel]] = defaultdict(list)

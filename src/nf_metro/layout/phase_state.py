@@ -308,6 +308,32 @@ PHASE_FIELD_REGISTRY: dict[str, PhaseFieldSpec] = {
             "tolerate its empty default when no fold compression occurred"
         ),
     ),
+    "_departure_order_plan": PhaseFieldSpec(
+        name="_departure_order_plan",
+        writer_stage="5.1",
+        reader_stages=(STATION_OFFSET_LAYOUT,),
+        enforcement=FieldEnforcement.FALLBACK,
+        why=(
+            "offsets phase 7b''s per-port departure-order decisions for one "
+            "positioning pass: reset when the pass starts, decided by the "
+            "pass's first station-offset computation after junction "
+            "positioning and replayed by every later one, so a record port is "
+            "decided once per pass; an absent plan decides nothing"
+        ),
+    ),
+    "_departure_lane_orders": PhaseFieldSpec(
+        name="_departure_lane_orders",
+        writer_stage=STATION_OFFSET_LAYOUT,
+        reader_stages=(POST_LAYOUT,),
+        enforcement=FieldEnforcement.FALLBACK,
+        why=(
+            "per-departure lane-order records the latest station-offset "
+            "computation holds; routing's fan, gap, band, exit-turn and "
+            "seating consumers and the bundle-order curve check relabel their "
+            "natural ranks through them and read the empty default as no "
+            "record"
+        ),
+    ),
     "_linear_entry_pill_lines_cache": PhaseFieldSpec(
         name="_linear_entry_pill_lines_cache",
         writer_stage=STATION_OFFSET_LAYOUT,

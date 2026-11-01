@@ -224,7 +224,7 @@ def test_a_gap_bundle_lays_out_in_its_entry_port_order(side, positive_fan, expec
         side=side,
         positive_fan=positive_fan,
     )
-    assert _distinct_line_order(chans) == ["a", "b"]
+    assert _distinct_line_order(chans, ctx.graph) == ["a", "b"]
 
     _layout_gap_bundle([(True, chans)], 200.0, 260.0, ctx)
     assert [ch.route.line_id for ch in sorted(chans, key=lambda ch: ch.x)] == expected
@@ -269,7 +269,7 @@ def test_a_port_order_twisting_two_lines_from_one_source_keeps_the_free_order(
     so the bundle keeps its free order."""
     graph, chans, ctx = _bundle(*legs, offsets=offsets)
 
-    assert _distinct_line_order(chans) == ["a", "c", "b"]
+    assert _distinct_line_order(chans, graph) == ["a", "c", "b"]
     assert _gap_pairs(graph, chans, ctx) == [pair]
     assert _port_ordered_line_order(chans, ctx) == ["a", "c", "b"]
 

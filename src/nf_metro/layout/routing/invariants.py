@@ -6981,6 +6981,23 @@ class CurveInvariantError(RuntimeError):
     """
 
 
+def _outside_recorded_forks(
+    graph: MetroGraph, violations: list[BundleOrderViolation]
+) -> list[BundleOrderViolation]:
+    """*violations* less each pair a recorded departure reorders crossing on
+    the departure's first segment: lines that part at a fork take their own
+    order there (:class:`~nf_metro.layout.departure_order.DepartureLaneOrder`)."""
+    records = graph._departure_lane_orders
+    return [
+        violation
+        for violation in violations
+        if violation.segment_index != 1
+        or (record := records.get((violation.edge_source, violation.edge_target)))
+        is None
+        or not record.reorders(violation.line_a, violation.line_b)
+    ]
+
+
 def render_curve_violations(
     graph: MetroGraph,
     routes: list[RoutedPath],
@@ -6996,7 +7013,7 @@ def render_curve_violations(
     return [
         (
             "bundle order (line crosses its bundle-mate)",
-            check_bundle_order_preserved(routes),
+            _outside_recorded_forks(graph, check_bundle_order_preserved(routes)),
         ),
         (
             "non-concentric bundle corner",

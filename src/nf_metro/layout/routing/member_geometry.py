@@ -1335,6 +1335,29 @@ def _corridor_hold_shift(
     return 0.0 if allowed is None else allowed.hold(0.0)
 
 
+def _departure_lane_rank(route: RoutedPath, lane_rank: int, ctx: _RoutingCtx) -> int:
+    """*lane_rank* moved by as many source lanes as separate *route*'s line
+    from the line whose lane a recorded departure gives it."""
+    record = ctx.graph._departure_lane_orders.get(
+        (route.edge.source, route.edge.target)
+    )
+    if record is None or route.line_id not in record.lines:
+        return lane_rank
+    source, offsets = route.edge.source, ctx.station_offsets or {}
+    held = sorted(
+        (
+            line_id
+            for line_id in ctx.graph.station_lines(source)
+            if (source, line_id) in offsets
+        ),
+        key=lambda line_id: offsets[(source, line_id)],
+    )
+    natural = record.natural_line(route.line_id)
+    if route.line_id not in held or natural not in held:
+        return lane_rank
+    return lane_rank + held.index(natural) - held.index(route.line_id)
+
+
 def _settled_exit_turns(
     routes: Iterable[RoutedPath],
     ctx: _RoutingCtx,
@@ -1379,7 +1402,7 @@ def _settled_exit_turns(
                 ),
                 entry_group_id=assignment.entry_group_id,
                 rank=rank,
-                lane_rank=assignment.source_lane_rank,
+                lane_rank=_departure_lane_rank(route, assignment.source_lane_rank, ctx),
                 launch_coordinate=launch_coordinate,
                 required_runway=(
                     assignment.minimum_runway
@@ -2390,7 +2413,10 @@ def _seat_claimed_segments_before_freeze(
     placed it.  The pin is read from the segment rank -- as
     :func:`_upstream_plan_fixes_channel` reads it -- not the plan id: the settled
     two-pass path clears a member's segment rank (restoring it after this pass)
-    to hand it to seating, and reads as unpinned here.
+    to hand it to seating, and reads as unpinned here.  A segment seated by
+    its entry port's slot order (``RoutedPath.port_slot_seated_ranks``) nests
+    against planner-owned columns the same way and is left where it was
+    seated.
     """
     grouped: defaultdict[
         tuple[RouteSystemId, str, int, int],
@@ -2401,7 +2427,10 @@ def _seat_claimed_segments_before_freeze(
         if route.exit_turn_segment_rank is not None:
             continue
         for rank, (start, end) in enumerate(zip(route.points, route.points[1:])):
-            if not 1 <= rank <= len(route.points) - 3:
+            if (
+                not 1 <= rank <= len(route.points) - 3
+                or rank in route.port_slot_seated_ranks
+            ):
                 continue
             band = _segment_claim_band(ctx, route, rank)
             if band is None:

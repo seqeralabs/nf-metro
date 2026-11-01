@@ -23,8 +23,15 @@ from nf_metro.layout.constants import (
     DIAGONAL_RUN,
     OFFSET_STEP,
     SAME_Y_TOLERANCE,
+    STATION_RADIUS_APPROX,
     graph_offset_step,
 )
+from nf_metro.layout.departure_order import (
+    DepartureLaneOrder,
+    PortOrderDecision,
+    departure_records,
+)
+from nf_metro.layout.fan_ordering import _fan_branch_entry_port
 from nf_metro.layout.geometry import (
     AxisFrame,
     flow_entry_side,
@@ -36,6 +43,7 @@ from nf_metro.layout.geometry import (
     station_lane_coord,
 )
 from nf_metro.layout.phases._common import (
+    _station_bundle_offset_span,
     iter_corridor_fed_solo_entries,
     iter_flat_seam_solo_entries,
     line_forks_within_section,
@@ -132,6 +140,10 @@ class _OffsetCtx:
     # Writes declined because they would break an ``approach_orders`` entry,
     # per phase.
     decided_order_declines: Counter[str] = field(default_factory=Counter)
+    # Departures 7b' recorded, keyed (source, entry port).
+    departure_orders: dict[tuple[str, str], DepartureLaneOrder] = field(
+        default_factory=dict
+    )
 
 
 @dataclass(frozen=True)
@@ -4009,6 +4021,11 @@ def _narrows_a_junction_feeder(
     return False
 
 
+_OwnerRefusal = Literal[
+    "claim", "decided", "reversal", "compaction", "fan-plan", "reconcile"
+]
+
+
 def _order_entry_ports_by_approach(
     ctx: _OffsetCtx,
     same_y_adj: dict[str, dict[str, list[tuple[str, str]]]],
@@ -4031,7 +4048,22 @@ def _order_entry_ports_by_approach(
     or sit a line that skips a station between two of that station's lanes.
     It is also left alone where another phase owns its order
     (:func:`_trial_overrides_an_owner`), so every order this phase decides
-    holds to the end of the run.
+    holds to the end of the run; that includes an order this phase decided
+    for another port earlier in the same run, which a later carry may not
+    break.
+
+    A junction feeder whose lines part at the junction may reach the port in
+    an order its bundle does not carry: those lines change sides once, at the
+    fork, and the departure takes a :class:`DepartureLaneOrder`
+    (:func:`_feeder_departure_orders`).  A single junction feeder whose lines
+    peel off beyond the port takes one for its peeling lines too
+    (:func:`_single_feeder_departure_order`).  A port with a record is
+    decided once per positioning pass, in the first run after Stage 5.1, and
+    every later run of the pass replays that decision; its order is carried
+    along the bundle only when the carry adds no crossing, sandwich or marker
+    strike (:func:`_record_carry_is_full`), and the decision is judged by the
+    owners on the offsets phase 8 would leave it with
+    (:func:`_decision_overrides_an_owner`).
 
     Drafts are drawn once per call on the offsets the phase started from, so
     every port is judged against the same routing.
@@ -4039,17 +4071,46 @@ def _order_entry_ports_by_approach(
     if ctx.compact:
         return
     graph = ctx.graph
+    plan = graph._departure_order_plan
+    deciding = plan is not None and not plan.sealed and "5.1" in graph._stages_completed
     draft_ctx: _RoutingCtx | None = None
     drop_reversed: set[str] | None = None
+
+    def owner(
+        port: Port, touched: Sequence[str], trial: Mapping[tuple[str, str], float]
+    ) -> _OwnerRefusal | None:
+        nonlocal drop_reversed
+        if drop_reversed is None:
+            drop_reversed = _sections_downstream_of(
+                graph, _junction_drop_reversal_roots(graph)
+            )
+        return _trial_overrides_an_owner(
+            ctx, port, touched, trial, drop_reversed, same_y_adj, sec_layer_stations
+        )
+
     for port_id, port in graph.ports.items():
         if not port.is_entry:
             continue
         section = graph.sections.get(port.section_id)
         if section is None or port.side not in flow_port_sides(section.direction):
             continue
+        decided = None if plan is None else plan.decisions.get(port_id)
+        if decided is not None:
+            _apply_port_decision(ctx, port, decided)
+            continue
+        may_record = deciding and plan is not None and port_id not in plan.decisions
         edges = list(graph.edges_to(port_id))
         feeders = _feeder_lines(edges)
         if len(feeders) < 2:
+            if may_record and len(feeders) == 1:
+                if draft_ctx is None:
+                    draft_ctx = _build_routing_context(
+                        graph, DIAGONAL_RUN, CURVE_RADIUS, dict(ctx.offsets)
+                    )
+                decision = _single_feeder_departure_order(
+                    ctx, port, section, edges, draft_ctx
+                )
+                _decide_port(ctx, port, decision, owner)
             continue
         cur = {
             lid: ctx.offsets.get((port_id, lid), 0.0)
@@ -4072,12 +4133,33 @@ def _order_entry_ports_by_approach(
         new_offs = _deal_slots_in_order(ctx, port_id, order)
         if all(abs(new_offs[lid] - cur[lid]) <= 1e-6 for lid in new_offs):
             continue
+        if not all(arrival.on_lane for arrival in arrivals):
+            continue
+        records = (
+            _feeder_departure_orders(ctx, port, feeders, order, cur, arrivals)
+            if may_record
+            else ()
+        )
+        recorded = {record.station_id for record in records}
+        rest = {src: lines for src, lines in feeders.items() if src not in recorded}
         if (
-            not all(arrival.on_lane for arrival in arrivals)
-            or _reorders_a_feeder(feeders, order, cur)
-            or _turns_a_feeder_over(ctx, port, feeders, order, arrivals)
+            _reorders_a_feeder(rest, order, cur)
+            or _turns_a_feeder_over(ctx, port, rest, order, arrivals)
             or _narrows_a_junction_feeder(graph, feeders, cur, new_offs)
         ):
+            if records:
+                _decide_port(ctx, port, None, owner)
+            continue
+        if records:
+            carry_full = _record_carry_is_full(ctx, port, frame, draft_ctx, new_offs)
+            _decide_port(
+                ctx,
+                port,
+                None
+                if carry_full is None
+                else PortOrderDecision(tuple(order), records, carry_full),
+                owner,
+            )
             continue
         touched, trial = _carry_trial(ctx, port, new_offs)
         if _carry_shares_a_lane(graph, touched, trial) or (
@@ -4088,19 +4170,319 @@ def _order_entry_ports_by_approach(
             )
         ):
             continue
-        if drop_reversed is None:
-            drop_reversed = _sections_downstream_of(
-                graph, _junction_drop_reversal_roots(graph)
-            )
-        if _trial_overrides_an_owner(
-            ctx, port, touched, trial, drop_reversed, same_y_adj, sec_layer_stations
-        ):
+        if owner(port, touched, trial):
             continue
         ctx.approach_orders[port_id] = tuple(order)
         _apply_offsets_along_bundle(ctx, port_id, port.section_id, new_offs)
 
 
-_OwnerRefusal = Literal["claim", "decided", "reversal", "compaction", "fan-plan"]
+_OwnerJudge = Callable[
+    [Port, Sequence[str], Mapping[tuple[str, str], float]], _OwnerRefusal | None
+]
+
+
+def _decide_port(
+    ctx: _OffsetCtx,
+    port: Port,
+    decision: PortOrderDecision | None,
+    owner: _OwnerJudge,
+) -> None:
+    """Record *decision* as the pass's verdict on *port* and apply it, unless
+    an owner of a lane order would override it (the port then takes none)."""
+    plan = ctx.graph._departure_order_plan
+    assert plan is not None
+    if decision is not None and _decision_overrides_an_owner(
+        ctx, port, decision, owner
+    ):
+        decision = None
+    plan.decisions[port.id] = decision
+    if decision is not None:
+        _apply_port_decision(ctx, port, decision)
+
+
+def _decision_trial(
+    ctx: _OffsetCtx, port: Port, decision: PortOrderDecision
+) -> tuple[list[str], Mapping[tuple[str, str], float]]:
+    """The stations *decision* writes and the offsets they would hold."""
+    new_offs = _deal_slots_in_order(ctx, port.id, list(decision.order))
+    if decision.carry_full:
+        return _carry_trial(ctx, port, new_offs)
+    at_port = {(port.id, lid): off for lid, off in new_offs.items()}
+    return [port.id], ChainMap(at_port, ctx.offsets)
+
+
+def _decision_overrides_an_owner(
+    ctx: _OffsetCtx, port: Port, decision: PortOrderDecision, owner: _OwnerJudge
+) -> _OwnerRefusal | None:
+    """Which owner would override *decision*, judged on the offsets phase 8
+    leaves its trial with.
+
+    Phase 8 runs next and flattens a level run-in into the port, so the trial
+    is reconciled on its own copy first: ``reconcile`` when that breaks the
+    decided order, else the owners judge the reconciled offsets over every
+    station the trial or the reconciliation writes.
+    """
+    touched, trial = _decision_trial(ctx, port, decision)
+    flat = replace(ctx, offsets=dict(trial))
+    _reconcile_horizontal_offsets(flat)
+    if _breaks_order(flat.offsets, port.id, decision.order):
+        return "reconcile"
+    moved = [
+        key[0]
+        for key, off in flat.offsets.items()
+        if abs(off - trial.get(key, 0.0)) > 1e-6
+    ]
+    return owner(port, list(dict.fromkeys([*touched, *moved])), flat.offsets)
+
+
+def _apply_port_decision(
+    ctx: _OffsetCtx, port: Port, decision: PortOrderDecision
+) -> None:
+    new_offs = _deal_slots_in_order(ctx, port.id, list(decision.order))
+    ctx.approach_orders[port.id] = decision.order
+    if decision.carry_full:
+        _apply_offsets_along_bundle(ctx, port.id, port.section_id, new_offs)
+    else:
+        for lid, off in new_offs.items():
+            ctx.offsets[(port.id, lid)] = off
+    ctx.departure_orders.update(departure_records(decision.records))
+
+
+def _natural_port_order(
+    ctx: _OffsetCtx, port: Port, src: str, lines: Sequence[str], heading: float
+) -> list[str]:
+    """*src*'s *lines* in the ascending port order its bundle carries
+    concentrically when its draft leaves heading *heading* along the flow."""
+    order = sorted(lines, key=lambda lid: ctx.offsets.get((src, lid), 0.0))
+    if heading * _entry_inward(port) <= 0:
+        order.reverse()
+    return order
+
+
+def _parts_at_fork(
+    graph: MetroGraph,
+    src: str,
+    port_id: str,
+    natural: Sequence[str],
+    want: Sequence[str],
+) -> bool:
+    """Whether every pair *want* reorders against *natural* parts at *src*.
+
+    Lines that part at a fork take their own order there: one of the pair
+    also leaves *src* for another target.  A pair that leaves only for
+    *port_id* travels on together, so reordering it would be a lane swap
+    along a straight run.
+    """
+    elsewhere = {e.line_id for e in graph.edges_from(src) if e.target != port_id}
+    rank = {lid: i for i, lid in enumerate(natural)}
+    return all(
+        rank[a] < rank[b] or a in elsewhere or b in elsewhere
+        for i, a in enumerate(want)
+        for b in want[i + 1 :]
+    )
+
+
+def _feeder_departure_orders(
+    ctx: _OffsetCtx,
+    port: Port,
+    feeders: Mapping[str, Sequence[str]],
+    order: Sequence[str],
+    cur: Mapping[str, float],
+    arrivals: Sequence[_FeederArrival],
+) -> tuple[DepartureLaneOrder, ...]:
+    """A record for each junction feeder *order* reorders against the order
+    its bundle carries, where the reordered lines part at the junction."""
+    graph = ctx.graph
+    heading = {(a.edge.source, a.edge.line_id): a.heading for a in arrivals}
+    records = []
+    for src, lines in feeders.items():
+        if len(lines) < 2 or src not in graph.junctions:
+            continue
+        want = [lid for lid in order if lid in lines]
+        if sorted(lines, key=cur.__getitem__) == want:
+            continue
+        headings = {heading[(src, lid)] for lid in lines}
+        direction = headings.pop() if len(headings) == 1 else None
+        if direction is None:
+            continue
+        natural = _natural_port_order(ctx, port, src, lines, direction)
+        if natural != want and _parts_at_fork(graph, src, port.id, natural, want):
+            records.append(
+                DepartureLaneOrder(src, port.id, tuple(zip(want, natural, strict=True)))
+            )
+    return tuple(records)
+
+
+def _single_feeder_departure_order(
+    ctx: _OffsetCtx,
+    port: Port,
+    section: Section,
+    edges: Sequence[Edge],
+    draft_ctx: _RoutingCtx,
+) -> PortOrderDecision | None:
+    """Rule W: a single junction feeder's lines shared with a sibling departure
+    that peels off beyond this port take the port lanes on the fork's side.
+
+    The fork must sit at least two formed corners across the lanes from the
+    port, and the sibling's entry port lie in the port's grid row, beyond the
+    port's section along the flow and on the fork's side of the section.  The
+    grid is read along the port's own inward axis, so one predicate serves
+    every side.  The order must part at the fork and carry along the whole
+    bundle (:func:`_record_carry_is_full`): with one feeder nothing else
+    forces it, so the section has to take it too.
+    """
+    graph = ctx.graph
+    src = edges[0].source
+    lines = list(dict.fromkeys(edge.line_id for edge in edges))
+    if src not in graph.junctions or len(lines) < 2:
+        return None
+    inward_x = port_free_axis(port.side) == "y"
+
+    def grid(station: Station) -> tuple[int | None, int | None]:
+        col, row = _resolve_section_colrow(graph, station)
+        return (col, row) if inward_x else (row, col)
+
+    fork, entry = graph.stations[src], graph.stations[port.id]
+    frame = _section_lane_frame(graph, section, draft_ctx.positive_fan)
+    (port_along, port_across), (fork_along, _) = grid(entry), grid(fork)
+    if port_along is None or port_across is None or fork_along is None:
+        return None
+    fork_side = frame.secondary.get(fork) - frame.secondary.get(entry)
+    if abs(fork_side) < 2 * CURVE_RADIUS:
+        return None
+    peeling = set()
+    for edge in graph.edges_from(src):
+        sibling = (
+            None
+            if edge.target == port.id
+            else _fan_branch_entry_port(graph, edge.target)
+        )
+        if sibling is None or sibling == port.id:
+            continue
+        along, across = grid(graph.stations[sibling])
+        if along is None or across != port_across:
+            continue
+        beyond = (port_along - fork_along) * (along - port_along) > 0 and abs(
+            along - fork_along
+        ) > abs(port_along - fork_along)
+        sibling_side = frame.secondary.get(fork) - frame.secondary.get(
+            graph.stations[sibling]
+        )
+        if beyond and sibling_side * fork_side > 0 and edge.line_id in lines:
+            peeling.add(edge.line_id)
+    if not peeling or len(peeling) == len(lines):
+        return None
+    port_lane = frame.secondary_sign * frame.secondary.get(entry)
+    arrivals = _draft_feeder_arrivals(ctx, port, frame, port_lane, edges, draft_ctx)
+    if arrivals is None or len({a.heading for a in arrivals}) != 1:
+        return None
+    heading = arrivals[0].heading
+    if heading is None:
+        return None
+    natural = _natural_port_order(ctx, port, src, lines, heading)
+    keep = [lid for lid in natural if lid not in peeling]
+    peel = [lid for lid in natural if lid in peeling]
+    fork_high = frame.secondary_sign * frame.secondary.get(fork) > port_lane
+    want = keep + peel if fork_high else peel + keep
+    if want == natural or not _parts_at_fork(graph, src, port.id, natural, want):
+        return None
+    new_offs = _deal_slots_in_order(ctx, port.id, want)
+    if not _record_carry_is_full(ctx, port, frame, draft_ctx, new_offs):
+        return None
+    record = DepartureLaneOrder(src, port.id, tuple(zip(want, natural, strict=True)))
+    return PortOrderDecision(tuple(want), (record,), True)
+
+
+def _record_carry_is_full(
+    ctx: _OffsetCtx,
+    port: Port,
+    frame: AxisFrame,
+    draft_ctx: _RoutingCtx,
+    new_offs: Mapping[str, float],
+) -> bool | None:
+    """Whether a record port's order carries along its bundle (``True``) or
+    stops at the port (``False``); ``None`` when the carry would put two
+    lines on one lane.
+
+    The carry stops at the port when it would add crossings or sandwiches
+    (:func:`_carry_adds_crossings_or_sandwiches`), or put a line it moves
+    between the lanes, or through the marker, of a station of the port's
+    section that the line skips on its row (:func:`_skipped_station_hits`).
+    """
+    graph = ctx.graph
+    touched, trial = _carry_trial(ctx, port, new_offs)
+    if _carry_shares_a_lane(graph, touched, trial):
+        return None
+    view = _CarryFrame(graph, frame, draft_ctx.positive_fan, port.id, touched)
+    if _carry_adds_crossings_or_sandwiches(view, ctx.offsets, trial):
+        return False
+    before = _skipped_station_hits(view, port.section_id, ctx.offsets)
+    after = _skipped_station_hits(view, port.section_id, trial)
+    return not any(len(a) > len(b) for a, b in zip(after, before, strict=True))
+
+
+def _skipped_station_hits(
+    view: _CarryFrame, section_id: str, offsets: Mapping[tuple[str, str], float]
+) -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
+    """``(line, station)`` pairs where a line skips a station *v* of
+    *section_id* on its row, from a carried station, any number of hops on.
+
+    The first set holds lines whose lane at either end, on *v*'s row, sits
+    strictly between two of *v*'s lanes; the second, lines running level
+    straight past *v* on its row inside *v*'s marker pill (its lane span
+    widened by the station radius, as :func:`_station_marker_bbox` draws it).
+    """
+    graph = view.graph
+    radius = STATION_RADIUS_APPROX * graph.stroke_scale
+    between: set[tuple[str, str]] = set()
+    struck: set[tuple[str, str]] = set()
+    for u in view.touched:
+        if not view.stacks(u):
+            continue
+        for lid in graph.station_lines(u):
+            for w in _line_neighbours(graph, u, lid, outgoing=True):
+                if not view.stacks(w):
+                    continue
+                lo, hi = sorted((view.along(u), view.along(w)))
+                lane_u, lane_w = offsets.get((u, lid)), offsets.get((w, lid))
+                level_lane = (
+                    lane_u
+                    if abs(view.across(u) - view.across(w)) <= _SAME_Y_TOLERANCE
+                    and lane_u is not None
+                    and lane_w is not None
+                    and abs(lane_u - lane_w) <= 1e-6
+                    else None
+                )
+                for v, station in graph.stations.items():
+                    v_lines = graph.station_lines(v)
+                    if (
+                        station.section_id != section_id
+                        or v in graph.ports
+                        or v in graph.junctions
+                        or v in (u, w)
+                        or lid in v_lines
+                        or not v_lines
+                        or not view.stacks(v)
+                        or not lo + 1e-6 < view.along(v) < hi - 1e-6
+                    ):
+                        continue
+                    lanes = [offsets.get((v, k), 0.0) for k in v_lines]
+                    for end in (u, w):
+                        if abs(
+                            view.across(end) - view.across(v)
+                        ) <= _SAME_Y_TOLERANCE and min(lanes) < offsets.get(
+                            (end, lid), 0.0
+                        ) < max(lanes):
+                            between.add((lid, v))
+                    if (
+                        level_lane is not None
+                        and not station.is_hidden
+                        and abs(view.across(u) - view.across(v)) <= _SAME_Y_TOLERANCE
+                    ):
+                        low, high = _station_bundle_offset_span(graph, v, offsets)
+                        if low - radius < level_lane < high + radius:
+                            struck.add((lid, v))
+    return between, struck
 
 
 def _lane_order(
@@ -6565,6 +6947,10 @@ def _run_offset_phases(graph: MetroGraph, resolved: float) -> _OffsetCtx:
     _hold_decided_orders(ctx, "15")
     _validate_linear_entry_frames(ctx, frames)
     _cache_linear_entry_pill_lines(ctx, frames)
+    graph._departure_lane_orders = dict(ctx.departure_orders)
+    plan = graph._departure_order_plan
+    if plan is not None and "5.1" in graph._stages_completed:
+        plan.sealed = True
     return ctx
 
 

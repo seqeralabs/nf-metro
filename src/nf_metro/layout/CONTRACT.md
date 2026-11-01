@@ -324,6 +324,13 @@ runtime check either:
   render fold-abort chokepoint. A resolve-time flow reversal is recorded as a
   `FLOW_REORIENTED_DIRECTION` decision in `graph.layout_provenance`; routing's
   exit-port offset reads that typed reason instead of a second section set.
+- `graph._departure_order_plan` - one positioning pass's 7b' port decisions
+  (a record, or none), reset at the start of each pass, filled by the pass's
+  first offsets run after Stage 5.1 and replayed by every later run.
+- `graph._departure_lane_orders` - the `DepartureLaneOrder` records the latest
+  station-offset computation holds; read by routing's fan, gap, band,
+  exit-turn and seating consumers and the bundle-order curve check, empty when
+  no departure is recorded.
 - `graph._linear_entry_pill_lines_cache` - accepted linear-entry cohorts
   projected by each station-offset computation. Marker bbox, label, and render
   consumers use the cohort with the offset map produced by that computation;
@@ -1583,10 +1590,15 @@ the planned-fan offsets that follow them own the lanes a fan plan states.
   interleave, deal the lanes in the order the feeders' risers turn in without
   crossing, and carry that order along the bundle.
 - **Helpers**: `_order_entry_ports_by_approach` decides each port;
-  `_trial_overrides_an_owner` refuses a re-deal another phase owns;
+  `_trial_overrides_an_owner` refuses a re-deal another phase owns, or one
+  whose carry breaks an order 7b' itself decided earlier in the same pass;
   `_claim_family_port_orders` records the entry-port order family's claims;
   `_hold_decided_orders` and `_commit_unless_a_decided_order_breaks` hold the
-  decided orders through the later phases.
+  decided orders through the later phases. `_feeder_departure_orders` and
+  `_single_feeder_departure_order` (rule W) write `DepartureLaneOrder`
+  records (`layout/departure_order.py`); `_record_carry_is_full` stops a
+  record port's carry at the port; `_decision_overrides_an_owner` judges a
+  record decision.
 - **Precondition**: Non-compact mode. The entry-port order family (7c, 7d, 7e,
   7f) has run, and each entry port it moved or judged (7c's convergence and
   same-row bypass ports, 7e's top-descent ports) is claimed with the order it
@@ -1599,6 +1611,24 @@ the planned-fan offsets that follow them own the lanes a fan plan states.
   on its own copy of the re-dealt offsets, would reorder the port, or when a
   geometry-owning fan plan's lanes at the port would reorder it. Each refusal
   reads offsets only: no routing, compile or solve.
+- **Departure records**: A junction feeder whose lines part at the junction
+  (one line of each reordered pair also leaves it for another target) may
+  reach the port in an order its bundle does not carry concentrically; the
+  departure then takes a `DepartureLaneOrder`, a permutation of that natural
+  order, and the lines change sides once, at the fork. Rule W gives one to a
+  single junction feeder whose lines shared with a sibling departure peel off
+  beyond the port: those take the lanes on the fork's side, the grid read
+  along the port's inward axis. A record port is decided once per positioning
+  pass, in the first offsets run after Stage 5.1, into
+  `graph._departure_order_plan`; later runs of the pass replay the decision.
+  Its order is carried along the bundle only when the carry adds no
+  crossing, sandwich or same-row marker strike; it is judged by the owners
+  above on the offsets phase 8 would leave it with, and refused
+  (`reconcile`) when phase 8 would break it. Junction fan positions, gap
+  ranks, `_distinct_line_order`, the trunk-band constraints, exit-turn axes,
+  settled exit-turn lane ranks, the gap-bundle seat by port slot order and
+  the bundle-order curve check read the records each run publishes in
+  `graph._departure_lane_orders`.
 - **Invariants preserved**: Every order 7b' decides holds to the end of the
   run. Phase 12 compacts seed by seed and 14b exchanges arrival by arrival,
   each committing a write only when every decided order still holds; a

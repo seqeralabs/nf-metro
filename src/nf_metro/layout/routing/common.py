@@ -905,6 +905,9 @@ class RoutedPath:
     """Segments whose final geometry is owned by the convergence plan."""
     route_system_owned_segment_ranks: tuple[int, ...] = ()
     """Gap-channel segments frozen by the route-system member plan."""
+    port_slot_seated_ranks: tuple[int, ...] = ()
+    """Gap-channel segments seated by the slot order of the entry port they
+    land on, nested between planner-owned columns."""
     exit_turn_segment_rank: int | None = None
     """Index of the owned turn segment's first waypoint."""
     concentric_corner_offsets_by_segment: dict[

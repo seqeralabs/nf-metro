@@ -1443,7 +1443,10 @@ def _layout_once(
 
     Clears ``_cross_column_perp_bridge_ports`` before the pass and prunes it
     against the pass's final boxes after, so it holds only this pass's bridges.
+    Starts an empty departure-order plan, which offsets phase 7b' fills once
+    per pass.
     """
+    from nf_metro.layout.departure_order import DepartureOrderPlan
     from nf_metro.layout.fan_plans import (
         build_fan_plan_execution,
         install_fan_plan_execution,
@@ -1451,6 +1454,7 @@ def _layout_once(
     from nf_metro.parser.route_topology import build_route_topology_query
 
     graph._cross_column_perp_bridge_ports.clear()
+    graph._departure_order_plan = DepartureOrderPlan()
     topology = build_route_topology_query(graph)
     if topology is not None:
         install_fan_plan_execution(

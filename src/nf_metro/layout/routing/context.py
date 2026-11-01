@@ -16,6 +16,7 @@ from nf_metro.layout.constants import (
     SAME_Y_TOLERANCE,
     graph_offset_step,
 )
+from nf_metro.layout.departure_order import relabel_departures
 from nf_metro.layout.fan_ordering import fanout_divergence_peel_order
 from nf_metro.layout.geometry import (
     AxisFrame,
@@ -1064,7 +1065,9 @@ def _compute_bypass_gap_indices(
     assigns per-gap indices so each route gets a unique X offset.
 
     Edges in *skip_edges* are excluded so truncated merge branches
-    don't create gaps in the bundle.
+    don't create gaps in the bundle.  A recorded departure
+    (:class:`~nf_metro.layout.departure_order.DepartureLaneOrder`) gives each
+    of its lines the first-gap index of the line whose lane it takes.
 
     Returns
     -------
@@ -1156,6 +1159,11 @@ def _compute_bypass_gap_indices(
         g2_j, g2_n = gap2_idx.get(ek, (0, 1))
         result[ek] = (g1_j, g1_n, g2_j, g2_n)
 
+    relabel_departures(
+        graph._departure_lane_orders,
+        result,
+        lambda own, natural: (natural[0], own[1], own[2], own[3]),
+    )
     return result
 
 
@@ -1179,7 +1187,9 @@ def _compute_junction_fan_info(
     vertical channel X.
 
     Edges in *skip_edges* are excluded so that truncated merge branches
-    don't create gaps in the bundle.
+    don't create gaps in the bundle.  A recorded departure
+    (:class:`~nf_metro.layout.departure_order.DepartureLaneOrder`) gives each
+    of its lines the position of the line whose lane it takes.
     """
     _skip = skip_edges or set()
     result: dict[tuple[str, str, str], tuple[int, int]] = {}
@@ -1358,6 +1368,9 @@ def _compute_junction_fan_info(
                     n,
                 )
 
+    relabel_departures(
+        graph._departure_lane_orders, result, lambda _own, natural: natural
+    )
     return result
 
 
