@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Iterator
+from itertools import combinations
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -299,14 +300,10 @@ def test_a_carry_that_reorders_a_perpendicular_seam_takes_no_record(
     Zone 2's exit, whose connector feeds Zone 3's BOTTOM entry.  That entry's
     other feeder holds its order, so the seam would change order between the
     sections: the carry stops at the port, and the departure, whose order the
-    whole section has to take, gets no record.
-
-    The swapped pair ends together in Zone 2, which refuses the record before
-    the carry is judged, so the test lets the pair count as parting to reach
-    the seam."""
+    whole section has to take, gets no record.  The swapped pair parts beyond
+    the port (m1 for Q3X0, m4 for Q3X2), so the carry is what refuses it."""
     added: list[set[tuple[str, str, str, str]]] = []
     flips = offsets_module._perpendicular_seam_flips
-    monkeypatch.setattr(offsets_module, "_part_beyond", lambda *_args: True)
 
     def spy(*args: Any) -> set[tuple[str, str, str, str]]:
         found = flips(*args)
@@ -338,29 +335,18 @@ def test_a_pass_that_ends_with_other_records_than_the_first_fails_closed() -> No
     assert raised.value.changed == (("j", "port"),)
 
 
-def _part_beyond(graph: MetroGraph, sid: str, a: str, b: str) -> bool:
-    stack, seen = [sid], {sid}
-    while stack:
-        cur = stack.pop()
-        next_a, next_b = (
-            {e.target for e in graph.edges_from(cur) if e.line_id == line}
-            for line in (a, b)
-        )
-        if next_a and next_b and next_a != next_b:
-            return True
-        if next_a == next_b:
-            stack.extend(next_a - seen)
-            seen |= next_a
-    return False
-
-
 @pytest.mark.parametrize(
-    "path",
-    [REJOINING_PAIR, REJOINING_PAIR_SPACED, REJOINING_ROTATION, CARRY_REPLAY],
+    ("path", "recorded"),
+    [
+        (REJOINING_PAIR, False),
+        (REJOINING_PAIR_SPACED, False),
+        (REJOINING_ROTATION, False),
+        (CARRY_REPLAY, True),
+    ],
     ids=["rejoining-pair", "rejoining-pair-spaced", "rejoining-rotation", "parting"],
 )
 def test_a_single_feeder_record_swaps_only_pairs_that_part_beyond_the_port(
-    monkeypatch: pytest.MonkeyPatch, path: Path
+    monkeypatch: pytest.MonkeyPatch, path: Path, recorded: bool
 ) -> None:
     """With one feeder nothing else forces the order, so a pair that ends
     together beyond the port gains nothing from changing sides at the fork:
@@ -370,14 +356,16 @@ def test_a_single_feeder_record_swaps_only_pairs_that_part_beyond_the_port(
 
     assert drawn.graph is not None
     graph = drawn.graph
-    for (source, port), record in graph._departure_lane_orders.items():
-        if len({e.source for e in graph.edges_to(port)}) != 1:
-            continue
-        lines = record.lines
-        for i, a in enumerate(lines):
-            for b in lines[i + 1 :]:
-                if record.reorders(a, b):
-                    assert _part_beyond(graph, port, a, b), (source, port, a, b)
+    swapped = [
+        (port, a, b)
+        for (_source, port), record in graph._departure_lane_orders.items()
+        if len({e.source for e in graph.edges_to(port)}) == 1
+        for a, b in combinations(record.lines, 2)
+        if record.reorders(a, b)
+    ]
+    assert bool(swapped) is recorded
+    for port, a, b in swapped:
+        assert offsets_module._part_beyond(graph, port, a, b), (port, a, b)
 
 
 def test_a_record_leaves_its_ports_same_row_exit_feeder_level(

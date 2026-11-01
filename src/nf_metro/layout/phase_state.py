@@ -315,12 +315,10 @@ PHASE_FIELD_REGISTRY: dict[str, PhaseFieldSpec] = {
         enforcement=FieldEnforcement.FALLBACK,
         why=(
             "offsets phase 7b''s per-port departure-order decisions for one "
-            "layout: reset when compute_layout starts, decided by the first "
-            "station-offset computation after junction positioning and "
-            "replayed by every later one after junction positioning in any "
-            "positioning pass, so a record port is decided once per layout; "
-            "a two-feeder port's carry extent is decided once per pass and "
-            "cleared when each pass starts; an absent plan decides nothing"
+            "layout, reset when compute_layout starts; which parts are "
+            "decided once per layout and which once per positioning pass is "
+            "under 'Departure record lifetime' in layout/CONTRACT.md; an "
+            "absent plan decides nothing"
         ),
     ),
     "_departure_lane_orders": PhaseFieldSpec(

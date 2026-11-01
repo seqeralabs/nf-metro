@@ -1460,8 +1460,8 @@ def _layout_once(
     from nf_metro.parser.route_topology import build_route_topology_query
 
     graph._cross_column_perp_bridge_ports.clear()
-    if graph._departure_order_plan is not None:
-        graph._departure_order_plan.start_pass()
+    assert graph._departure_order_plan is not None
+    graph._departure_order_plan.start_pass()
     topology = build_route_topology_query(graph)
     if topology is not None:
         install_fan_plan_execution(

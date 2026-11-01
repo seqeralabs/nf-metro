@@ -25,7 +25,7 @@ graph LR
     subgraph z2 [Zone 2]
         q2x0[Q2X0]
         q2x1[Q2X1]
-        q2x0 -->|m1,m3| q2x1
+        q2x0 -->|m1,m3,m4| q2x1
     end
     subgraph z3 [Zone 3]
         %%metro direction: BT
@@ -52,6 +52,7 @@ graph LR
     q1x2 -->|m1,m4| q2x0
     q1x2 -->|m2| q3x0
     q2x1 -->|m1,m2| q3x0
+    q2x1 -->|m4| q3x2
     q2x1 -->|m3| q4x1
     q3x1 -->|m1| q4x1
     q3x2 -->|m0,m1| q4x0

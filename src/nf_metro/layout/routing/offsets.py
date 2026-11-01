@@ -4054,16 +4054,13 @@ def _order_entry_ports_by_approach(
     fork, and the departure takes a :class:`DepartureLaneOrder`
     (:func:`_feeder_departure_orders`).  A single junction feeder whose lines
     peel off beyond the port takes one for its peeling lines too
-    (:func:`_single_feeder_departure_order`).  A port with a record is
-    decided once per layout, in the first run after Stage 5.1, and every later
-    run after Stage 5.1, in any positioning pass, replays that decision; its
-    order is carried along the bundle only when the carry adds no crossing,
-    sandwich or marker strike or perpendicular-seam reorder
-    (:func:`_record_carry_is_full`), which a port with two or more feeders
-    judges once per positioning pass on the pass's own positions (a lane the
-    carry would share stops it at the port), and the decision is judged by
-    the owners on the offsets phase 8 would leave it with
-    (:func:`_decision_overrides_an_owner`).
+    (:func:`_single_feeder_departure_order`).  When a record port is decided
+    and when it is replayed is under "Departure record lifetime" in
+    ``layout/CONTRACT.md``.  Its order is carried along the bundle only when
+    the carry adds no crossing, sandwich or marker strike or
+    perpendicular-seam reorder (:func:`_record_carry_is_full`), and the
+    decision is judged by the owners on the offsets phase 8 would leave it
+    with (:func:`_decision_overrides_an_owner`).
 
     Drafts are drawn once per call on the offsets the phase started from, so
     every port is judged against the same routing.
@@ -4075,6 +4072,8 @@ def _order_entry_ports_by_approach(
     stages = graph._stages_completed
     open_plan = plan if plan is not None and plan.deciding(stages) else None
     replayed = plan.decisions if plan is not None and plan.replaying(stages) else {}
+    decisions = plan.decisions if plan is not None else {}
+    pass_carry = plan.pass_carry if plan is not None else {}
     drafts: list[_RoutingCtx] = []
     drop_reversed = _sections_downstream_of(graph, _junction_drop_reversal_roots(graph))
 
@@ -4094,27 +4093,32 @@ def _order_entry_ports_by_approach(
             ctx, port, touched, trial, drop_reversed, same_y_adj, sec_layer_stations
         )
 
+    def carry_per_pass(port: Port) -> bool:
+        return len(_feeder_lines(list(graph.edges_to(port.id)))) > 1
+
     def decide(port: Port, decision: PortOrderDecision | None) -> None:
         if decision is not None and _decision_overrides_an_owner(
             ctx, port, decision, owner
         ):
             decision = None
-        assert plan is not None
-        plan.decisions[port.id] = decision
-        if decision is not None:
-            plan.pass_carry[port.id] = decision.carry_full
-            _apply_port_decision(ctx, port, decision)
+        decisions[port.id] = decision
+        if decision is None:
+            return
+        if carry_per_pass(port):
+            pass_carry[port.id] = decision.carry_full
+        new_offs = _deal_slots_in_order(ctx, port.id, list(decision.order))
+        _apply_port_decision(ctx, port, decision, new_offs)
 
     def replay(port: Port, decision: PortOrderDecision) -> None:
-        assert plan is not None
-        if len(_feeder_lines(list(graph.edges_to(port.id)))) > 1:
-            if port.id not in plan.pass_carry:
-                new_offs = _deal_slots_in_order(ctx, port.id, list(decision.order))
-                plan.pass_carry[port.id] = bool(
+        new_offs = _deal_slots_in_order(ctx, port.id, list(decision.order))
+        if carry_per_pass(port):
+            carry = pass_carry.get(port.id)
+            if carry is None:
+                carry = pass_carry[port.id] = bool(
                     _record_carry_is_full(ctx, port, draft().positive_fan, new_offs)
                 )
-            decision = replace(decision, carry_full=plan.pass_carry[port.id])
-        _apply_port_decision(ctx, port, decision)
+            decision = replace(decision, carry_full=carry)
+        _apply_port_decision(ctx, port, decision, new_offs)
 
     for port_id, port in graph.ports.items():
         if not port.is_entry:
@@ -4272,9 +4276,13 @@ def _stepped_exit_feeders(
 
 
 def _apply_port_decision(
-    ctx: _OffsetCtx, port: Port, decision: PortOrderDecision
+    ctx: _OffsetCtx,
+    port: Port,
+    decision: PortOrderDecision,
+    new_offs: dict[str, float],
 ) -> None:
-    new_offs = _deal_slots_in_order(ctx, port.id, list(decision.order))
+    """Deal *decision*'s order at *port* (*new_offs*, its slots) and carry it
+    as far as the decision says."""
     ctx.approach_orders[port.id] = decision.order
     if decision.carry_full:
         _apply_offsets_along_bundle(ctx, port.id, port.section_id, new_offs)

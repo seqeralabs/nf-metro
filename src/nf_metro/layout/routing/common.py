@@ -2086,7 +2086,8 @@ def peeloff_target_slots(
 
     A recorded departure (:class:`DepartureLaneOrder` in *records*) whose
     tails leave its junction on the trunk itself has its lines change sides at
-    the fork, so each of them takes the slot of the line whose lane it takes.
+    the fork, so each recorded line takes the slot of the line whose lane the
+    record gives it (:func:`_record_seats_tails`).
     """
     per_line = bundle.per_line
     n = len(per_line)
@@ -2110,20 +2111,36 @@ def peeloff_target_slots(
         )
         for i, lid in enumerate(ranked)
     }
+    recorded = [r for r in records.values() if r.target_id == bundle.port_id]
+    if not recorded:
+        return slots
     routes: dict[str, RoutedPath] = {}
     for rp, _tail in bundle.entries:
         routes.setdefault(rp.edge.line_id, rp)
-    for record in records.values():
-        if record.target_id == bundle.port_id and all(
-            line in routes
-            and (routes[line].edge.source, routes[line].edge.target) == record.key
-            and len(routes[line].points) == 4
-            for line in record.lines
-        ):
+    for record in recorded:
+        if _record_seats_tails(record, routes):
             natural = dict(slots)
             for line, natural_line in record.takes_lane_of:
                 slots[line] = natural[natural_line]
     return slots
+
+
+_PEELOFF_TAIL_POINTS = 4
+
+
+def _record_seats_tails(
+    record: DepartureLaneOrder, routes: Mapping[str, RoutedPath]
+) -> bool:
+    """Whether every line *record* reorders reaches its port on a route that
+    is its peel-off tail alone, so the tail's trunk leaves the recorded
+    junction itself.
+    """
+    return all(
+        line in routes
+        and (routes[line].edge.source, routes[line].edge.target) == record.key
+        and len(routes[line].points) == _PEELOFF_TAIL_POINTS
+        for line in record.lines
+    )
 
 
 def iter_eligible_destination_tail_bundles(

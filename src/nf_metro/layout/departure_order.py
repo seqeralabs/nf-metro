@@ -1,4 +1,4 @@
-"""The per-departure lane-order record and the per-pass plan that decides it.
+"""The per-departure lane-order record and the plan that decides it.
 
 Lines that part at a fork take their own order there.  When a junction's lines
 reach one entry port in an order the bundle they leave in does not carry
@@ -8,13 +8,10 @@ line per station, so they cannot state this; a :class:`DepartureLaneOrder`
 does, as a permutation of the natural (concentric) order, so every consumer
 relabels its own natural ranks and none reads a frame sign.
 
-Offsets phase 7b' (``_order_entry_ports_by_approach``) decides each port once
-per layout, in its first run after junction positioning (Stage 5.1) of the
-first positioning pass, into a :class:`DepartureOrderPlan`; every later run
-after junction positioning, in that pass and every later one, replays the
-decision rather than re-deciding it.  How far a port with two or more feeders
-carries its order along the section is the one part decided once per pass:
-it reads the pass's own positions, and the record holds whatever it decides.
+Offsets phase 7b' (``_order_entry_ports_by_approach``) decides the records
+into a :class:`DepartureOrderPlan`; which parts are decided once per layout
+and which once per positioning pass is set out under "Departure record
+lifetime" in ``layout/CONTRACT.md``.
 """
 
 from __future__ import annotations
@@ -122,15 +119,10 @@ class DepartureOrderPlan:
     """One layout's 7b' decisions, keyed by entry port.
 
     A port maps to ``None`` when it was decided to take no record.  The plan is
-    *sealed* once the first offsets run after junction positioning completes,
-    so no later run decides a port anew: every run after junction positioning,
-    in any positioning pass, replays the decisions.  A run before junction
-    positioning neither decides nor replays.
-
-    A single feeder's full carry is a condition of its record, so it replays
-    with the record.  A port with two or more feeders takes its carry extent
-    per positioning pass instead (*pass_carry*): the pass's first replaying run
-    decides it from the pass's positions and the rest of the pass replays it.
+    *sealed* once the first offsets run after junction positioning completes.
+    *pass_carry* holds the carry extents of record ports with two or more
+    feeders for the current positioning pass.  The decide-once and per-pass
+    rules are under "Departure record lifetime" in ``layout/CONTRACT.md``.
     """
 
     decisions: dict[str, PortOrderDecision | None] = field(default_factory=dict)
@@ -143,7 +135,7 @@ class DepartureOrderPlan:
 
     def deciding(self, stages: Sequence[str]) -> bool:
         """Whether an offsets run at *stages* decides ports."""
-        return not self.sealed and JUNCTIONS_POSITIONED in stages
+        return not self.sealed and self.replaying(stages)
 
     def replaying(self, stages: Sequence[str]) -> bool:
         """Whether an offsets run at *stages* applies the decisions taken."""
@@ -151,18 +143,16 @@ class DepartureOrderPlan:
 
     def seal(self, stages: Sequence[str]) -> None:
         """Seal the plan once a run at *stages* has decided."""
-        if JUNCTIONS_POSITIONED in stages:
+        if self.replaying(stages):
             self.sealed = True
 
 
 class DepartureRecordDriftError(RuntimeError):
-    """A positioning pass ended holding other departure records than an
-    earlier pass of the same layout.
+    """A positioning pass ended holding other departure records than the
+    layout's first pass.
 
-    Every pass replays the records the first pass decided, so a difference
-    means a pass drew without that replay; a record one pass keeps and another
-    drops would leave its trace (spacing, bypass helpers) on a layout the final
-    pass draws without it.
+    A record one pass keeps and another drops would leave its trace (spacing,
+    bypass helpers) on a layout the final pass draws without it.
     """
 
     def __init__(self, changed: Iterable[tuple[str, str]]) -> None:
