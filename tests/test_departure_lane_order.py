@@ -39,6 +39,7 @@ FORK_PORT_STOP = REGRESSIONS / "departure_order_fork_port_stop.mmd"
 FORK_TWO_FEEDERS = REGRESSIONS / "departure_order_fork_two_feeders.mmd"
 SHARED_RUN = REGRESSIONS / "departure_order_shared_run_no_record.mmd"
 FORK_PORT_STOP_TB = REGRESSIONS / "departure_order_fork_port_stop_tb.mmd"
+PERPENDICULAR_SEAM = REGRESSIONS / "departure_order_perpendicular_seam.mmd"
 
 
 class _Drawn:
@@ -49,7 +50,9 @@ class _Drawn:
         self.decided_in: list[int] = []
 
 
-def _draw(monkeypatch: pytest.MonkeyPatch, path: Path) -> _Drawn:
+def _draw(
+    monkeypatch: pytest.MonkeyPatch, path: Path, *, may_abort: bool = False
+) -> _Drawn:
     drawn = _Drawn()
     check = svg.assert_render_curve_invariants
     run = offsets_module._run_offset_phases
@@ -73,7 +76,11 @@ def _draw(monkeypatch: pytest.MonkeyPatch, path: Path) -> _Drawn:
     monkeypatch.setattr(offsets_module, "_feeder_departure_orders", spy_decide)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        render_string(path.read_text(), source_dir=str(path.parent))
+        try:
+            render_string(path.read_text(), source_dir=str(path.parent))
+        except Exception:
+            if not may_abort:
+                raise
     return drawn
 
 
@@ -267,3 +274,30 @@ def test_the_port_stop_fork_keeps_its_order_at_the_port(
 
     (decision,) = _decisions(drawn)
     assert not decision.carry_full
+
+
+def test_a_carry_that_reorders_a_perpendicular_seam_takes_no_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rule W's carry would move one line across another at Zone 2's exit,
+    whose connector feeds Zone 3's BOTTOM entry; that entry's other feeder
+    holds its order, so the seam would change order between the sections.
+    The carry stops at the port instead, and rule W, which needs the whole
+    section to take the order, writes no record."""
+    added: list[set[tuple[str, str, str, str]]] = []
+    flips = offsets_module._perpendicular_seam_flips
+
+    def spy(*args: Any) -> set[tuple[str, str, str, str]]:
+        found = flips(*args)
+        added.append(found)
+        return found
+
+    monkeypatch.setattr(offsets_module, "_perpendicular_seam_flips", spy)
+    drawn = _draw(monkeypatch, PERPENDICULAR_SEAM, may_abort=True)
+
+    assert any(
+        (exit_id, entry_id) == ("z2__exit_right_2", "z3__entry_bottom_6")
+        for found in added
+        for exit_id, entry_id, _a, _b in found
+    )
+    assert not any(drawn.runs)

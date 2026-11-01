@@ -1622,7 +1622,10 @@ the planned-fan offsets that follow them own the lanes a fan plan states.
   pass, in the first offsets run after Stage 5.1, into
   `graph._departure_order_plan`; later runs of the pass replay the decision.
   Its order is carried along the bundle only when the carry adds no
-  crossing, sandwich or same-row marker strike; it is judged by the owners
+  crossing, sandwich or same-row marker strike, and leaves no carried exit
+  holding a pair in the other order to the perpendicular entry its connector
+  feeds (`_perpendicular_seam_flips`: that entry's order belongs to its own
+  feeders); it is judged by the owners
   above on the offsets phase 8 would leave it with, and refused
   (`reconcile`) when phase 8 would break it. Junction fan positions, gap
   ranks, `_distinct_line_order`, the trunk-band constraints, exit-turn axes,

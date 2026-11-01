@@ -326,13 +326,13 @@ def _seat_by_port_slots(
     first: dict[str, float] = {}
     for ch in chans:
         first.setdefault(ch.route.line_id, seats[id(ch)])
-    left_to_right = sorted(first, key=first.__getitem__)
+    by_column = sorted(first, key=first.__getitem__)
     for ch in chans:
         _restack_channel(
             ch,
             seats[id(ch)],
-            left_to_right.index(ch.route.line_id),
-            len(left_to_right),
+            by_column.index(ch.route.line_id),
+            len(by_column),
             ctx.offset_step,
             ctx.curve_radius,
         )
@@ -5643,10 +5643,10 @@ def _recorded_departure_line_order(
             continue
         inner_first = sorted(record.lines, key=lambda lid: far[lid][0])
         leaves_right = next(iter(far.values()))[1] > 0
-        left_to_right = inner_first[::-1] if leaves_right else inner_first
+        by_column = inner_first[::-1] if leaves_right else inner_first
         slots = sorted(order.index(lid) for lid in record.lines)
         order = list(order)
-        for slot, lid in zip(slots, left_to_right, strict=True):
+        for slot, lid in zip(slots, by_column, strict=True):
             order[slot] = lid
     return order
 
