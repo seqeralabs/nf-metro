@@ -976,6 +976,7 @@ def _compile_corridor_cohorts(
                 ctx.station_offsets or {},
             ),
             live_route=lambda route: live_by_copy_id[id(route)],
+            entry_port_for=ctx.merge.entry_port_for,
         )
     except CorridorCohortCompilationError as error:
         if not allow_clearance_requirements:
@@ -3497,6 +3498,7 @@ def plan_corridor_cohorts(
     ledger: CorridorCohortLedger,
     targets: Sequence[CorridorCohortTarget],
     *,
+    entry_port_for: Mapping[str, str],
     scalar_requests: Sequence[CorridorScalarRequest] = (),
 ) -> CorridorCohortPlan:
     """Compile one corridor cohort snapshot into heterogeneous grants.
@@ -3508,7 +3510,10 @@ def plan_corridor_cohorts(
     geometry moves here.
     """
     return compile_corridor_cohort_plan(
-        ledger, targets, scalar_requests=scalar_requests
+        ledger,
+        targets,
+        scalar_requests=scalar_requests,
+        entry_port_for=entry_port_for,
     )
 
 
