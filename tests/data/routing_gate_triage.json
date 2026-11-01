@@ -2279,10 +2279,6 @@
   "note": "A root whose floor exceeds its ceiling raises while choosing a coordinate; the corpus's bounds are satisfiable for every root. Exercised by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
  },
- "corridor_cohorts.py::elif before_feasible:::#1": {
-  "note": "A forbidden interval whose before side lies below the root's floor skips to the after-side test; it needs a floor-bounded root beside a forbidden interval, which only failing or retried solves build. Exercised by tests/test_corridor_cohorts.py::test_infeasible_forbidden_interval_reports_its_named_obstacle and tests/test_member_geometry.py::test_seed_77_shortfall_requests_one_atomic_corridor_aperture. needs-review because the arm is reachable, not because it is unreachable.",
-  "status": "needs-review"
- },
  "corridor_cohorts.py::if after_feasible:::#1": {
   "note": "A forbidden interval whose after side is infeasible and whose before side is infeasible too, so the squeeze deficit is computed and the root fails. It needs a root bounded on both sides with a distinct-line run spanning the whole window, which no test or fixture builds. needs-review because the arm is reachable and no corpus fixture takes it.",
   "status": "needs-review"
