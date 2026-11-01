@@ -1146,7 +1146,17 @@ def test_free_lane_arm_overlapping_a_pinned_corner_uses_legacy(
     monkeypatch.setattr(exit_turns, "_plan_turn_axes", capture)
     _build_execution(TOPOLOGIES / "riboseq_fold_two_dir_entry.mmd")
     assert captured
-    graph, ctx, plan_id, source_id, exit_port_id, source_run, lanes, seeds = captured[0]
+    (
+        graph,
+        ctx,
+        plan_id,
+        source_id,
+        exit_port_id,
+        source_run,
+        lanes,
+        seeds,
+        departure_orders,
+    ) = captured[0]
     pinned = next(seed for seed in seeds if seed.fixed_axis is not None)
     assert pinned.fixed_axis is not None
     assert pinned.run_direction is not None
@@ -1172,9 +1182,47 @@ def test_free_lane_arm_overlapping_a_pinned_corner_uses_legacy(
         source_run,
         lanes,
         (*seeds, free),
+        departure_orders,
     )
 
     assert result.legacy_reason == "lane-arms-pinned-to-overlapping-corners"
+
+
+def test_a_line_whose_departures_take_two_lanes_refuses_one_turn_cohort(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A recorded line turns on the axis of the lane it takes, so the same line
+    turning unrecorded beside it would hold two axes of one cohort."""
+    real_plan = exit_turns._plan_turn_axes
+    captured = []
+
+    def capture(*args):
+        if args[3] == "__junction_4":
+            captured.append(args)
+        return real_plan(*args)
+
+    monkeypatch.setattr(exit_turns, "_plan_turn_axes", capture)
+    _build_execution(FIXTURES / "regressions" / "departure_order_fork_port_stop.mmd")
+    *head, seeds, departure_orders = next(
+        args for args in captured if real_plan(*args).legacy_reason is None
+    )
+    (record,) = departure_orders
+    swapped = next(
+        seed
+        for seed in seeds
+        if seed.turn_direction is not None
+        and seed.edge.target == record.target_id
+        and record.natural_line(seed.edge.line_id) != seed.edge.line_id
+    )
+    unrecorded = replace(
+        swapped,
+        edge=swapped.edge._replace(target="unrecorded"),
+        member_id=EmissionMemberId("unrecorded-twin"),
+    )
+
+    result = real_plan(*head, (*seeds, unrecorded), departure_orders)
+
+    assert result.legacy_reason == "departure-order-shares-turn-axis"
 
 
 def test_multiline_stacked_left_exit_drop_is_planned() -> None:
@@ -1907,7 +1955,17 @@ def test_free_vertical_turn_axes_choose_origin_in_the_run_direction(
     monkeypatch.setattr(exit_turns, "_plan_turn_axes", capture)
     _observe(TOPOLOGIES / "tb_bottom_exit_bundle_jog.mmd")
     assert captured
-    graph, ctx, plan_id, source_id, exit_port_id, _run, lanes, seeds = captured[0]
+    (
+        graph,
+        ctx,
+        plan_id,
+        source_id,
+        exit_port_id,
+        _run,
+        lanes,
+        seeds,
+        departure_orders,
+    ) = captured[0]
 
     for run_direction, turn_direction in (
         (Direction.D, Direction.R),
@@ -1933,6 +1991,7 @@ def test_free_vertical_turn_axes_choose_origin_in_the_run_direction(
             run_direction,
             lanes,
             synthetic,
+            departure_orders,
         )
 
         assert result.legacy_reason is None

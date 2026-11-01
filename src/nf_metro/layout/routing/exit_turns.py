@@ -12,6 +12,7 @@ from nf_metro.layout.constants import (
     COORD_TOLERANCE,
     MIN_STRAIGHT_EDGE,
 )
+from nf_metro.layout.departure_order import DepartureLaneOrder, departure_records
 from nf_metro.layout.route_plan import (
     CoordinateRegime,
     DemandAxis,
@@ -2001,15 +2002,15 @@ def _turn_cohort_key_by_member(
 
 
 def _departure_ranked_seeds(
-    ctx: _RoutingCtx,
+    departure_orders: tuple[DepartureLaneOrder, ...],
     ordered_lanes: tuple[tuple[str, float], ...],
     seeds: tuple[_AssignmentSeed, ...],
 ) -> tuple[_AssignmentSeed, ...]:
     """*seeds* with each recorded departure's lines ranked as the lines whose
     lanes they take (:class:`~nf_metro.layout.departure_order.DepartureLaneOrder`)."""
-    records = ctx.graph._departure_lane_orders
-    if not records:
+    if not departure_orders:
         return seeds
+    records = departure_records(departure_orders)
     rank = {line_id: index for index, (line_id, _offset) in enumerate(ordered_lanes)}
     ranked = []
     for seed in seeds:
@@ -2030,9 +2031,10 @@ def _plan_turn_axes(
     source_run_direction: Direction,
     ordered_lanes: tuple[tuple[str, float], ...],
     seeds: tuple[_AssignmentSeed, ...],
+    departure_orders: tuple[DepartureLaneOrder, ...],
 ) -> _AxisPlan:
     del graph, source_id, exit_port_id
-    seeds = _departure_ranked_seeds(ctx, ordered_lanes, seeds)
+    seeds = _departure_ranked_seeds(departure_orders, ordered_lanes, seeds)
     turning_seeds = tuple(seed for seed in seeds if seed.turn_direction is not None)
     minimum_runway = max(
         (
@@ -2083,6 +2085,20 @@ def _plan_turn_axes(
         set
     )
     for (run_direction, turn_direction, pinning_group_id), cohort in cohorts.items():
+        # Each axis is one line's: a departure record that would put two lines
+        # on one rank, or one line on two, is refused under a reason the
+        # compatibility registry deliberately leaves out, so the map fails
+        # closed instead of falling back.
+        rank_lines = {(seed.lane_rank, seed.edge.line_id) for seed in cohort}
+        if len(rank_lines) != len({rank for rank, _line in rank_lines}) or len(
+            rank_lines
+        ) != len({line for _rank, line in rank_lines}):
+            return _AxisPlan(
+                (),
+                MappingProxyType({}),
+                minimum_runway,
+                "departure-order-shares-turn-axis",
+            )
         ranks = tuple(sorted({seed.lane_rank for seed in cohort}))
         cohort_rank = {rank: index for index, rank in enumerate(ranks)}
         progression = lateral_order_sign(turn_direction)
@@ -2158,8 +2174,8 @@ def _plan_turn_axes(
                 )
             known.add(coordinates[rank])
         for rank in ranks:
-            lane_line = ordered_lanes[rank][0]
             rank_seeds = tuple(seed for seed in cohort if seed.lane_rank == rank)
+            lane_line = rank_seeds[0].edge.line_id
             claimant_ids = tuple(seed.member_id for seed in rank_seeds)
             fixed_seed = next(
                 (
@@ -2357,6 +2373,12 @@ def _build_group_plan(
     member_ids = tuple(scaffold.member_id_by_edge[edge] for edge in member_edges)
     system_member_ids = indexes.member_ids_by_system.get(system_id, ())
     outbound_edges = tuple(edge for edge in member_edges if edge.source == source_id)
+    records = ctx.graph._departure_lane_orders
+    departure_orders = tuple(
+        records[key]
+        for key in sorted({(source_id, edge.target) for edge in outbound_edges})
+        if key in records
+    )
     reason: str | None = None
     represented_connectors = {
         ref.connector_id
@@ -2484,6 +2506,7 @@ def _build_group_plan(
             run_direction,
             ordered_lanes,
             seeds,
+            departure_orders,
         )
         reason = axis_plan.legacy_reason
     axes = axis_plan.axes
@@ -2676,6 +2699,7 @@ def _build_group_plan(
         disposition,
         reason,
         decision_refs,
+        departure_orders,
     )
     diagnostic = (
         RoutePlanDiagnostic(

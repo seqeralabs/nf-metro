@@ -83,6 +83,14 @@ KNOWN_NOT_RENDERING = frozenset(
         # Defects, not a category: each aborts in routing on a second owner of a
         # member-plan-owned coordinate (#1756).
         *ROUTE_EMISSION_ABORT_FIXTURES,
+        # The TB twin of the port-stop fork trips the curve invariant; its
+        # strict xfail in tests/test_departure_lane_order.py holds the abort
+        # (#1792, #2094 line 7p).
+        "tests/fixtures/regressions/departure_order_fork_port_stop_tb.mmd",
+        # Corridor-cohort allocation finds the perpendicular seam's corridor
+        # infeasible, the class of w2_01215; tests/test_departure_lane_order.py
+        # asserts the abort (#2094 line 7w).
+        "tests/fixtures/regressions/departure_order_perpendicular_seam.mmd",
     }
 )
 

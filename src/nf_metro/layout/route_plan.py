@@ -21,6 +21,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, NewType, TypeAlias, TypeVar
 
 from nf_metro.layout.constants import COORD_TOLERANCE
+from nf_metro.layout.departure_order import DepartureLaneOrder, departure_records
 from nf_metro.layout.fan_geometry import fan_lane_offsets
 from nf_metro.layout.geometry import AxisFrame
 from nf_metro.layout.routing.common import (
@@ -1318,6 +1319,7 @@ class ExitTurnPlan:
     disposition: ExitTurnDisposition
     legacy_reason: str | None
     provenance: tuple[ReservationDecisionRef, ...]
+    departure_orders: tuple[DepartureLaneOrder, ...]
 
     def __post_init__(self) -> None:
         planned = self.disposition is ExitTurnDisposition.PLANNED
@@ -3677,6 +3679,40 @@ class RoutePlanQuery:
         return self._reservations_by_member.get(member_id, ())
 
 
+def _validate_exit_turn_departure_orders(
+    exit_turn_plan: ExitTurnPlan,
+    members: Mapping[EmissionMemberId, EmissionMember],
+) -> None:
+    targets = {
+        members[member_id].target.station_id
+        for member_id in exit_turn_plan.member_ids
+        if members[member_id].source.station_id == exit_turn_plan.source_id
+    }
+    lane_lines = {lane.line_id for lane in exit_turn_plan.source_lanes}
+    keys = [record.key for record in exit_turn_plan.departure_orders]
+    if keys != sorted(set(keys)) or any(
+        record.station_id != exit_turn_plan.source_id
+        or record.target_id not in targets
+        or len(set(record.lines)) != len(record.lines)
+        or set(record.lines) != {line for _, line in record.takes_lane_of}
+        or not set(record.lines) <= lane_lines
+        for record in exit_turn_plan.departure_orders
+    ):
+        raise ValueError("exit-turn departure order is not a permutation of its lanes")
+
+
+def _exit_turn_axis_rank(
+    exit_turn_plan: ExitTurnPlan, member: EmissionMember, lane: ExitSourceLane
+) -> int:
+    """The rank of the turn axis *lane*'s line takes on *member*'s departure."""
+    record = departure_records(exit_turn_plan.departure_orders).get(
+        (member.source.station_id, member.target.station_id)
+    )
+    ranks = {item.line_id: item.rank for item in exit_turn_plan.source_lanes}
+    natural = None if record is None else record.natural_rank(lane.line_id, ranks)
+    return lane.rank if natural is None else natural
+
+
 def _validate_exit_turn_assignment(
     exit_turn_plan: ExitTurnPlan,
     assignment: ExitTurnAssignment,
@@ -3774,7 +3810,7 @@ def _validate_exit_turn_assignment(
     if axis is not None and (
         assignment.member_id not in axis.claimant_member_ids
         or axis.line_id != lane.line_id
-        or axis.rank != lane.rank
+        or axis.rank != _exit_turn_axis_rank(exit_turn_plan, member, lane)
         or axis.axis is not exit_turn_plan.source_axis
         or axis.coordinate_regime is not CoordinateRegime.LAYOUT_CANVAS
     ):
@@ -4254,6 +4290,7 @@ def _validate_exit_turn_assignments(
     axes = {axis.id: axis for axis in exit_turn_plan.axes}
     if len(axes) != len(exit_turn_plan.axes):
         raise ValueError("exit-turn plan contains duplicate axes")
+    _validate_exit_turn_departure_orders(exit_turn_plan, members)
     for assignment in exit_turn_plan.assignments:
         _validate_exit_turn_assignment(
             exit_turn_plan,

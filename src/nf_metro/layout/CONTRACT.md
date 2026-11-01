@@ -1650,7 +1650,9 @@ the planned-fan offsets that follow them own the lanes a fan plan states.
   exit-turn lane ranks, the gap-bundle seat by port slot order, the peel-off
   riser slots of a departure whose tail leaves the junction itself
   (`peeloff_target_slots`) and the bundle-order curve check read the records
-  each run publishes in `graph._departure_lane_orders`.
+  each run publishes in `graph._departure_lane_orders`. An `ExitTurnPlan`
+  carries its source's records in `departure_orders`, so the route-plan checker
+  validates a recorded line's turn-axis rank from the plan alone.
 - **Invariants preserved**: Every order 7b' decides holds to the end of the
   run. Phase 12 compacts seed by seed and 14b exchanges arrival by arrival,
   each committing a write only when every decided order still holds; a
