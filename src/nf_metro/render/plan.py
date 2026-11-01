@@ -235,6 +235,7 @@ _RENDER_GRAPH_EXCLUDED_FIELDS = {
     "_junction_ids_cache",
 }
 _RENDER_ROUTE_EXCLUDED_FIELDS = {
+    "port_slot_seated_ranks",
     "exit_turn_plan_id",
     "exit_turn_member_id",
     "exit_turn_family_id",

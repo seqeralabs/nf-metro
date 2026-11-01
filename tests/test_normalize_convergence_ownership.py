@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 import nf_metro.layout.routing.normalize as normalize
 from nf_metro.layout.routing.common import (
     RoutedPath,
@@ -17,6 +19,7 @@ def _route(
     points: list[tuple[float, float]],
     *,
     owned: tuple[int, ...] = (),
+    member_owned: tuple[int, ...] = (),
 ) -> RoutedPath:
     return RoutedPath(
         edge=Edge("fork", f"target_{line_id}", line_id),
@@ -25,14 +28,18 @@ def _route(
         is_inter_section=True,
         curve_radii=[10.0] * (len(points) - 2),
         convergence_owned_segment_ranks=owned,
+        route_system_owned_segment_ranks=member_owned,
     )
 
 
-def test_fanout_traverse_bundling_uses_complete_group_ownership() -> None:
+@pytest.mark.parametrize("ownership", ["owned", "member_owned"])
+def test_fanout_traverse_bundling_uses_complete_group_ownership(
+    ownership: str,
+) -> None:
     owned = _route(
         "owned",
         [(0.0, 0.0), (10.0, 0.0), (10.0, 40.0), (90.0, 40.0), (90.0, 90.0)],
-        owned=(3,),
+        **{ownership: (3,)},
     )
     sibling = _route(
         "sibling",

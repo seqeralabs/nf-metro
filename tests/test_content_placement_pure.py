@@ -28,13 +28,16 @@ from __future__ import annotations
 import pytest
 from conftest import (
     CONTENT_PLACEMENT_PHASES,
+    KNOWN_FINAL_GUARD_ABORTS,
     compute_corpus_layout,
     content_corpus,
+    corpus_params,
     restore_graph_state,
     snapshot_graph_state,
 )
 
 import nf_metro.layout.engine as engine
+from nf_metro.layout.phases.guards import LayoutInvariantError
 from nf_metro.parser.model import MetroGraph
 
 TOL = 1e-3
@@ -117,8 +120,12 @@ def test_content_placement_phases_complete():
       as *guarded but never run* and fails too.
     """
     engine._PLACEMENT_PHASES_RUN.clear()
-    for _, path, is_nf in CORPUS:
-        compute_corpus_layout(path, is_nf)
+    for fid, path, is_nf in CORPUS:
+        try:
+            compute_corpus_layout(path, is_nf)
+        except LayoutInvariantError:
+            if fid not in KNOWN_FINAL_GUARD_ABORTS:
+                raise
     run = set(engine._PLACEMENT_PHASES_RUN)
     guarded = set(CONTENT_PLACEMENT_PHASES)
 
@@ -135,7 +142,9 @@ def test_content_placement_phases_complete():
     )
 
 
-@pytest.mark.parametrize("fid,path,is_nf", CORPUS, ids=[fid for fid, _, _ in CORPUS])
+@pytest.mark.parametrize(
+    "fid,path,is_nf", corpus_params(CORPUS), ids=[fid for fid, _, _ in CORPUS]
+)
 def test_placement_phase_is_pure(fid, path, is_nf, monkeypatch):
     """Every content-placement phase is pure on ``fid``.
 

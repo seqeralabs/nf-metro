@@ -1,0 +1,42 @@
+%%metro title: Fuzz 8404587
+%%metro style: nfcore
+%%metro line: l0 | Bam_Annotate_Summarise | #e6194b
+%%metro line: l1 | Filter_Normalize | #3cb44b
+%%metro line: l2 | Sort | #4363d8
+%%metro line: l3 | Annotate_Index | #f58231
+
+graph LR
+    subgraph sec0 [Gather_Report 0]
+        %%metro exit: bottom | l0, l1
+        s0n0[call_bin]
+        s0n1[fastqc_export]
+        s0n2[summarise]
+        s0n0 -->|l0| s0n2
+        s0n0 -->|l1| s0n1
+        s0n1 -->|l1| s0n2
+    end
+    subgraph sec1 [Export 1]
+        %%metro entry: right | l0
+        s1n0[trim_call]
+        s1n1[cluster]
+        s1n2[INDEX_NORMALIZE_FILTER]
+        s1n3[call]
+        s1n4[summarise_call]
+        s1n0 -->|l0,l2,l3| s1n1
+        s1n1 -->|l0,l2| s1n2
+        s1n2 -->|l0| s1n3
+        s1n3 -->|l0,l3| s1n4
+        s1n2 -->|l2| s1n4
+        s1n1 -->|l3| s1n3
+    end
+    subgraph sec2 [Polish_Summarise 2]
+        s2n0[INDEX]
+        s2n1[count]
+        s2n0 -->|l0| s2n1
+    end
+    s0n2 -->|l0| s1n0
+    s1n4 -->|l0,l3| s2n0
+    s0n2 -->|l1| s2n0
+    s1n4 -->|l2| s2n1
+    s1n1 -->|l2| s2n1
+    s1n1 -->|l2| s2n0

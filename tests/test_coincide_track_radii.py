@@ -223,6 +223,18 @@ def _touched_corner_mismatches(
         touched[(id(rp), k)] = (rp, offset_out, radius_out)
 
     monkeypatch.setattr(normalize, "_reseat_concentric_flanking", reseat_spy)
+
+    prod_record = RoutedPath.record_concentric_corner
+
+    def record_spy(
+        self: RoutedPath, radius_index: int, offset: float, base_radius: float
+    ) -> None:
+        prod_record(self, radius_index, offset, base_radius)
+        key = (id(self), radius_index)
+        if key in touched:
+            touched[key] = (self, offset, base_radius)
+
+    monkeypatch.setattr(RoutedPath, "record_concentric_corner", record_spy)
     monkeypatch.setattr(normalize, "_set_vchannel_x", vspy)
     monkeypatch.setattr(normalize, "_set_htrunk_y", hspy)
     graph = parse_metro_mermaid(path.read_text())

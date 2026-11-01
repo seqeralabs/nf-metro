@@ -6,7 +6,7 @@ vertically.  When several lines co-travel that edge the turn must fan them as a
 concentric bundle: the line deepest inside the bend sits at the floor radius and
 the rest fan outward, so no arc pinches below the floor.
 
-``_route_intra_section`` routes that bundle through ``build_tapered_bundle``,
+The local edge dispatch routes that bundle through ``build_tapered_bundle``,
 which anchors every corner on the bundle's innermost-of-turn line from the
 declared fan.  These tests pin that on every fixture whose internal flow exits
 through a perpendicular port, by routing the arm with a wide co-travelling fan
@@ -30,7 +30,7 @@ from nf_metro.layout.routing import (
     route_edges,
 )
 from nf_metro.layout.routing.context import _build_routing_context
-from nf_metro.layout.routing.intra_handlers import _route_intra_section
+from nf_metro.layout.routing.core import _route_classified_edge
 from nf_metro.layout.routing.invariants import (
     assert_render_curve_invariants,
     check_bundle_order_preserved,
@@ -64,8 +64,8 @@ def _arm_groups(graph):
     """The multi-sibling perp-exit edges, grouped by ``(source, target)``.
 
     An internal (non-port) station feeding a TOP/BOTTOM exit port on an LR/RL
-    section with more than one co-travelling line: the shape ``_route_intra_section``
-    routes through the bundle builder.
+    section with more than one co-travelling line: the shape the local edge
+    dispatch routes through the bundle builder.
     """
     groups: dict[tuple[str, str], list] = {}
     for edge in graph.edges:
@@ -96,7 +96,7 @@ def _route_arm_with_fan(graph, source, target, edges):
 
     Assigns each co-travelling line a signed offset centred on zero at both the
     source station and the exit port, then routes every member through
-    ``_route_intra_section`` with that fan in the context.
+    ``_route_classified_edge`` with that fan in the context.
     """
     line_ids = list(dict.fromkeys(e.line_id for e in edges))
     n = len(line_ids)
@@ -106,10 +106,7 @@ def _route_arm_with_fan(graph, source, target, edges):
         offsets[(source, line_id)] = d
         offsets[(target, line_id)] = d
     ctx = _build_routing_context(graph, 30.0, CURVE_RADIUS, offsets)
-    routes = [
-        _route_intra_section(e, graph.stations[e.source], graph.stations[e.target], ctx)
-        for e in edges
-    ]
+    routes = [_route_classified_edge(e, ctx) for e in edges]
     return offsets, routes
 
 

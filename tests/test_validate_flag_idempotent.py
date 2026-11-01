@@ -22,7 +22,7 @@ import warnings
 from pathlib import Path
 
 import pytest
-from conftest import content_corpus
+from conftest import content_corpus, corpus_params
 
 from nf_metro.convert import convert_nextflow_dag
 from nf_metro.layout.engine import compute_layout
@@ -48,7 +48,11 @@ def _coords(graph: MetroGraph) -> dict[str, tuple[float, float]]:
     return {sid: (round(s.x, 6), round(s.y, 6)) for sid, s in graph.stations.items()}
 
 
-@pytest.mark.parametrize("fixture", CORPUS, ids=[fid for fid, _, _ in CORPUS])
+@pytest.mark.parametrize(
+    "fixture",
+    corpus_params(CORPUS, unpacked=False),
+    ids=[fid for fid, _, _ in CORPUS],
+)
 def test_validate_flag_does_not_change_geometry(fixture):
     fid, path, is_nextflow = fixture
 

@@ -1,0 +1,35 @@
+%%metro line: m0 | L0 | #e6194b
+%%metro line: m1 | L1 | #3cb44b
+%%metro line: m2 | L2 | #4363d8
+%%metro line: m3 | L3 | #f58231
+
+graph LR
+    subgraph z0 [Zone 0]
+        %%metro direction: BT
+        q0x0[Q0X0]
+        q0x1[Q0X1]
+        q0x2[Q0X2]
+        q0x3[Q0X3]
+        q0x0 -->|m1,m2,m3| q0x1
+        q0x1 -->|m2,m3| q0x2
+        q0x1 -->|m1| q0x3
+        q0x2 -->|m3| q0x3
+    end
+    subgraph z1 [Zone 1]
+        q1x0[Q1X0]
+        q1x1[Q1X1]
+        q1x2[Q1X2]
+        q1x3[Q1X3]
+        q1x0 -->|m3| q1x1
+        q1x1 -->|m3| q1x2
+        q1x1 -->|m2| q1x3
+        q1x2 -->|m0,m3| q1x3
+    end
+    subgraph z2 [Zone 2]
+        q2x0[Q2X0]
+    end
+    q0x2 -->|m2| q2x0
+    q0x3 -->|m3| q1x0
+    q0x3 -->|m0| q1x2
+    q0x3 -->|m1| q2x0
+    q1x3 -->|m0,m2| q2x0

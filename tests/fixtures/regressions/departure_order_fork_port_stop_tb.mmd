@@ -1,0 +1,59 @@
+%%metro title: Fuzz 8403980
+%%metro line: l0 | Bam_Vcf | #e6194b
+%%metro line: l1 | Trim_Stats_Fastqc | #3cb44b
+%%metro line: l2 | Stats | #4363d8
+%%metro line: l3 | Count_Trim | #f58231
+%%metro line: l4 | Assemble | #911eb4
+
+%%metro grid: sec0 | 0,0
+%%metro grid: sec1 | 0,1
+%%metro grid: sec2 | 0,2
+graph LR
+    subgraph sec0 [Annotate_Markdup 0]
+        %%metro direction: TB
+        s0n0[gather]
+        s0n1[annotate_index_export]
+        s0n2[cluster]
+        s0n3[bam_trim]
+        s0n4[count]
+        s0n1 -->|l0,l2| s0n2
+        s0n2 -->|l0,l1,l2| s0n3
+        s0n3 -->|l0,l1,l2,l3| s0n4
+        s0n0 -->|l2,l3| s0n1
+        s0n1 -->|l3| s0n3
+    end
+    subgraph sec1 [Dedup 1]
+        %%metro direction: RL
+        %%metro entry: top | l0, l1
+        %%metro entry: left | l2, l3
+        s1n0[FASTQC_CALL_SORT]
+        s1n1[gather]
+        s1n2[annotate]
+        s1n3[summarise_cluster]
+        s1n4[report_markdup]
+        s1n0 -->|l0,l2,l4| s1n2
+        s1n2 -->|l0,l4| s1n3
+        s1n3 -->|l0,l4| s1n4
+        s1n0 -->|l1,l2,l3| s1n1
+        s1n2 -->|l2,l3| s1n4
+        s1n1 -->|l3| s1n2
+    end
+    subgraph sec2 [Trim_Gather_Fastqc 2]
+        %%metro direction: TB
+        s2n0[bam]
+        s2n1[qc]
+        s2n2[CLUSTER_TRIM]
+        s2n3[EXPORT_TRIM]
+        s2n4[stats_cluster_index]
+        s2n0 -->|l2,l4| s2n1
+        s2n1 -->|l4| s2n3
+        s2n3 -->|l4| s2n4
+    end
+    s0n4 -->|l0,l1,l2,l3| s1n0
+    s0n2 -->|l0| s2n2
+    s1n4 -->|l2,l4| s2n0
+    s0n2 -->|l2| s1n0
+    s1n4 -->|l3| s2n4
+    s0n0 -->|l3| s1n1
+    s1n1 -->|l3| s2n4
+    s0n0 -->|l3| s2n0

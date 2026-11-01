@@ -62,11 +62,15 @@ BASELINE_PYTHON = (3, 11)
 # sweep re-execs under this value when invoked without it.
 PINNED_HASH_SEED = "0"
 
-# The gate matrix scopes to routing *decision* modules: the dispatch handlers
-# and the post-routing passes.  ``invariants.py`` is the validator (its branches
-# only fire under ``validate=True``, a separate test surface), and ``__init__``
-# is re-exports; neither holds a topology gate.
-EXCLUDED_MODULES = {"__init__.py", "invariants.py"}
+# The gate matrix scopes to routing code a render executes: the dispatch
+# handlers, the post-routing passes and the corridor-cohort compile.
+# ``invariants.py`` is the validator (its branches only fire under
+# ``validate=True``, a separate test surface) and ``__init__`` is re-exports;
+# neither holds a topology gate the fixture corpus reaches.
+EXCLUDED_MODULES = {
+    "__init__.py",
+    "invariants.py",
+}
 
 # These fixtures naturally exercise the distinct public route-observation paths.
 # Keeping the lane explicit avoids a second routing pass over the full corpus,
@@ -176,14 +180,27 @@ def _collect_corpus() -> list[tuple[Path, bool]]:
     is not about and would be judged on that instead.  They render like any
     other map, and the crowded corridors that put them there are what reach a
     pass's last-resort arms.
+
+    The entry-port approach-order regressions
+    (``regressions/approach_order_*`` and ``entry_slot_overlay_tied_feeders``)
+    are walked too: each locks one decision of that pass, and no other corpus
+    map reaches the arms those decisions sit on.
     """
     examples = PROJECT_ROOT / "examples"
     fixtures = PROJECT_ROOT / "tests" / "fixtures"
     nextflow = fixtures / "nextflow"
+    regressions = fixtures / "regressions"
     sources: list[tuple[list[Path], bool]] = [
         (sorted(examples.rglob("*.mmd")), False),
         (sorted(fixtures.glob("*.mmd")), False),
         (sorted((fixtures / "curve_invariant_repros").glob("*.mmd")), False),
+        (
+            [
+                *sorted(regressions.glob("approach_order_*.mmd")),
+                regressions / "entry_slot_overlay_tied_feeders.mmd",
+            ],
+            False,
+        ),
         (sorted(nextflow.glob("*.mmd")), True),
     ]
     candidates = [(p, is_nextflow) for paths, is_nextflow in sources for p in paths]

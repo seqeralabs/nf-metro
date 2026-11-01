@@ -25,6 +25,7 @@ from nf_metro.layout.constants import (
     SECTION_HEADER_PROTRUSION,
     graph_offset_step,
 )
+from nf_metro.layout.departure_order import DepartureLaneOrder
 from nf_metro.layout.geometry import (
     AxisFrame,
     cotravelling_lane_clearance,
@@ -111,6 +112,14 @@ EXIT_SIDE_DIRECTION: Mapping[PortSide, Direction] = {
     PortSide.BOTTOM: Direction.D,
 }
 """The direction a line travels leaving an exit port on each side."""
+
+ENTRY_SIDE_DIRECTION: Mapping[PortSide, Direction] = {
+    PortSide.LEFT: Direction.R,
+    PortSide.RIGHT: Direction.L,
+    PortSide.TOP: Direction.D,
+    PortSide.BOTTOM: Direction.U,
+}
+"""The direction a line travels entering an entry port on each side."""
 
 
 def offsets_hold(
@@ -897,6 +906,9 @@ class RoutedPath:
     """Segments whose final geometry is owned by the convergence plan."""
     route_system_owned_segment_ranks: tuple[int, ...] = ()
     """Gap-channel segments frozen by the route-system member plan."""
+    port_slot_seated_ranks: tuple[int, ...] = ()
+    """Gap-channel segments seated by the slot order of the entry port they
+    land on, nested between planner-owned columns."""
     exit_turn_segment_rank: int | None = None
     """Index of the owned turn segment's first waypoint."""
     concentric_corner_offsets_by_segment: dict[
@@ -2052,7 +2064,9 @@ def peeloff_trunk_line_order(bundle: PortPeeloffBundle) -> list[str]:
 
 
 def peeloff_target_slots(
-    bundle: PortPeeloffBundle, step: float
+    bundle: PortPeeloffBundle,
+    step: float,
+    records: Mapping[tuple[str, str], DepartureLaneOrder],
 ) -> dict[str, PeeloffSlot]:
     """Map each line of *bundle* to the slot its trunk depth earns.
 
@@ -2069,6 +2083,11 @@ def peeloff_target_slots(
     separation stages own, so a fused band keeps its realised channels.  Port Y
     is the destination port's own line stack rather than this bundle's to
     choose, and stays as realised throughout.
+
+    A recorded departure (:class:`DepartureLaneOrder` in *records*) whose
+    tails leave its junction on the trunk itself has its lines change sides at
+    the fork, so each recorded line takes the slot of the line whose lane the
+    record gives it (:func:`_record_seats_tails`).
     """
     per_line = bundle.per_line
     n = len(per_line)
@@ -2084,7 +2103,7 @@ def peeloff_target_slots(
     ranked = sorted(per_line, key=lambda lid: per_line[lid].trunk_y)
     x_follows_trunk = x_follows_trunk_direction(bundle.vertical_sign, bundle.trunk_sign)
     y_follows_trunk = bundle.port_lead_sign == bundle.trunk_sign
-    return {
+    slots = {
         lid: PeeloffSlot(
             x_slots[i if x_follows_trunk else n - 1 - i],
             y_slots[i if y_follows_trunk else n - 1 - i],
@@ -2092,6 +2111,36 @@ def peeloff_target_slots(
         )
         for i, lid in enumerate(ranked)
     }
+    recorded = [r for r in records.values() if r.target_id == bundle.port_id]
+    if not recorded:
+        return slots
+    routes: dict[str, RoutedPath] = {}
+    for rp, _tail in bundle.entries:
+        routes.setdefault(rp.edge.line_id, rp)
+    for record in recorded:
+        if _record_seats_tails(record, routes):
+            natural = dict(slots)
+            for line, natural_line in record.takes_lane_of:
+                slots[line] = natural[natural_line]
+    return slots
+
+
+_PEELOFF_TAIL_POINTS = 4
+
+
+def _record_seats_tails(
+    record: DepartureLaneOrder, routes: Mapping[str, RoutedPath]
+) -> bool:
+    """Whether every line *record* reorders reaches its port on a route that
+    is its peel-off tail alone, so the tail's trunk leaves the recorded
+    junction itself.
+    """
+    return all(
+        line in routes
+        and (routes[line].edge.source, routes[line].edge.target) == record.key
+        and len(routes[line].points) == _PEELOFF_TAIL_POINTS
+        for line in record.lines
+    )
 
 
 def iter_eligible_destination_tail_bundles(

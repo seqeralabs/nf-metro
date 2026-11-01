@@ -1,0 +1,59 @@
+%%metro title: Cohort Junction Fed Gap Boundary
+%%metro line: l0 | Assemble | #e6194b
+%%metro line: l1 | Bam | #3cb44b
+%%metro line: l2 | Polish_Assemble | #4363d8
+%%metro line: l3 | Trim_Call_Dedup | #f58231
+
+graph LR
+    subgraph sec0 [Cluster_Call 0]
+        s0n0[normalize]
+        s0n1[classify_index_classify]
+        s0n2[NORMALIZE]
+        s0n3[assemble_bin]
+        s0n4[count]
+        s0n0 -->|l0| s0n2
+        s0n2 -->|l0| s0n4
+        s0n1 -->|l1| s0n3
+        s0n3 -->|l1| s0n4
+        s0n0 -->|l3| s0n1
+    end
+    subgraph sec1 [Markdup_Pca 1]
+        %%metro entry: top | l1
+        s1n0[markdup_call]
+        s1n1[assemble]
+        s1n0 -->|l1,l2| s1n1
+    end
+    subgraph sec2 [Filter 2]
+        %%metro entry: top | l2
+        %%metro entry: left | l3
+        s2n0[filter]
+        s2n1[CLUSTER_SUMMARISE]
+        s2n2[fastqc_polish]
+        s2n3[count]
+        s2n4[merge]
+        s2n0 -->|l2,l3| s2n1
+        s2n1 -->|l2,l3| s2n2
+        s2n2 -->|l2,l3| s2n3
+        s2n3 -->|l2,l3| s2n4
+    end
+    subgraph sec3 [Index_Filter 3]
+        s3n0[fastqc]
+        s3n1[stats_dedup]
+        s3n0 -->|l0,l1,l2| s3n1
+    end
+    subgraph sec4 [Merge_Align 4]
+        s4n0[dedup]
+        s4n1[QC_INDEX]
+        s4n3[qc]
+        s4n0 -->|l1| s4n1
+        s4n1 -->|l1| s4n3
+    end
+    s0n4 -->|l0| s3n0
+    s0n4 -->|l1| s1n0
+    s1n1 -->|l1| s3n0
+    s3n1 -->|l1| s4n0
+    s1n1 -->|l2| s2n0
+    s2n4 -->|l2| s3n0
+    s2n4 -->|l2| s4n1
+    s0n1 -->|l3| s2n0
+    s2n1 -->|l3| s3n1

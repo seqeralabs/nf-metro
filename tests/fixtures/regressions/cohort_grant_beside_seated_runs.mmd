@@ -1,0 +1,24 @@
+%%metro title: Cohort Grant Beside Seated Runs
+%%metro line: l0 | Summarise_Classify | #e6194b
+%%metro line: l1 | Index_Summarise | #3cb44b
+%%metro line: l2 | Bin_Qc | #4363d8
+%%metro line: l3 | Assemble | #f58231
+%%metro line: l4 | Bam | #911eb4
+graph LR
+    subgraph sec2 [Trim 2]
+        %%metro exit: bottom | l0, l1, l2, l3, l4
+        s2n3[filter]
+    end
+    subgraph sec3 [Index_Pca 3]
+        s3n0[classify]
+    end
+    subgraph sec4 [Pca_Annotate_Filter 4]
+        %%metro entry: bottom | l3, l4
+        s4n1[gather]
+        s4n3[align]
+    end
+    s2n3 -->|l0,l1,l2,l3,l4| s3n0
+    s1n2 -->|l3| s3n0
+    s3n0 -->|l3| s4n3
+    s1n2 -->|l4| s2n3
+    s2n3 -->|l4| s4n1

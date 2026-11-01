@@ -34,6 +34,7 @@ from nf_metro.layout.routing.bundle import (
 from nf_metro.layout.routing.centrelines import (
     gather_member_edges,
 )
+from nf_metro.layout.routing.co_row import CoRowFeeder, DiagonalWindow, co_row_feeder
 from nf_metro.layout.routing.common import (
     OffsetRegime,
     RoutedPath,
@@ -81,6 +82,20 @@ def _route_tb_internal(
     edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
 ) -> RoutedPath | None:
     """Route internal edges within TB sections as vertical drops."""
+    section = _section_link_owner(edge, src, tgt, ctx)
+    if section is None:
+        return None
+    return _section_link_route(edge, src, tgt, ctx, section)
+
+
+def _section_link_owner(
+    edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
+) -> Section | None:
+    """The vertical-flow section whose internal link *edge* is, or ``None``.
+
+    An internal station feeding another internal station, or the section's
+    trailing exit port, of one vertical-flow section.
+    """
     graph = ctx.graph
     src_sec = src.section_id
     tgt_sec = tgt.section_id
@@ -100,41 +115,72 @@ def _route_tb_internal(
         and (not tgt.is_port or tgt_is_trailing_exit)
     ):
         return None
-    return _section_link_route(edge, src, tgt, ctx, graph.sections[src_sec])
+    return graph.sections[src_sec]
 
 
 def _section_link_route(
     edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx, section: Section
 ) -> RoutedPath:
     """Route an edge between two internal stations of vertical-flow *section*."""
-    sx, tx = _tb_trunk_endpoints(ctx, edge, src, tgt, section)
-    sy = src.y
-    ty = tgt.y
-    dx = tx - sx
+    sx, tx, own = _section_link_diagonal(edge, src, tgt, section, ctx)
 
     # Different X tracks: route with vertical runs + 45-degree diagonal
-    if abs(dx) >= COORD_TOLERANCE:
-        direction = section.direction
-        # A feeder descending collinear with the merge's column but landing on an
-        # outboard slot is displaced by a continuation that owns the trunk; bend
-        # its diagonal at the source so it vacates the column immediately instead
-        # of running down the trunk-owner's lane and overlapping it (issue #1012).
-        bias_to_source = (
-            edge.target in ctx.join_stations
-            and abs(sx - tgt.x) < COORD_TOLERANCE
-            and abs(tx - tgt.x) >= COORD_TOLERANCE
-        )
+    if own is not None:
+        key = (edge.source, edge.target, edge.line_id)
+        group = ctx.co_row_diagonal_groups.get(key)
+        window = group.window_for(key) if group is not None else (own.start, own.end)
         return _route_tb_diagonal(
-            edge, sx, sy, tx, ty, ctx, direction, bias_to_source=bias_to_source
+            edge, (sx, src.y), (tx, tgt.y), window, section.direction
         )
 
     # Same track: straight vertical drop
     return RoutedPath(
         edge=edge,
         line_id=edge.line_id,
-        points=[(sx, sy), (tx, ty)],
+        points=[(sx, src.y), (tx, tgt.y)],
         offset_regime=OffsetRegime.BAKED,
     )
+
+
+def _section_link_diagonal(
+    edge: Edge, src: Station, tgt: Station, section: Section, ctx: _RoutingCtx
+) -> tuple[float, float, DiagonalWindow | None]:
+    """A vertical-flow link's lanes and, unless they share an X, its own window."""
+    sx, tx = _tb_trunk_endpoints(ctx, edge, src, tgt, section)
+    if abs(tx - sx) < COORD_TOLERANCE:
+        return sx, tx, None
+    # A feeder descending collinear with the merge's column but landing on an
+    # outboard slot is displaced by a continuation that owns the trunk; bend
+    # its diagonal at the source so it vacates the column immediately instead
+    # of running down the trunk-owner's lane and overlapping it.
+    bias_to_source = (
+        edge.target in ctx.join_stations
+        and abs(sx - tgt.x) < COORD_TOLERANCE
+        and abs(tx - tgt.x) >= COORD_TOLERANCE
+    )
+    start, end = _compute_diagonal_placement(
+        src.y,
+        tgt.y,
+        ctx.diagonal_run,
+        MIN_STRAIGHT_EDGE,
+        MIN_STRAIGHT_EDGE,
+        bias_to_source or edge.source in ctx.fork_stations,
+        edge.target in ctx.join_stations and not bias_to_source,
+    )
+    return sx, tx, DiagonalWindow(start, end, MIN_STRAIGHT_EDGE, MIN_STRAIGHT_EDGE)
+
+
+def section_link_co_row_feeder(
+    edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
+) -> CoRowFeeder | None:
+    """*edge* as a co-row feeder, when :func:`_section_link_route` draws a diagonal."""
+    section = _section_link_owner(edge, src, tgt, ctx)
+    if section is None:
+        return None
+    sx, tx, own = _section_link_diagonal(edge, src, tgt, section, ctx)
+    if own is None:
+        return None
+    return co_row_feeder(edge, src, section.direction, own, (sx, tx))
 
 
 def _compute_diagonal_placement(
@@ -148,8 +194,8 @@ def _compute_diagonal_placement(
 ) -> tuple[float, float]:
     """Compute diagonal start/end on the run axis.
 
-    Shared by ``_route_diagonal`` (horizontal run axis) and
-    ``_route_tb_diagonal`` (vertical run axis).  The caller maps the
+    Shared by ``_diagonal_window`` (horizontal run axis) and
+    ``_section_link_diagonal`` (vertical run axis).  The caller maps the
     result back to (x, y) coordinates.
 
     Returns (diag_start, diag_end) in run-axis coordinates.
@@ -188,42 +234,23 @@ def _compute_diagonal_placement(
 
 def _route_tb_diagonal(
     edge: Edge,
-    sx: float,
-    sy: float,
-    tx: float,
-    ty: float,
-    ctx: _RoutingCtx,
+    source: tuple[float, float],
+    target: tuple[float, float],
+    window: tuple[float, float],
     direction: str,
-    *,
-    bias_to_source: bool = False,
 ) -> RoutedPath:
     """Route TB edges with vertical runs and a 45-degree diagonal transition.
 
-    The flow-axis sibling of ``_route_diagonal``: the diagonal is placed along
-    the flow axis (Y for TB) by the shared ``_compute_diagonal_placement`` and
-    laid out by :func:`~nf_metro.layout.geometry.diagonal_centreline`, which maps
-    the flow-axis run back to vertical legs for a vertical-flow *direction*.
-
-    ``bias_to_source`` forces the diagonal to the source end regardless of the
-    fork/join classification, for a feeder that must leave the merge's column at
-    its source rather than run down it.
+    The flow-axis sibling of ``_route_diagonal``: *window* is the diagonal's
+    flow-axis span (Y for TB), from :func:`_section_link_diagonal` or a co-row
+    group, laid out by :func:`~nf_metro.layout.geometry.diagonal_centreline`,
+    which maps the flow-axis run back to vertical legs for a vertical-flow
+    *direction*.
     """
-    diag_start_y, diag_end_y = _compute_diagonal_placement(
-        sy,
-        ty,
-        ctx.diagonal_run,
-        MIN_STRAIGHT_EDGE,
-        MIN_STRAIGHT_EDGE,
-        bias_to_source or edge.source in ctx.fork_stations,
-        edge.target in ctx.join_stations and not bias_to_source,
-    )
-
     return RoutedPath(
         edge=edge,
         line_id=edge.line_id,
-        points=diagonal_centreline(
-            direction, (sx, sy), (tx, ty), diag_start_y, diag_end_y
-        ),
+        points=diagonal_centreline(direction, source, target, *window),
         offset_regime=OffsetRegime.BAKED,
     )
 

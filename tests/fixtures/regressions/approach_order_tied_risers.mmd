@@ -1,0 +1,68 @@
+%%metro title: Fuzz 8403136
+%%metro line: l0 | Bin_Fastqc | #e6194b
+%%metro line: l1 | Index_Cluster_Polish | #3cb44b
+%%metro line: l2 | Sort_Classify | #4363d8
+%%metro line: l3 | Export_Stats | #f58231
+
+graph LR
+    subgraph sec0 [Index 0]
+        s0n0[sort]
+        s0n1[dedup_polish_trim]
+        s0n2[DEDUP]
+        s0n3[assemble]
+        s0n4[STATS]
+        s0n0 -->|l0,l1| s0n1
+        s0n1 -->|l0,l1| s0n2
+        s0n2 -->|l1| s0n3
+        s0n3 -->|l1| s0n4
+    end
+    subgraph sec1 [Stats_Vcf 1]
+        s1n0[quant]
+        s1n1[sort]
+        s1n2[export]
+        s1n3[bam_gather]
+        s1n0 -->|l0,l1| s1n1
+        s1n1 -->|l0,l1| s1n2
+        s1n2 -->|l0,l1,l2| s1n3
+        s1n0 -->|l2| s1n2
+    end
+    subgraph sec2 [Filter_Annotate 2]
+        s2n0[gather]
+        s2n1[call]
+        s2n2[polish]
+        s2n3[filter]
+        s2n4[cluster_report_qc]
+        s2n0 -->|l2| s2n1
+        s2n1 -->|l2| s2n2
+        s2n2 -->|l2| s2n3
+        s2n3 -->|l2| s2n4
+    end
+    subgraph sec3 [Index_Classify_Fastqc 3]
+        %%metro exit: right | l0, l2
+        s3n0[vcf_cluster]
+        s3n1[POLISH_SORT_ANNOTATE]
+        s3n2[merge_trim_quant]
+        s3n0 -->|l0,l2| s3n1
+        s3n1 -->|l0,l2| s3n2
+    end
+    subgraph sec4 [Gather_Polish 4]
+        s4n0[markdup]
+        s4n1[call]
+        s4n0 -->|l0,l3| s4n1
+    end
+    subgraph sec5 [Export 5]
+        s5n0[MERGE_ASSEMBLE]
+        s5n1[DEDUP_VCF]
+        s5n0 -->|l0,l1,l2,l3| s5n1
+    end
+    s0n2 -->|l0| s1n0
+    s1n3 -->|l0| s3n0
+    s3n2 -->|l0| s4n0
+    s4n1 -->|l0,l3| s5n0
+    s1n2 -->|l0| s2n4
+    s0n4 -->|l1,l2| s1n0
+    s1n3 -->|l1| s2n4
+    s2n4 -->|l1| s5n0
+    s1n3 -->|l2| s2n0
+    s2n4 -->|l2| s3n0
+    s3n2 -->|l2| s5n0

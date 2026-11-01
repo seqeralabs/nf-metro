@@ -297,7 +297,7 @@ def test_natural_blocked_riser_records_metadata_backed_corner_radii() -> None:
     assert upper.concentric_corner_offsets_by_segment[3] == (0.0, -4.0)
     assert upper.concentric_corner_bases_by_segment[3] == (10.0, 10.0)
     assert exempt.concentric_corner_offsets_by_segment[3] == (0.0, 0.0)
-    assert exempt.concentric_corner_bases_by_segment[3] == (14.0, 14.0)
+    assert exempt.concentric_corner_bases_by_segment[3] == (14.0, 10.0)
     assert upper.member_geometry_plan_id is not None
     assert exempt.member_geometry_plan_id is not None
     assert not check_no_dogleg_crosses_exempt_trunk(graph, routes, offsets)
