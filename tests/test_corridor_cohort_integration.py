@@ -58,6 +58,7 @@ from nf_metro.layout.routing.corridor_cohort_integration import (
     claims_share_fixed_lane_identity,
 )
 from nf_metro.layout.routing.corridor_cohorts import (
+    SOLVE_QUANTUM,
     CorridorAllocationStatus,
     CorridorForbiddenInterval,
     solve_corridor_cohorts,
@@ -3008,23 +3009,21 @@ def test_guard_corner_orders_turn_with_the_run_direction(
     assert [(item.lower_member_id, item.upper_member_id) for item in emitted] == orders
 
 
-def _riser_patch(
-    *,
-    source: float,
-    allocated: float,
-    other_source: float | None = None,
-    other_allocated: float | None = None,
-) -> tuple[list[tuple[float, float]], tuple[int, ...]]:
-    """The patched points and owned ranks of a route with one or two risers."""
-    risers = [(source, allocated)]
-    if other_source is not None and other_allocated is not None:
-        risers.append((other_source, other_allocated))
-    points = [(0.0, 10.0)]
-    for source_x, _allocated_x in risers:
-        points += [(source_x, 10.0), (source_x, 40.0), (source_x + 30.0, 40.0)]
+def _riser_patch_xs(
+    *, source: float, allocated: float, source_end: float | None = None
+) -> list[float]:
+    """The x of the riser's two end points after patching it to *allocated*."""
     edge_key = ("a:source", "a:target", "l0")
     route = _mutable_route(
-        source=edge_key[0], target=edge_key[1], line_id=edge_key[2], points=points
+        source=edge_key[0],
+        target=edge_key[1],
+        line_id=edge_key[2],
+        points=[
+            (0.0, 10.0),
+            (source, 10.0),
+            (source if source_end is None else source_end, 40.0),
+            (source + 30.0, 40.0),
+        ],
     )
     target = CorridorCohortTarget(
         "a",
@@ -3035,50 +3034,55 @@ def _riser_patch(
         route,
         True,
     )
-    allocations = tuple(
-        cci.CorridorCohortAllocation(
-            f"claim:{rank}",
-            "a",
-            "plan:a",
-            edge_key,
-            RouteFamilyId.MERGE_TRUNK,
-            ("connector:a",),
-            3 * rank + 1,
-            0,
-            10.0,
-            40.0,
-            allocated_x,
-            source_x,
-        )
-        for rank, (source_x, allocated_x) in enumerate(risers)
+    allocation = cci.CorridorCohortAllocation(
+        claim_id="claim:a",
+        member_id="a",
+        member_geometry_plan_id="plan:a",
+        edge_key=edge_key,
+        family_id=RouteFamilyId.MERGE_TRUNK,
+        connector_ids=("connector:a",),
+        segment_rank=1,
+        axis=0,
+        longitudinal_start=10.0,
+        longitudinal_end=40.0,
+        coordinate=allocated,
+        source_coordinate=source,
     )
-    patches = cci._prepare_patches(allocations, (), (target,))
+    patches = cci._prepare_patches((allocation,), (), (target,))
     assert patches is not None
     (patch,) = patches
-    return patch.points, patch.owned
+    assert 1 in patch.owned
+    return [x for x, _y in patch.points[1:3]]
 
 
-def test_patch_keeps_an_unmoved_coordinates_own_float() -> None:
-    """The solve reads coordinates to a nanometre, so an allocation within that
-    of its source is the source: the patch keeps the source's float form, which
-    the exact-equality ownership checks compare against."""
-    source = 337.34999999999997
-    allocated = 337.35
-    assert allocated != source
+@pytest.mark.parametrize(
+    ("source", "allocated", "expected"),
+    [
+        pytest.param(337.34999999999997, 337.35, 337.34999999999997, id="float-noise"),
+        pytest.param(
+            100.0, 100.0 + SOLVE_QUANTUM / 2, 100.0, id="within-the-solve-quantum"
+        ),
+        pytest.param(
+            100.0,
+            100.0 + 2 * SOLVE_QUANTUM,
+            100.0 + 2 * SOLVE_QUANTUM,
+            id="beyond-the-solve-quantum",
+        ),
+        pytest.param(337.34999999999997, 341.35, 341.35, id="moved"),
+    ],
+)
+def test_patch_keeps_an_allocation_within_the_solve_quantum_as_its_source(
+    source: float, allocated: float, expected: float
+) -> None:
+    """The solve reads coordinates only to SOLVE_QUANTUM, so an allocation that
+    close to its source is the source: the patch keeps the source's float form,
+    which the exact-equality ownership checks compare against."""
+    assert _riser_patch_xs(source=source, allocated=allocated) == [expected, expected]
 
-    points, owned = _riser_patch(source=source, allocated=allocated)
 
-    assert [x for x, _y in points[1:3]] == [source, source]
-    assert 1 in owned
+def test_patch_writes_a_skewed_segment_even_within_the_solve_quantum() -> None:
+    """A segment whose ends differ is written at both ends, so they snap to the
+    one allocated coordinate."""
+    xs = _riser_patch_xs(source=337.34999999999997, allocated=337.35, source_end=337.35)
 
-
-def test_patch_writes_a_coordinate_the_solve_moved() -> None:
-    points, _owned = _riser_patch(
-        source=337.34999999999997,
-        allocated=341.35,
-        other_source=400.0,
-        other_allocated=400.0000001,
-    )
-
-    assert [x for x, _y in points[1:3]] == [341.35, 341.35]
-    assert [x for x, _y in points[4:6]] == [400.0000001, 400.0000001]
+    assert xs == [337.35, 337.35]

@@ -4059,6 +4059,8 @@ def _prepare_patches(
             # The solve reads coordinates only to SOLVE_QUANTUM, so a result
             # that close to the source is the source; its float form differs
             # by noise that the exact-equality ownership checks read as a move.
+            # A skewed segment (ends within COORD_TOLERANCE, not equal) is
+            # always written, so both its ends snap to the one coordinate.
             if (
                 start[axis] == end[axis]
                 and abs(coordinate - start[axis]) <= SOLVE_QUANTUM
