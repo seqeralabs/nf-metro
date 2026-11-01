@@ -1,0 +1,6 @@
+# Repository maps check_cross_edge_corners_concentric fails on their ordinary
+# render. test_cross_edge_corner_nesting_2165.py fails if a map joins this list
+# or a listed map starts passing, so the list only ever shrinks.
+examples/riboseq_metro.mmd
+tests/fixtures/curve_invariant_repros/riboseq_inter_row_corridor.mmd
+tests/fixtures/genomeassembly_organellar.mmd

@@ -7,7 +7,7 @@ import itertools
 from collections import defaultdict, deque
 from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
-from math import inf, isfinite
+from math import hypot, inf, isfinite
 from typing import TYPE_CHECKING, AbstractSet, NamedTuple, TypeVar
 
 from nf_metro.layout.constants import (
@@ -19,6 +19,7 @@ from nf_metro.layout.constants import (
     INTER_ROW_EDGE_CLEARANCE,
     INTER_ROW_HEADER_CLEARANCE,
     MIN_CORRIDOR_Y_OVERLAP,
+    NESTED_BEND_MAX_LANES,
     NEXT_ROW_HEADER_BADGE_CLEARANCE,
     SECTION_HEADER_PROTRUSION,
     graph_offset_step,
@@ -1184,39 +1185,331 @@ def semantic_end_corners(
     )
 
 
+def widened_corner_families(
+    routes: Sequence[RoutedPath],
+    station_offsets: Mapping[tuple[str, str], float],
+    *,
+    offset_step: float,
+    fixed_route_ids: AbstractSet[int] = frozenset(),
+) -> list[list[tuple[RoutedPath, int]]]:
+    """The cross-edge corner families of *routes*, as ``(route, rank)`` members.
+
+    The families :func:`_rederive_semantic_end_corners` sizes when given
+    *offset_step*, ignoring planner ownership as its plan-time callers do.
+    """
+    cohorts, corners = _collect_sizable_corners(
+        routes, station_offsets, respect_owned_corners=False
+    )
+    return [
+        [(corner.route, corner.rank) for corner in family]
+        for family in _widened_families(corners, cohorts, offset_step, fixed_route_ids)
+    ]
+
+
+def _collect_sizable_corners(
+    routes: Sequence[RoutedPath],
+    station_offsets: Mapping[tuple[str, str], float],
+    *,
+    respect_owned_corners: bool,
+) -> tuple[
+    defaultdict[SemanticEndCornerKey, list[_SemanticEndCorner]],
+    list[_SemanticEndCorner],
+]:
+    """End-key cohorts of *routes* and every corner the end-corner rule may size.
+
+    An end corner joins each cohort its key's rule keeps, and is sizable when it
+    joins one.  Any other orthogonal corner is sizable unless it is the route's
+    exit-turn corner or a respected planner owns it.
+    """
+    cohorts: defaultdict[SemanticEndCornerKey, list[_SemanticEndCorner]] = defaultdict(
+        list
+    )
+    corners: list[_SemanticEndCorner] = []
+    for route in routes:
+        if route.curve_radii is None or len(route.points) < 3:
+            continue
+        points = apply_route_offsets(route, station_offsets)
+        end_keys: defaultdict[int, list[SemanticEndCornerKey]] = defaultdict(list)
+        for key, rank in semantic_end_corners(route, points):
+            end_keys[rank].append(key)
+        for rank in range(1, min(len(points) - 1, len(route.curve_radii) + 1)):
+            incoming = segment_direction(points[rank - 1], points[rank])
+            outgoing = segment_direction(points[rank], points[rank + 1])
+            if (
+                incoming is None
+                or outgoing is None
+                or incoming is outgoing
+                or not is_orthogonal_turn(
+                    points[rank - 1], points[rank], points[rank + 1]
+                )
+            ):
+                continue
+            corner = _SemanticEndCorner(
+                route,
+                rank,
+                points,
+                direction_vector(incoming),
+                direction_vector(outgoing),
+            )
+            owned = respect_owned_corners and planner_owns_segment_or_boundary(
+                route, rank
+            )
+            kept_keys = [
+                key
+                for key in end_keys[rank]
+                if not owned
+                and not (
+                    key[0] == "source"
+                    and route.exit_lane_transition_plan_id is not None
+                )
+                and not (key[0] == "target" and route.exit_turn_segment_rank == rank)
+            ]
+            for key in kept_keys:
+                cohorts[key].append(corner)
+            if kept_keys or (
+                not end_keys[rank]
+                and route.exit_turn_segment_rank != rank
+                and not owned
+            ):
+                corners.append(corner)
+    return cohorts, corners
+
+
+def _corner_id(corner: _SemanticEndCorner) -> tuple[int, int]:
+    return id(corner.route), corner.rank
+
+
+def _corner_legs(corner: _SemanticEndCorner) -> tuple[float, float]:
+    before, at, after = corner.points[corner.rank - 1 : corner.rank + 2]
+    return hypot(at[0] - before[0], at[1] - before[1]), hypot(
+        after[0] - at[0], after[1] - at[1]
+    )
+
+
+def _bend_nests_across_edges(
+    a: _SemanticEndCorner, b: _SemanticEndCorner, offset_step: float
+) -> bool:
+    """Whether two corners turning one bend are lanes of one bundle bending.
+
+    The same line at one vertex is one corner drawn by overlaid routes.  Distinct
+    lines are lanes when the bend translates wholesale by a whole number of lanes,
+    one to ``NESTED_BEND_MAX_LANES``, and every leg outruns that gap: a leg no
+    longer than the gap is a lane jog, not a bundle bend.
+    """
+    point_a, point_b = a.points[a.rank], b.points[b.rank]
+    if a.route.line_id == b.route.line_id:
+        return (
+            abs(point_a[0] - point_b[0]) <= COORD_TOLERANCE
+            and abs(point_a[1] - point_b[1]) <= COORD_TOLERANCE
+        )
+    gap = abs(point_a[0] - point_b[0])
+    lanes = gap / offset_step
+    return (
+        wholesale_corner_translation(point_a, point_b, a.incoming, a.outgoing)
+        and 0.5 < lanes < NESTED_BEND_MAX_LANES + 0.5
+        and abs(lanes - round(lanes)) * offset_step <= COORD_TOLERANCE_FINE
+        and all(min(_corner_legs(corner)) > gap for corner in (a, b))
+    )
+
+
+def _widened_families(
+    corners: Sequence[_SemanticEndCorner],
+    cohorts: Mapping[SemanticEndCornerKey, Sequence[_SemanticEndCorner]],
+    offset_step: float,
+    fixed_route_ids: AbstractSet[int],
+) -> list[list[_SemanticEndCorner]]:
+    """Corners nesting as one bend across two or more edges, family by family.
+
+    A family is a connected set of *corners* under two links: a wholesale
+    translation inside one end-key cohort, and :func:`_bend_nests_across_edges`
+    between corners turning the same bend.  A corner traversed backwards turns the
+    same bend.  Families come in the order of their first corner in *corners*,
+    members in that order.
+
+    A family holding a corner of *fixed_route_ids* is left out: its radius may not
+    change, and nesting the rest of the family without it would leave the bend
+    off-centre.
+    """
+    members: dict[tuple[int, int], _SemanticEndCorner] = {}
+    for corner in corners:
+        members.setdefault(_corner_id(corner), corner)
+    parent = {key: key for key in members}
+
+    def root(key: tuple[int, int]) -> tuple[int, int]:
+        while parent[key] != key:
+            parent[key] = parent[parent[key]]
+            key = parent[key]
+        return key
+
+    def link(a: _SemanticEndCorner, b: _SemanticEndCorner) -> None:
+        root_a, root_b = root(_corner_id(a)), root(_corner_id(b))
+        parent[max(root_a, root_b)] = min(root_a, root_b)
+
+    by_bend: defaultdict[tuple[int, int], list[_SemanticEndCorner]] = defaultdict(list)
+    for corner in members.values():
+        by_bend[
+            (
+                corner.outgoing[0] - corner.incoming[0],
+                corner.outgoing[1] - corner.incoming[1],
+            )
+        ].append(corner)
+    for bend in by_bend.values():
+        for index, a in enumerate(bend):
+            for b in bend[index + 1 :]:
+                if _bend_nests_across_edges(a, b, offset_step):
+                    link(a, b)
+    for cohort in cohorts.values():
+        for index, a in enumerate(cohort):
+            for b in cohort[index + 1 :]:
+                if wholesale_corner_translation(
+                    a.points[a.rank], b.points[b.rank], a.incoming, a.outgoing
+                ):
+                    link(a, b)
+    families: defaultdict[tuple[int, int], list[_SemanticEndCorner]] = defaultdict(list)
+    for key, corner in members.items():
+        families[root(key)].append(corner)
+    return [
+        family
+        for family in families.values()
+        if len(
+            {(corner.route.edge.source, corner.route.edge.target) for corner in family}
+        )
+        > 1
+        and not any(id(corner.route) in fixed_route_ids for corner in family)
+    ]
+
+
+def _size_concentric_members(
+    members: Sequence[_SemanticEndCorner], curve_radius: float, member_floor: float
+) -> bool:
+    """Size *members* concentric about one reference radius, each >= *member_floor*.
+
+    The reference is the widest any member's current radius asks for, narrowed
+    until every member resolves its radius within its segment budget.  Returns
+    ``False``, writing nothing, when no reference seats every member at
+    *member_floor* or wider.
+    """
+    incoming_vector = members[0].incoming
+    outgoing_vector = members[0].outgoing
+    turn_x = outgoing_vector[0] - incoming_vector[0]
+    xs = [member.points[member.rank][0] for member in members]
+    reference_x = min(xs) if turn_x < 0 else max(xs)
+    reference_radius = curve_radius
+    prepared: list[tuple[_SemanticEndCorner, int, float, list[float]]] = []
+    for member in members:
+        radius_index = member.rank - 1
+        offset = member.points[member.rank][0] - reference_x
+        radii = member.route.curve_radii
+        assert radii is not None
+        reference_radius = max(
+            reference_radius,
+            concentric_reference_radius_at(
+                member.points[member.rank - 1],
+                member.points[member.rank],
+                member.points[member.rank + 1],
+                offset,
+                radii[radius_index],
+            ),
+        )
+        prepared.append((member, radius_index, offset, list(radii)))
+
+    def reference_fits(candidate: float) -> bool:
+        for member, radius_index, offset, desired in prepared:
+            desired[radius_index] = concentric_corner_radius_at(
+                member.points[member.rank - 1],
+                member.points[member.rank],
+                member.points[member.rank + 1],
+                offset,
+                candidate,
+            )
+            if (
+                desired[radius_index] < member_floor
+                or abs(
+                    resolve_curve_radius_at(member.points, desired, radius_index)
+                    - desired[radius_index]
+                )
+                > COORD_TOLERANCE_FINE
+            ):
+                return False
+        return True
+
+    floor = max(
+        concentric_reference_radius_at(
+            member.points[member.rank - 1],
+            member.points[member.rank],
+            member.points[member.rank + 1],
+            offset,
+            member_floor,
+        )
+        for member, _radius_index, offset, _desired in prepared
+    )
+    reference = _largest_feasible_reference(floor, reference_radius, reference_fits)
+    if reference is None:
+        return False
+    for member, radius_index, offset, _desired in prepared:
+        radii = member.route.curve_radii
+        assert radii is not None
+        radii[radius_index] = concentric_corner_radius_at(
+            member.points[member.rank - 1],
+            member.points[member.rank],
+            member.points[member.rank + 1],
+            offset,
+            reference,
+        )
+        member.route.record_concentric_corner(radius_index, offset, reference)
+    return True
+
+
 def _rederive_semantic_end_corners(
     routes: list[RoutedPath],
     curve_radius: float,
     station_offsets: Mapping[tuple[str, str], float],
     *,
     respect_owned_corners: bool = True,
+    cross_edge_offset_step: float | None = None,
+    cross_edge_fixed_route_ids: AbstractSet[int] = frozenset(),
 ) -> None:
-    """Size wholesale-translated source and landing corner cohorts."""
-    cohorts: defaultdict[
-        SemanticEndCornerKey,
-        list[_SemanticEndCorner],
-    ] = defaultdict(list)
-    for route in routes:
-        if route.curve_radii is None or len(route.points) < 3:
-            continue
-        points = apply_route_offsets(route, station_offsets)
-        for key, rank in semantic_end_corners(route, points):
-            kind, _owner, incoming, outgoing = key
-            if (
-                kind == "source" and route.exit_lane_transition_plan_id is not None
-            ) or (kind == "target" and route.exit_turn_segment_rank == rank):
-                continue
-            if respect_owned_corners and planner_owns_segment_or_boundary(route, rank):
-                continue
-            cohorts[key].append(
-                _SemanticEndCorner(
-                    route,
-                    rank,
-                    points,
-                    direction_vector(incoming),
-                    direction_vector(outgoing),
-                )
+    """Size wholesale-translated source and landing corner cohorts.
+
+    Given *cross_edge_offset_step*, the corner families of
+    :func:`_widened_families` clear of *cross_edge_fixed_route_ids* are sized
+    too, each member at *curve_radius* or wider.  A family is sized once: when
+    the first end-key cohort holding one of its corners is reached, or after
+    every cohort when none holds one.  A cohort whose family sized is left to
+    it; a family that cannot seat every member at *curve_radius* leaves its
+    corners to the end-key cohort rule.
+    """
+    cohorts, corners = _collect_sizable_corners(
+        routes, station_offsets, respect_owned_corners=respect_owned_corners
+    )
+    families: list[list[_SemanticEndCorner]] = []
+    if cross_edge_offset_step is not None:
+        families = _widened_families(
+            corners, cohorts, cross_edge_offset_step, cross_edge_fixed_route_ids
+        )
+    family_of = {
+        _corner_id(corner): index
+        for index, family in enumerate(families)
+        for corner in family
+    }
+    family_sized: dict[int, bool] = {}
+
+    def size_family(index: int) -> bool:
+        if index not in family_sized:
+            members = sorted(
+                families[index],
+                key=lambda member: (
+                    member.route.edge.source,
+                    member.route.edge.target,
+                    member.route.line_id,
+                    tuple(member.route.points),
+                    member.rank,
+                ),
             )
+            family_sized[index] = _size_concentric_members(
+                members, curve_radius, curve_radius
+            )
+        return family_sized[index]
 
     def wholesale_pair(a: _SemanticEndCorner, b: _SemanticEndCorner) -> bool:
         return wholesale_corner_translation(
@@ -1242,81 +1535,12 @@ def _rederive_semantic_end_corners(
             if len(component) < 2:
                 continue
             members = [cohort[index] for index in sorted(component)]
-            incoming_vector = members[0].incoming
-            outgoing_vector = members[0].outgoing
-            turn_x = outgoing_vector[0] - incoming_vector[0]
-            xs = [member.points[member.rank][0] for member in members]
-            reference_x = min(xs) if turn_x < 0 else max(xs)
-            reference_radius = curve_radius
-            prepared: list[tuple[_SemanticEndCorner, int, float, list[float]]] = []
-            for member in members:
-                radius_index = member.rank - 1
-                offset = member.points[member.rank][0] - reference_x
-                radii = member.route.curve_radii
-                assert radii is not None
-                reference_radius = max(
-                    reference_radius,
-                    concentric_reference_radius_at(
-                        member.points[member.rank - 1],
-                        member.points[member.rank],
-                        member.points[member.rank + 1],
-                        offset,
-                        radii[radius_index],
-                    ),
-                )
-                prepared.append((member, radius_index, offset, list(radii)))
-
-            def reference_fits(candidate: float) -> bool:
-                for member, radius_index, offset, desired in prepared:
-                    desired[radius_index] = concentric_corner_radius_at(
-                        member.points[member.rank - 1],
-                        member.points[member.rank],
-                        member.points[member.rank + 1],
-                        offset,
-                        candidate,
-                    )
-                    if (
-                        desired[radius_index] < COORD_TOLERANCE_FINE
-                        or abs(
-                            resolve_curve_radius_at(
-                                member.points, desired, radius_index
-                            )
-                            - desired[radius_index]
-                        )
-                        > COORD_TOLERANCE_FINE
-                    ):
-                        return False
-                return True
-
-            floor = max(
-                concentric_reference_radius_at(
-                    member.points[member.rank - 1],
-                    member.points[member.rank],
-                    member.points[member.rank + 1],
-                    offset,
-                    COORD_TOLERANCE_FINE,
-                )
-                for member, _radius_index, offset, _desired in prepared
-            )
-            reference = _largest_feasible_reference(
-                floor, reference_radius, reference_fits
-            )
-            if reference is None:
+            family = family_of.get(_corner_id(members[0]))
+            if family is not None and size_family(family):
                 continue
-            reference_radius = reference
-            for member, radius_index, offset, _desired in prepared:
-                radii = member.route.curve_radii
-                assert radii is not None
-                radii[radius_index] = concentric_corner_radius_at(
-                    member.points[member.rank - 1],
-                    member.points[member.rank],
-                    member.points[member.rank + 1],
-                    offset,
-                    reference_radius,
-                )
-                member.route.record_concentric_corner(
-                    radius_index, offset, reference_radius
-                )
+            _size_concentric_members(members, curve_radius, COORD_TOLERANCE_FINE)
+    for index in range(len(families)):
+        size_family(index)
 
 
 def _declared_htrunks(routes: list[RoutedPath]) -> list[_HTrunk]:

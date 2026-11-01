@@ -246,6 +246,12 @@ corners.  Derived as 4 * CURVE_RADIUS."""
 OFFSET_STEP: float = 4.0
 """Per-line offset increment for parallel lines in bundles."""
 
+NESTED_BEND_MAX_LANES: int = 3
+"""Most lanes apart two lines' corners can turn one bend and still nest.
+
+Corners turning the same way further apart belong to separate bundles, whose
+arcs need not share a centre."""
+
 DEFAULT_LINE_WIDTH: float = 3.0
 """Stroke width used when converting a visual *track_gap* to an offset step.
 
