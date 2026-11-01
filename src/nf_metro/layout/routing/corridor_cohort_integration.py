@@ -3998,7 +3998,10 @@ def _prepare_patches(
     ] = defaultdict(list)
     for landing in landings:
         landings_by_key[(landing.member_id, landing.edge_key)].append(landing)
-    patches: list[_RoutePatch] = []
+    staged: list[
+        tuple[RoutedPath, list[tuple[float, float]], tuple[int, ...], str]
+    ] = []
+    moved_destinations: set[str] = set()
     for key in dict.fromkeys((*changes, *landings_by_key)):
         member_changes = changes[key]
         member_landings = landings_by_key[key]
@@ -4056,16 +4059,11 @@ def _prepare_patches(
             start, end = points[segment_rank : segment_rank + 2]
             if abs(start[axis] - end[axis]) > COORD_TOLERANCE:
                 return None
-            # The solve reads coordinates only to SOLVE_QUANTUM, so a result
-            # that close to the source is the source; its float form differs
-            # by noise that the exact-equality ownership checks read as a move.
-            # A skewed segment (ends within COORD_TOLERANCE, not equal) is
-            # always written, so both its ends snap to the one coordinate.
             if (
-                start[axis] == end[axis]
-                and abs(coordinate - start[axis]) <= SOLVE_QUANTUM
+                start[axis] != end[axis]
+                or abs(coordinate - start[axis]) > SOLVE_QUANTUM
             ):
-                continue
+                moved_destinations.add(key[1][1])
             for point_rank in (segment_rank, segment_rank + 1):
                 point = list(points[point_rank])
                 point[axis] = coordinate
@@ -4079,8 +4077,21 @@ def _prepare_patches(
                 }
             )
         )
-        patches.append(_unsized_patch(route, points, owned))
-    return tuple(patches)
+        staged.append((route, points, owned, key[1][1]))
+    # The solve reads coordinates only to SOLVE_QUANTUM, so a route whose every
+    # result is that close to its source keeps the source's float form, which
+    # the exact-equality ownership checks compare against. The routes into one
+    # destination are written together or not at all: the pass that seats a
+    # destination's approach bundle derives each lane from its neighbours'
+    # written floats.
+    return tuple(
+        _unsized_patch(
+            route,
+            points if destination in moved_destinations else list(route.points),
+            owned,
+        )
+        for route, points, owned, destination in staged
+    )
 
 
 def _commit_patches(patches: tuple[_RoutePatch, ...]) -> None:
