@@ -15,6 +15,7 @@ from hash_seed_oracle import observe_across_hash_seeds
 
 from nf_metro.api import prepare_graph, resolve_theme
 from nf_metro.layout.constants import COORD_TOLERANCE
+from nf_metro.layout.geometry import cotravelling_lane_clearance
 from nf_metro.layout.route_plan import (
     SETTLEMENT_STAGE_ORDER,
     ConvergenceDisposition,
@@ -2372,6 +2373,17 @@ def test_endpoint_lanes_rank_past_an_interleaved_fixed_member(
     assert allocations["m3"] == pytest.approx(364.0 + 2 * step)
 
 
+_M1_PIN = 364.0
+_SEAT_PITCH = 4.0
+_SEAT_CURVE_RADIUS = 8.0
+_DISTINCT_LINE_CLEARANCE = cotravelling_lane_clearance(
+    same_line=False,
+    counter_running=False,
+    curve_radius=_SEAT_CURVE_RADIUS,
+    offset_step=_SEAT_PITCH,
+)
+
+
 def _cohort_beside_a_fixed_lane(
     pin: str | None,
     rotated: bool,
@@ -2381,7 +2393,7 @@ def _cohort_beside_a_fixed_lane(
     """``m1`` and ``m4`` are consecutive members of one endpoint cohort, and
     ``m2``'s fixed lane, outside the cohort, runs between them beside both.
 
-    ``pin`` holds ``m1`` at 364 on its own line's fixed lane ``"direct"``ly or
+    ``pin`` holds ``m1`` at ``_M1_PIN`` on its own line's fixed lane ``"direct"``ly or
     ``"through-equality"`` with a same-lane run of its line, holds ``m4``
     ``"outer"`` instead, or holds neither.
     """
@@ -2391,7 +2403,7 @@ def _cohort_beside_a_fixed_lane(
         lane_rank=0,
         endpoint_network_rank=0,
         slot=120.0,
-        coordinate=364.0,
+        coordinate=_M1_PIN,
         rotated=rotated,
     )
     m4 = _entry_cohort_claim(
@@ -2425,7 +2437,7 @@ def _cohort_beside_a_fixed_lane(
             lane_rank=0,
             endpoint_network_rank=None,
             slot=200.0,
-            coordinate=364.0,
+            coordinate=_M1_PIN,
             rotated=rotated,
         )
         movable.append(feed)
@@ -2437,7 +2449,14 @@ def _cohort_beside_a_fixed_lane(
     roles.update({item.claim_id: cci.CorridorCohortClaimRole.FIXED for item in fixed})
     footprint_model = _MemberFootprintModel((), (), {}, (), (), ())
     problem = cci._problem(
-        claims, roles, True, 4.0, 8.0, footprint_model, {}, corner_neighbours={}
+        claims,
+        roles,
+        True,
+        _SEAT_PITCH,
+        _SEAT_CURVE_RADIUS,
+        footprint_model,
+        {},
+        corner_neighbours={},
     )
     return claims, problem
 
@@ -2479,14 +2498,14 @@ def test_pinned_endpoint_cohort_seats_past_a_fixed_lane_between_its_members(
 
     boundaries = {lane.member_id: lane.boundary_coordinate for lane in problem.lanes}
     assert boundaries["m1"] == pytest.approx(0.0)
-    assert boundaries["m4"] == pytest.approx(m4_seat - 364.0)
+    assert boundaries["m4"] == pytest.approx(m4_seat - _M1_PIN)
     assert _pinned_gap_violations(claims, problem) == []
     result = solve_corridor_cohorts(problem)
     assert result.status is CorridorAllocationStatus.PLANNED, result
     allocations = dict(result.allocations)
-    assert allocations["m1"] == pytest.approx(364.0)
+    assert allocations["m1"] == pytest.approx(_M1_PIN)
     assert allocations["m4"] == pytest.approx(m4_seat)
-    assert abs(allocations["m4"] - fixed_coordinate) >= 4.0
+    assert abs(allocations["m4"] - fixed_coordinate) >= _DISTINCT_LINE_CLEARANCE
 
 
 @pytest.mark.parametrize("rotated", [False, True], ids=["left-entry", "top-entry"])

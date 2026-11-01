@@ -3289,24 +3289,19 @@ def _seat_bound(
     item: _BoundClaim,
     frame: int,
     lane: _BoundClaim,
-    lower: Sequence[_BoundClaim],
+    previous: Sequence[_BoundClaim],
     pin: float,
-    offset_step: float,
-    curve_radius: float,
+    clearance: Callable[[_BoundClaim, _BoundClaim], float],
 ) -> tuple[float, float]:
-    """The offsets out from ``pin`` in ``frame`` that ``item`` cannot seat
-    strictly between because of the fixed ``lane`` beside it.
+    """The open interval of offsets out from ``pin`` in ``frame`` that ``item``
+    cannot seat in because of the fixed ``lane`` beside it.
 
-    That is the lane's clearance band, or everything short of clearing it when
-    the lane is drawn between ``item`` and a ``lower`` neighbour on a span both
-    run, so ``item`` keeps the side of it that its drawn coordinate is on.
+    It is the lane's clearance band; when the lane is drawn between ``item``
+    and a claim of the ``previous`` rank on a span both run, it is every
+    offset short of clearing the lane, so ``item`` keeps the side of the lane
+    its drawn coordinate is on.
     """
-    gap = cotravelling_lane_clearance(
-        same_line=item.target.route.line_id == lane.target.route.line_id,
-        counter_running=item.ledger.direction is not lane.ledger.direction,
-        curve_radius=curve_radius,
-        offset_step=offset_step,
-    )
+    gap = clearance(item, lane)
     at = frame * (lane.coordinate - pin)
     between = any(
         min(neighbour.coordinate, item.coordinate) + COORD_TOLERANCE
@@ -3318,23 +3313,23 @@ def _seat_bound(
             max(neighbour.longitudinal_start, item.longitudinal_start),
             min(neighbour.longitudinal_end, item.longitudinal_end),
         )
-        for neighbour in lower
+        for neighbour in previous
     )
     return (-inf if between else at - gap, at + gap)
 
 
 def _next_seat_pitch(
-    lower: Sequence[_BoundClaim],
-    upper: Sequence[_BoundClaim],
+    previous: Sequence[_BoundClaim],
+    current: Sequence[_BoundClaim],
     previous_pitch: int,
     outward: int,
     pin: float,
     foreign: Sequence[_BoundClaim],
     offset_step: float,
-    curve_radius: float,
+    clearance: Callable[[_BoundClaim, _BoundClaim], float],
 ) -> int:
     """The first pitch out from ``pin``, past ``previous_pitch``, at which the
-    ``upper`` rank seats outside the bound of every ``foreign`` fixed lane.
+    ``current`` rank seats outside the bound of every ``foreign`` fixed lane.
 
     Pitches count ``offset_step`` from ``pin`` on the ``outward`` side of the
     rank's boundary frame.  Bounds scanned in order of their low ends only
@@ -3343,10 +3338,8 @@ def _next_seat_pitch(
     blocked = [
         (-inf, (previous_pitch + 1) * offset_step),
         *(
-            _seat_bound(
-                item, outward * sign, lane, lower, pin, offset_step, curve_radius
-            )
-            for item in upper
+            _seat_bound(item, outward * sign, lane, previous, pin, clearance)
+            for item in current
             if (sign := item.ledger.destination_boundary_axis_sign) is not None
             for lane in foreign
             if _overlap(item, lane)
@@ -3376,6 +3369,15 @@ def _local_boundary_ranks(
     fixed lanes from outside the cohort, on the side of each that the members'
     drawn coordinates put it.
     """
+
+    def clearance(item: _BoundClaim, lane: _BoundClaim) -> float:
+        return cotravelling_lane_clearance(
+            same_line=item.target.route.line_id == lane.target.route.line_id,
+            counter_running=item.ledger.direction is not lane.ledger.direction,
+            curve_radius=curve_radius,
+            offset_step=offset_step,
+        )
+
     members: defaultdict[str, defaultdict[int, list[_BoundClaim]]] = defaultdict(
         lambda: defaultdict(list)
     )
@@ -3419,7 +3421,7 @@ def _local_boundary_ranks(
                     pinned_seats[(cohort_id, pinned_rank)],
                     foreign,
                     offset_step,
-                    curve_radius,
+                    clearance,
                 )
                 previous = rank
         local_ranks.update(
