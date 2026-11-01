@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import hashlib
 from collections import Counter, defaultdict
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from itertools import permutations
@@ -3259,20 +3259,18 @@ def _corner_orders(
 def _pinned_endpoint_cohorts(
     movable: tuple[_BoundClaim, ...],
     equalities: Sequence[CorridorEquality],
-    fixed_lane_pairs: Sequence[tuple[_BoundClaim, _BoundClaim]],
+    pinned: Iterable[_BoundClaim],
 ) -> frozenset[str]:
-    """Endpoint cohorts with a member held on its own line's fixed lane,
-    directly or through a chain of same-lane equalities."""
+    """Endpoint cohorts with a member joined to a ``pinned`` claim, one held on
+    its own line's fixed lane, directly or through a chain of same-lane
+    equalities."""
     rank_by_id = {item.claim_id: rank for rank, item in enumerate(movable)}
     union = _UnionFind(len(movable))
     for equality in equalities:
         union.union(
             rank_by_id[equality.left_member_id], rank_by_id[equality.right_member_id]
         )
-    pinned_roots = {
-        union.find(rank_by_id[movable_claim.claim_id])
-        for movable_claim, _fixed_claim in fixed_lane_pairs
-    }
+    pinned_roots = {union.find(rank_by_id[item.claim_id]) for item in pinned}
     return frozenset(
         item.ledger.endpoint_cohort_id
         for rank, item in enumerate(movable)
@@ -3314,9 +3312,9 @@ def _local_boundary_ranks(
 
     Every cohort claim ranks, fixed and counter-running alike, so a fixed lane
     between movable ones keeps its step and a lane pinned onto its line's fixed
-    lane can reach its pin.  A pinned cohort cannot move off a fixed lane from
-    outside it either, so each one drawn between two consecutive members holds
-    a step of its own there.
+    lane can reach its pin.  A cohort in ``pinned_cohorts`` cannot shift as a
+    whole, so every fixed lane from outside it drawn between two consecutive
+    members must hold a step of its own between them.
     """
     members: defaultdict[str, defaultdict[int, list[_BoundClaim]]] = defaultdict(
         lambda: defaultdict(list)
@@ -3447,7 +3445,11 @@ def _problem(
     local_boundary_ranks = _local_boundary_ranks(
         claims,
         fixed_claims,
-        _pinned_endpoint_cohorts(movable, equalities, fixed_lane_pairs),
+        _pinned_endpoint_cohorts(
+            movable,
+            equalities,
+            (movable_claim for movable_claim, _fixed_claim in fixed_lane_pairs),
+        ),
     )
     aliased_claims = tuple(item for item in claims if item.claim_id in aliases)
     scalar_equalities = [

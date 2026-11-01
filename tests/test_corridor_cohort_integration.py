@@ -2182,26 +2182,24 @@ def _entry_cohort_claim(
     claim_id: str,
     line_id: str,
     lane_rank: int,
-    endpoint_network_rank: int,
+    endpoint_network_rank: int | None,
     slot: float,
     coordinate: float,
     rotated: bool = False,
-    endpoint_cohort_id: str | None = "cohort:entry",
-    span: tuple[float, float] | None = None,
 ) -> _BoundClaim:
     """One upward run of a LEFT-entry cohort, ``slot`` its port landing Y.
 
     ``rotated`` swaps the axes: a leftward run of a TOP-entry cohort, ``slot``
-    its port landing X.  ``span`` replaces the run's ``slot`` to ``slot + 100``
-    extent.
+    its port landing X.  A run with no ``endpoint_network_rank`` belongs to no
+    cohort and only spans ``slot`` to ``slot + 100``.
     """
-    start, end = span if span is not None else (slot, slot + 100.0)
+    in_cohort = endpoint_network_rank is not None
     ledger = replace(
         _identity_claim(
             claim_id=claim_id,
             reservation_id="reservation:gap",
             network_id=f"network:{line_id}",
-            endpoint_cohort_id=endpoint_cohort_id,
+            endpoint_cohort_id="cohort:entry" if in_cohort else None,
             direction=Direction.L if rotated else Direction.U,
             region=RowGapRegion(1, 2) if rotated else ColumnGapRegion(1, 2),
             orientation=(
@@ -2214,7 +2212,7 @@ def _entry_cohort_claim(
         ),
         destination_boundary_axis_sign=1,
     )
-    points = [(coordinate, end), (coordinate, start)]
+    points = [(coordinate, slot + 100.0), (coordinate, slot)]
     target = replace(
         _footprint_target(
             claim_id,
@@ -2222,15 +2220,10 @@ def _entry_cohort_claim(
             [(y, x) for x, y in points] if rotated else points,
         ),
         endpoint_lane_axis=0 if rotated else 1,
-        endpoint_lane_coordinate=slot if endpoint_cohort_id is not None else None,
+        endpoint_lane_coordinate=slot if in_cohort else None,
     )
     return _BoundClaim(
-        ledger,
-        target,
-        start,
-        end,
-        coordinate,
-        slot if endpoint_cohort_id is not None else None,
+        ledger, target, slot, slot + 100.0, coordinate, slot if in_cohort else None
     )
 
 
@@ -2379,20 +2372,15 @@ def test_endpoint_lanes_rank_past_an_interleaved_fixed_member(
     assert allocations["m3"] == pytest.approx(364.0 + 2 * step)
 
 
-@pytest.mark.parametrize("rotated", [False, True], ids=["left-entry", "top-entry"])
-@pytest.mark.parametrize("pin", ["direct", "through-equality", None])
-def test_pinned_endpoint_cohort_steps_past_a_fixed_lane_between_its_members(
+def _cohort_beside_a_fixed_lane(
     pin: str | None, rotated: bool
-) -> None:
+) -> tuple[tuple[_BoundClaim, ...], cci.CorridorAllocationProblem]:
     """``m1`` and ``m4`` are consecutive members of one endpoint cohort, and
     ``m2``'s fixed lane, outside the cohort, runs between them beside both.
 
-    When ``m1`` is pinned onto its own line's fixed lane, directly or through a
-    same-lane run of its line, the cohort cannot move off ``m2``: ``m4`` seats a
-    pitch further out so the fixed lane keeps its own.  An unpinned cohort is
-    free to seat clear of ``m2`` as a whole, so its ranks keep one pitch.
+    ``pin`` holds ``m1`` on its own line's fixed lane ``"direct"``ly or
+    ``"through-equality"`` with a same-lane run of its line, or not at all.
     """
-    step = 4.0
     m1 = _entry_cohort_claim(
         claim_id="m1",
         line_id="m1",
@@ -2419,7 +2407,6 @@ def test_pinned_endpoint_cohort_steps_past_a_fixed_lane_between_its_members(
         slot=120.0,
         coordinate=368.0,
         rotated=rotated,
-        endpoint_cohort_id=None,
     )
     movable = [m1, m4]
     fixed = [lane_m2]
@@ -2434,8 +2421,6 @@ def test_pinned_endpoint_cohort_steps_past_a_fixed_lane_between_its_members(
             slot=200.0,
             coordinate=364.0,
             rotated=rotated,
-            endpoint_cohort_id=None,
-            span=(200.0, 320.0),
         )
         movable.append(feed)
         fixed.append(
@@ -2445,23 +2430,43 @@ def test_pinned_endpoint_cohort_steps_past_a_fixed_lane_between_its_members(
     roles = {item.claim_id: cci.CorridorCohortClaimRole.MOVABLE for item in movable}
     roles.update({item.claim_id: cci.CorridorCohortClaimRole.FIXED for item in fixed})
     footprint_model = _MemberFootprintModel((), (), {}, (), (), ())
-
     problem = cci._problem(
-        claims, roles, True, step, 8.0, footprint_model, {}, corner_neighbours={}
+        claims, roles, True, 4.0, 8.0, footprint_model, {}, corner_neighbours={}
     )
+    return claims, problem
 
-    pitches = 1 if pin is None else 2
+
+@pytest.mark.parametrize("rotated", [False, True], ids=["left-entry", "top-entry"])
+@pytest.mark.parametrize("pin", ["direct", "through-equality"])
+def test_pinned_endpoint_cohort_steps_past_a_fixed_lane_between_its_members(
+    pin: str, rotated: bool
+) -> None:
+    """A pinned cohort cannot move off ``m2``'s fixed lane, so ``m4`` seats a
+    pitch further out and the fixed lane keeps a pitch of its own."""
+    claims, problem = _cohort_beside_a_fixed_lane(pin, rotated)
+
     boundaries = {lane.member_id: lane.boundary_coordinate for lane in problem.lanes}
     assert boundaries["m1"] == pytest.approx(0.0)
-    assert boundaries["m4"] == pytest.approx(pitches * step)
-    if pin is None:
-        return
+    assert boundaries["m4"] == pytest.approx(8.0)
     assert _pinned_gap_violations(claims, problem) == []
     result = solve_corridor_cohorts(problem)
     assert result.status is CorridorAllocationStatus.PLANNED, result
     allocations = dict(result.allocations)
     assert allocations["m1"] == pytest.approx(364.0)
-    assert allocations["m4"] == pytest.approx(364.0 + 2 * step)
+    assert allocations["m4"] == pytest.approx(372.0)
+
+
+@pytest.mark.parametrize("rotated", [False, True], ids=["left-entry", "top-entry"])
+def test_unpinned_endpoint_cohort_keeps_one_pitch_past_a_fixed_lane(
+    rotated: bool,
+) -> None:
+    """An unpinned cohort is free to seat clear of ``m2``'s fixed lane as a
+    whole, so its consecutive ranks stay one pitch apart."""
+    _claims, problem = _cohort_beside_a_fixed_lane(None, rotated)
+
+    boundaries = {lane.member_id: lane.boundary_coordinate for lane in problem.lanes}
+    assert boundaries["m1"] == pytest.approx(0.0)
+    assert boundaries["m4"] == pytest.approx(4.0)
 
 
 _ENDPOINT_RANK_FIXTURES = (
