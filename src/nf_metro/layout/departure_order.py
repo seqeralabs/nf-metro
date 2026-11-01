@@ -12,7 +12,9 @@ Offsets phase 7b' (``_order_entry_ports_by_approach``) decides each port once
 per layout, in its first run after junction positioning (Stage 5.1) of the
 first positioning pass, into a :class:`DepartureOrderPlan`; every later run
 after junction positioning, in that pass and every later one, replays the
-decision rather than re-deciding it.
+decision rather than re-deciding it.  How far a port with two or more feeders
+carries its order along the section is the one part decided once per pass:
+it reads the pass's own positions, and the record holds whatever it decides.
 """
 
 from __future__ import annotations
@@ -122,13 +124,22 @@ class DepartureOrderPlan:
     A port maps to ``None`` when it was decided to take no record.  The plan is
     *sealed* once the first offsets run after junction positioning completes,
     so no later run decides a port anew: every run after junction positioning,
-    in any positioning pass, replays the decisions, carry verdict included,
-    whatever the pass's own positions would decide.  A run before junction
+    in any positioning pass, replays the decisions.  A run before junction
     positioning neither decides nor replays.
+
+    A single feeder's full carry is a condition of its record, so it replays
+    with the record.  A port with two or more feeders takes its carry extent
+    per positioning pass instead (*pass_carry*): the pass's first replaying run
+    decides it from the pass's positions and the rest of the pass replays it.
     """
 
     decisions: dict[str, PortOrderDecision | None] = field(default_factory=dict)
     sealed: bool = False
+    pass_carry: dict[str, bool] = field(default_factory=dict)
+
+    def start_pass(self) -> None:
+        """Forget the carry extents a previous positioning pass decided."""
+        self.pass_carry.clear()
 
     def deciding(self, stages: Sequence[str]) -> bool:
         """Whether an offsets run at *stages* decides ports."""

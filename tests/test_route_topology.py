@@ -1097,7 +1097,7 @@ def test_corpus_topology_shapes_match_byte_identical_resolved_graphs() -> None:
         )
 
     assert digest.hexdigest() == (
-        "9f53cf3f13459b981724446f8db2d5be2eec2ca1079ec2e082b32b05562ce5dc"
+        "2e3d36eed481341656abe1b18e12e4ee7339e9e0ae8993469ca43d79df52c6fc"
     )
     assert saw_bypass_path
 

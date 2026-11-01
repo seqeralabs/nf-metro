@@ -327,7 +327,8 @@ runtime check either:
 - `graph._departure_order_plan` - one layout's 7b' port decisions (a
   record, or none), reset when `compute_layout` starts, filled by the first
   offsets run after Stage 5.1 and replayed by every later run after Stage 5.1
-  in any positioning pass.
+  in any positioning pass; its per-pass carry extents of ports with two or
+  more feeders are cleared when each pass starts.
 - `graph._departure_lane_orders` - the `DepartureLaneOrder` records the latest
   station-offset computation holds; read by routing's fan, gap, band,
   exit-turn and seating consumers and the bundle-order curve check, empty when
@@ -1626,9 +1627,13 @@ the planned-fan offsets that follow them own the lanes a fan plan states.
   after the port too (the two lines go on to different stations before
   either ends). A record port is decided once per layout, in the first
   offsets run after Stage 5.1, into `graph._departure_order_plan`; every
-  later run after Stage 5.1, in any positioning pass, replays the decision
-  and its carry verdict, so every pass ends holding the first pass's records
-  (`DepartureRecordDriftError` asserts it).
+  later run after Stage 5.1, in any positioning pass, replays the decision,
+  so every pass ends holding the first pass's records
+  (`DepartureRecordDriftError` asserts it). A single feeder's full carry is a
+  condition of its record and replays with it; a port with two or more
+  feeders decides its carry extent once per positioning pass, in the pass's
+  first run after Stage 5.1, on that pass's positions (a lane the carry would
+  share stops it at the port), and replays it for the rest of the pass.
   Its order is carried along the bundle only when the carry adds no
   crossing, sandwich or same-row marker strike, and leaves no carried exit
   holding a pair in the other order to the perpendicular entry its connector

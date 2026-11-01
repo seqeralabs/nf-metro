@@ -319,7 +319,8 @@ PHASE_FIELD_REGISTRY: dict[str, PhaseFieldSpec] = {
             "station-offset computation after junction positioning and "
             "replayed by every later one after junction positioning in any "
             "positioning pass, so a record port is decided once per layout; "
-            "an absent plan decides nothing"
+            "a two-feeder port's carry extent is decided once per pass and "
+            "cleared when each pass starts; an absent plan decides nothing"
         ),
     ),
     "_departure_lane_orders": PhaseFieldSpec(

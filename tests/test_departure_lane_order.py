@@ -56,6 +56,7 @@ REJOINING_PAIR_SPACED = REGRESSIONS / "departure_order_rejoining_pair_spaced.mmd
 REJOINING_ROTATION = REGRESSIONS / "departure_order_rejoining_rotation.mmd"
 LEVEL_EXIT_FEEDER = REGRESSIONS / "departure_order_level_exit_feeder.mmd"
 CARRY_REPLAY = REGRESSIONS / "departure_order_carry_replay.mmd"
+CARRY_PER_PASS = REGRESSIONS / "departure_order_carry_per_pass.mmd"
 
 
 class _Drawn:
@@ -490,3 +491,24 @@ def test_a_departure_whose_tail_starts_beyond_its_junction_keeps_its_slots() -> 
     assert peeloff_target_slots(bundle, 4.0, swap) == peeloff_target_slots(
         bundle, 4.0, {}
     )
+
+
+def test_a_two_feeder_record_takes_each_passs_own_carry_extent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The first positioning pass stops the record's carry at Fastqc 1's
+    entry; the label-spread passes that follow widen the map, and there the
+    order carries along the section.  The final pass draws its own extent, so
+    the port and the section's stations hold one order rather than the lines
+    changing lanes along a straight past the entry."""
+    drawn = _draw(monkeypatch, CARRY_PER_PASS)
+
+    assert drawn.graph is not None
+    plan = drawn.graph._departure_order_plan
+    assert plan is not None
+    decision = plan.decisions["sec2__entry_left_2"]
+    assert decision is not None and not decision.carry_full
+    offsets = compute_station_offsets(drawn.graph)
+    for station in ("sec2__entry_left_2", "s2n0", "s2n2"):
+        order = sorted(decision.order, key=lambda line: offsets[(station, line)])
+        assert tuple(order) == decision.order, station

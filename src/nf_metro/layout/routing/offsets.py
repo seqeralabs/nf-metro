@@ -88,7 +88,10 @@ from nf_metro.layout.routing.invariants import (
 )
 from nf_metro.layout.routing.orientation import lateral_order_sign
 from nf_metro.layout.routing.perp_columns import deal_perp_entry_column
-from nf_metro.layout.routing.reversal import detect_reversed_sections
+from nf_metro.layout.routing.reversal import (
+    detect_reversed_sections,
+    tb_positive_fan_sections,
+)
 from nf_metro.layout.routing.seam import SeamOrientation, seam_orientation
 from nf_metro.parser.model import (
     Edge,
@@ -4059,9 +4062,11 @@ def _order_entry_ports_by_approach(
     run after Stage 5.1, in any positioning pass, replays that decision; its
     order is carried along the bundle only when the carry adds no crossing,
     sandwich or marker strike or perpendicular-seam reorder
-    (:func:`_record_carry_is_full`),
-    and the decision is judged by the owners on the offsets phase 8 would
-    leave it with (:func:`_decision_overrides_an_owner`).
+    (:func:`_record_carry_is_full`), which a port with two or more feeders
+    judges once per positioning pass on the pass's own positions (a lane the
+    carry would share stops it at the port), and the decision is judged by
+    the owners on the offsets phase 8 would leave it with
+    (:func:`_decision_overrides_an_owner`).
 
     Drafts are drawn once per call on the offsets the phase started from, so
     every port is judged against the same routing.
@@ -4100,7 +4105,21 @@ def _order_entry_ports_by_approach(
         assert plan is not None
         plan.decisions[port.id] = decision
         if decision is not None:
+            plan.pass_carry[port.id] = decision.carry_full
             _apply_port_decision(ctx, port, decision)
+
+    def replay(port: Port, decision: PortOrderDecision) -> None:
+        assert plan is not None
+        if len(_feeder_lines(list(graph.edges_to(port.id)))) > 1:
+            if port.id not in plan.pass_carry:
+                new_offs = _deal_slots_in_order(ctx, port.id, list(decision.order))
+                plan.pass_carry[port.id] = bool(
+                    _record_carry_is_full(
+                        ctx, port, tb_positive_fan_sections(graph), new_offs
+                    )
+                )
+            decision = replace(decision, carry_full=plan.pass_carry[port.id])
+        _apply_port_decision(ctx, port, decision)
 
     for port_id, port in graph.ports.items():
         if not port.is_entry:
@@ -4110,7 +4129,7 @@ def _order_entry_ports_by_approach(
             continue
         decided = replayed.get(port_id)
         if decided is not None:
-            _apply_port_decision(ctx, port, decided)
+            replay(port, decided)
             continue
         may_record = open_plan is not None and port_id not in open_plan.decisions
         edges = list(graph.edges_to(port_id))

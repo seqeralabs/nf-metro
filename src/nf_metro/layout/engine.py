@@ -1448,8 +1448,9 @@ def _layout_once(
 
     Clears ``_cross_column_perp_bridge_ports`` before the pass and prunes it
     against the pass's final boxes after, so it holds only this pass's bridges.
-    Fails closed if the pass ends holding other departure records than the
-    layout's first pass did.
+    Starts the departure-order plan's pass, so the pass decides its own
+    carry extents, and fails closed if the pass ends holding other departure
+    records than the layout's first pass did.
     """
     from nf_metro.layout.departure_order import hold_departure_records
     from nf_metro.layout.fan_plans import (
@@ -1459,6 +1460,8 @@ def _layout_once(
     from nf_metro.parser.route_topology import build_route_topology_query
 
     graph._cross_column_perp_bridge_ports.clear()
+    if graph._departure_order_plan is not None:
+        graph._departure_order_plan.start_pass()
     topology = build_route_topology_query(graph)
     if topology is not None:
         install_fan_plan_execution(
