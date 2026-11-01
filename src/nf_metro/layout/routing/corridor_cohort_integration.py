@@ -3986,7 +3986,8 @@ def _prepare_patches(
     allocations: tuple[CorridorCohortAllocation, ...],
     landings: tuple[CorridorCohortLanding, ...],
     targets: Sequence[CorridorCohortTarget],
-    entry_port_for: Mapping[str, str] = MappingProxyType({}),
+    *,
+    entry_port_for: Mapping[str, str],
 ) -> tuple[_RoutePatch, ...] | None:
     targets_by_key = {(target.member_id, target.edge_key): target for target in targets}
     changes: defaultdict[
@@ -4215,7 +4216,7 @@ def compile_corridor_cohort_plan(
     settlement_trace: SettlementStageTrace | None = None,
     corner_sizer: CorridorCornerSizer = _no_corner_sizing,
     live_route: Callable[[RoutedPath], RoutedPath] = _same_route,
-    entry_port_for: Mapping[str, str] = MappingProxyType({}),
+    entry_port_for: Mapping[str, str],
 ) -> CorridorCohortPlan:
     """Solve every cohort from one route snapshot without publishing geometry.
 
@@ -4461,7 +4462,9 @@ def compile_corridor_cohort_plan(
             }
         )
     )
-    patches = _prepare_patches(allocations, landings, targets, entry_port_for)
+    patches = _prepare_patches(
+        allocations, landings, targets, entry_port_for=entry_port_for
+    )
     if patches is None:
         raise CorridorCohortCompilationError(
             "corridor cohort publication does not match its source snapshot"

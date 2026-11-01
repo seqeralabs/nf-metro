@@ -1299,7 +1299,7 @@ def test_fixed_endpoint_landing_is_planned_clear_of_an_unclaimed_fixed_lead() ->
 
     fixed_points_before = tuple(fixed_route.points)
 
-    plan = cci.compile_corridor_cohort_plan(ledger, targets)
+    plan = cci.compile_corridor_cohort_plan(ledger, targets, entry_port_for={})
     cci.publish_corridor_cohort_plan(plan)
 
     (landing,) = plan.landings
@@ -1536,7 +1536,10 @@ def test_member_and_scalar_relation_occupy_one_problem(
     monkeypatch.setattr(cci, "solve_corridor_cohorts", spy_solve)
 
     plan = cci.compile_corridor_cohort_plan(
-        ledger, targets, scalar_requests=scalar_requests
+        ledger,
+        targets,
+        scalar_requests=scalar_requests,
+        entry_port_for={},
     )
 
     scalar_variable_id = scalar_requests[0].variable.variable_id
@@ -1604,7 +1607,10 @@ def test_compiler_counts_every_solve_call(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(cci, "solve_corridor_cohorts", counting_solve)
 
     plan = cci.compile_corridor_cohort_plan(
-        ledger, targets, scalar_requests=scalar_requests
+        ledger,
+        targets,
+        scalar_requests=scalar_requests,
+        entry_port_for={},
     )
 
     assert plan.solve_call_count == 1
@@ -1630,7 +1636,11 @@ def test_final_solve_trace_is_emitted_from_the_integration_call_site(
     )
 
     plan = cci.compile_corridor_cohort_plan(
-        ledger, targets, scalar_requests=scalar_requests, settlement_trace=trace
+        ledger,
+        targets,
+        scalar_requests=scalar_requests,
+        settlement_trace=trace,
+        entry_port_for={},
     )
 
     assert plan.settlement_trace is not None
@@ -1712,7 +1722,9 @@ def test_component_on_segments_another_plan_owns_is_planned_without_a_solve() ->
         target.route.route_system_owned_segment_ranks = (0,)
 
     plan = cci.compile_corridor_cohort_plan(
-        _ledger_of(*claims), tuple(target for _claim, target in claims)
+        _ledger_of(*claims),
+        tuple(target for _claim, target in claims),
+        entry_port_for={},
     )
 
     (component,) = plan.components
@@ -1755,7 +1767,9 @@ def test_component_with_an_incomplete_reservation_fails_closed(
 
     with pytest.raises(cci.CorridorCohortCompilationError, match=match):
         cci.compile_corridor_cohort_plan(
-            _ledger_of(*claims), tuple(target for _claim, target in claims)
+            _ledger_of(*claims),
+            tuple(target for _claim, target in claims),
+            entry_port_for={},
         )
 
 
@@ -1818,7 +1832,7 @@ def test_inconsistent_endpoint_cohort_fails_closed(
     )
 
     with pytest.raises(cci.CorridorCohortCompilationError, match=match):
-        cci.compile_corridor_cohort_plan(ledger, tuple(targets))
+        cci.compile_corridor_cohort_plan(ledger, tuple(targets), entry_port_for={})
 
 
 def test_two_claims_on_one_member_segment_fail_closed() -> None:
@@ -1835,6 +1849,7 @@ def test_two_claims_on_one_member_segment_fail_closed() -> None:
         cci.compile_corridor_cohort_plan(
             _ledger_of(first, (twin_claim, twin_target)),
             (first[1], twin_target),
+            entry_port_for={},
         )
 
 
@@ -1855,7 +1870,9 @@ def test_overlaid_cohort_component_with_an_incomplete_claim_keeps_its_overlay() 
     )
 
     plan = cci.compile_corridor_cohort_plan(
-        ledger, (first[1], second[1], incomplete[1])
+        ledger,
+        (first[1], second[1], incomplete[1]),
+        entry_port_for={},
     )
 
     (component,) = plan.components
@@ -1877,7 +1894,9 @@ def test_endpoint_cohort_split_across_components_is_typed_compatibility() -> Non
     second = _cohort_member("b", "cohort:x", region=RowGapRegion(1, 2))
     ledger = _cohort_ledger((first, second), expected=frozenset({"a", "b"}))
 
-    plan = cci.compile_corridor_cohort_plan(ledger, (first[1], second[1]))
+    plan = cci.compile_corridor_cohort_plan(
+        ledger, (first[1], second[1]), entry_port_for={}
+    )
 
     assert len(plan.components) == 2
     for component in plan.components:
@@ -1905,7 +1924,9 @@ def test_endpoint_cohort_without_claims_adds_no_component() -> None:
         offset_step=10.0,
     )
 
-    plan = cci.compile_corridor_cohort_plan(ledger, (carrier_target,))
+    plan = cci.compile_corridor_cohort_plan(
+        ledger, (carrier_target,), entry_port_for={}
+    )
 
     (component,) = plan.components
     assert component.status is cci.CorridorAllocationStatus.PLANNED
@@ -1928,7 +1949,10 @@ def test_member_geometry_corridor_handoff_returns_heterogeneous_grants(
     )
 
     plan = member_geometry.plan_corridor_cohorts(
-        ledger, targets, scalar_requests=scalar_requests
+        ledger,
+        targets,
+        scalar_requests=scalar_requests,
+        entry_port_for={},
     )
 
     scalar_variable_id = scalar_requests[0].variable.variable_id
@@ -1996,7 +2020,7 @@ def test_unwitnessed_blocking_obstacle_raises_instead_of_losing_its_shortfall(
     monkeypatch.setattr(cci, "solve_corridor_cohorts", fake_solve)
 
     with pytest.raises(CorridorCohortCompilationError, match="unwitnessed obstacles"):
-        cci.compile_corridor_cohort_plan(ledger, (target,))
+        cci.compile_corridor_cohort_plan(ledger, (target,), entry_port_for={})
 
 
 def test_shortfall_without_a_directed_shift_sign_raises(
@@ -2054,7 +2078,7 @@ def test_shortfall_without_a_directed_shift_sign_raises(
     monkeypatch.setattr(cci, "solve_corridor_cohorts", fake_solve)
 
     with pytest.raises(CorridorCohortCompilationError, match="directed boundary side"):
-        cci.compile_corridor_cohort_plan(ledger, (target,))
+        cci.compile_corridor_cohort_plan(ledger, (target,), entry_port_for={})
 
 
 def _top_entry_drops(routes, port_id: str) -> dict[str, tuple[float, int]]:
@@ -2703,7 +2727,9 @@ def _compile_turning_routes(
         offset_step=4.0,
     )
     return cci.compile_corridor_cohort_plan(
-        ledger, tuple(target for _claims, target in members)
+        ledger,
+        tuple(target for _claims, target in members),
+        entry_port_for={},
     )
 
 
@@ -3062,7 +3088,7 @@ def _riser_patch_xs(
             )
         )
     patches = cci._prepare_patches(
-        tuple(allocations), (), tuple(targets), entry_port_for or {}
+        tuple(allocations), (), tuple(targets), entry_port_for=entry_port_for or {}
     )
     assert patches is not None
     assert all(1 in patch.owned for patch in patches)

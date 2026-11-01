@@ -3498,6 +3498,7 @@ def plan_corridor_cohorts(
     ledger: CorridorCohortLedger,
     targets: Sequence[CorridorCohortTarget],
     *,
+    entry_port_for: Mapping[str, str],
     scalar_requests: Sequence[CorridorScalarRequest] = (),
 ) -> CorridorCohortPlan:
     """Compile one corridor cohort snapshot into heterogeneous grants.
@@ -3509,7 +3510,10 @@ def plan_corridor_cohorts(
     geometry moves here.
     """
     return compile_corridor_cohort_plan(
-        ledger, targets, scalar_requests=scalar_requests
+        ledger,
+        targets,
+        scalar_requests=scalar_requests,
+        entry_port_for=entry_port_for,
     )
 
 
