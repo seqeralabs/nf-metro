@@ -3986,6 +3986,7 @@ def _prepare_patches(
     allocations: tuple[CorridorCohortAllocation, ...],
     landings: tuple[CorridorCohortLanding, ...],
     targets: Sequence[CorridorCohortTarget],
+    entry_port_for: Mapping[str, str] = MappingProxyType({}),
 ) -> tuple[_RoutePatch, ...] | None:
     targets_by_key = {(target.member_id, target.edge_key): target for target in targets}
     changes: defaultdict[
@@ -4001,7 +4002,7 @@ def _prepare_patches(
     staged: list[
         tuple[RoutedPath, list[tuple[float, float]], tuple[int, ...], str]
     ] = []
-    moved_destinations: set[str] = set()
+    moved_ports: set[str] = set()
     for key in dict.fromkeys((*changes, *landings_by_key)):
         member_changes = changes[key]
         member_landings = landings_by_key[key]
@@ -4061,7 +4062,7 @@ def _prepare_patches(
                 return None
             reach = max(abs(coordinate - start[axis]), abs(coordinate - end[axis]))
             if reach > SOLVE_QUANTUM:
-                moved_destinations.add(key[1][1])
+                moved_ports.add(entry_port_for.get(key[1][1], key[1][1]))
             for point_rank in (segment_rank, segment_rank + 1):
                 point = list(points[point_rank])
                 point[axis] = coordinate
@@ -4075,20 +4076,17 @@ def _prepare_patches(
                 }
             )
         )
-        staged.append((route, points, owned, key[1][1]))
+        staged.append((route, points, owned, entry_port_for.get(key[1][1], key[1][1])))
     # The solve reads coordinates only to SOLVE_QUANTUM, so a route whose every
     # result is that close to its source keeps the source's float form, which
     # the exact-equality ownership checks compare against. The routes into one
-    # destination are written together or not at all: the pass that seats a
-    # destination's approach bundle derives each lane from its neighbours'
-    # written floats.
+    # entry port are written together or not at all: the passes that stagger
+    # and seat a port's lanes derive each from its neighbours' written floats.
     return tuple(
         _unsized_patch(
-            route,
-            points if destination in moved_destinations else list(route.points),
-            owned,
+            route, points if port in moved_ports else list(route.points), owned
         )
-        for route, points, owned, destination in staged
+        for route, points, owned, port in staged
     )
 
 
@@ -4217,6 +4215,7 @@ def compile_corridor_cohort_plan(
     settlement_trace: SettlementStageTrace | None = None,
     corner_sizer: CorridorCornerSizer = _no_corner_sizing,
     live_route: Callable[[RoutedPath], RoutedPath] = _same_route,
+    entry_port_for: Mapping[str, str] = MappingProxyType({}),
 ) -> CorridorCohortPlan:
     """Solve every cohort from one route snapshot without publishing geometry.
 
@@ -4232,6 +4231,9 @@ def compile_corridor_cohort_plan(
     routes themselves, *live_route* maps each copy to the route it stands for,
     and every returned patch, a mate's included, names that route, so
     publishing writes the routes the render draws.
+
+    *entry_port_for* maps a merge junction to the entry port it feeds, so the
+    routes converging on one port are written as one group.
     """
     claims, overlaid_cohort_ids = _bind_ledger(ledger, targets)
     scalar_requests_by_id = {
@@ -4459,7 +4461,7 @@ def compile_corridor_cohort_plan(
             }
         )
     )
-    patches = _prepare_patches(allocations, landings, targets)
+    patches = _prepare_patches(allocations, landings, targets, entry_port_for)
     if patches is None:
         raise CorridorCohortCompilationError(
             "corridor cohort publication does not match its source snapshot"

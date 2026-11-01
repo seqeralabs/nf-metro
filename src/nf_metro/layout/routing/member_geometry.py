@@ -976,6 +976,7 @@ def _compile_corridor_cohorts(
                 ctx.station_offsets or {},
             ),
             live_route=lambda route: live_by_copy_id[id(route)],
+            entry_port_for=ctx.merge.entry_port_for,
         )
     except CorridorCohortCompilationError as error:
         if not allow_clearance_requirements:

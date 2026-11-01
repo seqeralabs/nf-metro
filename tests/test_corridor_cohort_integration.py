@@ -3010,9 +3010,11 @@ def test_guard_corner_orders_turn_with_the_run_direction(
 
 
 def _riser_patch_xs(
-    *risers: tuple[str, float, float], source_end: float | None = None
-) -> list[float]:
-    """The x of each riser's first end point after patching it to its allocation.
+    *risers: tuple[str, float, float],
+    source_end: float | None = None,
+    entry_port_for: dict[str, str] | None = None,
+) -> list[tuple[float, float]]:
+    """The x of each riser's two end points after patching it to its allocation.
 
     A riser is ``(destination, source x, allocated x)``; *source_end* skews the
     first riser's far end.
@@ -3059,10 +3061,12 @@ def _riser_patch_xs(
                 source_coordinate=source,
             )
         )
-    patches = cci._prepare_patches(tuple(allocations), (), tuple(targets))
+    patches = cci._prepare_patches(
+        tuple(allocations), (), tuple(targets), entry_port_for or {}
+    )
     assert patches is not None
     assert all(1 in patch.owned for patch in patches)
-    return [patch.points[1][0] for patch in patches]
+    return [(patch.points[1][0], patch.points[2][0]) for patch in patches]
 
 
 @pytest.mark.parametrize(
@@ -3087,7 +3091,7 @@ def test_patch_keeps_an_allocation_within_the_solve_quantum_as_its_source(
     """The solve reads coordinates only to SOLVE_QUANTUM, so an allocation that
     close to its source is the source: the patch keeps the source's float form,
     which the exact-equality ownership checks compare against."""
-    assert _riser_patch_xs(("port", source, allocated)) == [expected]
+    assert _riser_patch_xs(("port", source, allocated)) == [(expected, expected)]
 
 
 def test_patch_writes_a_segment_whose_far_end_is_beyond_the_solve_quantum() -> None:
@@ -3095,18 +3099,27 @@ def test_patch_writes_a_segment_whose_far_end_is_beyond_the_solve_quantum() -> N
     written at both ends and they snap to the one allocated coordinate."""
     xs = _riser_patch_xs(("port", 337.35, 337.35), source_end=337.35 + 1e-6)
 
-    assert xs == [337.35]
+    assert xs == [(337.35, 337.35)]
 
 
-def test_patch_writes_every_route_into_a_destination_a_route_moves_into() -> None:
-    """The approach bundle of one destination is seated from its routes' written
-    floats together, so a route within the quantum is written with its mates."""
-    xs = _riser_patch_xs(("port", 337.34999999999997, 337.35), ("port", 100.0, 108.0))
+def test_patch_writes_every_route_into_an_entry_port_a_route_moves_into() -> None:
+    """The lanes of one entry port are staggered and seated from their routes'
+    written floats together, so a route within the quantum is written with its
+    mates, whichever merge junction it reaches the port through."""
+    xs = _riser_patch_xs(
+        ("junction-1", 337.34999999999997, 337.35),
+        ("junction-2", 100.0, 108.0),
+        entry_port_for={"junction-1": "port", "junction-2": "port"},
+    )
 
-    assert xs == [337.35, 108.0]
+    assert xs == [(337.35, 337.35), (108.0, 108.0)]
 
 
-def test_patch_keeps_a_route_into_a_destination_no_route_moves_into() -> None:
-    xs = _riser_patch_xs(("port", 337.34999999999997, 337.35), ("other", 100.0, 108.0))
+def test_patch_keeps_a_route_into_an_entry_port_no_route_moves_into() -> None:
+    xs = _riser_patch_xs(
+        ("junction-1", 337.34999999999997, 337.35),
+        ("junction-2", 100.0, 108.0),
+        entry_port_for={"junction-1": "port-1", "junction-2": "port-2"},
+    )
 
-    assert xs == [337.34999999999997, 108.0]
+    assert xs == [(337.34999999999997, 337.34999999999997), (108.0, 108.0)]
