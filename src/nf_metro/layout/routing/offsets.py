@@ -88,10 +88,7 @@ from nf_metro.layout.routing.invariants import (
 )
 from nf_metro.layout.routing.orientation import lateral_order_sign
 from nf_metro.layout.routing.perp_columns import deal_perp_entry_column
-from nf_metro.layout.routing.reversal import (
-    detect_reversed_sections,
-    tb_positive_fan_sections,
-)
+from nf_metro.layout.routing.reversal import detect_reversed_sections
 from nf_metro.layout.routing.seam import SeamOrientation, seam_orientation
 from nf_metro.parser.model import (
     Edge,
@@ -4114,9 +4111,7 @@ def _order_entry_ports_by_approach(
             if port.id not in plan.pass_carry:
                 new_offs = _deal_slots_in_order(ctx, port.id, list(decision.order))
                 plan.pass_carry[port.id] = bool(
-                    _record_carry_is_full(
-                        ctx, port, tb_positive_fan_sections(graph), new_offs
-                    )
+                    _record_carry_is_full(ctx, port, draft().positive_fan, new_offs)
                 )
             decision = replace(decision, carry_full=plan.pass_carry[port.id])
         _apply_port_decision(ctx, port, decision)
