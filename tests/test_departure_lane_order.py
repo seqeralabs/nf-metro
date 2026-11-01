@@ -13,7 +13,6 @@ from __future__ import annotations
 import dataclasses
 import warnings
 from collections.abc import Iterator
-from contextlib import nullcontext
 from itertools import combinations
 from pathlib import Path
 from types import SimpleNamespace
@@ -39,9 +38,6 @@ from nf_metro.layout.routing.common import (
     RoutedPath,
     peeloff_target_slots,
     port_peeloff_tail,
-)
-from nf_metro.layout.routing.corridor_cohort_integration import (
-    CorridorCohortCompilationError,
 )
 from nf_metro.layout.routing.exit_turns import DepartureTurnAxisError
 from nf_metro.layout.routing.invariants import (
@@ -133,8 +129,6 @@ class _Drawn:
 def _draw(
     monkeypatch: pytest.MonkeyPatch,
     path: Path,
-    *,
-    raises: type[Exception] | None = None,
 ) -> _Drawn:
     drawn = _Drawn()
     check = svg.assert_render_curve_invariants
@@ -157,10 +151,7 @@ def _draw(
     monkeypatch.setattr(svg, "assert_render_curve_invariants", capture)
     monkeypatch.setattr(offsets_module, "_run_offset_phases", spy_run)
     monkeypatch.setattr(offsets_module, "_feeder_departure_orders", spy_decide)
-    with (
-        warnings.catch_warnings(),
-        pytest.raises(raises) if raises is not None else nullcontext(),
-    ):
+    with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         render_string(path.read_text(), source_dir=str(path.parent))
     return drawn
@@ -465,10 +456,7 @@ def test_a_carry_that_reorders_a_perpendicular_seam_takes_no_record(
     other feeder holds its order, so the seam would change order between the
     sections: the carry stops at the port, and the departure, whose order the
     whole section has to take, gets no record.  The swapped pair parts beyond
-    the port (m1 for Q3X0, m4 for Q3X2), so the carry is what refuses it.
-
-    The map aborts in corridor-cohort allocation; ``KNOWN_NOT_RENDERING`` in
-    ``tests/test_reserved_claim_consumption.py`` lists it until it renders."""
+    the port (m1 for Q3X0, m4 for Q3X2), so the carry is what refuses it."""
     added: list[set[tuple[str, str, str, str]]] = []
     flips = offsets_module._perpendicular_seam_flips
 
@@ -478,16 +466,16 @@ def test_a_carry_that_reorders_a_perpendicular_seam_takes_no_record(
         return found
 
     monkeypatch.setattr(offsets_module, "_perpendicular_seam_flips", spy)
-    drawn = _draw(
-        monkeypatch, PERPENDICULAR_SEAM, raises=CorridorCohortCompilationError
-    )
+    drawn = _draw(monkeypatch, PERPENDICULAR_SEAM)
 
+    assert drawn.graph is not None
     assert any(
         (exit_id, entry_id) == ("z2__exit_right_2", "z3__entry_bottom_6")
         for found in added
         for exit_id, entry_id, _a, _b in found
     )
     assert not any(drawn.runs)
+    assert not drawn.graph._departure_lane_orders
 
 
 def test_a_pass_that_ends_with_other_records_than_the_first_fails_closed() -> None:
