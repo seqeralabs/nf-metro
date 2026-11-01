@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+import inspect
 import warnings
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from enum import Enum
 from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -56,6 +58,7 @@ from nf_metro.layout.routing.corners import (
     resolve_curve_radii,
 )
 from nf_metro.layout.routing.exit_turns import (
+    DepartureTurnAxisError,
     ExitTurnInvariantError,
     assert_exit_turn_snapshot,
     snapshot_exit_turn_segments,
@@ -1132,21 +1135,42 @@ def test_lane_arms_inside_one_corner_are_not_one_stroke() -> None:
     assert not exit_turns._lane_arms_read_as_one_stroke((1075.0,), 1079.0, CURVE_RADIUS)
 
 
+def _turn_axis_calls(
+    monkeypatch: pytest.MonkeyPatch,
+    route: Callable[[], object],
+    source_id: str | None = None,
+) -> list[tuple[dict[str, Any], Any]]:
+    """Each ``_plan_turn_axes`` call *route* makes, as its arguments by name
+    and its result, kept only for *source_id*'s turns when one is named."""
+    real_plan = exit_turns._plan_turn_axes
+    signature = inspect.signature(real_plan)
+    calls = []
+
+    def capture(*args: Any) -> Any:
+        result = real_plan(*args)
+        arguments = dict(signature.bind(*args).arguments)
+        if source_id is None or any(
+            seed.edge.source == source_id for seed in arguments["seeds"]
+        ):
+            calls.append((arguments, result))
+        return result
+
+    monkeypatch.setattr(exit_turns, "_plan_turn_axes", capture)
+    route()
+    monkeypatch.setattr(exit_turns, "_plan_turn_axes", real_plan)
+    assert calls
+    return calls
+
+
 def test_free_lane_arm_overlapping_a_pinned_corner_uses_legacy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    real_plan = exit_turns._plan_turn_axes
-    captured = []
-
-    def capture(*args):
-        if args[3] == "__junction_10":
-            captured.append(args)
-        return real_plan(*args)
-
-    monkeypatch.setattr(exit_turns, "_plan_turn_axes", capture)
-    _build_execution(TOPOLOGIES / "riboseq_fold_two_dir_entry.mmd")
-    assert captured
-    graph, ctx, plan_id, source_id, exit_port_id, source_run, lanes, seeds = captured[0]
+    (arguments, _result), *_ = _turn_axis_calls(
+        monkeypatch,
+        lambda: _build_execution(TOPOLOGIES / "riboseq_fold_two_dir_entry.mmd"),
+        "__junction_10",
+    )
+    ctx, seeds = arguments["ctx"], arguments["seeds"]
     pinned = next(seed for seed in seeds if seed.fixed_axis is not None)
     assert pinned.fixed_axis is not None
     assert pinned.run_direction is not None
@@ -1163,18 +1187,44 @@ def test_free_lane_arm_overlapping_a_pinned_corner_uses_legacy(
         fixed_axis=None,
     )
 
-    result = real_plan(
-        graph,
-        ctx,
-        plan_id,
-        source_id,
-        exit_port_id,
-        source_run,
-        lanes,
-        (*seeds, free),
-    )
+    result = exit_turns._plan_turn_axes(**{**arguments, "seeds": (*seeds, free)})
 
     assert result.legacy_reason == "lane-arms-pinned-to-overlapping-corners"
+
+
+def test_a_line_whose_departures_take_two_lanes_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A recorded line turns on the axis of the lane it takes, so the same line
+    also turning, unrecorded, in that cohort would need a second axis."""
+    calls = _turn_axis_calls(
+        monkeypatch,
+        lambda: _build_execution(
+            FIXTURES / "regressions" / "departure_order_fork_port_stop.mmd"
+        ),
+        "__junction_4",
+    )
+    arguments = next(
+        arguments for arguments, result in calls if result.legacy_reason is None
+    )
+    (record,) = arguments["departure_orders"]
+    recorded = next(
+        seed
+        for seed in arguments["seeds"]
+        if seed.turn_direction is not None
+        and seed.edge.target == record.target_id
+        and record.natural_line(seed.edge.line_id) != seed.edge.line_id
+    )
+    unrecorded = replace(
+        recorded,
+        edge=recorded.edge._replace(target="unrecorded"),
+        member_id=EmissionMemberId("unrecorded-twin"),
+    )
+
+    with pytest.raises(DepartureTurnAxisError, match="__junction_4"):
+        exit_turns._plan_turn_axes(
+            **{**arguments, "seeds": (*arguments["seeds"], unrecorded)}
+        )
 
 
 def test_multiline_stacked_left_exit_drop_is_planned() -> None:
@@ -1897,17 +1947,10 @@ def test_planned_bundle_pins_consistent_same_line_attachments() -> None:
 def test_free_vertical_turn_axes_choose_origin_in_the_run_direction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    real_plan = exit_turns._plan_turn_axes
-    captured = []
-
-    def capture(*args):
-        captured.append(args)
-        return real_plan(*args)
-
-    monkeypatch.setattr(exit_turns, "_plan_turn_axes", capture)
-    _observe(TOPOLOGIES / "tb_bottom_exit_bundle_jog.mmd")
-    assert captured
-    graph, ctx, plan_id, source_id, exit_port_id, _run, lanes, seeds = captured[0]
+    (arguments, _result), *_ = _turn_axis_calls(
+        monkeypatch, lambda: _observe(TOPOLOGIES / "tb_bottom_exit_bundle_jog.mmd")
+    )
+    seeds = arguments["seeds"]
 
     for run_direction, turn_direction in (
         (Direction.D, Direction.R),
@@ -1924,15 +1967,12 @@ def test_free_vertical_turn_axes_choose_origin_in_the_run_direction(
             )
             for seed in seeds
         )
-        result = real_plan(
-            graph,
-            ctx,
-            plan_id,
-            source_id,
-            exit_port_id,
-            run_direction,
-            lanes,
-            synthetic,
+        result = exit_turns._plan_turn_axes(
+            **{
+                **arguments,
+                "source_run_direction": run_direction,
+                "seeds": synthetic,
+            }
         )
 
         assert result.legacy_reason is None
