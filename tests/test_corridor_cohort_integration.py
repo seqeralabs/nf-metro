@@ -3006,3 +3006,79 @@ def test_guard_corner_orders_turn_with_the_run_direction(
     emitted = cci._corner_orders(claims, (), 4.0, neighbours)
 
     assert [(item.lower_member_id, item.upper_member_id) for item in emitted] == orders
+
+
+def _riser_patch(
+    *,
+    source: float,
+    allocated: float,
+    other_source: float | None = None,
+    other_allocated: float | None = None,
+) -> tuple[list[tuple[float, float]], tuple[int, ...]]:
+    """The patched points and owned ranks of a route with one or two risers."""
+    risers = [(source, allocated)]
+    if other_source is not None and other_allocated is not None:
+        risers.append((other_source, other_allocated))
+    points = [(0.0, 10.0)]
+    for source_x, _allocated_x in risers:
+        points += [(source_x, 10.0), (source_x, 40.0), (source_x + 30.0, 40.0)]
+    edge_key = ("a:source", "a:target", "l0")
+    route = _mutable_route(
+        source=edge_key[0], target=edge_key[1], line_id=edge_key[2], points=points
+    )
+    target = CorridorCohortTarget(
+        "a",
+        "plan:a",
+        edge_key,
+        RouteFamilyId.MERGE_TRUNK,
+        ("connector:a",),
+        route,
+        True,
+    )
+    allocations = tuple(
+        cci.CorridorCohortAllocation(
+            f"claim:{rank}",
+            "a",
+            "plan:a",
+            edge_key,
+            RouteFamilyId.MERGE_TRUNK,
+            ("connector:a",),
+            3 * rank + 1,
+            0,
+            10.0,
+            40.0,
+            allocated_x,
+            source_x,
+        )
+        for rank, (source_x, allocated_x) in enumerate(risers)
+    )
+    patches = cci._prepare_patches(allocations, (), (target,))
+    assert patches is not None
+    (patch,) = patches
+    return patch.points, patch.owned
+
+
+def test_patch_keeps_an_unmoved_coordinates_own_float() -> None:
+    """The solve reads coordinates to a nanometre, so an allocation within that
+    of its source is the source: the patch keeps the source's float form, which
+    the exact-equality ownership checks compare against."""
+    source = 337.34999999999997
+    allocated = 337.35
+    assert allocated != source
+
+    points, owned = _riser_patch(source=source, allocated=allocated)
+
+    assert [x for x, _y in points[1:3]] == [source, source]
+    assert 1 in owned
+
+
+def test_patch_writes_a_coordinate_the_solve_moved() -> None:
+    points, _owned = _riser_patch(
+        source=337.34999999999997,
+        allocated=341.35,
+        other_source=400.0,
+        other_allocated=400.0000001,
+    )
+
+    assert [x for x, _y in points[1:3]] == [341.35, 341.35]
+    assert [x for x, _y in points[4:6]] == [400.0000001, 400.0000001]

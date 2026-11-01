@@ -58,6 +58,7 @@ from nf_metro.layout.routing.common import (
     segment_direction,
 )
 from nf_metro.layout.routing.corridor_cohorts import (
+    SOLVE_QUANTUM,
     CorridorAllocationFailureReason,
     CorridorAllocationProblem,
     CorridorAllocationResult,
@@ -4055,6 +4056,14 @@ def _prepare_patches(
             start, end = points[segment_rank : segment_rank + 2]
             if abs(start[axis] - end[axis]) > COORD_TOLERANCE:
                 return None
+            # The solve reads coordinates only to SOLVE_QUANTUM, so a result
+            # that close to the source is the source; its float form differs
+            # by noise that the exact-equality ownership checks read as a move.
+            if (
+                start[axis] == end[axis]
+                and abs(coordinate - start[axis]) <= SOLVE_QUANTUM
+            ):
+                continue
             for point_rank in (segment_rank, segment_rank + 1):
                 point = list(points[point_rank])
                 point[axis] = coordinate
