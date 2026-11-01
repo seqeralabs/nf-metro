@@ -14,27 +14,40 @@ from typing import Any
 import pytest
 from conftest import curve_abort_softened, is_curve_abort_fixture
 
-from nf_metro.api import render_string
+from nf_metro.api import prepare_graph, render_string
 from nf_metro.layout.phases.guards import FoldThresholdError
+from nf_metro.layout.route_reservations import ColumnGapRegion
 from nf_metro.layout.routing import corridor_cohort_integration as cci
 from nf_metro.layout.routing import member_geometry
+from nf_metro.layout.routing.context import _RoutingCtx
 from nf_metro.layout.routing.corridor_cohorts import (
     CorridorAllocationProblem,
     CorridorAllocationResult,
     CorridorAllocationStatus,
     CorridorCornerOrderTier,
 )
+from nf_metro.layout.routing.normalize import _route_endpoint_section_ids
+from nf_metro.layout.routing.reserved_bands import corridor_clearance_band
 from nf_metro.layout.settlement_demand import BoundaryClearanceRequirement
 from nf_metro.parser.model import PermissiveGuardWarning
 from nf_metro.render import svg
 
 REGRESSIONS = Path(__file__).parent / "fixtures" / "regressions"
+DATA = Path(__file__).parent / "data"
 
 
 class _Captured:
     def __init__(self) -> None:
         self.compiles = 0
         self.plans: list[cci.CorridorCohortPlan] = []
+        self.compiled: list[
+            tuple[
+                _RoutingCtx,
+                tuple[cci.CorridorCohortTarget, ...],
+                cci.CorridorCohortPlan,
+            ]
+        ] = []
+        self.ctx: _RoutingCtx | None = None
         self.granted: set[str] = set()
         self.apertures: list[BoundaryClearanceRequirement] = []
 
@@ -55,18 +68,25 @@ class _Captured:
 
 def _render(
     monkeypatch: pytest.MonkeyPatch,
-    fixture: str,
+    fixture: str | Path,
     layout_options: dict[str, Any] | None = None,
 ) -> _Captured:
     captured = _Captured()
+    compile_cohorts = member_geometry._compile_corridor_cohorts
     compile_plan = member_geometry.compile_corridor_cohort_plan
     granted_ids = svg._corridor_grant_moved_plan_ids
     aperture_requirements = member_geometry._corridor_cohort_aperture_requirements
+
+    def capture_ctx(*args: Any, **kwargs: Any) -> Any:
+        captured.ctx = kwargs["ctx"] if "ctx" in kwargs else args[4]
+        return compile_cohorts(*args, **kwargs)
 
     def capture_plan(*args: Any, **kwargs: Any) -> cci.CorridorCohortPlan:
         captured.compiles += 1
         plan = compile_plan(*args, **kwargs)
         captured.plans.append(plan)
+        assert captured.ctx is not None
+        captured.compiled.append((captured.ctx, tuple(args[1]), plan))
         return plan
 
     def capture_granted(plan: Any) -> frozenset[str]:
@@ -79,12 +99,13 @@ def _render(
         captured.apertures.extend(requirements)
         return requirements
 
+    monkeypatch.setattr(member_geometry, "_compile_corridor_cohorts", capture_ctx)
     monkeypatch.setattr(member_geometry, "compile_corridor_cohort_plan", capture_plan)
     monkeypatch.setattr(
         member_geometry, "_corridor_cohort_aperture_requirements", capture_apertures
     )
     monkeypatch.setattr(svg, "_corridor_grant_moved_plan_ids", capture_granted)
-    path = REGRESSIONS / fixture
+    path = fixture if isinstance(fixture, Path) else REGRESSIONS / fixture
     with warnings.catch_warnings(), curve_abort_softened(is_curve_abort_fixture(path)):
         warnings.simplefilter("ignore")
         render_string(
@@ -182,19 +203,113 @@ def test_lanes_turning_together_seat_in_their_corner_order(
             ), order
 
 
-def test_junction_fed_gap_names_both_facing_sections(
+@pytest.mark.parametrize(
+    "fixture",
+    ["cohort_region_floor_lift.mmd", "cohort_region_exit_riser.mmd"],
+)
+def test_compile_seats_each_lane_inside_its_corridor_band(
+    monkeypatch: pytest.MonkeyPatch, fixture: str
+) -> None:
+    """Every seated lane lies inside the band the corridor hold draws its run
+    in: its claim's reserved band, else the live gap band, widened to the
+    lane's input coordinate, which the hold may already have left outside
+    it."""
+    captured = _render(monkeypatch, DATA / fixture)
+    checked = 0
+    outside = []
+    for ctx, targets, plan in captured.compiled:
+        routes = {target.edge_key: target.route for target in targets}
+        for allocation in plan.allocations:
+            band = ctx.reserved_bands.for_segment(
+                *allocation.edge_key, allocation.segment_rank
+            ) or corridor_clearance_band(
+                ctx.graph,
+                axis=allocation.axis,
+                section_ids=_route_endpoint_section_ids(
+                    ctx.graph, routes[allocation.edge_key]
+                ),
+                coordinate=allocation.source_coordinate,
+                run_start=allocation.longitudinal_start,
+                run_end=allocation.longitudinal_end,
+            )
+            if band is None:
+                continue
+            checked += 1
+            low = min(band.lo, allocation.source_coordinate)
+            high = max(band.hi, allocation.source_coordinate)
+            if not low - 1e-6 <= allocation.coordinate <= high + 1e-6:
+                outside.append((allocation.claim_id, allocation.coordinate, low, high))
+    assert checked
+    assert not outside
+
+
+def test_compile_seats_no_lane_through_a_section(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured = _render(
-        monkeypatch,
-        "cohort_junction_fed_gap_boundary.mmd",
-        {"compact_offsets": False, "stroke_scale": 1.5, "line_order": "span"},
+    """The junction's run to ``sec2`` crosses the gap beside ``sec1``, whose
+    reserved band keeps it out of ``sec1`` even where a fixed footprint denies
+    it the coordinate it was drawn at."""
+    captured = _render(monkeypatch, DATA / "cohort_region_beside_section.mmd")
+    assert captured.compiled
+    crossings = []
+    for ctx, _targets, plan in captured.compiled:
+        for allocation in plan.allocations:
+            run = sorted((allocation.longitudinal_start, allocation.longitudinal_end))
+            for section in ctx.graph.sections.values():
+                box = (
+                    (section.bbox_x, section.bbox_x + section.bbox_w),
+                    (section.bbox_y, section.bbox_y + section.bbox_h),
+                )
+                across, along = box[allocation.axis], box[1 - allocation.axis]
+                if (
+                    across[0] < allocation.coordinate < across[1]
+                    and min(run[1], along[1]) - max(run[0], along[0]) > 1.0
+                ):
+                    crossings.append((allocation.claim_id, section.id))
+    assert not crossings
+
+
+_JUNCTION_FED_GAP = "cohort_junction_fed_gap_boundary.mmd"
+_JUNCTION_FED_GAP_OPTIONS = {
+    "compact_offsets": False,
+    "stroke_scale": 1.5,
+    "line_order": "span",
+}
+
+
+def test_junction_fed_gap_names_both_facing_sections() -> None:
+    """The junction-fed claim and its blocker touch only ``sec4``, in column
+    0, so neither faces the column 1|2 gap; both sides come from the sections
+    at the gap's own columns sharing ``sec4``'s rows."""
+    path = REGRESSIONS / _JUNCTION_FED_GAP
+    graph = prepare_graph(
+        path.read_text(),
+        layout_options=_JUNCTION_FED_GAP_OPTIONS,
+        source_dir=str(path.parent),
     )
-    assert captured.apertures
-    assert all(
-        requirement.negative_section_ids and requirement.positive_section_ids
-        for requirement in captured.apertures
+    away = (graph.sections["sec4"],)
+
+    negative, positive = member_geometry._corridor_boundary_sections(
+        graph, ColumnGapRegion(1, 2), away, away
     )
+
+    assert [section.id for section in negative] == ["sec3"]
+    assert [section.id for section in positive] == ["sec2"]
+
+
+def test_junction_fed_gap_seats_inside_its_regions_without_an_aperture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A region floor lifts the lanes above it inside their own regions, so
+    the gap seats as drawn and asks for no widening."""
+    captured = _render(monkeypatch, _JUNCTION_FED_GAP, _JUNCTION_FED_GAP_OPTIONS)
+    assert captured.components
+    assert not captured.apertures
+    assert not [
+        component.component_id
+        for component in captured.components
+        if component.status is CorridorAllocationStatus.FAILURE
+    ]
 
 
 def test_vertical_drops_land_on_distinct_slots(

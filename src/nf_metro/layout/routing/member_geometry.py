@@ -44,7 +44,11 @@ from nf_metro.layout.route_plan import (
     RouteSemanticScaffold,
     RouteSystemId,
 )
-from nf_metro.layout.route_reservations import ColumnGapRegion, RowGapRegion
+from nf_metro.layout.route_reservations import (
+    ColumnGapRegion,
+    CorridorOrientation,
+    RowGapRegion,
+)
 from nf_metro.layout.routing.common import (
     Direction,
     GapSlot,
@@ -78,6 +82,7 @@ from nf_metro.layout.routing.corridor_cohort_integration import (
     CorridorCohortPlan,
     CorridorCohortTarget,
     CorridorCornerSizing,
+    CorridorLaneRegions,
     CorridorScalarRequest,
     _network_id,
     compile_corridor_cohort_plan,
@@ -924,6 +929,61 @@ def _post_emission_seated_snapshot(
     )
 
 
+def _corridor_lane_regions(
+    ledger: CorridorCohortLedger,
+    targets: Sequence[CorridorCohortTarget],
+    ctx: _RoutingCtx,
+) -> CorridorLaneRegions:
+    """Each claimed segment's corridor extent, as the corridor hold reads it.
+
+    The claim's reserved band where the ledger realises one, otherwise the
+    clearance band of the gap the segment's input coordinate sits in, widened
+    to hold that coordinate: the hold may already have left the lane outside
+    its band, and the solve must not ask for a seat the hold cannot draw.  An
+    unbounded side is ``None``; an inverted band bounds nothing, since the hold
+    then moves nothing.
+    """
+    routes = {target.edge_key: target.route for target in targets}
+    regions: dict[tuple[tuple[str, str, str], int], tuple[float | None, float | None]]
+    regions = {}
+    for claim in ledger.claims:
+        edge_key, rank = claim.edge_key, claim.segment_rank
+        if (
+            edge_key is None
+            or (route := routes.get(edge_key)) is None
+            or rank + 1 >= len(route.points)
+        ):
+            continue
+        axis = int(claim.orientation is CorridorOrientation.HORIZONTAL)
+        start, end = route.points[rank : rank + 2]
+        coordinate = start[axis]
+        band: ReservedBand | GapCorridorBand | None = _segment_claim_band(
+            ctx, route, rank
+        )
+        if band is None:
+            section_ids = _route_endpoint_section_ids(ctx.graph, route)
+            if not section_ids:
+                continue
+            band = corridor_clearance_band(
+                ctx.graph,
+                axis=axis,
+                section_ids=section_ids,
+                coordinate=coordinate,
+                run_start=start[1 - axis],
+                run_end=end[1 - axis],
+            )
+            if band is None:
+                continue
+        if band.hi < band.lo - COORD_TOLERANCE:
+            continue
+        low, high = min(band.lo, coordinate), max(band.hi, coordinate)
+        regions[edge_key, rank] = (
+            None if math.isinf(low) else low,
+            None if math.isinf(high) else high,
+        )
+    return regions
+
+
 def _compile_corridor_cohorts(
     ledger: CorridorCohortLedger | None,
     candidates: Sequence[_MemberCandidate],
@@ -977,6 +1037,7 @@ def _compile_corridor_cohorts(
             ),
             live_route=lambda route: live_by_copy_id[id(route)],
             entry_port_for=ctx.merge.entry_port_for,
+            lane_regions=_corridor_lane_regions(ledger, seated_targets, ctx),
         )
     except CorridorCohortCompilationError as error:
         if not allow_clearance_requirements:

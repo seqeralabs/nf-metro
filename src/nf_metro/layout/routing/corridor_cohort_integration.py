@@ -70,6 +70,7 @@ from nf_metro.layout.routing.corridor_cohorts import (
     CorridorFixedEquality,
     CorridorForbiddenInterval,
     CorridorLane,
+    CorridorLaneRegion,
     CorridorObstacle,
     CorridorSeparation,
     _overlaps,
@@ -81,6 +82,9 @@ from nf_metro.parser.route_topology import ConnectorId
 
 CorridorCohortSegmentKey = tuple[str, tuple[str, str, str], int]
 CorridorFootprintSegmentKey = tuple[str, tuple[str, str, str], int]
+CorridorLaneRegions = Mapping[
+    tuple[tuple[str, str, str], int], tuple[float | None, float | None]
+]
 
 
 class CorridorCohortClaimRole(str, Enum):
@@ -3270,6 +3274,7 @@ def _problem(
         MappingProxyType({})
     ),
     corner_neighbours: Mapping[tuple[str, int], _CornerNeighbour],
+    lane_regions: CorridorLaneRegions = MappingProxyType({}),
 ) -> CorridorAllocationProblem:
     scalar_by_id = {
         request.variable.variable_id: request for request in scalar_requests
@@ -3583,6 +3588,14 @@ def _problem(
         for item in movable
     )
     coordinate_axis = movable[0].axis if movable else scalar_requests[0].variable.axis
+    regions = tuple(
+        CorridorLaneRegion(item.claim_id, f"lane-region|{item.claim_id}", *bounds)
+        for item in movable
+        if (
+            bounds := lane_regions.get((item.target.edge_key, item.ledger.segment_rank))
+        )
+        is not None
+    )
     return CorridorAllocationProblem(
         (*member_lanes, *scalar_lanes),
         (
@@ -3607,6 +3620,7 @@ def _problem(
             {item.ledger.region for item in movable},
         ),
         coordinate_axis=coordinate_axis,
+        regions=regions,
         corner_orders=_corner_orders(
             movable, separations, offset_step, corner_neighbours
         ),
@@ -3854,6 +3868,7 @@ def _component_plan(
     solve: Callable[[CorridorAllocationProblem], CorridorAllocationResult],
     overlaid_cohort_ids: frozenset[str],
     corner_neighbours: Mapping[tuple[str, int], _CornerNeighbour],
+    lane_regions: CorridorLaneRegions,
 ) -> CorridorCohortComponentPlan:
     """Lower one closed component into a single per-axis solver problem.
 
@@ -3912,6 +3927,7 @@ def _component_plan(
             scalar_requests=component_scalar_requests,
             intervals_by_member=intervals_by_member,
             corner_neighbours=corner_neighbours,
+            lane_regions=lane_regions,
         )
         problems = (problem,)
         results = (solve(problem),)
@@ -4217,6 +4233,7 @@ def compile_corridor_cohort_plan(
     corner_sizer: CorridorCornerSizer = _no_corner_sizing,
     live_route: Callable[[RoutedPath], RoutedPath] = _same_route,
     entry_port_for: Mapping[str, str],
+    lane_regions: CorridorLaneRegions = MappingProxyType({}),
 ) -> CorridorCohortPlan:
     """Solve every cohort from one route snapshot without publishing geometry.
 
@@ -4235,6 +4252,9 @@ def compile_corridor_cohort_plan(
 
     *entry_port_for* maps a merge junction to the entry port it feeds, so the
     routes converging on one port are written as one group.
+
+    *lane_regions* bounds a claimed segment, keyed by edge and segment rank, to
+    the corridor extent it is drawn in (see :class:`CorridorLaneRegion`).
     """
     claims, overlaid_cohort_ids = _bind_ledger(ledger, targets)
     scalar_requests_by_id = {
@@ -4330,6 +4350,7 @@ def compile_corridor_cohort_plan(
             solve,
             overlaid_cohort_ids,
             corner_neighbours,
+            lane_regions,
         )
         for rank, spec in enumerate(logical)
     ]
