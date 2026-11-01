@@ -42,6 +42,7 @@ from nf_metro.layout.constants import (
     Y_SPACING,
     graph_offset_step,
 )
+from nf_metro.layout.departure_order import DepartureOrderPlan
 from nf_metro.layout.geometry import lanes_run_along_x, perpendicular_port_sides
 
 if TYPE_CHECKING:
@@ -541,6 +542,9 @@ def compute_layout(
     # the graph so per-stage call sites can snapshot without signature churn.
     # Off by default: when unset, each _snap call is a single attribute read.
     graph._phase_snapshots_enabled = phase_snapshots_enabled()
+    # Offsets phase 7b' decides each departure record once per layout, in the
+    # first positioning pass; every later pass replays the decisions.
+    graph._departure_order_plan = DepartureOrderPlan()
     graph._departure_record_keys = None
 
     from nf_metro.layout.pass_metrics import font_scale_context, stroke_scale_context
@@ -1444,14 +1448,10 @@ def _layout_once(
 
     Clears ``_cross_column_perp_bridge_ports`` before the pass and prunes it
     against the pass's final boxes after, so it holds only this pass's bridges.
-    Starts an empty departure-order plan, which offsets phase 7b' fills once
-    per pass, and fails closed if the pass ends holding other departure
-    records than the layout's first pass did.
+    Fails closed if the pass ends holding other departure records than the
+    layout's first pass did.
     """
-    from nf_metro.layout.departure_order import (
-        DepartureOrderPlan,
-        hold_departure_records,
-    )
+    from nf_metro.layout.departure_order import hold_departure_records
     from nf_metro.layout.fan_plans import (
         build_fan_plan_execution,
         install_fan_plan_execution,
@@ -1459,7 +1459,6 @@ def _layout_once(
     from nf_metro.parser.route_topology import build_route_topology_query
 
     graph._cross_column_perp_bridge_ports.clear()
-    graph._departure_order_plan = DepartureOrderPlan()
     topology = build_route_topology_query(graph)
     if topology is not None:
         install_fan_plan_execution(

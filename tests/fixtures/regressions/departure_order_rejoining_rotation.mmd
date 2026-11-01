@@ -1,0 +1,47 @@
+%%metro title: Fuzz 8403008
+%%metro style: seqera
+%%metro line: l0 | Vcf | #e6194b
+%%metro line: l1 | Qc_Stats_Sort | #3cb44b
+%%metro line: l2 | Report_Assemble | #4363d8
+%%metro line: l3 | Gather_Markdup | #f58231
+%%metro line: l4 | Bin_Report | #911eb4
+%%metro grid: sec0 | 0,0
+%%metro grid: sec1 | 1,0
+%%metro grid: sec2 | 2,0
+
+graph LR
+    subgraph sec0 [Call 0]
+        %%metro direction: BT
+        %%metro exit: top | l0, l1, l4
+        s0n0[gather_trim]
+        s0n1[gather_gather]
+        s0n2[ANNOTATE]
+        s0n3[CALL_QUANT_BIN]
+        s0n0 -->|l0,l1,l4| s0n1
+        s0n1 -->|l1,l4| s0n2
+        s0n2 -->|l1,l4| s0n3
+    end
+    subgraph sec1 [Pca 1]
+        %%metro entry: bottom | l0, l1
+        %%metro entry: top | l4
+        s1n0[pca_align]
+        s1n1[merge_quant_polish]
+        s1n2[qc_fastqc_call]
+        s1n0 -->|l0,l1,l3| s1n1
+        s1n1 -->|l0,l3| s1n2
+    end
+    subgraph sec2 [Polish 2]
+        s2n0[bin]
+        s2n1[BAM]
+        s2n2[annotate_call_annotate]
+        s2n3[vcf_call]
+        s2n0 -->|l2,l3| s2n1
+        s2n1 -->|l2,l3| s2n3
+        s2n0 -->|l3| s2n3
+        s2n0 -->|l4| s2n2
+    end
+    s0n1 -->|l0| s1n0
+    s0n3 -->|l1,l4| s1n0
+    s1n2 -->|l2,l3| s2n0
+    s1n1 -->|l3| s2n0
+    s0n0 -->|l4| s2n0

@@ -324,9 +324,10 @@ runtime check either:
   render fold-abort chokepoint. A resolve-time flow reversal is recorded as a
   `FLOW_REORIENTED_DIRECTION` decision in `graph.layout_provenance`; routing's
   exit-port offset reads that typed reason instead of a second section set.
-- `graph._departure_order_plan` - one positioning pass's 7b' port decisions
-  (a record, or none), reset at the start of each pass, filled by the pass's
-  first offsets run after Stage 5.1 and replayed by every later run.
+- `graph._departure_order_plan` - one layout's 7b' port decisions (a
+  record, or none), reset when `compute_layout` starts, filled by the first
+  offsets run after Stage 5.1 and replayed by every later run after Stage 5.1
+  in any positioning pass.
 - `graph._departure_lane_orders` - the `DepartureLaneOrder` records the latest
   station-offset computation holds; read by routing's fan, gap, band,
   exit-turn and seating consumers and the bundle-order curve check, empty when
@@ -1621,21 +1622,26 @@ the planned-fan offsets that follow them own the lanes a fan plan states.
   order, and the lines change sides once, at the fork. A single junction
   feeder gets one too where its lines shared with a sibling departure peel
   off beyond the port: those take the lanes on the fork's side, the grid read
-  along the port's inward axis. A record port is decided once per positioning
-  pass, in the first offsets run after Stage 5.1, into
-  `graph._departure_order_plan`; later runs of the pass replay the decision,
-  and a pass that ends holding other records than the layout's first pass
-  raises `DepartureRecordDriftError`.
+  along the port's inward axis, and only when each pair it reorders parts
+  after the port too (the two lines go on to different stations before
+  either ends). A record port is decided once per layout, in the first
+  offsets run after Stage 5.1, into `graph._departure_order_plan`; every
+  later run after Stage 5.1, in any positioning pass, replays the decision
+  and its carry verdict, so every pass ends holding the first pass's records
+  (`DepartureRecordDriftError` asserts it).
   Its order is carried along the bundle only when the carry adds no
   crossing, sandwich or same-row marker strike, and leaves no carried exit
   holding a pair in the other order to the perpendicular entry its connector
   feeds (`_perpendicular_seam_flips`: that entry's order belongs to its own
   feeders); it is judged by the owners above on the offsets phase 8 would
   leave it with, and refused
-  (`reconcile`) when phase 8 would break it. Junction fan positions, gap
+  (`reconcile`) when phase 8 would break it or leave more of the port's
+  same-row exit feeders (an exit of another section on the port's row) on
+  other lanes than the port's. Junction fan positions, gap
   ranks, `_distinct_line_order`, the trunk-band constraints, exit-turn axes,
-  settled exit-turn lane ranks, the gap-bundle seat by port slot order and
-  the bundle-order curve check read the records each run publishes in
+  settled exit-turn lane ranks, the gap-bundle seat by port slot order, the
+  peel-off riser slots of a departure whose tail leaves the junction itself
+  (`peeloff_target_slots`) and the bundle-order curve check read the records each run publishes in
   `graph._departure_lane_orders`.
 - **Invariants preserved**: Every order 7b' decides holds to the end of the
   run. Phase 12 compacts seed by seed and 14b exchanges arrival by arrival,

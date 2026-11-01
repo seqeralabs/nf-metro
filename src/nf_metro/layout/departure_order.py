@@ -9,8 +9,9 @@ does, as a permutation of the natural (concentric) order, so every consumer
 relabels its own natural ranks and none reads a frame sign.
 
 Offsets phase 7b' (``_order_entry_ports_by_approach``) decides each port once
-per positioning pass, in its first run after junction positioning (Stage 5.1),
-into a :class:`DepartureOrderPlan`; every later run of that pass replays the
+per layout, in its first run after junction positioning (Stage 5.1) of the
+first positioning pass, into a :class:`DepartureOrderPlan`; every later run
+after junction positioning, in that pass and every later one, replays the
 decision rather than re-deciding it.
 """
 
@@ -116,12 +117,14 @@ class PortOrderDecision:
 
 @dataclass
 class DepartureOrderPlan:
-    """One positioning pass's 7b' decisions, keyed by entry port.
+    """One layout's 7b' decisions, keyed by entry port.
 
-    A port maps to ``None`` when the pass decided it takes no record.  The plan
-    is *sealed* once the pass's first offsets run after junction positioning
-    completes, so no later run of the pass decides a port anew; those runs
-    replay the decisions.
+    A port maps to ``None`` when it was decided to take no record.  The plan is
+    *sealed* once the first offsets run after junction positioning completes,
+    so no later run decides a port anew: every run after junction positioning,
+    in any positioning pass, replays the decisions, carry verdict included,
+    whatever the pass's own positions would decide.  A run before junction
+    positioning neither decides nor replays.
     """
 
     decisions: dict[str, PortOrderDecision | None] = field(default_factory=dict)
@@ -130,6 +133,10 @@ class DepartureOrderPlan:
     def deciding(self, stages: Sequence[str]) -> bool:
         """Whether an offsets run at *stages* decides ports."""
         return not self.sealed and JUNCTIONS_POSITIONED in stages
+
+    def replaying(self, stages: Sequence[str]) -> bool:
+        """Whether an offsets run at *stages* applies the decisions taken."""
+        return JUNCTIONS_POSITIONED in stages
 
     def seal(self, stages: Sequence[str]) -> None:
         """Seal the plan once a run at *stages* has decided."""
@@ -141,10 +148,10 @@ class DepartureRecordDriftError(RuntimeError):
     """A positioning pass ended holding other departure records than an
     earlier pass of the same layout.
 
-    Each pass decides its records from the graph and its own positions, so a
-    record one pass keeps and another drops would leave its trace (spacing,
-    bypass helpers) on a layout the final pass draws without it.  The layout
-    fails closed rather than choosing between the passes.
+    Every pass replays the records the first pass decided, so a difference
+    means a pass drew without that replay; a record one pass keeps and another
+    drops would leave its trace (spacing, bypass helpers) on a layout the final
+    pass draws without it.
     """
 
     def __init__(self, changed: Iterable[tuple[str, str]]) -> None:

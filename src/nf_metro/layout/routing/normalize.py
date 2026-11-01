@@ -2303,7 +2303,7 @@ def _reconcile_port_peeloff_risers(routes: list[RoutedPath], ctx: _RoutingCtx) -
     """
     step = ctx.offset_step
     for bundle in iter_port_peeloff_bundles(routes, ctx.graph, step):
-        targets = peeloff_target_slots(bundle, step)
+        targets = peeloff_target_slots(bundle, step, ctx.graph._departure_lane_orders)
         n = len(bundle.per_line)
         seats: list[tuple[RoutedPath, _VChannel, PeeloffSlot]] = []
         settled = True
@@ -2410,7 +2410,7 @@ def _align_merge_fed_confluence_to_band(
         bundle = PortPeeloffBundle(
             port_id, entries, per_line, trunk_sign, vertical_sign, port_lead_sign
         )
-        slots = peeloff_target_slots(bundle, step)
+        slots = peeloff_target_slots(bundle, step, ctx.graph._departure_lane_orders)
         deltas = {
             (
                 round(per_line[lid].peel_x - slots[lid].peel_x, 3),

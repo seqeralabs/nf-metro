@@ -6811,7 +6811,7 @@ def check_peeloff_concentric(
             )
         if loose:
             continue
-        targets = peeloff_target_slots(bundle, step)
+        targets = peeloff_target_slots(bundle, step, graph._departure_lane_orders)
         for line_id, tail in bundle.per_line.items():
             slot = targets[line_id]
             if not tail_on_slot(tail, slot):
@@ -6833,7 +6833,7 @@ def check_peeloff_concentric(
         )
         if key in checked:
             continue
-        targets = peeloff_target_slots(bundle, step)
+        targets = peeloff_target_slots(bundle, step, graph._departure_lane_orders)
         for line_id, tail in bundle.per_line.items():
             slot = targets[line_id]
             if not tail_on_slot(tail, slot):

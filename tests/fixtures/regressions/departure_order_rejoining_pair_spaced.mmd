@@ -1,0 +1,34 @@
+%%metro title: Fuzz 8400444
+%%metro style: seqera
+%%metro line: l0 | Annotate_Assemble | #e6194b
+%%metro line: l1 | Filter | #3cb44b
+%%metro line: l2 | Polish | #4363d8
+
+%%metro y_spacing: 60
+%%metro section_x_gap: 80
+%%metro line_order: definition
+graph LR
+    subgraph sec0 [Normalize_Count_Classify 0]
+        %%metro direction: TB
+        s0n0[pca_trim]
+        s0n1[fastqc]
+        s0n2[dedup]
+        s0n1 -->|l0,l1,l2| s0n2
+        s0n0 -->|l1,l2| s0n1
+    end
+    subgraph sec1 [Gather 1]
+        s1n0[assemble_index_vcf]
+        s1n1[stats]
+        s1n0 -->|l0,l1,l2| s1n1
+    end
+    subgraph sec2 [Filter 2]
+        s2n0[report]
+        s2n1[count]
+        s2n2[bam]
+        s2n0 -->|l0| s2n1
+        s2n1 -->|l0,l1| s2n2
+    end
+    s0n2 -->|l0,l1,l2| s1n0
+    s1n1 -->|l0| s2n0
+    s0n0 -->|l1| s2n1
+    s0n1 -->|l1| s2n1

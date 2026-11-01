@@ -4,8 +4,8 @@ A junction feeder whose lines reach an entry port in an order its bundle does
 not carry concentrically gets a per-departure lane-order record
 (:class:`DepartureLaneOrder`): the recorded lines cross once, at the fork, and
 every routing consumer relabels its natural ranks through the record.  Offsets
-phase 7b' decides a record port once per positioning pass and replays the
-decision in every later offsets run of that pass.
+phase 7b' decides a record port once per layout and replays the decision in
+every later offsets run after junction positioning, in every positioning pass.
 """
 
 from __future__ import annotations
@@ -20,13 +20,22 @@ import pytest
 
 from nf_metro.api import render_string
 from nf_metro.layout.departure_order import (
+    JUNCTIONS_POSITIONED,
     DepartureLaneOrder,
+    DepartureOrderPlan,
     DepartureRecordDriftError,
     PortOrderDecision,
     hold_departure_records,
     relabel_departures,
 )
+from nf_metro.layout.routing import compute_station_offsets
 from nf_metro.layout.routing import offsets as offsets_module
+from nf_metro.layout.routing.common import (
+    PortPeeloffBundle,
+    RoutedPath,
+    peeloff_target_slots,
+    port_peeloff_tail,
+)
 from nf_metro.layout.routing.invariants import (
     BundleOrderViolation,
     CurveInvariantError,
@@ -42,6 +51,11 @@ FORK_TWO_FEEDERS = REGRESSIONS / "departure_order_fork_two_feeders.mmd"
 SHARED_RUN = REGRESSIONS / "departure_order_shared_run_no_record.mmd"
 FORK_PORT_STOP_TB = REGRESSIONS / "departure_order_fork_port_stop_tb.mmd"
 PERPENDICULAR_SEAM = REGRESSIONS / "departure_order_perpendicular_seam.mmd"
+REJOINING_PAIR = REGRESSIONS / "departure_order_rejoining_pair.mmd"
+REJOINING_PAIR_SPACED = REGRESSIONS / "departure_order_rejoining_pair_spaced.mmd"
+REJOINING_ROTATION = REGRESSIONS / "departure_order_rejoining_rotation.mmd"
+LEVEL_EXIT_FEEDER = REGRESSIONS / "departure_order_level_exit_feeder.mmd"
+CARRY_REPLAY = REGRESSIONS / "departure_order_carry_replay.mmd"
 
 
 class _Drawn:
@@ -128,19 +142,18 @@ def test_the_recorded_pair_crosses_only_on_its_departures_first_segment(
     assert not _outside_recorded_forks(drawn.graph, flips)
 
 
-def test_a_record_port_is_decided_once_per_positioning_pass(
+def test_a_record_port_is_decided_once_per_layout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Every offsets run after the deciding one replays its record, so the
-    record never changes within a pass and the decision is taken once."""
+    record never changes and the decision is taken in one run."""
     drawn = _draw(monkeypatch, FORK_PORT_STOP)
 
     with_record = [run for run in drawn.runs if run]
     assert with_record
     assert all(run == with_record[0] for run in with_record)
     first = next(i for i, run in enumerate(drawn.runs) if run)
-    assert first in drawn.decided_in
-    assert len(drawn.decided_in) < len(drawn.runs) - first
+    assert set(drawn.decided_in) == {first}
 
 
 def test_lines_that_leave_a_junction_together_take_no_record(
@@ -285,9 +298,14 @@ def test_a_carry_that_reorders_a_perpendicular_seam_takes_no_record(
     Zone 2's exit, whose connector feeds Zone 3's BOTTOM entry.  That entry's
     other feeder holds its order, so the seam would change order between the
     sections: the carry stops at the port, and the departure, whose order the
-    whole section has to take, gets no record."""
+    whole section has to take, gets no record.
+
+    The swapped pair ends together in Zone 2, which refuses the record before
+    the carry is judged, so the test lets the pair count as parting to reach
+    the seam."""
     added: list[set[tuple[str, str, str, str]]] = []
     flips = offsets_module._perpendicular_seam_flips
+    monkeypatch.setattr(offsets_module, "_part_beyond", lambda *_args: True)
 
     def spy(*args: Any) -> set[tuple[str, str, str, str]]:
         found = flips(*args)
@@ -317,3 +335,158 @@ def test_a_pass_that_ends_with_other_records_than_the_first_fails_closed() -> No
         hold_departure_records(graph)
 
     assert raised.value.changed == (("j", "port"),)
+
+
+def _part_beyond(graph: MetroGraph, sid: str, a: str, b: str) -> bool:
+    stack, seen = [sid], {sid}
+    while stack:
+        cur = stack.pop()
+        next_a, next_b = (
+            {e.target for e in graph.edges_from(cur) if e.line_id == line}
+            for line in (a, b)
+        )
+        if next_a and next_b and next_a != next_b:
+            return True
+        if next_a == next_b:
+            stack.extend(next_a - seen)
+            seen |= next_a
+    return False
+
+
+@pytest.mark.parametrize(
+    "path",
+    [REJOINING_PAIR, REJOINING_PAIR_SPACED, REJOINING_ROTATION, CARRY_REPLAY],
+    ids=["rejoining-pair", "rejoining-pair-spaced", "rejoining-rotation", "parting"],
+)
+def test_a_single_feeder_record_swaps_only_pairs_that_part_beyond_the_port(
+    monkeypatch: pytest.MonkeyPatch, path: Path
+) -> None:
+    """With one feeder nothing else forces the order, so a pair that ends
+    together beyond the port gains nothing from changing sides at the fork:
+    the swap would be an unforced crossing, or a lane change at the port the
+    connector arriving there does not make."""
+    drawn = _draw(monkeypatch, path)
+
+    assert drawn.graph is not None
+    graph = drawn.graph
+    for (source, port), record in graph._departure_lane_orders.items():
+        if len({e.source for e in graph.edges_to(port)}) != 1:
+            continue
+        lines = record.lines
+        for i, a in enumerate(lines):
+            for b in lines[i + 1 :]:
+                if record.reorders(a, b):
+                    assert _part_beyond(graph, port, a, b), (source, port, a, b)
+
+
+def test_a_record_leaves_its_ports_same_row_exit_feeder_level(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Section 1's exit sits on the row of section 2's entry and runs straight
+    into it, so every line it carries holds one lane across the gap; a record
+    whose order would step those lanes is refused."""
+    drawn = _draw(monkeypatch, LEVEL_EXIT_FEEDER)
+
+    assert drawn.graph is not None
+    offsets = compute_station_offsets(drawn.graph)
+    lines = ("l1", "l2", "l3")
+    exit_lanes = [offsets[("sec1__exit_right_1", line)] for line in lines]
+    entry_lanes = [offsets[("sec2__entry_left_3", line)] for line in lines]
+    assert exit_lanes == entry_lanes
+
+
+def test_a_later_pass_replays_the_first_pass_decision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A later positioning pass moves section 1's entry two rows from the
+    fork, where a fresh decision would stop the record's carry at the port and
+    drop the record; the pass replays the first pass's decision instead, so
+    every pass draws the same record."""
+    drawn = _draw(monkeypatch, CARRY_REPLAY)
+
+    key = ("__junction_4", "sec1__entry_left_3")
+    with_record = [run for run in drawn.runs if run]
+    assert with_record
+    assert all(run.keys() == {key} for run in with_record)
+    assert drawn.graph is not None
+    assert drawn.graph._departure_lane_orders.keys() == {key}
+
+
+def test_a_departure_plan_decides_once_and_replays_after_junctions_are_placed() -> None:
+    plan = DepartureOrderPlan()
+    before, after = ["1.1"], ["1.1", JUNCTIONS_POSITIONED]
+
+    assert not plan.deciding(before) and not plan.replaying(before)
+    assert plan.deciding(after) and plan.replaying(after)
+    plan.seal(before)
+    assert plan.deciding(after)
+    plan.seal(after)
+    assert not plan.deciding(after)
+    assert plan.replaying(after) and not plan.replaying(before)
+
+
+def _peeloff_bundle(*routes: RoutedPath) -> PortPeeloffBundle:
+    entries = []
+    for route in routes:
+        tail = port_peeloff_tail(route)
+        assert tail is not None
+        entries.append((route, tail))
+    per_line = {route.line_id: tail for route, tail in entries}
+    first = entries[0][1]
+    return PortPeeloffBundle(
+        "port",
+        entries,
+        per_line,
+        first.trunk_sign,
+        first.vertical_sign,
+        first.port_lead_sign,
+    )
+
+
+def _riser(source: str, line: str, *points: tuple[float, float]) -> RoutedPath:
+    return RoutedPath(Edge(source, "port", line), line, list(points))
+
+
+def test_a_recorded_departure_takes_the_peeloff_slot_of_the_lane_it_takes() -> None:
+    """Both tails leave the junction on their trunk, so the lines change sides
+    at the fork itself: each riser and port slot belongs to the line whose lane
+    the record gives it, not to its own trunk depth."""
+    bundle = _peeloff_bundle(
+        _riser("j", "a", (0.0, 100.0), (50.0, 100.0), (50.0, 20.0), (80.0, 20.0)),
+        _riser("j", "b", (0.0, 104.0), (54.0, 104.0), (54.0, 24.0), (80.0, 24.0)),
+    )
+    swap = {("j", "port"): _record(("b", "a"), ("a", "b"))}
+
+    natural = peeloff_target_slots(bundle, 4.0, {})
+    recorded = peeloff_target_slots(bundle, 4.0, swap)
+
+    assert (natural["a"].peel_x, natural["b"].peel_x) == (50.0, 54.0)
+    assert recorded == {"a": natural["b"], "b": natural["a"]}
+
+
+def test_a_departure_whose_tail_starts_beyond_its_junction_keeps_its_slots() -> None:
+    bundle = _peeloff_bundle(
+        _riser(
+            "j",
+            "a",
+            (0.0, 60.0),
+            (0.0, 100.0),
+            (50.0, 100.0),
+            (50.0, 20.0),
+            (80.0, 20.0),
+        ),
+        _riser(
+            "j",
+            "b",
+            (4.0, 60.0),
+            (4.0, 104.0),
+            (54.0, 104.0),
+            (54.0, 24.0),
+            (80.0, 24.0),
+        ),
+    )
+    swap = {("j", "port"): _record(("b", "a"), ("a", "b"))}
+
+    assert peeloff_target_slots(bundle, 4.0, swap) == peeloff_target_slots(
+        bundle, 4.0, {}
+    )
