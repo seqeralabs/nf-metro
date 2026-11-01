@@ -3001,20 +3001,13 @@ def _fixed_lanes_between(
 ) -> int:
     """Distinct fixed lanes from outside the members' cohort drawn strictly
     between two cohort members, beside both on a span they share."""
-    if (
-        lower.axis != upper.axis
-        or lower.ledger.direction is not upper.ledger.direction
-        or not _overlap(lower, upper)
-    ):
-        return 0
     low, high = sorted((lower.coordinate, upper.coordinate))
     shared_start = max(lower.longitudinal_start, upper.longitudinal_start)
     shared_end = min(lower.longitudinal_end, upper.longitudinal_end)
     between = sorted(
         item.coordinate
         for item in fixed_claims
-        if item.axis == lower.axis
-        and item.ledger.endpoint_cohort_id != lower.ledger.endpoint_cohort_id
+        if item.ledger.endpoint_cohort_id != lower.ledger.endpoint_cohort_id
         and low + COORD_TOLERANCE < item.coordinate < high - COORD_TOLERANCE
         and _overlaps(
             item.longitudinal_start, item.longitudinal_end, shared_start, shared_end
