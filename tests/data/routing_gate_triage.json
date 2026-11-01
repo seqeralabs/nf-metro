@@ -1651,10 +1651,6 @@
   "note": "A station the drop turns into stacking its lines against the order of their first turns off the drop cannot nest every turn, so no column is dealt. A generated-map sweep reaches it (11 of 1500 maps), but no committed map: needs a fixture whose perpendicular entry drops into two stations sharing lines in opposite lane orders.",
   "status": "needs-review"
  },
- "perp_columns.py::if column.offsets is not None and not offsets_hold(::#1": {
-  "note": "A dealt column the settled offsets no longer hold is declined at routing. A generated-map sweep reaches it (12 of 8000 maps), but no committed map: needs a fixture where a later offset pass re-slots a dealt port.",
-  "status": "needs-review"
- },
  "perp_columns.py::if departure is None:::#1": {
   "note": "A multi-line feeder whose departure has no stated lateral declines the column; one with a lateral is compared. Reached by `tests/fixtures/regressions/perp_entry_column_feeder_conflict.mmd` (no lateral) and `tests/fixtures/regressions/perp_entry_column_two_feeders.mmd`; a generated-map sweep reaches it (46 of 8000 maps) / A generated-map sweep reaches it (51 of 8000 maps). In the swept corpus `examples/topologies/top_entry_two_corridors_split_targets.mmd` reaches the with-lateral arm.",
   "status": "needs-review"

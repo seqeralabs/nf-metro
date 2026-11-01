@@ -102,6 +102,7 @@ from nf_metro.layout.routing.common import (
     port_peeloff_tail,
     resolve_section,
     same_destination_approach_slots,
+    segment_direction,
     segments_properly_cross,
     tail_on_slot,
     trunk_segment_crossings,
@@ -393,13 +394,15 @@ def _opening_turn(pts: Sequence[tuple[float, float]]) -> _OpeningTurn | None:
     opening = opening_horizontal_vertical(pts)
     if opening is None:
         return None
-    (x0, y0), (x1, y1), (_x2, y2) = opening
-    run_dir = horizontal_direction(x1 - x0)
+    (_x0, y0), (x1, _y1), _end = opening
+    run_dir = segment_direction(opening[0], opening[1])
+    turn_dir = segment_direction(opening[1], opening[2])
+    assert run_dir is not None and turn_dir is not None
     return _OpeningTurn(
         run_y=y0,
         turn_x=x1,
         run_dir=run_dir,
-        turn_dir=vertical_direction(y2 - y1),
+        turn_dir=turn_dir,
         corridor_y=_reversed_corridor_y(pts, run_dir),
     )
 
@@ -6808,7 +6811,7 @@ def check_peeloff_concentric(
             )
         if loose:
             continue
-        targets = peeloff_target_slots(bundle, step)
+        targets = peeloff_target_slots(bundle, step, graph._departure_lane_orders)
         for line_id, tail in bundle.per_line.items():
             slot = targets[line_id]
             if not tail_on_slot(tail, slot):
@@ -6830,7 +6833,7 @@ def check_peeloff_concentric(
         )
         if key in checked:
             continue
-        targets = peeloff_target_slots(bundle, step)
+        targets = peeloff_target_slots(bundle, step, graph._departure_lane_orders)
         for line_id, tail in bundle.per_line.items():
             slot = targets[line_id]
             if not tail_on_slot(tail, slot):
@@ -6981,6 +6984,23 @@ class CurveInvariantError(RuntimeError):
     """
 
 
+def _outside_recorded_forks(
+    graph: MetroGraph, violations: list[BundleOrderViolation]
+) -> list[BundleOrderViolation]:
+    """*violations* less each pair a recorded departure reorders crossing on
+    the departure's first segment: lines that part at a fork take their own
+    order there (:class:`~nf_metro.layout.departure_order.DepartureLaneOrder`)."""
+    records = graph._departure_lane_orders
+    return [
+        violation
+        for violation in violations
+        if violation.segment_index != 1
+        or (record := records.get((violation.edge_source, violation.edge_target)))
+        is None
+        or not record.reorders(violation.line_a, violation.line_b)
+    ]
+
+
 def render_curve_violations(
     graph: MetroGraph,
     routes: list[RoutedPath],
@@ -6996,7 +7016,7 @@ def render_curve_violations(
     return [
         (
             "bundle order (line crosses its bundle-mate)",
-            check_bundle_order_preserved(routes),
+            _outside_recorded_forks(graph, check_bundle_order_preserved(routes)),
         ),
         (
             "non-concentric bundle corner",

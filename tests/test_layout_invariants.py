@@ -3606,7 +3606,9 @@ def test_peeloff_concentric_runtime_guard(fixture):
             require_contiguous=False,
         )
     )
-    slots = peeloff_target_slots(bundle, graph_offset_step(graph))
+    slots = peeloff_target_slots(
+        bundle, graph_offset_step(graph), graph._departure_lane_orders
+    )
     ranked = sorted(bundle.per_line, key=lambda line_id: slots[line_id].rank)
     first_line, last_line = ranked[0], ranked[-1]
     representatives = {

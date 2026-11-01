@@ -30,7 +30,7 @@ from nf_metro.layout.routing import offsets as offsets_module
 from nf_metro.layout.routing.common import apply_route_offsets, graph_offset_step
 from nf_metro.layout.routing.invariants import CurveInvariantError
 from nf_metro.parser.mermaid import parse_metro_mermaid
-from nf_metro.parser.model import Edge, MetroGraph
+from nf_metro.parser.model import MetroGraph
 from nf_metro.render import svg
 
 REGRESSIONS = Path(__file__).parent / "fixtures" / "regressions"
@@ -637,30 +637,47 @@ def test_a_seed_off_the_carry_refuses_a_re_deal(
     assert off_carry
 
 
+DECIDED_LATER_MAP = """\
+%%metro line: l0 | L0 | #e6194b
+%%metro line: l1 | L1 | #3cb44b
+
+graph LR
+    subgraph s [S]
+        a[A]
+        decided[Decided]
+        a -->|l0,l1| decided
+    end
+"""
+
+
 @pytest.mark.parametrize(
-    "lanes",
-    [{"l0": 4.0, "l1": 0.0}, {"l0": 4.0, "l1": 4.0}],
-    ids=["reversed", "tied"],
+    ("lanes", "verdict"),
+    [
+        ({"l0": 0.0, "l1": 4.0}, None),
+        ({"l0": 4.0, "l1": 0.0}, "decided"),
+        ({"l0": 4.0, "l1": 4.0}, "decided"),
+    ],
+    ids=["in-order", "reversed", "tied"],
 )
 def test_a_carry_that_breaks_an_earlier_7b_decision_is_refused(
-    lanes: dict[str, float],
+    lanes: dict[str, float], verdict: str | None
 ) -> None:
     """A later re-deal whose carry reaches a port 7b' already decided in the
-    same pass may not reorder (or tie) that port's lanes."""
-    graph = MetroGraph()
-    for line in ("l0", "l1"):
-        graph.add_edge(Edge("a", "decided", line))
+    same pass may not reorder (or tie) that port's lanes; one that keeps them
+    in order passes every owner."""
+    graph = _laid_out(DECIDED_LATER_MAP)
     ctx = offsets_module._OffsetCtx(
         graph=graph, approach_orders={"decided": ("l0", "l1")}
     )
     trial = {("decided", lid): off for lid, off in lanes.items()}
     port = SimpleNamespace(id="a", section_id="s")
 
-    verdict = offsets_module._trial_overrides_an_owner(
-        ctx, port, ["a", "decided"], trial, set(), {}, {}
+    assert (
+        offsets_module._trial_overrides_an_owner(
+            ctx, port, ["a", "decided"], trial, set(), {}, {}
+        )
+        == verdict
     )
-
-    assert verdict == "decided"
 
 
 _FAIL_CLOSED = [

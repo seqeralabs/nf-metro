@@ -2000,6 +2000,27 @@ def _turn_cohort_key_by_member(
     return keys
 
 
+def _departure_ranked_seeds(
+    ctx: _RoutingCtx,
+    ordered_lanes: tuple[tuple[str, float], ...],
+    seeds: tuple[_AssignmentSeed, ...],
+) -> tuple[_AssignmentSeed, ...]:
+    """*seeds* with each recorded departure's lines ranked as the lines whose
+    lanes they take (:class:`~nf_metro.layout.departure_order.DepartureLaneOrder`)."""
+    records = ctx.graph._departure_lane_orders
+    if not records:
+        return seeds
+    rank = {line_id: index for index, (line_id, _offset) in enumerate(ordered_lanes)}
+    ranked = []
+    for seed in seeds:
+        record = records.get((seed.edge.source, seed.edge.target))
+        natural = (
+            None if record is None else record.natural_rank(seed.edge.line_id, rank)
+        )
+        ranked.append(seed if natural is None else replace(seed, lane_rank=natural))
+    return tuple(ranked)
+
+
 def _plan_turn_axes(
     graph: MetroGraph,
     ctx: _RoutingCtx,
@@ -2011,6 +2032,7 @@ def _plan_turn_axes(
     seeds: tuple[_AssignmentSeed, ...],
 ) -> _AxisPlan:
     del graph, source_id, exit_port_id
+    seeds = _departure_ranked_seeds(ctx, ordered_lanes, seeds)
     turning_seeds = tuple(seed for seed in seeds if seed.turn_direction is not None)
     minimum_runway = max(
         (
