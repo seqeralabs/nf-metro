@@ -3322,13 +3322,10 @@ def _local_boundary_ranks(
         lambda: defaultdict(list)
     )
     for item in claims:
-        if (
-            item.ledger.endpoint_cohort_id is not None
-            and item.ledger.endpoint_network_rank is not None
-        ):
-            members[item.ledger.endpoint_cohort_id][
-                item.ledger.endpoint_network_rank
-            ].append(item)
+        cohort_id = item.ledger.endpoint_cohort_id
+        network_rank = item.ledger.endpoint_network_rank
+        if cohort_id is not None and network_rank is not None:
+            members[cohort_id][network_rank].append(item)
     local_ranks: dict[tuple[str, int], int] = {}
     for cohort_id, by_rank in members.items():
         order = _ranks_in_slot_order(
