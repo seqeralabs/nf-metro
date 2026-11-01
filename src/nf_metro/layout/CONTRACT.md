@@ -1643,6 +1643,8 @@ the planned-fan offsets that follow them own the lanes a fan plan states.
   (`reconcile`) when phase 8 would break it or leave more of the port's
   same-row exit feeders (an exit of another section on the port's row) on
   other lanes than the port's.
+  The owner judgement, `reconcile` included, is taken on the deciding pass's
+  positions only; later passes replay the record and are not re-judged.
 - **Departure record consumers**: Junction fan positions, gap ranks,
   `_distinct_line_order`, the trunk-band constraints, exit-turn axes, settled
   exit-turn lane ranks, the gap-bundle seat by port slot order, the peel-off

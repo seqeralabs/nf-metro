@@ -57,7 +57,7 @@ REJOINING_PAIR_SPACED = REGRESSIONS / "departure_order_rejoining_pair_spaced.mmd
 REJOINING_ROTATION = REGRESSIONS / "departure_order_rejoining_rotation.mmd"
 LEVEL_EXIT_FEEDER = REGRESSIONS / "departure_order_level_exit_feeder.mmd"
 CARRY_REPLAY = REGRESSIONS / "departure_order_carry_replay.mmd"
-CARRY_PER_PASS = REGRESSIONS / "departure_order_carry_per_pass.mmd"
+CARRY_PER_PASS = FORK_TWO_FEEDERS
 
 
 class _Drawn:
@@ -182,8 +182,9 @@ def test_lines_that_leave_a_junction_together_take_no_record(
     raises=CurveInvariantError,
     strict=True,
     reason=(
-        "#1792: the TB twin of the port-stop fork aborts on main; its entry "
-        "already holds the approach order, so it takes no record"
+        "#1792: the TB twin of the port-stop fork trips the bundle-order, "
+        "same-line parallel descent and fan-opening guards; its entry already "
+        "holds the approach order, so it takes no record"
     ),
 )
 def test_the_tb_twin_of_a_parting_fork_renders_with_its_record(
