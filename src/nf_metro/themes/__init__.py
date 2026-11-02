@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from nf_metro.render.style import Theme
+from nf_metro.themes.halloween import HALLOWEEN_DARK_THEME, HALLOWEEN_LIGHT_THEME
 from nf_metro.themes.light import LIGHT_THEME
 from nf_metro.themes.nfcore import NFCORE_DARK_THEME, NFCORE_LIGHT_THEME
 from nf_metro.themes.seqera import SEQERA_DARK_THEME, SEQERA_LIGHT_THEME
@@ -36,6 +37,7 @@ DEFAULT_MODE = "dark"
 THEME_MODES: dict[str, dict[str, Theme]] = {
     "nfcore": {"dark": NFCORE_DARK_THEME, "light": NFCORE_LIGHT_THEME},
     "seqera": {"dark": SEQERA_DARK_THEME, "light": SEQERA_LIGHT_THEME},
+    "halloween": {"dark": HALLOWEEN_DARK_THEME, "light": HALLOWEEN_LIGHT_THEME},
 }
 
 # Flat by-name registry for direct ``--theme`` / ``style:`` selection. Bare brand
@@ -47,6 +49,9 @@ THEMES = {
     "seqera": THEME_MODES["seqera"][DEFAULT_MODE],
     "seqera-light": SEQERA_LIGHT_THEME,
     "seqera-dark": SEQERA_DARK_THEME,
+    "halloween": THEME_MODES["halloween"][DEFAULT_MODE],
+    "halloween-light": HALLOWEEN_LIGHT_THEME,
+    "halloween-dark": HALLOWEEN_DARK_THEME,
     "light": LIGHT_THEME,
 }
 
@@ -112,4 +117,6 @@ __all__ = [
     "NFCORE_DARK_THEME",
     "SEQERA_LIGHT_THEME",
     "SEQERA_DARK_THEME",
+    "HALLOWEEN_LIGHT_THEME",
+    "HALLOWEEN_DARK_THEME",
 ]

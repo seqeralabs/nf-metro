@@ -1,0 +1,41 @@
+%%metro title: Haunted Genome Assembly
+%%metro style: halloween
+%%metro mode: dark
+%%metro line: slime | Slime Trail (QC) | #7fff00 | dotted
+%%metro line: pumpkin | Pumpkin Patch (short reads) | #ff7518
+%%metro line: brew | Witch's Brew (plasmids) | #9b4dca
+%%metro line: ghost | Ghost Reads (long reads) | #e8e6f0 | dashed
+
+graph LR
+    subgraph graveyard [Graveyard Sampling]
+        exhume[Exhume Samples]
+        fastqc[FastQC]
+        nanoplot[NanoPlot]
+        exhume -->|pumpkin,brew,slime| fastqc
+        exhume -->|ghost| nanoplot
+    end
+
+    subgraph cauldron [The Cauldron]
+        fastp[fastp]
+        porechop[Porechop]
+        spades[SPAdes]
+        flye[Flye]
+        fastp -->|pumpkin,brew| spades
+        porechop -->|ghost| flye
+    end
+
+    subgraph seance [The Seance]
+        quast[QUAST]
+        busco[BUSCO]
+        prokka[Prokka]
+        multiqc[MultiQC]
+        quast -->|pumpkin,ghost,brew,slime| busco
+        busco -->|pumpkin,ghost,brew| prokka
+        busco -->|slime| multiqc
+    end
+
+    fastqc -->|pumpkin,brew| fastp
+    nanoplot -->|ghost| porechop
+    spades -->|pumpkin,brew| quast
+    flye -->|ghost| quast
+    fastqc -->|slime| quast

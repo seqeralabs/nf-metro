@@ -1,0 +1,38 @@
+%%metro title: Trick-or-Treat Variant Calling
+%%metro style: halloween
+%%metro mode: light
+%%metro line: trick | Trick (somatic) | #c2410c
+%%metro line: treat | Treat (germline) | #7a4b94
+%%metro line: candy | Candy Corn (QC) | #e0a100 | dashed
+
+graph LR
+    subgraph doorstep [Doorstep]
+        knock[Knock Knock]
+        bwa[BWA-MEM2]
+        markdup[MarkDuplicates]
+        knock -->|trick,treat,candy| bwa
+        bwa -->|trick,treat,candy| markdup
+    end
+
+    subgraph bag [Candy Bag]
+        mutect[Mutect2]
+        haplo[DeepVariant]
+        mosdepth[mosdepth]
+        filter[FilterCalls]
+        genotype[GLnexus]
+        mutect -->|trick| filter
+        haplo -->|treat| genotype
+    end
+
+    subgraph sorting [Sorting the Haul]
+        vep[VEP]
+        multiqc[MultiQC]
+        vep -->|candy| multiqc
+    end
+
+    markdup -->|trick| mutect
+    markdup -->|treat| haplo
+    markdup -->|candy| mosdepth
+    filter -->|trick| vep
+    genotype -->|treat| vep
+    mosdepth -->|candy| vep

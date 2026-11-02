@@ -11,6 +11,8 @@ from nf_metro.api import resolve_theme
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.themes import (
     DEFAULT_MODE,
+    HALLOWEEN_DARK_THEME,
+    HALLOWEEN_LIGHT_THEME,
     NFCORE_DARK_THEME,
     NFCORE_LIGHT_THEME,
     SEQERA_DARK_THEME,
@@ -35,7 +37,7 @@ def _graph(style="dark", mode=""):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("style", ["dark", "nfcore", "seqera"])
+@pytest.mark.parametrize("style", ["dark", "nfcore", "seqera", "halloween"])
 def test_unspecified_mode_uses_global_default_for_every_brand(style):
     resolved = resolve_theme(None, _graph(style=style))
     assert resolved.mode == DEFAULT_MODE
@@ -60,6 +62,8 @@ def test_brands_share_one_default_mode_not_a_per_brand_one():
         ("nfcore", "dark", NFCORE_DARK_THEME),
         ("seqera", "light", SEQERA_LIGHT_THEME),
         ("seqera", "dark", SEQERA_DARK_THEME),
+        ("halloween", "light", HALLOWEEN_LIGHT_THEME),
+        ("halloween", "dark", HALLOWEEN_DARK_THEME),
     ],
 )
 def test_brand_and_mode_combine_independently(style, mode, expected):
@@ -121,3 +125,4 @@ def test_mode_pair_none_without_family():
 def test_bare_brand_names_resolve_to_default_mode():
     assert THEMES["nfcore"].mode == DEFAULT_MODE
     assert THEMES["seqera"].mode == DEFAULT_MODE
+    assert THEMES["halloween"].mode == DEFAULT_MODE

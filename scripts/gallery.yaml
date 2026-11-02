@@ -228,6 +228,22 @@ gallery:
       with a taller row-mate, and the up-leg clears only the header badge rather
       than overshooting into the shared inter-row channel."
 
+  - id: halloween_pipeline
+    source_dir: examples
+    category: Feature Showcase
+    description:
+      "The seasonal `halloween` theme in dark mode (`%%metro style: halloween` plus `%%metro
+      mode: dark`): pumpkin title, bone stations and labels, purple section chrome. The theme
+      only changes the chrome, so the pumpkin, ghost, brew and slime line colours come from the
+      map's own `%%metro line:` directives."
+  - id: halloween_light
+    source_dir: examples
+    category: Feature Showcase
+    description:
+      "The same `halloween` theme in light mode (`%%metro mode: light`): the palette on aged
+      parchment, with a burnt-orange title. Like every paired theme, the SVG carries both palettes
+      and adapts to the viewer's `color-scheme`; the mode directive only bakes the default."
+
   # ── Realistic Pipelines ────────────────────────────────────────────────────
   - id: genomic_pipeline
     source_dir: examples
