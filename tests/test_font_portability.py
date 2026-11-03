@@ -119,6 +119,62 @@ def test_text_to_paths_anchor_uses_centralized_inter_advance() -> None:
     assert float(match.group(1)) == pytest.approx(expected_x, abs=0.001)
 
 
+@pytest.mark.parametrize(
+    ("baseline", "ascent_shift", "descent_shift"),
+    [
+        ("auto", 0.0, 0.0),
+        ("alphabetic", 0.0, 0.0),
+        # browsers' estimate for a font without a BASE table: 0.8 x ascent
+        ("hanging", 0.8, 0.0),
+        # halfway between the ascent and descent lines
+        ("central", 0.5, -0.5),
+    ],
+)
+def test_text_to_paths_applies_dominant_baseline(
+    baseline: str, ascent_shift: float, descent_shift: float
+) -> None:
+    """Issue #2166: the converted glyphs sit where the browser would put the
+    same <text> drawn in Inter, not with their alphabetic baseline at ``y``."""
+    from fontTools.ttLib import TTFont
+
+    from nf_metro.render.font_embed import _FONTS_DIR, text_to_paths
+
+    font = TTFont(str(_FONTS_DIR / "Inter-Regular.woff2"))
+    hhea = font["hhea"]
+    units = 13.0 / font["head"].unitsPerEm
+    expected_y = (
+        131.0
+        + ascent_shift * hhea.ascent * units
+        + descent_shift * -hhea.descent * units
+    )
+    source = (
+        '<svg xmlns="http://www.w3.org/2000/svg">'
+        f'<text x="40" y="131" font-size="13" dominant-baseline="{baseline}">'
+        "Trim reads</text></svg>"
+    )
+    ys = {
+        float(y)
+        for y in re.findall(r"translate\([-0-9.]+,([-0-9.]+)\)", text_to_paths(source))
+    }
+    assert ys and all(y == pytest.approx(expected_y, abs=0.001) for y in ys), ys
+
+
+def test_text_to_paths_dominant_baseline_composes_with_dy() -> None:
+    from nf_metro.render.font_embed import text_to_paths
+
+    def first_y(extra: str) -> float:
+        source = (
+            '<svg xmlns="http://www.w3.org/2000/svg">'
+            f'<text x="0" y="50" font-size="12" dominant-baseline="hanging"{extra}>'
+            "A</text></svg>"
+        )
+        match = re.search(r"translate\([-0-9.]+,([-0-9.]+)\)", text_to_paths(source))
+        assert match
+        return float(match.group(1))
+
+    assert first_y(' dy="0.3em"') - first_y("") == pytest.approx(3.6, abs=0.001)
+
+
 def test_text_to_paths_draws_visible_replacement_for_missing_glyph() -> None:
     from nf_metro.render.font_embed import text_to_paths
 

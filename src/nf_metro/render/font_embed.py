@@ -90,6 +90,11 @@ _DEFS_END = "</defs>"
 # Holds a pair of per-weight values (regular, bold).
 _FontPair = namedtuple("_FontPair", ["regular", "bold"])
 
+# Fraction of the ascent the hanging baseline sits above the alphabetic one.
+# Inter has no BASE table, so browsers estimate it; WebKit and Blink both use
+# 0.8 x ascent (SVGTextLayoutEngineBaseline: ``ascent * 8 / 10``).
+_HANGING_ASCENT_RATIO = 0.8
+
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -224,9 +229,13 @@ def text_to_paths(svg: str) -> str:
     glyphsets = _FontPair(regular.getGlyphSet(), bold.getGlyphSet())
     cmaps = _FontPair(regular.getBestCmap(), bold.getBestCmap())
     upems = _FontPair(regular["head"].unitsPerEm, bold["head"].unitsPerEm)
+    vmetrics = _FontPair(
+        (regular["hhea"].ascent, -regular["hhea"].descent),
+        (bold["hhea"].ascent, -bold["hhea"].descent),
+    )
 
     def _replace(match: re.Match[str]) -> str:
-        return _text_elem_to_paths(match, glyphsets, cmaps, upems)
+        return _text_elem_to_paths(match, glyphsets, cmaps, upems, vmetrics)
 
     return _TEXT_ELEM_RE.sub(_replace, svg)
 
@@ -248,6 +257,7 @@ def _text_elem_to_paths(
     glyphsets: _FontPair,
     cmaps: _FontPair,
     upems: _FontPair,
+    vmetrics: _FontPair,
 ) -> str:
     """Convert one matched <text …>content</text> to a <g> of <path> elements."""
     from fontTools.pens.svgPathPen import SVGPathPen  # type: ignore[import]
@@ -268,16 +278,20 @@ def _text_elem_to_paths(
     fill = attrs.get("fill", "#000000")
     text_anchor = attrs.get("text-anchor", "start")
     dy_str = attrs.get("dy", "0")
+    dominant_baseline = attrs.get("dominant-baseline", "auto")
     transform = attrs.get("transform", "")
-
-    dy = _parse_dy(dy_str, font_size)
-    baseline_y = y + dy
 
     is_bold = is_bold_weight(font_weight)
     glyphset = glyphsets.bold if is_bold else glyphsets.regular
     cmap = cmaps.bold if is_bold else cmaps.regular
     upem = upems.bold if is_bold else upems.regular
     scale = font_size / upem
+    ascent, descent = vmetrics.bold if is_bold else vmetrics.regular
+
+    dy = _parse_dy(dy_str, font_size)
+    baseline_y = (
+        y + dy + _baseline_shift(dominant_baseline, ascent * scale, descent * scale)
+    )
 
     metrics_style = TextStyle(font_size, font_weight, MetricsFace.INTER)
 
@@ -342,6 +356,22 @@ def _text_elem_to_paths(
         group_attrs += " " + passthrough_attrs
 
     return f"<g {group_attrs}>{''.join(path_parts)}</g>"
+
+
+def _baseline_shift(dominant_baseline: str, ascent: float, descent: float) -> float:
+    """Distance (SVG y-down, px) from a text's ``y`` to its alphabetic baseline.
+
+    ``ascent`` and ``descent`` are the face's positive extents at the font
+    size.  Mirrors how browsers place ``<text>`` for a font without a BASE
+    table, so a converted label lands where the same label drawn in Inter
+    would.  ``auto``/``alphabetic`` (and anything unrecognised) put the
+    baseline at ``y``.
+    """
+    if dominant_baseline == "hanging":
+        return _HANGING_ASCENT_RATIO * ascent
+    if dominant_baseline == "central":
+        return (ascent - descent) / 2.0
+    return 0.0
 
 
 def _passthrough_attrs(attrs: dict[str, str]) -> str:
