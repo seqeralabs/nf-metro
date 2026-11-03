@@ -68,6 +68,9 @@ history.
   feeders arriving along two different corridors, now gives each line the
   channel that matches its lane in the section, so the lines no longer cross
   or overlap inside the port's own turn.
+- `--text-to-paths` now applies each label's `dominant-baseline`. Labels
+  below a station (`hanging`) were drawn about one cap height too high, and
+  `central` labels sat above their centre line (#2166).
 
 ## [2.1.0] — 2026-09-15
 
