@@ -2303,10 +2303,6 @@
   "note": "A pass with no forced root order (cyclic separations) is skipped; reached only when the orders cycle. Exercised by tests/test_corridor_cohorts.py::test_contradicting_directed_separations_fail_closed_whatever_gives_way and tests/test_corridor_cohorts.py::test_directed_separation_cycle_fails_with_owner_provenance. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
  },
- "corridor_cohorts.py::if result.status is CorridorAllocationStatus.PLANNED:::#1": {
-  "note": "A pass whose seating is not PLANNED records its failure and tries the next order set; reached only when a seating fails. Exercised by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once. needs-review because the arm is reachable, not because it is unreachable.",
-  "status": "needs-review"
- },
  "corridor_cohort_integration.py::if (::#21": {
   "note": "Patch preparation: a landing matches its target's geometry plan, connectors, last segment, axis and finite slot, all taken from the same compile snapshot.",
   "status": "defensive"
