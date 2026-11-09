@@ -3375,9 +3375,9 @@ def _local_boundary_ranks(
     between movable ones keeps its step and a lane pinned onto its line's fixed
     lane can reach its pin.  A cohort with a rank in ``pinned_seats`` cannot
     shift as a whole, so its pin fixes every seat: walking out from the first
-    pinned rank in slot order, each rank takes the first pitch that clears the
-    fixed lanes from outside the cohort, on the side of each that the members'
-    drawn coordinates put it.
+    pinned rank in slot order, each rank takes the first pitch past the
+    previous one that clears the fixed lanes from outside the cohort, never
+    short of a lane drawn between it and the previous rank.
     """
 
     def clearance(item: _BoundClaim, lane: _BoundClaim) -> float:
