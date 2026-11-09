@@ -1509,11 +1509,11 @@ def _solve_in_frame(  # noqa: C901, PLR0915
 
         A region side the root's forced extreme passes releases the whole
         region, since its other side alone would steer the root and its floor
-        would lift the roots above it.  Each test runs once, ceilings first:
-        region floors against the highest extent every ceiling allows, region
-        ones included, then region ceilings against the lowest extent the
-        domain floors and the region floors that test kept allow.  Neither test
-        is revisited, so a region the ceiling test releases has counted toward
+        would lift the roots above it.  Two tests run, once each and in this
+        order: region floors against the highest extent every ceiling allows,
+        region ones included, then region ceilings against the lowest extent
+        the domain floors and the kept region floors allow.  Neither is
+        revisited, so a region the second test releases has counted toward
         both extents.
         """
         if not region_floor and not region_ceiling:
