@@ -1247,10 +1247,6 @@ def _collect_sizable_corners(
                 or not is_orthogonal_turn(
                     points[rank - 1], points[rank], points[rank + 1]
                 )
-                or (
-                    respect_owned_corners
-                    and planner_owns_segment_or_boundary(route, rank)
-                )
             ):
                 continue
             corner = _SemanticEndCorner(
@@ -1260,13 +1256,20 @@ def _collect_sizable_corners(
                 direction_vector(incoming),
                 direction_vector(outgoing),
             )
+            owned = respect_owned_corners and planner_owns_segment_or_boundary(
+                route, rank
+            )
             kept_keys = [
-                key for key in end_keys[rank] if not _end_rule_skips(route, key, rank)
+                key
+                for key in end_keys[rank]
+                if not owned and not _end_rule_skips(route, key, rank)
             ]
             for key in kept_keys:
                 cohorts[key].append(corner)
             if kept_keys or (
-                not end_keys[rank] and route.exit_turn_segment_rank != rank
+                not end_keys[rank]
+                and route.exit_turn_segment_rank != rank
+                and not owned
             ):
                 corners.append(corner)
     return cohorts, corners

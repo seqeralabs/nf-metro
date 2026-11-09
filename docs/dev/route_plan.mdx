@@ -333,7 +333,7 @@ Nothing is sized when no corner moves, because the rules read the radii they re-
 
 `tests/cohort_shadow_oracle.py` draws the compiling observation under production's conditions, but publishes every compiled plan at its compile site and takes the observation's own plan as the ledger; the drawn routes are then held to the published plan on every owned segment point and corner.
 `tests/data/cohort_shadow_ratchet.txt` lists the repository maps that oracle fails.
-The Tier C oracle `check_cross_edge_corners_concentric` holds the drawn corners of any two lines that bend together to one arc centre, and `tests/data/cross_edge_corner_nesting_ratchet.txt` lists the repository maps it fails.
+The Tier C oracle `check_cross_edge_corners_concentric` holds the drawn corners of any two lines that nest by the routing's own predicate, `bend_nests_across_edges`, to one arc centre, and `tests/data/cross_edge_corner_nesting_ratchet.txt` lists the repository maps it fails.
 
 ## Envelope settlement
 
