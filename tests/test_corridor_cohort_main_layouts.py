@@ -116,6 +116,7 @@ def _render(
         "cohort_pinned_lane_forced_crossing.mmd",
         "cohort_line_split_branches.mmd",
         "cohort_reverse_frame_seating.mmd",
+        "cohort_pinned_member_past_fixed_lane.mmd",
     ],
 )
 def test_compile_seats_every_component(

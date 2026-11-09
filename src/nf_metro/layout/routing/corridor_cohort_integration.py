@@ -15,7 +15,7 @@ from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from itertools import permutations
-from math import isclose, isfinite
+from math import ceil, inf, isclose, isfinite
 from types import MappingProxyType
 from typing import NamedTuple
 
@@ -3266,6 +3266,180 @@ def _corner_orders(
     return tuple(orders)
 
 
+def _pinned_endpoint_seats(
+    movable: tuple[_BoundClaim, ...],
+    equalities: Sequence[CorridorEquality],
+    pins: Mapping[str, float],
+) -> dict[tuple[str, int], float]:
+    """The coordinate each endpoint cohort rank is held at by a member joined to
+    a claim in ``pins``, one held on its own line's fixed lane, directly or
+    through a chain of same-lane equalities."""
+    rank_by_id = {item.claim_id: rank for rank, item in enumerate(movable)}
+    union = _UnionFind(len(movable))
+    for equality in equalities:
+        union.union(
+            rank_by_id[equality.left_member_id], rank_by_id[equality.right_member_id]
+        )
+    pin_by_root = {
+        union.find(rank_by_id[claim_id]): coordinate
+        for claim_id, coordinate in pins.items()
+    }
+    return {
+        (item.ledger.endpoint_cohort_id, item.ledger.endpoint_network_rank): (
+            pin_by_root[root]
+        )
+        for rank, item in enumerate(movable)
+        if item.ledger.endpoint_cohort_id is not None
+        and item.ledger.endpoint_network_rank is not None
+        and (root := union.find(rank)) in pin_by_root
+    }
+
+
+def _seat_bound(
+    item: _BoundClaim,
+    frame: int,
+    lane: _BoundClaim,
+    previous: Sequence[_BoundClaim],
+    pin: float,
+    clearance: Callable[[_BoundClaim, _BoundClaim], float],
+) -> tuple[float, float]:
+    """The open interval of offsets out from ``pin`` in ``frame`` that ``item``
+    cannot seat in because of the fixed ``lane`` beside it.
+
+    It is the lane's clearance band; when the lane is drawn between ``item``
+    and a claim of the ``previous`` rank on a span both run, it is every
+    offset short of clearing the lane, so ``item`` keeps the side of the lane
+    its drawn coordinate is on.
+    """
+    gap = clearance(item, lane)
+    at = frame * (lane.coordinate - pin)
+    between = any(
+        min(neighbour.coordinate, item.coordinate) + COORD_TOLERANCE
+        < lane.coordinate
+        < max(neighbour.coordinate, item.coordinate) - COORD_TOLERANCE
+        and _overlaps(
+            lane.longitudinal_start,
+            lane.longitudinal_end,
+            max(neighbour.longitudinal_start, item.longitudinal_start),
+            min(neighbour.longitudinal_end, item.longitudinal_end),
+        )
+        for neighbour in previous
+    )
+    return (-inf if between else at - gap, at + gap)
+
+
+def _next_seat_pitch(
+    previous: Sequence[_BoundClaim],
+    current: Sequence[_BoundClaim],
+    previous_pitch: int,
+    outward: int,
+    pin: float,
+    foreign: Sequence[_BoundClaim],
+    offset_step: float,
+    clearance: Callable[[_BoundClaim, _BoundClaim], float],
+) -> int:
+    """The first pitch out from ``pin``, past ``previous_pitch``, at which the
+    ``current`` rank seats outside the bound of every ``foreign`` fixed lane.
+
+    Pitches count ``offset_step`` from ``pin`` on the ``outward`` side of the
+    rank's boundary frame.  Bounds scanned in order of their low ends only
+    ever push the seat outward, so one pass finds the first free pitch.
+    """
+    blocked = [
+        (-inf, (previous_pitch + 1) * offset_step),
+        *(
+            _seat_bound(item, outward * sign, lane, previous, pin, clearance)
+            for item in current
+            if (sign := item.ledger.destination_boundary_axis_sign) is not None
+            for lane in foreign
+            if _overlap(item, lane)
+        ),
+    ]
+    pitch = 0
+    for low, high in sorted(blocked):
+        if low + COORD_TOLERANCE < pitch * offset_step < high - COORD_TOLERANCE:
+            pitch = ceil((high - COORD_TOLERANCE) / offset_step)
+    return pitch
+
+
+def _local_boundary_ranks(
+    claims: tuple[_BoundClaim, ...],
+    fixed_claims: tuple[_BoundClaim, ...],
+    pinned_seats: Mapping[tuple[str, int], float],
+    offset_step: float,
+    curve_radius: float,
+) -> dict[tuple[str, int], int]:
+    """Each endpoint cohort rank's local boundary rank, dealt in port-slot order.
+
+    Every cohort claim ranks, fixed and counter-running alike, so a fixed lane
+    between movable ones keeps its step and a lane pinned onto its line's fixed
+    lane can reach its pin.  A cohort with a rank in ``pinned_seats`` cannot
+    shift as a whole, so its pin fixes every seat: walking out from the first
+    pinned rank in slot order, each rank takes the first pitch that clears the
+    fixed lanes from outside the cohort, on the side of each that the members'
+    drawn coordinates put it.
+    """
+
+    def clearance(item: _BoundClaim, lane: _BoundClaim) -> float:
+        return cotravelling_lane_clearance(
+            same_line=item.target.route.line_id == lane.target.route.line_id,
+            counter_running=item.ledger.direction is not lane.ledger.direction,
+            curve_radius=curve_radius,
+            offset_step=offset_step,
+        )
+
+    members: defaultdict[str, defaultdict[int, list[_BoundClaim]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    for item in claims:
+        cohort_id = item.ledger.endpoint_cohort_id
+        network_rank = item.ledger.endpoint_network_rank
+        if cohort_id is not None and network_rank is not None:
+            members[cohort_id][network_rank].append(item)
+    local_ranks: dict[tuple[str, int], int] = {}
+    for cohort_id, by_rank in members.items():
+        order = _ranks_in_slot_order(
+            {
+                rank: items[-1].target.endpoint_lane_coordinate
+                for rank, items in by_rank.items()
+            }
+        )
+        pinned_rank = next(
+            (rank for rank in order if (cohort_id, rank) in pinned_seats), None
+        )
+        if pinned_rank is None:
+            local_ranks.update(
+                ((cohort_id, rank), local_rank) for local_rank, rank in enumerate(order)
+            )
+            continue
+        foreign = tuple(
+            item for item in fixed_claims if item.ledger.endpoint_cohort_id != cohort_id
+        )
+        pinned_index = order.index(pinned_rank)
+        pitches = {pinned_rank: 0}
+        for outward, walk in (
+            (1, order[pinned_index + 1 :]),
+            (-1, order[:pinned_index][::-1]),
+        ):
+            previous = pinned_rank
+            for rank in walk:
+                pitches[rank] = outward * _next_seat_pitch(
+                    by_rank[previous],
+                    by_rank[rank],
+                    outward * pitches[previous],
+                    outward,
+                    pinned_seats[(cohort_id, pinned_rank)],
+                    foreign,
+                    offset_step,
+                    clearance,
+                )
+                previous = rank
+        local_ranks.update(
+            ((cohort_id, rank), pitches[rank] - pitches[order[0]]) for rank in order
+        )
+    return local_ranks
+
+
 def _problem(
     claims: tuple[_BoundClaim, ...],
     roles: dict[str, CorridorCohortClaimRole],
@@ -3340,23 +3514,6 @@ def _problem(
             item.ledger.path_rank,
             cohort_first_path_rank.get(cohort_key, item.ledger.path_rank),
         )
-    # Every cohort claim ranks, fixed and counter-running alike, so a fixed lane
-    # between movable ones keeps its rank and a lane pinned onto its line's fixed
-    # lane can reach its pin.
-    slots_by_cohort: defaultdict[str, dict[int, float | None]] = defaultdict(dict)
-    for item in claims:
-        if (
-            item.ledger.endpoint_cohort_id is not None
-            and item.ledger.endpoint_network_rank is not None
-        ):
-            slots_by_cohort[item.ledger.endpoint_cohort_id][
-                item.ledger.endpoint_network_rank
-            ] = item.target.endpoint_lane_coordinate
-    local_boundary_ranks: dict[tuple[str, int], int] = {
-        (cohort_id, boundary_rank): local_rank
-        for cohort_id, slot_by_rank in slots_by_cohort.items()
-        for local_rank, boundary_rank in enumerate(_ranks_in_slot_order(slot_by_rank))
-    }
     equalities = tuple(
         CorridorEquality(
             _direction_owner(
@@ -3380,6 +3537,18 @@ def _problem(
         for fixed_claim in fixed_claims
         if _same_semantic_fixed_lane(movable_claim, fixed_claim)
     ]
+    # A lane pinned onto its own line's fixed lane has no coordinate to choose.
+    pinned = {
+        movable_claim.claim_id: fixed_claim.coordinate
+        for movable_claim, fixed_claim in fixed_lane_pairs
+    }
+    local_boundary_ranks = _local_boundary_ranks(
+        claims,
+        fixed_claims,
+        _pinned_endpoint_seats(movable, equalities, pinned),
+        offset_step,
+        curve_radius,
+    )
     aliased_claims = tuple(item for item in claims if item.claim_id in aliases)
     scalar_equalities = [
         CorridorEquality(
@@ -3507,13 +3676,8 @@ def _problem(
                 raise CorridorCohortCompilationError(
                     f"fixed footprint order {order.owner_id} is infeasible"
                 )
-    # A lane pinned onto its own line's fixed lane has no coordinate to choose:
-    # a crossing at the pinned coordinate is the fixed lane's, forced on the
-    # lane that joins it, so it is not a placement the solver can avoid.
-    pinned = {
-        movable_claim.claim_id: fixed_claim.coordinate
-        for movable_claim, fixed_claim in fixed_lane_pairs
-    }
+    # A crossing at a pinned coordinate is the fixed lane's, forced on the lane
+    # that joins it, so it is not a placement the solver can avoid.
     coupled_intervals, run_clearances = _run_coupled_clearances(
         footprint_model.run_couplings, scalar_witnesses, movable_by_id, lane_ids
     )
