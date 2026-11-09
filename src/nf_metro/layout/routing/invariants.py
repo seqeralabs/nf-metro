@@ -45,7 +45,6 @@ from nf_metro.layout.constants import (
     EDGE_TO_BUNDLE_CLEARANCE,
     FLOW_ALIGNED_PORT_ADVICE,
     MIN_CORRIDOR_Y_OVERLAP,
-    NESTED_BEND_MAX_LANES,
     OFFSET_STEP,
     SAME_COORD_TOLERANCE,
     SAME_Y_TOLERANCE,
@@ -4367,6 +4366,9 @@ def check_concentric_bundle_corners(
     return violations
 
 
+_Point = tuple[float, float]
+
+
 @dataclass(frozen=True)
 class NonNestedCornerPair:
     """Two lines' corners that bend together a few lanes apart off one arc centre.
@@ -4409,17 +4411,18 @@ def check_cross_edge_corners_concentric(
 
     Any two routes are compared, whatever edges they belong to, which is what
     sets this apart from :func:`check_concentric_bundle_corners`: corners on
-    unrelated edges that turn the same way, with both flanking legs offset by
-    one perpendicular distance of at most ``NESTED_BEND_MAX_LANES`` lanes,
-    read as one bundle bending, so their arcs must share a centre.  A corner
+    unrelated edges that turn the same way and nest as lanes of one bundle by
+    :func:`~nf_metro.layout.routing.corners.bend_nests_across_edges`, the
+    predicate the routing nests them by, must share an arc centre.  A corner
     traversed in the opposite direction shares the bend.  Each physical pair is
     reported once, however many same-line routes overlay either corner.
     """
-    max_gap = NESTED_BEND_MAX_LANES * graph_offset_step(graph) + COORD_TOLERANCE
-    Point = tuple[float, float]
-    by_bend: defaultdict[Point, list[tuple[RoutedPath, Point, float, Point, Point]]] = (
-        defaultdict(list)
-    )
+    from nf_metro.layout.routing.corners import bend_nests_across_edges
+
+    offset_step = graph_offset_step(graph)
+    by_bend: defaultdict[
+        _Point, list[tuple[RoutedPath, list[_Point], float, _Point, _Point]]
+    ] = defaultdict(list)
     for route in routes:
         points = apply_route_offsets(route, offsets)
         radii = _resolved_corner_radii(route, points)
@@ -4431,22 +4434,29 @@ def check_cross_edge_corners_concentric(
             assert incoming is not None and outgoing is not None
             bend = (outgoing[0] - incoming[0], outgoing[1] - incoming[1])
             by_bend[bend].append(
-                (route, points[rank], radii[rank - 1], incoming, outgoing)
+                (
+                    route,
+                    points[rank - 1 : rank + 2],
+                    radii[rank - 1],
+                    incoming,
+                    outgoing,
+                )
             )
 
     found: dict[frozenset[tuple[str, float, float]], NonNestedCornerPair] = {}
     for bend, corners in by_bend.items():
-        for index, (route_a, point_a, radius_a, incoming, outgoing) in enumerate(
+        for index, (route_a, corner_a, radius_a, incoming, outgoing) in enumerate(
             corners
         ):
-            for route_b, point_b, radius_b, _incoming, _outgoing in corners[
+            for route_b, corner_b, radius_b, _incoming, _outgoing in corners[
                 index + 1 :
             ]:
-                if route_a.line_id == route_b.line_id:
+                if route_a.line_id == route_b.line_id or not bend_nests_across_edges(
+                    corner_a, corner_b, incoming, outgoing, offset_step
+                ):
                     continue
+                point_a, point_b = corner_a[1], corner_b[1]
                 lane_gap = abs(point_b[0] - point_a[0])
-                if lane_gap > max_gap:
-                    continue
                 translated = _translated_corner(
                     point_a, radius_a, point_b, radius_b, incoming, outgoing
                 )
@@ -7578,11 +7588,11 @@ CHECK_REGISTRY: tuple[GuardSpec, ...] = (
         issue_pin=("#2165",),
         narrow_reason=(
             "A corpus oracle over corner nesting rather than a render guard: a "
-            "non-nested pair renders without aborting, and the repository maps "
-            "still failing it are held by a ratchet, so a render guard would "
-            "abort maps that are imperfect rather than undrawable. Restricted "
-            "to distinct lines whose corners turn together with both legs "
-            "offset by one distance of at most three lanes."
+            "non-nested pair renders without aborting, and failing repository "
+            "maps are held by a ratchet, so a render guard would abort maps "
+            "that are imperfect rather than undrawable. Restricted to distinct "
+            "lines whose corners turn together a whole one to three lanes "
+            "apart, every leg longer than that gap."
         ),
     ),
 )

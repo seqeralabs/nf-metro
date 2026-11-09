@@ -90,6 +90,7 @@ from nf_metro.layout.routing.inter_section_handlers import (
 )
 from nf_metro.layout.routing.invariants import concentric_corner_fans
 from nf_metro.layout.routing.normalize import (
+    CrossEdgeNesting,
     _align_merge_fed_confluence_to_band,
     _bundle_divergent_distinct_traverses,
     _bundle_same_destination_tails,
@@ -115,7 +116,6 @@ from nf_metro.layout.routing.normalize import (
     _unify_coincident_corner_radii,
     _VChannel,
     semantic_end_corners,
-    widened_corner_families,
 )
 from nf_metro.layout.routing.orientation import direction_axis, lateral_order_sign
 from nf_metro.layout.routing.perp import _perp_entry_crossing_x
@@ -3149,7 +3149,7 @@ def build_member_geometry_execution(
             ctx.curve_radius,
             ctx.station_offsets or {},
             respect_owned_corners=False,
-            cross_edge_offset_step=ctx.offset_step,
+            cross_edge=CrossEdgeNesting(ctx.offset_step),
         )
         _plan_source_turnouts(normalization_population, graph, ctx.curve_radius)
         # The freeze is the last word on an owned route's radii, and a
@@ -3611,8 +3611,7 @@ def _corner_sizing_scope(
     copies: Sequence[RoutedPath],
     moved_by_copy: Mapping[int, frozenset[int]],
     station_offsets: Mapping[tuple[str, str], float],
-    offset_step: float,
-    immutable_copy_ids: frozenset[int],
+    cross_edge_families: Sequence[Sequence[tuple[RoutedPath, int]]],
 ) -> frozenset[int]:
     """The copies whose re-sized corners a patch adopts.
 
@@ -3624,9 +3623,8 @@ def _corner_sizing_scope(
       :func:`semantic_end_corners`) of a corner a patch moved, without the
       exit-lane and exit-turn corners the rule itself skips;
     * an arc-centre fan holding a corner a patch moved;
-    * a cross-edge corner family (:func:`widened_corner_families`) holding a
-      corner a patch moved and clear of *immutable_copy_ids*, the families the
-      sizing nests;
+    * one of *cross_edge_families*, the families the end-corner rule nests
+      across edges, holding a corner a patch moved;
     * a departure (source station and first direction) of any patched copy,
       which covers the source-turnout rule's junction groups.
 
@@ -3656,12 +3654,7 @@ def _corner_sizing_scope(
             for observation in fan
         ):
             scope.update(id(observation.route) for observation in fan)
-    for family in widened_corner_families(
-        copies,
-        station_offsets,
-        offset_step=offset_step,
-        fixed_route_ids=immutable_copy_ids,
-    ):
+    for family in cross_edge_families:
         if any(rank in moved_by_copy.get(id(route), ()) for route, rank in family):
             scope.update(id(route) for route, _rank in family)
     departures = {
@@ -3742,13 +3735,12 @@ def _size_patched_corners(
         for route, sized in zip(population, copies, strict=True)
         if id(route) not in mutable_route_ids
     )
-    _rederive_semantic_end_corners(
+    cross_edge_families = _rederive_semantic_end_corners(
         copies,
         curve_radius,
         station_offsets,
         respect_owned_corners=False,
-        cross_edge_offset_step=offset_step,
-        cross_edge_fixed_route_ids=immutable_copy_ids,
+        cross_edge=CrossEdgeNesting(offset_step, immutable_copy_ids),
     )
     _plan_source_turnouts(copies, graph, curve_radius)
     _reanchor_concentric_corner_fans(copies, station_offsets, curve_radius)
@@ -3768,8 +3760,7 @@ def _size_patched_corners(
             if id(route) in moved
         },
         station_offsets,
-        offset_step,
-        immutable_copy_ids,
+        cross_edge_families,
     )
     changed = [
         (route, own, sized_state)

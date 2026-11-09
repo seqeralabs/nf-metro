@@ -139,7 +139,8 @@ One routing pass materializes one set of gap slots, and production reuses those 
 
 After exit-turn and convergence settlement, the final member-planning pass reconstructs every owned route in canonical order.
 Same-line members that turn at one coincident vertex receive one clamp-safe reference radius and matching concentric inputs before member plans and route-system templates are published.
-Corners of distinct lines on different edges that turn one bend a whole one to three lanes apart are sized there as one concentric family, its innermost lane at `CURVE_RADIUS`; a family that cannot seat every member at `CURVE_RADIUS` keeps its end-cohort sizing.
+Corners of distinct lines on different edges that turn one bend a whole one to three lanes apart are sized there as one concentric family.
+Its innermost lane keeps `CURVE_RADIUS`, and a family that cannot seat every member at `CURVE_RADIUS` keeps its end-cohort sizing.
 Emission copies those frozen values.
 The later corner normalizer handles only cohorts with no planner-owned member.
 

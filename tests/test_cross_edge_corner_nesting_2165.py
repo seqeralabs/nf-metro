@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Callable
-from functools import cache
+from functools import lru_cache
 from pathlib import Path
 from unittest import mock
 
@@ -20,7 +20,7 @@ import cohort_shadow_oracle
 import pytest
 
 from nf_metro.api import render_string
-from nf_metro.layout.constants import CURVE_RADIUS, OFFSET_STEP
+from nf_metro.layout.constants import COORD_TOLERANCE, CURVE_RADIUS, OFFSET_STEP
 from nf_metro.layout.routing.common import (
     OffsetRegime,
     RoutedPath,
@@ -31,7 +31,10 @@ from nf_metro.layout.routing.invariants import (
     NonNestedCornerPair,
     check_cross_edge_corners_concentric,
 )
-from nf_metro.layout.routing.normalize import _rederive_semantic_end_corners
+from nf_metro.layout.routing.normalize import (
+    CrossEdgeNesting,
+    _rederive_semantic_end_corners,
+)
 from nf_metro.parser.model import Edge, MetroGraph
 from nf_metro.render import svg
 
@@ -41,7 +44,7 @@ RATCHET_PATH = ROOT / "tests" / "data" / "cross_edge_corner_nesting_ratchet.txt"
 Point = tuple[float, float]
 
 
-@cache
+@lru_cache(maxsize=4)
 def _settled(relative_path: str) -> tuple[MetroGraph, list[RoutedPath], dict]:
     """The graph, routes and offsets the renderer draws for *relative_path*."""
     path = ROOT / relative_path
@@ -83,8 +86,8 @@ def _radius_at(relative_path: str, line_id: str, corner: Point) -> float:
         radii.update(
             round(resolved[rank - 1], 2)
             for rank in range(1, len(points) - 1)
-            if abs(points[rank][0] - corner[0]) < 0.5
-            and abs(points[rank][1] - corner[1]) < 0.5
+            if abs(points[rank][0] - corner[0]) <= COORD_TOLERANCE
+            and abs(points[rank][1] - corner[1]) <= COORD_TOLERANCE
         )
     assert len(radii) == 1, f"{line_id} corners at {corner}: {sorted(radii)}"
     return radii.pop()
@@ -192,7 +195,7 @@ def test_cross_edge_bend_nests_in_every_flow_direction(
         CURVE_RADIUS,
         {},
         respect_owned_corners=False,
-        cross_edge_offset_step=OFFSET_STEP,
+        cross_edge=CrossEdgeNesting(OFFSET_STEP),
     )
 
     assert outer.curve_radii == [CURVE_RADIUS + OFFSET_STEP]
@@ -226,7 +229,9 @@ def test_non_nested_corner_maps_match_the_ratchet(relative_path: str) -> None:
     """
     listed = relative_path in _read_ratchet()
     if _ordinary_render_fails(relative_path):
-        assert not listed, f"{relative_path} no longer renders; unlist it"
+        assert not listed, (
+            f"{relative_path} is rejected by the ordinary render; unlist it"
+        )
         return
     pairs = _non_nested(relative_path)
 
