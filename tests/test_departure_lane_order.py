@@ -10,6 +10,7 @@ every later offsets run after junction positioning, in every positioning pass.
 
 from __future__ import annotations
 
+import dataclasses
 import warnings
 from collections.abc import Iterator
 from itertools import combinations
@@ -19,7 +20,7 @@ from typing import Any
 
 import pytest
 
-from nf_metro.api import render_string
+from nf_metro.api import prepare_graph, render_string, resolve_theme
 from nf_metro.layout.departure_order import (
     JUNCTIONS_POSITIONED,
     DepartureLaneOrder,
@@ -29,6 +30,7 @@ from nf_metro.layout.departure_order import (
     hold_departure_records,
     relabel_departures,
 )
+from nf_metro.layout.route_plan import build_route_plan_query
 from nf_metro.layout.routing import compute_station_offsets
 from nf_metro.layout.routing import offsets as offsets_module
 from nf_metro.layout.routing.common import (
@@ -37,6 +39,7 @@ from nf_metro.layout.routing.common import (
     peeloff_target_slots,
     port_peeloff_tail,
 )
+from nf_metro.layout.routing.exit_turns import DepartureTurnAxisError
 from nf_metro.layout.routing.invariants import (
     BundleOrderViolation,
     CurveInvariantError,
@@ -45,6 +48,7 @@ from nf_metro.layout.routing.invariants import (
 )
 from nf_metro.parser.model import Edge, MetroGraph
 from nf_metro.render import svg
+from nf_metro.render.svg import build_observed_render_plan
 
 REGRESSIONS = Path(__file__).parent / "fixtures" / "regressions"
 FORK_PORT_STOP = REGRESSIONS / "departure_order_fork_port_stop.mmd"
@@ -58,6 +62,60 @@ REJOINING_ROTATION = REGRESSIONS / "departure_order_rejoining_rotation.mmd"
 LEVEL_EXIT_FEEDER = REGRESSIONS / "departure_order_level_exit_feeder.mmd"
 CARRY_REPLAY = REGRESSIONS / "departure_order_carry_replay.mmd"
 CARRY_PER_PASS = FORK_TWO_FEEDERS
+SHARED_TURN_AXIS = """\
+%%metro line: l0 | Annotate | #e6194b
+%%metro line: l1 | Report_Polish | #3cb44b
+%%metro grid: sec0 | 0,0
+%%metro grid: sec1 | 1,0
+%%metro grid: sec2 | 2,0
+
+graph LR
+    subgraph sec0 [Merge 0]
+        %%metro direction: TB
+        s0n0[call_fastqc_quant]
+        s0n1[trim_count_align]
+        s0n2[CLUSTER_DEDUP]
+        s0n3[summarise]
+        s0n4[call_trim_summarise]
+        s0n0 -->|l0| s0n2
+        s0n2 -->|l0| s0n3
+        s0n3 -->|l0| s0n4
+        s0n0 -->|l1| s0n1
+        s0n1 -->|l1| s0n2
+        s0n2 -->|l1| s0n4
+    end
+    subgraph sec1 [Count 1]
+        %%metro exit: right | l0, l1
+        s1n0[GATHER]
+        s1n1[polish]
+        s1n2[bam]
+        s1n3[report]
+        s1n4[TRIM]
+        s1n0 -->|l0| s1n1
+        s1n0 -->|l1| s1n1
+        s1n1 -->|l0| s1n2
+        s1n1 -->|l1| s1n2
+        s1n2 -->|l0| s1n3
+        s1n2 -->|l1| s1n3
+        s1n3 -->|l0| s1n4
+        s1n3 -->|l0| s1n4
+        s1n3 -->|l1| s1n4
+    end
+    subgraph sec2 [Quant_Assemble_Summarise 2]
+        %%metro entry: right | l0, l1
+        s2n0[cluster_quant_export]
+        s2n1[vcf]
+        s2n0 -->|l0| s2n1
+        s2n0 -->|l1| s2n1
+    end
+    s0n4 -->|l0| s1n0
+    s0n4 -->|l1| s1n0
+    s1n4 -->|l0| s2n0
+    s1n4 -->|l0| s2n0
+    s1n4 -->|l1| s2n0
+    s0n4 -->|l0| s1n3
+    s0n4 -->|l0| s2n0
+"""
 
 
 class _Drawn:
@@ -69,7 +127,8 @@ class _Drawn:
 
 
 def _draw(
-    monkeypatch: pytest.MonkeyPatch, path: Path, *, may_abort: bool = False
+    monkeypatch: pytest.MonkeyPatch,
+    path: Path,
 ) -> _Drawn:
     drawn = _Drawn()
     check = svg.assert_render_curve_invariants
@@ -94,11 +153,7 @@ def _draw(
     monkeypatch.setattr(offsets_module, "_feeder_departure_orders", spy_decide)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        try:
-            render_string(path.read_text(), source_dir=str(path.parent))
-        except Exception:
-            if not may_abort:
-                raise
+        render_string(path.read_text(), source_dir=str(path.parent))
     return drawn
 
 
@@ -125,6 +180,105 @@ def test_a_fork_whose_lines_part_renders_with_its_departure_record(
     assert drawn.graph is not None
     record = drawn.graph._departure_lane_orders[(junction, port)]
     assert record.reorders(*pair)
+
+
+def _junction_exit_turn(path: Path, junction: str) -> tuple[Any, Any]:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+        observed = build_observed_render_plan(graph, resolve_theme(None, graph))
+    route_plan = observed.route_plan
+    assert route_plan is not None
+    (exit_turn,) = (
+        item for item in route_plan.exit_turn_plans if item.source_id == junction
+    )
+    return route_plan, exit_turn
+
+
+@pytest.mark.parametrize(
+    ("path", "junction", "port"),
+    [
+        (FORK_PORT_STOP, "__junction_4", "sec2__entry_left_3"),
+        (FORK_TWO_FEEDERS, "__junction_4", "sec2__entry_left_2"),
+    ],
+    ids=["port-stop", "two-feeders"],
+)
+def test_a_recorded_departure_turns_each_line_on_the_axis_of_the_lane_it_takes(
+    path: Path, junction: str, port: str
+) -> None:
+    """Each recorded line keeps its own source lane and owns the turn axis
+    whose rank is that of the line whose lane it takes."""
+    route_plan, exit_turn = _junction_exit_turn(path, junction)
+    build_route_plan_query(route_plan)
+
+    (record,) = exit_turn.departure_orders
+    assert record.key == (junction, port)
+    ranks = {lane.line_id: lane.rank for lane in exit_turn.source_lanes}
+    axes = {axis.id: axis for axis in exit_turn.axes}
+    members = {member.id: member for member in route_plan.members}
+    recorded = [
+        (members[item.member_id].line_id, axes[item.axis_id])
+        for item in exit_turn.assignments
+        if item.axis_id is not None
+        and members[item.member_id].target.station_id == port
+    ]
+    assert {line for line, _axis in recorded} == set(record.lines)
+    assert any(record.natural_line(line) != line for line in record.lines)
+    for line, axis in recorded:
+        assert axis.line_id == line
+        assert axis.rank == record.natural_rank(line, ranks)
+
+
+@pytest.mark.parametrize(
+    ("misstatement", "message"),
+    [
+        ("dropped", "inconsistent assignment geometry"),
+        ("foreign-target", "inconsistent departure orders"),
+    ],
+)
+def test_an_exit_turn_plan_that_misstates_its_departure_record_fails_closed(
+    misstatement: str, message: str
+) -> None:
+    route_plan, exit_turn = _junction_exit_turn(FORK_PORT_STOP, "__junction_4")
+    (record,) = exit_turn.departure_orders
+    carried = (
+        ()
+        if misstatement == "dropped"
+        else (dataclasses.replace(record, target_id="elsewhere"),)
+    )
+    misstated = dataclasses.replace(
+        route_plan,
+        exit_turn_plans=tuple(
+            dataclasses.replace(item, departure_orders=carried)
+            if item is exit_turn
+            else item
+            for item in route_plan.exit_turn_plans
+        ),
+    )
+
+    with pytest.raises(ValueError, match=message):
+        build_route_plan_query(misstated)
+
+
+@pytest.mark.parametrize(
+    "takes_lane_of",
+    [(("a", "a"), ("b", "a")), (("a", "b"), ("b", "c"))],
+    ids=["line-twice", "lines-differ-from-natural"],
+)
+def test_a_departure_order_must_permute_its_lines(
+    takes_lane_of: tuple[tuple[str, str], ...],
+) -> None:
+    with pytest.raises(ValueError, match="not a permutation"):
+        DepartureLaneOrder("j", "port", takes_lane_of)
+
+
+def test_a_fork_whose_parting_line_turns_beside_its_record_fails_closed() -> None:
+    """At ``__junction_4`` l0 takes l1's lane to sec1, so it turns on l1's
+    axis, while l0 also leaves for sec2 on its own lane, turning the same way:
+    one line would need two axes of one turn cohort."""
+    with warnings.catch_warnings(), pytest.raises(DepartureTurnAxisError):
+        warnings.simplefilter("ignore")
+        render_string(SHARED_TURN_AXIS)
 
 
 def test_the_recorded_pair_crosses_only_on_its_departures_first_segment(
@@ -312,14 +466,16 @@ def test_a_carry_that_reorders_a_perpendicular_seam_takes_no_record(
         return found
 
     monkeypatch.setattr(offsets_module, "_perpendicular_seam_flips", spy)
-    drawn = _draw(monkeypatch, PERPENDICULAR_SEAM, may_abort=True)
+    drawn = _draw(monkeypatch, PERPENDICULAR_SEAM)
 
+    assert drawn.graph is not None
     assert any(
         (exit_id, entry_id) == ("z2__exit_right_2", "z3__entry_bottom_6")
         for found in added
         for exit_id, entry_id, _a, _b in found
     )
     assert not any(drawn.runs)
+    assert not drawn.graph._departure_lane_orders
 
 
 def test_a_pass_that_ends_with_other_records_than_the_first_fails_closed() -> None:

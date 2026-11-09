@@ -4,10 +4,11 @@
 column-2 corridor ``assembled``'s run (segment 1) is drawn 17px left of
 ``reference``'s run into ``annot`` (segment 3), and ``qc``'s two feeders sit
 12px right of ``assembled`` and 20px inside their 1037.5 ceiling.  Directing
-``assembled`` 5px right of that ``reference`` run instead drags ``qc``'s
-cohort 2.0px past its ceiling, a shortfall the producer maps to one aperture
+``assembled`` 10px right of that ``reference`` run drags ``qc``'s cohort
+2.0px past its ceiling, a shortfall the producer maps to one aperture
 requirement at column boundary 2 with ``assemble`` on the negative side and
-``qc`` on the positive.
+``qc`` on the positive.  A 5px order fits: the ``reference`` run gives way
+left inside its corridor band.
 
 No topology under ``examples/topologies/`` draws this order on its own; the
 directed separation ``direct_assembled_past_reference`` installs below is
@@ -60,7 +61,7 @@ def direct_assembled_past_reference(monkeypatch: pytest.MonkeyPatch) -> list[str
             built,
             directed_separations=(
                 *built.directed_separations,
-                CorridorDirectedSeparation(owner, lower, upper, 5.0),
+                CorridorDirectedSeparation(owner, lower, upper, 10.0),
             ),
         )
 

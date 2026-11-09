@@ -1,0 +1,23 @@
+%%metro title: A top exit's riser seats inside its corridor band
+%%metro line: red | Red | #e6194b
+%%metro line: green | Green | #3cb44b
+%%metro line: blue | Blue | #4363d8
+
+graph LR
+    subgraph left [Left]
+        index[index]
+        pca[pca]
+    end
+    subgraph middle [Middle]
+        %%metro exit: top | red, green, blue
+        start[start]
+        export[export]
+        start -->|green,blue| export
+    end
+    subgraph right [Right]
+        land[land]
+        qc[qc]
+    end
+    export -->|red,green,blue| land
+    pca -->|green| start
+    index -->|green| qc

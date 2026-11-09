@@ -129,6 +129,7 @@ from nf_metro.layout.routing.reserved_bands import (
 from nf_metro.parser.model import MetroGraph, Port, PortSide
 
 if TYPE_CHECKING:
+    from nf_metro.layout.route_reservations import GapCorridorBand
     from nf_metro.layout.routing.invariants import _CornerObservation
 
 
@@ -352,6 +353,36 @@ def _segment_claim_band(
     """The reserved band the ledger claims for this route segment, if any."""
     return ctx.reserved_bands.for_segment(
         route.edge.source, route.edge.target, route.line_id, idx
+    )
+
+
+def _segment_corridor_band(
+    ctx: _RoutingCtx, route: RoutedPath, idx: int, axis: int, coordinate: float
+) -> ReservedBand | GapCorridorBand | None:
+    """The band segment *idx* of *route*, held at *coordinate*, owes its corridor.
+
+    A claim over the segment is read ahead of live geometry: settlement widened
+    the boundary for that corridor over the corridor's own declared span, and
+    re-deriving the band from the drawn coordinate would discard that
+    allocation.  A segment no claim names is measured from the gap
+    *coordinate* sits in (:func:`corridor_clearance_band`), over the route's
+    endpoint sections; a route between no sections spans no gap.  *axis* is
+    the segment's own coordinate index.
+    """
+    claimed = _segment_claim_band(ctx, route, idx)
+    if claimed is not None:
+        return claimed
+    section_ids = _route_endpoint_section_ids(ctx.graph, route)
+    if not section_ids:
+        return None
+    start, end = route.points[idx : idx + 2]
+    return corridor_clearance_band(
+        ctx.graph,
+        axis=axis,
+        section_ids=section_ids,
+        coordinate=coordinate,
+        run_start=start[1 - axis],
+        run_end=end[1 - axis],
     )
 
 
@@ -6319,24 +6350,15 @@ def _corridor_run_band(
     axis: int,
     section_ids: tuple[str, ...],
     coordinate: float,
-    run_lo: float,
-    run_hi: float,
 ) -> tuple[float, float] | None:
     """The band this leg must be held inside, or ``None`` where it may not move.
 
-    A leg the ledger claims is held inside *its own claim's* realised band --
-    the identity the closing guard scores it against -- so containment consumes
-    the reservation rather than confirming wherever the leg already sits.  That
-    is the whole point of a reservation: settlement widened the boundary for
-    this corridor over the corridor's own declared span, and reading the band
-    back off live geometry would discard that allocation and re-derive whatever
-    the drawn coordinate happens to fall inside.
-
-    A leg no claim names has no reservation to consume, and its clearance is
-    measured from the gap it runs in
-    (:func:`~nf_metro.layout.routing.reserved_bands.corridor_clearance_band`).
-    That covers the first routing pass, which publishes the ledger and so has
-    none to read, and unclaimed geometry on the re-route.
+    A claimed leg is held inside its own claim's realised band, the identity
+    the closing guard scores it against, so containment consumes the
+    reservation rather than confirming wherever the leg sits.  An unclaimed
+    leg, on the first routing pass (which publishes the ledger and so has none
+    to read) or the re-route, is held inside its gap's clearance band
+    (:func:`_segment_corridor_band`).
     """
     # A plan-owned leg's own coordinate is fixed, and so is the length of the
     # leg feeding into it (the planned turn's ``minimum_runway``), which is
@@ -6351,17 +6373,7 @@ def _corridor_run_band(
     )
     if not section_ids or touches_planned_geometry:
         return None
-    claimed = _segment_claim_band(ctx, route, idx)
-    if claimed is not None:
-        return claimed.lo, claimed.hi
-    band = corridor_clearance_band(
-        ctx.graph,
-        axis=axis,
-        section_ids=section_ids,
-        coordinate=coordinate,
-        run_start=run_lo,
-        run_end=run_hi,
-    )
+    band = _segment_corridor_band(ctx, route, idx, axis, coordinate)
     return None if band is None else (band.lo, band.hi)
 
 
@@ -6386,9 +6398,7 @@ def _corridor_runs(
         for idx, axis, coordinate, start, end, turning in _iter_axis_aligned_legs(rp):
             run_lo, run_hi = min(start, end), max(start, end)
             band = (
-                _corridor_run_band(
-                    ctx, rp, idx, axis, section_ids, coordinate, run_lo, run_hi
-                )
+                _corridor_run_band(ctx, rp, idx, axis, section_ids, coordinate)
                 if turning and (id(rp), idx) not in fixed_segment_keys
                 else None
             )

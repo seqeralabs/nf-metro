@@ -1650,7 +1650,11 @@ the planned-fan offsets that follow them own the lanes a fan plan states.
   exit-turn lane ranks, the gap-bundle seat by port slot order, the peel-off
   riser slots of a departure whose tail leaves the junction itself
   (`peeloff_target_slots`) and the bundle-order curve check read the records
-  each run publishes in `graph._departure_lane_orders`.
+  each run publishes in `graph._departure_lane_orders`. An `ExitTurnPlan`
+  carries its source's records in `departure_orders`; the turn planner and the
+  route-plan checker both rank a recorded line through `departure_turn_rank`
+  on them, and a turn cohort they would give two lines on one axis, or one
+  line two axes, raises `DepartureTurnAxisError`.
 - **Invariants preserved**: Every order 7b' decides holds to the end of the
   run. Phase 12 compacts seed by seed and 14b exchanges arrival by arrival,
   each committing a write only when every decided order still holds; a
@@ -2250,7 +2254,11 @@ They are design evidence, not part of this specification.
   settlement moved nothing and nothing was re-routed; the replay without the
   grant reads the same ones. It is the only pass that runs the corridor-cohort
   compiler, because only a ledger already settled to its minimum widths
-  compiles without a spurious shortfall. The plan it accepts is stored on that
+  compiles without a spurious shortfall. Each claimed lane is solved inside
+  the band the corridor hold draws it in (`CorridorLaneRegion`: the claim's
+  reserved band, else the live gap band, widened to the lane's input
+  coordinate); a band the solve's hard relations cannot meet is released,
+  never reported as a shortfall. The plan it accepts is stored on that
   observation's `RoutePlan` as `accepted_corridor_cohort_plan`, from which the
   observation reads the convergences a grant moved, and
   `prepare_route_system_planning` refuses to compile on a pass seated against a

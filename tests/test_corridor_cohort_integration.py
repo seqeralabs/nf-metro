@@ -15,6 +15,7 @@ from hash_seed_oracle import observe_across_hash_seeds
 
 from nf_metro.api import prepare_graph, resolve_theme
 from nf_metro.layout.constants import COORD_TOLERANCE
+from nf_metro.layout.geometry import cotravelling_lane_clearance
 from nf_metro.layout.route_plan import (
     SETTLEMENT_STAGE_ORDER,
     ConvergenceDisposition,
@@ -2182,33 +2183,49 @@ def _entry_cohort_claim(
     claim_id: str,
     line_id: str,
     lane_rank: int,
-    endpoint_network_rank: int,
+    endpoint_network_rank: int | None,
     slot: float,
     coordinate: float,
+    rotated: bool = False,
 ) -> _BoundClaim:
-    """One upward run of a LEFT-entry cohort, ``slot`` its port landing Y."""
+    """One upward run of a LEFT-entry cohort, ``slot`` its port landing Y.
+
+    ``rotated`` swaps the axes: a leftward run of a TOP-entry cohort, ``slot``
+    its port landing X.  A run with no ``endpoint_network_rank`` belongs to no
+    cohort and only spans ``slot`` to ``slot + 100``.
+    """
+    in_cohort = endpoint_network_rank is not None
     ledger = replace(
         _identity_claim(
             claim_id=claim_id,
             reservation_id="reservation:gap",
             network_id=f"network:{line_id}",
-            endpoint_cohort_id="cohort:entry",
-            direction=Direction.U,
-            region=ColumnGapRegion(1, 2),
-            orientation=CorridorOrientation.VERTICAL,
+            endpoint_cohort_id="cohort:entry" if in_cohort else None,
+            direction=Direction.L if rotated else Direction.U,
+            region=RowGapRegion(1, 2) if rotated else ColumnGapRegion(1, 2),
+            orientation=(
+                CorridorOrientation.HORIZONTAL
+                if rotated
+                else CorridorOrientation.VERTICAL
+            ),
             lane_rank=lane_rank,
             endpoint_network_rank=endpoint_network_rank,
         ),
         destination_boundary_axis_sign=1,
     )
+    points = [(coordinate, slot + 100.0), (coordinate, slot)]
     target = replace(
         _footprint_target(
-            claim_id, line_id, [(coordinate, slot + 100.0), (coordinate, slot)]
+            claim_id,
+            line_id,
+            [(y, x) for x, y in points] if rotated else points,
         ),
-        endpoint_lane_axis=1,
-        endpoint_lane_coordinate=slot,
+        endpoint_lane_axis=0 if rotated else 1,
+        endpoint_lane_coordinate=slot if in_cohort else None,
     )
-    return _BoundClaim(ledger, target, slot, slot + 100.0, coordinate, slot)
+    return _BoundClaim(
+        ledger, target, slot, slot + 100.0, coordinate, slot if in_cohort else None
+    )
 
 
 def _fixed_copy(claim: _BoundClaim, claim_id: str) -> _BoundClaim:
@@ -2354,6 +2371,171 @@ def test_endpoint_lanes_rank_past_an_interleaved_fixed_member(
     allocations = dict(result.allocations)
     assert allocations["m1"] == pytest.approx(364.0)
     assert allocations["m3"] == pytest.approx(364.0 + 2 * step)
+
+
+_M1_PIN = 364.0
+_SEAT_PITCH = 4.0
+_SEAT_CURVE_RADIUS = 8.0
+_DISTINCT_LINE_CLEARANCE = cotravelling_lane_clearance(
+    same_line=False,
+    counter_running=False,
+    curve_radius=_SEAT_CURVE_RADIUS,
+    offset_step=_SEAT_PITCH,
+)
+
+
+def _cohort_beside_a_fixed_lane(
+    pin: str | None,
+    rotated: bool,
+    fixed_coordinate: float = 368.0,
+    m4_coordinate: float = 372.0,
+) -> tuple[tuple[_BoundClaim, ...], cci.CorridorAllocationProblem]:
+    """``m1`` and ``m4`` are consecutive members of one endpoint cohort, and
+    ``m2``'s fixed lane, outside the cohort, runs between them beside both.
+
+    ``pin`` holds ``m1`` at ``_M1_PIN`` on its own line's fixed lane ``"direct"``ly or
+    ``"through-equality"`` with a same-lane run of its line, holds ``m4``
+    ``"outer"`` instead, or holds neither.
+    """
+    m1 = _entry_cohort_claim(
+        claim_id="m1",
+        line_id="m1",
+        lane_rank=0,
+        endpoint_network_rank=0,
+        slot=120.0,
+        coordinate=_M1_PIN,
+        rotated=rotated,
+    )
+    m4 = _entry_cohort_claim(
+        claim_id="m4",
+        line_id="m4",
+        lane_rank=2,
+        endpoint_network_rank=1,
+        slot=124.0,
+        coordinate=m4_coordinate,
+        rotated=rotated,
+    )
+    lane_m2 = _entry_cohort_claim(
+        claim_id="fixed-m2",
+        line_id="m2",
+        lane_rank=1,
+        endpoint_network_rank=None,
+        slot=120.0,
+        coordinate=fixed_coordinate,
+        rotated=rotated,
+    )
+    movable = [m1, m4]
+    fixed = [lane_m2]
+    if pin == "direct":
+        fixed.append(_fixed_copy(m1, "fixed-m1"))
+    elif pin == "outer":
+        fixed.append(_fixed_copy(m4, "fixed-m4"))
+    elif pin == "through-equality":
+        feed = _entry_cohort_claim(
+            claim_id="m1-feed",
+            line_id="m1",
+            lane_rank=0,
+            endpoint_network_rank=None,
+            slot=200.0,
+            coordinate=_M1_PIN,
+            rotated=rotated,
+        )
+        movable.append(feed)
+        fixed.append(
+            replace(_fixed_copy(feed, "fixed-m1-feed"), longitudinal_start=240.0)
+        )
+    claims = (*movable, *fixed)
+    roles = {item.claim_id: cci.CorridorCohortClaimRole.MOVABLE for item in movable}
+    roles.update({item.claim_id: cci.CorridorCohortClaimRole.FIXED for item in fixed})
+    footprint_model = _MemberFootprintModel((), (), {}, (), (), ())
+    problem = cci._problem(
+        claims,
+        roles,
+        True,
+        _SEAT_PITCH,
+        _SEAT_CURVE_RADIUS,
+        footprint_model,
+        {},
+        corner_neighbours={},
+    )
+    return claims, problem
+
+
+@pytest.mark.parametrize("rotated", [False, True], ids=["left-entry", "top-entry"])
+@pytest.mark.parametrize("pin", ["direct", "through-equality"])
+@pytest.mark.parametrize(
+    ("fixed_coordinate", "m4_coordinate", "m4_seat"),
+    [
+        (368.0, 372.0, 372.0),
+        (372.0, 376.0, 376.0),
+        (372.0, 380.0, 376.0),
+        (376.0, 380.0, 380.0),
+        (376.0, 384.0, 380.0),
+        (368.0, 368.0, 372.0),
+    ],
+    ids=[
+        "packed",
+        "two-pitch",
+        "two-pitch-far",
+        "three-pitch",
+        "three-pitch-far",
+        "on-the-lane",
+    ],
+)
+def test_pinned_endpoint_cohort_seats_past_a_fixed_lane_between_its_members(
+    pin: str,
+    rotated: bool,
+    fixed_coordinate: float,
+    m4_coordinate: float,
+    m4_seat: float,
+) -> None:
+    """A pinned cohort's seats are fixed by its pin, so ``m4`` takes the first
+    pitch out from ``m1`` that clears ``m2``'s fixed lane on the side the
+    members start on, wherever that lane runs."""
+    claims, problem = _cohort_beside_a_fixed_lane(
+        pin, rotated, fixed_coordinate, m4_coordinate
+    )
+
+    boundaries = {lane.member_id: lane.boundary_coordinate for lane in problem.lanes}
+    assert boundaries["m1"] == pytest.approx(0.0)
+    assert boundaries["m4"] == pytest.approx(m4_seat - _M1_PIN)
+    assert _pinned_gap_violations(claims, problem) == []
+    result = solve_corridor_cohorts(problem)
+    assert result.status is CorridorAllocationStatus.PLANNED, result
+    allocations = dict(result.allocations)
+    assert allocations["m1"] == pytest.approx(_M1_PIN)
+    assert allocations["m4"] == pytest.approx(m4_seat)
+    assert abs(allocations["m4"] - fixed_coordinate) >= _DISTINCT_LINE_CLEARANCE
+
+
+@pytest.mark.parametrize("rotated", [False, True], ids=["left-entry", "top-entry"])
+def test_pinned_endpoint_cohort_seats_inward_past_a_fixed_lane(rotated: bool) -> None:
+    """Pinned on its outer member ``m4``, the cohort seats ``m1`` on the first
+    pitch in from the pin that clears ``m2``'s fixed lane on ``m1``'s side."""
+    claims, problem = _cohort_beside_a_fixed_lane("outer", rotated, 372.0, 380.0)
+
+    boundaries = {lane.member_id: lane.boundary_coordinate for lane in problem.lanes}
+    assert boundaries["m1"] == pytest.approx(0.0)
+    assert boundaries["m4"] == pytest.approx(12.0)
+    assert _pinned_gap_violations(claims, problem) == []
+    result = solve_corridor_cohorts(problem)
+    assert result.status is CorridorAllocationStatus.PLANNED, result
+    allocations = dict(result.allocations)
+    assert allocations["m1"] == pytest.approx(368.0)
+    assert allocations["m4"] == pytest.approx(380.0)
+
+
+@pytest.mark.parametrize("rotated", [False, True], ids=["left-entry", "top-entry"])
+def test_unpinned_endpoint_cohort_keeps_one_pitch_past_a_fixed_lane(
+    rotated: bool,
+) -> None:
+    """An unpinned cohort is free to seat clear of ``m2``'s fixed lane as a
+    whole, so its consecutive ranks stay one pitch apart."""
+    _claims, problem = _cohort_beside_a_fixed_lane(None, rotated)
+
+    boundaries = {lane.member_id: lane.boundary_coordinate for lane in problem.lanes}
+    assert boundaries["m1"] == pytest.approx(0.0)
+    assert boundaries["m4"] == pytest.approx(4.0)
 
 
 _ENDPOINT_RANK_FIXTURES = (

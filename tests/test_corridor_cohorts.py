@@ -18,6 +18,7 @@ from nf_metro.layout.routing.corridor_cohorts import (
     CorridorFixedEquality,
     CorridorForbiddenInterval,
     CorridorLane,
+    CorridorLaneRegion,
     CorridorObstacle,
     CorridorSeparation,
     solve_corridor_cohorts,
@@ -2022,3 +2023,230 @@ def test_guard_an_invalid_cornered_problem_returns_without_giving_way() -> None:
 
     assert result.reason is CorridorAllocationFailureReason.INVALID
     assert result == plain
+
+
+def _single_lane() -> CorridorLane:
+    return _lane("lane", "lane", "lane", 10.0, 10.0, span=(0.0, 10.0), line_rank=0)
+
+
+def _region_lanes() -> tuple[CorridorLane, ...]:
+    """``a``, ``b`` and ``c`` share one run; ``a`` and ``b`` are drawn inside
+    their clearance of each other, ``c`` clear above ``b``."""
+    span = (0.0, 50.0)
+    return (
+        _lane("a", "a", "a", 4.0, 4.0, span=span, line_rank=0),
+        _lane("b", "b", "b", 6.0, 6.0, span=span, line_rank=1),
+        _lane("c", "c", "c", 12.0, 12.0, span=span, line_rank=2),
+    )
+
+
+def _lifting_problem() -> CorridorAllocationProblem:
+    return CorridorAllocationProblem(
+        _region_lanes(),
+        regions=(
+            CorridorLaneRegion("b", 10.0, 20.0),
+            CorridorLaneRegion("c", 12.0, 16.0),
+        ),
+        clearance=4.0,
+    )
+
+
+def _pinned_above_problem() -> CorridorAllocationProblem:
+    return CorridorAllocationProblem(
+        _region_lanes(),
+        domains=(CorridorCoordinateDomain("c", maximum_coordinate=12.0),),
+        regions=(CorridorLaneRegion("b", 10.0, 20.0),),
+        clearance=4.0,
+    )
+
+
+def _ceiling_first_problem() -> CorridorAllocationProblem:
+    span = (0.0, 50.0)
+    return CorridorAllocationProblem(
+        (
+            _lane("b", "b", "b", 6.0, 6.0, span=span, line_rank=0),
+            _lane("c", "c", "c", 12.0, 12.0, span=span, line_rank=1),
+        ),
+        domains=(CorridorCoordinateDomain("c", minimum_coordinate=14.0),),
+        regions=(
+            CorridorLaneRegion("b", minimum_coordinate=8.0),
+            CorridorLaneRegion("c", maximum_coordinate=10.0),
+        ),
+        clearance=4.0,
+    )
+
+
+def _reflected(problem: CorridorAllocationProblem) -> CorridorAllocationProblem:
+    """*problem* mirrored through zero onto the other axis, lane order kept."""
+
+    def negated(value: float | None) -> float | None:
+        return None if value is None else -value
+
+    return replace(
+        problem,
+        lanes=tuple(
+            replace(
+                lane,
+                boundary_coordinate=-lane.boundary_coordinate,
+                planned_coordinate=-lane.planned_coordinate,
+            )
+            for lane in problem.lanes
+        ),
+        obstacles=tuple(
+            replace(
+                obstacle,
+                order_coordinate=-obstacle.order_coordinate,
+                realised_coordinate=-obstacle.realised_coordinate,
+            )
+            for obstacle in problem.obstacles
+        ),
+        domains=tuple(
+            replace(
+                domain,
+                minimum_coordinate=negated(domain.maximum_coordinate),
+                maximum_coordinate=negated(domain.minimum_coordinate),
+            )
+            for domain in problem.domains
+        ),
+        regions=tuple(
+            replace(
+                region,
+                minimum_coordinate=negated(region.maximum_coordinate),
+                maximum_coordinate=negated(region.minimum_coordinate),
+            )
+            for region in problem.regions
+        ),
+        axis_sign=-problem.axis_sign,
+        coordinate_axis=1 - problem.coordinate_axis,
+    )
+
+
+@pytest.mark.parametrize(
+    ("region", "expected"),
+    [
+        pytest.param(CorridorLaneRegion("lane", 0.0, 8.0), 8.0, id="ceiling"),
+        pytest.param(CorridorLaneRegion("lane", 12.0, 20.0), 12.0, id="floor"),
+        pytest.param(CorridorLaneRegion("lane", None, 30.0), 10.0, id="open-floor"),
+    ],
+)
+def test_a_lane_region_bounds_its_lane(
+    region: CorridorLaneRegion, expected: float
+) -> None:
+    problem = CorridorAllocationProblem((_single_lane(),), regions=(region,))
+
+    assert _allocations(problem) == {"lane": expected}
+
+
+def test_a_region_floor_lifts_the_lanes_above_it_inside_their_regions() -> None:
+    """``b``'s region floor needs ``c`` past its preference, so ``c`` gives way
+    upward inside its own region and ``a`` keeps its seat below ``b``."""
+    assert _allocations(_lifting_problem()) == {"a": 4.0, "b": 10.0, "c": 14.0}
+
+
+@pytest.mark.parametrize(
+    "problem",
+    [
+        pytest.param(_lifting_problem(), id="lift"),
+        pytest.param(_pinned_above_problem(), id="release"),
+        pytest.param(_ceiling_first_problem(), id="ceiling-first"),
+    ],
+)
+def test_lane_regions_are_equivariant_under_axis_reflection(
+    problem: CorridorAllocationProblem,
+) -> None:
+    original = _allocations(problem)
+
+    assert _allocations(_reflected(problem)) == {
+        member_id: -coordinate for member_id, coordinate in original.items()
+    }
+
+
+@pytest.mark.parametrize(
+    ("problem", "status"),
+    [
+        pytest.param(
+            CorridorAllocationProblem(
+                (_single_lane(),),
+                domains=(CorridorCoordinateDomain("lane", maximum_coordinate=8.0),),
+                regions=(CorridorLaneRegion("lane", 12.0, 20.0),),
+            ),
+            CorridorAllocationStatus.PLANNED,
+            id="floor-above-a-domain-ceiling",
+        ),
+        pytest.param(
+            CorridorAllocationProblem(
+                (_single_lane(),),
+                domains=(CorridorCoordinateDomain("lane", minimum_coordinate=12.0),),
+                regions=(CorridorLaneRegion("lane", 0.0, 8.0),),
+            ),
+            CorridorAllocationStatus.PLANNED,
+            id="ceiling-below-a-domain-floor",
+        ),
+        pytest.param(
+            CorridorAllocationProblem(
+                (_single_lane(),),
+                obstacles=(
+                    _obstacle(
+                        "fixed", 14.0, 14.0, span=(0.0, 10.0), semantic_rank=(1, 0)
+                    ),
+                ),
+                regions=(CorridorLaneRegion("lane", 12.0, 16.0),),
+            ),
+            CorridorAllocationStatus.PLANNED,
+            id="floor-inside-a-fixed-lane-clearance",
+        ),
+        pytest.param(
+            _pinned_above_problem(),
+            CorridorAllocationStatus.PLANNED,
+            id="floor-a-pinned-lane-denies",
+        ),
+        pytest.param(
+            CorridorAllocationProblem(
+                (_single_lane(),),
+                obstacles=(
+                    _obstacle(
+                        "fixed", 10.0, 10.0, span=(0.0, 10.0), semantic_rank=(1, 0)
+                    ),
+                ),
+                domains=(CorridorCoordinateDomain("lane", 8.0, 12.0, ("wall",)),),
+                regions=(CorridorLaneRegion("lane", 9.0, 11.0),),
+            ),
+            CorridorAllocationStatus.FAILURE,
+            id="failure-names-no-region",
+        ),
+    ],
+)
+def test_a_region_the_hard_relations_cannot_meet_changes_nothing(
+    problem: CorridorAllocationProblem, status: CorridorAllocationStatus
+) -> None:
+    """A region the hard relations force its lane past is released, and one
+    inside a domain the hard relations leave no coordinate adds no blocker to
+    the failure."""
+    result = solve_corridor_cohorts(problem)
+
+    assert result.status is status
+    assert result == solve_corridor_cohorts(replace(problem, regions=()))
+
+
+def test_a_region_ceiling_is_weighed_before_the_region_floors_below_it() -> None:
+    """``c``'s region ceiling leaves ``b`` at most 6, below ``b``'s region floor,
+    so that floor is released; ``c``'s domain floor then releases the ceiling
+    too, and ``b`` keeps its preference."""
+    assert _allocations(_ceiling_first_problem()) == {"b": 6.0, "c": 14.0}
+
+
+@pytest.mark.parametrize(
+    "region",
+    [
+        pytest.param(CorridorLaneRegion("ghost", 0.0, 8.0), id="unknown-member"),
+        pytest.param(CorridorLaneRegion("lane", 9.0, 8.0), id="inverted"),
+        pytest.param(CorridorLaneRegion("lane", float("nan"), 8.0), id="non-finite"),
+    ],
+)
+def test_guard_an_invalid_lane_region_is_invalid(region: CorridorLaneRegion) -> None:
+    problem = CorridorAllocationProblem((_single_lane(),), regions=(region,))
+
+    result = solve_corridor_cohorts(problem)
+
+    assert result.status is CorridorAllocationStatus.FAILURE
+    assert result.reason is CorridorAllocationFailureReason.INVALID
