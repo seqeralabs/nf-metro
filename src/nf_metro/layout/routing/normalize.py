@@ -2528,7 +2528,11 @@ def _unify_coincident_corner_radii(
     )
 
 
-def _reconcile_port_peeloff_risers(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
+def _reconcile_port_peeloff_risers(
+    routes: list[RoutedPath],
+    ctx: _RoutingCtx,
+    landing_orders: Mapping[str, Sequence[str]] | None = None,
+) -> None:
     """Re-stack port approaches onto the slots their settled trunk depth earns.
 
     The riser order is assigned during gap materialisation from the trunk
@@ -2548,10 +2552,20 @@ def _reconcile_port_peeloff_risers(routes: list[RoutedPath], ctx: _RoutingCtx) -
     of one riser: derived one member at a time against whatever base the
     emitting handler happened to use, the moved and unmoved risers bend on
     different arc centres and the bundle pinches through the corner.
+
+    *landing_orders* holds the landing order the plan decided for a port
+    (:mod:`~nf_metro.layout.routing.landing_deal`); such a port's risers take
+    that order rather than their trunk depths'.
     """
     step = ctx.offset_step
+    orders = landing_orders or {}
     for bundle in iter_port_peeloff_bundles(routes, ctx.graph, step):
-        targets = peeloff_target_slots(bundle, step, ctx.graph._departure_lane_orders)
+        targets = peeloff_target_slots(
+            bundle,
+            step,
+            ctx.graph._departure_lane_orders,
+            orders.get(bundle.port_id),
+        )
         n = len(bundle.per_line)
         seats: list[tuple[RoutedPath, _VChannel, PeeloffSlot]] = []
         settled = True

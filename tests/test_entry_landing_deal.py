@@ -1,0 +1,342 @@
+"""The plan-time landing deal of a bundle's lines into an entry port.
+
+Concentric turns keep each line on its own side of travel, so a bundle lands
+in the order it leaves its source; the plan deals that order over the port's
+own landing slots and every reconcile rises in it.
+"""
+
+from __future__ import annotations
+
+import warnings
+from collections.abc import Iterator, Mapping, Sequence
+from dataclasses import dataclass, replace
+from pathlib import Path
+from typing import Any
+
+import pytest
+from cohort_shadow_oracle import shadow_failure, shadow_observation
+
+from nf_metro.api import render_string
+from nf_metro.layout.routing import corridor_cohort_integration as cci
+from nf_metro.layout.routing import member_geometry
+from nf_metro.layout.routing.common import (
+    PeeloffTail,
+    PortPeeloffBundle,
+    peeloff_target_slots,
+)
+from nf_metro.layout.routing.context import _RoutingCtx
+from nf_metro.layout.routing.landing_deal import (
+    LandingDealRefusal,
+    bundle_landing_deals,
+    deal_by_exit_order,
+    landing_order,
+)
+from nf_metro.parser.model import PortSide
+
+FIXTURE = (
+    Path(__file__).parent
+    / "fixtures"
+    / "regressions"
+    / "cohort_top_exit_landing_order.mmd"
+)
+SHAPES = Path(__file__).parent / "data" / "landing_deal"
+FIXTURE_PORT = "sec1__entry_left_1"
+
+
+@dataclass
+class _DealCall:
+    ctx: _RoutingCtx
+    targets: tuple[cci.CorridorCohortTarget, ...]
+    decided: Mapping[str, Mapping[str, float]]
+    refused: Mapping[str, LandingDealRefusal]
+
+
+def _render(path: Path) -> None:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        render_string(path.read_text(), source_dir=str(path.parent))
+
+
+def _deal_calls(monkeypatch: pytest.MonkeyPatch, path: Path) -> list[_DealCall]:
+    calls: list[_DealCall] = []
+
+    def spy(
+        ctx: _RoutingCtx, targets: Sequence[cci.CorridorCohortTarget]
+    ) -> tuple[Any, Any]:
+        decided, refused = bundle_landing_deals(ctx, targets)
+        calls.append(_DealCall(ctx, tuple(targets), decided, refused))
+        return decided, refused
+
+    monkeypatch.setattr(member_geometry, "bundle_landing_deals", spy)
+    _render(path)
+    assert calls
+    return calls
+
+
+def _own_slots(call: _DealCall, port_id: str) -> dict[str, float]:
+    return {
+        target.edge_key[2]: target.endpoint_lane_coordinate
+        for target in call.targets
+        if target.edge_key[1] == port_id and target.endpoint_lane_coordinate is not None
+    }
+
+
+# (a) the fixture
+
+
+def test_cohort_final_compile_lands_the_bundle_in_exit_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Three lines leave ``sec0``'s TOP exit left to right as l0, l1, l2 and
+    turn right into ``sec1``'s LEFT entry, so they land top to bottom in that
+    order; the port's own lane order would put l2 above l1."""
+    plans: list[cci.CorridorCohortPlan] = []
+    with shadow_observation():
+        compile_plan = member_geometry.compile_corridor_cohort_plan
+
+        def capture(*args: Any, **kwargs: Any) -> cci.CorridorCohortPlan:
+            plan = compile_plan(*args, **kwargs)
+            plans.append(plan)
+            return plan
+
+        monkeypatch.setattr(member_geometry, "compile_corridor_cohort_plan", capture)
+        _render(FIXTURE)
+    final = plans[-1]
+    landings = {
+        landing.edge_key[2]: landing.coordinate
+        for landing in final.landings
+        if landing.edge_key[1] == FIXTURE_PORT
+    }
+
+    assert sorted(landings, key=landings.__getitem__) == ["l0", "l1", "l2"]
+
+
+def test_the_fixture_draws_as_planned() -> None:
+    assert shadow_failure(FIXTURE) is None
+
+
+# (b) the order
+
+
+@pytest.mark.parametrize(
+    ("exit_side", "entry_side", "expected"),
+    [
+        pytest.param(
+            PortSide.RIGHT,
+            PortSide.LEFT,
+            {"a": 120.0, "b": 124.0, "c": 128.0},
+            id="LR",
+        ),
+        pytest.param(
+            PortSide.LEFT,
+            PortSide.RIGHT,
+            {"a": 120.0, "b": 124.0, "c": 128.0},
+            id="RL",
+        ),
+        pytest.param(
+            PortSide.BOTTOM,
+            PortSide.TOP,
+            {"a": 120.0, "b": 124.0, "c": 128.0},
+            id="TB",
+        ),
+        pytest.param(
+            PortSide.TOP,
+            PortSide.BOTTOM,
+            {"a": 120.0, "b": 124.0, "c": 128.0},
+            id="BT",
+        ),
+        pytest.param(
+            PortSide.RIGHT,
+            PortSide.TOP,
+            {"a": 128.0, "b": 124.0, "c": 120.0},
+            id="LR-turning-down",
+        ),
+        pytest.param(
+            PortSide.TOP,
+            PortSide.LEFT,
+            {"a": 120.0, "b": 124.0, "c": 128.0},
+            id="BT-turning-right",
+        ),
+    ],
+)
+def test_a_bundle_lands_on_the_side_of_travel_it_leaves_on(
+    exit_side: PortSide, entry_side: PortSide, expected: dict[str, float]
+) -> None:
+    """A straight run keeps each line on its screen coordinate.  A turn keeps
+    it on its side of travel: the right of rightward travel is +y and of
+    downward travel -x, so turning down maps the lowest line to the left;
+    the right of upward travel is +x, so turning right keeps the screen ends."""
+    laterals = {"a": 0.0, "b": 4.0, "c": 8.0}
+
+    assert deal_by_exit_order(
+        exit_side, laterals, entry_side, (128.0, 120.0, 124.0)
+    ) == (expected)
+
+
+@pytest.mark.parametrize(
+    ("shape", "port_id", "expected_order"),
+    [
+        pytest.param(
+            "perpendicular_bottom_exit",
+            "sec2__entry_right_2",
+            ("l2", "l0"),
+            id="LR-bottom-exit",
+        ),
+        pytest.param(
+            "perpendicular_right_exit",
+            "sec2__entry_left_3",
+            ("l2", "l1", "l0"),
+            id="TB-right-exit",
+        ),
+        pytest.param(
+            "junction_source",
+            "sec1__entry_right_3",
+            ("l3", "l2", "l1"),
+            id="junction-source",
+        ),
+        pytest.param(
+            "multi_source",
+            "sec3__entry_right_5",
+            ("l3", "l1", "l2"),
+            id="multi-source",
+        ),
+    ],
+)
+def test_the_deal_permutes_the_ports_own_slots(
+    monkeypatch: pytest.MonkeyPatch,
+    shape: str,
+    port_id: str,
+    expected_order: tuple[str, ...],
+) -> None:
+    """A perpendicular exit leaves at its riser lateral, a junction at its own
+    offsets, and a port fed from several sources is dealt per source over that
+    source's slots; every decision only permutes the port's own slots."""
+    for call in _deal_calls(monkeypatch, SHAPES / f"{shape}.mmd"):
+        deal = call.decided[port_id]
+
+        assert landing_order(deal) == expected_order
+        assert sorted(deal.values()) == sorted(_own_slots(call, port_id).values())
+
+
+def test_a_multi_source_port_keeps_a_lone_sources_slot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for call in _deal_calls(monkeypatch, SHAPES / "multi_source.mmd"):
+        own = _own_slots(call, "sec3__entry_right_5")
+
+        assert call.decided["sec3__entry_right_5"]["l2"] == own["l2"]
+
+
+# (c) refusals
+
+
+@pytest.mark.parametrize(
+    ("shape", "port_id", "reason"),
+    [
+        pytest.param(
+            "line_from_two_sources",
+            "z3__entry_left_7",
+            LandingDealRefusal.LINE_FROM_TWO_SOURCES,
+            id="line-from-two-sources",
+        ),
+        pytest.param(
+            "two_sided",
+            "sec3__entry_left_5",
+            LandingDealRefusal.TWO_SIDED,
+            id="two-sided",
+        ),
+    ],
+)
+def test_a_port_the_deal_cannot_order_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+    shape: str,
+    port_id: str,
+    reason: LandingDealRefusal,
+) -> None:
+    for call in _deal_calls(monkeypatch, SHAPES / f"{shape}.mmd"):
+        assert call.refused[port_id] is reason
+        assert port_id not in call.decided
+
+
+@pytest.fixture
+def fixture_call(monkeypatch: pytest.MonkeyPatch) -> Iterator[_DealCall]:
+    yield _deal_calls(monkeypatch, FIXTURE)[0]
+
+
+def test_lines_tied_at_the_exit_are_refused(fixture_call: _DealCall) -> None:
+    offsets = dict(fixture_call.ctx.station_offsets or {})
+    for line in ("l0", "l1", "l2"):
+        offsets[("sec0__exit_top_0", line)] = 0.0
+    ctx = replace(fixture_call.ctx, station_offsets=offsets)
+
+    _decided, refused = bundle_landing_deals(ctx, fixture_call.targets)
+
+    assert refused[FIXTURE_PORT] is LandingDealRefusal.EXIT_TIE
+
+
+def test_a_deal_moving_an_immutable_member_is_refused(
+    fixture_call: _DealCall,
+) -> None:
+    targets = tuple(
+        replace(target, mutable=False) if target.edge_key[1] == FIXTURE_PORT else target
+        for target in fixture_call.targets
+    )
+
+    _decided, refused = bundle_landing_deals(fixture_call.ctx, targets)
+
+    assert refused[FIXTURE_PORT] is LandingDealRefusal.IMMUTABLE_MOVED
+
+
+def test_a_deal_that_moves_no_immutable_member_stands(
+    fixture_call: _DealCall,
+) -> None:
+    targets = tuple(
+        replace(target, mutable=False)
+        if target.edge_key[1] == FIXTURE_PORT and target.edge_key[2] == "l0"
+        else target
+        for target in fixture_call.targets
+    )
+
+    decided, _refused = bundle_landing_deals(fixture_call.ctx, targets)
+
+    assert landing_order(decided[FIXTURE_PORT]) == ("l0", "l1", "l2")
+
+
+# (d) the reconcile obeys
+
+
+def _peeloff_bundle(trunk_sign: int) -> PortPeeloffBundle:
+    """Lines a, b, c peel off one trunk shallowest first into a LEFT port."""
+    per_line = {
+        line: PeeloffTail(
+            0.0, 10.0 + 4 * rank, 100.0 + 4 * rank, 200.0 + 4 * rank, trunk_sign, 1, 1
+        )
+        for rank, line in enumerate("abc")
+    }
+    return PortPeeloffBundle("port", [], per_line, trunk_sign, 1, 1)
+
+
+@pytest.mark.parametrize("trunk_sign", [1, -1], ids=["trunk-leads", "half-turn"])
+def test_a_decided_port_seats_rank_and_port_y_in_the_decided_order(
+    trunk_sign: int,
+) -> None:
+    """The decided order disagrees with trunk depth; each line takes the whole
+    slot, port Y and peel-X rank alike, that its decided position holds."""
+    bundle = _peeloff_bundle(trunk_sign)
+    by_depth = peeloff_target_slots(bundle, 4.0, {})
+    depth_line_at = sorted(by_depth, key=lambda line: by_depth[line].port_y)
+    decided_order = ("c", "a", "b")
+
+    slots = peeloff_target_slots(bundle, 4.0, {}, decided_order)
+
+    assert sorted(slots, key=lambda line: slots[line].port_y) == list(decided_order)
+    for position, line in enumerate(decided_order):
+        assert slots[line] == by_depth[depth_line_at[position]]
+
+
+def test_an_undecided_bundle_keeps_its_trunk_depth_order() -> None:
+    bundle = _peeloff_bundle(1)
+
+    assert peeloff_target_slots(bundle, 4.0, {}, ("a", "b")) == (
+        peeloff_target_slots(bundle, 4.0, {})
+    )

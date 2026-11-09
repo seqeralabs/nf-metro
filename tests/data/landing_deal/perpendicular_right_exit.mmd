@@ -1,0 +1,28 @@
+%%metro title: Fuzz 8401923
+%%metro line: l0 | Pca_Assemble | #e6194b
+%%metro line: l1 | Gather_Pca | #3cb44b
+%%metro line: l2 | Vcf | #4363d8
+
+graph LR
+    subgraph sec0 [Filter 0]
+        s0n0[classify]
+        s0n1[fastqc_annotate_markdup]
+        s0n0 -->|l0| s0n1
+    end
+    subgraph sec1 [Markdup 1]
+        %%metro direction: TB
+        %%metro entry: right | l0
+        s1n0[filter_bam]
+        s1n1[SUMMARISE_MERGE_INDEX]
+        s1n0 -->|l0,l1,l2| s1n1
+    end
+    subgraph sec2 [Normalize_Summarise 2]
+        s2n0[report_dedup]
+        s2n1[qc_polish]
+        s2n2[gather]
+        s2n0 -->|l1,l2| s2n1
+        s2n1 -->|l2| s2n2
+    end
+    s0n1 -->|l0| s1n0
+    s1n1 -->|l0,l1,l2| s2n0
+    s1n1 -->|l1| s2n1

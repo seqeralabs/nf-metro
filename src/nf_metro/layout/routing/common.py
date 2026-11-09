@@ -174,6 +174,30 @@ def segment_direction(
     return None
 
 
+def leg_direction_sequence(
+    points: Sequence[tuple[float, float]],
+) -> tuple[tuple[int, int], ...]:
+    """The screen-axis signs of each leg of *points*, runs of one sign merged.
+
+    A coordinate change within ``COORD_TOLERANCE`` counts as none, so a leg
+    reads ``(0, 1)`` straight down or ``(1, 1)`` on a down-right diagonal; a
+    collapsed leg adds nothing.  Two routes with the same sequence turn the
+    same way at every bend, so concentric turns keep their lateral order.
+    """
+
+    def sign(delta: float) -> int:
+        if abs(delta) <= COORD_TOLERANCE:
+            return 0
+        return 1 if delta > 0 else -1
+
+    sequence: list[tuple[int, int]] = []
+    for (x0, y0), (x1, y1) in zip(points, points[1:]):
+        leg = (sign(x1 - x0), sign(y1 - y0))
+        if leg != (0, 0) and (not sequence or sequence[-1] != leg):
+            sequence.append(leg)
+    return tuple(sequence)
+
+
 def is_orthogonal_turn(
     p0: tuple[float, float], p1: tuple[float, float], p2: tuple[float, float]
 ) -> bool:
@@ -2067,6 +2091,7 @@ def peeloff_target_slots(
     bundle: PortPeeloffBundle,
     step: float,
     records: Mapping[tuple[str, str], DepartureLaneOrder],
+    decided_order: Sequence[str] | None = None,
 ) -> dict[str, PeeloffSlot]:
     """Map each line of *bundle* to the slot its trunk depth earns.
 
@@ -2088,6 +2113,13 @@ def peeloff_target_slots(
     tails leave its junction on the trunk itself has its lines change sides at
     the fork, so each recorded line takes the slot of the line whose lane the
     record gives it (:func:`_record_seats_tails`).
+
+    A port whose landing the plan decided (*decided_order*, its lines in
+    ascending port Y, :mod:`~nf_metro.layout.routing.landing_deal`) is dealt
+    in that order instead: each line takes the port Y of its rank there and
+    the peel-X of the matching trunk rank, so the risers rise in the order
+    the plan lands them.  The decided order already holds any recorded
+    departure.
     """
     per_line = bundle.per_line
     n = len(per_line)
@@ -2100,9 +2132,14 @@ def peeloff_target_slots(
         else realised_xs
     )
     y_slots = sorted(t.port_y for t in per_line.values())
-    ranked = sorted(per_line, key=lambda lid: per_line[lid].trunk_y)
     x_follows_trunk = x_follows_trunk_direction(bundle.vertical_sign, bundle.trunk_sign)
     y_follows_trunk = bundle.port_lead_sign == bundle.trunk_sign
+    decided = decided_order is not None and set(decided_order) == set(per_line)
+    if decided:
+        assert decided_order is not None
+        ranked = list(decided_order if y_follows_trunk else reversed(decided_order))
+    else:
+        ranked = sorted(per_line, key=lambda lid: per_line[lid].trunk_y)
     slots = {
         lid: PeeloffSlot(
             x_slots[i if x_follows_trunk else n - 1 - i],
@@ -2112,7 +2149,7 @@ def peeloff_target_slots(
         for i, lid in enumerate(ranked)
     }
     recorded = [r for r in records.values() if r.target_id == bundle.port_id]
-    if not recorded:
+    if decided or not recorded:
         return slots
     routes: dict[str, RoutedPath] = {}
     for rp, _tail in bundle.entries:
