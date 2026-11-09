@@ -139,6 +139,8 @@ One routing pass materializes one set of gap slots, and production reuses those 
 
 After exit-turn and convergence settlement, the final member-planning pass reconstructs every owned route in canonical order.
 Same-line members that turn at one coincident vertex receive one clamp-safe reference radius and matching concentric inputs before member plans and route-system templates are published.
+Corners of distinct lines on different edges that turn one bend a whole one to three lanes apart are sized there as one concentric family.
+Its innermost lane keeps `CURVE_RADIUS`, and a family that cannot seat every member at `CURVE_RADIUS` keeps its end-cohort sizing.
 Emission copies those frozen values.
 The later corner normalizer handles only cohorts with no planner-owned member.
 
@@ -327,10 +329,11 @@ Each result records which of those problems it came from.
 A patch moves member segments, so the corners at either end of a moved segment re-form.
 The compile sizes them with the freeze's own corner rules, run on copies of the member population at the patched points.
 Each patch carries its route's radii, concentric corner inputs and source turnout, and an unpatched route sharing a corner cohort with a moved corner gets a radius-only patch.
-Nothing is sized when no corner moves, because the rules read the radii they re-size, and an immutable context route is never sized.
+Nothing is sized when no corner moves, because the rules read the radii they re-size, and an immutable context route is never sized: a cross-edge family holding one of its corners keeps its end-cohort sizing.
 
 `tests/cohort_shadow_oracle.py` draws the compiling observation under production's conditions, but publishes every compiled plan at its compile site and takes the observation's own plan as the ledger; the drawn routes are then held to the published plan on every owned segment point and corner.
 `tests/data/cohort_shadow_ratchet.txt` lists the repository maps that oracle fails.
+The Tier C oracle `check_cross_edge_corners_concentric` holds the drawn corners of any two lines that nest by the routing's own predicate, `bend_nests_across_edges`, to one arc centre, and `tests/data/cross_edge_corner_nesting_ratchet.txt` lists the repository maps it fails.
 
 ## Envelope settlement
 
