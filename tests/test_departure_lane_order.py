@@ -135,9 +135,11 @@ def _draw(
     run = offsets_module._run_offset_phases
     decide = offsets_module._feeder_departure_orders
 
-    def capture(graph: MetroGraph, routes: list[Any], offsets: Any) -> None:
+    def capture(
+        graph: MetroGraph, routes: list[Any], offsets: Any, **kwargs: Any
+    ) -> None:
         drawn.graph, drawn.routes = graph, routes
-        check(graph, routes, offsets)
+        check(graph, routes, offsets, **kwargs)
 
     def spy_run(graph: MetroGraph, resolved: float) -> Any:
         ctx = run(graph, resolved)

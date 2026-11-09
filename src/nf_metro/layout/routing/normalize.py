@@ -2591,7 +2591,9 @@ def _reconcile_port_peeloff_risers(
 
 
 def _align_merge_fed_confluence_to_band(
-    routes: list[RoutedPath], ctx: _RoutingCtx
+    routes: list[RoutedPath],
+    ctx: _RoutingCtx,
+    landing_orders: Mapping[str, Sequence[str]] | None = None,
 ) -> None:
     """Nest a merge-fed convergence's free descent onto its reordered band.
 
@@ -2615,9 +2617,11 @@ def _align_merge_fed_confluence_to_band(
     slide that ladder rigidly until the anchors sit on their fixed columns and
     re-seat the free legs on the slots left over -- outboard of the anchors when
     the band ranks them there.  Bundles reachable without a merge are left to
-    :func:`_reconcile_port_peeloff_risers`.
+    :func:`_reconcile_port_peeloff_risers`.  A port in *landing_orders* ranks
+    its ladder in the order the plan lands it.
     """
     step = ctx.offset_step
+    orders = landing_orders or {}
     entry_port_for = ctx.merge.entry_port_for
     by_shape: dict[tuple[str, int, int, int], list[tuple[RoutedPath, PeeloffTail]]] = (
         defaultdict(list)
@@ -2672,7 +2676,9 @@ def _align_merge_fed_confluence_to_band(
         bundle = PortPeeloffBundle(
             port_id, entries, per_line, trunk_sign, vertical_sign, port_lead_sign
         )
-        slots = peeloff_target_slots(bundle, step, ctx.graph._departure_lane_orders)
+        slots = peeloff_target_slots(
+            bundle, step, ctx.graph._departure_lane_orders, orders.get(port_id)
+        )
         deltas = {
             (
                 round(per_line[lid].peel_x - slots[lid].peel_x, 3),

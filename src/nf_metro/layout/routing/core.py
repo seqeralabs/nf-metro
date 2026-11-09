@@ -79,6 +79,7 @@ from nf_metro.layout.routing.intra_handlers import (  # noqa: F401
     _route_entry_runway,
     intra_co_row_feeder,
 )
+from nf_metro.layout.routing.landing_deal import planned_landing_orders
 from nf_metro.layout.routing.normalize import (  # noqa: F401
     _align_merge_fed_confluence_to_band,
     _band_order_crossings,
@@ -655,8 +656,12 @@ def _route_edges(  # noqa: C901
     _separate_opposing_inter_row_trunks(routes, ctx)
     assert_exit_turn_snapshot(routes, planned_segments, "opposing-trunk separation")
     # Re-stack peel-off risers against the settled trunk depths, so each rises
-    # on the concentric slot its post-repack depth earns.
-    _reconcile_port_peeloff_risers(routes, ctx)
+    # on the concentric slot its post-repack depth earns, in the order the plan
+    # landed a port it landed whole.
+    landing_orders = planned_landing_orders(
+        graph, planning.accepted_corridor_cohort_plan
+    )
+    _reconcile_port_peeloff_risers(routes, ctx, landing_orders)
     assert_exit_turn_snapshot(routes, planned_segments, "port-peeloff reconciliation")
     # Peel-off reconciliation can transpose riser order, so symmetric
     # divergences must be joined against those final columns.
@@ -716,7 +721,7 @@ def _route_edges(  # noqa: C901
     # The separation pass rewrites only the band Y, so a merge-fed convergence
     # whose band it reorders is left with its flanking descent-X and port-Y on
     # the old order; re-nest them onto the band so the bundle stays concentric.
-    _align_merge_fed_confluence_to_band(routes, ctx)
+    _align_merge_fed_confluence_to_band(routes, ctx, landing_orders)
     assert_exit_turn_snapshot(routes, planned_segments, "merge confluence alignment")
     # Planned same-line corner cohorts are immutable here.  This final pass is
     # limited to wholly unowned legacy cohorts.

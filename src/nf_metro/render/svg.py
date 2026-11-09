@@ -124,6 +124,7 @@ from nf_metro.layout.routing.invariants import (
     CurveInvariantError,
     assert_render_curve_invariants,
 )
+from nf_metro.layout.routing.landing_deal import planned_landing_orders
 from nf_metro.layout.routing.reserved_bands import (
     ReservedCorridors,
     build_reserved_corridors,
@@ -2223,6 +2224,20 @@ def _settle_render_geometry(
         carried_ports = ()
         return offsets, moved_routes, moved_plan
 
+    def _assert_curves(
+        station_offsets: dict[tuple[str, str], float],
+        routes: list[RoutedPath],
+        plan: RoutePlan,
+    ) -> None:
+        assert_render_curve_invariants(
+            graph,
+            routes,
+            station_offsets,
+            landing_orders=planned_landing_orders(
+                graph, plan.accepted_corridor_cohort_plan
+            ),
+        )
+
     def _publish_observed_routes(
         station_offsets: dict[tuple[str, str], float],
         routes: list[RoutedPath],
@@ -2245,7 +2260,7 @@ def _settle_render_geometry(
         """
         labels = _place(station_offsets, routes)
         _reserve_group_band_space(graph, theme, station_offsets, labels)
-        assert_render_curve_invariants(graph, routes, station_offsets)
+        _assert_curves(station_offsets, routes, realised_plan)
         _assert_settlement_decisions_frozen(
             decided_routes, decided_plan, routes, realised_plan
         )
@@ -2286,7 +2301,7 @@ def _settle_render_geometry(
                 )
             )
             labels = _place(station_offsets, routes)
-            assert_render_curve_invariants(graph, routes, station_offsets)
+            _assert_curves(station_offsets, routes, route_plan)
         return station_offsets, routes, route_plan, labels
 
     reanchor_junctions(graph)
@@ -2296,7 +2311,7 @@ def _settle_render_geometry(
         stage=SettlementStage.DISCOVERY,
         allow_clearance_requirements=True,
     )
-    assert_render_curve_invariants(graph, routes, station_offsets)
+    _assert_curves(station_offsets, routes, route_plan)
 
     labels = _place(station_offsets, routes)
     station_offsets, routes, route_plan, labels = _reconcile_carried_ports(
@@ -2310,7 +2325,7 @@ def _settle_render_geometry(
             )
         )
         labels = _place(station_offsets, routes)
-        assert_render_curve_invariants(graph, routes, station_offsets)
+        _assert_curves(station_offsets, routes, route_plan)
         station_offsets, routes, route_plan, labels = _reconcile_carried_ports(
             station_offsets, routes, route_plan, labels
         )
@@ -2360,7 +2375,7 @@ def _settle_render_geometry(
                 "clearance requirements"
             )
         labels = _place(station_offsets, routes)
-        assert_render_curve_invariants(graph, routes, station_offsets)
+        _assert_curves(station_offsets, routes, routed_plan)
         if pending_clearance:
             granted_routes = routes
             granted_plan = routed_plan
@@ -2382,7 +2397,7 @@ def _settle_render_geometry(
                 granted_plan, settlement.coordinate_translations
             )
             labels = _place(station_offsets, routes)
-            assert_render_curve_invariants(graph, routes, station_offsets)
+            _assert_curves(station_offsets, routes, consumed_plan)
             _assert_settlement_decisions_frozen(
                 granted_routes, granted_plan, routes, consumed_plan
             )

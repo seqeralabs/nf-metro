@@ -30,15 +30,19 @@ from nf_metro.layout.routing.common import (
     right_normal_axis_sign,
 )
 from nf_metro.layout.routing.context import _get_offset, _section_lane_frame
+from nf_metro.layout.routing.corridor_cohort_integration import (
+    AcceptedCorridorOwnerKind,
+)
 from nf_metro.layout.routing.perp import _perp_riser_lateral
 from nf_metro.parser.model import PortSide
 
 if TYPE_CHECKING:
     from nf_metro.layout.routing.context import _RoutingCtx
     from nf_metro.layout.routing.corridor_cohort_integration import (
+        AcceptedCorridorCohortPlan,
         CorridorCohortTarget,
     )
-    from nf_metro.parser.model import Port
+    from nf_metro.parser.model import MetroGraph, Port
 
 _SAME_SLOT = 1e-9
 
@@ -235,3 +239,43 @@ def _source_deal(
 def landing_order(deal: Mapping[str, float]) -> tuple[str, ...]:
     """A decided port's lines in ascending landing coordinate."""
     return tuple(sorted(deal, key=deal.__getitem__))
+
+
+def planned_landing_orders(
+    graph: MetroGraph, plan: AcceptedCorridorCohortPlan | None
+) -> dict[str, tuple[str, ...]]:
+    """Each entry port's lines in ascending landing coordinate, as *plan* lands them.
+
+    A port counts only when the plan lands every edge entering it, once each,
+    on one axis, and no line enters it from two sources: such a line has no
+    single place in the order, which is why the deal refuses it too.  The
+    reconciles after emission take such a port's order from here instead of
+    re-deriving it from trunk depth.
+    """
+    if plan is None:
+        return {}
+    by_port: defaultdict[str, list[tuple[tuple[str, str], int, float]]] = defaultdict(
+        list
+    )
+    for frame in plan.owners:
+        if frame.kind is AcceptedCorridorOwnerKind.ENDPOINT_LANDING:
+            source, port_id, line = frame.segment[1]
+            by_port[port_id].append(
+                ((source, line), frame.axis, frame.accepted_coordinate)
+            )
+    orders: dict[str, tuple[str, ...]] = {}
+    for port_id, landed in by_port.items():
+        port = graph.ports.get(port_id)
+        if port is None or not port.is_entry:
+            continue
+        edges = sorted((edge.source, edge.line_id) for edge in graph.edges_to(port_id))
+        if sorted(edge for edge, _axis, _coordinate in landed) != edges:
+            continue
+        if len({line for _source, line in edges}) != len(edges):
+            continue
+        if len({axis for _edge, axis, _coordinate in landed}) != 1:
+            continue
+        orders[port_id] = landing_order(
+            {line: coordinate for (_source, line), _axis, coordinate in landed}
+        )
+    return orders

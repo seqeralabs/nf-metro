@@ -17,8 +17,8 @@ import pytest
 from cohort_shadow_oracle import shadow_failure, shadow_observation
 
 from nf_metro.api import render_string
+from nf_metro.layout.routing import core, invariants, member_geometry
 from nf_metro.layout.routing import corridor_cohort_integration as cci
-from nf_metro.layout.routing import member_geometry
 from nf_metro.layout.routing.common import (
     PeeloffTail,
     PortPeeloffBundle,
@@ -30,8 +30,9 @@ from nf_metro.layout.routing.landing_deal import (
     bundle_landing_deals,
     deal_by_exit_order,
     landing_order,
+    planned_landing_orders,
 )
-from nf_metro.parser.model import PortSide
+from nf_metro.parser.model import MetroGraph, PortSide
 
 FIXTURE = (
     Path(__file__).parent
@@ -340,3 +341,111 @@ def test_an_undecided_bundle_keeps_its_trunk_depth_order() -> None:
     assert peeloff_target_slots(bundle, 4.0, {}, ("a", "b")) == (
         peeloff_target_slots(bundle, 4.0, {})
     )
+
+
+# (e) the reconciles after emission take the published plan's order
+
+
+def test_every_consumer_after_emission_takes_the_plans_landing_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    received: dict[str, list[Mapping[str, Sequence[str]]]] = {
+        "reconcile": [],
+        "invariant": [],
+    }
+    reconcile = core._reconcile_port_peeloff_risers
+    check = invariants.check_peeloff_concentric
+
+    def spy_reconcile(routes: Any, ctx: Any, orders: Any = None) -> None:
+        received["reconcile"].append(orders or {})
+        reconcile(routes, ctx, orders)
+
+    def spy_check(graph: Any, routes: Any, radius: Any, orders: Any = None) -> Any:
+        received["invariant"].append(orders or {})
+        return check(graph, routes, radius, orders)
+
+    monkeypatch.setattr(core, "_reconcile_port_peeloff_risers", spy_reconcile)
+    monkeypatch.setattr(invariants, "check_peeloff_concentric", spy_check)
+    _render(FIXTURE)
+
+    for consumer, calls in received.items():
+        orders = [call[FIXTURE_PORT] for call in calls if FIXTURE_PORT in call]
+        assert orders, consumer
+        assert set(orders) == {("l0", "l1", "l2")}, consumer
+
+
+@pytest.fixture
+def published(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[MetroGraph, cci.AcceptedCorridorCohortPlan]:
+    seen: list[tuple[MetroGraph, cci.AcceptedCorridorCohortPlan]] = []
+
+    def spy(
+        graph: MetroGraph, plan: cci.AcceptedCorridorCohortPlan | None
+    ) -> dict[str, tuple[str, ...]]:
+        if plan is not None:
+            seen.append((graph, plan))
+        return planned_landing_orders(graph, plan)
+
+    monkeypatch.setattr(core, "planned_landing_orders", spy)
+    _render(FIXTURE)
+    graph, plan = seen[-1]
+    assert planned_landing_orders(graph, plan)[FIXTURE_PORT] == ("l0", "l1", "l2")
+    return graph, plan
+
+
+def _port_landings(
+    plan: cci.AcceptedCorridorCohortPlan,
+) -> list[cci.AcceptedCorridorOwnerFrame]:
+    return [
+        frame
+        for frame in plan.owners
+        if frame.kind is cci.AcceptedCorridorOwnerKind.ENDPOINT_LANDING
+        and frame.segment[1][1] == FIXTURE_PORT
+    ]
+
+
+def _with_owners(
+    plan: cci.AcceptedCorridorCohortPlan,
+    owners: Sequence[cci.AcceptedCorridorOwnerFrame],
+) -> cci.AcceptedCorridorCohortPlan:
+    translations = plan.coordinate_translations
+    return cci.AcceptedCorridorCohortPlan(
+        cci._accepted_plan_id(tuple(owners), translations),
+        tuple(owners),
+        translations,
+    )
+
+
+def test_a_port_the_plan_lands_in_part_is_not_decided(
+    published: tuple[MetroGraph, cci.AcceptedCorridorCohortPlan],
+) -> None:
+    graph, plan = published
+    dropped = _port_landings(plan)[0]
+    partial = _with_owners(plan, [f for f in plan.owners if f is not dropped])
+
+    assert FIXTURE_PORT not in planned_landing_orders(graph, partial)
+
+
+def test_a_line_two_members_land_leaves_its_port_undecided(
+    published: tuple[MetroGraph, cci.AcceptedCorridorCohortPlan],
+) -> None:
+    """A second member landing one of the port's lines on that line's own
+    coordinate, as a line fed from two sources is landed."""
+    graph, plan = published
+    landing = _port_landings(plan)[0]
+    member, (_source, port_id, line), rank = landing.segment
+    second = replace(
+        landing,
+        identity=landing.identity + "|second-source",
+        owner_id=member + "|second-source",
+        segment=(member + "|second-source", ("other_source", port_id, line), rank),
+    )
+
+    assert FIXTURE_PORT not in planned_landing_orders(
+        graph, _with_owners(plan, [*plan.owners, second])
+    )
+
+
+def test_without_a_plan_no_port_is_decided() -> None:
+    assert planned_landing_orders(MetroGraph(), None) == {}

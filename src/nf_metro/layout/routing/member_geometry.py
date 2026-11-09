@@ -822,15 +822,16 @@ def _post_emission_seated_snapshot(
 
     Over the distinct target copies in target order, :func:`_materialize_trunk_slots`
     restacks the trunk bands, :func:`_reconcile_port_peeloff_risers` re-seats
-    the peel-off risers (in the plan's *landing_orders* where it decided one),
-    and :func:`_coincide_same_line_fanout_traverses` and
+    the peel-off risers, and :func:`_coincide_same_line_fanout_traverses` and
     :func:`_bundle_divergent_distinct_traverses` fuse and nest the fan-out
     traverses.  Over every copy, :func:`_separate_fused_cotravelling_runs`,
     :func:`_align_merge_fed_confluence_to_band` and
     :func:`_hold_runs_in_corridor_clearance` then settle the corridor runs.
     That is the order those passes run after emission, so the compile reads
-    the coordinates they draw and no live route moves.  The snapshot predicts
-    those passes from their input; it is not a fixpoint of them.
+    the coordinates they draw and no live route moves.  Both peel-off passes
+    rank a port the plan decided (*landing_orders*) in that landing order.
+    The snapshot predicts those passes from their input; it is not a fixpoint
+    of them.
 
     After emission those passes read the segments the freeze owns as fixed,
     so the restack, the traverse passes and the confluence alignment run with
@@ -933,7 +934,7 @@ def _post_emission_seated_snapshot(
             fixed_segment_keys=fixed_segment_keys,
         )
     with freeze_ownership(()):
-        _align_merge_fed_confluence_to_band(seated, ctx)
+        _align_merge_fed_confluence_to_band(seated, ctx, landing_orders)
     _hold_runs_in_corridor_clearance(seated, ctx, fixed_segment_keys=fixed_segment_keys)
     return (
         tuple(replace(target, route=copies[id(target.route)]) for target in targets),
