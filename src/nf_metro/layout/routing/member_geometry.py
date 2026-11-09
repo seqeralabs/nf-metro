@@ -104,8 +104,8 @@ from nf_metro.layout.routing.normalize import (
     _reconcile_port_peeloff_risers,
     _rederive_semantic_end_corners,
     _reseat_concentric_flanking,
-    _route_endpoint_section_ids,
     _segment_claim_band,
+    _segment_corridor_band,
     _separate_fused_cotravelling_runs,
     _separate_opposing_inter_row_trunks,
     _set_vchannel_x,
@@ -121,7 +121,6 @@ from nf_metro.layout.routing.perp import _perp_entry_crossing_x
 from nf_metro.layout.routing.reserved_bands import (
     ReservedBand,
     bundle_travel,
-    corridor_clearance_band,
     resolved_band,
 )
 from nf_metro.layout.settlement_demand import (
@@ -924,6 +923,25 @@ def _post_emission_seated_snapshot(
     )
 
 
+def _corridor_lane_region(
+    ctx: _RoutingCtx, route: RoutedPath, rank: int, axis: int
+) -> tuple[float | None, float | None] | None:
+    """The corridor extent segment *rank* of *route* is drawn in, as the
+    corridor hold reads it (:func:`_segment_corridor_band`), widened to hold
+    the segment's input coordinate.
+
+    The hold can leave a lane outside its band, and the solve must not ask for
+    a seat the hold cannot draw.  An unbounded side is ``None``; an inverted
+    band bounds nothing, since the hold then moves nothing.
+    """
+    coordinate = route.points[rank][axis]
+    band = _segment_corridor_band(ctx, route, rank, axis, coordinate)
+    if band is None or band.hi < band.lo - COORD_TOLERANCE:
+        return None
+    low, high = min(band.lo, coordinate), max(band.hi, coordinate)
+    return None if math.isinf(low) else low, None if math.isinf(high) else high
+
+
 def _compile_corridor_cohorts(
     ledger: CorridorCohortLedger | None,
     candidates: Sequence[_MemberCandidate],
@@ -977,6 +995,7 @@ def _compile_corridor_cohorts(
             ),
             live_route=lambda route: live_by_copy_id[id(route)],
             entry_port_for=ctx.merge.entry_port_for,
+            lane_region=partial(_corridor_lane_region, ctx),
         )
     except CorridorCohortCompilationError as error:
         if not allow_clearance_requirements:
@@ -1213,32 +1232,13 @@ def _turn_corridor_band(
 ) -> ReservedBand | GapCorridorBand | None:
     """The clearance band the run leaving *candidate*'s turn owes its corridor.
 
-    A claim over the leg is read ahead of live geometry, because settlement
-    sized the boundary for that corridor and re-deriving from the drawn
-    coordinate would spend the allocation instead of consuming it.
-
     The run leaving the turn travels along the turn direction, so the
     coordinate it holds is the one the *run into* the turn advances along --
     hence the band's axis is the run's, and its extent the perpendicular.
     """
-    claimed = _segment_claim_band(ctx, candidate.route, candidate.rank)
-    if claimed is not None:
-        return claimed
     axis = direction_axis(candidate.run_direction).point_index
-    section_ids = _route_endpoint_section_ids(ctx.graph, candidate.route)
-    if not section_ids:
-        return None
-    span = (
-        candidate.route.points[candidate.rank][1 - axis],
-        candidate.route.points[candidate.rank + 1][1 - axis],
-    )
-    return corridor_clearance_band(
-        ctx.graph,
-        axis=axis,
-        section_ids=section_ids,
-        coordinate=coordinate,
-        run_start=min(span),
-        run_end=max(span),
+    return _segment_corridor_band(
+        ctx, candidate.route, candidate.rank, axis, coordinate
     )
 
 

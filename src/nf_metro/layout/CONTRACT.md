@@ -2254,7 +2254,11 @@ They are design evidence, not part of this specification.
   settlement moved nothing and nothing was re-routed; the replay without the
   grant reads the same ones. It is the only pass that runs the corridor-cohort
   compiler, because only a ledger already settled to its minimum widths
-  compiles without a spurious shortfall. The plan it accepts is stored on that
+  compiles without a spurious shortfall. Each claimed lane is solved inside
+  the band the corridor hold draws it in (`CorridorLaneRegion`: the claim's
+  reserved band, else the live gap band, widened to the lane's input
+  coordinate); a band the solve's hard relations cannot meet is released,
+  never reported as a shortfall. The plan it accepts is stored on that
   observation's `RoutePlan` as `accepted_corridor_cohort_plan`, from which the
   observation reads the convergences a grant moved, and
   `prepare_route_system_planning` refuses to compile on a pass seated against a
