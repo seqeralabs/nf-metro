@@ -123,10 +123,9 @@ def test_moved_landing_corner_nests_concentrically_with_its_mate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Both feeders into benchmarking's right entry are moved by the patch, the
-    test descent to x=1410, the edge of its corridor band, and the truth
-    descent to x=1406, so their landing corners turn 4px apart: the outer test
-    corner takes radius 14 around the inner truth corner's 10, and the two arcs
-    share one centre."""
+    test descent to the edge of its corridor band and the truth descent 4px
+    inside it, so the outer test landing corner takes radius 14 around the
+    inner truth corner's 10, and the two arcs share one centre."""
     truth_key = ("__junction_14", "benchmarking__entry_right_11", "truth")
     test_key = ("__junction_15", "benchmarking__entry_right_11", "test")
     compiles = _compiles(monkeypatch, "examples/variantbenchmarking.mmd")

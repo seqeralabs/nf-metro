@@ -3595,7 +3595,7 @@ def _problem(
     )
     coordinate_axis = movable[0].axis if movable else scalar_requests[0].variable.axis
     regions = tuple(
-        CorridorLaneRegion(item.claim_id, f"lane-region|{item.claim_id}", *bounds)
+        CorridorLaneRegion(item.claim_id, *bounds)
         for item in movable
         if (
             bounds := lane_region(

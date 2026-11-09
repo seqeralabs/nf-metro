@@ -1,42 +1,23 @@
-%%metro title: Fuzz 8400955
-%%metro line: l0 | Polish | #e6194b
-%%metro line: l1 | Count_Bin | #3cb44b
-%%metro line: l2 | Report_Filter | #4363d8
-%%metro line: l3 | Report_Summarise_Align | #f58231
+%%metro title: A top exit's riser seats inside its corridor band
+%%metro line: red | Red | #e6194b
+%%metro line: green | Green | #3cb44b
+%%metro line: blue | Blue | #4363d8
 
 graph LR
-    subgraph sec0 [Pca 0]
-        s0n0[index]
-        s0n1[report]
-        s0n3[pca]
-        s0n0 -->|l1| s0n1
-        s0n1 -->|l1| s0n3
+    subgraph left [Left]
+        index[index]
+        pca[pca]
     end
-    subgraph sec1 [Bin 1]
-        %%metro exit: top | l0, l1, l2
-        s1n0[export_polish]
-        s1n1[export]
-        s1n0 -->|l0,l1,l2| s1n1
+    subgraph middle [Middle]
+        %%metro exit: top | red, green, blue
+        start[start]
+        export[export]
+        start -->|green,blue| export
     end
-    subgraph sec2 [Index 2]
-        %%metro entry: right | l0, l1, l2
-        s2n0[polish_count]
-        s2n1[qc]
-        s2n2[report_polish]
-        s2n3[report]
-        s2n0 -->|l0,l1,l2| s2n1
-        s2n1 -->|l0,l1| s2n2
-        s2n2 -->|l0,l1| s2n3
-        s2n1 -->|l2| s2n3
+    subgraph right [Right]
+        land[land]
+        qc[qc]
     end
-    subgraph sec3 [Markdup_Annotate_Align 3]
-        %%metro direction: BT
-        s3n0[sort_report]
-        s3n1[report_summarise_fastqc]
-        s3n0 -->|l1,l2,l3| s3n1
-    end
-    s1n1 -->|l0,l1,l2| s2n0
-    s0n3 -->|l1| s1n0
-    s2n3 -->|l1,l2,l3| s3n0
-    s0n0 -->|l1| s2n1
-    s2n1 -->|l1| s3n1
+    export -->|red,green,blue| land
+    pca -->|green| start
+    index -->|green| qc

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import operator
 from collections import defaultdict
 from collections.abc import Callable, Container, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import Enum
 from fractions import Fraction
 from math import isfinite
+from typing import NamedTuple
 
 from nf_metro.layout.constants import COORD_TOLERANCE
 
@@ -151,7 +153,6 @@ class CorridorLaneRegion:
     """
 
     member_id: str
-    owner_id: str
     minimum_coordinate: float | None = None
     maximum_coordinate: float | None = None
 
@@ -240,6 +241,35 @@ def _tightest(
         for root, value in bound.items():
             tightest[root] = pick(tightest[root], value) if root in tightest else value
     return tightest
+
+
+class _SeatingBounds(NamedTuple):
+    """Each root's bound, and the obstacles that bound names: its domain's
+    where the domain sets it, none where only a region does."""
+
+    bound: Mapping[int, Fraction]
+    named: Mapping[int, set[str]]
+
+    def obstacles(self, root: int) -> set[str]:
+        return self.named.get(root, set())
+
+    @classmethod
+    def tightened(
+        cls,
+        bound: Mapping[int, Fraction],
+        named: Mapping[int, set[str]],
+        regions: Mapping[int, Fraction],
+        tighter: Callable[[Fraction, Fraction], bool],
+    ) -> _SeatingBounds:
+        """The domain *bound* and *named* obstacles, with each region bound
+        *tighter* than its root's domain in place of it."""
+        merged = dict(bound)
+        merged_named = dict(named)
+        for root, value in regions.items():
+            if root not in merged or tighter(value, merged[root]):
+                merged[root] = value
+                merged_named[root] = set()
+        return cls(merged, merged_named)
 
 
 def _overlaps(a_start: float, a_end: float, b_start: float, b_end: float) -> bool:
@@ -334,16 +364,14 @@ def _invalid_problem(
     numeric.extend(separation.distance for separation in problem.separations)
     all_directed = (*problem.directed_separations, *problem.corner_orders)
     numeric.extend(separation.distance for separation in all_directed)
-    numeric.extend(
-        coordinate
-        for domain in problem.domains
-        for coordinate in (domain.minimum_coordinate, domain.maximum_coordinate)
-        if coordinate is not None
+    bounds: tuple[CorridorCoordinateDomain | CorridorLaneRegion, ...] = (
+        *problem.domains,
+        *problem.regions,
     )
     numeric.extend(
         coordinate
-        for region in problem.regions
-        for coordinate in (region.minimum_coordinate, region.maximum_coordinate)
+        for bound in bounds
+        for coordinate in (bound.minimum_coordinate, bound.maximum_coordinate)
         if coordinate is not None
     )
     numeric.extend(
@@ -442,20 +470,16 @@ def _invalid_problem(
         for member_id in (separation.lower_member_id, separation.upper_member_id)
         if member_id in by_id
     }
-    bounds: tuple[CorridorCoordinateDomain | CorridorLaneRegion, ...] = (
-        *problem.domains,
-        *problem.regions,
-    )
     invalid_domains = {
-        domain.member_id
-        for domain in bounds
-        if domain.member_id not in by_id
+        bound.member_id
+        for bound in bounds
+        if bound.member_id not in by_id
         or (
-            domain.minimum_coordinate is not None
-            and domain.maximum_coordinate is not None
-            and domain.minimum_coordinate > domain.maximum_coordinate
+            bound.minimum_coordinate is not None
+            and bound.maximum_coordinate is not None
+            and bound.minimum_coordinate > bound.maximum_coordinate
         )
-    } | {region.member_id for region in problem.regions if not region.owner_id}
+    }
     invalid_forbidden_intervals = {
         interval.obstacle_id
         for interval in problem.forbidden_intervals
@@ -1479,16 +1503,25 @@ def _solve_in_frame(  # noqa: C901, PLR0915
         order: Sequence[int],
         successors: Mapping[int, list[tuple[int, Fraction]]],
         predecessors: Mapping[int, list[tuple[int, Fraction]]],
-    ) -> tuple[Mapping[int, Fraction], Mapping[int, Fraction], dict[int, Fraction]]:
+    ) -> tuple[_SeatingBounds, _SeatingBounds, dict[int, Fraction]]:
         """Each root's floor and ceiling with the regions it can meet, and the
         coordinate a kept region floor lifts it to above its preference.
 
-        A region side the root's forced extreme already passes releases the
-        whole region: keeping its other side would still steer the root, and
-        its kept floor would still lift the roots above it.
+        A region side the root's forced extreme passes releases the whole
+        region, since its other side alone would steer the root and its floor
+        would lift the roots above it.  Each test runs once, ceilings first:
+        region floors against the highest extent every ceiling allows, region
+        ones included, then region ceilings against the lowest extent the
+        domain floors and the region floors that test kept allow.  Neither test
+        is revisited, so a region the ceiling test releases has counted toward
+        both extents.
         """
         if not region_floor and not region_ceiling:
-            return domain_floor, domain_ceiling, {}
+            return (
+                _SeatingBounds(domain_floor, domain_floor_obstacles),
+                _SeatingBounds(domain_ceiling, domain_ceiling_obstacles),
+                {},
+            )
         highest = forced_extent(
             order,
             successors,
@@ -1529,8 +1562,12 @@ def _solve_in_frame(  # noqa: C901, PLR0915
         }
         lifted = forced_extent(order, predecessors, kept_floor, upward=True)
         return (
-            _tightest(max, domain_floor, kept_floor),
-            _tightest(min, domain_ceiling, kept_ceiling),
+            _SeatingBounds.tightened(
+                domain_floor, domain_floor_obstacles, kept_floor, operator.gt
+            ),
+            _SeatingBounds.tightened(
+                domain_ceiling, domain_ceiling_obstacles, kept_ceiling, operator.lt
+            ),
             {root: value for root, value in lifted.items() if value > preferred[root]},
         )
 
@@ -1635,19 +1672,9 @@ def _solve_in_frame(  # noqa: C901, PLR0915
             successors[before].append((after, edge_distance))
             predecessors[after].append((before, edge_distance))
 
-        floor_bound, ceiling_bound, lifted = region_seating(
-            order, successors, predecessors
-        )
-
-        def floor_obstacles_of(root: int) -> set[str]:
-            if floor_bound.get(root) != domain_floor.get(root):
-                return set()
-            return domain_floor_obstacles.get(root, set())
-
-        def ceiling_obstacles_of(root: int) -> set[str]:
-            if ceiling_bound.get(root) != domain_ceiling.get(root):
-                return set()
-            return domain_ceiling_obstacles.get(root, set())
+        floors, ceilings, lifted = region_seating(order, successors, predecessors)
+        floor_bound, ceiling_bound = floors.bound, ceilings.bound
+        floor_obstacles_of, ceiling_obstacles_of = floors.obstacles, ceilings.obstacles
 
         try:
             latest: dict[int, Fraction] = {}

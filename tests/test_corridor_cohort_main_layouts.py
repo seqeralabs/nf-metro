@@ -7,11 +7,13 @@ must establish there, not only that the render completes.
 
 from __future__ import annotations
 
+import inspect
 import warnings
 from pathlib import Path
 from typing import Any
 
 import pytest
+from cohort_shadow_oracle import shadow_observation
 from conftest import curve_abort_softened, is_curve_abort_fixture
 
 from nf_metro.api import prepare_graph, render_string
@@ -26,8 +28,6 @@ from nf_metro.layout.routing.corridor_cohorts import (
     CorridorAllocationStatus,
     CorridorCornerOrderTier,
 )
-from nf_metro.layout.routing.normalize import _route_endpoint_section_ids
-from nf_metro.layout.routing.reserved_bands import corridor_clearance_band
 from nf_metro.layout.settlement_demand import BoundaryClearanceRequirement
 from nf_metro.parser.model import PermissiveGuardWarning
 from nf_metro.render import svg
@@ -40,13 +40,7 @@ class _Captured:
     def __init__(self) -> None:
         self.compiles = 0
         self.plans: list[cci.CorridorCohortPlan] = []
-        self.compiled: list[
-            tuple[
-                _RoutingCtx,
-                tuple[cci.CorridorCohortTarget, ...],
-                cci.CorridorCohortPlan,
-            ]
-        ] = []
+        self.compiled: list[tuple[_RoutingCtx, cci.CorridorCohortPlan]] = []
         self.ctx: _RoutingCtx | None = None
         self.granted: set[str] = set()
         self.apertures: list[BoundaryClearanceRequirement] = []
@@ -73,12 +67,14 @@ def _render(
 ) -> _Captured:
     captured = _Captured()
     compile_cohorts = member_geometry._compile_corridor_cohorts
+    compile_cohorts_signature = inspect.signature(compile_cohorts)
     compile_plan = member_geometry.compile_corridor_cohort_plan
     granted_ids = svg._corridor_grant_moved_plan_ids
     aperture_requirements = member_geometry._corridor_cohort_aperture_requirements
 
     def capture_ctx(*args: Any, **kwargs: Any) -> Any:
-        captured.ctx = kwargs["ctx"] if "ctx" in kwargs else args[4]
+        bound = compile_cohorts_signature.bind(*args, **kwargs)
+        captured.ctx = bound.arguments["ctx"]
         return compile_cohorts(*args, **kwargs)
 
     def capture_plan(*args: Any, **kwargs: Any) -> cci.CorridorCohortPlan:
@@ -86,7 +82,7 @@ def _render(
         plan = compile_plan(*args, **kwargs)
         captured.plans.append(plan)
         assert captured.ctx is not None
-        captured.compiled.append((captured.ctx, tuple(args[1]), plan))
+        captured.compiled.append((captured.ctx, plan))
         return plan
 
     def capture_granted(plan: Any) -> frozenset[str]:
@@ -205,54 +201,32 @@ def test_lanes_turning_together_seat_in_their_corner_order(
 
 @pytest.mark.parametrize(
     "fixture",
-    ["cohort_region_floor_lift.mmd", "cohort_region_exit_riser.mmd"],
+    [
+        "cohort_region_floor_lift.mmd",
+        "cohort_region_exit_riser.mmd",
+        "cohort_region_beside_section.mmd",
+    ],
 )
-def test_compile_seats_each_lane_inside_its_corridor_band(
-    monkeypatch: pytest.MonkeyPatch, fixture: str
-) -> None:
-    """Every seated lane lies inside the band the corridor hold draws its run
-    in: its claim's reserved band, else the live gap band, widened to the
-    lane's input coordinate, which the hold may already have left outside
-    it."""
-    captured = _render(monkeypatch, DATA / fixture)
-    checked = 0
-    outside = []
-    for ctx, targets, plan in captured.compiled:
-        routes = {target.edge_key: target.route for target in targets}
-        for allocation in plan.allocations:
-            band = ctx.reserved_bands.for_segment(
-                *allocation.edge_key, allocation.segment_rank
-            ) or corridor_clearance_band(
-                ctx.graph,
-                axis=allocation.axis,
-                section_ids=_route_endpoint_section_ids(
-                    ctx.graph, routes[allocation.edge_key]
-                ),
-                coordinate=allocation.source_coordinate,
-                run_start=allocation.longitudinal_start,
-                run_end=allocation.longitudinal_end,
-            )
-            if band is None:
-                continue
-            checked += 1
-            low = min(band.lo, allocation.source_coordinate)
-            high = max(band.hi, allocation.source_coordinate)
-            if not low - 1e-6 <= allocation.coordinate <= high + 1e-6:
-                outside.append((allocation.claim_id, allocation.coordinate, low, high))
-    assert checked
-    assert not outside
+def test_corridor_hold_draws_every_lane_where_the_plan_seats_it(fixture: str) -> None:
+    """Each map's solve, left free of its corridor bands, seats a lane the
+    corridor hold then draws elsewhere; seated inside them, the drawn routes
+    match the plan."""
+    path = DATA / fixture
+    with warnings.catch_warnings(), shadow_observation():
+        warnings.simplefilter("ignore")
+        render_string(path.read_text(), source_dir=str(path.parent))
 
 
 def test_compile_seats_no_lane_through_a_section(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The junction's run to ``sec2`` crosses the gap beside ``sec1``, whose
-    reserved band keeps it out of ``sec1`` even where a fixed footprint denies
-    it the coordinate it was drawn at."""
+    """Red's run from its junction to ``upper_right`` crosses the gap beside
+    ``middle``, whose reserved band keeps it out of ``middle`` even where a
+    fixed footprint denies it the coordinate it was drawn at."""
     captured = _render(monkeypatch, DATA / "cohort_region_beside_section.mmd")
     assert captured.compiled
     crossings = []
-    for ctx, _targets, plan in captured.compiled:
+    for ctx, plan in captured.compiled:
         for allocation in plan.allocations:
             run = sorted((allocation.longitudinal_start, allocation.longitudinal_end))
             for section in ctx.graph.sections.values():

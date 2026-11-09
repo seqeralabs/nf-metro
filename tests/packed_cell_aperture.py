@@ -4,8 +4,8 @@
 column-2 corridor ``assembled``'s run (segment 1) is drawn 17px left of
 ``reference``'s run into ``annot`` (segment 3), and ``qc``'s two feeders sit
 12px right of ``assembled`` and 20px inside their 1037.5 ceiling.  Directing
-``assembled`` 10px right of that ``reference`` run instead drags ``qc``'s
-cohort 2.0px past its ceiling, a shortfall the producer maps to one aperture
+``assembled`` 10px right of that ``reference`` run drags ``qc``'s cohort
+2.0px past its ceiling, a shortfall the producer maps to one aperture
 requirement at column boundary 2 with ``assemble`` on the negative side and
 ``qc`` on the positive.  A 5px order fits: the ``reference`` run gives way
 left inside its corridor band.
