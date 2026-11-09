@@ -4,3 +4,5 @@
 examples/riboseq_metro.mmd
 tests/fixtures/curve_invariant_repros/riboseq_inter_row_corridor.mmd
 tests/fixtures/genomeassembly_organellar.mmd
+# Two corners of one line share a vertex and the coincident-radius rule unifies their radii, so no radii nest both bends.
+tests/fixtures/regressions/cohort_pinned_member_past_fixed_lane.mmd
