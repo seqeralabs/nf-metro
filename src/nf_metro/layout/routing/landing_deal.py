@@ -18,12 +18,14 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from enum import Enum
+from itertools import groupby
 from typing import TYPE_CHECKING
 
 from nf_metro.layout.geometry import lane_delta
 from nf_metro.layout.routing.common import (
     ENTRY_SIDE_DIRECTION,
     EXIT_SIDE_DIRECTION,
+    Direction,
     OffsetRegime,
     leg_direction_sequence,
     right_normal_axis_sign,
@@ -65,7 +67,8 @@ class LandingDealRefusal(Enum):
     RECORD_MISMATCH = "record-mismatch"
     IMMUTABLE_MOVED = "immutable-moved"
     NOTHING_TO_DEAL = "nothing-to-deal"
-    DEPARTS_AGAINST_SIDE = "departs-against-side"
+    AGAINST_SIDE = "against-side"
+    INTERLEAVED_SOURCES = "interleaved-sources"
 
 
 class _Refused(Exception):
@@ -138,15 +141,27 @@ def _port_deal(
     sourced = [line for lines in lines_by_source.values() for line in lines]
     if len(sourced) != len(set(sourced)):
         raise _Refused(LandingDealRefusal.LINE_FROM_TWO_SOURCES)
+    landing: dict[str, float] = {}
+    for line, line_targets in by_line.items():
+        coordinate = line_targets[0].endpoint_lane_coordinate
+        assert coordinate is not None
+        landing[line] = coordinate
+    # Each source is dealt over its own slots, so the order between sources
+    # is the port's own; it is one only while no source straddles another.
+    source_of = {
+        line: source for source, lines in lines_by_source.items() for line in lines
+    }
+    own_order = sorted(landing, key=landing.__getitem__)
+    runs = [source for source, _lines in groupby(own_order, key=source_of.get)]
+    if len(runs) != len(lines_by_source):
+        raise _Refused(LandingDealRefusal.INTERLEAVED_SOURCES)
     dealt: dict[str, float] = {}
     for source, lines in lines_by_source.items():
         if len(lines) > 1:
             dealt.update(_source_deal(ctx, port, source, sorted(lines), by_line))
     if not dealt:
         raise _Refused(LandingDealRefusal.NOTHING_TO_DEAL)
-    landing = {line: by_line[line][0].endpoint_lane_coordinate for line in by_line}
     for line, coordinate in landing.items():
-        assert coordinate is not None
         dealt.setdefault(line, coordinate)
     if any(
         not target.mutable
@@ -199,11 +214,14 @@ def _source_deal(
     if len(sequences) != 1:
         raise _Refused(LandingDealRefusal.TWO_SIDED)
     (sequence,) = sequences
-    # The exit order is read across the side's direction of travel, which
-    # says nothing about a bundle that leaves against it.
-    departure = direction_vector(EXIT_SIDE_DIRECTION[exit_port.side])
-    if sequence and sequence[0] == (-departure[0], -departure[1]):
-        raise _Refused(LandingDealRefusal.DEPARTS_AGAINST_SIDE)
+    # The order across travel is read at each end from its side's direction
+    # of travel, which says nothing about a bundle that leaves or lands
+    # against it.
+    if sequence and (
+        _runs_against(sequence[0], EXIT_SIDE_DIRECTION[exit_port.side])
+        or _runs_against(sequence[-1], ENTRY_SIDE_DIRECTION[port.side])
+    ):
+        raise _Refused(LandingDealRefusal.AGAINST_SIDE)
     for line in lines:
         line_targets = by_line[line]
         if any(
@@ -241,6 +259,11 @@ def _source_deal(
         for line, natural_line in record.takes_lane_of:
             dealt[line] = natural[natural_line]
     return dealt
+
+
+def _runs_against(leg: tuple[int, int], travel: Direction) -> bool:
+    dx, dy = direction_vector(travel)
+    return leg == (-dx, -dy)
 
 
 def landing_order(deal: Mapping[str, float]) -> tuple[str, ...]:

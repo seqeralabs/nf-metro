@@ -20,7 +20,6 @@ from nf_metro.api import render_string
 from nf_metro.layout.routing import core, invariants, member_geometry
 from nf_metro.layout.routing import corridor_cohort_integration as cci
 from nf_metro.layout.routing.common import (
-    EXIT_SIDE_DIRECTION,
     PeeloffTail,
     PortPeeloffBundle,
     peeloff_target_slots,
@@ -33,7 +32,6 @@ from nf_metro.layout.routing.landing_deal import (
     landing_order,
     planned_landing_orders,
 )
-from nf_metro.layout.routing.orientation import direction_vector
 from nf_metro.parser.model import MetroGraph, PortSide
 
 FIXTURE = (
@@ -271,23 +269,28 @@ def test_lines_tied_at_the_exit_are_refused(fixture_call: _DealCall) -> None:
     assert refused[FIXTURE_PORT] is LandingDealRefusal.EXIT_TIE
 
 
-def _departing(
+_COMPASS = {"N": (0.0, -1.0), "E": (1.0, 0.0), "S": (0.0, 1.0), "W": (-1.0, 0.0)}
+
+
+def _routed(
     call: _DealCall,
     monkeypatch: pytest.MonkeyPatch,
     exit_side: PortSide,
-    sign: int,
+    entry_side: PortSide,
+    legs: str,
 ) -> tuple[cci.CorridorCohortTarget, ...]:
-    """The fixture's TOP exit on *exit_side*, with every member of its bundle
-    leaving it along (*sign* 1) or against (*sign* -1) that side's travel."""
-    monkeypatch.setattr(call.ctx.graph.ports["sec0__exit_top_0"], "side", exit_side)
-    dx, dy = direction_vector(EXIT_SIDE_DIRECTION[exit_side])
+    """The fixture's bundle leaving *exit_side* and entering *entry_side*, with
+    every member running the compass *legs* in turn."""
+    ports = call.ctx.graph.ports
+    monkeypatch.setattr(ports["sec0__exit_top_0"], "side", exit_side)
+    monkeypatch.setattr(ports[FIXTURE_PORT], "side", entry_side)
+    points = [(0.0, 0.0)]
+    for leg in legs:
+        dx, dy = _COMPASS[leg]
+        x, y = points[-1]
+        points.append((x + 10.0 * dx, y + 10.0 * dy))
     return tuple(
-        replace(
-            target,
-            route=replace(
-                target.route, points=[(0.0, 0.0), (sign * 10.0 * dx, sign * 10.0 * dy)]
-            ),
-        )
+        replace(target, route=replace(target.route, points=list(points)))
         if target.edge_key[1] == FIXTURE_PORT
         else target
         for target in call.targets
@@ -295,39 +298,140 @@ def _departing(
 
 
 @pytest.mark.parametrize(
-    "exit_side",
+    ("exit_side", "entry_side", "legs"),
     [
-        pytest.param(PortSide.RIGHT, id="LR"),
-        pytest.param(PortSide.BOTTOM, id="TB"),
+        pytest.param(PortSide.RIGHT, PortSide.LEFT, "WSE", id="LR-departs-against"),
+        pytest.param(PortSide.BOTTOM, PortSide.TOP, "NES", id="TB-departs-against"),
+        pytest.param(PortSide.TOP, PortSide.LEFT, "NW", id="LR-arrives-against"),
+        pytest.param(PortSide.LEFT, PortSide.TOP, "WN", id="TB-arrives-against"),
+        pytest.param(PortSide.TOP, PortSide.RIGHT, "NESE", id="LR-over-the-top"),
+        pytest.param(PortSide.LEFT, PortSide.BOTTOM, "WSES", id="TB-over-the-top"),
     ],
 )
-def test_a_source_departing_against_its_exit_side_is_refused(
-    fixture_call: _DealCall, monkeypatch: pytest.MonkeyPatch, exit_side: PortSide
+def test_a_source_travelling_against_its_exit_or_entry_side_is_refused(
+    fixture_call: _DealCall,
+    monkeypatch: pytest.MonkeyPatch,
+    exit_side: PortSide,
+    entry_side: PortSide,
+    legs: str,
 ) -> None:
-    targets = _departing(fixture_call, monkeypatch, exit_side, -1)
+    """The order across travel is read at both ends from the sides' nominal
+    travel, which says nothing about a bundle whose first leg runs against its
+    exit side or whose last leg runs against its entry side."""
+    targets = _routed(fixture_call, monkeypatch, exit_side, entry_side, legs)
 
     decided, refused = bundle_landing_deals(fixture_call.ctx, targets)
 
-    assert refused[FIXTURE_PORT] is LandingDealRefusal.DEPARTS_AGAINST_SIDE
+    assert refused[FIXTURE_PORT] is LandingDealRefusal.AGAINST_SIDE
     assert FIXTURE_PORT not in decided
 
 
 @pytest.mark.parametrize(
-    "exit_side",
+    ("exit_side", "entry_side", "legs"),
     [
-        pytest.param(PortSide.RIGHT, id="LR"),
-        pytest.param(PortSide.BOTTOM, id="TB"),
+        pytest.param(PortSide.RIGHT, PortSide.LEFT, "E", id="LR"),
+        pytest.param(PortSide.BOTTOM, PortSide.TOP, "S", id="TB"),
+        pytest.param(PortSide.TOP, PortSide.LEFT, "NE", id="LR-turning"),
+        pytest.param(PortSide.LEFT, PortSide.TOP, "WS", id="TB-turning"),
     ],
 )
-def test_a_source_departing_along_its_exit_side_is_dealt(
-    fixture_call: _DealCall, monkeypatch: pytest.MonkeyPatch, exit_side: PortSide
+def test_a_source_travelling_along_its_exit_and_entry_sides_is_dealt(
+    fixture_call: _DealCall,
+    monkeypatch: pytest.MonkeyPatch,
+    exit_side: PortSide,
+    entry_side: PortSide,
+    legs: str,
 ) -> None:
-    targets = _departing(fixture_call, monkeypatch, exit_side, 1)
+    targets = _routed(fixture_call, monkeypatch, exit_side, entry_side, legs)
 
     decided, refused = bundle_landing_deals(fixture_call.ctx, targets)
 
     assert FIXTURE_PORT not in refused
     assert FIXTURE_PORT in decided
+
+
+@pytest.mark.parametrize(
+    ("shape", "port_id"),
+    [
+        pytest.param(
+            "arrives_against_entry_over_the_top",
+            "sec1__entry_right_1",
+            id="top-exit-over-the-top",
+        ),
+        pytest.param("arrives_against_entry_bt", "sec1__entry_left_1", id="BT"),
+    ],
+)
+def test_a_bundle_crossing_its_section_to_a_far_edge_port_is_refused(
+    monkeypatch: pytest.MonkeyPatch, shape: str, port_id: str
+) -> None:
+    """A TOP exit routed over the top onto the far edge of its destination
+    section arrives against that entry side."""
+    for call in _deal_calls(monkeypatch, SHAPES / f"{shape}.mmd"):
+        assert call.refused[port_id] is LandingDealRefusal.AGAINST_SIDE
+
+
+def test_a_bundle_arriving_against_its_entry_side_draws_as_planned() -> None:
+    assert shadow_failure(SHAPES / "arrives_against_entry_over_the_top.mmd") is None
+
+
+@pytest.mark.parametrize("shape", ["arrives_against_entry_bt", "interleaved_sources"])
+def test_a_refused_port_renders(shape: str) -> None:
+    _render(SHAPES / f"{shape}.mmd")
+
+
+def _with_source_slots(
+    call: _DealCall, port_id: str, interleave: bool
+) -> tuple[cci.CorridorCohortTarget, ...]:
+    """*port_id*'s targets with its own slots re-assigned so that one source's
+    lines either straddle another source's line or sit side by side."""
+    lines_by_source: dict[str, list[str]] = {}
+    for edge in call.ctx.graph.edges_to(port_id):
+        lines_by_source.setdefault(edge.source, []).append(edge.line_id)
+    pair = next(sorted(lines) for lines in lines_by_source.values() if len(lines) > 1)
+    lone = next(lines[0] for lines in lines_by_source.values() if lines[0] not in pair)
+    slots = sorted(_own_slots(call, port_id).values())
+    order = [pair[0], lone, pair[1]] if interleave else [pair[0], pair[1], lone]
+    others = [line for line in sorted(_own_slots(call, port_id)) if line not in order]
+    coordinate = dict(zip(order + others, slots, strict=True))
+    return tuple(
+        replace(target, endpoint_lane_coordinate=coordinate[target.edge_key[2]])
+        if target.edge_key[1] == port_id
+        else target
+        for target in call.targets
+    )
+
+
+@pytest.mark.parametrize(
+    ("interleave", "refusal"),
+    [
+        pytest.param(True, LandingDealRefusal.INTERLEAVED_SOURCES, id="interleaved"),
+        pytest.param(False, None, id="contiguous"),
+    ],
+)
+def test_a_port_whose_sources_interleave_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+    interleave: bool,
+    refusal: LandingDealRefusal | None,
+) -> None:
+    """The deal orders lines within each source; the order between sources
+    is the port's own, which a source straddling another does not give."""
+    port_id = "sec3__entry_right_5"
+    call = _deal_calls(monkeypatch, SHAPES / "multi_source.mmd")[0]
+    targets = _with_source_slots(call, port_id, interleave)
+
+    decided, refused = bundle_landing_deals(call.ctx, targets)
+
+    assert refused.get(port_id) is refusal
+    assert (port_id in decided) is (refusal is None)
+
+
+def test_a_port_fed_between_another_sources_lines_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for call in _deal_calls(monkeypatch, SHAPES / "interleaved_sources.mmd"):
+        assert (
+            call.refused["sec5__entry_left_6"] is LandingDealRefusal.INTERLEAVED_SOURCES
+        )
 
 
 def test_a_deal_moving_an_immutable_member_is_refused(
