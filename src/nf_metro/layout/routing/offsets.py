@@ -48,6 +48,7 @@ from nf_metro.layout.phases._common import (
     iter_flat_seam_solo_entries,
     line_forks_within_section,
 )
+from nf_metro.layout.port_order_plan import PortOrderPlan, build_port_order_plan
 from nf_metro.layout.route_topology import divergence_junction_exit_ports
 from nf_metro.layout.routing.arranger import BoundaryConfig, lane_order
 from nf_metro.layout.routing.common import (
@@ -147,6 +148,9 @@ class _OffsetCtx:
     departure_orders: dict[tuple[str, str], DepartureLaneOrder] = field(
         default_factory=dict
     )
+    # Every port's line order, decided from structure before any offset is
+    # written.
+    port_order_plan: PortOrderPlan | None = None
 
 
 @dataclass(frozen=True)
@@ -7075,6 +7079,7 @@ def _run_offset_phases(graph: MetroGraph, resolved: float) -> _OffsetCtx:
     """Run every :func:`compute_station_offsets` phase once, in order."""
     graph._linear_entry_pill_lines_cache.clear()
     ctx = _build_offset_ctx(graph, resolved)
+    ctx.port_order_plan = build_port_order_plan(graph)
     # Section/layer indexes over graph structure, not per-line offsets, so
     # they stay valid across every phase below and are built once here for
     # both compaction passes (phase 4 and phase 12) and 7b' to share.
