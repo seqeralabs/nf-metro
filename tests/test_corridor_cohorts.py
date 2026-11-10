@@ -822,10 +822,11 @@ def test_fixed_lane_drawn_orders_cycling_through_a_forced_order_give_way(
 
 def test_a_seated_order_that_cannot_seat_fails_in_its_frame() -> None:
     """``z`` is drawn a clearance above ``y``, which a domain holds at or above
-    its drawn 12, and a separation holds ``q`` a clearance above ``z``.  Seating
-    only lowers a lane, so keeping ``y`` below ``z`` drives ``y`` under its
-    domain.  The seated order is part of the one composition seated, so the
-    frame reports ``y``'s failure rather than seating a sparser order."""
+    its drawn 12, and a separation holds ``q`` a clearance above ``z``.  A
+    domain floor does not lift the lanes seated after it, so keeping ``y``
+    below ``z`` drives ``y`` under its domain.  The seated order is part of the
+    one composition seated, so the frame reports ``y``'s failure rather than
+    seating a sparser order."""
     for lanes in permutations(
         (
             _lane(
@@ -907,27 +908,41 @@ def test_semantic_rank_seats_a_lane_beside_one_lifted_clear_of_a_fixed_lane() ->
         }
 
 
+def _separated_lifted_fixed_lane_problem() -> CorridorAllocationProblem:
+    return _lifted_fixed_lane_problem(
+        12.0,
+        directed_separations=(CorridorDirectedSeparation("order:yz", "y", "z", 4.0),),
+    )
+
+
 @pytest.mark.parametrize(
     "problem",
-    (
-        _lifted_fixed_lane_problem(14.0),
-        _lifted_fixed_lane_problem(
-            12.0,
-            directed_separations=(
-                CorridorDirectedSeparation("order:yz", "y", "z", 4.0),
-            ),
-        ),
-    ),
+    (_lifted_fixed_lane_problem(14.0), _separated_lifted_fixed_lane_problem()),
     ids=("seated-clear", "directed-separation"),
 )
-def test_preference_orders_that_cannot_seat_fail_in_their_frame(
+def test_a_pin_lifts_the_lanes_seated_after_it_through_every_kept_order(
     problem: CorridorAllocationProblem,
 ) -> None:
-    """Seated a clearance above ``y``, ``z`` would hold ``y`` below 10; a
-    separation holding ``z`` above ``y`` does the same.  ``x``'s drawn order
-    keeps ``x`` below ``y``, so ``x`` is lowered off its fixed equality.  The
-    fullest acyclic composition is the one seated, so the frame reports
-    ``x``'s failure against its equality owner."""
+    """``x``'s drawn order seats ``y`` above the pinned ``x``, and a seated-clear
+    order or a separation seats ``z`` a clearance above ``y``.  The pin carried
+    along both lifts ``y`` to 12 and ``z`` to 16, so every order is kept."""
+    for lanes in permutations(problem.lanes):
+        assert _allocations(replace(problem, lanes=lanes)) == {
+            "x": 8.0,
+            "y": 12.0,
+            "z": 16.0,
+        }
+
+
+def test_kept_orders_a_domain_cannot_hold_fail_in_their_frame() -> None:
+    """With ``z`` held at or below 14, the pin carried through ``x``'s drawn
+    order and the separation cannot seat ``z``.  The fullest acyclic
+    composition is the one seated, so the frame reports the failure against
+    the pin's equality owner."""
+    problem = replace(
+        _separated_lifted_fixed_lane_problem(),
+        domains=(CorridorCoordinateDomain("z", maximum_coordinate=14.0),),
+    )
     for lanes in permutations(problem.lanes):
         result = _solve_in_frame(replace(problem, lanes=lanes))
 

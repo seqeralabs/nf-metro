@@ -1559,12 +1559,6 @@ def _solve_in_frame(  # noqa: C901, PLR0915
             reach[root] = value
         return reach
 
-    pinned_predecessors: dict[int, list[tuple[int, Fraction]]] = {
-        root: [] for root in roots
-    }
-    for (before, after), separation in separation_edges.items():
-        pinned_predecessors[after].append((before, separation))
-
     def region_seating(
         order: Sequence[int],
         successors: Mapping[int, list[tuple[int, Fraction]]],
@@ -1573,9 +1567,8 @@ def _solve_in_frame(  # noqa: C901, PLR0915
         """Each root's floor and ceiling with the regions it can meet, and the
         coordinate a kept region floor or a pin lifts it to above its preference.
 
-        A pin lifts the roots the directed separations seat after it: whatever
-        pair orders seat, none of them can take a coordinate short of the pin
-        carried along those separations.
+        A pin lifts the roots seated after it: none of them can take a
+        coordinate short of the pin carried along the edges it seats them by.
 
         A region side the root's forced extreme passes releases the whole
         region, since its other side alone would steer the root and its floor
@@ -1586,7 +1579,7 @@ def _solve_in_frame(  # noqa: C901, PLR0915
         revisited, so a region the second test releases has counted toward
         both extents.
         """
-        pin_lift = forced_extent(order, pinned_predecessors, pinned, upward=True)
+        pin_lift = forced_extent(order, predecessors, pinned, upward=True)
         if not region_floor and not region_ceiling:
             return (
                 _SeatingBounds(domain_floor, domain_floor_obstacles),
