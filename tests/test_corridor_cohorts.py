@@ -820,11 +820,13 @@ def test_fixed_lane_drawn_orders_cycling_through_a_forced_order_give_way(
         }
 
 
-def test_a_seated_order_that_cannot_seat_gives_way() -> None:
+def test_a_seated_order_that_cannot_seat_fails_in_its_frame() -> None:
     """``z`` is drawn a clearance above ``y``, which a domain holds at or above
-    its drawn 12, and a separation holds ``q`` a clearance above ``z``.  Keeping
-    ``y`` below ``z`` would lift ``z`` and ``q`` off where they are drawn, so
-    the seated order gives way and semantic rank seats ``z`` below ``y``."""
+    its drawn 12, and a separation holds ``q`` a clearance above ``z``.  A
+    domain floor does not lift the lanes seated after it, so keeping ``y``
+    below ``z`` drives ``y`` under its domain.  The seated order is part of the
+    one composition seated, so the frame reports ``y``'s failure rather than
+    seating a sparser order."""
     for lanes in permutations(
         (
             _lane(
@@ -852,7 +854,14 @@ def test_a_seated_order_that_cannot_seat_gives_way() -> None:
                 CorridorDirectedSeparation("order:zq", "z", "q", 4.0),
             ),
         )
-        assert _allocations(problem) == {"q": 17.0, "y": 12.0, "z": 8.0}
+
+        result = _solve_in_frame(problem)
+
+        assert result.status is CorridorAllocationStatus.FAILURE
+        assert result.reason is CorridorAllocationFailureReason.INFEASIBLE
+        assert result.blocking_member_ids == ("y",)
+        assert result.blocking_endpoint_owner_ids == ("ey",)
+        assert result.clearance_shortfall is None
 
 
 def _lifted_fixed_lane_problem(
@@ -888,33 +897,61 @@ def _lifted_fixed_lane_problem(
     )
 
 
-@pytest.mark.parametrize(
-    ("problem", "expected"),
-    (
-        (_lifted_fixed_lane_problem(12.0), {"x": 8.0, "y": 12.0, "z": 8.0}),
-        (_lifted_fixed_lane_problem(14.0), {"x": 8.0, "y": 12.0, "z": 8.0}),
-        (
-            _lifted_fixed_lane_problem(
-                12.0,
-                directed_separations=(
-                    CorridorDirectedSeparation("order:yz", "y", "z", 4.0),
-                ),
-            ),
-            {"x": 8.0, "y": 4.0, "z": 12.0},
-        ),
-    ),
-    ids=("semantic-rank", "seated-clear", "directed-separation"),
-)
-def test_preference_orders_that_cannot_seat_give_way_in_turn(
-    problem: CorridorAllocationProblem, expected: dict[str, float]
-) -> None:
-    """Semantic rank seats ``z`` below ``y``, and ``y`` lifts clear of ``x``.
-    Seated a clearance above ``y``, ``z`` would hold ``y`` below 10 and so onto
-    ``x``; the seated order gives way first.  A separation holding ``z`` above
-    ``y`` instead leaves ``x``'s drawn order, ``x`` below ``y``, no seating; the
-    fixed-lane order gives way next, and ``y`` seats below ``x``."""
+def test_semantic_rank_seats_a_lane_beside_one_lifted_clear_of_a_fixed_lane() -> None:
+    """Semantic rank seats ``z`` below ``y``, and ``y`` lifts clear of ``x``."""
+    problem = _lifted_fixed_lane_problem(12.0)
     for lanes in permutations(problem.lanes):
-        assert _allocations(replace(problem, lanes=lanes)) == expected
+        assert _allocations(replace(problem, lanes=lanes)) == {
+            "x": 8.0,
+            "y": 12.0,
+            "z": 8.0,
+        }
+
+
+def _separated_lifted_fixed_lane_problem() -> CorridorAllocationProblem:
+    return _lifted_fixed_lane_problem(
+        12.0,
+        directed_separations=(CorridorDirectedSeparation("order:yz", "y", "z", 4.0),),
+    )
+
+
+@pytest.mark.parametrize(
+    "problem",
+    (_lifted_fixed_lane_problem(14.0), _separated_lifted_fixed_lane_problem()),
+    ids=("seated-clear", "directed-separation"),
+)
+def test_a_pin_lifts_the_lanes_seated_after_it_through_every_kept_order(
+    problem: CorridorAllocationProblem,
+) -> None:
+    """``x``'s drawn order seats ``y`` above the pinned ``x``, and a seated-clear
+    order or a separation seats ``z`` a clearance above ``y``.  The pin carried
+    along both lifts ``y`` to 12 and ``z`` to 16, so every order is kept."""
+    for lanes in permutations(problem.lanes):
+        assert _allocations(replace(problem, lanes=lanes)) == {
+            "x": 8.0,
+            "y": 12.0,
+            "z": 16.0,
+        }
+
+
+def test_kept_orders_a_domain_cannot_hold_fail_in_their_frame() -> None:
+    """With ``z`` held at or below 14, the pin carried through ``x``'s drawn
+    order and the separation cannot seat ``z``.  The fullest acyclic
+    composition is the one seated, so the frame reports the failure against
+    the pin's equality owner."""
+    problem = replace(
+        _separated_lifted_fixed_lane_problem(),
+        domains=(CorridorCoordinateDomain("z", maximum_coordinate=14.0),),
+    )
+    for lanes in permutations(problem.lanes):
+        result = _solve_in_frame(replace(problem, lanes=lanes))
+
+        assert result.status is CorridorAllocationStatus.FAILURE
+        assert result.reason is CorridorAllocationFailureReason.INFEASIBLE
+        assert result.blocking_member_ids == ("x",)
+        assert result.blocking_equality_owner_ids == ("context",)
+        assert result.blocking_endpoint_owner_ids == ("ex",)
+        assert result.clearance_shortfall is None
 
 
 def test_a_failure_no_order_can_seat_reports_the_fullest_orders() -> None:
@@ -2092,6 +2129,27 @@ def test_a_footprint_order_against_its_cohort_offset_gives_way() -> None:
     assert plain.reason is CorridorAllocationFailureReason.INFEASIBLE
 
 
+def _pinned_lane_problem() -> CorridorAllocationProblem:
+    """``pinned`` is held on a fixed lane at 482 and must stay 4 above ``free``,
+    which prefers 710.5, in a lane-order frame running down the axis."""
+    span = (0.0, 100.0)
+    return CorridorAllocationProblem(
+        (
+            _lane("pinned", "pinned", "pinned", 714.5, 714.5, span=span, line_rank=0),
+            _lane("free", "free", "free", 710.5, 710.5, span=span, line_rank=1),
+        ),
+        obstacles=(
+            _obstacle("network", 482.0, 482.0, span=span, semantic_rank=(1, 0)),
+        ),
+        fixed_equalities=(CorridorFixedEquality("pin", "pinned", "network"),),
+        directed_separations=(
+            CorridorDirectedSeparation("footprint:free|pinned", "free", "pinned", 4.0),
+        ),
+        clearance=4.0,
+        axis_sign=-1,
+    )
+
+
 @pytest.mark.parametrize(
     "problem",
     [
@@ -2100,9 +2158,10 @@ def test_a_footprint_order_against_its_cohort_offset_gives_way() -> None:
             id="corner-orders-give-way",
         ),
         pytest.param(_relaxed_orders_problem(), id="relaxed-orders"),
+        pytest.param(_pinned_lane_problem(), id="pinned-lane-own-frame"),
     ],
 )
-def test_the_corner_order_tier_is_decided_without_a_trial_seating(
+def test_a_problem_seats_once_in_its_own_frame_without_a_trial_seating(
     problem: CorridorAllocationProblem, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     seated: list[CorridorAllocationProblem] = []
@@ -2115,7 +2174,7 @@ def test_the_corner_order_tier_is_decided_without_a_trial_seating(
 
     solve_corridor_cohorts(problem)
 
-    assert len(seated) == 1
+    assert [seat.axis_sign for seat in seated] == [problem.axis_sign]
 
 
 def test_guard_a_corner_order_naming_no_lane_is_invalid() -> None:
@@ -2373,3 +2432,12 @@ def test_guard_an_invalid_lane_region_is_invalid(region: CorridorLaneRegion) -> 
 
     assert result.status is CorridorAllocationStatus.FAILURE
     assert result.reason is CorridorAllocationFailureReason.INVALID
+
+
+def test_a_pin_carried_through_a_directed_separation_lifts_the_lane_after_it() -> None:
+    """Seating starts ``free`` where the pin leaves it rather than at its
+    preference, which lies past the pin in the lane-order frame."""
+    result = _solve_in_frame(_pinned_lane_problem())
+
+    assert result.status is CorridorAllocationStatus.PLANNED
+    assert dict(result.allocations) == {"pinned": 482.0, "free": 478.0}

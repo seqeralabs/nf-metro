@@ -1083,7 +1083,11 @@ def test_seed_77_compiles_atomic_single_lane_components() -> None:
     between two carriers with no region in common could never bind, since each
     carrier is held inside its own region, so it must not join them into one
     component: the compile would then refuse a component spanning two lanes.
-    Every claim of this compile fits its corridor, so it requests no aperture.
+
+    One component in the gap at column boundary 3 holds a seated-clear order
+    that would carry a lane across its forbidden footprint and past its
+    domain.  That component is seated once with the order kept, so the compile
+    requests the aperture at that boundary and no other.
     """
     path = ROOT / "tests" / "fixtures" / "hash_seed_determinism" / "seed_77.mmd"
     graph, first = _observe(path)
@@ -1107,7 +1111,16 @@ def test_seed_77_compiles_atomic_single_lane_components() -> None:
     s7_carrier = regions[(("__junction_40", "s7__entry_right_27", "l4"), 1)]
     assert s7_carrier == ColumnGapRegion(9, 10)
     assert s5_carrier != s7_carrier
-    assert provisional_plan.boundary_clearance_requirements == ()
+    assert [
+        (requirement.kind, requirement.axis, requirement.boundary)
+        for requirement in provisional_plan.boundary_clearance_requirements
+    ] == [
+        (
+            BoundaryClearanceRequirementKind.CORRIDOR_COHORT_APERTURE,
+            SettlementAxis.COLUMN,
+            3,
+        )
+    ]
 
 
 def test_reservation_reroute_reseats_port_peeloff_after_reconciliation() -> None:

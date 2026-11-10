@@ -996,12 +996,12 @@ def solve_corridor_cohorts(
     """
     plain = replace(problem, corner_orders=())
     if not problem.corner_orders or not problem.witnesses_complete:
-        return _solve_in_either_frame(plain)
+        return _solve_in_frame(plain)
     invalid = _invalid_problem(problem)
     if invalid is not None:
         return invalid
     tier, separations = _corner_order_tier(problem)
-    result = _solve_in_either_frame(replace(plain, directed_separations=separations))
+    result = _solve_in_frame(replace(plain, directed_separations=separations))
     if result.reason is CorridorAllocationFailureReason.INVALID:
         return result
     return replace(result, corner_tier=tier)
@@ -1055,32 +1055,6 @@ def _corner_order_tier(
             *problem.corner_orders,
         )
     return CorridorCornerOrderTier.GAVE_WAY, problem.directed_separations
-
-
-def _solve_in_either_frame(
-    problem: CorridorAllocationProblem,
-) -> CorridorAllocationResult:
-    """Seat *problem* in its own lane-order frame, or failing that the opposite.
-
-    Seating only lowers a root from its preferred base along the lane-order
-    frame.  A failure with a clearance shortfall is reported as it stands, for
-    an aperture to relieve.  One with none, where only lifting a lane clear of
-    a pinned neighbour seats it, has nothing an aperture can grant, so it is
-    seated in the opposite frame instead: every hard relation reads the same
-    there, and only the tie-breaks between unforced pairs and the seating
-    direction turn over.  A component that seats in neither reports its own
-    frame's failure.
-    """
-    result = _solve_in_frame(problem)
-    if (
-        result.status is not CorridorAllocationStatus.FAILURE
-        or result.clearance_shortfall is not None
-    ):
-        return result
-    reversed_result = _solve_in_frame(replace(problem, axis_sign=-problem.axis_sign))
-    if reversed_result.status is CorridorAllocationStatus.PLANNED:
-        return reversed_result
-    return result
 
 
 def _solve_in_frame(  # noqa: C901, PLR0915
@@ -1224,6 +1198,7 @@ def _solve_in_frame(  # noqa: C901, PLR0915
         list
     )
     fixed_root_owners: defaultdict[int, set[str]] = defaultdict(set)
+    pinned: dict[int, Fraction] = {}
     for fixed_equality in problem.fixed_equalities:
         index = by_id[fixed_equality.member_id]
         root, _ = union_find.find(index)
@@ -1251,6 +1226,7 @@ def _solve_in_frame(  # noqa: C901, PLR0915
                 },
             )
         coordinate = next(iter(fixed_coordinates))
+        pinned[root] = coordinate
         tighten_floor(root, coordinate, set())
         tighten_ceiling(root, coordinate, set())
 
@@ -1589,7 +1565,10 @@ def _solve_in_frame(  # noqa: C901, PLR0915
         predecessors: Mapping[int, list[tuple[int, Fraction]]],
     ) -> tuple[_SeatingBounds, _SeatingBounds, dict[int, Fraction]]:
         """Each root's floor and ceiling with the regions it can meet, and the
-        coordinate a kept region floor lifts it to above its preference.
+        coordinate a kept region floor or a pin lifts it to above its preference.
+
+        A pin lifts the roots seated after it: none of them can take a
+        coordinate short of the pin carried along the edges it seats them by.
 
         A region side the root's forced extreme passes releases the whole
         region, since its other side alone would steer the root and its floor
@@ -1600,11 +1579,16 @@ def _solve_in_frame(  # noqa: C901, PLR0915
         revisited, so a region the second test releases has counted toward
         both extents.
         """
+        pin_lift = forced_extent(order, predecessors, pinned, upward=True)
         if not region_floor and not region_ceiling:
             return (
                 _SeatingBounds(domain_floor, domain_floor_obstacles),
                 _SeatingBounds(domain_ceiling, domain_ceiling_obstacles),
-                {},
+                {
+                    root: value
+                    for root, value in pin_lift.items()
+                    if value > preferred[root]
+                },
             )
         highest = forced_extent(
             order,
@@ -1644,7 +1628,9 @@ def _solve_in_frame(  # noqa: C901, PLR0915
             for root, value in region_ceiling.items()
             if root not in released
         }
-        lifted = forced_extent(order, predecessors, kept_floor, upward=True)
+        lifted = _tightest(
+            max, forced_extent(order, predecessors, kept_floor, upward=True), pin_lift
+        )
         return (
             _SeatingBounds.tightened(
                 domain_floor, domain_floor_obstacles, kept_floor, operator.gt
@@ -1874,13 +1860,12 @@ def _solve_in_frame(  # noqa: C901, PLR0915
     # Per pair, a seated-clear order outranks the end-turn votes, so lanes the
     # render already draws clear of each other compile where it draws them,
     # and both outrank a fixed lane's drawn order.  Seated and fixed-lane
-    # orders only prefer the drawn order.  Seating only ever lowers a root
-    # from its preferred base, bar its domain and obstacles, so a preferred
-    # order can fail to seat where another order seats.  Where the orders
-    # cycle or fail to seat, the seated orders give way first and the
-    # fixed-lane orders next; the directed separations and end-turn votes
-    # never give way.  Where no tier seats, the fullest acyclic tier's failure
-    # is the one reported.
+    # orders only prefer the drawn order: where they make the orders cycle,
+    # the seated orders give way first and the fixed-lane orders next, and
+    # the directed separations and end-turn votes never give way.  The
+    # fullest acyclic composition is chosen before any seating and seated
+    # once; its result stands, planned or failed.  Where every composition
+    # cycles, seating the end-turn votes alone reports the cycle's owners.
     turn_orders = _turn_side_orders(lanes, union_find, sign)
     fixed_orders = _fixed_lane_drawn_orders(
         lanes, union_find, preferred, fixed_root_owners
@@ -1913,26 +1898,17 @@ def _solve_in_frame(  # noqa: C901, PLR0915
             if (root := union_find.find(index)[0]) in yielding_roots
         },
     )
-    first_failure: CorridorAllocationResult | None = None
-    previous_orders: Mapping[frozenset[int], tuple[int, int]] | None = None
     for pair_orders in (
         {**fixed_orders, **turn_orders, **seated_orders},
         {**fixed_orders, **turn_orders},
         turn_orders,
     ):
-        if pair_orders == previous_orders:
-            continue
-        previous_orders = pair_orders
         forced_order = _forced_root_order(
             set(roots), root_key, edge_order_owners.keys(), pair_orders
         )
-        if not forced_order:
-            continue
-        result = seat(pair_orders, forced_order)
-        if result.status is CorridorAllocationStatus.PLANNED:
-            return result
-        first_failure = first_failure or result
-    return first_failure or seat(turn_orders, ())
+        if forced_order:
+            return seat(pair_orders, forced_order)
+    return seat(turn_orders, ())
 
 
 __all__ = [

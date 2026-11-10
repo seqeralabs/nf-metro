@@ -40,7 +40,7 @@ import layout_iteration_guard as guard
 import pytest
 
 ALLOWLIST_PATH = Path(__file__).parent / "data" / "layout_iteration_allowlist.json"
-ROUTING_CEILING = 72
+ROUTING_CEILING = 70
 PLACEMENT_CEILING = 44
 PINNED_LATER_CEILING = 22
 PINNED_NESTED_CEILING = 1

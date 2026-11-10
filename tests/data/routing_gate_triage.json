@@ -2163,10 +2163,6 @@
   "note": "Rejects an invalid problem holding corner orders before any seating; the compile draws both lanes of every corner order from the problem's own movable claims, so only a hand-built malformed problem reaches the arm. Exercised by tests/test_corridor_cohorts.py::test_guard_a_corner_order_naming_no_lane_is_invalid. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
  },
- "corridor_cohorts.py::result.status is not CorridorAllocationStatus.FAILURE::#1": {
-  "note": "The first-frame solve reports FAILURE, so the shortfall and retry checks run. Every corpus first-frame solve plans or reports compatibility, so the arm needs a component that cannot seat. Exercised by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once. needs-review because the arm is reachable, not because it is unreachable.",
-  "status": "needs-review"
- },
  "corridor_cohorts.py::if result.reason is CorridorAllocationFailureReason.INVALID:::#1": {
   "note": "The seating's INVALID failure is returned as the plain problem's, held by no tier: it names lanes no semantic key separates, which the plain problem rejects alike. No render in the sweep's roots builds such lanes. Exercised by tests/test_corridor_cohorts.py::test_guard_an_invalid_cornered_problem_returns_without_giving_way. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
@@ -2197,14 +2193,6 @@
  },
  "corridor_cohorts.py::if existing is not None and existing != order:::#1": {
   "note": "Two seatings of one root pair that disagree on order mark the pair conflicting. Corpus seatings are consistent per pair. Exercised by tests/test_corridor_cohorts.py::test_a_pair_seated_clear_on_both_sides_is_left_to_semantic_rank. needs-review because the arm is reachable, not because it is unreachable.",
-  "status": "needs-review"
- },
- "corridor_cohorts.py::or result.clearance_shortfall is not None::#1": {
-  "note": "After a failed first-frame solve, a clearance shortfall is returned for an aperture to relieve and a shortfall-free failure is retried in the opposite frame. Both outcomes need a failed first-frame solve, which the corpus never produces. Exercised by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once. needs-review because the arm is reachable, not because it is unreachable.",
-  "status": "needs-review"
- },
- "corridor_cohorts.py::if reversed_result.status is CorridorAllocationStatus.PLANNED:::#1": {
-  "note": "After the opposite-frame retry, a PLANNED retry is returned and a failing retry yields the first frame's failure. Both need a failed first-frame solve, which the corpus never produces. Exercised by tests/test_corridor_cohorts.py::test_a_failure_no_order_can_seat_reports_the_fullest_orders and tests/test_corridor_cohorts.py::test_contradicting_directed_separations_fail_closed_whatever_gives_way. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
  },
  "corridor_cohorts.py::if invalid is not None:::#2": {
@@ -2304,19 +2292,11 @@
   "status": "needs-review"
  },
  "corridor_cohorts.py::for pair_orders in (::#1": {
-  "note": "The pair-order passes finish without a PLANNED seating and return the first failure; reached only when no order seats the component. Exercised by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once. needs-review because the arm is reachable, not because it is unreachable.",
+  "note": "Every composition cycles, so the loop ends and the end-turn votes alone are seated to report the cycle and its owners. No corpus solve's end-turn votes cycle with its directed separations. Exercised by tests/test_corridor_cohorts.py::test_directed_separation_cycle_fails_with_owner_provenance and tests/test_corridor_cohorts.py::test_contradicting_directed_separations_fail_closed_whatever_gives_way. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
  },
- "corridor_cohorts.py::if pair_orders == previous_orders:::#1": {
-  "note": "A pass whose pair orders equal the previous pass is skipped; reached when seated orders and end-turn orders coincide. Exercised by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once. needs-review because the arm is reachable, not because it is unreachable.",
-  "status": "needs-review"
- },
- "corridor_cohorts.py::if not forced_order:::#1": {
-  "note": "A pass with no forced root order (cyclic separations) is skipped; reached only when the orders cycle. Exercised by tests/test_corridor_cohorts.py::test_contradicting_directed_separations_fail_closed_whatever_gives_way and tests/test_corridor_cohorts.py::test_directed_separation_cycle_fails_with_owner_provenance. needs-review because the arm is reachable, not because it is unreachable.",
-  "status": "needs-review"
- },
- "corridor_cohorts.py::if result.status is CorridorAllocationStatus.PLANNED:::#1": {
-  "note": "A pass whose seating is not PLANNED records its failure and tries the next order set; reached only when a seating fails. Exercised by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once. needs-review because the arm is reachable, not because it is unreachable.",
+ "corridor_cohorts.py::if forced_order:::#1": {
+  "note": "A composition whose orders cycle has no forced root order, so the next, sparser composition is tried before any seating; the seated orders give way first, then the fixed-lane orders. No corpus solve's seated or fixed-lane orders cycle. Exercised by tests/test_corridor_cohorts.py::test_seated_orders_cycling_through_a_directed_separation_give_way and tests/test_corridor_cohorts.py::test_fixed_lane_drawn_orders_cycling_through_a_forced_order_give_way. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
  },
  "corridor_cohort_integration.py::if (::#21": {
