@@ -338,6 +338,8 @@ Corner orders are a preference: a directed separation they contradict is dropped
 They give way only to an order contradiction, decided from the problem before it is seated.
 Where the corner orders, the directed separations and the end-turn votes cycle over the lanes the cohorts and equalities join, or order two joined lanes against their offset, the problem is seated without the directed separations both of whose lanes lie in those joined lanes, and where that still contradicts, without corner orders.
 Each problem is seated once with the corner orders that decision keeps, and its result records which it held.
+Seated-clear and fixed-lane orders are preferences too, dropped only where they make the orders cycle; that is also decided before seating.
+The seating runs once, in the problem's own lane-order frame, and its result stands: a problem it cannot seat reports its failure, with any clearance shortfall as an aperture request.
 
 A patch moves member segments, so the corners at either end of a moved segment re-form.
 The compile sizes them with the freeze's own corner rules, run on copies of the member population at the patched points.
