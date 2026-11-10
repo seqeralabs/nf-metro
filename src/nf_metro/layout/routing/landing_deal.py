@@ -9,8 +9,13 @@ state: station offsets, port sides, the source section's lane frame, the
 perpendicular riser lateral, recorded departure orders, and the direction
 sequence (never the coordinates) of the routes as emitted.
 
-A port the deal cannot order is refused, once, with the reason; a refused port
-falls back to its own lane order and the reconcile's trunk-depth riser order.
+A port the deal cannot order is refused, once, with the reason; while the plan
+is compiled a refused port keeps its own lane order and the reconcile's
+trunk-depth riser order.  The reconciles after emission read
+:func:`planned_landing_orders` instead, which takes a port as decided when the
+plan lands every edge into it once, on one axis, with no line from two
+sources, and otherwise leaves it to trunk depth; the two decided sets can
+differ.
 """
 
 from __future__ import annotations

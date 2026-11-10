@@ -16,7 +16,7 @@ Each row is a branch point (a *gate*) in a `layout/routing/` dispatch handler or
 
 Modules scoped to routing decision gates; `invariants.py` (the `validate=True` checker) and `__init__.py` are excluded.
 
-The Triage column carries a curated verdict for gaps no fixture can close: **defensive** (a guard arm a valid topology never violates), **candidate-dead** (no constructible topology reaches it; left in place pending a separate deletion review), or **needs-review** (not yet classified). A blank cell means the gap is still open for a fixture. **588** gaps carry a triage verdict.
+The Triage column carries a curated verdict for gaps no fixture can close: **defensive** (a guard arm a valid topology never violates), **candidate-dead** (no constructible topology reaches it; left in place pending a separate deletion review), or **needs-review** (not yet classified). A blank cell means the gap is still open for a fixture. **605** gaps carry a triage verdict.
 
 ## `arranger.py`
 
@@ -879,23 +879,23 @@ Gates with an un-exercised arm:
 
 | Line | Gate | Un-exercised arm(s) | Triage |
 | ---: | --- | --- | --- |
-| 112 | `and target.endpoint_lane_coordinate is not None` | `->L109` |  |
-| 119 | `if port is None or not port.is_entry:` | `->L120` |  |
-| 136 | `if set(by_line) != {edge.line_id for edge in edges}:` | `->L137` |  |
-| 166 | `if any(` | `->L173` |  |
-| 200 | `if len(upstream) != 1:` | `->L201` |  |
-| 203 | `if held is not None:` | `->L204` |  |
-| 204 | `if record is not None:` | `->L205`, `->L206` |  |
-| 209 | `if exit_port is None or exit_port.is_entry or exit_port.section_id is None:` | `->L210` |  |
-| 220 | `if sequence and (` | `->L224` |  |
-| 227 | `if any(` | `->L231` |  |
-| 232 | `if len({target.endpoint_lane_coordinate for target in line_targets}) != 1:` | `->L233` |  |
-| 247 | `if len(set(laterals.values())) != len(lines):` | `->L248` |  |
-| 255 | `if record is not None:` | `->L256` |  |
-| 256 | `if set(record.lines) - set(lines):` | `->L257`, `->L258` |  |
-| 259 | `for line, natural_line in record.takes_lane_of:` | `->L260`, `->L261` |  |
-| 304 | `if port is None or not port.is_entry:` | `->L305` |  |
-| 311 | `if len({axis for _edge, axis, _coordinate in landed}) != 1:` | `->L312` |  |
+| 117 | `and target.endpoint_lane_coordinate is not None` | `->L114` | **defensive** -- A cohort target with an endpoint lane axis and no coordinate is skipped. The two are set together on a target, so no target presents one; the operand narrows the type for the code below, and no test pins the skip. |
+| 124 | `if port is None or not port.is_entry:` | `->L125` | **defensive** -- bundle_landing_deals skips a target whose port is missing or not an entry; no job of the 15k-job census reaches it and no test pins it. |
+| 141 | `if set(by_line) != {edge.line_id for edge in edges}:` | `->L142` | **defensive** -- INCOMPLETE refusal when the compile's targets omit a line entering the port; no job of the 15k-job census reaches it and no test pins it. |
+| 171 | `if any(` | `->L178` | **needs-review** -- Reachable: the IMMUTABLE_MOVED refusal fires when the deal would move a member whose slot is fixed. No swept fixture presents an immutable member whose dealt slot differs from its own; pinned by tests/test_entry_landing_deal.py::test_a_deal_moving_an_immutable_member_is_refused. |
+| 205 | `if len(upstream) != 1:` | `->L206` | **defensive** -- JUNCTION_MULTI_UPSTREAM refusal of a junction fed by more than one upstream station for the lines in question; no job of the 15k-job census reaches it and no test pins it. |
+| 208 | `if held is not None:` | `->L209` | **needs-review** -- Reachable: a junction on the walk up to the exit holds a DepartureLaneOrder record. No swept fixture presents one (tests/fixtures/regressions/departure_order_carry_replay.mmd is outside the sweep's corpus roots); pinned by tests/test_entry_landing_deal.py::test_a_junction_source_deals_in_its_recorded_departure_order. |
+| 209 | `if record is not None:` | `->L210`, `->L211` | **needs-review** -- Two arms. A junction on the walk up to the exit holding a record is reachable, pinned by tests/test_entry_landing_deal.py::test_a_junction_source_deals_in_its_recorded_departure_order, and no swept fixture presents it (tests/fixtures/regressions/departure_order_carry_replay.mmd is outside the sweep's corpus roots). The refusal of a chain holding two records (JUNCTION_TWO_RECORDS) is defensive: no job of the 15k-job census reaches it and no test pins it. |
+| 214 | `if exit_port is None or exit_port.is_entry or exit_port.section_id is None:` | `->L215` | **defensive** -- SOURCE_NOT_EXIT refusal when the walk up a junction chain ends at something that is not an exit port; no job of the 15k-job census reaches it and no test pins it. |
+| 225 | `if sequence and (` | `->L229` | **needs-review** -- Reachable: AGAINST_SIDE refuses a bundle that leaves against its exit side or lands against its entry side. No swept fixture presents one (tests/data/landing_deal/arrives_against_entry_*.mmd do); pinned by tests/test_entry_landing_deal.py::test_a_source_travelling_against_its_exit_or_entry_side_is_refused. |
+| 232 | `if any(` | `->L236` | **defensive** -- DEFERRED refusal of a port with a deferred-offset member; no job of the 15k-job census reaches it and no test pins it. The refusal reads only the member's offset regime. |
+| 237 | `if len({target.endpoint_lane_coordinate for target in line_targets}) != 1:` | `->L238` | **defensive** -- SPLIT_LANDING refusal of a line whose targets land at two coordinates. Unreachable by construction: _entry_port_landing is a function of (port, line) only, so every target of one line into one port carries the same coordinate. |
+| 252 | `if len(set(laterals.values())) != len(lines):` | `->L253` | **needs-review** -- Reachable: EXIT_TIE refuses a bundle whose lines leave at one lateral coordinate, which no exit-order deal can separate. No swept fixture presents a tie; pinned by tests/test_entry_landing_deal.py::test_lines_tied_at_the_exit_are_refused. |
+| 260 | `if record is not None:` | `->L261` | **needs-review** -- Reachable: a source with a recorded departure order is dealt through the record. No swept fixture presents one; pinned by tests/test_entry_landing_deal.py::test_a_junction_source_deals_in_its_recorded_departure_order. |
+| 261 | `if set(record.lines) - set(lines):` | `->L262`, `->L263` | **needs-review** -- Two arms. A record naming only lines the source carries is reachable, pinned by tests/test_entry_landing_deal.py::test_a_junction_source_deals_in_its_recorded_departure_order, and no swept fixture presents it (tests/fixtures/regressions/departure_order_carry_replay.mmd is outside the sweep's corpus roots). The RECORD_MISMATCH refusal of a record naming a line the source does not carry is defensive: no job of the 15k-job census reaches it and no test pins it. |
+| 264 | `for line, natural_line in record.takes_lane_of:` | `->L265`, `->L266` | **needs-review** -- Reachable: a junction source with a DepartureLaneOrder record permutes the dealt slots. No swept fixture presents one (tests/fixtures/regressions/departure_order_carry_replay.mmd is outside the sweep's corpus roots); pinned by tests/test_entry_landing_deal.py::test_a_junction_source_deals_in_its_recorded_departure_order. |
+| 309 | `if port is None or not port.is_entry:` | `->L310` | **defensive** -- planned_landing_orders skips an ENDPOINT_LANDING owner whose port is missing or not an entry; no job of the 15k-job census reaches it and no test pins it. |
+| 316 | `if len({axis for _edge, axis, _coordinate in landed}) != 1:` | `->L317` | **defensive** -- planned_landing_orders skips a port whose landings sit on two axes; no job of the 15k-job census reaches it and no test pins it. |
 
 ## `member_geometry.py`
 

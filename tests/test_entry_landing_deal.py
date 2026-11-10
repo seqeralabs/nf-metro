@@ -40,6 +40,12 @@ FIXTURE = (
     / "regressions"
     / "cohort_top_exit_landing_order.mmd"
 )
+DEPARTURE_RECORD_FIXTURE = (
+    Path(__file__).parent
+    / "fixtures"
+    / "regressions"
+    / "departure_order_carry_replay.mmd"
+)
 SHAPES = Path(__file__).parent / "data" / "landing_deal"
 FIXTURE_PORT = "sec1__entry_left_1"
 
@@ -223,6 +229,28 @@ def test_a_multi_source_port_keeps_a_lone_sources_slot(
         own = _own_slots(call, "sec3__entry_right_5")
 
         assert call.decided["sec3__entry_right_5"]["l2"] == own["l2"]
+
+
+def test_a_junction_source_deals_in_its_recorded_departure_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``__junction_4`` hands l2, l3 and l4 on at their own offsets, and its
+    record has l4 take the lane l3 would hold and l3 the lane l4 would: the
+    deal follows the record, not the offsets."""
+    port_id = "sec1__entry_left_3"
+    for call in _deal_calls(monkeypatch, DEPARTURE_RECORD_FIXTURE):
+        graph = call.ctx.graph
+        record = graph._departure_lane_orders[("__junction_4", port_id)]
+        assert record.takes_lane_of == (("l2", "l2"), ("l4", "l3"), ("l3", "l4"))
+
+        recorded = call.decided[port_id]
+        with monkeypatch.context() as unrecorded:
+            unrecorded.setattr(graph, "_departure_lane_orders", {})
+            natural, _refused = bundle_landing_deals(call.ctx, call.targets)
+
+        assert landing_order(recorded) == ("l2", "l4", "l3")
+        assert landing_order(natural[port_id]) == ("l2", "l3", "l4")
+        assert sorted(recorded.values()) == sorted(_own_slots(call, port_id).values())
 
 
 @pytest.mark.parametrize(
