@@ -10,8 +10,7 @@ perpendicular riser lateral, recorded departure orders, and the direction
 sequence (never the coordinates) of the routes as emitted.
 
 A port the deal cannot order is refused, once, with the reason; a refused port
-keeps the landings its own lane order gives and the reconcile keeps ordering
-its risers by trunk depth.
+falls back to its own lane order and the reconcile's trunk-depth riser order.
 """
 
 from __future__ import annotations
@@ -21,7 +20,6 @@ from collections.abc import Mapping, Sequence
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from nf_metro.layout.geometry import lane_delta
 from nf_metro.layout.routing.common import (
     ENTRY_SIDE_DIRECTION,
     EXIT_SIDE_DIRECTION,
@@ -29,7 +27,7 @@ from nf_metro.layout.routing.common import (
     leg_direction_sequence,
     right_normal_axis_sign,
 )
-from nf_metro.layout.routing.context import _get_offset, _section_lane_frame
+from nf_metro.layout.routing.context import _get_offset, _tb_x_offset
 from nf_metro.layout.routing.corridor_cohort_integration import (
     AcceptedCorridorOwnerKind,
 )
@@ -214,17 +212,14 @@ def _source_deal(
             raise _Refused(LandingDealRefusal.DEFERRED)
         if len({target.endpoint_lane_coordinate for target in line_targets}) != 1:
             raise _Refused(LandingDealRefusal.SPLIT_LANDING)
-    frame = _section_lane_frame(
-        graph, graph.sections[exit_port.section_id], ctx.positive_fan
-    )
+    section_id = exit_port.section_id
 
     def exit_lateral(line: str) -> float:
-        offset = _get_offset(ctx, source, line)
         if exit_port.side in (PortSide.LEFT, PortSide.RIGHT):
-            return offset
-        if frame.secondary.name == "y":
+            return _get_offset(ctx, source, line)
+        if section_id not in ctx.tb_sections:
             return _perp_riser_lateral(ctx, root, line, exit_port.side)
-        return lane_delta(frame, offset)
+        return _tb_x_offset(ctx, source, line, section_id)
 
     laterals = {line: exit_lateral(line) for line in lines}
     if len(set(laterals.values())) != len(lines):
@@ -247,6 +242,11 @@ def _source_deal(
 def landing_order(deal: Mapping[str, float]) -> tuple[str, ...]:
     """A decided port's lines in ascending landing coordinate."""
     return tuple(sorted(deal, key=deal.__getitem__))
+
+
+def landing_orders_of(deals: LandingDeals) -> dict[str, tuple[str, ...]]:
+    """Each decided port's lines in ascending landing coordinate."""
+    return {port_id: landing_order(deal) for port_id, deal in deals.items()}
 
 
 def planned_landing_orders(

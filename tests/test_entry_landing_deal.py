@@ -84,9 +84,6 @@ def _own_slots(call: _DealCall, port_id: str) -> dict[str, float]:
     }
 
 
-# (a) the fixture
-
-
 def test_cohort_final_compile_lands_the_bundle_in_exit_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -119,9 +116,6 @@ def test_cohort_final_compile_lands_the_bundle_in_exit_order(
 
 def test_the_fixture_draws_as_planned() -> None:
     assert shadow_failure(FIXTURE) is None
-
-
-# (b) the order
 
 
 @pytest.mark.parametrize(
@@ -231,9 +225,6 @@ def test_a_multi_source_port_keeps_a_lone_sources_slot(
         own = _own_slots(call, "sec3__entry_right_5")
 
         assert call.decided["sec3__entry_right_5"]["l2"] == own["l2"]
-
-
-# (c) refusals
 
 
 @pytest.mark.parametrize(
@@ -367,9 +358,6 @@ def test_a_deal_that_moves_no_immutable_member_stands(
     assert landing_order(decided[FIXTURE_PORT]) == ("l0", "l1", "l2")
 
 
-# (d) the reconcile obeys
-
-
 def _peeloff_bundle(trunk_sign: int) -> PortPeeloffBundle:
     """Lines a, b, c peel off one trunk shallowest first into a LEFT port."""
     per_line = {
@@ -392,7 +380,7 @@ def test_a_decided_port_seats_rank_and_port_y_in_the_decided_order(
     depth_line_at = sorted(by_depth, key=lambda line: by_depth[line].port_y)
     decided_order = ("c", "a", "b")
 
-    slots = peeloff_target_slots(bundle, 4.0, {}, decided_order)
+    slots = peeloff_target_slots(bundle, 4.0, {}, {"port": decided_order})
 
     assert sorted(slots, key=lambda line: slots[line].port_y) == list(decided_order)
     for position, line in enumerate(decided_order):
@@ -402,12 +390,9 @@ def test_a_decided_port_seats_rank_and_port_y_in_the_decided_order(
 def test_an_undecided_bundle_keeps_its_trunk_depth_order() -> None:
     bundle = _peeloff_bundle(1)
 
-    assert peeloff_target_slots(bundle, 4.0, {}, ("a", "b")) == (
+    assert peeloff_target_slots(bundle, 4.0, {}, {"port": ("a", "b")}) == (
         peeloff_target_slots(bundle, 4.0, {})
     )
-
-
-# (e) the reconciles after emission take the published plan's order
 
 
 def test_every_consumer_after_emission_takes_the_plans_landing_order(
@@ -420,12 +405,12 @@ def test_every_consumer_after_emission_takes_the_plans_landing_order(
     reconcile = core._reconcile_port_peeloff_risers
     check = invariants.check_peeloff_concentric
 
-    def spy_reconcile(routes: Any, ctx: Any, orders: Any = None) -> None:
-        received["reconcile"].append(orders or {})
+    def spy_reconcile(routes: Any, ctx: Any, orders: Any) -> None:
+        received["reconcile"].append(orders)
         reconcile(routes, ctx, orders)
 
-    def spy_check(graph: Any, routes: Any, radius: Any, orders: Any = None) -> Any:
-        received["invariant"].append(orders or {})
+    def spy_check(graph: Any, routes: Any, radius: Any, orders: Any) -> Any:
+        received["invariant"].append(orders)
         return check(graph, routes, radius, orders)
 
     monkeypatch.setattr(core, "_reconcile_port_peeloff_risers", spy_reconcile)

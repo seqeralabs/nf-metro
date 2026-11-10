@@ -67,6 +67,7 @@ from nf_metro.layout.route_topology import (
     merge_fanout_junction_ids,
 )
 from nf_metro.layout.routing.common import (
+    NO_LANDING_ORDERS,
     CorridorLane,
     Direction,
     HTrunkSeg,
@@ -6898,7 +6899,7 @@ def check_peeloff_concentric(
     graph: MetroGraph,
     routes: list[RoutedPath],
     curve_radius: float = CURVE_RADIUS,
-    landing_orders: Mapping[str, Sequence[str]] | None = None,
+    landing_orders: Mapping[str, Sequence[str]] = NO_LANDING_ORDERS,
 ) -> list[PeeloffBundleCrossing | LooseDestinationTail]:
     """Return peel-off bundles that do not nest into one band at a LEFT entry port.
 
@@ -6911,7 +6912,6 @@ def check_peeloff_concentric(
     *landing_orders* owes the band in the order the plan lands it.
     """
     step = graph_offset_step(graph)
-    orders = landing_orders or {}
     out: list[PeeloffBundleCrossing | LooseDestinationTail] = []
     checked: set[tuple[str, int, int, int]] = set()
     for bundle, trunks, target_ys in iter_eligible_destination_tail_bundles(
@@ -6942,7 +6942,7 @@ def check_peeloff_concentric(
         if loose:
             continue
         targets = peeloff_target_slots(
-            bundle, step, graph._departure_lane_orders, orders.get(bundle.port_id)
+            bundle, step, graph._departure_lane_orders, landing_orders
         )
         for line_id, tail in bundle.per_line.items():
             slot = targets[line_id]
@@ -6966,7 +6966,7 @@ def check_peeloff_concentric(
         if key in checked:
             continue
         targets = peeloff_target_slots(
-            bundle, step, graph._departure_lane_orders, orders.get(bundle.port_id)
+            bundle, step, graph._departure_lane_orders, landing_orders
         )
         for line_id, tail in bundle.per_line.items():
             slot = targets[line_id]
@@ -7141,7 +7141,7 @@ def render_curve_violations(
     offsets: dict[tuple[str, str], float],
     *,
     curve_radius: float = CURVE_RADIUS,
-    landing_orders: Mapping[str, Sequence[str]] | None = None,
+    landing_orders: Mapping[str, Sequence[str]] = NO_LANDING_ORDERS,
 ) -> list[tuple[str, Sequence[_HasMessage]]]:
     """Every render-time curve check, labelled, with the violations it finds.
 
@@ -7264,7 +7264,7 @@ def assert_render_curve_invariants(
     offsets: dict[tuple[str, str], float],
     *,
     curve_radius: float = CURVE_RADIUS,
-    landing_orders: Mapping[str, Sequence[str]] | None = None,
+    landing_orders: Mapping[str, Sequence[str]] = NO_LANDING_ORDERS,
 ) -> None:
     """Raise :class:`CurveInvariantError` if the final render routes are defective.
 

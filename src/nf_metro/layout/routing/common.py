@@ -7,6 +7,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
+from types import MappingProxyType
 from typing import AbstractSet, NamedTuple
 
 from nf_metro.layout.constants import (
@@ -174,6 +175,13 @@ def segment_direction(
     return None
 
 
+def tolerant_sign(delta: float) -> int:
+    """The sign of *delta*, ``0`` within ``COORD_TOLERANCE``."""
+    if abs(delta) <= COORD_TOLERANCE:
+        return 0
+    return 1 if delta > 0 else -1
+
+
 def leg_direction_sequence(
     points: Sequence[tuple[float, float]],
 ) -> tuple[tuple[int, int], ...]:
@@ -185,14 +193,9 @@ def leg_direction_sequence(
     same way at every bend, so concentric turns keep their lateral order.
     """
 
-    def sign(delta: float) -> int:
-        if abs(delta) <= COORD_TOLERANCE:
-            return 0
-        return 1 if delta > 0 else -1
-
     sequence: list[tuple[int, int]] = []
     for (x0, y0), (x1, y1) in zip(points, points[1:]):
-        leg = (sign(x1 - x0), sign(y1 - y0))
+        leg = (tolerant_sign(x1 - x0), tolerant_sign(y1 - y0))
         if leg != (0, 0) and (not sequence or sequence[-1] != leg):
             sequence.append(leg)
     return tuple(sequence)
@@ -2087,11 +2090,14 @@ def peeloff_trunk_line_order(bundle: PortPeeloffBundle) -> list[str]:
     return list(reversed(port_order))
 
 
+NO_LANDING_ORDERS: Mapping[str, Sequence[str]] = MappingProxyType({})
+
+
 def peeloff_target_slots(
     bundle: PortPeeloffBundle,
     step: float,
     records: Mapping[tuple[str, str], DepartureLaneOrder],
-    decided_order: Sequence[str] | None = None,
+    landing_orders: Mapping[str, Sequence[str]] = NO_LANDING_ORDERS,
 ) -> dict[str, PeeloffSlot]:
     """Map each line of *bundle* to the slot its trunk depth earns.
 
@@ -2114,7 +2120,7 @@ def peeloff_target_slots(
     the fork, so each recorded line takes the slot of the line whose lane the
     record gives it (:func:`_record_seats_tails`).
 
-    A port whose landing the plan decided (*decided_order*, its lines in
+    A port whose landing the plan decided (*landing_orders*, its lines in
     ascending port Y, :mod:`~nf_metro.layout.routing.landing_deal`) is dealt
     in that order instead: each line takes the port Y of its rank there and
     the peel-X of the matching trunk rank, so the risers rise in the order
@@ -2134,10 +2140,11 @@ def peeloff_target_slots(
     y_slots = sorted(t.port_y for t in per_line.values())
     x_follows_trunk = x_follows_trunk_direction(bundle.vertical_sign, bundle.trunk_sign)
     y_follows_trunk = bundle.port_lead_sign == bundle.trunk_sign
-    decided = decided_order is not None and set(decided_order) == set(per_line)
-    if decided:
-        assert decided_order is not None
-        ranked = list(decided_order if y_follows_trunk else reversed(decided_order))
+    order = landing_orders.get(bundle.port_id)
+    if order is not None and set(order) != set(per_line):
+        order = None
+    if order is not None:
+        ranked = list(order if y_follows_trunk else reversed(order))
     else:
         ranked = sorted(per_line, key=lambda lid: per_line[lid].trunk_y)
     slots = {
@@ -2149,7 +2156,7 @@ def peeloff_target_slots(
         for i, lid in enumerate(ranked)
     }
     recorded = [r for r in records.values() if r.target_id == bundle.port_id]
-    if decided or not recorded:
+    if order is not None or not recorded:
         return slots
     routes: dict[str, RoutedPath] = {}
     for rp, _tail in bundle.entries:

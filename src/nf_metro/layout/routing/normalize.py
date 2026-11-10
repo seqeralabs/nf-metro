@@ -37,6 +37,7 @@ from nf_metro.layout.routing.centrelines import (
 )
 from nf_metro.layout.routing.common import (
     ENTRY_SIDE_DIRECTION,
+    NO_LANDING_ORDERS,
     CorridorLane,
     Direction,
     GapSlot,
@@ -2531,7 +2532,7 @@ def _unify_coincident_corner_radii(
 def _reconcile_port_peeloff_risers(
     routes: list[RoutedPath],
     ctx: _RoutingCtx,
-    landing_orders: Mapping[str, Sequence[str]] | None = None,
+    landing_orders: Mapping[str, Sequence[str]] = NO_LANDING_ORDERS,
 ) -> None:
     """Re-stack port approaches onto the slots their settled trunk depth earns.
 
@@ -2558,13 +2559,12 @@ def _reconcile_port_peeloff_risers(
     that order rather than their trunk depths'.
     """
     step = ctx.offset_step
-    orders = landing_orders or {}
     for bundle in iter_port_peeloff_bundles(routes, ctx.graph, step):
         targets = peeloff_target_slots(
             bundle,
             step,
             ctx.graph._departure_lane_orders,
-            orders.get(bundle.port_id),
+            landing_orders,
         )
         n = len(bundle.per_line)
         seats: list[tuple[RoutedPath, _VChannel, PeeloffSlot]] = []
@@ -2593,7 +2593,7 @@ def _reconcile_port_peeloff_risers(
 def _align_merge_fed_confluence_to_band(
     routes: list[RoutedPath],
     ctx: _RoutingCtx,
-    landing_orders: Mapping[str, Sequence[str]] | None = None,
+    landing_orders: Mapping[str, Sequence[str]] = NO_LANDING_ORDERS,
 ) -> None:
     """Nest a merge-fed convergence's free descent onto its reordered band.
 
@@ -2621,7 +2621,6 @@ def _align_merge_fed_confluence_to_band(
     its ladder in the order the plan lands it.
     """
     step = ctx.offset_step
-    orders = landing_orders or {}
     entry_port_for = ctx.merge.entry_port_for
     by_shape: dict[tuple[str, int, int, int], list[tuple[RoutedPath, PeeloffTail]]] = (
         defaultdict(list)
@@ -2677,7 +2676,7 @@ def _align_merge_fed_confluence_to_band(
             port_id, entries, per_line, trunk_sign, vertical_sign, port_lead_sign
         )
         slots = peeloff_target_slots(
-            bundle, step, ctx.graph._departure_lane_orders, orders.get(port_id)
+            bundle, step, ctx.graph._departure_lane_orders, landing_orders
         )
         deltas = {
             (

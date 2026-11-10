@@ -56,6 +56,7 @@ from nf_metro.layout.routing.common import (
     planner_owns_segment,
     right_normal_axis_sign,
     segment_direction,
+    tolerant_sign,
 )
 from nf_metro.layout.routing.corridor_cohorts import (
     SOLVE_QUANTUM,
@@ -2834,10 +2835,7 @@ def _end_turn_sides(claim: _BoundClaim) -> tuple[int, int]:
     def turn_side(corner: tuple[float, float], beyond: int) -> int:
         if not 0 <= beyond < len(points):
             return 0
-        delta = points[beyond][axis] - corner[axis]
-        if abs(delta) <= COORD_TOLERANCE:
-            return 0
-        return 1 if delta > 0 else -1
+        return tolerant_sign(points[beyond][axis] - corner[axis])
 
     at_start, at_end = turn_side(start, rank - 1), turn_side(end, rank + 2)
     if start[1 - axis] <= end[1 - axis]:

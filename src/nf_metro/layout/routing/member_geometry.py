@@ -46,6 +46,7 @@ from nf_metro.layout.route_plan import (
 )
 from nf_metro.layout.route_reservations import ColumnGapRegion, RowGapRegion
 from nf_metro.layout.routing.common import (
+    NO_LANDING_ORDERS,
     Direction,
     GapSlot,
     OffsetRegime,
@@ -92,7 +93,7 @@ from nf_metro.layout.routing.invariants import concentric_corner_fans
 from nf_metro.layout.routing.landing_deal import (
     LandingDeals,
     bundle_landing_deals,
-    landing_order,
+    landing_orders_of,
 )
 from nf_metro.layout.routing.normalize import (
     CrossEdgeNesting,
@@ -399,12 +400,14 @@ def _corridor_cohort_targets(
     context_candidates: Sequence[_MemberCandidate],
     scaffold: RouteSemanticScaffold,
     ctx: _RoutingCtx,
-    landing_deals: LandingDeals | None = None,
+    landing_deals: LandingDeals = MappingProxyType({}),
 ) -> tuple[CorridorCohortTarget, ...]:
     """The cohort targets of *candidates*, then of *context_candidates* not
-    already targeted, each landing where *landing_deals* decided its port's
-    line lands, else at the port's own lane."""
-    deals = landing_deals or {}
+    already targeted.
+
+    Each lands where *landing_deals* decided its port's line lands, else at
+    the port's own lane.
+    """
     selected: dict[tuple[str, tuple[str, str, str]], CorridorCohortTarget] = {}
 
     def add(population: Sequence[_MemberCandidate], *, mutable: bool) -> None:
@@ -430,13 +433,14 @@ def _corridor_cohort_targets(
 
     add(candidates, mutable=True)
     add(context_candidates, mutable=False)
-    return tuple(
-        target
-        if (deal := deals.get(target.edge_key[1])) is None
-        or target.endpoint_lane_coordinate is None
-        else replace(target, endpoint_lane_coordinate=deal[target.edge_key[2]])
-        for target in selected.values()
-    )
+
+    def landed(target: CorridorCohortTarget) -> CorridorCohortTarget:
+        deal = landing_deals.get(target.edge_key[1])
+        if deal is None or target.endpoint_lane_coordinate is None:
+            return target
+        return replace(target, endpoint_lane_coordinate=deal[target.edge_key[2]])
+
+    return tuple(landed(target) for target in selected.values())
 
 
 def _corridor_boundary_sections(
@@ -814,7 +818,7 @@ def _post_emission_seated_snapshot(
     *,
     scalar_requests: Sequence[CorridorScalarRequest],
     complete_path_system_ids: frozenset[RouteSystemId] = frozenset(),
-    landing_orders: Mapping[str, Sequence[str]] | None = None,
+    landing_orders: Mapping[str, Sequence[str]] = NO_LANDING_ORDERS,
 ) -> tuple[
     tuple[CorridorCohortTarget, ...], tuple[RoutedPath, ...], dict[int, RoutedPath]
 ]:
@@ -828,10 +832,8 @@ def _post_emission_seated_snapshot(
     :func:`_align_merge_fed_confluence_to_band` and
     :func:`_hold_runs_in_corridor_clearance` then settle the corridor runs.
     That is the order those passes run after emission, so the compile reads
-    the coordinates they draw and no live route moves.  Both peel-off passes
-    rank a port the plan decided (*landing_orders*) in that landing order.
-    The snapshot predicts those passes from their input; it is not a fixpoint
-    of them.
+    the coordinates they draw and no live route moves.  The snapshot
+    predicts those passes from their input; it is not a fixpoint of them.
 
     After emission those passes read the segments the freeze owns as fixed,
     so the restack, the traverse passes and the confluence alignment run with
@@ -974,7 +976,7 @@ def _compile_corridor_cohorts(
     scalar_requests: Sequence[CorridorScalarRequest] = (),
     sizing_population: Sequence[RoutedPath] = (),
     complete_path_system_ids: frozenset[RouteSystemId] = frozenset(),
-    landing_deals: LandingDeals | None = None,
+    landing_deals: LandingDeals = MappingProxyType({}),
 ) -> tuple[
     CorridorCohortPlan | None,
     dict[ResolvedEdge, tuple[int, ...]],
@@ -982,13 +984,12 @@ def _compile_corridor_cohorts(
 ]:
     if ledger is None:
         return None, {}, ()
-    deals = landing_deals or {}
     member_targets = _corridor_cohort_targets(
         candidates,
         context_candidates,
         scaffold,
         ctx,
-        deals,
+        landing_deals,
     )
     targets = (*member_targets, *additional_targets)
     seated_targets, seated_population, live_by_copy_id = _post_emission_seated_snapshot(
@@ -997,9 +998,7 @@ def _compile_corridor_cohorts(
         ctx,
         scalar_requests=scalar_requests,
         complete_path_system_ids=complete_path_system_ids,
-        landing_orders={
-            port_id: landing_order(deal) for port_id, deal in deals.items()
-        },
+        landing_orders=landing_orders_of(landing_deals),
     )
     candidate_route_ids = {id(candidate.route) for candidate in candidates}
     try:
@@ -3086,10 +3085,8 @@ def build_member_geometry_execution(
             if compiles
             else ()
         )
-        # The plan decides each port's landing order once, from the routes as
-        # emitted, and every reconcile of this call deals the port's risers in
-        # that order: one owner for the order the plan lands and the drawing
-        # rises in.
+        # Decided once from the routes as emitted; every reconcile of this call
+        # deals a port's risers in that order.
         landing_deals, _refused = (
             bundle_landing_deals(
                 ctx,
@@ -3100,10 +3097,9 @@ def build_member_geometry_execution(
             if compiles
             else ({}, {})
         )
-        landing_orders = {
-            port_id: landing_order(deal) for port_id, deal in landing_deals.items()
-        }
-        _reconcile_port_peeloff_risers(complete_path_population, ctx, landing_orders)
+        _reconcile_port_peeloff_risers(
+            complete_path_population, ctx, landing_orders_of(landing_deals)
+        )
         _coincide_same_line_tracks(normalization_population, ctx)
         _coincide_fanout_opening_descents(
             normalization_population, ctx, settle_frozen_arcs=True
