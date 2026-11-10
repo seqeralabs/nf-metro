@@ -2066,13 +2066,30 @@ def _end_turn_cycle_problem() -> CorridorAllocationProblem:
 
 def test_an_end_turn_closing_an_order_cycle_relaxes_the_footprint_order() -> None:
     """``b`` turning down votes it below ``c``, which closes ``c < a < b < c``
-    with the two orders; end-turn votes never give way, so the footprint
-    order is dropped and the corner order holds."""
+    with the two orders; no seating composition drops that vote, so the
+    footprint order is dropped and the corner order holds."""
     result = solve_corridor_cohorts(_end_turn_cycle_problem())
 
     assert result.corner_tier is CorridorCornerOrderTier.RELAXED_ORDERS
     assert result.status is CorridorAllocationStatus.PLANNED
     assert dict(result.allocations) == {"a": 94.0, "b": 98.0, "c": 102.0}
+
+
+def test_a_footprint_order_against_its_cohort_offset_gives_way() -> None:
+    """``b`` sits a pitch above ``a`` in one cohort, so the footprint order
+    ``b < a`` contradicts the offset that joins them: it is dropped and the
+    corner order holds, where the plain problem cannot seat."""
+    problem = _rigid_pair_and_free_lane(
+        _corner_order("b", "c"),
+        footprint=(CorridorDirectedSeparation("footprint:b|a", "b", "a", 4.0),),
+    )
+
+    result = solve_corridor_cohorts(problem)
+    plain = solve_corridor_cohorts(replace(problem, corner_orders=()))
+
+    assert result.corner_tier is CorridorCornerOrderTier.RELAXED_ORDERS
+    assert dict(result.allocations) == {"a": 100.0, "b": 104.0, "c": 110.0}
+    assert plain.reason is CorridorAllocationFailureReason.INFEASIBLE
 
 
 @pytest.mark.parametrize(
@@ -2085,7 +2102,7 @@ def test_an_end_turn_closing_an_order_cycle_relaxes_the_footprint_order() -> Non
         pytest.param(_relaxed_orders_problem(), id="relaxed-orders"),
     ],
 )
-def test_a_problem_holding_corner_orders_seats_once(
+def test_the_corner_order_tier_is_decided_without_a_trial_seating(
     problem: CorridorAllocationProblem, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     seated: list[CorridorAllocationProblem] = []

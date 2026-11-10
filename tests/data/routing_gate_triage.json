@@ -2248,11 +2248,11 @@
   "status": "needs-review"
  },
  "corridor_cohorts.py::if lower_root != upper_root:::#1": {
-  "note": "A separation or corner order between two lanes already rigidly united into one root, in the corner-order tier's orderability check. It needs a footprint order between a lead and a carrier tied together by an equality or one cohort (one network lane) in a problem that also holds corner orders, which no corpus topology builds and no unit test in tests/test_corridor_cohorts.py takes. needs-review because the arm is reachable and nothing exercises it.",
+  "note": "A separation or corner order between two lanes already rigidly united into one root, in the corner-order tier's orderability check. No corpus topology takes it. Exercised by tests/test_corridor_cohort_integration.py::test_three_lines_keep_their_descent_order_onto_a_run and tests/test_corridor_cohort_integration.py::test_guard_lanes_of_one_endpoint_cohort_are_left_to_their_slot_order, whose corner orders order lanes an equality and a cohort already unite, and by tests/test_corridor_cohorts.py::test_a_footprint_order_against_its_cohort_offset_gives_way. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
  },
  "corridor_cohorts.py::elif sign * (upper_offset - lower_offset) < _q(separation.distance):::#1": {
-  "note": "Both arms are behind the same-root arm of the gate above (see it): a same-root separation fixed closer than its distance marks the root unorderable, and one fixed far enough leaves it orderable. No corpus topology and no unit test in tests/test_corridor_cohorts.py builds a same-root separation in a problem holding corner orders. needs-review because the arm is reachable and nothing exercises it.",
+  "note": "A same-root separation fixed closer than its distance marks the root unorderable; one fixed far enough leaves it orderable. No corpus topology takes either. The orderable arm is exercised by tests/test_corridor_cohort_integration.py::test_three_lines_keep_their_descent_order_onto_a_run, the unorderable one by tests/test_corridor_cohorts.py::test_a_footprint_order_against_its_cohort_offset_gives_way. needs-review because the arms are reachable, not because they are unreachable.",
   "status": "needs-review"
  },
  "corridor_cohorts.py::if contradiction is not None:::#1": {
@@ -2260,11 +2260,11 @@
   "status": "needs-review"
  },
  "corridor_cohorts.py::if not unorderable:::#1": {
-  "note": "The fall-through, where the corner orders leave a root unorderable and the tier looks for a relaxation or gives way. No render in the sweep takes it: the m2 census of the repo's example files seats every corner-order call in the corner tier or has none (tiers CORNER_ORDERS and NONE only). Exercised by tests/test_corridor_cohorts.py::test_corner_orders_blocked_by_a_footprint_order_seat_without_it and tests/test_corridor_cohorts.py::test_guard_corner_orders_that_cannot_seat_return_the_plain_result. needs-review because the arm is reachable, not because it is unreachable.",
+  "note": "The fall-through, where the corner orders leave a root unorderable and the tier looks for a relaxation or gives way. No fixture in the sweep takes it. Exercised by tests/test_corridor_cohorts.py::test_corner_orders_blocked_by_a_footprint_order_seat_without_it and tests/test_corridor_cohorts.py::test_guard_corner_orders_that_cannot_seat_return_the_plain_result. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
  },
  "corridor_cohorts.py::if len(relaxed) < len(kept) and not _unorderable_roots(::#1": {
-  "note": "Dropping the separations lying wholly in unorderable roots leaves every root orderable (RELAXED_ORDERS), or there is nothing to drop or the drop does not help and the tier gives way (GAVE_WAY). Both sit behind the unorderable fall-through of the gate above, which no render in the sweep takes: the m2 census of the repo's example files seats every corner-order call in the corner tier or has none (tiers CORNER_ORDERS and NONE only). RELAXED_ORDERS is exercised by tests/test_corridor_cohorts.py::test_corner_orders_blocked_by_a_footprint_order_seat_without_it and tests/test_corridor_cohorts.py::test_an_end_turn_closing_an_order_cycle_relaxes_the_footprint_order; GAVE_WAY by tests/test_corridor_cohorts.py::test_guard_corner_orders_that_cannot_seat_return_the_plain_result. needs-review because the arms are reachable, not because they are unreachable.",
+  "note": "Dropping the separations lying wholly in unorderable roots leaves every root orderable (RELAXED_ORDERS), or there is nothing to drop or the drop does not help and the tier gives way (GAVE_WAY). Both sit behind the unorderable fall-through of the gate above, which no fixture in the sweep takes. RELAXED_ORDERS is exercised by tests/test_corridor_cohorts.py::test_corner_orders_blocked_by_a_footprint_order_seat_without_it and tests/test_corridor_cohorts.py::test_an_end_turn_closing_an_order_cycle_relaxes_the_footprint_order, and tests/test_corridor_cohorts.py::test_a_footprint_order_against_its_cohort_offset_gives_way; GAVE_WAY by tests/test_corridor_cohorts.py::test_guard_corner_orders_that_cannot_seat_return_the_plain_result. needs-review because the arms are reachable, not because they are unreachable.",
   "status": "needs-review"
  },
  "corridor_cohorts.py::if contradiction is not None:::#2": {

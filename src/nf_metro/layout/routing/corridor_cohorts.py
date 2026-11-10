@@ -916,9 +916,9 @@ def _unorderable_roots(
     """The roots *separations* cannot order.
 
     A root is unorderable where it lies on a cycle of the separations' root
-    orders together with the end-turn votes, which never give way in a
-    seating, on the root pairs no separation orders; or where a separation
-    orders two of its own lanes against their fixed offset.
+    orders together with the end-turn votes on the root pairs no separation
+    orders, the pair orders the seating's last composition holds; or where a
+    separation orders two of its own lanes against their fixed offset.
     """
     sign = problem.axis_sign
     by_id = {lane.member_id: index for index, lane in enumerate(problem.lanes)}
