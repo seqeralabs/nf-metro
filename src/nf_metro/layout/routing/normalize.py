@@ -37,6 +37,7 @@ from nf_metro.layout.routing.centrelines import (
 )
 from nf_metro.layout.routing.common import (
     ENTRY_SIDE_DIRECTION,
+    NO_LANDING_ORDERS,
     CorridorLane,
     Direction,
     GapSlot,
@@ -2528,7 +2529,11 @@ def _unify_coincident_corner_radii(
     )
 
 
-def _reconcile_port_peeloff_risers(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
+def _reconcile_port_peeloff_risers(
+    routes: list[RoutedPath],
+    ctx: _RoutingCtx,
+    landing_orders: Mapping[str, Sequence[str]] = NO_LANDING_ORDERS,
+) -> None:
     """Re-stack port approaches onto the slots their settled trunk depth earns.
 
     The riser order is assigned during gap materialisation from the trunk
@@ -2548,10 +2553,19 @@ def _reconcile_port_peeloff_risers(routes: list[RoutedPath], ctx: _RoutingCtx) -
     of one riser: derived one member at a time against whatever base the
     emitting handler happened to use, the moved and unmoved risers bend on
     different arc centres and the bundle pinches through the corner.
+
+    *landing_orders* holds the landing order the plan decided for a port
+    (:mod:`~nf_metro.layout.routing.landing_deal`); such a port's risers take
+    that order rather than their trunk depths'.
     """
     step = ctx.offset_step
     for bundle in iter_port_peeloff_bundles(routes, ctx.graph, step):
-        targets = peeloff_target_slots(bundle, step, ctx.graph._departure_lane_orders)
+        targets = peeloff_target_slots(
+            bundle,
+            step,
+            ctx.graph._departure_lane_orders,
+            landing_orders,
+        )
         n = len(bundle.per_line)
         seats: list[tuple[RoutedPath, _VChannel, PeeloffSlot]] = []
         settled = True
@@ -2577,7 +2591,9 @@ def _reconcile_port_peeloff_risers(routes: list[RoutedPath], ctx: _RoutingCtx) -
 
 
 def _align_merge_fed_confluence_to_band(
-    routes: list[RoutedPath], ctx: _RoutingCtx
+    routes: list[RoutedPath],
+    ctx: _RoutingCtx,
+    landing_orders: Mapping[str, Sequence[str]] = NO_LANDING_ORDERS,
 ) -> None:
     """Nest a merge-fed convergence's free descent onto its reordered band.
 
@@ -2601,7 +2617,8 @@ def _align_merge_fed_confluence_to_band(
     slide that ladder rigidly until the anchors sit on their fixed columns and
     re-seat the free legs on the slots left over -- outboard of the anchors when
     the band ranks them there.  Bundles reachable without a merge are left to
-    :func:`_reconcile_port_peeloff_risers`.
+    :func:`_reconcile_port_peeloff_risers`.  A port in *landing_orders* ranks
+    its ladder in the order the plan lands it.
     """
     step = ctx.offset_step
     entry_port_for = ctx.merge.entry_port_for
@@ -2658,7 +2675,9 @@ def _align_merge_fed_confluence_to_band(
         bundle = PortPeeloffBundle(
             port_id, entries, per_line, trunk_sign, vertical_sign, port_lead_sign
         )
-        slots = peeloff_target_slots(bundle, step, ctx.graph._departure_lane_orders)
+        slots = peeloff_target_slots(
+            bundle, step, ctx.graph._departure_lane_orders, landing_orders
+        )
         deltas = {
             (
                 round(per_line[lid].peel_x - slots[lid].peel_x, 3),

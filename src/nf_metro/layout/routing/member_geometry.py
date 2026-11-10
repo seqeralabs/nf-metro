@@ -46,6 +46,7 @@ from nf_metro.layout.route_plan import (
 )
 from nf_metro.layout.route_reservations import ColumnGapRegion, RowGapRegion
 from nf_metro.layout.routing.common import (
+    NO_LANDING_ORDERS,
     Direction,
     GapSlot,
     OffsetRegime,
@@ -89,6 +90,11 @@ from nf_metro.layout.routing.inter_section_handlers import (
     packed_cell_handoff_carrier,
 )
 from nf_metro.layout.routing.invariants import concentric_corner_fans
+from nf_metro.layout.routing.landing_deal import (
+    LandingDeals,
+    bundle_landing_deals,
+    landing_orders_of,
+)
 from nf_metro.layout.routing.normalize import (
     CrossEdgeNesting,
     _align_merge_fed_confluence_to_band,
@@ -394,7 +400,14 @@ def _corridor_cohort_targets(
     context_candidates: Sequence[_MemberCandidate],
     scaffold: RouteSemanticScaffold,
     ctx: _RoutingCtx,
+    landing_deals: LandingDeals = MappingProxyType({}),
 ) -> tuple[CorridorCohortTarget, ...]:
+    """The cohort targets of *candidates*, then of *context_candidates* not
+    already targeted.
+
+    Each lands where *landing_deals* decided its port's line lands, else at
+    the port's own lane.
+    """
     selected: dict[tuple[str, tuple[str, str, str]], CorridorCohortTarget] = {}
 
     def add(population: Sequence[_MemberCandidate], *, mutable: bool) -> None:
@@ -420,7 +433,14 @@ def _corridor_cohort_targets(
 
     add(candidates, mutable=True)
     add(context_candidates, mutable=False)
-    return tuple(selected.values())
+
+    def landed(target: CorridorCohortTarget) -> CorridorCohortTarget:
+        deal = landing_deals.get(target.edge_key[1])
+        if deal is None or target.endpoint_lane_coordinate is None:
+            return target
+        return replace(target, endpoint_lane_coordinate=deal[target.edge_key[2]])
+
+    return tuple(landed(target) for target in selected.values())
 
 
 def _corridor_boundary_sections(
@@ -798,6 +818,7 @@ def _post_emission_seated_snapshot(
     *,
     scalar_requests: Sequence[CorridorScalarRequest],
     complete_path_system_ids: frozenset[RouteSystemId] = frozenset(),
+    landing_orders: Mapping[str, Sequence[str]] = NO_LANDING_ORDERS,
 ) -> tuple[
     tuple[CorridorCohortTarget, ...], tuple[RoutedPath, ...], dict[int, RoutedPath]
 ]:
@@ -811,8 +832,8 @@ def _post_emission_seated_snapshot(
     :func:`_align_merge_fed_confluence_to_band` and
     :func:`_hold_runs_in_corridor_clearance` then settle the corridor runs.
     That is the order those passes run after emission, so the compile reads
-    the coordinates they draw and no live route moves.  The snapshot predicts
-    those passes from their input; it is not a fixpoint of them.
+    the coordinates they draw and no live route moves.  The snapshot
+    predicts those passes from their input; it is not a fixpoint of them.
 
     After emission those passes read the segments the freeze owns as fixed,
     so the restack, the traverse passes and the confluence alignment run with
@@ -880,7 +901,7 @@ def _post_emission_seated_snapshot(
 
     with freeze_ownership(anchor_copies):
         _materialize_trunk_slots(target_copies, ctx, fixed_route_ids=frozenset(anchors))
-    _reconcile_port_peeloff_risers(target_copies, ctx)
+    _reconcile_port_peeloff_risers(target_copies, ctx, landing_orders)
     with freeze_ownership(anchor_copies):
         _coincide_same_line_fanout_traverses(target_copies, ctx)
         _bundle_divergent_distinct_traverses(target_copies, ctx)
@@ -915,7 +936,7 @@ def _post_emission_seated_snapshot(
             fixed_segment_keys=fixed_segment_keys,
         )
     with freeze_ownership(()):
-        _align_merge_fed_confluence_to_band(seated, ctx)
+        _align_merge_fed_confluence_to_band(seated, ctx, landing_orders)
     _hold_runs_in_corridor_clearance(seated, ctx, fixed_segment_keys=fixed_segment_keys)
     return (
         tuple(replace(target, route=copies[id(target.route)]) for target in targets),
@@ -955,6 +976,7 @@ def _compile_corridor_cohorts(
     scalar_requests: Sequence[CorridorScalarRequest] = (),
     sizing_population: Sequence[RoutedPath] = (),
     complete_path_system_ids: frozenset[RouteSystemId] = frozenset(),
+    landing_deals: LandingDeals = MappingProxyType({}),
 ) -> tuple[
     CorridorCohortPlan | None,
     dict[ResolvedEdge, tuple[int, ...]],
@@ -967,6 +989,7 @@ def _compile_corridor_cohorts(
         context_candidates,
         scaffold,
         ctx,
+        landing_deals,
     )
     targets = (*member_targets, *additional_targets)
     seated_targets, seated_population, live_by_copy_id = _post_emission_seated_snapshot(
@@ -975,6 +998,7 @@ def _compile_corridor_cohorts(
         ctx,
         scalar_requests=scalar_requests,
         complete_path_system_ids=complete_path_system_ids,
+        landing_orders=landing_orders_of(landing_deals),
     )
     candidate_route_ids = {id(candidate.route) for candidate in candidates}
     try:
@@ -3050,7 +3074,32 @@ def build_member_geometry_execution(
         # direction bands have to be settled here rather than by the same pass
         # running after emission, which skips a plan-owned trunk.
         _separate_opposing_inter_row_trunks(normalization_population, ctx)
-        _reconcile_port_peeloff_risers(complete_path_population, ctx)
+        compiles = corridor_cohort_ledger is not None and allow_clearance_requirements
+        context_candidates = (
+            _corridor_cohort_context_candidates(
+                context_routes,
+                frozenset(id(route) for route in candidate_routes),
+                scaffold,
+                family_by_edge,
+            )
+            if compiles
+            else ()
+        )
+        # Decided once from the routes as emitted; every reconcile of this call
+        # deals a port's risers in that order.
+        landing_deals, _refused = (
+            bundle_landing_deals(
+                ctx,
+                _corridor_cohort_targets(
+                    tuple(candidates), context_candidates, scaffold, ctx
+                ),
+            )
+            if compiles
+            else ({}, {})
+        )
+        _reconcile_port_peeloff_risers(
+            complete_path_population, ctx, landing_orders_of(landing_deals)
+        )
         _coincide_same_line_tracks(normalization_population, ctx)
         _coincide_fanout_opening_descents(
             normalization_population, ctx, settle_frozen_arcs=True
@@ -3168,13 +3217,7 @@ def build_member_geometry_execution(
         # The compiler fails closed on a shortfall it cannot map to a requirement
         # unless the pass permits clearance requirements, so it runs only on a
         # pass that does.
-        if corridor_cohort_ledger is not None and allow_clearance_requirements:
-            context_candidates = _corridor_cohort_context_candidates(
-                context_routes,
-                candidate_route_ids,
-                scaffold,
-                family_by_edge,
-            )
+        if compiles:
             corridor_cohorts, _cohort_ranks, corridor_requirements = (
                 _compile_corridor_cohorts(
                     corridor_cohort_ledger,
@@ -3183,6 +3226,7 @@ def build_member_geometry_execution(
                     scaffold,
                     ctx,
                     allow_clearance_requirements=allow_clearance_requirements,
+                    landing_deals=landing_deals,
                     additional_targets=corridor_targets,
                     scalar_requests=corridor_scalar_requests,
                     sizing_population=normalization_population,

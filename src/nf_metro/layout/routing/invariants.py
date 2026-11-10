@@ -67,6 +67,7 @@ from nf_metro.layout.route_topology import (
     merge_fanout_junction_ids,
 )
 from nf_metro.layout.routing.common import (
+    NO_LANDING_ORDERS,
     CorridorLane,
     Direction,
     HTrunkSeg,
@@ -6898,6 +6899,7 @@ def check_peeloff_concentric(
     graph: MetroGraph,
     routes: list[RoutedPath],
     curve_radius: float = CURVE_RADIUS,
+    landing_orders: Mapping[str, Sequence[str]] = NO_LANDING_ORDERS,
 ) -> list[PeeloffBundleCrossing | LooseDestinationTail]:
     """Return peel-off bundles that do not nest into one band at a LEFT entry port.
 
@@ -6906,7 +6908,8 @@ def check_peeloff_concentric(
     :class:`PeeloffBundleCrossing` describes.  That band is set up front by
     ``_convergence_line_order`` (riser peel-x) and
     ``_order_convergence_entry_ports`` (port slots), so the bundle nests through
-    the standard layout path rather than by repair here.
+    the standard layout path rather than by repair here.  A port in
+    *landing_orders* owes the band in the order the plan lands it.
     """
     step = graph_offset_step(graph)
     out: list[PeeloffBundleCrossing | LooseDestinationTail] = []
@@ -6938,7 +6941,9 @@ def check_peeloff_concentric(
             )
         if loose:
             continue
-        targets = peeloff_target_slots(bundle, step, graph._departure_lane_orders)
+        targets = peeloff_target_slots(
+            bundle, step, graph._departure_lane_orders, landing_orders
+        )
         for line_id, tail in bundle.per_line.items():
             slot = targets[line_id]
             if not tail_on_slot(tail, slot):
@@ -6960,7 +6965,9 @@ def check_peeloff_concentric(
         )
         if key in checked:
             continue
-        targets = peeloff_target_slots(bundle, step, graph._departure_lane_orders)
+        targets = peeloff_target_slots(
+            bundle, step, graph._departure_lane_orders, landing_orders
+        )
         for line_id, tail in bundle.per_line.items():
             slot = targets[line_id]
             if not tail_on_slot(tail, slot):
@@ -7134,11 +7141,13 @@ def render_curve_violations(
     offsets: dict[tuple[str, str], float],
     *,
     curve_radius: float = CURVE_RADIUS,
+    landing_orders: Mapping[str, Sequence[str]] = NO_LANDING_ORDERS,
 ) -> list[tuple[str, Sequence[_HasMessage]]]:
     """Every render-time curve check, labelled, with the violations it finds.
 
     The check set :func:`assert_render_curve_invariants` enforces on every
-    render.
+    render.  *landing_orders* holds the landing order the routes' plan decided
+    for each port it lands whole.
     """
     return [
         (
@@ -7219,7 +7228,7 @@ def render_curve_violations(
         ),
         (
             "peel-off bundle braids into port",
-            check_peeloff_concentric(graph, routes, curve_radius),
+            check_peeloff_concentric(graph, routes, curve_radius, landing_orders),
         ),
         (
             "opposing feeder confluence changes lane order",
@@ -7255,6 +7264,7 @@ def assert_render_curve_invariants(
     offsets: dict[tuple[str, str], float],
     *,
     curve_radius: float = CURVE_RADIUS,
+    landing_orders: Mapping[str, Sequence[str]] = NO_LANDING_ORDERS,
 ) -> None:
     """Raise :class:`CurveInvariantError` if the final render routes are defective.
 
@@ -7285,9 +7295,17 @@ def assert_render_curve_invariants(
     builder cannot always make clean.  A failure every one of whose named routes
     is such a lead-in downgrades to a warning naming the actionable fix; every
     other failure in the map aborts.
+
+    *landing_orders* is the plan's landing order for each port it decided
+    (:func:`~nf_metro.layout.routing.landing_deal.planned_landing_orders` of
+    the plan that emitted *routes*).
     """
     named_checks = render_curve_violations(
-        graph, routes, offsets, curve_radius=curve_radius
+        graph,
+        routes,
+        offsets,
+        curve_radius=curve_radius,
+        landing_orders=landing_orders,
     )
     # A permissive render warns on every failure below, so nothing is bridged.
     bridged_ports: set[str] = (

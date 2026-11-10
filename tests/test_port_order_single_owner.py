@@ -386,9 +386,11 @@ def _render(
 
     check = svg.assert_render_curve_invariants
 
-    def capture(graph: MetroGraph, routes: list[Any], offsets: Lanes) -> None:
+    def capture(
+        graph: MetroGraph, routes: list[Any], offsets: Lanes, **kwargs: Any
+    ) -> None:
         record.drawn = (graph, routes, offsets)
-        check(graph, routes, offsets)
+        check(graph, routes, offsets, **kwargs)
 
     monkeypatch.setattr(offsets_module, "_run_offset_phases", spy_run)
     for module in (offsets_module, routing_package, svg, candidate_executor):
