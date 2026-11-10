@@ -90,7 +90,16 @@ LATER_PHASE_NAMES = frozenset(
 
 # Ways to reach any of the above, or run a phase on a copy, without naming it.
 DYNAMIC_ACCESS = frozenset(
-    {"getattr", "__import__", "importlib", "deepcopy", "eval", "exec"}
+    {
+        "getattr",
+        "vars",
+        "__dict__",
+        "__import__",
+        "importlib",
+        "deepcopy",
+        "eval",
+        "exec",
+    }
 )
 
 # Every (module, name) the plan module imports: a new import is a new input.
@@ -420,8 +429,18 @@ def test_the_plan_module_reads_no_later_phase_state() -> None:
         "from . import engine\ndef f(g): engine.compute_layout(g)",
         "def f(g): return getattr(g, 'station' + '_offsets')",
         "from nf_metro.layout.routing.common import compute_routes_somehow",
+        "def f(g): return vars(g)['station' + '_offsets']",
+        "def f(g): return g.__dict__['station' + '_offsets']",
     ],
-    ids=["deepcopy", "plain-import", "relative-import", "getattr", "new-name"],
+    ids=[
+        "deepcopy",
+        "plain-import",
+        "relative-import",
+        "getattr",
+        "new-name",
+        "vars",
+        "dunder-dict",
+    ],
 )
 def test_the_module_check_catches_indirect_reads(source: str) -> None:
     assert _later_phase_reads(source)
