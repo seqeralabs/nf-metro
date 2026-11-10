@@ -13,17 +13,20 @@ lists, each checked on its own:
 * ``routing`` (route planning and emission: ``layout/routing/`` and the planning
   modules named by ``guard.ROUTING_MODULES``) is the PR #2015 merge gate: it
   must be empty before #2015 merges to ``main``.  Its ``manual`` section holds
-  cases the AST cannot see; each is kept honest only by asserting the named
-  function still exists, so removing the function makes the entry stale.
+  cases the AST cannot see; each is checked only by asserting that the named
+  function exists, so removing the function makes the entry stale.  Its pins
+  (``pinned_later_passes``, ``pinned_nested_passes``) keep route passes
+  registered while anything calls them.
 * ``placement`` (``engine.py``, ``phases/``, ``geometric_bypass.py`` and the other
   modules of ``guard.PLACEMENT_MODULES``) is not a #2015 gate.  It is shrink-only
   and owned by #2171, the placement programme (#323/#1745).
 
 Each list may only shrink, which the tests enforce three ways: a hit with no
 entry fails, an entry that matches no hit fails (so a removal must delete its
-entry), and the entry count must equal the list's ceiling exactly, so a commit
-that swaps entries cannot leave the ceiling where it was.  Set the ceiling to the
-new count in the commit that removes entries.  Every layout module has a role, so
+entry), and the entry count must equal the list's ceiling, so the commit that
+removes entries lowers the ceiling and a later addition has to raise it.  A commit
+that deletes one entry and adds another leaves the count unchanged; only the
+allowlist diff shows it.  Every layout module has a role, so
 a new module forces a decision about which list its hits belong to.
 """
 
@@ -37,8 +40,10 @@ import layout_iteration_guard as guard
 import pytest
 
 ALLOWLIST_PATH = Path(__file__).parent / "data" / "layout_iteration_allowlist.json"
-ROUTING_CEILING = 70
+ROUTING_CEILING = 72
 PLACEMENT_CEILING = 44
+PINNED_LATER_CEILING = 22
+PINNED_NESTED_CEILING = 1
 LISTS = ("routing", "placement")
 PLACEMENT_OWNER = "#2171"
 ROUTING_REMOVED_BY = re.compile(r"^(unassigned|\d+[a-z]?\b|R3\b)")
@@ -59,6 +64,11 @@ def _manual() -> list[dict[str, str]]:
     return _data()["routing"]["manual"]
 
 
+def _pins(kind: str) -> list[str]:
+    key = "pinned_nested_passes" if kind == "nested" else "pinned_later_passes"
+    return _data()["routing"][key]
+
+
 def _key(entry: dict[str, str]) -> tuple[str, str, str]:
     return (entry["rule"], entry["site"], entry["callee"])
 
@@ -73,7 +83,7 @@ def _where(hit: guard.Hit) -> str:
 
 @pytest.fixture(scope="module")
 def live() -> tuple[guard.Registry, list[guard.Hit]]:
-    return guard.scan(guard.parse_layout())
+    return guard.scan(guard.parse_layout(), _pins("routing"), _pins("nested"))
 
 
 @pytest.mark.parametrize("name", LISTS)
@@ -93,12 +103,12 @@ def test_allowlist_has_no_stale_entries(live, name):
     found = {h.key for h in hits}
     stale = [" ".join(_key(e)) for e in _entries(name) if _key(e) not in found]
     assert not stale, (
-        f"{name} allowlist entries that no longer match a hit; delete them and "
+        f"{name} allowlist entries that match no hit; delete them and "
         "lower the ceiling:\n" + "\n".join(stale)
     )
 
 
-def test_manual_entries_name_functions_that_still_exist():
+def test_manual_entries_name_existing_functions():
     funcs = guard.collect_functions(guard.parse_layout())
     defined = {f.site for f in funcs}
     stale = [m["site"] for m in _manual() if m["site"] not in defined]
@@ -165,10 +175,63 @@ def test_registry_is_derived_from_the_source(live):
     assert len(reg.table_phases) > 50
     assert len(reg.offset_writers) > 20
     assert "compute_layout" in reg.runners
-    assert {"compute_station_offsets", "route_edges"} <= reg.later_passes
-    assert len(reg.later_passes) > 20
+    assert {
+        "route_edges",
+        "route_edges_centred",
+        "observe_route_edges",
+        "compute_station_offsets",
+    } <= reg.later_passes
     assert "solve_corridor_cohorts" in reg.solver
-    assert reg.solver_local
+
+
+def _call_sites(funcs: list[guard.Func], name: str) -> list[str]:
+    return sorted(
+        f.site
+        for f in funcs
+        if not guard.is_checker(f)
+        and any(guard._call_name(c) == name for c in guard._calls(f))
+    )
+
+
+def test_every_routing_table_pass_is_pinned(live):
+    reg, _ = live
+    missing = sorted(reg.table_postpasses - set(_pins("later")))
+    assert not missing, (
+        "add each pass the routing table runs to pinned_later_passes:\n"
+        + "\n".join(missing)
+    )
+
+
+def test_pinned_passes_are_called_somewhere(live):
+    reg, _ = live
+    funcs = guard.collect_functions(guard.parse_layout())
+    defined = {f.name for f in funcs}
+    problems = []
+    for name in _pins("later") + _pins("nested"):
+        sites = _call_sites(funcs, name)
+        in_table = name in reg.table_postpasses
+        if name not in defined:
+            problems.append(f"{name} is not defined; delete its pin and its rows")
+        elif not sites:
+            problems.append(f"{name} has no callers; delete its pin")
+        elif name in _pins("later") and not in_table:
+            problems.append(
+                f"{name} no longer runs in the routing table but is called at "
+                f"{', '.join(sites)}; remove those calls, then its pin"
+            )
+    assert not problems, "\n".join(problems)
+
+
+def test_pin_lists_are_sorted_and_unique():
+    for kind in ("later", "nested"):
+        pins = _pins(kind)
+        assert pins == sorted(set(pins))
+    assert not set(_pins("later")) & set(_pins("nested"))
+
+
+def test_pin_counts_are_the_ceilings():
+    assert len(_pins("later")) == PINNED_LATER_CEILING
+    assert len(_pins("nested")) == PINNED_NESTED_CEILING
 
 
 # ---------------------------------------------------------------------------
@@ -208,16 +271,35 @@ def compute_station_offsets(graph):
 """
 
 
-def _hits(rule: str, **modules: str) -> list[guard.Hit]:
+def _hits(
+    rule: str,
+    pinned: tuple[str, ...] = (),
+    nested: tuple[str, ...] = (),
+    **modules: str,
+) -> list[guard.Hit]:
     sources = {name.replace("__", "/") + ".py": text for name, text in modules.items()}
     sources.setdefault("engine.py", ENGINE)
     sources.setdefault("routing/offsets.py", OFFSETS)
-    _, hits = guard.scan(guard.parse_sources(sources))
+    _, hits = guard.scan(guard.parse_sources(sources), pinned, nested)
     return [h for h in hits if h.rule == rule]
 
 
 def _callees(rule: str, **modules: str) -> set[tuple[str, str]]:
     return {(h.site.split(":", 1)[1], h.callee) for h in _hits(rule, **modules)}
+
+
+CORE_TABLE = """
+def _route_edges(graph):
+    routes = []
+    tidy_trunks(routes, graph)
+    assert_exit_turn_snapshot(routes, 1, 'a')
+    assert_exit_turn_snapshot(routes, 1, 'b')
+    assert_exit_turn_snapshot(routes, 1, 'c')
+"""
+PLANNER = """
+def plan(copies, graph):
+    tidy_trunks(copies, graph)
+"""
 
 
 def test_registry_of_synthetic_sources():
@@ -405,6 +487,43 @@ class TestRetryLoop:
         )
         assert not _hits("retry-loop", engine=src)
 
+    def test_ladder_over_literal_alternatives_is_flagged(self):
+        solver = (
+            "def _solve_in_frame(problem, a, b, c):\n"
+            "    def seat(order, forced):\n"
+            "        return order\n"
+            "    for pair_orders in (a, b, c):\n"
+            "        forced = query(pair_orders)\n"
+            "        if forced:\n"
+            "            return seat(pair_orders, forced)\n"
+            "    return None\n"
+        )
+        got = _callees("retry-loop", routing__corridor_cohorts=solver)
+        assert ("_solve_in_frame", "seat") in got
+
+    def test_return_in_an_inner_loop_is_an_exit(self):
+        src = ENGINE + (
+            "\ndef search(graph, pitches, checks):\n"
+            "    for pitch in pitches:\n"
+            "        result = _layout_once(graph, pitch)\n"
+            "        for check in checks:\n"
+            "            if check(result):\n"
+            "                return result\n"
+        )
+        assert ("search", "_layout_once") in _callees("retry-loop", engine=src)
+
+    def test_assignment_in_the_else_arm_is_not_a_cache(self):
+        src = ENGINE + (
+            "\ndef size(graph, sections):\n"
+            "    offsets = None\n"
+            "    for section in sections:\n"
+            "        if offsets is None:\n"
+            "            use(section)\n"
+            "        else:\n"
+            "            offsets = phase_a(graph)\n"
+        )
+        assert ("size", "phase_a") in _callees("retry-loop", engine=src)
+
     def test_break_in_an_inner_loop_is_not_the_outer_exit(self):
         src = ENGINE + (
             "\ndef per(graph, rows):\n"
@@ -497,6 +616,49 @@ class TestLaterPassAndRepair:
             "later-pass-read", routing__core=core, routing__member_geometry=planner
         )
         assert got == {("seat_snapshot", "tidy_trunks"), ("plan", "tidy_trunks")}
+
+    def test_pinned_pass_stays_registered_after_it_leaves_the_table(self):
+        core = CORE_TABLE.replace("    tidy_trunks(routes, graph)\n", "")
+        assert not _hits("later-pass-read", routing__core=core, routing__plan=PLANNER)
+        got = _hits(
+            "later-pass-read",
+            pinned=("tidy_trunks",),
+            routing__core=core,
+            routing__plan=PLANNER,
+        )
+        assert {(h.site, h.callee) for h in got} == {
+            ("routing/plan.py:plan", "tidy_trunks")
+        }
+
+    def test_table_pass_run_nested_in_another_pass_is_flagged(self):
+        core = CORE_TABLE.replace(
+            "    tidy_trunks(routes, graph)\n",
+            "    tidy_trunks(routes, graph)\n    tidy_gaps(routes, graph)\n",
+        )
+        passes = (
+            "def tidy_trunks(routes, graph):\n"
+            "    tidy_gaps(routes, graph)\n"
+            "    tidy_tails(routes, graph)\n"
+            "def tidy_gaps(routes, graph):\n"
+            "    return None\n"
+        )
+        got = _callees(
+            "later-pass-read",
+            routing__core=core,
+            routing__normalize=passes,
+        )
+        assert got == {("tidy_trunks", "tidy_gaps")}
+
+    def test_nested_pass_run_by_a_planner_is_flagged(self):
+        got = _hits(
+            "later-pass-read",
+            nested=("tidy_tails",),
+            routing__core=CORE_TABLE,
+            routing__plan=PLANNER.replace("tidy_trunks", "tidy_tails"),
+        )
+        assert {(h.site, h.callee) for h in got} == {
+            ("routing/plan.py:plan", "tidy_tails")
+        }
 
     def test_repair_named_table_phase_is_flagged(self):
         engine = ENGINE.replace("phase_b", "restore_order")

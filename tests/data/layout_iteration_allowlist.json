@@ -1,6 +1,6 @@
 {
   "routing": {
-    "gate": "MERGE GATE: this list must be empty before the integration branch (PR #2015) merges to main (ruling GATE-SCOPE).  It covers route planning and emission: everything under layout/routing/ and the planning modules route_plan.py, route_reservations.py, fan_plans.py, route_topology.py, seam_topology.py, departure_order.py, fan_geometry.py, fan_ordering.py, envelope_settlement.py and settlement_demand.py.  It may only shrink.  removed_by names the #2094 list line or ruling that removes the entry, or 'unassigned'.  'entries' are detected by the guard; 'manual' are cases the AST cannot see, kept honest only by asserting the named function still exists, so deleting the function makes the entry stale.",
+    "gate": "MERGE GATE: this list must be empty before the integration branch (PR #2015) merges to main (ruling GATE-SCOPE).  It covers route planning and emission: everything under layout/routing/ and the planning modules route_plan.py, route_reservations.py, fan_plans.py, route_topology.py, seam_topology.py, departure_order.py, fan_geometry.py, fan_ordering.py, envelope_settlement.py and settlement_demand.py.  It may only shrink.  removed_by names the #2094 list line or ruling that removes the entry, or 'unassigned'.  'entries' are detected by the guard; 'manual' are cases the AST cannot see, checked only by asserting that the named function exists, so deleting the function makes the entry stale.  'pinned_later_passes' and 'pinned_nested_passes' keep a route pass registered while anything calls it, whether or not the routing table runs it; a pin is deleted only with the last call to its pass.",
     "entries": [
       {
         "rule": "route-postpass",
@@ -289,6 +289,13 @@
       {
         "rule": "later-pass-read",
         "site": "routing/member_geometry.py:build_member_geometry_execution",
+        "callee": "_bundle_same_destination_tails",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the final route coordinates; planning does not run emission passes on copies of the routes to learn them"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "routing/member_geometry.py:build_member_geometry_execution",
         "callee": "_coincide_fanout_opening_descents",
         "removed_by": "unassigned",
         "replacement": "the plan states the final route coordinates; planning does not run emission passes on copies of the routes to learn them"
@@ -383,6 +390,13 @@
         "callee": "_unify_coincident_corner_radii",
         "removed_by": "unassigned",
         "replacement": "the plan states the final route coordinates; planning does not run emission passes on copies of the routes to learn them"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "routing/normalize.py:_materialize_trunk_slots",
+        "callee": "_separate_declared_opposing_gap_bundles",
+        "removed_by": "unassigned",
+        "replacement": "run the gap-bundle separation once, from the routing table or inside the trunk-slot pass, not both"
       },
       {
         "rule": "lookahead-copy",
@@ -496,10 +510,37 @@
         "removed_by": "unassigned",
         "replacement": "seat bubble-centred markers at placement from the plan; routing returns routes and moves no station"
       }
+    ],
+    "pinned_later_passes": [
+      "_align_merge_fed_confluence_to_band",
+      "_bundle_divergent_distinct_traverses",
+      "_center_bubble_stations",
+      "_clear_bypass_v_label_strikes",
+      "_clear_merge_trunk_opposite_arm",
+      "_coincide_fanout_opening_descents",
+      "_coincide_merge_fanout_pivots",
+      "_coincide_same_line_fanout_traverses",
+      "_coincide_same_line_tracks",
+      "_hold_runs_in_corridor_clearance",
+      "_materialize_gap_slots",
+      "_materialize_trunk_slots",
+      "_nest_bypass_above_over_top_wrap",
+      "_reconcile_port_peeloff_risers",
+      "_rederive_semantic_end_corners",
+      "_separate_declared_opposing_gap_bundles",
+      "_separate_fused_cotravelling_runs",
+      "_separate_opposing_inter_row_trunks",
+      "_settle_same_destination_approach_bundles",
+      "_spread_diagonal_bundles",
+      "_stagger_convergent_distinct_lines",
+      "_unify_coincident_corner_radii"
+    ],
+    "pinned_nested_passes": [
+      "_bundle_same_destination_tails"
     ]
   },
   "placement": {
-    "gate": "Not a #2015 gate.  Shrink-only list owned by #2171 (the placement programme, #323/#1745): engine.py, geometric_bypass.py, phases/ and the other placement modules.  A new hit still fails the test, and an entry that no longer matches a hit must be deleted.",
+    "gate": "Not a #2015 gate.  Shrink-only list owned by #2171 (the placement programme, #323/#1745): engine.py, geometric_bypass.py, phases/ and the other placement modules.  A new hit fails the test, and an entry that matches no hit must be deleted.",
     "entries": [
       {
         "rule": "retry-loop",

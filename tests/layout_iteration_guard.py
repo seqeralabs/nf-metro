@@ -47,6 +47,13 @@ from the source on each run:
   routing table runs on the emitted routes.  They run after placement, so a call
   from outside the table, such as a planner running a pass on a copy of the
   routes, reads a later stage.
+* **pinned passes**: the allowlist's ``pinned_later_passes`` names the passes
+  the routing table runs; they stay registered after a call leaves the table,
+  so a planner that still runs one is still reported.  ``pinned_nested_passes``
+  names writer sub-passes that a pass runs on routes, such as
+  ``_bundle_same_destination_tails``; they are registered the same way.  The
+  tests require every table pass to be pinned and every pin to name a function
+  that exists and is called somewhere.
 
 Guard modules (``phases/guards.py``, ``routing/invariants.py``) and functions
 named ``_guard*``, ``check_*`` or ``assert_*`` only check, so they are not
@@ -81,9 +88,10 @@ Detection rules
     target or a name assigned from it.  A ``while`` call depends on the loop when
     it names something the loop body assigns, as a worklist walk does.  A loop
     that applies a phase once per item and always continues is not a retry.  A
-    call whose result is returned, or that fills a name once under
-    ``if name is None``, runs once.  A ``break`` or ``return`` inside an inner
-    loop is not the outer loop's exit.
+    call that fills a name once under ``if name is None``, or whose result is
+    returned from a loop over a collection, runs once; returned from a loop over
+    a literal tuple or list of alternatives, it is a fallback ladder.  A
+    ``break`` inside an inner loop is not the outer loop's exit.
 
 ``rerun``
     A registered runner, solver or delegate is called from two sites of one
@@ -96,9 +104,11 @@ Detection rules
     as the phase, not the wrapper.
 
 ``later-pass-read``
-    A function other than a table or runner calls a later pass.  The caller
-    reads a product of stages that have not run yet, or runs routing to measure
-    placement.
+    A function other than a table, runner or core wrapper calls a later pass.
+    The caller reads a product of stages that have not run yet, or runs routing
+    to measure placement.  Inside a routing pass only a call to another table
+    pass is reported, which is a pass run both nested and from the table;
+    composing its own sub-passes is not.
 
 ``repair-named``
     A table phase whose name declares that it undoes or redoes an earlier
@@ -137,7 +147,8 @@ break``), a phase passed as a lambda, a retry by recursion, a trial run on the
 live state followed by a rollback, and a copy made by a helper function
 (``_corner_sizing_copy``).  A ``.copy()`` method is read as a scratch copy only
 when its receiver names ``offsets``, ``graph`` or ``ctx``.  A ``for`` loop that
-exits early after consuming a phase's result is read as a search.
+exits early after consuming a phase's result is read as a search.  A loop over a
+tuple of phases (``for step in (phase_a, phase_b): step(graph)``) is not detected.
 """
 
 from __future__ import annotations
@@ -286,6 +297,10 @@ class Registry:
     solver: set[str] = field(default_factory=set)
     solver_local: set[str] = field(default_factory=set)
     routing_tables: set[str] = field(default_factory=set)
+    table_postpasses: set[str] = field(default_factory=set)
+    postpasses: set[str] = field(default_factory=set)
+    nested_passes: set[str] = field(default_factory=set)
+    entry_passes: set[str] = field(default_factory=set)
     later_passes: set[str] = field(default_factory=set)
     delegates: dict[str, set[str]] = field(default_factory=dict)
 
@@ -480,7 +495,11 @@ def _postpass_calls(func: Func) -> list[ast.Call]:
     ]
 
 
-def build_registry(funcs: list[Func]) -> Registry:
+def build_registry(
+    funcs: list[Func],
+    pinned_passes: Iterable[str] = (),
+    pinned_nested_passes: Iterable[str] = (),
+) -> Registry:
     reg = Registry()
     defined = {f.name for f in funcs}
 
@@ -571,12 +590,16 @@ def build_registry(funcs: list[Func]) -> Registry:
         )
         or (f.module == OFFSETS and f.name in reg.runners)
     }
-    reg.later_passes |= {
+    reg.table_postpasses = {
         _call_name(call) or ""
         for f in funcs
         if f.name in reg.routing_tables
         for call in _postpass_calls(f)
     }
+    reg.postpasses = reg.table_postpasses | set(pinned_passes)
+    reg.nested_passes = set(pinned_nested_passes)
+    reg.entry_passes = {f.name for f in funcs if f.name in reg.later_passes}
+    reg.later_passes |= reg.postpasses | reg.nested_passes
     reg.runners -= reg.later_passes
 
     _find_delegates(funcs, reg)
@@ -752,15 +775,21 @@ def _with_header_names(loop: ast.stmt, call: ast.Call) -> set[str]:
 
 
 def _loop_exits(loop: ast.stmt) -> bool:
-    """Whether *loop* itself can end early; an exit inside an inner loop ends
-    only that loop or is a ``return`` of the inner search."""
-    stack: list[ast.AST] = list(ast.iter_child_nodes(loop))
+    """Whether *loop* can end early: a ``return`` anywhere in it, or a ``break``
+    that is not inside an inner loop."""
+    stack: list[tuple[ast.AST, bool]] = [
+        (child, False) for child in ast.iter_child_nodes(loop)
+    ]
     while stack:
-        node = stack.pop()
-        if isinstance(node, ast.Return | ast.Break):
+        node, in_inner = stack.pop()
+        if isinstance(node, ast.Return) or (
+            isinstance(node, ast.Break) and not in_inner
+        ):
             return True
-        if not isinstance(node, (*_DEFS, ast.Lambda, *_LOOPS)):
-            stack.extend(ast.iter_child_nodes(node))
+        if isinstance(node, (*_DEFS, ast.Lambda)):
+            continue
+        inner = in_inner or isinstance(node, _LOOPS)
+        stack.extend((child, inner) for child in ast.iter_child_nodes(node))
     return False
 
 
@@ -776,6 +805,8 @@ def _is_lazy_cache(loop: ast.stmt, call: ast.Call) -> bool:
             and isinstance(test.left, ast.Name)
             and len(test.ops) == 1
             and isinstance(test.ops[0], ast.Is)
+            and isinstance(test.comparators[0], ast.Constant)
+            and test.comparators[0].value is None
         ):
             guarded = test.left.id
         elif (
@@ -786,14 +817,25 @@ def _is_lazy_cache(loop: ast.stmt, call: ast.Call) -> bool:
             guarded = test.operand.id
         if guarded is None:
             continue
-        for stmt in ast.walk(node):
-            if (
-                isinstance(stmt, ast.Assign)
-                and any(sub is call for sub in ast.walk(stmt.value))
-                and guarded in {n for t in stmt.targets for n in _names_in(t)}
-            ):
-                return True
+        for stmt in node.body:
+            for sub in ast.walk(stmt):
+                if (
+                    isinstance(sub, ast.Assign)
+                    and any(inner is call for inner in ast.walk(sub.value))
+                    and guarded in {n for t in sub.targets for n in _names_in(t)}
+                ):
+                    return True
     return False
+
+
+def _iterates_literal_alternatives(loop: ast.stmt) -> bool:
+    """Whether *loop* is a ``for`` over a literal tuple or list of two or more
+    alternatives."""
+    return (
+        isinstance(loop, ast.For | ast.AsyncFor)
+        and isinstance(loop.iter, ast.Tuple | ast.List)
+        and len(loop.iter.elts) >= 2
+    )
 
 
 def _result_consumed(func: Func, call: ast.Call) -> bool:
@@ -937,7 +979,10 @@ class _Scanner:
                 name = _call_name(call)
                 if name is None or not _is_registered(func, name, self.reg):
                     continue
-                if id(call) in returned or _is_lazy_cache(loop, call):
+                returned_once = id(call) in returned and not (
+                    _iterates_literal_alternatives(loop)
+                )
+                if returned_once or _is_lazy_cache(loop, call):
                     continue
                 used = set().union(*(_names_in(a) for a in _arg_values(call)))
                 if isinstance(call.func, ast.Attribute):
@@ -983,11 +1028,16 @@ class _Scanner:
 
     def later_pass_reads(self, func: Func, calls: list[ast.Call]) -> None:
         reg = self.reg
-        if func.name in reg.tables | reg.runners | reg.later_passes:
+        if (
+            func.name
+            in reg.tables | reg.runners | reg.routing_tables | reg.entry_passes
+        ):
             return
+        inside_a_pass = func.name in reg.postpasses | reg.nested_passes
+        reportable = reg.postpasses if inside_a_pass else reg.later_passes
         for call in calls:
             name = _call_name(call)
-            if name in reg.later_passes:
+            if name in reportable:
                 self.add("later-pass-read", func, name or "", call.lineno)
 
     def table_repairs(self, func: Func) -> None:
@@ -1042,8 +1092,15 @@ class _Scanner:
                     changed = True
 
 
-def scan(trees: dict[str, ast.Module]) -> tuple[Registry, list[Hit]]:
-    """The registry and every hit in *trees*, ordered by site and line."""
+def scan(
+    trees: dict[str, ast.Module],
+    pinned_passes: Iterable[str] = (),
+    pinned_nested_passes: Iterable[str] = (),
+) -> tuple[Registry, list[Hit]]:
+    """The registry and every hit in *trees*, ordered by site and line.
+
+    *pinned_passes* and *pinned_nested_passes* are registered as later passes
+    whether or not a routing table calls them."""
     funcs = collect_functions(trees)
-    reg = build_registry(funcs)
+    reg = build_registry(funcs, pinned_passes, pinned_nested_passes)
     return reg, _Scanner(funcs, reg).run()
