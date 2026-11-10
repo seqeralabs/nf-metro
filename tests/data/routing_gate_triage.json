@@ -2384,7 +2384,7 @@
   "status": "defensive"
  },
  "landing_deal.py::if len({axis for _edge, axis, _coordinate in landed}) != 1:::#1": {
-  "note": "planned_landing_orders skips a port whose landings sit on two axes; no job of the 15k-job census reaches it and no test pins it.",
+  "note": "planned_landing_orders skips a port whose landings sit on two axes. A landing's axis is its target's endpoint lane axis, which _entry_port_landing picks from the port side alone, so every landing into one port shares one axis; no test pins it.",
   "status": "defensive"
  },
  "landing_deal.py::if len({target.endpoint_lane_coordinate for target in line_targets}) != 1:::#1": {
@@ -2392,11 +2392,11 @@
   "status": "defensive"
  },
  "landing_deal.py::if port is None or not port.is_entry:::#1": {
-  "note": "bundle_landing_deals skips a target whose port is missing or not an entry; no job of the 15k-job census reaches it and no test pins it.",
+  "note": "bundle_landing_deals skips a target whose port is missing or not an entry. Only targets carrying an endpoint lane axis reach this loop, and _corridor_cohort_target sets one only when the target is an entry port, so no target takes the arm; no test pins it.",
   "status": "defensive"
  },
  "landing_deal.py::if port is None or not port.is_entry:::#2": {
-  "note": "planned_landing_orders skips an ENDPOINT_LANDING owner whose port is missing or not an entry; no job of the 15k-job census reaches it and no test pins it.",
+  "note": "planned_landing_orders skips an ENDPOINT_LANDING owner whose port is missing or not an entry. Every endpoint landing is framed from its target's endpoint lane axis, which _corridor_cohort_target sets only for an entry port, so no owner takes the arm; no test pins it.",
   "status": "defensive"
  },
  "landing_deal.py::if record is not None:::#1": {
