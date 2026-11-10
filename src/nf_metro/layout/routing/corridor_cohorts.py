@@ -989,11 +989,10 @@ def solve_corridor_cohorts(
 ) -> CorridorAllocationResult:
     """Return the unique canonical seating for a complete witness set.
 
-    A problem holding corner orders seats in the corner-order tier
-    ``_corner_order_tier`` decides from its inputs, with no fallback to
-    another tier; the result's ``corner_tier`` names that tier, and its
-    result stands, planned or not.
-    An invalid problem is reported without a seating to fall back on.
+    A problem holding corner orders seats in the tier ``_corner_order_tier``
+    decides from its inputs alone; the result's ``corner_tier`` names that tier.
+
+    An invalid problem is reported without a seating.
     """
     plain = replace(problem, corner_orders=())
     if not problem.corner_orders or not problem.witnesses_complete:

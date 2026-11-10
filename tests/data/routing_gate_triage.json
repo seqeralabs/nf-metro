@@ -2247,6 +2247,30 @@
   "note": "Domain floor above ceiling on a root is an INFEASIBLE failure; the corpus's domains are satisfiable. Exercised by tests/test_corridor_cohorts.py::test_coordinate_domains_constrain_the_joint_solve_and_attribute_conflicts and tests/test_corridor_cohorts.py::test_non_boundary_domain_conflict_has_no_clearance_shortfall. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
  },
+ "corridor_cohorts.py::if lower_root != upper_root:::#1": {
+  "note": "A separation or corner order between two lanes already rigidly united into one root, in the corner-order tier's orderability check. It needs a footprint order between a lead and a carrier tied together by an equality or one cohort (one network lane) in a problem that also holds corner orders, which no corpus topology builds and no unit test in tests/test_corridor_cohorts.py takes. needs-review because the arm is reachable and nothing exercises it.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::elif sign * (upper_offset - lower_offset) < _q(separation.distance):::#1": {
+  "note": "Both arms are behind the same-root arm of the gate above (see it): a same-root separation fixed closer than its distance marks the root unorderable, and one fixed far enough leaves it orderable. No corpus topology and no unit test in tests/test_corridor_cohorts.py builds a same-root separation in a problem holding corner orders. needs-review because the arm is reachable and nothing exercises it.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if contradiction is not None:::#1": {
+  "note": "The corner-order tier gives way at once when the cohorts and equalities contradict among themselves. The engine's equalities are consistent, so only a hand-built problem holding both corner orders and contradictory equalities reaches it; no corpus topology and no unit test in tests/test_corridor_cohorts.py takes it (test_contradictory_equalities_are_attributed_without_mutating_input holds no corner orders, so it reaches the seating's own check, not this one). needs-review because the arm is reachable and nothing exercises it.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if not unorderable:::#1": {
+  "note": "The fall-through, where the corner orders leave a root unorderable and the tier looks for a relaxation or gives way. No render in the sweep takes it: the m2 census of the repo's example files seats every corner-order call in the corner tier or has none (tiers CORNER_ORDERS and NONE only). Exercised by tests/test_corridor_cohorts.py::test_corner_orders_blocked_by_a_footprint_order_seat_without_it and tests/test_corridor_cohorts.py::test_guard_corner_orders_that_cannot_seat_return_the_plain_result. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if len(relaxed) < len(kept) and not _unorderable_roots(::#1": {
+  "note": "Dropping the separations lying wholly in unorderable roots leaves every root orderable (RELAXED_ORDERS), or there is nothing to drop or the drop does not help and the tier gives way (GAVE_WAY). Both sit behind the unorderable fall-through of the gate above, which no render in the sweep takes: the m2 census of the repo's example files seats every corner-order call in the corner tier or has none (tiers CORNER_ORDERS and NONE only). RELAXED_ORDERS is exercised by tests/test_corridor_cohorts.py::test_corner_orders_blocked_by_a_footprint_order_seat_without_it and tests/test_corridor_cohorts.py::test_an_end_turn_closing_an_order_cycle_relaxes_the_footprint_order; GAVE_WAY by tests/test_corridor_cohorts.py::test_guard_corner_orders_that_cannot_seat_return_the_plain_result. needs-review because the arms are reachable, not because they are unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if contradiction is not None:::#2": {
+  "note": "The seating reports a CONTRADICTION failure when equalities contradict the weighted union-find; the engine's equalities are consistent, so only hand-built equalities reach it. Exercised by tests/test_corridor_cohorts.py::test_contradictory_equalities_are_attributed_without_mutating_input. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
  "corridor_cohorts.py::if lower_root == upper_root:::#1": {
   "note": "A directed separation between two lanes already rigidly united into one root. It needs a footprint order between a lead and a carrier tied together by an equality (one network lane), which no corpus topology builds. needs-review because the arm is reachable and no corpus fixture takes it.",
   "status": "needs-review"
