@@ -33,6 +33,7 @@ from nf_metro.layout.routing.context import _get_offset, _section_lane_frame
 from nf_metro.layout.routing.corridor_cohort_integration import (
     AcceptedCorridorOwnerKind,
 )
+from nf_metro.layout.routing.orientation import direction_vector
 from nf_metro.layout.routing.perp import _perp_riser_lateral
 from nf_metro.parser.model import PortSide
 
@@ -65,6 +66,7 @@ class LandingDealRefusal(Enum):
     RECORD_MISMATCH = "record-mismatch"
     IMMUTABLE_MOVED = "immutable-moved"
     NOTHING_TO_DEAL = "nothing-to-deal"
+    DEPARTS_AGAINST_SIDE = "departs-against-side"
 
 
 class _Refused(Exception):
@@ -192,11 +194,17 @@ def _source_deal(
     exit_port = graph.ports.get(root)
     if exit_port is None or exit_port.is_entry or exit_port.section_id is None:
         raise _Refused(LandingDealRefusal.SOURCE_NOT_EXIT)
-    if (
-        len({leg_direction_sequence(by_line[line][0].route.points) for line in lines})
-        != 1
-    ):
+    sequences = {
+        leg_direction_sequence(by_line[line][0].route.points) for line in lines
+    }
+    if len(sequences) != 1:
         raise _Refused(LandingDealRefusal.TWO_SIDED)
+    (sequence,) = sequences
+    # The exit order is read across the side's direction of travel, which
+    # says nothing about a bundle that leaves against it.
+    departure = direction_vector(EXIT_SIDE_DIRECTION[exit_port.side])
+    if sequence and sequence[0] == (-departure[0], -departure[1]):
+        raise _Refused(LandingDealRefusal.DEPARTS_AGAINST_SIDE)
     for line in lines:
         line_targets = by_line[line]
         if any(

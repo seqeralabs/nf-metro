@@ -20,6 +20,7 @@ from nf_metro.api import render_string
 from nf_metro.layout.routing import core, invariants, member_geometry
 from nf_metro.layout.routing import corridor_cohort_integration as cci
 from nf_metro.layout.routing.common import (
+    EXIT_SIDE_DIRECTION,
     PeeloffTail,
     PortPeeloffBundle,
     peeloff_target_slots,
@@ -32,6 +33,7 @@ from nf_metro.layout.routing.landing_deal import (
     landing_order,
     planned_landing_orders,
 )
+from nf_metro.layout.routing.orientation import direction_vector
 from nf_metro.parser.model import MetroGraph, PortSide
 
 FIXTURE = (
@@ -273,6 +275,65 @@ def test_lines_tied_at_the_exit_are_refused(fixture_call: _DealCall) -> None:
     _decided, refused = bundle_landing_deals(ctx, fixture_call.targets)
 
     assert refused[FIXTURE_PORT] is LandingDealRefusal.EXIT_TIE
+
+
+def _departing(
+    call: _DealCall,
+    monkeypatch: pytest.MonkeyPatch,
+    exit_side: PortSide,
+    sign: int,
+) -> tuple[cci.CorridorCohortTarget, ...]:
+    """The fixture's TOP exit on *exit_side*, with every member of its bundle
+    leaving it along (*sign* 1) or against (*sign* -1) that side's travel."""
+    monkeypatch.setattr(call.ctx.graph.ports["sec0__exit_top_0"], "side", exit_side)
+    dx, dy = direction_vector(EXIT_SIDE_DIRECTION[exit_side])
+    return tuple(
+        replace(
+            target,
+            route=replace(
+                target.route, points=[(0.0, 0.0), (sign * 10.0 * dx, sign * 10.0 * dy)]
+            ),
+        )
+        if target.edge_key[1] == FIXTURE_PORT
+        else target
+        for target in call.targets
+    )
+
+
+@pytest.mark.parametrize(
+    "exit_side",
+    [
+        pytest.param(PortSide.RIGHT, id="LR"),
+        pytest.param(PortSide.BOTTOM, id="TB"),
+    ],
+)
+def test_a_source_departing_against_its_exit_side_is_refused(
+    fixture_call: _DealCall, monkeypatch: pytest.MonkeyPatch, exit_side: PortSide
+) -> None:
+    targets = _departing(fixture_call, monkeypatch, exit_side, -1)
+
+    decided, refused = bundle_landing_deals(fixture_call.ctx, targets)
+
+    assert refused[FIXTURE_PORT] is LandingDealRefusal.DEPARTS_AGAINST_SIDE
+    assert FIXTURE_PORT not in decided
+
+
+@pytest.mark.parametrize(
+    "exit_side",
+    [
+        pytest.param(PortSide.RIGHT, id="LR"),
+        pytest.param(PortSide.BOTTOM, id="TB"),
+    ],
+)
+def test_a_source_departing_along_its_exit_side_is_dealt(
+    fixture_call: _DealCall, monkeypatch: pytest.MonkeyPatch, exit_side: PortSide
+) -> None:
+    targets = _departing(fixture_call, monkeypatch, exit_side, 1)
+
+    decided, refused = bundle_landing_deals(fixture_call.ctx, targets)
+
+    assert FIXTURE_PORT not in refused
+    assert FIXTURE_PORT in decided
 
 
 def test_a_deal_moving_an_immutable_member_is_refused(
