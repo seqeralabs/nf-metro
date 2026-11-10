@@ -743,7 +743,7 @@
   "landing_deal.py::if port is None or not port.is_entry:::#2",
   "landing_deal.py::if record is not None:::#1",
   "landing_deal.py::if record is not None:::#2",
-  "landing_deal.py::if sequence and sequence[0] == (-departure[0], -departure[1]):::#1",
+  "landing_deal.py::if sequence and (::#1",
   "landing_deal.py::if set(by_line) != {edge.line_id for edge in edges}:::#1",
   "landing_deal.py::if set(record.lines) - set(lines):::#1",
   "member_geometry.py::and abs(route.points[-2][0] - route.points[-1][0]) <= COORD_TOLERANCE::#1",
