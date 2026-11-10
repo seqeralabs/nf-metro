@@ -157,25 +157,11 @@
         "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
       },
       {
-        "rule": "rerun",
-        "site": "routing/corridor_cohorts.py:_solve_in_either_frame",
-        "callee": "_solve_in_frame",
-        "removed_by": "7x (branch fix/2094-7x-retry-removal)",
-        "replacement": "seat once in the plan's own lane-order frame; no opposite-frame attempt"
-      },
-      {
-        "rule": "rerun",
-        "site": "routing/corridor_cohorts.py:_solve_in_frame",
-        "callee": "seat",
-        "removed_by": "7x (branch fix/2094-7x-retry-removal)",
-        "replacement": "seat once from the plan's order relation; no seat-then-drop chain over alternative orders"
-      },
-      {
         "rule": "retry-loop",
         "site": "routing/corridor_cohorts.py:_solve_in_frame",
         "callee": "seat",
         "removed_by": "unassigned (pair_orders ladder)",
-        "replacement": "seat once from the plan's order relation; no seat-then-drop chain over alternative orders"
+        "replacement": "state which seated-clear and fixed-lane orders hold as one decision from the problem's inputs; no ladder of compositions tried in turn"
       },
       {
         "rule": "scratch-offsets",
