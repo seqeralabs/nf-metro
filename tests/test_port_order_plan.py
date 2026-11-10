@@ -88,6 +88,35 @@ LATER_PHASE_NAMES = frozenset(
     }
 )
 
+# Ways to reach any of the above, or run a phase on a copy, without naming it.
+DYNAMIC_ACCESS = frozenset(
+    {"getattr", "__import__", "importlib", "deepcopy", "eval", "exec"}
+)
+
+# Every (module, name) the plan module imports: a new import is a new input.
+ALLOWED_IMPORTS = frozenset(
+    {
+        ("__future__", "annotations"),
+        ("collections.abc", "Iterator"),
+        ("collections.abc", "Mapping"),
+        ("collections.abc", "Sequence"),
+        ("dataclasses", "dataclass"),
+        ("enum", "Enum"),
+        ("functools", "partial"),
+        ("types", "MappingProxyType"),
+        ("nf_metro.layout.constants", "SAME_Y_TOLERANCE"),
+        ("nf_metro.layout.geometry", "perpendicular_port_sides"),
+        ("nf_metro.layout.routing.common", "ENTRY_SIDE_DIRECTION"),
+        ("nf_metro.layout.routing.common", "EXIT_SIDE_DIRECTION"),
+        ("nf_metro.layout.routing.common", "Direction"),
+        ("nf_metro.layout.routing.orientation", "get_point_coordinate"),
+        ("nf_metro.layout.routing.orientation", "lateral_axis"),
+        ("nf_metro.layout.routing.orientation", "lateral_order_sign"),
+        ("nf_metro.parser.model", "MetroGraph"),
+        ("nf_metro.parser.model", "Port"),
+    }
+)
+
 
 @lru_cache(maxsize=None)
 def _laid_out(source: str) -> MetroGraph:
@@ -229,7 +258,7 @@ def test_a_line_with_no_reference_node_is_undecided() -> None:
     assert line_id in order.missing
 
 
-def test_port_classes_cover_the_census_kinds() -> None:
+def test_coverage_fixtures_exercise_every_port_class() -> None:
     """The coverage fixtures exercise every :class:`PortClass`."""
     seen = {
         order.port_class
@@ -302,35 +331,96 @@ def test_lines_from_one_station_fall_to_priority() -> None:
     assert order.basis is OrderBasis.PRIORITY
 
 
-def test_the_plan_module_reads_no_later_phase_state() -> None:
-    """Its inputs are structure and placement: no lane offset, route, draft,
-    departure record or offsets/routing entry point appears in the module."""
-    tree = ast.parse(Path(port_order_plan_module.__file__).read_text())
+def _quarter_turn(point: tuple[float, float], turns: int) -> tuple[float, float]:
+    x, y = point
+    for _ in range(turns):
+        x, y = -y, x
+    return (x, y)
+
+
+@pytest.mark.parametrize(
+    ("turns", "direction", "side"),
+    [
+        (0, "LR", PortSide.LEFT),
+        (1, "TB", PortSide.TOP),
+        (2, "RL", PortSide.RIGHT),
+        (3, "BT", PortSide.BOTTOM),
+    ],
+    ids=["LR", "TB", "RL", "BT"],
+)
+def test_an_exit_against_the_flow_orders_across_its_own_travel(
+    turns: int, direction: str, side: PortSide
+) -> None:
+    """Lines leaving against the flow run straight from their feeders into the
+    port, so the feeder on the traveller's left comes first: for an LR
+    section's LEFT exit, the lower feeder."""
+    graph = MetroGraph()
+    for line_id in ("upper", "lower"):
+        graph.lines[line_id] = MetroLine(line_id, line_id, "#000000")
+    graph.add_section(Section("a", "a", direction=direction, grid_col=0, grid_row=0))
+    placed = {"upper": (50.0, 0.0), "lower": (50.0, 40.0), "a_out": (0.0, 20.0)}
+    for node_id, point in placed.items():
+        if node_id == "a_out":
+            graph.add_port(Port(node_id, "a", side, is_entry=False))
+        else:
+            graph.register_station(Station(node_id, node_id, section_id="a"))
+        station = graph.stations[node_id]
+        station.x, station.y = _quarter_turn(point, turns)
+    for line_id in ("upper", "lower"):
+        graph.add_edge(Edge(line_id, "a_out", line_id))
+
+    order = build_port_order_plan(graph).orders["a_out"]
+
+    assert order.lines == ("lower", "upper")
+    assert order.basis is OrderBasis.LATERAL
+
+
+def test_an_entry_without_grid_cells_is_undecided() -> None:
+    graph = _two_section_loop()
+    graph.sections["a"].grid_col = -1
+
+    order = build_port_order_plan(graph).orders["b_in"]
+
+    assert not order.decided
+    assert order.missing is not None
+    assert order.missing.startswith("grid cells")
+
+
+def _later_phase_reads(source: str) -> list[str]:
+    """What in *source* could read later-phase state or run a phase on a copy."""
+    tree = ast.parse(source)
     names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
     names |= {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
-    names |= {
-        alias.name.rsplit(".", 1)[-1]
-        for n in ast.walk(tree)
-        if isinstance(n, (ast.Import, ast.ImportFrom))
-        for alias in n.names
-    }
-    modules = {
-        n.module
-        for n in ast.walk(tree)
-        if isinstance(n, ast.ImportFrom) and n.module is not None
-    }
+    froms = [n for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)]
+    names |= {alias.name for n in froms for alias in n.names}
+    found = sorted(names & (LATER_PHASE_NAMES | DYNAMIC_ACCESS))
+    if any(isinstance(n, ast.Import) for n in ast.walk(tree)):
+        found.append("plain import")
+    if any(n.level != 0 for n in froms):
+        found.append("relative import")
+    imported = {(n.module, alias.name) for n in froms for alias in n.names}
+    found.extend(f"{m}.{n}" for m, n in sorted(imported - ALLOWED_IMPORTS, key=str))
+    return found
 
-    assert not names & LATER_PHASE_NAMES
-    assert modules <= {
-        "__future__",
-        "collections.abc",
-        "dataclasses",
-        "enum",
-        "functools",
-        "types",
-        "nf_metro.layout.constants",
-        "nf_metro.layout.geometry",
-        "nf_metro.layout.routing.common",
-        "nf_metro.layout.routing.orientation",
-        "nf_metro.parser.model",
-    }
+
+def test_the_plan_module_reads_no_later_phase_state() -> None:
+    """Its inputs are structure and placement: no lane offset, route, draft,
+    departure record or offsets/routing entry point appears in the module, and
+    it imports nothing beyond its stated inputs."""
+    source = Path(port_order_plan_module.__file__).read_text()
+    assert _later_phase_reads(source) == []
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import copy\ndef f(g): return copy.deepcopy(g)",
+        "import nf_metro.layout.phases.spacing as sp\ndef f(g): return sp.x(g)",
+        "from . import engine\ndef f(g): engine.compute_layout(g)",
+        "def f(g): return getattr(g, 'station' + '_offsets')",
+        "from nf_metro.layout.routing.common import compute_routes_somehow",
+    ],
+    ids=["deepcopy", "plain-import", "relative-import", "getattr", "new-name"],
+)
+def test_the_module_check_catches_indirect_reads(source: str) -> None:
+    assert _later_phase_reads(source)

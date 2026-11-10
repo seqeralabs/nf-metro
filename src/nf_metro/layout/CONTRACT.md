@@ -1594,8 +1594,10 @@ the planned-fan offsets that follow them own the lanes a fan plan states.
 - **Helpers**: `build_port_order_plan` (`layout/port_order_plan.py`), called at
   the top of `_run_offset_phases` and held on the offsets context as
   `port_order_plan`.
-- **Precondition**: Placement has settled station coordinates and section grid
-  cells for this offsets run.
+- **Precondition**: Station coordinates and section grid cells as they stand
+  when this offsets run starts. Placement runs the offsets phases while it is
+  still moving stations, so the plan can differ between the offsets runs of one
+  layout; the last run's plan is the one the drawn offsets come from.
 - **Postcondition**: Every port has a `PortOrder`: its lines ordered
   travel-left to travel-right with the sort field that decided it, or
   undecided with the missing input named.

@@ -499,13 +499,13 @@
       {
         "site": "routing/offsets.py:_materialize_linear_entry_frames",
         "shape": "fixed-point loop with roll-back",
-        "removed_by": "LANE-PLAN (ruling LANE-PLAN; step 4)",
+        "removed_by": "LANE-PLAN step 4",
         "replacement": "the lane plan states each entry frame's lanes once; no pass re-applies frames until they stop changing or restores the offsets it started from"
       },
       {
         "site": "routing/exit_turns.py:build_exit_turn_execution",
         "shape": "later pass rewrites planned port lanes",
-        "removed_by": "LANE-PLAN (ruling LANE-PLAN; step 4)",
+        "removed_by": "LANE-PLAN step 4",
         "replacement": "exit-turn plans read their source lanes from the lane plan; routing writes no station offset after the offsets run"
       }
     ],

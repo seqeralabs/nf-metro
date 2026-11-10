@@ -24,15 +24,17 @@ Rule, per line at a port, as a sort key with the earlier field deciding:
    the port's own travel, because a rotated map maps cells exactly but not the
    coordinates that text extents move.  An exit port's reference node is the
    in-section station feeding it, measured by placed coordinates across the
-   section's flow, which the line rides before any turn into the port.  A line
+   exit's own travel; at a perpendicular exit, across the section's flow, which
+   the line rides before it turns into the port.  A line
    with several reference nodes rides the one nearest the port's lane.
 2. *upstream* - the line's rank in its reference port's planned order, so lines
    sharing a source keep that source's order across the seam.
 3. *priority* - line declaration order.
 
-A port whose order needs an input the plan cannot supply (the order of a
-reference port that depends on it round a section cycle, or a reference node for
-one of its lines) is undecided and names that input; it never takes a value a
+A port whose order needs an input the plan cannot supply (a reference node for
+one of its lines, the grid cells either side of an entry's seam, or a decided
+order for a reference port it inherits from, including one round a section
+cycle) is undecided and names that input; it never takes a value a
 later phase wrote.
 """
 
@@ -212,10 +214,11 @@ class _Builder:
         graph = self.graph
         section = graph.section_for_port(port)
         origin = self.point(port_id)
-        if port.is_entry:
-            travel = _port_travel(port)
-        else:
+        perpendicular = port.side in perpendicular_port_sides(section.direction)
+        if perpendicular and not port.is_entry:
             travel = _FLOW_DIRECTION[section.direction]
+        else:
+            travel = _port_travel(port)
         lines = graph.station_lines(port_id)
         here = self.cell_centre(port_id)
 
@@ -253,8 +256,7 @@ class _Builder:
         if not port.is_entry:
             via_junction = self.feeds_junction(port_id)
         port_class = _classify(
-            port,
-            section.direction,
+            perpendicular,
             set(measured_nodes),
             list(measured_nodes.values()),
             via_junction,
@@ -318,13 +320,12 @@ def _basis(
 
 
 def _classify(
-    port: Port,
-    direction: str,
+    perpendicular: bool,
     ref_nodes: set[str],
     ref_laterals: Sequence[float],
     via_junction: bool,
 ) -> PortClass:
-    if port.side in perpendicular_port_sides(direction):
+    if perpendicular:
         return PortClass.PERPENDICULAR
     if len(ref_nodes) >= 2:
         below = any(v < -SAME_Y_TOLERANCE for v in ref_laterals)
