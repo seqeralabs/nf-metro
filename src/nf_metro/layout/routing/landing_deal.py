@@ -20,6 +20,7 @@ from collections.abc import Mapping, Sequence
 from enum import Enum
 from typing import TYPE_CHECKING
 
+from nf_metro.layout.geometry import lane_delta
 from nf_metro.layout.routing.common import (
     ENTRY_SIDE_DIRECTION,
     EXIT_SIDE_DIRECTION,
@@ -27,7 +28,7 @@ from nf_metro.layout.routing.common import (
     leg_direction_sequence,
     right_normal_axis_sign,
 )
-from nf_metro.layout.routing.context import _get_offset, _tb_x_offset
+from nf_metro.layout.routing.context import _get_offset, _section_lane_frame
 from nf_metro.layout.routing.corridor_cohort_integration import (
     AcceptedCorridorOwnerKind,
 )
@@ -212,14 +213,17 @@ def _source_deal(
             raise _Refused(LandingDealRefusal.DEFERRED)
         if len({target.endpoint_lane_coordinate for target in line_targets}) != 1:
             raise _Refused(LandingDealRefusal.SPLIT_LANDING)
-    section_id = exit_port.section_id
+    frame = _section_lane_frame(
+        graph, graph.sections[exit_port.section_id], ctx.positive_fan
+    )
 
     def exit_lateral(line: str) -> float:
+        offset = _get_offset(ctx, source, line)
         if exit_port.side in (PortSide.LEFT, PortSide.RIGHT):
-            return _get_offset(ctx, source, line)
-        if section_id not in ctx.tb_sections:
+            return offset
+        if frame.secondary.name == "y":
             return _perp_riser_lateral(ctx, root, line, exit_port.side)
-        return _tb_x_offset(ctx, source, line, section_id)
+        return lane_delta(frame, offset)
 
     laterals = {line: exit_lateral(line) for line in lines}
     if len(set(laterals.values())) != len(lines):
