@@ -2163,10 +2163,6 @@
   "note": "Rejects an invalid problem holding corner orders before any seating; the compile draws both lanes of every corner order from the problem's own movable claims, so only a hand-built malformed problem reaches the arm. Exercised by tests/test_corridor_cohorts.py::test_guard_a_corner_order_naming_no_lane_is_invalid. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
  },
- "corridor_cohorts.py::result.status is not CorridorAllocationStatus.FAILURE::#1": {
-  "note": "The first-frame solve reports FAILURE, so the shortfall and retry checks run. Every corpus first-frame solve plans or reports compatibility, so the arm needs a component that cannot seat. Exercised by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once. needs-review because the arm is reachable, not because it is unreachable.",
-  "status": "needs-review"
- },
  "corridor_cohorts.py::if result.reason is CorridorAllocationFailureReason.INVALID:::#1": {
   "note": "The seating's INVALID failure is returned as the plain problem's, held by no tier: it names lanes no semantic key separates, which the plain problem rejects alike. No render in the sweep's roots builds such lanes. Exercised by tests/test_corridor_cohorts.py::test_guard_an_invalid_cornered_problem_returns_without_giving_way. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
@@ -2197,14 +2193,6 @@
  },
  "corridor_cohorts.py::if existing is not None and existing != order:::#1": {
   "note": "Two seatings of one root pair that disagree on order mark the pair conflicting. Corpus seatings are consistent per pair. Exercised by tests/test_corridor_cohorts.py::test_a_pair_seated_clear_on_both_sides_is_left_to_semantic_rank. needs-review because the arm is reachable, not because it is unreachable.",
-  "status": "needs-review"
- },
- "corridor_cohorts.py::or result.clearance_shortfall is not None::#1": {
-  "note": "After a failed first-frame solve, a clearance shortfall is returned for an aperture to relieve and a shortfall-free failure is retried in the opposite frame. Both outcomes need a failed first-frame solve, which the corpus never produces. Exercised by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once. needs-review because the arm is reachable, not because it is unreachable.",
-  "status": "needs-review"
- },
- "corridor_cohorts.py::if reversed_result.status is CorridorAllocationStatus.PLANNED:::#1": {
-  "note": "After the opposite-frame retry, a PLANNED retry is returned and a failing retry yields the first frame's failure. Both need a failed first-frame solve, which the corpus never produces. Exercised by tests/test_corridor_cohorts.py::test_a_failure_no_order_can_seat_reports_the_fullest_orders and tests/test_corridor_cohorts.py::test_contradicting_directed_separations_fail_closed_whatever_gives_way. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
  },
  "corridor_cohorts.py::if invalid is not None:::#2": {

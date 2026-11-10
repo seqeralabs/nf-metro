@@ -3807,8 +3807,9 @@ def _lane_order_axis_sign(
     component whose lanes all travel one way orders along that normal.
     Counter-running lanes share no travel frame.  On one canvas margin they
     order in the frame pointing back toward the sections, so seating, which
-    only lowers a lane along that frame, pushes it out into open canvas rather
-    than into the boxes the margin skirts, where no aperture can make room.
+    lowers a lane along that frame wherever no region floor or pin lifts it,
+    pushes it out into open canvas rather than into the boxes the margin
+    skirts, where no aperture can make room.
     Elsewhere they order in the frame of screen-positive travel along the
     corridor (R for a Y-coordinate lane, D for an X-coordinate one).
     """

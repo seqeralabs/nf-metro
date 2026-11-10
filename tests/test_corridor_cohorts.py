@@ -2395,3 +2395,49 @@ def test_guard_an_invalid_lane_region_is_invalid(region: CorridorLaneRegion) -> 
 
     assert result.status is CorridorAllocationStatus.FAILURE
     assert result.reason is CorridorAllocationFailureReason.INVALID
+
+
+def _pinned_lane_problem() -> CorridorAllocationProblem:
+    """``pinned`` is held on a fixed lane at 482 and must stay 4 above ``free``,
+    which prefers 710.5, in a lane-order frame running down the axis."""
+    span = (0.0, 100.0)
+    return CorridorAllocationProblem(
+        (
+            _lane("pinned", "pinned", "pinned", 714.5, 714.5, span=span, line_rank=0),
+            _lane("free", "free", "free", 710.5, 710.5, span=span, line_rank=1),
+        ),
+        obstacles=(
+            _obstacle("network", 482.0, 482.0, span=span, semantic_rank=(1, 0)),
+        ),
+        fixed_equalities=(CorridorFixedEquality("pin", "pinned", "network"),),
+        directed_separations=(
+            CorridorDirectedSeparation("footprint:free|pinned", "free", "pinned", 4.0),
+        ),
+        clearance=4.0,
+        axis_sign=-1,
+    )
+
+
+def test_a_pin_carried_through_a_directed_separation_lifts_the_lane_after_it() -> None:
+    """Seating starts ``free`` where the pin leaves it rather than at its
+    preference, which lies past the pin in the lane-order frame."""
+    result = _solve_in_frame(_pinned_lane_problem())
+
+    assert result.status is CorridorAllocationStatus.PLANNED
+    assert dict(result.allocations) == {"pinned": 482.0, "free": 478.0}
+
+
+def test_a_problem_seats_once_in_its_own_lane_order_frame(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    axis_signs: list[int] = []
+
+    def seat_in_frame(problem: CorridorAllocationProblem) -> CorridorAllocationResult:
+        axis_signs.append(problem.axis_sign)
+        return _solve_in_frame(problem)
+
+    monkeypatch.setattr(corridor_cohorts, "_solve_in_frame", seat_in_frame)
+
+    solve_corridor_cohorts(_pinned_lane_problem())
+
+    assert axis_signs == [-1]
