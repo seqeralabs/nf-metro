@@ -42,9 +42,11 @@ from the source on each run:
   ``assert_exit_turn_snapshot`` at least three times sequences the passes that
   run on emitted routes.
 * **later passes**: the routing table, the ``routing/core.py`` functions that
-  call it (``route_edges`` and its variants), and the public runners of
-  ``routing/offsets.py`` (``compute_station_offsets``).  They run after
-  placement.
+  call it (``route_edges`` and its variants), the public runners of
+  ``routing/offsets.py`` (``compute_station_offsets``), and every pass the
+  routing table runs on the emitted routes.  They run after placement, so a call
+  from outside the table, such as a planner running a pass on a copy of the
+  routes, reads a later stage.
 
 Guard modules (``phases/guards.py``, ``routing/invariants.py``) and functions
 named ``_guard*``, ``check_*`` or ``assert_*`` only check, so they are not
@@ -78,7 +80,10 @@ Detection rules
     enclosing ``with`` header between the loop and the call, names the loop
     target or a name assigned from it.  A ``while`` call depends on the loop when
     it names something the loop body assigns, as a worklist walk does.  A loop
-    that applies a phase once per item and always continues is not a retry.
+    that applies a phase once per item and always continues is not a retry.  A
+    call whose result is returned, or that fills a name once under
+    ``if name is None``, runs once.  A ``break`` or ``return`` inside an inner
+    loop is not the outer loop's exit.
 
 ``rerun``
     A registered runner, solver or delegate is called from two sites of one
@@ -125,7 +130,14 @@ Limits
 Resolution is by bare name, so a registered name reused by an unrelated function
 in another module matches both.  Retry and fixed-point loops around callees that
 are neither registered nor named for it, and repair passes with a neutral name,
-are outside what these rules can see.
+are not detected.  Also not detected: a loop over alternative arguments whose
+success is read from graph state rather than from the call's result
+(``for pitch in ...: _layout_once(graph, pitch)`` followed by ``if ok(graph):
+break``), a phase passed as a lambda, a retry by recursion, a trial run on the
+live state followed by a rollback, and a copy made by a helper function
+(``_corner_sizing_copy``).  A ``.copy()`` method is read as a scratch copy only
+when its receiver names ``offsets``, ``graph`` or ``ctx``.  A ``for`` loop that
+exits early after consuming a phase's result is read as a search.
 """
 
 from __future__ import annotations
@@ -136,6 +148,40 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 LAYOUT_ROOT = Path(__file__).resolve().parent.parent / "src" / "nf_metro" / "layout"
+
+# Modules by role.  ``routing`` is route planning and emission; ``placement`` is
+# section and station placement.  Every layout module has exactly one role.
+ROUTING_MODULES = frozenset(
+    {
+        "departure_order.py",
+        "envelope_settlement.py",
+        "fan_geometry.py",
+        "fan_ordering.py",
+        "fan_plans.py",
+        "route_plan.py",
+        "route_reservations.py",
+        "route_topology.py",
+        "seam_topology.py",
+        "settlement_demand.py",
+    }
+)
+PLACEMENT_MODULES = frozenset(
+    {
+        "__init__.py",
+        "auto_layout.py",
+        "constants.py",
+        "engine.py",
+        "geometric_bypass.py",
+        "geometry.py",
+        "labels.py",
+        "layers.py",
+        "ordering.py",
+        "pass_metrics.py",
+        "phase_state.py",
+        "rail_mode.py",
+        "section_placement.py",
+    }
+)
 
 ENGINE = "engine.py"
 OFFSETS = "routing/offsets.py"
@@ -161,6 +207,7 @@ SOLVER_PREFIXES = ("solve", "_solve", "seat")
 OFFSET_STATE_KWARGS = frozenset({"offsets", "station_offsets"})
 COPY_CALLS = frozenset({"deepcopy", "copy"})
 COPY_WRAPPERS = frozenset({"dict", "ChainMap"})
+COPY_RECEIVER_TERMS = ("offsets", "graph", "ctx")
 MUTATORS = frozenset({"update", "pop", "setdefault", "clear", "popitem"})
 BUILTIN_CALLS = frozenset(
     {"tuple", "list", "set", "dict", "len", "sorted", "min", "max", "sum", "any", "all"}
@@ -255,6 +302,15 @@ class Registry:
         )
 
 
+def module_role(module: str) -> str | None:
+    """``"routing"`` or ``"placement"`` for a layout module path, else None."""
+    if module.startswith("routing/") or module in ROUTING_MODULES:
+        return "routing"
+    if module.startswith("phases/") or module in PLACEMENT_MODULES:
+        return "placement"
+    return None
+
+
 def _own_nodes(node: ast.AST) -> Iterator[ast.AST]:
     """Nodes of *node*'s own body, not descending into nested scopes."""
     stack = list(ast.iter_child_nodes(node))
@@ -285,16 +341,45 @@ def _stored_names(node: ast.AST) -> set[str]:
     }
 
 
+class _CopyAliases(ast.NodeTransformer):
+    """Rename aliases of the ``copy`` module's functions to their own names."""
+
+    def __init__(self, aliases: dict[str, str]) -> None:
+        self.aliases = aliases
+
+    def visit_Name(self, node: ast.Name) -> ast.AST:
+        return ast.copy_location(
+            ast.Name(self.aliases.get(node.id, node.id), node.ctx), node
+        )
+
+
+def _parse(text: str) -> ast.Module:
+    """Parse *text*, naming ``deepcopy``/``copy`` and ``copy`` module aliases
+    canonically so a renamed import is read like the plain one."""
+    tree = ast.parse(text)
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "copy":
+            for item in node.names:
+                if item.asname:
+                    aliases[item.asname] = item.name
+        elif isinstance(node, ast.Import):
+            for item in node.names:
+                if item.name == "copy" and item.asname:
+                    aliases[item.asname] = "copy"
+    return _CopyAliases(aliases).visit(tree) if aliases else tree
+
+
 def parse_layout(root: Path = LAYOUT_ROOT) -> dict[str, ast.Module]:
     """Parsed layout modules keyed by their path under *root*."""
     return {
-        path.relative_to(root).as_posix(): ast.parse(path.read_text())
+        path.relative_to(root).as_posix(): _parse(path.read_text())
         for path in sorted(root.rglob("*.py"))
     }
 
 
 def parse_sources(sources: dict[str, str]) -> dict[str, ast.Module]:
-    return {module: ast.parse(text) for module, text in sources.items()}
+    return {module: _parse(text) for module, text in sources.items()}
 
 
 def _nested_definitions(node: ast.AST) -> list[ast.AST]:
@@ -381,6 +466,18 @@ def _table_statement_calls(func: Func) -> Iterator[ast.Call]:
     for stmt in _own_nodes(func.node):
         if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
             yield stmt.value
+
+
+def _postpass_calls(func: Func) -> list[ast.Call]:
+    """Calls in a routing table that take the emitted ``routes`` list and are
+    not assertions, validations or snapshots."""
+    return [
+        call
+        for call in _calls(func)
+        if isinstance(call.func, ast.Name)
+        and _first_arg_name(call) == "routes"
+        and not call.func.id.startswith(POSTPASS_SKIP_PREFIXES)
+    ]
 
 
 def build_registry(funcs: list[Func]) -> Registry:
@@ -474,6 +571,12 @@ def build_registry(funcs: list[Func]) -> Registry:
         )
         or (f.module == OFFSETS and f.name in reg.runners)
     }
+    reg.later_passes |= {
+        _call_name(call) or ""
+        for f in funcs
+        if f.name in reg.routing_tables
+        for call in _postpass_calls(f)
+    }
     reg.runners -= reg.later_passes
 
     _find_delegates(funcs, reg)
@@ -536,6 +639,12 @@ def _copy_kind(node: ast.AST) -> str | None:
             isinstance(node.func, ast.Attribute)
             and ast.unparse(node.func.value) == "copy"
         )
+    ):
+        return "copy"
+    if (
+        name == "copy"
+        and isinstance(node.func, ast.Attribute)
+        and any(t in ast.unparse(node.func.value) for t in COPY_RECEIVER_TERMS)
     ):
         return "copy"
     if name == "replace" and any(kw.arg in OFFSET_STATE_KWARGS for kw in node.keywords):
@@ -643,7 +752,48 @@ def _with_header_names(loop: ast.stmt, call: ast.Call) -> set[str]:
 
 
 def _loop_exits(loop: ast.stmt) -> bool:
-    return any(isinstance(n, ast.Return | ast.Break) for n in _loop_body_nodes(loop))
+    """Whether *loop* itself can end early; an exit inside an inner loop ends
+    only that loop or is a ``return`` of the inner search."""
+    stack: list[ast.AST] = list(ast.iter_child_nodes(loop))
+    while stack:
+        node = stack.pop()
+        if isinstance(node, ast.Return | ast.Break):
+            return True
+        if not isinstance(node, (*_DEFS, ast.Lambda, *_LOOPS)):
+            stack.extend(ast.iter_child_nodes(node))
+    return False
+
+
+def _is_lazy_cache(loop: ast.stmt, call: ast.Call) -> bool:
+    """Whether *call* fills a name once under ``if name is None`` / ``if not name``."""
+    for node in _loop_body_nodes(loop):
+        if not isinstance(node, ast.If):
+            continue
+        test = node.test
+        guarded = None
+        if (
+            isinstance(test, ast.Compare)
+            and isinstance(test.left, ast.Name)
+            and len(test.ops) == 1
+            and isinstance(test.ops[0], ast.Is)
+        ):
+            guarded = test.left.id
+        elif (
+            isinstance(test, ast.UnaryOp)
+            and isinstance(test.op, ast.Not)
+            and isinstance(test.operand, ast.Name)
+        ):
+            guarded = test.operand.id
+        if guarded is None:
+            continue
+        for stmt in ast.walk(node):
+            if (
+                isinstance(stmt, ast.Assign)
+                and any(sub is call for sub in ast.walk(stmt.value))
+                and guarded in {n for t in stmt.targets for n in _names_in(t)}
+            ):
+                return True
+    return False
 
 
 def _result_consumed(func: Func, call: ast.Call) -> bool:
@@ -782,9 +932,12 @@ class _Scanner:
             tainted = (
                 _while_taint(loop) if isinstance(loop, ast.While) else _for_taint(loop)  # type: ignore[arg-type]
             )
+            returned = _returned_calls(func)
             for call in (c for c in _loop_body_nodes(loop) if isinstance(c, ast.Call)):
                 name = _call_name(call)
                 if name is None or not _is_registered(func, name, self.reg):
+                    continue
+                if id(call) in returned or _is_lazy_cache(loop, call):
                     continue
                 used = set().union(*(_names_in(a) for a in _arg_values(call)))
                 if isinstance(call.func, ast.Attribute):
@@ -848,15 +1001,8 @@ class _Scanner:
     def route_postpasses(self, func: Func, calls: list[ast.Call]) -> None:
         if func.name not in self.reg.routing_tables:
             return
-        for call in calls:
-            name = _call_name(call)
-            if (
-                isinstance(call.func, ast.Name)
-                and name is not None
-                and _first_arg_name(call) == "routes"
-                and not name.startswith(POSTPASS_SKIP_PREFIXES)
-            ):
-                self.add("route-postpass", func, name, call.lineno)
+        for call in _postpass_calls(func):
+            self.add("route-postpass", func, _call_name(call) or "", call.lineno)
 
     def lookahead_callers(self) -> None:
         """Flag every function that calls one that runs a copy.

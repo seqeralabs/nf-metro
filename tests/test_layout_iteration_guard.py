@@ -10,18 +10,21 @@ The allowlist in ``tests/data/layout_iteration_allowlist.json`` names every
 existing hit, who removes it and the plan-time rule that replaces it.  It has two
 lists, each checked on its own:
 
-* ``routing`` (sites under ``layout/routing/``) is the PR #2015 merge gate: it
+* ``routing`` (route planning and emission: ``layout/routing/`` and the planning
+  modules named by ``guard.ROUTING_MODULES``) is the PR #2015 merge gate: it
   must be empty before #2015 merges to ``main``.  Its ``manual`` section holds
   cases the AST cannot see; each is kept honest only by asserting the named
   function still exists, so removing the function makes the entry stale.
-* ``placement`` (``engine.py``, ``phases/``, ``geometric_bypass.py``) is not a
-  #2015 gate.  It is shrink-only and owned by the placement programme
-  (#323/#1745).
+* ``placement`` (``engine.py``, ``phases/``, ``geometric_bypass.py`` and the other
+  modules of ``guard.PLACEMENT_MODULES``) is not a #2015 gate.  It is shrink-only
+  and owned by #2171, the placement programme (#323/#1745).
 
 Each list may only shrink, which the tests enforce three ways: a hit with no
 entry fails, an entry that matches no hit fails (so a removal must delete its
-entry), and the entry count may not exceed the list's ceiling.  Lower the ceiling
-to the new count in the commit that removes entries.
+entry), and the entry count must equal the list's ceiling exactly, so a commit
+that swaps entries cannot leave the ceiling where it was.  Set the ceiling to the
+new count in the commit that removes entries.  Every layout module has a role, so
+a new module forces a decision about which list its hits belong to.
 """
 
 from __future__ import annotations
@@ -34,12 +37,12 @@ import layout_iteration_guard as guard
 import pytest
 
 ALLOWLIST_PATH = Path(__file__).parent / "data" / "layout_iteration_allowlist.json"
-ROUTING_CEILING = 45
-PLACEMENT_CEILING = 46
+ROUTING_CEILING = 70
+PLACEMENT_CEILING = 44
 LISTS = ("routing", "placement")
-ROUTING_PREFIX = "routing/"
-PLACEMENT_OWNER = "placement programme (#323/#1745)"
+PLACEMENT_OWNER = "#2171"
 ROUTING_REMOVED_BY = re.compile(r"^(unassigned|\d+[a-z]?\b|R3\b)")
+OPTIONAL_ENTRY_FIELDS = {"note"}
 MANUAL_FIELDS = {"site", "shape", "removed_by", "replacement"}
 ENTRY_FIELDS = {"rule", "site", "callee", "removed_by", "replacement"}
 
@@ -61,7 +64,7 @@ def _key(entry: dict[str, str]) -> tuple[str, str, str]:
 
 
 def _in_list(name: str, site: str) -> bool:
-    return site.startswith(ROUTING_PREFIX) == (name == "routing")
+    return guard.module_role(site.split(":", 1)[0]) == name
 
 
 def _where(hit: guard.Hit) -> str:
@@ -111,7 +114,7 @@ def test_allowlist_is_well_formed(name):
     keys = [_key(e) for e in entries]
     assert len(keys) == len(set(keys)), "duplicate allowlist entries"
     for entry in entries:
-        assert set(entry) == ENTRY_FIELDS, entry
+        assert ENTRY_FIELDS <= set(entry) <= ENTRY_FIELDS | OPTIONAL_ENTRY_FIELDS, entry
         assert entry["rule"] in guard.RULES, entry
         assert _in_list(name, entry["site"]), f"{entry['site']} is in the wrong list"
         assert entry["replacement"].strip(), entry
@@ -127,32 +130,45 @@ def test_manual_entries_are_well_formed():
     assert len({m["site"] for m in manual}) == len(manual)
     for entry in manual:
         assert set(entry) == MANUAL_FIELDS, entry
-        assert entry["site"].startswith(ROUTING_PREFIX), entry
+        assert _in_list("routing", entry["site"]), entry
         assert ROUTING_REMOVED_BY.match(entry["removed_by"]), entry
         assert entry["replacement"].strip(), entry
 
 
-def test_routing_allowlist_only_shrinks():
-    assert len(_entries("routing")) + len(_manual()) <= ROUTING_CEILING
+def test_routing_allowlist_count_is_the_ceiling():
+    assert len(_entries("routing")) + len(_manual()) == ROUTING_CEILING, (
+        "set ROUTING_CEILING to the new count"
+    )
 
 
-def test_placement_allowlist_only_shrinks():
-    assert len(_entries("placement")) <= PLACEMENT_CEILING
+def test_placement_allowlist_count_is_the_ceiling():
+    assert len(_entries("placement")) == PLACEMENT_CEILING, (
+        "set PLACEMENT_CEILING to the new count"
+    )
+
+
+def test_every_layout_module_has_a_role():
+    unclassified = [m for m in guard.parse_layout() if guard.module_role(m) is None]
+    assert not unclassified, (
+        "add each module to guard.ROUTING_MODULES or guard.PLACEMENT_MODULES:\n"
+        + "\n".join(unclassified)
+    )
 
 
 def test_registry_is_derived_from_the_source(live):
-    """A rename that empties the registry must fail here, not pass silently."""
+    """A rename that empties the registry must fail here, not pass silently.
+
+    Pins entry points that no allowlist entry targets, plus count floors."""
     reg, _ = live
-    assert {"_compute_section_layout", "_run_offset_phases", "_route_edges"} <= (
-        reg.tables | reg.routing_tables
-    )
+    assert {"_compute_section_layout", "_run_offset_phases"} <= reg.tables
+    assert "_route_edges" in reg.routing_tables
     assert len(reg.table_phases) > 50
     assert len(reg.offset_writers) > 20
-    assert {"compute_layout", "_layout_once", "_compute_layout_scaled"} <= reg.runners
+    assert "compute_layout" in reg.runners
     assert {"compute_station_offsets", "route_edges"} <= reg.later_passes
-    assert {"_solve_in_frame", "solve_corridor_cohorts"} <= reg.solver
-    assert "seat" in reg.solver_local
-    assert "_reconcile_horizontal_offsets" in reg.table_phases
+    assert len(reg.later_passes) > 20
+    assert "solve_corridor_cohorts" in reg.solver
+    assert reg.solver_local
 
 
 # ---------------------------------------------------------------------------
@@ -279,6 +295,32 @@ class TestLookaheadCopy:
         src = ENGINE + "\ndef plain(graph):\n    phase_a(graph)\n"
         assert not _hits("lookahead-copy", engine=src)
 
+    def test_aliased_deepcopy_import_is_flagged(self):
+        src = (
+            "from copy import deepcopy as dc\n" + ENGINE + "\ndef decide(graph):\n"
+            "    trial = dc(graph)\n"
+            "    phase_a(trial)\n"
+        )
+        assert ("decide", "phase_a") in _callees("lookahead-copy", engine=src)
+
+    def test_copy_module_alias_is_flagged(self):
+        src = (
+            "import copy as cp\n" + ENGINE + "\ndef decide(graph):\n"
+            "    trial = cp.copy(graph)\n"
+            "    phase_a(trial)\n"
+        )
+        assert ("decide", "phase_a") in _callees("lookahead-copy", engine=src)
+
+    def test_method_copy_of_offsets_is_flagged(self):
+        src = OFFSETS + (
+            "\ndef judge(ctx):\n"
+            "    scratch = ctx.offsets.copy()\n"
+            "    write_offsets(scratch)\n"
+        )
+        assert ("judge", "write_offsets") in _callees(
+            "lookahead-copy", routing__offsets=src
+        )
+
 
 class TestRetryLoop:
     def test_phase_in_a_loop_over_unrelated_values_is_flagged(self):
@@ -343,6 +385,37 @@ class TestRetryLoop:
         )
         assert not _hits("retry-loop", routing__offsets=src)
 
+    def test_lazy_cache_in_a_loop_is_not_a_retry(self):
+        src = ENGINE + (
+            "\ndef size(graph, sections):\n"
+            "    offsets = None\n"
+            "    for section in sections:\n"
+            "        if offsets is None:\n"
+            "            offsets = phase_a(graph)\n"
+            "        use(section, offsets)\n"
+        )
+        assert not _hits("retry-loop", engine=src)
+
+    def test_returned_call_in_a_loop_is_not_a_retry(self):
+        src = ENGINE + (
+            "\ndef first(graph, sections):\n"
+            "    for section in sections:\n"
+            "        if section.ok:\n"
+            "            return phase_a(graph)\n"
+        )
+        assert not _hits("retry-loop", engine=src)
+
+    def test_break_in_an_inner_loop_is_not_the_outer_exit(self):
+        src = ENGINE + (
+            "\ndef per(graph, rows):\n"
+            "    for row in rows:\n"
+            "        result = phase_a(row)\n"
+            "        for cell in row:\n"
+            "            if cell:\n"
+            "                break\n"
+        )
+        assert not _hits("retry-loop", engine=src)
+
 
 class TestRerun:
     def test_runner_called_from_two_sites_is_flagged(self):
@@ -402,6 +475,28 @@ class TestLaterPassAndRepair:
         assert ("size", "compute_station_offsets") in _callees(
             "later-pass-read", engine=src
         )
+
+    def test_postpass_run_by_a_planner_is_flagged(self):
+        core = (
+            "def _route_edges(graph):\n"
+            "    routes = []\n"
+            "    tidy_trunks(routes, graph)\n"
+            "    assert_exit_turn_snapshot(routes, 1, 'a')\n"
+            "    assert_exit_turn_snapshot(routes, 1, 'b')\n"
+            "    assert_exit_turn_snapshot(routes, 1, 'c')\n"
+        )
+        planner = (
+            "def seat_snapshot(copies, graph):\n"
+            "    tidy_trunks(copies, graph)\n"
+            "    tidy_trunks(copies, graph)\n"
+            "    return copies\n"
+            "def plan(routes, graph):\n"
+            "    tidy_trunks(routes, graph)\n"
+        )
+        got = _callees(
+            "later-pass-read", routing__core=core, routing__member_geometry=planner
+        )
+        assert got == {("seat_snapshot", "tidy_trunks"), ("plan", "tidy_trunks")}
 
     def test_repair_named_table_phase_is_flagged(self):
         engine = ENGINE.replace("phase_b", "restore_order")
