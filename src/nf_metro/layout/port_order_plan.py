@@ -47,7 +47,7 @@ from functools import partial
 from types import MappingProxyType
 
 from nf_metro.layout.constants import SAME_Y_TOLERANCE
-from nf_metro.layout.geometry import perpendicular_port_sides
+from nf_metro.layout.geometry import flow_entry_side, perpendicular_port_sides
 from nf_metro.layout.routing.common import (
     ENTRY_SIDE_DIRECTION,
     EXIT_SIDE_DIRECTION,
@@ -61,13 +61,6 @@ from nf_metro.layout.routing.orientation import (
 from nf_metro.parser.model import MetroGraph, Port
 
 _Point = tuple[float, float]
-
-_FLOW_DIRECTION = {
-    "LR": Direction.R,
-    "RL": Direction.L,
-    "TB": Direction.D,
-    "BT": Direction.U,
-}
 
 
 class PortClass(Enum):
@@ -216,7 +209,7 @@ class _Builder:
         origin = self.point(port_id)
         perpendicular = port.side in perpendicular_port_sides(section.direction)
         if perpendicular and not port.is_entry:
-            travel = _FLOW_DIRECTION[section.direction]
+            travel = ENTRY_SIDE_DIRECTION[flow_entry_side(section.direction)]
         else:
             travel = _port_travel(port)
         lines = graph.station_lines(port_id)

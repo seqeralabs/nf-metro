@@ -105,6 +105,7 @@ ALLOWED_IMPORTS = frozenset(
         ("functools", "partial"),
         ("types", "MappingProxyType"),
         ("nf_metro.layout.constants", "SAME_Y_TOLERANCE"),
+        ("nf_metro.layout.geometry", "flow_entry_side"),
         ("nf_metro.layout.geometry", "perpendicular_port_sides"),
         ("nf_metro.layout.routing.common", "ENTRY_SIDE_DIRECTION"),
         ("nf_metro.layout.routing.common", "EXIT_SIDE_DIRECTION"),
