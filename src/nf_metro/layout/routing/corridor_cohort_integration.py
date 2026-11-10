@@ -1082,9 +1082,8 @@ class CorridorCohortPlan:
     def solve_call_count(self) -> int:
         """How many solver problems the compile built, one per non-empty component.
 
-        ``solve_corridor_cohorts`` may seat one problem up to three times when
-        it holds corner orders; each result's ``corner_tier`` names the seating
-        it kept.
+        ``solve_corridor_cohorts`` decides a problem's corner orders before
+        seating it; a result's ``corner_tier`` names the corner orders it held.
         """
         return sum(len(component.problems) for component in self.components)
 
