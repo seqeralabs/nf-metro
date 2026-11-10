@@ -53,9 +53,10 @@ class CorridorCornerOrderTier(Enum):
 
     ``NONE``: no corner orders applied, because the problem holds none, its
     witnesses are incomplete, or it is invalid.  ``CORNER_ORDERS``: every
-    corner order held.  ``RELAXED_ORDERS``: every corner order held without the
-    directed separations the corner-order failure blocked.  ``GAVE_WAY``: no
-    corner order applied, the problem seated as though it held none.
+    corner order held.  ``RELAXED_ORDERS``: every corner order held, without
+    the directed separations both of whose lanes lie in the roots an order
+    contradiction leaves unorderable.  ``GAVE_WAY``: no corner order applied,
+    the problem seated as though it held none.
     """
 
     NONE = "none"
@@ -615,7 +616,7 @@ def _contradiction_attribution(
 def _ordered_roots_or_cycle(
     roots: set[int],
     edges: dict[tuple[int, int], Fraction],
-    root_key: dict[int, tuple[tuple[int, ...], tuple[tuple[int, ...], ...], Fraction]],
+    root_key: Mapping[int, tuple[object, ...]],
 ) -> tuple[tuple[int, ...], frozenset[int]]:
     successors: dict[int, set[int]] = {root: set() for root in roots}
     indegree = {root: 0 for root in roots}
@@ -748,9 +749,7 @@ def _fixed_lane_drawn_orders(
     roots around a fixed one can seat on either side of it, so a pair through
     it can close a cycle with the other orders, or can simply fail to seat
     even though it closes none.  Either way it gives way like any other
-    preference, through the same outcome-driven ladder in
-    ``solve_corridor_cohorts`` that retries without it.  A pair whose bases
-    coincide is left unordered.
+    preference.  A pair whose bases coincide is left unordered.
     """
     return {
         frozenset((left_root, right_root)): (
@@ -819,6 +818,22 @@ def _seated_clear_orders(
     return orders
 
 
+def _root_order_edges(
+    separation_orders: Iterable[tuple[int, int]],
+    pair_orders: Mapping[frozenset[int], tuple[int, int]],
+) -> dict[tuple[int, int], Fraction]:
+    """The directed separations' root orders, and each pair order on a root
+    pair no directed separation orders."""
+    forced = {edge: Fraction(0) for edge in separation_orders}
+    separated_pairs = {frozenset(edge) for edge in forced}
+    forced.update(
+        (order, Fraction(0))
+        for pair, order in pair_orders.items()
+        if pair not in separated_pairs
+    )
+    return forced
+
+
 def _forced_root_order(
     roots: set[int],
     root_key: dict[int, tuple[tuple[int, ...], tuple[tuple[int, ...], ...], Fraction]],
@@ -830,14 +845,103 @@ def _forced_root_order(
     A pair a directed separation orders takes the separation's order, and ties
     break by semantic rank.  Empty when those orders cycle.
     """
-    forced = {edge: Fraction(0) for edge in separation_orders}
-    separated_pairs = {frozenset(edge) for edge in forced}
-    forced.update(
-        (order, Fraction(0))
-        for pair, order in pair_orders.items()
-        if pair not in separated_pairs
+    return _ordered_roots_or_cycle(
+        roots, _root_order_edges(separation_orders, pair_orders), root_key
+    )[0]
+
+
+def _joined_lanes(
+    problem: CorridorAllocationProblem,
+) -> tuple[_WeightedUnionFind, CorridorAllocationResult | None]:
+    """The lanes joined into roots by their cohorts' boundary offsets and by
+    the equalities, in the problem's lane-order frame, and the contradiction
+    failure where those disagree."""
+    sign = problem.axis_sign
+    lanes = problem.lanes
+    by_id = {lane.member_id: index for index, lane in enumerate(lanes)}
+    canonical_member_keys = [
+        (
+            lane.semantic_rank,
+            sign * _q(lane.boundary_coordinate),
+            sign * _q(lane.planned_coordinate),
+        )
+        for lane in lanes
+    ]
+    union_find = _WeightedUnionFind(canonical_member_keys)
+    cohorts: dict[str, list[int]] = {}
+    for index, lane in enumerate(lanes):
+        cohorts.setdefault(lane.cohort_id, []).append(index)
+    for members in cohorts.values():
+        anchor = min(members, key=lambda index: canonical_member_keys[index])
+        anchor_boundary = sign * _q(lanes[anchor].boundary_coordinate)
+        for member in members:
+            delta = sign * _q(lanes[member].boundary_coordinate) - anchor_boundary
+            if not union_find.union(anchor, member, delta):
+                return union_find, _failure(
+                    CorridorAllocationFailureReason.CONTRADICTION,
+                    members={lanes[index].member_id for index in members},
+                    endpoint_owners={
+                        lanes[index].endpoint_owner_id for index in members
+                    },
+                )
+
+    processed_equalities: list[CorridorEquality] = []
+    for equality in sorted(
+        problem.equalities,
+        key=lambda item: (
+            item.owner_id,
+            item.left_member_id,
+            item.right_member_id,
+            item.delta,
+        ),
+    ):
+        left = by_id[equality.left_member_id]
+        right = by_id[equality.right_member_id]
+        if not union_find.union(left, right, sign * _q(equality.delta)):
+            return union_find, _contradiction_attribution(
+                lanes,
+                tuple((*processed_equalities, equality)),
+                union_find,
+                equality,
+            )
+        processed_equalities.append(equality)
+    return union_find, None
+
+
+def _unorderable_roots(
+    problem: CorridorAllocationProblem,
+    union_find: _WeightedUnionFind,
+    separations: Iterable[CorridorDirectedSeparation],
+) -> frozenset[int]:
+    """The roots *separations* cannot order.
+
+    A root is unorderable where it lies on a cycle of the separations' root
+    orders together with the end-turn votes on the root pairs no separation
+    orders, the pair orders the seating's last composition holds; or where a
+    separation orders two of its own lanes against their fixed offset.
+    """
+    sign = problem.axis_sign
+    by_id = {lane.member_id: index for index, lane in enumerate(problem.lanes)}
+    unorderable: set[int] = set()
+    separation_orders: list[tuple[int, int]] = []
+    for separation in separations:
+        lower_root, lower_offset = union_find.find(by_id[separation.lower_member_id])
+        upper_root, upper_offset = union_find.find(by_id[separation.upper_member_id])
+        if lower_root != upper_root:
+            separation_orders.append(
+                (lower_root, upper_root) if sign > 0 else (upper_root, lower_root)
+            )
+        elif sign * (upper_offset - lower_offset) < _q(separation.distance):
+            unorderable.add(lower_root)
+    roots = {union_find.find(index)[0] for index in range(len(problem.lanes))}
+    _order, cyclic_roots = _ordered_roots_or_cycle(
+        roots,
+        _root_order_edges(
+            separation_orders, _turn_side_orders(problem.lanes, union_find, sign)
+        ),
+        {root: union_find.keys[root] for root in roots},
     )
-    return _ordered_roots_or_cycle(roots, forced, root_key)[0]
+    return frozenset(unorderable | cyclic_roots)
 
 
 def _corner_contradicted_order_owners(
@@ -885,15 +989,10 @@ def solve_corridor_cohorts(
 ) -> CorridorAllocationResult:
     """Return the unique canonical seating for a complete witness set.
 
-    Corner orders rank the seatings, and the result's ``corner_tier`` names
-    the first that plans:
+    A problem holding corner orders seats in the tier ``_corner_order_tier``
+    decides from its inputs alone; the result's ``corner_tier`` names that tier.
 
-    1. every corner order, without the directed separations they contradict;
-    2. the same, also without each directed separation both of whose lanes
-       the first seating's failure blocks;
-    3. no corner orders.
-
-    An invalid problem is reported without a seating to fall back on.
+    An invalid problem is reported without a seating.
     """
     plain = replace(problem, corner_orders=())
     if not problem.corner_orders or not problem.witnesses_complete:
@@ -901,33 +1000,61 @@ def solve_corridor_cohorts(
     invalid = _invalid_problem(problem)
     if invalid is not None:
         return invalid
+    tier, separations = _corner_order_tier(problem)
+    result = _solve_in_either_frame(replace(plain, directed_separations=separations))
+    if result.reason is CorridorAllocationFailureReason.INVALID:
+        return result
+    return replace(result, corner_tier=tier)
+
+
+def _corner_order_tier(
+    problem: CorridorAllocationProblem,
+) -> tuple[CorridorCornerOrderTier, tuple[CorridorDirectedSeparation, ...]]:
+    """The corner-order tier *problem* seats in, and the directed separations
+    it seats with.
+
+    Corner orders give way only to an order contradiction over the roots the
+    cohorts and equalities join the lanes into:
+
+    1. every corner order, without the directed separations they contradict,
+       where those orders leave every root orderable;
+    2. the same, also without each directed separation both of whose lanes
+       lie in an unorderable root, where that leaves every root orderable;
+    3. otherwise no corner orders, as where the cohorts and equalities
+       themselves contradict.
+    """
+    union_find, contradiction = _joined_lanes(problem)
+    if contradiction is not None:
+        return CorridorCornerOrderTier.GAVE_WAY, problem.directed_separations
     contradicted = _corner_contradicted_order_owners(problem)
     kept = tuple(
         separation
         for separation in problem.directed_separations
         if separation.owner_id not in contradicted
     )
-    cornered = replace(plain, directed_separations=(*kept, *problem.corner_orders))
-    result = _solve_in_either_frame(cornered)
-    if result.reason is CorridorAllocationFailureReason.INVALID:
-        return result
-    if result.status is not CorridorAllocationStatus.FAILURE:
-        return replace(result, corner_tier=CorridorCornerOrderTier.CORNER_ORDERS)
-    blocked = set(result.blocking_member_ids)
+    unorderable = _unorderable_roots(
+        problem, union_find, (*kept, *problem.corner_orders)
+    )
+    if not unorderable:
+        return CorridorCornerOrderTier.CORNER_ORDERS, (*kept, *problem.corner_orders)
+    by_id = {lane.member_id: index for index, lane in enumerate(problem.lanes)}
     relaxed = tuple(
         separation
         for separation in kept
-        if not {separation.lower_member_id, separation.upper_member_id} <= blocked
+        if not {
+            union_find.find(by_id[separation.lower_member_id])[0],
+            union_find.find(by_id[separation.upper_member_id])[0],
+        }
+        <= unorderable
     )
-    if len(relaxed) < len(kept):
-        retried = _solve_in_either_frame(
-            replace(cornered, directed_separations=(*relaxed, *problem.corner_orders))
+    if len(relaxed) < len(kept) and not _unorderable_roots(
+        problem, union_find, (*relaxed, *problem.corner_orders)
+    ):
+        return CorridorCornerOrderTier.RELAXED_ORDERS, (
+            *relaxed,
+            *problem.corner_orders,
         )
-        if retried.status is CorridorAllocationStatus.PLANNED:
-            return replace(retried, corner_tier=CorridorCornerOrderTier.RELAXED_ORDERS)
-    return replace(
-        _solve_in_either_frame(plain), corner_tier=CorridorCornerOrderTier.GAVE_WAY
-    )
+    return CorridorCornerOrderTier.GAVE_WAY, problem.directed_separations
 
 
 def _solve_in_either_frame(
@@ -970,15 +1097,10 @@ def _solve_in_frame(  # noqa: C901, PLR0915
     sign = problem.axis_sign
     lanes = problem.lanes
     by_id = {lane.member_id: index for index, lane in enumerate(lanes)}
-    canonical_member_keys = [
-        (
-            lane.semantic_rank,
-            sign * _q(lane.boundary_coordinate),
-            sign * _q(lane.planned_coordinate),
-        )
-        for lane in lanes
-    ]
-    union_find = _WeightedUnionFind(canonical_member_keys)
+    union_find, contradiction = _joined_lanes(problem)
+    if contradiction is not None:
+        return contradiction
+    canonical_member_keys = union_find.keys
     clearance_by_pair = {
         frozenset((separation.left_member_id, separation.right_member_id)): _q(
             separation.distance
@@ -990,44 +1112,6 @@ def _solve_in_frame(  # noqa: C901, PLR0915
         return clearance_by_pair.get(
             frozenset((left_id, right_id)), _q(problem.clearance)
         )
-
-    cohorts: dict[str, list[int]] = {}
-    for index, lane in enumerate(lanes):
-        cohorts.setdefault(lane.cohort_id, []).append(index)
-    for members in cohorts.values():
-        anchor = min(members, key=lambda index: canonical_member_keys[index])
-        anchor_boundary = sign * _q(lanes[anchor].boundary_coordinate)
-        for member in members:
-            delta = sign * _q(lanes[member].boundary_coordinate) - anchor_boundary
-            if not union_find.union(anchor, member, delta):
-                return _failure(
-                    CorridorAllocationFailureReason.CONTRADICTION,
-                    members={lanes[index].member_id for index in members},
-                    endpoint_owners={
-                        lanes[index].endpoint_owner_id for index in members
-                    },
-                )
-
-    processed_equalities: list[CorridorEquality] = []
-    for equality in sorted(
-        problem.equalities,
-        key=lambda item: (
-            item.owner_id,
-            item.left_member_id,
-            item.right_member_id,
-            item.delta,
-        ),
-    ):
-        left = by_id[equality.left_member_id]
-        right = by_id[equality.right_member_id]
-        if not union_find.union(left, right, sign * _q(equality.delta)):
-            return _contradiction_attribution(
-                lanes,
-                tuple((*processed_equalities, equality)),
-                union_find,
-                equality,
-            )
-        processed_equalities.append(equality)
 
     roots: dict[int, list[int]] = {}
     raw_potentials: dict[int, Fraction] = {}

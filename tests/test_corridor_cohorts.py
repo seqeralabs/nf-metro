@@ -7,9 +7,11 @@ from itertools import permutations
 
 import pytest
 
+from nf_metro.layout.routing import corridor_cohorts
 from nf_metro.layout.routing.corridor_cohorts import (
     CorridorAllocationFailureReason,
     CorridorAllocationProblem,
+    CorridorAllocationResult,
     CorridorAllocationStatus,
     CorridorCoordinateDomain,
     CorridorCornerOrderTier,
@@ -21,6 +23,7 @@ from nf_metro.layout.routing.corridor_cohorts import (
     CorridorLaneRegion,
     CorridorObstacle,
     CorridorSeparation,
+    _solve_in_frame,
     solve_corridor_cohorts,
 )
 
@@ -1906,8 +1909,8 @@ def test_a_footprint_order_a_chain_of_corner_orders_contradicts_gives_way() -> N
 
 def test_lanes_an_offset_equality_ties_do_not_stand_as_one_for_the_yield() -> None:
     """``b`` sits a pitch above ``a`` by an equality, not on it: the corner order
-    ``c < a`` therefore says nothing about ``b < c`` directly, which only the
-    failure shows it contradicts."""
+    ``c < a`` therefore says nothing about ``b < c`` directly, which the order
+    cycle over the joined lanes shows it contradicts."""
     span = (0.0, 50.0)
     problem = CorridorAllocationProblem(
         tuple(
@@ -1950,14 +1953,42 @@ def _rigid_pair_and_free_lane(
     )
 
 
+def _relaxed_orders_problem(
+    domains: tuple[CorridorCoordinateDomain, ...] = (),
+) -> CorridorAllocationProblem:
+    return _rigid_pair_and_free_lane(
+        _corner_order("a", "c"),
+        footprint=(CorridorDirectedSeparation("footprint:c|b", "c", "b", 4.0),),
+        domains=domains,
+    )
+
+
+def _cohort_between_corner_orders() -> CorridorAllocationProblem:
+    """A three-lane cohort a pitch apart, with corner orders putting ``b`` below
+    its top lane and above its bottom one: only ``b`` on the middle lane meets
+    both, which no order over whole roots can seat."""
+    span = (0.0, 50.0)
+    return CorridorAllocationProblem(
+        (
+            *(
+                _lane(
+                    f"a{k}", "a", "a", -4.0 * k, 108.0 - 4.0 * k, span=span, line_rank=k
+                )
+                for k in range(3)
+            ),
+            _lane("b", "b", "b", 103.0, 103.0, span=span, line_rank=3),
+        ),
+        corner_orders=(_corner_order("b", "a0"), _corner_order("a2", "b")),
+        clearance=4.0,
+    )
+
+
 def test_corner_orders_blocked_by_a_footprint_order_seat_without_it() -> None:
     """The footprint order holds ``c`` below ``b`` and so below ``a``, which the
     corner orders put below ``c``; the cohort offset, not an equality, joins
-    ``a`` and ``b``, so only the failure names the order to drop."""
-    problem = _rigid_pair_and_free_lane(
-        _corner_order("a", "c"),
-        footprint=(CorridorDirectedSeparation("footprint:c|b", "c", "b", 4.0),),
-    )
+    ``a`` and ``b``, so the order cycle over the joined lanes names the order
+    to drop."""
+    problem = _relaxed_orders_problem()
 
     result = solve_corridor_cohorts(problem)
 
@@ -1973,15 +2004,8 @@ def test_corner_orders_blocked_by_a_footprint_order_seat_without_it() -> None:
             id="no-footprint-order-to-drop",
         ),
         pytest.param(
-            _rigid_pair_and_free_lane(
-                _corner_order("a", "c"),
-                footprint=(CorridorDirectedSeparation("footprint:c|b", "c", "b", 4.0),),
-                domains=(
-                    CorridorCoordinateDomain("a", minimum_coordinate=100.0),
-                    CorridorCoordinateDomain("c", maximum_coordinate=100.0),
-                ),
-            ),
-            id="relaxed-orders-fail",
+            _cohort_between_corner_orders(),
+            id="corner-orders-cycle-through-a-cohort",
         ),
     ],
 )
@@ -1993,6 +2017,105 @@ def test_guard_corner_orders_that_cannot_seat_return_the_plain_result(
 
     assert result.corner_tier is CorridorCornerOrderTier.GAVE_WAY
     assert replace(result, corner_tier=CorridorCornerOrderTier.NONE) == plain
+
+
+def test_relaxed_corner_orders_a_domain_blocks_report_their_own_failure() -> None:
+    """The order cycle drops the footprint order, and nothing but an order
+    contradiction makes the corner orders give way, so the failure the domains
+    force on the relaxed orders stands."""
+    problem = _relaxed_orders_problem(
+        domains=(
+            CorridorCoordinateDomain("a", minimum_coordinate=100.0),
+            CorridorCoordinateDomain("c", maximum_coordinate=100.0),
+        )
+    )
+
+    result = solve_corridor_cohorts(problem)
+
+    assert result.corner_tier is CorridorCornerOrderTier.RELAXED_ORDERS
+    assert result.status is CorridorAllocationStatus.FAILURE
+    assert result.reason is CorridorAllocationFailureReason.INFEASIBLE
+    assert result.blocking_member_ids == ("a", "b")
+
+
+def _end_turn_cycle_problem() -> CorridorAllocationProblem:
+    """The corner order ``a < b`` and the footprint order ``c < a`` with ``b``
+    turning down inside the other two lanes' runs."""
+    return CorridorAllocationProblem(
+        (
+            _lane("a", "a", "a", 100.0, 100.0, span=(0.0, 50.0), line_rank=0),
+            _lane(
+                "b",
+                "b",
+                "b",
+                101.0,
+                101.0,
+                span=(0.0, 30.0),
+                line_rank=1,
+                turns=(0, -1),
+            ),
+            _lane("c", "c", "c", 102.0, 102.0, span=(0.0, 50.0), line_rank=2),
+        ),
+        directed_separations=(
+            CorridorDirectedSeparation("footprint:c|a", "c", "a", 4.0),
+        ),
+        corner_orders=(_corner_order("a", "b"),),
+        clearance=4.0,
+    )
+
+
+def test_an_end_turn_closing_an_order_cycle_relaxes_the_footprint_order() -> None:
+    """``b`` turning down votes it below ``c``, which closes ``c < a < b < c``
+    with the two orders; no seating composition drops that vote, so the
+    footprint order is dropped and the corner order holds."""
+    result = solve_corridor_cohorts(_end_turn_cycle_problem())
+
+    assert result.corner_tier is CorridorCornerOrderTier.RELAXED_ORDERS
+    assert result.status is CorridorAllocationStatus.PLANNED
+    assert dict(result.allocations) == {"a": 94.0, "b": 98.0, "c": 102.0}
+
+
+def test_a_footprint_order_against_its_cohort_offset_gives_way() -> None:
+    """``b`` sits a pitch above ``a`` in one cohort, so the footprint order
+    ``b < a`` contradicts the offset that joins them: it is dropped and the
+    corner order holds, where the plain problem cannot seat."""
+    problem = _rigid_pair_and_free_lane(
+        _corner_order("b", "c"),
+        footprint=(CorridorDirectedSeparation("footprint:b|a", "b", "a", 4.0),),
+    )
+
+    result = solve_corridor_cohorts(problem)
+    plain = solve_corridor_cohorts(replace(problem, corner_orders=()))
+
+    assert result.corner_tier is CorridorCornerOrderTier.RELAXED_ORDERS
+    assert dict(result.allocations) == {"a": 100.0, "b": 104.0, "c": 110.0}
+    assert plain.reason is CorridorAllocationFailureReason.INFEASIBLE
+
+
+@pytest.mark.parametrize(
+    "problem",
+    [
+        pytest.param(
+            _rigid_pair_and_free_lane(_corner_order("a", "c"), _corner_order("c", "b")),
+            id="corner-orders-give-way",
+        ),
+        pytest.param(_relaxed_orders_problem(), id="relaxed-orders"),
+    ],
+)
+def test_the_corner_order_tier_is_decided_without_a_trial_seating(
+    problem: CorridorAllocationProblem, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seated: list[CorridorAllocationProblem] = []
+
+    def seat_in_frame(problem: CorridorAllocationProblem) -> CorridorAllocationResult:
+        seated.append(problem)
+        return _solve_in_frame(problem)
+
+    monkeypatch.setattr(corridor_cohorts, "_solve_in_frame", seat_in_frame)
+
+    solve_corridor_cohorts(problem)
+
+    assert len(seated) == 1
 
 
 def test_guard_a_corner_order_naming_no_lane_is_invalid() -> None:
