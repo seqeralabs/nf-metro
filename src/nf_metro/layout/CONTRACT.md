@@ -1587,6 +1587,24 @@ are recorded because they move lanes a whole section at a time, after each
 base, station, port, junction and rail-boundary phase has settled, and because
 the planned-fan offsets that follow them own the lanes a fan plan states.
 
+### Port order plan (before phase 1)
+
+- **Purpose**: Decide every port's line order once, from structure, before any
+  lane offset is written.
+- **Helpers**: `build_port_order_plan` (`layout/port_order_plan.py`), called at
+  the top of `_run_offset_phases` and held on the offsets context as
+  `port_order_plan`.
+- **Precondition**: Station coordinates and section grid cells as they stand
+  when this offsets run starts. Placement runs the offsets phases while it is
+  still moving stations, so the plan can differ between the offsets runs of one
+  layout; the last run's plan is the one the drawn offsets come from.
+- **Postcondition**: Every port has a `PortOrder`: its lines ordered
+  travel-left to travel-right with the sort field that decided it, or
+  undecided with the missing input named.
+- **Invariants preserved**: All offsets and geometry; the plan reads no lane
+  offset, route, draft or departure record.
+- **Related tests**: `tests/test_port_order_plan.py`.
+
 ### Phase 7b': approach-derived entry-port order
 
 - **Purpose**: At a multi-feeder flow-side entry port whose feeders' lines

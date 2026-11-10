@@ -1,6 +1,6 @@
 {
   "routing": {
-    "gate": "MERGE GATE: this list must be empty before the integration branch (PR #2015) merges to main (ruling GATE-SCOPE).  It covers route planning and emission: everything under layout/routing/ and the planning modules route_plan.py, route_reservations.py, fan_plans.py, route_topology.py, seam_topology.py, departure_order.py, fan_geometry.py, fan_ordering.py, envelope_settlement.py and settlement_demand.py.  It may only shrink.  removed_by names the #2094 list line or ruling that removes the entry, or 'unassigned'.  'entries' are detected by the guard; 'manual' are cases the AST cannot see, checked only by asserting that the named function exists, so deleting the function makes the entry stale.  'pinned_later_passes' and 'pinned_nested_passes' keep a route pass registered while anything calls it, whether or not the routing table runs it; a pin is valid to delete only when its pass has no callers left, and review checks that.",
+    "gate": "MERGE GATE: this list must be empty before the integration branch (PR #2015) merges to main (ruling GATE-SCOPE).  It covers route planning and emission: everything under layout/routing/ and the planning modules port_order_plan.py, route_plan.py, route_reservations.py, fan_plans.py, route_topology.py, seam_topology.py, departure_order.py, fan_geometry.py, fan_ordering.py, envelope_settlement.py and settlement_demand.py.  It may only shrink.  removed_by names the #2094 list line or ruling that removes the entry, or 'unassigned'.  'entries' are detected by the guard; 'manual' are cases the AST cannot see, checked only by asserting that the named function exists, so deleting the function makes the entry stale.  'pinned_later_passes' and 'pinned_nested_passes' keep a route pass registered while anything calls it, whether or not the routing table runs it; a pin is valid to delete only when its pass has no callers left, and review checks that.",
     "entries": [
       {
         "rule": "route-postpass",
@@ -495,6 +495,18 @@
         "shape": "routing moves placement after emission",
         "removed_by": "unassigned",
         "replacement": "seat bubble-centred markers at placement from the plan; routing returns routes and moves no station"
+      },
+      {
+        "site": "routing/offsets.py:_materialize_linear_entry_frames",
+        "shape": "fixed-point loop with roll-back",
+        "removed_by": "LANE-PLAN step 4",
+        "replacement": "the lane plan states each entry frame's lanes once; no pass re-applies frames until they stop changing or restores the offsets it started from"
+      },
+      {
+        "site": "routing/exit_turns.py:build_exit_turn_execution",
+        "shape": "later pass rewrites planned port lanes",
+        "removed_by": "LANE-PLAN step 4",
+        "replacement": "exit-turn plans read their source lanes from the lane plan; routing writes no station offset after the offsets run"
       }
     ],
     "pinned_later_passes": [

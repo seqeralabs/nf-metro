@@ -219,6 +219,29 @@ Straight reconvergences are planned as one semantic fan.
 Their established section tracks, including phantom tracks and collision-compacted slots, supply the fixed frame the fan plan owns.
 The plan therefore records and validates the whole branch-and-join system without replacing the section track allocator.
 
+## Port order plan
+
+The port order plan (`layout/port_order_plan.py`) records the line order at every section port.
+It is decided at the start of every station-offset computation, before that computation writes a lane offset, so its only inputs are the map's structure, line declaration priority, section grid cells and the station coordinates placement has reached when the computation starts.
+
+Each `PortOrder` lists the port's lines across its direction of travel, from the traveller's left to their right.
+An entry port's travel is its inward normal and an exit port's is its outward normal.
+A nested bundle keeps each line on the same side of its travel through every turn, so one port's order can be compared directly with the order of the port its lines came from.
+The frame also turns with the map: a map rotated a quarter turn plans the same orders.
+
+Lines are sorted by three fields, the earlier deciding:
+
+1. **Lateral.** Where the line's reference node sits across travel.
+   For an entry port this is the line's upstream source, walked back through junctions, compared by grid cell.
+   For an exit port it is the in-section station that feeds the line, compared by its placed coordinate across the exit's travel, or across the section's flow at a perpendicular exit, whose lines turn into the port.
+2. **Upstream.** The line's rank in its reference port's planned order, so lines from one source keep that source's order across the seam.
+3. **Priority.** Line declaration order.
+
+The record also states which field decided the order and the port's structural class: perpendicular, two-sided, shared, junction-fed, or a flow-side port with a single feeder.
+A port whose order needs an input the plan cannot supply is undecided and names that input, rather than taking a value a later phase wrote.
+
+The plan is held on the offsets context as `port_order_plan`.
+
 ## Identity and coverage
 
 A route system is a maximal component of connectors coupled by semantic topology, whether a shared bundle, endpoint group, divergence, convergence or resolved physical leg.
