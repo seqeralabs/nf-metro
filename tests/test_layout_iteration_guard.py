@@ -7,12 +7,21 @@ runs a pass again, retries until a result holds, or rewrites a decision after
 it was made.  Its docstring defines the registry and each detection rule.
 
 The allowlist in ``tests/data/layout_iteration_allowlist.json`` names every
-existing hit, the #2094 line that removes it and the plan-time rule that
-replaces it.  It is a merge gate: it must be empty before PR #2015 merges to
-``main``.  It may only shrink, which the tests enforce three ways: a hit with no
+existing hit, who removes it and the plan-time rule that replaces it.  It has two
+lists, each checked on its own:
+
+* ``routing`` (sites under ``layout/routing/``) is the PR #2015 merge gate: it
+  must be empty before #2015 merges to ``main``.  Its ``manual`` section holds
+  cases the AST cannot see; each is kept honest only by asserting the named
+  function still exists, so removing the function makes the entry stale.
+* ``placement`` (``engine.py``, ``phases/``, ``geometric_bypass.py``) is not a
+  #2015 gate.  It is shrink-only and owned by the placement programme
+  (#323/#1745).
+
+Each list may only shrink, which the tests enforce three ways: a hit with no
 entry fails, an entry that matches no hit fails (so a removal must delete its
-entry), and the entry count may not exceed ``ALLOWLIST_CEILING``.  Lower the
-ceiling to the new count in the commit that removes entries.
+entry), and the entry count may not exceed the list's ceiling.  Lower the ceiling
+to the new count in the commit that removes entries.
 """
 
 from __future__ import annotations
@@ -25,12 +34,34 @@ import layout_iteration_guard as guard
 import pytest
 
 ALLOWLIST_PATH = Path(__file__).parent / "data" / "layout_iteration_allowlist.json"
-ALLOWLIST_CEILING = 89
-REMOVED_BY = re.compile(r"^(unassigned|\d+[a-z]?\b|R3\b)")
+ROUTING_CEILING = 45
+PLACEMENT_CEILING = 46
+LISTS = ("routing", "placement")
+ROUTING_PREFIX = "routing/"
+PLACEMENT_OWNER = "placement programme (#323/#1745)"
+ROUTING_REMOVED_BY = re.compile(r"^(unassigned|\d+[a-z]?\b|R3\b)")
+MANUAL_FIELDS = {"site", "shape", "removed_by", "replacement"}
+ENTRY_FIELDS = {"rule", "site", "callee", "removed_by", "replacement"}
 
 
-def _allowlist() -> list[dict[str, str]]:
-    return json.loads(ALLOWLIST_PATH.read_text())["entries"]
+def _data() -> dict[str, dict]:
+    return json.loads(ALLOWLIST_PATH.read_text())
+
+
+def _entries(name: str) -> list[dict[str, str]]:
+    return _data()[name]["entries"]
+
+
+def _manual() -> list[dict[str, str]]:
+    return _data()["routing"]["manual"]
+
+
+def _key(entry: dict[str, str]) -> tuple[str, str, str]:
+    return (entry["rule"], entry["site"], entry["callee"])
+
+
+def _in_list(name: str, site: str) -> bool:
+    return site.startswith(ROUTING_PREFIX) == (name == "routing")
 
 
 def _where(hit: guard.Hit) -> str:
@@ -42,44 +73,71 @@ def live() -> tuple[guard.Registry, list[guard.Hit]]:
     return guard.scan(guard.parse_layout())
 
 
-def test_layout_has_no_unlisted_iteration(live):
+@pytest.mark.parametrize("name", LISTS)
+def test_layout_has_no_unlisted_iteration(live, name):
     _, hits = live
-    allowed = {(e["rule"], e["site"], e["callee"]) for e in _allowlist()}
-    new = [h for h in hits if h.key not in allowed]
+    allowed = {_key(e) for e in _entries(name)}
+    new = [h for h in hits if _in_list(name, h.site) and h.key not in allowed]
     assert not new, (
-        "iteration or look-ahead in the layout code; decide it at plan time "
-        "instead of adding an allowlist entry:\n" + "\n".join(map(_where, new))
+        f"iteration or look-ahead in the layout code ({name}); decide it at plan "
+        "time instead of adding an allowlist entry:\n" + "\n".join(map(_where, new))
     )
 
 
-def test_allowlist_has_no_stale_entries(live):
+@pytest.mark.parametrize("name", LISTS)
+def test_allowlist_has_no_stale_entries(live, name):
     _, hits = live
     found = {h.key for h in hits}
-    stale = [
-        f"{e['rule']} {e['site']} -> {e['callee']}"
-        for e in _allowlist()
-        if (e["rule"], e["site"], e["callee"]) not in found
-    ]
+    stale = [" ".join(_key(e)) for e in _entries(name) if _key(e) not in found]
     assert not stale, (
-        "allowlist entries that no longer match a hit; delete them and lower "
-        "ALLOWLIST_CEILING:\n" + "\n".join(stale)
+        f"{name} allowlist entries that no longer match a hit; delete them and "
+        "lower the ceiling:\n" + "\n".join(stale)
     )
 
 
-def test_allowlist_is_well_formed():
-    entries = _allowlist()
-    keys = [(e["rule"], e["site"], e["callee"]) for e in entries]
+def test_manual_entries_name_functions_that_still_exist():
+    funcs = guard.collect_functions(guard.parse_layout())
+    defined = {f.site for f in funcs}
+    stale = [m["site"] for m in _manual() if m["site"] not in defined]
+    assert not stale, (
+        "manual entries whose function is gone; delete them and lower "
+        "ROUTING_CEILING:\n" + "\n".join(stale)
+    )
+
+
+@pytest.mark.parametrize("name", LISTS)
+def test_allowlist_is_well_formed(name):
+    entries = _entries(name)
+    keys = [_key(e) for e in entries]
     assert len(keys) == len(set(keys)), "duplicate allowlist entries"
     for entry in entries:
-        assert set(entry) == {"rule", "site", "callee", "removed_by", "replacement"}
+        assert set(entry) == ENTRY_FIELDS, entry
         assert entry["rule"] in guard.RULES, entry
-        assert REMOVED_BY.match(entry["removed_by"]), entry
+        assert _in_list(name, entry["site"]), f"{entry['site']} is in the wrong list"
         assert entry["replacement"].strip(), entry
-    assert json.loads(ALLOWLIST_PATH.read_text())["gate"]
+        if name == "routing":
+            assert ROUTING_REMOVED_BY.match(entry["removed_by"]), entry
+        else:
+            assert entry["removed_by"] == PLACEMENT_OWNER, entry
+    assert _data()[name]["gate"]
 
 
-def test_allowlist_only_shrinks():
-    assert len(_allowlist()) <= ALLOWLIST_CEILING
+def test_manual_entries_are_well_formed():
+    manual = _manual()
+    assert len({m["site"] for m in manual}) == len(manual)
+    for entry in manual:
+        assert set(entry) == MANUAL_FIELDS, entry
+        assert entry["site"].startswith(ROUTING_PREFIX), entry
+        assert ROUTING_REMOVED_BY.match(entry["removed_by"]), entry
+        assert entry["replacement"].strip(), entry
+
+
+def test_routing_allowlist_only_shrinks():
+    assert len(_entries("routing")) + len(_manual()) <= ROUTING_CEILING
+
+
+def test_placement_allowlist_only_shrinks():
+    assert len(_entries("placement")) <= PLACEMENT_CEILING
 
 
 def test_registry_is_derived_from_the_source(live):
