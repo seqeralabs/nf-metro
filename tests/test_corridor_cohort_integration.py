@@ -65,7 +65,7 @@ from nf_metro.layout.routing.corridor_cohorts import (
     solve_corridor_cohorts,
 )
 from nf_metro.layout.routing.families import RouteFamilyId
-from nf_metro.parser.model import Edge, MetroGraph, PermissiveGuardWarning
+from nf_metro.parser.model import Edge, MetroGraph
 from nf_metro.render import svg
 from nf_metro.render.plan import _RENDER_GRAPH_EXCLUDED_FIELDS, RenderPlan
 
@@ -2121,58 +2121,66 @@ def test_no_solver_owner_contains_opposite_running_claims(
 
     Seed 77 compiles one cohort over both directions of several shared gaps; a
     cohort or equality owner holding both would bundle counter-running lines.
-    Scalar trunk lanes are their own cohort and carry no ledger claim.  The map
-    trips the peel-off guard after the compiles run, so it renders permissively.
+    Scalar trunk lanes are their own cohort and carry no ledger claim.  The
+    map's ordinary render trips the peel-off guard before any compile runs, so
+    it renders permissively.  There one component fails to seat, the compile
+    reports it as an aperture request, and the emission check then rejects a
+    bypass-family channel whose geometry changed.
     """
-    compiles = []
-    original = member_geometry_routing.compile_corridor_cohort_plan
+    ledgers = []
+    problems = []
+    original_compile = member_geometry_routing.compile_corridor_cohort_plan
+    original_solve = cci.solve_corridor_cohorts
 
-    def capture(ledger, targets, **kwargs):
-        plan = original(ledger, targets, **kwargs)
-        compiles.append((ledger, plan))
-        return plan
+    def capture_ledger(ledger, targets, **kwargs):
+        ledgers.append(ledger)
+        return original_compile(ledger, targets, **kwargs)
+
+    def capture_problem(problem):
+        problems.append((ledgers[-1], problem))
+        return original_solve(problem)
 
     monkeypatch.setattr(
-        member_geometry_routing, "compile_corridor_cohort_plan", capture
+        member_geometry_routing, "compile_corridor_cohort_plan", capture_ledger
     )
+    monkeypatch.setattr(cci, "solve_corridor_cohorts", capture_problem)
     path = ROOT / "tests/fixtures/hash_seed_determinism/seed_77.mmd"
     graph = prepare_graph(
         path.read_text(),
         layout_options={"permissive": True},
         source_dir=str(path.parent),
     )
-    with pytest.warns(PermissiveGuardWarning):
+    with pytest.raises(RuntimeError, match="bypass-family channel geometry changed"):
         svg.build_observed_render_plan(graph, resolve_theme(None, graph))
 
-    assert compiles
-    for ledger, plan in compiles:
-        direction_by_claim = {
-            claim.claim_id: claim.direction for claim in ledger.claims
-        }
+    assert problems
+    for ledger in ledgers:
         assert {claim.direction for claim in ledger.claims} >= {
             Direction.U,
             Direction.D,
         }
-        for component in plan.components:
-            for problem in component.problems:
-                directions_by_owner: dict[str, set[Direction]] = {}
-                for lane in problem.lanes:
-                    if lane.member_id in direction_by_claim:
-                        directions_by_owner.setdefault(
-                            f"cohort|{lane.cohort_id}", set()
-                        ).add(direction_by_claim[lane.member_id])
-                for equality in problem.equalities:
-                    directions_by_owner.setdefault(
-                        f"equality|{equality.owner_id}", set()
-                    ).update(
-                        (
-                            direction_by_claim[equality.left_member_id],
-                            direction_by_claim[equality.right_member_id],
-                        )
-                    )
-                assert all(
-                    len(directions) == 1 for directions in directions_by_owner.values()
-                ), directions_by_owner
+    for ledger, problem in problems:
+        direction_by_claim = {
+            claim.claim_id: claim.direction for claim in ledger.claims
+        }
+        directions_by_owner: dict[str, set[Direction]] = {}
+        for lane in problem.lanes:
+            if lane.member_id in direction_by_claim:
+                directions_by_owner.setdefault(f"cohort|{lane.cohort_id}", set()).add(
+                    direction_by_claim[lane.member_id]
+                )
+        for equality in problem.equalities:
+            directions_by_owner.setdefault(
+                f"equality|{equality.owner_id}", set()
+            ).update(
+                (
+                    direction_by_claim[equality.left_member_id],
+                    direction_by_claim[equality.right_member_id],
+                )
+            )
+        assert all(
+            len(directions) == 1 for directions in directions_by_owner.values()
+        ), directions_by_owner
 
 
 # --- Endpoint cohort lane ranks over fixed members ---

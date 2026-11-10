@@ -820,11 +820,12 @@ def test_fixed_lane_drawn_orders_cycling_through_a_forced_order_give_way(
         }
 
 
-def test_a_seated_order_that_cannot_seat_gives_way() -> None:
+def test_a_seated_order_that_cannot_seat_fails_in_its_frame() -> None:
     """``z`` is drawn a clearance above ``y``, which a domain holds at or above
-    its drawn 12, and a separation holds ``q`` a clearance above ``z``.  Keeping
-    ``y`` below ``z`` would lift ``z`` and ``q`` off where they are drawn, so
-    the seated order gives way and semantic rank seats ``z`` below ``y``."""
+    its drawn 12, and a separation holds ``q`` a clearance above ``z``.  Seating
+    only lowers a lane, so keeping ``y`` below ``z`` drives ``y`` under its
+    domain.  The seated order is part of the one composition seated, so the
+    frame reports ``y``'s failure rather than seating a sparser order."""
     for lanes in permutations(
         (
             _lane(
@@ -852,7 +853,14 @@ def test_a_seated_order_that_cannot_seat_gives_way() -> None:
                 CorridorDirectedSeparation("order:zq", "z", "q", 4.0),
             ),
         )
-        assert _allocations(problem) == {"q": 17.0, "y": 12.0, "z": 8.0}
+
+        result = _solve_in_frame(problem)
+
+        assert result.status is CorridorAllocationStatus.FAILURE
+        assert result.reason is CorridorAllocationFailureReason.INFEASIBLE
+        assert result.blocking_member_ids == ("y",)
+        assert result.blocking_endpoint_owner_ids == ("ey",)
+        assert result.clearance_shortfall is None
 
 
 def _lifted_fixed_lane_problem(
@@ -888,33 +896,47 @@ def _lifted_fixed_lane_problem(
     )
 
 
+def test_semantic_rank_seats_a_lane_beside_one_lifted_clear_of_a_fixed_lane() -> None:
+    """Semantic rank seats ``z`` below ``y``, and ``y`` lifts clear of ``x``."""
+    problem = _lifted_fixed_lane_problem(12.0)
+    for lanes in permutations(problem.lanes):
+        assert _allocations(replace(problem, lanes=lanes)) == {
+            "x": 8.0,
+            "y": 12.0,
+            "z": 8.0,
+        }
+
+
 @pytest.mark.parametrize(
-    ("problem", "expected"),
+    "problem",
     (
-        (_lifted_fixed_lane_problem(12.0), {"x": 8.0, "y": 12.0, "z": 8.0}),
-        (_lifted_fixed_lane_problem(14.0), {"x": 8.0, "y": 12.0, "z": 8.0}),
-        (
-            _lifted_fixed_lane_problem(
-                12.0,
-                directed_separations=(
-                    CorridorDirectedSeparation("order:yz", "y", "z", 4.0),
-                ),
+        _lifted_fixed_lane_problem(14.0),
+        _lifted_fixed_lane_problem(
+            12.0,
+            directed_separations=(
+                CorridorDirectedSeparation("order:yz", "y", "z", 4.0),
             ),
-            {"x": 8.0, "y": 4.0, "z": 12.0},
         ),
     ),
-    ids=("semantic-rank", "seated-clear", "directed-separation"),
+    ids=("seated-clear", "directed-separation"),
 )
-def test_preference_orders_that_cannot_seat_give_way_in_turn(
-    problem: CorridorAllocationProblem, expected: dict[str, float]
+def test_preference_orders_that_cannot_seat_fail_in_their_frame(
+    problem: CorridorAllocationProblem,
 ) -> None:
-    """Semantic rank seats ``z`` below ``y``, and ``y`` lifts clear of ``x``.
-    Seated a clearance above ``y``, ``z`` would hold ``y`` below 10 and so onto
-    ``x``; the seated order gives way first.  A separation holding ``z`` above
-    ``y`` instead leaves ``x``'s drawn order, ``x`` below ``y``, no seating; the
-    fixed-lane order gives way next, and ``y`` seats below ``x``."""
+    """Seated a clearance above ``y``, ``z`` would hold ``y`` below 10; a
+    separation holding ``z`` above ``y`` does the same.  ``x``'s drawn order
+    keeps ``x`` below ``y``, so ``x`` is lowered off its fixed equality.  The
+    fullest acyclic composition is the one seated, so the frame reports
+    ``x``'s failure against its equality owner."""
     for lanes in permutations(problem.lanes):
-        assert _allocations(replace(problem, lanes=lanes)) == expected
+        result = _solve_in_frame(replace(problem, lanes=lanes))
+
+        assert result.status is CorridorAllocationStatus.FAILURE
+        assert result.reason is CorridorAllocationFailureReason.INFEASIBLE
+        assert result.blocking_member_ids == ("x",)
+        assert result.blocking_equality_owner_ids == ("context",)
+        assert result.blocking_endpoint_owner_ids == ("ex",)
+        assert result.clearance_shortfall is None
 
 
 def test_a_failure_no_order_can_seat_reports_the_fullest_orders() -> None:

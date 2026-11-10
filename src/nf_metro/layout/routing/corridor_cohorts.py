@@ -1874,13 +1874,12 @@ def _solve_in_frame(  # noqa: C901, PLR0915
     # Per pair, a seated-clear order outranks the end-turn votes, so lanes the
     # render already draws clear of each other compile where it draws them,
     # and both outrank a fixed lane's drawn order.  Seated and fixed-lane
-    # orders only prefer the drawn order.  Seating only ever lowers a root
-    # from its preferred base, bar its domain and obstacles, so a preferred
-    # order can fail to seat where another order seats.  Where the orders
-    # cycle or fail to seat, the seated orders give way first and the
-    # fixed-lane orders next; the directed separations and end-turn votes
-    # never give way.  Where no tier seats, the fullest acyclic tier's failure
-    # is the one reported.
+    # orders only prefer the drawn order: where they make the orders cycle,
+    # the seated orders give way first and the fixed-lane orders next, and
+    # the directed separations and end-turn votes never give way.  The
+    # fullest acyclic composition is chosen before any seating and seated
+    # once; its result stands, planned or failed.  Where every composition
+    # cycles, seating the end-turn votes alone reports the cycle's owners.
     turn_orders = _turn_side_orders(lanes, union_find, sign)
     fixed_orders = _fixed_lane_drawn_orders(
         lanes, union_find, preferred, fixed_root_owners
@@ -1913,26 +1912,17 @@ def _solve_in_frame(  # noqa: C901, PLR0915
             if (root := union_find.find(index)[0]) in yielding_roots
         },
     )
-    first_failure: CorridorAllocationResult | None = None
-    previous_orders: Mapping[frozenset[int], tuple[int, int]] | None = None
     for pair_orders in (
         {**fixed_orders, **turn_orders, **seated_orders},
         {**fixed_orders, **turn_orders},
         turn_orders,
     ):
-        if pair_orders == previous_orders:
-            continue
-        previous_orders = pair_orders
         forced_order = _forced_root_order(
             set(roots), root_key, edge_order_owners.keys(), pair_orders
         )
-        if not forced_order:
-            continue
-        result = seat(pair_orders, forced_order)
-        if result.status is CorridorAllocationStatus.PLANNED:
-            return result
-        first_failure = first_failure or result
-    return first_failure or seat(turn_orders, ())
+        if forced_order:
+            return seat(pair_orders, forced_order)
+    return seat(turn_orders, ())
 
 
 __all__ = [
