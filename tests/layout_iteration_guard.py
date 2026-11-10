@@ -49,9 +49,9 @@ from the source on each run:
   routes, reads a later stage.
 * **pinned passes**: the allowlist's ``pinned_later_passes`` names the passes
   the routing table runs; they stay registered after a call leaves the table,
-  so a planner that still runs one is still reported.  ``pinned_nested_passes``
-  names writer sub-passes that a pass runs on routes, such as
-  ``_bundle_same_destination_tails``; they are registered the same way.  The
+  so a planner that runs one is reported whether or not the table runs it.
+  ``pinned_nested_passes`` names writer sub-passes that a pass runs on routes,
+  such as ``_bundle_same_destination_tails``; they are registered the same way.  The
   tests require every table pass to be pinned and every pin to name a function
   that exists and is called somewhere.
 
@@ -88,9 +88,10 @@ Detection rules
     target or a name assigned from it.  A ``while`` call depends on the loop when
     it names something the loop body assigns, as a worklist walk does.  A loop
     that applies a phase once per item and always continues is not a retry.  A
-    call that fills a name once under ``if name is None``, or whose result is
-    returned from a loop over a collection, runs once; returned from a loop over
-    a literal tuple or list of alternatives, it is a fallback ladder.  A
+    call that fills a name once under ``if name is None`` runs once, and so does
+    a returned call whose inputs do not depend on the loop.  A returned call that
+    reads the loop target, or any returned call in a loop over a literal tuple or
+    list, takes the first alternative that passes: it is a fallback ladder.  A
     ``break`` inside an inner loop is not the outer loop's exit.
 
 ``rerun``
@@ -104,10 +105,10 @@ Detection rules
     as the phase, not the wrapper.
 
 ``later-pass-read``
-    A function other than a table, runner or core wrapper calls a later pass.
+    A function other than a table or runner calls a later pass.
     The caller reads a product of stages that have not run yet, or runs routing
-    to measure placement.  Inside a routing pass only a call to another table
-    pass is reported, which is a pass run both nested and from the table;
+    to measure placement.  Inside a route pass only a call to another table or
+    pinned pass is reported, which is a pass run both nested and on its own;
     composing its own sub-passes is not.
 
 ``repair-named``
@@ -147,8 +148,12 @@ break``), a phase passed as a lambda, a retry by recursion, a trial run on the
 live state followed by a rollback, and a copy made by a helper function
 (``_corner_sizing_copy``).  A ``.copy()`` method is read as a scratch copy only
 when its receiver names ``offsets``, ``graph`` or ``ctx``.  A ``for`` loop that
-exits early after consuming a phase's result is read as a search.  A loop over a
-tuple of phases (``for step in (phase_a, phase_b): step(graph)``) is not detected.
+exits early after consuming a phase's result is reported even when it is a plain
+search over items rather than a ladder of alternatives.  A loop that only searches
+(``for p in orders: if ok(p): break``) and calls the phase once after it is not
+detected.  A loop over a tuple of phases (``for step in (phase_a, phase_b):
+step(graph)``) is not detected.  A pin deleted while its pass has callers drops
+their rows; review checks that each deleted pin names a pass with no callers.
 """
 
 from __future__ import annotations
@@ -979,15 +984,17 @@ class _Scanner:
                 name = _call_name(call)
                 if name is None or not _is_registered(func, name, self.reg):
                     continue
-                returned_once = id(call) in returned and not (
-                    _iterates_literal_alternatives(loop)
-                )
-                if returned_once or _is_lazy_cache(loop, call):
-                    continue
                 used = set().union(*(_names_in(a) for a in _arg_values(call)))
                 if isinstance(call.func, ast.Attribute):
                     used |= _names_in(call.func.value)
                 used |= _with_header_names(loop, call)
+                returned_once = (
+                    id(call) in returned
+                    and not used & tainted
+                    and not _iterates_literal_alternatives(loop)
+                )
+                if returned_once or _is_lazy_cache(loop, call):
+                    continue
                 if not used & tainted:
                     detail = "inputs independent of loop"
                 elif _loop_exits(loop) and _result_consumed(func, call):
@@ -1028,13 +1035,14 @@ class _Scanner:
 
     def later_pass_reads(self, func: Func, calls: list[ast.Call]) -> None:
         reg = self.reg
-        if (
-            func.name
-            in reg.tables | reg.runners | reg.routing_tables | reg.entry_passes
-        ):
+        if func.name in reg.tables | reg.runners | reg.routing_tables:
             return
-        inside_a_pass = func.name in reg.postpasses | reg.nested_passes
-        reportable = reg.postpasses if inside_a_pass else reg.later_passes
+        if func.name in reg.entry_passes:
+            reportable = reg.postpasses | reg.nested_passes
+        elif func.name in reg.postpasses | reg.nested_passes:
+            reportable = reg.postpasses
+        else:
+            reportable = reg.later_passes
         for call in calls:
             name = _call_name(call)
             if name in reportable:

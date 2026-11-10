@@ -222,6 +222,26 @@ def test_pinned_passes_are_called_somewhere(live):
     assert not problems, "\n".join(problems)
 
 
+def test_a_sub_pass_runs_inside_one_pass(live):
+    reg, _ = live
+    funcs = guard.collect_functions(guard.parse_layout())
+    passes = reg.postpasses | reg.nested_passes
+    problems = []
+    for pin in _pins("nested"):
+        sites = sorted(
+            f.site
+            for f in funcs
+            if f.name in passes
+            and f.name != pin
+            and any(guard._call_name(c) == pin for c in guard._calls(f))
+        )
+        if len(sites) > 1:
+            problems.append(
+                f"{pin} runs inside {', '.join(sites)}; a sub-pass runs inside one pass"
+            )
+    assert not problems, "\n".join(problems)
+
+
 def test_pin_lists_are_sorted_and_unique():
     for kind in ("later", "nested"):
         pins = _pins(kind)
@@ -500,6 +520,34 @@ class TestRetryLoop:
         )
         got = _callees("retry-loop", routing__corridor_cohorts=solver)
         assert ("_solve_in_frame", "seat") in got
+
+    def test_ladder_over_a_named_tuple_is_flagged(self):
+        solver = (
+            "def _solve_in_frame(problem, a, b, c):\n"
+            "    def seat(order, forced):\n"
+            "        return order\n"
+            "    orders = (a, b, c)\n"
+            "    for pair_orders in orders:\n"
+            "        forced = query(pair_orders)\n"
+            "        if forced:\n"
+            "            return seat(pair_orders, forced)\n"
+            "    return None\n"
+        )
+        got = _callees("retry-loop", routing__corridor_cohorts=solver)
+        assert ("_solve_in_frame", "seat") in got
+
+    def test_loop_returning_the_first_frame_that_solves_is_flagged(self):
+        solver = (
+            "def _solve_in_either_frame(problem):\n"
+            "    frames = (problem.own, problem.opposite)\n"
+            "    for frame in frames:\n"
+            "        if ok(frame):\n"
+            "            return _solve_in_frame(problem, frame)\n"
+            "def _solve_in_frame(problem, frame):\n"
+            "    return frame\n"
+        )
+        got = _callees("retry-loop", routing__corridor_cohorts=solver)
+        assert ("_solve_in_either_frame", "_solve_in_frame") in got
 
     def test_return_in_an_inner_loop_is_an_exit(self):
         src = ENGINE + (
