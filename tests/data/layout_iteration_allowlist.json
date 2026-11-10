@@ -1,0 +1,855 @@
+{
+  "routing": {
+    "gate": "MERGE GATE: this list must be empty before the integration branch (PR #2015) merges to main (ruling GATE-SCOPE).  It covers route planning and emission: everything under layout/routing/ and the planning modules route_plan.py, route_reservations.py, fan_plans.py, route_topology.py, seam_topology.py, departure_order.py, fan_geometry.py, fan_ordering.py, envelope_settlement.py and settlement_demand.py.  It may only shrink.  removed_by names the #2094 list line or ruling that removes the entry, or 'unassigned'.  'entries' are detected by the guard; 'manual' are cases the AST cannot see, checked only by asserting that the named function exists, so deleting the function makes the entry stale.  'pinned_later_passes' and 'pinned_nested_passes' keep a route pass registered while anything calls it, whether or not the routing table runs it; a pin is valid to delete only when its pass has no callers left, and review checks that.",
+    "entries": [
+      {
+        "rule": "route-postpass",
+        "site": "routing/core.py:_route_edges",
+        "callee": "_align_merge_fed_confluence_to_band",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
+      },
+      {
+        "rule": "route-postpass",
+        "site": "routing/core.py:_route_edges",
+        "callee": "_bundle_divergent_distinct_traverses",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
+      },
+      {
+        "rule": "route-postpass",
+        "site": "routing/core.py:_route_edges",
+        "callee": "_center_bubble_stations",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
+      },
+      {
+        "rule": "route-postpass",
+        "site": "routing/core.py:_route_edges",
+        "callee": "_clear_bypass_v_label_strikes",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
+      },
+      {
+        "rule": "route-postpass",
+        "site": "routing/core.py:_route_edges",
+        "callee": "_clear_merge_trunk_opposite_arm",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
+      },
+      {
+        "rule": "route-postpass",
+        "site": "routing/core.py:_route_edges",
+        "callee": "_coincide_fanout_opening_descents",
+        "removed_by": "7q (K10)",
+        "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
+      },
+      {
+        "rule": "route-postpass",
+        "site": "routing/core.py:_route_edges",
+        "callee": "_coincide_merge_fanout_pivots",
+        "removed_by": "7q (K10)",
+        "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
+      },
+      {
+        "rule": "route-postpass",
+        "site": "routing/core.py:_route_edges",
+        "callee": "_coincide_same_line_fanout_traverses",
+        "removed_by": "7q (K10)",
+        "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
+      },
+      {
+        "rule": "route-postpass",
+        "site": "routing/core.py:_route_edges",
+        "callee": "_coincide_same_line_tracks",
+        "removed_by": "7q (K10)",
+        "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
+      },
+      {
+        "rule": "route-postpass",
+        "site": "routing/core.py:_route_edges",
+        "callee": "_hold_runs_in_corridor_clearance",
+        "removed_by": "7u (K14)",
+        "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
+      },
+      {
+        "rule": "route-postpass",
+        "site": "routing/core.py:_route_edges",
+        "callee": "_materialize_gap_slots",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
+      },
+      {
+        "rule": "route-postpass",
+        "site": "routing/core.py:_route_edges",
+        "callee": "_materialize_trunk_slots",
+        "removed_by": "7q (K4r)",
+        "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
+      },
+      {
+        "rule": "route-postpass",
+        "site": "routing/core.py:_route_edges",
+        "callee": "_nest_bypass_above_over_top_wrap",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
+      },
+      {
+        "rule": "route-postpass",
+        "site": "routing/core.py:_route_edges",
+        "callee": "_reconcile_port_peeloff_risers",
+        "removed_by": "7q (K2x)",
+        "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
+      },
+      {
+        "rule": "route-postpass",
+        "site": "routing/core.py:_route_edges",
+        "callee": "_rederive_semantic_end_corners",
+        "removed_by": "7s (K1r)",
+        "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
+      },
+      {
+        "rule": "route-postpass",
+        "site": "routing/core.py:_route_edges",
+        "callee": "_separate_declared_opposing_gap_bundles",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
+      },
+      {
+        "rule": "route-postpass",
+        "site": "routing/core.py:_route_edges",
+        "callee": "_separate_fused_cotravelling_runs",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
+      },
+      {
+        "rule": "route-postpass",
+        "site": "routing/core.py:_route_edges",
+        "callee": "_separate_opposing_inter_row_trunks",
+        "removed_by": "7r (K7)",
+        "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
+      },
+      {
+        "rule": "route-postpass",
+        "site": "routing/core.py:_route_edges",
+        "callee": "_settle_same_destination_approach_bundles",
+        "removed_by": "7q (K6)",
+        "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
+      },
+      {
+        "rule": "route-postpass",
+        "site": "routing/core.py:_route_edges",
+        "callee": "_spread_diagonal_bundles",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
+      },
+      {
+        "rule": "route-postpass",
+        "site": "routing/core.py:_route_edges",
+        "callee": "_stagger_convergent_distinct_lines",
+        "removed_by": "7q (K11)",
+        "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
+      },
+      {
+        "rule": "route-postpass",
+        "site": "routing/core.py:_route_edges",
+        "callee": "_unify_coincident_corner_radii",
+        "removed_by": "7s (K1r)",
+        "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
+      },
+      {
+        "rule": "rerun",
+        "site": "routing/corridor_cohorts.py:_solve_in_either_frame",
+        "callee": "_solve_in_frame",
+        "removed_by": "7x (branch fix/2094-7x-retry-removal)",
+        "replacement": "seat once in the plan's own lane-order frame; no opposite-frame attempt"
+      },
+      {
+        "rule": "rerun",
+        "site": "routing/corridor_cohorts.py:_solve_in_frame",
+        "callee": "seat",
+        "removed_by": "7x (branch fix/2094-7x-retry-removal)",
+        "replacement": "seat once from the plan's order relation; no seat-then-drop chain over alternative orders"
+      },
+      {
+        "rule": "retry-loop",
+        "site": "routing/corridor_cohorts.py:_solve_in_frame",
+        "callee": "seat",
+        "removed_by": "unassigned (pair_orders ladder)",
+        "replacement": "seat once from the plan's order relation; no seat-then-drop chain over alternative orders"
+      },
+      {
+        "rule": "scratch-offsets",
+        "site": "routing/exit_turns.py:_build_group_plan",
+        "callee": "<scratch context>",
+        "removed_by": "unassigned",
+        "replacement": "state the exit-turn lanes from plan inputs; no tentative-offset context to classify or plan against",
+        "note": "per-site ruling needed: plan-time evaluation vs look-ahead"
+      },
+      {
+        "rule": "scratch-offsets",
+        "site": "routing/exit_turns.py:_continuation_lane_ownership",
+        "callee": "<scratch context>",
+        "removed_by": "unassigned",
+        "replacement": "state continuation lane ownership from plan inputs; no tentative-offset context",
+        "note": "per-site ruling needed: plan-time evaluation vs look-ahead"
+      },
+      {
+        "rule": "scratch-offsets",
+        "site": "routing/exit_turns.py:_planned_axis_cross_range",
+        "callee": "<scratch context>",
+        "removed_by": "unassigned",
+        "replacement": "state the cross range from the planned lanes; no tentative-offset context",
+        "note": "per-site ruling needed: plan-time evaluation vs look-ahead"
+      },
+      {
+        "rule": "scratch-offsets",
+        "site": "routing/exit_turns.py:_source_lane_ownership",
+        "callee": "<scratch context>",
+        "removed_by": "unassigned",
+        "replacement": "state source lane ownership from plan inputs; no tentative-offset context",
+        "note": "per-site ruling needed: plan-time evaluation vs look-ahead"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "routing/member_geometry.py:_post_emission_seated_snapshot",
+        "callee": "_align_merge_fed_confluence_to_band",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the final route coordinates; planning does not run emission passes on copies of the routes to learn them"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "routing/member_geometry.py:_post_emission_seated_snapshot",
+        "callee": "_bundle_divergent_distinct_traverses",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the final route coordinates; planning does not run emission passes on copies of the routes to learn them"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "routing/member_geometry.py:_post_emission_seated_snapshot",
+        "callee": "_coincide_same_line_fanout_traverses",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the final route coordinates; planning does not run emission passes on copies of the routes to learn them"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "routing/member_geometry.py:_post_emission_seated_snapshot",
+        "callee": "_hold_runs_in_corridor_clearance",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the final route coordinates; planning does not run emission passes on copies of the routes to learn them"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "routing/member_geometry.py:_post_emission_seated_snapshot",
+        "callee": "_materialize_trunk_slots",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the final route coordinates; planning does not run emission passes on copies of the routes to learn them"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "routing/member_geometry.py:_post_emission_seated_snapshot",
+        "callee": "_reconcile_port_peeloff_risers",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the final route coordinates; planning does not run emission passes on copies of the routes to learn them"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "routing/member_geometry.py:_post_emission_seated_snapshot",
+        "callee": "_separate_fused_cotravelling_runs",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the final route coordinates; planning does not run emission passes on copies of the routes to learn them"
+      },
+      {
+        "rule": "rerun",
+        "site": "routing/member_geometry.py:_post_emission_seated_snapshot",
+        "callee": "_materialize_trunk_slots",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the final route coordinates; planning does not run emission passes on copies of the routes to learn them"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "routing/member_geometry.py:_size_patched_corners",
+        "callee": "_rederive_semantic_end_corners",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the final route coordinates; planning does not run emission passes on copies of the routes to learn them"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "routing/member_geometry.py:_size_patched_corners",
+        "callee": "_unify_coincident_corner_radii",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the final route coordinates; planning does not run emission passes on copies of the routes to learn them"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "routing/member_geometry.py:build_member_geometry_execution",
+        "callee": "_bundle_divergent_distinct_traverses",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the final route coordinates; planning does not run emission passes on copies of the routes to learn them"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "routing/member_geometry.py:build_member_geometry_execution",
+        "callee": "_bundle_same_destination_tails",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the final route coordinates; planning does not run emission passes on copies of the routes to learn them"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "routing/member_geometry.py:build_member_geometry_execution",
+        "callee": "_coincide_fanout_opening_descents",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the final route coordinates; planning does not run emission passes on copies of the routes to learn them"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "routing/member_geometry.py:build_member_geometry_execution",
+        "callee": "_coincide_same_line_fanout_traverses",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the final route coordinates; planning does not run emission passes on copies of the routes to learn them"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "routing/member_geometry.py:build_member_geometry_execution",
+        "callee": "_coincide_same_line_tracks",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the final route coordinates; planning does not run emission passes on copies of the routes to learn them"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "routing/member_geometry.py:build_member_geometry_execution",
+        "callee": "_hold_runs_in_corridor_clearance",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the final route coordinates; planning does not run emission passes on copies of the routes to learn them"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "routing/member_geometry.py:build_member_geometry_execution",
+        "callee": "_materialize_gap_slots",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the final route coordinates; planning does not run emission passes on copies of the routes to learn them"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "routing/member_geometry.py:build_member_geometry_execution",
+        "callee": "_materialize_trunk_slots",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the final route coordinates; planning does not run emission passes on copies of the routes to learn them"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "routing/member_geometry.py:build_member_geometry_execution",
+        "callee": "_reconcile_port_peeloff_risers",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the final route coordinates; planning does not run emission passes on copies of the routes to learn them"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "routing/member_geometry.py:build_member_geometry_execution",
+        "callee": "_rederive_semantic_end_corners",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the final route coordinates; planning does not run emission passes on copies of the routes to learn them"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "routing/member_geometry.py:build_member_geometry_execution",
+        "callee": "_separate_fused_cotravelling_runs",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the final route coordinates; planning does not run emission passes on copies of the routes to learn them"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "routing/member_geometry.py:build_member_geometry_execution",
+        "callee": "_separate_opposing_inter_row_trunks",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the final route coordinates; planning does not run emission passes on copies of the routes to learn them"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "routing/member_geometry.py:build_member_geometry_execution",
+        "callee": "_settle_same_destination_approach_bundles",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the final route coordinates; planning does not run emission passes on copies of the routes to learn them"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "routing/member_geometry.py:build_member_geometry_execution",
+        "callee": "_stagger_convergent_distinct_lines",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the final route coordinates; planning does not run emission passes on copies of the routes to learn them"
+      },
+      {
+        "rule": "rerun",
+        "site": "routing/member_geometry.py:build_member_geometry_execution",
+        "callee": "_coincide_same_line_tracks",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the final route coordinates; planning does not run emission passes on copies of the routes to learn them"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "routing/member_geometry.py:settle_member_geometry_corner_cohorts",
+        "callee": "_unify_coincident_corner_radii",
+        "removed_by": "unassigned",
+        "replacement": "the plan states the final route coordinates; planning does not run emission passes on copies of the routes to learn them"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "routing/normalize.py:_materialize_trunk_slots",
+        "callee": "_separate_declared_opposing_gap_bundles",
+        "removed_by": "unassigned",
+        "replacement": "run the gap-bundle separation once, from the routing table or inside the trunk-slot pass, not both"
+      },
+      {
+        "rule": "lookahead-copy",
+        "site": "routing/offsets.py:_commit_unless_a_decided_order_breaks",
+        "callee": "write",
+        "removed_by": "R3 owner (ruling R3; lines 7f-7h)",
+        "replacement": "decide each lane order once at plan time from the plan's inputs; later phases consume it, with no trial run and no refusal"
+      },
+      {
+        "rule": "named-retry",
+        "site": "routing/offsets.py:_compact_one_seed_with_retry",
+        "callee": "_compact_one_seed_with_retry",
+        "removed_by": "unassigned",
+        "replacement": "compact each seed once against the plan's lane slots; no hold-one-line-fixed retry"
+      },
+      {
+        "rule": "lookahead-copy",
+        "site": "routing/offsets.py:_compaction_seed_reordering",
+        "callee": "_recompact_seed",
+        "removed_by": "R3 owner (ruling R3; lines 7f-7h)",
+        "replacement": "decide each lane order once at plan time from the plan's inputs; later phases consume it, with no trial run and no refusal"
+      },
+      {
+        "rule": "lookahead-copy",
+        "site": "routing/offsets.py:_decision_overrides_an_owner",
+        "callee": "_reconcile_horizontal_offsets",
+        "removed_by": "R3 owner (ruling R3; lines 7f-7h)",
+        "replacement": "decide each lane order once at plan time from the plan's inputs; later phases consume it, with no trial run and no refusal"
+      },
+      {
+        "rule": "calls-lookahead",
+        "site": "routing/offsets.py:_order_entry_ports_by_approach",
+        "callee": "decide",
+        "removed_by": "R3 owner (ruling R3; lines 7f-7h)",
+        "replacement": "decide each lane order once at plan time from the plan's inputs; later phases consume it, with no trial run and no refusal"
+      },
+      {
+        "rule": "calls-lookahead",
+        "site": "routing/offsets.py:_order_entry_ports_by_approach.decide",
+        "callee": "_decision_overrides_an_owner",
+        "removed_by": "R3 owner (ruling R3; lines 7f-7h)",
+        "replacement": "decide each lane order once at plan time from the plan's inputs; later phases consume it, with no trial run and no refusal"
+      },
+      {
+        "rule": "calls-lookahead",
+        "site": "routing/offsets.py:_order_entry_ports_by_approach.owner",
+        "callee": "_trial_overrides_an_owner",
+        "removed_by": "R3 owner (ruling R3; lines 7f-7h)",
+        "replacement": "decide each lane order once at plan time from the plan's inputs; later phases consume it, with no trial run and no refusal"
+      },
+      {
+        "rule": "calls-lookahead",
+        "site": "routing/offsets.py:_recompact_fan_port_bordering_stations",
+        "callee": "_commit_unless_a_decided_order_breaks",
+        "removed_by": "R3 owner (ruling R3; lines 7f-7h)",
+        "replacement": "decide each lane order once at plan time from the plan's inputs; later phases consume it, with no trial run and no refusal"
+      },
+      {
+        "rule": "repair-named",
+        "site": "routing/offsets.py:_run_offset_phases",
+        "callee": "_recompact_fan_port_bordering_stations",
+        "removed_by": "unassigned",
+        "replacement": "compact the fan-port bundle once against the plan's slots; no recompaction after the port phases"
+      },
+      {
+        "rule": "repair-named",
+        "site": "routing/offsets.py:_run_offset_phases",
+        "callee": "_reconcile_horizontal_offsets",
+        "removed_by": "unassigned",
+        "replacement": "state same-row lane equalities at plan time; no reconcile pass over the offsets"
+      },
+      {
+        "rule": "repair-named",
+        "site": "routing/offsets.py:_run_offset_phases",
+        "callee": "_restore_fanout_peel_order",
+        "removed_by": "32 (#2134 S4)",
+        "replacement": "decide the peel order at a divergence once at plan time; no restoration pass"
+      },
+      {
+        "rule": "rerun",
+        "site": "routing/offsets.py:_run_offset_phases",
+        "callee": "_reconcile_horizontal_offsets",
+        "removed_by": "unassigned",
+        "replacement": "state same-row lane equalities at plan time; no second reconcile pass"
+      },
+      {
+        "rule": "calls-lookahead",
+        "site": "routing/offsets.py:_slot_entry_arrivals_on_their_approach_lane",
+        "callee": "_commit_unless_a_decided_order_breaks",
+        "removed_by": "R3 owner (ruling R3; lines 7f-7h)",
+        "replacement": "decide each lane order once at plan time from the plan's inputs; later phases consume it, with no trial run and no refusal"
+      },
+      {
+        "rule": "calls-lookahead",
+        "site": "routing/offsets.py:_trial_overrides_an_owner",
+        "callee": "_compaction_seed_reordering",
+        "removed_by": "R3 owner (ruling R3; lines 7f-7h)",
+        "replacement": "decide each lane order once at plan time from the plan's inputs; later phases consume it, with no trial run and no refusal"
+      }
+    ],
+    "manual": [
+      {
+        "site": "routing/corridor_cohorts.py:_corner_order_tier",
+        "shape": "fallback ladder",
+        "removed_by": "unassigned (corner-order tier ladder)",
+        "replacement": "state which corner orders hold as one decision from the problem's inputs; no tier that gives orders way in turn"
+      },
+      {
+        "site": "routing/core.py:_settle_station_moves",
+        "shape": "routing moves placement after emission",
+        "removed_by": "unassigned",
+        "replacement": "seat bubble-centred markers at placement from the plan; routing returns routes and moves no station"
+      }
+    ],
+    "pinned_later_passes": [
+      "_align_merge_fed_confluence_to_band",
+      "_bundle_divergent_distinct_traverses",
+      "_center_bubble_stations",
+      "_clear_bypass_v_label_strikes",
+      "_clear_merge_trunk_opposite_arm",
+      "_coincide_fanout_opening_descents",
+      "_coincide_merge_fanout_pivots",
+      "_coincide_same_line_fanout_traverses",
+      "_coincide_same_line_tracks",
+      "_hold_runs_in_corridor_clearance",
+      "_materialize_gap_slots",
+      "_materialize_trunk_slots",
+      "_nest_bypass_above_over_top_wrap",
+      "_reconcile_port_peeloff_risers",
+      "_rederive_semantic_end_corners",
+      "_separate_declared_opposing_gap_bundles",
+      "_separate_fused_cotravelling_runs",
+      "_separate_opposing_inter_row_trunks",
+      "_settle_same_destination_approach_bundles",
+      "_spread_diagonal_bundles",
+      "_stagger_convergent_distinct_lines",
+      "_unify_coincident_corner_radii"
+    ],
+    "pinned_nested_passes": [
+      "_bundle_same_destination_tails"
+    ]
+  },
+  "placement": {
+    "gate": "Not a #2015 gate.  Shrink-only list owned by #2171 (the placement programme, #323/#1745): engine.py, geometric_bypass.py, phases/ and the other placement modules.  A new hit fails the test, and an entry that matches no hit must be deleted.",
+    "entries": [
+      {
+        "rule": "retry-loop",
+        "site": "engine.py:_apply_label_strike_clearance",
+        "callee": "_relay",
+        "removed_by": "#2171",
+        "replacement": "decide row pitch and label wrap from label extents before the single layout pass; no probe, relayout or rollback"
+      },
+      {
+        "rule": "rerun",
+        "site": "engine.py:_apply_label_strike_clearance",
+        "callee": "_relay",
+        "removed_by": "#2171",
+        "replacement": "decide row pitch and label wrap from label extents before the single layout pass; no probe, relayout or rollback"
+      },
+      {
+        "rule": "retry-loop",
+        "site": "engine.py:_clear_bypass_label_rakes",
+        "callee": "reseat",
+        "removed_by": "#2171",
+        "replacement": "decide row pitch and label wrap from label extents before the single layout pass; no probe, relayout or rollback"
+      },
+      {
+        "rule": "retry-loop",
+        "site": "engine.py:_compute_layout_scaled",
+        "callee": "_layout_once",
+        "removed_by": "#2171",
+        "replacement": "decide row pitch and label wrap from label extents before the single layout pass; no probe, relayout or rollback"
+      },
+      {
+        "rule": "calls-lookahead",
+        "site": "engine.py:_compute_layout_scaled",
+        "callee": "_settle_row_pitch_against_reflow",
+        "removed_by": "#2171",
+        "replacement": "decide row pitch and label wrap from label extents before the single layout pass; no probe, relayout or rollback"
+      },
+      {
+        "rule": "rerun",
+        "site": "engine.py:_compute_layout_scaled",
+        "callee": "_layout_once",
+        "removed_by": "#2171",
+        "replacement": "decide row pitch and label wrap from label extents before the single layout pass; no probe, relayout or rollback"
+      },
+      {
+        "rule": "rerun",
+        "site": "engine.py:_compute_section_layout",
+        "callee": "reenforce_column_gaps",
+        "removed_by": "#2171",
+        "replacement": "decide column gaps once in section placement; no second enforcement pass"
+      },
+      {
+        "rule": "repair-named",
+        "site": "engine.py:_compute_section_layout",
+        "callee": "_reconcile_flow_exit_carrier_anchors",
+        "removed_by": "#2171",
+        "replacement": "seat the flow-exit carrier anchor from the plan; no reconcile pass"
+      },
+      {
+        "rule": "repair-named",
+        "site": "engine.py:_finalize_layout",
+        "callee": "_realign_fold_lr_exit_ports",
+        "removed_by": "#2171",
+        "replacement": "seat fold exit ports once from the plan; no realign after the row flush"
+      },
+      {
+        "rule": "repair-named",
+        "site": "engine.py:_finalize_layout",
+        "callee": "refit_tops_after_entry_resnap",
+        "removed_by": "#2171",
+        "replacement": "row tops follow content in the one placement; no refit after the entry resnap"
+      },
+      {
+        "rule": "repair-named",
+        "site": "engine.py:_finalize_layout",
+        "callee": "refit_empty_section_tops_to_content",
+        "removed_by": "#2171",
+        "replacement": "row tops follow content in the one placement; no refit of empty sections"
+      },
+      {
+        "rule": "rerun",
+        "site": "engine.py:_finalize_layout",
+        "callee": "_reserve_row_gap_for_top_padding",
+        "removed_by": "#2171",
+        "replacement": "row gaps follow content in the one placement; no second reservation"
+      },
+      {
+        "rule": "rerun",
+        "site": "engine.py:_finalize_layout",
+        "callee": "push_lower_rows_after_bbox_grow",
+        "removed_by": "#2171",
+        "replacement": "row bands follow content in the one placement; no second push"
+      },
+      {
+        "rule": "repair-named",
+        "site": "engine.py:_place_pass_c_content",
+        "callee": "_reanchor_off_track_to_consumer",
+        "removed_by": "#2171",
+        "replacement": "off-track stations seat on their consumer in the one placement (#1024); no reanchor pass"
+      },
+      {
+        "rule": "rerun",
+        "site": "engine.py:_place_pass_c_content",
+        "callee": "_shift_graph_into_canvas",
+        "removed_by": "#2171",
+        "replacement": "translate once, after the last placement; no second canvas shift"
+      },
+      {
+        "rule": "rerun",
+        "site": "engine.py:_place_pass_c_content",
+        "callee": "_reanchor_off_track_to_consumer",
+        "removed_by": "#2171",
+        "replacement": "off-track stations seat on their consumer in the one placement (#1024); no second reanchor"
+      },
+      {
+        "rule": "rerun",
+        "site": "engine.py:_place_pass_c_content",
+        "callee": "_top_align_row_bboxes_only",
+        "removed_by": "#2171",
+        "replacement": "row tops follow content in the one placement; no second top-align pass"
+      },
+      {
+        "rule": "lookahead-copy",
+        "site": "engine.py:_settle_row_pitch_against_reflow",
+        "callee": "_relay",
+        "removed_by": "#2171",
+        "replacement": "decide row pitch and label wrap from label extents before the single layout pass; no probe, relayout or rollback"
+      },
+      {
+        "rule": "retry-loop",
+        "site": "engine.py:_settle_row_pitch_against_reflow",
+        "callee": "_relay",
+        "removed_by": "#2171",
+        "replacement": "decide row pitch and label wrap from label extents before the single layout pass; no probe, relayout or rollback"
+      },
+      {
+        "rule": "rerun",
+        "site": "engine.py:_settle_row_pitch_against_reflow",
+        "callee": "_relay",
+        "removed_by": "#2171",
+        "replacement": "decide row pitch and label wrap from label extents before the single layout pass; no probe, relayout or rollback"
+      },
+      {
+        "rule": "rerun",
+        "site": "engine.py:compute_layout",
+        "callee": "_layout_pass",
+        "removed_by": "#2171",
+        "replacement": "decide bypass insertion from the section DAG at plan time; one layout pass, no lay-measure-revert"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "geometric_bypass.py:_evaluate",
+        "callee": "compute_station_offsets",
+        "removed_by": "#2171",
+        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "geometric_bypass.py:_evaluate",
+        "callee": "route_edges",
+        "removed_by": "#2171",
+        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
+      },
+      {
+        "rule": "rerun",
+        "site": "geometric_bypass.py:apply_geometric_bypass",
+        "callee": "layout_pass",
+        "removed_by": "#2171",
+        "replacement": "decide bypass insertion from the section DAG at plan time; one layout pass, no lay-measure-revert"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "phases/_common.py:_section_interior_crossings",
+        "callee": "compute_station_offsets",
+        "removed_by": "#2171",
+        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "phases/_common.py:_section_interior_crossings",
+        "callee": "route_edges",
+        "removed_by": "#2171",
+        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "phases/_common.py:_station_marker_bbox",
+        "callee": "compute_station_offsets",
+        "removed_by": "#2171",
+        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "phases/bbox.py:_fit_bboxes_to_content_top",
+        "callee": "compute_station_offsets",
+        "removed_by": "#2171",
+        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "phases/bbox.py:_predict_section_content_bottom",
+        "callee": "compute_station_offsets",
+        "removed_by": "#2171",
+        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "phases/bbox.py:_reserve_perp_port_edge_inset",
+        "callee": "compute_station_offsets",
+        "removed_by": "#2171",
+        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "phases/bbox.py:_reserve_row_gap_for_top_padding",
+        "callee": "compute_station_offsets",
+        "removed_by": "#2171",
+        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "phases/bbox.py:_section_content_hug_top",
+        "callee": "compute_station_offsets",
+        "removed_by": "#2171",
+        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "phases/bbox.py:_shrink_bboxes_to_content_bottom",
+        "callee": "compute_station_offsets",
+        "removed_by": "#2171",
+        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "phases/bbox.py:_snapshot_struct_heights_below_top",
+        "callee": "compute_station_offsets",
+        "removed_by": "#2171",
+        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "phases/bbox.py:grow_section_bands_to_content",
+        "callee": "compute_station_offsets",
+        "removed_by": "#2171",
+        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "phases/bbox.py:refit_empty_section_tops_to_content",
+        "callee": "compute_station_offsets",
+        "removed_by": "#2171",
+        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "phases/bbox.py:refit_tops_after_entry_resnap",
+        "callee": "compute_station_offsets",
+        "removed_by": "#2171",
+        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "phases/off_track.py:_line_crossed_file_icon_sinks",
+        "callee": "compute_station_offsets",
+        "removed_by": "#2171",
+        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "phases/off_track.py:_line_crossed_file_icon_sinks",
+        "callee": "route_edges",
+        "removed_by": "#2171",
+        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "phases/ports.py:_align_tb_section_bbox_bottoms",
+        "callee": "compute_station_offsets",
+        "removed_by": "#2171",
+        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "phases/row_align.py:_descent_step_is_stable",
+        "callee": "compute_station_offsets",
+        "removed_by": "#2171",
+        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "phases/row_align.py:_row_trunk_alignment",
+        "callee": "compute_station_offsets",
+        "removed_by": "#2171",
+        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "phases/spacing.py:_probe_label_placements",
+        "callee": "compute_station_offsets",
+        "removed_by": "#2171",
+        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
+      },
+      {
+        "rule": "later-pass-read",
+        "site": "phases/spacing.py:_probe_label_placements",
+        "callee": "route_edges_centred",
+        "removed_by": "#2171",
+        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
+      }
+    ]
+  }
+}
