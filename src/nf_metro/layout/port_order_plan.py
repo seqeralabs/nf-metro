@@ -8,7 +8,7 @@ outward normal.  A nested bundle keeps each line on the same side of its travel
 through every turn, so this frame makes one port's order directly comparable
 with the order of the port its lines came from, and it is a rotation invariant:
 a map turned a quarter turn plans the same orders, and a reflected map plans
-each order reversed.
+each lateral-decided order reversed.
 
 The inputs are the graph's structure (port sides, section flow directions, line
 sets, edges and junctions), line declaration priority, section grid cells and
@@ -39,17 +39,33 @@ later phase wrote.
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
+from functools import partial
 from types import MappingProxyType
 
 from nf_metro.layout.constants import SAME_Y_TOLERANCE
-from nf_metro.layout.geometry import AxisFrame, perpendicular_port_sides
-from nf_metro.layout.routing.common import ENTRY_SIDE_DIRECTION, EXIT_SIDE_DIRECTION
-from nf_metro.layout.routing.orientation import direction_vector
+from nf_metro.layout.geometry import perpendicular_port_sides
+from nf_metro.layout.routing.common import (
+    ENTRY_SIDE_DIRECTION,
+    EXIT_SIDE_DIRECTION,
+    Direction,
+)
+from nf_metro.layout.routing.orientation import (
+    get_point_coordinate,
+    lateral_axis,
+    lateral_order_sign,
+)
 from nf_metro.parser.model import MetroGraph, Port
 
-_Vector = tuple[float, float]
+_Point = tuple[float, float]
+
+_FLOW_DIRECTION = {
+    "LR": Direction.R,
+    "RL": Direction.L,
+    "TB": Direction.D,
+    "BT": Direction.U,
+}
 
 
 class PortClass(Enum):
@@ -85,7 +101,6 @@ class PortOrder:
     """One port's planned line order, or the input an undecided order lacks."""
 
     port_id: str
-    section_id: str
     is_entry: bool
     port_class: PortClass
     lines: tuple[str, ...] | None
@@ -103,40 +118,24 @@ class PortOrder:
 class PortOrderPlan:
     """Every port's :class:`PortOrder`, keyed by port id."""
 
-    orders: Mapping[str, PortOrder] = field(
-        default_factory=lambda: MappingProxyType({})
-    )
+    orders: Mapping[str, PortOrder]
 
     def __iter__(self) -> Iterator[PortOrder]:
         return iter(self.orders.values())
 
-    def undecided(self) -> tuple[PortOrder, ...]:
-        return tuple(order for order in self if not order.decided)
+
+def _lateral(point: _Point, origin: _Point, travel: Direction) -> float:
+    """Signed distance of *point* from *origin* across *travel*, positive to the
+    traveller's right."""
+    axis = lateral_axis(travel)
+    return lateral_order_sign(travel) * (
+        get_point_coordinate(point, axis) - get_point_coordinate(origin, axis)
+    )
 
 
-def _sub(a: _Vector, b: _Vector) -> _Vector:
-    return (a[0] - b[0], a[1] - b[1])
-
-
-def _dot(a: _Vector, b: _Vector) -> float:
-    return a[0] * b[0] + a[1] * b[1]
-
-
-def _right_normal(travel: _Vector) -> _Vector:
-    """Screen right-hand normal of *travel* (Y grows downward)."""
-    return (-travel[1], travel[0])
-
-
-def _flow_vector(direction: str) -> _Vector:
-    primary, _secondary = AxisFrame.axes_for_direction(direction)
-    sign = AxisFrame.flow_sign(direction)
-    return (sign, 0.0) if primary == "x" else (0.0, sign)
-
-
-def _port_travel(port: Port) -> _Vector:
+def _port_travel(port: Port) -> Direction:
     sides = ENTRY_SIDE_DIRECTION if port.is_entry else EXIT_SIDE_DIRECTION
-    dx, dy = direction_vector(sides[port.side])
-    return (float(dx), float(dy))
+    return sides[port.side]
 
 
 class _Builder:
@@ -149,11 +148,11 @@ class _Builder:
         self.decided: dict[str, PortOrder] = {}
         self.in_progress: set[str] = set()
 
-    def point(self, node_id: str) -> _Vector:
+    def point(self, node_id: str) -> _Point:
         station = self.graph.stations[node_id]
         return (station.x, station.y)
 
-    def cell_centre(self, node_id: str) -> _Vector | None:
+    def cell_centre(self, node_id: str) -> _Point | None:
         """Centre of *node_id*'s section's grid cell, in (column, row) units."""
         section_id = self.graph.stations[node_id].section_id
         section = self.graph.sections.get(section_id) if section_id else None
@@ -214,16 +213,15 @@ class _Builder:
         section = graph.section_for_port(port)
         origin = self.point(port_id)
         if port.is_entry:
-            normal = _right_normal(_port_travel(port))
+            travel = _port_travel(port)
         else:
-            normal = _right_normal(_flow_vector(section.direction))
+            travel = _FLOW_DIRECTION[section.direction]
         lines = graph.station_lines(port_id)
         here = self.cell_centre(port_id)
 
         refs: dict[str, str] = {}
         laterals: dict[str, float] = {}
-        ref_nodes: set[str] = set()
-        ref_laterals: list[float] = []
+        measured_nodes: dict[str, float] = {}
         via_junction = False
         missing: str | None = None
         for lid in lines:
@@ -242,36 +240,31 @@ class _Builder:
                     missing = missing or f"grid cells at line {lid!r}'s seam"
                     continue
                 measured = {
-                    n: _dot(_sub(c, here), normal)
+                    n: _lateral(c, here, travel)
                     for n, c in cells.items()
                     if c is not None
                 }
             else:
-                measured = {n: _dot(_sub(self.point(n), origin), normal) for n in nodes}
-            ref_nodes.update(nodes)
-            ref_laterals.extend(measured.values())
+                measured = {n: _lateral(self.point(n), origin, travel) for n in nodes}
+            measured_nodes.update(measured)
             ref = min(nodes, key=lambda n: (abs(measured[n]), measured[n], n))
             refs[lid] = ref
             laterals[lid] = measured[ref]
         if not port.is_entry:
             via_junction = self.feeds_junction(port_id)
         port_class = _classify(
-            port, section.direction, ref_nodes, ref_laterals, via_junction
+            port,
+            section.direction,
+            set(measured_nodes),
+            list(measured_nodes.values()),
+            via_junction,
         )
-
-        def order(
-            lines: tuple[str, ...] | None,
-            basis: OrderBasis | None,
-            missing: str | None = None,
-        ) -> PortOrder:
-            return PortOrder(
-                port_id, section.id, port.is_entry, port_class, lines, basis, missing
-            )
+        make = partial(PortOrder, port_id, port.is_entry, port_class)
 
         if missing is not None:
-            return order(None, None, missing)
+            return make(None, None, missing)
         if len(lines) < 2:
-            return order(tuple(lines), OrderBasis.SINGLE)
+            return make(tuple(lines), OrderBasis.SINGLE)
 
         lateral_rank = _tolerance_ranks(laterals)
         upstream: dict[str, int] = {}
@@ -279,7 +272,8 @@ class _Builder:
             ref = refs[lid]
             rank = lateral_rank[lid]
             tied = [o for o in lines if o != lid and lateral_rank[o] == rank]
-            # A rank orders lines only against lines of the same port.
+            # An upstream rank breaks a lateral tie only between lines that share
+            # one reference node.
             shared = all(refs[o] == ref for o in tied)
             if ref not in graph.ports or not tied or not shared:
                 upstream[lid] = 0
@@ -287,14 +281,14 @@ class _Builder:
             held = self.order_of(ref)
             if held is None or held.lines is None:
                 why = "on a section cycle" if held is None else "undecided"
-                return order(None, None, f"order of reference port {ref!r} ({why})")
+                return make(None, None, f"order of reference port {ref!r} ({why})")
             upstream[lid] = held.lines.index(lid) if lid in held.lines else 0
         keys = {
             lid: (lateral_rank[lid], upstream[lid], self.priority.get(lid, 0))
             for lid in lines
         }
         ordered = sorted(lines, key=lambda lid: (keys[lid], lid))
-        return order(tuple(ordered), _basis(ordered, keys))
+        return make(tuple(ordered), _basis(ordered, keys))
 
 
 def _tolerance_ranks(values: Mapping[str, float]) -> dict[str, int]:

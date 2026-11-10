@@ -240,8 +240,7 @@ Lines are sorted by three fields, the earlier deciding:
 The record also states which field decided the order and the port's structural class: perpendicular, two-sided, shared, junction-fed, or a flow-side port with a single feeder.
 A port whose order needs an input the plan cannot supply is undecided and names that input, rather than taking a value a later phase wrote.
 
-The plan is held on the offsets context and no offset phase reads it.
-It is the first stage of the lane plan: a track plan that packs each section's lanes with these orders fixed at its ports, and a seam joint read from both sides of each seam, follow it.
+The plan is held on the offsets context as `port_order_plan`.
 
 ## Identity and coverage
 

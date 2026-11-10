@@ -1590,7 +1590,7 @@ the planned-fan offsets that follow them own the lanes a fan plan states.
 ### Port order plan (before phase 1)
 
 - **Purpose**: Decide every port's line order once, from structure, before any
-  lane offset is written, as the first stage of the lane plan.
+  lane offset is written.
 - **Helpers**: `build_port_order_plan` (`layout/port_order_plan.py`), called at
   the top of `_run_offset_phases` and held on the offsets context as
   `port_order_plan`.
@@ -1598,7 +1598,7 @@ the planned-fan offsets that follow them own the lanes a fan plan states.
   cells for this offsets run.
 - **Postcondition**: Every port has a `PortOrder`: its lines ordered
   travel-left to travel-right with the sort field that decided it, or
-  undecided with the missing input named. No offset phase reads the plan.
+  undecided with the missing input named.
 - **Invariants preserved**: All offsets and geometry; the plan reads no lane
   offset, route, draft or departure record.
 - **Related tests**: `tests/test_port_order_plan.py`.

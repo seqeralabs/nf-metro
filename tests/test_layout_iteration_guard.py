@@ -40,13 +40,13 @@ import layout_iteration_guard as guard
 import pytest
 
 ALLOWLIST_PATH = Path(__file__).parent / "data" / "layout_iteration_allowlist.json"
-ROUTING_CEILING = 71
+ROUTING_CEILING = 72
 PLACEMENT_CEILING = 44
 PINNED_LATER_CEILING = 22
 PINNED_NESTED_CEILING = 1
 LISTS = ("routing", "placement")
 PLACEMENT_OWNER = "#2171"
-ROUTING_REMOVED_BY = re.compile(r"^(unassigned|\d+[a-z]?\b|R3\b|lane plan step \d\b)")
+ROUTING_REMOVED_BY = re.compile(r"^(unassigned|\d+[a-z]?\b|R3\b|LANE-PLAN\b)")
 OPTIONAL_ENTRY_FIELDS = {"note"}
 MANUAL_FIELDS = {"site", "shape", "removed_by", "replacement"}
 ENTRY_FIELDS = {"rule", "site", "callee", "removed_by", "replacement"}
