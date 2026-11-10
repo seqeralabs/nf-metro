@@ -2292,7 +2292,11 @@
   "status": "needs-review"
  },
  "corridor_cohorts.py::for pair_orders in (::#1": {
-  "note": "The pair-order passes finish without a PLANNED seating and return the first failure; reached only when no order seats the component. Exercised by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once. needs-review because the arm is reachable, not because it is unreachable.",
+  "note": "Every composition cycles, so the loop ends and the end-turn votes alone are seated to report the cycle and its owners. No corpus solve's end-turn votes cycle with its directed separations. Exercised by tests/test_corridor_cohorts.py::test_directed_separation_cycle_fails_with_owner_provenance and tests/test_corridor_cohorts.py::test_contradicting_directed_separations_fail_closed_whatever_gives_way. needs-review because the arm is reachable, not because it is unreachable.",
+  "status": "needs-review"
+ },
+ "corridor_cohorts.py::if forced_order:::#1": {
+  "note": "A composition whose orders cycle has no forced root order, so the next, sparser composition is tried before any seating; the seated orders give way first, then the fixed-lane orders. No corpus solve's seated or fixed-lane orders cycle. Exercised by tests/test_corridor_cohorts.py::test_seated_orders_cycling_through_a_directed_separation_give_way and tests/test_corridor_cohorts.py::test_fixed_lane_drawn_orders_cycling_through_a_forced_order_give_way. needs-review because the arm is reachable, not because it is unreachable.",
   "status": "needs-review"
  },
  "corridor_cohort_integration.py::if (::#21": {
