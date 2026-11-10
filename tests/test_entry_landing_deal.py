@@ -94,15 +94,18 @@ def test_cohort_final_compile_lands_the_bundle_in_exit_order(
     turn right into ``sec1``'s LEFT entry, so they land top to bottom in that
     order; the port's own lane order would put l2 above l1."""
     plans: list[cci.CorridorCohortPlan] = []
+    compile_plan = member_geometry.compile_corridor_cohort_plan
+
+    def capture(*args: Any, **kwargs: Any) -> cci.CorridorCohortPlan:
+        plan = compile_plan(*args, **kwargs)
+        plans.append(plan)
+        return plan
+
+    # Patched outside the shadow observation so that each patch restores the
+    # function it replaced: inside it, teardown would reinstate the shadow's
+    # publishing compile for every later test in the process.
+    monkeypatch.setattr(member_geometry, "compile_corridor_cohort_plan", capture)
     with shadow_observation():
-        compile_plan = member_geometry.compile_corridor_cohort_plan
-
-        def capture(*args: Any, **kwargs: Any) -> cci.CorridorCohortPlan:
-            plan = compile_plan(*args, **kwargs)
-            plans.append(plan)
-            return plan
-
-        monkeypatch.setattr(member_geometry, "compile_corridor_cohort_plan", capture)
         _render(FIXTURE)
     final = plans[-1]
     landings = {
