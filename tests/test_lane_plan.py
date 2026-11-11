@@ -1899,6 +1899,17 @@ def test_a_through_line_turns_off_beyond_the_lines_ending(path: Path) -> None:
     assert bad == []
 
 
+def test_a_line_carrying_on_past_its_branch_turns_off_beyond() -> None:
+    """At the junction after riboseq_metro's alignment exit, rnaseq both runs
+    on level to Novel transcripts and branches down past it: its branch turns
+    off beyond riboseq, whose run ends there, whichever side the legs head."""
+    graph = _laid_out(ROOT / "examples" / "riboseq_metro.mmd").graph
+    assert graph is not None and graph._lane_plan is not None
+    turn_off = graph._lane_plan.tracks.turn_offs[("__junction_13", True)]
+    assert turn_off.through == ("rnaseq",)
+    assert turn_off.along(True)[-1] == turn_off.along(False)[-1] == "rnaseq"
+
+
 def test_the_record_is_immutable_and_survives_deepcopy() -> None:
     graph = _laid_out(TOPOLOGIES / "return_trunk_over_member_run.mmd").graph
     assert graph is not None and graph._lane_plan is not None

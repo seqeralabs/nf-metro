@@ -79,7 +79,7 @@ reflected.
 run, lines meet a leg turning off (or joining) the run by their side of
 travel there, the side the leg heads for first, except that a line whose run
 carries on level through the node meets it beyond (before) every line whose
-run ends there.
+run ends there; a junction lies on the run of the port it continues.
 
 **Section order.**  The merge of every entry's order read up the lane
 index, line priority deciding between lines no entry orders.  A line on no
@@ -812,7 +812,9 @@ class _Tracks:
                     }
                 through = tuple(
                     sorted(
-                        lid for lid in key if self._through(node, lid, travel, leaving)
+                        lid
+                        for lid in key
+                        if self._through(node, port_id, lid, travel, leaving)
                     )
                 )
                 classes = [
@@ -825,22 +827,24 @@ class _Tracks:
                 out[(node, leaving)] = TurnOff(node, leaving, travel, lines, through)
         return out
 
-    def _through(self, node: str, lid: str, travel: Direction, leaving: bool) -> bool:
+    def _through(
+        self, node: str, port_id: str, lid: str, travel: Direction, leaving: bool
+    ) -> bool:
         """Whether *lid*'s run carries on level through *node* along
         *travel*: it also leaves the node level ahead (or arrives level from
-        behind)."""
+        behind).  A junction lies on the run of the port *port_id* it
+        continues."""
         graph = self.graph
-        here = graph.stations[node]
+        here, on = graph.stations[node], graph.stations[port_id]
+        vx, vy = direction_vector(travel)
         edges = graph.edges_from(node) if leaving else graph.edges_to(node)
         ahead = 1 if leaving else -1
         for edge in edges:
             if edge.line_id != lid:
                 continue
             other = graph.stations[edge.target if leaving else edge.source]
-            vx, vy = direction_vector(travel)
-            dx, dy = other.x - here.x, other.y - here.y
-            along = dx * vx + dy * vy
-            across = dy * vx - dx * vy
+            along = (other.x - here.x) * vx + (other.y - here.y) * vy
+            across = (other.y - on.y) * vx - (other.x - on.x) * vy
             if abs(across) <= COORD_TOLERANCE and along * ahead > COORD_TOLERANCE:
                 return True
         return False
@@ -888,7 +892,8 @@ class _Tracks:
         pins = {
             lid: pin
             for lid, pin in pins.items()
-            if lid not in slotted and pin[0] not in slotted.values()
+            if slotted.get(lid, pin[0]) == pin[0]
+            and all(k != pin[0] or m == lid for m, k in slotted.items())
         }
         if not pins:
             return None
