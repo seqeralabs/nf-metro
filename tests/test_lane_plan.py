@@ -400,7 +400,7 @@ def _straight_seams(graph: MetroGraph) -> list[tuple[str, str, str]]:
 def test_a_straight_seam_keeps_its_lines_level(path: Path) -> None:
     """A line crossing a straight seam leaves its exit and reaches the entry
     on one coordinate, unless the exit's lane falls between the entry's lanes
-    or the entry also takes the line from elsewhere: no out-and-back step."""
+    or another exit also feeds the line straight in: no out-and-back step."""
     graph = _laid_out(path).graph
     if graph is None or graph._lane_plan is None:
         return
@@ -417,9 +417,7 @@ def test_a_straight_seam_keeps_its_lines_level(path: Path) -> None:
         on_grid = (here - there) / step
         if abs(on_grid - round(on_grid)) > 0.05 or len(sources[(entry_id, lid)]) > 1:
             continue
-        if abs(here - there) > SAME_Y_TOLERANCE and (
-            (entry_id, lid) not in plan.seams.pins
-        ):
+        if abs(here - there) > SAME_Y_TOLERANCE:
             stepped.append((exit_id, entry_id, lid))
     assert stepped == []
 
