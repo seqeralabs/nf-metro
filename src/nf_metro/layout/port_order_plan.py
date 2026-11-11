@@ -75,8 +75,13 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from functools import partial
+from types import MappingProxyType
 
-from nf_metro.layout.constants import SAME_Y_TOLERANCE
+from nf_metro.layout.constants import (
+    CURVE_RADIUS,
+    SAME_Y_TOLERANCE,
+    graph_offset_step,
+)
 from nf_metro.layout.geometry import (
     flow_entry_side,
     flow_port_sides,
@@ -87,10 +92,16 @@ from nf_metro.layout.routing.common import (
     ENTRY_SIDE_DIRECTION,
     EXIT_SIDE_DIRECTION,
     Direction,
-    resolve_section,
+    _v_segment_crosses_other_section,
     resolve_section_colrow,
+    section_ids_of_stations,
 )
-from nf_metro.layout.routing.context import _packed_cell_mate_obstructs
+from nf_metro.layout.routing.context import (
+    BypassNeed,
+    _packed_cell_mate_obstructs,
+    boxed_fanout_junction,
+    packed_cell_same_row_bypass,
+)
 from nf_metro.layout.routing.orientation import (
     direction_vector,
     get_point_coordinate,
@@ -104,6 +115,8 @@ _Cell = tuple[float, float, float, float]
 """``(col0, col1, row0, row1)`` grid extent."""
 
 _BYPASS_SPREAD = 0.25
+_PARTING = 0.1
+"""Lateral within which an entry's consumer counts as level with it."""
 _U_TURN_SPREAD = 0.75
 _REACH_STEP = 0.01
 
@@ -140,6 +153,9 @@ class OrderBasis(Enum):
     """An exit's lines in its section's planned lanes."""
     SEAM = "seam"
     """An entry's lines in the lanes its straight seams pin."""
+    DEPARTURE = "departure"
+    """A same-band bypass parting at the entry took the outermost place on
+    the side it leaves to."""
 
 
 class ApproachKind(Enum):
@@ -162,6 +178,10 @@ class SideRule(Enum):
     TURN_ROUND = "turn-round"
     """The source exit heads along the port's axis: the loop turns round
     left-handed, onto the entry traveller's right."""
+    OVER_TOP = "over-top"
+    """A single line's loop from a LEFT exit into a far LEFT entry of a
+    section entered from its left runs over the target's top, on the entry
+    traveller's left, where the far-side wrap handler finds that band clear."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,8 +235,16 @@ class PortOrderPlan:
     approaches: Mapping[tuple[str, str], Approach]
     """Keyed ``(entry port, upstream source)``."""
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "orders", MappingProxyType(dict(self.orders)))
+        object.__setattr__(self, "approaches", MappingProxyType(dict(self.approaches)))
+
     def __iter__(self) -> Iterator[PortOrder]:
         return iter(self.orders.values())
+
+    def __deepcopy__(self, memo: dict[int, object]) -> PortOrderPlan:
+        del memo
+        return self
 
 
 def _lateral(point: _Point, origin: _Point, travel: Direction) -> float:
@@ -489,9 +517,64 @@ class PortOrderBuilder:
         if source is None or source.is_entry:
             return below, SideRule.SCREEN_BELOW
         heading = EXIT_SIDE_DIRECTION[source.side]
-        if lateral_axis(heading) != lateral_axis(port_travel(graph.ports[entry_id])):
+        entry = graph.ports[entry_id]
+        if lateral_axis(heading) != lateral_axis(port_travel(entry)):
             return below, SideRule.SCREEN_BELOW
+        if (
+            entry.side is PortSide.LEFT
+            and source.side is PortSide.LEFT
+            and flow_entry_side(graph.section_for_port(entry).direction)
+            is PortSide.LEFT
+            and self.wraps_over_top(source_id, entry_id)
+        ):
+            return -1, SideRule.OVER_TOP
         return 1, SideRule.TURN_ROUND
+
+    def wraps_over_top(self, exit_id: str, entry_id: str) -> bool:
+        """Whether the far-side wrap handler loops one line from *exit_id*
+        over the top of *entry_id*'s section: its own test, read from the
+        placement this record seals at, with no corridor reserved in the band
+        above and :func:`left_exit_wrap_columns`'s single-line columns.
+        Dispatch runs the test on the placement and reserved corridors it
+        routes with."""
+        # Dispatch imports the offsets pass, which seals this record.
+        from nf_metro.layout.routing.inter_section_handlers import (
+            left_exit_wrap_columns,
+            left_exit_wrap_over_top_y,
+        )
+        from nf_metro.layout.routing.normalize import (
+            _h_segment_crosses_other_section,
+        )
+
+        graph = self.graph
+        src, tgt = graph.stations[exit_id], graph.stations[entry_id]
+        ends = frozenset(section_ids_of_stations(graph, src, tgt))
+
+        def crosses_v(x: float, y1: float, y2: float) -> bool:
+            return _v_segment_crosses_other_section(graph, x, y1, y2, ends, 0.0)
+
+        def crosses_h(x1: float, x2: float, y: float) -> bool:
+            return _h_segment_crosses_other_section(graph, x1, x2, y, ends, 0.0)
+
+        columns = left_exit_wrap_columns(
+            graph,
+            src,
+            tgt,
+            resolve_section_colrow(graph, src),
+            graph_offset_step(graph),
+        )
+        channel = left_exit_wrap_over_top_y(
+            graph,
+            src,
+            tgt,
+            resolve_section_colrow(graph, tgt)[1],
+            columns,
+            CURVE_RADIUS,
+            None,
+            crosses_v,
+            crosses_h,
+        )
+        return channel is not None
 
     def bypass_side(
         self, entry_id: str, source_id: str, below: int
@@ -569,22 +652,23 @@ class PortOrderBuilder:
         return -below, SideRule.ROW_TOP
 
     def hop_obstructed(self, hop_id: str, entry_id: str) -> bool:
+        """Whether dispatch takes the hop into *entry_id* as a packed-cell
+        same-row bypass (:func:`packed_cell_same_row_bypass`)."""
         graph = self.graph
         hop, target = graph.stations[hop_id], graph.stations[entry_id]
-        blocks_source, blocks_target = _packed_cell_mate_obstructs(
-            graph,
-            hop,
-            target,
+        rows = (
             resolve_section_colrow(graph, hop)[1],
             resolve_section_colrow(graph, target)[1],
         )
-        fork = (
-            hop_id in self.junctions
-            and len({e.target for e in graph.edges_from(hop_id)}) > 1
+        blocks_source, blocks_target = _packed_cell_mate_obstructs(
+            graph, hop, target, *rows
         )
-        home = resolve_section(graph, hop)
-        boxed = fork and home is not None and graph.is_packed_section(home.id)
-        return (blocks_source or blocks_target) and not (blocks_source and boxed)
+        return packed_cell_same_row_bypass(
+            graph.ports[entry_id].side,
+            BypassNeed(blocks_source or blocks_target, blocks_source, blocks_target),
+            rows,
+            boxed_fanout_junction(graph, hop_id, graph.is_fanout_junction(hop_id)),
+        )
 
     def joining_side(
         self,
@@ -774,10 +858,67 @@ class PortOrderBuilder:
             lid: (rank[lid], refined[lid], self.priority.get(lid, 0)) for lid in lines
         }
         keyed = sorted(lines, key=lambda lid: (keys[lid], lid))
-        ordered = self._keep_feeding_bundles(lines, sources, keyed)
+        ordered, bundled = self._keep_feeding_bundles(lines, sources, keyed)
+        if not perpendicular:
+            parted = self._depart(port_id, ordered, bundled, laterals, kinds)
+            if parted != ordered:
+                return make(tuple(parted), OrderBasis.DEPARTURE)
         if ordered != keyed:
             return make(tuple(ordered), OrderBasis.BUNDLE)
         return make(tuple(ordered), _basis(ordered, keys))
+
+    def _depart(
+        self,
+        entry_id: str,
+        ordered: list[str],
+        bundled: set[str],
+        laterals: Mapping[str, float],
+        kinds: Mapping[str, ApproachKind],
+    ) -> list[str]:
+        """*ordered* with each line that parts at the entry for one side, and
+        arrives there by a same-band bypass on that side in no feeding bundle
+        of the entry's lines, outermost on that side, nearer consumers inside,
+        where the entry's other lines include some running on level."""
+        graph = self.graph
+        port = graph.ports[entry_id]
+        origin, travel = self.point(entry_id), port_travel(port)
+        sides: dict[str, float] = {}
+        for lid in ordered:
+            laterals_out = [
+                _lateral(self.point(e.target), origin, travel)
+                for e in graph.edges_from(entry_id)
+                if e.line_id == lid
+                and graph.stations[e.target].section_id == port.section_id
+            ]
+            if not laterals_out:
+                return ordered
+            if all(abs(v) <= _PARTING for v in laterals_out):
+                sides[lid] = 0.0
+            elif all(v > _PARTING for v in laterals_out):
+                sides[lid] = min(laterals_out)
+            elif all(v < -_PARTING for v in laterals_out):
+                sides[lid] = max(laterals_out)
+            else:
+                return ordered
+        if 0.0 not in sides.values() or set(sides.values()) == {0.0}:
+            return ordered
+        movers = [
+            lid
+            for lid in ordered
+            if sides[lid] != 0.0
+            and lid not in bundled
+            and kinds.get(lid) is ApproachKind.BYPASS
+            and (laterals[lid] > 0) == (sides[lid] > 0)
+        ]
+        left = sorted(
+            (lid for lid in movers if sides[lid] < 0),
+            key=lambda lid: (sides[lid], ordered.index(lid)),
+        )
+        right = sorted(
+            (lid for lid in movers if sides[lid] > 0),
+            key=lambda lid: (-sides[lid], ordered.index(lid)),
+        )[::-1]
+        return left + [lid for lid in ordered if lid not in movers] + right
 
     def _round_own_side(
         self,
@@ -811,7 +952,9 @@ class PortOrderBuilder:
         lines: Sequence[str],
         sources: Mapping[str, list[tuple[str, bool]]],
         ordered: list[str],
-    ) -> list[str]:
+    ) -> tuple[list[str], set[str]]:
+        """*ordered* keeping every feeding exit's bundle order, and the lines
+        those bundles carry."""
         by_source: dict[str, list[str]] = {}
         for lid in lines:
             for node, _via in sources[lid]:
@@ -823,7 +966,10 @@ class PortOrderBuilder:
             held = self.order_of(node)
             if held is not None and held.lines is not None:
                 chains.append([lid for lid in held.lines if lid in carried])
-        return _merge_orders(ordered, chains, lines) if chains else ordered
+        bundled = {lid for chain in chains for lid in chain}
+        if not chains:
+            return ordered, bundled
+        return _merge_orders(ordered, chains, lines), bundled
 
 
 def _tolerance_ranks(values: Mapping[str, float]) -> dict[str, int]:

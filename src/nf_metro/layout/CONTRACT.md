@@ -1614,8 +1614,13 @@ the planned-fan offsets that follow them own the lanes a fan plan states.
   travel-right with the sort field that decided it, or undecided with the
   missing input named), every same-band `(entry, upstream source)` pair an
   `Approach`, every in-section `(node, line)` and fed junction a lane, every
-  entry a straight seam pins its lanes, and every perpendicular port whose
-  lines all cross straight seams the offsets that keep them straight.
+  perpendicular port each line's offset across its travel, every port and
+  every junction continuing one port's run the order its lines turn off it,
+  every entry a straight seam pins its lanes, every entry two feeding bundles
+  cross at a forced crossing, and every perpendicular port whose lines all
+  cross straight seams the offsets that keep them straight.  The record and
+  its mappings are read-only and shared, never copied, by a deep copy of the
+  graph.
   Later offsets runs of the layout, and routing and rendering
   after it, replay the sealed record rather than rebuilding it.
   Rail-mode and sectionless layouts never reach 5.1 and hold no record.

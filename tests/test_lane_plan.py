@@ -25,10 +25,10 @@ import os
 import subprocess
 import sys
 import warnings
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -38,8 +38,12 @@ import pytest
 import nf_metro.layout.lane_plan as lane_plan_module
 import nf_metro.layout.port_order_plan as port_order_plan_module
 from nf_metro.layout import engine as engine_module
+from nf_metro.layout import fan_ordering
 from nf_metro.layout.constants import SAME_Y_TOLERANCE, graph_offset_step
-from nf_metro.layout.geometry import perpendicular_port_sides
+from nf_metro.layout.geometry import (
+    packed_section_visual_rank,
+    perpendicular_port_sides,
+)
 from nf_metro.layout.lane_plan import LanePlan
 from nf_metro.layout.port_order_plan import (
     Approach,
@@ -49,8 +53,13 @@ from nf_metro.layout.port_order_plan import (
     _lateral,
     port_travel,
 )
+from nf_metro.layout.route_topology import fanout_junction_ids
 from nf_metro.layout.routing import offsets as offsets_module
-from nf_metro.layout.routing.common import EXIT_SIDE_DIRECTION, Direction
+from nf_metro.layout.routing.common import (
+    EXIT_SIDE_DIRECTION,
+    Direction,
+    resolve_section_colrow,
+)
 from nf_metro.layout.routing.context import _section_lane_frame
 from nf_metro.layout.routing.offsets import (
     compute_station_offsets,
@@ -96,14 +105,12 @@ ROTATION_FIXTURES = [
     FIXTURES / "regressions" / "entry_slot_overlay_from_exit_forward.mmd",
     FIXTURES / "curve_invariant_repros" / "trunk_lane_taken_by_turning_line.mmd",
     FIXTURES / "curve_invariant_repros" / "backward_right_entry_lane_handover.mmd",
+    FIXTURES / "regressions" / "approach_order_multi_line_feeder.mmd",
+    FIXTURES / "regressions" / "approach_order_carry_sandwich.mmd",
 ]
 
-# Same-row bypasses whose drawn approach differs from the record: the U-turn
-# loop from a same-row LEFT exit into a LEFT entry it lies right of is
-# drawn over the top while the turn-round rule records the traveller's right.
-APPROACH_SIDE_EXCEPTIONS = frozenset(
-    {("samerow_left_exit_far_left_entry", "te__entry_left_9", "psite_id__exit_left_4")}
-)
+# Same-row bypasses whose drawn approach differs from the record.
+APPROACH_SIDE_EXCEPTIONS: frozenset[tuple[str, str, str]] = frozenset()
 
 
 @dataclass
@@ -214,7 +221,19 @@ def test_every_sealed_record_is_total(path: Path) -> None:
         for edge in graph.edges_to(junction)
         if (edge.source, edge.line_id) in in_sections
     }
-    assert set(plan.tracks.lanes) == in_sections | fed_junctions
+    perpendicular = {
+        (node, lid)
+        for node, lid in in_sections
+        if node in graph.ports and _perpendicular(graph, node)
+    }
+    assert set(plan.tracks.lanes) == (in_sections - perpendicular) | fed_junctions
+    assert {
+        (port_id, lid)
+        for port_id, offsets in plan.tracks.perpendicular.items()
+        for lid in offsets
+    } == perpendicular
+    for port_id, offsets in plan.tracks.perpendicular.items():
+        assert len(set(offsets.values())) == len(offsets)
     seams = plan.seams
     for entry_id, lanes in seams.entries.items():
         assert not _perpendicular(graph, entry_id) and graph.ports[entry_id].is_entry
@@ -226,8 +245,7 @@ def test_every_sealed_record_is_total(path: Path) -> None:
         assert not graph.ports[exit_id].is_entry
     for port_id, offsets in seams.perpendicular.items():
         assert _perpendicular(graph, port_id)
-        assert sorted(offsets) == graph.station_lines(port_id)
-        assert len(set(offsets.values())) == len(offsets)
+        assert offsets == plan.tracks.perpendicular[port_id]
 
 
 def _perpendicular(graph: MetroGraph, port_id: str) -> bool:
@@ -274,6 +292,11 @@ def test_no_two_coexisting_lines_share_a_lane(path: Path) -> None:
                 ):
                     continue
                 for node_e, node_f in ((e.source, f.source), (e.target, f.target)):
+                    if (node_e, e.line_id) not in lanes or (
+                        node_f,
+                        f.line_id,
+                    ) not in lanes:
+                        continue
                     if lanes[(node_e, e.line_id)] == lanes[(node_f, f.line_id)]:
                         clashes.append((node_e, e.line_id, node_f, f.line_id))
     assert clashes == []
@@ -333,80 +356,126 @@ def _reordered_bundles(
     return out
 
 
-# Seams whose bundle a straight-seam entry orders otherwise than its exit.
-# "forced-conflict": another bundle into the entry carries the same lines in
-# the opposite order, so one of the two crosses whatever the entry's order.
-# "unforced-fill": no other bundle orders those lines; the fill round the
-# entry's pins sends the bundle's free line, ordered between two adjacent
-# pins, past the later one.
-SEAM_ORDER_EXCEPTIONS: dict[tuple[str, str, str], str] = {
-    (
-        "tests/fixtures/hash_seed_determinism/seed_15.mmd",
-        "s8__exit_left_8",
-        "s10__entry_right_19",
-    ): "forced-conflict",
-    (
-        "tests/fixtures/regressions/approach_order_carry_sandwich.mmd",
-        "sec0__exit_top_2",
-        "sec3__entry_left_4",
-    ): "forced-conflict",
-    (
-        "tests/fixtures/regressions/approach_order_multi_line_feeder.mmd",
-        "z0__exit_top_0",
-        "z2__entry_left_2",
-    ): "unforced-fill",
-    (
-        "tests/fixtures/regressions/departure_order_shared_run_no_record.mmd",
-        "z1__exit_right_1",
-        "z3__entry_left_5",
-    ): "unforced-fill",
-}
+def _recorded_conflicts(graph: MetroGraph) -> dict[str, set[str]]:
+    """Per entry, the lines its feeding bundles order oppositely, as the
+    record states them."""
+    plan = graph._lane_plan
+    assert plan is not None
+    out: dict[str, set[str]] = {}
+    for forced in plan.tracks.forced:
+        if forced.port is not None:
+            out.setdefault(forced.port, set()).update(forced.lines)
+    return out
 
 
 @pytest.mark.parametrize("path", CURATED, ids=lambda p: str(p.relative_to(ROOT)))
 def test_no_seam_changes_a_bundle_order(path: Path) -> None:
     """Every line an exit carries into an entry crosses that seam in the
     order it leaves the exit: travel-frame orders keep each line's side
-    through every turn, so the entry's order of a bundle is its exit's.
-    ``SEAM_ORDER_EXCEPTIONS`` lists the seams where a straight-seam entry's
-    order reverses a bundle: one another bundle orders oppositely, or one
-    whose free line the fill round the entry's pins sends past a pin."""
+    through every turn, so the entry's order of a bundle is its exit's,
+    except between lines another bundle into the entry orders oppositely,
+    which the record states as a forced crossing at the entry."""
     graph = _laid_out(path).graph
     if graph is None or graph._lane_plan is None:
         return
-    changed = [
-        seam
-        for seam in _reordered_bundles(graph)
-        if (_rel(path), *seam) not in SEAM_ORDER_EXCEPTIONS
-    ]
+    conflicts = _recorded_conflicts(graph)
+    changed = []
+    for (exit_id, entry_id), (leaving, arriving) in _reordered_bundles(graph).items():
+        swapped = {lid for lid, other in zip(leaving, arriving) if lid != other}
+        if not swapped <= conflicts.get(entry_id, set()):
+            changed.append((exit_id, entry_id))
     assert changed == []
 
 
 @pytest.mark.parametrize(
-    ("rel", "exit_id", "entry_id"), sorted(SEAM_ORDER_EXCEPTIONS), ids=str
+    ("rel", "entry_id"),
+    [
+        ("tests/fixtures/hash_seed_determinism/seed_15.mmd", "s10__entry_right_19"),
+        (
+            "tests/fixtures/regressions/approach_order_carry_sandwich.mmd",
+            "sec3__entry_left_4",
+        ),
+    ],
+    ids=str,
 )
-def test_seam_order_exceptions_are_live(rel: str, exit_id: str, entry_id: str) -> None:
+def test_opposite_bundles_into_an_entry_are_a_forced_crossing(
+    rel: str, entry_id: str
+) -> None:
+    """Two bundles into one entry carrying the same lines in opposite orders
+    cross whatever the entry's order: the record names the entry and the
+    lines."""
     graph = _laid_out(ROOT / rel).graph
     assert graph is not None and graph._lane_plan is not None
-    plan = graph._lane_plan
-    leaving, arriving = _reordered_bundles(graph)[(exit_id, entry_id)]
-    swapped = [lid for lid, other in zip(leaving, arriving) if lid != other]
-    assert plan.port_orders.orders[entry_id].basis is OrderBasis.SEAM
-    orders = plan.port_orders.orders
-    others = [
-        [lid for lid in orders[source].lines or () if lid in swapped]
-        for (source, entry), carried in _seam_bundles(graph).items()
+    orders = graph._lane_plan.port_orders.orders
+    feeding = [
+        [lid for lid in orders[exit_id].lines or () if lid in carried]
+        for (exit_id, entry), carried in _seam_bundles(graph).items()
         if entry == entry_id
-        and source != exit_id
-        and len(set(carried) & set(swapped)) >= 2
     ]
-    if SEAM_ORDER_EXCEPTIONS[(rel, exit_id, entry_id)] == "forced-conflict":
-        assert [lid for lid in arriving if lid in swapped] in others
-    else:
-        pinned = {lid for (entry, lid) in plan.seams.pins if entry == entry_id}
-        assert others == []
-        assert set(swapped) & pinned
-        assert set(swapped) - pinned
+    stated = _recorded_conflicts(graph)[entry_id]
+    assert any(
+        [lid for lid in a if lid in stated] == [lid for lid in b if lid in stated][::-1]
+        for i, a in enumerate(feeding)
+        for b in feeding[i + 1 :]
+    )
+
+
+def test_a_free_line_between_adjacent_pins_keeps_its_bundle() -> None:
+    """A free line ordered between two pins with no lane free between them
+    passes the pin it shares no bundle with."""
+    fill = lane_plan_module._fill_round_pins
+    assert fill(["a", "f", "b"], {"a": 0, "b": 1}, [["f", "b"]]) == {
+        "a": 0,
+        "b": 1,
+        "f": -1,
+    }
+    assert fill(["a", "f", "b"], {"a": 0, "b": 1}, [["a", "f"]]) == {
+        "a": 0,
+        "b": 1,
+        "f": 2,
+    }
+    assert fill(["a", "c", "f", "b"], {"a": 0, "c": 2, "b": 3}, [["a", "f", "b"]]) == {
+        "a": 0,
+        "c": 2,
+        "b": 3,
+        "f": 1,
+    }
+    assert fill(["a", "f", "b"], {"a": 0, "b": 1}, [["a", "f"], ["f", "b"]]) == {
+        "a": 0,
+        "b": 1,
+        "f": 2,
+    }
+
+
+def test_an_undecided_seam_entry_fills_in_declaration_order() -> None:
+    """A seam-pinned entry whose order is undecided fills its lines round
+    the pins in their declaration order, not their ids'."""
+    graph = _laid_out(
+        FIXTURES / "regressions" / "approach_order_multi_line_feeder.mmd"
+    ).graph
+    assert graph is not None and graph._lane_plan is not None
+    entry_id = "z2__entry_left_2"
+    tracks = lane_plan_module._Tracks(
+        graph, lane_plan_module._Frames(graph), graph._lane_plan.lane_senses
+    )
+    for section_id in sorted(graph.sections):
+        tracks.section(section_id)
+    filled: list[list[str]] = []
+    real = lane_plan_module._fill_round_pins
+
+    def spy(order, pins, bundles=()):  # type: ignore[no-untyped-def]
+        filled.append(list(order))
+        return real(order, pins, bundles)
+
+    declared = ["m2", "m1", "m0"]
+    tracks.builder.priority = {lid: i for i, lid in enumerate(declared)}
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(lane_plan_module, "_fill_round_pins", spy)
+        tracks.seam_order(entry_id, None)
+    ascending = (
+        declared if graph._lane_plan.lane_senses[entry_id] > 0 else declared[::-1]
+    )
+    assert filled == [ascending]
 
 
 def _planned_lateral(
@@ -447,7 +516,7 @@ def _boxes_between(graph: MetroGraph, exit_id: str, entry_id: str) -> bool:
 def _straight_seams(graph: MetroGraph) -> list[tuple[str, str, str]]:
     """``(exit, entry, line)`` for every line joining two facing flow-side
     ports on one lane coordinate, through junctions only, past no section."""
-    out = []
+    out: list[tuple[str, str, str]] = []
     for (exit_id, entry_id), lines in sorted(_seam_bundles(graph).items()):
         if _perpendicular(graph, exit_id) or _perpendicular(graph, entry_id):
             continue
@@ -509,11 +578,8 @@ def _seam_lane_disagreements(graph: MetroGraph) -> list[str]:
     return out
 
 
-# Seam-pinned entries where a fan plan's carrier slot, not the seam lane,
-# is a line's track lane, while the entry's order is read from its seam lanes.
-SEAM_LANE_EXCEPTIONS = frozenset(
-    {("examples/topologies/return_trunk_over_member_run.mmd", "export__entry_left_4")}
-)
+# Seam-pinned entries whose seam lanes are not their track lanes.
+SEAM_LANE_EXCEPTIONS: frozenset[tuple[str, str]] = frozenset()
 
 
 @pytest.mark.parametrize("path", CURATED, ids=lambda p: str(p.relative_to(ROOT)))
@@ -881,7 +947,7 @@ def _record_payload(plan: LanePlan) -> list[object]:
             [port_id, None if order.lines is None else list(order.lines)]
             for port_id, order in sorted(plan.port_orders.orders.items())
         ],
-        [[f.section_id, f.run, list(f.lines)] for f in tracks.forced],
+        [[f.section_id, f.run, f.port, list(f.lines)] for f in tracks.forced],
         list(tracks.cycle_sections),
         sorted(
             [entry_id, lid, lane]
@@ -896,6 +962,15 @@ def _record_payload(plan: LanePlan) -> list[object]:
             [port_id, lid, offset]
             for port_id, offsets in plan.seams.perpendicular.items()
             for lid, offset in offsets.items()
+        ),
+        sorted(
+            [port_id, lid, offset]
+            for port_id, offsets in tracks.perpendicular.items()
+            for lid, offset in offsets.items()
+        ),
+        sorted(
+            [t.node_id, t.leaving, t.travel.value, list(t.lines), list(t.through)]
+            for t in tracks.turn_offs.values()
         ),
     ]
 
@@ -1105,6 +1180,7 @@ def _rotation_case(path: Path) -> tuple[MetroGraph, LanePlan]:
 # from that section's lanes reverse, and with them the entry orders they feed.
 ORDER_TURN_EXCEPTIONS = frozenset(
     {
+        ("approach_order_multi_line_feeder", "r270"),
         ("bottom_entry_two_feeders_own_lanes", "r180"),
         ("departure_order_carry_replay", "r90"),
         ("lr_perp_top_exit_perp_entry_diverging", "r180"),
@@ -1221,6 +1297,15 @@ def test_a_turned_placement_plans_the_turned_record(path: Path, turn: _Turn) -> 
             port_id: {lid: flip * v for lid, v in offsets.items()}
             for port_id, offsets in reference.seams.perpendicular.items()
         }
+        for port_id, offsets in reference.tracks.perpendicular.items():
+            turned = image.tracks.perpendicular[port_id]
+            assert len({turned[lid] - flip * v for lid, v in offsets.items()}) == 1
+        for at, ref_turn in reference.tracks.turn_offs.items():
+            got_turn = image.tracks.turn_offs[at]
+            assert got_turn.travel is turn.travel(ref_turn.travel), at
+            assert got_turn.through == ref_turn.through, at
+            ref_lines = ref_turn.lines[::-1] if turn.reflect else ref_turn.lines
+            assert got_turn.lines == ref_lines, at
 
     if not _conventions_kept(reference, image, turn):
         return
@@ -1530,8 +1615,17 @@ BORN_AND_SEAM_SPIES = [
         lane_plan_module,
         "_fill_round_pins",
         "filled below a pin",
-        lambda v, _order, pins: min(v.values()) < min(pins.values()),
+        lambda v, _order, pins, *_b: min(v.values()) < min(pins.values()),
     ),
+    (
+        lane_plan_module,
+        "_fill_round_pins",
+        "free line kept beside its bundle",
+        lambda v, order, pins, *_b: (
+            [lid for lid in sorted(v, key=v.__getitem__)] != list(order)
+        ),
+    ),
+    (lane_plan_module, "_opposed", "opposed bundles", lambda v, *_a: bool(v)),
     (_TRACKS, "_pinned_floor", "floor below zero", lambda v, *_a: v < 0),
     (_TRACKS, "_born_side", "born side", lambda v, *_a: v[0] != 0),
     (_TRACKS, "_fork_side", "fork side", lambda v, *_a: v is not None and v[0] != 0),
@@ -1540,7 +1634,16 @@ BORN_AND_SEAM_SPIES = [
     (_TRACKS, "_born_below", "born order kept below", lambda v, *_a: v > 0),
     (_TRACKS, "_born_lane", "born fill", lambda _v, *_a: True),
     (_TRACKS, "_breezes", "breeze", lambda v, *_a: v),
-    (_TRACKS, "_perpendicular_seams", "perpendicular seam", lambda v, *_a: bool(v)),
+    (_TRACKS, "perpendicular_seams", "perpendicular seam", lambda v, *_a: bool(v)),
+    (_TRACKS, "_carry", "perpendicular carry", lambda v, *_a: len(v) > 1),
+    (_TRACKS, "_turn_merge", "turn merge", lambda v, *_a: len(v) > 1),
+    (_TRACKS, "_through", "through line", lambda v, *_a: v),
+    (
+        port_order_plan_module.PortOrderBuilder,
+        "_depart",
+        "bypass parts outermost",
+        lambda v, _b, _e, ordered, *_a: v != ordered,
+    ),
 ]
 
 
@@ -1569,6 +1672,351 @@ def test_rotation_fixtures_cover_every_born_line_and_seam_rule() -> None:
     assert fired >= {rule for _owner, _name, rule, _when in BORN_AND_SEAM_SPIES}
 
 
+# ---- perpendicular ports, entry departures, turn-offs
+
+
+def _column(graph: MetroGraph, port_id: str) -> tuple[str, dict[str, int]] | None:
+    """The one in-section node every line of perpendicular *port_id* turns
+    into (an entry) or out of (an exit), with each line's lane there."""
+    plan = graph._lane_plan
+    assert plan is not None
+    port = graph.ports[port_id]
+    ends = {
+        (e.target if port.is_entry else e.source, e.line_id)
+        for e in (
+            graph.edges_from(port_id) if port.is_entry else graph.edges_to(port_id)
+        )
+        if graph.stations[e.target if port.is_entry else e.source].section_id
+        == port.section_id
+    }
+    nodes = {node for node, _lid in ends}
+    lines = graph.station_lines(port_id)
+    if len(nodes) != 1 or {lid for _node, lid in ends} != set(lines):
+        return None
+    node = nodes.pop()
+    if any((node, lid) not in plan.tracks.lanes for lid in lines):
+        return None
+    return node, {lid: plan.tracks.lanes[(node, lid)] for lid in lines}
+
+
+@pytest.mark.parametrize("path", CURATED, ids=lambda p: str(p.relative_to(ROOT)))
+def test_a_perpendicular_port_carries_its_column(path: Path) -> None:
+    """A perpendicular port whose lines all turn into, or out of, one column
+    holds that column's lanes across its travel, gaps kept, so the turn is
+    concentric; an entry's innermost line lies on the port's coordinate, or
+    the column's lane zero when the column holds none below its lines."""
+    graph = _laid_out(path).graph
+    if graph is None or graph._lane_plan is None:
+        return
+    plan = graph._lane_plan
+    bad = []
+    for port_id, offsets in sorted(plan.tracks.perpendicular.items()):
+        column = _column(graph, port_id)
+        consumers = [t for t in plan.perpendicular_turns.get(port_id, ())]
+        if column is None or len(consumers) > 1:
+            continue
+        _node, lanes = column
+        if len(set(lanes.values())) != len(lanes):
+            continue
+        sense = plan.lane_senses[port_id]
+        shifts = {offsets[lid] - sense * lane for lid, lane in lanes.items()}
+        if len(shifts) != 1:
+            bad.append((port_id, "not concentric"))
+            continue
+        if graph.ports[port_id].is_entry and port_id not in plan.seams.perpendicular:
+            anchor = 0 if min(lanes.values()) > 0 else None
+            if anchor is None and 0 not in offsets.values():
+                bad.append((port_id, "innermost off the port"))
+            if anchor == 0 and shifts != {0}:
+                bad.append((port_id, "lane zero off the port"))
+    assert bad == []
+
+
+@pytest.mark.parametrize("path", CURATED, ids=lambda p: str(p.relative_to(ROOT)))
+def test_a_multi_consumer_perpendicular_entry_keeps_each_turn_side(path: Path) -> None:
+    """A perpendicular entry feeding several in-section consumers lays its
+    lines side by side, each consumer's lines in the order they hold after
+    turning into it, read across that turn."""
+    graph = _laid_out(path).graph
+    if graph is None or graph._lane_plan is None:
+        return
+    plan = graph._lane_plan
+    bad = []
+    for port_id, turns in sorted(plan.perpendicular_turns.items()):
+        if len(turns) < 2 or port_id not in plan.tracks.perpendicular:
+            continue
+        offsets = plan.tracks.perpendicular[port_id]
+        values = sorted(offsets.values())
+        if values != list(range(values[0], values[0] + len(values))):
+            bad.append((port_id, "gap"))
+        section = graph.section_for_port(graph.ports[port_id])
+        sign = _section_lane_frame(graph, section).secondary_sign
+        for turn in turns:
+            if turn.turn is None or len(turn.lines) < 2:
+                continue
+            lanes = {
+                lid: plan.tracks.lanes[(turn.consumer_id, lid)] for lid in turn.lines
+            }
+            across = lateral_order_sign(turn.turn) * sign
+            after = sorted(turn.lines, key=lambda lid: across * lanes[lid])
+            if sorted(turn.lines, key=offsets.__getitem__) != after:
+                bad.append((port_id, turn.consumer_id))
+    assert bad == []
+
+
+def test_a_multi_consumer_perpendicular_entry_keeps_each_turn_over_its_order() -> None:
+    """Handed its port order reversed, which laid side by side would cross
+    both of its consumers' turns, cross_column_perp_entry_overflow's
+    reporting entry still lays each consumer's lines in the order they hold
+    after turning into it."""
+    graph = _laid_out(
+        FIXTURES / "regressions" / "cross_column_perp_entry_overflow.mmd"
+    ).graph
+    assert graph is not None and graph._lane_plan is not None
+    plan = graph._lane_plan
+    entry_id = "reporting__entry_top_7"
+    order = plan.port_orders.orders[entry_id]
+    assert order.lines is not None
+    reversed_order = replace(order, lines=order.lines[::-1])
+    section = graph.section_for_port(graph.ports[entry_id])
+    sign = _section_lane_frame(graph, section).secondary_sign
+    turns = plan.perpendicular_turns[entry_id]
+    chains: list[list[str]] = []
+    for turn in turns:
+        assert turn.turn is not None
+        lanes = {lid: plan.tracks.lanes[(turn.consumer_id, lid)] for lid in turn.lines}
+        across = lateral_order_sign(turn.turn) * sign
+        chains.append(sorted(turn.lines, key=lambda lid: across * lanes[lid]))
+    assert len(chains) == 2 and all(len(chain) >= 2 for chain in chains)
+
+    def keeps(offsets: Mapping[str, int], chain: list[str]) -> bool:
+        return sorted(chain, key=offsets.__getitem__) == chain
+
+    side_by_side = {lid: i for i, lid in enumerate(reversed_order.lines or ())}
+    assert not any(keeps(side_by_side, chain) for chain in chains)
+    tracks = lane_plan_module._Tracks(
+        graph, lane_plan_module._Frames(graph), plan.lane_senses
+    )
+    for section_id in sorted(graph.sections):
+        tracks.section(section_id)
+    merged = tracks._turn_merge(entry_id, turns, 1, reversed_order)
+    across_ports, _seams = tracks._perpendicular_offsets(
+        {**plan.port_orders.orders, entry_id: reversed_order}, plan.perpendicular_turns
+    )
+    for chain in chains:
+        assert keeps(merged, chain)
+        assert keeps(across_ports[entry_id], chain)
+
+
+def _parting_side(graph: MetroGraph, entry_id: str, line_id: str) -> int | None:
+    """``0`` when *line_id* runs from flow-side *entry_id* only to consumers
+    level with it, ``+1`` / ``-1`` when only to consumers on the traveller's
+    right / left, ``None`` otherwise."""
+    port = graph.ports[entry_id]
+    travel = port_travel(port)
+    here = graph.stations[entry_id]
+    laterals = [
+        _lateral(
+            (graph.stations[e.target].x, graph.stations[e.target].y),
+            (here.x, here.y),
+            travel,
+        )
+        for e in graph.edges_from(entry_id)
+        if e.line_id == line_id
+        and graph.stations[e.target].section_id == port.section_id
+    ]
+    sides = {0 if abs(v) <= 0.1 else (1 if v > 0 else -1) for v in laterals}
+    return sides.pop() if len(sides) == 1 else None
+
+
+@pytest.mark.parametrize("path", CURATED, ids=lambda p: str(p.relative_to(ROOT)))
+def test_a_bypass_parting_at_its_entry_lies_outermost(path: Path) -> None:
+    """Where an entry's lines part at the port, some running on level and
+    others leaving at once, a line arriving by a same-band bypass on the side
+    it leaves to, in no feeding bundle with another of the entry's lines,
+    lies outside every line that runs on level."""
+    graph = _laid_out(path).graph
+    if graph is None or graph._lane_plan is None:
+        return
+    plan = graph._lane_plan
+    bad = []
+    for entry_id, order in sorted(plan.port_orders.orders.items()):
+        if not order.is_entry or order.lines is None or len(order.lines) < 2:
+            continue
+        if _perpendicular(graph, entry_id):
+            continue
+        sides = {lid: _parting_side(graph, entry_id, lid) for lid in order.lines}
+        if (
+            None in sides.values()
+            or 0 not in sides.values()
+            or set(sides.values()) == {0}
+        ):
+            continue
+        builder = port_order_plan_module.PortOrderBuilder(graph, _no_exits, _no_seams)
+        feeding: dict[str, set[str]] = {}
+        for lid in order.lines:
+            for node, _via in builder.upstream_sources(entry_id, lid):
+                feeding.setdefault(node, set()).add(lid)
+        bundled = {
+            lid
+            for node, lines in feeding.items()
+            if node in graph.ports and len(lines) >= 2
+            for lid in lines
+        }
+        level = [order.lines.index(lid) for lid, side in sides.items() if side == 0]
+        for lid, side in sides.items():
+            if side == 0 or lid in bundled:
+                continue
+            approaches = [
+                a
+                for (entry, source), a in plan.port_orders.approaches.items()
+                if entry == entry_id and lid in feeding.get(source, ())
+            ]
+            if not any(
+                a.kind is ApproachKind.BYPASS and a.side == side for a in approaches
+            ):
+                continue
+            at = order.lines.index(lid)
+            if (side is not None and side > 0 and at < max(level)) or (
+                side is not None and side < 0 and at > min(level)
+            ):
+                bad.append((entry_id, lid))
+    assert bad == []
+
+
+def test_the_over_top_u_turn_is_the_wrap_handler_scope() -> None:
+    """Only a single-line U-turn from a LEFT exit into a far LEFT entry of an
+    LR section loops over the top: the far-side wrap handler's own scope."""
+    seen = 0
+    for path in CURATED:
+        graph = _laid_out(path).graph
+        if graph is None or graph._lane_plan is None:
+            continue
+        for (
+            entry_id,
+            source_id,
+        ), approach in graph._lane_plan.port_orders.approaches.items():
+            if approach.rule is not SideRule.OVER_TOP:
+                continue
+            entry, source = graph.ports[entry_id], graph.ports[source_id]
+            assert entry.side is PortSide.LEFT and source.side is PortSide.LEFT
+            assert graph.section_for_port(entry).direction == "LR"
+            assert approach.kind is ApproachKind.U_TURN and approach.side == -1
+            assert len({e.line_id for e in graph.edges_to(entry_id)}) == 1
+            seen += 1
+    assert seen > 0
+
+
+@pytest.mark.parametrize("path", CURATED, ids=lambda p: str(p.relative_to(ROOT)))
+def test_a_fan_carrier_keeps_its_slot(path: Path) -> None:
+    """Every section station a fan plan carries holds the carrier's slot."""
+    graph = _laid_out(path).graph
+    if graph is None or graph._lane_plan is None:
+        return
+    lanes = graph._lane_plan.tracks.lanes
+    moved = [
+        (carrier.station_id, slot.line_id)
+        for plan in graph.fan_plans
+        if plan.owns_geometry
+        for carrier in plan.offset_carriers
+        if graph.stations[carrier.station_id].section_id in graph.sections
+        and carrier.station_id not in graph.junction_ids
+        for slot in carrier.assignments
+        if (carrier.station_id, slot.line_id) in lanes
+        and lanes[(carrier.station_id, slot.line_id)] != slot.slot
+    ]
+    assert moved == []
+
+
+@pytest.mark.parametrize("path", CURATED, ids=lambda p: str(p.relative_to(ROOT)))
+def test_a_through_line_turns_off_beyond_the_lines_ending(path: Path) -> None:
+    """Lines leaving a node's run into a leg (or joining it from one) meet
+    the leg in the order of their side of travel, the side the leg heads for
+    first, except that a line whose run carries on level through the node
+    turns off beyond (joins before) every line whose run ends there."""
+    graph = _laid_out(path).graph
+    if graph is None or graph._lane_plan is None:
+        return
+    bad = []
+    for key, turn_off in sorted(graph._lane_plan.tracks.turn_offs.items()):
+        assert sorted(turn_off.lines) == sorted(graph.station_lines(turn_off.node_id))
+        assert set(turn_off.through) <= set(turn_off.lines)
+        for heads_right in (False, True):
+            along = turn_off.along(heads_right)
+            by_side = turn_off.lines[::-1] if heads_right else turn_off.lines
+            ending = [lid for lid in by_side if lid not in turn_off.through]
+            through = [lid for lid in by_side if lid in turn_off.through]
+            expect = ending + through if turn_off.leaving else through + ending
+            if list(along) != expect:
+                bad.append(key)
+    assert bad == []
+
+
+def test_a_line_carrying_on_past_its_branch_turns_off_beyond() -> None:
+    """At the junction after riboseq_metro's alignment exit, rnaseq both runs
+    on level to Novel transcripts and branches down past it: its branch turns
+    off beyond riboseq, whose run ends there, whichever side the legs head."""
+    graph = _laid_out(ROOT / "examples" / "riboseq_metro.mmd").graph
+    assert graph is not None and graph._lane_plan is not None
+    turn_off = graph._lane_plan.tracks.turn_offs[("__junction_13", True)]
+    assert turn_off.through == ("rnaseq",)
+    assert turn_off.along(True)[-1] == turn_off.along(False)[-1] == "rnaseq"
+
+
+def test_the_record_is_immutable_and_survives_deepcopy() -> None:
+    graph = _laid_out(TOPOLOGIES / "return_trunk_over_member_run.mmd").graph
+    assert graph is not None and graph._lane_plan is not None
+    plan = graph._lane_plan
+    some_lane = next(iter(plan.tracks.lanes))
+    some_entry = next(iter(plan.seams.entries))
+    with pytest.raises(TypeError):
+        plan.tracks.lanes[some_lane] = 0  # type: ignore[index]
+    with pytest.raises(TypeError):
+        plan.seams.entries[some_entry]["x"] = 0  # type: ignore[index]
+    with pytest.raises(TypeError):
+        plan.port_orders.orders["x"] = None  # type: ignore[index]
+    with pytest.raises(TypeError):
+        plan.lane_senses["x"] = 1  # type: ignore[index]
+    copied = deepcopy(graph)
+    assert copied._lane_plan is plan
+    assert deepcopy(plan) is plan
+
+
+def test_the_record_and_dispatch_share_the_same_row_bypass_predicate() -> None:
+    """The record's packed-cell same-row bypass eligibility and dispatch's are
+    one structural predicate."""
+    name = "packed_cell_same_row_bypass"
+    callers = set()
+    for module, tree in _src_modules():
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                func = node.func
+                called = (
+                    func.attr
+                    if isinstance(func, ast.Attribute)
+                    else getattr(func, "id", None)
+                )
+                if called == name:
+                    callers.add(module)
+    assert {
+        "layout/port_order_plan.py",
+        "layout/routing/inter_section_handlers.py",
+    } <= callers
+
+
+@pytest.mark.parametrize("path", CURATED, ids=lambda p: str(p.relative_to(ROOT)))
+def test_the_record_and_dispatch_agree_on_every_fan_out_junction(path: Path) -> None:
+    """The record's fan-out test of a hop and dispatch's fan-out junction set
+    name the same junctions."""
+    graph = _laid_out(path).graph
+    if graph is None:
+        return
+    fanouts = fanout_junction_ids(graph)
+    assert {
+        j for j in graph.junctions if graph.is_fanout_junction(j) != (j in fanouts)
+    } == set()
+
+
 # ---- screen conventions the record keeps
 
 
@@ -1588,6 +2036,30 @@ def test_the_row_top_corridor_is_dispatch_rule_21_scope() -> None:
                 assert approach.side == -1
                 seen += 1
     assert seen > 0
+
+
+def test_a_turned_peel_ranks_a_packed_cell_member_in_its_own_cell() -> None:
+    """Read in a turned flow frame, a packed section not yet boxed keeps its
+    rank inside its own grid cell's pack."""
+    graph = _laid_out(TOPOLOGIES / "packed_cell_cellmate_bypass.mmd").graph
+    assert graph is not None
+    image = deepcopy(graph)
+    members = next(m for m in image.cell_packs.values() if len(m) >= 2)
+    ranked = []
+    for section_id in members:
+        section = image.sections[section_id]
+        section.bbox_w = 0
+        station = next(
+            st for st in image.stations.values() if st.section_id == section_id
+        )
+        col, row = resolve_section_colrow(image, station)
+        assert col is not None and row is not None
+        rank = packed_section_visual_rank(image, section, col, row)
+        ranked.append(rank)
+        assert fan_ordering._section_order_coordinate(image, station, 1) == (
+            row * (len(image.sections) + 1) + rank
+        )
+    assert max(ranked) > 0
 
 
 def test_a_packed_cell_member_sits_at_its_own_slot() -> None:
