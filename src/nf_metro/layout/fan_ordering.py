@@ -61,13 +61,15 @@ def _section_order_coordinate(
     section = resolve_section(graph, station, prefer_upstream=False)
     if section is None:
         return None
-    col, row = _colrow(graph, station, flow_sign)
+    col, row = resolve_section_colrow(graph, station)
     if col is None or row is None:
         return None
     if section.bbox_w > 0:
         return station.x if flow_sign is None else flow_sign * station.y
     rank = packed_section_visual_rank(graph, section, col, row)
-    return col * (len(graph.sections) + 1) + rank
+    along, _lane = _colrow(graph, station, flow_sign)
+    assert along is not None
+    return along * (len(graph.sections) + 1) + rank
 
 
 class _SlotShape(NamedTuple):

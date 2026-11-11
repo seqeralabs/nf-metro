@@ -943,6 +943,33 @@ def _hop_needs_bypass(graph: MetroGraph, src: HopEnd, tgt: HopEnd) -> BypassNeed
     )
 
 
+def boxed_fanout_junction(graph: MetroGraph, node_id: str, diverges: bool) -> bool:
+    """Whether *node_id*, a junction that *diverges*, sits in a packed
+    section, boxed in by its cell-mates."""
+    if not diverges:
+        return False
+    home = resolve_section(graph, graph.stations[node_id])
+    return home is not None and graph.is_packed_section(home.id)
+
+
+def packed_cell_same_row_bypass(
+    entry_side: PortSide | None,
+    need: BypassNeed,
+    rows: tuple[int | None, int | None],
+    boxed_fanout_source: bool,
+) -> bool:
+    """Whether a hop into an entry on *entry_side* is a packed-cell same-row
+    bypass: a LEFT entry on the hop's own grid row (*rows*: the source's,
+    the target's) with a packed cell-mate standing on either endpoint's Y,
+    unless the mate blocks the source row of a fan-out junction its packed
+    section boxes in (the band-hop takes that one)."""
+    blocks = need.cellmate_blocks_source_row or need.cellmate_blocks_target_row
+    held_back = need.cellmate_blocks_source_row and boxed_fanout_source
+    return (
+        entry_side is PortSide.LEFT and blocks and rows[0] == rows[1] and not held_back
+    )
+
+
 def _adjacent_feeder_reaches_merge_directly(
     graph: MetroGraph, feeder: HopEnd, merge: HopEnd, channel_y: float
 ) -> bool:

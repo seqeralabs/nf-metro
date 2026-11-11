@@ -248,6 +248,7 @@ An entry's lines are sorted by three fields, the earlier deciding:
 3. **Priority.** Line declaration order.
 
 Every feeding exit's bundle keeps its order across the seam: the entry order is the merge of those orders, the sort key deciding only between lines no bundle orders.
+Where a flow-side entry's lines part at the port, some running on level and the rest leaving at once for one side, a line that arrives by a same-band bypass on the side it leaves to, in no feeding bundle with another of the entry's lines, takes the outermost place on that side, nearer consumers inside.
 An entry some of whose lines cross a straight seam (below) takes instead the order of its seam lanes: the lanes the seam's pins and the fill round them give its lines.
 An exit's order is its lines' lanes at the port in the track plan (below), read across the exit's travel.
 
@@ -258,7 +259,8 @@ A port whose order needs an input the plan cannot supply is undecided and names 
 
 Each source on an entry's own band has an `Approach`: LEVEL along the band, BYPASS round a section standing between them, or U_TURN from ahead of the port.
 Its side is stated in the entry's travel frame.
-A bypass takes the row-top corridor when it is a same-row bypass into the LEFT entry of an LR section whose hop a packed cell-mate obstructs (dispatch's packed-cell handler scope); a U-turn whose source exit heads along the port's axis turns round onto the traveller's right.
+A bypass takes the row-top corridor when it is a same-row bypass into the LEFT entry of an LR section that dispatch takes as a packed-cell same-row bypass: the record and dispatch decide that by one predicate, `packed_cell_same_row_bypass`.
+A U-turn whose source exit heads along the port's axis turns round onto the traveller's right, except that a single line's loop from a LEFT exit into a far LEFT entry of an LR section runs over the target's top, on the traveller's left, where the far-side wrap handler's own test finds the band above the target row clear for it.
 Every other bypass or U-turn keeps the screen-below convention, which is the traveller's right except across leftward travel.
 
 A connector from a flow-side exit to an off-band entry that the same line also reaches by a bypass from the entry's own band, on the side facing the exit, leaves the exit's band on its far side: the record lists it as a far-side approach.
@@ -268,13 +270,26 @@ A connector from a flow-side exit to an off-band entry that the same line also r
 A line crosses a straight seam when it reaches a flow-side entry, through junctions only, from a facing flow-side exit on the same lane coordinate, with the two ports' grid cells level in one band and no section between them.
 Such a line is pinned to the entry lane that keeps the exit lane's coordinate, below lane zero if need be, provided that lane lands on the entry's lane grid and the line's other straight seams agree.
 A pin on a line that another feeding bundle also carries holds only where every such bundle carries its pinned lines in its own lane order.
-The entry's other lines fill round the pins in the entry's order (by line id when that order is undecided): those before the first pinned line take the free lanes below it, nearest first, and each later one the first free lane past the line before it.
-Where two pins leave no lane between them for a line ordered there, that line goes past the later pin, so a bundle carrying both it and the later pinned line crosses the seam in the other order.
-Where two bundles into the entry carry the same lines in opposite orders, one of them crosses the seam whatever the entry's order.
-The seam joint records each such entry's seam lanes and the exit each pinned line comes from.
-The track plan gives the entry these lanes, except a line's whose lane in the entry's run a fan plan's carrier slot, or the lane the line keeps from an earlier part of its level run, fixes otherwise; the entry's order is read from the seam lanes either way.
+A fan plan's carrier slot at the entry fixes its line's lane as a pin does, and a pin on another line's slot lane is dropped.
+The entry's other lines fill round the fixed lanes in the entry's order (by line declaration order when that order is undecided): those before the first fixed line take the free lanes below it, nearest first, and each later one the first free lane past the line before it.
+Where that passes a pinned line a feeding bundle carries it ahead of, the line takes instead the nearest free lane below the line before it, when no feeding bundle carries a line it then passes ahead of it: every feeding bundle keeps its order where one side allows it.
+Where two bundles into the entry carry the same lines in opposite orders, one of them crosses the seam whatever the entry's order: the track plan records the entry and those lines as a forced crossing.
+The seam joint records each such entry's seam lanes, which are its track lanes, and the exit each pinned line comes from.
 
-A perpendicular port every line of which crosses a straight seam, past no section box, to a facing flow-side port centred on it records each line's offset from the port on the flow-side port's lane, read across the seam's travel.
+A perpendicular port every line of which crosses a straight seam, past no section box, to a facing flow-side port centred on it takes each line's offset from the port on the flow-side port's lane, read across the seam's travel, where those offsets are the port's own (below) shifted by one constant: the seam joint records them.
+
+### Perpendicular ports
+
+A perpendicular port's lines are offsets from the port, across its travel, not lanes of its section.
+Where they all turn into (an entry) or out of (an exit) one in-section node holding them on distinct lanes, the port carries that column's lanes, gaps kept, so the turn stays concentric: on the side of the port its drawing reads offsets toward, the column's lane zero on the port, or, where the column's lanes would fall on the other side, its highest lane.
+An entry whose column holds no lane zero keeps the column's lane zero on the port; any other entry's innermost line lies on the port.
+Otherwise the lines lie side by side in the port's order.
+A perpendicular entry feeding several in-section consumers lays its lines side by side in the merge of each consumer's lines in the order they hold after turning into it, the port's order deciding the rest.
+The side a port's drawing reads offsets toward is the drawing's convention: across an LR or RL section's TOP or BOTTOM edge an entry's travel's right, an exit's on the BOTTOM edge reflected, every other port's as it stands.
+
+### Turn-offs
+
+Every port, and every junction continuing one port's run, records the order its lines meet a leg turning off its run (an exit, or a junction it feeds) or joining it (an entry, or a junction feeding it): the side of travel at the node, the side the leg heads for first, except that a line whose run carries on level through the node meets the leg beyond (leaving) or before (joining) every line whose run ends there.
 
 ### Turns and lane senses
 
@@ -295,6 +310,7 @@ A run with pinned lanes may fill from below lane zero, as far as a pin needs to 
 No line takes a lane beside a line that runs from the run's entry port past one of its stations where it stops.
 Two lines coexist when the flow spans of their connected pieces on the run overlap; touching at one station is a hand-over when one ends there and the other starts there.
 A cycle among the bundle orders a section or part must keep is recorded as a forced crossing, broken by the merge's tie-break.
+A fan plan's carrier keeps its slot even where bundles entering a pinned part drop a pin on its line.
 
 A line on no entry of its section is born there.
 A born line leaving an exit on whose level run it is born, beside lines that entered the section, moves in the section order past each of them whose nearest consumer lies beyond its own across the exit's travel; where no consumer separates them, by the side it joins its consumer entries from.

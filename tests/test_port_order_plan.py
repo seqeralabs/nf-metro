@@ -31,6 +31,7 @@ from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.port_order_plan import (
     OrderBasis,
     PortClass,
+    PortOrder,
     PortOrderPlan,
 )
 from nf_metro.parser.mermaid import parse_metro_mermaid
@@ -61,6 +62,7 @@ COVERAGE_FIXTURES = [
     / "regressions"
     / "approach_order_coincident_corners.mmd",
     TOPOLOGIES / "entry_cohort_interleaved_fixed_lane.mmd",
+    TOPOLOGIES / "bypass_fan_in_outer_slot.mmd",
 ]
 
 # Names whose values a later offset phase, routing or emission writes.
@@ -137,6 +139,15 @@ ALLOWED_IMPORTS = {
             ("nf_metro.parser.model", "Port"),
             ("nf_metro.parser.model", "PortSide"),
             ("nf_metro.parser.model", "Section"),
+            ("nf_metro.layout.constants", "graph_offset_step"),
+            ("nf_metro.layout.routing.context", "BypassNeed"),
+            ("nf_metro.layout.routing.context", "boxed_fanout_junction"),
+            ("nf_metro.layout.routing.context", "packed_cell_same_row_bypass"),
+            (
+                "nf_metro.layout.routing.inter_section_handlers",
+                "left_exit_wraps_over_top",
+            ),
+            ("types", "MappingProxyType"),
         }
     ),
     lane_plan_module: frozenset(
@@ -173,6 +184,15 @@ ALLOWED_IMPORTS = {
             ("nf_metro.layout.routing.orientation", "lateral_order_sign"),
             ("nf_metro.parser.model", "MetroGraph"),
             ("nf_metro.parser.model", "Section"),
+            ("nf_metro.layout.constants", "COORD_TOLERANCE"),
+            ("nf_metro.layout.geometry", "lanes_run_along_y"),
+            ("nf_metro.layout.port_order_plan", "PortOrder"),
+            ("nf_metro.layout.port_order_plan", "_merge_orders"),
+            ("nf_metro.parser.model", "Port"),
+            ("nf_metro.parser.model", "PortSide"),
+            ("types", "MappingProxyType"),
+            ("typing", "Self"),
+            ("typing", "TypeVar"),
             ("nf_metro.parser.model", "Station"),
             ("nf_metro.parser.model", "is_bypass_v"),
             ("typing", "NamedTuple"),
@@ -348,7 +368,22 @@ def test_order_bases_cover_every_kind() -> None:
         order.basis for path in COVERAGE_FIXTURES for order in _plan(path.read_text())
     }
     seen |= {order.basis for order in _port_orders(_tied_entry())}
+    seen |= {_departing_entry().basis}
     assert seen == set(OrderBasis)
+
+
+def _departing_entry() -> PortOrder:
+    """The entry whose same-band bypass parts at the port for the side it
+    arrives on, ordered before its straight seams pin it."""
+    graph = _laid_out((TOPOLOGIES / "bypass_fan_in_outer_slot.mmd").read_text())
+    plan = lane_plan_module.build_lane_plan(graph)
+    planner = lane_plan_module._Tracks(
+        graph, lane_plan_module._Frames(graph), plan.lane_senses
+    )
+    planner.builder.seam_order = lambda _port_id, _order: None
+    order = planner.builder.order_of("integrate__entry_left_11")
+    assert order is not None
+    return order
 
 
 def _two_section_loop() -> MetroGraph:
