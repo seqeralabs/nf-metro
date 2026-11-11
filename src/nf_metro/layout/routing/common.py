@@ -7,6 +7,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
+from types import MappingProxyType
 from typing import AbstractSet, NamedTuple
 
 from nf_metro.layout.constants import (
@@ -25,6 +26,7 @@ from nf_metro.layout.constants import (
     SECTION_HEADER_PROTRUSION,
     graph_offset_step,
 )
+from nf_metro.layout.departure_order import DepartureLaneOrder
 from nf_metro.layout.geometry import (
     AxisFrame,
     cotravelling_lane_clearance,
@@ -112,6 +114,14 @@ EXIT_SIDE_DIRECTION: Mapping[PortSide, Direction] = {
 }
 """The direction a line travels leaving an exit port on each side."""
 
+ENTRY_SIDE_DIRECTION: Mapping[PortSide, Direction] = {
+    PortSide.LEFT: Direction.R,
+    PortSide.RIGHT: Direction.L,
+    PortSide.TOP: Direction.D,
+    PortSide.BOTTOM: Direction.U,
+}
+"""The direction a line travels entering an entry port on each side."""
+
 
 def offsets_hold(
     offsets: Mapping[tuple[str, str], float],
@@ -163,6 +173,32 @@ def segment_direction(
     if abs(dx) <= COORD_TOLERANCE and abs(dy) > COORD_TOLERANCE:
         return Direction.D if dy > 0 else Direction.U
     return None
+
+
+def tolerant_sign(delta: float) -> int:
+    """The sign of *delta*, ``0`` within ``COORD_TOLERANCE``."""
+    if abs(delta) <= COORD_TOLERANCE:
+        return 0
+    return 1 if delta > 0 else -1
+
+
+def leg_direction_sequence(
+    points: Sequence[tuple[float, float]],
+) -> tuple[tuple[int, int], ...]:
+    """The screen-axis signs of each leg of *points*, runs of one sign merged.
+
+    A coordinate change within ``COORD_TOLERANCE`` counts as none, so a leg
+    reads ``(0, 1)`` straight down or ``(1, 1)`` on a down-right diagonal; a
+    collapsed leg adds nothing.  Two routes with the same sequence turn the
+    same way at every bend, so concentric turns keep their lateral order.
+    """
+
+    sequence: list[tuple[int, int]] = []
+    for (x0, y0), (x1, y1) in zip(points, points[1:]):
+        leg = (tolerant_sign(x1 - x0), tolerant_sign(y1 - y0))
+        if leg != (0, 0) and (not sequence or sequence[-1] != leg):
+            sequence.append(leg)
+    return tuple(sequence)
 
 
 def is_orthogonal_turn(
@@ -897,6 +933,9 @@ class RoutedPath:
     """Segments whose final geometry is owned by the convergence plan."""
     route_system_owned_segment_ranks: tuple[int, ...] = ()
     """Gap-channel segments frozen by the route-system member plan."""
+    port_slot_seated_ranks: tuple[int, ...] = ()
+    """Gap-channel segments seated by the slot order of the entry port they
+    land on, nested between planner-owned columns."""
     exit_turn_segment_rank: int | None = None
     """Index of the owned turn segment's first waypoint."""
     concentric_corner_offsets_by_segment: dict[
@@ -2051,8 +2090,14 @@ def peeloff_trunk_line_order(bundle: PortPeeloffBundle) -> list[str]:
     return list(reversed(port_order))
 
 
+NO_LANDING_ORDERS: Mapping[str, Sequence[str]] = MappingProxyType({})
+
+
 def peeloff_target_slots(
-    bundle: PortPeeloffBundle, step: float
+    bundle: PortPeeloffBundle,
+    step: float,
+    records: Mapping[tuple[str, str], DepartureLaneOrder],
+    landing_orders: Mapping[str, Sequence[str]] = NO_LANDING_ORDERS,
 ) -> dict[str, PeeloffSlot]:
     """Map each line of *bundle* to the slot its trunk depth earns.
 
@@ -2069,6 +2114,18 @@ def peeloff_target_slots(
     separation stages own, so a fused band keeps its realised channels.  Port Y
     is the destination port's own line stack rather than this bundle's to
     choose, and stays as realised throughout.
+
+    A recorded departure (:class:`DepartureLaneOrder` in *records*) whose
+    tails leave its junction on the trunk itself has its lines change sides at
+    the fork, so each recorded line takes the slot of the line whose lane the
+    record gives it (:func:`_record_seats_tails`).
+
+    A port whose landing the plan decided (*landing_orders*, its lines in
+    ascending port Y, :mod:`~nf_metro.layout.routing.landing_deal`) is dealt
+    in that order instead: each line takes the port Y of its rank there and
+    the peel-X of the matching trunk rank, so the risers rise in the order
+    the plan lands them.  The decided order already holds any recorded
+    departure.
     """
     per_line = bundle.per_line
     n = len(per_line)
@@ -2081,10 +2138,16 @@ def peeloff_target_slots(
         else realised_xs
     )
     y_slots = sorted(t.port_y for t in per_line.values())
-    ranked = sorted(per_line, key=lambda lid: per_line[lid].trunk_y)
     x_follows_trunk = x_follows_trunk_direction(bundle.vertical_sign, bundle.trunk_sign)
     y_follows_trunk = bundle.port_lead_sign == bundle.trunk_sign
-    return {
+    order = landing_orders.get(bundle.port_id)
+    if order is not None and set(order) != set(per_line):
+        order = None
+    if order is not None:
+        ranked = list(order if y_follows_trunk else reversed(order))
+    else:
+        ranked = sorted(per_line, key=lambda lid: per_line[lid].trunk_y)
+    slots = {
         lid: PeeloffSlot(
             x_slots[i if x_follows_trunk else n - 1 - i],
             y_slots[i if y_follows_trunk else n - 1 - i],
@@ -2092,6 +2155,36 @@ def peeloff_target_slots(
         )
         for i, lid in enumerate(ranked)
     }
+    recorded = [r for r in records.values() if r.target_id == bundle.port_id]
+    if order is not None or not recorded:
+        return slots
+    routes: dict[str, RoutedPath] = {}
+    for rp, _tail in bundle.entries:
+        routes.setdefault(rp.edge.line_id, rp)
+    for record in recorded:
+        if _record_seats_tails(record, routes):
+            natural = dict(slots)
+            for line, natural_line in record.takes_lane_of:
+                slots[line] = natural[natural_line]
+    return slots
+
+
+_PEELOFF_TAIL_POINTS = 4
+
+
+def _record_seats_tails(
+    record: DepartureLaneOrder, routes: Mapping[str, RoutedPath]
+) -> bool:
+    """Whether every line *record* reorders reaches its port on a route that
+    is its peel-off tail alone, so the tail's trunk leaves the recorded
+    junction itself.
+    """
+    return all(
+        line in routes
+        and (routes[line].edge.source, routes[line].edge.target) == record.key
+        and len(routes[line].points) == _PEELOFF_TAIL_POINTS
+        for line in record.lines
+    )
 
 
 def iter_eligible_destination_tail_bundles(

@@ -36,7 +36,7 @@ DEFERRED_ROUTE_GUARD_FAILURES = [
     ),
     (
         "hash_seed_determinism/seed_77.mmd",
-        "destination-tail bundle into port 's16__entry_right_18'",
+        "[peel-off bundle braids into port] peel-off bundle into port",
     ),
 ]
 

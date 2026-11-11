@@ -890,7 +890,7 @@ def _linear_entry_pill_lines(
 
 
 def _station_bundle_offset_span(
-    graph: MetroGraph, sid: str, offsets: dict[tuple[str, str], float]
+    graph: MetroGraph, sid: str, offsets: Mapping[tuple[str, str], float]
 ) -> tuple[float, float]:
     """Min/max per-line Y offset ``sid``'s drawn bundle pill spans around
     its anchor lane, ``(0.0, 0.0)`` for a station with no lines.

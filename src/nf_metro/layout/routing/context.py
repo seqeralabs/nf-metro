@@ -16,6 +16,7 @@ from nf_metro.layout.constants import (
     SAME_Y_TOLERANCE,
     graph_offset_step,
 )
+from nf_metro.layout.departure_order import relabel_departures
 from nf_metro.layout.fan_ordering import fanout_divergence_peel_order
 from nf_metro.layout.geometry import (
     AxisFrame,
@@ -69,6 +70,7 @@ from nf_metro.parser.route_topology import (
 
 if TYPE_CHECKING:
     from nf_metro.layout.route_plan import ExitTurnPlanId
+    from nf_metro.layout.routing.co_row import CoRowDiagonalGroup
     from nf_metro.layout.routing.convergences import ConvergencePlanExecutionQuery
     from nf_metro.layout.routing.exit_turns import ExitTurnPlanQuery
     from nf_metro.layout.routing.system_emission import RouteSystemEmissionExecution
@@ -265,6 +267,9 @@ class _RoutingCtx:
     route_systems: RouteSystemEmissionExecution | None = None
     skip_edges: set[_EdgeKey] = field(default_factory=set)
     built_routes: list[RoutedPath] = field(default_factory=list)
+    co_row_diagonal_groups: Mapping[_EdgeKey, CoRowDiagonalGroup] = field(
+        default_factory=dict
+    )
     junction_fan_info: dict[_EdgeKey, tuple[int, int]] = field(default_factory=dict)
     perp_entry_columns: Mapping[str, PerpEntryColumn] = field(default_factory=dict)
     fan_corridors: dict[str, FanCorridor] = field(default_factory=dict)
@@ -938,6 +943,33 @@ def _hop_needs_bypass(graph: MetroGraph, src: HopEnd, tgt: HopEnd) -> BypassNeed
     )
 
 
+def boxed_fanout_junction(graph: MetroGraph, node_id: str, diverges: bool) -> bool:
+    """Whether *node_id*, a junction that *diverges*, sits in a packed
+    section, boxed in by its cell-mates."""
+    if not diverges:
+        return False
+    home = resolve_section(graph, graph.stations[node_id])
+    return home is not None and graph.is_packed_section(home.id)
+
+
+def packed_cell_same_row_bypass(
+    entry_side: PortSide | None,
+    need: BypassNeed,
+    rows: tuple[int | None, int | None],
+    boxed_fanout_source: bool,
+) -> bool:
+    """Whether a hop into an entry on *entry_side* is a packed-cell same-row
+    bypass: a LEFT entry on the hop's own grid row (*rows*: the source's,
+    the target's) with a packed cell-mate standing on either endpoint's Y,
+    unless the mate blocks the source row of a fan-out junction its packed
+    section boxes in (the band-hop takes that one)."""
+    blocks = need.cellmate_blocks_source_row or need.cellmate_blocks_target_row
+    held_back = need.cellmate_blocks_source_row and boxed_fanout_source
+    return (
+        entry_side is PortSide.LEFT and blocks and rows[0] == rows[1] and not held_back
+    )
+
+
 def _adjacent_feeder_reaches_merge_directly(
     graph: MetroGraph, feeder: HopEnd, merge: HopEnd, channel_y: float
 ) -> bool:
@@ -1060,7 +1092,9 @@ def _compute_bypass_gap_indices(
     assigns per-gap indices so each route gets a unique X offset.
 
     Edges in *skip_edges* are excluded so truncated merge branches
-    don't create gaps in the bundle.
+    don't create gaps in the bundle.  A recorded departure
+    (:class:`~nf_metro.layout.departure_order.DepartureLaneOrder`) gives each
+    of its lines the first-gap index of the line whose lane it takes.
 
     Returns
     -------
@@ -1152,6 +1186,11 @@ def _compute_bypass_gap_indices(
         g2_j, g2_n = gap2_idx.get(ek, (0, 1))
         result[ek] = (g1_j, g1_n, g2_j, g2_n)
 
+    relabel_departures(
+        graph._departure_lane_orders,
+        result,
+        lambda own, natural: (natural[0], own[1], own[2], own[3]),
+    )
     return result
 
 
@@ -1175,7 +1214,9 @@ def _compute_junction_fan_info(
     vertical channel X.
 
     Edges in *skip_edges* are excluded so that truncated merge branches
-    don't create gaps in the bundle.
+    don't create gaps in the bundle.  A recorded departure
+    (:class:`~nf_metro.layout.departure_order.DepartureLaneOrder`) gives each
+    of its lines the position of the line whose lane it takes.
     """
     _skip = skip_edges or set()
     result: dict[tuple[str, str, str], tuple[int, int]] = {}
@@ -1354,6 +1395,9 @@ def _compute_junction_fan_info(
                     n,
                 )
 
+    relabel_departures(
+        graph._departure_lane_orders, result, lambda _own, natural: natural
+    )
     return result
 
 

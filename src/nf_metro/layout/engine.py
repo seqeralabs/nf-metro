@@ -42,6 +42,7 @@ from nf_metro.layout.constants import (
     Y_SPACING,
     graph_offset_step,
 )
+from nf_metro.layout.departure_order import DepartureOrderPlan
 from nf_metro.layout.geometry import lanes_run_along_x, perpendicular_port_sides
 
 if TYPE_CHECKING:
@@ -541,6 +542,10 @@ def compute_layout(
     # the graph so per-stage call sites can snapshot without signature churn.
     # Off by default: when unset, each _snap call is a single attribute read.
     graph._phase_snapshots_enabled = phase_snapshots_enabled()
+    # Offsets phase 7b' decides each departure record once per layout, in the
+    # first positioning pass; every later pass replays the decisions.
+    graph._departure_order_plan = DepartureOrderPlan()
+    graph._departure_record_keys = None
 
     from nf_metro.layout.pass_metrics import font_scale_context, stroke_scale_context
 
@@ -1443,14 +1448,22 @@ def _layout_once(
 
     Clears ``_cross_column_perp_bridge_ports`` before the pass and prunes it
     against the pass's final boxes after, so it holds only this pass's bridges.
+    Starts the departure-order plan's pass, so the pass decides its own
+    carry extents, and fails closed if the pass ends holding other departure
+    records than the layout's first pass did.
     """
+    from nf_metro.layout.departure_order import hold_departure_records
     from nf_metro.layout.fan_plans import (
         build_fan_plan_execution,
         install_fan_plan_execution,
     )
+    from nf_metro.layout.lane_plan import start_layout
     from nf_metro.parser.route_topology import build_route_topology_query
 
     graph._cross_column_perp_bridge_ports.clear()
+    start_layout(graph)
+    assert graph._departure_order_plan is not None
+    graph._departure_order_plan.start_pass()
     topology = build_route_topology_query(graph)
     if topology is not None:
         install_fan_plan_execution(
@@ -1488,6 +1501,7 @@ def _layout_once(
         validate=validate,
     )
     prune_settled_cross_column_perp_bridges(graph)
+    hold_departure_records(graph)
 
 
 def _compute_flat_layout(

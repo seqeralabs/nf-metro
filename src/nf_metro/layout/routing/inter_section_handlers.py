@@ -31,6 +31,7 @@ from nf_metro.layout.constants import (
     BYPASS_CLEARANCE,
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
+    CURVE_RADIUS,
     EDGE_TO_BUNDLE_CLEARANCE,
     INTER_ROW_EDGE_CLEARANCE,
     INTER_ROW_HEADER_CLEARANCE,
@@ -39,6 +40,8 @@ from nf_metro.layout.constants import (
     SECTION_ROUTE_CLEARANCE,
 )
 from nf_metro.layout.geometry import (
+    AxisFrame,
+    axis_split,
     cotravelling_lane_clearance,
     lanes_run_along_x,
     lanes_run_along_y,
@@ -104,6 +107,7 @@ from nf_metro.layout.routing.common import (
     vertical_direction,
 )
 from nf_metro.layout.routing.context import (
+    BypassNeed,
     HopEnd,
     _get_offset,
     _has_intervening_sections,
@@ -112,7 +116,9 @@ from nf_metro.layout.routing.context import (
     _resolve_section_colrow,
     _RoutingCtx,
     _tb_x_offset,
+    boxed_fanout_junction,
     is_near_vertical_drop,
+    packed_cell_same_row_bypass,
 )
 from nf_metro.layout.routing.corners import (
     bypass_stagger,
@@ -725,14 +731,13 @@ def _bypass_route_kind(f: _InterFacts) -> _BypassRoute:
         return _BypassRoute.RIGHT_ENTRY_CROSS_ROW
     if f.left_entry_from_right and f.is_left_exit:
         return _BypassRoute.LEFT_EXIT_AROUND_BELOW
-    held_back_by_boxed_fanout = (
-        f.cellmate_blocks_source_row and _source_is_boxed_fanout_junction(f)
-    )
-    if (
-        f.entry_side is PortSide.LEFT
-        and (f.cellmate_blocks_source_row or f.cellmate_blocks_target_row)
-        and f.src_row == f.tgt_row
-        and not held_back_by_boxed_fanout
+    if packed_cell_same_row_bypass(
+        f.entry_side,
+        BypassNeed(
+            f.needs_bypass, f.cellmate_blocks_source_row, f.cellmate_blocks_target_row
+        ),
+        (f.src_row, f.tgt_row),
+        _source_is_boxed_fanout_junction(f),
     ):
         return _BypassRoute.PACKED_CELL_SAME_ROW
     if f.left_entry_from_right:
@@ -1224,7 +1229,35 @@ def _left_exit_wrap_over_top_y(
     channel, so pooling every feeder into it collinearly overlays them, whereas
     the dips give each feeder its own descent below the target.
     """
-    graph, src, tgt, tgt_row = f.graph, f.src, f.tgt, f.tgt_row
+    return left_exit_wrap_over_top_y(
+        f.graph,
+        f.src,
+        f.tgt,
+        f.tgt_row,
+        (cx, vx),
+        f.ctx.curve_radius,
+        f.ctx.reserved_bands.rows.at(f.tgt_row),
+        f.v_segment_crosses_other_section,
+        f.h_segment_crosses_other_section,
+    )
+
+
+def left_exit_wrap_over_top_y(
+    graph: MetroGraph,
+    src: Station,
+    tgt: Station,
+    tgt_row: int | None,
+    columns: tuple[float, float],
+    curve_radius: float,
+    reserved: ReservedBand | None,
+    crosses_v: Callable[[float, float, float], bool],
+    crosses_h: Callable[[float, float, float], bool],
+) -> float | None:
+    """:func:`_left_exit_wrap_over_top_y` from placement: the loop's source
+    ascent and target descent *columns*, the band above *tgt_row* holding
+    *reserved* corridors, and *crosses_v* / *crosses_h* telling whether a
+    vertical ``(x, y1, y2)`` or horizontal ``(x1, x2, y)`` leg crosses a
+    section other than the loop's ends."""
     if tgt_row is None:
         return None
     gap_top, gap_bottom = _gap_above_target_y(graph, tgt_row)
@@ -1232,13 +1265,41 @@ def _left_exit_wrap_over_top_y(
         return None
     if len({e.line_id for e in graph.edges_to(tgt.id)}) > 1:
         return None
-    gy = _gap_above_channel_y(f.ctx, tgt_row)
+    gy = gap_above_channel_y(graph, tgt_row, curve_radius, reserved)
+    cx, vx = columns
     blocked = (
-        f.v_segment_crosses_other_section(cx, src.y, gy)
-        or f.v_segment_crosses_other_section(vx, gy, tgt.y)
-        or f.h_segment_crosses_other_section(cx, vx, gy)
+        crosses_v(cx, src.y, gy) or crosses_v(vx, gy, tgt.y) or crosses_h(cx, vx, gy)
     )
     return None if blocked else gy
+
+
+def left_exit_wrap_columns(
+    graph: MetroGraph,
+    src: Station,
+    tgt: Station,
+    src_cell: tuple[int | None, int | None],
+    offset_step: float,
+) -> tuple[float, float]:
+    """A single line's far-side wrap columns (source ascent, target descent) from
+    *src* in grid cell *src_cell*, as :func:`left_exit_around_below_geometry`
+    places them at zero exit and entry offset on the module's ``CURVE_RADIUS``."""
+    src_col, src_row = src_cell
+    gap_left, gap_right = (
+        column_gap_edges(graph, src_col - 1, src_col, row=src_row)
+        if src_col is not None and src_col > 0
+        else (0.0, 0.0)
+    )
+    if gap_right > gap_left:
+        cx = max(
+            symmetric_bundle_midpoint(gap_left, gap_right, [0.0], 0),
+            gap_right - CURVE_RADIUS - offset_step,
+        )
+    else:
+        cx = _left_descent_x(
+            CURVE_RADIUS, offset_step, _section_left_edge(graph, src), 1
+        )
+    vx = _left_descent_x(CURVE_RADIUS, offset_step, _section_left_edge(graph, tgt), 1)
+    return cx, vx
 
 
 def _route_right_entry_cross_row(f: _InterFacts) -> RoutedPath | None:
@@ -2176,6 +2237,15 @@ def _route_inter_section(
     return route
 
 
+def is_inter_section_edge(
+    edge: Edge, src: Station, tgt: Station, ctx: _RoutingCtx
+) -> bool:
+    """Whether both ends of *edge* are boundary ports or junctions."""
+    return (src.is_port or edge.source in ctx.junction_ids) and (
+        tgt.is_port or edge.target in ctx.junction_ids
+    )
+
+
 def classify_inter_section_family(
     edge: Edge,
     src: Station,
@@ -2183,10 +2253,7 @@ def classify_inter_section_family(
     ctx: _RoutingCtx,
 ) -> RouteFamilyId | None:
     """Return the production family selected before its builder is invoked."""
-    is_inter = (src.is_port or edge.source in ctx.junction_ids) and (
-        tgt.is_port or edge.target in ctx.junction_ids
-    )
-    if not is_inter:
+    if not is_inter_section_edge(edge, src, tgt, ctx):
         return None
     facts = _build_inter_facts(edge, src, tgt, ctx)
     rule = _match_inter_section_rule(facts)
@@ -2207,6 +2274,21 @@ def _match_inter_section_rule(f: _InterFacts) -> _Rule | None:
     return None
 
 
+def _dispatch_draft_points(
+    edge: Edge, ctx: _RoutingCtx
+) -> Sequence[tuple[float, float]]:
+    """The points of the route inter-section *edge*'s dispatch rule draws."""
+    src, tgt = ctx.graph.edge_endpoints(edge)
+    f = _build_inter_facts(edge, src, tgt, ctx)
+    rule = _match_inter_section_rule(f)
+    route = (
+        rule.route(f)
+        if rule is not None
+        else _route_l_shape(edge, src, tgt, f.i, f.n, ctx)
+    )
+    return route.points if route is not None else []
+
+
 def arrival_approach(edge: Edge, ctx: _RoutingCtx) -> Direction | None:
     """The way inter-section *edge* travels on its last vertical leg.
 
@@ -2217,15 +2299,7 @@ def arrival_approach(edge: Edge, ctx: _RoutingCtx) -> Direction | None:
     are all shorter than a curve radius only shifts its line's lane on the way,
     so it arrives level too.
     """
-    src, tgt = ctx.graph.edge_endpoints(edge)
-    f = _build_inter_facts(edge, src, tgt, ctx)
-    rule = _match_inter_section_rule(f)
-    route = (
-        rule.route(f)
-        if rule is not None
-        else _route_l_shape(edge, src, tgt, f.i, f.n, ctx)
-    )
-    points = route.points if route is not None else []
+    points = _dispatch_draft_points(edge, ctx)
     vertical_steps = [
         end[1] - start[1]
         for start, end in zip(points, points[1:])
@@ -2234,6 +2308,66 @@ def arrival_approach(edge: Edge, ctx: _RoutingCtx) -> Direction | None:
     if all(abs(dy) <= ctx.curve_radius for dy in vertical_steps):
         return None
     return Direction.D if vertical_steps[-1] > 0 else Direction.U
+
+
+@dataclass(frozen=True, slots=True)
+class ArrivalLeg:
+    """Where an inter-section dispatch draft lands and how it gets there.
+
+    Read in a section's frame: *along* is the flow-axis coordinate and *lane*
+    the lane-axis coordinate times the frame's lane sign, so a lane reading
+    grows with the stored lane offset on every orientation.
+
+    ``first_along`` is the draft's first step along the flow axis, ``None``
+    when it never moves that way.  ``riser_lane`` is the start of its last
+    step across the lanes, ``None`` when no such step is longer than a curve
+    radius (the draft then only shifts lanes on the way and arrives level).
+    ``lead_along`` is the flow-axis component of the step leading into that
+    riser, ``None`` when the riser starts the draft.  Any step steeper across
+    the lanes than along them counts as a riser step, however short, so a
+    riser is the step that turns into the port.
+    """
+
+    end_lane: float
+    first_along: float | None
+    riser_lane: float | None
+    lead_along: float | None
+
+
+def arrival_leg_of(
+    points: Sequence[tuple[float, float]], frame: AxisFrame, curve_radius: float
+) -> ArrivalLeg | None:
+    """The :class:`ArrivalLeg` of a drawn polyline, ``None`` when it is empty."""
+    if not points:
+        return None
+    sign = frame.secondary_sign
+    framed = [
+        (along, sign * lane)
+        for along, lane in (axis_split(frame.primary.name, p) for p in points)
+    ]
+    steps = [(a, b) for a, b in zip(framed, framed[1:]) if a != b]
+    first_along = next((b[0] - a[0] for a, b in steps if abs(b[0] - a[0]) > 1e-6), None)
+    risers = [
+        i
+        for i, (a, b) in enumerate(steps)
+        if abs(b[1] - a[1]) > max(abs(b[0] - a[0]), 1e-6)
+    ]
+    riser_lane = lead_along = None
+    if any(abs(steps[i][1][1] - steps[i][0][1]) > curve_radius for i in risers):
+        last = risers[-1]
+        riser_lane = steps[last][0][1]
+        if last:
+            lead = steps[last - 1]
+            lead_along = lead[1][0] - lead[0][0]
+    return ArrivalLeg(framed[-1][1], first_along, riser_lane, lead_along)
+
+
+def arrival_leg(edge: Edge, ctx: _RoutingCtx, frame: AxisFrame) -> ArrivalLeg | None:
+    """The :class:`ArrivalLeg` of the route *edge*'s dispatch rule draws.
+
+    The same draft :func:`arrival_approach` reads, taken in *frame*.
+    """
+    return arrival_leg_of(_dispatch_draft_points(edge, ctx), frame, ctx.curve_radius)
 
 
 @dataclass(frozen=True, slots=True)
@@ -5831,8 +5965,20 @@ def _left_entry_descent_x(
     ``SECTION_ROUTE_CLEARANCE`` is a legibility gap beside a box edge that a run
     can give up.
     """
-    base_gap = ctx.curve_radius + ctx.offset_step
-    max_delta = (n_outer - 1) * ctx.offset_step / 2
+    return _left_descent_x(
+        ctx.curve_radius, ctx.offset_step, anchor_x, n_outer, signed_delta
+    )
+
+
+def _left_descent_x(
+    curve_radius: float,
+    offset_step: float,
+    anchor_x: float,
+    n_outer: int,
+    signed_delta: float = 0.0,
+) -> float:
+    base_gap = curve_radius + offset_step
+    max_delta = (n_outer - 1) * offset_step / 2
     extra_clearance = max(0.0, SECTION_ROUTE_CLEARANCE - (base_gap - max_delta))
     outboard_room = max(
         0.0, anchor_x - base_gap + signed_delta - canvas_edge_clearance()
@@ -7291,12 +7437,23 @@ def _gap_above_channel_y(ctx: _RoutingCtx, tgt_row: int) -> float:
     row (``_reserve_over_top_headroom``): clear of every header badge in the row
     by the same margin as :func:`_right_entry_over_top_geometry`'s channel.
     """
-    gap_top, gap_bottom = _gap_above_target_y(ctx.graph, tgt_row)
-    if not section_exists_above_row(ctx.graph, tgt_row):
-        return gap_bottom - INTER_ROW_HEADER_CLEARANCE - ctx.curve_radius
-    return _center_inter_row_channel(
-        gap_top, gap_bottom, reserved=ctx.reserved_bands.rows.at(tgt_row)
+    return gap_above_channel_y(
+        ctx.graph, tgt_row, ctx.curve_radius, ctx.reserved_bands.rows.at(tgt_row)
     )
+
+
+def gap_above_channel_y(
+    graph: MetroGraph,
+    tgt_row: int,
+    curve_radius: float,
+    reserved: ReservedBand | None,
+) -> float:
+    """:func:`_gap_above_channel_y` from placement, the band holding
+    *reserved* corridors."""
+    gap_top, gap_bottom = _gap_above_target_y(graph, tgt_row)
+    if not section_exists_above_row(graph, tgt_row):
+        return gap_bottom - INTER_ROW_HEADER_CLEARANCE - curve_radius
+    return _center_inter_row_channel(gap_top, gap_bottom, reserved=reserved)
 
 
 def _right_entry_gap_above_is_clear(f: _InterFacts) -> bool:
@@ -7586,12 +7743,9 @@ def _source_is_boxed_fanout_junction(f: _InterFacts) -> bool:
     traps it; a plain fan-out (no pack) reaches its clear column via the
     gap-above path or the around-below dive.
     """
-    graph = f.graph
-    is_divergence = f.edge.source in f.ctx.fanout_junctions
-    if not is_divergence:
-        return False
-    src_section = resolve_section(graph, f.src)
-    return src_section is not None and graph.is_packed_section(src_section.id)
+    return boxed_fanout_junction(
+        f.graph, f.edge.source, f.edge.source in f.ctx.fanout_junctions
+    )
 
 
 def _exit_side_pack_gap_midpoint(f: _InterFacts) -> float | None:

@@ -11,7 +11,12 @@ from nf_metro.errors import NfMetroError, UnknownInactiveLineError
 from nf_metro.parser.provenance import LayoutProvenance
 
 if TYPE_CHECKING:
+    from nf_metro.layout.departure_order import (
+        DepartureLaneOrder,
+        DepartureOrderPlan,
+    )
     from nf_metro.layout.fan_plans import FanPlanExecution, FanPlanQuery
+    from nf_metro.layout.lane_plan import LanePlan
     from nf_metro.layout.route_plan import FanPlan
     from nf_metro.parser.route_topology import (
         RouteResolutionTrace,
@@ -510,6 +515,16 @@ class MetroGraph:
     _linear_entry_pill_lines_cache: dict[str, tuple[str, ...]] = field(
         default_factory=dict, compare=False, repr=False
     )
+    _departure_order_plan: DepartureOrderPlan | None = field(
+        default=None, compare=False, repr=False
+    )
+    _departure_lane_orders: dict[tuple[str, str], DepartureLaneOrder] = field(
+        default_factory=dict, compare=False, repr=False
+    )
+    _departure_record_keys: frozenset[tuple[str, str]] | None = field(
+        default=None, compare=False, repr=False
+    )
+    _lane_plan: LanePlan | None = field(default=None, compare=False, repr=False)
     groups: list[StationGroup] = field(default_factory=list)
     grid_overrides: dict[str, tuple[int, int, int, int]] = field(default_factory=dict)
     layout_provenance: LayoutProvenance = field(

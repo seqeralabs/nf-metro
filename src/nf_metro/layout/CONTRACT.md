@@ -324,6 +324,16 @@ runtime check either:
   render fold-abort chokepoint. A resolve-time flow reversal is recorded as a
   `FLOW_REORIENTED_DIRECTION` decision in `graph.layout_provenance`; routing's
   exit-port offset reads that typed reason instead of a second section set.
+- `graph._departure_order_plan` - one layout's 7b' port decisions (a
+  record, or none), reset when `compute_layout` starts; when they are decided
+  and replayed is under "Departure record lifetime" below.
+- `graph._departure_lane_orders` - the `DepartureLaneOrder` records the latest
+  station-offset computation holds; read by routing's fan, gap, band,
+  exit-turn and seating consumers and the bundle-order curve check, empty when
+  no departure is recorded.
+- `graph._departure_record_keys` - the departure-record keys the layout's
+  first positioning pass ended with; every later pass must end with the same
+  keys or raises `DepartureRecordDriftError`.
 - `graph._linear_entry_pill_lines_cache` - accepted linear-entry cohorts
   projected by each station-offset computation. Marker bbox, label, and render
   consumers use the cohort with the offset map produced by that computation;
@@ -1570,11 +1580,135 @@ in pipeline order.
 ## Post-layout offset boundary: late per-line offset phases
 
 `compute_station_offsets` (`layout/routing/offsets.py`) assigns one lane per
-`(station, line)` in numbered phases; its docstring lists every phase in order.
-The two below are recorded here because they move lanes a whole section at a
-time, after each base, station, port, junction and rail-boundary phase has
-settled, and because the planned-fan offsets that follow them own the lanes a
-fan plan states.
+`(station, line)` in numbered phases, each run once per call; its docstring
+lists every phase in order. Phase 7b' is recorded here because it decides an
+entry port's lane order that every later phase must hold. Phases 14b and 14c
+are recorded because they move lanes a whole section at a time, after each
+base, station, port, junction and rail-boundary phase has settled, and because
+the planned-fan offsets that follow them own the lanes a fan plan states.
+
+### Lane plan record (sealed before phase 1 of a layout's first run at or after 5.1)
+
+- **Purpose**: Decide the layout's planned lane decisions once, from structure
+  and placement, before that offsets run writes any lane: every port's line
+  order and same-band entry approach, each port's order travel and lane sense,
+  each perpendicular entry's consumer turns, the far-side approaches, the
+  track plan: every in-section `(node, line)`'s lane, from which each exit's
+  order is read, and the seam joint: the lanes either side of every straight
+  seam.
+- **Helpers**: `seal_lane_plan` (`layout/lane_plan.py`), called at the top of
+  `_run_offset_phases`; `build_lane_plan` decides the track plan section by
+  section, upstream first, asking the `PortOrderBuilder`
+  (`layout/port_order_plan.py`) for entry orders and feeding it exit orders
+  and the orders straight seams pin at entries.  Born lines leaving a
+  divergence fan read `fanout_divergence_peel_order` (`layout/fan_ordering.py`)
+  in their section flow's frame.
+  `start_layout`, called at the top of `_layout_once`, clears the previous
+  layout's record.
+- **Precondition**: Station coordinates, section boxes, grid cells and cell
+  packs as they stand at the layout's first offsets run whose stages include
+  5.1, and the fan plans (`graph.fan_plans`) installed at the top of
+  `_layout_once`. Offsets runs before 5.1 in a layout see no record.
+- **Postcondition**: `graph._lane_plan` holds a `LanePlan` until the next
+  layout starts: every port has a `PortOrder` (its lines travel-left to
+  travel-right with the sort field that decided it, or undecided with the
+  missing input named), every same-band `(entry, upstream source)` pair an
+  `Approach`, every in-section `(node, line)` and fed junction a lane, every
+  perpendicular port each line's offset across its travel, every port and
+  every junction continuing one port's run the order its lines turn off it,
+  every entry a straight seam pins its lanes, every entry two feeding bundles
+  cross at a forced crossing, and every perpendicular port whose lines all
+  cross straight seams the offsets that keep them straight.  The record and
+  its mappings are read-only and shared, never copied, by a deep copy of the
+  graph.
+  Later offsets runs of the layout, and routing and rendering
+  after it, replay the sealed record rather than rebuilding it.
+  Rail-mode and sectionless layouts never reach 5.1 and hold no record.
+- **Invariants preserved**: All offsets and geometry; nothing in layout,
+  routing or rendering reads the record, and the record reads no lane offset,
+  route, draft or departure record.
+- **Related tests**: `tests/test_lane_plan.py`, `tests/test_port_order_plan.py`.
+
+### Phase 7b': approach-derived entry-port order
+
+- **Purpose**: At a multi-feeder flow-side entry port whose feeders' lines
+  interleave, deal the lanes in the order the feeders' risers turn in without
+  crossing, and carry that order along the bundle.
+- **Helpers**: `_order_entry_ports_by_approach` decides each port;
+  `_trial_overrides_an_owner` refuses a re-deal another phase owns, or one
+  whose carry breaks an order 7b' itself decided earlier in the same pass;
+  `_claim_family_port_orders` records the entry-port order family's claims;
+  `_hold_decided_orders` and `_commit_unless_a_decided_order_breaks` hold the
+  decided orders through the later phases. `_feeder_departure_orders` and
+  `_single_feeder_departure_order` write `DepartureLaneOrder`
+  records (`layout/departure_order.py`); `_record_carry_is_full` stops a
+  record port's carry at the port; `_decision_overrides_an_owner` judges a
+  record decision.
+- **Precondition**: Non-compact mode. The entry-port order family (7c, 7d, 7e,
+  7f) has run, and each entry port it moved or judged (7c's convergence and
+  same-row bypass ports, 7e's top-descent ports) is claimed with the order it
+  holds after the family.
+- **Postcondition**: A port is re-dealt only when no other phase owns its
+  order. The re-deal is refused when its carry changes a claimed port's order
+  or breaks an order 7b' decided earlier in the same pass, when phase 10
+  reverses the port's section, when any phase 12 compaction seed
+  (`_fan_port_compaction_seeds`, the seeds phase 12 itself takes), compacted
+  on its own copy of the re-dealt offsets, would reorder the port, or when a
+  geometry-owning fan plan's lanes at the port would reorder it. Each refusal
+  reads offsets only: no routing, compile or solve.
+- **Departure records**: A junction feeder whose lines part at the junction
+  (one line of each reordered pair also leaves it for another target) may
+  reach the port in an order its bundle does not carry concentrically; the
+  departure then takes a `DepartureLaneOrder`, a permutation of that natural
+  order, and the lines change sides once, at the fork. A single junction
+  feeder gets one too where its lines shared with a sibling departure peel
+  off beyond the port: those take the lanes on the fork's side, the grid read
+  along the port's inward axis, and only when each pair it reorders parts
+  after the port too (the two lines go on to different stations before
+  either ends).
+- **Departure record lifetime**: A record port is decided once per layout, in
+  the first offsets run after Stage 5.1, into `graph._departure_order_plan`;
+  every later run after Stage 5.1, in any positioning pass, replays the
+  decision, so every pass ends holding the first pass's records
+  (`DepartureRecordDriftError` asserts it). A run before Stage 5.1 neither
+  decides nor replays. A single feeder's full carry is a condition of its
+  record and replays with it. A port with two or more feeders decides its
+  carry extent once per positioning pass, in the pass's first run after
+  Stage 5.1, on that pass's positions (a lane the carry would share stops it
+  at the port), and replays it for the rest of the pass.
+- **Departure record carry and refusal**: A record's order is carried along
+  the bundle only when the carry adds no crossing, sandwich or same-row
+  marker strike, and leaves no carried exit holding a pair in the other order
+  to the perpendicular entry its connector feeds (`_perpendicular_seam_flips`:
+  that entry's order belongs to its own feeders). The decision is judged by
+  the owners above on the offsets phase 8 would leave it with, and refused
+  (`reconcile`) when phase 8 would break it or leave more of the port's
+  same-row exit feeders (an exit of another section on the port's row) on
+  other lanes than the port's.
+  The owner judgement, `reconcile` included, is taken on the deciding pass's
+  positions only; later passes replay the record and are not re-judged.
+- **Departure record consumers**: Junction fan positions, gap ranks,
+  `_distinct_line_order`, the trunk-band constraints, exit-turn axes, settled
+  exit-turn lane ranks, the gap-bundle seat by port slot order, the peel-off
+  riser slots of a departure whose tail leaves the junction itself
+  (`peeloff_target_slots`), the landing deal of a junction-fed entry port
+  (`bundle_landing_deals`, which deals the junction's lines in the recorded
+  order) and the bundle-order curve check read the records
+  each run publishes in `graph._departure_lane_orders`. An `ExitTurnPlan`
+  carries its source's records in `departure_orders`; the turn planner and the
+  route-plan checker both rank a recorded line through `departure_turn_rank`
+  on them, and a turn cohort they would give two lines on one axis, or one
+  line two axes, raises `DepartureTurnAxisError`.
+- **Invariants preserved**: Every order 7b' decides holds to the end of the
+  run. Phase 12 compacts seed by seed and 14b exchanges arrival by arrival,
+  each committing a write only when every decided order still holds; a
+  declined write is counted in `decided_order_declines` (the decided order
+  wins). Phases 7b' itself, 8, 8b, 9, 10, 12a, 13, 14, 14a, 14c, 14d, 14e and
+  15 fail closed with `DecidedLaneOrderError` naming the phase and port.
+- **Related tests**: `tests/test_port_order_single_owner.py`,
+  `tests/test_entry_port_approach_order.py`.
+- **Lifecycle:** invariant - the published offset map holds every lane order
+  7b' decided.
 
 ### Phase 14b: entry-arrival lane slotting
 
@@ -1599,14 +1733,20 @@ fan plan states.
   the swap propagates along the section's horizontal runs. Outside the section
   the exchange continues until the pair stops travelling together, so the
   bundle's lead-in order at the divergence junction and its peel order at the
-  destination agree. Every station keeps one lane per line it carries.
+  destination agree. Every station keeps one lane per line it carries. An
+  exchange never writes a lane order phase 7b' decided: the walk beyond the
+  exit does not take a section holding a decided port that only one line of
+  the pair reaches from where the walk is, and an exchange that would still
+  break a decided order (the pair entering such a section together) is
+  declined whole and counted.
 - **Invariants preserved**: Station, port and junction coordinates; the number
   of lanes each station spreads; the order of every line outside the exchanged
   pair. The approach lane is read as a stored lane offset, which names the same
   lane at the consumer only while the feeder's trunk is level with it, so a
   stepped seam is declined rather than converted through screen coordinates.
 - **Related tests**:
-  `test_entry_arrival_permutes_lanes_rather_than_sharing_one`.
+  `test_entry_arrival_permutes_lanes_rather_than_sharing_one`,
+  `test_exchange_does_not_enter_a_decided_section_one_line_reaches`.
 - **Lifecycle:** invariant - the arriving line holds its approach lane in the
   published offset map: phase 14c can only relabel a whole section's levels
   rigidly, which preserves the exchange.
@@ -1727,8 +1867,13 @@ fan plan states.
 - **Related tests**: `tests/test_member_geometry.py`,
   `tests/test_route_system_emission.py`, and `tests/test_route_plan.py`.
 - **Lifecycle:** invariant - `validate_member_geometry_emission` checks that
-  the final planned paths retain the owned segment ranks and exact coordinates
-  of every frozen gap channel after normalization.
+  the final planned paths retain the owned segment ranks, the exact points of
+  every owned segment, and the exact coordinates of every frozen gap channel
+  after normalization. Fan-traverse coincidence and bundling anchor a
+  route-system-owned segment as they anchor a convergence-owned one, so
+  neither moves a coordinate the plan decided. Bypass nesting anchors only a
+  convergence-owned leg: a member-plan-owned leg it lifts fails this check
+  and aborts the render.
 
 ## Post-layout routing boundary: convergence planning
 
@@ -1749,7 +1894,31 @@ fan plan states.
   Two runs count as one bundle only on local evidence: one route system, one
   travel direction, an overlapping span, a shared carrier junction or entry
   port, and either one named inter-row gap or a separation already inside
-  `BUNDLE_TO_BUNDLE_CLEARANCE`.
+  `BUNDLE_TO_BUNDLE_CLEARANCE`. On a pass that compiles corridor cohorts the
+  compile states the same conflicts as relations on each trunk's scalar
+  request: a bundle-pitch equality to the nearest bundled member run, a
+  one-pitch separation from every same-direction distinct-line member run along
+  the trunk once one of them crowds it, and a forbidden interval around a
+  distinct line's turn-off leg across the trunk. A member run that is a lane of
+  the compile is related to the scalar as a variable, and every immutable
+  context claim drawn on the trunk's own run stands for the scalar rather than
+  an obstacle at its pre-grant coordinate, so the trunk and the members it is
+  coupled to solve in one component; a run no compile moves, or one outside
+  the `(region, orientation)` lane of the trunk's own context claims (for a
+  trunk with none, outside the one lane all its coupled runs share), stands
+  in the trunk's problem as a fixed obstacle at its compile-time coordinate,
+  even where its own component moves it. Where either side could give way the
+  members keep their coordinate and the scalar takes the grant. Where those relations
+  cover the conflict, the grant already sits where
+  `_pack_cotravelling_corridor_runs` and `_separate_distinct_cotravelling_trunks`
+  would seat it, so their re-seat is a no-op. The passes themselves do not know
+  about grants: where a relation does not cover a conflict they still move the
+  trunk, and `_assert_grants_survive_settlement` then fails the render closed
+  rather than drawing a trunk off its published grant. The relations tie a
+  trunk only to member runs; trunk-to-trunk packing and separation, which the
+  passes perform by counting already-seated trunks as neighbours, has no typed
+  relation, so a compiled round where it would move a granted trunk fails
+  closed.
 - **Precondition**: The semantic route scaffold, exit-turn decisions, station
   offsets, layout coordinates, topology resolution, merge
   classification, and stable member family IDs are settled. Final global
@@ -2117,9 +2286,61 @@ They are design evidence, not part of this specification.
   strict plan that may not publish another requirement, settle that plan once
   for drawn positive-side containment, then re-route while consuming it. The
   final decision-freeze check compares the strict plan with that consuming
-  re-route. There is no retry or fixpoint search. A requirement surviving the
-  first strict observation, or any deficit surviving final settlement, is an
-  invariant failure.
+  re-route. After either sequence the render takes one aperture observation:
+  a replay of the last routing pass against the ledger the last settlement
+  consumed, with its translations, that may publish clearance requirements.
+  The replay reads exactly that pass's inputs (station coordinates, section
+  boxes, bypass-label obstacles, station offsets and the reserved bands it
+  seated corridors in), not the boxes the label pass after it grows: that
+  pass seated its corridors against the inputs it read, and a box the ledger
+  never saw can leave a corridor with no band that fits. The bands are the ones a
+  settlement re-route measured from the ledger it consumed, and none where
+  settlement moved nothing and nothing was re-routed; the replay without the
+  grant reads the same ones. It is the only pass that runs the corridor-cohort
+  compiler, because only a ledger already settled to its minimum widths
+  compiles without a spurious shortfall. Each claimed lane is solved inside
+  the band the corridor hold draws it in (`CorridorLaneRegion`: the claim's
+  reserved band, else the live gap band, widened to the lane's input
+  coordinate); a band the solve's hard relations cannot meet is released,
+  never reported as a shortfall. The plan it accepts is stored on that
+  observation's `RoutePlan` as `accepted_corridor_cohort_plan`, from which the
+  observation reads the convergences a grant moved, and
+  `prepare_route_system_planning` refuses to compile on a pass seated against a
+  plan that carries one. The observation is drawn in two cases. A convergence
+  corridor grant that moved a trunk is drawn by this observation alone, so it
+  is adopted with its own plan once `_assert_grant_moves_only_its_convergences`
+  proves it differs on the granted convergences alone from the same
+  observation routed without the grant; a grant observation that also
+  publishes a requirement is an invariant failure. Otherwise the observation
+  is the last routing pass replayed and seated by the accepted plan, whether
+  or not envelope settlement re-routed before it (a translation, or a
+  live-derived band the ledger changes at zero translation). It is drawn
+  whenever it accepted a plan and published no requirement, and the published
+  plan is the ledger the last settlement consumed, projected through its
+  translations, carrying the accepted record. An observation that accepted no
+  plan has no record to publish, and one that published a requirement is
+  settled below, so neither is drawn. A drawn observation can replay
+  inputs from before the group-caption band was reserved, so the publish step
+  reserves the band again after placing labels; the reservation only grows a
+  box. An observation that is not drawn has its geometry (station
+  coordinates, section boxes, and bypass-label obstacles) discarded by
+  `_restoring_route_observation_geometry`; routing alone, it leaves the ports
+  the label pass before it carried as they were. A
+  `CORRIDOR_COHORT_APERTURE` requirement it publishes is settled once against
+  the observed plan, the grant is proven from that settlement's own
+  translations to pay every measured deficit (`_assert_aperture_grant_closes`:
+  the translation at the requirement's boundary carries every positive-side
+  box, no negative-side box, and at least the deficit, which the quantised
+  allocation may exceed), and a re-route consuming the observed plan draws the
+  result, which is adopted and published. That re-route starts every non-port
+  station at the x the last routing pass read
+  (`_RouteObservationInputs.restore_station_x`), translated by the grant:
+  routing's centring is the only writer of non-port x since that pass, and it
+  is not idempotent, so a re-route from the drawn output would centre a station
+  a second time. There is no retry or fixpoint search. A requirement surviving
+  the first strict observation, any deficit surviving final settlement, or an
+  aperture deficit its grant does not pay is an invariant failure; a render
+  settles at most one aperture batch.
   `attach_reroute_ledger_delta` compares each corridor's description together
   with the width it asks for, since a boundary whose corridor survives at a
   different `minimum_width` is one the translations were sized wrongly for.
@@ -2153,6 +2374,11 @@ They are design evidence, not part of this specification.
   be split, and never moving a track a plan owns.
   Plan-owned trunks take the same distinct-line pitch during global convergence
   settlement, before member geometry and convergence geometry freeze.
+  Settlement packs a horizontal trunk lying on a member track one pitch to the
+  track's far (greater-coordinate) side. Where the trunk on the near side
+  crosses fewer legs, the member track takes that step itself at member
+  geometry instead, before it freezes, so the trunk keeps its trial lane and
+  settlement finds it already one pitch from the track.
   `check_no_fused_cotravelling_lines` is the final postcondition on every track,
   including a pair where both coordinates are immutable. Such a violation names
   its route system and exact owning plans, which identifies the construction
@@ -2335,11 +2561,14 @@ every other stage. The stage decides it, so no caller can disagree with it.
 The render path (`_settle_render_geometry` and the publish step in
 `render/svg.py`) records `DISCOVERY` for the first route observation and
 `GENERAL_SETTLEMENT` for each re-observation a carried port, a header-collision
-reconcile, or an envelope-settlement translation forces. `COHORT_INTENT`,
-`APERTURE_SETTLEMENT`, `FINAL_SOLVE` and `TYPED_MATERIALIZATION` are positions
-the vocabulary reserves between them and the closing pair; no render records
-one, which `tests/test_corridor_cohort_integration.py` asserts alongside the
-frozen order.
+reconcile, or an envelope-settlement translation forces. The aperture
+observation and the re-route drawing an aperture grant are `GENERAL_SETTLEMENT`
+re-observations too, and the aperture observation keeps its record when its
+geometry is discarded, so every route observation has exactly one record.
+`COHORT_INTENT`, `APERTURE_SETTLEMENT`, `FINAL_SOLVE` and
+`TYPED_MATERIALIZATION` are positions the vocabulary reserves between them and
+the closing pair; no render records one, which
+`tests/test_corridor_cohort_integration.py` asserts alongside the frozen order.
 
 `COHORT_FINAL` sits *after* both closing acts, not between them: the final
 canvas geometry is published first (`_FinalPublishedGeometry` - canvas width and

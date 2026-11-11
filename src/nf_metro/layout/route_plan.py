@@ -21,6 +21,11 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, NewType, TypeAlias, TypeVar
 
 from nf_metro.layout.constants import COORD_TOLERANCE
+from nf_metro.layout.departure_order import (
+    DepartureLaneOrder,
+    departure_records,
+    departure_turn_rank,
+)
 from nf_metro.layout.fan_geometry import fan_lane_offsets
 from nf_metro.layout.geometry import AxisFrame
 from nf_metro.layout.routing.common import (
@@ -66,6 +71,10 @@ if TYPE_CHECKING:
     )
     from nf_metro.layout.routing.common import RoutedPath
     from nf_metro.layout.routing.context import _EdgeKey, _RoutingCtx
+    from nf_metro.layout.routing.corridor_cohort_integration import (
+        AcceptedCorridorCohortPlan,
+        CorridorCohortLedger,
+    )
     from nf_metro.layout.routing.system_emission import RouteSystemEmissionExecution
     from nf_metro.layout.settlement_demand import BoundaryClearanceRequirement
 
@@ -139,8 +148,12 @@ class SettlementStage(str, Enum):
     """Stable vocabulary for observing settlement progress.
 
     A render emits only ``DISCOVERY``, ``GENERAL_SETTLEMENT``, ``COHORT_FINAL``
-    and ``VALIDATION``.  The other four members are reserved vocabulary that no
-    production path may emit, which
+    and ``VALIDATION``; the corridor-cohort aperture observation, and the
+    re-route drawing its grant, each record ``GENERAL_SETTLEMENT``.
+    ``FINAL_SOLVE`` is emitted by the corridor cohort
+    compiler when it is handed a settlement trace.  ``COHORT_INTENT``,
+    ``APERTURE_SETTLEMENT`` and ``TYPED_MATERIALIZATION`` remain reserved
+    vocabulary no production path emits, which
     ``tests/test_corridor_cohort_integration.py`` asserts.
     """
 
@@ -1310,6 +1323,7 @@ class ExitTurnPlan:
     disposition: ExitTurnDisposition
     legacy_reason: str | None
     provenance: tuple[ReservationDecisionRef, ...]
+    departure_orders: tuple[DepartureLaneOrder, ...]
 
     def __post_init__(self) -> None:
         planned = self.disposition is ExitTurnDisposition.PLANNED
@@ -2452,6 +2466,12 @@ class RoutePlan:
     boundary_clearance_owner_ids: tuple[str, ...] = ()
     """Systems whose member geometry owns a settled boundary-clearance cohort."""
     settlement_trace: SettlementStageTrace = SettlementStageTrace()
+    corridor_cohort_ledger: CorridorCohortLedger | None = None
+    accepted_corridor_cohort_plan: AcceptedCorridorCohortPlan | None = None
+    """The corridor-cohort plan the observation that compiled it accepted.
+
+    Present only on the plan of an observation that ran the compiler; a pass
+    that reads it never compiles again."""
 
 
 @dataclass(slots=True)
@@ -2698,6 +2718,8 @@ class RoutePlanObserver:
     boundary_clearance_owner_ids: frozenset[str] = frozenset()
     member_geometry_plans: tuple[RouteMemberGeometryPlan, ...] = ()
     exit_turn_dispositions: tuple[tuple[ExitTurnPlanId, str | None], ...] = ()
+    corridor_cohort_ledger: CorridorCohortLedger | None = None
+    accepted_corridor_cohort_plan: AcceptedCorridorCohortPlan | None = None
     _family_by_edge: dict[_EdgeKey, RouteFamilyId] = field(default_factory=dict)
     _merge_skips: dict[_EdgeKey, _EdgeKey | None] = field(default_factory=dict)
 
@@ -2749,6 +2771,8 @@ def build_route_plan_observer(
     boundary_clearance_owner_ids: frozenset[str] = frozenset(),
     member_geometry_plans: tuple[RouteMemberGeometryPlan, ...] = (),
     exit_turn_dispositions: tuple[tuple[ExitTurnPlanId, str | None], ...] = (),
+    corridor_cohort_ledger: CorridorCohortLedger | None = None,
+    accepted_corridor_cohort_plan: AcceptedCorridorCohortPlan | None = None,
 ) -> RoutePlanObserver:
     """Create one transient observer after settled routing context construction."""
     return RoutePlanObserver(
@@ -2768,6 +2792,8 @@ def build_route_plan_observer(
         boundary_clearance_owner_ids=boundary_clearance_owner_ids,
         member_geometry_plans=member_geometry_plans,
         exit_turn_dispositions=exit_turn_dispositions,
+        corridor_cohort_ledger=corridor_cohort_ledger,
+        accepted_corridor_cohort_plan=accepted_corridor_cohort_plan,
     )
 
 
@@ -3254,6 +3280,8 @@ def _build_route_plan(
             bindings=(),
             provenance=_plan_provenance(graph, ()),
             diagnostics=fan_diagnostics,
+            corridor_cohort_ledger=observer.corridor_cohort_ledger,
+            accepted_corridor_cohort_plan=observer.accepted_corridor_cohort_plan,
         )
 
     topology = scaffold.topology
@@ -3543,6 +3571,8 @@ def _build_route_plan(
         boundary_clearance_owner_ids=tuple(
             sorted(observer.boundary_clearance_owner_ids)
         ),
+        corridor_cohort_ledger=observer.corridor_cohort_ledger,
+        accepted_corridor_cohort_plan=observer.accepted_corridor_cohort_plan,
     )
     from nf_metro.layout.route_reservations import attach_route_reservations
 
@@ -3653,6 +3683,29 @@ class RoutePlanQuery:
         return self._reservations_by_member.get(member_id, ())
 
 
+def _validate_exit_turn_departure_orders(
+    exit_turn_plan: ExitTurnPlan,
+    members: Mapping[EmissionMemberId, EmissionMember],
+) -> dict[tuple[str, str], DepartureLaneOrder]:
+    """*exit_turn_plan*'s departure records by departure, each one leaving its
+    source for an outbound target on lines among its source lanes."""
+    targets = {
+        members[member_id].target.station_id
+        for member_id in exit_turn_plan.member_ids
+        if members[member_id].source.station_id == exit_turn_plan.source_id
+    }
+    lane_lines = {lane.line_id for lane in exit_turn_plan.source_lanes}
+    keys = [record.key for record in exit_turn_plan.departure_orders]
+    if keys != sorted(set(keys)) or not all(
+        record.station_id == exit_turn_plan.source_id
+        and record.target_id in targets
+        and set(record.lines) <= lane_lines
+        for record in exit_turn_plan.departure_orders
+    ):
+        raise ValueError("exit-turn plan has inconsistent departure orders")
+    return departure_records(exit_turn_plan.departure_orders)
+
+
 def _validate_exit_turn_assignment(
     exit_turn_plan: ExitTurnPlan,
     assignment: ExitTurnAssignment,
@@ -3661,6 +3714,8 @@ def _validate_exit_turn_assignment(
     axes: Mapping[ExitTurnAxisId, ExitTurnAxis],
     endpoint_groups: Mapping[EndpointGroupId, ResolvedEndpointGroup],
     section_grids: Mapping[str, GridCell],
+    departures: Mapping[tuple[str, str], DepartureLaneOrder],
+    line_ranks: Mapping[str, int],
 ) -> None:
     member = members[assignment.member_id]
     lane = lanes.get(assignment.source_lane_rank)
@@ -3750,7 +3805,13 @@ def _validate_exit_turn_assignment(
     if axis is not None and (
         assignment.member_id not in axis.claimant_member_ids
         or axis.line_id != lane.line_id
-        or axis.rank != lane.rank
+        or axis.rank
+        != departure_turn_rank(
+            departures,
+            (member.source.station_id, member.target.station_id),
+            lane.line_id,
+            line_ranks,
+        )
         or axis.axis is not exit_turn_plan.source_axis
         or axis.coordinate_regime is not CoordinateRegime.LAYOUT_CANVAS
     ):
@@ -4230,6 +4291,8 @@ def _validate_exit_turn_assignments(
     axes = {axis.id: axis for axis in exit_turn_plan.axes}
     if len(axes) != len(exit_turn_plan.axes):
         raise ValueError("exit-turn plan contains duplicate axes")
+    departures = _validate_exit_turn_departure_orders(exit_turn_plan, members)
+    line_ranks = {lane.line_id: lane.rank for lane in exit_turn_plan.source_lanes}
     for assignment in exit_turn_plan.assignments:
         _validate_exit_turn_assignment(
             exit_turn_plan,
@@ -4239,6 +4302,8 @@ def _validate_exit_turn_assignments(
             axes,
             endpoint_groups,
             section_grids,
+            departures,
+            line_ranks,
         )
     return axes
 
@@ -5140,11 +5205,19 @@ def _json_value(value: object) -> object:
         return value.value
     if isinstance(value, tuple):
         return [_json_value(item) for item in value]
+    if isinstance(value, frozenset):
+        # Set iteration order depends on the hash seed; the JSON form is the
+        # one canonical key every element type shares.
+        return [_json_value(item) for item in sorted(value, key=_canonical_json)]
     if isinstance(value, (str, int, float, bool, type(None))):
         return value
     raise TypeError(f"route plan contains unsupported {type(value).__name__}")
 
 
+def _canonical_json(value: object) -> str:
+    return json.dumps(_json_value(value), sort_keys=True, separators=(",", ":"))
+
+
 def serialize_route_plan(plan: RoutePlan) -> str:
     """Return the canonical JSON representation of one immutable plan."""
-    return json.dumps(_json_value(plan), sort_keys=True, separators=(",", ":"))
+    return _canonical_json(plan)

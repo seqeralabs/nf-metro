@@ -139,6 +139,8 @@ One routing pass materializes one set of gap slots, and production reuses those 
 
 After exit-turn and convergence settlement, the final member-planning pass reconstructs every owned route in canonical order.
 Same-line members that turn at one coincident vertex receive one clamp-safe reference radius and matching concentric inputs before member plans and route-system templates are published.
+Corners of distinct lines on different edges that turn one bend a whole one to three lanes apart are sized there as one concentric family.
+Its innermost lane keeps `CURVE_RADIUS`, and a family that cannot seat every member at `CURVE_RADIUS` keeps its end-cohort sizing.
 Emission copies those frozen values.
 The later corner normalizer handles only cohorts with no planner-owned member.
 
@@ -216,6 +218,110 @@ Remaining fallback cases can then be measured and removed.
 Straight reconvergences are planned as one semantic fan.
 Their established section tracks, including phantom tracks and collision-compacted slots, supply the fixed frame the fan plan owns.
 The plan therefore records and validates the whole branch-and-join system without replacing the section track allocator.
+
+## Lane plan record
+
+The lane plan (`layout/lane_plan.py`) records a layout's planned lane decisions.
+It is sealed once per layout, at the first station-offset computation whose placement has positioned the junctions (stage 5.1), before that computation writes a lane offset.
+Its inputs are the map's structure, line declaration priority, section grid cells and cell packs, and the station and section-box coordinates placement has reached at that point.
+Every later offset computation of the layout, and routing and rendering after it, find the sealed record in place; a new layout (a spread attempt, a row-pitch or strike-clearance relay, an off-track or geometric-bypass relayout) starts without one and seals its own.
+Rail-mode and sectionless layouts never reach 5.1 and hold no record.
+Nothing in layout, routing or rendering reads it.
+
+### Port orders
+
+The port order plan (`layout/port_order_plan.py`) lists each port's lines across its direction of travel, from the traveller's left to their right.
+An entry port's travel is its inward normal and an exit port's is its outward normal; a perpendicular exit's is the section flow its lines ride before they turn into the port.
+A nested bundle keeps each line on the same side of its travel through every turn, so one port's order can be compared directly with the order of the port its lines came from.
+
+Nodes are measured by grid cell.
+A section packed into a shared cell sits at its own slot of the cell, in the pack's visual order.
+An entry port of a section spanning several grid bands lies in the one band whose extent (the boxes of the sections occupying that band alone) holds its coordinate.
+Two nodes whose sections' grid extents overlap across the travel share a band, and their lateral is zero.
+
+An entry's lines are sorted by three fields, the earlier deciding:
+
+1. **Lateral.** The line's reference source across the port's travel: its grid lateral, or for a source on the port's own band its approach (below).
+   A line fed from several sources rides the one most of the port's other lines come from.
+   A perpendicular entry whose off-band sources all lie level with or ahead of it is reached round its own side, so within each side the nearer source lands outermost.
+2. **Refined.** The source's placed lateral; then the side the source joins the shared approach from (the source further along the travel joins later, on its own side; concentric U-turn loops put the nearer source inner); then the line's rank in the source exit's order.
+3. **Priority.** Line declaration order.
+
+Every feeding exit's bundle keeps its order across the seam: the entry order is the merge of those orders, the sort key deciding only between lines no bundle orders.
+Where a flow-side entry's lines part at the port, some running on level and the rest leaving at once for one side, a line that arrives by a same-band bypass on the side it leaves to, in no feeding bundle with another of the entry's lines, takes the outermost place on that side, nearer consumers inside.
+An entry some of whose lines cross a straight seam (below) takes instead the order of its seam lanes: the lanes the seam's pins and the fill round them give its lines.
+An exit's order is its lines' lanes at the port in the track plan (below), read across the exit's travel.
+
+Each order states the field that decided it and the port's structural class.
+A port whose order needs an input the plan cannot supply is undecided and names that input, rather than taking a value a later phase wrote.
+
+### Approaches
+
+Each source on an entry's own band has an `Approach`: LEVEL along the band, BYPASS round a section standing between them, or U_TURN from ahead of the port.
+Its side is stated in the entry's travel frame.
+A bypass takes the row-top corridor when it is a same-row bypass into the LEFT entry of an LR section that dispatch takes as a packed-cell same-row bypass: the record and dispatch decide that by one predicate, `packed_cell_same_row_bypass`.
+A U-turn whose source exit heads along the port's axis turns round onto the traveller's right, except that a single line's loop from a LEFT exit into a far LEFT entry of an LR section runs over the target's top, on the traveller's left, where the far-side wrap handler's own test finds the band above the target row clear for it.
+Every other bypass or U-turn keeps the screen-below convention, which is the traveller's right except across leftward travel.
+
+A connector from a flow-side exit to an off-band entry that the same line also reaches by a bypass from the entry's own band, on the side facing the exit, leaves the exit's band on its far side: the record lists it as a far-side approach.
+
+### Seams
+
+A line crosses a straight seam when it reaches a flow-side entry, through junctions only, from a facing flow-side exit on the same lane coordinate, with the two ports' grid cells level in one band and no section between them.
+Such a line is pinned to the entry lane that keeps the exit lane's coordinate, below lane zero if need be, provided that lane lands on the entry's lane grid and the line's other straight seams agree.
+A pin on a line that another feeding bundle also carries holds only where every such bundle carries its pinned lines in its own lane order.
+A fan plan's carrier slot at the entry fixes its line's lane as a pin does, and a pin on another line's slot lane is dropped.
+The entry's other lines fill round the fixed lanes in the entry's order (by line declaration order when that order is undecided): those before the first fixed line take the free lanes below it, nearest first, and each later one the first free lane past the line before it.
+Where that passes a pinned line a feeding bundle carries it ahead of, the line takes instead the nearest free lane below the line before it, when no feeding bundle carries a line it then passes ahead of it: every feeding bundle keeps its order where one side allows it.
+Where two bundles into the entry carry the same lines in opposite orders, one of them crosses the seam whatever the entry's order: the track plan records the entry and those lines as a forced crossing.
+The seam joint records each such entry's seam lanes, which are its track lanes, and the exit each pinned line comes from.
+
+A perpendicular port every line of which crosses a straight seam, past no section box, to a facing flow-side port centred on it takes each line's offset from the port on the flow-side port's lane, read across the seam's travel, where those offsets are the port's own (below) shifted by one constant: the seam joint records them.
+
+### Perpendicular ports
+
+A perpendicular port's lines are offsets from the port, across its travel, not lanes of its section.
+Where they all turn into (an entry) or out of (an exit) one in-section node holding them on distinct lanes, the port carries that column's lanes, gaps kept, so the turn stays concentric: on the side of the port its drawing reads offsets toward, the column's lane zero on the port, or, where the column's lanes would fall on the other side, its highest lane.
+An entry whose column holds no lane zero keeps the column's lane zero on the port; any other entry's innermost line lies on the port.
+Otherwise the lines lie side by side in the port's order.
+A perpendicular entry feeding several in-section consumers lays its lines side by side in the merge of each consumer's lines in the order they hold after turning into it, the port's order deciding the rest.
+The side a port's drawing reads offsets toward is the drawing's convention: across an LR or RL section's TOP or BOTTOM edge an entry's travel's right, an exit's on the BOTTOM edge reflected, every other port's as it stands.
+
+### Turn-offs
+
+Every port, and every junction continuing one port's run, records the order its lines meet a leg turning off its run (an exit, or a junction it feeds) or joining it (an entry, or a junction feeding it): the side of travel at the node, the side the leg heads for first, except that a line whose run carries on level through the node meets the leg beyond (leaving) or before (joining) every line whose run ends there; a junction lies on the run of the port it continues.
+
+### Turns and lane senses
+
+Each perpendicular entry records, per in-section consumer, the lines it takes and the direction along the section's flow the lines turn to reach it.
+Each port records the travel its order is read across (its own, the section flow's at a perpendicular port, or the turn at a perpendicular entry whose lines all go to one consumer) and whether that order runs up or down the section's lane index.
+
+### Track plan
+
+The track plan gives every in-section `(node, line)` a lane index in its section's lane frame, and each junction the lane its feeding exit gives the line.
+Sections are decided upstream first, because a section's lanes need its entries' orders and an exit's order is read from its section's lanes.
+A section reached again round a cycle while its own lanes are being decided leaves the exit asked for undecided.
+
+Within a section, nodes joined by edges whose ends share the lane coordinate form level runs; a run the flow leaves and re-enters is split into parts at each re-entry node.
+The section order merges every entry's order read up the lane index, line priority deciding between lines no entry orders, and gives each line a section slot one past the highest slot of an earlier line it coexists with.
+Each run sorts its lines by where they arrive from across the lane axis (zero for lines riding an entry of the run), nests lines arriving from one side by where they leave their sources, ranks a line that parts to the opposite side by the side it leaves to, keeps the bundles entering a later part in their order, and lets an exit carry an upstream exit's order on the lines both bring to one entry.
+Fan plans' carriers keep their slots, a line entering a part along its level run keeps its lane, and a line riding a seam-pinned entry keeps its entry lane; every other line takes the lowest lane past the earlier lines it coexists with, or the lane of a line it hands over to at a shared station.
+A run with pinned lanes may fill from below lane zero, as far as a pin needs to fit the free lines ordered before it.
+No line takes a lane beside a line that runs from the run's entry port past one of its stations where it stops.
+Two lines coexist when the flow spans of their connected pieces on the run overlap; touching at one station is a hand-over when one ends there and the other starts there.
+A cycle among the bundle orders a section or part must keep is recorded as a forced crossing, broken by the merge's tie-break.
+A fan plan's carrier keeps its slot even where bundles entering a pinned part drop a pin on its line.
+
+A line on no entry of its section is born there.
+A born line leaving an exit on whose level run it is born, beside lines that entered the section, moves in the section order past each of them whose nearest consumer lies beyond its own across the exit's travel; where no consumer separates them, by the side it joins its consumer entries from.
+Born lines leaving one exit through a divergence fan take the fan's peel order, read in the section flow's frame; other born lines leaving one exit together take the order of the sides they head for where their bundle first parts.
+Each run applies the same moves to its own order.
+In a run holding a seam-pinned entry, a line no entry of the run carries lies beside the fixed lines it is born among, on the side it heads for (or, joining from an in-section source, the side it joins from), on the first lane there no line it coexists with holds.
+
+The lane frame is the drawing's convention, not one frame turned to each flow.
+TB and BT sections' lanes run as an LR section's turned a quarter (TB toward -x, BT toward +x), except that a TB section entered from the right, receiving a reversed bundle or joined to no other section runs its lanes toward +x.
+An RL section's lanes run as an LR section's reflected, toward +y.
+A turned placement plans the same lanes wherever the turn carries each section's lane direction onto the turned section's, except where a born line takes its side from an exit's approach to a consumer on its band whose side is a screen convention the turn does not carry.
 
 ## Identity and coverage
 
@@ -295,6 +401,58 @@ Negative available width is valid evidence, and means the final blocker envelope
 A negative side slack means the route lies too close to one boundary, or past it.
 Observation retains both values and emits an attributed diagnostic.
 Observation itself moves no geometry.
+
+## Accepted corridor-cohort plan
+
+The corridor-cohort compiler runs at one observation per settle call, and the plan it accepts is stored on that observation's `RoutePlan` as `accepted_corridor_cohort_plan`.
+`AcceptedCorridorCohortPlan` is immutable and holds exactly the coordinates the plan moves: one `AcceptedCorridorOwnerFrame` per member segment, endpoint landing and owned scalar grant, ordered by kind then identity.
+A frame keeps its owner identity, axis, source and accepted coordinates, the along-run extent of a member segment, and the control recipe of a scalar grant.
+The plan also keeps the coordinate translations the compiling observation was seated under, and its `plan_id` is the SHA-256 digest of all of that.
+Construction rejects a `plan_id` that does not match the content, a duplicate owner identity, a duplicate segment claim, a recipe belonging to another owner, and a non-finite coordinate.
+
+Later readers take the moved convergence grants from the record.
+`prepare_route_system_planning` refuses to compile when the plan it is seated against already carries one.
+Only the path that adopts the compiling observation publishes the record; a plan published from any other path carries none.
+
+A convergence trunk and the member runs it is coupled to are one decision, so the compile seats them in one component.
+A trunk held on its bundle is an equality with the run's lane, a trunk crowded by a distinct line's run is separated from that run's lane by a pitch, and an immutable context claim drawn on the trunk's own run is the trunk's scalar inside that problem rather than an obstacle where the trunk stood before the solve.
+
+The compile reads copies of its target routes seated by the post-emission trunk chain, in the order it runs after emission: `_materialize_trunk_slots` restacks the trunk bands, `_reconcile_port_peeloff_risers` seats each peel-off riser on the slot its port's decided landing order gives it (or, at a port the plan decided no order for, the slot its settled trunk depth earns), and `_coincide_same_line_fanout_traverses` and `_bundle_divergent_distinct_traverses` fuse and nest the fan-out traverses.
+The copies then pass through the post-emission corridor rules, `_separate_fused_cotravelling_runs`, `_align_merge_fed_confluence_to_band` and `_hold_runs_in_corridor_clearance`, so the corridor runs and confluence descents the plan accepts agree with the ones drawn.
+The restack, the traverse passes and the confluence alignment run with each mutable target's copy owning the segment ranks the freeze will own, the ownership those passes read after emission; immutable copies and the routes a scalar request's control recipe names also own every rank during the restack and the traverse passes, and stay where they stand.
+The separation and the hold keep the recipe-named routes and any copy a second `_materialize_trunk_slots` pass would restack where they stand, and the separation is skipped when the compile carries scalar requests, whose grant is drawn.
+The snapshot predicts those passes from their input rather than reaching a fixpoint of them, so its agreement with the drawn geometry is measured, not guaranteed by construction.
+No live route moves before a plan is published, and every patch names its live route.
+
+Each settle call that compiles decides every entry port's landing order once, before the in-plan reconcile, with `bundle_landing_deals` (`routing/landing_deal.py`).
+Concentric turns keep each line on its own side of travel, so the order of a bundle's lines across travel where it leaves its source is their order where it lands: per source, that order is dealt over the source's own landing slots, which permutes the slots and never changes the set.
+The exit order comes from the emitter's own placement: the source's offsets, `_perp_riser_lateral` for a TOP/BOTTOM exit of a horizontal-flow section, and a junction source's own offsets permuted by its recorded `DepartureLaneOrder`.
+Each source is dealt over its own slots, so the order between a port's sources is the port's own lane order, which holds only while no source's lines straddle another's.
+A port the deal cannot order is refused, once, with its reason: a line arriving from two sources, sources whose lines interleave in the port's lane order, a junction chain with more than one upstream or two records, a root that is not an exit, members turning differently (`leg_direction_sequence`), members leaving against their exit side's or landing against their entry side's direction of travel, a deferred-offset member, a split landing, a tie at the exit, a record naming lines the source does not carry, and a deal that would move an immutable member.
+The decided landing is each target's `endpoint_lane_coordinate`, and the in-plan and snapshot reconciles deal the port's risers in that order, rank and port Y alike, so the order the plan lands is the order the drawing rises in.
+After emission, the riser reconcile, the merge-fed confluence alignment and the render-time peel-off curve check read each port's order from the accepted plan's endpoint landings (`planned_landing_orders`), not from the deal.
+There a port counts as decided when the plan lands every edge entering it exactly once, all on one axis, and no line enters it from two sources; its order is then its lines in ascending landed coordinate.
+Every other port keeps its trunk-depth order.
+The two decided sets can differ: a port the deal decided but the plan does not land whole takes the trunk-depth order after emission, and a port the deal refused but the plan lands whole takes the port's own lane order there.
+Whether the two agree on a corpus is measured by comparing them port by port, not guaranteed by construction.
+
+Two lanes whose neighbouring claims at one end of their run lie in one physical group turn together at that corner, so each keeps the side of travel it held on the run it turns from.
+The compile states that as a corner order only where the snapshot corner is uncrossed, never between two lanes of one endpoint cohort, whose slot order already seats them, and never where the run's two ends disagree.
+Corner orders are a preference: a directed separation they contradict is dropped while they hold.
+They give way only to an order contradiction, decided from the problem before it is seated.
+Where the corner orders, the directed separations and the end-turn votes cycle over the lanes the cohorts and equalities join, or order two joined lanes against their offset, the problem is seated without the directed separations both of whose lanes lie in those joined lanes, and where that still contradicts, without corner orders.
+Each problem is seated once with the corner orders that decision keeps, and its result records which it held.
+Seated-clear and fixed-lane orders are preferences too: where they make the orders cycle, every seated-clear order gives way, then every fixed-lane order, and that is decided before seating.
+The seating runs once, in the problem's own lane-order frame, and its result stands: a problem it cannot seat reports its failure, with any clearance shortfall as an aperture request.
+
+A patch moves member segments, so the corners at either end of a moved segment re-form.
+The compile sizes them with the freeze's own corner rules, run on copies of the member population at the patched points.
+Each patch carries its route's radii, concentric corner inputs and source turnout, and an unpatched route sharing a corner cohort with a moved corner gets a radius-only patch.
+Nothing is sized when no corner moves, because the rules read the radii they re-size, and an immutable context route is never sized: a cross-edge family holding one of its corners keeps its end-cohort sizing.
+
+`tests/cohort_shadow_oracle.py` draws the compiling observation under production's conditions, but publishes every compiled plan at its compile site and takes the observation's own plan as the ledger; the drawn routes are then held to the published plan on every owned segment point and corner.
+`tests/data/cohort_shadow_ratchet.txt` lists the repository maps that oracle fails.
+The Tier C oracle `check_cross_edge_corners_concentric` holds the drawn corners of any two lines that nest by the routing's own predicate, `bend_nests_across_edges`, to one arc centre, and `tests/data/cross_edge_corner_nesting_ratchet.txt` lists the repository maps it fails.
 
 ## Envelope settlement
 

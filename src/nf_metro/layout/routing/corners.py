@@ -23,13 +23,14 @@ is NEVER variable beyond the line's position within the bundle.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from typing import NamedTuple
 
 from nf_metro.layout.constants import (
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
     CURVE_RADIUS,
+    NESTED_BEND_MAX_LANES,
     OFFSET_STEP,
 )
 from nf_metro.layout.routing.common import Direction, bundle_width
@@ -58,6 +59,38 @@ def wholesale_corner_translation(
         tangent_shift <= tolerance
         and max(incoming_leg_offset, outgoing_leg_offset) > tolerance
         and abs(incoming_leg_offset - outgoing_leg_offset) <= tolerance
+    )
+
+
+def bend_nests_across_edges(
+    corner_a: Sequence[tuple[float, float]],
+    corner_b: Sequence[tuple[float, float]],
+    incoming: tuple[float, float],
+    outgoing: tuple[float, float],
+    offset_step: float,
+) -> bool:
+    """Whether two distinct lines' corners turning one bend are lanes of one bundle.
+
+    Each corner is its ``(before, vertex, after)`` points.  They are lanes when
+    the bend translates wholesale by a whole number of lanes, one to
+    ``NESTED_BEND_MAX_LANES``, and every leg outruns that gap: a leg no longer
+    than the gap is a lane jog, not a bundle bend.
+    """
+    point_a, point_b = corner_a[1], corner_b[1]
+    # A wholesale translation of an orthogonal corner is diagonal, so |dx| is
+    # the lane gap in any flow direction.
+    gap = abs(point_a[0] - point_b[0])
+    lanes = gap / offset_step
+    whole = round(lanes)
+    return (
+        wholesale_corner_translation(point_a, point_b, incoming, outgoing)
+        and 1 <= whole <= NESTED_BEND_MAX_LANES
+        and abs(lanes - whole) * offset_step <= COORD_TOLERANCE_FINE
+        and all(
+            math.hypot(at[0] - before[0], at[1] - before[1]) > gap
+            and math.hypot(after[0] - at[0], after[1] - at[1]) > gap
+            for before, at, after in (corner_a, corner_b)
+        )
     )
 
 

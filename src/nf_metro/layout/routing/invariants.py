@@ -67,6 +67,7 @@ from nf_metro.layout.route_topology import (
     merge_fanout_junction_ids,
 )
 from nf_metro.layout.routing.common import (
+    NO_LANDING_ORDERS,
     CorridorLane,
     Direction,
     HTrunkSeg,
@@ -102,6 +103,7 @@ from nf_metro.layout.routing.common import (
     port_peeloff_tail,
     resolve_section,
     same_destination_approach_slots,
+    segment_direction,
     segments_properly_cross,
     tail_on_slot,
     trunk_segment_crossings,
@@ -393,13 +395,15 @@ def _opening_turn(pts: Sequence[tuple[float, float]]) -> _OpeningTurn | None:
     opening = opening_horizontal_vertical(pts)
     if opening is None:
         return None
-    (x0, y0), (x1, y1), (_x2, y2) = opening
-    run_dir = horizontal_direction(x1 - x0)
+    (_x0, y0), (x1, _y1), _end = opening
+    run_dir = segment_direction(opening[0], opening[1])
+    turn_dir = segment_direction(opening[1], opening[2])
+    assert run_dir is not None and turn_dir is not None
     return _OpeningTurn(
         run_y=y0,
         turn_x=x1,
         run_dir=run_dir,
-        turn_dir=vertical_direction(y2 - y1),
+        turn_dir=turn_dir,
         corridor_y=_reversed_corridor_y(pts, run_dir),
     )
 
@@ -4363,6 +4367,133 @@ def check_concentric_bundle_corners(
     return violations
 
 
+_Point = tuple[float, float]
+
+
+@dataclass(frozen=True)
+class NonNestedCornerPair:
+    """Two lines' corners that bend together a few lanes apart off one arc centre.
+
+    The outer corner is the one farther from the shared bend's centre, so a
+    concentric pair has ``outer_radius == inner_radius + lane_gap``.
+    """
+
+    outer_line: str
+    outer_edge: tuple[str, str]
+    outer_xy: tuple[float, float]
+    outer_radius: float
+    inner_line: str
+    inner_edge: tuple[str, str]
+    inner_xy: tuple[float, float]
+    inner_radius: float
+    lane_gap: float
+    centre_spread: float
+
+    def message(self) -> str:
+        """Human-readable summary of the pair."""
+        return (
+            f"non-nested corners: {self.outer_line!r} "
+            f"{self.outer_edge[0]!r}->{self.outer_edge[1]!r} at "
+            f"({self.outer_xy[0]:.1f},{self.outer_xy[1]:.1f}) r="
+            f"{self.outer_radius:.1f} bends {self.lane_gap:.1f}px outside "
+            f"{self.inner_line!r} {self.inner_edge[0]!r}->{self.inner_edge[1]!r} "
+            f"at ({self.inner_xy[0]:.1f},{self.inner_xy[1]:.1f}) r="
+            f"{self.inner_radius:.1f}; their arc centres are "
+            f"{self.centre_spread:.1f}px apart"
+        )
+
+
+def check_cross_edge_corners_concentric(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[NonNestedCornerPair]:
+    """Return corner pairs of distinct lines that translate a bend together off-centre.
+
+    Any two routes are compared, whatever edges they belong to, which is what
+    sets this apart from :func:`check_concentric_bundle_corners`: corners on
+    unrelated edges that turn the same way and nest as lanes of one bundle by
+    :func:`~nf_metro.layout.routing.corners.bend_nests_across_edges`, the
+    predicate the routing nests them by, must share an arc centre.  A corner
+    traversed in the opposite direction shares the bend.  Each physical pair is
+    reported once, however many same-line routes overlay either corner.
+    """
+    from nf_metro.layout.routing.corners import bend_nests_across_edges
+
+    offset_step = graph_offset_step(graph)
+    by_bend: defaultdict[
+        _Point, list[tuple[RoutedPath, list[_Point], float, _Point, _Point]]
+    ] = defaultdict(list)
+    for route in routes:
+        points = apply_route_offsets(route, offsets)
+        radii = _resolved_corner_radii(route, points)
+        for rank in range(1, len(points) - 1):
+            if not is_orthogonal_turn(points[rank - 1], points[rank], points[rank + 1]):
+                continue
+            incoming = _segment_unit(points[rank - 1], points[rank])
+            outgoing = _segment_unit(points[rank], points[rank + 1])
+            assert incoming is not None and outgoing is not None
+            bend = (outgoing[0] - incoming[0], outgoing[1] - incoming[1])
+            by_bend[bend].append(
+                (
+                    route,
+                    points[rank - 1 : rank + 2],
+                    radii[rank - 1],
+                    incoming,
+                    outgoing,
+                )
+            )
+
+    found: dict[frozenset[tuple[str, float, float]], NonNestedCornerPair] = {}
+    for bend, corners in by_bend.items():
+        for index, (route_a, corner_a, radius_a, incoming, outgoing) in enumerate(
+            corners
+        ):
+            for route_b, corner_b, radius_b, _incoming, _outgoing in corners[
+                index + 1 :
+            ]:
+                if route_a.line_id == route_b.line_id or not bend_nests_across_edges(
+                    corner_a, corner_b, incoming, outgoing, offset_step
+                ):
+                    continue
+                point_a, point_b = corner_a[1], corner_b[1]
+                lane_gap = abs(point_b[0] - point_a[0])
+                translated = _translated_corner(
+                    point_a, radius_a, point_b, radius_b, incoming, outgoing
+                )
+                if translated is None or translated[2] <= _CONCENTRIC_CENTRE_TOLERANCE:
+                    continue
+                key = frozenset(
+                    (
+                        (route_a.line_id, round(point_a[0], 1), round(point_a[1], 1)),
+                        (route_b.line_id, round(point_b[0], 1), round(point_b[1], 1)),
+                    )
+                )
+                if key in found:
+                    continue
+                toward_centre = (point_b[0] - point_a[0]) * bend[0] + (
+                    point_b[1] - point_a[1]
+                ) * bend[1]
+                outer, inner = (
+                    ((route_a, point_a, radius_a), (route_b, point_b, radius_b))
+                    if toward_centre > 0
+                    else ((route_b, point_b, radius_b), (route_a, point_a, radius_a))
+                )
+                found[key] = NonNestedCornerPair(
+                    outer_line=outer[0].line_id,
+                    outer_edge=(outer[0].edge.source, outer[0].edge.target),
+                    outer_xy=outer[1],
+                    outer_radius=outer[2],
+                    inner_line=inner[0].line_id,
+                    inner_edge=(inner[0].edge.source, inner[0].edge.target),
+                    inner_xy=inner[1],
+                    inner_radius=inner[2],
+                    lane_gap=lane_gap,
+                    centre_spread=translated[2],
+                )
+    return list(found.values())
+
+
 def _fan_corner_observations(
     route: RoutedPath, points: list[tuple[float, float]]
 ) -> list[_CornerObservation]:
@@ -6768,6 +6899,7 @@ def check_peeloff_concentric(
     graph: MetroGraph,
     routes: list[RoutedPath],
     curve_radius: float = CURVE_RADIUS,
+    landing_orders: Mapping[str, Sequence[str]] = NO_LANDING_ORDERS,
 ) -> list[PeeloffBundleCrossing | LooseDestinationTail]:
     """Return peel-off bundles that do not nest into one band at a LEFT entry port.
 
@@ -6776,7 +6908,8 @@ def check_peeloff_concentric(
     :class:`PeeloffBundleCrossing` describes.  That band is set up front by
     ``_convergence_line_order`` (riser peel-x) and
     ``_order_convergence_entry_ports`` (port slots), so the bundle nests through
-    the standard layout path rather than by repair here.
+    the standard layout path rather than by repair here.  A port in
+    *landing_orders* owes the band in the order the plan lands it.
     """
     step = graph_offset_step(graph)
     out: list[PeeloffBundleCrossing | LooseDestinationTail] = []
@@ -6808,7 +6941,9 @@ def check_peeloff_concentric(
             )
         if loose:
             continue
-        targets = peeloff_target_slots(bundle, step)
+        targets = peeloff_target_slots(
+            bundle, step, graph._departure_lane_orders, landing_orders
+        )
         for line_id, tail in bundle.per_line.items():
             slot = targets[line_id]
             if not tail_on_slot(tail, slot):
@@ -6830,7 +6965,9 @@ def check_peeloff_concentric(
         )
         if key in checked:
             continue
-        targets = peeloff_target_slots(bundle, step)
+        targets = peeloff_target_slots(
+            bundle, step, graph._departure_lane_orders, landing_orders
+        )
         for line_id, tail in bundle.per_line.items():
             slot = targets[line_id]
             if not tail_on_slot(tail, slot):
@@ -6981,22 +7118,41 @@ class CurveInvariantError(RuntimeError):
     """
 
 
+def _outside_recorded_forks(
+    graph: MetroGraph, violations: list[BundleOrderViolation]
+) -> list[BundleOrderViolation]:
+    """*violations* less each pair a recorded departure reorders crossing on
+    the departure's first segment: lines that part at a fork take their own
+    order there (:class:`~nf_metro.layout.departure_order.DepartureLaneOrder`)."""
+    records = graph._departure_lane_orders
+    return [
+        violation
+        for violation in violations
+        if violation.segment_index != 1
+        or (record := records.get((violation.edge_source, violation.edge_target)))
+        is None
+        or not record.reorders(violation.line_a, violation.line_b)
+    ]
+
+
 def render_curve_violations(
     graph: MetroGraph,
     routes: list[RoutedPath],
     offsets: dict[tuple[str, str], float],
     *,
     curve_radius: float = CURVE_RADIUS,
+    landing_orders: Mapping[str, Sequence[str]] = NO_LANDING_ORDERS,
 ) -> list[tuple[str, Sequence[_HasMessage]]]:
     """Every render-time curve check, labelled, with the violations it finds.
 
     The check set :func:`assert_render_curve_invariants` enforces on every
-    render.
+    render.  *landing_orders* holds the landing order the routes' plan decided
+    for each port it lands whole.
     """
     return [
         (
             "bundle order (line crosses its bundle-mate)",
-            check_bundle_order_preserved(routes),
+            _outside_recorded_forks(graph, check_bundle_order_preserved(routes)),
         ),
         (
             "non-concentric bundle corner",
@@ -7072,7 +7228,7 @@ def render_curve_violations(
         ),
         (
             "peel-off bundle braids into port",
-            check_peeloff_concentric(graph, routes, curve_radius),
+            check_peeloff_concentric(graph, routes, curve_radius, landing_orders),
         ),
         (
             "opposing feeder confluence changes lane order",
@@ -7108,6 +7264,7 @@ def assert_render_curve_invariants(
     offsets: dict[tuple[str, str], float],
     *,
     curve_radius: float = CURVE_RADIUS,
+    landing_orders: Mapping[str, Sequence[str]] = NO_LANDING_ORDERS,
 ) -> None:
     """Raise :class:`CurveInvariantError` if the final render routes are defective.
 
@@ -7138,9 +7295,17 @@ def assert_render_curve_invariants(
     builder cannot always make clean.  A failure every one of whose named routes
     is such a lead-in downgrades to a warning naming the actionable fix; every
     other failure in the map aborts.
+
+    *landing_orders* is the plan's landing order for each port it decided
+    (:func:`~nf_metro.layout.routing.landing_deal.planned_landing_orders` of
+    the plan that emitted *routes*).
     """
     named_checks = render_curve_violations(
-        graph, routes, offsets, curve_radius=curve_radius
+        graph,
+        routes,
+        offsets,
+        curve_radius=curve_radius,
+        landing_orders=landing_orders,
     )
     # A permissive render warns on every failure below, so nothing is bridged.
     bridged_ports: set[str] = (
@@ -7435,6 +7600,19 @@ CHECK_REGISTRY: tuple[GuardSpec, ...] = (
             "to the plan, exactly as `check_no_fused_cotravelling_lines` reasons."
         ),
     ),
+    _check_spec(
+        check_cross_edge_corners_concentric,
+        "C",
+        issue_pin=("#2165",),
+        narrow_reason=(
+            "A corpus oracle over corner nesting rather than a render guard: a "
+            "non-nested pair renders without aborting, and failing repository "
+            "maps are held by a ratchet, so a render guard would abort maps "
+            "that are imperfect rather than undrawable. Restricted to distinct "
+            "lines whose corners turn together a whole one to three lanes "
+            "apart, every leg longer than that gap."
+        ),
+    ),
 )
 
 
@@ -7461,6 +7639,7 @@ __all__ = [
     "MergeFeederOffTrunk",
     "MergePortApproachViolation",
     "NonConcentricCornerViolation",
+    "NonNestedCornerPair",
     "LooseDestinationTail",
     "LooseSameDestinationFinalVertical",
     "OpposingGapChannelCrowding",
@@ -7493,6 +7672,7 @@ __all__ = [
     "check_same_destination_approach_bundle",
     "check_trunks_declared",
     "check_concentric_bundle_corners",
+    "check_cross_edge_corners_concentric",
     "check_bundle_corner_radius_floor",
     "check_standard_source_bundle_corner_inputs",
     "check_coincident_corner_radii",

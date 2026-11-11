@@ -19,6 +19,7 @@ from nf_metro import NfMetroError
 from nf_metro.api import RenderConfig, prepare_graph, render_string
 from nf_metro.cli import cli
 from nf_metro.layout import PhaseInvariantError
+from nf_metro.options import LAYOUT_OPTIONS
 from nf_metro.parser import CyclicGraphError
 from nf_metro.parser.model import PermissiveGuardWarning
 
@@ -142,6 +143,60 @@ def test_prepare_graph_accepts_a_parsed_graph() -> None:
     direct_svg = render_graph(direct, resolve_theme(None, direct), cfg)
     via_parse_svg = render_graph(via_parse, resolve_theme(None, via_parse), cfg)
     assert direct_svg == via_parse_svg
+
+
+_SMALL_MAP = "%%metro line: a | A | #f00\ngraph LR\n  n1[N1] -->|a| n2[N2]\n"
+
+
+def _out_of_range_options() -> list[tuple[str, object]]:
+    """One declared-range violation per constrained registry option."""
+    cases: list[tuple[str, object]] = []
+    for opt in LAYOUT_OPTIONS:
+        if opt.kind not in ("int", "float"):
+            continue
+        if opt.max_val is not None:
+            cases.append((opt.name, opt.max_val + 1))
+        if opt.sign == "positive":
+            cases.append((opt.name, 0))
+        elif opt.sign == "nonneg":
+            cases.append((opt.name, -1))
+    return cases
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("track_gap", 6),
+        *_out_of_range_options(),
+        ("x_spacing", True),
+        ("x_spacing", float("nan")),
+        ("fold_threshold", 7.5),
+        ("diamond_style", "curly"),
+        ("animate", "yes"),
+        ("caption", 3),
+    ],
+)
+@pytest.mark.parametrize(
+    "entry",
+    [
+        lambda opts: render_string(_SMALL_MAP, layout_options=opts),
+        lambda opts: prepare_graph(_SMALL_MAP, layout_options=opts),
+        lambda opts: prepare_graph(
+            api_module._parse_source(_SMALL_MAP), layout_options=opts
+        ),
+    ],
+    ids=["render_string", "prepare_graph", "prepare_graph_parsed"],
+)
+def test_api_rejects_a_layout_option_outside_its_declared_range(
+    entry, name: str, value: object
+) -> None:
+    with pytest.raises(ValueError, match=f"layout option {name!r} must be"):
+        entry({name: value})
+
+
+def test_api_accepts_a_layout_option_at_its_declared_bound() -> None:
+    graph = prepare_graph(_SMALL_MAP, layout_options={"track_gap": 3, "animate": None})
+    assert graph.track_gap == 3
 
 
 def test_render_string_propagates_layout_error() -> None:
