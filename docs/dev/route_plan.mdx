@@ -225,7 +225,7 @@ The lane plan (`layout/lane_plan.py`) records a layout's planned lane decisions.
 It is sealed once per layout, at the first station-offset computation whose placement has positioned the junctions (stage 5.1), before that computation writes a lane offset.
 Its inputs are the map's structure, line declaration priority, section grid cells and cell packs, and the station and section-box coordinates placement has reached at that point.
 Every later offset computation of the layout, and routing and rendering after it, find the sealed record in place; a new layout (a spread attempt, a row-pitch or strike-clearance relay, an off-track or geometric-bypass relayout) starts without one and seals its own.
-Nothing in layout, routing or rendering reads it yet.
+Nothing in layout, routing or rendering reads it.
 
 ### Port orders
 

@@ -37,7 +37,7 @@ from nf_metro.layout.port_order_plan import (
     OrderBasis,
     SideRule,
     _lateral,
-    _port_travel,
+    port_travel,
 )
 from nf_metro.layout.routing import offsets as offsets_module
 from nf_metro.layout.routing.common import Direction
@@ -163,9 +163,9 @@ def test_every_sealed_record_is_total(path: Path) -> None:
         assert source_id in {
             node
             for lid in graph.station_lines(entry_id)
-            for node, _via in port_order_plan_module._Builder(graph).upstream_sources(
-                entry_id, lid
-            )
+            for node, _via in port_order_plan_module.PortOrderBuilder(
+                graph
+            ).upstream_sources(entry_id, lid)
         }
     for port_id, turns in plan.perpendicular_turns.items():
         assert graph.ports[port_id].is_entry
@@ -186,7 +186,7 @@ def _origin(graph: MetroGraph, node: str, line_id: str) -> str:
 
 
 def _screen_side(graph: MetroGraph, entry_id: str, side: int) -> str:
-    travel = _port_travel(graph.ports[entry_id])
+    travel = port_travel(graph.ports[entry_id])
     if side == 0:
         return "flat"
     return "below" if side * lateral_order_sign(travel) > 0 else "above"
@@ -533,7 +533,7 @@ def test_a_turned_placement_plans_the_turned_record(path: Path, turn: _Turn) -> 
         got = image.port_orders.approaches[key]
         assert (got.kind, got.rule, got.reach) == (ref.kind, ref.rule, ref.reach), key
         if ref.rule in _CONVENTIONS:
-            travel = _port_travel(image_graph.ports[key[0]])
+            travel = port_travel(image_graph.ports[key[0]])
             assert got.side == _CONVENTIONS[ref.rule](travel), key
             convention_kept &= got.side == flip * ref.side
         else:
@@ -561,7 +561,7 @@ def test_a_turned_placement_plans_the_turned_record(path: Path, turn: _Turn) -> 
 def test_rotation_fixtures_cover_every_rule() -> None:
     """The fixtures above exercise every rule the record states."""
     fired: set[str] = set()
-    builder_cls = port_order_plan_module._Builder
+    builder_cls = port_order_plan_module.PortOrderBuilder
     real = {
         name: getattr(builder_cls, name)
         for name in ("joining_side", "cell_lateral", "own_band", "_round_own_side")
@@ -611,7 +611,7 @@ def test_rotation_fixtures_cover_every_rule() -> None:
             for port_id, turns in plan.perpendicular_turns.items():
                 if sum(t.turn is not None for t in turns) >= 2:
                     fired.add("multi-consumer turns")
-                default = plan.order_travels[port_id] is not _port_travel(
+                default = plan.order_travels[port_id] is not port_travel(
                     graph.ports[port_id]
                 )
                 if len(turns) == 1 and turns[0].turn is not None and default:
@@ -660,7 +660,7 @@ def test_the_row_top_corridor_is_dispatch_rule_21_scope() -> None:
 def test_a_packed_cell_member_sits_at_its_own_slot() -> None:
     graph = _laid_out(TOPOLOGIES / "packed_cell_cellmate_bypass.mmd").graph
     assert graph is not None
-    builder = port_order_plan_module._Builder(graph)
+    builder = port_order_plan_module.PortOrderBuilder(graph)
     packs = [m for m in graph.cell_packs.values() if len(m) >= 2]
     assert packs
     for members in packs:

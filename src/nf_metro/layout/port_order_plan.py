@@ -229,7 +229,7 @@ def _sign(value: float) -> int:
     return 1 if value > 0 else -1
 
 
-def _port_travel(port: Port) -> Direction:
+def port_travel(port: Port) -> Direction:
     sides = ENTRY_SIDE_DIRECTION if port.is_entry else EXIT_SIDE_DIRECTION
     return sides[port.side]
 
@@ -271,7 +271,7 @@ def _merge_orders(
     return out
 
 
-class _Builder:
+class PortOrderBuilder:
     """Decides each port once, depth-first through the ports it inherits from."""
 
     def __init__(self, graph: MetroGraph) -> None:
@@ -411,7 +411,7 @@ class _Builder:
         known = self.approaches.get(key)
         if known is not None:
             return known
-        travel = _port_travel(self.graph.ports[entry_id])
+        travel = port_travel(self.graph.ports[entry_id])
         here = self.cell_centre(entry_id)
         cell = self.cell_centre(source_id)
         assert here is not None and cell is not None
@@ -464,7 +464,7 @@ class _Builder:
         if source is None or source.is_entry:
             return below, SideRule.SCREEN_BELOW
         heading = EXIT_SIDE_DIRECTION[source.side]
-        if lateral_axis(heading) != lateral_axis(_port_travel(graph.ports[entry_id])):
+        if lateral_axis(heading) != lateral_axis(port_travel(graph.ports[entry_id])):
             return below, SideRule.SCREEN_BELOW
         return 1, SideRule.TURN_ROUND
 
@@ -685,7 +685,7 @@ class _Builder:
         if perpendicular and not port.is_entry:
             travel = ENTRY_SIDE_DIRECTION[flow_entry_side(section.direction)]
         else:
-            travel = _port_travel(port)
+            travel = port_travel(port)
         lines = graph.station_lines(port_id)
         here = self.cell_centre(port_id)
         sources = {lid: self.upstream_sources(port_id, lid) for lid in lines}
@@ -877,14 +877,14 @@ def _classify(
     return PortClass.SINGLE_FEEDER
 
 
-def _same_band_sources(builder: _Builder) -> list[tuple[str, str]]:
+def _same_band_sources(builder: PortOrderBuilder) -> list[tuple[str, str]]:
     """Every ``(entry port, upstream source)`` pair on one grid band."""
     graph = builder.graph
     pairs: set[tuple[str, str]] = set()
     for port_id in sorted(graph.ports):
         if not graph.ports[port_id].is_entry or builder.cell_centre(port_id) is None:
             continue
-        travel = _port_travel(graph.ports[port_id])
+        travel = port_travel(graph.ports[port_id])
         for lid in graph.station_lines(port_id):
             for node, _via in builder.upstream_sources(port_id, lid):
                 if (
@@ -896,10 +896,10 @@ def _same_band_sources(builder: _Builder) -> list[tuple[str, str]]:
     return sorted(pairs)
 
 
-def plan_builder(graph: MetroGraph) -> tuple[_Builder, PortOrderPlan]:
+def plan_builder(graph: MetroGraph) -> tuple[PortOrderBuilder, PortOrderPlan]:
     """Decide every port's order and every same-band approach, keeping the
     builder whose band and cell reads later record rules share."""
-    builder = _Builder(graph)
+    builder = PortOrderBuilder(graph)
     for port_id in sorted(graph.ports):
         builder.order_of(port_id)
     approaches = {key: builder.approach(*key) for key in _same_band_sources(builder)}

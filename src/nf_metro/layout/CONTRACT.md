@@ -1595,7 +1595,7 @@ the planned-fan offsets that follow them own the lanes a fan plan states.
   each perpendicular entry's consumer turns, and the far-side approaches.
 - **Helpers**: `seal_lane_plan` (`layout/lane_plan.py`), called at the top of
   `_run_offset_phases`; `build_lane_plan` builds the record from
-  `build_port_order_plan` (`layout/port_order_plan.py`). `start_layout`, called
+  `plan_builder` (`layout/port_order_plan.py`). `start_layout`, called
   at the top of `_layout_once`, clears the previous layout's record.
 - **Precondition**: Station coordinates, section boxes, grid cells and cell
   packs as they stand at the layout's first offsets run whose stages include

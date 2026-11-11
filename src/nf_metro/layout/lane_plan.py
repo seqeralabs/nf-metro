@@ -39,10 +39,10 @@ from nf_metro.layout.geometry import (
 )
 from nf_metro.layout.port_order_plan import (
     ApproachKind,
+    PortOrderBuilder,
     PortOrderPlan,
-    _Builder,
-    _port_travel,
     plan_builder,
+    port_travel,
 )
 from nf_metro.layout.routing.common import (
     ENTRY_SIDE_DIRECTION,
@@ -155,11 +155,11 @@ def _order_travels(
         elif port.side in perpendicular_port_sides(section.direction):
             out[port_id] = ENTRY_SIDE_DIRECTION[flow_entry_side(section.direction)]
         else:
-            out[port_id] = _port_travel(port)
+            out[port_id] = port_travel(port)
     return out
 
 
-def _consumers(builder: _Builder, exit_id: str, line_id: str) -> list[str]:
+def _consumers(builder: PortOrderBuilder, exit_id: str, line_id: str) -> list[str]:
     """The non-junction nodes *line_id* reaches from *exit_id*."""
     graph = builder.graph
     found: list[str] = []
@@ -180,11 +180,11 @@ def _consumers(builder: _Builder, exit_id: str, line_id: str) -> list[str]:
 
 
 def _far_side(
-    builder: _Builder, exit_id: str, entry_id: str, line_id: str, lateral: float
+    builder: PortOrderBuilder, exit_id: str, entry_id: str, line_id: str, lateral: float
 ) -> bool:
     graph = builder.graph
     travel = EXIT_SIDE_DIRECTION[graph.ports[exit_id].side]
-    entry_travel = _port_travel(graph.ports[entry_id])
+    entry_travel = port_travel(graph.ports[entry_id])
     ex, ey = direction_vector(travel)
     nx, ny = direction_vector(entry_travel)
     dot = ex * nx + ey * ny
@@ -207,7 +207,7 @@ def _far_side(
     return False
 
 
-def _far_sides(builder: _Builder) -> dict[tuple[str, str, str], int]:
+def _far_sides(builder: PortOrderBuilder) -> dict[tuple[str, str, str], int]:
     graph = builder.graph
     out: dict[tuple[str, str, str], int] = {}
     for exit_id in sorted(graph.ports):
