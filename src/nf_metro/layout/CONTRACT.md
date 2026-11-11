@@ -1592,13 +1592,17 @@ the planned-fan offsets that follow them own the lanes a fan plan states.
 - **Purpose**: Decide the layout's planned lane decisions once, from structure
   and placement, before that offsets run writes any lane: every port's line
   order and same-band entry approach, each port's order travel and lane sense,
-  each perpendicular entry's consumer turns, the far-side approaches, and the
+  each perpendicular entry's consumer turns, the far-side approaches, the
   track plan: every in-section `(node, line)`'s lane, from which each exit's
-  order is read.
+  order is read, and the seam joint: the lanes either side of every straight
+  seam.
 - **Helpers**: `seal_lane_plan` (`layout/lane_plan.py`), called at the top of
   `_run_offset_phases`; `build_lane_plan` decides the track plan section by
   section, upstream first, asking the `PortOrderBuilder`
-  (`layout/port_order_plan.py`) for entry orders and feeding it exit orders.
+  (`layout/port_order_plan.py`) for entry orders and feeding it exit orders
+  and the orders straight seams pin at entries.  Born lines leaving a
+  divergence fan read `fanout_divergence_peel_order` (`layout/fan_ordering.py`)
+  in their section flow's frame.
   `start_layout`, called at the top of `_layout_once`, clears the previous
   layout's record.
 - **Precondition**: Station coordinates, section boxes, grid cells and cell
@@ -1609,7 +1613,9 @@ the planned-fan offsets that follow them own the lanes a fan plan states.
   layout starts: every port has a `PortOrder` (its lines travel-left to
   travel-right with the sort field that decided it, or undecided with the
   missing input named), every same-band `(entry, upstream source)` pair an
-  `Approach`, every in-section `(node, line)` and fed junction a lane.
+  `Approach`, every in-section `(node, line)` and fed junction a lane, every
+  entry a straight seam pins its lanes, and every perpendicular port whose
+  lines all cross straight seams the offsets that keep them straight.
   Later offsets runs of the layout, and routing and rendering
   after it, replay the sealed record rather than rebuilding it.
   Rail-mode and sectionless layouts never reach 5.1 and hold no record.

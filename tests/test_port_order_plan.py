@@ -3,10 +3,11 @@
 :mod:`nf_metro.layout.port_order_plan` is decided when a layout seals its lane
 plan, before that offsets run writes any lane, so it can only be a function of
 the map's structure and placement.  These tests hold the properties that make
-it a plan: it covers every port, it is deterministic, and neither it nor the
-lane plan module reads anything a later phase writes, beyond the fan plans
-each layout installs before its first stage.  Rotation and reflection are held
-for the whole record in ``test_lane_plan.py``.
+it a plan: it covers every port, it is deterministic, and neither it, the
+lane plan module nor the fan peel order the lane plan reads reads anything a
+later phase writes, beyond the fan plans each layout installs before its first
+stage.  Rotation and reflection are held for the whole record in
+``test_lane_plan.py``.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from types import ModuleType
 
 import pytest
 
+import nf_metro.layout.fan_ordering as fan_ordering_module
 import nf_metro.layout.fan_plans as fan_plans_module
 import nf_metro.layout.lane_plan as lane_plan_module
 import nf_metro.layout.port_order_plan as port_order_plan_module
@@ -53,6 +55,11 @@ COVERAGE_FIXTURES = [
     TOPOLOGIES / "packed_cell_right_exit_left_entry_wrap.mmd",
     TOPOLOGIES / "paired_input_fan_branch_tree.mmd",
     TOPOLOGIES / "stacked_top_entry_flanked_riser.mmd",
+    ROOT
+    / "tests"
+    / "fixtures"
+    / "regressions"
+    / "approach_order_coincident_corners.mmd",
     TOPOLOGIES / "entry_cohort_interleaved_fixed_lane.mmd",
 ]
 
@@ -81,6 +88,7 @@ LAYOUT_START_STATE = frozenset({"fan_plans", "fan_plan_query"})
 STATED_INPUTS = {
     port_order_plan_module: frozenset[str](),
     lane_plan_module: frozenset({"fan_plans"}),
+    fan_ordering_module: frozenset[str](),
 }
 
 # Ways to reach any of the above, or run a phase on a copy, without naming it.
@@ -97,7 +105,8 @@ DYNAMIC_ACCESS = frozenset(
     }
 )
 
-# Every (module, name) each record module imports: a new import is a new input.
+# Every (module, name) each record module, and the peel order module the record
+# reads, imports: a new import is a new input.
 ALLOWED_IMPORTS = {
     port_order_plan_module: frozenset(
         {
@@ -138,12 +147,16 @@ ALLOWED_IMPORTS = {
             ("collections.abc", "Mapping"),
             ("collections.abc", "Sequence"),
             ("dataclasses", "dataclass"),
+            ("dataclasses", "field"),
             ("functools", "partial"),
             ("heapq", "heapify"),
             ("heapq", "heappop"),
             ("heapq", "heappush"),
+            ("nf_metro.layout.constants", "SAME_COORD_TOLERANCE"),
             ("nf_metro.layout.constants", "SAME_Y_TOLERANCE"),
+            ("nf_metro.layout.constants", "graph_offset_step"),
             ("nf_metro.layout.departure_order", "JUNCTIONS_POSITIONED"),
+            ("nf_metro.layout.fan_ordering", "fanout_divergence_peel_order"),
             ("nf_metro.layout.geometry", "AxisFrame"),
             ("nf_metro.layout.geometry", "flow_entry_side"),
             ("nf_metro.layout.geometry", "perpendicular_port_sides"),
@@ -162,6 +175,24 @@ ALLOWED_IMPORTS = {
             ("nf_metro.parser.model", "Section"),
             ("nf_metro.parser.model", "Station"),
             ("nf_metro.parser.model", "is_bypass_v"),
+            ("typing", "NamedTuple"),
+        }
+    ),
+    fan_ordering_module: frozenset(
+        {
+            ("__future__", "annotations"),
+            ("nf_metro.layout.fan_plans", "FanTopologyQuery"),
+            ("nf_metro.layout.geometry", "AxisFrame"),
+            ("nf_metro.layout.geometry", "lanes_run_along_x"),
+            ("nf_metro.layout.geometry", "packed_section_visual_rank"),
+            ("nf_metro.layout.route_topology", "convergence_entry_port_id"),
+            ("nf_metro.layout.routing.common", "resolve_section"),
+            ("nf_metro.layout.routing.common", "resolve_section_colrow"),
+            ("nf_metro.parser.model", "MetroGraph"),
+            ("nf_metro.parser.model", "PortSide"),
+            ("nf_metro.parser.model", "Station"),
+            ("typing", "NamedTuple"),
+            ("typing", "TYPE_CHECKING"),
         }
     ),
 }
@@ -227,12 +258,15 @@ def test_plan_does_not_depend_on_the_hash_seed() -> None:
     assert len(outputs) == 1
 
 
-def test_a_line_with_no_reference_node_is_undecided() -> None:
+def _orphaned(pinned: bool) -> tuple[MetroGraph, str, str]:
+    """rnaseq_sections with the edge into a multi-line entry, one its straight
+    seams pin or not, removed for its first line."""
     graph = _fresh_laid_out((ROOT / "examples" / "rnaseq_sections.mmd").read_text())
+    seamed = set(lane_plan_module.build_lane_plan(graph).seams.entries)
     entry_id, line_id = next(
         (pid, lid)
         for pid, port in sorted(graph.ports.items())
-        if port.is_entry
+        if port.is_entry and (pid in seamed) == pinned
         for lid in graph.station_lines(pid)
         if len(graph.station_lines(pid)) > 1
     )
@@ -240,11 +274,32 @@ def test_a_line_with_no_reference_node_is_undecided() -> None:
         e for e in graph.edges if not (e.target == entry_id and e.line_id == line_id)
     ]
     graph.replace_edges(orphaned)
+    return graph, entry_id, line_id
+
+
+def test_a_line_with_no_reference_node_is_undecided() -> None:
+    graph, entry_id, line_id = _orphaned(pinned=False)
     order = _port_orders(graph).orders[entry_id]
 
     assert not order.decided
     assert order.missing is not None
     assert line_id in order.missing
+
+
+def test_seam_pins_decide_an_entry_its_sort_key_cannot() -> None:
+    """An entry whose straight seams pin some of its lines takes the pinned
+    lanes' order even when a line lacks a reference node: the unpinned lines
+    fill round the pins in line-id order."""
+    graph, entry_id, line_id = _orphaned(pinned=True)
+    plan = lane_plan_module.build_lane_plan(graph)
+    order = plan.port_orders.orders[entry_id]
+    lanes = plan.seams.entries[entry_id]
+
+    assert order.basis is OrderBasis.SEAM
+    assert order.lines is not None and line_id in order.lines
+    assert line_id not in {lid for e, lid in plan.seams.pins if e == entry_id}
+    free = [lid for lid in sorted(lanes) if (entry_id, lid) not in plan.seams.pins]
+    assert sorted(free, key=lanes.__getitem__) == free
 
 
 def test_coverage_fixtures_exercise_every_port_class() -> None:
