@@ -1603,7 +1603,8 @@ the planned-fan offsets that follow them own the lanes a fan plan states.
   layout's record.
 - **Precondition**: Station coordinates, section boxes, grid cells and cell
   packs as they stand at the layout's first offsets run whose stages include
-  5.1. Offsets runs before 5.1 in a layout see no record.
+  5.1, and the fan plans (`graph.fan_plans`) installed at the top of
+  `_layout_once`. Offsets runs before 5.1 in a layout see no record.
 - **Postcondition**: `graph._lane_plan` holds a `LanePlan` until the next
   layout starts: every port has a `PortOrder` (its lines travel-left to
   travel-right with the sort field that decided it, or undecided with the

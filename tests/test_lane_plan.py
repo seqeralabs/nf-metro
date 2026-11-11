@@ -5,15 +5,17 @@ same-band entry approach, each port's order travel and lane sense, each
 perpendicular entry's consumer turns and the far-side approaches at the first
 offsets run of a layout at or after stage 5.1.  These tests hold the record's
 contract: one record per layout, replayed for the rest of it; total on every
-curated map; independent of the hash seed; read by nothing in the package; a
-rotated or reflected placement plans the rotated or reflected record; and its
-approach sides are the ones dispatch draws.
+curated map; independent of the hash seed; pinned per curated map; read by
+nothing in the package; a rotated or reflected placement plans the rotated or
+reflected record; and its approach sides are the ones dispatch draws.
 """
 
 from __future__ import annotations
 
 import ast
+import hashlib
 import inspect
+import json
 import os
 import subprocess
 import sys
@@ -428,6 +430,63 @@ def test_the_record_does_not_depend_on_the_hash_seed(path: Path) -> None:
     assert len(outputs) == 1
 
 
+# ---- the pinned record
+
+RECORD_DIGESTS = ROOT / "tests" / "data" / "lane_plan_digests.json"
+
+
+def _rel(path: Path) -> str:
+    return str(path.relative_to(ROOT))
+
+
+def _record_payload(plan: LanePlan) -> list[object]:
+    tracks = plan.tracks
+    return [
+        sorted([node, lid, lane] for (node, lid), lane in tracks.lanes.items()),
+        [
+            [port_id, None if order.lines is None else list(order.lines)]
+            for port_id, order in sorted(plan.port_orders.orders.items())
+        ],
+        [[f.section_id, f.run, list(f.lines)] for f in tracks.forced],
+        list(tracks.cycle_sections),
+    ]
+
+
+def _map_digest(run: _Run) -> str | None:
+    """Digest of every record *run*'s layouts sealed, in order: lanes, port
+    orders, forced crossings and cycle sections.  ``None`` when the map's
+    layout aborts or seals no record."""
+    if run.graph is None or run.graph._lane_plan is None:
+        return None
+    payload = json.dumps([_record_payload(p) for p in run.plans], separators=(",", ":"))
+    return hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+
+@lru_cache(maxsize=1)
+def _pinned_digests() -> dict[str, str | None]:
+    return dict(json.loads(RECORD_DIGESTS.read_text()))
+
+
+def _write_record_digests() -> None:
+    digests = {_rel(p): _map_digest(_laid_out(p)) for p in CURATED}
+    RECORD_DIGESTS.write_text(json.dumps(digests, indent=1, sort_keys=True) + "\n")
+
+
+@pytest.mark.parametrize("path", CURATED, ids=_rel)
+def test_the_record_matches_its_pinned_digest(path: Path) -> None:
+    """Each curated map seals the records pinned in ``RECORD_DIGESTS``, so a
+    change to any track or port-order rule shows as the maps it moves.
+
+    Regenerate the pin, only when that change is intended, with
+    ``python tests/test_lane_plan.py``; the digests do not depend on the hash
+    seed."""
+    assert _map_digest(_laid_out(path)) == _pinned_digests().get(_rel(path), "absent")
+
+
+def test_the_pinned_digests_name_every_curated_map() -> None:
+    assert set(_pinned_digests()) == {_rel(p) for p in CURATED}
+
+
 # ---- read by nothing
 
 
@@ -593,6 +652,33 @@ def _rotation_case(path: Path) -> tuple[MetroGraph, LanePlan]:
     return graph, _plan(graph)
 
 
+# Rotations that mirror some section's lane frame (see
+# ``test_a_turned_placement_plans_the_turned_record``): the exit orders read
+# from that section's lanes reverse, and with them the entry orders they feed.
+ORDER_TURN_EXCEPTIONS = frozenset(
+    {
+        ("bottom_entry_two_feeders_own_lanes", "r180"),
+        ("departure_order_carry_replay", "r90"),
+        ("lr_perp_top_exit_perp_entry_diverging", "r180"),
+        ("right_entry_wrap_bundle", "r180"),
+        ("stacked_collector_fanin", "r180"),
+        ("tb_right_entry_stack", "r180"),
+        ("wide_fan_out", "r180"),
+    }
+)
+
+
+def _conventions_kept(reference: LanePlan, image: LanePlan, turn: _Turn) -> bool:
+    """Whether *turn* carries every side-convention approach's side as it
+    carries every other side."""
+    flip = -1 if turn.reflect else 1
+    return all(
+        image.port_orders.approaches[key].side == flip * ref.side
+        for key, ref in reference.port_orders.approaches.items()
+        if ref.rule in _CONVENTIONS
+    )
+
+
 @pytest.mark.parametrize(
     ("path", "turn"),
     [(p, t) for p in ROTATION_FIXTURES for t in TURNS],
@@ -600,31 +686,41 @@ def _rotation_case(path: Path) -> tuple[MetroGraph, LanePlan]:
 )
 def test_a_turned_placement_plans_the_turned_record(path: Path, turn: _Turn) -> None:
     """Every rule reads its inputs in a travel frame, so turning the placement
-    turns the record: a rotation keeps each order and side, a reflection
-    reverses each lateral-decided order and flips each side.  The two side
-    conventions dispatch draws are the exception: a turn-round U-turn loops on
-    the traveller's right in every frame, and the screen-below side is the
-    traveller's right except across leftward travel.  Where a turn changes a
-    convention's side, the orders and far sides resting on it are not
-    compared.  Lanes are decided in each section's lane frame, whose direction
-    is a convention too (an RL section's lanes run as an LR section's, a
-    vertical section's by its feed side): a turn that carries every section's
-    lane direction onto the image's plans the same lanes; any other turn mirrors
-    some section's lane frame, and the lanes and the exit orders read from them
-    are not compared."""
+    turns the record.
+
+    Every turn keeps each approach's kind, rule and reach and each port's
+    class, and turns each port's order travel and each perpendicular turn.  It
+    flips each approach side under a reflection, except the two side
+    conventions dispatch draws: a turn-round U-turn loops on the traveller's
+    right in every frame, and the screen-below side is the traveller's right
+    except across leftward travel.
+
+    Lanes are decided in each section's lane frame, which is the drawing's
+    convention rather than one frame turned: an RL section's lanes run as an
+    LR section's reflected, TB and BT sections' as an LR section's turned a
+    quarter, except that a TB section entered from the right, receiving a
+    reversed bundle or joined to no other section runs its lanes toward +x.  A
+    turn that carries every section's lane direction onto the image
+    section's plans the same lanes.
+
+    Where the turn carries every convention side as well, it flips each far
+    side under a reflection and turns each order: a rotation keeps it; a
+    reflection reverses a lateral-decided order, and, where the turn carries
+    every lane direction, an order read from the lanes.  The turns in
+    ``ORDER_TURN_EXCEPTIONS`` mirror some section's lane frame and so are not
+    held to the orders."""
     graph, reference = _rotation_case(path)
     image_graph = _turned(graph, turn)
     image = _plan(image_graph)
     flip = -1 if turn.reflect else 1
+    keeps_frames = _keeps_lane_frames(graph, image_graph, turn)
 
-    convention_kept = True
     for key, ref in reference.port_orders.approaches.items():
         got = image.port_orders.approaches[key]
         assert (got.kind, got.rule, got.reach) == (ref.kind, ref.rule, ref.reach), key
         if ref.rule in _CONVENTIONS:
             travel = port_travel(image_graph.ports[key[0]])
             assert got.side == _CONVENTIONS[ref.rule](travel), key
-            convention_kept &= got.side == flip * ref.side
         else:
             assert got.side == flip * ref.side, key
 
@@ -634,20 +730,45 @@ def test_a_turned_placement_plans_the_turned_record(path: Path, turn: _Turn) -> 
         assert [(t.consumer_id, t.lines, turn.travel(t.turn)) for t in turns] == [
             (t.consumer_id, t.lines, t.turn) for t in image.perpendicular_turns[port_id]
         ]
-    if not convention_kept:
-        return
-    assert image.far_sides == {k: flip * v for k, v in reference.far_sides.items()}
-    if not _keeps_lane_frames(graph, image_graph, turn):
-        return
-    assert image.tracks.lanes == reference.tracks.lanes
     for port_id, ref_order in reference.port_orders.orders.items():
         image_order = image.port_orders.orders[port_id]
         assert image_order.port_class is ref_order.port_class, port_id
+    if keeps_frames:
+        assert image.tracks.lanes == reference.tracks.lanes
+
+    if not _conventions_kept(reference, image, turn):
+        return
+    assert image.far_sides == {k: flip * v for k, v in reference.far_sides.items()}
+    if (path.stem, turn.name) in ORDER_TURN_EXCEPTIONS:
+        return
+    for port_id, ref_order in reference.port_orders.orders.items():
+        image_order = image.port_orders.orders[port_id]
         if not turn.reflect:
             assert image_order.lines == ref_order.lines, port_id
-        elif ref_order.basis is OrderBasis.LATERAL:
+        elif ref_order.basis is OrderBasis.LATERAL or (
+            keeps_frames and ref_order.basis is OrderBasis.LANES
+        ):
             assert ref_order.lines is not None
             assert image_order.lines == tuple(reversed(ref_order.lines)), port_id
+
+
+@pytest.mark.parametrize(
+    ("stem", "turn_name"), sorted(ORDER_TURN_EXCEPTIONS), ids=lambda v: v
+)
+def test_order_turn_exceptions_are_live(stem: str, turn_name: str) -> None:
+    path = next(p for p in ROTATION_FIXTURES if p.stem == stem)
+    turn = next(t for t in TURNS if t.name == turn_name)
+    graph, reference = _rotation_case(path)
+    image_graph = _turned(graph, turn)
+    image = _plan(image_graph)
+
+    assert not turn.reflect
+    assert _conventions_kept(reference, image, turn)
+    assert not _keeps_lane_frames(graph, image_graph, turn)
+    assert any(
+        image.port_orders.orders[port_id].lines != ref_order.lines
+        for port_id, ref_order in reference.port_orders.orders.items()
+    )
 
 
 def test_rotation_fixtures_cover_every_rule() -> None:
@@ -904,3 +1025,7 @@ def test_screen_below_convention_by_travel() -> None:
     assert _convention_side(Direction.D) == 1
     assert _convention_side(Direction.U) == 1
     assert _convention_side(Direction.L) == -1
+
+
+if __name__ == "__main__":
+    _write_record_digests()

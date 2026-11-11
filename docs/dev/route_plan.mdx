@@ -280,7 +280,9 @@ Fan plans' carriers keep their slots and a line entering a part along its level 
 Two lines coexist when the flow spans of their connected pieces on the run overlap; touching at one station is a hand-over when one ends there and the other starts there.
 A cycle among the bundle orders a section or part must keep is recorded as a forced crossing, broken by the merge's tie-break.
 
-The lane frame is the drawing's convention: an RL section's lanes run the way an LR section's do, and a vertical section's by its feed side.
+The lane frame is the drawing's convention, not one frame turned to each flow.
+TB and BT sections' lanes run as an LR section's turned a quarter (TB toward -x, BT toward +x), except that a TB section entered from the right, receiving a reversed bundle or joined to no other section runs its lanes toward +x.
+An RL section's lanes run as an LR section's reflected, toward +y.
 A turned placement plans the same lanes wherever the turn carries each section's lane direction onto the turned section's.
 
 ## Identity and coverage

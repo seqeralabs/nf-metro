@@ -4,8 +4,9 @@
 plan, before that offsets run writes any lane, so it can only be a function of
 the map's structure and placement.  These tests hold the properties that make
 it a plan: it covers every port, it is deterministic, and neither it nor the
-lane plan module reads anything a later phase writes.  Rotation and reflection
-are held for the whole record in ``test_lane_plan.py``.
+lane plan module reads anything a later phase writes, beyond the fan plans
+each layout installs before its first stage.  Rotation and reflection are held
+for the whole record in ``test_lane_plan.py``.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from types import ModuleType
 
 import pytest
 
+import nf_metro.layout.fan_plans as fan_plans_module
 import nf_metro.layout.lane_plan as lane_plan_module
 import nf_metro.layout.port_order_plan as port_order_plan_module
 from nf_metro.layout.engine import compute_layout
@@ -71,6 +73,15 @@ LATER_PHASE_NAMES = frozenset(
         "route_edges",
     }
 )
+
+# Graph state each layout installs at its start (``_layout_once``), before any
+# stage runs: a record module may read it only as a stated input.
+LAYOUT_START_STATE = frozenset({"fan_plans", "fan_plan_query"})
+
+STATED_INPUTS = {
+    port_order_plan_module: frozenset[str](),
+    lane_plan_module: frozenset({"fan_plans"}),
+}
 
 # Ways to reach any of the above, or run a phase on a copy, without naming it.
 DYNAMIC_ACCESS = frozenset(
@@ -423,14 +434,26 @@ def test_an_entry_without_grid_cells_is_undecided() -> None:
     assert order.missing.startswith("grid cells")
 
 
-def _later_phase_reads(source: str, allowed: frozenset[tuple[str, str]]) -> list[str]:
-    """What in *source* could read later-phase state or run a phase on a copy."""
-    tree = ast.parse(source)
+def _names(tree: ast.Module) -> set[str]:
     names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
     names |= {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
     froms = [n for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)]
-    names |= {alias.name for n in froms for alias in n.names}
-    found = sorted(names & (LATER_PHASE_NAMES | DYNAMIC_ACCESS))
+    return names | {alias.name for n in froms for alias in n.names}
+
+
+def _later_phase_reads(
+    source: str,
+    allowed: frozenset[tuple[str, str]],
+    stated: frozenset[str] = frozenset(),
+) -> list[str]:
+    """What in *source* could read later-phase state, read layout-start state
+    beyond *stated*, or run a phase on a copy."""
+    tree = ast.parse(source)
+    froms = [n for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)]
+    names = _names(tree)
+    found = sorted(
+        names & (LATER_PHASE_NAMES | DYNAMIC_ACCESS | (LAYOUT_START_STATE - stated))
+    )
     if any(isinstance(n, ast.Import) for n in ast.walk(tree)):
         found.append("plain import")
     if any(n.level != 0 for n in froms):
@@ -444,11 +467,65 @@ def _later_phase_reads(source: str, allowed: frozenset[tuple[str, str]]) -> list
     "module", list(ALLOWED_IMPORTS), ids=lambda m: m.__name__.rsplit(".", 1)[-1]
 )
 def test_the_record_modules_read_no_later_phase_state(module: ModuleType) -> None:
-    """Their inputs are structure and placement: no lane offset, route, draft,
+    """Their inputs are structure, placement and the state each module states
+    of what its layout installs at its start: no lane offset, route, draft,
     departure record or offsets/routing entry point appears in either module,
     and each imports nothing beyond its stated inputs."""
     source = Path(str(module.__file__)).read_text()
-    assert _later_phase_reads(source, ALLOWED_IMPORTS[module]) == []
+    assert (
+        _later_phase_reads(source, ALLOWED_IMPORTS[module], STATED_INPUTS[module]) == []
+    )
+
+
+@pytest.mark.parametrize(
+    "module", list(STATED_INPUTS), ids=lambda m: m.__name__.rsplit(".", 1)[-1]
+)
+def test_each_stated_input_is_read(module: ModuleType) -> None:
+    source = Path(str(module.__file__)).read_text()
+    assert STATED_INPUTS[module] <= LAYOUT_START_STATE
+    assert STATED_INPUTS[module] <= _names(ast.parse(source))
+
+
+def test_the_lane_plan_reads_the_fan_plans_its_layout_installed() -> None:
+    """Each record is built from the fan plans installed at the start of its
+    own layout, and no layout installs fan plans after its record seals."""
+    events: list[tuple[str, object]] = []
+    real_install = fan_plans_module.install_fan_plan_execution
+    real_start = lane_plan_module.start_layout
+    real_build = lane_plan_module.build_lane_plan
+
+    def install(graph: MetroGraph, execution: object) -> None:
+        events.append(("install", execution))
+        real_install(graph, execution)  # type: ignore[arg-type]
+
+    def start(graph: MetroGraph) -> None:
+        events.append(("start", None))
+        real_start(graph)
+
+    def build(graph: MetroGraph) -> lane_plan_module.LanePlan:
+        events.append(("build", graph.fan_plan_execution))
+        return real_build(graph)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(fan_plans_module, "install_fan_plan_execution", install)
+        mp.setattr(lane_plan_module, "start_layout", start)
+        mp.setattr(lane_plan_module, "build_lane_plan", build)
+        graph = _fresh_laid_out((TOPOLOGIES / "wide_fan_out.mmd").read_text())
+
+    assert any(plan.owns_geometry and plan.offset_carriers for plan in graph.fan_plans)
+    layouts: list[list[tuple[str, object]]] = []
+    for kind, value in events:
+        if kind == "start":
+            layouts.append([])
+        else:
+            layouts[-1].append((kind, value))
+    assert any(kind == "build" for layout in layouts for kind, _ in layout)
+    for layout in layouts:
+        kinds = [kind for kind, _ in layout]
+        if "build" not in kinds:
+            continue
+        assert kinds == ["install", "build"]
+        assert layout[1][1] is layout[0][1]
 
 
 @pytest.mark.parametrize(
@@ -461,6 +538,7 @@ def test_the_record_modules_read_no_later_phase_state(module: ModuleType) -> Non
         "from nf_metro.layout.routing.common import compute_routes_somehow",
         "def f(g): return vars(g)['station' + '_offsets']",
         "def f(g): return g.__dict__['station' + '_offsets']",
+        "def f(g): return g.fan_plans",
     ],
     ids=[
         "deepcopy",
@@ -470,6 +548,7 @@ def test_the_record_modules_read_no_later_phase_state(module: ModuleType) -> Non
         "new-name",
         "vars",
         "dunder-dict",
+        "unstated-layout-start-state",
     ],
 )
 def test_the_module_check_catches_indirect_reads(source: str) -> None:
