@@ -1280,9 +1280,9 @@ def left_exit_wrap_columns(
     src_cell: tuple[int | None, int | None],
     offset_step: float,
 ) -> tuple[float, float]:
-    """The source ascent and target descent columns of one line's far-side
-    wrap loop from *src* in grid cell *src_cell*, as
-    :func:`left_exit_around_below_geometry` places a single line's."""
+    """A single line's far-side wrap columns (source ascent, target descent) from
+    *src* in grid cell *src_cell*, as :func:`left_exit_around_below_geometry`
+    places them at zero exit and entry offset on the module's ``CURVE_RADIUS``."""
     src_col, src_row = src_cell
     gap_left, gap_right = (
         column_gap_edges(graph, src_col - 1, src_col, row=src_row)

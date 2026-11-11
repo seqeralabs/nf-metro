@@ -532,8 +532,11 @@ class PortOrderBuilder:
 
     def wraps_over_top(self, exit_id: str, entry_id: str) -> bool:
         """Whether the far-side wrap handler loops one line from *exit_id*
-        over the top of *entry_id*'s section, read from placement: its own
-        test, the band above holding no corridor yet."""
+        over the top of *entry_id*'s section: its own test, read from the
+        placement this record seals at, with no corridor reserved in the band
+        above and :func:`left_exit_wrap_columns`'s single-line columns.
+        Dispatch runs the test on the placement and reserved corridors it
+        routes with."""
         # Dispatch imports the offsets pass, which seals this record.
         from nf_metro.layout.routing.inter_section_handlers import (
             left_exit_wrap_columns,

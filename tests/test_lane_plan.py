@@ -25,10 +25,10 @@ import os
 import subprocess
 import sys
 import warnings
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -53,6 +53,7 @@ from nf_metro.layout.port_order_plan import (
     _lateral,
     port_travel,
 )
+from nf_metro.layout.route_topology import fanout_junction_ids
 from nf_metro.layout.routing import offsets as offsets_module
 from nf_metro.layout.routing.common import (
     EXIT_SIDE_DIRECTION,
@@ -1763,6 +1764,50 @@ def test_a_multi_consumer_perpendicular_entry_keeps_each_turn_side(path: Path) -
     assert bad == []
 
 
+def test_a_multi_consumer_perpendicular_entry_keeps_each_turn_over_its_order() -> None:
+    """Handed its port order reversed, which laid side by side would cross
+    both of its consumers' turns, cross_column_perp_entry_overflow's
+    reporting entry still lays each consumer's lines in the order they hold
+    after turning into it."""
+    graph = _laid_out(
+        FIXTURES / "regressions" / "cross_column_perp_entry_overflow.mmd"
+    ).graph
+    assert graph is not None and graph._lane_plan is not None
+    plan = graph._lane_plan
+    entry_id = "reporting__entry_top_7"
+    order = plan.port_orders.orders[entry_id]
+    assert order.lines is not None
+    reversed_order = replace(order, lines=order.lines[::-1])
+    section = graph.section_for_port(graph.ports[entry_id])
+    sign = _section_lane_frame(graph, section).secondary_sign
+    turns = plan.perpendicular_turns[entry_id]
+    chains: list[list[str]] = []
+    for turn in turns:
+        assert turn.turn is not None
+        lanes = {lid: plan.tracks.lanes[(turn.consumer_id, lid)] for lid in turn.lines}
+        across = lateral_order_sign(turn.turn) * sign
+        chains.append(sorted(turn.lines, key=lambda lid: across * lanes[lid]))
+    assert len(chains) == 2 and all(len(chain) >= 2 for chain in chains)
+
+    def keeps(offsets: Mapping[str, int], chain: list[str]) -> bool:
+        return sorted(chain, key=offsets.__getitem__) == chain
+
+    side_by_side = {lid: i for i, lid in enumerate(reversed_order.lines or ())}
+    assert not any(keeps(side_by_side, chain) for chain in chains)
+    tracks = lane_plan_module._Tracks(
+        graph, lane_plan_module._Frames(graph), plan.lane_senses
+    )
+    for section_id in sorted(graph.sections):
+        tracks.section(section_id)
+    merged = tracks._turn_merge(entry_id, turns, 1, reversed_order)
+    across_ports, _seams = tracks._perpendicular_offsets(
+        {**plan.port_orders.orders, entry_id: reversed_order}, plan.perpendicular_turns
+    )
+    for chain in chains:
+        assert keeps(merged, chain)
+        assert keeps(across_ports[entry_id], chain)
+
+
 def _parting_side(graph: MetroGraph, entry_id: str, line_id: str) -> int | None:
     """``0`` when *line_id* runs from flow-side *entry_id* only to consumers
     level with it, ``+1`` / ``-1`` when only to consumers on the traveller's
@@ -1957,6 +2002,19 @@ def test_the_record_and_dispatch_share_the_same_row_bypass_predicate() -> None:
         "layout/port_order_plan.py",
         "layout/routing/inter_section_handlers.py",
     } <= callers
+
+
+@pytest.mark.parametrize("path", CURATED, ids=lambda p: str(p.relative_to(ROOT)))
+def test_the_record_and_dispatch_agree_on_every_fan_out_junction(path: Path) -> None:
+    """The record's fan-out test of a hop and dispatch's fan-out junction set
+    name the same junctions."""
+    graph = _laid_out(path).graph
+    if graph is None:
+        return
+    fanouts = fanout_junction_ids(graph)
+    assert {
+        j for j in graph.junctions if graph.is_fanout_junction(j) != (j in fanouts)
+    } == set()
 
 
 # ---- screen conventions the record keeps
