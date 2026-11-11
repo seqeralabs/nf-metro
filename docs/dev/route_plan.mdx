@@ -219,28 +219,53 @@ Straight reconvergences are planned as one semantic fan.
 Their established section tracks, including phantom tracks and collision-compacted slots, supply the fixed frame the fan plan owns.
 The plan therefore records and validates the whole branch-and-join system without replacing the section track allocator.
 
-## Port order plan
+## Lane plan record
 
-The port order plan (`layout/port_order_plan.py`) records the line order at every section port.
-It is decided at the start of every station-offset computation, before that computation writes a lane offset, so its only inputs are the map's structure, line declaration priority, section grid cells and the station coordinates placement has reached when the computation starts.
+The lane plan (`layout/lane_plan.py`) records a layout's planned lane decisions.
+It is sealed once per layout, at the first station-offset computation whose placement has positioned the junctions (stage 5.1), before that computation writes a lane offset.
+Its inputs are the map's structure, line declaration priority, section grid cells and cell packs, and the station and section-box coordinates placement has reached at that point.
+Every later offset computation of the layout, and routing and rendering after it, find the sealed record in place; a new layout (a spread attempt, a row-pitch or strike-clearance relay, an off-track or geometric-bypass relayout) starts without one and seals its own.
+Rail-mode and sectionless layouts never reach 5.1 and hold no record.
+Nothing in layout, routing or rendering reads it.
 
-Each `PortOrder` lists the port's lines across its direction of travel, from the traveller's left to their right.
-An entry port's travel is its inward normal and an exit port's is its outward normal.
+### Port orders
+
+The port order plan (`layout/port_order_plan.py`) lists each port's lines across its direction of travel, from the traveller's left to their right.
+An entry port's travel is its inward normal and an exit port's is its outward normal; a perpendicular exit's is the section flow its lines ride before they turn into the port.
 A nested bundle keeps each line on the same side of its travel through every turn, so one port's order can be compared directly with the order of the port its lines came from.
-The frame also turns with the map: a map rotated a quarter turn plans the same orders.
 
-Lines are sorted by three fields, the earlier deciding:
+Nodes are measured by grid cell.
+A section packed into a shared cell sits at its own slot of the cell, in the pack's visual order.
+An entry port of a section spanning several grid bands lies in the one band whose extent (the boxes of the sections occupying that band alone) holds its coordinate.
+Two nodes whose sections' grid extents overlap across the travel share a band, and their lateral is zero.
 
-1. **Lateral.** Where the line's reference node sits across travel.
-   For an entry port this is the line's upstream source, walked back through junctions, compared by grid cell.
-   For an exit port it is the in-section station that feeds the line, compared by its placed coordinate across the exit's travel, or across the section's flow at a perpendicular exit, whose lines turn into the port.
-2. **Upstream.** The line's rank in its reference port's planned order, so lines from one source keep that source's order across the seam.
+An entry's lines are sorted by three fields, the earlier deciding:
+
+1. **Lateral.** The line's reference source across the port's travel: its grid lateral, or for a source on the port's own band its approach (below).
+   A line fed from several sources rides the one most of the port's other lines come from.
+   A perpendicular entry whose off-band sources all lie level with or ahead of it is reached round its own side, so within each side the nearer source lands outermost.
+2. **Refined.** The source's placed lateral; then the side the source joins the shared approach from (the source further along the travel joins later, on its own side; concentric U-turn loops put the nearer source inner); then the line's rank in the source exit's order.
 3. **Priority.** Line declaration order.
 
-The record also states which field decided the order and the port's structural class: perpendicular, two-sided, shared, junction-fed, or a flow-side port with a single feeder.
+Every feeding exit's bundle keeps its order across the seam: the entry order is the merge of those orders, the sort key deciding only between lines no bundle orders.
+An exit's lines are sorted by their in-section feeder's placed lateral; lines tied at one feeder carry the section's order back along the line.
+
+Each order states the field that decided it and the port's structural class.
 A port whose order needs an input the plan cannot supply is undecided and names that input, rather than taking a value a later phase wrote.
 
-The plan is held on the offsets context as `port_order_plan`.
+### Approaches
+
+Each source on an entry's own band has an `Approach`: LEVEL along the band, BYPASS round a section standing between them, or U_TURN from ahead of the port.
+Its side is stated in the entry's travel frame.
+A bypass takes the row-top corridor when it is a same-row bypass into the LEFT entry of an LR section whose hop a packed cell-mate obstructs (dispatch's packed-cell handler scope); a U-turn whose source exit heads along the port's axis turns round onto the traveller's right.
+Every other bypass or U-turn keeps the screen-below convention, which is the traveller's right except across leftward travel.
+
+A connector from a flow-side exit to an off-band entry that the same line also reaches by a bypass from the entry's own band, on the side facing the exit, leaves the exit's band on its far side: the record lists it as a far-side approach.
+
+### Turns and lane senses
+
+Each perpendicular entry records, per in-section consumer, the lines it takes and the direction along the section's flow the lines turn to reach it.
+Each port records the travel its order is read across (its own, the section flow's at a perpendicular port, or the turn at a perpendicular entry whose lines all go to one consumer) and whether that order runs up or down the section's lane index.
 
 ## Identity and coverage
 

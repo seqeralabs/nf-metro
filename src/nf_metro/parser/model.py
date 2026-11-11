@@ -16,6 +16,7 @@ if TYPE_CHECKING:
         DepartureOrderPlan,
     )
     from nf_metro.layout.fan_plans import FanPlanExecution, FanPlanQuery
+    from nf_metro.layout.lane_plan import LanePlan
     from nf_metro.layout.route_plan import FanPlan
     from nf_metro.parser.route_topology import (
         RouteResolutionTrace,
@@ -523,6 +524,7 @@ class MetroGraph:
     _departure_record_keys: frozenset[tuple[str, str]] | None = field(
         default=None, compare=False, repr=False
     )
+    _lane_plan: LanePlan | None = field(default=None, compare=False, repr=False)
     groups: list[StationGroup] = field(default_factory=list)
     grid_overrides: dict[str, tuple[int, int, int, int]] = field(default_factory=dict)
     layout_provenance: LayoutProvenance = field(
