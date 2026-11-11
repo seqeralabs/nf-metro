@@ -38,8 +38,12 @@ import pytest
 import nf_metro.layout.lane_plan as lane_plan_module
 import nf_metro.layout.port_order_plan as port_order_plan_module
 from nf_metro.layout import engine as engine_module
+from nf_metro.layout import fan_ordering
 from nf_metro.layout.constants import SAME_Y_TOLERANCE, graph_offset_step
-from nf_metro.layout.geometry import perpendicular_port_sides
+from nf_metro.layout.geometry import (
+    packed_section_visual_rank,
+    perpendicular_port_sides,
+)
 from nf_metro.layout.lane_plan import LanePlan
 from nf_metro.layout.port_order_plan import (
     Approach,
@@ -50,7 +54,11 @@ from nf_metro.layout.port_order_plan import (
     port_travel,
 )
 from nf_metro.layout.routing import offsets as offsets_module
-from nf_metro.layout.routing.common import EXIT_SIDE_DIRECTION, Direction
+from nf_metro.layout.routing.common import (
+    EXIT_SIDE_DIRECTION,
+    Direction,
+    resolve_section_colrow,
+)
 from nf_metro.layout.routing.context import _section_lane_frame
 from nf_metro.layout.routing.offsets import (
     compute_station_offsets,
@@ -507,7 +515,7 @@ def _boxes_between(graph: MetroGraph, exit_id: str, entry_id: str) -> bool:
 def _straight_seams(graph: MetroGraph) -> list[tuple[str, str, str]]:
     """``(exit, entry, line)`` for every line joining two facing flow-side
     ports on one lane coordinate, through junctions only, past no section."""
-    out = []
+    out: list[tuple[str, str, str]] = []
     for (exit_id, entry_id), lines in sorted(_seam_bundles(graph).items()):
         if _perpendicular(graph, exit_id) or _perpendicular(graph, entry_id):
             continue
@@ -1291,12 +1299,12 @@ def test_a_turned_placement_plans_the_turned_record(path: Path, turn: _Turn) -> 
         for port_id, offsets in reference.tracks.perpendicular.items():
             turned = image.tracks.perpendicular[port_id]
             assert len({turned[lid] - flip * v for lid, v in offsets.items()}) == 1
-        for key, ref_turn in reference.tracks.turn_offs.items():
-            got_turn = image.tracks.turn_offs[key]
-            assert got_turn.travel is turn.travel(ref_turn.travel), key
-            assert got_turn.through == ref_turn.through, key
+        for at, ref_turn in reference.tracks.turn_offs.items():
+            got_turn = image.tracks.turn_offs[at]
+            assert got_turn.travel is turn.travel(ref_turn.travel), at
+            assert got_turn.through == ref_turn.through, at
             ref_lines = ref_turn.lines[::-1] if turn.reflect else ref_turn.lines
-            assert got_turn.lines == ref_lines, key
+            assert got_turn.lines == ref_lines, at
 
     if not _conventions_kept(reference, image, turn):
         return
@@ -1748,10 +1756,8 @@ def test_a_multi_consumer_perpendicular_entry_keeps_each_turn_side(path: Path) -
             lanes = {
                 lid: plan.tracks.lanes[(turn.consumer_id, lid)] for lid in turn.lines
             }
-            after = sorted(
-                turn.lines,
-                key=lambda lid: lateral_order_sign(turn.turn) * sign * lanes[lid],
-            )
+            across = lateral_order_sign(turn.turn) * sign
+            after = sorted(turn.lines, key=lambda lid: across * lanes[lid])
             if sorted(turn.lines, key=offsets.__getitem__) != after:
                 bad.append((port_id, turn.consumer_id))
     assert bad == []
@@ -1826,7 +1832,9 @@ def test_a_bypass_parting_at_its_entry_lies_outermost(path: Path) -> None:
             ):
                 continue
             at = order.lines.index(lid)
-            if (side > 0 and at < max(level)) or (side < 0 and at > min(level)):
+            if (side is not None and side > 0 and at < max(level)) or (
+                side is not None and side < 0 and at > min(level)
+            ):
                 bad.append((entry_id, lid))
     assert bad == []
 
@@ -1975,10 +1983,6 @@ def test_the_row_top_corridor_is_dispatch_rule_21_scope() -> None:
 def test_a_turned_peel_ranks_a_packed_cell_member_in_its_own_cell() -> None:
     """Read in a turned flow frame, a packed section not yet boxed keeps its
     rank inside its own grid cell's pack."""
-    from nf_metro.layout import fan_ordering
-    from nf_metro.layout.geometry import packed_section_visual_rank
-    from nf_metro.layout.routing.common import resolve_section_colrow
-
     graph = _laid_out(TOPOLOGIES / "packed_cell_cellmate_bypass.mmd").graph
     assert graph is not None
     image = deepcopy(graph)
