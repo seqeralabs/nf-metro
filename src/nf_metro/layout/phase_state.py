@@ -321,6 +321,18 @@ PHASE_FIELD_REGISTRY: dict[str, PhaseFieldSpec] = {
             "absent plan decides nothing"
         ),
     ),
+    "_lane_plan": PhaseFieldSpec(
+        name="_lane_plan",
+        writer_stage="5.1",
+        reader_stages=(),
+        enforcement=FieldEnforcement.FALLBACK,
+        why=(
+            "the layout's lane plan record, cleared when each positioning pass "
+            "starts and sealed at its first station-offset computation at or "
+            "after 5.1; nothing reads it, and 'Lane plan record' in "
+            "layout/CONTRACT.md states its lifetime"
+        ),
+    ),
     "_departure_lane_orders": PhaseFieldSpec(
         name="_departure_lane_orders",
         writer_stage=STATION_OFFSET_LAYOUT,
