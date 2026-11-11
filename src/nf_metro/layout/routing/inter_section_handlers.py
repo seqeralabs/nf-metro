@@ -1229,11 +1229,16 @@ def _left_exit_wrap_over_top_y(
     channel, so pooling every feeder into it collinearly overlays them, whereas
     the dips give each feeder its own descent below the target.
     """
-    if f.tgt_row is None:
-        return None
-    reserved = f.ctx.reserved_bands.rows.at(f.tgt_row)
     return left_exit_wrap_over_top_y(
-        f.graph, f.src, f.tgt, f.tgt_row, cx, vx, f.ctx.curve_radius, reserved
+        f.graph,
+        f.src,
+        f.tgt,
+        f.tgt_row,
+        (cx, vx),
+        f.ctx.curve_radius,
+        f.ctx.reserved_bands.rows.at(f.tgt_row),
+        f.v_segment_crosses_other_section,
+        f.h_segment_crosses_other_section,
     )
 
 
@@ -1241,43 +1246,44 @@ def left_exit_wrap_over_top_y(
     graph: MetroGraph,
     src: Station,
     tgt: Station,
-    tgt_row: int,
-    cx: float,
-    vx: float,
+    tgt_row: int | None,
+    columns: tuple[float, float],
     curve_radius: float,
     reserved: ReservedBand | None,
+    crosses_v: Callable[[float, float, float], bool],
+    crosses_h: Callable[[float, float, float], bool],
 ) -> float | None:
     """:func:`_left_exit_wrap_over_top_y` from placement: the loop's source
-    ascent at *cx* and target descent at *vx*, the band above *tgt_row*
-    holding *reserved* corridors."""
+    ascent and target descent *columns*, the band above *tgt_row* holding
+    *reserved* corridors, and *crosses_v* / *crosses_h* telling whether a
+    vertical ``(x, y1, y2)`` or horizontal ``(x1, x2, y)`` leg crosses a
+    section other than the loop's ends."""
+    if tgt_row is None:
+        return None
     gap_top, gap_bottom = _gap_above_target_y(graph, tgt_row)
     if gap_bottom <= gap_top or not _inter_row_band_fits(gap_top, gap_bottom):
         return None
     if len({e.line_id for e in graph.edges_to(tgt.id)}) > 1:
         return None
     gy = gap_above_channel_y(graph, tgt_row, curve_radius, reserved)
-    ends = frozenset(section_ids_of_stations(graph, src, tgt))
+    cx, vx = columns
     blocked = (
-        _v_segment_crosses_other_section(graph, cx, src.y, gy, ends, 0.0)
-        or _v_segment_crosses_other_section(graph, vx, gy, tgt.y, ends, 0.0)
-        or _h_segment_crosses_other_section(graph, cx, vx, gy, ends, 0.0)
+        crosses_v(cx, src.y, gy) or crosses_v(vx, gy, tgt.y) or crosses_h(cx, vx, gy)
     )
     return None if blocked else gy
 
 
-def left_exit_wraps_over_top(
-    graph: MetroGraph, exit_id: str, entry_id: str, offset_step: float
-) -> bool:
-    """Whether one line's far-side wrap loop from LEFT exit *exit_id* into
-    LEFT entry *entry_id* runs over the target's top
-    (:func:`_left_exit_wrap_over_top_y`), from placement alone: its ascent
-    and descent placed as :func:`left_exit_around_below_geometry` places a
-    single line's, the band above the target row holding no corridor."""
-    src, tgt = graph.stations[exit_id], graph.stations[entry_id]
-    src_col, src_row = _resolve_section_colrow(graph, src)
-    tgt_row = _resolve_section_colrow(graph, tgt)[1]
-    if tgt_row is None:
-        return False
+def left_exit_wrap_columns(
+    graph: MetroGraph,
+    src: Station,
+    tgt: Station,
+    src_cell: tuple[int | None, int | None],
+    offset_step: float,
+) -> tuple[float, float]:
+    """The source ascent and target descent columns of one line's far-side
+    wrap loop from *src* in grid cell *src_cell*, as
+    :func:`left_exit_around_below_geometry` places a single line's."""
+    src_col, src_row = src_cell
     gap_left, gap_right = (
         column_gap_edges(graph, src_col - 1, src_col, row=src_row)
         if src_col is not None and src_col > 0
@@ -1293,10 +1299,7 @@ def left_exit_wraps_over_top(
             CURVE_RADIUS, offset_step, _section_left_edge(graph, src), 1
         )
     vx = _left_descent_x(CURVE_RADIUS, offset_step, _section_left_edge(graph, tgt), 1)
-    return (
-        left_exit_wrap_over_top_y(graph, src, tgt, tgt_row, cx, vx, CURVE_RADIUS, None)
-        is not None
-    )
+    return cx, vx
 
 
 def _route_right_entry_cross_row(f: _InterFacts) -> RoutedPath | None:

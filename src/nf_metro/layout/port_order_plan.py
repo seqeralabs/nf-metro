@@ -77,7 +77,11 @@ from enum import Enum
 from functools import partial
 from types import MappingProxyType
 
-from nf_metro.layout.constants import SAME_Y_TOLERANCE, graph_offset_step
+from nf_metro.layout.constants import (
+    CURVE_RADIUS,
+    SAME_Y_TOLERANCE,
+    graph_offset_step,
+)
 from nf_metro.layout.geometry import (
     flow_entry_side,
     flow_port_sides,
@@ -88,7 +92,9 @@ from nf_metro.layout.routing.common import (
     ENTRY_SIDE_DIRECTION,
     EXIT_SIDE_DIRECTION,
     Direction,
+    _v_segment_crosses_other_section,
     resolve_section_colrow,
+    section_ids_of_stations,
 )
 from nf_metro.layout.routing.context import (
     BypassNeed,
@@ -510,11 +516,6 @@ class PortOrderBuilder:
         source = graph.ports.get(source_id)
         if source is None or source.is_entry:
             return below, SideRule.SCREEN_BELOW
-        # Dispatch imports the offsets pass, which seals this record.
-        from nf_metro.layout.routing.inter_section_handlers import (
-            left_exit_wraps_over_top,
-        )
-
         heading = EXIT_SIDE_DIRECTION[source.side]
         entry = graph.ports[entry_id]
         if lateral_axis(heading) != lateral_axis(port_travel(entry)):
@@ -524,12 +525,53 @@ class PortOrderBuilder:
             and source.side is PortSide.LEFT
             and flow_entry_side(graph.section_for_port(entry).direction)
             is PortSide.LEFT
-            and left_exit_wraps_over_top(
-                graph, source_id, entry_id, graph_offset_step(graph)
-            )
+            and self.wraps_over_top(source_id, entry_id)
         ):
             return -1, SideRule.OVER_TOP
         return 1, SideRule.TURN_ROUND
+
+    def wraps_over_top(self, exit_id: str, entry_id: str) -> bool:
+        """Whether the far-side wrap handler loops one line from *exit_id*
+        over the top of *entry_id*'s section, read from placement: its own
+        test, the band above holding no corridor yet."""
+        # Dispatch imports the offsets pass, which seals this record.
+        from nf_metro.layout.routing.inter_section_handlers import (
+            left_exit_wrap_columns,
+            left_exit_wrap_over_top_y,
+        )
+        from nf_metro.layout.routing.normalize import (
+            _h_segment_crosses_other_section,
+        )
+
+        graph = self.graph
+        src, tgt = graph.stations[exit_id], graph.stations[entry_id]
+        ends = frozenset(section_ids_of_stations(graph, src, tgt))
+
+        def crosses_v(x: float, y1: float, y2: float) -> bool:
+            return _v_segment_crosses_other_section(graph, x, y1, y2, ends, 0.0)
+
+        def crosses_h(x1: float, x2: float, y: float) -> bool:
+            return _h_segment_crosses_other_section(graph, x1, x2, y, ends, 0.0)
+
+        columns = left_exit_wrap_columns(
+            graph,
+            src,
+            tgt,
+            resolve_section_colrow(graph, src),
+            graph_offset_step(graph),
+        )
+        channel = left_exit_wrap_over_top_y(
+            graph,
+            src,
+            tgt,
+            resolve_section_colrow(graph, tgt)[1],
+            columns,
+            CURVE_RADIUS,
+            None,
+            crosses_v,
+            crosses_h,
+        )
+        return channel is not None
 
     def bypass_side(
         self, entry_id: str, source_id: str, below: int

@@ -143,10 +143,18 @@ ALLOWED_IMPORTS = {
             ("nf_metro.layout.routing.context", "BypassNeed"),
             ("nf_metro.layout.routing.context", "boxed_fanout_junction"),
             ("nf_metro.layout.routing.context", "packed_cell_same_row_bypass"),
+            ("nf_metro.layout.constants", "CURVE_RADIUS"),
+            ("nf_metro.layout.routing.common", "_v_segment_crosses_other_section"),
+            ("nf_metro.layout.routing.common", "section_ids_of_stations"),
             (
                 "nf_metro.layout.routing.inter_section_handlers",
-                "left_exit_wraps_over_top",
+                "left_exit_wrap_columns",
             ),
+            (
+                "nf_metro.layout.routing.inter_section_handlers",
+                "left_exit_wrap_over_top_y",
+            ),
+            ("nf_metro.layout.routing.normalize", "_h_segment_crosses_other_section"),
             ("types", "MappingProxyType"),
         }
     ),
