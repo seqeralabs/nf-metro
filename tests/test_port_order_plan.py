@@ -28,7 +28,6 @@ from nf_metro.layout.port_order_plan import (
     OrderBasis,
     PortClass,
     PortOrderPlan,
-    build_port_order_plan,
 )
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import (
@@ -92,6 +91,7 @@ ALLOWED_IMPORTS = {
     port_order_plan_module: frozenset(
         {
             ("__future__", "annotations"),
+            ("collections.abc", "Callable"),
             ("collections.abc", "Iterator"),
             ("collections.abc", "Mapping"),
             ("collections.abc", "Sequence"),
@@ -122,7 +122,15 @@ ALLOWED_IMPORTS = {
     lane_plan_module: frozenset(
         {
             ("__future__", "annotations"),
+            ("collections.abc", "Callable"),
+            ("collections.abc", "Iterable"),
+            ("collections.abc", "Mapping"),
+            ("collections.abc", "Sequence"),
             ("dataclasses", "dataclass"),
+            ("functools", "partial"),
+            ("heapq", "heapify"),
+            ("heapq", "heappop"),
+            ("heapq", "heappush"),
             ("nf_metro.layout.constants", "SAME_Y_TOLERANCE"),
             ("nf_metro.layout.departure_order", "JUNCTIONS_POSITIONED"),
             ("nf_metro.layout.geometry", "AxisFrame"),
@@ -131,8 +139,8 @@ ALLOWED_IMPORTS = {
             ("nf_metro.layout.port_order_plan", "ApproachKind"),
             ("nf_metro.layout.port_order_plan", "PortOrderPlan"),
             ("nf_metro.layout.port_order_plan", "PortOrderBuilder"),
+            ("nf_metro.layout.port_order_plan", "decide_ports"),
             ("nf_metro.layout.port_order_plan", "port_travel"),
-            ("nf_metro.layout.port_order_plan", "plan_builder"),
             ("nf_metro.layout.routing.common", "ENTRY_SIDE_DIRECTION"),
             ("nf_metro.layout.routing.common", "EXIT_SIDE_DIRECTION"),
             ("nf_metro.layout.routing.common", "Direction"),
@@ -142,6 +150,7 @@ ALLOWED_IMPORTS = {
             ("nf_metro.parser.model", "MetroGraph"),
             ("nf_metro.parser.model", "Section"),
             ("nf_metro.parser.model", "Station"),
+            ("nf_metro.parser.model", "is_bypass_v"),
         }
     ),
 }
@@ -161,14 +170,18 @@ def _fresh_laid_out(source: str) -> MetroGraph:
     return _laid_out.__wrapped__(source)
 
 
+def _port_orders(graph: MetroGraph) -> PortOrderPlan:
+    return lane_plan_module.build_lane_plan(graph).port_orders
+
+
 def _plan(source: str) -> PortOrderPlan:
-    return build_port_order_plan(_laid_out(source))
+    return _port_orders(_laid_out(source))
 
 
 @pytest.mark.parametrize("path", COVERAGE_FIXTURES, ids=lambda p: p.stem)
 def test_every_port_has_an_order(path: Path) -> None:
     graph = _laid_out(path.read_text())
-    plan = build_port_order_plan(graph)
+    plan = _port_orders(graph)
 
     assert set(plan.orders) == set(graph.ports)
     for order in plan:
@@ -183,11 +196,11 @@ def test_plan_does_not_depend_on_the_hash_seed() -> None:
         "import warnings; warnings.simplefilter('ignore')\n"
         "from nf_metro.parser.mermaid import parse_metro_mermaid\n"
         "from nf_metro.layout.engine import compute_layout\n"
-        "from nf_metro.layout.port_order_plan import build_port_order_plan\n"
+        "from nf_metro.layout.lane_plan import build_lane_plan\n"
         "from pathlib import Path\n"
         f"g = parse_metro_mermaid(Path({str(fixture)!r}).read_text())\n"
         "compute_layout(g)\n"
-        "print(sorted(build_port_order_plan(g).orders.items()))\n"
+        "print(sorted(build_lane_plan(g).port_orders.orders.items()))\n"
     )
     outputs = set()
     for seed in ("0", "1", "4242"):
@@ -216,7 +229,7 @@ def test_a_line_with_no_reference_node_is_undecided() -> None:
         e for e in graph.edges if not (e.target == entry_id and e.line_id == line_id)
     ]
     graph.replace_edges(orphaned)
-    order = build_port_order_plan(graph).orders[entry_id]
+    order = _port_orders(graph).orders[entry_id]
 
     assert not order.decided
     assert order.missing is not None
@@ -233,11 +246,42 @@ def test_coverage_fixtures_exercise_every_port_class() -> None:
     assert seen == set(PortClass)
 
 
+def _tied_entry() -> MetroGraph:
+    """Two lines reach entry ``b_in`` level from two stations of the section
+    before it, one ahead of the other: nothing but priority separates them."""
+    graph = MetroGraph()
+    for line_id in ("l2", "l1"):
+        graph.lines[line_id] = MetroLine(line_id, line_id, "#000000")
+    for col, sid in enumerate(("a", "b")):
+        graph.add_section(Section(sid, sid, direction="LR", grid_col=col, grid_row=0))
+    for node_id, x in (("s1", 0.0), ("s2", 10.0)):
+        graph.register_station(Station(node_id, node_id, section_id="a"))
+        graph.stations[node_id].x = x
+    graph.add_port(Port("b_in", "b", PortSide.LEFT, is_entry=True))
+    graph.stations["b_in"].x = 100.0
+    graph.register_station(Station("t", "t", section_id="b"))
+    graph.stations["t"].x = 150.0
+    graph.add_edge(Edge("s1", "b_in", "l1"))
+    graph.add_edge(Edge("s2", "b_in", "l2"))
+    for line_id in ("l1", "l2"):
+        graph.add_edge(Edge("b_in", "t", line_id))
+    return graph
+
+
+def test_lines_tied_at_an_entry_fall_to_priority() -> None:
+    order = _port_orders(_tied_entry()).orders["b_in"]
+
+    assert order.lines == ("l2", "l1")
+    assert order.basis is OrderBasis.PRIORITY
+
+
 def test_order_bases_cover_every_kind() -> None:
-    """The coverage fixtures exercise every :class:`OrderBasis`."""
+    """The coverage fixtures and the tied entry exercise every
+    :class:`OrderBasis`."""
     seen = {
         order.basis for path in COVERAGE_FIXTURES for order in _plan(path.read_text())
     }
+    seen |= {order.basis for order in _port_orders(_tied_entry())}
     assert seen == set(OrderBasis)
 
 
@@ -273,8 +317,8 @@ def _two_section_loop() -> MetroGraph:
 def _self_feeding_section() -> MetroGraph:
     """Section ``a`` feeds its own entry, two lines through one station.
 
-    The exit (``a_0``) is planned first; its tied lines carry the entry's
-    rank, and the entry's order rests on the exit's, round the loop.
+    The section's lanes need the entry's order, which rests on the exit's,
+    which is read from the section's lanes, round the loop.
     """
     graph = MetroGraph()
     for line_id in ("l1", "l2"):
@@ -291,16 +335,20 @@ def _self_feeding_section() -> MetroGraph:
 
 
 def test_a_port_on_a_section_cycle_is_undecided() -> None:
-    plan = build_port_order_plan(_self_feeding_section())
+    plan = lane_plan_module.build_lane_plan(_self_feeding_section())
+    orders = plan.port_orders.orders
 
-    assert not plan.orders["a_1"].decided
-    assert "section cycle" in (plan.orders["a_1"].missing or "")
-    assert plan.orders["a_0"].decided
+    assert plan.tracks.cycle_sections == ("a",)
+    assert not orders["a_0"].decided
+    assert "section cycle" in (orders["a_0"].missing or "")
+    assert not orders["a_1"].decided
+    assert "'a_0'" in (orders["a_1"].missing or "")
 
 
-def test_lines_from_one_station_fall_to_priority() -> None:
-    """Two lines leaving through one exit from one in-section station tie on
-    lateral and have no port rank, so declaration order decides."""
+def test_lines_from_one_station_take_lanes_by_priority() -> None:
+    """Two lines leaving through one exit from one in-section station arrive
+    from nowhere off their run, so their section slots, in declaration order,
+    decide their lanes and the exit reads them."""
     graph = MetroGraph()
     for line_id in ("l2", "l1"):
         graph.lines[line_id] = MetroLine(line_id, line_id, "#000000")
@@ -311,10 +359,13 @@ def test_lines_from_one_station_fall_to_priority() -> None:
     for line_id in ("l1", "l2"):
         graph.add_edge(Edge("s", "a_out", line_id))
 
-    order = build_port_order_plan(graph).orders["a_out"]
+    plan = lane_plan_module.build_lane_plan(graph)
+    order = plan.port_orders.orders["a_out"]
 
     assert order.lines == ("l2", "l1")
-    assert order.basis is OrderBasis.PRIORITY
+    assert order.basis is OrderBasis.LANES
+    assert plan.tracks.lanes[("a_out", "l2")] == 0
+    assert plan.tracks.lanes[("a_out", "l1")] == 1
 
 
 def _quarter_turn(point: tuple[float, float], turns: int) -> tuple[float, float]:
@@ -355,17 +406,17 @@ def test_an_exit_against_the_flow_orders_across_its_own_travel(
     for line_id in ("upper", "lower"):
         graph.add_edge(Edge(line_id, "a_out", line_id))
 
-    order = build_port_order_plan(graph).orders["a_out"]
+    order = _port_orders(graph).orders["a_out"]
 
     assert order.lines == ("lower", "upper")
-    assert order.basis is OrderBasis.LATERAL
+    assert order.basis is OrderBasis.LANES
 
 
 def test_an_entry_without_grid_cells_is_undecided() -> None:
     graph = _two_section_loop()
     graph.sections["a"].grid_col = -1
 
-    order = build_port_order_plan(graph).orders["b_in"]
+    order = _port_orders(graph).orders["b_in"]
 
     assert not order.decided
     assert order.missing is not None
