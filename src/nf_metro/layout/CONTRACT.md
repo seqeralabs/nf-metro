@@ -1587,23 +1587,29 @@ are recorded because they move lanes a whole section at a time, after each
 base, station, port, junction and rail-boundary phase has settled, and because
 the planned-fan offsets that follow them own the lanes a fan plan states.
 
-### Port order plan (before phase 1)
+### Lane plan record (sealed before phase 1 of a layout's first run at or after 5.1)
 
-- **Purpose**: Decide every port's line order once, from structure, before any
-  lane offset is written.
-- **Helpers**: `build_port_order_plan` (`layout/port_order_plan.py`), called at
-  the top of `_run_offset_phases` and held on the offsets context as
-  `port_order_plan`.
-- **Precondition**: Station coordinates and section grid cells as they stand
-  when this offsets run starts. Placement runs the offsets phases while it is
-  still moving stations, so the plan can differ between the offsets runs of one
-  layout; the last run's plan is the one the drawn offsets come from.
-- **Postcondition**: Every port has a `PortOrder`: its lines ordered
-  travel-left to travel-right with the sort field that decided it, or
-  undecided with the missing input named.
-- **Invariants preserved**: All offsets and geometry; the plan reads no lane
-  offset, route, draft or departure record.
-- **Related tests**: `tests/test_port_order_plan.py`.
+- **Purpose**: Decide the layout's planned lane decisions once, from structure
+  and placement, before that offsets run writes any lane: every port's line
+  order and same-band entry approach, each port's order travel and lane sense,
+  each perpendicular entry's consumer turns, and the far-side approaches.
+- **Helpers**: `seal_lane_plan` (`layout/lane_plan.py`), called at the top of
+  `_run_offset_phases`; `build_lane_plan` builds the record from
+  `build_port_order_plan` (`layout/port_order_plan.py`). `start_layout`, called
+  at the top of `_layout_once`, clears the previous layout's record.
+- **Precondition**: Station coordinates, section boxes, grid cells and cell
+  packs as they stand at the layout's first offsets run whose stages include
+  5.1. Offsets runs before 5.1 in a layout see no record.
+- **Postcondition**: `graph._lane_plan` holds a `LanePlan` until the next
+  layout starts: every port has a `PortOrder` (its lines travel-left to
+  travel-right with the sort field that decided it, or undecided with the
+  missing input named), every same-band `(entry, upstream source)` pair an
+  `Approach`. Later offsets runs of the layout, and routing and rendering
+  after it, replay the sealed record rather than rebuilding it.
+- **Invariants preserved**: All offsets and geometry; nothing in layout,
+  routing or rendering reads the record, and the record reads no lane offset,
+  route, draft or departure record.
+- **Related tests**: `tests/test_lane_plan.py`, `tests/test_port_order_plan.py`.
 
 ### Phase 7b': approach-derived entry-port order
 

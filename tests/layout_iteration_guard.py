@@ -174,6 +174,7 @@ ROUTING_MODULES = frozenset(
         "fan_geometry.py",
         "fan_ordering.py",
         "fan_plans.py",
+        "lane_plan.py",
         "port_order_plan.py",
         "route_plan.py",
         "route_reservations.py",

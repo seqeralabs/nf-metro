@@ -1457,9 +1457,11 @@ def _layout_once(
         build_fan_plan_execution,
         install_fan_plan_execution,
     )
+    from nf_metro.layout.lane_plan import start_layout
     from nf_metro.parser.route_topology import build_route_topology_query
 
     graph._cross_column_perp_bridge_ports.clear()
+    start_layout(graph)
     assert graph._departure_order_plan is not None
     graph._departure_order_plan.start_pass()
     topology = build_route_topology_query(graph)

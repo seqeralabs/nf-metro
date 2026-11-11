@@ -1,10 +1,11 @@
 """The port order plan: every port's line order, decided once from structure.
 
-:mod:`nf_metro.layout.port_order_plan` is decided at the start of each offsets
-run, before any lane offset exists, so it can only be a function of the map's
-structure and placement.  These tests hold the properties that make it a plan:
-it covers every port, it is deterministic, a rotated map plans the rotated
-orders, and its module reads nothing a later phase writes.
+:mod:`nf_metro.layout.port_order_plan` is decided when a layout seals its lane
+plan, before that offsets run writes any lane, so it can only be a function of
+the map's structure and placement.  These tests hold the properties that make
+it a plan: it covers every port, it is deterministic, and neither it nor the
+lane plan module reads anything a later phase writes.  Rotation and reflection
+are held for the whole record in ``test_lane_plan.py``.
 """
 
 from __future__ import annotations
@@ -16,11 +17,11 @@ import sys
 import warnings
 from functools import lru_cache
 from pathlib import Path
+from types import ModuleType
 
 import pytest
-from orientation_signature import port_key
-from orientation_transform import Orientation, transform_source
 
+import nf_metro.layout.lane_plan as lane_plan_module
 import nf_metro.layout.port_order_plan as port_order_plan_module
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.port_order_plan import (
@@ -29,8 +30,6 @@ from nf_metro.layout.port_order_plan import (
     PortOrderPlan,
     build_port_order_plan,
 )
-from nf_metro.layout.routing import offsets as offsets_module
-from nf_metro.layout.routing.offsets import _run_offset_phases
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import (
     Edge,
@@ -53,22 +52,8 @@ COVERAGE_FIXTURES = [
     TOPOLOGIES / "packed_cell_right_exit_left_entry_wrap.mmd",
     TOPOLOGIES / "paired_input_fan_branch_tree.mmd",
     TOPOLOGIES / "stacked_top_entry_flanked_riser.mmd",
+    TOPOLOGIES / "entry_cohort_interleaved_fixed_lane.mmd",
 ]
-
-# Fully authored (direction and grid on every section), so the orientation
-# transform carries their whole geometry.
-ROTATION_FIXTURES = [
-    TOPOLOGIES / "bt_perp_left_entry_right_exit.mmd",
-    TOPOLOGIES / "bt_to_tb.mmd",
-    TOPOLOGIES / "lr_top_entry_cross_column_two_line.mmd",
-    TOPOLOGIES / "orbit_perp_exit_back_row_entry.mmd",
-    TOPOLOGIES / "orbit_perp_exit_perp_entry.mmd",
-    TOPOLOGIES / "samerow_bypass_joins_flat_bundle_rl.mmd",
-    TOPOLOGIES / "tb_bottom_exit_bundle_jog.mmd",
-]
-
-QUARTER_TURNS = [Orientation(turns, False) for turns in (1, 2, 3)]
-REFLECTIONS = [Orientation(turns, True) for turns in range(4)]
 
 # Names whose values a later offset phase, routing or emission writes.
 LATER_PHASE_NAMES = frozenset(
@@ -102,30 +87,64 @@ DYNAMIC_ACCESS = frozenset(
     }
 )
 
-# Every (module, name) the plan module imports: a new import is a new input.
-ALLOWED_IMPORTS = frozenset(
-    {
-        ("__future__", "annotations"),
-        ("collections.abc", "Iterator"),
-        ("collections.abc", "Mapping"),
-        ("collections.abc", "Sequence"),
-        ("dataclasses", "dataclass"),
-        ("enum", "Enum"),
-        ("functools", "partial"),
-        ("types", "MappingProxyType"),
-        ("nf_metro.layout.constants", "SAME_Y_TOLERANCE"),
-        ("nf_metro.layout.geometry", "flow_entry_side"),
-        ("nf_metro.layout.geometry", "perpendicular_port_sides"),
-        ("nf_metro.layout.routing.common", "ENTRY_SIDE_DIRECTION"),
-        ("nf_metro.layout.routing.common", "EXIT_SIDE_DIRECTION"),
-        ("nf_metro.layout.routing.common", "Direction"),
-        ("nf_metro.layout.routing.orientation", "get_point_coordinate"),
-        ("nf_metro.layout.routing.orientation", "lateral_axis"),
-        ("nf_metro.layout.routing.orientation", "lateral_order_sign"),
-        ("nf_metro.parser.model", "MetroGraph"),
-        ("nf_metro.parser.model", "Port"),
-    }
-)
+# Every (module, name) each record module imports: a new import is a new input.
+ALLOWED_IMPORTS = {
+    port_order_plan_module: frozenset(
+        {
+            ("__future__", "annotations"),
+            ("collections.abc", "Iterator"),
+            ("collections.abc", "Mapping"),
+            ("collections.abc", "Sequence"),
+            ("dataclasses", "dataclass"),
+            ("enum", "Enum"),
+            ("functools", "partial"),
+            ("nf_metro.layout.constants", "SAME_Y_TOLERANCE"),
+            ("nf_metro.layout.geometry", "flow_entry_side"),
+            ("nf_metro.layout.geometry", "flow_port_sides"),
+            ("nf_metro.layout.geometry", "packed_section_visual_order"),
+            ("nf_metro.layout.geometry", "perpendicular_port_sides"),
+            ("nf_metro.layout.routing.common", "ENTRY_SIDE_DIRECTION"),
+            ("nf_metro.layout.routing.common", "EXIT_SIDE_DIRECTION"),
+            ("nf_metro.layout.routing.common", "Direction"),
+            ("nf_metro.layout.routing.common", "resolve_section"),
+            ("nf_metro.layout.routing.common", "resolve_section_colrow"),
+            ("nf_metro.layout.routing.context", "_packed_cell_mate_obstructs"),
+            ("nf_metro.layout.routing.orientation", "direction_vector"),
+            ("nf_metro.layout.routing.orientation", "get_point_coordinate"),
+            ("nf_metro.layout.routing.orientation", "lateral_axis"),
+            ("nf_metro.layout.routing.orientation", "lateral_order_sign"),
+            ("nf_metro.parser.model", "MetroGraph"),
+            ("nf_metro.parser.model", "Port"),
+            ("nf_metro.parser.model", "PortSide"),
+            ("nf_metro.parser.model", "Section"),
+        }
+    ),
+    lane_plan_module: frozenset(
+        {
+            ("__future__", "annotations"),
+            ("dataclasses", "dataclass"),
+            ("nf_metro.layout.constants", "SAME_Y_TOLERANCE"),
+            ("nf_metro.layout.departure_order", "JUNCTIONS_POSITIONED"),
+            ("nf_metro.layout.geometry", "AxisFrame"),
+            ("nf_metro.layout.geometry", "flow_entry_side"),
+            ("nf_metro.layout.geometry", "perpendicular_port_sides"),
+            ("nf_metro.layout.port_order_plan", "ApproachKind"),
+            ("nf_metro.layout.port_order_plan", "PortOrderPlan"),
+            ("nf_metro.layout.port_order_plan", "_Builder"),
+            ("nf_metro.layout.port_order_plan", "_port_travel"),
+            ("nf_metro.layout.port_order_plan", "plan_builder"),
+            ("nf_metro.layout.routing.common", "ENTRY_SIDE_DIRECTION"),
+            ("nf_metro.layout.routing.common", "EXIT_SIDE_DIRECTION"),
+            ("nf_metro.layout.routing.common", "Direction"),
+            ("nf_metro.layout.routing.context", "_section_lane_frame"),
+            ("nf_metro.layout.routing.orientation", "direction_vector"),
+            ("nf_metro.layout.routing.orientation", "lateral_order_sign"),
+            ("nf_metro.parser.model", "MetroGraph"),
+            ("nf_metro.parser.model", "Section"),
+            ("nf_metro.parser.model", "Station"),
+        }
+    ),
+}
 
 
 @lru_cache(maxsize=None)
@@ -158,27 +177,6 @@ def test_every_port_has_an_order(path: Path) -> None:
         assert sorted(order.lines) == sorted(graph.station_lines(order.port_id))
 
 
-def test_the_offsets_run_records_the_plan_before_any_offset() -> None:
-    """The plan exists before phase 1 writes the first lane."""
-    graph = _laid_out((ROOT / "examples" / "rnaseq_sections.mmd").read_text())
-    seen: list[tuple[PortOrderPlan | None, int]] = []
-    base = offsets_module._compute_base_offsets
-
-    def spy(ctx: offsets_module._OffsetCtx) -> None:
-        seen.append((ctx.port_order_plan, len(ctx.offsets)))
-        base(ctx)
-
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(offsets_module, "_compute_base_offsets", spy)
-        ctx = _run_offset_phases(graph, 4.0)
-
-    ((plan_at_phase_1, written),) = seen
-    assert written == 0
-    assert plan_at_phase_1 is not None
-    assert ctx.port_order_plan == plan_at_phase_1
-    assert set(plan_at_phase_1.orders) == set(graph.ports)
-
-
 def test_plan_does_not_depend_on_the_hash_seed() -> None:
     fixture = COVERAGE_FIXTURES[-1]
     script = (
@@ -203,49 +201,6 @@ def test_plan_does_not_depend_on_the_hash_seed() -> None:
         )
         outputs.add(result.stdout)
     assert len(outputs) == 1
-
-
-@pytest.mark.parametrize(
-    ("path", "orientation"),
-    [(p, o) for p in ROTATION_FIXTURES for o in QUARTER_TURNS],
-    ids=lambda v: v.stem if isinstance(v, Path) else v.name,
-)
-def test_a_rotated_map_plans_the_same_orders(
-    path: Path, orientation: Orientation
-) -> None:
-    source = path.read_text()
-    reference = {port_key(k): v for k, v in _plan(source).orders.items()}
-    image = {
-        port_key(k): v
-        for k, v in _plan(transform_source(source, orientation)).orders.items()
-    }
-
-    assert set(image) == set(reference)
-    for key, order in reference.items():
-        assert image[key].lines == order.lines, key
-        assert image[key].port_class is order.port_class, key
-
-
-@pytest.mark.parametrize("orientation", REFLECTIONS, ids=lambda o: o.name)
-def test_a_reflected_map_reverses_each_geometric_order(
-    orientation: Orientation,
-) -> None:
-    """Reflection flips travel-left and travel-right, so an order decided by
-    where the lines come from reverses; a priority tie-break does not."""
-    compared = 0
-    for path in ROTATION_FIXTURES:
-        source = path.read_text()
-        reference = {port_key(k): v for k, v in _plan(source).orders.items()}
-        image = {
-            port_key(k): v
-            for k, v in _plan(transform_source(source, orientation)).orders.items()
-        }
-        for key, order in reference.items():
-            if order.basis is OrderBasis.LATERAL:
-                assert order.lines is not None
-                assert image[key].lines == tuple(reversed(order.lines)), (path, key)
-                compared += 1
-    assert compared > 0
 
 
 def test_a_line_with_no_reference_node_is_undecided() -> None:
@@ -315,11 +270,32 @@ def _two_section_loop() -> MetroGraph:
     return graph
 
 
-def test_a_port_on_a_section_cycle_is_undecided() -> None:
-    plan = build_port_order_plan(_two_section_loop())
+def _self_feeding_section() -> MetroGraph:
+    """Section ``a`` feeds its own entry, two lines through one station.
 
-    assert {o.port_id for o in plan if not o.decided} == set(plan.orders)
-    assert any("section cycle" in (o.missing or "") for o in plan)
+    The exit (``a_0``) is planned first; its tied lines carry the entry's
+    rank, and the entry's order rests on the exit's, round the loop.
+    """
+    graph = MetroGraph()
+    for line_id in ("l1", "l2"):
+        graph.lines[line_id] = MetroLine(line_id, line_id, "#000000")
+    graph.add_section(Section("a", "a", direction="LR", grid_col=0, grid_row=0))
+    graph.register_station(Station("s", "s", section_id="a"))
+    graph.add_port(Port("a_0", "a", PortSide.RIGHT, is_entry=False))
+    graph.add_port(Port("a_1", "a", PortSide.LEFT, is_entry=True))
+    graph.stations["a_0"].x = 50.0
+    for line_id in ("l1", "l2"):
+        for src, tgt in (("a_1", "s"), ("s", "a_0"), ("a_0", "a_1")):
+            graph.add_edge(Edge(src, tgt, line_id))
+    return graph
+
+
+def test_a_port_on_a_section_cycle_is_undecided() -> None:
+    plan = build_port_order_plan(_self_feeding_section())
+
+    assert not plan.orders["a_1"].decided
+    assert "section cycle" in (plan.orders["a_1"].missing or "")
+    assert plan.orders["a_0"].decided
 
 
 def test_lines_from_one_station_fall_to_priority() -> None:
@@ -396,7 +372,7 @@ def test_an_entry_without_grid_cells_is_undecided() -> None:
     assert order.missing.startswith("grid cells")
 
 
-def _later_phase_reads(source: str) -> list[str]:
+def _later_phase_reads(source: str, allowed: frozenset[tuple[str, str]]) -> list[str]:
     """What in *source* could read later-phase state or run a phase on a copy."""
     tree = ast.parse(source)
     names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
@@ -409,16 +385,19 @@ def _later_phase_reads(source: str) -> list[str]:
     if any(n.level != 0 for n in froms):
         found.append("relative import")
     imported = {(n.module, alias.name) for n in froms for alias in n.names}
-    found.extend(f"{m}.{n}" for m, n in sorted(imported - ALLOWED_IMPORTS, key=str))
+    found.extend(f"{m}.{n}" for m, n in sorted(imported - allowed, key=str))
     return found
 
 
-def test_the_plan_module_reads_no_later_phase_state() -> None:
-    """Its inputs are structure and placement: no lane offset, route, draft,
-    departure record or offsets/routing entry point appears in the module, and
-    it imports nothing beyond its stated inputs."""
-    source = Path(port_order_plan_module.__file__).read_text()
-    assert _later_phase_reads(source) == []
+@pytest.mark.parametrize(
+    "module", list(ALLOWED_IMPORTS), ids=lambda m: m.__name__.rsplit(".", 1)[-1]
+)
+def test_the_record_modules_read_no_later_phase_state(module: ModuleType) -> None:
+    """Their inputs are structure and placement: no lane offset, route, draft,
+    departure record or offsets/routing entry point appears in either module,
+    and each imports nothing beyond its stated inputs."""
+    source = Path(str(module.__file__)).read_text()
+    assert _later_phase_reads(source, ALLOWED_IMPORTS[module]) == []
 
 
 @pytest.mark.parametrize(
@@ -443,4 +422,4 @@ def test_the_plan_module_reads_no_later_phase_state() -> None:
     ],
 )
 def test_the_module_check_catches_indirect_reads(source: str) -> None:
-    assert _later_phase_reads(source)
+    assert _later_phase_reads(source, ALLOWED_IMPORTS[port_order_plan_module])
