@@ -248,6 +248,7 @@ An entry's lines are sorted by three fields, the earlier deciding:
 3. **Priority.** Line declaration order.
 
 Every feeding exit's bundle keeps its order across the seam: the entry order is the merge of those orders, the sort key deciding only between lines no bundle orders.
+An entry some of whose lines cross a straight seam (below) takes instead the order of its seam lanes: the lanes the seam's pins and the fill round them give its lines.
 An exit's order is its lines' lanes at the port in the track plan (below), read across the exit's travel.
 
 Each order states the field that decided it and the port's structural class.
@@ -261,6 +262,19 @@ A bypass takes the row-top corridor when it is a same-row bypass into the LEFT e
 Every other bypass or U-turn keeps the screen-below convention, which is the traveller's right except across leftward travel.
 
 A connector from a flow-side exit to an off-band entry that the same line also reaches by a bypass from the entry's own band, on the side facing the exit, leaves the exit's band on its far side: the record lists it as a far-side approach.
+
+### Seams
+
+A line crosses a straight seam when it reaches a flow-side entry, through junctions only, from a facing flow-side exit on the same lane coordinate, with the two ports' grid cells level in one band and no section between them.
+Such a line is pinned to the entry lane that keeps the exit lane's coordinate, below lane zero if need be, provided that lane lands on the entry's lane grid and the line's other straight seams agree.
+A pin on a line that another feeding bundle also carries holds only where every such bundle carries its pinned lines in its own lane order.
+The entry's other lines fill round the pins in the entry's order (by line id when that order is undecided): those before the first pinned line take the free lanes below it, nearest first, and each later one the first free lane past the line before it.
+Where two pins leave no lane between them for a line ordered there, that line goes past the later pin, so a bundle carrying both it and the later pinned line crosses the seam in the other order.
+Where two bundles into the entry carry the same lines in opposite orders, one of them crosses the seam whatever the entry's order.
+The seam joint records each such entry's seam lanes and the exit each pinned line comes from.
+The track plan gives the entry these lanes, except a line's whose lane in the entry's run a fan plan's carrier slot, or the lane the line keeps from an earlier part of its level run, fixes otherwise; the entry's order is read from the seam lanes either way.
+
+A perpendicular port every line of which crosses a straight seam, past no section box, to a facing flow-side port centred on it records each line's offset from the port on the flow-side port's lane, read across the seam's travel.
 
 ### Turns and lane senses
 
@@ -276,14 +290,22 @@ A section reached again round a cycle while its own lanes are being decided leav
 Within a section, nodes joined by edges whose ends share the lane coordinate form level runs; a run the flow leaves and re-enters is split into parts at each re-entry node.
 The section order merges every entry's order read up the lane index, line priority deciding between lines no entry orders, and gives each line a section slot one past the highest slot of an earlier line it coexists with.
 Each run sorts its lines by where they arrive from across the lane axis (zero for lines riding an entry of the run), nests lines arriving from one side by where they leave their sources, ranks a line that parts to the opposite side by the side it leaves to, keeps the bundles entering a later part in their order, and lets an exit carry an upstream exit's order on the lines both bring to one entry.
-Fan plans' carriers keep their slots and a line entering a part along its level run keeps its lane; every other line takes the lowest lane past the earlier lines it coexists with, or the lane of a line it hands over to at a shared station.
+Fan plans' carriers keep their slots, a line entering a part along its level run keeps its lane, and a line riding a seam-pinned entry keeps its entry lane; every other line takes the lowest lane past the earlier lines it coexists with, or the lane of a line it hands over to at a shared station.
+A run with pinned lanes may fill from below lane zero, as far as a pin needs to fit the free lines ordered before it.
+No line takes a lane beside a line that runs from the run's entry port past one of its stations where it stops.
 Two lines coexist when the flow spans of their connected pieces on the run overlap; touching at one station is a hand-over when one ends there and the other starts there.
 A cycle among the bundle orders a section or part must keep is recorded as a forced crossing, broken by the merge's tie-break.
+
+A line on no entry of its section is born there.
+A born line leaving an exit on whose level run it is born, beside lines that entered the section, moves in the section order past each of them whose nearest consumer lies beyond its own across the exit's travel; where no consumer separates them, by the side it joins its consumer entries from.
+Born lines leaving one exit through a divergence fan take the fan's peel order, read in the section flow's frame; other born lines leaving one exit together take the order of the sides they head for where their bundle first parts.
+Each run applies the same moves to its own order.
+In a run holding a seam-pinned entry, a line no entry of the run carries lies beside the fixed lines it is born among, on the side it heads for (or, joining from an in-section source, the side it joins from), on the first lane there no line it coexists with holds.
 
 The lane frame is the drawing's convention, not one frame turned to each flow.
 TB and BT sections' lanes run as an LR section's turned a quarter (TB toward -x, BT toward +x), except that a TB section entered from the right, receiving a reversed bundle or joined to no other section runs its lanes toward +x.
 An RL section's lanes run as an LR section's reflected, toward +y.
-A turned placement plans the same lanes wherever the turn carries each section's lane direction onto the turned section's.
+A turned placement plans the same lanes wherever the turn carries each section's lane direction onto the turned section's, except where a born line takes its side from an exit's approach to a consumer on its band whose side is a screen convention the turn does not carry.
 
 ## Identity and coverage
 

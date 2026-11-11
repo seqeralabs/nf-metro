@@ -58,6 +58,10 @@ them at the port, read across the exit's travel.  The builder asks the track
 plan for them (:data:`ExitOrder`); the track plan in turn reads its section's
 entry orders from the builder, so sections are decided upstream first.
 
+**Seam pins**: an entry some of whose lines cross a straight seam takes the
+order of the lanes the track plan keeps them on there, the entry's other
+lines filled round them in the order above (:data:`SeamOrder`).
+
 A port whose order needs an input the plan cannot supply (a reference node for
 one of an entry's lines, the grid cells either side of an entry's seam, a
 decided order for a reference port it inherits from, or an exit's lanes,
@@ -134,6 +138,8 @@ class OrderBasis(Enum):
     """A feeding exit's bundle order overrode the sort key."""
     LANES = "lanes"
     """An exit's lines in its section's planned lanes."""
+    SEAM = "seam"
+    """An entry's lines in the lanes its straight seams pin."""
 
 
 class ApproachKind(Enum):
@@ -278,13 +284,21 @@ ExitOrder = Callable[[str], "tuple[str, ...] | None"]
 """An exit's lines in its section's planned lanes, travel-left to travel-right;
 ``None`` when the section's lanes are undecided."""
 
+SeamOrder = Callable[[str, "tuple[str, ...] | None"], "tuple[str, ...] | None"]
+"""Given an entry and its order by the sort key (``None`` when undecided), the
+entry's lines in the lanes its straight seams pin, travel-left to
+travel-right; ``None`` when no line is pinned."""
+
 
 class PortOrderBuilder:
     """Decides each port once, depth-first through the ports it inherits from."""
 
-    def __init__(self, graph: MetroGraph, exit_order: ExitOrder) -> None:
+    def __init__(
+        self, graph: MetroGraph, exit_order: ExitOrder, seam_order: SeamOrder
+    ) -> None:
         self.graph = graph
         self.exit_order = exit_order
+        self.seam_order = seam_order
         self.junctions = graph.junction_ids
         self.priority = {lid: i for i, lid in enumerate(graph.lines)}
         self.decided: dict[str, PortOrder] = {}
@@ -415,12 +429,14 @@ class PortOrderBuilder:
     # ---- approach records
 
     def approach(self, entry_id: str, source_id: str) -> Approach:
-        """How *source_id* reaches *entry_id* along their shared band."""
+        """How *source_id* reaches *entry_id* along their shared band.  An
+        exit's is read as if its lines arrived through its side: how the exit
+        sees a downstream node it shares a band with."""
         key = (entry_id, source_id)
         known = self.approaches.get(key)
         if known is not None:
             return known
-        travel = port_travel(self.graph.ports[entry_id])
+        travel = ENTRY_SIDE_DIRECTION[self.graph.ports[entry_id].side]
         here = self.cell_centre(entry_id)
         cell = self.cell_centre(source_id)
         assert here is not None and cell is not None
@@ -637,6 +653,11 @@ class PortOrderBuilder:
             return None
         self.in_progress.add(port_id)
         order = self._plan_port(port_id, self.graph.ports[port_id])
+        if order.is_entry:
+            pinned = self.seam_order(port_id, order.lines)
+            if pinned is not None:
+                basis = OrderBasis.SINGLE if len(pinned) < 2 else OrderBasis.SEAM
+                order = PortOrder(port_id, True, order.port_class, pinned, basis)
         self.in_progress.discard(port_id)
         self.decided[port_id] = order
         return order

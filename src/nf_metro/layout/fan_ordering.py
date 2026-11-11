@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, NamedTuple
 
-from nf_metro.layout.geometry import packed_section_visual_rank
+from nf_metro.layout.geometry import (
+    AxisFrame,
+    lanes_run_along_x,
+    packed_section_visual_rank,
+)
 from nf_metro.layout.route_topology import convergence_entry_port_id
 from nf_metro.layout.routing.common import resolve_section, resolve_section_colrow
 from nf_metro.parser.model import MetroGraph, PortSide, Station
@@ -28,16 +32,40 @@ def _fan_branch_entry_port(
     return convergence_entry_port_id(graph, target_id)
 
 
-def _section_order_coordinate(graph: MetroGraph, station: Station) -> float | None:
-    """Return settled X or a stable pre-placement packed-cell coordinate."""
+_FRAME_SIDES = {
+    PortSide.TOP: {1: PortSide.LEFT, -1: PortSide.RIGHT},
+    PortSide.BOTTOM: {1: PortSide.RIGHT, -1: PortSide.LEFT},
+    PortSide.LEFT: {1: PortSide.TOP, -1: PortSide.TOP},
+    PortSide.RIGHT: {1: PortSide.BOTTOM, -1: PortSide.BOTTOM},
+}
+"""A port side read in the frame of a flow whose lanes run along X, keyed by
+the flow's sign: the flow axis becomes the frame's X, signed so the flow runs
+toward +X, and the lane axis its Y, unsigned."""
+
+
+def _colrow(
+    graph: MetroGraph, station: Station, flow_sign: int | None
+) -> tuple[int | None, int | None]:
+    """*station*'s grid cell, read in the flow frame of *flow_sign* if given."""
+    col, row = resolve_section_colrow(graph, station)
+    if flow_sign is None or col is None or row is None:
+        return col, row
+    return flow_sign * row, col
+
+
+def _section_order_coordinate(
+    graph: MetroGraph, station: Station, flow_sign: int | None = None
+) -> float | None:
+    """Return settled X or a stable pre-placement packed-cell coordinate,
+    along the flow axis of *flow_sign*'s frame if given."""
     section = resolve_section(graph, station, prefer_upstream=False)
     if section is None:
         return None
-    col, row = resolve_section_colrow(graph, station)
+    col, row = _colrow(graph, station, flow_sign)
     if col is None or row is None:
         return None
     if section.bbox_w > 0:
-        return station.x
+        return station.x if flow_sign is None else flow_sign * station.y
     rank = packed_section_visual_rank(graph, section, col, row)
     return col * (len(graph.sections) + 1) + rank
 
@@ -157,19 +185,30 @@ def fanout_divergence_peel_order(
     junction_id: str,
     line_priority: dict[str, int],
     topology: FanTopologyQuery | None = None,
+    flow: str | None = None,
 ) -> list[str] | None:
     """Return the crossing-free opening order for a clean divergence.
 
     The result runs outermost to innermost at the shared turn. Unsupported or
     ambiguous groups return ``None`` and keep declaration order.
+
+    The rule reads a horizontal flow's grid and coordinates.  Given a *flow*
+    whose lanes run along X, it reads them in that flow's frame instead: grid
+    rows, Y and port sides turned so the flow runs toward +X, the lane axis
+    unsigned.
     """
+    flow_sign = (
+        int(AxisFrame.flow_sign(flow))
+        if flow is not None and lanes_run_along_x(flow)
+        else None
+    )
     junction = graph.stations.get(junction_id)
     if junction is None:
         return None
-    source_col, source_row = resolve_section_colrow(graph, junction)
+    source_col, source_row = _colrow(graph, junction, flow_sign)
     if source_col is None or source_row is None:
         return None
-    source_x = _section_order_coordinate(graph, junction)
+    source_x = _section_order_coordinate(graph, junction, flow_sign)
     if source_x is None:
         return None
 
@@ -187,12 +226,12 @@ def fanout_divergence_peel_order(
             return None
         converging |= entry_id != edge.target
         entry = graph.stations[entry_id]
-        target_col, target_row = resolve_section_colrow(graph, entry)
+        target_col, target_row = _colrow(graph, entry, flow_sign)
         if target_col is None or target_row is None:
             return None
         if entry_id in claimed and claimed[entry_id] != edge.line_id:
             return None
-        coordinate = _section_order_coordinate(graph, entry)
+        coordinate = _section_order_coordinate(graph, entry, flow_sign)
         if coordinate is None:
             return None
         branch = len(line_of)
@@ -202,7 +241,10 @@ def fanout_divergence_peel_order(
         row_delta.append(target_row - source_row)
         target_x.append(coordinate)
         entry_port = graph.ports.get(entry_id)
-        entry_side.append(entry_port.side if entry_port is not None else None)
+        side = entry_port.side if entry_port is not None else None
+        if side is not None and flow_sign is not None:
+            side = _FRAME_SIDES[side][flow_sign]
+        entry_side.append(side)
         if _traverses_near_band(entry_side[branch], reach[branch], row_delta[branch]):
             near_band.add(branch)
 
