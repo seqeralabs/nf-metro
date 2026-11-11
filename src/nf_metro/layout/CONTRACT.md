@@ -1592,19 +1592,25 @@ the planned-fan offsets that follow them own the lanes a fan plan states.
 - **Purpose**: Decide the layout's planned lane decisions once, from structure
   and placement, before that offsets run writes any lane: every port's line
   order and same-band entry approach, each port's order travel and lane sense,
-  each perpendicular entry's consumer turns, and the far-side approaches.
+  each perpendicular entry's consumer turns, the far-side approaches, and the
+  track plan: every in-section `(node, line)`'s lane, from which each exit's
+  order is read.
 - **Helpers**: `seal_lane_plan` (`layout/lane_plan.py`), called at the top of
-  `_run_offset_phases`; `build_lane_plan` builds the record from
-  `plan_builder` (`layout/port_order_plan.py`). `start_layout`, called
-  at the top of `_layout_once`, clears the previous layout's record.
+  `_run_offset_phases`; `build_lane_plan` decides the track plan section by
+  section, upstream first, asking the `PortOrderBuilder`
+  (`layout/port_order_plan.py`) for entry orders and feeding it exit orders.
+  `start_layout`, called at the top of `_layout_once`, clears the previous
+  layout's record.
 - **Precondition**: Station coordinates, section boxes, grid cells and cell
   packs as they stand at the layout's first offsets run whose stages include
-  5.1. Offsets runs before 5.1 in a layout see no record.
+  5.1, and the fan plans (`graph.fan_plans`) installed at the top of
+  `_layout_once`. Offsets runs before 5.1 in a layout see no record.
 - **Postcondition**: `graph._lane_plan` holds a `LanePlan` until the next
   layout starts: every port has a `PortOrder` (its lines travel-left to
   travel-right with the sort field that decided it, or undecided with the
   missing input named), every same-band `(entry, upstream source)` pair an
-  `Approach`. Later offsets runs of the layout, and routing and rendering
+  `Approach`, every in-section `(node, line)` and fed junction a lane.
+  Later offsets runs of the layout, and routing and rendering
   after it, replay the sealed record rather than rebuilding it.
   Rail-mode and sectionless layouts never reach 5.1 and hold no record.
 - **Invariants preserved**: All offsets and geometry; nothing in layout,

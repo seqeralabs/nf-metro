@@ -53,20 +53,21 @@ Every feeding exit's bundle keeps its order across the seam: the entry order is
 the merge of those orders, the key above deciding only between lines no bundle
 orders.
 
-**Exit order**: the in-section feeder's placed lateral; lines tied at one
-feeder carry the section's order back along the line, the predecessors'
-laterals to the first divergence and then the entry port's planned rank.
+**Exit order**: the exit's lines in the lanes its section's track plan gives
+them at the port, read across the exit's travel.  The builder asks the track
+plan for them (:data:`ExitOrder`); the track plan in turn reads its section's
+entry orders from the builder, so sections are decided upstream first.
 
 A port whose order needs an input the plan cannot supply (a reference node for
-one of its lines, the grid cells either side of an entry's seam, or a decided
-order for a reference port it inherits from, including one round a section
-cycle) is undecided and names that input; it never takes a value a later phase
-wrote.
+one of an entry's lines, the grid cells either side of an entry's seam, a
+decided order for a reference port it inherits from, or an exit's lanes,
+including either round a section cycle) is undecided and names that input; it
+never takes a value a later phase wrote.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from functools import partial
@@ -131,6 +132,8 @@ class OrderBasis(Enum):
     PRIORITY = "priority"
     BUNDLE = "bundle"
     """A feeding exit's bundle order overrode the sort key."""
+    LANES = "lanes"
+    """An exit's lines in its section's planned lanes."""
 
 
 class ApproachKind(Enum):
@@ -271,11 +274,17 @@ def _merge_orders(
     return out
 
 
+ExitOrder = Callable[[str], "tuple[str, ...] | None"]
+"""An exit's lines in its section's planned lanes, travel-left to travel-right;
+``None`` when the section's lanes are undecided."""
+
+
 class PortOrderBuilder:
     """Decides each port once, depth-first through the ports it inherits from."""
 
-    def __init__(self, graph: MetroGraph) -> None:
+    def __init__(self, graph: MetroGraph, exit_order: ExitOrder) -> None:
         self.graph = graph
+        self.exit_order = exit_order
         self.junctions = graph.junction_ids
         self.priority = {lid: i for i, lid in enumerate(graph.lines)}
         self.decided: dict[str, PortOrder] = {}
@@ -620,44 +629,6 @@ class PortOrderBuilder:
     def feeds_junction(self, port_id: str) -> bool:
         return any(e.target in self.junctions for e in self.graph.edges_from(port_id))
 
-    def carried_key(
-        self,
-        port_id: str,
-        feeder: str,
-        line_id: str,
-        travel: Direction,
-        origin: _Point,
-        section_id: str,
-    ) -> tuple[float, ...]:
-        """*line_id*'s walk back from *feeder* inside the section: each
-        predecessor's lateral, then the entry port's planned rank."""
-        key: list[float] = []
-        node, seen = feeder, {port_id}
-        graph = self.graph
-        while node not in seen:
-            seen.add(node)
-            key.append(round(_lateral(self.point(node), origin, travel), 1))
-            if node in graph.ports and graph.ports[node].is_entry:
-                held = self.order_of(node)
-                lines = held.lines if held is not None else None
-                key.append(lines.index(line_id) if lines and line_id in lines else 0)
-                return tuple(key)
-            preds = sorted(
-                {
-                    e.source
-                    for e in graph.edges_to(node)
-                    if e.line_id == line_id
-                    and graph.stations[e.source].section_id == section_id
-                }
-            )
-            if not preds:
-                break
-            node = min(
-                preds,
-                key=lambda n: (abs(_lateral(self.point(n), origin, travel)), n),
-            )
-        return (*key, 0)
-
     def order_of(self, port_id: str) -> PortOrder | None:
         """*port_id*'s order, or ``None`` while it is being decided (a cycle)."""
         if port_id in self.decided:
@@ -746,9 +717,15 @@ class PortOrderBuilder:
         )
         make = partial(PortOrder, port_id, port.is_entry, port_class)
 
+        if not port.is_entry:
+            exit_lines = self.exit_order(port_id)
+            if exit_lines is None:
+                return make(None, None, "its section's lanes (on a section cycle)")
+            basis = OrderBasis.SINGLE if len(exit_lines) < 2 else OrderBasis.LANES
+            return make(exit_lines, basis)
         if missing is not None:
             return make(None, None, missing)
-        if port.is_entry and perpendicular and len(lines) >= 2:
+        if perpendicular and len(lines) >= 2:
             self._round_own_side(refs, laterals, kinds, here, travel)
         if len(lines) < 2:
             return make(tuple(lines), OrderBasis.SINGLE)
@@ -760,10 +737,6 @@ class PortOrderBuilder:
             ref = refs[lid]
             if not tied:
                 refined[lid] = ()
-            elif not port.is_entry:
-                refined[lid] = self.carried_key(
-                    port_id, ref, lid, travel, origin, port.section_id
-                )
             else:
                 assert here is not None
                 joins = self.joining_side(
@@ -780,9 +753,7 @@ class PortOrderBuilder:
             lid: (rank[lid], refined[lid], self.priority.get(lid, 0)) for lid in lines
         }
         keyed = sorted(lines, key=lambda lid: (keys[lid], lid))
-        ordered = keyed
-        if port.is_entry:
-            ordered = self._keep_feeding_bundles(lines, sources, keyed)
+        ordered = self._keep_feeding_bundles(lines, sources, keyed)
         if ordered != keyed:
             return make(tuple(ordered), OrderBasis.BUNDLE)
         return make(tuple(ordered), _basis(ordered, keys))
@@ -896,19 +867,12 @@ def _same_band_sources(builder: PortOrderBuilder) -> list[tuple[str, str]]:
     return sorted(pairs)
 
 
-def plan_builder(graph: MetroGraph) -> tuple[PortOrderBuilder, PortOrderPlan]:
-    """Decide every port's order and every same-band approach, keeping the
-    builder whose band and cell reads later record rules share."""
-    builder = PortOrderBuilder(graph)
+def decide_ports(builder: PortOrderBuilder) -> PortOrderPlan:
+    """Decide every port's order and every same-band approach."""
+    graph = builder.graph
     for port_id in sorted(graph.ports):
         builder.order_of(port_id)
     approaches = {key: builder.approach(*key) for key in _same_band_sources(builder)}
-    plan = PortOrderPlan(
+    return PortOrderPlan(
         {pid: builder.decided[pid] for pid in sorted(graph.ports)}, approaches
     )
-    return builder, plan
-
-
-def build_port_order_plan(graph: MetroGraph) -> PortOrderPlan:
-    """Decide every port's line order from *graph*'s structure and placement."""
-    return plan_builder(graph)[1]

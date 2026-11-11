@@ -248,7 +248,7 @@ An entry's lines are sorted by three fields, the earlier deciding:
 3. **Priority.** Line declaration order.
 
 Every feeding exit's bundle keeps its order across the seam: the entry order is the merge of those orders, the sort key deciding only between lines no bundle orders.
-An exit's lines are sorted by their in-section feeder's placed lateral; lines tied at one feeder carry the section's order back along the line.
+An exit's order is its lines' lanes at the port in the track plan (below), read across the exit's travel.
 
 Each order states the field that decided it and the port's structural class.
 A port whose order needs an input the plan cannot supply is undecided and names that input, rather than taking a value a later phase wrote.
@@ -266,6 +266,24 @@ A connector from a flow-side exit to an off-band entry that the same line also r
 
 Each perpendicular entry records, per in-section consumer, the lines it takes and the direction along the section's flow the lines turn to reach it.
 Each port records the travel its order is read across (its own, the section flow's at a perpendicular port, or the turn at a perpendicular entry whose lines all go to one consumer) and whether that order runs up or down the section's lane index.
+
+### Track plan
+
+The track plan gives every in-section `(node, line)` a lane index in its section's lane frame, and each junction the lane its feeding exit gives the line.
+Sections are decided upstream first, because a section's lanes need its entries' orders and an exit's order is read from its section's lanes.
+A section reached again round a cycle while its own lanes are being decided leaves the exit asked for undecided.
+
+Within a section, nodes joined by edges whose ends share the lane coordinate form level runs; a run the flow leaves and re-enters is split into parts at each re-entry node.
+The section order merges every entry's order read up the lane index, line priority deciding between lines no entry orders, and gives each line a section slot one past the highest slot of an earlier line it coexists with.
+Each run sorts its lines by where they arrive from across the lane axis (zero for lines riding an entry of the run), nests lines arriving from one side by where they leave their sources, ranks a line that parts to the opposite side by the side it leaves to, keeps the bundles entering a later part in their order, and lets an exit carry an upstream exit's order on the lines both bring to one entry.
+Fan plans' carriers keep their slots and a line entering a part along its level run keeps its lane; every other line takes the lowest lane past the earlier lines it coexists with, or the lane of a line it hands over to at a shared station.
+Two lines coexist when the flow spans of their connected pieces on the run overlap; touching at one station is a hand-over when one ends there and the other starts there.
+A cycle among the bundle orders a section or part must keep is recorded as a forced crossing, broken by the merge's tie-break.
+
+The lane frame is the drawing's convention, not one frame turned to each flow.
+TB and BT sections' lanes run as an LR section's turned a quarter (TB toward -x, BT toward +x), except that a TB section entered from the right, receiving a reversed bundle or joined to no other section runs its lanes toward +x.
+An RL section's lanes run as an LR section's reflected, toward +y.
+A turned placement plans the same lanes wherever the turn carries each section's lane direction onto the turned section's.
 
 ## Identity and coverage
 

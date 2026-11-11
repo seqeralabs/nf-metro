@@ -4,8 +4,9 @@
 plan, before that offsets run writes any lane, so it can only be a function of
 the map's structure and placement.  These tests hold the properties that make
 it a plan: it covers every port, it is deterministic, and neither it nor the
-lane plan module reads anything a later phase writes.  Rotation and reflection
-are held for the whole record in ``test_lane_plan.py``.
+lane plan module reads anything a later phase writes, beyond the fan plans
+each layout installs before its first stage.  Rotation and reflection are held
+for the whole record in ``test_lane_plan.py``.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from types import ModuleType
 
 import pytest
 
+import nf_metro.layout.fan_plans as fan_plans_module
 import nf_metro.layout.lane_plan as lane_plan_module
 import nf_metro.layout.port_order_plan as port_order_plan_module
 from nf_metro.layout.engine import compute_layout
@@ -28,7 +30,6 @@ from nf_metro.layout.port_order_plan import (
     OrderBasis,
     PortClass,
     PortOrderPlan,
-    build_port_order_plan,
 )
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import (
@@ -73,6 +74,15 @@ LATER_PHASE_NAMES = frozenset(
     }
 )
 
+# Graph state each layout installs at its start (``_layout_once``), before any
+# stage runs: a record module may read it only as a stated input.
+LAYOUT_START_STATE = frozenset({"fan_plans", "fan_plan_query"})
+
+STATED_INPUTS = {
+    port_order_plan_module: frozenset[str](),
+    lane_plan_module: frozenset({"fan_plans"}),
+}
+
 # Ways to reach any of the above, or run a phase on a copy, without naming it.
 DYNAMIC_ACCESS = frozenset(
     {
@@ -92,6 +102,7 @@ ALLOWED_IMPORTS = {
     port_order_plan_module: frozenset(
         {
             ("__future__", "annotations"),
+            ("collections.abc", "Callable"),
             ("collections.abc", "Iterator"),
             ("collections.abc", "Mapping"),
             ("collections.abc", "Sequence"),
@@ -122,7 +133,15 @@ ALLOWED_IMPORTS = {
     lane_plan_module: frozenset(
         {
             ("__future__", "annotations"),
+            ("collections.abc", "Callable"),
+            ("collections.abc", "Iterable"),
+            ("collections.abc", "Mapping"),
+            ("collections.abc", "Sequence"),
             ("dataclasses", "dataclass"),
+            ("functools", "partial"),
+            ("heapq", "heapify"),
+            ("heapq", "heappop"),
+            ("heapq", "heappush"),
             ("nf_metro.layout.constants", "SAME_Y_TOLERANCE"),
             ("nf_metro.layout.departure_order", "JUNCTIONS_POSITIONED"),
             ("nf_metro.layout.geometry", "AxisFrame"),
@@ -131,8 +150,8 @@ ALLOWED_IMPORTS = {
             ("nf_metro.layout.port_order_plan", "ApproachKind"),
             ("nf_metro.layout.port_order_plan", "PortOrderPlan"),
             ("nf_metro.layout.port_order_plan", "PortOrderBuilder"),
+            ("nf_metro.layout.port_order_plan", "decide_ports"),
             ("nf_metro.layout.port_order_plan", "port_travel"),
-            ("nf_metro.layout.port_order_plan", "plan_builder"),
             ("nf_metro.layout.routing.common", "ENTRY_SIDE_DIRECTION"),
             ("nf_metro.layout.routing.common", "EXIT_SIDE_DIRECTION"),
             ("nf_metro.layout.routing.common", "Direction"),
@@ -142,6 +161,7 @@ ALLOWED_IMPORTS = {
             ("nf_metro.parser.model", "MetroGraph"),
             ("nf_metro.parser.model", "Section"),
             ("nf_metro.parser.model", "Station"),
+            ("nf_metro.parser.model", "is_bypass_v"),
         }
     ),
 }
@@ -161,14 +181,18 @@ def _fresh_laid_out(source: str) -> MetroGraph:
     return _laid_out.__wrapped__(source)
 
 
+def _port_orders(graph: MetroGraph) -> PortOrderPlan:
+    return lane_plan_module.build_lane_plan(graph).port_orders
+
+
 def _plan(source: str) -> PortOrderPlan:
-    return build_port_order_plan(_laid_out(source))
+    return _port_orders(_laid_out(source))
 
 
 @pytest.mark.parametrize("path", COVERAGE_FIXTURES, ids=lambda p: p.stem)
 def test_every_port_has_an_order(path: Path) -> None:
     graph = _laid_out(path.read_text())
-    plan = build_port_order_plan(graph)
+    plan = _port_orders(graph)
 
     assert set(plan.orders) == set(graph.ports)
     for order in plan:
@@ -183,11 +207,11 @@ def test_plan_does_not_depend_on_the_hash_seed() -> None:
         "import warnings; warnings.simplefilter('ignore')\n"
         "from nf_metro.parser.mermaid import parse_metro_mermaid\n"
         "from nf_metro.layout.engine import compute_layout\n"
-        "from nf_metro.layout.port_order_plan import build_port_order_plan\n"
+        "from nf_metro.layout.lane_plan import build_lane_plan\n"
         "from pathlib import Path\n"
         f"g = parse_metro_mermaid(Path({str(fixture)!r}).read_text())\n"
         "compute_layout(g)\n"
-        "print(sorted(build_port_order_plan(g).orders.items()))\n"
+        "print(sorted(build_lane_plan(g).port_orders.orders.items()))\n"
     )
     outputs = set()
     for seed in ("0", "1", "4242"):
@@ -216,7 +240,7 @@ def test_a_line_with_no_reference_node_is_undecided() -> None:
         e for e in graph.edges if not (e.target == entry_id and e.line_id == line_id)
     ]
     graph.replace_edges(orphaned)
-    order = build_port_order_plan(graph).orders[entry_id]
+    order = _port_orders(graph).orders[entry_id]
 
     assert not order.decided
     assert order.missing is not None
@@ -233,11 +257,42 @@ def test_coverage_fixtures_exercise_every_port_class() -> None:
     assert seen == set(PortClass)
 
 
+def _tied_entry() -> MetroGraph:
+    """Two lines reach entry ``b_in`` level from two stations of the section
+    before it, one ahead of the other: nothing but priority separates them."""
+    graph = MetroGraph()
+    for line_id in ("l2", "l1"):
+        graph.lines[line_id] = MetroLine(line_id, line_id, "#000000")
+    for col, sid in enumerate(("a", "b")):
+        graph.add_section(Section(sid, sid, direction="LR", grid_col=col, grid_row=0))
+    for node_id, x in (("s1", 0.0), ("s2", 10.0)):
+        graph.register_station(Station(node_id, node_id, section_id="a"))
+        graph.stations[node_id].x = x
+    graph.add_port(Port("b_in", "b", PortSide.LEFT, is_entry=True))
+    graph.stations["b_in"].x = 100.0
+    graph.register_station(Station("t", "t", section_id="b"))
+    graph.stations["t"].x = 150.0
+    graph.add_edge(Edge("s1", "b_in", "l1"))
+    graph.add_edge(Edge("s2", "b_in", "l2"))
+    for line_id in ("l1", "l2"):
+        graph.add_edge(Edge("b_in", "t", line_id))
+    return graph
+
+
+def test_lines_tied_at_an_entry_fall_to_priority() -> None:
+    order = _port_orders(_tied_entry()).orders["b_in"]
+
+    assert order.lines == ("l2", "l1")
+    assert order.basis is OrderBasis.PRIORITY
+
+
 def test_order_bases_cover_every_kind() -> None:
-    """The coverage fixtures exercise every :class:`OrderBasis`."""
+    """The coverage fixtures and the tied entry exercise every
+    :class:`OrderBasis`."""
     seen = {
         order.basis for path in COVERAGE_FIXTURES for order in _plan(path.read_text())
     }
+    seen |= {order.basis for order in _port_orders(_tied_entry())}
     assert seen == set(OrderBasis)
 
 
@@ -273,8 +328,8 @@ def _two_section_loop() -> MetroGraph:
 def _self_feeding_section() -> MetroGraph:
     """Section ``a`` feeds its own entry, two lines through one station.
 
-    The exit (``a_0``) is planned first; its tied lines carry the entry's
-    rank, and the entry's order rests on the exit's, round the loop.
+    The section's lanes need the entry's order, which rests on the exit's,
+    which is read from the section's lanes, round the loop.
     """
     graph = MetroGraph()
     for line_id in ("l1", "l2"):
@@ -291,16 +346,20 @@ def _self_feeding_section() -> MetroGraph:
 
 
 def test_a_port_on_a_section_cycle_is_undecided() -> None:
-    plan = build_port_order_plan(_self_feeding_section())
+    plan = lane_plan_module.build_lane_plan(_self_feeding_section())
+    orders = plan.port_orders.orders
 
-    assert not plan.orders["a_1"].decided
-    assert "section cycle" in (plan.orders["a_1"].missing or "")
-    assert plan.orders["a_0"].decided
+    assert plan.tracks.cycle_sections == ("a",)
+    assert not orders["a_0"].decided
+    assert "section cycle" in (orders["a_0"].missing or "")
+    assert not orders["a_1"].decided
+    assert "'a_0'" in (orders["a_1"].missing or "")
 
 
-def test_lines_from_one_station_fall_to_priority() -> None:
-    """Two lines leaving through one exit from one in-section station tie on
-    lateral and have no port rank, so declaration order decides."""
+def test_lines_from_one_station_take_lanes_by_priority() -> None:
+    """Two lines leaving through one exit from one in-section station arrive
+    from nowhere off their run, so their section slots, in declaration order,
+    decide their lanes and the exit reads them."""
     graph = MetroGraph()
     for line_id in ("l2", "l1"):
         graph.lines[line_id] = MetroLine(line_id, line_id, "#000000")
@@ -311,10 +370,13 @@ def test_lines_from_one_station_fall_to_priority() -> None:
     for line_id in ("l1", "l2"):
         graph.add_edge(Edge("s", "a_out", line_id))
 
-    order = build_port_order_plan(graph).orders["a_out"]
+    plan = lane_plan_module.build_lane_plan(graph)
+    order = plan.port_orders.orders["a_out"]
 
     assert order.lines == ("l2", "l1")
-    assert order.basis is OrderBasis.PRIORITY
+    assert order.basis is OrderBasis.LANES
+    assert plan.tracks.lanes[("a_out", "l2")] == 0
+    assert plan.tracks.lanes[("a_out", "l1")] == 1
 
 
 def _quarter_turn(point: tuple[float, float], turns: int) -> tuple[float, float]:
@@ -355,31 +417,43 @@ def test_an_exit_against_the_flow_orders_across_its_own_travel(
     for line_id in ("upper", "lower"):
         graph.add_edge(Edge(line_id, "a_out", line_id))
 
-    order = build_port_order_plan(graph).orders["a_out"]
+    order = _port_orders(graph).orders["a_out"]
 
     assert order.lines == ("lower", "upper")
-    assert order.basis is OrderBasis.LATERAL
+    assert order.basis is OrderBasis.LANES
 
 
 def test_an_entry_without_grid_cells_is_undecided() -> None:
     graph = _two_section_loop()
     graph.sections["a"].grid_col = -1
 
-    order = build_port_order_plan(graph).orders["b_in"]
+    order = _port_orders(graph).orders["b_in"]
 
     assert not order.decided
     assert order.missing is not None
     assert order.missing.startswith("grid cells")
 
 
-def _later_phase_reads(source: str, allowed: frozenset[tuple[str, str]]) -> list[str]:
-    """What in *source* could read later-phase state or run a phase on a copy."""
-    tree = ast.parse(source)
+def _names(tree: ast.Module) -> set[str]:
     names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
     names |= {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
     froms = [n for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)]
-    names |= {alias.name for n in froms for alias in n.names}
-    found = sorted(names & (LATER_PHASE_NAMES | DYNAMIC_ACCESS))
+    return names | {alias.name for n in froms for alias in n.names}
+
+
+def _later_phase_reads(
+    source: str,
+    allowed: frozenset[tuple[str, str]],
+    stated: frozenset[str] = frozenset(),
+) -> list[str]:
+    """What in *source* could read later-phase state, read layout-start state
+    beyond *stated*, or run a phase on a copy."""
+    tree = ast.parse(source)
+    froms = [n for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)]
+    names = _names(tree)
+    found = sorted(
+        names & (LATER_PHASE_NAMES | DYNAMIC_ACCESS | (LAYOUT_START_STATE - stated))
+    )
     if any(isinstance(n, ast.Import) for n in ast.walk(tree)):
         found.append("plain import")
     if any(n.level != 0 for n in froms):
@@ -393,11 +467,65 @@ def _later_phase_reads(source: str, allowed: frozenset[tuple[str, str]]) -> list
     "module", list(ALLOWED_IMPORTS), ids=lambda m: m.__name__.rsplit(".", 1)[-1]
 )
 def test_the_record_modules_read_no_later_phase_state(module: ModuleType) -> None:
-    """Their inputs are structure and placement: no lane offset, route, draft,
+    """Their inputs are structure, placement and the state each module states
+    of what its layout installs at its start: no lane offset, route, draft,
     departure record or offsets/routing entry point appears in either module,
     and each imports nothing beyond its stated inputs."""
     source = Path(str(module.__file__)).read_text()
-    assert _later_phase_reads(source, ALLOWED_IMPORTS[module]) == []
+    assert (
+        _later_phase_reads(source, ALLOWED_IMPORTS[module], STATED_INPUTS[module]) == []
+    )
+
+
+@pytest.mark.parametrize(
+    "module", list(STATED_INPUTS), ids=lambda m: m.__name__.rsplit(".", 1)[-1]
+)
+def test_each_stated_input_is_read(module: ModuleType) -> None:
+    source = Path(str(module.__file__)).read_text()
+    assert STATED_INPUTS[module] <= LAYOUT_START_STATE
+    assert STATED_INPUTS[module] <= _names(ast.parse(source))
+
+
+def test_the_lane_plan_reads_the_fan_plans_its_layout_installed() -> None:
+    """Each record is built from the fan plans installed at the start of its
+    own layout, and no layout installs fan plans after its record seals."""
+    events: list[tuple[str, object]] = []
+    real_install = fan_plans_module.install_fan_plan_execution
+    real_start = lane_plan_module.start_layout
+    real_build = lane_plan_module.build_lane_plan
+
+    def install(graph: MetroGraph, execution: object) -> None:
+        events.append(("install", execution))
+        real_install(graph, execution)  # type: ignore[arg-type]
+
+    def start(graph: MetroGraph) -> None:
+        events.append(("start", None))
+        real_start(graph)
+
+    def build(graph: MetroGraph) -> lane_plan_module.LanePlan:
+        events.append(("build", graph.fan_plan_execution))
+        return real_build(graph)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(fan_plans_module, "install_fan_plan_execution", install)
+        mp.setattr(lane_plan_module, "start_layout", start)
+        mp.setattr(lane_plan_module, "build_lane_plan", build)
+        graph = _fresh_laid_out((TOPOLOGIES / "wide_fan_out.mmd").read_text())
+
+    assert any(plan.owns_geometry and plan.offset_carriers for plan in graph.fan_plans)
+    layouts: list[list[tuple[str, object]]] = []
+    for kind, value in events:
+        if kind == "start":
+            layouts.append([])
+        else:
+            layouts[-1].append((kind, value))
+    assert any(kind == "build" for layout in layouts for kind, _ in layout)
+    for layout in layouts:
+        kinds = [kind for kind, _ in layout]
+        if "build" not in kinds:
+            continue
+        assert kinds == ["install", "build"]
+        assert layout[1][1] is layout[0][1]
 
 
 @pytest.mark.parametrize(
@@ -410,6 +538,7 @@ def test_the_record_modules_read_no_later_phase_state(module: ModuleType) -> Non
         "from nf_metro.layout.routing.common import compute_routes_somehow",
         "def f(g): return vars(g)['station' + '_offsets']",
         "def f(g): return g.__dict__['station' + '_offsets']",
+        "def f(g): return g.fan_plans",
     ],
     ids=[
         "deepcopy",
@@ -419,6 +548,7 @@ def test_the_record_modules_read_no_later_phase_state(module: ModuleType) -> Non
         "new-name",
         "vars",
         "dunder-dict",
+        "unstated-layout-start-state",
     ],
 )
 def test_the_module_check_catches_indirect_reads(source: str) -> None:
