@@ -1606,6 +1606,7 @@ the planned-fan offsets that follow them own the lanes a fan plan states.
   missing input named), every same-band `(entry, upstream source)` pair an
   `Approach`. Later offsets runs of the layout, and routing and rendering
   after it, replay the sealed record rather than rebuilding it.
+  Rail-mode and sectionless layouts never reach 5.1 and hold no record.
 - **Invariants preserved**: All offsets and geometry; nothing in layout,
   routing or rendering reads the record, and the record reads no lane offset,
   route, draft or departure record.

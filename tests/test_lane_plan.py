@@ -7,7 +7,7 @@ offsets run of a layout at or after stage 5.1.  These tests hold the record's
 contract: one record per layout, replayed for the rest of it; total on every
 curated map; independent of the hash seed; read by nothing in the package; a
 rotated or reflected placement plans the rotated or reflected record; and its
-approach sides are the ones dispatch draws today.
+approach sides are the ones dispatch draws.
 """
 
 from __future__ import annotations
@@ -76,8 +76,8 @@ ROTATION_FIXTURES = [
     FIXTURES / "regressions" / "stacked_collector_fanin.mmd",
 ]
 
-# Same-row bypasses whose drawn approach the record does not state yet: the
-# U-turn loop from a same-row LEFT exit into a LEFT entry it lies right of is
+# Same-row bypasses whose drawn approach differs from the record: the U-turn
+# loop from a same-row LEFT exit into a LEFT entry it lies right of is
 # drawn over the top while the turn-round rule records the traveller's right.
 APPROACH_SIDE_EXCEPTIONS = frozenset(
     {("samerow_left_exit_far_left_entry", "te__entry_left_9", "psite_id__exit_left_4")}
@@ -194,7 +194,7 @@ def _screen_side(graph: MetroGraph, entry_id: str, side: int) -> str:
 
 @pytest.mark.parametrize("path", CURATED, ids=lambda p: str(p.relative_to(ROOT)))
 def test_approach_sides_match_the_drawn_same_row_bypasses(path: Path) -> None:
-    """Every same-row bypass dispatch draws round its row today arrives on the
+    """Every same-row bypass dispatch draws round its row arrives on the
     side the approach record states."""
     run = _laid_out(path)
     graph = run.graph
