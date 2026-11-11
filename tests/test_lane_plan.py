@@ -9,8 +9,10 @@ contract: one record per layout, replayed for the rest of it; total on every
 curated map; independent of the hash seed; pinned per curated map; read by
 nothing in the package; a rotated or reflected placement plans the rotated or
 reflected record; its approach sides are the ones dispatch draws; no seam
-changes a bundle's order or steps a line that crosses it straight; and a line
-born in a section leaves it on its consumers' side.
+changes a bundle's order, outside the listed seams where a straight-seam
+entry reverses one, or steps a line that crosses it straight; the seam joint's
+lanes are the track plan's, outside a listed entry; and a line born on an
+exit's level run leaves the exit on its consumers' side.
 """
 
 from __future__ import annotations
@@ -312,33 +314,99 @@ def _seam_bundles(graph: MetroGraph) -> dict[tuple[str, str], list[str]]:
     return bundles
 
 
+def _reordered_bundles(
+    graph: MetroGraph,
+) -> dict[tuple[str, str], tuple[list[str], list[str]]]:
+    """Per (exit, entry) seam whose bundle the entry orders otherwise than
+    the exit: the bundle's lines in the exit's order, then the entry's."""
+    assert graph._lane_plan is not None
+    orders = graph._lane_plan.port_orders.orders
+    out = {}
+    for (exit_id, entry_id), carried in _seam_bundles(graph).items():
+        left, right = orders[exit_id].lines, orders[entry_id].lines
+        if len(carried) < 2 or left is None or right is None:
+            continue
+        leaving = [lid for lid in left if lid in carried]
+        arriving = [lid for lid in right if lid in carried]
+        if leaving != arriving:
+            out[(exit_id, entry_id)] = (leaving, arriving)
+    return out
+
+
+# Seams whose bundle a straight-seam entry orders otherwise than its exit.
+# "forced-conflict": another bundle into the entry carries the same lines in
+# the opposite order, so one of the two crosses whatever the entry's order.
+# "unforced-fill": no other bundle orders those lines; the fill round the
+# entry's pins sends the bundle's free line, ordered between two adjacent
+# pins, past the later one.
+SEAM_ORDER_EXCEPTIONS: dict[tuple[str, str, str], str] = {
+    (
+        "tests/fixtures/hash_seed_determinism/seed_15.mmd",
+        "s8__exit_left_8",
+        "s10__entry_right_19",
+    ): "forced-conflict",
+    (
+        "tests/fixtures/regressions/approach_order_carry_sandwich.mmd",
+        "sec0__exit_top_2",
+        "sec3__entry_left_4",
+    ): "forced-conflict",
+    (
+        "tests/fixtures/regressions/approach_order_multi_line_feeder.mmd",
+        "z0__exit_top_0",
+        "z2__entry_left_2",
+    ): "unforced-fill",
+    (
+        "tests/fixtures/regressions/departure_order_shared_run_no_record.mmd",
+        "z1__exit_right_1",
+        "z3__entry_left_5",
+    ): "unforced-fill",
+}
+
+
 @pytest.mark.parametrize("path", CURATED, ids=lambda p: str(p.relative_to(ROOT)))
 def test_no_seam_changes_a_bundle_order(path: Path) -> None:
-    """Lines one exit alone feeds into an entry cross that seam in the order
-    they leave the exit: travel-frame orders keep each line's side through
-    every turn, so the entry's order of those lines is the exit's.  A line
-    two exits feed into one entry takes a single place there, so the bundle
-    of one of them may cross it."""
+    """Every line an exit carries into an entry crosses that seam in the
+    order it leaves the exit: travel-frame orders keep each line's side
+    through every turn, so the entry's order of a bundle is its exit's.
+    ``SEAM_ORDER_EXCEPTIONS`` lists the seams where a straight-seam entry's
+    order reverses a bundle: one another bundle orders oppositely, or one
+    whose free line the fill round the entry's pins sends past a pin."""
     graph = _laid_out(path).graph
     if graph is None or graph._lane_plan is None:
         return
-    orders = graph._lane_plan.port_orders.orders
-    bundles = _seam_bundles(graph)
-    feeders: dict[tuple[str, str], int] = {}
-    for (_exit_id, entry_id), carried in bundles.items():
-        for lid in carried:
-            feeders[(entry_id, lid)] = feeders.get((entry_id, lid), 0) + 1
-    changed = []
-    for (exit_id, entry_id), carried in bundles.items():
-        lines = [lid for lid in carried if feeders[(entry_id, lid)] == 1]
-        left, right = orders[exit_id].lines, orders[entry_id].lines
-        if len(lines) < 2 or left is None or right is None:
-            continue
-        if [lid for lid in left if lid in lines] != [
-            lid for lid in right if lid in lines
-        ]:
-            changed.append((exit_id, entry_id))
+    changed = [
+        seam
+        for seam in _reordered_bundles(graph)
+        if (_rel(path), *seam) not in SEAM_ORDER_EXCEPTIONS
+    ]
     assert changed == []
+
+
+@pytest.mark.parametrize(
+    ("rel", "exit_id", "entry_id"), sorted(SEAM_ORDER_EXCEPTIONS), ids=str
+)
+def test_seam_order_exceptions_are_live(rel: str, exit_id: str, entry_id: str) -> None:
+    graph = _laid_out(ROOT / rel).graph
+    assert graph is not None and graph._lane_plan is not None
+    plan = graph._lane_plan
+    leaving, arriving = _reordered_bundles(graph)[(exit_id, entry_id)]
+    swapped = [lid for lid, other in zip(leaving, arriving) if lid != other]
+    assert plan.port_orders.orders[entry_id].basis is OrderBasis.SEAM
+    orders = plan.port_orders.orders
+    others = [
+        [lid for lid in orders[source].lines or () if lid in swapped]
+        for (source, entry), carried in _seam_bundles(graph).items()
+        if entry == entry_id
+        and source != exit_id
+        and len(set(carried) & set(swapped)) >= 2
+    ]
+    if SEAM_ORDER_EXCEPTIONS[(rel, exit_id, entry_id)] == "forced-conflict":
+        assert [lid for lid in arriving if lid in swapped] in others
+    else:
+        pinned = {lid for (entry, lid) in plan.seams.pins if entry == entry_id}
+        assert others == []
+        assert set(swapped) & pinned
+        assert set(swapped) - pinned
 
 
 def _planned_lateral(
@@ -422,6 +490,63 @@ def test_a_straight_seam_keeps_its_lines_level(path: Path) -> None:
     assert stepped == []
 
 
+def _seam_lane_disagreements(graph: MetroGraph) -> list[str]:
+    """Entries whose seam lanes are not their track lanes, or whose seam
+    order is not read from their track lanes."""
+    plan = graph._lane_plan
+    assert plan is not None
+    out = []
+    for entry_id, lanes in sorted(plan.seams.entries.items()):
+        tracked = {lid: plan.tracks.lanes[(entry_id, lid)] for lid in lanes}
+        by_lane = sorted(lanes, key=lambda lid: (tracked[lid], lid))
+        if plan.lane_senses[entry_id] < 0:
+            by_lane.reverse()
+        order = plan.port_orders.orders[entry_id]
+        if tracked != lanes or (
+            order.basis is OrderBasis.SEAM and order.lines != tuple(by_lane)
+        ):
+            out.append(entry_id)
+    return out
+
+
+# Seam-pinned entries where a fan plan's carrier slot, not the seam lane,
+# is a line's track lane, while the entry's order is read from its seam lanes.
+SEAM_LANE_EXCEPTIONS = frozenset(
+    {("examples/topologies/return_trunk_over_member_run.mmd", "export__entry_left_4")}
+)
+
+
+@pytest.mark.parametrize("path", CURATED, ids=lambda p: str(p.relative_to(ROOT)))
+def test_the_seam_lanes_are_the_track_lanes(path: Path) -> None:
+    """Every lane the seam joint records at an entry is the track plan's lane
+    there, and an entry its seam lanes order reads that order across its
+    track lanes."""
+    graph = _laid_out(path).graph
+    if graph is None or graph._lane_plan is None:
+        return
+    disagree = [
+        entry_id
+        for entry_id in _seam_lane_disagreements(graph)
+        if (_rel(path), entry_id) not in SEAM_LANE_EXCEPTIONS
+    ]
+    assert disagree == []
+
+
+@pytest.mark.parametrize(("rel", "entry_id"), sorted(SEAM_LANE_EXCEPTIONS), ids=str)
+def test_seam_lane_exceptions_are_live(rel: str, entry_id: str) -> None:
+    graph = _laid_out(ROOT / rel).graph
+    assert graph is not None and graph._lane_plan is not None
+    plan = graph._lane_plan
+    seam = plan.seams.entries[entry_id]
+    by_seam = sorted(seam, key=lambda lid: (seam[lid], lid))
+    if plan.lane_senses[entry_id] < 0:
+        by_seam.reverse()
+    assert entry_id in _seam_lane_disagreements(graph)
+    assert plan.port_orders.orders[entry_id].basis is OrderBasis.SEAM
+    assert plan.port_orders.orders[entry_id].lines == tuple(by_seam)
+    assert any(plan.tracks.lanes[(entry_id, lid)] != lane for lid, lane in seam.items())
+
+
 def _cell_lateral(graph: MetroGraph, node: str, ref: str, travel: Direction) -> float:
     def centre(node_id: str) -> tuple[float, float]:
         section = graph.sections[graph.stations[node_id].section_id or ""]
@@ -433,16 +558,85 @@ def _cell_lateral(graph: MetroGraph, node: str, ref: str, travel: Direction) -> 
     return _lateral(centre(node), centre(ref), travel)
 
 
+def _consumer_sides(
+    graph: MetroGraph, plan: LanePlan, exit_id: str, line_id: str
+) -> set[float] | None:
+    """Where *line_id* heads for past *exit_id*, per consumer, across the
+    exit's travel: for an entry on the exit's band (one the record holds an
+    approach from the exit to), that approach's lateral read along the
+    exit's travel; for any other consumer, its grid cell's lateral, reversed
+    for a far-side approach.  ``None`` when an on-band entry is perpendicular
+    or travels across the exit's travel, or an off-band consumer's cell is
+    level with the exit's."""
+    travel = EXIT_SIDE_DIRECTION[graph.ports[exit_id].side]
+    tx, ty = direction_vector(travel)
+    sides = set()
+    for node in _reached(graph, exit_id, line_id):
+        section = graph.sections.get(graph.stations[node].section_id or "")
+        if section is None or section.grid_col < 0:
+            continue
+        approach = plan.port_orders.approaches.get((node, exit_id))
+        if approach is None:
+            lateral = _cell_lateral(graph, node, exit_id, travel)
+            if abs(lateral) <= SAME_Y_TOLERANCE:
+                return None
+            far = (node, exit_id, line_id) in plan.far_sides
+            sides.add(-lateral if far else lateral)
+            continue
+        if _perpendicular(graph, node):
+            return None
+        if approach.kind is ApproachKind.LEVEL:
+            sides.add(0.0)
+            continue
+        ex, ey = direction_vector(port_travel(graph.ports[node]))
+        parallel = ex * tx + ey * ty
+        if abs(parallel) < 0.5:
+            return None
+        sides.add(approach.lateral * parallel)
+    return sides
+
+
+def _level_run(graph: MetroGraph, section_id: str, node: str) -> set[str]:
+    """The nodes of *section_id* joined to *node* by level edges."""
+    joined: dict[str, set[str]] = {}
+    for edge, *_span in _level_edges(graph, section_id):
+        joined.setdefault(edge.source, set()).add(edge.target)
+        joined.setdefault(edge.target, set()).add(edge.source)
+    run, frontier = {node}, [node]
+    while frontier:
+        for other in joined.get(frontier.pop(), ()):
+            if other not in run:
+                run.add(other)
+                frontier.append(other)
+    return run
+
+
+def _born_on(graph: MetroGraph, run: set[str], line_id: str) -> bool:
+    """Whether *line_id* starts in its section at a node of *run*."""
+    return any(
+        line_id in graph.station_lines(node)
+        and not any(
+            e.line_id == line_id
+            and graph.stations[e.source].section_id == graph.stations[node].section_id
+            for e in graph.edges_to(node)
+        )
+        for node in run
+    )
+
+
 @pytest.mark.parametrize("path", CURATED, ids=lambda p: str(p.relative_to(ROOT)))
 def test_a_born_line_leaves_on_its_consumers_side(path: Path) -> None:
-    """A line born in a section beside lines that entered it leaves their
-    shared exit on the side, across the exit's travel, where every one of its
-    consumers' grid cells lies from every one of theirs, all off the exit's
-    band."""
+    """A line born on an exit's level run, beside lines that entered the
+    section, leaves the exit on the side, across its travel, where every one
+    of its consumers lies from every one of theirs: off the exit's band by
+    grid cell, on it by the side its approach record states.  A run holding
+    a seam-pinned entry places its born lines by the seam-pinned run's rule
+    instead."""
     graph = _laid_out(path).graph
     if graph is None or graph._lane_plan is None:
         return
-    orders = graph._lane_plan.port_orders.orders
+    plan = graph._lane_plan
+    orders = plan.port_orders.orders
     wrong = []
     for section_id, section in sorted(graph.sections.items()):
         if section.grid_col < 0 or section.grid_row < 0:
@@ -457,34 +651,21 @@ def test_a_born_line_leaves_on_its_consumers_side(path: Path) -> None:
             if exit_id not in graph.ports or _perpendicular(graph, exit_id):
                 continue
             lines = orders[exit_id].lines
-            if lines is None:
+            run = _level_run(graph, section_id, exit_id)
+            if lines is None or any(n in plan.seams.entries for n in run):
                 continue
-            travel = EXIT_SIDE_DIRECTION[graph.ports[exit_id].side]
-            sides: dict[str, set[float]] = {}
-            for lid in lines:
-                consumers = [
-                    n
-                    for n in _reached(graph, exit_id, lid)
-                    if (graph.stations[n].section_id or "") in graph.sections
-                    and graph.sections[graph.stations[n].section_id or ""].grid_col >= 0
-                ]
-                sides[lid] = {
-                    _cell_lateral(graph, n, exit_id, travel) for n in consumers
-                }
+            sides = {lid: _consumer_sides(graph, plan, exit_id, lid) for lid in lines}
             for born in lines:
-                if born in entered or not sides[born]:
+                mine = sides[born]
+                if born in entered or not mine or not _born_on(graph, run, born):
                     continue
                 for kept in lines:
-                    both = sides[born] | sides[kept]
-                    if (
-                        kept not in entered
-                        or not sides[kept]
-                        or any(abs(v) <= SAME_Y_TOLERANCE for v in both)
-                    ):
+                    theirs = sides[kept]
+                    if kept not in entered or not theirs:
                         continue
-                    if min(sides[born]) > max(sides[kept]) + SAME_Y_TOLERANCE:
+                    if min(mine) > max(theirs) + SAME_Y_TOLERANCE:
                         right = True
-                    elif max(sides[born]) < min(sides[kept]) - SAME_Y_TOLERANCE:
+                    elif max(mine) < min(theirs) - SAME_Y_TOLERANCE:
                         right = False
                     else:
                         continue

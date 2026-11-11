@@ -248,7 +248,7 @@ An entry's lines are sorted by three fields, the earlier deciding:
 3. **Priority.** Line declaration order.
 
 Every feeding exit's bundle keeps its order across the seam: the entry order is the merge of those orders, the sort key deciding only between lines no bundle orders.
-An entry some of whose lines cross a straight seam (below) takes the order of the lanes the seam pins instead.
+An entry some of whose lines cross a straight seam (below) takes instead the order of its seam lanes: the lanes the seam's pins and the fill round them give its lines.
 An exit's order is its lines' lanes at the port in the track plan (below), read across the exit's travel.
 
 Each order states the field that decided it and the port's structural class.
@@ -269,8 +269,10 @@ A line crosses a straight seam when it reaches a flow-side entry, through juncti
 Such a line is pinned to the entry lane that keeps the exit lane's coordinate, below lane zero if need be, provided that lane lands on the entry's lane grid and the line's other straight seams agree.
 A pin on a line that another feeding bundle also carries holds only where every such bundle carries its pinned lines in its own lane order.
 The entry's other lines fill round the pins in the entry's order (by line id when that order is undecided): those before the first pinned line take the free lanes below it, nearest first, and each later one the first free lane past the line before it.
-Where two pins leave no lane between them for a line ordered there, that line goes past the later pin; a line two exits feed into the entry takes one place, so the other exit's bundle crosses it.
-The seam joint records each such entry's lanes and the exit each pinned line comes from.
+Where two pins leave no lane between them for a line ordered there, that line goes past the later pin, so a bundle carrying both it and the later pinned line crosses the seam in the other order.
+Where two bundles into the entry carry the same lines in opposite orders, one of them crosses the seam whatever the entry's order.
+The seam joint records each such entry's seam lanes and the exit each pinned line comes from.
+The track plan gives the entry these lanes, except a line's whose lane in the entry's run a fan plan's carrier slot, or the lane the line keeps from an earlier part of its level run, fixes otherwise; the entry's order is read from the seam lanes either way.
 
 A perpendicular port every line of which crosses a straight seam, past no section box, to a facing flow-side port centred on it records each line's offset from the port on the flow-side port's lane, read across the seam's travel.
 

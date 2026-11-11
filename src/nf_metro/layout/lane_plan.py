@@ -218,8 +218,12 @@ class SeamJoint:
     docstring)."""
 
     entries: dict[str, dict[str, int]]
-    """Per flow-side entry some line crosses a straight seam into: every line's
-    lane at the entry, in its section lane frame."""
+    """Per flow-side entry some line crosses a straight seam into: every
+    line's lane at the entry by its pins and the fill round them, in its
+    section lane frame.  The entry's seam order is read from these lanes.
+    The track plan gives the entry these lanes, except a line's whose lane in
+    the entry's run a fan plan's carrier slot, or the lane the line keeps
+    from an earlier part of its level run, fixes otherwise."""
     pins: dict[tuple[str, str], str]
     """Keyed ``(entry, line)``: the exit a pinned line crosses straight from."""
     perpendicular: dict[str, dict[str, int]]
