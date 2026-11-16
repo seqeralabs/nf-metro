@@ -62,6 +62,8 @@ history.
 
 ### Fixed
 
+- Nextflow conversion preserves spur dependencies between subworkflows instead
+  of silently omitting those edges from the emitted map.
 - Section number badges skip sections that draw no badge. A map mixing loose
   stations with subgraphs numbered its visible sections from 2.
 - A perpendicular (top or bottom) entry port fed through merges, or by
