@@ -619,7 +619,7 @@ def _assign_lines(
         line_id = bypass_lines[(src_sec, tgt_sec)][0]
         for e in bp_edges:
             edge_line[e] = line_id
-    for e in spur_edges:
+    for e in sorted(spur_edges):
         if e not in edge_line:
             edge_line[e] = spur_line_id
 
@@ -707,9 +707,9 @@ def _emit_mmd(
         out.append("    end")
         out.append("")
 
-    all_inter = lines.main_inter_edges[:]
-    for bp_edges in lines.bypass_groups.values():
-        all_inter.extend(bp_edges)
+    # edge_line includes spur edges too; the main/bypass groups do not.
+    intra = {edge for sec_edges in intra_edges.values() for edge in sec_edges}
+    all_inter = [edge for edge in lines.edge_line if edge not in intra]
 
     if all_inter:
         out.append("    %% Inter-section edges")
