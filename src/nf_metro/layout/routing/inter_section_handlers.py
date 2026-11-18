@@ -5320,21 +5320,35 @@ def _perp_entry_landing_x(
     return _perp_entry_crossing_x(ctx, entry_port_id, line_id, tx)
 
 
+def _perp_entry_final_x(
+    ctx: _RoutingCtx, edge: Edge, tgt_sec: Section | None, tx: float, ref_lid: str
+) -> float:
+    """The X a perpendicular entry's centreline lands on: the reference line's
+    own lane where the entry lands each line on its own lane
+    (:func:`_perp_entry_lands_on_its_own_lane`), so the bundle tapers to the
+    landing section's spread; otherwise the port."""
+    if tgt_sec is not None and _perp_entry_lands_on_its_own_lane(tgt_sec):
+        ref_landing_x = _perp_entry_landing_x(ctx, edge, tgt_sec, tx, ref_lid)
+        assert ref_landing_x is not None
+        return ref_landing_x
+    return tx
+
+
 def _perp_entry_bundle_members(
     edge: Edge,
     tgt_sec: Section | None,
     tx: float,
-    ref_lid: str,
+    final_x: float,
     line_ids: list[str],
     edge_by_line: dict[str, Edge],
     *,
     src_geom: Callable[[str], float],
     ctx: _RoutingCtx,
     side: PortSide,
-) -> tuple[float, list[tuple[Edge, str, float, float]]]:
-    """Landing X and per-line bundle members for a perpendicular (TOP or
-    BOTTOM) entry port, shared by :func:`_route_top_entry_l_shape` and
-    :func:`_route_bottom_entry_l_shape`.
+) -> list[tuple[Edge, str, float, float]]:
+    """Per-line bundle members for a perpendicular (TOP or BOTTOM) entry port
+    whose centreline lands on *final_x* (:func:`_perp_entry_final_x`), shared
+    by :func:`_route_top_entry_l_shape` and :func:`_route_bottom_entry_l_shape`.
 
     Every line lands on the X :func:`_perp_entry_landing_x` states for it, and
     the members carry that X as the lateral the bundle builder needs, so the
@@ -5344,12 +5358,6 @@ def _perp_entry_bundle_members(
     the other side of the port is the boundary jitter: the stroke steps sideways
     as it crosses the section edge.  The source offset stands only where the
     crossing is undefined.
-
-    Where the entry lands each line on its own lane
-    (:func:`_perp_entry_lands_on_its_own_lane`) the reference line's lane is the
-    centreline, so the target spread is the landing section's rather than the
-    source fan's and the bundle tapers; otherwise the centreline stays on the
-    port.
     """
     # The bundle builder fans a leg along its own right-hand normal, and the
     # landing leg descends into a TOP port but ascends into a BOTTOM one, so
@@ -5359,21 +5367,13 @@ def _perp_entry_bundle_members(
     def landing_x(line_id: str) -> float | None:
         return _perp_entry_landing_x(ctx, edge, tgt_sec, tx, line_id)
 
-    if tgt_sec is not None and _perp_entry_lands_on_its_own_lane(tgt_sec):
-        ref_landing_x = landing_x(ref_lid)
-        assert ref_landing_x is not None
-        final_x = ref_landing_x
-    else:
-        final_x = tx
-
     def tgt_offset(line_id: str) -> float:
         lx = landing_x(line_id)
         return src_geom(line_id) if lx is None else landing_normal_x * (lx - final_x)
 
-    members = [
+    return [
         (edge_by_line[lid], lid, src_geom(lid), tgt_offset(lid)) for lid in line_ids
     ]
-    return final_x, members
 
 
 @dataclass(frozen=True, slots=True)
@@ -5674,17 +5674,19 @@ def _perp_entry_l_geometry(
     ref_lid = min(line_ids, key=src_offset)
 
     # The bundle builder fans each source-region leg by the right-hand normal of
-    # its travel direction, so a LEFT exit -- whose lead-in departs leftward --
-    # seats the fan on the opposite side of the port from the section's own +Y
-    # lane draw.  That parts the inter-section departure from the intra trunk by
-    # twice the offset right at the boundary.  Signing the source offset by the
-    # exit lead lands the departure on the section's lane whichever side the line
-    # leaves from; a RIGHT exit (and a junction source, whose off-box point has
-    # no intra trunk to meet) keep the raw offset.
-    src_sign = lead.sign if exit_side is not None and src.is_port else 1.0
-
-    def src_geom(line_id: str) -> float:
-        return src_sign * src_offset(line_id)
+    # its travel, so an exit port's lanes are drawn where its section draws them
+    # only when signed by the way the centreline's first leg actually leaves:
+    # leftward for a LEFT exit, and for a RIGHT exit wrapping past the target or
+    # rising on the far side of its own box.  A junction source keeps the raw
+    # offset: its off-box point has no intra trunk to meet.
+    def src_geom_leaving(toward_x: float) -> Callable[[str], float]:
+        departure = (
+            horizontal_direction(toward_x - sx)
+            if abs(toward_x - sx) > COORD_TOLERANCE
+            else lead
+        )
+        sign = departure.sign if exit_side is not None and src.is_port else 1.0
+        return lambda line_id: sign * src_offset(line_id)
 
     # A branch of a junction fan consumes the fan's shared per-line rank so its
     # source-side first corner coincides with the bypass/wrap siblings' rather
@@ -5716,17 +5718,7 @@ def _perp_entry_l_geometry(
             )
         )
 
-    final_x, members = _perp_entry_bundle_members(
-        edge,
-        tgt_sec,
-        tx,
-        ref_lid,
-        line_ids,
-        edge_by_line,
-        src_geom=src_geom,
-        ctx=ctx,
-        side=side,
-    )
+    final_x = _perp_entry_final_x(ctx, edge, tgt_sec, tx, ref_lid)
 
     # A feeder standing on the far side of the target from its port cannot turn
     # straight in without ploughing through the box; carry past one side, cross
@@ -5769,7 +5761,7 @@ def _perp_entry_l_geometry(
             # A planned turn axis, and the channel leg hanging off it, are
             # frozen against the settlement that holds a drawn run inside its
             # corridor's clearance, so the centreline states that seat itself.
-            lane_offsets = tuple(src_geom(lid) for lid in line_ids)
+            lane_offsets = tuple(src_geom_leaving(lx0)(lid) for lid in line_ids)
             riser_sign = right_normal_axis_sign(_leg_direction((sx, sy), (sx, mid_y)))
             lx0 = _perp_entry_seated_corridor(
                 ctx,
@@ -5809,6 +5801,18 @@ def _perp_entry_l_geometry(
                 (final_x, ty),
             )
             transition_leg = 3
+    first_leg_end = points[1] if abs(points[1][1] - sy) <= COORD_TOLERANCE else (sx, sy)
+    members = _perp_entry_bundle_members(
+        edge,
+        tgt_sec,
+        tx,
+        final_x,
+        line_ids,
+        edge_by_line,
+        src_geom=src_geom_leaving(first_leg_end[0]),
+        ctx=ctx,
+        side=side,
+    )
     return _perp_entry_l_record(
         points,
         tuple(members),
