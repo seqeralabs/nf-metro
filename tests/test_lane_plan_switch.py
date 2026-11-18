@@ -559,6 +559,32 @@ def test_the_validated_layout_passes(stem: str) -> None:
         prepare_graph(path.read_text(), source_dir=str(path.parent))
 
 
+STRADDLED_FAN_PORTS = [
+    ("side_branch_ascent_label_strike", "sec__entry_left_2"),
+    ("out_of_section_retag_fan", "secA__entry_left_2"),
+    ("symmetric_deadend_fanout_exit", "s1__entry_left_2"),
+    ("symmetric_deadend_fanout", "s1__entry_left_1"),
+]
+
+
+@pytest.mark.parametrize(("stem", "port_id"), STRADDLED_FAN_PORTS)
+def test_a_port_branches_land_on_from_both_sides_continues_the_centreline(
+    stem: str, port_id: str
+) -> None:
+    """A fan with no branch on its centreline whose branches land on one port
+    from both sides carries the whole fan through that port, straddling the
+    centreline: the plan freezes the port on it."""
+    drawn = _drawn(_curated(stem))
+    assert drawn.graph is not None
+    plans = [
+        plan
+        for plan in drawn.graph.fan_plans
+        if port_id in {pid for b in plan.branches for pid in b.landing_port_ids}
+    ]
+    assert plans
+    assert all(port_id in plan.centreline_port_ids for plan in plans)
+
+
 def test_the_shallow_feeder_check_reads_the_approach_record() -> None:
     from nf_metro.layout.routing.offsets import same_row_bypass_entry
 
