@@ -222,8 +222,9 @@ def _step_off_exit_rows(
     When several carriers converge on the exit, each rides its own row flat to
     the section edge, and any dead-end station seated on one of those rows in a
     later layer would have a run drawn straight through its marker.  Such a
-    station steps away from its predecessors by one sibling pitch until it
-    clears every blocking row and every station already at this layer.
+    station peels downward, as other dead-end tails do, one sibling pitch at
+    a time until it clears every blocking row and every station already at
+    this layer.
     """
     placed = layer_occupancy.get(layer_idx, {})
     if not placed:
@@ -256,13 +257,11 @@ def _step_off_exit_rows(
 
         if not on_foreign_row(tracks[node]):
             continue
-        pred = _predecessor_avg(node, G, tracks)
-        step = -pitch if pred is not None and tracks[node] < pred else pitch
-        new = tracks[node] + step
+        new = tracks[node] + pitch
         while on_foreign_row(new) or _is_track_occupied_at_layer(
             new, layer_idx, layer_occupancy, node
         ):
-            new += step
+            new += pitch
         tracks[node] = new
         placed[node] = new
 
