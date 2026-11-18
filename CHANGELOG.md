@@ -68,6 +68,10 @@ history.
   feeders arriving along two different corridors, now gives each line the
   channel that matches its lane in the section, so the lines no longer cross
   or overlap inside the port's own turn.
+- When two stations feed the same exit and one of them also fans into
+  dead-end branches, a branch no longer sits on the other feeder's row.
+  That feeder's exit run was drawn straight through the branch's marker
+  (and any file icon after it); the branch now peels below the exit rows.
 
 ## [2.1.0] — 2026-09-15
 

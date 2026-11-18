@@ -197,8 +197,73 @@ def assign_tracks(
             line_gap,
             line_base=line_base if centered else None,
         )
+        if flow_horizontal:
+            _step_off_exit_rows(
+                layer_idx, layers, tracks, G, exit_reaching, layer_occupancy
+            )
 
     return tracks
+
+
+def _step_off_exit_rows(
+    layer_idx: int,
+    layers: dict[str, int],
+    tracks: dict[str, float],
+    G: nx.DiGraph[str],
+    exit_reaching: frozenset[str],
+    layer_occupancy: dict[int, dict[str, float]],
+) -> None:
+    """Move this layer's dead-end stations off rows an exit run holds.
+
+    A station whose flow leaves through the section's exit port, with no
+    in-section successor carrying it there, is an exit carrier.  A sole
+    carrier's run peels off its row ahead of everything downstream of the
+    carrier, so only a station hanging off a different feeder is in its way.
+    When several carriers converge on the exit, each rides its own row flat to
+    the section edge, and any dead-end station seated on one of those rows in a
+    later layer would have a run drawn straight through its marker.  Such a
+    station peels downward, as other dead-end tails do, one sibling pitch at
+    a time until it clears every blocking row and every station already at
+    this layer.
+    """
+    placed = layer_occupancy.get(layer_idx, {})
+    if not placed:
+        return
+    carriers = {
+        s: tracks[s]
+        for s in exit_reaching
+        if s in tracks
+        and layers.get(s, 0) < layer_idx
+        and not any(n in exit_reaching for n in G.successors(s))
+    }
+    if not carriers:
+        return
+    distinct = sorted(set(tracks[n] for n in placed) | set(carriers.values()))
+    gaps = [
+        b - a for a, b in zip(distinct, distinct[1:]) if b - a > SAME_COORD_TOLERANCE
+    ]
+    pitch = min(gaps) if gaps else LINE_GAP
+
+    for node in sorted(placed, key=lambda n: tracks[n]):
+        if node in exit_reaching:
+            continue
+        upstream = nx.ancestors(G, node)
+        foreign = [
+            t for c, t in carriers.items() if len(carriers) > 1 or c not in upstream
+        ]
+
+        def on_foreign_row(t: float, rows: list[float] = foreign) -> bool:
+            return any(abs(t - r) < SAME_COORD_TOLERANCE for r in rows)
+
+        if not on_foreign_row(tracks[node]):
+            continue
+        new = tracks[node] + pitch
+        while on_foreign_row(new) or _is_track_occupied_at_layer(
+            new, layer_idx, layer_occupancy, node
+        ):
+            new += pitch
+        tracks[node] = new
+        placed[node] = new
 
 
 def _build_diamond_index(
