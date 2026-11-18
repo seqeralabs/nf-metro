@@ -17,6 +17,7 @@ from nf_metro.layout.departure_order import (
     departure_records,
     departure_turn_rank,
 )
+from nf_metro.layout.geometry import lanes_run_along_y
 from nf_metro.layout.route_plan import (
     CoordinateRegime,
     DemandAxis,
@@ -1545,14 +1546,20 @@ def _source_lane_ownership(
     mismatched = [
         station_id
         for station_id in candidates
-        if abs(offsets.get((station_id, line_id), 0.0) - desired) > COORD_TOLERANCE
+        if abs(
+            _offset_across_run(graph, offsets, station_id, line_id, run_direction)
+            - desired
+        )
+        > COORD_TOLERANCE
     ]
     if not mismatched:
         return tuple(stations), (), None
     if len(candidates) != 1:
         return (), (), "ambiguous-source-lane-boundary"
     candidate = candidates[0]
-    source_lane_offset = offsets.get((candidate, line_id), 0.0)
+    source_lane_offset = _offset_across_run(
+        graph, offsets, candidate, line_id, run_direction
+    )
     target_lane_offset = desired
     source_offset = source_lane_offset
     target_offset = target_lane_offset
@@ -1561,11 +1568,15 @@ def _source_lane_ownership(
         target_offsets = dict(offsets)
         target_offsets[exit_port_id, line_id] = desired
         target_ctx = replace(ctx, station_offsets=target_offsets)
-        source_offset = _tb_x_offset(
-            source_ctx,
-            candidate,
-            line_id,
-            graph.stations[candidate].section_id,
+        source_offset = (
+            0.0
+            if source_lane_offset == 0.0
+            else _tb_x_offset(
+                source_ctx,
+                candidate,
+                line_id,
+                graph.stations[candidate].section_id,
+            )
         )
         target_offset = _tb_x_offset(
             target_ctx,
@@ -1587,6 +1598,26 @@ def _source_lane_ownership(
     if transition is None:
         return (), (), "source-lane-transition-has-no-runway"
     return tuple(stations), (transition,), None
+
+
+def _offset_across_run(
+    graph: MetroGraph,
+    offsets: Mapping[tuple[str, str], float],
+    station_id: str,
+    line_id: str,
+    run_direction: Direction,
+) -> float:
+    """*line_id*'s offset at *station_id* across a run heading
+    *run_direction*: its stored offset where the station's section lays its
+    lanes across that run, else zero, every lane then leaving the station on
+    its own coordinate across the run."""
+    section_id = graph.stations[station_id].section_id
+    assert section_id is not None
+    section = graph.sections[section_id]
+    across = lanes_run_along_y(section.direction) is (
+        direction_axis(run_direction) is DemandAxis.X
+    )
+    return offsets.get((station_id, line_id), 0.0) if across else 0.0
 
 
 def _holds_lane(

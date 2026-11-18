@@ -113,15 +113,17 @@ off it), or for a line nothing feeds there, of the nearest consumer its last
 node leaves to.  A line a perpendicular entry of the section turns into the
 run upstream of its first node keeps a near-zero key on its port's side.
 Lines arriving from one side at one lateral nest by where they leave their
-sources: the farther upstream, the farther from that side.  A line that parts
+sources (read through bypass-V helpers): the farther upstream, the farther
+from that side.  A line that parts
 from the run to the side opposite the one it arrived from, where another of
 its lines carries on, ranks by the side it leaves to, outside the lines
 arriving there.  Ties fall to the source's lane, then the section slot.  A
 later part keeps every bundle entering it from an earlier part in that part's
-lane order.  A run moves its born lines and applies its section's peel and
-parting orders as the section order does.  An exit carries, on lines it
-shares with an upstream exit it descends from, that exit's order where both
-reach one entry.
+lane order; another bundle entering it that carries two of those lines the
+other way crosses them there.  A run moves its born lines and applies its
+section's peel and parting orders as the section order does.  An exit
+carries, on lines it shares with an upstream exit it descends from, that
+exit's order where both reach one entry.
 
 **Lanes.**  A fan plan's carriers keep their slot; a line riding a level edge
 into a part from an earlier part of its run keeps that lane, and a line
@@ -1662,8 +1664,9 @@ class _Tracks:
         for chain in born_chains:
             order = _apply_chain(order, chain)
         chains = self._bundles_into(run) if key in sec.later_parts else []
+        mates = self._bundle_mates(run, chains) if chains else []
         if chains:
-            order = self._keep_bundles(run, order, chains)
+            order = self._keep_bundles(run, order, mates)
         for exit_id in [n for n in members if n in carried]:
             for chain in carried[exit_id]:
                 seq = [
@@ -1693,7 +1696,7 @@ class _Tracks:
         )
         if pins and chains:
             lanes = self._fill_bundled(
-                run, order, section_order, fixed, pins, chains, conflict
+                run, order, section_order, fixed, pins, mates, conflict
             )
         else:
             lanes = self._fill(
@@ -1723,18 +1726,42 @@ class _Tracks:
             out.append((e.line_id, lo, hi, e.source, e.target))
         return out
 
+    def _bundle_mates(
+        self, run: _Run, chains: Sequence[Sequence[str]]
+    ) -> list[tuple[str, str]]:
+        """Every ``(a, b)`` a bundle entering *run* carries *a* before *b*,
+        except a pair a bundle from an earlier part of the run's level run
+        carries the other way: the other bundle crosses them there."""
+        earlier = self._bundles_into(run, earlier_only=True)
+        held: dict[str, set[str]] = {lid: set() for lid in run.present}
+        for kept in earlier:
+            for a, b in zip(kept, kept[1:]):
+                held[a].add(b)
+        mates: list[tuple[str, str]] = []
+        for chain in chains:
+            for i, a in enumerate(chain):
+                for b in chain[i + 1 :]:
+                    if chain in earlier or not _reaches(held, b, a):
+                        mates.append((a, b))
+                        continue
+                    crossing = ForcedCrossing(
+                        run.sec.id, run.key, tuple(sorted((a, b)))
+                    )
+                    if crossing not in self.forced:
+                        self.forced.append(crossing)
+        return mates
+
     def _keep_bundles(
-        self, run: _Run, order: Sequence[str], chains: Sequence[Sequence[str]]
+        self, run: _Run, order: Sequence[str], mates: Sequence[tuple[str, str]]
     ) -> list[str]:
-        """*order* with every chain's lines in the chain's order."""
+        """*order* with every bundle-mate pair in its bundle's order."""
         position = {lid: i for i, lid in enumerate(order)}
         succ: dict[str, set[str]] = {lid: set() for lid in run.present}
         indeg = dict.fromkeys(run.present, 0)
-        for chain in chains:
-            for a, b in zip(chain, chain[1:]):
-                if b not in succ[a]:
-                    succ[a].add(b)
-                    indeg[b] += 1
+        for a, b in mates:
+            if b not in succ[a]:
+                succ[a].add(b)
+                indeg[b] += 1
         return self._kahn(
             run.present,
             succ,
@@ -1796,8 +1823,9 @@ class _Tracks:
         ):
             return _Arrival(side * _TURNED_IN, neighbour, None, None)
         nest = None
-        if abs(side) > _SIDED and rank == 0 and not is_bypass_v(source):
-            nest = round((1 if side > 0 else -1) * self.along(source, sid), 1)
+        if abs(side) > _SIDED and rank == 0:
+            origin = _edge_source(sec, source, lid)
+            nest = round((1 if side > 0 else -1) * self.along(origin, sid), 1)
         last = carriers[-1]
         leaving = sec.outs.get((last, lid), [])
         gone = [
@@ -1857,12 +1885,18 @@ class _Tracks:
                 pins[lid] = lane
         return pins
 
-    def _bundles_into(self, run: _Run) -> list[list[str]]:
-        """Each in-section bundle entering *run*, in its source's lane order."""
+    def _bundles_into(self, run: _Run, earlier_only: bool = False) -> list[list[str]]:
+        """Each in-section bundle entering *run* (only those from an earlier
+        part of its level run where *earlier_only*), in its source's lane
+        order."""
         into: dict[str, list[str]] = {}
         for (source, lid), targets in run.sec.outs.items():
             if (
                 source not in run.member_set
+                and (
+                    not earlier_only
+                    or run.sec.level_run_of.get(source) == run.level_run
+                )
                 and lid in run.present
                 and (source, lid) in self.lanes
                 and any(t in run.member_set for t in targets)
@@ -1882,15 +1916,13 @@ class _Tracks:
         section_order: Sequence[str],
         fixed: dict[str, int],
         pins: Mapping[str, int],
-        chains: Sequence[Sequence[str]],
+        mates: Sequence[tuple[str, str]],
         conflict: _Conflict,
     ) -> dict[str, int]:
         present = run.present
         before: dict[str, set[str]] = {lid: set() for lid in present}
-        for chain in chains:
-            for i, a in enumerate(chain):
-                for b in chain[i + 1 :]:
-                    before[b].add(a)
+        for a, b in mates:
+            before[b].add(a)
         slotted = {lid for n, lid in self.fan_slots if n in run.member_set}
         for lid in sorted(pins):
             if (
@@ -2408,6 +2440,19 @@ class _Tracks:
                     return False
                 found = True
         return found
+
+
+def _reaches(succ: Mapping[str, set[str]], start: str, goal: str) -> bool:
+    """Whether *goal* follows *start* through *succ*."""
+    seen, stack = {start}, [start]
+    while stack:
+        for nxt in succ[stack.pop()]:
+            if nxt == goal:
+                return True
+            if nxt not in seen:
+                seen.add(nxt)
+                stack.append(nxt)
+    return False
 
 
 def _past(mine: set[int], theirs: Sequence[set[int]]) -> int:

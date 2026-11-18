@@ -15,6 +15,7 @@ import ast
 import contextlib
 import hashlib
 import inspect
+import sys
 import textwrap
 import warnings
 from collections.abc import Iterator
@@ -38,7 +39,11 @@ from nf_metro.layout.geometry import (
 )
 from nf_metro.layout.lane_plan import LanePlan
 from nf_metro.layout.port_order_plan import ApproachKind, SideRule, port_travel
-from nf_metro.layout.route_plan import ExitTurnDisposition, ExitTurnPlan
+from nf_metro.layout.route_plan import (
+    ExitLaneTransitionPlacement,
+    ExitTurnDisposition,
+    ExitTurnPlan,
+)
 from nf_metro.layout.routing import corridor_cohort_integration
 from nf_metro.layout.routing import exit_turns as exit_turns_module
 from nf_metro.layout.routing import offsets as offsets_module
@@ -581,6 +586,45 @@ def test_every_planned_exit_turn_lane_is_the_record(path: Path) -> None:
                 if abs(held - lane.planned_offset) > 1e-6:
                     wrong.append((station_id, lane.line_id))
     assert wrong == []
+
+
+C9_WITNESSES = sorted((ROOT / "tests" / "data" / "lane_plan_c9").glob("*.mmd"))
+"""Generated maps whose records once parted an aligned in-section source from
+its exit port: a bundle entering a later part crossing the earlier part's
+bundle, a bypass-V helper standing for a nesting line's source, and a
+vertical-flow station whose lanes lie along a horizontal run to its exit.
+Each aborts later on a defect it shares with the pre-plan layout."""
+
+
+@pytest.mark.parametrize("path", C9_WITNESSES, ids=lambda p: p.stem)
+def test_no_planned_exit_turn_steps_a_line_between_its_source_and_its_exit(
+    path: Path,
+) -> None:
+    """A PLANNED exit-turn plan draws each line from an aligned in-section
+    source on the lane its exit port holds: the record gives the two one lane,
+    so no source-lane step lies on the straight between them."""
+    steps: list[tuple[str, str, str]] = []
+    real = exit_turns_module.build_exit_turn_execution
+
+    def build(graph: MetroGraph, ctx: object, **kwargs: object) -> object:
+        execution = real(graph, ctx, **kwargs)  # type: ignore[arg-type]
+        steps.extend(
+            (t.edge.source, t.edge.target, t.edge.line_id)
+            for plan in execution.plans
+            if plan.disposition is ExitTurnDisposition.PLANNED
+            for t in plan.lane_transitions
+            if t.placement is ExitLaneTransitionPlacement.TARGET
+        )
+        return execution
+
+    with warnings.catch_warnings(), pytest.MonkeyPatch.context() as mp:
+        warnings.simplefilter("ignore")
+        for module in list(sys.modules.values()):
+            if getattr(module, "build_exit_turn_execution", None) is real:
+                mp.setattr(module, "build_exit_turn_execution", build)
+        with contextlib.suppress(Exception):
+            render_string(path.read_text(), source_dir=str(path.parent))
+    assert steps == []
 
 
 # ---- 8. nest order
