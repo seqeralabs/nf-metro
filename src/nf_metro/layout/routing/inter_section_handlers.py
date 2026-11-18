@@ -5680,11 +5680,7 @@ def _perp_entry_l_geometry(
     # rising on the far side of its own box.  A junction source keeps the raw
     # offset: its off-box point has no intra trunk to meet.
     def src_geom_leaving(toward_x: float) -> Callable[[str], float]:
-        departure = (
-            horizontal_direction(toward_x - sx)
-            if abs(toward_x - sx) > COORD_TOLERANCE
-            else lead
-        )
+        departure = segment_direction((sx, sy), (toward_x, sy)) or lead
         sign = departure.sign if exit_side is not None and src.is_port else 1.0
         return lambda line_id: sign * src_offset(line_id)
 

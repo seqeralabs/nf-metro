@@ -1773,10 +1773,11 @@ class _Tracks:
 
     def _arrival(self, run: _Run, lid: str) -> _Arrival:
         """*lid*'s arrival key, neighbour lane, nest key and joining station on
-        *run*.  A line fed from several sources arrives from the one bringing
-        the most of the run's other lines with it, the nearest among those: a
-        lone feeder joins its line's lane in the bundle rather than ordering
-        the bundle."""
+        *run*.  A line fed from several sources arrives from the one running
+        level into the run's port along its travel, whose lane cannot step on
+        that straight; else from the one bringing the most of the run's other
+        lines with it, the nearest among those: a lone feeder that turns in
+        joins its line's lane in the bundle rather than ordering the bundle."""
         graph, sec, sid = self.graph, run.sec, run.sec.id
         carriers = sorted(
             (n for n in run.members if lid in graph.station_lines(n)),
@@ -1807,6 +1808,14 @@ class _Tracks:
         if not near:
             return _Arrival(0.0, None, None, None)
         rank = min(p for p, _ in near)
+        port = graph.ports.get(carriers[0] if rank == 0 else carriers[-1])
+
+        def level(s: str) -> bool:
+            if port is None:
+                return False
+            vx, vy = direction_vector(port_travel(port))
+            at, here = graph.stations[s], graph.stations[port.id]
+            return abs((at.y - here.y) * vx - (at.x - here.x) * vy) <= SAME_Y_TOLERANCE
 
         def shared(s: str) -> int:
             ends = sec.outs if rank == 0 else sec.ins
@@ -1819,6 +1828,7 @@ class _Tracks:
         source = min(
             (s for p, s in near if p == rank),
             key=lambda s: (
+                not level(s),
                 -shared(s),
                 round(abs(self.lateral(s, sid) - run.lateral), 1),
                 s,
