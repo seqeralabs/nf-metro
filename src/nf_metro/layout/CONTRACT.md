@@ -1577,38 +1577,40 @@ in pipeline order.
   `_guard_section_top_padding`.
 - **Lifecycle:** invariant - no geometry or bbox phase follows this refit.
 
-## Post-layout offset boundary: late per-line offset phases
+## Post-layout offset boundary: the lane plan drawn
 
-`compute_station_offsets` (`layout/routing/offsets.py`) assigns one lane per
-`(station, line)` in numbered phases, each run once per call; its docstring
-lists every phase in order. Phase 7b' is recorded here because it decides an
-entry port's lane order that every later phase must hold. Phases 14b and 14c
-are recorded because they move lanes a whole section at a time, after each
-base, station, port, junction and rail-boundary phase has settled, and because
-the planned-fan offsets that follow them own the lanes a fan plan states.
+`compute_station_offsets` (`layout/routing/offsets.py`) writes no lane of its
+own: every `(station, line)` offset it returns is the layout's lane plan read
+through the record's draw accessors (`planned_offsets` in
+`layout/lane_plan.py`). Rail-mode layouts return no offsets.
 
-### Lane plan record (sealed before phase 1 of a layout's first run at or after 5.1)
+### Lane plan record (sealed at a layout's first production offsets run at or after 5.1)
 
-- **Purpose**: Decide the layout's planned lane decisions once, from structure
-  and placement, before that offsets run writes any lane: every port's line
-  order and same-band entry approach, each port's order travel and lane sense,
-  each perpendicular entry's consumer turns, the far-side approaches, the
-  track plan: every in-section `(node, line)`'s lane, from which each exit's
-  order is read, and the seam joint: the lanes either side of every straight
-  seam.
-- **Helpers**: `seal_lane_plan` (`layout/lane_plan.py`), called at the top of
-  `_run_offset_phases`; `build_lane_plan` decides the track plan section by
-  section, upstream first, asking the `PortOrderBuilder`
-  (`layout/port_order_plan.py`) for entry orders and feeding it exit orders
-  and the orders straight seams pin at entries.  Born lines leaving a
-  divergence fan read `fanout_divergence_peel_order` (`layout/fan_ordering.py`)
-  in their section flow's frame.
-  `start_layout`, called at the top of `_layout_once`, clears the previous
-  layout's record.
+- **Purpose**: Decide the layout's lanes once, from structure and placement:
+  every port's line order and same-band entry approach, each port's order
+  travel and lane sense, each perpendicular entry's consumer turns, the
+  far-side approaches, the track plan (every in-section `(node, line)`'s lane,
+  from which each exit's order is read), the seam joint (the lanes either side
+  of every straight seam), and each rail-section port's origin (the middle of
+  its own lanes).
+- **Helpers**: `lane_plan_of` (`layout/lane_plan.py`) returns the sealed
+  record, or builds one with `build_lane_plan` and seals it when the layout has
+  completed 5.1; an offsets run before 5.1 reads the record its current
+  placement plans and stores nothing.  `observing` scopes a run that only
+  observes the layout: `run_validate_guards` enters it around its whole
+  dispatch, so an offsets run made by validation reads a provisional record
+  held for the scope and never seals one.  `recorded_lane_plan` hands routing
+  the record the last offsets run read without planning one.
+  `build_lane_plan` decides the track plan section by section, upstream first,
+  asking the `PortOrderBuilder` (`layout/port_order_plan.py`) for entry orders
+  and feeding it exit orders and the orders straight seams pin at entries.
+  Born lines leaving a divergence fan read `fanout_divergence_peel_order`
+  (`layout/fan_ordering.py`) in their section flow's frame.  `start_layout`,
+  called at the top of `_layout_once`, clears the previous layout's record.
 - **Precondition**: Station coordinates, section boxes, grid cells and cell
-  packs as they stand at the layout's first offsets run whose stages include
-  5.1, and the fan plans (`graph.fan_plans`) installed at the top of
-  `_layout_once`. Offsets runs before 5.1 in a layout see no record.
+  packs as they stand at the layout's first production offsets run whose
+  stages include 5.1, and the fan plans (`graph.fan_plans`) installed at the
+  top of `_layout_once`.
 - **Postcondition**: `graph._lane_plan` holds a `LanePlan` until the next
   layout starts: every port has a `PortOrder` (its lines travel-left to
   travel-right with the sort field that decided it, or undecided with the
@@ -1617,191 +1619,48 @@ the planned-fan offsets that follow them own the lanes a fan plan states.
   perpendicular port each line's offset across its travel, every port and
   every junction continuing one port's run the order its lines turn off it,
   every entry a straight seam pins its lanes, every entry two feeding bundles
-  cross at a forced crossing, and every perpendicular port whose lines all
-  cross straight seams the offsets that keep them straight.  The record and
-  its mappings are read-only and shared, never copied, by a deep copy of the
-  graph.
-  Later offsets runs of the layout, and routing and rendering
-  after it, replay the sealed record rather than rebuilding it.
+  cross at a forced crossing, every perpendicular port whose lines all cross
+  straight seams the offsets that keep them straight, and every rail-section
+  port whose lanes are off-centre its origin.  The record and its mappings are
+  read-only and shared, never copied, by a deep copy of the graph.  Later
+  offsets runs of the layout, and routing and rendering after it, read the
+  sealed record rather than rebuilding it, and a layout validated with
+  `validate=True` seals the same record at the same stage as without.
   Rail-mode and sectionless layouts never reach 5.1 and hold no record.
-- **Invariants preserved**: All offsets and geometry; nothing in layout,
-  routing or rendering reads the record, and the record reads no lane offset,
-  route, draft or departure record.
-- **Related tests**: `tests/test_lane_plan.py`, `tests/test_port_order_plan.py`.
-
-### Phase 7b': approach-derived entry-port order
-
-- **Purpose**: At a multi-feeder flow-side entry port whose feeders' lines
-  interleave, deal the lanes in the order the feeders' risers turn in without
-  crossing, and carry that order along the bundle.
-- **Helpers**: `_order_entry_ports_by_approach` decides each port;
-  `_trial_overrides_an_owner` refuses a re-deal another phase owns, or one
-  whose carry breaks an order 7b' itself decided earlier in the same pass;
-  `_claim_family_port_orders` records the entry-port order family's claims;
-  `_hold_decided_orders` and `_commit_unless_a_decided_order_breaks` hold the
-  decided orders through the later phases. `_feeder_departure_orders` and
-  `_single_feeder_departure_order` write `DepartureLaneOrder`
-  records (`layout/departure_order.py`); `_record_carry_is_full` stops a
-  record port's carry at the port; `_decision_overrides_an_owner` judges a
-  record decision.
-- **Precondition**: Non-compact mode. The entry-port order family (7c, 7d, 7e,
-  7f) has run, and each entry port it moved or judged (7c's convergence and
-  same-row bypass ports, 7e's top-descent ports) is claimed with the order it
-  holds after the family.
-- **Postcondition**: A port is re-dealt only when no other phase owns its
-  order. The re-deal is refused when its carry changes a claimed port's order
-  or breaks an order 7b' decided earlier in the same pass, when phase 10
-  reverses the port's section, when any phase 12 compaction seed
-  (`_fan_port_compaction_seeds`, the seeds phase 12 itself takes), compacted
-  on its own copy of the re-dealt offsets, would reorder the port, or when a
-  geometry-owning fan plan's lanes at the port would reorder it. Each refusal
-  reads offsets only: no routing, compile or solve.
-- **Departure records**: A junction feeder whose lines part at the junction
-  (one line of each reordered pair also leaves it for another target) may
-  reach the port in an order its bundle does not carry concentrically; the
-  departure then takes a `DepartureLaneOrder`, a permutation of that natural
-  order, and the lines change sides once, at the fork. A single junction
-  feeder gets one too where its lines shared with a sibling departure peel
-  off beyond the port: those take the lanes on the fork's side, the grid read
-  along the port's inward axis, and only when each pair it reorders parts
-  after the port too (the two lines go on to different stations before
-  either ends).
-- **Departure record lifetime**: A record port is decided once per layout, in
-  the first offsets run after Stage 5.1, into `graph._departure_order_plan`;
-  every later run after Stage 5.1, in any positioning pass, replays the
-  decision, so every pass ends holding the first pass's records
-  (`DepartureRecordDriftError` asserts it). A run before Stage 5.1 neither
-  decides nor replays. A single feeder's full carry is a condition of its
-  record and replays with it. A port with two or more feeders decides its
-  carry extent once per positioning pass, in the pass's first run after
-  Stage 5.1, on that pass's positions (a lane the carry would share stops it
-  at the port), and replays it for the rest of the pass.
-- **Departure record carry and refusal**: A record's order is carried along
-  the bundle only when the carry adds no crossing, sandwich or same-row
-  marker strike, and leaves no carried exit holding a pair in the other order
-  to the perpendicular entry its connector feeds (`_perpendicular_seam_flips`:
-  that entry's order belongs to its own feeders). The decision is judged by
-  the owners above on the offsets phase 8 would leave it with, and refused
-  (`reconcile`) when phase 8 would break it or leave more of the port's
-  same-row exit feeders (an exit of another section on the port's row) on
-  other lanes than the port's.
-  The owner judgement, `reconcile` included, is taken on the deciding pass's
-  positions only; later passes replay the record and are not re-judged.
-- **Departure record consumers**: Junction fan positions, gap ranks,
-  `_distinct_line_order`, the trunk-band constraints, exit-turn axes, settled
-  exit-turn lane ranks, the gap-bundle seat by port slot order, the peel-off
-  riser slots of a departure whose tail leaves the junction itself
-  (`peeloff_target_slots`), the landing deal of a junction-fed entry port
-  (`bundle_landing_deals`, which deals the junction's lines in the recorded
-  order) and the bundle-order curve check read the records
-  each run publishes in `graph._departure_lane_orders`. An `ExitTurnPlan`
-  carries its source's records in `departure_orders`; the turn planner and the
-  route-plan checker both rank a recorded line through `departure_turn_rank`
-  on them, and a turn cohort they would give two lines on one axis, or one
-  line two axes, raises `DepartureTurnAxisError`.
-- **Invariants preserved**: Every order 7b' decides holds to the end of the
-  run. Phase 12 compacts seed by seed and 14b exchanges arrival by arrival,
-  each committing a write only when every decided order still holds; a
-  declined write is counted in `decided_order_declines` (the decided order
-  wins). Phases 7b' itself, 8, 8b, 9, 10, 12a, 13, 14, 14a, 14c, 14d, 14e and
-  15 fail closed with `DecidedLaneOrderError` naming the phase and port.
-- **Related tests**: `tests/test_port_order_single_owner.py`,
-  `tests/test_entry_port_approach_order.py`.
-- **Lifecycle:** invariant - the published offset map holds every lane order
-  7b' decided.
-
-### Phase 14b: entry-arrival lane slotting
-
-- **Purpose**: An inter-section run arrives on the lane its upstream carrier
-  draws. Where the receiving section reserves a different slot for that line,
-  the run between the entry port and the first station spends the difference as
-  a sub-radius diagonal - and a port draws no marker, so that step lands in open
-  space just inside the section box. Exchange the arriving line's slot for the
-  one already holding the approach lane.
-- **Helpers**: `_slot_entry_arrivals_on_their_approach_lane` walks each
-  lane-stacked section's flow-side entry ports; `_slot_one_entry_arrival`
-  decides one line; `_exchange_pair_beyond_exit` carries an exchange that
-  reaches an exit port out along the pair's shared chain.
-- **Precondition**: Non-compact mode, and a section whose lanes run along Y.
-  The port, reconciliation and rail-boundary phases (5 through 14) have settled
-  the upstream lane the exchange reads.
-- **Postcondition**: Where the exchange is provably a permutation of lanes
-  already in use at the first station and provably crossing-free - the approach
-  lane held by exactly one other line, and that line originating at the station,
-  so the two meet only under the station's own marker - the arriving line holds
-  its approach lane, the displaced line holds the slot the arrival vacated, and
-  the swap propagates along the section's horizontal runs. Outside the section
-  the exchange continues until the pair stops travelling together, so the
-  bundle's lead-in order at the divergence junction and its peel order at the
-  destination agree. Every station keeps one lane per line it carries. An
-  exchange never writes a lane order phase 7b' decided: the walk beyond the
-  exit does not take a section holding a decided port that only one line of
-  the pair reaches from where the walk is, and an exchange that would still
-  break a decided order (the pair entering such a section together) is
-  declined whole and counted.
-- **Invariants preserved**: Station, port and junction coordinates; the number
-  of lanes each station spreads; the order of every line outside the exchanged
-  pair. The approach lane is read as a stored lane offset, which names the same
-  lane at the consumer only while the feeder's trunk is level with it, so a
-  stepped seam is declined rather than converted through screen coordinates.
-- **Related tests**:
-  `test_entry_arrival_permutes_lanes_rather_than_sharing_one`,
-  `test_exchange_does_not_enter_a_decided_section_one_line_reaches`.
-- **Lifecycle:** invariant - the arriving line holds its approach lane in the
-  published offset map: phase 14c can only relabel a whole section's levels
-  rigidly, which preserves the exchange.
-
-### Phase 14c: section free-lane closure
-
-- **Purpose**: A station whose bundle skips a lane level draws a marker tall
-  enough to span it. That reservation earns its space when a section-mate rides
-  the level; a level *no* line of the section rides reserves nothing, so every
-  lane above it drops one step.
-- **Helpers**: `_close_section_dead_lanes`, admitting a section's shift only
-  when `_dead_lane_squeeze_keeps_runs` confirms it.
-- **Precondition**: Non-compact mode; phase 14b has run, being the last phase
-  that can vacate a level. Rail-laid sections are skipped: their geometry is
-  drawn from absolute rail coordinates, so their lane levels are not a bundle to
-  tighten.
-- **Postcondition**: No section reserves a lane level none of its lines ride,
-  except where closing one would tilt a run. The drop is a rigid,
-  order-preserving relabelling applied to every station and port of the section
-  at once, and it is applied only when no edge carrying a shifted line ends with
-  a larger lane difference across it - so a run that was level inside the
-  section or across one of its seams stays level, and a hop that already stepped
-  never steps further. A squeeze that fails that test is declined whole and the
-  section keeps its dead level: the level costs a taller marker, a tilted run
-  costs a kink. No fixture in the corpus needs that escape, which is why
-  `tests/test_section_lane_reservations.py` can assert the unconditional form
-  over every laid-out `.mmd`.
-- **Invariants preserved**: Bundle order, one lane per line at every station,
-  compact-mode and rail-section offsets, and the lanes a fan plan states: the
-  planned-fan offsets run after this and have the last word on them.
-- **Related tests**: `tests/test_section_lane_reservations.py`.
-- **Lifecycle:** invariant - the published offset map holds no lane level
-  reserved for a line its section never carries, save one a declined squeeze
-  left behind.
+- **Invariants preserved**: The record reads no lane offset, route, draft or
+  departure record.  `compute_station_offsets` returns exactly
+  `planned_offsets(graph, record, step)`; a station line the record lacks
+  (a node placed after the seal that splits a recorded edge) takes its line's
+  nearest recorded neighbour's lane.
+- **Readers**: `compute_station_offsets`; routing's approach-side consumers
+  (the same-row bypass entry, the left-entry over-top and far-left U-turn
+  wraps, the row-level bottom-row climb), the perpendicular-entry crossing
+  (`_planned_entry_crossing` in `routing/perp.py`), the seam turn facts of
+  `_InterFacts`, and the invariants `check_exit_inherits_entry_bundle_order`
+  and `check_merge_port_approach_side`.  `RECORD_USES` in
+  `tests/test_lane_plan.py` names each one.
+- **Related tests**: `tests/test_lane_plan.py`,
+  `tests/test_lane_plan_switch.py`, `tests/test_port_order_plan.py`.
 
 ## Post-layout routing boundary: exit-turn planning
 
 - **Purpose**: Decide source-lane order and turn axes for every complete
   inter-section exit group before route emission.
-- **Helpers**: `compute_station_offsets` produces the base offset map.
+- **Helpers**: `compute_station_offsets` produces the planned offset map.
   `_route_edges` prepares exit-turn execution immediately before emission. A
   turn that needs a shared gap seat enters member-geometry allocation as a
   movable claim. The allocated axis and signed corner offsets are then supplied
-  to `build_exit_turn_execution`, which publishes the complete group and
-  commits its owned compact offsets to the routing context.
+  to `build_exit_turn_execution`, which publishes the complete group.
 - **Precondition**: Layout coordinates and topology resolution are settled and
-  remain immutable. The mutable per-line offset map has completed all local,
-  port, junction, and rail-boundary phases.
-- **Postcondition**: Each supported exit group has compact active lanes, one
-  assignment per outbound member, and any needed ordered turn axes, lane
-  transitions, references, and runway demands. Gap-allocated axes are fixed in
+  remain immutable. The offset map is the lane plan's.
+- **Postcondition**: Each supported exit group has one assignment per outbound
+  member, its source lanes read from the record at the exit port, and any
+  needed ordered turn axes with their nest order, lane transitions,
+  references, and runway demands. Gap-allocated axes are fixed in
   the plan before emission. Any unsupported member records a declined child
   verdict; the route system must obtain complete ownership elsewhere or fail.
-- **Invariants preserved**: Station, port, junction, and section coordinates.
-  The planner may commit per-line station offsets at its owned seam. Downstream
+- **Invariants preserved**: Station, port, junction, and section coordinates,
+  and every station offset: the planner computes no lane.  Downstream
   passes may change unowned route geometry but cannot move, remove, or replace
   a planner-owned source-turn segment or lane transition. The general gap pass
   validates a gap-allocated plan's exact axis and derives its expected radius

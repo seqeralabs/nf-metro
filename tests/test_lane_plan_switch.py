@@ -169,12 +169,26 @@ def _planned_lateral(drawn: _Drawn, node: str, line_id: str, axis: str) -> float
             + lateral_order_sign(port_travel(port)) * value * drawn.step
         )
     section = graph.sections.get(station.section_id or "")
-    if section is None or (node, line_id) not in drawn.offsets:
+    if (
+        section is None
+        or (node, line_id) not in drawn.offsets
+        or _feeds_a_perpendicular_entry(graph, node)
+    ):
         return None
     frame = _section_lane_frame(graph, section)
     if frame.secondary.name != axis:
         return None
     return station_lane_coord(frame, station, drawn.offsets[(node, line_id)])
+
+
+def _feeds_a_perpendicular_entry(graph: MetroGraph, node: str) -> bool:
+    """Whether *node* is a junction whose lines all go on into one TOP or
+    BOTTOM entry: they converge across that port's travel, not on its
+    section's lanes."""
+    if node not in graph.junctions:
+        return False
+    targets = {edge.target for edge in graph.edges_from(node)}
+    return len(targets) == 1 and _perpendicular(graph, next(iter(targets)))
 
 
 def _on_a_rail(graph: MetroGraph, node: str) -> bool:

@@ -88,9 +88,9 @@ The **source seam** is that exit port or divergence together with the directly o
 
 | Record                 | Meaning                                                                                                                |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Source lanes           | Active lines in physical station-offset order, with terminated lines removed, plus their input offsets and seam owners |
+| Source lanes           | Active lines in physical station-offset order, with terminated lines removed, each on its lane plan offset at the exit |
 | Assignments            | Each outbound member's destination, route family, semantic role, run, turn, and handedness                             |
-| Axes                   | Turn columns or rows, including any structural anchor and required curve runway                                        |
+| Axes                   | Turn columns or rows, including any structural anchor and required curve runway, and the order their legs nest in      |
 | Lane transitions       | Explicit hand-offs between an unchanged feeder lane and a compacted seam lane                                          |
 | References and demands | Shared axes, symbolic space requirements, and conflicts with another route system                                      |
 
@@ -98,7 +98,7 @@ The disposition applies to the complete group:
 
 | Disposition | Routing behavior                                                                           |
 | ----------- | ------------------------------------------------------------------------------------------ |
-| `PLANNED`   | Commits supported seam offsets, assignments, axes, and transitions before emission         |
+| `PLANNED`   | Commits supported assignments, axes, and transitions before emission                       |
 | `LEGACY`    | Records why this child planner declined ownership. It does not select a production emitter |
 
 Exit-turn dispositions are planning verdicts rather than alternate emitters.
@@ -109,7 +109,9 @@ Supported handlers consume the committed assignment during planning.
 They may build the rest of the path with their established family logic, but the source-side turn is seated on the planned axis.
 When a turn competes for a row or column gap, its provisional axis takes part in the same allocation as member channels.
 The settled axis and signed corner offset return to the exit-turn planner before it publishes the complete plan.
-The planner owns lane order, axes and transition requirements, and templates only realize those decisions as points and radii.
+The planner owns axes and transition requirements, and templates only realize those decisions as points and radii.
+Lanes are the lane plan's: the planner reads each source lane from the record at the exit port and never writes a station offset.
+Its published nest order (`ExitTurnPlan.nest_order`) is the order the two start legs of one planned plan nest in where they share a trunk slot; every other pair at a trunk anchor's corner nests by the record's turn-off order.
 
 Every downstream route-mutating pass is ratcheted against a snapshot of the owned segments and transitions.
 The general gap materializer treats a settled planned turn as validation-only.
