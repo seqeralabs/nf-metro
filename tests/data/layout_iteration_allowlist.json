@@ -383,104 +383,6 @@
         "callee": "_separate_declared_opposing_gap_bundles",
         "removed_by": "unassigned",
         "replacement": "run the gap-bundle separation once, from the routing table or inside the trunk-slot pass, not both"
-      },
-      {
-        "rule": "lookahead-copy",
-        "site": "routing/offsets.py:_commit_unless_a_decided_order_breaks",
-        "callee": "write",
-        "removed_by": "R3 owner (ruling R3; lines 7f-7h)",
-        "replacement": "decide each lane order once at plan time from the plan's inputs; later phases consume it, with no trial run and no refusal"
-      },
-      {
-        "rule": "named-retry",
-        "site": "routing/offsets.py:_compact_one_seed_with_retry",
-        "callee": "_compact_one_seed_with_retry",
-        "removed_by": "unassigned",
-        "replacement": "compact each seed once against the plan's lane slots; no hold-one-line-fixed retry"
-      },
-      {
-        "rule": "lookahead-copy",
-        "site": "routing/offsets.py:_compaction_seed_reordering",
-        "callee": "_recompact_seed",
-        "removed_by": "R3 owner (ruling R3; lines 7f-7h)",
-        "replacement": "decide each lane order once at plan time from the plan's inputs; later phases consume it, with no trial run and no refusal"
-      },
-      {
-        "rule": "lookahead-copy",
-        "site": "routing/offsets.py:_decision_overrides_an_owner",
-        "callee": "_reconcile_horizontal_offsets",
-        "removed_by": "R3 owner (ruling R3; lines 7f-7h)",
-        "replacement": "decide each lane order once at plan time from the plan's inputs; later phases consume it, with no trial run and no refusal"
-      },
-      {
-        "rule": "calls-lookahead",
-        "site": "routing/offsets.py:_order_entry_ports_by_approach",
-        "callee": "decide",
-        "removed_by": "R3 owner (ruling R3; lines 7f-7h)",
-        "replacement": "decide each lane order once at plan time from the plan's inputs; later phases consume it, with no trial run and no refusal"
-      },
-      {
-        "rule": "calls-lookahead",
-        "site": "routing/offsets.py:_order_entry_ports_by_approach.decide",
-        "callee": "_decision_overrides_an_owner",
-        "removed_by": "R3 owner (ruling R3; lines 7f-7h)",
-        "replacement": "decide each lane order once at plan time from the plan's inputs; later phases consume it, with no trial run and no refusal"
-      },
-      {
-        "rule": "calls-lookahead",
-        "site": "routing/offsets.py:_order_entry_ports_by_approach.owner",
-        "callee": "_trial_overrides_an_owner",
-        "removed_by": "R3 owner (ruling R3; lines 7f-7h)",
-        "replacement": "decide each lane order once at plan time from the plan's inputs; later phases consume it, with no trial run and no refusal"
-      },
-      {
-        "rule": "calls-lookahead",
-        "site": "routing/offsets.py:_recompact_fan_port_bordering_stations",
-        "callee": "_commit_unless_a_decided_order_breaks",
-        "removed_by": "R3 owner (ruling R3; lines 7f-7h)",
-        "replacement": "decide each lane order once at plan time from the plan's inputs; later phases consume it, with no trial run and no refusal"
-      },
-      {
-        "rule": "repair-named",
-        "site": "routing/offsets.py:_run_offset_phases",
-        "callee": "_recompact_fan_port_bordering_stations",
-        "removed_by": "unassigned",
-        "replacement": "compact the fan-port bundle once against the plan's slots; no recompaction after the port phases"
-      },
-      {
-        "rule": "repair-named",
-        "site": "routing/offsets.py:_run_offset_phases",
-        "callee": "_reconcile_horizontal_offsets",
-        "removed_by": "unassigned",
-        "replacement": "state same-row lane equalities at plan time; no reconcile pass over the offsets"
-      },
-      {
-        "rule": "repair-named",
-        "site": "routing/offsets.py:_run_offset_phases",
-        "callee": "_restore_fanout_peel_order",
-        "removed_by": "32 (#2134 S4)",
-        "replacement": "decide the peel order at a divergence once at plan time; no restoration pass"
-      },
-      {
-        "rule": "rerun",
-        "site": "routing/offsets.py:_run_offset_phases",
-        "callee": "_reconcile_horizontal_offsets",
-        "removed_by": "unassigned",
-        "replacement": "state same-row lane equalities at plan time; no second reconcile pass"
-      },
-      {
-        "rule": "calls-lookahead",
-        "site": "routing/offsets.py:_slot_entry_arrivals_on_their_approach_lane",
-        "callee": "_commit_unless_a_decided_order_breaks",
-        "removed_by": "R3 owner (ruling R3; lines 7f-7h)",
-        "replacement": "decide each lane order once at plan time from the plan's inputs; later phases consume it, with no trial run and no refusal"
-      },
-      {
-        "rule": "calls-lookahead",
-        "site": "routing/offsets.py:_trial_overrides_an_owner",
-        "callee": "_compaction_seed_reordering",
-        "removed_by": "R3 owner (ruling R3; lines 7f-7h)",
-        "replacement": "decide each lane order once at plan time from the plan's inputs; later phases consume it, with no trial run and no refusal"
       }
     ],
     "manual": [
@@ -495,18 +397,6 @@
         "shape": "routing moves placement after emission",
         "removed_by": "unassigned",
         "replacement": "seat bubble-centred markers at placement from the plan; routing returns routes and moves no station"
-      },
-      {
-        "site": "routing/offsets.py:_materialize_linear_entry_frames",
-        "shape": "fixed-point loop with roll-back",
-        "removed_by": "LANE-PLAN step 4",
-        "replacement": "the lane plan states each entry frame's lanes once; no pass re-applies frames until they stop changing or restores the offsets it started from"
-      },
-      {
-        "site": "routing/exit_turns.py:build_exit_turn_execution",
-        "shape": "later pass rewrites planned port lanes",
-        "removed_by": "LANE-PLAN step 4",
-        "replacement": "exit-turn plans read their source lanes from the lane plan; routing writes no station offset after the offsets run"
       }
     ],
     "pinned_later_passes": [
@@ -690,13 +580,6 @@
       {
         "rule": "later-pass-read",
         "site": "geometric_bypass.py:_evaluate",
-        "callee": "compute_station_offsets",
-        "removed_by": "#2171",
-        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
-      },
-      {
-        "rule": "later-pass-read",
-        "site": "geometric_bypass.py:_evaluate",
         "callee": "route_edges",
         "removed_by": "#2171",
         "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
@@ -711,98 +594,7 @@
       {
         "rule": "later-pass-read",
         "site": "phases/_common.py:_section_interior_crossings",
-        "callee": "compute_station_offsets",
-        "removed_by": "#2171",
-        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
-      },
-      {
-        "rule": "later-pass-read",
-        "site": "phases/_common.py:_section_interior_crossings",
         "callee": "route_edges",
-        "removed_by": "#2171",
-        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
-      },
-      {
-        "rule": "later-pass-read",
-        "site": "phases/_common.py:_station_marker_bbox",
-        "callee": "compute_station_offsets",
-        "removed_by": "#2171",
-        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
-      },
-      {
-        "rule": "later-pass-read",
-        "site": "phases/bbox.py:_fit_bboxes_to_content_top",
-        "callee": "compute_station_offsets",
-        "removed_by": "#2171",
-        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
-      },
-      {
-        "rule": "later-pass-read",
-        "site": "phases/bbox.py:_predict_section_content_bottom",
-        "callee": "compute_station_offsets",
-        "removed_by": "#2171",
-        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
-      },
-      {
-        "rule": "later-pass-read",
-        "site": "phases/bbox.py:_reserve_perp_port_edge_inset",
-        "callee": "compute_station_offsets",
-        "removed_by": "#2171",
-        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
-      },
-      {
-        "rule": "later-pass-read",
-        "site": "phases/bbox.py:_reserve_row_gap_for_top_padding",
-        "callee": "compute_station_offsets",
-        "removed_by": "#2171",
-        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
-      },
-      {
-        "rule": "later-pass-read",
-        "site": "phases/bbox.py:_section_content_hug_top",
-        "callee": "compute_station_offsets",
-        "removed_by": "#2171",
-        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
-      },
-      {
-        "rule": "later-pass-read",
-        "site": "phases/bbox.py:_shrink_bboxes_to_content_bottom",
-        "callee": "compute_station_offsets",
-        "removed_by": "#2171",
-        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
-      },
-      {
-        "rule": "later-pass-read",
-        "site": "phases/bbox.py:_snapshot_struct_heights_below_top",
-        "callee": "compute_station_offsets",
-        "removed_by": "#2171",
-        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
-      },
-      {
-        "rule": "later-pass-read",
-        "site": "phases/bbox.py:grow_section_bands_to_content",
-        "callee": "compute_station_offsets",
-        "removed_by": "#2171",
-        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
-      },
-      {
-        "rule": "later-pass-read",
-        "site": "phases/bbox.py:refit_empty_section_tops_to_content",
-        "callee": "compute_station_offsets",
-        "removed_by": "#2171",
-        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
-      },
-      {
-        "rule": "later-pass-read",
-        "site": "phases/bbox.py:refit_tops_after_entry_resnap",
-        "callee": "compute_station_offsets",
-        "removed_by": "#2171",
-        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
-      },
-      {
-        "rule": "later-pass-read",
-        "site": "phases/off_track.py:_line_crossed_file_icon_sinks",
-        "callee": "compute_station_offsets",
         "removed_by": "#2171",
         "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
       },
@@ -810,34 +602,6 @@
         "rule": "later-pass-read",
         "site": "phases/off_track.py:_line_crossed_file_icon_sinks",
         "callee": "route_edges",
-        "removed_by": "#2171",
-        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
-      },
-      {
-        "rule": "later-pass-read",
-        "site": "phases/ports.py:_align_tb_section_bbox_bottoms",
-        "callee": "compute_station_offsets",
-        "removed_by": "#2171",
-        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
-      },
-      {
-        "rule": "later-pass-read",
-        "site": "phases/row_align.py:_descent_step_is_stable",
-        "callee": "compute_station_offsets",
-        "removed_by": "#2171",
-        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
-      },
-      {
-        "rule": "later-pass-read",
-        "site": "phases/row_align.py:_row_trunk_alignment",
-        "callee": "compute_station_offsets",
-        "removed_by": "#2171",
-        "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
-      },
-      {
-        "rule": "later-pass-read",
-        "site": "phases/spacing.py:_probe_label_placements",
-        "callee": "compute_station_offsets",
         "removed_by": "#2171",
         "replacement": "read lane offsets and routes from the plan-time record; do not run compute_station_offsets or route_edges mid-layout"
       },

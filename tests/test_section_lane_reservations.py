@@ -32,13 +32,24 @@ from nf_metro.layout.routing.invariants import (
     distinct_offset_levels,
     max_interior_offset_gap,
 )
-from nf_metro.layout.routing.offsets import section_node_lines
+from nf_metro.parser.model import MetroGraph
 
 _ROOT = Path(__file__).resolve().parents[1]
 
 # Directories holding inputs that are not laid out as-is: the deliberately
 # invalid fixtures abort in layout, and the Nextflow DAGs need conversion first.
 _SKIP_DIRS = frozenset({"invalid", "nextflow"})
+
+
+def section_node_lines(graph: MetroGraph, sec_id: str) -> list[tuple[str, str]]:
+    """Every ``(node_id, line_id)`` lane slot a section owns, ports included."""
+    section = graph.sections[sec_id]
+    return [
+        (sid, lid)
+        for sid in section.station_ids
+        if sid in graph.stations
+        for lid in graph.station_lines(sid)
+    ]
 
 
 def _corpus() -> list[tuple[str, Path]]:

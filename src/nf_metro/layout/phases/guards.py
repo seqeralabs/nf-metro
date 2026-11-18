@@ -59,6 +59,7 @@ from nf_metro.layout.geometry import (
     section_lane_sign,
     segment_intersects_bbox,
 )
+from nf_metro.layout.lane_plan import observing
 from nf_metro.layout.pass_metrics import icon_half_height_approx, station_radius_approx
 from nf_metro.layout.phase_state import GuardSpec
 from nf_metro.layout.phases._common import (
@@ -6241,27 +6242,33 @@ def run_validate_guards(
     followed by the final-only specs, reproducing the historical call order.
     A spec needing ``routes`` is skipped when routing failed.  Returns the
     shared ``(offsets, routes)``.
+
+    The dispatch observes: an offsets run inside it reads the lane plan its
+    placement plans without sealing the layout's record
+    (:func:`~nf_metro.layout.lane_plan.observing`), so validation draws what
+    production draws.
     """
-    offsets, routes = _ensure_pass_c_inputs(
-        graph,
-        offsets,
-        routes,
-        validate_final_geometry=include_final,
-    )
-    available: dict[str, object] = {
-        "offsets": offsets,
-        "routes": routes,
-        "section_y_gap": section_y_gap,
-        "section_y_padding": section_y_padding,
-    }
-    for spec in GUARD_REGISTRY:
-        if not spec.bisection_safe and not include_final:
-            continue
-        if spec.bisection_safe and not _bisection_should_run(spec.name, phase):
-            continue
-        if "routes" in spec.needs and routes is None:
-            continue
-        spec.fn(graph, phase, **{name: available[name] for name in spec.needs})
+    with observing():
+        offsets, routes = _ensure_pass_c_inputs(
+            graph,
+            offsets,
+            routes,
+            validate_final_geometry=include_final,
+        )
+        available: dict[str, object] = {
+            "offsets": offsets,
+            "routes": routes,
+            "section_y_gap": section_y_gap,
+            "section_y_padding": section_y_padding,
+        }
+        for spec in GUARD_REGISTRY:
+            if not spec.bisection_safe and not include_final:
+                continue
+            if spec.bisection_safe and not _bisection_should_run(spec.name, phase):
+                continue
+            if "routes" in spec.needs and routes is None:
+                continue
+            spec.fn(graph, phase, **{name: available[name] for name in spec.needs})
     return offsets, routes
 
 

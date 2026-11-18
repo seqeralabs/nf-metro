@@ -1,8 +1,10 @@
 """The lane plan record: every planned lane decision, sealed once per layout.
 
 A :class:`LanePlan` is decided at the first offsets run of a layout whose
-placement has positioned the junctions (stage 5.1), from structure and that
-placement alone, and kept on the graph for the rest of the layout.  A new
+placement has positioned the junctions (stage 5.1), outside validation, from
+structure and that placement alone, and kept on the graph for the rest of the
+layout.  A run before that writes the record its placement plans, keeping
+none.  A new
 layout (each :func:`~nf_metro.layout.engine._layout_once`: the spread loop's
 attempts, the row-pitch and strike-clearance relays, the off-track and
 geometric-bypass relayouts) starts without one and seals its own; a record is
@@ -161,12 +163,22 @@ overlap; touching at one coordinate is a hand-over when one terminates
 there arriving from upstream and the other is born there leaving
 downstream.
 
-Nothing in layout, routing or rendering reads the record.
+**Readers.**  Every offsets run writes the record's lanes
+(:func:`planned_offsets` of :func:`lane_plan_of`): a lane in offset steps
+along its section's lane frame, a perpendicular port's offsets across its
+travel as its drawing reads them, a rail section's port about its bundle's
+middle (:attr:`TrackPlan.rail_origins`).  Routing reads the approach record
+and the far sides (:func:`recorded_lane_plan`) where it chooses a connector's
+side, and the turn-offs where it nests trunks.  Validation observes
+(:func:`observing`): its runs read the record their placement plans and never
+seal one.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from functools import partial
 from heapq import heapify, heappop, heappush
@@ -309,11 +321,16 @@ class TrackPlan(_Sealed):
     cycle_sections: tuple[str, ...]
     """Sections reached again while their own lanes were being decided; an
     exit of such a section asked for round the cycle is undecided."""
+    rail_origins: Mapping[str, int] = field(default_factory=dict)
+    """Per port of a rail-laid section, its lowest plus its highest lane (or
+    offset, for a perpendicular port): twice the middle of its bundle, which
+    lies on the port, the middle of the fan out to the rails."""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "lanes", _frozen(self.lanes))
         object.__setattr__(self, "perpendicular", _frozen_nested(self.perpendicular))
         object.__setattr__(self, "turn_offs", _frozen(self.turn_offs))
+        object.__setattr__(self, "rail_origins", _frozen(self.rail_origins))
 
 
 @dataclass(frozen=True)
@@ -648,6 +665,7 @@ class _Tracks:
             self._turn_offs(lanes, across),
             tuple(self.forced),
             tuple(sorted(self.cycles)),
+            _rail_origins(graph, flat, across),
         )
         return plan, seams
 
@@ -2606,6 +2624,31 @@ def _travel_order(
     return out
 
 
+def _rail_origins(
+    graph: MetroGraph,
+    lanes: Mapping[tuple[str, str], int],
+    across: Mapping[str, Mapping[str, int]],
+) -> dict[str, int]:
+    if not graph.has_rail_sections:
+        return {}
+    out = {}
+    for port_id, port in sorted(graph.ports.items()):
+        if not graph.is_rail_section(port.section_id):
+            continue
+        values = (
+            list(across[port_id].values())
+            if port_id in across
+            else [
+                lanes[(port_id, lid)]
+                for lid in graph.station_lines(port_id)
+                if (port_id, lid) in lanes
+            ]
+        )
+        if values and min(values) + max(values):
+            out[port_id] = min(values) + max(values)
+    return out
+
+
 def build_lane_plan(graph: MetroGraph) -> LanePlan:
     """Decide *graph*'s lane plan from its structure and placement."""
     frames = _Frames(graph)
@@ -2675,7 +2718,130 @@ def start_layout(graph: MetroGraph) -> None:
     graph._lane_plan = None
 
 
-def seal_lane_plan(graph: MetroGraph) -> None:
-    """Seal the layout's record at its first offsets run at or after 5.1."""
-    if graph._lane_plan is None and JUNCTIONS_POSITIONED in graph._stages_completed:
-        graph._lane_plan = build_lane_plan(graph)
+_OBSERVED: ContextVar[dict[int, tuple[MetroGraph, LanePlan]] | None] = ContextVar(
+    "lane_plan_observed", default=None
+)
+"""Inside :func:`observing`, each graph's provisional record by graph id."""
+
+
+@contextmanager
+def observing() -> Iterator[None]:
+    """Offsets runs inside read a provisional record and never seal one.
+
+    Validation observes a layout: the record it reads is the one its current
+    placement plans, kept for the scope, and the layout still seals its own at
+    its first production run at or after 5.1."""
+    token = _OBSERVED.set({})
+    try:
+        yield
+    finally:
+        _OBSERVED.reset(token)
+
+
+def lane_plan_of(graph: MetroGraph) -> LanePlan:
+    """The layout's sealed record; else, sealing it at the first run at or
+    after 5.1 outside :func:`observing`, the record the current placement
+    plans."""
+    if graph._lane_plan is not None:
+        return graph._lane_plan
+    observed = _OBSERVED.get()
+    if observed is not None:
+        held = observed.get(id(graph))
+        if held is None or held[0] is not graph:
+            held = observed[id(graph)] = (graph, build_lane_plan(graph))
+        return held[1]
+    plan = build_lane_plan(graph)
+    if JUNCTIONS_POSITIONED in graph._stages_completed:
+        graph._lane_plan = plan
+    return plan
+
+
+def recorded_lane_plan(graph: MetroGraph) -> LanePlan | None:
+    """The record the layout's last offsets run read, without planning one:
+    the sealed record, or inside :func:`observing` the scope's provisional
+    one; ``None`` before either exists."""
+    if graph._lane_plan is not None:
+        return graph._lane_plan
+    observed = _OBSERVED.get()
+    held = observed.get(id(graph)) if observed is not None else None
+    return held[1] if held is not None and held[0] is graph else None
+
+
+def _stored_offsets(graph: MetroGraph, plan: LanePlan) -> dict[tuple[str, str], float]:
+    """Each recorded ``(node, line)``'s offset in lanes as its drawing reads
+    it, a rail section's port about its bundle's middle."""
+    tracks = plan.tracks
+    out: dict[tuple[str, str], float] = {
+        key: float(lane) for key, lane in tracks.lanes.items()
+    }
+    for port_id, values in tracks.perpendicular.items():
+        port = graph.ports[port_id]
+        sign = lateral_order_sign(port_travel(port)) * _draw_sign(graph, port)
+        for lid, value in values.items():
+            out[(port_id, lid)] = float(sign * value)
+    for port_id, both in tracks.rail_origins.items():
+        port = graph.ports[port_id]
+        sign = (
+            lateral_order_sign(port_travel(port)) * _draw_sign(graph, port)
+            if port_id in tracks.perpendicular
+            else 1
+        )
+        for lid in graph.station_lines(port_id):
+            if (port_id, lid) in out:
+                out[(port_id, lid)] -= sign * both / 2
+    return out
+
+
+def _line_neighbour(
+    graph: MetroGraph, node: str, line_id: str, held: Mapping[tuple[str, str], float]
+) -> float | None:
+    """The offset *line_id* holds at the nearest recorded node up its edges
+    from *node*, else down them: a node placed after the seal splits an edge
+    its line keeps its lane along."""
+    for walk in (graph.edges_to, graph.edges_from):
+        seen, frontier = {node}, [node]
+        while frontier:
+            ahead = []
+            for here in frontier:
+                for edge in walk(here):
+                    if edge.line_id != line_id:
+                        continue
+                    other = edge.source if walk == graph.edges_to else edge.target
+                    if other in seen:
+                        continue
+                    seen.add(other)
+                    if (other, line_id) in held:
+                        return held[(other, line_id)]
+                    ahead.append(other)
+            frontier = ahead
+    return None
+
+
+def planned_offsets(
+    graph: MetroGraph, plan: LanePlan, step: float
+) -> dict[tuple[str, str], float]:
+    """Every station line's offset: *plan*'s lane in *step* units, as its
+    drawing reads it; a node the record lacks takes its line's nearest
+    recorded neighbour's, a line with none lane zero."""
+    held = _stored_offsets(graph, plan)
+    out: dict[tuple[str, str], float] = {}
+    for node in graph.stations:
+        for lid in graph.station_lines(node):
+            lanes = held.get((node, lid))
+            if lanes is None:
+                lanes = _line_neighbour(graph, node, lid, held)
+            out[(node, lid)] = 0.0 if lanes is None else lanes * step
+    return out
+
+
+def approach_source(graph: MetroGraph, node: str, line_id: str) -> str:
+    """The node an approach record keys *line_id*'s connector from *node*
+    by: up through junctions each fed by one edge of the line."""
+    seen: set[str] = set()
+    while node in graph.junction_ids and node not in seen:
+        seen.add(node)
+        ups = [e.source for e in graph.edges_to(node) if e.line_id == line_id]
+        if len(ups) != 1:
+            return node
+        node = ups[0]
+    return node

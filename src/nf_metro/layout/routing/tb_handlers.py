@@ -39,6 +39,7 @@ from nf_metro.layout.routing.common import (
     OffsetRegime,
     RoutedPath,
     trailing_perp_side,
+    vertical_direction,
 )
 from nf_metro.layout.routing.context import (
     _get_offset,
@@ -46,9 +47,12 @@ from nf_metro.layout.routing.context import (
     _section_lane_frame,
     _tb_x_offset,
 )
+from nf_metro.layout.routing.orientation import lateral_order_sign
 from nf_metro.layout.routing.perp import (
+    _lane_stacked_perp_entry,
     _perp_entry_crossing_x,
     _perp_riser_lateral,
+    _planned_entry_crossing,
 )
 from nf_metro.layout.routing.perp_columns import perp_corridor_feeder
 from nf_metro.parser.model import (
@@ -458,8 +462,13 @@ def _route_perp_entry(
     if abs(dx) < COORD_TOLERANCE and abs(drop_delta) < COORD_TOLERANCE:
         # Aligned perpendicular entry: each line drops straight at its in-section
         # trunk lane, so a multi-line bundle stays parallel into the trunk
-        # instead of one line slanting across to a Y-staggered marker.
-        x = tx + _tb_x_offset(ctx, edge.target, edge.line_id, tgt.section_id)
+        # instead of one line slanting across to a Y-staggered marker.  Into a
+        # lane-stacked section that lane is the port crossing the plan states.
+        x = (
+            _planned_entry_crossing(ctx, edge.source, edge.line_id, sx)
+            if _lane_stacked_perp_entry(graph, edge.source)
+            else tx + _tb_x_offset(ctx, edge.target, edge.line_id, tgt.section_id)
+        )
         return RoutedPath(
             edge=edge,
             line_id=edge.line_id,
@@ -1057,14 +1066,22 @@ def _route_perp_entry_from_corridor(
     The turn into the station is fanned through :func:`build_tapered_bundle`, so
     the bundle's arcs nest concentrically (a constant gap through the bend) for
     either drop direction.
+
+    A lane-stacked section's entry drops each line from the crossing its lane
+    plan states (:func:`perp._planned_entry_crossing`).
     """
     sx, sy = src.x, src.y
     tx, ty = tgt.x, tgt.y
     _members, line_ids, _edge_by_line = gather_member_edges(ctx.graph, edge)
     td = _sign(ty - sy)
     hd = _sign(tx - sx)
+    planned = _lane_stacked_perp_entry(ctx.graph, edge.source)
+    drop = lateral_order_sign(vertical_direction(ty - sy))
 
     def source_offset(line_id: str) -> float:
+        if planned:
+            crossing = _planned_entry_crossing(ctx, edge.source, line_id, sx)
+            return drop * (crossing - sx)
         lateral = _perp_riser_lateral(ctx, edge.source, line_id, feeder_side)
         return td * lateral
 

@@ -28,15 +28,24 @@ from nf_metro.layout.geometry import (
     cotravelling_lane_clearance,
     cotravelling_lanes_fuse,
     flow_port_sides,
+    perpendicular_port_sides,
     port_free_axis,
     spans_share_corridor,
+    station_lane_coord,
 )
-from nf_metro.layout.route_plan import DemandAxis, ExitTurnPlanId
+from nf_metro.layout.lane_plan import _draw_sign, _run_port
+from nf_metro.layout.route_plan import (
+    DemandAxis,
+    ExitTurnDisposition,
+    ExitTurnPlan,
+    ExitTurnPlanId,
+)
 from nf_metro.layout.routing.centrelines import (
     fan_offsets,
 )
 from nf_metro.layout.routing.common import (
     ENTRY_SIDE_DIRECTION,
+    EXIT_SIDE_DIRECTION,
     NO_LANDING_ORDERS,
     CorridorLane,
     Direction,
@@ -46,6 +55,7 @@ from nf_metro.layout.routing.common import (
     PeeloffTail,
     PortPeeloffBundle,
     RoutedPath,
+    TrunkSlot,
     _grid_row_bands,
     _h_segment_penetrates_section,
     _section_intrudes,
@@ -79,7 +89,9 @@ from nf_metro.layout.routing.common import (
     planner_owns_segment_or_boundary,
     port_peeloff_tail,
     route_system_owns_segment_boundary,
+    row_bottom_edge,
     row_local_gap_bundle_midpoint,
+    row_top_edge,
     same_destination_approach_slots,
     seat_peeloff_port_y,
     section_ids_of_stations,
@@ -96,6 +108,7 @@ from nf_metro.layout.routing.context import (
     _MergeRouting,
     _resolve_section_col,
     _RoutingCtx,
+    _section_lane_frame,
     port_lane_coord,
 )
 from nf_metro.layout.routing.corners import (
@@ -127,7 +140,7 @@ from nf_metro.layout.routing.reserved_bands import (
     corridor_clearance_band,
     resolved_band,
 )
-from nf_metro.parser.model import MetroGraph, Port, PortSide
+from nf_metro.parser.model import Edge, MetroGraph, Port, PortSide
 
 if TYPE_CHECKING:
     from nf_metro.layout.route_reservations import GapCorridorBand
@@ -3879,10 +3892,24 @@ def _materialize_trunk_slots(
     plan has already fixed their geometry by the time it emits them.  Their
     trunks still join the channel stack, as anchors: the stack is seated so they
     keep their Y, and the other trunks take their tracks around them rather than
-    fanning onto a track one of them already holds.
+    fanning onto a track one of them already holds.  A declared trunk whose
+    segment (or a corner of it) a plan owns is such an anchor too: it keeps its
+    planned Y, and a trunk turning off or into its corner nests round it in the
+    planned order (:func:`_recorded_band_pairs`).  Every other trunk is drawn
+    exactly on its slot.
     """
     step = ctx.offset_step
     trunks = _declared_htrunks(routes)
+    anchors = [
+        t
+        for t in _collect_htrunks(routes, include_exempt=True)
+        if t.route.trunk_slot is not None
+        and planner_owns_segment_or_boundary(t.route, t.idx)
+    ]
+    declared = {(id(t.route), t.idx) for t in trunks}
+    trunks += [t for t in anchors if (id(t.route), t.idx) not in declared]
+    held = frozenset((id(t.route), t.idx) for t in anchors)
+    fixed_route_ids = fixed_route_ids | {id(t.route) for t in anchors}
     groups = _group_channel_trunks(trunks, step) if len(trunks) >= 2 else []
 
     # Routes whose trunk this pass has placed into a concentric bundle; the
@@ -3924,6 +3951,7 @@ def _materialize_trunk_slots(
             bundled,
             discretionary=all_exempt,
             fixed_route_ids=fixed_route_ids,
+            held=held,
         )
 
     _dogleg_off_exempt_trunks(
@@ -3941,6 +3969,7 @@ def _stack_trunk_bands(
     *,
     discretionary: bool = False,
     fixed_route_ids: frozenset[int] = frozenset(),
+    held: frozenset[tuple[int, int]] = frozenset(),
 ) -> None:
     """Lay an ordered top -> bottom list of trunk bands into their inter-row gap.
 
@@ -3963,7 +3992,7 @@ def _stack_trunk_bands(
     one that seats it at its current Y, and a stack whose anchors no single top
     seats together is abandoned.
     """
-    planned = [_plan_trunk_band(b, ctx) for b in bands]
+    planned = [_plan_trunk_band(b, ctx, held) for b in bands]
     gap = BUNDLE_TO_BUNDLE_CLEARANCE
     total = sum((n - 1) * step for _o, _t, n in planned) + gap * (len(bands) - 1)
     anchors = [t for b in bands for t in b if id(t.route) in fixed_route_ids]
@@ -3987,7 +4016,7 @@ def _stack_trunk_bands(
         band_top = _hold_stack_in_claim_bands(ctx, band_top, planned, bands, step, gap)
     for (order, track_of, n), band in zip(planned, bands):
         _restack_trunk_band(
-            order, track_of, n, band_top, band[0].dips_down, step, ctx, bundled
+            order, track_of, n, band_top, band[0].dips_down, step, ctx, bundled, held
         )
         band_top += (n - 1) * step + gap
 
@@ -4441,51 +4470,202 @@ def _band_port_constraints(
 
 
 def _recorded_band_pairs(
-    slots: list[list[_HTrunk]], ctx: _RoutingCtx | None
+    slots: list[list[_HTrunk]],
+    ctx: _RoutingCtx | None,
+    held: frozenset[tuple[int, int]] = frozenset(),
 ) -> list[tuple[int, int]]:
-    """Slot pairs ``(a, b)`` whose lines leave one recorded departure
-    (:class:`~nf_metro.layout.departure_order.DepartureLaneOrder`), ordered
-    as the port the departure enters holds them.
+    """Slot pairs ``(a, b)`` the plan nests at a corner an anchor in *held*
+    turns at: ``a`` above ``b``.
 
-    The record decided that order at the fork, so the band carries it whatever
-    else it would prefer (:func:`_ranked_band_order`).  Only a port whose
-    lanes run along the band's lateral axis decides.
+    Two slots whose trunks leave one node (start legs) or enter one node (end
+    legs), the legs turning the same way and one of them an anchor's
+    plan-owned leg, nest at that shared corner.  Two start legs of one PLANNED
+    exit-turn plan nest by its published order
+    (:attr:`~nf_metro.layout.route_plan.ExitTurnPlan.nest_order`, a later turn
+    off the source run outer along it); every other pair by where the lane
+    plan puts the two lines at the node, read on the side of travel the legs
+    head for (:func:`_planned_leg_key`).  The outer leg takes the track below
+    where its node lies above the trunk's gap, above where it lies below.  A
+    pair two corners order both ways binds nothing.
     """
-    if ctx is None or not ctx.station_offsets or not ctx.graph._departure_lane_orders:
+    if ctx is None or not held:
         return []
-    travel = Direction.R if slots[0][0].sign_x > 0 else Direction.L
-    lane_axis = lateral_axis(travel).value
-    records = {
-        key: record
-        for key, record in ctx.graph._departure_lane_orders.items()
-        if (port := ctx.graph.ports.get(record.target_id)) is not None
-        and port_free_axis(port.side) == lane_axis
-    }
-    slot_lines: list[dict[tuple[str, str], str]] = []
-    for slot in slots:
-        lines: dict[tuple[str, str], str] = {}
-        for trunk in slot:
-            key = (trunk.route.edge.source, trunk.route.edge.target)
-            if key in records:
-                lines.setdefault(key, trunk.route.line_id)
-        slot_lines.append(lines)
-    decided: dict[frozenset[int], tuple[int, int]] = {}
+    legs = {id(t): _planned_legs(t, ctx) for slot in slots for t in slot}
+    pairs: dict[frozenset[int], tuple[int, int]] = {}
+    clashing: set[frozenset[int]] = set()
     for i, j in itertools.combinations(range(len(slots)), 2):
-        for key, record in records.items():
-            line_i, line_j = slot_lines[i].get(key), slot_lines[j].get(key)
-            if (
-                line_i is None
-                or line_j is None
-                or line_i == line_j
-                or not {line_i, line_j} <= set(record.lines)
-            ):
+        if slots[i][0].route.line_id == slots[j][0].route.line_id:
+            continue
+        for ta, tb in itertools.product(slots[i], slots[j]):
+            if ta.sign_x != tb.sign_x:
                 continue
-            pair = _entry_order_pair(
-                ctx, record.target_id, (i, line_i), (j, line_j), travel
-            )
-            if pair is not None:
-                decided[frozenset((i, j))] = pair
-    return list(decided.values())
+            held_a = (id(ta.route), ta.idx) in held
+            held_b = (id(tb.route), tb.idx) in held
+            for end_a, node_a, key_a, above_a, owned_a in legs[id(ta)]:
+                for end_b, node_b, key_b, above_b, owned_b in legs[id(tb)]:
+                    if (end_a, node_a, above_a) != (end_b, node_b, above_b):
+                        continue
+                    if not ((held_a and owned_a) or (held_b and owned_b)):
+                        continue
+                    outward = -ta.sign_x if end_a == "start" else ta.sign_x
+                    a_outer = _nested_outer(ctx, ta, tb, end_a, key_a, key_b, outward)
+                    if a_outer is None:
+                        continue
+                    pair = (j, i) if a_outer == above_a else (i, j)
+                    key = frozenset((i, j))
+                    if key in pairs and pairs[key] != pair:
+                        clashing.add(key)
+                    pairs[key] = pair
+    return [pair for key, pair in pairs.items() if key not in clashing]
+
+
+def _nested_outer(
+    ctx: _RoutingCtx,
+    ta: _HTrunk,
+    tb: _HTrunk,
+    end: str,
+    key_a: float,
+    key_b: float,
+    outward: int,
+) -> bool | None:
+    """Whether *ta*'s leg lies outside *tb*'s at their shared corner, or
+    ``None`` where neither the exit-turn plan nor the lane plan separates them.
+    """
+    if end == "start":
+        plan_a = _planned_exit_turn(ctx, ta.route.edge)
+        plan_b = _planned_exit_turn(ctx, tb.route.edge)
+        if plan_a is not None and plan_a is plan_b:
+            order = plan_a.nest_order
+            line_a, line_b = ta.route.line_id, tb.route.line_id
+            if line_a not in order or line_b not in order:
+                return None
+            run = plan_a.source_run_direction
+            along = direction_vector(run)[0] if run is not None else 1.0
+            return (order.index(line_a) - order.index(line_b)) * along * outward > 0
+    if abs(key_a - key_b) < ctx.offset_step - COORD_TOLERANCE:
+        return None
+    return (key_a - key_b) * outward > 0
+
+
+def _planned_exit_turn(ctx: _RoutingCtx, edge: Edge) -> ExitTurnPlan | None:
+    """The PLANNED exit-turn plan whose x-axis turn *edge* takes, if any."""
+    query = ctx.exit_turns
+    membership = query.membership_for_edge(edge) if query is not None else None
+    if (
+        membership is None
+        or membership.axis is None
+        or membership.plan.disposition is not ExitTurnDisposition.PLANNED
+        or membership.axis.axis is not DemandAxis.X
+    ):
+        return None
+    return membership.plan
+
+
+def _planned_legs(
+    t: _HTrunk, ctx: _RoutingCtx
+) -> list[tuple[str, str, float, bool, bool]]:
+    """``(end, node, key, above, plan-owned)`` for *t*'s start and end legs:
+    the leg's node, where the lane plan puts the line there across the leg
+    (:func:`_planned_leg_key`), whether the node lies above the trunk's gap,
+    and whether a plan owns the leg's segment."""
+    edge, k = t.route.edge, t.idx
+    out = []
+    for end, node, leg_index in (
+        ("start", edge.source, k - 1),
+        ("end", edge.target, k + 1),
+    ):
+        above = _node_above_trunk_gap(ctx.graph, node, t.route.trunk_slot, t.y)
+        if above is None:
+            continue
+        start = end == "start"
+        leg = (
+            (Direction.D if above else Direction.U)
+            if start
+            else (Direction.U if above else Direction.D)
+        )
+        key = _planned_leg_key(ctx, node, t.route.line_id, start, leg)
+        if key is None:
+            continue
+        owned = planner_owns_segment_or_boundary(t.route, leg_index)
+        out.append((end, node, key, above, owned))
+    return out
+
+
+def _planned_leg_key(
+    ctx: _RoutingCtx, node: str, line_id: str, start: bool, leg: Direction
+) -> float | None:
+    """Where the lane plan puts *line_id* at *node* across *leg*'s travel:
+    its lane coordinate through the node's port accessor, on its side of the
+    run's travel there (a concentric bundle keeps each line on its side through
+    the turn into the leg).  A line whose run carries on level through the
+    node meets the leg beyond every line whose run ends there (start leg) or
+    before them (end leg).  ``None`` where the node holds no planned lane."""
+    graph = ctx.graph
+    offset = (ctx.station_offsets or {}).get((node, line_id))
+    port_id = _run_port(graph, node, leaving=start)
+    if offset is None or port_id is None:
+        return None
+    port = graph.ports[port_id]
+    section = graph.sections.get(port.section_id)
+    if section is None:
+        return None
+    travel = (EXIT_SIDE_DIRECTION if start else ENTRY_SIDE_DIRECTION)[port.side]
+    station = graph.stations[node]
+    if port.side in perpendicular_port_sides(section.direction):
+        lane = getattr(station, port_free_axis(port.side)) + (
+            _draw_sign(graph, port) * offset
+        )
+    else:
+        frame = _section_lane_frame(graph, section, ctx.positive_fan)
+        lane = station_lane_coord(frame, station, offset)
+    key = lane * lateral_order_sign(travel) * lateral_order_sign(leg)
+    if travel in (Direction.L, Direction.R) and _runs_on_through(
+        graph, node, line_id, travel, start
+    ):
+        along = 1.0 if travel is Direction.R else -1.0
+        key += (along if start else -along) * _THROUGH_RANK
+    return key
+
+
+_THROUGH_RANK = 1e6
+"""Key offset ranking a line running through a node past every lane."""
+
+
+def _runs_on_through(
+    graph: MetroGraph, node: str, line_id: str, travel: Direction, start: bool
+) -> bool:
+    """Whether *line_id* also leaves *node* level along *travel* (start) or
+    arrives level from behind it (end)."""
+    here = graph.stations[node]
+    along = 1.0 if travel is Direction.R else -1.0
+    for edge in graph.edges_from(node) if start else graph.edges_to(node):
+        if edge.line_id != line_id:
+            continue
+        other = graph.stations[edge.target if start else edge.source]
+        ahead = (other.x - here.x) * along * (1 if start else -1)
+        if abs(other.y - here.y) <= COORD_TOLERANCE and ahead > COORD_TOLERANCE:
+            return True
+    return False
+
+
+def _node_above_trunk_gap(
+    graph: MetroGraph, node: str, slot: TrunkSlot | None, channel_y: float
+) -> bool | None:
+    """Whether *node* lies above the gap its trunk runs in (``False`` below),
+    or ``None`` inside it.  A trunk in no inter-row gap (over the top, under
+    the map) reads the side of its own channel."""
+    y = graph.stations[node].y
+    if slot is None or slot.gap_upper_row is None:
+        if abs(y - channel_y) <= COORD_TOLERANCE:
+            return None
+        return y < channel_y
+    top = row_bottom_edge(graph, slot.gap_upper_row)
+    bottom = row_top_edge(graph, slot.gap_upper_row + 1)
+    if y <= top + COORD_TOLERANCE:
+        return True
+    if y >= bottom - COORD_TOLERANCE:
+        return False
+    return None
 
 
 def _entry_order_pair(
@@ -4740,6 +4920,7 @@ def _cheapest_band_order(
 def _plan_trunk_band(
     band: list[_HTrunk],
     ctx: _RoutingCtx | None = None,
+    held: frozenset[tuple[int, int]] = frozenset(),
 ) -> tuple[list[list[_HTrunk]], dict[int, int], int]:
     """Order one same-direction band into concentric slots and pack its tracks.
 
@@ -4772,7 +4953,7 @@ def _plan_trunk_band(
     if len(slot_groups) < 2 or len(slot_groups) > _MAX_BAND_PERMUTE:
         heuristic = _heuristic_slot_order(slot_groups)
         return heuristic, *_packed_track_map(heuristic, span_of)
-    recorded = _recorded_band_pairs(slot_groups, ctx)
+    recorded = _recorded_band_pairs(slot_groups, ctx, held)
     constraints = _band_port_constraints(slot_groups, ctx, recorded)
     best_ttb = _ranked_band_order(band, slot_groups, span_of, constraints, recorded)[0]
     order = list(reversed(best_ttb)) if band[0].dips_down else best_ttb
@@ -4870,6 +5051,7 @@ def _restack_trunk_band(
     step: float,
     ctx: _RoutingCtx,
     bundled: set[int],
+    held: frozenset[tuple[int, int]] = frozenset(),
 ) -> None:
     """Fan one planned same-direction band onto its packed tracks.
 
@@ -4878,7 +5060,8 @@ def _restack_trunk_band(
     sharing one sub-corridor pack onto adjacent tracks, so a slot present only
     in part of the channel reuses a track left free where it is absent.  All
     trunks here -- including exempt ones grouped with a non-exempt mate -- are
-    placed so each co-travelling bundle reads as one tight concentric run.
+    placed so each co-travelling bundle reads as one tight concentric run,
+    exactly on its slot, except an anchor in *held*, which keeps its planned Y.
     """
     for sg in order:
         inner = track_of[id(sg)]  # 0 = innermost (shallowest); sets corner radii
@@ -4886,7 +5069,7 @@ def _restack_trunk_band(
         new_y = band_top + _slot_depth_in_band(inner, n, dips) * step
         for t in sg:
             bundled.add(id(t.route))
-            if abs(new_y - t.y) <= COORD_TOLERANCE:
+            if (id(t.route), t.idx) in held or abs(new_y - t.y) <= COORD_TOLERANCE_FINE:
                 continue
             _restack_htrunk(t, new_y, inner, n, step, ctx.curve_radius)
 

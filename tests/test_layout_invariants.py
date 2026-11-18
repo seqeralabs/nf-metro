@@ -17,7 +17,7 @@ import copy
 import json
 import warnings
 from collections import defaultdict, deque
-from collections.abc import Iterator
+from collections.abc import Container, Iterator
 from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
@@ -144,7 +144,6 @@ from nf_metro.layout.routing.invariants import (
     check_collinear_distinct_lines,
     check_merge_fanout_pivots_shared,
 )
-from nf_metro.layout.routing.offsets import _sole_in_section_consumer
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import (
     BYPASS_V_PREFIX,
@@ -170,6 +169,22 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # Tolerance for "same Y" assertions.  The grid pitch defaults to 55px;
 # 1px slack absorbs sub-pixel rounding from fan-recenter phases.
 _Y_TOL = 1.0
+
+
+def _sole_in_section_consumer(
+    graph: MetroGraph, port_id: str, section_id: str, lines: Container[str]
+) -> str | None:
+    """The one real station in *section_id* that *lines* reach from *port_id*."""
+    consumers = {
+        edge.target
+        for edge in graph.edges_from(port_id)
+        if edge.line_id in lines
+        and not graph.stations[edge.target].is_port
+        and graph.stations[edge.target].section_id == section_id
+    }
+    if len(consumers) != 1:
+        return None
+    return next(iter(consumers))
 
 
 @lru_cache(maxsize=None)

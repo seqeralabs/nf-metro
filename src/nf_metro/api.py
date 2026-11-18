@@ -519,9 +519,8 @@ def render_string(
       :class:`~nf_metro.layout.routing.convergences.ConvergenceInvariantError`,
       :class:`~nf_metro.render.section_header.SectionHeaderClashError`,
       :class:`~nf_metro.render.section_header.SectionHeaderOverflowError`,
-      :class:`~nf_metro.render.section_header.SectionHeaderBandError`,
-      :class:`~nf_metro.render.bridges.BridgeInvariantError`, or
-      :class:`~nf_metro.layout.routing.offsets.OffsetAnchorError`. These are
+      :class:`~nf_metro.render.section_header.SectionHeaderBandError`, or
+      :class:`~nf_metro.render.bridges.BridgeInvariantError`. These are
       deliberately **not** part of the :class:`~nf_metro.NfMetroError`
       hierarchy: they signal a defect in nf-metro's own drawing of an
       otherwise-valid graph, not a problem with the caller's input, so they

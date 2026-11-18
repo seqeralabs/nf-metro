@@ -33,11 +33,7 @@ from nf_metro.layout.routing import compute_station_offsets
 from nf_metro.layout.routing.invariants import (
     check_convergence_shallow_feeder_concentric,
 )
-from nf_metro.layout.routing.offsets import (
-    _OffsetCtx,
-    _plan_level_approach_carries,
-    same_row_bypass_entry,
-)
+from nf_metro.layout.routing.offsets import same_row_bypass_entry
 from nf_metro.parser.model import MetroGraph
 from nf_metro.render.svg import build_render_plan
 from nf_metro.themes import resolve_theme
@@ -248,7 +244,7 @@ def test_bypass_approach_side_matches_the_drawn_route(
 ) -> None:
     """A bypass line counts as coming down exactly when its route descends in."""
     graph, routes = _drawn_routes(fixture)
-    entry = same_row_bypass_entry(graph, port_id, compute_station_offsets(graph))
+    entry = same_row_bypass_entry(graph, port_id)
     assert entry is not None
     port_y = graph.stations[port_id].y
     drawn_from_above = {
@@ -281,54 +277,6 @@ def test_concentric_guard_reads_the_side_a_bypass_arrives_from() -> None:
     assert check_convergence_shallow_feeder_concentric(graph, above) == []
     (message,) = check_convergence_shallow_feeder_concentric(graph, below)
     assert OVER_TOP_PORT in message
-
-
-LEVEL_PAIR_MMD = """\
-%%metro line: a | A | #4a90d9
-%%metro line: b | B | #e63946
-graph LR
-    subgraph up [Up]
-        u1[U1]
-        u2[U2]
-        u1 -->|a,b| u2
-    end
-    subgraph down [Down]
-        d1[D1]
-    end
-    u2 -->|a,b| d1
-"""
-
-
-def _level_pair_ctx() -> tuple[_OffsetCtx, str, list[str]]:
-    graph = prepare_graph(LEVEL_PAIR_MMD)
-    (port_id,) = graph.sections["down"].entry_ports
-    approach = ["up__exit_right_0", "u2", "u1"]
-    offsets = {(sid, "a"): 4.0 for sid in approach}
-    offsets.update({(sid, "b"): 8.0 for sid in approach})
-    return _OffsetCtx(graph=graph, offsets=offsets), port_id, approach
-
-
-def test_level_approach_carries_see_the_lanes_earlier_moves_vacate() -> None:
-    """Moving ``a`` up first frees its lane for ``b``; the plan leaves ctx alone."""
-    ctx, port_id, approach = _level_pair_ctx()
-    before = dict(ctx.offsets)
-    writes, refused = _plan_level_approach_carries(
-        ctx, port_id, [("a", 0.0), ("b", 4.0)]
-    )
-    assert refused == frozenset()
-    assert writes == {
-        **{(sid, "a"): 0.0 for sid in approach},
-        **{(sid, "b"): 4.0 for sid in approach},
-    }
-    assert ctx.offsets == before
-
-
-def test_level_approach_carry_is_refused_whole_where_a_lane_is_held() -> None:
-    ctx, port_id, _approach = _level_pair_ctx()
-    ctx.offsets[("u1", "a")] = 0.0
-    writes, refused = _plan_level_approach_carries(ctx, port_id, [("b", 0.0)])
-    assert refused == frozenset({"b"})
-    assert writes == {}
 
 
 LEVEL_RETURN_MMD = """\
@@ -401,7 +349,7 @@ def test_feeder_past_the_port_drawn_level_is_not_a_u_turn() -> None:
     """
     graph, routes = _inline_routes(LEVEL_RETURN_MMD)
     (port_id,) = graph.sections["sec2"].entry_ports
-    entry = same_row_bypass_entry(graph, port_id, compute_station_offsets(graph))
+    entry = same_row_bypass_entry(graph, port_id)
     assert entry is None or not entry.u_turn
     (leg,) = [
         points

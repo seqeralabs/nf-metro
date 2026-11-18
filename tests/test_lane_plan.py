@@ -6,9 +6,9 @@ perpendicular entry's consumer turns, the far-side approaches, every
 in-section lane and the lanes either side of every straight seam at the first
 offsets run of a layout at or after stage 5.1.  These tests hold the record's
 contract: one record per layout, replayed for the rest of it; total on every
-curated map; independent of the hash seed; pinned per curated map; read by
-nothing in the package; a rotated or reflected placement plans the rotated or
-reflected record; its approach sides are the ones dispatch draws; no seam
+curated map; independent of the hash seed; pinned per curated map; read only
+by its named consumers; a rotated or reflected placement plans the rotated or
+reflected record; no seam
 changes a bundle's order, outside the listed seams where a straight-seam
 entry reverses one, or steps a line that crosses it straight; the seam joint's
 lanes are the track plan's, outside a listed entry; and a line born on an
@@ -25,13 +25,12 @@ import os
 import subprocess
 import sys
 import warnings
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
 
 import pytest
 
@@ -40,6 +39,7 @@ import nf_metro.layout.port_order_plan as port_order_plan_module
 from nf_metro.layout import engine as engine_module
 from nf_metro.layout import fan_ordering
 from nf_metro.layout.constants import SAME_Y_TOLERANCE, graph_offset_step
+from nf_metro.layout.departure_order import JUNCTIONS_POSITIONED
 from nf_metro.layout.geometry import (
     packed_section_visual_rank,
     perpendicular_port_sides,
@@ -63,7 +63,6 @@ from nf_metro.layout.routing.common import (
 from nf_metro.layout.routing.context import _section_lane_frame
 from nf_metro.layout.routing.offsets import (
     compute_station_offsets,
-    same_row_bypass_entry,
 )
 from nf_metro.layout.routing.orientation import (
     direction_vector,
@@ -108,9 +107,6 @@ ROTATION_FIXTURES = [
     FIXTURES / "regressions" / "approach_order_multi_line_feeder.mmd",
     FIXTURES / "regressions" / "approach_order_carry_sandwich.mmd",
 ]
-
-# Same-row bypasses whose drawn approach differs from the record.
-APPROACH_SIDE_EXCEPTIONS: frozenset[tuple[str, str, str]] = frozenset()
 
 
 @dataclass
@@ -758,56 +754,10 @@ def _screen_side(graph: MetroGraph, entry_id: str, side: int) -> str:
     return "below" if side * lateral_order_sign(travel) > 0 else "above"
 
 
-@pytest.mark.parametrize("path", CURATED, ids=lambda p: str(p.relative_to(ROOT)))
-def test_approach_sides_match_the_drawn_same_row_bypasses(path: Path) -> None:
-    """Every same-row bypass dispatch draws round its row arrives on the
-    side the approach record states."""
-    run = _laid_out(path)
-    graph = run.graph
-    if graph is None or graph._lane_plan is None:
-        return
-    approaches = graph._lane_plan.port_orders.approaches
-    offsets = compute_station_offsets(graph)
-    drawn: list[tuple[Edge, str]] = []
-    real = offsets_module._same_row_bypass_approaches
-
-    def spy(
-        g: MetroGraph,
-        edges: Sequence[Edge],
-        station_offsets: dict[tuple[str, str], float] | None,
-    ) -> list[Literal["above", "below", "flat"]]:
-        got = real(g, edges, station_offsets)
-        drawn.extend(zip(edges, got))
-        return got
-
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(offsets_module, "_same_row_bypass_approaches", spy)
-        for port_id in sorted(graph.ports):
-            if graph.ports[port_id].is_entry:
-                same_row_bypass_entry(graph, port_id, offsets)
-    for edge, side in drawn:
-        origin = _origin(graph, edge.source, edge.line_id)
-        if (path.stem, edge.target, origin) in APPROACH_SIDE_EXCEPTIONS:
-            continue
-        record = approaches.get((edge.target, origin))
-        assert record is not None, (edge.target, origin)
-        assert _screen_side(graph, edge.target, record.side) == side, (
-            edge.target,
-            origin,
-        )
-
-
-def test_approach_side_exceptions_are_live() -> None:
-    for stem, entry_id, source_id in APPROACH_SIDE_EXCEPTIONS:
-        graph = _laid_out(TOPOLOGIES / f"{stem}.mmd").graph
-        assert graph is not None and graph._lane_plan is not None
-        record = graph._lane_plan.port_orders.approaches[(entry_id, source_id)]
-        assert record.rule is SideRule.TURN_ROUND
-
-
 @contextmanager
 def _layouts(kinds: list[str], builds: list[int]) -> Iterator[None]:
-    """Record each layout's kind and, per record built, its layout's index."""
+    """Record each layout's kind and, per record sealed (built once the
+    junctions are positioned), its layout's index."""
     real_layout = engine_module._layout_once
     real_build = lane_plan_module.build_lane_plan
     real_sinks = engine_module._line_crossed_file_icon_sinks
@@ -834,7 +784,8 @@ def _layouts(kinds: list[str], builds: list[int]) -> Iterator[None]:
         return found
 
     def build(graph: MetroGraph) -> LanePlan:
-        builds.append(len(kinds) - 1)
+        if JUNCTIONS_POSITIONED in graph._stages_completed:
+            builds.append(len(kinds) - 1)
         return real_build(graph)
 
     with pytest.MonkeyPatch.context() as mp:
@@ -879,26 +830,25 @@ def test_a_layout_replays_its_record() -> None:
 
 
 def test_the_record_is_sealed_before_the_first_lane_after_5_1() -> None:
-    seen: list[tuple[bool, LanePlan | None, int]] = []
-    base = offsets_module._compute_base_offsets
+    seen: list[tuple[bool, bool]] = []
+    real = offsets_module.planned_offsets
 
-    def spy(ctx: offsets_module._OffsetCtx) -> None:
-        stages = ctx.graph._stages_completed
-        seen.append(("5.1" in stages, ctx.graph._lane_plan, len(ctx.offsets)))
-        base(ctx)
+    def spy(graph: MetroGraph, plan: LanePlan, step: float) -> dict:
+        after = "5.1" in graph._stages_completed
+        seen.append((after, graph._lane_plan is plan))
+        return real(graph, plan, step)
 
     with warnings.catch_warnings(), pytest.MonkeyPatch.context() as mp:
         warnings.simplefilter("ignore")
-        mp.setattr(offsets_module, "_compute_base_offsets", spy)
+        mp.setattr(offsets_module, "planned_offsets", spy)
         graph = parse_metro_mermaid(
             (ROOT / "examples" / "rnaseq_sections.mmd").read_text()
         )
         engine_module.compute_layout(graph)
 
-    assert any(after for after, _plan, _n in seen)
-    for after, plan, written in seen:
-        assert written == 0
-        assert (plan is not None) == after
+    assert any(after for after, _sealed in seen)
+    for after, sealed in seen:
+        assert sealed == after
 
 
 @pytest.mark.parametrize(
@@ -972,7 +922,7 @@ def _record_payload(plan: LanePlan) -> list[object]:
             [t.node_id, t.leaving, t.travel.value, list(t.lines), list(t.through)]
             for t in tracks.turn_offs.values()
         ),
-    ]
+    ] + ([sorted(tracks.rail_origins.items())] if tracks.rail_origins else [])
 
 
 def _map_digest(run: _Run) -> str | None:
@@ -1010,7 +960,7 @@ def test_the_pinned_digests_name_every_curated_map() -> None:
     assert set(_pinned_digests()) == {_rel(p) for p in CURATED}
 
 
-# ---- read by nothing
+# ---- read by its named consumers
 
 
 def _src_modules() -> Iterator[tuple[str, ast.Module]]:
@@ -1019,16 +969,34 @@ def _src_modules() -> Iterator[tuple[str, ast.Module]]:
         yield str(path.relative_to(src)), ast.parse(path.read_text())
 
 
-# The record's lifetime hooks and the graph field's type are its only uses.
+# Every module outside the record that imports from it, and what: the record's
+# lifetime hooks, its reader, the dispatch and invariant consumers, and the
+# graph field's type.
 RECORD_USES = {
     "layout/engine.py": {"start_layout"},
-    "layout/routing/offsets.py": {"seal_lane_plan"},
+    "layout/phases/guards.py": {"observing"},
+    "layout/routing/offsets.py": {
+        "approach_source",
+        "lane_plan_of",
+        "planned_offsets",
+        "recorded_lane_plan",
+        "port_travel",
+    },
+    "layout/routing/inter_section_handlers.py": {
+        "Approach",
+        "ApproachKind",
+        "SideRule",
+        "approach_source",
+        "port_travel",
+        "recorded_lane_plan",
+    },
+    "layout/routing/normalize.py": {"_draw_sign", "_run_port"},
     "parser/model.py": {"LanePlan"},
 }
 RECORD_MODULES = {"layout/lane_plan.py", "layout/port_order_plan.py"}
 
 
-def test_nothing_reads_the_record() -> None:
+def test_only_the_named_consumers_read_the_record() -> None:
     found: list[str] = []
     for name, tree in _src_modules():
         if name in RECORD_MODULES:

@@ -34,7 +34,11 @@ from __future__ import annotations
 
 from nf_metro.layout.constants import COORD_TOLERANCE
 from nf_metro.layout.geometry import lanes_run_along_x, lanes_run_along_y
-from nf_metro.layout.routing.common import needs_perp_approach_fan, resolve_section
+from nf_metro.layout.routing.common import (
+    ENTRY_SIDE_DIRECTION,
+    needs_perp_approach_fan,
+    resolve_section,
+)
 from nf_metro.layout.routing.context import (
     _get_offset,
     _max_offset_at,
@@ -42,9 +46,33 @@ from nf_metro.layout.routing.context import (
     _tb_x_offset,
 )
 from nf_metro.layout.routing.corners import reversed_offset
+from nf_metro.layout.routing.orientation import lateral_order_sign
 from nf_metro.parser.model import (
+    MetroGraph,
     PortSide,
 )
+
+
+def _lane_stacked_perp_entry(graph: MetroGraph, port_id: str) -> bool:
+    """Whether *port_id* is a TOP or BOTTOM entry of a section whose lanes
+    run along y."""
+    port = graph.ports.get(port_id)
+    if port is None or not port.is_entry:
+        return False
+    if port.side not in (PortSide.TOP, PortSide.BOTTOM):
+        return False
+    return lanes_run_along_y(graph.section_for_port(port).direction)
+
+
+def _planned_entry_crossing(
+    ctx: _RoutingCtx, entry_port_id: str, line_id: str, port_x: float
+) -> float:
+    """Where the lane plan crosses *line_id* through a lane-stacked TOP or
+    BOTTOM entry: its offset read along the right-hand normal of the entry's
+    travel."""
+    side = ctx.graph.ports[entry_port_id].side
+    sign = lateral_order_sign(ENTRY_SIDE_DIRECTION[side])
+    return port_x + sign * _get_offset(ctx, entry_port_id, line_id)
 
 
 def _bundled_feeders(
@@ -80,7 +108,11 @@ def _perp_approach_fan_x(
     outside of the bend, matching the intra-section bundle order, so the feeders
     do not cross.  The inter-section feeder drop and the intra-section drop both
     anchor on this one X.  Lines without a bundled feeder stay on the trunk.
+    A lane-stacked section's entry crosses each line where its lane plan does
+    (:func:`_planned_entry_crossing`).
     """
+    if _lane_stacked_perp_entry(ctx.graph, entry_port_id):
+        return _planned_entry_crossing(ctx, entry_port_id, line_id, port_x)
     index, count, _source = next(
         iter(_bundled_feeders(ctx, entry_port_id, line_id)), (0, 1, "")
     )
@@ -96,8 +128,9 @@ def _perp_entry_crossing_x(
     this one X so the line passes straight through the boundary rather than
     converging on the port marker and re-fanning.
 
-    A port with a dealt column (:class:`perp_columns.PerpEntryColumn`) is
-    crossed on that column's channel by every feeder.  Otherwise a distinct-line
+    A TOP or BOTTOM entry of a section whose lanes run along y is crossed
+    where the lane plan puts each line (:func:`_planned_entry_crossing`).
+    Otherwise a distinct-line
     perp entry (:func:`needs_perp_approach_fan`) fans its single-line feeders
     onto parallel approach channels by bundle index --
     :func:`_perp_approach_fan_x` -- since their feeder lanes all collapse onto
@@ -118,9 +151,8 @@ def _perp_entry_crossing_x(
     index on that side.  Returns ``None`` when no bundled inter-section feeder
     reaches the port for this line (nothing to align to).
     """
-    column = ctx.perp_entry_columns.get(entry_port_id)
-    if column is not None and column.offsets is not None:
-        return port_x + column.offset(line_id)
+    if _lane_stacked_perp_entry(ctx.graph, entry_port_id):
+        return _planned_entry_crossing(ctx, entry_port_id, line_id, port_x)
     if needs_perp_approach_fan(ctx.graph, entry_port_id):
         return _perp_approach_fan_x(ctx, entry_port_id, line_id, port_x)
     feeders = _bundled_feeders(ctx, entry_port_id, line_id)
@@ -202,7 +234,7 @@ def _perp_riser_lateral(
     """
     entry_port_id = _aligned_horizontal_drop_entry(ctx, station_id)
     if entry_port_id is not None:
-        return _get_offset(ctx, entry_port_id, line_id)
+        return _planned_entry_crossing(ctx, entry_port_id, line_id, 0.0)
     if side == PortSide.TOP:
         return _get_offset(ctx, station_id, line_id)
     off = _get_offset(ctx, station_id, line_id)

@@ -583,7 +583,6 @@ ROUTE_SYSTEM_COMPATIBILITY_REASONS: Mapping[str, Mapping[str, CompatibilityFamil
                     "fixed-anchor-owned-by-another-plan",
                     "entry-bundle-owns-the-shared-seam-lanes",
                     "lane-arms-pinned-to-overlapping-corners",
-                    "linear-entry-frame-ownership-conflict",
                     "merge-branch-shares-the-descent-corner",
                     "overlapping-planned-turn-axes",
                     "shared-source-ownership-conflict",
@@ -1324,6 +1323,10 @@ class ExitTurnPlan:
     legacy_reason: str | None
     provenance: tuple[ReservationDecisionRef, ...]
     departure_orders: tuple[DepartureLaneOrder, ...]
+    nest_order: tuple[str, ...] = ()
+    """The member lines in the order they turn off the source run, along its
+    travel: their axes read along the run.  Two of the plan's start legs nest
+    by it at a shared corner, a later turn-off outer along the run."""
 
     def __post_init__(self) -> None:
         planned = self.disposition is ExitTurnDisposition.PLANNED

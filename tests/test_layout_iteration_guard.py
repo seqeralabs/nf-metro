@@ -40,8 +40,8 @@ import layout_iteration_guard as guard
 import pytest
 
 ALLOWLIST_PATH = Path(__file__).parent / "data" / "layout_iteration_allowlist.json"
-ROUTING_CEILING = 72
-PLACEMENT_CEILING = 44
+ROUTING_CEILING = 56
+PLACEMENT_CEILING = 26
 PINNED_LATER_CEILING = 22
 PINNED_NESTED_CEILING = 1
 LISTS = ("routing", "placement")
@@ -170,17 +170,17 @@ def test_registry_is_derived_from_the_source(live):
 
     Pins entry points that no allowlist entry targets, plus count floors."""
     reg, _ = live
-    assert {"_compute_section_layout", "_run_offset_phases"} <= reg.tables
+    assert "_compute_section_layout" in reg.tables
     assert "_route_edges" in reg.routing_tables
     assert len(reg.table_phases) > 50
-    assert len(reg.offset_writers) > 20
+    assert reg.offset_writers == set()
     assert "compute_layout" in reg.runners
     assert {
         "route_edges",
         "route_edges_centred",
         "observe_route_edges",
-        "compute_station_offsets",
     } <= reg.later_passes
+    assert "compute_station_offsets" not in reg.later_passes
     assert "solve_corridor_cohorts" in reg.solver
 
 

@@ -517,6 +517,49 @@ def _bundled_sibling_owns_opening_column(ctx: _RoutingCtx, edge: Edge) -> bool:
     )
 
 
+def _trunk_landing_point(
+    feeder: list[tuple[float, float]],
+    trunk: list[tuple[float, float]],
+    radius: float,
+) -> tuple[float, float]:
+    """Where a converging *feeder* joins the *trunk* polyline: the trunk
+    point nearest its end, except at a trunk corner the feeder meets along
+    the leg the trunk turns onto, travelling that leg's way.  There it joins
+    two radii along that leg (never past its end), on the straight the
+    trunk's rounded corner leaves, so the two draw as one stroke rather than
+    meeting at a vertex the curve does not reach."""
+    nearest = _closest_point_on_polyline(feeder[-1], trunk)
+    if len(trunk) < 3 or len(feeder) < 2:
+        return nearest
+    (px, py), (qx, qy) = feeder[-2], feeder[-1]
+    fx, fy = qx - px, qy - py
+    for k in range(1, len(trunk) - 1):
+        vx, vy = trunk[k]
+        if (
+            abs(nearest[0] - vx) > COORD_TOLERANCE
+            or abs(nearest[1] - vy) > COORD_TOLERANCE
+        ):
+            continue
+        (ax, ay), (bx, by) = trunk[k - 1], trunk[k + 1]
+        length = math.hypot(bx - vx, by - vy)
+        if length <= COORD_TOLERANCE:
+            return nearest
+        ux, uy = (bx - vx) / length, (by - vy) / length
+        if abs((vx - ax) * uy - (vy - ay) * ux) <= COORD_TOLERANCE:
+            return nearest
+        along_leg = (
+            math.hypot(fx, fy) > COORD_TOLERANCE
+            and abs(fx * uy - fy * ux) <= COORD_TOLERANCE
+            and fx * ux + fy * uy > 0
+            and abs((qx - vx) * uy - (qy - vy) * ux) <= COORD_TOLERANCE
+        )
+        if not along_leg:
+            return nearest
+        reach = min(length, 2 * radius)
+        return (vx + ux * reach, vy + uy * reach)
+    return nearest
+
+
 def _landing_from_trial(
     *,
     plan_member_id: EmissionMemberId,
@@ -545,11 +588,11 @@ def _landing_from_trial(
                     "convergence landing conflicts with an upstream exit turn"
                 )
         _bake_route(route, ctx)
-        join_point = _closest_point_on_polyline(route.points[-1], trunk_points)
+        join_point = _trunk_landing_point(route.points, trunk_points, ctx.curve_radius)
         _connect_route_endpoint(route, join_point)
     else:
         _bake_route(route, ctx)
-        join_point = _closest_point_on_polyline(route.points[-1], trunk_points)
+        join_point = _trunk_landing_point(route.points, trunk_points, ctx.curve_radius)
         _connect_route_endpoint(route, join_point)
     approach = _landing_approach(route, join_point)
     if approach is None:
