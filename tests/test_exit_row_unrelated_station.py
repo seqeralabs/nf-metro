@@ -9,6 +9,8 @@ row; the drawn geometry has to keep each marker clear of the other edges.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.geometry import segment_intersects_bbox
 from nf_metro.layout.phases._common import _station_marker_bbox
@@ -16,40 +18,12 @@ from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.common import apply_route_offsets
 from nf_metro.parser.mermaid import parse_metro_mermaid
 
-SIBLING_BRANCHES_MMD = """\
-%%metro file: b_out | TSV
-%%metro file: c_out | TSV
-%%metro line: main | Main | #0570b0
-%%metro grid: s1 | 0,0
-%%metro grid: s2 | 0,1
-
-graph LR
-    subgraph s1 [Section one]
-        %%metro exit: right | main
-        align[align]
-        summary[summary]
-        collapse[collapse]
-        b[branch B]
-        b_out[ ]
-        c[branch C]
-        c_out[ ]
-        align -->|main| summary
-        align -->|main| collapse
-        collapse -->|main| b
-        b -->|main| b_out
-        collapse -->|main| c
-        c -->|main| c_out
-    end
-
-    subgraph s2 [Section two]
-        %%metro entry: left | main
-        qc[qc]
-        sort[sort]
-    end
-
-    summary -->|main| qc
-    collapse -->|main| sort
-"""
+FIXTURE = (
+    Path(__file__).resolve().parent.parent
+    / "examples"
+    / "topologies"
+    / "exit_row_sibling_branches.mmd"
+)
 
 
 def _marker_crossings(mmd: str) -> list[tuple[str, str, str]]:
@@ -76,4 +50,4 @@ def _marker_crossings(mmd: str) -> list[tuple[str, str, str]]:
 
 def test_exit_runs_clear_sibling_branch_markers() -> None:
     """No drawn segment passes through the marker of a station it doesn't end at."""
-    assert _marker_crossings(SIBLING_BRANCHES_MMD) == []
+    assert _marker_crossings(FIXTURE.read_text()) == []
