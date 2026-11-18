@@ -1773,7 +1773,10 @@ class _Tracks:
 
     def _arrival(self, run: _Run, lid: str) -> _Arrival:
         """*lid*'s arrival key, neighbour lane, nest key and joining station on
-        *run*."""
+        *run*.  A line fed from several sources arrives from the one bringing
+        the most of the run's other lines with it, the nearest among those: a
+        lone feeder joins its line's lane in the bundle rather than ordering
+        the bundle."""
         graph, sec, sid = self.graph, run.sec, run.sec.id
         carriers = sorted(
             (n for n in run.members if lid in graph.station_lines(n)),
@@ -1804,9 +1807,22 @@ class _Tracks:
         if not near:
             return _Arrival(0.0, None, None, None)
         rank = min(p for p, _ in near)
+
+        def shared(s: str) -> int:
+            ends = sec.outs if rank == 0 else sec.ins
+            return sum(
+                1
+                for m in run.present
+                if m != lid and any(n in run.member_set for n in ends.get((s, m), ()))
+            )
+
         source = min(
             (s for p, s in near if p == rank),
-            key=lambda s: (round(abs(self.lateral(s, sid) - run.lateral), 1), s),
+            key=lambda s: (
+                -shared(s),
+                round(abs(self.lateral(s, sid) - run.lateral), 1),
+                s,
+            ),
         )
         sign = self.frames(sid).secondary_sign
         side = round(sign * (self.lateral(source, sid) - run.lateral), 1)

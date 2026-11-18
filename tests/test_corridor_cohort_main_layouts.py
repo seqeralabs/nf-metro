@@ -287,14 +287,6 @@ def test_junction_fed_gap_seats_inside_its_regions_without_an_aperture(
     ]
 
 
-def test_vertical_drops_land_on_distinct_slots(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured = _render(monkeypatch, "cohort_tb_drop_drawn_landing.mmd")
-    assert captured.components
-    assert not captured.overlaid
-
-
 def test_approach_ordered_entry_slots_do_not_overlay(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

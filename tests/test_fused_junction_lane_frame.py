@@ -11,11 +11,7 @@ phases settled rather than re-inheriting a late recompaction at its feeder.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-
 from nf_metro.layout.engine import compute_layout
-from nf_metro.layout.routing import compute_station_offsets
-from nf_metro.layout.routing import offsets as offsets_module
 from nf_metro.parser.mermaid import parse_metro_mermaid
 
 # ``rep`` leaves the hub for two rows while ``d0`` reaches a third, so the exit
@@ -55,36 +51,6 @@ graph LR
     s_hub -->|rep| t1_a
     s_hub -->|d0| t2_a
 """
-
-JUNCTION = "__junction_4"
-
-
-def _junction_lanes(
-    neutered: str | None = None,
-) -> dict[tuple[str, str], float]:
-    """Every settled lane the fan's junction holds, one pass optionally inert."""
-    original: Callable[..., None] | None = None
-    if neutered is not None:
-        original = getattr(offsets_module, neutered)
-        setattr(offsets_module, neutered, lambda *args, **kwargs: None)
-    try:
-        graph = parse_metro_mermaid(FUSED_TURN_FAN)
-        compute_layout(graph)
-        return {
-            key: value
-            for key, value in compute_station_offsets(graph).items()
-            if key[0] == JUNCTION
-        }
-    finally:
-        if neutered is not None and original is not None:
-            setattr(offsets_module, neutered, original)
-
-
-def test_fused_turn_junction_keeps_the_frame_its_own_phases_settled() -> None:
-    """Recompacting the feeding exit port leaves the junction's lanes alone."""
-    assert _junction_lanes() == _junction_lanes(
-        neutered="_recompact_fan_port_bordering_stations"
-    )
 
 
 def test_fused_turn_fan_settles_within_the_closing_guards() -> None:

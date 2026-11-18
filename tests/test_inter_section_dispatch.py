@@ -76,6 +76,12 @@ def test_inter_facts_owns_raw_section_queries() -> None:
     )
 
 
+def _fake_graph(**fields: object) -> SimpleNamespace:
+    """A graph stub whose edges carry no lines, so no bundle reads as running
+    straight on its drawn lanes and the rules key on the port centres."""
+    return SimpleNamespace(edges_from=lambda _node: (), **fields)
+
+
 def _port(side: PortSide, *, is_entry: bool) -> SimpleNamespace:
     return SimpleNamespace(side=side, is_entry=is_entry)
 
@@ -97,7 +103,7 @@ def _facts(**overrides: object) -> H._InterFacts:
         tb_sections=set(),
         station_offsets={},
         merge=SimpleNamespace(trunk_source={}, branch_edges=set()),
-        graph=SimpleNamespace(sections={}),
+        graph=_fake_graph(sections={}),
     )
     defaults: dict[str, object] = dict(
         edge=SimpleNamespace(source="a", target="b", line_id="L"),
@@ -122,6 +128,10 @@ def _facts(**overrides: object) -> H._InterFacts:
         merge_ep=None,
     )
     defaults.update(overrides)
+    fake_ctx = defaults["ctx"]
+    if not hasattr(fake_ctx, "graph"):
+        fake_ctx.graph = _fake_graph(sections={})
+    fake_ctx.graph.is_fanout_junction = fake_ctx.fanout_junctions.__contains__
     return H._InterFacts(**defaults)  # type: ignore[arg-type]
 
 
@@ -151,7 +161,7 @@ _CASES = [
                 tb_sections={"src_sec"},
                 station_offsets={"x": 1.0},
                 merge=SimpleNamespace(trunk_source={}, branch_edges=set()),
-                graph=SimpleNamespace(
+                graph=_fake_graph(
                     sections={"src_sec": SimpleNamespace(direction="TB", bbox_w=0.0)}
                 ),
             ),
@@ -175,7 +185,7 @@ _CASES = [
                 tb_sections={"src_sec"},
                 station_offsets={"x": 1.0},
                 merge=SimpleNamespace(trunk_source={}, branch_edges=set()),
-                graph=SimpleNamespace(
+                graph=_fake_graph(
                     sections={
                         "src_sec": SimpleNamespace(direction="TB", bbox_w=0.0),
                         "mid": SimpleNamespace(
@@ -204,7 +214,7 @@ _CASES = [
                 tb_sections={"src_sec"},
                 station_offsets={"x": 1.0},
                 merge=SimpleNamespace(trunk_source={}, branch_edges=set()),
-                graph=SimpleNamespace(
+                graph=_fake_graph(
                     sections={"src_sec": SimpleNamespace(direction="BT", bbox_w=0.0)}
                 ),
             ),
@@ -394,7 +404,7 @@ def test_would_route_around_section_below(
     edge = SimpleNamespace(source="s", target="t", line_id="L")
     stations = {"s": object(), "t": object()}
     ctx = SimpleNamespace(
-        graph=SimpleNamespace(
+        graph=_fake_graph(
             edge_endpoints=lambda e: (stations[e.source], stations[e.target])
         )
     )
@@ -453,7 +463,7 @@ def test_would_route_around_section_below_propagates_missing_endpoint(
     def fail(*_a: object) -> object:
         raise AssertionError("must not dispatch when an endpoint is missing")
 
-    ctx = SimpleNamespace(graph=SimpleNamespace(edge_endpoints=unresolved))
+    ctx = SimpleNamespace(graph=_fake_graph(edge_endpoints=unresolved))
     monkeypatch.setattr(H, "_build_inter_facts", fail)
     with pytest.raises(UnresolvedEndpointError):
         H._would_route_around_section_below(edge, ctx)  # type: ignore[arg-type]
