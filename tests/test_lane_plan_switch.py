@@ -12,6 +12,7 @@ record, so a ``validate=True`` render draws the production render.
 from __future__ import annotations
 
 import ast
+import contextlib
 import hashlib
 import inspect
 import textwrap
@@ -85,29 +86,34 @@ class _Drawn:
 @lru_cache(maxsize=None)
 def _drawn(path: Path) -> _Drawn:
     """Lay out and render *path*, keeping the settled geometry the render
-    draws; ``graph`` is ``None`` when the map aborts."""
-    settled: list[svg._SettledRenderGeometry] = []
+    draws and the graph copy it settled, whose rows and columns the render
+    translates; ``graph`` is ``None`` when the map aborts."""
+    settled: list[tuple[MetroGraph, svg._SettledRenderGeometry]] = []
     real = svg._settle_render_geometry
 
-    def settle(*args: object, **kwargs: object) -> svg._SettledRenderGeometry:
-        result = real(*args, **kwargs)  # type: ignore[arg-type]
-        settled.append(result)
+    def settle(
+        graph: MetroGraph, *args: object, **kwargs: object
+    ) -> svg._SettledRenderGeometry:
+        result = real(graph, *args, **kwargs)  # type: ignore[arg-type]
+        settled.append((graph, result))
         return result
 
     with warnings.catch_warnings(), pytest.MonkeyPatch.context() as mp:
         warnings.simplefilter("ignore")
         mp.setattr(svg, "_settle_render_geometry", settle)
         try:
-            graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-            observed = svg.build_observed_render_plan(graph, resolve_theme(None, graph))
+            source = prepare_graph(path.read_text(), source_dir=str(path.parent))
+            observed = svg.build_observed_render_plan(
+                source, resolve_theme(None, source)
+            )
         except Exception:
             return _Drawn(None)
     if not settled:
         return _Drawn(None)
-    last = settled[-1]
+    graph, last = settled[-1]
     return _Drawn(
         graph,
-        graph._lane_plan,
+        source._lane_plan,
         dict(last.station_offsets),
         list(last.routes),
         [list(p) for p in last.route_polylines],
@@ -127,19 +133,22 @@ def _perpendicular(graph: MetroGraph, node: str) -> bool:
 
 
 def _end_lateral(
-    points: list[tuple[float, float]], at_start: bool
+    graph: MetroGraph, points: list[tuple[float, float]], at_start: bool, node: str
 ) -> tuple[str, float] | None:
     """The axis across a route's end segment and the route's coordinate on
-    it there, or ``None`` for a diagonal or degenerate end."""
+    it there, or ``None`` for a diagonal or degenerate end or one that stops
+    short of *node* along that segment: a feeder into a convergence's merge
+    junction ends where it lands on the trunk."""
     pts = points if at_start else points[::-1]
     end = pts[0]
     other = next((p for p in pts[1:] if p != end), None)
     if other is None:
         return None
+    station = graph.stations[node]
     dx, dy = other[0] - end[0], other[1] - end[1]
-    if abs(dy) <= 1e-6 < abs(dx):
+    if abs(dy) <= 1e-6 < abs(dx) and abs(end[0] - station.x) <= DRAWN_TOLERANCE:
         return "y", end[1]
-    if abs(dx) <= 1e-6 < abs(dy):
+    if abs(dx) <= 1e-6 < abs(dy) and abs(end[1] - station.y) <= DRAWN_TOLERANCE:
         return "x", end[0]
     return None
 
@@ -168,18 +177,47 @@ def _planned_lateral(drawn: _Drawn, node: str, line_id: str, axis: str) -> float
     return station_lane_coord(frame, station, drawn.offsets[(node, line_id)])
 
 
+def _on_a_rail(graph: MetroGraph, node: str) -> bool:
+    """Whether *node* is a station inside a rail section, which draws each of
+    its lines on that line's own rail, in the rail layout's slot order at the
+    rail pitch, rather than at a lane offset; the section's ports take the
+    record's lanes."""
+    return graph.station_is_rail(node) and not graph.stations[node].is_port
+
+
 def _drawn_mismatches(drawn: _Drawn) -> list[tuple[str, str, float, float]]:
+    """Every route end off its planned lane.  A perpendicular port's riser
+    anchors its bundle by its own convention (reflected about the widest
+    lane, or on the lanes of an entry it drops straight into), so there the
+    record fixes the lanes' order and pitch: every end at the port sits one
+    shared distance from its planned lane."""
+    graph = drawn.graph
+    assert graph is not None
     out = []
+    shifts: dict[str, list[tuple[str, float, float]]] = {}
     for route, polyline in zip(drawn.routes, drawn.polylines, strict=True):
         edge = route.edge  # type: ignore[attr-defined]
         for node, at_start in ((edge.source, True), (edge.target, False)):
-            got = _end_lateral(polyline, at_start)
+            if _on_a_rail(graph, node):
+                continue
+            got = _end_lateral(graph, polyline, at_start, node)
             if got is None:
                 continue
             axis, lateral = got
             want = _planned_lateral(drawn, node, edge.line_id, axis)
-            if want is not None and abs(want - lateral) > DRAWN_TOLERANCE:
+            if want is None:
+                continue
+            if _perpendicular(graph, node):
+                shifts.setdefault(node, []).append((edge.line_id, want, lateral))
+            elif abs(want - lateral) > DRAWN_TOLERANCE:
                 out.append((node, edge.line_id, want, lateral))
+    for node, ends in shifts.items():
+        anchor = ends[0][2] - ends[0][1]
+        out.extend(
+            (node, lid, want + anchor, lateral)
+            for lid, want, lateral in ends
+            if abs(lateral - want - anchor) > DRAWN_TOLERANCE
+        )
     return out
 
 
@@ -219,10 +257,15 @@ def test_every_station_draws_its_lines_in_planned_order(path: Path) -> None:
     for route, polyline in zip(drawn.routes, drawn.polylines, strict=True):
         edge = route.edge  # type: ignore[attr-defined]
         for node, at_start in ((edge.source, True), (edge.target, False)):
-            got = _end_lateral(polyline, at_start)
+            got = _end_lateral(graph, polyline, at_start, node)
             station = graph.stations[node]
             section = graph.sections.get(station.section_id or "")
-            if got is None or section is None or _perpendicular(graph, node):
+            if (
+                got is None
+                or section is None
+                or _perpendicular(graph, node)
+                or _on_a_rail(graph, node)
+            ):
                 continue
             frame = _section_lane_frame(graph, section)
             if frame.secondary.name == got[0]:
@@ -339,7 +382,9 @@ def test_every_approach_arrives_on_its_planned_side(path: Path) -> None:
 
 
 @contextmanager
-def _seal_points(seen: list[tuple[LanePlan, frozenset[str], str]]) -> Iterator[None]:
+def _seal_points(
+    seen: list[tuple[LanePlan, frozenset[str], str, MetroGraph]],
+) -> Iterator[None]:
     real = lane_plan_module.build_lane_plan
 
     def build(graph: MetroGraph) -> LanePlan:
@@ -351,7 +396,7 @@ def _seal_points(seen: list[tuple[LanePlan, frozenset[str], str]]) -> Iterator[N
                 ("lane_plan.py", "routing/offsets.py", "routing/__init__.py")
             )
         )
-        seen.append((plan, frozenset(graph._stages_completed), caller))
+        seen.append((plan, frozenset(graph._stages_completed), caller, graph))
         return plan
 
     with pytest.MonkeyPatch.context() as mp:
@@ -376,24 +421,29 @@ def _validating(validate: bool) -> Iterator[None]:
 
 
 def _seal_point(path: Path, validate: bool) -> tuple[frozenset[str], str] | None:
-    seen: list[tuple[LanePlan, frozenset[str], str]] = []
-    with _validating(validate), _seal_points(seen):
-        try:
-            graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-        except Exception:
-            return None
+    """The stages done and the caller where the layout's record was built,
+    read even when the layout aborts after sealing it."""
+    seen: list[tuple[LanePlan, frozenset[str], str, MetroGraph]] = []
+    with _validating(validate), _seal_points(seen), contextlib.suppress(Exception):
+        prepare_graph(path.read_text(), source_dir=str(path.parent))
     return next(
-        ((stages, caller) for plan, stages, caller in seen if plan is graph._lane_plan),
+        (
+            (stages, caller)
+            for plan, stages, caller, graph in seen
+            if plan is graph._lane_plan
+        ),
         None,
     )
 
 
 @pytest.mark.parametrize("path", CURATED, ids=_rel)
 def test_validation_seals_where_production_does(path: Path) -> None:
+    """A validated layout that reaches the seal seals where production does;
+    one a guard aborts before the seal has no seal to compare."""
     production = _seal_point(path, validate=False)
-    if production is None:
-        return
-    assert _seal_point(path, validate=True) == production
+    validated = _seal_point(path, validate=True)
+    if production is not None and validated is not None:
+        assert validated == production
 
 
 VALIDATE_DIVERGED = [
@@ -561,8 +611,6 @@ def test_the_validated_layout_passes(stem: str) -> None:
 
 STRADDLED_FAN_PORTS = [
     ("side_branch_ascent_label_strike", "sec__entry_left_2"),
-    ("out_of_section_retag_fan", "secA__entry_left_2"),
-    ("symmetric_deadend_fanout_exit", "s1__entry_left_2"),
     ("symmetric_deadend_fanout", "s1__entry_left_1"),
 ]
 

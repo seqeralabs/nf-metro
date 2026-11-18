@@ -2843,7 +2843,7 @@ def _bottom_exit_junction_route_kind(f: _InterFacts) -> _BottomExitJunctionRoute
     if (
         f.h_segment_crosses_other_section(geometry.vx, f.tgt.x, geometry.hy)
         and _route_bottom_exit_junction_via_gap(
-            f.edge, f.src, f.tgt, f.ctx, geometry.vx, rigid
+            f.edge, f.src, f.tgt, f.ctx, geometry, rigid
         )
         is not None
     ):
@@ -2871,7 +2871,7 @@ def _route_bottom_exit_junction_leaf(
             edge, src, tgt, ctx, members, exit_x_offset, hy
         )
     if kind is _BottomExitJunctionRoute.VIA_GAP:
-        return _route_bottom_exit_junction_via_gap(edge, src, tgt, ctx, vx, rigid)
+        return _route_bottom_exit_junction_via_gap(edge, src, tgt, ctx, geometry, rigid)
     return route_tapered(
         edge,
         rigid,
@@ -3011,7 +3011,7 @@ def _route_bottom_exit_junction_via_gap(
     src: Station,
     tgt: Station,
     ctx: _RoutingCtx,
-    vx: float,
+    geometry: _BottomExitJunctionGeometry,
     rigid: list[_TaperedMember],
 ) -> RoutedPath | None:
     """Detour a bottom-exit-junction feed whose horizontal leg crosses a box.
@@ -3020,9 +3020,10 @@ def _route_bottom_exit_junction_via_gap(
     the bundle drops straight down its exit channel to the header-clear gap Y,
     traverses that gap to the clear inter-column channel just left of the target
     column (above the crossed box, whose row starts below the gap), then drops
-    into the target's LEFT entry::
+    into the target's LEFT entry on the bundle's planned lanes there
+    (``geometry.hy``, the entry's mean lane, as the plain L lands)::
 
-        (vx, jy) -> (vx, gy) -> (corner_x, gy) -> (corner_x, ty) -> (tx, ty)
+        (vx, jy) -> (vx, gy) -> (corner_x, gy) -> (corner_x, hy) -> (tx, hy)
 
     Returns ``None`` for a target this shape does not cover (a non-LEFT entry,
     or one with no clear inter-column channel to its left), so the caller falls
@@ -3047,14 +3048,15 @@ def _route_bottom_exit_junction_via_gap(
         ctx.curve_radius,
         reserved=ctx.reserved_bands.rows,
     )
+    vx, hy = geometry.vx, geometry.hy
     route = route_tapered(
         edge,
         rigid,
-        [(vx, src.y), (vx, gy), (corner_x, gy), (corner_x, tgt.y), (tgt.x, tgt.y)],
+        [(vx, src.y), (vx, gy), (corner_x, gy), (corner_x, hy), (tgt.x, hy)],
         transition_leg=1,
         base_radius=ctx.curve_radius,
     )
-    _declare_channel(route, ctx, corner_x, vertical_direction(tgt.y - gy))
+    _declare_channel(route, ctx, corner_x, vertical_direction(hy - gy))
     return route
 
 
