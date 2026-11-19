@@ -744,14 +744,11 @@ def _descent_step_is_stable(
     if len(deltas) != 1:
         return False
     (delta,) = deltas
-    pill_cache = dict(graph._linear_entry_pill_lines_cache)
     shift_section(graph, partial, dy=delta)
     try:
         levelled = compute_station_offsets(graph)
     finally:
         shift_section(graph, partial, dy=-delta)
-        graph._linear_entry_pill_lines_cache.clear()
-        graph._linear_entry_pill_lines_cache.update(pill_cache)
     return all(
         round(
             levelled.get((h.carrier_port, h.line_id), 0.0)

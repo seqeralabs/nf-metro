@@ -24,6 +24,7 @@ from nf_metro.layout.constants import (
 )
 from nf_metro.layout.geometry import (
     AxisFrame,
+    flow_port_sides,
     lanes_run_along_x,
     lanes_run_along_y,
     quantize_coord,
@@ -855,17 +856,39 @@ def _linear_entry_pill_lines(
     sid: str,
     offsets: Mapping[tuple[str, str], float],
 ) -> tuple[str, ...] | None:
-    """Return the inherited cohort defining an accepted entry-frame pill."""
+    """The lines an entry-frame pill covers at *sid*, or ``None``.
+
+    The cohort is the line set of the section's sole flow-side entry that
+    carries lines, when one upstream node feeds all of it and the section's
+    flow-side exit carries all of it or none of it; it defines the pill when it
+    is a contiguous run of two or more lanes and the station's one other line
+    sits beside it.
+    """
     if graph.compact_offsets or graph.line_spread is LineSpread.RAILS:
         return None
     station = graph.stations.get(sid)
     if station is None or station.section_id is None or station.is_port:
         return None
-    inherited = graph._linear_entry_pill_lines_cache.get(sid)
-    # Mirrors the >=2-lane guard in _cache_linear_entry_pill_lines (offsets.py).
-    if inherited is None or len(inherited) < 2:
+    section = graph.sections[station.section_id]
+    entry_side, exit_side = flow_port_sides(section.direction)
+    entries = [
+        pid
+        for pid in section.entry_ports
+        if graph.ports[pid].side is entry_side and graph.station_lines(pid)
+    ]
+    if len(entries) != 1 or len({e.source for e in graph.edges_to(entries[0])}) != 1:
         return None
+    inherited = tuple(sorted(graph.station_lines(entries[0])))
     inherited_set = set(inherited)
+    leaving = {
+        line_id
+        for pid in section.exit_ports
+        if graph.ports[pid].side is exit_side
+        for line_id in graph.station_lines(pid)
+        if line_id in inherited_set
+    }
+    if len(inherited) < 2 or leaving not in (set(), inherited_set):
+        return None
     served = tuple(graph.station_lines(sid))
     local = tuple(line_id for line_id in served if line_id not in inherited_set)
     if len(local) != 1 or not inherited_set.issubset(served):

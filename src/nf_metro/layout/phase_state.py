@@ -358,17 +358,6 @@ PHASE_FIELD_REGISTRY: dict[str, PhaseFieldSpec] = {
             "fails closed on a difference"
         ),
     ),
-    "_linear_entry_pill_lines_cache": PhaseFieldSpec(
-        name="_linear_entry_pill_lines_cache",
-        writer_stage=STATION_OFFSET_LAYOUT,
-        reader_stages=(STATION_OFFSET_LAYOUT, POST_LAYOUT),
-        enforcement=FieldEnforcement.FALLBACK,
-        why=(
-            "accepted linear-entry cohorts projected by each station-offset "
-            "computation; marker bbox, label, and render consumers use the "
-            "cohort with that offset map and tolerate the empty default"
-        ),
-    ),
     "_rail_y": PhaseFieldSpec(
         name="_rail_y",
         writer_stage=RAIL_LAYOUT,

@@ -1102,7 +1102,7 @@ def _source_turn_requirement(
     if family_id is RouteFamilyId.MERGE_BRANCH:
         facts = _build_inter_facts(edge, src, tgt, ctx)
         assert facts.src_col is not None
-        axis = _merge_branch_lead_x(src, ctx, facts.src_col) + (
+        axis = _merge_branch_lead_x(edge, src, ctx, facts.src_col) + (
             ctx.station_offsets or {}
         ).get((edge.target, edge.line_id), 0.0)
         source_offset = (ctx.station_offsets or {}).get(

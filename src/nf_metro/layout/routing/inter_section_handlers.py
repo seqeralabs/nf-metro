@@ -3083,7 +3083,7 @@ def _route_merge_branch(
     src_off = _get_offset(ctx, edge.source, edge.line_id)
     by = ctx.merge.trunk_by.get(edge.target, sy)
 
-    lead_x = _merge_branch_lead_x(src, ctx, src_col)
+    lead_x = _merge_branch_lead_x(edge, src, ctx, src_col)
 
     # Turn along the channel toward the entry port (the way the trunk runs).
     ep_id = ctx.merge.entry_port_for.get(edge.target)
@@ -3111,13 +3111,36 @@ def _route_merge_branch(
     return route
 
 
-def _merge_branch_lead_x(src: Station, ctx: _RoutingCtx, src_col: int) -> float:
-    """Return the source channel fixed by a merge feeder's section edge."""
-    left_edge = col_left_edge(ctx.graph, src_col)
-    right_edge = col_right_edge(ctx.graph, src_col)
+def _merge_branch_lead_x(
+    edge: Edge, src: Station, ctx: _RoutingCtx, src_col: int
+) -> float:
+    """Return the riser column of merge branch *edge* leaving *src*.
+
+    The column sits past the feeder's section edge, one offset step further out
+    for every other line at *src* that turns the same way and lies inside
+    *edge*'s line by the planned offsets, so the branch's corner nests outside
+    theirs at full radius.
+    """
+    graph = ctx.graph
+    left_edge = col_left_edge(graph, src_col)
+    right_edge = col_right_edge(graph, src_col)
     if src.x >= (left_edge + right_edge) / 2:
-        return max(right_edge + MERGE_ROUTE_MARGIN, src.x + ctx.curve_radius)
-    return min(left_edge - MERGE_ROUTE_MARGIN, src.x - ctx.curve_radius)
+        sign, x = 1.0, max(right_edge + MERGE_ROUTE_MARGIN, src.x + ctx.curve_radius)
+    else:
+        sign, x = -1.0, min(left_edge - MERGE_ROUTE_MARGIN, src.x - ctx.curve_radius)
+    offsets = ctx.station_offsets or {}
+    mine = offsets.get((src.id, edge.line_id))
+    if mine is None:
+        return x
+    turn = 1.0 if ctx.merge.trunk_by.get(edge.target, src.y) > src.y else -1.0
+    inner = {
+        other.line_id
+        for other in graph.edges_from(src.id)
+        if other.line_id != edge.line_id
+        and (graph.stations[other.target].y - src.y) * turn > 0
+        and (offsets.get((src.id, other.line_id), mine) - mine) * turn > 0
+    }
+    return x + sign * len(inner) * ctx.offset_step
 
 
 def _would_route_around_section_below(edge: Edge, ctx: _RoutingCtx) -> bool:
@@ -3610,11 +3633,15 @@ def _bypass_geometry(
     half_g1 = (g1_n - 1) * ctx.offset_step / 2
     half_g2 = (g2_n - 1) * ctx.offset_step / 2
 
+    # A fan branch running straight on along its own track never turns through
+    # the fan's shared corner, so it takes no slot stagger there.
+    fan_delta = 0.0
+    if fan is not None and abs(by - src_leg_y) > COORD_TOLERANCE:
+        fan_delta = l_shape_stagger(*fan, gap1_vertical, ctx.offset_step)
+
     if horizontal is Direction.R:
         if fan is not None:
-            ui, un = fan
-            fan_delta = l_shape_stagger(ui, un, gap1_vertical, ctx.offset_step)
-            fan_mid_x = _fan_corner_x(ctx, src, un, horizontal, facts=f)
+            fan_mid_x = _fan_corner_x(ctx, src, fan[1], horizontal, facts=f)
             off1 = fan_delta
             gap1_x = fan_mid_x + fan_delta
         else:
@@ -3639,9 +3666,7 @@ def _bypass_geometry(
             # Wrap-style routes whose source-side curve is on the RIGHT
             # regardless of dx (left-entry wrap, around-section-below) are
             # dispatched through their own handlers, not here.
-            ui, un = fan
-            fan_delta = l_shape_stagger(ui, un, gap1_vertical, ctx.offset_step)
-            fan_mid_x = _fan_corner_x(ctx, src, un, horizontal, facts=f)
+            fan_mid_x = _fan_corner_x(ctx, src, fan[1], horizontal, facts=f)
             off1 = fan_delta
             gap1_x = fan_mid_x + fan_delta
         else:
@@ -6428,8 +6453,10 @@ def _left_entry_wrap_geometry(
     # the builder re-adds ``delta`` on the leftward traverse, so pre-subtract it
     # here to land on the clamped Y.
     corridor = ctx.fan_corridors.get(edge.source)
+    solo_band = False
     if fan is not None and corridor is not None and corridor.band_y is not None:
         hy = corridor.band_y
+        solo_band = not _fan_shares_inter_row_channel(ctx, edge)
     elif fan is not None and _fan_shares_inter_row_channel(ctx, edge):
         # A fanned wrap with no shared corridor band but sibling branches
         # co-travelling this inter-row gap shares the channel with them.  Seat it
@@ -6492,6 +6519,10 @@ def _left_entry_wrap_geometry(
             shared_vx = _fan_left_entry_descent_x(ctx, tgt_col, pos_n, 0.0)
             if shared_vx is not None:
                 vx = shared_vx
+    # A branch alone in its fan's band has no fan-mate to nest beside there, so
+    # its run takes the band centre rather than its slot's stagger.
+    if solo_band:
+        hy -= _entry_wrap_run_displacement(delta, corner_x, vx)
 
     return _entry_wrap_record(
         ctx,
