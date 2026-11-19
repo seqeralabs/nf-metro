@@ -3,7 +3,8 @@
 The fan's slots follow the record's lanes at the junction, read travel-left
 first.  Three consumers of the slots read them only where a fan-mate shares the
 leg: a branch running straight on takes no slot shift, a branch alone in the
-fan's corridor band runs on the band centre, and a restacked trunk's corner
+fan's corridor band runs on the band lane farthest from its source row, and a
+restacked trunk's corner
 nests only with the trunks that turn with it, so a corner turning alone keeps
 the base radius.  Merge risers and entry-frame pills read the same record.
 """
@@ -16,7 +17,11 @@ from pathlib import Path
 import pytest
 
 from nf_metro.api import RenderConfig, prepare_graph, render_graph_result, render_string
-from nf_metro.layout.constants import CURVE_RADIUS, graph_offset_step
+from nf_metro.layout.constants import (
+    BUNDLE_TO_BUNDLE_CLEARANCE,
+    CURVE_RADIUS,
+    graph_offset_step,
+)
 from nf_metro.layout.phases._common import _station_bundle_offset_span
 from nf_metro.layout.routing.offsets import compute_station_offsets
 from nf_metro.parser.model import MetroGraph
@@ -91,26 +96,35 @@ def test_a_straight_on_fan_branch_stays_on_its_track() -> None:
     assert len({round(y, 3) for _x, y in route.points[: riser + 1]}) == 1
 
 
-def test_a_lone_wrap_run_is_not_bundled_with_an_opposite_runner() -> None:
+def test_a_lone_wrap_keeps_clear_of_the_lines_its_descent_crosses() -> None:
     graph, _offsets, plan = _plan(
         TOPOLOGIES / "packed_cell_right_exit_left_entry_wrap.mmd"
     )
     step = graph_offset_step(graph)
     wrap = _route(plan, "__junction_11", "polish__entry_left_7", "short")
-    run_y = wrap.points[3][1]
-    assert wrap.points[3][0] < wrap.points[2][0]
-    rightward = [
-        a[1]
-        for route in plan.routes
-        if route.line_id != "short"
-        for a, b in zip(route.points, route.points[1:])
-        if abs(a[1] - b[1]) < 1e-6
-        and b[0] > a[0]
-        and min(a[0], b[0]) < wrap.points[2][0]
-        and max(a[0], b[0]) > wrap.points[3][0]
-    ]
-    assert rightward
-    assert min(abs(y - run_y) for y in rightward) > 2 * step
+    (_, top), (descent_x, run_y), (run_end_x, _) = wrap.points[1:4]
+    assert wrap.curve_radii is not None
+    arc_top = run_y - wrap.curve_radii[1]
+    crossing, beside = [], []
+    for route in plan.routes:
+        if route.line_id == "short":
+            continue
+        for a, b in zip(route.points, route.points[1:]):
+            if abs(a[1] - b[1]) > 1e-6:
+                continue
+            lo, hi = sorted((a[0], b[0]))
+            if lo < descent_x < hi and top < a[1] < run_y:
+                crossing.append(a[1])
+            if lo < descent_x and hi > run_end_x:
+                beside.append((a[1], b[0] > a[0]))
+    assert crossing
+    assert all(y < arc_top for y in crossing)
+    assert all(abs(y - run_y) >= step for y, _ in beside)
+    assert all(
+        abs(y - run_y) >= BUNDLE_TO_BUNDLE_CLEARANCE
+        for y, rightward in beside
+        if rightward
+    )
 
 
 def test_a_restacked_corner_turning_alone_keeps_the_base_radius() -> None:
