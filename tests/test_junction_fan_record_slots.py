@@ -3,9 +3,11 @@
 The fan's slots follow the record's lanes at the junction, read travel-left
 first, after the lines that turn through the fan's corner: a line running
 straight on takes the last slots and no slot shift.
-A restacked trunk's corner nests only with the trunks that turn with it, so a
-corner turning alone keeps the base radius.  Merge risers read the same record,
-and a station's pill covers every line that stops there.
+A fan corner is sized by the lines that turn through it, read in the frame of
+each branch's first turn, and a restacked trunk's corner nests only with the
+trunks that turn with it, so a corner turning alone keeps the base radius.
+Merge risers read the same record, and a station's pill covers every line that
+stops there.
 """
 
 from __future__ import annotations
@@ -138,6 +140,50 @@ def test_a_restacked_corner_turning_alone_keeps_the_base_radius() -> None:
     )
     assert route.curve_radii is not None
     assert set(route.curve_radii) == {CURVE_RADIUS}
+
+
+@pytest.mark.parametrize(
+    ("path", "source", "turners"),
+    [
+        (
+            REPROS / "inter_row_corridor_overflow.mmd",
+            "__junction_12",
+            (("calling__entry_left_8", "la"), ("calling__entry_left_8", "lc")),
+        ),
+        (
+            TOPOLOGIES / "seed72_cross_family_fan.mmd",
+            "__junction_4",
+            (("exempt_target__entry_right_3", "exempt"),),
+        ),
+    ],
+    ids=["two_turners", "lone_turner"],
+)
+def test_a_fan_corner_is_sized_by_the_lines_turning_through_it(
+    path: Path, source: str, turners: tuple[tuple[str, str], ...]
+) -> None:
+    _graph, _offsets, plan = _plan(path)
+    radii = []
+    for target, line_id in turners:
+        route = _route(plan, source, target, line_id)
+        assert route.curve_radii is not None
+        radii.append(route.curve_radii)
+    step = graph_offset_step(_graph)
+    assert sorted(r[0] for r in radii) == [
+        CURVE_RADIUS + k * step for k in range(len(radii))
+    ]
+    if len(radii) == 1:
+        assert radii[0][-1] == CURVE_RADIUS
+
+
+def test_an_around_below_branch_reads_its_slot_in_its_descents_frame() -> None:
+    _graph, _offsets, plan = _plan(TOPOLOGIES / "bypass_left_entry_from_right.mmd")
+    wrap = _route(plan, "__junction_3", "target__entry_left_1", "main")
+    mate = _route(plan, "__junction_3", "sibling__entry_left_2", "side")
+    step = graph_offset_step(_graph)
+    assert wrap.curve_radii is not None and mate.curve_radii is not None
+    assert wrap.curve_radii[:2] == (CURVE_RADIUS + step,) * 2
+    assert mate.curve_radii[0] == CURVE_RADIUS
+    assert wrap.curve_radii[2:] == (CURVE_RADIUS, CURVE_RADIUS)
 
 
 @pytest.mark.parametrize(

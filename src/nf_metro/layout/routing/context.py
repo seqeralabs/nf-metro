@@ -1231,6 +1231,25 @@ def _lines_running_straight_on(
     return lines - turning
 
 
+def fan_turning_slots(ctx: _RoutingCtx, jid: str) -> set[int]:
+    """Slots of junction *jid*'s fan held by lines that turn through its corner."""
+    branches = {
+        key: slot for key, slot in ctx.junction_fan_info.items() if key[0] == jid
+    }
+    straight = (
+        _lines_running_straight_on(
+            ctx.graph,
+            jid,
+            _junction_lead(ctx.graph, jid),
+            [ctx.edge_by_key[key] for key in branches],
+            ctx.station_offsets,
+        )
+        if ctx.station_offsets
+        else set()
+    )
+    return {i for (_s, _t, lid), (i, _n) in branches.items() if lid not in straight}
+
+
 def _compute_junction_fan_info(
     graph: MetroGraph,
     junction_ids: Iterable[str],

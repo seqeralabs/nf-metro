@@ -126,6 +126,7 @@ from nf_metro.layout.routing.context import (
     _section_lane_frame,
     _tb_x_offset,
     boxed_fanout_junction,
+    fan_turning_slots,
     is_near_vertical_drop,
     packed_cell_same_row_bypass,
 )
@@ -988,7 +989,9 @@ def _route_right_entry_drop_in(
         [(edge, edge.line_id, -delta)],
         centerline,
         base_radius=ctx.curve_radius,
-        bundle_offsets=fan_offsets(pos_n, ctx.offset_step),
+        bundle_offsets=fan_corner_offsets(
+            ctx, edge, pos_n, vertical_direction(ey - sy)
+        ),
     )
     assert route is not None  # the lone member is always in its own bundle
     _declare_channel(route, ctx, corner_x, vertical_direction(ey - sy))
@@ -4492,7 +4495,7 @@ def _route_l_shape_fan(
         [(edge, edge.line_id, -delta)],
         centerline,
         base_radius=ctx.curve_radius,
-        bundle_offsets=fan_offsets(un, ctx.offset_step),
+        bundle_offsets=fan_corner_offsets(ctx, edge, un, geometry.turn_direction),
         normalize_exempt=False,
     )
     assert route is not None  # the lone member is always in its own bundle
@@ -6259,6 +6262,24 @@ def _fan_corner_x(
     return max(stand_off, slot) if rightward else min(stand_off, slot)
 
 
+def fan_corner_offsets(
+    ctx: _RoutingCtx, edge: Edge, n: int, vertical: Direction
+) -> list[float]:
+    """The signed offsets of the *n*-line fan slots that turn with *edge*.
+
+    A handler routing one junction-fan branch at a time anchors its corners on
+    these, read in the frame of the branch's first turn (*vertical*), so the
+    innermost line that turns takes the base radius: a slot held by a line
+    running straight on through the junction sizes no corner.  A branch outside
+    any junction fan anchors on its whole *n*-line bundle.
+    """
+    fan = ctx.junction_fan_info.get((edge.source, edge.target, edge.line_id))
+    if fan is None:
+        return fan_offsets(n, ctx.offset_step)
+    slots = fan_turning_slots(ctx, edge.source) | {fan[0]}
+    return [-l_shape_stagger(j, n, vertical, ctx.offset_step) for j in sorted(slots)]
+
+
 def _wrap_fan_geometry(
     ctx: _RoutingCtx,
     edge: Edge,
@@ -6396,7 +6417,9 @@ def _route_entry_wrap(
         [(edge, edge.line_id, -delta)],
         centerline,
         base_radius=ctx.curve_radius,
-        bundle_offsets=fan_offsets(pos_n, ctx.offset_step),
+        bundle_offsets=fan_corner_offsets(
+            ctx, edge, pos_n, vertical_direction(channel_y - sy)
+        ),
         normalize_exempt=normalize_exempt,
     )
     assert route is not None  # the lone member is always in its own bundle
@@ -7028,7 +7051,7 @@ def _around_section_below_geometry(
     for what *channel_y* overrides.
     """
     sy = src.y
-    ex, ey = entry_port.x, entry_port.y
+    ex = entry_port.x
 
     # The route shares its first corner with any sibling routes from the same
     # junction (junction_fan_info pivots all outgoing edges through one shared
@@ -7040,7 +7063,7 @@ def _around_section_below_geometry(
         src,
         i,
         n,
-        vertical_direction(ey - sy),
+        Direction.D,
         include_fan=include_fan,
     )
 
@@ -7656,7 +7679,7 @@ def _build_right_entry_wrap_route(
     ex = entry_port.x
 
     _fan, pos_n, delta, corner_x = _wrap_fan_geometry(
-        ctx, edge, src, f.i, f.n, vertical_direction(entry_port.y - src.y)
+        ctx, edge, src, f.i, f.n, vertical_direction(channel_y_base - src.y)
     )
 
     # V_down/up channel centre, just RIGHT of the target section's bbox in the
@@ -8092,7 +8115,9 @@ def _route_left_entry_via_band_hop(f: _InterFacts) -> RoutedPath:
         [(edge, edge.line_id, -delta)],
         centerline,
         base_radius=ctx.curve_radius,
-        bundle_offsets=fan_offsets(geom.pos_n, ctx.offset_step),
+        bundle_offsets=fan_corner_offsets(
+            ctx, edge, geom.pos_n, vertical_direction(geom.band0_y - src.y)
+        ),
     )
     assert route is not None
     _declare_channel(route, ctx, geom.corner_x, Direction.D)
