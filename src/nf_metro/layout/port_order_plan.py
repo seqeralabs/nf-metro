@@ -185,6 +185,10 @@ class SideRule(Enum):
     """A single line's loop from a LEFT exit into a far LEFT entry of a
     section entered from its left runs over the target's top, on the entry
     traveller's left, where the far-side wrap handler finds that band clear."""
+    FORK_NEST = "fork-nest"
+    """A fork's branch off a TOP or BOTTOM exit passes on the side the exit faces,
+    unless a line on a lane outside its turn there leaves for a node short of the
+    entry, which that side would cross: then on the other side."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -589,6 +593,9 @@ class PortOrderBuilder:
         landing on the port, unless the source is a boxed fan-out, the same
         line hands over through a nearer packed sibling whose own hop bypasses,
         or a section from a row above spans down across the hop's columns."""
+        fork = self.fork_branch_side(entry_id, source_id)
+        if fork is not None:
+            return fork, SideRule.FORK_NEST
         graph = self.graph
         port = graph.ports[entry_id]
         target = graph.section_for_port(port)
@@ -655,6 +662,42 @@ class PortOrderBuilder:
             ):
                 return below, SideRule.SCREEN_BELOW
         return -below, SideRule.ROW_TOP
+
+    def fork_branch_side(self, entry_id: str, source_id: str) -> int | None:
+        """:attr:`SideRule.FORK_NEST`'s side, or ``None`` where *source_id* is no
+        TOP or BOTTOM exit into a fork or has no lane order yet."""
+        source = self.graph.ports.get(source_id)
+        if (
+            source is None
+            or source.is_entry
+            or source.side not in (PortSide.TOP, PortSide.BOTTOM)
+            or not self.feeds_junction(source_id)
+        ):
+            return None
+        heading = EXIT_SIDE_DIRECTION[source.side]
+        travel = port_travel(self.graph.ports[entry_id])
+        turn = _lateral(direction_vector(travel), (0.0, 0.0), heading)
+        order = self.order_of(source_id)
+        if not turn or order is None or order.lines is None:
+            return None
+
+        def reach(lid: str) -> list[str]:
+            ups = self.upstream_sources
+            return [p for p in self.graph.ports if (source_id, True) in ups(p, lid)]
+
+        mine = [i for i, lid in enumerate(order.lines) if entry_id in reach(lid)]
+        outer = order.lines[: min(mine)] if turn > 0 else order.lines[max(mine) + 1 :]
+
+        def along(node: str) -> float:
+            return -_behind(self.point(node), (0.0, 0.0), travel)
+
+        crossed = any(
+            along(source_id) < along(node) < along(entry_id)
+            for lid in outer
+            for node in reach(lid)
+        )
+        facing = _sign(_lateral(direction_vector(heading), (0.0, 0.0), travel))
+        return -facing if crossed else facing
 
     def hop_obstructed(self, hop_id: str, entry_id: str) -> bool:
         """Whether dispatch takes the hop into *entry_id* as a packed-cell

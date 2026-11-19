@@ -7,6 +7,11 @@ across the exit's row traverses the channel on the exit's side of that row,
 clear of the row's header badges.  A merge trunk into a TOP or BOTTOM entry
 takes the staircase the port's other feeders take instead of reaching the port's
 edge from beyond the section.
+
+Which side of the row a branch passes is the lane plan's: on the side the exit
+faces, unless a line on a lane outside the branch's turn at the exit leaves for a
+node short of the branch's entry, which that side would cross.  Every branch is
+drawn on the side the record states.
 """
 
 from __future__ import annotations
@@ -19,6 +24,10 @@ import pytest
 from nf_metro.api import RenderConfig, prepare_graph, render_graph_result
 from nf_metro.layout.constants import COORD_TOLERANCE, INTER_ROW_HEADER_CLEARANCE
 from nf_metro.layout.geometry import segment_intersects_bbox
+from nf_metro.layout.lane_plan import recorded_lane_plan
+from nf_metro.layout.port_order_plan import SideRule, port_travel
+from nf_metro.layout.routing.common import segments_properly_cross
+from nf_metro.layout.routing.orientation import lateral_order_sign
 from nf_metro.parser.model import PortSide
 from nf_metro.themes import resolve_theme
 
@@ -32,6 +41,8 @@ BT_TOP = REGRESSIONS / "approach_order_carry_sandwich.mmd"
 TB_BOTTOM = TOPOLOGIES / "fold_stacked_branch.mmd"
 BT_TOP_LEFTWARD = REGRESSIONS / "approach_order_feeders_not_interleaved.mmd"
 SEAM = REGRESSIONS / "departure_order_perpendicular_seam.mmd"
+MULTI_LINE = REGRESSIONS / "approach_order_multi_line_feeder.mmd"
+OVERRIDDEN = REGRESSIONS / "approach_order_overridden_later.mmd"
 
 FORK_FIXTURES = [LR_TOP, LR_BOTTOM, BT_TOP, TB_BOTTOM]
 INSET = 2.0
@@ -43,7 +54,11 @@ def _render(path: Path):
         graph, resolve_theme(None, graph, "light"), RenderConfig()
     ).plan
     drawn = list(zip(plan.routes, plan.route_polylines, strict=True))
+    _RECORDS[path] = recorded_lane_plan(graph)
     return _DrawnGraph(plan.graph, graph.junction_ids), drawn
+
+
+_RECORDS: dict[Path, object] = {}
 
 
 class _DrawnGraph:
@@ -218,3 +233,51 @@ def test_a_feed_into_a_perpendicular_entry_merge_crosses_no_section(
         assert not any(_crosses(line, box) for box in boxes), (
             f"{route.edge.source}->{route.edge.target} {route.line_id}: {line}"
         )
+
+
+@pytest.mark.parametrize(
+    ("fixture", "entry", "exit_port", "side"),
+    [
+        (MULTI_LINE, "z2__entry_left_2", "z0__exit_top_0", "below"),
+        (BT_TOP, "sec2__entry_left_3", "sec0__exit_top_2", "below"),
+        (BT_TOP, "sec3__entry_left_4", "sec0__exit_top_2", "below"),
+        (OVERRIDDEN, "sec3__entry_left_4", "sec1__exit_top_0", "above"),
+        (LR_TOP, "sec4__entry_left_5", "sec2__exit_top_1", "above"),
+    ],
+    ids=["inner_bundle", "inner_near", "inner_far", "outermost", "lr_outermost"],
+)
+def test_a_fork_branch_passes_the_row_on_the_side_no_outer_lane_crosses(
+    fixture: Path, entry: str, exit_port: str, side: str
+) -> None:
+    """The outermost branch of a turn passes on the side its TOP exit faces;
+    a branch inside lanes that leave for a nearer entry passes the other side."""
+    graph, _drawn = _render(fixture)
+    approach = _RECORDS[fixture].port_orders.approaches[(entry, exit_port)]  # type: ignore[attr-defined]
+    below = approach.side * lateral_order_sign(port_travel(graph.ports[entry])) > 0
+    assert approach.rule is SideRule.FORK_NEST
+    assert ("below" if below else "above") == side
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    [MULTI_LINE, BT_TOP, OVERRIDDEN, LR_TOP],
+    ids=_ids([MULTI_LINE, BT_TOP, OVERRIDDEN, LR_TOP]),
+)
+def test_no_two_branches_of_a_fork_cross_each_other(fixture: Path) -> None:
+    """Lines leaving one fork for different entries never cross."""
+    graph, drawn = _render(fixture)
+    forks = _perp_forks(graph)
+    branches = [(route, line) for route, line in drawn if route.edge.source in forks]
+    assert branches
+    crossings = [
+        (a.edge.target, a.line_id, b.edge.target, b.line_id, hit)
+        for i, (a, line_a) in enumerate(branches)
+        for b, line_b in branches[i + 1 :]
+        if a.edge.source == b.edge.source
+        and a.edge.target != b.edge.target
+        and a.line_id != b.line_id
+        for p0, p1 in pairwise(line_a)
+        for q0, q1 in pairwise(line_b)
+        if (hit := segments_properly_cross(p0, p1, q0, q1, reject_collinear_touch=True))
+    ]
+    assert crossings == []

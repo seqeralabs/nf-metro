@@ -143,6 +143,7 @@ from nf_metro.layout.routing.normalize import (
     _restack_channel,
     _VChannel,
 )
+from nf_metro.layout.routing.offsets import _recorded_approach as _recorded_side
 from nf_metro.layout.routing.orientation import lateral_order_sign
 from nf_metro.layout.routing.perp import (
     _lane_stacked_perp_entry,
@@ -2859,9 +2860,7 @@ def _bottom_exit_junction_route_kind(f: _InterFacts) -> _BottomExitJunctionRoute
     geometry, _members, rigid, _offset = _bottom_exit_junction_parts(f)
     if (
         f.h_segment_crosses_other_section(geometry.vx, f.tgt.x, geometry.hy)
-        and _route_bottom_exit_junction_via_gap(
-            f.edge, f.src, f.tgt, f.ctx, geometry, rigid
-        )
+        and _route_bottom_exit_junction_via_gap(f.edge, f.src, f.tgt, f.ctx, geometry)
         is not None
     ):
         return _BottomExitJunctionRoute.VIA_GAP
@@ -2892,7 +2891,7 @@ def _route_bottom_exit_junction_leaf(
             edge, src, tgt, ctx, members, exit_x_offset, hy
         )
     if kind is _BottomExitJunctionRoute.VIA_GAP:
-        return _route_bottom_exit_junction_via_gap(edge, src, tgt, ctx, geometry, rigid)
+        return _route_bottom_exit_junction_via_gap(edge, src, tgt, ctx, geometry)
     return route_tapered(
         edge,
         rigid,
@@ -3033,7 +3032,6 @@ def _route_bottom_exit_junction_via_gap(
     tgt: Station,
     ctx: _RoutingCtx,
     geometry: _BottomExitJunctionGeometry,
-    rigid: list[_TaperedMember],
 ) -> RoutedPath | None:
     """Detour a bottom-exit-junction feed whose horizontal leg crosses a box.
 
@@ -3072,19 +3070,24 @@ def _route_bottom_exit_junction_via_gap(
     vx, hy = geometry.vx, geometry.hy
     exit_pid, _exit_sec = _bottom_exit_junction_exit_port(ctx, edge.source)
     exit_side, exit_y = ctx.graph.ports[exit_pid].side, ctx.graph.stations[exit_pid].y
-    exit_row = _resolve_section_colrow(ctx.graph, ctx.graph.stations[exit_pid])[1]
+    exit_col, exit_row = _resolve_section_colrow(
+        ctx.graph, ctx.graph.stations[exit_pid]
+    )
+    detour: list[tuple[float, float]] = []
     if (hy - src.y) * (src.y - exit_y) < 0 and exit_row is not None:
         # The target lies back across the exit's own row: the traverse runs in
         # the channel on the exit's side of that row, clear of its header badges.
-        gy = (
-            header_corridor_y(
-                ctx.graph, exit_row, below=True, base_radius=ctx.curve_radius
-            )
-            if exit_side is PortSide.BOTTOM
-            else row_top_edge(ctx.graph, exit_row)
-            - INTER_ROW_HEADER_CLEARANCE
-            - ctx.curve_radius
-        )
+        # A branch the record sends round the far side drops past the section.
+        bottom, r = exit_side is PortSide.BOTTOM, ctx.curve_radius
+        below = header_corridor_y(ctx.graph, exit_row, below=True, base_radius=r)
+        above = row_top_edge(ctx.graph, exit_row) - INTER_ROW_HEADER_CLEARANCE - r
+        gy, far_y = (below, above) if bottom else (above, below)
+        if _recorded_side(ctx.graph, edge) == ("above" if bottom else "below"):
+            assert exit_col is not None
+            drop_x = _corridor_descent_x(ctx, exit_col + 1, ep_row, 0.0)
+            if drop_x is None:
+                return None
+            detour = [(drop_x, gy), (drop_x, far_y)]
     else:
         gy = inter_row_channel_y(
             ctx.graph,
@@ -3096,14 +3099,18 @@ def _route_bottom_exit_junction_via_gap(
             ctx.curve_radius,
             reserved=ctx.reserved_bands.rows,
         )
+    run_y = detour[-1][1] if detour else gy
+    tail = [(corner_x, run_y), (corner_x, hy), (tgt.x, hy)]
     route = route_tapered(
         edge,
-        rigid,
-        [(vx, src.y), (vx, gy), (corner_x, gy), (corner_x, hy), (tgt.x, hy)],
-        transition_leg=1,
+        gather_tapered_bundle(ctx, edge)[0],
+        [(vx, src.y), (vx, gy), *detour, *tail],
+        transition_leg=3 + len(detour),
         base_radius=ctx.curve_radius,
     )
-    _declare_channel(route, ctx, corner_x, vertical_direction(hy - gy))
+    channels = [(corner_x, run_y, hy), *((x, gy, run_y) for x, _y in detour[:1])]
+    for x, y0, y1 in channels:
+        _declare_channel(route, ctx, x, vertical_direction(y1 - y0))
     return route
 
 
