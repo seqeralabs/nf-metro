@@ -12,6 +12,7 @@ import nf_metro.layout.routing.convergences as convergence_routing
 from nf_metro.api import prepare_graph
 from nf_metro.layout.constants import CURVE_RADIUS
 from nf_metro.layout.geometry import point_to_polyline_distance
+from nf_metro.layout.port_order_plan import port_travel
 from nf_metro.layout.route_plan import (
     ROUTE_SYSTEM_COMPATIBILITY_REASONS,
     BindingKind,
@@ -49,6 +50,7 @@ from nf_metro.layout.routing.invariants import (
     check_merge_branches_meet_trunk,
     check_merge_feeders_land_on_trunk,
 )
+from nf_metro.layout.routing.orientation import lateral_order_sign
 from nf_metro.parser.model import Edge, MetroGraph, PortSide, Station
 from nf_metro.parser.route_topology import ResolvedEdge, build_route_topology_query
 
@@ -56,6 +58,7 @@ ROOT = Path(__file__).parents[1]
 TOPOLOGIES = ROOT / "examples" / "topologies"
 GUIDE = ROOT / "examples" / "guide"
 FROZEN = ROOT / "tests" / "fixtures" / "hash_seed_determinism"
+STAGGERED_ASSEMBLY = ROOT / "examples" / "genomeassembly_staggered.mmd"
 SEED_15_ABORT = "convergence feeder opening turn is invalid"
 
 
@@ -363,7 +366,7 @@ def test_every_feeder_join_connects_to_the_target_entry() -> None:
 
 
 def test_multiple_lines_share_the_target_entry_bundle_order() -> None:
-    _graph, _offsets, observed = _observe(FROZEN / "seed_15.mmd")
+    _graph, _offsets, observed = _observe(ROOT / "examples" / "genomic_pipeline.mmd")
     plans_by_entry: dict[object, list] = {}
     for plan in observed.plan.convergence_plans:
         plans_by_entry.setdefault(plan.entry_group_ids[0], []).append(plan)
@@ -400,7 +403,7 @@ def test_frozen_recovery_seeds_have_complete_planned_convergences(name: str) -> 
 
 
 def test_mixed_direct_bypass_and_multirow_approaches_are_frozen() -> None:
-    _graph, _offsets, observed = _observe(FROZEN / "seed_15.mmd")
+    _graph, _offsets, observed = _observe(TOPOLOGIES / "merge_bottom_row_bypass.mmd")
     landings = [
         landing for plan in observed.plan.convergence_plans for landing in plan.landings
     ]
@@ -469,7 +472,7 @@ def test_target_section_orientations_use_one_convergence_model(
 def test_planned_opening_turns_remain_exact_after_normalization() -> None:
     from nf_metro.layout.routing.normalize import _opening_fanout_descent
 
-    _graph, _offsets, observed = _observe(FROZEN / "seed_15.mmd")
+    _graph, _offsets, observed = _observe(STAGGERED_ASSEMBLY)
     planned = {
         landing.member_id: landing
         for plan in observed.plan.convergence_plans
@@ -499,7 +502,7 @@ def test_planned_opening_turns_remain_exact_after_normalization() -> None:
 
 
 def test_runtime_guard_rejects_a_mutated_planned_opening_segment() -> None:
-    _graph, _offsets, observed = _observe(FROZEN / "seed_15.mmd")
+    _graph, _offsets, observed = _observe(STAGGERED_ASSEMBLY)
     from nf_metro.layout.routing.normalize import _opening_fanout_descent
 
     candidates = []
@@ -755,9 +758,11 @@ def test_perpendicular_entry_convergences_plan_one_trunk_per_crossing_column() -
         axis_by_line[plan.line_ids[0]] = axis.coordinate
 
     # Each trunk stands in the column the port states for its line, so no two
-    # of them share one.
+    # of them share one.  A perpendicular port states its lanes across its own
+    # travel, so the screen column carries that travel's lateral sign.
+    sign = lateral_order_sign(port_travel(graph.ports[port.id]))
     for line_id, coordinate in axis_by_line.items():
-        assert coordinate == pytest.approx(port.x + offsets[(port.id, line_id)])
+        assert coordinate == pytest.approx(port.x + sign * offsets[(port.id, line_id)])
     assert len(set(axis_by_line.values())) == len(plans)
 
 

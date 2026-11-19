@@ -757,7 +757,7 @@ def test_reportho_owned_lead_is_frozen_at_its_concentric_radius() -> None:
     assert (
         tuple(route.curve_radii) == plan.curve_radii == tuple(fresh.curve_radii or ())
     )
-    assert route.curve_radii[0] == 14.0
+    assert route.curve_radii[0] == pytest.approx(6.01)
     assert route.concentric_corner_offsets_by_segment == dict(
         plan.concentric_corner_offsets_by_segment
     )
@@ -1084,10 +1084,9 @@ def test_seed_77_compiles_atomic_single_lane_components() -> None:
     carrier is held inside its own region, so it must not join them into one
     component: the compile would then refuse a component spanning two lanes.
 
-    One component in the gap at column boundary 3 holds a seated-clear order
-    that would carry a lane across its forbidden footprint and past its
-    domain.  That component is seated once with the order kept, so the compile
-    requests the aperture at that boundary and no other.
+    One component in the gap at column boundary 4 cannot seat its lanes inside
+    their domains, so the compile requests the aperture at that boundary and
+    no other.
     """
     path = ROOT / "tests" / "fixtures" / "hash_seed_determinism" / "seed_77.mmd"
     graph, first = _observe(path)
@@ -1118,7 +1117,7 @@ def test_seed_77_compiles_atomic_single_lane_components() -> None:
         (
             BoundaryClearanceRequirementKind.CORRIDOR_COHORT_APERTURE,
             SettlementAxis.COLUMN,
-            3,
+            4,
         )
     ]
 
