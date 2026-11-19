@@ -4904,12 +4904,14 @@ def _looping_lanes(ctx: _RoutingCtx, port_id: str) -> dict[str, float]:
     """Lanes at side port *port_id* of the lines fed from behind it, which
     must loop round the port's section to land."""
     graph = ctx.graph
-    port = graph.stations[port_id]
-    outward = 1.0 if graph.ports[port_id].side is PortSide.RIGHT else -1.0
+    side = graph.ports[port_id].side if port_id in graph.ports else None
+    if side not in (PortSide.LEFT, PortSide.RIGHT):
+        return {}
+    outward = 1.0 if side is PortSide.RIGHT else -1.0
     return {
         e.line_id: _get_offset(ctx, port_id, e.line_id)
         for e in graph.edges_to(port_id)
-        if (graph.stations[e.source].x - port.x) * outward < 0
+        if (graph.stations[e.source].x - graph.stations[port_id].x) * outward < 0
     }
 
 
