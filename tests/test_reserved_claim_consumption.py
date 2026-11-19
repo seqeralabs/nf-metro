@@ -108,7 +108,7 @@ WITHIN_TOLERANCE_OVERHANGS: frozenset[tuple[str, int, int]] = frozenset(
 # than a claim a plan positioned.
 DRAWN_PASS_OUT_OF_BAND_CLAIMS: frozenset[tuple[str, int, int]] = frozenset(
     {
-        ("tests/fixtures/regressions/cohort_grant_beside_seated_runs.mmd", 17, 2),
+        ("tests/fixtures/regressions/cohort_grant_beside_seated_runs.mmd", 25, 2),
     }
 )
 

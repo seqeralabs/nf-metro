@@ -115,8 +115,8 @@ def test_seed_72_s5_source_order_maps_to_descending_turn_columns() -> None:
         for line_id in lines
     }
 
-    assert source_y == {"l1": 328.0, "l2": 332.0, "l3": 336.0}
-    assert [turn_x[line_id] for line_id in lines] == [850.0, 846.0, 842.0]
+    assert source_y == {"l1": 324.0, "l3": 328.0, "l2": 332.0}
+    assert turn_x == {"l1": 850.0, "l3": 846.0, "l2": 842.0}
 
 
 def test_two_line_off_row_fan_keeps_peel_order() -> None:

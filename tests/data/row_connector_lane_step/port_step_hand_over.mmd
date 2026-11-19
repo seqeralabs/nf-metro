@@ -1,0 +1,38 @@
+%%metro title: Fuzz 8403776
+%%metro line: l0 | Assemble | #e6194b
+%%metro line: l1 | Assemble | #3cb44b
+%%metro line: l2 | Annotate | #4363d8
+
+graph LR
+    subgraph sec0 [Annotate_Export_Trim 0]
+        %%metro direction: BT
+        s0n0[dedup_pca]
+        s0n1[gather_bam_call]
+        s0n2[normalize_stats]
+        s0n0 -->|l2| s0n1
+        s0n1 -->|l2| s0n2
+    end
+    subgraph sec1 [Classify 1]
+        %%metro entry: right | l2
+        s1n0[sort_annotate]
+        s1n1[trim_count_polish]
+        s1n2[fastqc_normalize_dedup]
+        s1n3[bam_bin]
+        s1n0 -->|l1,l2| s1n1
+        s1n1 -->|l1,l2| s1n2
+        s1n2 -->|l2| s1n3
+    end
+    subgraph sec2 [Sort_Fastqc 2]
+        %%metro direction: TB
+        s2n0[EXPORT]
+        s2n1[merge]
+        s2n2[annotate_assemble]
+        s2n3[ALIGN_DEDUP]
+        s2n0 -->|l0| s2n1
+        s2n1 -->|l0| s2n3
+        s2n0 -->|l1| s2n2
+        s2n2 -->|l1| s2n3
+    end
+    s0n2 -->|l0| s2n0
+    s1n2 -->|l1| s2n0
+    s0n2 -->|l2| s1n0

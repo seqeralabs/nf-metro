@@ -28,6 +28,7 @@ from nf_metro.layout.routing.common import Direction, SourceTurnout
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import Edge, MetroGraph
 from nf_metro.render.bridges import (
+    BRIDGE_GAP_HALF,
     BRIDGE_NODE_TOLERANCE,
     BridgeBreak,
     _line_reachability,
@@ -191,22 +192,29 @@ def test_seed72_straight_endpoint_bridges_keep_the_full_gap() -> None:
             )
         ]
 
-    # That descent's own approach run (530 -> 568 at y=506) is crossed by two
-    # descents, at x=546 and x=554.  Its right end is a smoothed corner, whose
-    # clearance stops the gap at 552; its left end is the s3 exit port, a
-    # straight run start that imposes no clearance, so the gap keeps the full
-    # BRIDGE_GAP_HALF below the leftmost descent rather than being pulled in.
-    descent = next(
-        route
-        for route in routes
-        if route.edge.source == "s3__exit_right_2"
-        and route.edge.target == "s4__entry_left_9"
+
+def test_straight_run_start_keeps_the_full_gap_against_a_clamped_corner() -> None:
+    """``lower``'s approach run leaves the s3 exit port (617 -> 653 at y=502)
+    and is crossed by two descents, at x=637 and x=641.  Its right end is a
+    smoothed corner, whose clearance stops the gap at 637; its left end is the
+    exit port, a straight run start that imposes no clearance, so the gap keeps
+    the full BRIDGE_GAP_HALF below the leftmost descent rather than being
+    pulled in to match the clamped side."""
+    _graph, routes, polylines, bridges = _bridges(
+        TOPOLOGIES_DIR / "same_destination_vertical_convergence.mmd"
     )
-    assert bridges[id(descent)] == [
+    route, points = next(
+        (route, points)
+        for route, points in zip(routes, polylines, strict=True)
+        if route.edge.source == "s3__exit_right_4"
+        and route.edge.target == "target__entry_left_8"
+    )
+    assert points[:2] == [(617.0, 502.0), (653.0, 502.0)]
+    assert bridges[id(route)] == [
         BridgeBreak(
             seg_index=0,
-            cut_a=(540.0, 506.0),
-            cut_b=(552.0, 506.0),
+            cut_a=(637.0 - BRIDGE_GAP_HALF, 502.0),
+            cut_b=(637.0, 502.0),
         )
     ]
 

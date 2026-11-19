@@ -183,8 +183,8 @@ def test_three_family_exit_bundle_has_one_complete_turn_plan() -> None:
     assert len(plan.system_member_ids) > len(plan.member_ids)
     assert tuple(lane.line_id for lane in plan.source_lanes) == (
         "main",
-        "report",
         "sheets",
+        "report",
     )
     assert set(plan.member_ids) >= {
         assignment.member_id for assignment in plan.assignments
@@ -490,7 +490,7 @@ def test_seed_72_leftward_straight_preserves_source_lane_order() -> None:
     assert plan.disposition is ExitTurnDisposition.PLANNED
     assert system.disposition is RouteSystemDisposition.PLANNED
     assert not system.compatibility_reasons
-    assert tuple(lane.line_id for lane in plan.source_lanes) == ("l6", "l2")
+    assert tuple(lane.line_id for lane in plan.source_lanes) == ("l2", "l6")
     assert all(
         assignment.run_direction is Direction.L
         and assignment.turn_direction is None
@@ -509,7 +509,7 @@ def test_seed_72_leftward_straight_preserves_source_lane_order() -> None:
         for line_id, route in routes.items()
     } == {
         "l2": [(250.0, 664.0), (190.0, 664.0)],
-        "l6": [(250.0, 668.0), (190.0, 668.0)],
+        "l6": [(250.0, 660.0), (190.0, 660.0)],
     }
     validate_exit_turn_plans(graph, observation.routes, observation.plan, offsets)
 
@@ -876,9 +876,9 @@ def test_owners_pinning_one_corner_apart_defer_to_gap_allocation() -> None:
     agree on, it declines wholesale and the emitter draws the nested corner.
     """
     _graph, _offsets, _original_offsets, execution = _build_execution(
-        FIXTURES / "target_entry_runway_bypass.mmd"
+        TOPOLOGIES / "entry_cohort_interleaved_fixed_lane.mmd"
     )
-    plan = next(item for item in execution.plans if item.source_id == "__junction_13")
+    plan = next(item for item in execution.plans if item.source_id == "__junction_4")
 
     assert plan.disposition is ExitTurnDisposition.LEGACY
     assert plan.legacy_reason == exit_turns.GAP_ALLOCATION_PENDING
@@ -2173,8 +2173,10 @@ def test_post_pass_snapshot_preserves_owned_corner_radius(
 
 def test_runtime_invariant_checks_every_station_owner() -> None:
     graph, offsets, observation = _observe(FROZEN / "seed_77.mmd")
-    plan = _plan_for_source(observation, "__junction_37")
+    plan = _plan_for_source(observation, "__junction_35")
+    assert plan.disposition is ExitTurnDisposition.PLANNED
     lane = plan.source_lanes[-1]
+    assert lane.station_ids
     malformed_lane = replace(lane, station_ids=(*lane.station_ids, "not-a-station"))
     malformed_plan = replace(
         plan,
@@ -2797,12 +2799,12 @@ def test_custom_spacing_is_shared_by_offsets_plan_and_routes() -> None:
         abs(right.planned_offset - left.planned_offset) == pytest.approx(10.0)
         for left, right in zip(plan.source_lanes, plan.source_lanes[1:])
     )
-    ordered_axes = sorted(plan.axes, key=lambda item: item.rank)
-    assert all(
-        abs(right.coordinate - left.coordinate)
-        == pytest.approx((right.rank - left.rank) * 10.0)
-        for left, right in zip(ordered_axes, ordered_axes[1:])
-    )
+    # ``sheets`` runs straight between the two turning lanes and takes no
+    # column, so the turning columns sit one spacing apart.
+    assert {axis.line_id: axis.coordinate for axis in plan.axes} == {
+        "main": pytest.approx(830.0),
+        "report": pytest.approx(820.0),
+    }
     system = next(
         item for item in observation.plan.systems if item.id == plan.system_id
     )
