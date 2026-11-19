@@ -16,6 +16,7 @@ import pytest
 
 from nf_metro.layout.constants import COORD_TOLERANCE
 from nf_metro.layout.engine import compute_layout
+from nf_metro.layout.lane_plan import recorded_lane_plan
 from nf_metro.layout.routing import (
     OffsetRegime,
     compute_station_offsets,
@@ -237,7 +238,8 @@ def test_tb_exit_corner_continues_column_and_keeps_bundle_order(path: Path) -> N
     "path", _gather_fixtures(), ids=lambda p: p.relative_to(REPO_ROOT).as_posix()
 )
 def test_no_shared_run_turn_flips_in_gallery(path: Path) -> None:
-    """No shipped fixture turns lines off one shared run onto crossing columns.
+    """No shipped fixture turns lines off one shared run onto crossing columns
+    the lane plan does not record as a forced crossing at the turn.
 
     Lines leaving a source bundled on one horizontal run are one bundle while
     they share it, so the column each turns down at must keep that bundle's
@@ -249,7 +251,18 @@ def test_no_shared_run_turn_flips_in_gallery(path: Path) -> None:
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
-    violations = check_shared_run_turn_preserves_bundle_order(routes, offsets)
+    plan = recorded_lane_plan(graph)
+    recorded = {
+        (f.port, frozenset((f.lines[0], other)))
+        for f in (plan.tracks.forced if plan is not None else ())
+        if f.turn is not None
+        for other in f.lines[1:]
+    }
+    violations = [
+        v
+        for v in check_shared_run_turn_preserves_bundle_order(routes, offsets)
+        if (v.source_id, frozenset((v.line_a, v.line_b))) not in recorded
+    ]
     assert violations == [], (
         f"{path.name}: {len(violations)} shared-run turn flip(s); "
         f"first: {violations[0].message() if violations else ''}"

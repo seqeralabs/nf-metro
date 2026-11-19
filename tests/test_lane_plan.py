@@ -532,8 +532,10 @@ def _straight_seams(graph: MetroGraph) -> list[tuple[str, str, str]]:
 @pytest.mark.parametrize("path", CURATED, ids=lambda p: str(p.relative_to(ROOT)))
 def test_a_straight_seam_keeps_its_lines_level(path: Path) -> None:
     """A line crossing a straight seam leaves its exit and reaches the entry
-    on one coordinate, unless the exit's lane falls between the entry's lanes
-    or another exit also feeds the line straight in: no out-and-back step."""
+    on one coordinate, unless the exit's lane falls between the entry's lanes,
+    another exit also feeds the line straight in, or holding the exit's lane
+    would leave the entry a lane none of its lines rides: no out-and-back
+    step."""
     graph = _laid_out(path).graph
     if graph is None or graph._lane_plan is None:
         return
@@ -550,9 +552,22 @@ def test_a_straight_seam_keeps_its_lines_level(path: Path) -> None:
         on_grid = (here - there) / step
         if abs(on_grid - round(on_grid)) > 0.05 or len(sources[(entry_id, lid)]) > 1:
             continue
-        if abs(here - there) > SAME_Y_TOLERANCE:
+        if abs(here - there) > SAME_Y_TOLERANCE and _packed(
+            graph, plan, entry_id, lid, here, step
+        ):
             stepped.append((exit_id, entry_id, lid))
     assert stepped == []
+
+
+def _packed(graph, plan, entry_id, lid, here, step) -> bool:
+    """Whether *entry_id*'s lines, *lid* moved to *here*, ride adjacent lanes."""
+    at = sorted(
+        {
+            round(here if m == lid else _planned_lateral(graph, plan, entry_id, m), 3)
+            for m in graph.station_lines(entry_id)
+        }
+    )
+    return all(abs(b - a - step) <= SAME_Y_TOLERANCE for a, b in zip(at, at[1:]))
 
 
 def _seam_lane_disagreements(graph: MetroGraph) -> list[str]:

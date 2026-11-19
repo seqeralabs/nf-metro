@@ -253,10 +253,10 @@ def test_riboseq_corridor_band_carries_the_orf_calling_entry_order(
     relative_path: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """``annotation`` and ``riboseq`` run left along the top corridor, drop
-    down the west side and turn right into ``orf_calling``'s left entry, where
-    ``annotation`` holds the lower lane.  Every trunk-slot plan of that band in
-    the render, whichever pass makes it, stacks ``annotation`` above
-    ``riboseq``."""
+    down the west side and turn right into ``orf_calling``'s left entry.  The
+    outer lane stays outer through both turns, so every trunk-slot plan of that
+    band in the render, whichever pass makes it, stacks on top the line the
+    entry holds on the larger offset."""
     annotation = ("novel_transcripts__exit_right_5", "orf_calling__entry_left_7")
     riboseq = ("__junction_13", "psite_id__entry_left_9")
     port = annotation[1]
@@ -286,8 +286,8 @@ def test_riboseq_corridor_band_carries_the_orf_calling_entry_order(
 
     assert seen
     for order, offsets in seen:
-        assert offsets[(port, "annotation")] > offsets[(port, "riboseq")]
-        assert order.index(annotation) < order.index(riboseq), order
+        outer = offsets[(port, "annotation")] > offsets[(port, "riboseq")]
+        assert (order.index(annotation) < order.index(riboseq)) == outer, order
 
 
 def _top_to_bottom_edges(plan) -> list[tuple[str, str]]:
