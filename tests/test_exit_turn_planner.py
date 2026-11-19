@@ -866,24 +866,6 @@ def test_split_stacked_left_entry_drop_is_planned() -> None:
     validate_exit_turn_plans(graph, observation.routes, observation.plan, offsets)
 
 
-def test_owners_pinning_one_corner_apart_defer_to_gap_allocation() -> None:
-    """Owners pinning columns inside one corner defer their shared axis.
-
-    Several families pin this source's turn columns within a single corner's
-    runway, each to a column of its own.  Columns that close together belong to
-    one bundle turning one corner, which nests from a single origin, so the
-    plan may not hand each owner a centre of its own; with no origin the pins
-    agree on, it declines wholesale and the emitter draws the nested corner.
-    """
-    _graph, _offsets, _original_offsets, execution = _build_execution(
-        TOPOLOGIES / "entry_cohort_interleaved_fixed_lane.mmd"
-    )
-    plan = next(item for item in execution.plans if item.source_id == "__junction_4")
-
-    assert plan.disposition is ExitTurnDisposition.LEGACY
-    assert plan.legacy_reason == exit_turns.GAP_ALLOCATION_PENDING
-
-
 @pytest.mark.parametrize(
     ("path", "source_id"),
     (
@@ -891,12 +873,14 @@ def test_owners_pinning_one_corner_apart_defer_to_gap_allocation() -> None:
         (FIXTURES / "planned_compatibility_channel_collision.mmd", "__junction_8"),
         (TOPOLOGIES / "disjoint_sameline_trunks.mmd", "__junction_8"),
         (ROOT / "examples" / "differentialabundance.mmd", "__junction_7"),
+        (TOPOLOGIES / "entry_cohort_interleaved_fixed_lane.mmd", "__junction_4"),
     ),
     ids=(
         "fixed-axis",
         "compatibility-channel",
         "chained-trunk",
         "descent-seating-group",
+        "record-ordered-fan-pins",
     ),
 )
 def test_gap_allocated_exit_turns_are_planned(path: Path, source_id: str) -> None:

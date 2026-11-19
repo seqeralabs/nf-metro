@@ -1,10 +1,8 @@
 """A junction fan seats its branches in the lanes the lane plan records there.
 
 The fan's slots follow the record's lanes at the junction, read travel-left
-first.  Three consumers of the slots read them only where a fan-mate shares the
-leg: a branch running straight on takes no slot shift, a branch alone in the
-fan's corridor band runs on the band lane farthest from its source row, and a
-restacked trunk's corner
+first, after the lines that turn through the fan's corner: a line running
+straight on takes the last slots and no slot shift.  A restacked trunk's corner
 nests only with the trunks that turn with it, so a corner turning alone keeps
 the base radius.  Merge risers and entry-frame pills read the same record.
 """

@@ -6453,10 +6453,8 @@ def _left_entry_wrap_geometry(
     # the builder re-adds ``delta`` on the leftward traverse, so pre-subtract it
     # here to land on the clamped Y.
     corridor = ctx.fan_corridors.get(edge.source)
-    solo_band = False
     if fan is not None and corridor is not None and corridor.band_y is not None:
         hy = corridor.band_y
-        solo_band = not _fan_shares_inter_row_channel(ctx, edge)
     elif fan is not None and _fan_shares_inter_row_channel(ctx, edge):
         # A fanned wrap with no shared corridor band but sibling branches
         # co-travelling this inter-row gap shares the channel with them.  Seat it
@@ -6519,13 +6517,6 @@ def _left_entry_wrap_geometry(
             shared_vx = _fan_left_entry_descent_x(ctx, tgt_col, pos_n, 0.0)
             if shared_vx is not None:
                 vx = shared_vx
-    # The band holds a lane for every fan slot.  A branch alone in it has no
-    # fan-mate to nest beside, so its run takes the lane farthest from the
-    # source row: the lines crossing its descent higher in the gap then cross
-    # its straight leg, clear of its corner.
-    if solo_band:
-        hy += (pos_n - 1) * ctx.offset_step / 2
-        hy -= _entry_wrap_run_displacement(delta, corner_x, vx)
 
     return _entry_wrap_record(
         ctx,

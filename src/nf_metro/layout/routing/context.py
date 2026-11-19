@@ -1187,18 +1187,48 @@ def _compute_bypass_gap_indices(
     return result
 
 
-def _junction_lead_sign(graph: MetroGraph, jid: str) -> int:
-    """Screen sign of travel-right across the exit run fan junction *jid* continues.
-
-    A fan's slot 0 is its travel-left line (:func:`l_shape_stagger`), and the
-    junction's planned offsets lie across that run, so ranking by this sign
-    times the offset seats the slots in the lane order the run arrives in.
-    """
+def _junction_lead(graph: MetroGraph, jid: str) -> Direction:
+    """Direction of the exit run fan junction *jid* continues."""
     for edge in graph.edges_to(jid):
         port = graph.ports.get(edge.source)
         if port is not None and not port.is_entry:
-            return right_normal_axis_sign(EXIT_SIDE_DIRECTION[port.side])
-    return 1
+            return EXIT_SIDE_DIRECTION[port.side]
+    return Direction.R
+
+
+def _lines_running_straight_on(
+    graph: MetroGraph,
+    jid: str,
+    lead: Direction,
+    edges: Iterable[Edge],
+    station_offsets: Mapping[tuple[str, str], float],
+) -> set[str]:
+    """Lines whose every branch leaves junction *jid* straight on along *lead*.
+
+    Such a branch reaches the same or the next grid cell along the lead on the
+    lane it holds at the junction, so it never turns through the fan's corner.
+    """
+    across = 1 if lead in (Direction.L, Direction.R) else 0
+    jst = graph.stations[jid]
+    cell = _resolve_section_colrow(graph, jst)[1 - across]
+    lines: set[str] = set()
+    turning: set[str] = set()
+    for edge in edges:
+        lines.add(edge.line_id)
+        tgt = graph.station_for_edge_target(edge)
+        tgt_cell = _resolve_section_colrow(graph, tgt)[1 - across]
+        lane = (jst.x, jst.y)[across] + station_offsets[(jid, edge.line_id)]
+        tgt_lane = (tgt.x, tgt.y)[across] + station_offsets.get(
+            (edge.target, edge.line_id), 0.0
+        )
+        if (
+            cell is None
+            or tgt_cell is None
+            or abs(tgt_cell - cell) > 1
+            or abs(tgt_lane - lane) > COORD_TOLERANCE
+        ):
+            turning.add(edge.line_id)
+    return lines - turning
 
 
 def _compute_junction_fan_info(
@@ -1383,16 +1413,23 @@ def _compute_junction_fan_info(
         ]
         # Each line's slot follows its planned lane at the junction, read
         # travel-left first, so the descent X order is in phase with the lead-in
-        # it arrives on.  A rail layout plans no per-line offsets: there a clean
+        # it arrives on.  Lines running straight on never turn through the
+        # fan's corner, so they take the last slots and the turning lines nest
+        # from the first.  A rail layout plans no per-line offsets: there a clean
         # divergence (distinct lines peeling to disjoint targets) is ordered
         # outermost-to-innermost by reach and every other fan keeps declaration
         # order.
         fan_lines = {e.line_id for e in all_outgoing}
         if station_offsets:
-            sign = _junction_lead_sign(graph, jid)
+            lead = _junction_lead(graph, jid)
+            sign = right_normal_axis_sign(lead)
+            straight = _lines_running_straight_on(
+                graph, jid, lead, all_outgoing, station_offsets
+            )
             line_ids = sorted(
                 fan_lines,
                 key=lambda lid: (
+                    lid in straight,
                     sign * station_offsets[(jid, lid)],
                     line_priority.get(lid, 0),
                 ),
