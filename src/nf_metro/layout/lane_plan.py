@@ -149,7 +149,8 @@ it, clamped below its pinned bundle-mates after it.  A free line never takes a
 lane a line it coexists with holds, nor one beside a line that runs from the
 run's entry port past one of its stations where the other stops (a *breeze*):
 it steps up past both.  The run then holds no lane none of its lines rides:
-its lanes close up in order about its lowest pinned lane (else its lowest).
+its lanes close up in order about its lowest pinned lane (else its lowest),
+where that moves no lane it keeps but a seam pin's.
 
 **Lines in a seam-pinned run.**  Outside a part entered by bundles, a line
 riding no entry of a run holding a seam-pinned entry lies beside the fixed
@@ -1851,9 +1852,13 @@ class _Tracks:
                 run, order, slots, fixed, bool(pins), arrival, conflict, riding, joins
             )
         held = sorted({lanes[lid] for lid in run.present}) or [0]
-        anchor = min((lanes[lid] for lid in fixed), default=held[0])
+        seamed = {lid for n in members for lid in self.seam_lanes.get(n, ())}
+        kept = [lid for lid in fixed if lid not in seamed]
+        anchor = min((lanes[lid] for lid in kept or fixed), default=held[0])
         shift = anchor - held.index(anchor)
-        lanes = {lid: shift + held.index(lane) for lid, lane in lanes.items()}
+        packed = {lid: shift + held.index(lane) for lid, lane in lanes.items()}
+        if all(packed[lid] == lanes[lid] for lid in kept):
+            lanes = packed
         for n in members:
             if n in self.seam_lanes:
                 self.seam_lanes[n] = {lid: lanes[lid] for lid in self.seam_lanes[n]}
