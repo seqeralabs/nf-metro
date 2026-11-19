@@ -122,6 +122,7 @@ from nf_metro.layout.routing.context import (
     _hop_needs_bypass,
     _resolve_section_col,
     _resolve_section_colrow,
+    _resolve_section_row,
     _RoutingCtx,
     _section_lane_frame,
     _tb_x_offset,
@@ -6287,6 +6288,30 @@ def _fan_shares_inter_row_channel(ctx: _RoutingCtx, edge: Edge) -> bool:
     return len(lines) >= 2
 
 
+def _fan_lane_in_shared_channel(
+    ctx: _RoutingCtx, edge: Edge, src: Station, tgt: Station
+) -> float:
+    """The lane a junction fan sharing *edge*'s inter-row channel gives its line.
+
+    A line holds one lane in a channel, in the record's lane order, so a wrap of
+    a fan line from another source packs beside the fan's turning lines instead
+    of centring onto a lane one of them holds.
+    """
+    graph = ctx.graph
+    rows = (_resolve_section_row(graph, src), _resolve_section_row(graph, tgt))
+    for (jid, _target, line_id), (pos, n) in ctx.junction_fan_info.items():
+        if line_id != edge.line_id or jid == edge.source:
+            continue
+        for branch in graph.edges_from(jid):
+            target = graph.station_for_edge_target(branch)
+            if (
+                _resolve_section_row(graph, graph.stations[jid]),
+                _resolve_section_row(graph, target),
+            ) == rows and _fan_shares_inter_row_channel(ctx, branch):
+                return l_shape_stagger(pos, n, Direction.D, ctx.offset_step)
+    return 0.0
+
+
 def _fan_corner_run(ctx: _RoutingCtx, pos_n: int) -> float:
     """Run from a fan's source to the centreline of its first corner column.
 
@@ -6675,7 +6700,7 @@ def _left_entry_wrap_geometry(
         )
         if claimed_band is not None:
             channel_y = claimed_band.hold(channel_y)
-        hy = channel_y - delta
+        hy = channel_y - delta + _fan_lane_in_shared_channel(ctx, edge, src, tgt)
 
     # V2 descent channel centre, left of the target section.
     vx = _left_entry_descent_x(ctx, tgt.x, pos_n)

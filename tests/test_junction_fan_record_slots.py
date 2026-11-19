@@ -4,7 +4,8 @@ The fan's slots follow the record's lanes at the junction, read travel-left
 first; a line running straight on takes no slot shift.  A fan's lone turning
 line descends in a gap slot seated with the gap's other channels, and a
 descent seated alone where a counter-running channel stands takes its side of
-the pair the gap holds.
+the pair the gap holds.  A wrap of a fan line from another source running the
+fan's inter-row channel takes the lane the fan gives that line.
 A fan corner is sized by the lines that turn through it, read in the frame of
 each branch's first turn, and a restacked trunk's corner nests only with the
 trunks that turn with it, so a corner turning alone keeps the base radius.
@@ -165,6 +166,64 @@ def test_a_lone_descent_and_the_riser_against_it_share_their_gap(
     down = _vertical_leg(_route(plan, *descent), down=True)
     up = _vertical_leg(_route(plan, *riser), down=False)
     assert abs(down - up) >= BUNDLE_TO_BUNDLE_CLEARANCE - COORD_TOLERANCE
+
+
+def _gap_run(route) -> float:
+    a, _b = max(
+        (
+            (a, b)
+            for a, b in zip(route.points, route.points[1:])
+            if abs(a[1] - b[1]) <= COORD_TOLERANCE
+        ),
+        key=lambda leg: abs(leg[1][0] - leg[0][0]),
+    )
+    return a[1]
+
+
+@pytest.mark.parametrize(
+    ("path", "fan_target", "fan_lines", "other", "other_line"),
+    [
+        (
+            REGRESSIONS / "riboseq_row_trunk_subrun.mmd",
+            "orf_calling__entry_left_8",
+            ("riboseq", "tiseq"),
+            ("novel_transcripts__exit_right_2", "te__entry_left_9"),
+            "rnaseq",
+        ),
+        (
+            REPROS / "inter_row_corridor_overflow.mmd",
+            "calling__entry_left_8",
+            ("la", "lc"),
+            ("discovery__exit_right_2", "ratio__entry_left_9"),
+            "lb",
+        ),
+    ],
+    ids=["riboseq_row", "inter_row"],
+)
+def test_a_line_runs_its_fan_lane_in_a_gap_the_fan_shares(
+    path: Path,
+    fan_target: str,
+    fan_lines: tuple[str, ...],
+    other: tuple[str, str],
+    other_line: str,
+) -> None:
+    """Every line in the gap holds the lane the fan records for it, packed:
+    a straight-on fan line's lane carries that line's own wrap, not a hole."""
+    graph, offsets, plan = _plan(path)
+    step = graph_offset_step(graph)
+    runs = {
+        lid: _gap_run(_route(plan, "__junction_12", fan_target, lid))
+        for lid in fan_lines
+    }
+    runs[other_line] = _gap_run(_route(plan, *other, other_line))
+    fan = _record_fan_info(graph, offsets)
+    slot = {
+        lid: pos for (jid, _t, lid), (pos, _n) in fan.items() if jid == "__junction_12"
+    }
+    ys = [runs[lid] for lid in sorted(runs, key=slot.__getitem__)]
+    steps = [b - a for a, b in zip(ys, ys[1:])]
+    assert all(abs(abs(d) - step) <= COORD_TOLERANCE for d in steps), ys
+    assert len({d > 0 for d in steps}) == 1, ys
 
 
 def test_a_straight_on_fan_branch_stays_on_its_track() -> None:
