@@ -1204,7 +1204,7 @@ def left_exit_around_below_geometry(f: _InterFacts) -> _LeftExitUnderTargetLoop:
     ]
     # Run the horizontal over the target's top when viable, else dip below it
     # (see :func:`_left_exit_wrap_over_top_y`).
-    over_gy = _left_exit_wrap_over_top_y(f)
+    over_gy = _left_exit_wrap_over_top_y(f, cx, vx)
     over_top = over_gy is not None
     channel_y = over_gy if over_gy is not None else by
     vx -= ctx.offset_step * _outward_loop_inner_lanes(
@@ -1276,7 +1276,11 @@ def _route_left_exit_around_below_left_entry(f: _InterFacts) -> RoutedPath | Non
     return route
 
 
-def _left_exit_wrap_over_top_y(f: _InterFacts) -> float | None:
+def _left_exit_wrap_over_top_y(
+    f: _InterFacts,
+    cx: float,
+    vx: float,
+) -> float | None:
     """Over-the-top channel Y for a same-row LEFT-exit far-LEFT-entry wrap loop.
 
     A same-row wrap dips below the target box; when the target is tall that dip
@@ -1284,9 +1288,10 @@ def _left_exit_wrap_over_top_y(f: _InterFacts) -> float | None:
     lane plan's approach record loops the connector over the target's top
     (:attr:`SideRule.OVER_TOP`, decided from placement by
     :func:`left_exit_wrap_over_top_y`), the loop traverses the band ABOVE the
-    target row (:func:`_gap_above_channel_y`); otherwise it keeps the dip
-    (``None``).
+    target row (:func:`_gap_above_channel_y`) between its ascent at *cx* and
+    descent at *vx*; otherwise it keeps the dip (``None``).
     """
+    del cx, vx
     approach = _approach_record(f.graph, f.edge)
     if approach is None or approach.rule is not SideRule.OVER_TOP:
         return None
