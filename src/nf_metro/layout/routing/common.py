@@ -889,6 +889,9 @@ class RoutedPath:
     Set by wrap / around-section / TOP-entry handlers whose vertical
     channels follow a special concentric loop (all corners share one
     radius) that the standard L-shape re-stacking would break."""
+    seats_in_gap: bool = False
+    """The gap allocation seats this exempt route's declared channel with the
+    gap's other channels."""
     gap_slots: list[GapSlot] = field(default_factory=list)
     """Symbolic gap-relative slots for this route's vertical channel runs.
 

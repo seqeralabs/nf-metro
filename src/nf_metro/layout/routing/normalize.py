@@ -891,6 +891,7 @@ def _materialize_gap_slots(
         dict
     )
     owned_chans: dict[tuple[int, int | None], list[_VChannel]] = defaultdict(list)
+    owned_in_gap: dict[int, list[_VChannel]] = defaultdict(list)
     for rp in routes:
         for slot in rp.gap_slots:
             ch = _locate_slot_channel(rp, slot, graph)
@@ -905,11 +906,12 @@ def _materialize_gap_slots(
                 or rp.fan_route_emitter is not None
                 or ch.idx in rp.route_system_owned_segment_ranks
             )
-            if rp.normalize_exempt or (
+            if (rp.normalize_exempt and not rp.seats_in_gap) or (
                 _planner_owns_channel(ch) and not exit_plan_is_movable
             ):
                 owned[(slot.gap_lo_col, slot.row)][(ch.down, rp.line_id)] = ch.x
                 owned_chans[(slot.gap_lo_col, slot.row)].append(ch)
+                owned_in_gap[slot.gap_lo_col].append(ch)
             else:
                 by_gap[(slot.gap_lo_col, slot.row)].append(ch)
 
@@ -941,14 +943,73 @@ def _materialize_gap_slots(
             same = [c for c in chans if c.down is down]
             for corridor in _split_corridors(same):
                 bundles.append((down, corridor))
-        if not _seat_beside_counter_runner(
-            bundles, owned_chans[(lo, row)], gap_left, gap_right, ctx
+        if not (
+            _bundle_with_owned_runner(
+                bundles, owned_in_gap[lo], gap_left, gap_right, ctx
+            )
+            or _seat_beside_counter_runner(
+                bundles, owned_chans[(lo, row)], gap_left, gap_right, ctx
+            )
         ):
             _layout_gap_bundle(bundles, gap_left, gap_right, ctx, owned.get((lo, row)))
 
     if movable_exit_plan_ids:
         return
     _validate_planned_exit_turn_radii(routes, ctx)
+
+
+def _bundle_with_owned_runner(
+    bundles: list[tuple[bool, list[_VChannel]]],
+    owned: list[_VChannel],
+    gap_left: float,
+    gap_right: float,
+    ctx: _RoutingCtx,
+) -> bool:
+    """Bundle a seated exempt channel with the owned channel running its way.
+
+    Same-direction channels sharing one gap's corridor are one bundle: the
+    seated channel takes the lane one step beside the owned channel of another
+    line, past the turn its lead-in makes into the gap, so a channel crossing
+    that lead-in's bundle crosses it clear of the stub between its node and the
+    turn.  A same-line counter-runner landing on the seated channel's port holds
+    its side of it, a turn's clearance away; the gap's other bundles keep their
+    clearance from both.
+    """
+    chans = [ch for _down, group in bundles for ch in group]
+    pairs = [
+        (ch, runner)
+        for ch in chans
+        if ch.route.seats_in_gap
+        for runner in owned
+        if runner.down is ch.down
+        and runner.route.line_id != ch.route.line_id
+        and spans_share_corridor(ch.y_lo, ch.y_hi, runner.y_lo, runner.y_hi)
+    ]
+    if len(pairs) != 1:
+        return False
+    ch, runner = pairs[0]
+    was = ch.x
+    lead_x = runner.route.points[max(runner.idx - 1, 0)][0]
+    past = 1 if runner.x >= lead_x else -1
+    _seat_channel(ch, runner.x + past * ctx.offset_step, 0, 1, ctx)
+    held = [ch]
+    clearance = cotravelling_lane_clearance(
+        same_line=True, counter_running=True, curve_radius=ctx.curve_radius
+    )
+    for other in chans:
+        if (
+            other.down is not ch.down
+            and other.route.line_id == ch.route.line_id
+            and other.route.edge.target == ch.route.edge.target
+        ):
+            side = 1 if other.x >= was else -1
+            _seat_channel(other, ch.x + side * clearance, 0, 1, ctx)
+            held.append(other)
+    rest = [(d, [c for c in g if all(c is not h for h in held)]) for d, g in bundles]
+    _separate_opposing_gap_bundles(
+        [b for b in rest if b[1]], [*owned, *held], gap_left, gap_right, ctx
+    )
+    return True
 
 
 def _seat_beside_counter_runner(

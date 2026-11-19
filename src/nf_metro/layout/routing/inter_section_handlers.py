@@ -7728,6 +7728,7 @@ def _route_right_entry_wrap(f: _InterFacts) -> RoutedPath:
         descent_x=seam.descent_x,
         entry_side=PortSide.RIGHT,
     )
+    route.seats_in_gap = True
     route.declare_gap_slot(
         lo_col=tgt_col,
         hi_col=tgt_col + 1,

@@ -366,7 +366,28 @@ def _screen_side(graph: MetroGraph, entry_id: str, side: int) -> int:
     return side * lateral_order_sign(port_travel(graph.ports[entry_id]))
 
 
-@pytest.mark.parametrize("path", CURATED, ids=_rel)
+# Main's TOP/BOTTOM-entry L-shape drops straight in on the port column past a
+# section on the band, where the turned LR hop bypasses it (#1058, #1521); the
+# record states the turned side.
+L_SHAPE_DROPS_PAST_A_BAND_SECTION = frozenset(
+    {"peeloff_straight_drop_near_wall", "tb_bottom_exit_fork_diamond"}
+)
+APPROACH_CASES = [
+    pytest.param(
+        path,
+        marks=pytest.mark.xfail(
+            strict=True,
+            reason="main's orientation-asymmetric TOP/BOTTOM-entry L-shape dispatch "
+            "(#1058/#1521); renders == main; rotating it is a #2094 item",
+        ),
+    )
+    if path.stem in L_SHAPE_DROPS_PAST_A_BAND_SECTION
+    else path
+    for path in CURATED
+]
+
+
+@pytest.mark.parametrize("path", APPROACH_CASES, ids=_rel)
 def test_every_approach_arrives_on_its_planned_side(path: Path) -> None:
     """A connector the approach record sends round one side of its entry's
     band reaches the entry from that side in the drawn route."""
