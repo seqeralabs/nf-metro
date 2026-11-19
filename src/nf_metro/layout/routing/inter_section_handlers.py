@@ -3610,11 +3610,15 @@ def _bypass_geometry(
     half_g1 = (g1_n - 1) * ctx.offset_step / 2
     half_g2 = (g2_n - 1) * ctx.offset_step / 2
 
+    # A fan branch running straight on along its own track never turns through
+    # the fan's shared corner, so it takes no slot stagger there.
+    fan_delta = 0.0
+    if fan is not None and abs(by - src_leg_y) > COORD_TOLERANCE:
+        fan_delta = l_shape_stagger(*fan, gap1_vertical, ctx.offset_step)
+
     if horizontal is Direction.R:
         if fan is not None:
-            ui, un = fan
-            fan_delta = l_shape_stagger(ui, un, gap1_vertical, ctx.offset_step)
-            fan_mid_x = _fan_corner_x(ctx, src, un, horizontal, facts=f)
+            fan_mid_x = _fan_corner_x(ctx, src, fan[1], horizontal, facts=f)
             off1 = fan_delta
             gap1_x = fan_mid_x + fan_delta
         else:
@@ -3639,9 +3643,7 @@ def _bypass_geometry(
             # Wrap-style routes whose source-side curve is on the RIGHT
             # regardless of dx (left-entry wrap, around-section-below) are
             # dispatched through their own handlers, not here.
-            ui, un = fan
-            fan_delta = l_shape_stagger(ui, un, gap1_vertical, ctx.offset_step)
-            fan_mid_x = _fan_corner_x(ctx, src, un, horizontal, facts=f)
+            fan_mid_x = _fan_corner_x(ctx, src, fan[1], horizontal, facts=f)
             off1 = fan_delta
             gap1_x = fan_mid_x + fan_delta
         else:
@@ -6422,8 +6424,10 @@ def _left_entry_wrap_geometry(
     # the builder re-adds ``delta`` on the leftward traverse, so pre-subtract it
     # here to land on the clamped Y.
     corridor = ctx.fan_corridors.get(edge.source)
+    solo_band = False
     if fan is not None and corridor is not None and corridor.band_y is not None:
         hy = corridor.band_y
+        solo_band = not _fan_shares_inter_row_channel(ctx, edge)
     elif fan is not None and _fan_shares_inter_row_channel(ctx, edge):
         # A fanned wrap with no shared corridor band but sibling branches
         # co-travelling this inter-row gap shares the channel with them.  Seat it
@@ -6486,6 +6490,10 @@ def _left_entry_wrap_geometry(
             shared_vx = _fan_left_entry_descent_x(ctx, tgt_col, pos_n, 0.0)
             if shared_vx is not None:
                 vx = shared_vx
+    # A branch alone in its fan's band has no fan-mate to nest beside there, so
+    # its run takes the band centre rather than its slot's stagger.
+    if solo_band:
+        hy -= _entry_wrap_run_displacement(delta, corner_x, vx)
 
     return _entry_wrap_record(
         ctx,

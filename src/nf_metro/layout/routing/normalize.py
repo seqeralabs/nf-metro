@@ -117,7 +117,6 @@ from nf_metro.layout.routing.corners import (
     concentric_corner_radius,
     concentric_corner_radius_at,
     concentric_reference_radius_at,
-    corner_radius,
     resolve_curve_radii,
     resolve_curve_radius_at,
     wholesale_corner_translation,
@@ -5063,15 +5062,21 @@ def _restack_trunk_band(
     placed so each co-travelling bundle reads as one tight concentric run,
     exactly on its slot, except an anchor in *held*, which keeps its planned Y.
     """
-    for sg in order:
-        inner = track_of[id(sg)]  # 0 = innermost (shallowest); sets corner radii
-        # Depth from ``band_top`` (the band's smallest Y).
-        new_y = band_top + _slot_depth_in_band(inner, n, dips) * step
-        for t in sg:
-            bundled.add(id(t.route))
-            if (id(t.route), t.idx) in held or abs(new_y - t.y) <= COORD_TOLERANCE_FINE:
-                continue
-            _restack_htrunk(t, new_y, inner, n, step, ctx.curve_radius)
+    seated = [
+        (
+            t,
+            t.y
+            if (id(t.route), t.idx) in held
+            else band_top + _slot_depth_in_band(track_of[id(sg)], n, dips) * step,
+        )
+        for sg in order
+        for t in sg
+    ]
+    for t, new_y in seated:
+        bundled.add(id(t.route))
+        if abs(new_y - t.y) <= COORD_TOLERANCE_FINE:
+            continue
+        _restack_htrunk(t, new_y, ctx.curve_radius, seated, (n - 1) * step)
 
 
 def _inter_row_gap_band(ctx: _RoutingCtx, y: float) -> tuple[float, float] | None:
@@ -5197,9 +5202,8 @@ def _dogleg_off_exempt_trunks(
         else:
             continue
         new_y = down_y if use_down else up_y
-        _restack_htrunk(t, new_y, 0, 1, ctx.offset_step, ctx.curve_radius)
+        _restack_htrunk(t, new_y, ctx.curve_radius)
 
-    step = ctx.offset_step
     for t in _collect_htrunks(routes):
         if id(t.route) in unmoved or route_system_owns_segment_boundary(t.route, t.idx):
             continue
@@ -5241,7 +5245,7 @@ def _dogleg_off_exempt_trunks(
             use_below = False
         else:
             continue
-        _restack_htrunk(t, below if use_below else above, 0, 1, step, ctx.curve_radius)
+        _restack_htrunk(t, below if use_below else above, ctx.curve_radius)
 
 
 def _run_enters_section(
@@ -5815,40 +5819,42 @@ def _coincident_trunk_slots(grp: list[_HTrunk]) -> list[list[_HTrunk]]:
 def _restack_htrunk(
     t: _HTrunk,
     new_y: float,
-    inner: int,
-    n: int,
-    step: float,
     base_radius: float,
+    band: Sequence[tuple[_HTrunk, float]] = (),
+    reach: float = 0.0,
 ) -> None:
-    """Move one horizontal trunk to *new_y* and recompute its flanking radii.
+    """Move one horizontal trunk to *new_y* and resize its two flanking corners.
 
     Shifts both trunk endpoints (which share Y) to *new_y*; the flanking
-    vertical legs stretch to meet them.  ``inner`` is the nesting index
-    (0 = innermost / shallowest); the two flanking corners are sized so the
-    bundle stays concentric, mirroring :func:`_restack_channel`.
+    vertical legs stretch to meet them.  A corner nests with the trunks of
+    *band* (each paired with its seated Y) whose same-end corner lies within
+    *reach* along the trunk and whose leg leaves to the same side.  The track
+    nearest that side is the innermost and takes *base_radius*; every other
+    track adds its distance from it, so the corners stay concentric through a
+    dip and a step alike and a corner turning alone keeps the base radius.
     """
     rp = t.route
     pts = rp.points
     k = t.idx
     pts[k] = (pts[k][0], new_y)
     pts[k + 1] = (pts[k + 1][0], new_y)
-
     if rp.curve_radii is None:
         return
-    max_off = (n - 1) * step
-    off = inner * step
-    # An innermost trunk turns on the INSIDE of both flanking corners (smaller
-    # radius), the outermost on the OUTSIDE (larger); same parity on both
-    # corners of a dip.  ``off`` grows from 0 at the innermost line, so the
-    # radius is base_radius + off (innermost = base_radius, the tightest) --
-    # the concentric nesting.  Using the reversed (outside=False) offset here
-    # inverts that, giving the inside line the LARGEST radius and tearing the
-    # bundle apart at the dip corners.
-    r = corner_radius(off, max_off, outside=True, base_radius=base_radius)
-    if 0 <= k - 1 < len(rp.curve_radii):
-        rp.curve_radii[k - 1] = r
-    if k < len(rp.curve_radii) and k + 2 < len(pts):
-        rp.curve_radii[k] = r
+    for end, far in ((0, -1), (1, 2)):
+        if not (k + end - 1 < len(rp.curve_radii) and 0 <= k + far < len(pts)):
+            continue
+        leg_up = pts[k + far][1] < new_y
+        ys = [new_y]
+        for m, y in band:
+            mp = m.route.points
+            if m is t or not 0 <= m.idx + far < len(mp):
+                continue
+            if (mp[m.idx + far][1] < y) == leg_up and (
+                abs(mp[m.idx + end][0] - pts[k + end][0]) <= reach + COORD_TOLERANCE
+            ):
+                ys.append(y)
+        depth = new_y - min(ys) if leg_up else max(ys) - new_y
+        rp.curve_radii[k + end - 1] = base_radius + depth
 
 
 def _join_fanout_upstream_tails(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
