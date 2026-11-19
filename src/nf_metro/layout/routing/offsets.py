@@ -62,6 +62,7 @@ def compute_station_offsets(
     Rail mode bakes absolute rail Ys into the route points and the pill span,
     so per-line offsets are not used; the map is empty.
     """
+    graph._linear_entry_pill_lines_cache.clear()
     if graph.line_spread is LineSpread.RAILS:
         return {}
     resolved = offset_step if offset_step is not None else graph_offset_step(graph)

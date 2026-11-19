@@ -512,6 +512,9 @@ class MetroGraph:
     fan_plan_execution: FanPlanExecution | None = field(
         default=None, compare=False, repr=False
     )
+    _linear_entry_pill_lines_cache: dict[str, tuple[str, ...]] = field(
+        default_factory=dict, compare=False, repr=False
+    )
     _departure_order_plan: DepartureOrderPlan | None = field(
         default=None, compare=False, repr=False
     )

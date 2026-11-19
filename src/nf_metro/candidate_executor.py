@@ -94,6 +94,7 @@ __all__ = [
 LayoutOptionScalar = str | int | float | bool
 _CACHE_FIELDS = {
     "_route_topology_query",
+    "_linear_entry_pill_lines_cache",
     "_station_lines_cache",
     "_edges_from_cache",
     "_edges_to_cache",

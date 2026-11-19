@@ -334,6 +334,10 @@ runtime check either:
 - `graph._departure_record_keys` - the departure-record keys the layout's
   first positioning pass ended with; every later pass must end with the same
   keys or raises `DepartureRecordDriftError`.
+- `graph._linear_entry_pill_lines_cache` - accepted linear-entry cohorts
+  projected by each station-offset computation. Marker bbox, label, and render
+  consumers use the cohort with the offset map produced by that computation;
+  the empty default means no entry frame owns marker geometry.
 - `graph._rail_y` - the per-section `{line_id: rail_y}` map produced by the
   opt-in rail-mode layout; read by the rail router, label placement, and rail
   guards, empty when rail mode is off.

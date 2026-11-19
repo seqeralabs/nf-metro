@@ -129,6 +129,7 @@ def test_route_metadata_is_excluded_from_render_artifacts(path: str) -> None:
     assert not hasattr(plan.graph, "route_resolution")
     assert not hasattr(plan.graph, "_route_topology_query")
     assert not hasattr(plan.graph, "fan_plan_execution")
+    assert hasattr(plan.graph, "_linear_entry_pill_lines_cache")
     excluded_route_fields = {
         "exit_turn_plan_id",
         "exit_turn_member_id",
