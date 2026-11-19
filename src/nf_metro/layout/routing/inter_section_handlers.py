@@ -4730,12 +4730,14 @@ def _perp_exit_over_geometry(
     def source_lateral(line_id: str) -> float:
         """The centreline's source-side perpendicular offset for *line_id*.
 
-        ``_perp_riser_lateral`` keeps the raw per-line X on a TOP riser and
-        reverses it on a BOTTOM one; the right-hand normal on the centreline's
-        vertical legs reverses the BOTTOM sign back, so it is negated here.
+        The line leaves where the exit's own lane accessor seats it
+        (:func:`_drawn_lane`); the right-hand normal on the centreline's
+        vertical legs points the other way on a BOTTOM leave, so it is negated
+        there.
         """
-        d = _perp_riser_lateral(ctx, edge.source, line_id, src_port.side)
-        return d if is_top else -d
+        lane = _drawn_lane(ctx, edge.source, line_id, "x")
+        assert lane is not None
+        return lane - sx if is_top else sx - lane
 
     src_offs = {lid: source_lateral(lid) for lid in line_ids}
 

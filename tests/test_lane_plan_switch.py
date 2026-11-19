@@ -48,7 +48,11 @@ from nf_metro.layout.routing import corridor_cohort_integration
 from nf_metro.layout.routing import exit_turns as exit_turns_module
 from nf_metro.layout.routing import offsets as offsets_module
 from nf_metro.layout.routing.context import _section_lane_frame
-from nf_metro.layout.routing.orientation import lateral_order_sign
+from nf_metro.layout.routing.orientation import (
+    DemandAxis,
+    lateral_axis,
+    lateral_order_sign,
+)
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import LineSpread, MetroGraph
 
@@ -357,9 +361,9 @@ def _origin(graph: MetroGraph, node: str, line_id: str) -> str:
     return lane_plan_module.approach_source(graph, node, line_id)
 
 
-def _screen_side(graph: MetroGraph, entry_id: str, side: int) -> str:
-    travel = port_travel(graph.ports[entry_id])
-    return "below" if side * lateral_order_sign(travel) > 0 else "above"
+def _screen_side(graph: MetroGraph, entry_id: str, side: int) -> int:
+    """Screen sign, on the entry's lateral axis, of the travel-frame *side*."""
+    return side * lateral_order_sign(port_travel(graph.ports[entry_id]))
 
 
 @pytest.mark.parametrize("path", CURATED, ids=_rel)
@@ -374,7 +378,8 @@ def test_every_approach_arrives_on_its_planned_side(path: Path) -> None:
     for (entry_id, source_id), approach in plan.port_orders.approaches.items():
         if approach.kind is ApproachKind.LEVEL or approach.side == 0:
             continue
-        port_y = graph.stations[entry_id].y
+        axis = int(lateral_axis(port_travel(graph.ports[entry_id])) is DemandAxis.Y)
+        port_c = (graph.stations[entry_id].x, graph.stations[entry_id].y)[axis]
         for route, polyline in zip(drawn.routes, drawn.polylines, strict=True):
             edge = route.edge  # type: ignore[attr-defined]
             if edge.target != entry_id:
@@ -383,13 +388,13 @@ def test_every_approach_arrives_on_its_planned_side(path: Path) -> None:
                 continue
             last = next(
                 (
-                    y
-                    for _x, y in reversed(polyline)
-                    if abs(y - port_y) > APPROACH_BEYOND_TAPER
+                    p[axis]
+                    for p in reversed(polyline)
+                    if abs(p[axis] - port_c) > APPROACH_BEYOND_TAPER
                 ),
                 None,
             )
-            got = "flat" if last is None else ("above" if last < port_y else "below")
+            got = 0 if last is None else (1 if last > port_c else -1)
             want = _screen_side(graph, entry_id, approach.side)
             if got != want:
                 wrong.append((entry_id, source_id, edge.line_id, want, got))
