@@ -709,11 +709,8 @@ def test_riboseq_corridor_bundle_holds_a_uniform_nesting_pitch() -> None:
     """The three distinct lines sharing the inter-row corridor nest at one pitch.
 
     ``annotation``, ``riboseq`` and ``rnaseq`` co-travel the corridor back toward
-    the ``te``/``reporting`` columns.  The separation cascade clears their
-    fusions but can strand the outermost movable line a full step wide when the
-    obstacle it stepped clear of then relocates past the pinned trunk, leaving a
-    4px/6px stack that reads as a bundle with one widened gap.  A bundle must
-    read at one pitch, so both adjacent gaps hold exactly one ``OFFSET_STEP``.
+    the ``te``/``reporting`` columns.  A bundle must read at one pitch, whichever
+    order it holds: both adjacent gaps hold exactly one ``OFFSET_STEP``.
     """
     path = CURVE_REPROS / "riboseq_inter_row_corridor.mmd"
     with warnings.catch_warnings():
@@ -721,12 +718,17 @@ def test_riboseq_corridor_bundle_holds_a_uniform_nesting_pitch() -> None:
         graph, routes, offsets = _route(path)
     step = graph_offset_step(graph)
     separations = _pair_separations(routes, offsets)
-    for pair in (("annotation", "riboseq", "Y"), ("riboseq", "rnaseq", "Y")):
+    pairs = [
+        ("annotation", "riboseq", "Y"),
+        ("annotation", "rnaseq", "Y"),
+        ("riboseq", "rnaseq", "Y"),
+    ]
+    for pair in pairs:
         assert pair in separations, f"{pair} no longer shares the corridor"
-        assert separations[pair] == pytest.approx(step), (
-            f"{pair[0]}/{pair[1]} nest {separations[pair]:.1f}px apart, not one "
-            f"{step:.1f}px step -- the corridor bundle carries a widened gap"
-        )
+    gaps = sorted(separations[pair] for pair in pairs)
+    assert gaps == pytest.approx([step, step, 2 * step]), (
+        f"corridor bundle gaps {gaps}, not one {step:.1f}px pitch"
+    )
 
 
 def _peeloff_riser_xs(

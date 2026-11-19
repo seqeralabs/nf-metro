@@ -18,21 +18,23 @@ different lanes at different stations.  Rail-laid sections are out of scope too
 
 from __future__ import annotations
 
+import contextlib
+import warnings
 from pathlib import Path
 
 import pytest
 
-from nf_metro.api import prepare_graph
+from nf_metro.api import render_string
 from nf_metro.layout.constants import (
     COORD_TOLERANCE_FINE,
     graph_offset_step,
 )
-from nf_metro.layout.routing import compute_station_offsets
 from nf_metro.layout.routing.invariants import (
     distinct_offset_levels,
     max_interior_offset_gap,
 )
 from nf_metro.parser.model import MetroGraph
+from nf_metro.render import svg
 
 _ROOT = Path(__file__).resolve().parents[1]
 
@@ -66,21 +68,30 @@ def _corpus() -> list[tuple[str, Path]]:
 CORPUS = _corpus()
 CORPUS_IDS = [fixture_id for fixture_id, _ in CORPUS]
 
-# seed_15 keeps two lanes at n8_0 that only lines ending inside s8 ride (#2041).
-RESERVED_UNRIDDEN = {
-    "tests/fixtures/hash_seed_determinism/seed_15.mmd": [
-        ("s8", "n8_0", 4.0),
-        ("s8", "n8_0", 12.0),
-    ],
-}
-
 
 def _lane_graph(path: Path):
-    """The settled graph and its lane map, or ``None`` when lanes do not apply."""
-    graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-    if graph.compact_offsets:
+    """The rendered graph and the lane map its drawing settles (permissive, so
+    a map that aborts on a guard still shows its drawing), or ``None`` when
+    lanes do not apply or nothing is drawn."""
+    settled: list = []
+    real = svg._settle_render_geometry
+
+    def settle(graph, *args, **kwargs):
+        result = real(graph, *args, **kwargs)
+        settled.append((graph, result.station_offsets))
+        return result
+
+    with pytest.MonkeyPatch.context() as mp, warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        mp.setattr(svg, "_settle_render_geometry", settle)
+        with contextlib.suppress(Exception):
+            render_string(
+                "%%metro permissive: true\n" + path.read_text(),
+                source_dir=str(path.parent),
+            )
+    if not settled or settled[-1][0].compact_offsets:
         return None
-    return graph, compute_station_offsets(graph)
+    return settled[-1]
 
 
 def _lane_stacked_sections(graph) -> list[str]:
@@ -121,9 +132,9 @@ def unridden_lanes(graph, offsets) -> list[tuple[str, str, float]]:
 
 @pytest.mark.parametrize(("fixture_id", "path"), CORPUS, ids=CORPUS_IDS)
 def test_no_section_reserves_an_unridden_lane(fixture_id, path):
-    """No station stretches its marker over a lane no section-mate rides."""
+    """No station stretches its drawn marker over a lane no section-mate rides."""
     loaded = _lane_graph(path)
     if loaded is None:
-        pytest.skip("compact mode does not hold a lane per line per section")
+        pytest.skip("compact mode, or nothing drawn")
     graph, offsets = loaded
-    assert unridden_lanes(graph, offsets) == RESERVED_UNRIDDEN.get(fixture_id, [])
+    assert unridden_lanes(graph, offsets) == []

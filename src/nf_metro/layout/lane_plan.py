@@ -4,11 +4,10 @@ A :class:`LanePlan` is decided at the first offsets run of a layout whose
 placement has positioned the junctions (stage 5.1), outside validation, from
 structure and that placement alone, and kept on the graph for the rest of the
 layout.  A run before that writes the record its placement plans, keeping
-none.  A new
-layout (each :func:`~nf_metro.layout.engine._layout_once`: the spread loop's
-attempts, the row-pitch and strike-clearance relays, the off-track and
-geometric-bypass relayouts) starts without one and seals its own; a record is
-never carried from one layout's placement to another's.
+none.  A new layout (each :func:`~nf_metro.layout.engine._layout_once`: the
+spread loop's attempts, the row-pitch and strike-clearance relays, the
+off-track and geometric-bypass relayouts) starts without one and seals its
+own; a record is never carried from one layout's placement to another's.
 
 The record holds:
 
@@ -75,7 +74,12 @@ feeding several consumers lays them in the merge of each consumer's lines as
 they lie after turning into it.  A port's drawing reads offsets toward its
 travel's right, except across a TOP or BOTTOM edge of a section whose lanes
 run along y: an entry's travel's right-hand normal, a BOTTOM exit's
-reflected.
+reflected.  An entry a line drops into straight from a perpendicular exit
+upstream along its travel, past no section box, shifts its offsets to put the
+line on its drop's lane, where every such line agrees on the shift and it is
+less than the port's line count.  A line an entry hands a farther consumer,
+lying on the turn's side of lines turning the same way into a nearer one,
+crosses them there: a forced crossing at that turn.
 
 **Turn-offs.**  At every port, and every junction continuing one port's
 run, lines meet a leg turning off (or joining) the run by their side of
@@ -126,9 +130,10 @@ carries, on lines it shares with an upstream exit it descends from, that
 exit's order where both reach one entry.
 
 **Lanes.**  A fan plan's carriers keep their slot; a line riding a level edge
-into a part from an earlier part of its run keeps that lane, and a line
-riding a seam-pinned entry of the run its entry lane, unless a carrier's slot
-differs (pins).  The other lines take lanes in run order: one past the highest
+into a part from an earlier part of its run keeps that lane, a run whose lines
+are one node's whole bundle keeps that node's lanes, and a line riding a
+seam-pinned entry of the run its entry lane, unless a carrier's slot differs
+(pins).  The other lines take lanes in run order: one past the highest
 lane of an earlier line they coexist with; with none, the lane of an earlier
 line they hand over to at a shared station (on a side, the lowest or highest
 such lane, else the latest-ordered), else the run's floor (the lowest section
@@ -138,12 +143,15 @@ ordered before it; a hand-over lane below that floor is not taken.  A free
 line in a pinned run stays below the next pinned line it coexists with, a
 lane left for each free line between.  Where bundles enter a pinned part, a
 pin ordered after a bundle-mate pinned no lower is dropped, unless a carrier's
-slot fixes it, and each free line
-takes its section slot among the part's lines, lifted past its bundle-mates
-laned before it and the free line before it, clamped below its pinned
-bundle-mates after it.  A free line never takes a lane a line it coexists with
-holds, nor one beside a line that runs from the run's entry port past one of
-its stations where the other stops (a *breeze*): it steps up past both.
+slot fixes it, and each free line takes its section slot among the part's
+lines, lifted past its bundle-mates laned before it and the free line before
+it, clamped below its pinned bundle-mates after it.  A free line never takes a
+lane a line it coexists with holds, nor one beside a line that runs from the
+run's entry port past one of its stations where the other stops (a *breeze*):
+it steps up past both.  The run's stations then hold no lane none of its lines
+rides: the lanes between their outermost close up in order about its lowest
+pinned lane (else its lowest), lanes beyond them keeping their distance, where
+that moves no lane it keeps but a seam pin's.
 
 **Lines in a seam-pinned run.**  Outside a part entered by bundles, a line
 riding no entry of a run holding a seam-pinned entry lies beside the fixed
@@ -165,15 +173,9 @@ overlap; touching at one coordinate is a hand-over when one terminates
 there arriving from upstream and the other is born there leaving
 downstream.
 
-**Readers.**  Every offsets run writes the record's lanes
-(:func:`planned_offsets` of :func:`lane_plan_of`): a lane in offset steps
-along its section's lane frame, a perpendicular port's offsets across its
-travel as its drawing reads them, a rail section's port about its bundle's
-middle (:attr:`TrackPlan.rail_origins`).  Routing reads the approach record
-and the far sides (:func:`recorded_lane_plan`) where it chooses a connector's
-side, and the turn-offs where it nests trunks.  Validation observes
-(:func:`observing`): its runs read the record their placement plans and never
-seal one.
+**Readers.**  Offsets runs write the record's lanes (:func:`planned_offsets`);
+routing reads the approaches and far sides (:func:`recorded_lane_plan`).
+Validation observes (:func:`observing`).
 """
 
 from __future__ import annotations
@@ -260,6 +262,9 @@ class ForcedCrossing:
     through to its lane between that bundle's lanes, the rest of
     :attr:`lines`; ``None`` where one bundle into the entry exchanges the
     lines itself, in its last bend."""
+    turn: str | None = None
+    """The consumer the first of :attr:`lines` turns into from a perpendicular
+    :attr:`port`, past the rest where they turn into nearer ones."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -692,7 +697,7 @@ class _Tracks:
         wanted = self.perpendicular_seams()
         across: dict[str, dict[str, int]] = {}
         seams: dict[str, dict[str, int]] = {}
-        for port_id in sorted(graph.ports):
+        for port_id in sorted(graph.ports, key=lambda p: (graph.ports[p].is_entry, p)):
             lines = graph.station_lines(port_id)
             if not self.perpendicular(port_id) or any(
                 (port_id, lid) not in self.lanes for lid in lines
@@ -709,8 +714,84 @@ class _Tracks:
             if want is not None and len({want[lid] - own[lid] for lid in lines}) == 1:
                 own = dict(want)
                 seams[port_id] = dict(want)
+            elif port.is_entry:
+                shift = {
+                    k - own[lid]
+                    for lid in lines
+                    for k in self._drops(port_id, lid, across)
+                }
+                if len(shift) == 1 and abs(step := shift.pop()) < len(lines):
+                    own = {lid: k + step for lid, k in own.items()}
+            if port.is_entry:
+                self._turn_crossings(port_id, consumers, own)
             across[port_id] = own
-        return across, seams
+        return dict(sorted(across.items())), seams
+
+    def _turn_crossings(
+        self, port_id: str, consumers: Sequence[ConsumerTurn], own: Mapping[str, int]
+    ) -> None:
+        """Record each line a perpendicular entry hands a farther consumer
+        that lies, at the port, on the turn's side of lines turning the same
+        way into a nearer one: it crosses them where they turn."""
+        graph = self.graph
+        port = graph.stations[port_id]
+        travel = port_travel(graph.ports[port_id])
+        (vx, vy), sign = direction_vector(travel), lateral_order_sign(travel)
+
+        def along(turn: ConsumerTurn) -> float:
+            at = graph.stations[turn.consumer_id]
+            return (at.x - port.x) * vx + (at.y - port.y) * vy
+
+        for far in consumers:
+            if far.turn is None:
+                continue
+            tx, ty = direction_vector(far.turn)
+            side = sign * (tx if vx == 0 else ty)
+            for lid in far.lines:
+                crossed = sorted(
+                    other
+                    for near in consumers
+                    if near.turn is far.turn
+                    and along(near) < along(far) - SAME_COORD_TOLERANCE
+                    for other in near.lines
+                    if side * (own[lid] - own[other]) > 0
+                )
+                if crossed:
+                    self.forced.append(
+                        ForcedCrossing(
+                            graph.ports[port_id].section_id,
+                            None,
+                            (lid, *crossed),
+                            port_id,
+                            turn=far.consumer_id,
+                        )
+                    )
+
+    def _drops(
+        self, port_id: str, lid: str, across: Mapping[str, Mapping[str, int]]
+    ) -> set[int]:
+        """*lid*'s offsets at perpendicular entry *port_id* on the lane it drops
+        in on straight from a perpendicular exit upstream along the entry's
+        travel, past no section box."""
+        graph = self.graph
+        travel = port_travel(graph.ports[port_id])
+        (vx, vy), sign = direction_vector(travel), lateral_order_sign(travel)
+        axis = "x" if vx == 0 else "y"
+        here = graph.stations[port_id]
+        out: set[int] = set()
+        for node, _via in self.builder.upstream_sources(port_id, lid):
+            there = graph.stations[node]
+            if (
+                node not in across
+                or port_travel(graph.ports[node]) is not travel
+                or (here.x - there.x) * vx + (here.y - there.y) * vy <= 0
+            ):
+                continue
+            at = getattr(there, axis) + sign * across[node][lid] * self.step
+            k = _on_grid(sign * (at - getattr(here, axis)) / self.step)
+            if k is not None and not _boxes_across(graph, port_id, node, at, axis):
+                out.add(k)
+        return out
 
     def _carry(
         self, port_id: str, draw: int, order: PortOrder | None
@@ -1771,7 +1852,37 @@ class _Tracks:
             lanes = self._fill(
                 run, order, slots, fixed, bool(pins), arrival, conflict, riding, joins
             )
+        stops = (
+            [
+                lanes[lid]
+                for n in members
+                if n not in graph.ports
+                for lid in graph.station_lines(n)
+            ]
+            or [*lanes.values()]
+            or [0]
+        )
+        lo, hi = min(stops), max(stops)
+        held = sorted({v for v in lanes.values() if lo <= v <= hi})
+
+        def close(v: int) -> int:
+            return (
+                held.index(v)
+                if lo <= v <= hi
+                else v - lo
+                if v < lo
+                else v - hi + len(held) - 1
+            )
+
+        seamed = {lid for n in members for lid in self.seam_lanes.get(n, ())}
+        kept = [lid for lid in fixed if lid not in seamed]
+        anchor = min((lanes[lid] for lid in kept or fixed), default=lo)
+        packed = {lid: anchor - close(anchor) + close(v) for lid, v in lanes.items()}
+        if all(packed[lid] == lanes[lid] for lid in kept):
+            lanes = packed
         for n in members:
+            if n in self.seam_lanes:
+                self.seam_lanes[n] = {lid: lanes[lid] for lid in self.seam_lanes[n]}
             for lid in graph.station_lines(n):
                 self.lanes[(n, lid)] = lanes[lid]
 
@@ -1958,8 +2069,17 @@ class _Tracks:
         return _Arrival(side, neighbour, nest, carriers[0] if rank == 0 else None)
 
     def _part_pins(self, run: _Run, fixed: Mapping[str, int]) -> dict[str, int]:
-        """Lanes the run's lines keep from an earlier part of their level run."""
+        """Lanes the run's lines keep from an earlier part of their level run,
+        or from a node whose whole bundle continues into the run as all of it,
+        unless it turns there into a perpendicular port."""
         sec, sid = run.sec, run.sec.id
+        into: dict[str, set[str]] = {}
+        for (target, lid), sources in sec.ins.items():
+            onto = target in run.member_set and not (
+                target in self.graph.ports and self.perpendicular(target)
+            )
+            for node in sources if onto else ():
+                into.setdefault(_edge_source(sec, node, lid), set()).add(lid)
         pins: dict[str, int] = {}
         for (target, lid), sources in sorted(sec.ins.items()):
             if target not in run.member_set:
@@ -1967,12 +2087,20 @@ class _Tracks:
             for node in sources:
                 source = _edge_source(sec, node, lid)
                 lane = self.lanes.get((source, lid))
+                whole = (
+                    into.get(source)
+                    == set(self.graph.station_lines(source))
+                    == {*run.present}
+                )
                 if (
                     lane is None
                     or source in run.member_set
-                    or sec.level_run_of[source] != run.level_run
-                    or abs(self.lateral(source, sid) - self.lateral(target, sid))
-                    > SAME_Y_TOLERANCE
+                    or not whole
+                    and (
+                        sec.level_run_of[source] != run.level_run
+                        or abs(self.lateral(source, sid) - self.lateral(target, sid))
+                        > SAME_Y_TOLERANCE
+                    )
                     or fixed.get(lid, lane) != lane
                     or pins.get(lid, lane) != lane
                 ):
@@ -2866,11 +2994,8 @@ _OBSERVED: ContextVar[dict[int, tuple[MetroGraph, LanePlan]] | None] = ContextVa
 
 @contextmanager
 def observing() -> Iterator[None]:
-    """Offsets runs inside read a provisional record and never seal one.
-
-    Validation observes a layout: the record it reads is the one its current
-    placement plans, kept for the scope, and the layout still seals its own at
-    its first production run at or after 5.1."""
+    """Offsets runs inside read the record their placement plans, kept for
+    the scope, and never seal one."""
     token = _OBSERVED.set({})
     try:
         yield
@@ -2917,7 +3042,9 @@ def entry_crossing_lines(graph: MetroGraph, port_id: str) -> frozenset[str]:
     return frozenset(
         lid
         for crossing in plan.tracks.forced
-        if crossing.port == port_id and crossing.across is None
+        if crossing.port == port_id
+        and crossing.across is None
+        and crossing.turn is None
         for lid in crossing.lines
     )
 
@@ -2934,7 +3061,7 @@ def recorded_crossing_pairs(
         return frozenset()
     pairs: set[tuple[tuple[str, str, str], tuple[str, str, str]]] = set()
     for crossing in plan.tracks.forced:
-        if crossing.port is None:
+        if crossing.port is None or crossing.turn is not None:
             continue
         passing, crossed = crossing.lines[0], crossing.lines[1:]
         keys = [
