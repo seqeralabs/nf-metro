@@ -2,9 +2,10 @@
 
 The fan's slots follow the record's lanes at the junction, read travel-left
 first, after the lines that turn through the fan's corner: a line running
-straight on takes the last slots and no slot shift.  A restacked trunk's corner
-nests only with the trunks that turn with it, so a corner turning alone keeps
-the base radius.  Merge risers and entry-frame pills read the same record.
+straight on takes the last slots and no slot shift.
+A restacked trunk's corner nests only with the trunks that turn with it, so a
+corner turning alone keeps the base radius.  Merge risers read the same record,
+and a station's pill covers every line that stops there.
 """
 
 from __future__ import annotations
@@ -139,31 +140,24 @@ def test_a_restacked_corner_turning_alone_keeps_the_base_radius() -> None:
     assert set(route.curve_radii) == {CURVE_RADIUS}
 
 
-@pytest.mark.parametrize("station", ["before", "split"])
-def test_an_entry_frame_pill_covers_the_sole_flow_entrys_lines(station: str) -> None:
-    path = TOPOLOGIES / "external_owner_exit_lane_frame.mmd"
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-    offsets = compute_station_offsets(graph)
-    cohort = ("lower", "straight", "wrap")
-    assert set(graph.station_lines(station)) == {*cohort, "ends"}
-    assert _station_bundle_offset_span(graph, station, offsets) == (
-        min(offsets[station, lid] for lid in cohort),
-        max(offsets[station, lid] for lid in cohort),
-    )
-
-
 @pytest.mark.parametrize(
     ("path", "station"),
     [
+        (TOPOLOGIES / "external_owner_exit_lane_frame.mmd", "before"),
+        (TOPOLOGIES / "external_owner_exit_lane_frame.mmd", "split"),
+        (TOPOLOGIES / "exit_lane_settlement_without_crossings.mmd", "before"),
         (REPROS / "bt_bottom_entry_rise_from_junction.mmd", "q1x0"),
-        (REPROS / "bt_bottom_entry_rise_from_junction.mmd", "q1x2"),
         (TOPOLOGIES / "junction_entry_lane_rebase.mmd", "ribocode"),
     ],
-    ids=["partly_leaving_q1x0", "partly_leaving_q1x2", "two_feeders"],
+    ids=[
+        "local_line_starts",
+        "local_line_ends",
+        "settlement",
+        "partly_leaving",
+        "two_feeders",
+    ],
 )
-def test_a_cohort_not_carried_as_one_bundle_keeps_the_full_pill(
+def test_a_pill_covers_every_line_stopping_at_its_station(
     path: Path, station: str
 ) -> None:
     with warnings.catch_warnings():

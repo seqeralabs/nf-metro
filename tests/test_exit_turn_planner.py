@@ -634,22 +634,20 @@ def test_linear_entry_cohort_keeps_one_lane_frame(
         )
 
 
-def test_adjacent_local_terminator_does_not_inflate_entry_frame_pills() -> None:
+def test_a_pill_covers_the_local_line_beginning_or_ending_at_its_station() -> None:
     graph, offsets, _observation = _observe(
         TOPOLOGIES / "external_owner_exit_lane_frame.mmd"
     )
-    inherited = ("lower", "straight", "wrap")
-    inherited_span = max(offsets["before", line_id] for line_id in inherited) - min(
-        offsets["before", line_id] for line_id in inherited
-    )
-
     for station_id in ("before", "split"):
+        served = graph.station_lines(station_id)
+        assert "ends" in served
+        span = max(offsets[station_id, lid] for lid in served) - min(
+            offsets[station_id, lid] for lid in served
+        )
         _cx, _cy, _width, height, _radius = station_marker_box(
             graph, NFCORE_DARK_THEME, graph.stations[station_id], offsets
         )
-        assert height == pytest.approx(
-            inherited_span + 2 * NFCORE_DARK_THEME.station_radius
-        )
+        assert height == pytest.approx(span + 2 * NFCORE_DARK_THEME.station_radius)
 
 
 @pytest.mark.parametrize(

@@ -13,18 +13,15 @@ from nf_metro.layout.constants import (
     COORD_GROUP_DIGITS_COARSE,
     COORD_GROUP_DIGITS_FINE,
     COORD_TOLERANCE,
-    COORD_TOLERANCE_FINE,
     MIN_BUNDLE_EDGE_CLEARANCE,
     PERP_PORT_EDGE_INSET,
     PORT_BOUNDARY_CROSSING_TOL,
     SAME_COORD_TOLERANCE,
     SECTION_Y_PADDING,
     STATION_RADIUS_APPROX,
-    graph_offset_step,
 )
 from nf_metro.layout.geometry import (
     AxisFrame,
-    flow_port_sides,
     lanes_run_along_x,
     lanes_run_along_y,
     quantize_coord,
@@ -34,7 +31,6 @@ from nf_metro.layout.route_topology import divergence_junction_sources
 from nf_metro.parser.model import (
     FLOW_DIRECTIONS,
     Edge,
-    LineSpread,
     MetroGraph,
     Port,
     PortSide,
@@ -851,72 +847,14 @@ def _trunk_symmetric_fan_ids(graph: MetroGraph, section: Section) -> set[str]:
     return result
 
 
-def _linear_entry_pill_lines(
-    graph: MetroGraph,
-    sid: str,
-    offsets: Mapping[tuple[str, str], float],
-) -> tuple[str, ...] | None:
-    """The lines an entry-frame pill covers at *sid*, or ``None``.
-
-    The cohort is the line set of the section's sole flow-side entry that
-    carries lines, when one upstream node feeds all of it and the section's
-    flow-side exit carries all of it or none of it; it defines the pill when it
-    is a contiguous run of two or more lanes and the station's one other line
-    sits beside it.
-    """
-    if graph.compact_offsets or graph.line_spread is LineSpread.RAILS:
-        return None
-    station = graph.stations.get(sid)
-    if station is None or station.section_id is None or station.is_port:
-        return None
-    section = graph.sections[station.section_id]
-    entry_side, exit_side = flow_port_sides(section.direction)
-    entries = [
-        pid
-        for pid in section.entry_ports
-        if graph.ports[pid].side is entry_side and graph.station_lines(pid)
-    ]
-    if len(entries) != 1 or len({e.source for e in graph.edges_to(entries[0])}) != 1:
-        return None
-    inherited = tuple(sorted(graph.station_lines(entries[0])))
-    inherited_set = set(inherited)
-    leaving = {
-        line_id
-        for pid in section.exit_ports
-        if graph.ports[pid].side is exit_side
-        for line_id in graph.station_lines(pid)
-        if line_id in inherited_set
-    }
-    if len(inherited) < 2 or leaving not in (set(), inherited_set):
-        return None
-    served = tuple(graph.station_lines(sid))
-    local = tuple(line_id for line_id in served if line_id not in inherited_set)
-    if len(local) != 1 or not inherited_set.issubset(served):
-        return None
-    try:
-        ordered = sorted(offsets[sid, line_id] for line_id in inherited)
-    except KeyError:
-        return None
-    step = graph_offset_step(graph)
-    if any(
-        abs(right - left - step) > COORD_TOLERANCE_FINE
-        for left, right in zip(ordered, ordered[1:])
-    ):
-        return None
-    local_offset = offsets.get((sid, local[0]))
-    if local_offset is None or not (
-        abs(local_offset - (ordered[0] - step)) <= COORD_TOLERANCE_FINE
-        or abs(local_offset - (ordered[-1] + step)) <= COORD_TOLERANCE_FINE
-    ):
-        return None
-    return inherited
-
-
 def _station_bundle_offset_span(
     graph: MetroGraph, sid: str, offsets: Mapping[tuple[str, str], float]
 ) -> tuple[float, float]:
     """Min/max per-line Y offset ``sid``'s drawn bundle pill spans around
     its anchor lane, ``(0.0, 0.0)`` for a station with no lines.
+
+    The pill covers every line that stops at the station, one beginning or
+    ending there included; a line only passing the station's lane is not one.
 
     A multi-line bundle's per-line offsets need not be centred on the
     anchor -- the default non-compact assignment gives each line a
@@ -926,10 +864,7 @@ def _station_bundle_offset_span(
     targets in :mod:`...bbox`, so the room a padding constant reserves
     matches what the marker pill actually spans.
     """
-    line_ids = _linear_entry_pill_lines(graph, sid, offsets)
-    if line_ids is None:
-        line_ids = tuple(graph.station_lines(sid))
-    line_offs = [offsets.get((sid, lid), 0.0) for lid in line_ids]
+    line_offs = [offsets.get((sid, lid), 0.0) for lid in graph.station_lines(sid)]
     if not line_offs:
         return 0.0, 0.0
     return min(line_offs), max(line_offs)
