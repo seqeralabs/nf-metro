@@ -55,9 +55,12 @@ from nf_metro.render.svg import _plan_decision_fingerprint, build_observed_rende
 
 ROOT = Path(__file__).resolve().parent.parent
 TOPOLOGIES = ROOT / "examples" / "topologies"
+SHORT_OVERLAP_TAILS = (
+    ROOT / "tests" / "data" / "same_destination_short_overlap_tails.mmd"
+)
 
 
-def _planned_and_routed(stem: str):
+def _planned_and_routed(stem: str | Path):
     """One fixture's graph, both of its offset frames, and its routes.
 
     ``route_edges`` rewrites the mapping it is handed, so the frame
@@ -66,7 +69,7 @@ def _planned_and_routed(stem: str):
     that copy; a caller asking what the renderer draws with needs the
     rewritten one.
     """
-    path = TOPOLOGIES / f"{stem}.mmd"
+    path = stem if isinstance(stem, Path) else TOPOLOGIES / f"{stem}.mmd"
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
@@ -76,7 +79,7 @@ def _planned_and_routed(stem: str):
     return graph, planned, offsets, routes
 
 
-def _routed(stem: str):
+def _routed(stem: str | Path):
     graph, _planned, offsets, routes = _planned_and_routed(stem)
     return graph, offsets, routes
 
@@ -93,8 +96,8 @@ def _normalization_context(graph, offsets):
     )
 
 
-def _destination_routes(graph, routes):
-    port_id = graph.sections["target"].entry_ports[0]
+def _destination_routes(graph, routes, section_id: str = "target"):
+    port_id = graph.sections[section_id].entry_ports[0]
     return {route.line_id: route for route in routes if route.edge.target == port_id}
 
 
@@ -334,8 +337,8 @@ def test_invalid_drawable_turnout_shape_raises_project_invariant() -> None:
 
 
 def test_short_same_destination_overlap_is_refused_atomically() -> None:
-    graph, offsets, routes = _routed("same_destination_short_overlap")
-    destination = _destination_routes(graph, routes)
+    graph, offsets, routes = _routed(SHORT_OVERLAP_TAILS)
+    destination = _destination_routes(graph, routes, "sec4")
     tails = {
         line_id: port_peeloff_tail(route) for line_id, route in destination.items()
     }
@@ -359,7 +362,7 @@ def test_short_same_destination_overlap_is_refused_atomically() -> None:
     suffix_overlap = suffix_hi - suffix_lo
     threshold = 2 * CURVE_RADIUS - COORD_TOLERANCE
 
-    assert overlap == pytest.approx(18.0)
+    assert overlap == pytest.approx(16.0)
     assert suffix_overlap >= threshold
     assert overlap < threshold
     assert all(
@@ -396,15 +399,12 @@ def test_short_same_destination_overlap_settles_as_one_planned_cohort(
         ("source",),
         ("target",),
     )
-    assert requirement.required == pytest.approx(221.591)
+    assert requirement.required == pytest.approx(229.591)
     assert baseline_target_y - source_bottom == pytest.approx(219.591)
-    assert demand.deficit == pytest.approx(2.0)
-    # Every deficit at or under two quanta settles to the same width, so the
-    # coordinate below is the ledger's floor and not a measurement.  The
-    # deficit assertion above is what a 1px clearance error has to get past.
-    assert quantised_allocation(demand.deficit) == pytest.approx(2.0)
+    assert demand.deficit == pytest.approx(10.0)
+    assert quantised_allocation(demand.deficit) == pytest.approx(10.0)
     assert first.plan.graph.sections["target"].bbox_y == pytest.approx(
-        baseline_target_y + 2.0
+        baseline_target_y + 10.0
     )
     assert first.route_plan.boundary_clearance_requirements == ()
     assert len(first.route_plan.boundary_clearance_owner_ids) == 1
@@ -422,14 +422,14 @@ def test_short_same_destination_overlap_settles_as_one_planned_cohort(
         "assembly": (
             (206.0, 120.0),
             (663.0, 120.0),
-            (663.0, 567.182),
-            (696.0, 567.182),
+            (663.0, 575.182),
+            (696.0, 575.182),
         ),
         "audit": (
-            (630.0, 547.182),
-            (659.0, 547.182),
-            (659.0, 571.182),
-            (696.0, 571.182),
+            (630.0, 555.182),
+            (659.0, 555.182),
+            (659.0, 579.182),
+            (696.0, 579.182),
         ),
     }
     assert {
@@ -502,7 +502,7 @@ def test_same_row_short_overlap_settles_every_route_system_owner(
     # multiple of the settlement quantum rather than the ledger's 2px floor,
     # where any smaller measurement would settle to the same coordinate.
     expected_deficit = 10.0
-    relocated_y = 355.591
+    relocated_y = 363.591
     path = TOPOLOGIES / "same_destination_short_overlap.mmd"
     header, body = path.read_text().split("graph LR", maxsplit=1)
     replacements = {

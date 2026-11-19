@@ -269,8 +269,7 @@ def test_endpoint_members_bind_and_rank_by_their_own_drawn_slots(
     lanes_by_cohort: dict[str, list[tuple[int, float]]] = {}
 
     def landings(ledger, targets, *args):
-        coordinates, overlaid = real_landings(ledger, targets, *args)
-        assert not overlaid
+        coordinates = real_landings(ledger, targets, *args)
         slots = {
             (target.member_id, target.edge_key): target.endpoint_lane_coordinate
             for target in targets
@@ -284,7 +283,7 @@ def test_endpoint_members_bind_and_rank_by_their_own_drawn_slots(
             slot = slots[identity]
             assert coordinate == pytest.approx(slot, abs=COORD_TOLERANCE), identity
             bound_slots.setdefault(cohorts[identity], set()).add(round(coordinate, 3))
-        return coordinates, overlaid
+        return coordinates
 
     def lane(claim, cohort_first_path_rank, local_boundary_rank, *args):
         cohort_id = claim.ledger.endpoint_cohort_id
@@ -485,10 +484,10 @@ RIBOSEQ_TOP_CORRIDOR_EDGES = (
 @pytest.mark.parametrize(
     ("relative_path", "coordinates"),
     (
-        ("examples/riboseq_metro.mmd", (321.0, 317.0, 313.0)),
+        ("examples/riboseq_metro.mmd", (325.0, 317.0, 321.0)),
         (
             "tests/fixtures/curve_invariant_repros/riboseq_inter_row_corridor.mmd",
-            (337.8, 333.8, 329.8),
+            (341.8, 333.8, 337.8),
         ),
     ),
 )
@@ -501,9 +500,9 @@ def test_unowned_lane_pair_seats_on_the_side_its_end_turns_take(
     again.  ``rnaseq`` turns down at an end inside ``riboseq``'s run and
     ``riboseq`` turns up at an end inside ``rnaseq``'s, so ``rnaseq`` seats
     below ``riboseq`` whatever their connector ranks say.  ``annotation``'s run
-    spans both lanes' ends, which turn opposite ways, so no side avoids a
-    crossing; drawn a clearance clear of both, it keeps its drawn side.  The
-    compile seats every lane where the render draws it."""
+    spans both lanes' ends, which turn opposite ways, so no seat avoids a
+    crossing; drawn one pitch clear of each, between them, it keeps that
+    lane.  The compile seats every lane where the render draws it."""
     compiled = []
     real_compile = member_geometry.compile_corridor_cohort_plan
 
@@ -546,9 +545,10 @@ def test_merge_fed_confluence_descent_compiles_where_it_is_drawn(
     relative_path: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """``annotation`` enters section 4 directly while ``riboseq`` arrives
-    through a merge junction whose convergence owns its west descent, so the
-    merge-fed confluence alignment re-seats ``annotation``'s free descent
-    outboard of ``riboseq``'s.  The last compile reads the same descent."""
+    through a merge junction whose convergence owns its west descent, so
+    ``annotation``'s free descent is drawn one pitch inboard of ``riboseq``'s,
+    the side its corridor lane takes.  The last compile reads the same
+    descent."""
     compiled = []
     real_compile = member_geometry.compile_corridor_cohort_plan
 
@@ -570,7 +570,7 @@ def test_merge_fed_confluence_descent_compiles_where_it_is_drawn(
         for allocation in compiled[-1].allocations
         if allocation.edge_key == edge_key and allocation.segment_rank == 3
     ]
-    assert drawn[3][0] == pytest.approx(30.0) == drawn[4][0]
+    assert drawn[3][0] == pytest.approx(34.0) == drawn[4][0]
     assert descent == pytest.approx([drawn[3][0]])
 
 

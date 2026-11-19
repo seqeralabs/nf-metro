@@ -122,32 +122,33 @@ def _unit(start: tuple[float, float], end: tuple[float, float]) -> tuple[float, 
 def test_moved_landing_corner_nests_concentrically_with_its_mate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Both feeders into benchmarking's right entry are moved by the patch, the
-    test descent to the edge of its corridor band and the truth descent 4px
-    inside it, so the outer test landing corner takes radius 14 around the
-    inner truth corner's 10, and the two arcs share one centre."""
-    truth_key = ("__junction_14", "benchmarking__entry_right_11", "truth")
-    test_key = ("__junction_15", "benchmarking__entry_right_11", "test")
-    compiles = _compiles(monkeypatch, "examples/variantbenchmarking.mmd")
+    """The patch moves the ``second`` and ``third`` descents into
+    target_lane_transition's left entry 5px east, keeping their 4px pitch, so
+    the outer ``second`` landing corner takes radius 14 around the inner
+    ``third`` corner's 10, and the two arcs share one centre."""
+    inner_key = ("__junction_6", "source__entry_left_2", "third")
+    outer_key = ("__junction_6", "source__entry_left_2", "second")
+    compiles = _compiles(monkeypatch, "examples/topologies/target_lane_transition.mmd")
     moved = [
         record
         for record in compiles
-        if truth_key in record.patches
-        and record.moves_a_point(record.patches[truth_key])
+        if inner_key in record.patches
+        and record.moves_a_point(record.patches[inner_key])
+        and record.moves_a_point(record.patches[outer_key])
     ]
     assert moved
 
     for record in moved:
-        truth = record.patches[truth_key]
-        test = record.patches[test_key]
-        assert truth.points[-2] == (1406.0, 531.0)
-        assert test.points[-2] == (1410.0, 535.0)
-        assert truth.radii[-1] == pytest.approx(10.0)
-        assert test.radii[-1] == pytest.approx(14.0)
+        inner = record.patches[inner_key]
+        outer = record.patches[outer_key]
+        assert inner.points[-2] == (194.0, 128.0)
+        assert outer.points[-2] == (190.0, 124.0)
+        assert inner.radii[-1] == pytest.approx(10.0)
+        assert outer.radii[-1] == pytest.approx(14.0)
         assert (
             math.dist(
-                _landing_arc_centre(truth.points, truth.radii[-1]),
-                _landing_arc_centre(test.points, test.radii[-1]),
+                _landing_arc_centre(inner.points, inner.radii[-1]),
+                _landing_arc_centre(outer.points, outer.radii[-1]),
             )
             <= 1.0
         )
@@ -156,16 +157,17 @@ def test_moved_landing_corner_nests_concentrically_with_its_mate(
 def test_unpatched_mate_in_a_moved_corner_cohort_is_resized(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The patch moves m3's descent into z2's left entry, re-forming the landing
-    cohort the exit-fed m1 and m2 leads turn in.  Neither lead is allocated, so
-    each takes a radius-only patch: its points stay put, its landing corner
-    re-nests around the moved one."""
+    """The patch moves the junction-fed l1 and l2 descents into sec3's left
+    entry, re-forming the landing cohort the exit-fed l0, l3 and l4 leads turn
+    in.  None of those leads is allocated, so each takes a radius-only patch:
+    its points stay put, its landing corner re-nests around the moved ones."""
     mate_radii = {
-        ("z1__exit_right_1", "z2__entry_left_3", "m1"): (10.0, 18.0),
-        ("z1__exit_right_1", "z2__entry_left_3", "m2"): (14.0, 14.0),
+        ("sec2__exit_right_2", "sec3__entry_left_6", "l0"): (14.0, 22.0),
+        ("sec2__exit_right_2", "sec3__entry_left_6", "l3"): (18.0, 18.0),
+        ("sec2__exit_right_2", "sec3__entry_left_6", "l4"): (10.0, 26.0),
     }
     compiles = _compiles(
-        monkeypatch, "examples/topologies/entry_cohort_interleaved_fixed_lane.mmd"
+        monkeypatch, "tests/data/corridor_cohort_witnesses/unpatched_mates_resized.mmd"
     )
     moved = [
         record
@@ -213,8 +215,8 @@ def test_compile_moving_no_corner_keeps_every_corner(
 @pytest.mark.parametrize(
     "relative_path",
     [
-        "examples/variantbenchmarking.mmd",
-        "examples/topologies/entry_cohort_interleaved_fixed_lane.mmd",
+        "examples/variantbenchmarking_auto.mmd",
+        "examples/longread_variant_calling.mmd",
     ],
 )
 def test_sizing_leaves_the_live_routes_untouched(
@@ -288,8 +290,8 @@ def _sizings_by_edge(
 @pytest.mark.parametrize(
     "relative_path",
     [
-        "examples/variantbenchmarking.mmd",
-        "examples/topologies/entry_cohort_interleaved_fixed_lane.mmd",
+        "examples/variantbenchmarking_auto.mmd",
+        "examples/longread_variant_calling.mmd",
     ],
 )
 def test_immutable_route_is_never_sized(
@@ -321,12 +323,13 @@ def test_sizing_leaves_cohorts_no_moved_corner_touches(
 ) -> None:
     """The corner rules read the radii they size, so they would re-size any
     cohort whose corners sit off its own sizing.  Preprocess's exit fan into
-    normalization shares no cohort with the moved benchmarking descents: with
-    its test lead's source corner seated 4px off, the rules re-size that fan,
-    yet the move adopts exactly what it adopts with the fan left as drawn."""
+    normalization is in none of the cohorts the benchmarking move re-sizes:
+    with its test lead's source corner seated 4px off, the rules re-size that
+    fan, yet the move adopts exactly what it adopts with the fan left as
+    drawn."""
     distractor = ("preprocess__exit_right_1", "normalization__entry_left_7", "test")
     population, mutable, *rest = _sizing_calls(
-        monkeypatch, "examples/variantbenchmarking.mmd"
+        monkeypatch, "examples/variantbenchmarking_auto.mmd"
     )[0]
     (index,) = [
         rank for rank, route in enumerate(population) if _edge_key(route) == distractor

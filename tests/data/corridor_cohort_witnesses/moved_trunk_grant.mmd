@@ -1,0 +1,58 @@
+%%metro title: Fuzz 8401420
+%%metro style: nfcore
+%%metro line: l0 | Normalize_Trim | #e6194b
+%%metro line: l1 | Export_Markdup_Call | #3cb44b
+%%metro line: l2 | Normalize | #4363d8
+%%metro line: l3 | Call | #f58231
+%%metro line: l4 | Cluster_Index | #911eb4
+
+graph LR
+    subgraph sec0 [Summarise_Classify_Qc 0]
+        s0n0[call]
+        s0n1[align]
+        s0n2[classify]
+        s0n3[export]
+        s0n1 -->|l1| s0n3
+        s0n1 -->|l2,l4| s0n2
+        s0n2 -->|l2,l4| s0n3
+        s0n0 -->|l4| s0n1
+    end
+    subgraph sec1 [Vcf_Markdup 1]
+        s1n0[qc_summarise]
+        s1n1[cluster]
+        s1n0 -->|l1,l3| s1n1
+    end
+    subgraph sec2 [Pca 2]
+        s2n0[cluster_dedup]
+        s2n1[normalize_report_summarise]
+        s2n2[filter]
+        s2n3[trim]
+        s2n4[qc_sort]
+        s2n0 -->|l0,l1,l2,l4| s2n1
+        s2n1 -->|l0,l2| s2n2
+        s2n2 -->|l0,l2| s2n3
+        s2n3 -->|l0,l1,l2| s2n4
+        s2n1 -->|l1,l4| s2n3
+    end
+    subgraph sec3 [Sort_Call 3]
+        s3n0[quant]
+        s3n1[gather_bam_pca]
+        s3n2[align]
+        s3n3[filter]
+        s3n4[qc_pca]
+        s3n0 -->|l0,l1,l3| s3n1
+        s3n1 -->|l0,l3| s3n2
+        s3n2 -->|l0,l2,l3| s3n3
+        s3n3 -->|l0,l1,l2,l3| s3n4
+        s3n1 -->|l1| s3n3
+        s3n0 -->|l2| s3n2
+    end
+    s2n4 -->|l0,l1,l2| s3n0
+    s0n3 -->|l1,l3,l4| s1n0
+    s1n1 -->|l1| s2n0
+    s0n3 -->|l2| s2n0
+    s0n2 -->|l2| s1n1
+    s1n1 -->|l2| s2n3
+    s1n1 -->|l3| s3n0
+    s1n0 -->|l4| s2n0
+    s0n3 -->|l4| s3n1

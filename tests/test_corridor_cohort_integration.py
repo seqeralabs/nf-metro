@@ -1854,8 +1854,8 @@ def test_two_claims_on_one_member_segment_fail_closed() -> None:
         )
 
 
-def test_overlaid_cohort_component_with_an_incomplete_claim_keeps_its_overlay() -> None:
-    """A tied entry slot exempts its component from the seating checks."""
+def test_overlaid_endpoint_cohort_fails_the_compile() -> None:
+    """A tied entry slot states no lane order, so the compile refuses it."""
     first = _cohort_member("a", "cohort:x")
     second_claim, second_target = _cohort_member("b", "cohort:x")
     second = (replace(second_claim, endpoint_network_rank=1), second_target)
@@ -1870,21 +1870,15 @@ def test_overlaid_cohort_component_with_an_incomplete_claim_keeps_its_overlay() 
         offset_step=10.0,
     )
 
-    plan = cci.compile_corridor_cohort_plan(
-        ledger,
-        (first[1], second[1], incomplete[1]),
-        entry_port_for={},
-    )
-
-    (component,) = plan.components
-    assert component.status is cci.CorridorAllocationStatus.COMPATIBILITY
-    assert component.compatibility is not None
-    assert (
-        component.compatibility.reason
-        is cci.CorridorCompatibilityReason.OVERLAID_ENDPOINT_SLOTS
-    )
-    assert component.problems == ()
-    assert plan.allocations == ()
+    with pytest.raises(
+        CorridorCohortCompilationError,
+        match="corridor endpoint cohort cohort:x lays its lines over each other",
+    ):
+        cci.compile_corridor_cohort_plan(
+            ledger,
+            (first[1], second[1], incomplete[1]),
+            entry_port_for={},
+        )
 
 
 def test_endpoint_cohort_split_across_components_is_typed_compatibility() -> None:
@@ -2110,7 +2104,7 @@ def test_opposing_bypass_lines_hold_separated_direction_qualified_lanes() -> Non
     graph, observed = _render("examples/topologies/opposing_bypass_corridor.mmd")
     drops = _top_entry_drops(observed.plan.routes, "orf_calling__entry_top_9")
 
-    assert drops == {"ribo": (692.0, 1), "rnaseq": (696.0, -1)}
+    assert drops == {"ribo": (688.0, 1), "rnaseq": (692.0, -1)}
     assert drops["rnaseq"][0] - drops["ribo"][0] == graph_offset_step(graph)
 
 
@@ -2122,10 +2116,7 @@ def test_no_solver_owner_contains_opposite_running_claims(
     Seed 77 compiles one cohort over both directions of several shared gaps; a
     cohort or equality owner holding both would bundle counter-running lines.
     Scalar trunk lanes are their own cohort and carry no ledger claim.  The
-    map's ordinary render trips the peel-off guard before any compile runs, so
-    it renders permissively.  There one component fails to seat, the compile
-    reports it as an aperture request, and the emission check then rejects a
-    bypass-family channel whose geometry changed.
+    map's ordinary render aborts on a curve guard, so it renders permissively.
     """
     ledgers = []
     problems = []
@@ -2150,8 +2141,7 @@ def test_no_solver_owner_contains_opposite_running_claims(
         layout_options={"permissive": True},
         source_dir=str(path.parent),
     )
-    with pytest.raises(RuntimeError, match="bypass-family channel geometry changed"):
-        svg.build_observed_render_plan(graph, resolve_theme(None, graph))
+    svg.build_observed_render_plan(graph, resolve_theme(None, graph))
 
     assert problems
     for ledger in ledgers:
@@ -2677,8 +2667,8 @@ def test_trunk_scalar_shares_a_component_with_its_bundled_member(
 
 
 _JOINT_SOLVE_GRANTS = {
-    "examples/topologies/merge_right_entry.mmd": (346.0,),
-    "tests/fixtures/regressions/perp_entry_column_merge_feeder.mmd": (247.0,),
+    "examples/topologies/merge_right_entry.mmd": (350.0,),
+    "tests/fixtures/regressions/perp_entry_column_merge_feeder.mmd": (243.0,),
     "examples/topologies/plan_owned_distinct_lane_separation.mmd": (200.0, 200.0),
     "tests/fixtures/regressions/plan_owned_distinct_lane_separation_reordered.mmd": (
         200.0,
