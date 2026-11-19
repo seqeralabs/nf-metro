@@ -3077,16 +3077,34 @@ def _route_bottom_exit_junction_via_gap(
     if (hy - src.y) * (src.y - exit_y) < 0 and exit_row is not None:
         # The target lies back across the exit's own row: the traverse runs in
         # the channel on the exit's side of that row, clear of its header badges.
-        # A branch the record sends round the far side drops past the section.
-        bottom, r = exit_side is PortSide.BOTTOM, ctx.curve_radius
-        below = header_corridor_y(ctx.graph, exit_row, below=True, base_radius=r)
-        above = row_top_edge(ctx.graph, exit_row) - INTER_ROW_HEADER_CLEARANCE - r
-        gy, far_y = (below, above) if bottom else (above, below)
+        gy = (
+            header_corridor_y(
+                ctx.graph, exit_row, below=True, base_radius=ctx.curve_radius
+            )
+            if exit_side is PortSide.BOTTOM
+            else row_top_edge(ctx.graph, exit_row)
+            - INTER_ROW_HEADER_CLEARANCE
+            - ctx.curve_radius
+        )
+        # A branch the record sends round the far side drops past the section
+        # and hugs the far edges of the sections between it and the target.
+        bottom = exit_side is PortSide.BOTTOM
         if _recorded_side(ctx.graph, edge) == ("above" if bottom else "below"):
             assert exit_col is not None
             drop_x = _corridor_descent_x(ctx, exit_col + 1, ep_row, 0.0)
             if drop_x is None:
                 return None
+            far_y = (min if bottom else max)(
+                header_corridor_y(
+                    ctx.graph,
+                    exit_row,
+                    below=not bottom,
+                    base_radius=ctx.curve_radius,
+                    col=c,
+                    default=inf if bottom else 0.0,
+                )
+                for c in range(exit_col + 1, ep_col)
+            )
             detour = [(drop_x, gy), (drop_x, far_y)]
     else:
         gy = inter_row_channel_y(
