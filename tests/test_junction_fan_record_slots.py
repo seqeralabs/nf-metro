@@ -138,3 +138,16 @@ def test_an_entry_frame_pill_covers_the_sole_flow_entrys_lines(station: str) -> 
         min(offsets[station, lid] for lid in cohort),
         max(offsets[station, lid] for lid in cohort),
     )
+
+
+def test_a_merge_riser_steps_out_past_the_lines_turning_inside_it() -> None:
+    graph, _offsets, plan = _plan(
+        ROOT / "tests" / "fixtures" / "route_reservations" / "reportho.metro"
+    )
+    step = graph_offset_step(graph)
+    report = _route(plan, "__junction_12", "__merge_5", "report")
+    main = _route(plan, "__junction_12", "fetch_seqs__entry_left_6", "main")
+    assert report.points[1][0] - main.points[1][0] == pytest.approx(step)
+    assert report.curve_radii is not None and main.curve_radii is not None
+    assert main.curve_radii[0] == pytest.approx(CURVE_RADIUS)
+    assert report.curve_radii[0] == pytest.approx(CURVE_RADIUS + step)

@@ -3083,7 +3083,7 @@ def _route_merge_branch(
     src_off = _get_offset(ctx, edge.source, edge.line_id)
     by = ctx.merge.trunk_by.get(edge.target, sy)
 
-    lead_x = _merge_branch_lead_x(src, ctx, src_col)
+    lead_x = _merge_branch_lead_x(edge, src, ctx, src_col)
 
     # Turn along the channel toward the entry port (the way the trunk runs).
     ep_id = ctx.merge.entry_port_for.get(edge.target)
@@ -3111,13 +3111,36 @@ def _route_merge_branch(
     return route
 
 
-def _merge_branch_lead_x(src: Station, ctx: _RoutingCtx, src_col: int) -> float:
-    """Return the source channel fixed by a merge feeder's section edge."""
-    left_edge = col_left_edge(ctx.graph, src_col)
-    right_edge = col_right_edge(ctx.graph, src_col)
+def _merge_branch_lead_x(
+    edge: Edge, src: Station, ctx: _RoutingCtx, src_col: int
+) -> float:
+    """Return the riser column of merge branch *edge* leaving *src*.
+
+    The column sits past the feeder's section edge, one offset step further out
+    for every other line at *src* that turns the same way and lies inside
+    *edge*'s line by the planned offsets, so the branch's corner nests outside
+    theirs at full radius.
+    """
+    graph = ctx.graph
+    left_edge = col_left_edge(graph, src_col)
+    right_edge = col_right_edge(graph, src_col)
     if src.x >= (left_edge + right_edge) / 2:
-        return max(right_edge + MERGE_ROUTE_MARGIN, src.x + ctx.curve_radius)
-    return min(left_edge - MERGE_ROUTE_MARGIN, src.x - ctx.curve_radius)
+        sign, x = 1.0, max(right_edge + MERGE_ROUTE_MARGIN, src.x + ctx.curve_radius)
+    else:
+        sign, x = -1.0, min(left_edge - MERGE_ROUTE_MARGIN, src.x - ctx.curve_radius)
+    offsets = ctx.station_offsets or {}
+    mine = offsets.get((src.id, edge.line_id))
+    if mine is None:
+        return x
+    turn = 1.0 if ctx.merge.trunk_by.get(edge.target, src.y) > src.y else -1.0
+    inner = {
+        other.line_id
+        for other in graph.edges_from(src.id)
+        if other.line_id != edge.line_id
+        and (graph.stations[other.target].y - src.y) * turn > 0
+        and (offsets.get((src.id, other.line_id), mine) - mine) * turn > 0
+    }
+    return x + sign * len(inner) * ctx.offset_step
 
 
 def _would_route_around_section_below(edge: Edge, ctx: _RoutingCtx) -> bool:
