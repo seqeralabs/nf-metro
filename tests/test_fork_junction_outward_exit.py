@@ -281,3 +281,35 @@ def test_no_two_branches_of_a_fork_cross_each_other(fixture: Path) -> None:
         if (hit := segments_properly_cross(p0, p1, q0, q1, reject_collinear_touch=True))
     ]
     assert crossings == []
+
+
+@pytest.mark.parametrize(
+    ("fixture", "entry"),
+    [
+        (MULTI_LINE, "z2__entry_left_2"),
+        (REGRESSIONS / "departure_order_rejoining_rotation.mmd", "sec2__entry_left_3"),
+    ],
+    ids=["multi_line_feeder", "rejoining_rotation"],
+)
+def test_a_far_side_branch_hugs_the_sections_it_passes(
+    fixture: Path, entry: str
+) -> None:
+    """A branch round its row's far side runs along the far edges of the
+    sections it passes, not round the taller section it forks from."""
+    graph, drawn = _render(fixture)
+    forks = _perp_forks(graph)
+    branch = [
+        line
+        for route, line in drawn
+        if route.edge.source in forks and route.edge.target == entry
+    ]
+    assert branch
+    fork = next(
+        r.edge.source
+        for r, _line in drawn
+        if r.edge.source in forks and r.edge.target == entry
+    )
+    exit_section = graph.sections[graph.ports[forks[fork]].section_id]
+    assert max(y for line in branch for _x, y in line) < (
+        exit_section.bbox_y + exit_section.bbox_h
+    )
