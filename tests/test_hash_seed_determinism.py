@@ -88,16 +88,15 @@ EXPECTED_DEFECT_CLASSES = {
     # seed_15 aborts in convergence planning, before any routing guard runs
     # (#2041), so its message names no defect class.
     "seed_15.mmd": (),
-    "seed_41.mmd": (
-        "non-concentric bundle corner",
-        "merge fan-out branches split off one fork corner",
-    ),
+    # seed_41 aborts in the convergence plan (a merge approach emitted with the
+    # opposite handedness to the one planned), before any routing guard runs.
+    "seed_41.mmd": (),
     "seed_77.mmd": ("peel-off bundle braids into port",),
 }
 
 EXPECTED_EXCEPTION_SHA256 = {
     "seed_15.mmd": "cc5cab13f70c78921d6103905af0651a9bcc246eb404fa68343645fe7bddcb6f",
-    "seed_41.mmd": "119a52417bd9fdf02767feb6b41d7c32a4f7dcaba5095adf991886c4175c6ebe",
+    "seed_41.mmd": "3b5ca922585bb3e53e1bf999325c741eed1d4d605516069cc968e35cf865b46c",
     "seed_77.mmd": "e6ca83122dc7161a61dcc36a8fe38b92eb7010afe446ddaf907b960418a72620",
 }
 
