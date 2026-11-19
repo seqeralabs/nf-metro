@@ -151,3 +151,11 @@ def test_a_feeder_wrapping_to_a_perpendicular_port_clears_its_own_section(
                 for a, b in pairwise(line)
             ), f"{route.edge.source}->{route.edge.target} {route.line_id} crosses {sid}"
     assert wraps, "fixture has no feeder into a perpendicular port"
+
+
+def test_a_fork_off_a_top_exit_stands_outside_its_section() -> None:
+    graph, _drawn = _render(REGRESSIONS / "perp_entry_column_merge_feeder.mmd")
+    exit_port = graph.stations["sec2__exit_top_1"]
+    junction = graph.stations["__junction_9"]
+    assert junction.x == pytest.approx(exit_port.x)
+    assert junction.y < graph.sections["sec2"].bbox_y

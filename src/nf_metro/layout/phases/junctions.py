@@ -201,9 +201,11 @@ def _position_junctions(graph: MetroGraph) -> None:
                 _junction_outgoing_line_count(graph, jid)
             )
             exit_port_obj = graph.ports.get(exit_port_id) if exit_port_id else None
-            if exit_port_obj and exit_port_obj.side == PortSide.BOTTOM:
+            if exit_port_obj and exit_port_obj.side in (PortSide.TOP, PortSide.BOTTOM):
                 junction.x = exit_port_x
-                junction.y = exit_port_y + margin
+                junction.y = exit_port_y + (
+                    margin if exit_port_obj.side is PortSide.BOTTOM else -margin
+                )
             elif exit_port_obj and exit_port_obj.side in (
                 PortSide.RIGHT,
                 PortSide.LEFT,
