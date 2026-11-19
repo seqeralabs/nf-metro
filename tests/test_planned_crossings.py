@@ -117,6 +117,13 @@ def test_an_interleaved_entry_lane_records_its_crossing() -> None:
     assert graph._lane_plan is not None
     assert graph._lane_plan.tracks.forced == (
         ForcedCrossing(
+            "sec1",
+            None,
+            ("l3", "l0", "l1", "l2"),
+            "sec1__entry_left_2",
+            turn="s1n1",
+        ),
+        ForcedCrossing(
             "sec2",
             None,
             ("l0", "l2", "l3", "l4"),
