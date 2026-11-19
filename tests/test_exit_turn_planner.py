@@ -876,9 +876,9 @@ def test_owners_pinning_one_corner_apart_defer_to_gap_allocation() -> None:
     agree on, it declines wholesale and the emitter draws the nested corner.
     """
     _graph, _offsets, _original_offsets, execution = _build_execution(
-        FIXTURES / "target_entry_runway_bypass.mmd"
+        TOPOLOGIES / "entry_cohort_interleaved_fixed_lane.mmd"
     )
-    plan = next(item for item in execution.plans if item.source_id == "__junction_13")
+    plan = next(item for item in execution.plans if item.source_id == "__junction_4")
 
     assert plan.disposition is ExitTurnDisposition.LEGACY
     assert plan.legacy_reason == exit_turns.GAP_ALLOCATION_PENDING

@@ -1,0 +1,38 @@
+%%metro title: Fuzz 8402408
+%%metro line: l0 | Pca | #e6194b
+%%metro line: l1 | Cluster_Bam_Assemble | #3cb44b
+
+graph LR
+    subgraph sec0 [Quant_Annotate 0]
+        s0n0[classify_assemble]
+        s0n1[BIN_MERGE]
+        s0n2[bin_report]
+        s0n4[align]
+        s0n0 -->|l1| s0n1
+        s0n1 -->|l1| s0n2
+        s0n2 -->|l1| s0n4
+    end
+    subgraph sec1 [Cluster 1]
+        %%metro direction: TB
+        s1n0[polish_normalize_sort]
+        s1n3[bin]
+        s1n0 -->|l1| s1n3
+    end
+    subgraph sec2 [Polish 2]
+        s2n0[assemble]
+        s2n1[bin_polish]
+        s2n3[REPORT_ANNOTATE_CLASSIFY]
+        s2n4[merge_pca]
+        s2n0 -->|l0| s2n1
+        s2n1 -->|l0| s2n3
+        s2n3 -->|l0| s2n4
+    end
+    subgraph sec3 [Pca_Summarise 3]
+        %%metro direction: TB
+        s3n0[classify_stats]
+        s3n1[ASSEMBLE_BAM]
+        s3n0 -->|l1| s3n1
+    end
+    s2n4 -->|l0| s3n0
+    s0n4 -->|l1| s1n0
+    s1n3 -->|l1| s3n0

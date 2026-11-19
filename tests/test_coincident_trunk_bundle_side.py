@@ -103,7 +103,7 @@ def test_corridor_runs_keep_the_box_edge_clearance_under_annotate(
 @pytest.mark.parametrize(
     ("relative_path", "trunk_lines"),
     [
-        ("examples/topologies/return_trunk_over_member_run.mmd", {"qc"}),
+        ("tests/data/coincident_trunk/member_yields_stated_trunk.mmd", {"m0"}),
         ("examples/riboseq_metro.mmd", set()),
         ("tests/fixtures/curve_invariant_repros/riboseq_inter_row_corridor.mmd", set()),
     ],

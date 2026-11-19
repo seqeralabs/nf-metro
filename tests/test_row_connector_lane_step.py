@@ -9,10 +9,10 @@ level, and carrying a chevron pointing off-axis.  The house shape is the step:
 a flat runway, a 45-degree diagonal of exactly the lane difference, then a flat
 runway into the port.
 
-``funcprofiler_upstream`` is the fixture that cannot be levelled: its receiving
-section carries the handed-over line eight lanes above the lane its feeder
-holds it on.  The rest are maps whose same-row hand-overs change lane for their
-own reasons, so the invariant is exercised beyond one topology.
+``port_step_hand_over`` is the fixture that cannot be levelled: its receiving
+section carries the handed-over line one lane off the lane its feeder holds it
+on.  The rest are maps whose same-row hand-overs change lane for their own
+reasons, so the invariant is exercised beyond one topology.
 """
 
 from __future__ import annotations
@@ -47,17 +47,11 @@ FIXTURES = [
 ]
 FIXTURE_IDS = [Path(f).stem for f in FIXTURES]
 
-STEP_FIXTURE = "examples/topologies/funcprofiler_upstream.mmd"
-STEP_EDGE = ("__junction_6", "profiling__entry_left_3", "db")
+STEP_FIXTURE = "tests/data/row_connector_lane_step/port_step_hand_over.mmd"
+STEP_EDGE = ("__junction_4", "sec1__entry_left_3", "l2")
 
-SHARED_PORT_FIXTURE = (
-    "tests/fixtures/curve_invariant_repros/backward_right_entry_lane_handover.mmd"
-)
-SHARED_PORT_EDGE = (
-    "level_src__exit_left_0",
-    "sink__entry_right_2",
-    "level",
-)
+SHARED_PORT_FIXTURE = "tests/data/row_connector_lane_step/shared_port_level_feeder.mmd"
+SHARED_PORT_EDGE = ("sec2__exit_right_0", "sec3__entry_left_3", "l0")
 
 _TOLERANCE = 0.5
 
@@ -172,14 +166,13 @@ def test_over_constrained_hand_over_steps_at_the_port() -> None:
 def test_shared_port_connector_vacates_its_source_lane_at_the_source() -> None:
     """A connector into a shared port reaches its own lane before the corridor.
 
-    ``backward_right_entry_lane_handover`` shares one right entry port between a
-    ``level`` feeder arriving flat along the port's row and a ``descend`` line
-    dropping in from the row above.  ``level`` is assigned the outer port lane
-    while ``descend`` holds the port centre -- the same screen lane ``level``
-    would hold if its hand-off were drawn against the port.  Placing the hand-off
-    at the source instead keeps only a minimum runway on the source lane, so
-    ``level`` descends to its own outer lane before entering the approach
-    ``descend`` already occupies.
+    ``shared_port_level_feeder`` shares Sec3's left entry port between ``l0``,
+    arriving flat along the port's row from Sec2, and ``l1``, dropping in from
+    the row above.  ``l0`` is assigned the outer port lane while ``l1`` holds
+    the port centre -- the same screen lane ``l0`` would hold if its hand-off
+    were drawn against the port.  Placing the hand-off at the source instead
+    keeps only a minimum runway on the source lane, so ``l0`` steps to its own
+    outer lane before entering the approach ``l1`` already occupies.
     """
     graph = parse_metro_mermaid(
         (ROOT / SHARED_PORT_FIXTURE).read_text(), max_station_columns=15
