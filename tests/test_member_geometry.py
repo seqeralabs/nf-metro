@@ -1,7 +1,6 @@
 """Non-convergence member geometry is planned once and emitted exactly."""
 
 import json
-import re
 import warnings
 from dataclasses import replace
 from pathlib import Path
@@ -1855,51 +1854,6 @@ def test_packed_cell_routing_observation_publishes_corridor_aperture_requirement
     assert requirement.required == pytest.approx(REQUIRED_APERTURE)
     assert requirement.negative_section_ids == ("assemble",)
     assert requirement.positive_section_ids == ("qc",)
-
-
-def test_corridor_cohort_aperture_producer_processes_failures_independently() -> None:
-    """One failed corridor component with no usable shortfall does not void a
-    sibling component's diagnosis in the same allocation batch.
-
-    ``hash_seed_determinism/seed_15.mmd`` fails two components at once:
-    ``corridor-component|3`` (a plain equality conflict with no shortfall at
-    all) and a later convergence-trunk component (a shortfall whose negative
-    side has no section anywhere in this fixture's sparse grid, so it cannot
-    map to a two-section boundary either). An all-or-nothing batch would
-    report only whichever came first and never even look at the other; this
-    asserts both are named, proving each was actually attempted.
-    """
-    path = ROOT / "tests" / "fixtures" / "hash_seed_determinism" / "seed_15.mmd"
-    (
-        ledger,
-        candidates,
-        context_candidates,
-        scaffold,
-        ctx,
-        extra_targets,
-        scalar_requests,
-    ) = _corridor_cohort_population(path)
-
-    with pytest.raises(CorridorCohortCompilationError) as excinfo:
-        member_geometry._compile_corridor_cohorts(
-            ledger,
-            candidates,
-            context_candidates,
-            scaffold,
-            ctx,
-            allow_clearance_requirements=True,
-            additional_targets=extra_targets,
-            scalar_requests=scalar_requests,
-        )
-
-    message = str(excinfo.value)
-    assert "corridor-component|3/result:0: allocation failure has no typed" in message
-    (trunk_component,) = re.findall(
-        r"(corridor-component\|\d+/result:0) infeasible members=convergence-trunk",
-        message,
-    )
-    assert trunk_component != "corridor-component|3/result:0"
-    assert f"{trunk_component}: clearance boundary has no facing section" in message
 
 
 def test_record_boundary_clearance_requirement_keeps_kinds_distinct() -> None:

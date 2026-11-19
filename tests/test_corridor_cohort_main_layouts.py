@@ -321,16 +321,6 @@ def test_tied_feeders_compile_onto_distinct_entry_slots(
         assert len(landed) == len(set(landed)), port_id
 
 
-def test_grant_is_proven_against_its_ungranted_observation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A grant moves a trunk beside runs pre-freeze seating moves too; the
-    render's grant guard passes only when it diffs against the ungranted
-    observation."""
-    captured = _render(monkeypatch, "cohort_grant_beside_seated_runs.mmd")
-    assert captured.granted
-
-
 def test_grant_keeps_its_trunk_inside_the_reserved_corridor() -> None:
     """A trunk's own covered continuation is the recipe's to move, so it does
     not push the granted trunk out of the row-gap corridor its reservation

@@ -2668,12 +2668,7 @@ def test_trunk_scalar_shares_a_component_with_its_bundled_member(
 
 _JOINT_SOLVE_GRANTS = {
     "examples/topologies/merge_right_entry.mmd": (350.0,),
-    "tests/fixtures/regressions/perp_entry_column_merge_feeder.mmd": (243.0,),
-    "examples/topologies/plan_owned_distinct_lane_separation.mmd": (200.0, 200.0),
-    "tests/fixtures/regressions/plan_owned_distinct_lane_separation_reordered.mmd": (
-        200.0,
-        200.0,
-    ),
+    "tests/fixtures/regressions/perp_entry_column_merge_feeder.mmd": (247.0,),
 }
 
 

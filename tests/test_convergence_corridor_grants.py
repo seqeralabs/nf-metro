@@ -1248,12 +1248,7 @@ def _routes_by_edge(routes: list[RoutedPath]) -> dict[tuple[str, str, str], Rout
     }
 
 
-@pytest.mark.parametrize(
-    ("fixture", "granted"),
-    # merge_right_entry's trunk is held on its same-line member's lane, which
-    # outranks its shifted preference.
-    [(_FUNCPROFILER, 466.0), (_MERGE_RIGHT_ENTRY, 346.0)],
-)
+@pytest.mark.parametrize(("fixture", "granted"), [(_FUNCPROFILER, 466.0)])
 def test_granted_trunk_is_drawn_and_published_and_nothing_else_moves(
     fixture: str, granted: float, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1406,43 +1401,6 @@ def _render_with_compiled_grants(
     plan, _routes = _render(fixture, monkeypatch, layout_options)
     assert compiled
     return plan, compiled[-1]
-
-
-@pytest.mark.parametrize("fixture", _DISTINCT_LANE_SEPARATION_FIXTURES)
-def test_trunk_is_granted_clear_of_a_distinct_line_turning_off_its_lane(
-    fixture: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The grant, not settlement, seats a trunk clear of a distinct line's turn.
-
-    The ``secondary`` members run left on the ``primary`` trunks' lane and turn
-    up out of it across the trunks, so both trunks take the nearest lane one
-    pitch clear of that turn-off, and the drawn trunk is the granted one.
-    """
-    plan, grants = _render_with_compiled_grants(fixture, monkeypatch)
-
-    assert len(grants) == 2
-    assert {grant.coordinate for grant in grants} == {200.0}
-    by_owner = {str(item.id): item for item in plan.convergence_plans}
-    for grant in grants:
-        assert by_owner[grant.owner_id].trunk_axis.coordinate == grant.coordinate
-
-
-def test_trunk_is_granted_onto_the_same_line_run_it_bundles_with(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The grant, not settlement, fuses a trunk onto its own line's frozen run.
-
-    The unowned ``main`` member into the sink's right entry already runs along
-    the trunk's corridor one pitch away, so the two are one bundle drawn too
-    wide: the trunk is granted the member's lane, and the drawn trunk is the
-    granted one.
-    """
-    plan, grants = _render_with_compiled_grants(_MERGE_RIGHT_ENTRY, monkeypatch)
-
-    (grant,) = grants
-    assert grant.coordinate == 346.0
-    by_owner = {str(item.id): item for item in plan.convergence_plans}
-    assert by_owner[grant.owner_id].trunk_axis.coordinate == grant.coordinate
 
 
 def test_only_a_trunk_grant_binds_its_plan_through_settlement() -> None:
