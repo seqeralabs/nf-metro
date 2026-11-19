@@ -993,7 +993,7 @@ RECORD_USES = {
     "layout/routing/normalize.py": {"_draw_sign", "_run_port"},
     "layout/routing/common.py": {"entry_crossing_lines"},
     "layout/routing/invariants.py": {"entry_crossing_lines"},
-    "layout/routing/corridor_cohort_integration.py": {"interleaved_crossings"},
+    "layout/routing/corridor_cohort_integration.py": {"recorded_crossing_pairs"},
     "parser/model.py": {"LanePlan"},
 }
 RECORD_MODULES = {"layout/lane_plan.py", "layout/port_order_plan.py"}

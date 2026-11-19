@@ -2922,19 +2922,19 @@ def entry_crossing_lines(graph: MetroGraph, port_id: str) -> frozenset[str]:
     )
 
 
-def interleaved_crossings(
+def recorded_crossing_pairs(
     graph: MetroGraph,
 ) -> frozenset[tuple[tuple[str, str, str], tuple[str, str, str]]]:
-    """Each ``(edge, edge)`` pair a recorded crossing between two feeding
-    bundles at an entry exchanges: the passing line's connector from any
-    other source against each crossed line's from the bundle's exit, both
-    ways round."""
+    """Each ``(edge, edge)`` pair a recorded crossing at an entry exchanges,
+    both ways round: between two feeding bundles, the passing line's connector
+    from any other source against each crossed line's from the bundle's exit;
+    within one bundle, its connectors of the lines it exchanges."""
     plan = recorded_lane_plan(graph)
     if plan is None:
         return frozenset()
     pairs: set[tuple[tuple[str, str, str], tuple[str, str, str]]] = set()
     for crossing in plan.tracks.forced:
-        if crossing.port is None or crossing.across is None:
+        if crossing.port is None:
             continue
         passing, crossed = crossing.lines[0], crossing.lines[1:]
         keys = [
@@ -2944,6 +2944,16 @@ def interleaved_crossings(
             )
             for e in graph.edges_to(crossing.port)
         ]
+        if crossing.across is None:
+            pairs.update(
+                (key, other)
+                for key, _source in keys
+                for other, _other_source in keys
+                if key[0] == other[0]
+                and key[2] != other[2]
+                and {key[2], other[2]} <= set(crossing.lines)
+            )
+            continue
         for key, source in keys:
             if key[2] != passing or source == crossing.across:
                 continue

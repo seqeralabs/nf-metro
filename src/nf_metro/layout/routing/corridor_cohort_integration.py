@@ -26,7 +26,7 @@ from nf_metro.layout.constants import (
     graph_offset_step,
 )
 from nf_metro.layout.geometry import cotravelling_lane_clearance, spans_share_corridor
-from nf_metro.layout.lane_plan import interleaved_crossings
+from nf_metro.layout.lane_plan import recorded_crossing_pairs
 from nf_metro.layout.route_plan import (
     BindingKind,
     EmissionBinding,
@@ -55,6 +55,7 @@ from nf_metro.layout.routing.common import (
     RoutedPath,
     SourceTurnout,
     planner_owns_segment,
+    port_peeloff_tail,
     right_normal_axis_sign,
     segment_direction,
     tolerant_sign,
@@ -300,7 +301,7 @@ class CorridorCohortLedger:
     )
     """``(member edge, perpendicular edge)`` pairs whose crossing the topology
     forces (:func:`_forced_loop_crossings`) or the lane plan records
-    (:func:`~nf_metro.layout.lane_plan.interleaved_crossings`)."""
+    (:func:`~nf_metro.layout.lane_plan.recorded_crossing_pairs`)."""
 
 
 def _reaches_along(
@@ -787,7 +788,7 @@ def build_corridor_cohort_ledger(
         | frozenset(ambiguous_path_rank_cohorts),
         offset_step=graph_offset_step(graph),
         curve_radius=curve_radius,
-        forced_crossings=_forced_loop_crossings(graph) | interleaved_crossings(graph),
+        forced_crossings=_forced_loop_crossings(graph) | recorded_crossing_pairs(graph),
     )
 
 
@@ -3357,14 +3358,52 @@ def _next_seat_pitch(
     return pitch
 
 
+def _crossed_ranks_in_trunk_order(
+    order: list[int],
+    by_rank: Mapping[int, list[_BoundClaim]],
+    forced_crossings: frozenset[tuple[tuple[str, str, str], tuple[str, str, str]]],
+) -> list[int]:
+    keys = {rank: items[-1].target.edge_key for rank, items in by_rank.items()}
+    crossed = [
+        rank
+        for rank in order
+        if any(
+            (keys[rank], keys[other]) in forced_crossings
+            and keys[rank][0] == keys[other][0]
+            for other in order
+        )
+    ]
+    tails = {
+        rank: port_peeloff_tail(by_rank[rank][-1].target.route) for rank in crossed
+    }
+    if not crossed or any(tail is None for tail in tails.values()):
+        return order
+    first = tails[crossed[0]]
+    assert first is not None
+    kept = iter(
+        sorted(
+            crossed,
+            key=lambda rank: tails[rank].trunk_y,  # type: ignore[union-attr]
+            reverse=first.trunk_sign != first.port_lead_sign,
+        )
+    )
+    return [next(kept) if rank in crossed else rank for rank in order]
+
+
 def _local_boundary_ranks(
     claims: tuple[_BoundClaim, ...],
     fixed_claims: tuple[_BoundClaim, ...],
     pinned_seats: Mapping[tuple[str, int], float],
     offset_step: float,
     curve_radius: float,
+    forced_crossings: frozenset[tuple[tuple[str, str, str], tuple[str, str, str]]],
 ) -> dict[tuple[str, int], int]:
     """Each endpoint cohort rank's local boundary rank, dealt in port-slot order.
+
+    Lines one bundle exchanges at the port by a recorded crossing take that
+    exchange in their last bend, so up to it they keep their trunk order among
+    the slots they hold, as the peel-off drawing seats them
+    (:func:`~nf_metro.layout.routing.common.peeloff_trunk_line_order`).
 
     Every cohort claim ranks, fixed and counter-running alike, so a fixed lane
     between movable ones keeps its step and a lane pinned onto its line's fixed
@@ -3399,6 +3438,7 @@ def _local_boundary_ranks(
                 for rank, items in by_rank.items()
             }
         )
+        order = _crossed_ranks_in_trunk_order(order, by_rank, forced_crossings)
         pinned_rank = next(
             (rank for rank in order if (cohort_id, rank) in pinned_seats), None
         )
@@ -3450,6 +3490,9 @@ def _problem(
     ),
     corner_neighbours: Mapping[tuple[str, int], _CornerNeighbour],
     lane_region: CorridorLaneRegionReader = _no_lane_region,
+    forced_crossings: frozenset[
+        tuple[tuple[str, str, str], tuple[str, str, str]]
+    ] = frozenset(),
 ) -> CorridorAllocationProblem:
     scalar_by_id = {
         request.variable.variable_id: request for request in scalar_requests
@@ -3543,6 +3586,7 @@ def _problem(
         _pinned_endpoint_seats(movable, equalities, pinned),
         offset_step,
         curve_radius,
+        forced_crossings,
     )
     aliased_claims = tuple(item for item in claims if item.claim_id in aliases)
     scalar_equalities = [
@@ -4093,6 +4137,7 @@ def _component_plan(
             intervals_by_member=intervals_by_member,
             corner_neighbours=corner_neighbours,
             lane_region=lane_region,
+            forced_crossings=ledger.forced_crossings,
         )
         problems = (problem,)
         results = (solve(problem),)
