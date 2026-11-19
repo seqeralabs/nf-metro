@@ -5418,7 +5418,7 @@ def _perp_entry_finish_route(
             tgt_bundle_offsets=[member[3]],
             normalize_exempt=True,
         )
-        if geometry.flanked_gap:
+        if geometry.seated_in_gap:
             _declare_placed_channels(route, ctx)
         return route
 
@@ -5430,10 +5430,10 @@ def _perp_entry_finish_route(
         normalize_exempt=True,
     )
     route = next(r for r in routes if r.line_id == edge.line_id)
-    if geometry.flanked_gap:
-        # The riser descends a two-walled gap it counter-runs other bundles in.
-        # Declaring its channel makes the exempt frame a visible obstacle so the
-        # gap passes seat those movable bundles clear of it.
+    if geometry.seated_in_gap:
+        # The riser stands in an inter-column gap other bundles also use.
+        # Declaring its channel registers its gap slot, so the gap passes seat
+        # those movable bundles clear of it.
         _declare_placed_channels(route, ctx)
     return route
 
@@ -5541,7 +5541,7 @@ class _PerpEntryLGeometry:
     transition_leg: int
     fan_source_offsets: tuple[float, ...] | None
     seam: _SourceSeam
-    flanked_gap: bool = False
+    seated_in_gap: bool = False
 
 
 def _leg_direction(start: tuple[float, float], end: tuple[float, float]) -> Direction:
@@ -5569,7 +5569,7 @@ def _perp_entry_l_record(
     transition_leg: int,
     line_id: str,
     fan_source_offsets: tuple[float, ...] | None,
-    flanked_gap: bool = False,
+    seated_in_gap: bool = False,
 ) -> _PerpEntryLGeometry:
     """Complete a perpendicular-entry record from its centreline.
 
@@ -5589,7 +5589,7 @@ def _perp_entry_l_record(
             transition_leg,
             fan_source_offsets,
             _SourceSeam(_leg_direction(points[0], points[-1]), None, None, None),
-            flanked_gap,
+            seated_in_gap,
         )
     source_offset, target_offset = next(
         (source, target)
@@ -5609,7 +5609,7 @@ def _perp_entry_l_record(
             points[0][0],
             points[1][0] + right_normal_axis_sign(turn_direction) * member_offset,
         ),
-        flanked_gap,
+        seated_in_gap,
     )
 
 
@@ -5807,16 +5807,16 @@ def _perp_entry_l_geometry(
     # pair centres the riser in the clear inter-column corridor; a same-column
     # cross-row pair flanked on its exit side seats it a clearance off the exit
     # wall, leaving the widened gap for the bundles it counter-runs.
-    flanked_gap = False
+    seated_in_gap = False
     if exit_side is not None and not straight_drop:
         corridor_x = _corridor_riser_x(ctx, src_sec, tgt_sec)
         if corridor_x is None:
             corridor_x = _flanked_cross_row_riser_seat_x(
                 ctx, src, tgt, src_sec, tgt_sec, exit_side, sy, mid_y
             )
-            flanked_gap = corridor_x is not None
         if corridor_x is not None:
             lx0 = corridor_x
+            seated_in_gap = True
 
     # Anchor the centreline on the bundle's reference line (source offset 0) and
     # fan every co-travelling line as a per-leg offset of it, so each corner
@@ -5936,6 +5936,15 @@ def _perp_entry_l_geometry(
             channel_direction = segment_direction((lx0, mid_y), (final_x, mid_y))
             assert channel_direction is not None
             channel_sign = right_normal_axis_sign(channel_direction)
+            # A line fed into the port from more than one source runs each lone
+            # feed's leg on the lane it holds at the port: the feeds share it.
+            feeds = [
+                e for e in ctx.graph.edges_to(edge.target) if e.line_id in line_ids
+            ]
+            if len(line_ids) == 1 and len(feeds) > 1:
+                mid_y += channel_sign * (
+                    _get_offset(ctx, edge.target, line_ids[0]) - lane_offsets[0]
+                )
             mid_y = _perp_entry_seated_corridor(
                 ctx,
                 src,
@@ -5979,7 +5988,7 @@ def _perp_entry_l_geometry(
         transition_leg,
         edge.line_id,
         fan_source_offsets,
-        flanked_gap,
+        seated_in_gap,
     )
 
 

@@ -23,20 +23,21 @@ import cohort_shadow_oracle
 import pytest
 from conftest import curve_abort_softened, is_curve_abort_fixture
 
-from nf_metro.api import render_string
+from nf_metro.api import RenderConfig, prepare_graph, render_graph_result, render_string
+from nf_metro.layout.constants import COORD_TOLERANCE
 from nf_metro.layout.routing import corridor_cohort_integration as cci
 from nf_metro.layout.routing import member_geometry
 from nf_metro.layout.routing.common import RoutedPath, port_peeloff_tail
 from nf_metro.render import svg
+from nf_metro.themes import resolve_theme
 
 ROOT = Path(__file__).resolve().parents[1]
 
 EdgeKey = tuple[str, str, str]
 
-# Two lines leave sec2 through one row-gap corridor whose clearance band sits
-# below where the fused-run separation leaves them: only the post-emission
-# hold seats them, a step deeper.
-CLEARANCE_HELD_CORRIDOR = """\
+# Two feeds of l1 reach sec3's bottom entry, one from sec2 beside l0 and one
+# from sec1's junction.
+SAME_LINE_FEEDS = """\
 %%metro title: Fuzz 8400125
 %%metro line: l0 | Markdup_Cluster | #e6194b
 %%metro line: l1 | Fastqc | #3cb44b
@@ -78,6 +79,12 @@ graph LR
     s2n0 -->|l1| s3n1
     s1n0 -->|l1| s3n1
 """
+
+# Two lines fan from one junction into a row-gap corridor that leaves them
+# outside the clearance band it owes: only the post-emission hold seats them
+# inside it.
+CLEARANCE_HELD_CORRIDOR = "examples/topologies/fanout_intersection_shared_channel.mmd"
+
 
 # A top-entry bundle into sec2 whose declared trunk slot restacks it before
 # the corridor-clearance hold shifts it back: the two moves cancel in the
@@ -399,6 +406,27 @@ def test_compile_accepts_the_runs_the_clearance_hold_draws(tmp_path: Path) -> No
     path = _map_path(CLEARANCE_HELD_CORRIDOR, tmp_path)
 
     assert cohort_shadow_oracle.shadow_failure(path) is None
+
+
+def test_feeds_of_one_line_into_a_perpendicular_entry_share_its_lane(
+    tmp_path: Path,
+) -> None:
+    """Each feed of l1 into sec3's bottom entry runs its corridor leg on the lane
+    l1 holds at the port, so the line is drawn once under the section."""
+    path = _map_path(SAME_LINE_FEEDS, tmp_path)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+        plan = render_graph_result(
+            graph, resolve_theme(None, graph, mode=None), RenderConfig()
+        ).plan
+    legs = {
+        route.edge.source: route.points[-2][1]
+        for route in plan.routes
+        if (route.edge.target, route.line_id) == ("sec3__entry_bottom_3", "l1")
+    }
+    assert set(legs) == {"sec2__exit_right_0", "__junction_6"}
+    assert max(legs.values()) - min(legs.values()) <= COORD_TOLERANCE, legs
 
 
 def test_compile_holds_a_trunk_slot_restacked_bundle_where_it_is_drawn(
