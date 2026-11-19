@@ -990,7 +990,7 @@ def _route_right_entry_drop_in(
         centerline,
         base_radius=ctx.curve_radius,
         bundle_offsets=fan_corner_offsets(
-            ctx, edge, pos_n, vertical_direction(ey - sy)
+            ctx, edge, pos_n, (centerline[1], centerline[2])
         ),
     )
     assert route is not None  # the lone member is always in its own bundle
@@ -4495,7 +4495,9 @@ def _route_l_shape_fan(
         [(edge, edge.line_id, -delta)],
         centerline,
         base_radius=ctx.curve_radius,
-        bundle_offsets=fan_corner_offsets(ctx, edge, un, geometry.turn_direction),
+        bundle_offsets=fan_corner_offsets(
+            ctx, edge, un, (centerline[1], centerline[2])
+        ),
         normalize_exempt=False,
     )
     assert route is not None  # the lone member is always in its own bundle
@@ -6263,21 +6265,26 @@ def _fan_corner_x(
 
 
 def fan_corner_offsets(
-    ctx: _RoutingCtx, edge: Edge, n: int, vertical: Direction
+    ctx: _RoutingCtx,
+    edge: Edge,
+    n: int,
+    first_turn: tuple[tuple[float, float], tuple[float, float]],
 ) -> list[float]:
     """The signed offsets of the *n*-line fan slots that turn with *edge*.
 
     A handler routing one junction-fan branch at a time anchors its corners on
-    these, read in the frame of the branch's first turn (*vertical*), so the
-    innermost line that turns takes the base radius: a slot held by a line
-    running straight on through the junction sizes no corner.  A branch outside
-    any junction fan anchors on its whole *n*-line bundle.
+    these, read in the frame of the branch's first turn (the centreline leg
+    *first_turn* spans), so the innermost line that turns takes the base
+    radius: a slot held by a line running straight on through the junction
+    sizes no corner.  A branch outside any junction fan anchors on its whole
+    *n*-line bundle.
     """
     fan = ctx.junction_fan_info.get((edge.source, edge.target, edge.line_id))
-    if fan is None:
+    turn = segment_direction(*first_turn)
+    if fan is None or turn is None:
         return fan_offsets(n, ctx.offset_step)
     slots = fan_turning_slots(ctx, edge.source) | {fan[0]}
-    return [-l_shape_stagger(j, n, vertical, ctx.offset_step) for j in sorted(slots)]
+    return [-l_shape_stagger(j, n, turn, ctx.offset_step) for j in sorted(slots)]
 
 
 def _wrap_fan_geometry(
@@ -6418,7 +6425,7 @@ def _route_entry_wrap(
         centerline,
         base_radius=ctx.curve_radius,
         bundle_offsets=fan_corner_offsets(
-            ctx, edge, pos_n, vertical_direction(channel_y - sy)
+            ctx, edge, pos_n, ((corner_x, sy), (corner_x, channel_y))
         ),
         normalize_exempt=normalize_exempt,
     )
@@ -8116,7 +8123,7 @@ def _route_left_entry_via_band_hop(f: _InterFacts) -> RoutedPath:
         centerline,
         base_radius=ctx.curve_radius,
         bundle_offsets=fan_corner_offsets(
-            ctx, edge, geom.pos_n, vertical_direction(geom.band0_y - src.y)
+            ctx, edge, geom.pos_n, (centerline[1], centerline[2])
         ),
     )
     assert route is not None
