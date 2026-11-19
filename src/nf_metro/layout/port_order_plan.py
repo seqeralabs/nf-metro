@@ -32,7 +32,9 @@ into its travel.  A bypass passes screen-below, except a same-row bypass into
 the LEFT entry of an LR section whose hop a packed cell-mate obstructs, which
 runs the row-top corridor (:class:`SideRule`).  A U-turn whose source exit heads
 along or against the port's travel turns round left-handed, so its loop lies on
-the entry traveller's right; any other U-turn keeps the screen-below side.
+the entry traveller's right; one whose exit heads across it passes on the side
+the exit faces, so it never crosses the target section; any other U-turn keeps
+the screen-below side.
 
 **Entry order**, as a sort key with the earlier field deciding:
 
@@ -176,8 +178,9 @@ class SideRule(Enum):
     ROW_TOP = "row-top"
     """A packed cell-mate obstructs the hop: the row-top corridor."""
     TURN_ROUND = "turn-round"
-    """The source exit heads along the port's axis: the loop turns round
-    left-handed, onto the entry traveller's right."""
+    """The loop turns round: from an exit heading along the port's axis,
+    left-handed onto the entry traveller's right; from an exit heading across
+    it, on the side the exit faces, never through the target section."""
     OVER_TOP = "over-top"
     """A single line's loop from a LEFT exit into a far LEFT entry of a
     section entered from its left runs over the target's top, on the entry
@@ -519,7 +522,9 @@ class PortOrderBuilder:
         heading = EXIT_SIDE_DIRECTION[source.side]
         entry = graph.ports[entry_id]
         if lateral_axis(heading) != lateral_axis(port_travel(entry)):
-            return below, SideRule.SCREEN_BELOW
+            travel = ENTRY_SIDE_DIRECTION[entry.side]
+            facing = _lateral(direction_vector(heading), (0.0, 0.0), travel)
+            return _sign(facing), SideRule.TURN_ROUND
         if (
             entry.side is PortSide.LEFT
             and source.side is PortSide.LEFT
