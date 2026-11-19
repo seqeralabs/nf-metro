@@ -1223,6 +1223,9 @@ def left_exit_around_below_geometry(f: _InterFacts) -> _LeftExitUnderTargetLoop:
     over_gy = _left_exit_wrap_over_top_y(f, cx, vx)
     over_top = over_gy is not None
     channel_y = over_gy if over_gy is not None else by
+    vx -= ctx.offset_step * _outward_loop_inner_lanes(
+        ctx, edge.target, set(line_ids), channel_y < ey
+    )
     lead_out = -exit_offs[edge.line_id]
     run_direction = _leg_direction((sx, sy), (cx, sy))
     lead_out_y = sy + lead_out * right_normal_axis_sign(run_direction)
@@ -4766,14 +4769,26 @@ def _perp_exit_over_geometry(
         # so the bundle stays stacked into the station marker rather than
         # collapsing onto the entry-port Y (which would hide all but one line).
         gap_x = inter_col_gap_x()
+        centreline: tuple[tuple[float, float], ...] = (
+            (sx, sy),
+            (sx, cy_base),
+            (gap_x, cy_base),
+            (gap_x, ty),
+            (tx, ty),
+        )
+        land = 1.0
+        if tgt_port is not None and tgt_sec is not None and src_sec is not None:
+            centreline, land = _perp_exit_outward_loop(
+                ctx, edge, src_sec, tgt_sec, src_offs, centreline
+            )
         return _perp_exit_record(
-            ((sx, sy), (sx, cy_base), (gap_x, cy_base), (gap_x, ty), (tx, ty)),
+            centreline,
             src_offs[edge.line_id],
             tuple(src_offs[lid] for lid in line_ids),
-            tuple(_get_offset(ctx, edge.target, lid) for lid in line_ids),
+            tuple(land * _get_offset(ctx, edge.target, lid) for lid in line_ids),
             3,
             aligned_drop=False,
-            member_target_offset=_get_offset(ctx, edge.target, edge.line_id),
+            member_target_offset=land * _get_offset(ctx, edge.target, edge.line_id),
         )
 
     assert tgt_port is not None
@@ -4836,6 +4851,80 @@ def _perp_exit_over_geometry(
         None if landing is None else len(points) - 2,
         aligned_drop=False,
         member_target_offset=None if landing is None else landing[edge.line_id],
+    )
+
+
+def _perp_exit_outward_loop(
+    ctx: _RoutingCtx,
+    edge: Edge,
+    src_sec: Section,
+    tgt_sec: Section,
+    src_offs: Mapping[str, float],
+    points: tuple[tuple[float, float], ...],
+) -> tuple[tuple[tuple[float, float], ...], float]:
+    """The centreline and landing sign of a perpendicular exit into a side
+    port facing away from the gap *points* descends in.
+
+    The loop runs in the band beyond the row on the side the exit faces, comes
+    down outside the target's far edge and turns in on the port's planned
+    lanes, never crossing the target.  A port facing the gap keeps *points*.
+    """
+    graph, port_id = ctx.graph, edge.target
+    outward = 1.0 if graph.ports[port_id].side is PortSide.RIGHT else -1.0
+    (sx, sy), (tx, ty) = points[0], points[-1]
+    if (tx - points[2][0]) * outward <= 0:
+        return points, 1.0
+    is_top = graph.ports[edge.source].side is PortSide.TOP
+    band = (
+        _gap_above_channel_y(ctx, tgt_sec.grid_row)
+        if is_top
+        else bypass_bottom_y(
+            graph,
+            src_sec.grid_col,
+            tgt_sec.grid_col,
+            BYPASS_CLEARANCE,
+            src_row=tgt_sec.grid_row,
+        )
+    )
+    inner = _outward_loop_inner_lanes(ctx, port_id, {edge.line_id}, is_top)
+    outer = len(_looping_lanes(ctx, port_id)) - 1 - inner
+    edge_x = tgt_sec.bbox_x + (tgt_sec.bbox_w if outward > 0 else 0.0)
+    descent_x = edge_x + outward * (
+        max(ctx.curve_radius + ctx.offset_step, SECTION_ROUTE_CLEARANCE)
+        + ctx.offset_step * inner
+    )
+    run_y = band + (1.0 if is_top else -1.0) * ctx.offset_step * outer
+    lateral = src_offs[edge.line_id]
+    cy = run_y - right_normal_axis_sign(horizontal_direction(descent_x - sx)) * lateral
+    cx = descent_x - right_normal_axis_sign(vertical_direction(ty - run_y)) * lateral
+    return ((sx, sy), (sx, cy), (cx, cy), (cx, ty), (tx, ty)), -outward
+
+
+def _looping_lanes(ctx: _RoutingCtx, port_id: str) -> dict[str, float]:
+    """Lanes at side port *port_id* of the lines fed from behind it, which
+    must loop round the port's section to land."""
+    graph = ctx.graph
+    port = graph.stations[port_id]
+    outward = 1.0 if graph.ports[port_id].side is PortSide.RIGHT else -1.0
+    return {
+        e.line_id: _get_offset(ctx, port_id, e.line_id)
+        for e in graph.edges_to(port_id)
+        if (graph.stations[e.source].x - port.x) * outward < 0
+    }
+
+
+def _outward_loop_inner_lanes(
+    ctx: _RoutingCtx, port_id: str, lines: AbstractSet[str], from_above: bool
+) -> int:
+    """Looping lanes of other lines at *port_id* nested inside the loop that
+    lands *lines* there from above (or below): the loop descends one lane
+    outside each of them, every loop into the port sharing one base."""
+    sign = 1.0 if from_above else -1.0
+    edge = min(_get_offset(ctx, port_id, lid) * sign for lid in lines)
+    return sum(
+        edge - off * sign > COORD_TOLERANCE_FINE
+        for lid, off in _looping_lanes(ctx, port_id).items()
+        if lid not in lines
     )
 
 
@@ -6360,6 +6449,16 @@ def _route_entry_wrap(
     sx, sy = src.x, src.y
     ex, ey = entry_port.x, entry_port.y
     entry_delta = delta if entry_side is PortSide.LEFT else -delta
+    descent_x += (
+        (1.0 if entry_side is PortSide.RIGHT else -1.0)
+        * ctx.offset_step
+        * _outward_loop_inner_lanes(
+            ctx,
+            edge.target,
+            set(gather_member_edges(ctx.graph, edge)[1]),
+            channel_y < ey,
+        )
+    )
     src_off = _get_offset(ctx, edge.source, edge.line_id)
     tgt_off = _get_offset(ctx, edge.target, edge.line_id)
     if source_leads_down:
@@ -7234,6 +7333,11 @@ def _right_entry_over_top_geometry(
     descent_x = (
         section_right + ctx.curve_radius + ctx.offset_step + SECTION_ROUTE_CLEARANCE
     )
+    lines = {line_id for _member, line_id, _off in members}
+    if set(_looping_lanes(ctx, tgt.id)) - lines:
+        descent_x = _right_entry_descent_x(
+            ctx, section_right, len(members)
+        ) + ctx.offset_step * _outward_loop_inner_lanes(ctx, tgt.id, lines, True)
 
     # Keep the over-top channel below the bottom of any upstream section its
     # horizontal span crosses: channel_y derives from the target's own top and
