@@ -7,6 +7,8 @@
   crosses that bundle; the cohort compile accepts that crossing.
 * A perpendicular exit whose lines all cross into one flow-side entry takes
   that entry's lanes, gaps kept, and its turn columns keep them.
+* A riser centred in a column gap declares it; a branch into a TOP or BOTTOM
+  entry never runs inside the target box.
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ from nf_metro.themes import resolve_theme
 REGRESSIONS = Path(__file__).parent / "fixtures" / "regressions"
 CARRY_SANDWICH = REGRESSIONS / "approach_order_carry_sandwich.mmd"
 FORK_PORT_STOP = REGRESSIONS / "departure_order_fork_port_stop.mmd"
+FEEDERS = REGRESSIONS / "approach_order_feeders_not_interleaved.mmd"
 
 
 def _settled(
@@ -120,3 +123,22 @@ def test_a_perpendicular_exit_takes_its_fed_entrys_gaps() -> None:
     assert columns["l2"] - columns["l4"] == pytest.approx(step)
     assert columns["l3"] - columns["l2"] == pytest.approx(2 * step)
     assert columns["l2"] < riser < columns["l3"]
+
+
+def test_a_gap_centred_riser_declares_its_gap() -> None:
+    _graph, _drawn, routes = _settled(FEEDERS, permissive=True)
+    riser = _route(routes, "sec2__exit_right_3", "sec3__entry_bottom_7", "l2")
+    assert riser.gap_slots
+
+
+def test_a_branch_into_a_bottom_entry_runs_outside_the_target_box() -> None:
+    _graph, drawn, routes = _settled(FEEDERS, permissive=True)
+    branch = _route(routes, "__junction_9", "sec3__entry_bottom_7", "l3")
+    section = drawn.sections["sec3"]
+    bottom = section.bbox_y + section.bbox_h
+    level = [
+        a[1]
+        for a, b in zip(branch.points, branch.points[1:])
+        if abs(a[1] - b[1]) < 1e-6 and abs(a[0] - b[0]) > 1e-6
+    ]
+    assert level and all(y > bottom for y in level[1:]), (bottom, branch.points)
