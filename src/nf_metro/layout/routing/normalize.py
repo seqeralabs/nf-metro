@@ -906,7 +906,7 @@ def _materialize_gap_slots(
                 or rp.fan_route_emitter is not None
                 or ch.idx in rp.route_system_owned_segment_ranks
             )
-            if (rp.normalize_exempt and not rp.seats_in_gap) or (
+            if rp.normalize_exempt or (
                 _planner_owns_channel(ch) and not exit_plan_is_movable
             ):
                 owned[(slot.gap_lo_col, slot.row)][(ch.down, rp.line_id)] = ch.x
@@ -915,6 +915,8 @@ def _materialize_gap_slots(
             else:
                 by_gap[(slot.gap_lo_col, slot.row)].append(ch)
 
+    for lo, gap_owned in owned_in_gap.items():
+        _bundle_with_owned_runner(gap_owned, by_gap, lo, ctx)
     bands = _grid_row_bands(graph)
     for (lo, row), chans in by_gap.items():
         gap_left, gap_right = column_gap_edges(graph, lo, lo + 1, row=row)
@@ -943,13 +945,8 @@ def _materialize_gap_slots(
             same = [c for c in chans if c.down is down]
             for corridor in _split_corridors(same):
                 bundles.append((down, corridor))
-        if not (
-            _bundle_with_owned_runner(
-                bundles, owned_in_gap[lo], gap_left, gap_right, ctx
-            )
-            or _seat_beside_counter_runner(
-                bundles, owned_chans[(lo, row)], gap_left, gap_right, ctx
-            )
+        if not _seat_beside_counter_runner(
+            bundles, owned_chans[(lo, row)], gap_left, gap_right, ctx
         ):
             _layout_gap_bundle(bundles, gap_left, gap_right, ctx, owned.get((lo, row)))
 
@@ -959,57 +956,54 @@ def _materialize_gap_slots(
 
 
 def _bundle_with_owned_runner(
-    bundles: list[tuple[bool, list[_VChannel]]],
     owned: list[_VChannel],
-    gap_left: float,
-    gap_right: float,
+    by_gap: dict[tuple[int, int | None], list[_VChannel]],
+    lo: int,
     ctx: _RoutingCtx,
-) -> bool:
-    """Bundle a seated exempt channel with the owned channel running its way.
+) -> None:
+    """Bundle a seated exempt channel with an owned channel whose lead-in it crosses.
 
-    Same-direction channels sharing one gap's corridor are one bundle: the
-    seated channel takes the lane one step beside the owned channel of another
-    line, past the turn its lead-in makes into the gap, so a channel crossing
-    that lead-in's bundle crosses it clear of the stub between its node and the
-    turn.  A same-line counter-runner landing on the seated channel's port holds
-    its side of it, a turn's clearance away; the gap's other bundles keep their
-    clearance from both.
+    Same-direction channels sharing one gap are one bundle: a seated channel
+    crossing the lead-in of an owned channel of another line running its way
+    takes the lane one step past that lead-in's turn, so it crosses the
+    lead-in's bundle clear of the stub between its node and the turn.  A
+    same-line counter-runner landing on the seated channel's port holds its
+    side of it, a turn's clearance away, and leaves the gap's layout.
     """
-    chans = [ch for _down, group in bundles for ch in group]
-    pairs = [
-        (ch, runner)
-        for ch in chans
-        if ch.route.seats_in_gap
-        for runner in owned
-        if runner.down is ch.down
-        and runner.route.line_id != ch.route.line_id
-        and spans_share_corridor(ch.y_lo, ch.y_hi, runner.y_lo, runner.y_hi)
-    ]
-    if len(pairs) != 1:
-        return False
-    ch, runner = pairs[0]
-    was = ch.x
-    lead_x = runner.route.points[max(runner.idx - 1, 0)][0]
-    past = 1 if runner.x >= lead_x else -1
-    _seat_channel(ch, runner.x + past * ctx.offset_step, 0, 1, ctx)
-    held = [ch]
-    clearance = cotravelling_lane_clearance(
-        same_line=True, counter_running=True, curve_radius=ctx.curve_radius
-    )
-    for other in chans:
-        if (
-            other.down is not ch.down
-            and other.route.line_id == ch.route.line_id
-            and other.route.edge.target == ch.route.edge.target
-        ):
-            side = 1 if other.x >= was else -1
-            _seat_channel(other, ch.x + side * clearance, 0, 1, ctx)
-            held.append(other)
-    rest = [(d, [c for c in g if all(c is not h for h in held)]) for d, g in bundles]
-    _separate_opposing_gap_bundles(
-        [b for b in rest if b[1]], [*owned, *held], gap_left, gap_right, ctx
-    )
-    return True
+
+    def crosses_lead_in(ch: _VChannel, runner: _VChannel) -> bool:
+        lead_x, lead_y = runner.route.points[max(runner.idx - 1, 0)]
+        return ch.y_lo < lead_y < ch.y_hi and (
+            min(lead_x, runner.x) < ch.x < max(lead_x, runner.x)
+        )
+
+    for ch in [c for c in owned if c.route.seats_in_gap]:
+        runners = [
+            r
+            for r in owned
+            if r.down is ch.down
+            and r.route.line_id != ch.route.line_id
+            and crosses_lead_in(ch, r)
+        ]
+        if len(runners) != 1:
+            continue
+        (runner,) = runners
+        was = ch.x
+        past = 1 if runner.x >= runner.route.points[runner.idx - 1][0] else -1
+        _seat_channel(ch, runner.x + past * ctx.offset_step, 0, 1, ctx)
+        clearance = cotravelling_lane_clearance(
+            same_line=True, counter_running=True, curve_radius=ctx.curve_radius
+        )
+        for key in [k for k in by_gap if k[0] == lo]:
+            for other in list(by_gap[key]):
+                if (
+                    other.down is not ch.down
+                    and other.route.line_id == ch.route.line_id
+                    and other.route.edge.target == ch.route.edge.target
+                ):
+                    side = 1 if other.x >= was else -1
+                    _seat_channel(other, ch.x + side * clearance, 0, 1, ctx)
+                    by_gap[key].remove(other)
 
 
 def _seat_beside_counter_runner(
