@@ -1,8 +1,10 @@
 """A junction fan seats its branches in the lanes the lane plan records there.
 
 The fan's slots follow the record's lanes at the junction, read travel-left
-first, after the lines that turn through the fan's corner: a line running
-straight on takes the last slots and no slot shift.
+first; a line running straight on takes no slot shift.  A fan's lone turning
+line descends in a gap slot seated with the gap's other channels, and a
+descent seated alone where a counter-running channel stands takes its side of
+the pair the gap holds.
 A fan corner is sized by the lines that turn through it, read in the frame of
 each branch's first turn, and a restacked trunk's corner nests only with the
 trunks that turn with it, so a corner turning alone keeps the base radius.
@@ -26,8 +28,15 @@ from nf_metro.layout.constants import (
 )
 from nf_metro.layout.geometry import point_to_polyline_distance
 from nf_metro.layout.phases._common import _station_bundle_offset_span
+from nf_metro.layout.route_topology import divergence_junction_sources
+from nf_metro.layout.routing.context import (
+    _classify_merge_edges,
+    _compute_junction_fan_info,
+)
 from nf_metro.layout.routing.offsets import compute_station_offsets
+from nf_metro.layout.routing.reserved_bands import ReservedCorridors
 from nf_metro.parser.model import MetroGraph
+from nf_metro.parser.route_topology import build_route_topology_query
 from nf_metro.render.plan import RenderPlan
 from nf_metro.themes import resolve_theme
 
@@ -86,6 +95,76 @@ def test_fan_descents_nest_in_the_junctions_planned_lane_order() -> None:
     lower = max(("l1", "l3"), key=lambda lid: offsets["__junction_8", lid])
     upper = min(("l1", "l3"), key=lambda lid: offsets["__junction_8", lid])
     assert descents[lower] < descents[upper]
+
+
+def _record_fan_info(
+    graph: MetroGraph, offsets: dict[tuple[str, str], float]
+) -> dict[tuple[str, str, str], tuple[int, int]]:
+    topology = build_route_topology_query(graph)
+    merge = _classify_merge_edges(
+        graph, graph.junction_ids, topology, ReservedCorridors()
+    )
+    return _compute_junction_fan_info(
+        graph,
+        divergence_junction_sources(graph, topology),
+        {lid: i for i, lid in enumerate(graph.lines)},
+        skip_edges=merge.skip_edges | merge.index_exclude,
+        topology=topology,
+        station_offsets=offsets,
+    )
+
+
+def test_fan_slots_follow_the_record_with_lines_running_straight_on() -> None:
+    graph, offsets, _ = _plan(REGRESSIONS / "approach_order_interleaved_feeders.mmd")
+    fan = _record_fan_info(graph, offsets)
+    slots = {
+        line_id: fan["__junction_9", target, line_id][0]
+        for target, line_id in (
+            ("z2__entry_left_6", "m2"),
+            ("z2__entry_left_6", "m3"),
+            ("z3__entry_left_5", "m1"),
+        )
+    }
+    # Leaving rightward, travel-left is screen-up: slots run in the record's
+    # lane order whichever of the lines turns through the corner.
+    assert sorted(slots, key=slots.__getitem__) == sorted(
+        slots, key=lambda lid: offsets["__junction_9", lid]
+    )
+
+
+def _vertical_leg(route, down: bool) -> float:
+    return next(
+        a[0]
+        for a, b in zip(route.points, route.points[1:])
+        if abs(a[0] - b[0]) <= COORD_TOLERANCE
+        and abs(b[1] - a[1]) > COORD_TOLERANCE
+        and (b[1] > a[1]) is down
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "descent", "riser"),
+    [
+        (
+            TOPOLOGIES / "member_channel_runway_candidate_outside_band.mmd",
+            ("__junction_8", "sec4__entry_left_4", "l0"),
+            ("__junction_9", "__merge_2", "l1"),
+        ),
+        (
+            REGRESSIONS / "approach_order_interleaved_feeders.mmd",
+            ("__junction_9", "z3__entry_left_5", "m1"),
+            ("__junction_8", "z2__entry_left_6", "m0"),
+        ),
+    ],
+    ids=["descent-beside-convergence-riser", "lone-turner-beside-riser"],
+)
+def test_a_lone_descent_and_the_riser_against_it_share_their_gap(
+    path: Path, descent: tuple[str, str, str], riser: tuple[str, str, str]
+) -> None:
+    _graph, _offsets, plan = _plan(path)
+    down = _vertical_leg(_route(plan, *descent), down=True)
+    up = _vertical_leg(_route(plan, *riser), down=False)
+    assert abs(down - up) >= BUNDLE_TO_BUNDLE_CLEARANCE - COORD_TOLERANCE
 
 
 def test_a_straight_on_fan_branch_stays_on_its_track() -> None:

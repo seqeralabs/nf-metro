@@ -74,6 +74,7 @@ from nf_metro.layout.routing.common import (
 from nf_metro.layout.routing.context import (
     _RoutingCtx,
     _tb_x_offset,
+    fan_turning_slots,
     slot_is_available,
 )
 from nf_metro.layout.routing.families import (
@@ -984,6 +985,15 @@ def _route_derived_turn_requirement(
     )
 
 
+_ENTRY_COLUMN_L_SHAPES = frozenset(
+    {
+        RouteFamilyId.STANDARD_L_SHAPE,
+        RouteFamilyId.TOP_ENTRY_L_SHAPE,
+        RouteFamilyId.BOTTOM_ENTRY_L_SHAPE,
+    }
+)
+
+
 def _source_turn_requirement(
     edge: Edge,
     family_id: RouteFamilyId,
@@ -993,6 +1003,18 @@ def _source_turn_requirement(
 ) -> _SourceTurnRequirement:
     src = ctx.graph.stations[edge.source]
     tgt = ctx.graph.stations[edge.target]
+    fan = ctx.junction_fan_info.get((edge.source, edge.target, edge.line_id))
+    if (
+        fan is not None
+        and family_id not in _ENTRY_COLUMN_L_SHAPES
+        and edge.target not in ctx.merge.junctions
+        and fan_turning_slots(ctx, edge.source) == {fan[0]}
+    ):
+        # A fan's lone turning line descends in a gap slot of its own, seated
+        # with the gap's other channels rather than on the fan's stagger.  An
+        # L-shape lands on its entry's column and a merge feeder on its
+        # convergence's, so neither column is the gap's to seat.
+        return _SourceTurnRequirement.declined(GAP_ALLOCATION_PENDING)
     off_column_decline = _OFF_COLUMN_RUN_DECLINES.get(family_id)
     if off_column_decline is not None and source_run_direction not in {
         Direction.U,

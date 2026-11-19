@@ -1432,23 +1432,16 @@ def _compute_junction_fan_info(
         ]
         # Each line's slot follows its planned lane at the junction, read
         # travel-left first, so the descent X order is in phase with the lead-in
-        # it arrives on.  Lines running straight on never turn through the
-        # fan's corner, so they take the last slots and the turning lines nest
-        # from the first.  A rail layout plans no per-line offsets: there a clean
+        # it arrives on.  A rail layout plans no per-line offsets: there a clean
         # divergence (distinct lines peeling to disjoint targets) is ordered
         # outermost-to-innermost by reach and every other fan keeps declaration
         # order.
         fan_lines = {e.line_id for e in all_outgoing}
         if station_offsets:
-            lead = _junction_lead(graph, jid)
-            sign = right_normal_axis_sign(lead)
-            straight = _lines_running_straight_on(
-                graph, jid, lead, all_outgoing, station_offsets
-            )
+            sign = right_normal_axis_sign(_junction_lead(graph, jid))
             line_ids = sorted(
                 fan_lines,
                 key=lambda lid: (
-                    lid in straight,
                     sign * station_offsets[(jid, lid)],
                     line_priority.get(lid, 0),
                 ),

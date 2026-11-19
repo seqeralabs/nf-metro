@@ -890,6 +890,7 @@ def _materialize_gap_slots(
     owned: dict[tuple[int, int | None], dict[tuple[bool, str], float]] = defaultdict(
         dict
     )
+    owned_chans: dict[tuple[int, int | None], list[_VChannel]] = defaultdict(list)
     for rp in routes:
         for slot in rp.gap_slots:
             ch = _locate_slot_channel(rp, slot, graph)
@@ -908,6 +909,7 @@ def _materialize_gap_slots(
                 _planner_owns_channel(ch) and not exit_plan_is_movable
             ):
                 owned[(slot.gap_lo_col, slot.row)][(ch.down, rp.line_id)] = ch.x
+                owned_chans[(slot.gap_lo_col, slot.row)].append(ch)
             else:
                 by_gap[(slot.gap_lo_col, slot.row)].append(ch)
 
@@ -939,11 +941,61 @@ def _materialize_gap_slots(
             same = [c for c in chans if c.down is down]
             for corridor in _split_corridors(same):
                 bundles.append((down, corridor))
-        _layout_gap_bundle(bundles, gap_left, gap_right, ctx, owned.get((lo, row)))
+        if not _seat_beside_counter_runner(
+            bundles, owned_chans[(lo, row)], gap_left, gap_right, ctx
+        ):
+            _layout_gap_bundle(bundles, gap_left, gap_right, ctx, owned.get((lo, row)))
 
     if movable_exit_plan_ids:
         return
     _validate_planned_exit_turn_radii(routes, ctx)
+
+
+def _seat_beside_counter_runner(
+    bundles: list[tuple[bool, list[_VChannel]]],
+    owned: list[_VChannel],
+    gap_left: float,
+    gap_right: float,
+    ctx: _RoutingCtx,
+) -> bool:
+    """Seat a gap's lone bundle beside the owned channel running against it.
+
+    The bundle and that channel are one gap allocation: two bundles the
+    clearance apart, centred in the gap, each on the side it already stands.
+    Seated alone where the other stands, every clear column can lie outside the
+    gap; the owned channel keeps its column here and settles against the seat.
+    """
+    if len(bundles) != 1:
+        return False
+    down, chans = bundles[0]
+    order = _gap_bundle_line_order(chans, ctx)
+    mid = sum(c.x for c in chans) / len(chans)
+    crowding = next(
+        (
+            other
+            for other in owned
+            if other.down is not down
+            and any(
+                abs(other.x - c.x) < BUNDLE_TO_BUNDLE_CLEARANCE - COORD_TOLERANCE_FINE
+                and min(other.y_hi, c.y_hi) - max(other.y_lo, c.y_lo)
+                > MIN_CORRIDOR_Y_OVERLAP
+                for c in chans
+            )
+        ),
+        None,
+    )
+    if crowding is None:
+        return False
+    widths = [(len(order) - 1) * ctx.offset_step, 0.0]
+    if (mid, down) < (crowding.x, crowding.down):
+        seat = symmetric_bundle_midpoint(gap_left, gap_right, widths, 0)
+    else:
+        seat = symmetric_bundle_midpoint(gap_left, gap_right, widths[::-1], 1)
+    slots = fan_offsets(len(order), ctx.offset_step)
+    for ch in chans:
+        i = order.index(ch.route.line_id)
+        _seat_channel(ch, seat + slots[i], i, len(order), ctx)
+    return True
 
 
 def _validate_planned_exit_turn_radii(
@@ -4009,6 +4061,10 @@ def _stack_trunk_bands(
         if max(anchored_tops) - min(anchored_tops) > COORD_TOLERANCE:
             return
         band_top = min(anchored_tops)
+        if discretionary and not _restack_fits_corridor_claims(
+            ctx, depth_of, bands, band_top
+        ):
+            return
     else:
         top = min(t.y for b in bands for t in b)
         band_top = _clamp_inter_row_band_top(ctx, top, total)
@@ -4054,6 +4110,7 @@ def _restack_fits_corridor_claims(
     ctx: _RoutingCtx,
     depth_of: dict[int, float],
     bands: list[list[_HTrunk]],
+    top: float | None = None,
 ) -> bool:
     """Whether the planned stack can seat every corridor inside its own claim.
 
@@ -4065,6 +4122,8 @@ def _restack_fits_corridor_claims(
     trunk no higher than the band's near edge, its deepest no lower than the far
     one.  An empty intersection refuses the reorder; a non-empty one is weaker
     than the per-direction-band fit :func:`_hold_stack_in_claim_bands` applies.
+    A stack whose anchors fix its *top* fits only where that top lies in the
+    interval.
 
     An unclaimed corridor constrains nothing, and a stack no corridor of which
     is claimed is therefore admitted outright rather than refused for want of
@@ -4091,6 +4150,8 @@ def _restack_fits_corridor_claims(
     # the gap sized for an arrangement no pass ever produces.
     if lo_bound is None or hi_bound is None:
         return True
+    if top is not None:
+        return lo_bound - COORD_TOLERANCE <= top <= hi_bound + COORD_TOLERANCE
     return hi_bound >= lo_bound - COORD_TOLERANCE
 
 
