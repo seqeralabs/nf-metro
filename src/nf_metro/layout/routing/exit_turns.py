@@ -832,7 +832,7 @@ def _left_entry_wrap_turn_requirement(
     facts = _build_inter_facts(edge, src, tgt, ctx)
     wrap_kind = _left_entry_route_kind(facts)
     if wrap_kind is _LeftEntryRoute.WRAP:
-        wrap_geometry = _left_entry_wrap_geometry(ctx, edge, src, tgt, facts.i, facts.n)
+        wrap_geometry = _left_entry_wrap_geometry(facts)
     elif wrap_kind is _LeftEntryRoute.GAP_ABOVE:
         assert facts.tgt_row is not None
         wrap_geometry = _left_entry_gap_above_geometry(

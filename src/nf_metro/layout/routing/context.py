@@ -1196,29 +1196,28 @@ def _junction_lead(graph: MetroGraph, jid: str) -> Direction:
     return Direction.R
 
 
-def _lines_running_straight_on(
-    graph: MetroGraph,
-    jid: str,
-    lead: Direction,
-    edges: Iterable[Edge],
-    station_offsets: Mapping[tuple[str, str], float],
-) -> set[str]:
-    """Lines whose every branch leaves junction *jid* straight on along *lead*.
+def fan_turning_slots(ctx: _RoutingCtx, jid: str) -> set[int]:
+    """Slots of junction *jid*'s fan held by lines that turn through its corner.
 
-    Such a branch reaches the same or the next grid cell along the lead on the
-    lane it holds at the junction, so it never turns through the fan's corner.
+    A line whose every branch reaches the same or the next grid cell along the
+    junction's lead on the lane it holds at the junction runs straight on.
     """
-    across = 1 if lead in (Direction.L, Direction.R) else 0
+    branches = {
+        key: slot for key, slot in ctx.junction_fan_info.items() if key[0] == jid
+    }
+    if not ctx.station_offsets:
+        return {i for i, _n in branches.values()}
+    graph = ctx.graph
+    across = 1 if _junction_lead(graph, jid) in (Direction.L, Direction.R) else 0
     jst = graph.stations[jid]
     cell = _resolve_section_colrow(graph, jst)[1 - across]
-    lines: set[str] = set()
     turning: set[str] = set()
-    for edge in edges:
-        lines.add(edge.line_id)
+    for key in branches:
+        edge = ctx.edge_by_key[key]
         tgt = graph.station_for_edge_target(edge)
         tgt_cell = _resolve_section_colrow(graph, tgt)[1 - across]
-        lane = (jst.x, jst.y)[across] + station_offsets[(jid, edge.line_id)]
-        tgt_lane = (tgt.x, tgt.y)[across] + station_offsets.get(
+        lane = (jst.x, jst.y)[across] + ctx.station_offsets[(jid, edge.line_id)]
+        tgt_lane = (tgt.x, tgt.y)[across] + ctx.station_offsets.get(
             (edge.target, edge.line_id), 0.0
         )
         if (
@@ -1228,26 +1227,7 @@ def _lines_running_straight_on(
             or abs(tgt_lane - lane) > COORD_TOLERANCE
         ):
             turning.add(edge.line_id)
-    return lines - turning
-
-
-def fan_turning_slots(ctx: _RoutingCtx, jid: str) -> set[int]:
-    """Slots of junction *jid*'s fan held by lines that turn through its corner."""
-    branches = {
-        key: slot for key, slot in ctx.junction_fan_info.items() if key[0] == jid
-    }
-    straight = (
-        _lines_running_straight_on(
-            ctx.graph,
-            jid,
-            _junction_lead(ctx.graph, jid),
-            [ctx.edge_by_key[key] for key in branches],
-            ctx.station_offsets,
-        )
-        if ctx.station_offsets
-        else set()
-    )
-    return {i for (_s, _t, lid), (i, _n) in branches.items() if lid not in straight}
+    return {i for (_s, _t, lid), (i, _n) in branches.items() if lid in turning}
 
 
 def _compute_junction_fan_info(

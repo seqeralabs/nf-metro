@@ -4589,19 +4589,13 @@ def _recorded_band_pairs(
     ctx: _RoutingCtx | None,
     held: frozenset[tuple[int, int]] = frozenset(),
 ) -> list[tuple[int, int]]:
-    """Slot pairs ``(a, b)`` the plan nests at a corner an anchor in *held*
-    turns at: ``a`` above ``b``.
-
-    Two slots whose trunks leave one node (start legs) or enter one node (end
-    legs), the legs turning the same way and one of them an anchor's
-    plan-owned leg, nest at that shared corner.  Two start legs of one PLANNED
-    exit-turn plan nest by its published order
-    (:attr:`~nf_metro.layout.route_plan.ExitTurnPlan.nest_order`, a later turn
-    off the source run outer along it); every other pair by where the lane
-    plan puts the two lines at the node, read on the side of travel the legs
-    head for (:func:`_planned_leg_key`).  The outer leg takes the track below
-    where its node lies above the trunk's gap, above where it lies below.  A
-    pair two corners order both ways binds nothing.
+    """Slot pairs ``(a, b)``, ``a`` above ``b``, the plan nests at a corner an
+    anchor in *held* turns at: same-way legs leaving or entering one node, one
+    an anchor's plan-owned leg.  Start legs of one PLANNED exit-turn plan nest
+    by its ``nest_order``; every other pair by the lane plan's order at the
+    node on the legs' side of travel (:func:`_planned_leg_key`).  The outer leg
+    takes the track below where its node lies above the trunk's gap, above
+    where it lies below.  A pair two corners order both ways binds nothing.
     """
     if ctx is None or not held:
         return []
@@ -4721,9 +4715,7 @@ def _planned_leg_key(
     if offset is None or port_id is None:
         return None
     port = graph.ports[port_id]
-    section = graph.sections.get(port.section_id)
-    if section is None:
-        return None
+    section = graph.section_for_port(port)
     travel = (EXIT_SIDE_DIRECTION if start else ENTRY_SIDE_DIRECTION)[port.side]
     station = graph.stations[node]
     if port.side in perpendicular_port_sides(section.direction):

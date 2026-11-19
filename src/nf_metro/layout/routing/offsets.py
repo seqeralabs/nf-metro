@@ -33,7 +33,7 @@ from nf_metro.layout.lane_plan import (
     planned_offsets,
     recorded_lane_plan,
 )
-from nf_metro.layout.port_order_plan import port_travel
+from nf_metro.layout.port_order_plan import Approach, port_travel
 from nf_metro.layout.routing.common import (
     bypass_bottom_y,
     merge_junction_ids,
@@ -233,16 +233,20 @@ class SameRowBypassEntry:
         return frozenset(self.feeders) - frozenset(self.bypass_depth)
 
 
+def _approach_record(graph: MetroGraph, edge: Edge) -> Approach | None:
+    """The lane plan's approach record for *edge*'s connector into its entry."""
+    plan = recorded_lane_plan(graph)
+    if plan is None:
+        return None
+    source = approach_source(graph, edge.source, edge.line_id)
+    return plan.port_orders.approaches.get((edge.target, source))
+
+
 def _recorded_approach(graph: MetroGraph, edge: Edge) -> _Approach:
     """The screen side the lane plan's approach record sends *edge* round
     its entry's band on; ``"flat"`` where it records no side or no record
     exists."""
-    plan = recorded_lane_plan(graph)
-    if plan is None:
-        return "flat"
-    approach = plan.port_orders.approaches.get(
-        (edge.target, approach_source(graph, edge.source, edge.line_id))
-    )
+    approach = _approach_record(graph, edge)
     if approach is None or approach.side == 0:
         return "flat"
     travel = port_travel(graph.ports[edge.target])

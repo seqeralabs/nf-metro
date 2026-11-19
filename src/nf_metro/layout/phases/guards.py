@@ -6223,6 +6223,7 @@ def _ensure_pass_c_inputs(
     return offsets, routes
 
 
+@observing()
 def run_validate_guards(
     graph: MetroGraph,
     phase: str,
@@ -6243,32 +6244,29 @@ def run_validate_guards(
     A spec needing ``routes`` is skipped when routing failed.  Returns the
     shared ``(offsets, routes)``.
 
-    The dispatch observes: an offsets run inside it reads the lane plan its
-    placement plans without sealing the layout's record
-    (:func:`~nf_metro.layout.lane_plan.observing`), so validation draws what
-    production draws.
+    Runs under :func:`~nf_metro.layout.lane_plan.observing`: offsets runs read
+    the lane plan without sealing the layout's.
     """
-    with observing():
-        offsets, routes = _ensure_pass_c_inputs(
-            graph,
-            offsets,
-            routes,
-            validate_final_geometry=include_final,
-        )
-        available: dict[str, object] = {
-            "offsets": offsets,
-            "routes": routes,
-            "section_y_gap": section_y_gap,
-            "section_y_padding": section_y_padding,
-        }
-        for spec in GUARD_REGISTRY:
-            if not spec.bisection_safe and not include_final:
-                continue
-            if spec.bisection_safe and not _bisection_should_run(spec.name, phase):
-                continue
-            if "routes" in spec.needs and routes is None:
-                continue
-            spec.fn(graph, phase, **{name: available[name] for name in spec.needs})
+    offsets, routes = _ensure_pass_c_inputs(
+        graph,
+        offsets,
+        routes,
+        validate_final_geometry=include_final,
+    )
+    available: dict[str, object] = {
+        "offsets": offsets,
+        "routes": routes,
+        "section_y_gap": section_y_gap,
+        "section_y_padding": section_y_padding,
+    }
+    for spec in GUARD_REGISTRY:
+        if not spec.bisection_safe and not include_final:
+            continue
+        if spec.bisection_safe and not _bisection_should_run(spec.name, phase):
+            continue
+        if "routes" in spec.needs and routes is None:
+            continue
+        spec.fn(graph, phase, **{name: available[name] for name in spec.needs})
     return offsets, routes
 
 
@@ -6293,11 +6291,9 @@ _RENDER_LAYOUT_INVARIANT_SPECS: tuple[GuardSpec, ...] = tuple(
 )
 
 
-# Tier-A guards whose violation aborts the default render instead of warning:
+# The Tier-A guard whose violation aborts the default render instead of warning:
 # a route reaching its own section's port across that section is no drawing.
-_RENDER_ABORTING_GUARDS = frozenset(
-    {"_guard_inter_section_route_clears_own_section_interior"}
-)
+_RENDER_ABORTING_GUARD = "_guard_inter_section_route_clears_own_section_interior"
 
 
 def deferred_final_route_guard_specs() -> tuple[GuardSpec, ...]:
@@ -6343,8 +6339,8 @@ def assert_render_layout_invariants(
     registry guard. Each guard raises ``PhaseInvariantError`` on its first
     violation rather than returning a list, so each runs in isolation and its
     message is captured; the aggregate is one message. Without *strict* the
-    aggregate is a :class:`UserWarning`, unless a guard in
-    ``_RENDER_ABORTING_GUARDS`` fired on a non-permissive graph; otherwise it
+    aggregate is a :class:`UserWarning`, unless
+    ``_RENDER_ABORTING_GUARD`` fired on a non-permissive graph; otherwise it
     raises :class:`LayoutInvariantError`.
     """
     available: dict[str, Any] = {"offsets": offsets, "routes": routes}
@@ -6357,7 +6353,7 @@ def assert_render_layout_invariants(
             spec.fn(graph, "render", **{name: available[name] for name in spec.needs})
         except PhaseInvariantError as exc:
             messages.append(f"[{spec.name}] {exc}")
-            aborting = aborting or spec.name in _RENDER_ABORTING_GUARDS
+            aborting = aborting or spec.name == _RENDER_ABORTING_GUARD
     if not messages:
         return
 
