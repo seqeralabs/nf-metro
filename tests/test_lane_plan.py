@@ -359,7 +359,7 @@ def _recorded_conflicts(graph: MetroGraph) -> dict[str, set[str]]:
     assert plan is not None
     out: dict[str, set[str]] = {}
     for forced in plan.tracks.forced:
-        if forced.port is not None:
+        if forced.port is not None and forced.across is None:
             out.setdefault(forced.port, set()).update(forced.lines)
     return out
 
@@ -991,6 +991,9 @@ RECORD_USES = {
         "recorded_lane_plan",
     },
     "layout/routing/normalize.py": {"_draw_sign", "_run_port"},
+    "layout/routing/common.py": {"entry_crossing_lines"},
+    "layout/routing/invariants.py": {"entry_crossing_lines"},
+    "layout/routing/corridor_cohort_integration.py": {"interleaved_crossings"},
     "parser/model.py": {"LanePlan"},
 }
 RECORD_MODULES = {"layout/lane_plan.py", "layout/port_order_plan.py"}

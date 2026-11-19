@@ -2936,14 +2936,20 @@ def interleaved_crossings(
     for crossing in plan.tracks.forced:
         if crossing.port is None or crossing.across is None:
             continue
-        passing, *crossed = crossing.lines
-        for edge in graph.edges_to(crossing.port):
-            if edge.line_id != passing or edge.source == crossing.across:
+        passing, crossed = crossing.lines[0], crossing.lines[1:]
+        keys = [
+            (
+                (e.source, e.target, e.line_id),
+                approach_source(graph, e.source, e.line_id),
+            )
+            for e in graph.edges_to(crossing.port)
+        ]
+        for key, source in keys:
+            if key[2] != passing or source == crossing.across:
                 continue
-            for lid in crossed:
-                other = (crossing.across, crossing.port, lid)
-                key = (edge.source, edge.target, edge.line_id)
-                pairs.update(((key, other), (other, key)))
+            for other, other_source in keys:
+                if other[2] in crossed and other_source == crossing.across:
+                    pairs.update(((key, other), (other, key)))
     return frozenset(pairs)
 
 
