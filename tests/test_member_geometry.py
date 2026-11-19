@@ -757,7 +757,7 @@ def test_reportho_owned_lead_is_frozen_at_its_concentric_radius() -> None:
     assert (
         tuple(route.curve_radii) == plan.curve_radii == tuple(fresh.curve_radii or ())
     )
-    assert route.curve_radii[0] == pytest.approx(6.01)
+    assert route.curve_radii[0] == pytest.approx(CURVE_RADIUS)
     assert route.concentric_corner_offsets_by_segment == dict(
         plan.concentric_corner_offsets_by_segment
     )
