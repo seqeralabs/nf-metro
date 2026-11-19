@@ -1229,6 +1229,9 @@ def test_a_turned_placement_plans_the_turned_record(path: Path, turn: _Turn) -> 
     ``LANE_TURN_EXCEPTIONS``, where a born line's side comes from a side
     convention the turn does not carry.
 
+    A fork branch's side is read from its exit's lanes, so it turns with them
+    only where the turn carries every lane direction.
+
     Where the turn carries every convention side as well, it flips each far
     side under a reflection and turns each order: a rotation keeps it; a
     reflection reverses a lateral-decided order, and, where the turn carries
@@ -1248,6 +1251,8 @@ def test_a_turned_placement_plans_the_turned_record(path: Path, turn: _Turn) -> 
         if ref.rule in _CONVENTIONS:
             travel = port_travel(image_graph.ports[key[0]])
             assert got.side == _CONVENTIONS[ref.rule](travel), key
+        elif ref.rule is SideRule.FORK_NEST and not keeps_frames:
+            continue
         else:
             assert got.side == flip * ref.side, key
 

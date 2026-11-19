@@ -143,6 +143,7 @@ from nf_metro.layout.routing.normalize import (
     _restack_channel,
     _VChannel,
 )
+from nf_metro.layout.routing.offsets import _recorded_approach as _recorded_side
 from nf_metro.layout.routing.orientation import lateral_order_sign
 from nf_metro.layout.routing.perp import (
     _lane_stacked_perp_entry,
@@ -760,6 +761,7 @@ class _BottomExitJunctionRoute(Enum):
     FAN_LANDINGS = "fan_landings"
     VIA_GAP = "via_gap"
     PLAIN = "plain"
+    NONE = "none"
 
 
 def _bypass_route_kind(f: _InterFacts) -> _BypassRoute:
@@ -2769,6 +2771,15 @@ def _bottom_exit_junction_exit_port(
     return exit_pid, exit_sec or ""
 
 
+def _junction_exit_lane_x(
+    ctx: _RoutingCtx, exit_pid: str, line_id: str, exit_sec: str | None
+) -> float:
+    """*line_id*'s X offset at the perpendicular exit feeding a fork junction."""
+    if exit_sec in ctx.tb_sections:
+        return _tb_x_offset(ctx, exit_pid, line_id, exit_sec)
+    return _perp_riser_lateral(ctx, exit_pid, line_id, ctx.graph.ports[exit_pid].side)
+
+
 def _bottom_exit_junction_geometry(
     edge: Edge,
     src: Station,
@@ -2830,7 +2841,7 @@ def _bottom_exit_junction_parts(
 
     def exit_x_offset(line_id: str) -> float:
         if ctx.station_offsets:
-            return _tb_x_offset(ctx, exit_pid, line_id, exit_sec)
+            return _junction_exit_lane_x(ctx, exit_pid, line_id, exit_sec)
         bi, bn = ctx.bundle_info.get((edge.source, edge.target, line_id), (f.i, f.n))
         return l_shape_stagger(bi, bn, Direction.D, ctx.offset_step)
 
@@ -2849,12 +2860,14 @@ def _bottom_exit_junction_route_kind(f: _InterFacts) -> _BottomExitJunctionRoute
     geometry, _members, rigid, _offset = _bottom_exit_junction_parts(f)
     if (
         f.h_segment_crosses_other_section(geometry.vx, f.tgt.x, geometry.hy)
-        and _route_bottom_exit_junction_via_gap(
-            f.edge, f.src, f.tgt, f.ctx, geometry, rigid
-        )
+        and _route_bottom_exit_junction_via_gap(f.edge, f.src, f.tgt, f.ctx, geometry)
         is not None
     ):
         return _BottomExitJunctionRoute.VIA_GAP
+    if f.v_segment_crosses_other_section(geometry.vx, f.sy, geometry.hy):
+        # The leg would run back through the exit's section and no gap leads
+        # round it: no junction shape reaches the target.
+        return _BottomExitJunctionRoute.NONE
     return _BottomExitJunctionRoute.PLAIN
 
 
@@ -2878,7 +2891,7 @@ def _route_bottom_exit_junction_leaf(
             edge, src, tgt, ctx, members, exit_x_offset, hy
         )
     if kind is _BottomExitJunctionRoute.VIA_GAP:
-        return _route_bottom_exit_junction_via_gap(edge, src, tgt, ctx, geometry, rigid)
+        return _route_bottom_exit_junction_via_gap(edge, src, tgt, ctx, geometry)
     return route_tapered(
         edge,
         rigid,
@@ -3019,7 +3032,6 @@ def _route_bottom_exit_junction_via_gap(
     tgt: Station,
     ctx: _RoutingCtx,
     geometry: _BottomExitJunctionGeometry,
-    rigid: list[_TaperedMember],
 ) -> RoutedPath | None:
     """Detour a bottom-exit-junction feed whose horizontal leg crosses a box.
 
@@ -3036,34 +3048,87 @@ def _route_bottom_exit_junction_via_gap(
     or one with no clear inter-column channel to its left), so the caller falls
     back to the plain L.
     """
-    tgt_port = ctx.graph.ports.get(edge.target)
-    if tgt_port is None or tgt_port.side != PortSide.LEFT:
+    entry_id = ctx.merge.entry_port_for.get(edge.target, edge.target)
+    tgt_port = ctx.graph.ports.get(entry_id)
+    perp_merge = (
+        entry_id != edge.target
+        and tgt_port is not None
+        and tgt_port.side
+        in (
+            PortSide.TOP,
+            PortSide.BOTTOM,
+        )
+    )
+    if not perp_merge and (tgt_port is None or tgt_port.side != PortSide.LEFT):
         return None
-    ep_col, ep_row = _resolve_section_colrow(ctx.graph, tgt)
+    ep_col, ep_row = _resolve_section_colrow(ctx.graph, ctx.graph.stations[entry_id])
     if ep_col is None or ep_row is None:
         return None
     corner_x = _corridor_descent_x(ctx, ep_col, ep_row, 0.0)
     if corner_x is None:
         return None
-    gy = inter_row_channel_y(
-        ctx.graph,
-        src,
-        tgt,
-        src.y,
-        tgt.y,
-        tgt.y - src.y,
-        ctx.curve_radius,
-        reserved=ctx.reserved_bands.rows,
-    )
     vx, hy = geometry.vx, geometry.hy
+    exit_pid, _exit_sec = _bottom_exit_junction_exit_port(ctx, edge.source)
+    exit_side, exit_y = ctx.graph.ports[exit_pid].side, ctx.graph.stations[exit_pid].y
+    exit_col, exit_row = _resolve_section_colrow(
+        ctx.graph, ctx.graph.stations[exit_pid]
+    )
+    detour: list[tuple[float, float]] = []
+    if (hy - src.y) * (src.y - exit_y) < 0 and exit_row is not None:
+        # The target lies back across the exit's own row: the traverse runs in
+        # the channel on the exit's side of that row, clear of its header badges.
+        gy = (
+            header_corridor_y(
+                ctx.graph, exit_row, below=True, base_radius=ctx.curve_radius
+            )
+            if exit_side is PortSide.BOTTOM
+            else row_top_edge(ctx.graph, exit_row)
+            - INTER_ROW_HEADER_CLEARANCE
+            - ctx.curve_radius
+        )
+        # A branch the record sends round the far side drops past the section
+        # and hugs the far edges of the sections between it and the target.
+        bottom = exit_side is PortSide.BOTTOM
+        if _recorded_side(ctx.graph, edge) == ("above" if bottom else "below"):
+            assert exit_col is not None
+            drop_x = _corridor_descent_x(ctx, exit_col + 1, ep_row, 0.0)
+            if drop_x is None:
+                return None
+            far_y = (min if bottom else max)(
+                header_corridor_y(
+                    ctx.graph,
+                    exit_row,
+                    below=not bottom,
+                    base_radius=ctx.curve_radius,
+                    col=c,
+                    default=inf if bottom else 0.0,
+                )
+                for c in range(exit_col + 1, ep_col)
+            )
+            detour = [(drop_x, gy), (drop_x, far_y)]
+    else:
+        gy = inter_row_channel_y(
+            ctx.graph,
+            src,
+            tgt,
+            src.y,
+            tgt.y,
+            tgt.y - src.y,
+            ctx.curve_radius,
+            reserved=ctx.reserved_bands.rows,
+        )
+    run_y = detour[-1][1] if detour else gy
+    tail = [(corner_x, run_y), (corner_x, hy), (tgt.x, hy)]
     route = route_tapered(
         edge,
-        rigid,
-        [(vx, src.y), (vx, gy), (corner_x, gy), (corner_x, hy), (tgt.x, hy)],
-        transition_leg=1,
+        gather_tapered_bundle(ctx, edge)[0],
+        [(vx, src.y), (vx, gy), *detour, *tail],
+        transition_leg=3 + len(detour),
         base_radius=ctx.curve_radius,
     )
-    _declare_channel(route, ctx, corner_x, vertical_direction(hy - gy))
+    channels = [(corner_x, run_y, hy), *((x, gy, run_y) for x, _y in detour[:1])]
+    for x, y0, y1 in channels:
+        _declare_channel(route, ctx, x, vertical_direction(y1 - y0))
     return route
 
 
@@ -3295,7 +3360,25 @@ def _route_merge_trunk(
     """Full U-shape bypass for the trunk carrier, ending at the entry port."""
     shape = shape or f.merge_trunk_shape
     assert not shape.around_below
+    if _merge_trunk_enters_perpendicular(f.ctx, f.edge):
+        assert shape.entry_port is not None
+        stair = _route_perpendicular_entry_stair(
+            f.edge, f.src, shape.entry_port, f.n, f.ctx
+        )
+        assert stair is not None
+        return stair
     return _route_bypass(f, _bypass_geometry(f, shape))
+
+
+def _merge_trunk_enters_perpendicular(ctx: _RoutingCtx, edge: Edge) -> bool:
+    """Whether merge trunk *edge* lands on a TOP/BOTTOM entry port.
+
+    Such a trunk takes the staircase the port's other feeders take, along the
+    gap on the port's own side; the U-shaped bypass would reach the port's
+    edge from beyond the section and run back along it.
+    """
+    port = ctx.graph.ports.get(ctx.merge.entry_port_for.get(edge.target, ""))
+    return port is not None and port.side in (PortSide.TOP, PortSide.BOTTOM)
 
 
 def _merge_trunk_around_below_geometry(
@@ -4677,7 +4760,8 @@ def _perp_exit_geometry(f: _InterFacts) -> _PerpExitGeometry | None:
     ):
         return None
     tgt_port = f.tgt_port
-    aligned_drop = (
+    fork_junction = ctx.bottom_exit_junction_ports.get(edge.target) == edge.source
+    aligned_drop = fork_junction or (
         tgt_port is not None
         and tgt_port.is_entry
         and tgt_port.side in (PortSide.TOP, PortSide.BOTTOM)
@@ -4690,7 +4774,13 @@ def _perp_exit_geometry(f: _InterFacts) -> _PerpExitGeometry | None:
     # so the leg is one straight segment.  Each line drops at the target trunk's
     # per-line X offset, keeping a co-travelling bundle parallel down to the
     # port and on into the trunk, merging only at the first station inside it.
-    drop_x = tgt.x + _tb_x_offset(ctx, edge.target, edge.line_id, tgt.section_id)
+    # A fork junction stands on the exit's own column, so the leg keeps the
+    # exit's lanes, the lanes the junction's branches leave on.
+    drop_x = (
+        src.x + _junction_exit_lane_x(ctx, edge.source, edge.line_id, src.section_id)
+        if fork_junction
+        else tgt.x + _tb_x_offset(ctx, edge.target, edge.line_id, tgt.section_id)
+    )
     return _perp_exit_record(
         ((drop_x, src.y), (drop_x, tgt.y)),
         0.0,
