@@ -4,7 +4,8 @@
   bundle keeps its own order on every leg and takes the entry's lanes in its
   last bend.
 * A line whose entry lane lies between the lanes of another feeding bundle
-  crosses that bundle; the cohort compile accepts that crossing.
+  crosses that bundle; the cohort compile accepts that crossing on the
+  connectors that carry it, reached through the exit's fork where it forks.
 * A perpendicular exit whose lines all cross into one flow-side entry takes
   that entry's lanes, gaps kept, and its turn columns keep them; columns
   close up over an exit line that turns elsewhere.
@@ -19,7 +20,11 @@ from pathlib import Path
 import pytest
 
 from nf_metro.api import prepare_graph, render_string
-from nf_metro.layout.lane_plan import ForcedCrossing
+from nf_metro.layout.lane_plan import (
+    ForcedCrossing,
+    recorded_crossing_pairs,
+    recorded_lane_plan,
+)
 from nf_metro.layout.routing.common import RoutedPath
 from nf_metro.layout.routing.invariants import check_bundle_order_preserved
 from nf_metro.parser.model import MetroGraph
@@ -152,3 +157,38 @@ def test_a_branch_into_a_bottom_entry_runs_outside_the_target_box() -> None:
         if abs(a[1] - b[1]) < 1e-6 and abs(a[0] - b[0]) > 1e-6
     ]
     assert level and all(y > bottom for y in level[1:]), (bottom, branch.points)
+
+
+@pytest.mark.parametrize(
+    "stem",
+    [
+        "approach_order_carry_sandwich",
+        "approach_order_multi_line_feeder",
+        "departure_order_shared_run_no_record",
+    ],
+)
+def test_a_crossing_through_a_forked_exit_pairs_the_connectors_it_carries(
+    stem: str,
+) -> None:
+    path = REGRESSIONS / f"{stem}.mmd"
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+    plan = recorded_lane_plan(graph)
+    assert plan is not None
+    edges = {(e.source, e.target, e.line_id) for e in graph.edges}
+    pairs = recorded_crossing_pairs(graph)
+    crossings = [c for c in plan.tracks.forced if c.port and c.across]
+    assert crossings
+    for crossing in crossings:
+        passing, *crossed_lines = crossing.lines
+        crossed = {
+            other
+            for key, other in pairs
+            if key[1] == crossing.port
+            and key[2] == passing
+            and other[2] in crossed_lines
+        }
+        assert {key[2] for key in crossed} == set(crossed_lines)
+        assert crossed <= edges
+        assert all(key[0] != crossing.across for key in crossed)
