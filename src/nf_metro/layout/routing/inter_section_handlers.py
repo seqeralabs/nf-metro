@@ -143,13 +143,10 @@ from nf_metro.layout.routing.normalize import (
 from nf_metro.layout.routing.offsets import _approach_record
 from nf_metro.layout.routing.offsets import _recorded_approach as _recorded_side
 from nf_metro.layout.routing.perp import (
-    _lane_stacked_perp_entry,
-    _perp_approach_fan_x,
     _perp_entry_crossing_x,
     _perp_riser_lateral,
     _planned_entry_crossing,
 )
-from nf_metro.layout.routing.perp_columns import feeder_sources, perp_corridor_feeder
 from nf_metro.layout.routing.reserved_bands import (
     EdgeKey,
     ReservedBand,
@@ -174,8 +171,7 @@ def _leaves_on_far_side(graph: MetroGraph, edge: Edge) -> bool:
     """Whether the lane plan sends *edge*'s connector off its exit's band on
     the far side (:attr:`~nf_metro.layout.lane_plan.LanePlan.far_sides`)."""
     plan = recorded_lane_plan(graph)
-    if plan is None:
-        return False
+    assert plan is not None
     source = approach_source(graph, edge.source, edge.line_id)
     return (edge.target, source, edge.line_id) in plan.far_sides
 
@@ -199,8 +195,6 @@ def _drawn_lane(
     if lanes_run_along_x(section.direction):
         frame = _section_lane_frame(graph, section, ctx.positive_fan)
         return station.x + lane_delta(frame, offset)
-    if port.is_entry:
-        return _planned_entry_crossing(ctx, node_id, line_id, station.x)
     return station.x + _perp_riser_lateral(ctx, node_id, line_id, port.side)
 
 
@@ -2475,7 +2469,7 @@ def _tb_bottom_exit_geometry(
     """Resolve the source seam shared by TB bottom-exit planning and emission."""
     run_direction = vertical_direction(tgt.y - src.y)
     if needs_perp_approach_fan(ctx.graph, edge.target):
-        land_x = _perp_approach_fan_x(ctx, edge.target, edge.line_id, tgt.x)
+        land_x = _planned_entry_crossing(ctx, edge.target, edge.line_id, tgt.x)
         channel_y = inter_row_channel_y(
             ctx.graph,
             src,
@@ -2624,7 +2618,7 @@ def _around_stack_geometry(
     one centreline so the final drop lands on the same per-line X as the
     adjacent straight-drop feeders converging on the shared port.  Where distinct
     lines share the entry (:func:`needs_perp_approach_fan`) that shared X is the
-    per-line approach channel (:func:`perp._perp_approach_fan_x`) instead of the
+    lane plan's crossing (:func:`perp._planned_entry_crossing`) instead of the
     feeder lane, since every feeder sits on one column trunk.
     """
     edge, src, tgt, ctx, graph = f.edge, f.src, f.tgt, f.ctx, f.graph
@@ -2638,7 +2632,7 @@ def _around_stack_geometry(
 
     fans_distinct = needs_perp_approach_fan(graph, edge.target)
     if fans_distinct:
-        tx = _perp_approach_fan_x(ctx, edge.target, edge.line_id, tgt.x)
+        tx = _planned_entry_crossing(ctx, edge.target, edge.line_id, tgt.x)
 
     def lane_offset(line_id: str) -> float:
         # Negated so the down-leg's right-hand normal lands each riser on its
@@ -3058,8 +3052,7 @@ def _route_bottom_exit_junction_via_gap(
         if _recorded_side(ctx.graph, edge) == ("above" if bottom else "below"):
             assert exit_col is not None
             drop_x = _corridor_descent_x(ctx, exit_col + 1, ep_row, 0.0)
-            if drop_x is None:
-                return None
+            assert drop_x is not None
             far_y = (min if bottom else max)(
                 header_corridor_y(
                     ctx.graph,
@@ -4835,11 +4828,10 @@ def _perp_exit_over_geometry(
             (gap_x, ty),
             (tx, ty),
         )
-        land = 1.0
-        if tgt_port is not None and tgt_sec is not None and src_sec is not None:
-            centreline, land = _perp_exit_outward_loop(
-                ctx, edge, src_sec, tgt_sec, src_offs, centreline
-            )
+        assert tgt_sec is not None and src_sec is not None
+        centreline, land = _perp_exit_outward_loop(
+            ctx, edge, src_sec, tgt_sec, src_offs, centreline
+        )
         return _perp_exit_record(
             centreline,
             src_offs[edge.line_id],
@@ -5009,21 +5001,13 @@ def _perp_exit_landing_offsets(
     reads as opposite laterals on the two sides.
 
     A TOP or BOTTOM entry is crossed where the lane plan puts each line
-    (:func:`perp._planned_entry_crossing`), so every such port is landed so.
-    Any other port is landed so where this exit alone feeds it, its crossing
-    set by this feeder's own lines.  ``None`` keeps the bundle on its riser
-    laterals all the way down: into every other port, into a port continuing a
-    corridor run at its own Y (:func:`perp_columns.perp_corridor_feeder`),
-    where the crossing is undefined, and where the crossing orders the lines
-    unlike the risers, so the bundle could only land by crossing its own lines.
+    (:func:`perp._planned_entry_crossing`).  ``None`` keeps the bundle on its
+    riser laterals all the way down: where the crossing is undefined, and where
+    the crossing orders the lines unlike the risers, so the bundle could only
+    land by crossing its own lines.
     """
     tgt_port = ctx.graph.ports[edge.target]
     if tgt_sec is None or not lanes_run_along_y(tgt_sec.direction):
-        return None
-    if not _lane_stacked_perp_entry(ctx.graph, edge.target) and (
-        len(feeder_sources(ctx.graph, edge.target)) != 1
-        or perp_corridor_feeder(ctx.graph, edge.target) is not None
-    ):
         return None
     tx = ctx.graph.stations[edge.target].x
     landing_sign = -1.0 if tgt_port.side is PortSide.TOP else 1.0

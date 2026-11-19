@@ -1,19 +1,14 @@
 """Feeders of a perpendicular entry port.
 
-A TOP/BOTTOM entry port is crossed by the feeders that land on it; these
-helpers name them: the distinct sources feeding a port, and the perpendicular
-exit continuing a corridor run at the port's own coordinate.
+A TOP/BOTTOM entry port is crossed by the feeders that land on it; this
+names the perpendicular exit continuing a corridor run at the port's own
+coordinate.
 """
 
 from __future__ import annotations
 
 from nf_metro.layout.constants import COORD_TOLERANCE
 from nf_metro.parser.model import MetroGraph, Port, PortSide
-
-
-def feeder_sources(graph: MetroGraph, port_id: str) -> set[str]:
-    """The distinct stations with an edge into *port_id*."""
-    return {edge.source for edge in graph.edges_to(port_id)}
 
 
 def perp_corridor_feeder(graph: MetroGraph, port_id: str) -> Port | None:

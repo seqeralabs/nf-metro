@@ -36,7 +36,6 @@ from nf_metro.layout.geometry import (
 from nf_metro.layout.lane_plan import _draw_sign, _run_port
 from nf_metro.layout.route_plan import (
     DemandAxis,
-    ExitTurnDisposition,
     ExitTurnPlan,
     ExitTurnPlanId,
 )
@@ -4606,8 +4605,6 @@ def _recorded_band_pairs(
         if slots[i][0].route.line_id == slots[j][0].route.line_id:
             continue
         for ta, tb in itertools.product(slots[i], slots[j]):
-            if ta.sign_x != tb.sign_x:
-                continue
             held_a = (id(ta.route), ta.idx) in held
             held_b = (id(tb.route), tb.idx) in held
             for end_a, node_a, key_a, above_a, owned_a in legs[id(ta)]:
@@ -4646,8 +4643,6 @@ def _nested_outer(
         if plan_a is not None and plan_a is plan_b:
             order = plan_a.nest_order
             line_a, line_b = ta.route.line_id, tb.route.line_id
-            if line_a not in order or line_b not in order:
-                return None
             run = plan_a.source_run_direction
             along = direction_vector(run)[0] if run is not None else 1.0
             return (order.index(line_a) - order.index(line_b)) * along * outward > 0
@@ -4658,14 +4653,10 @@ def _nested_outer(
 
 def _planned_exit_turn(ctx: _RoutingCtx, edge: Edge) -> ExitTurnPlan | None:
     """The PLANNED exit-turn plan whose x-axis turn *edge* takes, if any."""
-    query = ctx.exit_turns
-    membership = query.membership_for_edge(edge) if query is not None else None
-    if (
-        membership is None
-        or membership.axis is None
-        or membership.plan.disposition is not ExitTurnDisposition.PLANNED
-        or membership.axis.axis is not DemandAxis.X
-    ):
+    assert ctx.exit_turns is not None
+    membership = ctx.exit_turns.membership_for_edge(edge)
+    assert membership is not None
+    if membership.axis is None or membership.axis.axis is not DemandAxis.X:
         return None
     return membership.plan
 
@@ -5949,8 +5940,6 @@ def _restack_htrunk(
     if rp.curve_radii is None:
         return
     for end, far in ((0, -1), (1, 2)):
-        if not (k + end - 1 < len(rp.curve_radii) and 0 <= k + far < len(pts)):
-            continue
         leg_up = pts[k + far][1] < new_y
         ys = [new_y]
         for m, y in band:

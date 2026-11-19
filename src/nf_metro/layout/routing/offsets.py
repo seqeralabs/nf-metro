@@ -67,8 +67,6 @@ def compute_station_offsets(
         return {}
     resolved = offset_step if offset_step is not None else graph_offset_step(graph)
     offsets = planned_offsets(graph, lane_plan_of(graph), resolved)
-    if graph._departure_lane_orders:
-        graph._departure_lane_orders = {}
     if graph._departure_order_plan is not None:
         graph._departure_order_plan.seal(graph._stages_completed)
     return offsets
@@ -236,8 +234,7 @@ class SameRowBypassEntry:
 def _approach_record(graph: MetroGraph, edge: Edge) -> Approach | None:
     """The lane plan's approach record for *edge*'s connector into its entry."""
     plan = recorded_lane_plan(graph)
-    if plan is None:
-        return None
+    assert plan is not None
     source = approach_source(graph, edge.source, edge.line_id)
     return plan.port_orders.approaches.get((edge.target, source))
 

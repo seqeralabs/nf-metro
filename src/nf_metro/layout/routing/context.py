@@ -1188,12 +1188,9 @@ def _compute_bypass_gap_indices(
 
 
 def _junction_lead(graph: MetroGraph, jid: str) -> Direction:
-    """Direction of the exit run fan junction *jid* continues."""
-    for edge in graph.edges_to(jid):
-        port = graph.ports.get(edge.source)
-        if port is not None and not port.is_entry:
-            return EXIT_SIDE_DIRECTION[port.side]
-    return Direction.R
+    """Direction of the exit run fan junction *jid* continues: the side of
+    the exit port feeding it."""
+    return EXIT_SIDE_DIRECTION[graph.ports[graph.edges_to(jid)[0].source].side]
 
 
 def fan_turning_slots(ctx: _RoutingCtx, jid: str) -> set[int]:
@@ -1220,12 +1217,8 @@ def fan_turning_slots(ctx: _RoutingCtx, jid: str) -> set[int]:
         tgt_lane = (tgt.x, tgt.y)[across] + ctx.station_offsets.get(
             (edge.target, edge.line_id), 0.0
         )
-        if (
-            cell is None
-            or tgt_cell is None
-            or abs(tgt_cell - cell) > 1
-            or abs(tgt_lane - lane) > COORD_TOLERANCE
-        ):
+        assert cell is not None and tgt_cell is not None
+        if abs(tgt_cell - cell) > 1 or abs(tgt_lane - lane) > COORD_TOLERANCE:
             turning.add(edge.line_id)
     return {i for (_s, _t, lid), (i, _n) in branches.items() if lid in turning}
 

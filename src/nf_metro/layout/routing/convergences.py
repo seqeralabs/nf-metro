@@ -540,13 +540,9 @@ def _trunk_landing_point(
             or abs(nearest[1] - vy) > COORD_TOLERANCE
         ):
             continue
-        (ax, ay), (bx, by) = trunk[k - 1], trunk[k + 1]
+        bx, by = trunk[k + 1]
         length = math.hypot(bx - vx, by - vy)
-        if length <= COORD_TOLERANCE:
-            return nearest
         ux, uy = (bx - vx) / length, (by - vy) / length
-        if abs((vx - ax) * uy - (vy - ay) * ux) <= COORD_TOLERANCE:
-            return nearest
         along_leg = (
             math.hypot(fx, fy) > COORD_TOLERANCE
             and abs(fx * uy - fy * ux) <= COORD_TOLERANCE
