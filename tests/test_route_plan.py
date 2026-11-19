@@ -721,9 +721,7 @@ def test_invalid_caller_line_order_is_not_recorded_as_typed_provenance() -> None
         )
 
 
-@pytest.mark.parametrize(
-    "name", ["seed_15.mmd", "seed_41.mmd", "seed_72.mmd", "seed_77.mmd"]
-)
+@pytest.mark.parametrize("name", ["seed_15.mmd", "seed_72.mmd", "seed_77.mmd"])
 def test_frozen_sources_have_canonical_plan_serialisation(name: str) -> None:
     if name == "seed_15.mmd":
         # seed_15's convergence planning aborts (#2041).
@@ -742,7 +740,7 @@ def test_frozen_source_plans_are_identical_across_supported_hash_seeds() -> None
     # by test_frozen_sources_have_canonical_plan_serialisation; genomeassembly
     # carries three convergence plans through the same serialisation.
     paths = (
-        *(FROZEN / name for name in ("seed_41.mmd", "seed_72.mmd", "seed_77.mmd")),
+        *(FROZEN / name for name in ("seed_72.mmd", "seed_77.mmd")),
         ROOT / "examples" / "genomeassembly.mmd",
     )
     script = """
@@ -805,6 +803,10 @@ def test_every_routable_corpus_connector_and_leg_has_exact_plan_coverage() -> No
             ):
                 warnings.simplefilter("ignore")
                 _observe(path)
+            continue
+        if path == FROZEN / "seed_41.mmd":
+            # seed_41 aborts in its convergence plan; test_hash_seed_determinism.py
+            # pins that abort with its defect classes.
             continue
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")

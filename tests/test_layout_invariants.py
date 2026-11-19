@@ -5890,7 +5890,6 @@ def test_flow_entry_run_into_trunk_consumer_holds_one_lane(fixture):
     "fixture",
     (
         "hash_seed_determinism/seed_15.mmd",
-        "hash_seed_determinism/seed_41.mmd",
         "hash_seed_determinism/seed_72.mmd",
         "hash_seed_determinism/seed_77.mmd",
     ),

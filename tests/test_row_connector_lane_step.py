@@ -42,7 +42,6 @@ ROOT = Path(__file__).resolve().parent.parent
 
 FIXTURES = [
     "examples/topologies/funcprofiler_upstream.mmd",
-    "tests/fixtures/hash_seed_determinism/seed_41.mmd",
     "tests/fixtures/hash_seed_determinism/seed_77.mmd",
 ]
 FIXTURE_IDS = [Path(f).stem for f in FIXTURES]

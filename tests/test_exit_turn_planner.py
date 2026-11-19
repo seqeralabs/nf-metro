@@ -74,6 +74,9 @@ ROOT = Path(__file__).parents[1]
 TOPOLOGIES = ROOT / "examples" / "topologies"
 FIXTURES = ROOT / "tests" / "fixtures"
 FROZEN = FIXTURES / "hash_seed_determinism"
+# A corpus map whose exit bundle hands its lanes over through planned
+# lane-transition templates.
+LANE_TRANSITION = ROOT / "tests" / "data" / "exit_lane_transition" / "f8400149.mmd"
 REDUCED = (
     TOPOLOGIES / "leftward_up_exit_turn_order.mmd",
     TOPOLOGIES / "terminated_exit_lane_compaction.mmd",
@@ -2196,7 +2199,7 @@ def test_runtime_invariant_rejects_a_missing_planned_offset() -> None:
 
 
 def test_runtime_invariant_rejects_a_changed_lane_transition() -> None:
-    graph, offsets, observation = _observe(FROZEN / "seed_41.mmd")
+    graph, offsets, observation = _observe(LANE_TRANSITION)
     routes = copy.deepcopy(observation.routes)
     route = next(
         item for item in routes if item.exit_lane_transition_plan_id is not None

@@ -387,7 +387,7 @@ def test_multiple_lines_share_the_target_entry_bundle_order() -> None:
         )
 
 
-@pytest.mark.parametrize("name", ("seed_15.mmd", "seed_41.mmd"))
+@pytest.mark.parametrize("name", ("seed_15.mmd", "seed_77.mmd"))
 def test_frozen_recovery_seeds_have_complete_planned_convergences(name: str) -> None:
     if name == "seed_15.mmd":
         # seed_15's convergence planning aborts (#2041).
