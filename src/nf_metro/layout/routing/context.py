@@ -32,7 +32,6 @@ from nf_metro.layout.route_topology import (
     merge_fanout_junction_ids,
 )
 from nf_metro.layout.routing.common import (
-    EXIT_SIDE_DIRECTION,
     Direction,
     RoutedPath,
     _h_segment_penetrates_section,
@@ -43,7 +42,6 @@ from nf_metro.layout.routing.common import (
     merge_trunk_force_cross_row,
     resolve_section,
     resolve_section_colrow,
-    right_normal_axis_sign,
     row_bottom_edge,
     row_top_edge,
     vertical_flow_sections,
@@ -480,7 +478,6 @@ def _build_routing_context(
         divergence_sources,
         line_priority,
         skip_edges=all_exclude,
-        station_offsets=station_offsets,
         topology=topology,
     )
     resolved_offset_step = (
@@ -1187,27 +1184,12 @@ def _compute_bypass_gap_indices(
     return result
 
 
-def _junction_lead_sign(graph: MetroGraph, jid: str) -> int:
-    """Screen sign of travel-right across the exit run fan junction *jid* continues.
-
-    A fan's slot 0 is its travel-left line (:func:`l_shape_stagger`), and the
-    junction's planned offsets lie across that run, so ranking by this sign
-    times the offset seats the slots in the lane order the run arrives in.
-    """
-    for edge in graph.edges_to(jid):
-        port = graph.ports.get(edge.source)
-        if port is not None and not port.is_entry:
-            return right_normal_axis_sign(EXIT_SIDE_DIRECTION[port.side])
-    return 1
-
-
 def _compute_junction_fan_info(
     graph: MetroGraph,
     junction_ids: Iterable[str],
     line_priority: dict[str, int],
     skip_edges: set[tuple[str, str, str]] | None = None,
     topology: RouteTopologyQuery | None = None,
-    station_offsets: Mapping[tuple[str, str], float] | None = None,
 ) -> dict[tuple[str, str, str], tuple[int, int]]:
     """Unified fan-out positions for junctions with mixed-direction edges.
 
@@ -1370,7 +1352,7 @@ def _compute_junction_fan_info(
         if not outgoing or not needs_unified:
             continue
 
-        # Assign one position per unique line_id.
+        # Assign one position per unique line_id (sorted by priority).
         # All edges of the same line share that position, including
         # edges previously SKIPPED for the bundle.  This makes a merge
         # branch route share the same source-side fan position as a
@@ -1381,26 +1363,18 @@ def _compute_junction_fan_info(
             for e in graph.edges_from(jid)
             if graph.station_for_edge_target(e).is_port or e.target in junction_ids
         ]
-        # Each line's slot follows its planned lane at the junction, read
-        # travel-left first, so the descent X order is in phase with the lead-in
-        # it arrives on.  A rail layout plans no per-line offsets: there a clean
-        # divergence (distinct lines peeling to disjoint targets) is ordered
-        # outermost-to-innermost by reach and every other fan keeps declaration
-        # order.
-        fan_lines = {e.line_id for e in all_outgoing}
-        if station_offsets:
-            sign = _junction_lead_sign(graph, jid)
-            line_ids = sorted(
-                fan_lines,
-                key=lambda lid: (
-                    sign * station_offsets[(jid, lid)],
-                    line_priority.get(lid, 0),
-                ),
-            )
+        # A clean divergence (distinct lines peeling to disjoint targets) is
+        # ordered outermost-to-innermost by reach so the descent X order stays
+        # in phase with the source-section bundle's lead-in Y order; every other
+        # fan (co-travelling bundles, mixed targets) keeps declaration order.
+        peel_order = fanout_divergence_peel_order(graph, jid, line_priority, topology)
+        if peel_order is not None:
+            line_ids = peel_order
         else:
-            line_ids = fanout_divergence_peel_order(
-                graph, jid, line_priority, topology
-            ) or sorted(fan_lines, key=lambda lid: line_priority.get(lid, 0))
+            line_ids = sorted(
+                {e.line_id for e in all_outgoing},
+                key=lambda lid: line_priority.get(lid, 0),
+            )
         line_pos = {lid: i for i, lid in enumerate(line_ids)}
         n = len(line_ids)
 
