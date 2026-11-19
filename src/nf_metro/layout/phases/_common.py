@@ -24,7 +24,7 @@ from nf_metro.layout.constants import (
 )
 from nf_metro.layout.geometry import (
     AxisFrame,
-    flow_entry_side,
+    flow_port_sides,
     lanes_run_along_x,
     lanes_run_along_y,
     quantize_coord,
@@ -859,8 +859,9 @@ def _linear_entry_pill_lines(
     """The lines an entry-frame pill covers at *sid*, or ``None``.
 
     The cohort is the line set of the section's sole flow-side entry that
-    carries lines; it defines the pill when it is a contiguous run of two or
-    more lanes and the station's one other line sits beside it.
+    carries lines, when the section's flow-side exit carries all of it or none
+    of it; it defines the pill when it is a contiguous run of two or more lanes
+    and the station's one other line sits beside it.
     """
     if graph.compact_offsets or graph.line_spread is LineSpread.RAILS:
         return None
@@ -868,18 +869,25 @@ def _linear_entry_pill_lines(
     if station is None or station.section_id is None or station.is_port:
         return None
     section = graph.sections[station.section_id]
-    side = flow_entry_side(section.direction)
+    entry_side, exit_side = flow_port_sides(section.direction)
     entries = [
         pid
         for pid in section.entry_ports
-        if graph.ports[pid].side is side and graph.station_lines(pid)
+        if graph.ports[pid].side is entry_side and graph.station_lines(pid)
     ]
     if len(entries) != 1:
         return None
     inherited = tuple(sorted(graph.station_lines(entries[0])))
-    if len(inherited) < 2:
-        return None
     inherited_set = set(inherited)
+    leaving = {
+        line_id
+        for pid in section.exit_ports
+        if graph.ports[pid].side is exit_side
+        for line_id in graph.station_lines(pid)
+        if line_id in inherited_set
+    }
+    if len(inherited) < 2 or leaving not in (set(), inherited_set):
+        return None
     served = tuple(graph.station_lines(sid))
     local = tuple(line_id for line_id in served if line_id not in inherited_set)
     if len(local) != 1 or not inherited_set.issubset(served):
