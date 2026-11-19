@@ -738,9 +738,12 @@ def test_frozen_sources_have_canonical_plan_serialisation(name: str) -> None:
 
 
 def test_frozen_source_plans_are_identical_across_supported_hash_seeds() -> None:
-    paths = tuple(
-        FROZEN / name
-        for name in ("seed_15.mmd", "seed_41.mmd", "seed_72.mmd", "seed_77.mmd")
+    # seed_15 aborts in convergence planning (#2041) and is held to that abort
+    # by test_frozen_sources_have_canonical_plan_serialisation; genomeassembly
+    # carries three convergence plans through the same serialisation.
+    paths = (
+        *(FROZEN / name for name in ("seed_41.mmd", "seed_72.mmd", "seed_77.mmd")),
+        ROOT / "examples" / "genomeassembly.mmd",
     )
     script = """
 import json
@@ -794,6 +797,15 @@ def test_route_emission_abort_fixture_aborts_on_its_owned_segment(
 
 def test_every_routable_corpus_connector_and_leg_has_exact_plan_coverage() -> None:
     for path in ROUTABLE_CORPUS:
+        if path == FROZEN / "seed_15.mmd":
+            # seed_15's convergence planning aborts (#2041).
+            with (
+                warnings.catch_warnings(),
+                pytest.raises(ValueError, match=SEED_15_ABORT),
+            ):
+                warnings.simplefilter("ignore")
+                _observe(path)
+            continue
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             graph, routes, plan = _observe(path)
