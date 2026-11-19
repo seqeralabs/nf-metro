@@ -148,9 +148,10 @@ lines, lifted past its bundle-mates laned before it and the free line before
 it, clamped below its pinned bundle-mates after it.  A free line never takes a
 lane a line it coexists with holds, nor one beside a line that runs from the
 run's entry port past one of its stations where the other stops (a *breeze*):
-it steps up past both.  The run then holds no lane none of its lines rides:
-its lanes close up in order about its lowest pinned lane (else its lowest),
-where that moves no lane it keeps but a seam pin's.
+it steps up past both.  The run's stations then hold no lane none of its lines
+rides: the lanes between their outermost close up in order about its lowest
+pinned lane (else its lowest), lanes beyond them keeping their distance, where
+that moves no lane it keeps but a seam pin's.
 
 **Lines in a seam-pinned run.**  Outside a part entered by bundles, a line
 riding no entry of a run holding a seam-pinned entry lies beside the fixed
@@ -1851,12 +1852,32 @@ class _Tracks:
             lanes = self._fill(
                 run, order, slots, fixed, bool(pins), arrival, conflict, riding, joins
             )
-        held = sorted({lanes[lid] for lid in run.present}) or [0]
+        stops = (
+            [
+                lanes[lid]
+                for n in members
+                if n not in graph.ports
+                for lid in graph.station_lines(n)
+            ]
+            or [*lanes.values()]
+            or [0]
+        )
+        lo, hi = min(stops), max(stops)
+        held = sorted({v for v in lanes.values() if lo <= v <= hi})
+
+        def close(v: int) -> int:
+            return (
+                held.index(v)
+                if lo <= v <= hi
+                else v - lo
+                if v < lo
+                else v - hi + len(held) - 1
+            )
+
         seamed = {lid for n in members for lid in self.seam_lanes.get(n, ())}
         kept = [lid for lid in fixed if lid not in seamed]
-        anchor = min((lanes[lid] for lid in kept or fixed), default=held[0])
-        shift = anchor - held.index(anchor)
-        packed = {lid: shift + held.index(lane) for lid, lane in lanes.items()}
+        anchor = min((lanes[lid] for lid in kept or fixed), default=lo)
+        packed = {lid: anchor - close(anchor) + close(v) for lid, v in lanes.items()}
         if all(packed[lid] == lanes[lid] for lid in kept):
             lanes = packed
         for n in members:

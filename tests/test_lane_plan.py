@@ -36,6 +36,7 @@ import pytest
 
 import nf_metro.layout.lane_plan as lane_plan_module
 import nf_metro.layout.port_order_plan as port_order_plan_module
+from nf_metro.api import render_string
 from nf_metro.layout import engine as engine_module
 from nf_metro.layout import fan_ordering
 from nf_metro.layout.constants import SAME_Y_TOLERANCE, graph_offset_step
@@ -557,6 +558,32 @@ def test_a_straight_seam_keeps_its_lines_level(path: Path) -> None:
         ):
             stepped.append((exit_id, entry_id, lid))
     assert stepped == []
+
+
+def test_a_seam_line_riding_only_the_entry_port_keeps_its_lane() -> None:
+    """``l2`` crosses the straight seam into sec2 and leaves its entry port
+    straight down to ``s2n2``: no station of the entry's run holds it, so the
+    run closing up its stations' lanes leaves it on its exit lane."""
+    path = ROOT / "tests/fixtures/regressions/perp_entry_column_merge_feeder.mmd"
+    graph = _laid_out(path).graph
+    assert graph is not None and graph._lane_plan is not None
+    lanes = graph._lane_plan.tracks.lanes
+    assert lanes[("sec2__entry_left_4", "l2")] == lanes[("sec1__exit_right_0", "l2")]
+
+
+def test_a_later_part_keeps_the_lanes_its_lines_carry_level_into_it() -> None:
+    """In sec1 ``l1`` turns off at ``s1n0``; ``l0`` and ``l2`` carry on level
+    down the run, so its later part keeps their lanes rather than closing up
+    the lane ``l1`` leaves: no step mid-straight, and the map renders."""
+    path = ROOT / "tests/fixtures/regressions/departure_order_fork_port_stop.mmd"
+    graph = _laid_out(path).graph
+    assert graph is not None and graph._lane_plan is not None
+    lanes = graph._lane_plan.tracks.lanes
+    for lid in ("l0", "l2"):
+        assert lanes[("s1n2", lid)] == lanes[("s1n0", lid)], lid
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        assert render_string(path.read_text(), source_dir=str(path.parent))
 
 
 def _packed(graph, plan, entry_id, lid, here, step) -> bool:
