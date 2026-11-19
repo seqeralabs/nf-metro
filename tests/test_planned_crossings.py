@@ -8,8 +8,7 @@
 * A perpendicular exit whose lines all cross into one flow-side entry takes
   that entry's lanes, gaps kept, and its turn columns keep them; columns
   close up over an exit line that turns elsewhere.
-* A riser centred in a column gap declares it; a branch into a TOP or BOTTOM
-  entry never runs inside the target box.
+* A branch into a TOP or BOTTOM entry never runs inside the target box.
 """
 
 from __future__ import annotations
@@ -140,12 +139,6 @@ def test_a_perpendicular_exit_takes_its_fed_entrys_gaps() -> None:
     assert columns["l2"] - columns["l4"] == pytest.approx(step)
     assert columns["l3"] - columns["l2"] == pytest.approx(2 * step)
     assert columns["l2"] < riser < columns["l3"]
-
-
-def test_a_gap_centred_riser_declares_its_gap() -> None:
-    _graph, _drawn, routes = _settled(FEEDERS, permissive=True)
-    riser = _route(routes, "sec2__exit_right_3", "sec3__entry_bottom_7", "l2")
-    assert riser.gap_slots
 
 
 def test_a_branch_into_a_bottom_entry_runs_outside_the_target_box() -> None:

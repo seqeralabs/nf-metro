@@ -5260,7 +5260,7 @@ def _perp_entry_finish_route(
             tgt_bundle_offsets=[member[3]],
             normalize_exempt=True,
         )
-        if geometry.seated_in_gap:
+        if geometry.flanked_gap:
             _declare_placed_channels(route, ctx)
         return route
 
@@ -5272,10 +5272,10 @@ def _perp_entry_finish_route(
         normalize_exempt=True,
     )
     route = next(r for r in routes if r.line_id == edge.line_id)
-    if geometry.seated_in_gap:
-        # The riser stands in an inter-column gap other bundles also use.
+    if geometry.flanked_gap:
+        # The riser descends a two-walled gap it counter-runs other bundles in.
         # Declaring its channel makes the exempt frame a visible obstacle so the
-        # gap passes seat it and those bundles jointly.
+        # gap passes seat those movable bundles clear of it.
         _declare_placed_channels(route, ctx)
     return route
 
@@ -5383,7 +5383,7 @@ class _PerpEntryLGeometry:
     transition_leg: int
     fan_source_offsets: tuple[float, ...] | None
     seam: _SourceSeam
-    seated_in_gap: bool = False
+    flanked_gap: bool = False
 
 
 def _leg_direction(start: tuple[float, float], end: tuple[float, float]) -> Direction:
@@ -5411,7 +5411,7 @@ def _perp_entry_l_record(
     transition_leg: int,
     line_id: str,
     fan_source_offsets: tuple[float, ...] | None,
-    seated_in_gap: bool = False,
+    flanked_gap: bool = False,
 ) -> _PerpEntryLGeometry:
     """Complete a perpendicular-entry record from its centreline.
 
@@ -5431,7 +5431,7 @@ def _perp_entry_l_record(
             transition_leg,
             fan_source_offsets,
             _SourceSeam(_leg_direction(points[0], points[-1]), None, None, None),
-            seated_in_gap,
+            flanked_gap,
         )
     source_offset, target_offset = next(
         (source, target)
@@ -5451,7 +5451,7 @@ def _perp_entry_l_record(
             points[0][0],
             points[1][0] + right_normal_axis_sign(turn_direction) * member_offset,
         ),
-        seated_in_gap,
+        flanked_gap,
     )
 
 
@@ -5649,16 +5649,16 @@ def _perp_entry_l_geometry(
     # pair centres the riser in the clear inter-column corridor; a same-column
     # cross-row pair flanked on its exit side seats it a clearance off the exit
     # wall, leaving the widened gap for the bundles it counter-runs.
-    seated_in_gap = False
+    flanked_gap = False
     if exit_side is not None and not straight_drop:
         corridor_x = _corridor_riser_x(ctx, src_sec, tgt_sec)
         if corridor_x is None:
             corridor_x = _flanked_cross_row_riser_seat_x(
                 ctx, src, tgt, src_sec, tgt_sec, exit_side, sy, mid_y
             )
+            flanked_gap = corridor_x is not None
         if corridor_x is not None:
             lx0 = corridor_x
-            seated_in_gap = True
 
     # Anchor the centreline on the bundle's reference line (source offset 0) and
     # fan every co-travelling line as a per-leg offset of it, so each corner
@@ -5821,7 +5821,7 @@ def _perp_entry_l_geometry(
         transition_leg,
         edge.line_id,
         fan_source_offsets,
-        seated_in_gap,
+        flanked_gap,
     )
 
 
