@@ -17,9 +17,11 @@ import pytest
 from nf_metro.api import RenderConfig, prepare_graph, render_graph_result, render_string
 from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
+    COORD_TOLERANCE,
     CURVE_RADIUS,
     graph_offset_step,
 )
+from nf_metro.layout.geometry import point_to_polyline_distance
 from nf_metro.layout.phases._common import _station_bundle_offset_span
 from nf_metro.layout.routing.offsets import compute_station_offsets
 from nf_metro.parser.model import MetroGraph
@@ -186,3 +188,14 @@ def test_a_merge_riser_steps_out_past_the_lines_turning_inside_it() -> None:
     assert report.curve_radii is not None and main.curve_radii is not None
     assert main.curve_radii[0] == pytest.approx(CURVE_RADIUS)
     assert report.curve_radii[0] == pytest.approx(CURVE_RADIUS + step)
+
+
+def test_merge_feeders_land_on_the_trunk_their_line_converges_on() -> None:
+    _graph, _offsets, plan = _plan(TOPOLOGIES / "exit_run_three_drop_columns.mmd")
+    trunk = _route(plan, "__junction_7", "__merge_4", "report")
+    for source in ("__junction_8", "__junction_9"):
+        feeder = _route(plan, source, "__merge_4", "report")
+        assert (
+            point_to_polyline_distance(feeder.points[-1], list(trunk.points))
+            <= COORD_TOLERANCE
+        )

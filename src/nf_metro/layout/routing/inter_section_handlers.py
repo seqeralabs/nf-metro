@@ -3330,11 +3330,12 @@ def _merge_trunk_around_below_geometry(
         if flank_xs:
             target_x = f.ctx.graph.stations[sibling.target].x
             sibling_flanks.append(min(flank_xs, key=lambda x: abs(x - target_x)))
-    if not sibling_flanks:
+    descent_x = _merge_trunk_rise_on_feeder(f, geometry, shape.entry_port)
+    if not sibling_flanks and descent_x == geometry.descent_x:
         return geometry
     corner_x = max(
         geometry.corner_x,
-        max(sibling_flanks)
+        max(sibling_flanks, default=-inf)
         + cotravelling_lane_clearance(
             same_line=True,
             counter_running=True,
@@ -3349,8 +3350,37 @@ def _merge_trunk_around_below_geometry(
         delta=geometry.delta,
         corner_x=corner_x,
         channel_y=geometry.channel_y,
-        descent_x=geometry.descent_x,
+        descent_x=descent_x,
     )
+
+
+def _merge_trunk_rise_on_feeder(
+    f: _InterFacts, geometry: _EntryWrapGeometry, entry: Station
+) -> float:
+    """Centreline column of the trunk's rise into *entry*.
+
+    A branch feeder of the same merge whose descent stands within a radius of
+    the trunk's rise converges on the trunk's corner.  The feeder's column is
+    fixed by its own exit turn, so the trunk rises on it and the two lines read
+    as one stroke.
+    """
+    ctx = f.ctx
+    shift = geometry.delta * right_normal_axis_sign(
+        vertical_direction(entry.y - geometry.channel_y)
+    )
+    drawn = geometry.descent_x - shift
+    for feeder in ctx.graph.edges_to(f.edge.target):
+        source = ctx.graph.stations[feeder.source]
+        column = _resolve_section_col(ctx.graph, source)
+        key = (feeder.source, feeder.target, feeder.line_id)
+        if feeder.line_id != f.edge.line_id or key not in ctx.merge.branch_edges:
+            continue
+        assert column is not None
+        lead_x = _merge_branch_lead_x(feeder, source, ctx, column)
+        lead_x += _get_offset(ctx, feeder.target, feeder.line_id)
+        if abs(drawn - lead_x) < ctx.curve_radius:
+            return lead_x + shift
+    return geometry.descent_x
 
 
 def _route_merge_trunk_around_below(f: _InterFacts) -> RoutedPath:
