@@ -17,6 +17,7 @@ import pytest
 
 from nf_metro.api import RenderConfig, prepare_graph, render_graph_result, render_string
 from nf_metro.layout.constants import CURVE_RADIUS, graph_offset_step
+from nf_metro.layout.phases._common import _station_bundle_offset_span
 from nf_metro.layout.routing.offsets import compute_station_offsets
 from nf_metro.parser.model import MetroGraph
 from nf_metro.render.plan import RenderPlan
@@ -122,3 +123,18 @@ def test_a_restacked_corner_turning_alone_keeps_the_base_radius() -> None:
     )
     assert route.curve_radii is not None
     assert set(route.curve_radii) == {CURVE_RADIUS}
+
+
+@pytest.mark.parametrize("station", ["before", "split"])
+def test_an_entry_frame_pill_covers_the_sole_flow_entrys_lines(station: str) -> None:
+    path = TOPOLOGIES / "external_owner_exit_lane_frame.mmd"
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+    offsets = compute_station_offsets(graph)
+    cohort = ("lower", "straight", "wrap")
+    assert set(graph.station_lines(station)) == {*cohort, "ends"}
+    assert _station_bundle_offset_span(graph, station, offsets) == (
+        min(offsets[station, lid] for lid in cohort),
+        max(offsets[station, lid] for lid in cohort),
+    )

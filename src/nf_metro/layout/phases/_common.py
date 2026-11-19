@@ -24,6 +24,7 @@ from nf_metro.layout.constants import (
 )
 from nf_metro.layout.geometry import (
     AxisFrame,
+    flow_entry_side,
     lanes_run_along_x,
     lanes_run_along_y,
     quantize_coord,
@@ -855,15 +856,28 @@ def _linear_entry_pill_lines(
     sid: str,
     offsets: Mapping[tuple[str, str], float],
 ) -> tuple[str, ...] | None:
-    """Return the inherited cohort defining an accepted entry-frame pill."""
+    """The lines an entry-frame pill covers at *sid*, or ``None``.
+
+    The cohort is the line set of the section's sole flow-side entry that
+    carries lines; it defines the pill when it is a contiguous run of two or
+    more lanes and the station's one other line sits beside it.
+    """
     if graph.compact_offsets or graph.line_spread is LineSpread.RAILS:
         return None
     station = graph.stations.get(sid)
     if station is None or station.section_id is None or station.is_port:
         return None
-    inherited = graph._linear_entry_pill_lines_cache.get(sid)
-    # Mirrors the >=2-lane guard in _cache_linear_entry_pill_lines (offsets.py).
-    if inherited is None or len(inherited) < 2:
+    section = graph.sections[station.section_id]
+    side = flow_entry_side(section.direction)
+    entries = [
+        pid
+        for pid in section.entry_ports
+        if graph.ports[pid].side is side and graph.station_lines(pid)
+    ]
+    if len(entries) != 1:
+        return None
+    inherited = tuple(sorted(graph.station_lines(entries[0])))
+    if len(inherited) < 2:
         return None
     inherited_set = set(inherited)
     served = tuple(graph.station_lines(sid))
