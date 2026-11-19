@@ -6293,6 +6293,13 @@ _RENDER_LAYOUT_INVARIANT_SPECS: tuple[GuardSpec, ...] = tuple(
 )
 
 
+# Tier-A guards whose violation aborts the default render instead of warning:
+# a route reaching its own section's port across that section is no drawing.
+_RENDER_ABORTING_GUARDS = frozenset(
+    {"_guard_inter_section_route_clears_own_section_interior"}
+)
+
+
 def deferred_final_route_guard_specs() -> tuple[GuardSpec, ...]:
     """Return final-checkpoint guards that require settled route geometry."""
     return tuple(spec for spec in GUARD_REGISTRY if "routes" in spec.needs)
@@ -6336,11 +6343,13 @@ def assert_render_layout_invariants(
     registry guard. Each guard raises ``PhaseInvariantError`` on its first
     violation rather than returning a list, so each runs in isolation and its
     message is captured; the aggregate is one message. Without *strict* the
-    aggregate is a :class:`UserWarning`; with *strict* it raises
-    :class:`LayoutInvariantError`.
+    aggregate is a :class:`UserWarning`, unless a guard in
+    ``_RENDER_ABORTING_GUARDS`` fired on a non-permissive graph; otherwise it
+    raises :class:`LayoutInvariantError`.
     """
     available: dict[str, Any] = {"offsets": offsets, "routes": routes}
     messages: list[str] = []
+    aborting = False
     for spec in render_layout_invariant_specs(
         include_deferred_final=include_deferred_final
     ):
@@ -6348,6 +6357,7 @@ def assert_render_layout_invariants(
             spec.fn(graph, "render", **{name: available[name] for name in spec.needs})
         except PhaseInvariantError as exc:
             messages.append(f"[{spec.name}] {exc}")
+            aborting = aborting or spec.name in _RENDER_ABORTING_GUARDS
     if not messages:
         return
 
@@ -6359,7 +6369,7 @@ def assert_render_layout_invariants(
         "(or the directive combination) that produced this geometry.\n  "
         f"{detail}"
     )
-    if strict:
+    if strict or (aborting and not graph.permissive):
         raise LayoutInvariantError(msg)
     warnings.warn(msg, category=PermissiveGuardWarning, stacklevel=2)
 

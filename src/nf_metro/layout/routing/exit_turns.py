@@ -93,6 +93,7 @@ from nf_metro.layout.routing.inter_section_handlers import (
     _BypassRoute,
     _inter_section_rule_for_family,
     _InterFacts,
+    _junction_exit_lane_x,
     _l_shape_fan_source_turn,
     _l_shape_mid_x,
     _left_entry_band_hop_source_seam,
@@ -103,6 +104,7 @@ from nf_metro.layout.routing.inter_section_handlers import (
     _LeftEntryRoute,
     _merge_branch_lead_x,
     _merge_entry_route_kind,
+    _merge_trunk_enters_perpendicular,
     _MergeEntryRoute,
     _perp_entry_l_geometry,
     _perp_exit_geometry,
@@ -806,7 +808,7 @@ def _bottom_exit_junction_turn_requirement(
     exit_pid, exit_sec = _bottom_exit_junction_exit_port(ctx, edge.source)
 
     def exit_x_offset(line_id: str) -> float:
-        return _tb_x_offset(ctx, exit_pid, line_id, exit_sec)
+        return _junction_exit_lane_x(ctx, exit_pid, line_id, exit_sec)
 
     members, _source_center, tgt_center = gather_tapered_bundle(ctx, edge)
     geometry = _bottom_exit_junction_geometry(
@@ -1336,6 +1338,8 @@ def _merge_trunk_turn_requirement(
         return _SourceTurnRequirement.declined(
             "entry-bundle-owns-the-shared-seam-lanes"
         )
+    if _merge_trunk_enters_perpendicular(ctx, edge):
+        return _route_derived_turn_requirement(edge, RouteFamilyId.MERGE_TRUNK, ctx)
     geometry = u_bypass_descent_geometry(edge, ctx)
     assert geometry is not None
     return _u_bypass_source_turn(edge, geometry, ctx)
@@ -3174,7 +3178,7 @@ def _planned_axis_cross_range(
                 def bej_exit_x_offset(
                     line_id: str, _pid: str = exit_pid, _sec: str = exit_sec
                 ) -> float:
-                    return _tb_x_offset(tentative_ctx, _pid, line_id, _sec)
+                    return _junction_exit_lane_x(tentative_ctx, _pid, line_id, _sec)
 
                 bej_members, _bej_source_center, bej_tgt_center = gather_tapered_bundle(
                     tentative_ctx, graph_edge
