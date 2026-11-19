@@ -5886,6 +5886,7 @@ def _perp_entry_l_geometry(
     fan = ctx.junction_fan_info.get((edge.source, edge.target, edge.line_id))
     fan_single = fan if fan is not None and len(line_ids) == 1 else None
     fan_source_offsets: tuple[float, ...] | None = None
+    stand_off: float | None = None
     if fan_single is not None:
         pos_i, pos_n = fan_single
         corridor = ctx.fan_corridors.get(edge.source)
@@ -5899,18 +5900,22 @@ def _perp_entry_l_geometry(
             # wrap siblings turn at one Y rather than a few px apart; a band on
             # the target box's side of its port lies inside the box.
             mid_y = corridor.band_y
+        leaving = src_geom_leaving(sx + lead.sign)
+        fan_source_offsets = tuple(
+            sorted(leaving(lid) for lid in ctx.graph.station_lines(edge.source))
+        )
         if not straight_drop:
             lx0 = sx + lead.sign * outer_lane_radius(
                 pos_i + 1, ctx.curve_radius, ctx.offset_step
             )
+            # The riser's lanes take radii growing from the innermost lane of
+            # the turn at the base radius, so every corner rounds in full once
+            # that lane stands a base radius clear of the junction.
+            riser = segment_direction((sx, sy), (sx, mid_y)) or lead
+            inward = -lead.sign * right_normal_axis_sign(riser)
+            stand_off = ctx.curve_radius + max(inward * a for a in fan_source_offsets)
             if lead is Direction.R:
                 lx0 = _v1_corner_x(ctx, src, sx, lx0)
-        fan_source_offsets = tuple(
-            sorted(
-                _get_offset(ctx, edge.source, lid)
-                for lid in ctx.graph.station_lines(edge.source)
-            )
-        )
 
     # Where the entry lands each line on its own lane, the centreline lands on
     # the reference line's, so the bundle tapers to the section's spread.
@@ -5995,6 +6000,8 @@ def _perp_entry_l_geometry(
                 run_start=lx0,
                 run_end=final_x,
             )
+        if stand_off is not None:
+            lx0 = sx + lead.sign * max(lead.sign * (lx0 - sx), stand_off)
         # A fan branch nests its staircase with its siblings', so it keeps it.
         if fan_single is None and _perp_entry_source_beyond_channel(
             src, tgt, tgt_sec, final_x, mid_y, lead, n, ctx, is_top=is_top
