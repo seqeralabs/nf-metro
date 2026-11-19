@@ -5463,7 +5463,7 @@ def _perp_entry_finish_route(
             transition_leg=geometry.transition_leg,
             base_radius=ctx.curve_radius,
             src_bundle_offsets=list(geometry.fan_source_offsets),
-            tgt_bundle_offsets=[member[3]],
+            tgt_bundle_offsets=[member[3], *geometry.landing_anchors],
             normalize_exempt=True,
         )
         if geometry.seated_in_gap:
@@ -5475,6 +5475,8 @@ def _perp_entry_finish_route(
         centerline,
         geometry.transition_leg,
         base_radius=ctx.curve_radius,
+        bundle_offsets=[(s, t) for _e, _l, s, t in members]
+        + [(members[0][2], t) for t in geometry.landing_anchors],
         normalize_exempt=True,
     )
     route = next(r for r in routes if r.line_id == edge.line_id)
@@ -5576,6 +5578,7 @@ class _PerpEntryLGeometry:
     fan_source_offsets: tuple[float, ...] | None
     seam: _SourceSeam
     seated_in_gap: bool = False
+    landing_anchors: tuple[float, ...] = ()
 
 
 def _leg_direction(start: tuple[float, float], end: tuple[float, float]) -> Direction:
@@ -6029,7 +6032,7 @@ def _perp_entry_l_geometry(
         ctx=ctx,
         side=side,
     )
-    return _perp_entry_l_record(
+    record = _perp_entry_l_record(
         points,
         tuple(members),
         transition_leg,
@@ -6037,6 +6040,52 @@ def _perp_entry_l_geometry(
         fan_source_offsets,
         seated_in_gap,
     )
+    return replace(
+        record,
+        landing_anchors=_perp_entry_turn_anchors(
+            ctx, edge, tgt, tgt_sec, points, is_top
+        ),
+    )
+
+
+def _perp_entry_turn_anchors(
+    ctx: _RoutingCtx,
+    edge: Edge,
+    tgt: Station,
+    tgt_sec: Section | None,
+    points: tuple[tuple[float, float], ...],
+    is_top: bool,
+) -> tuple[float, ...]:
+    """Landing offsets the final corner into TOP/BOTTOM entry *tgt* anchors on.
+
+    The corner's lane takes its radius among every line of the port turning
+    into it the same way: those whose sources (a merge's feeders) lie behind
+    their own landing lanes along the corner's approach.
+    """
+    if len(points) < 3:
+        return ()
+    heading = segment_direction(points[-3], points[-2])
+    final_x = points[-1][0]
+    graph = ctx.graph
+    feeds = list(graph.edges_to(tgt.id))
+    feeds += [
+        e
+        for f in feeds
+        if f.source in ctx.merge.entry_port_for
+        for e in graph.edges_to(f.source)
+        if e.line_id == f.line_id
+    ]
+    anchors = []
+    for lid in dict.fromkeys(f.line_id for f in feeds):
+        landing = _perp_entry_landing_x(ctx, edge, tgt_sec, tgt.x, lid)
+        if landing is not None and any(
+            f.line_id == lid
+            and segment_direction((graph.stations[f.source].x, 0.0), (landing, 0.0))
+            is heading
+            for f in feeds
+        ):
+            anchors.append((-1.0 if is_top else 1.0) * (landing - final_x))
+    return tuple(anchors)
 
 
 def _perp_entry_turn_is_planned(
