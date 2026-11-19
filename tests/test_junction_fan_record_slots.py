@@ -140,6 +140,22 @@ def test_an_entry_frame_pill_covers_the_sole_flow_entrys_lines(station: str) -> 
     )
 
 
+@pytest.mark.parametrize("station", ["q1x0", "q1x2"])
+def test_a_cohort_partly_leaving_by_the_flow_exit_keeps_the_full_pill(
+    station: str,
+) -> None:
+    path = REPROS / "bt_bottom_entry_rise_from_junction.mmd"
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+    offsets = compute_station_offsets(graph)
+    served = graph.station_lines(station)
+    assert _station_bundle_offset_span(graph, station, offsets) == (
+        min(offsets[station, lid] for lid in served),
+        max(offsets[station, lid] for lid in served),
+    )
+
+
 def test_a_merge_riser_steps_out_past_the_lines_turning_inside_it() -> None:
     graph, _offsets, plan = _plan(
         ROOT / "tests" / "fixtures" / "route_reservations" / "reportho.metro"
