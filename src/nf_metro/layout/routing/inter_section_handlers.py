@@ -4895,15 +4895,11 @@ def _perp_exit_outward_loop(
     )
     run_y = band + (1.0 if is_top else -1.0) * ctx.offset_step * outer
     lateral = src_offs[edge.line_id]
-    cy = (
-        run_y
-        - right_normal_axis_sign(_leg_direction((sx, run_y), (descent_x, run_y)))
-        * lateral
-    )
+    turn = (descent_x, run_y)
+    cy = run_y - right_normal_axis_sign(_leg_direction((sx, run_y), turn)) * lateral
     cx = (
         descent_x
-        - right_normal_axis_sign(_leg_direction((descent_x, run_y), (descent_x, ty)))
-        * lateral
+        - right_normal_axis_sign(_leg_direction(turn, (descent_x, ty))) * lateral
     )
     return ((sx, sy), (sx, cy), (cx, cy), (cx, ty), (tx, ty)), -outward
 
