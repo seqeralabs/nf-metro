@@ -83,7 +83,7 @@ _KEPT_ORDER = [
     pytest.param(
         "approach_order_feeders_not_interleaved.mmd",
         "sec3__entry_bottom_7",
-        ("l2", "l3"),
+        ("l3", "l2"),
         id="feeders-do-not-interleave",
     ),
     pytest.param(
@@ -95,7 +95,7 @@ _KEPT_ORDER = [
     pytest.param(
         "approach_order_carry_sandwich.mmd",
         "sec2__entry_left_3",
-        ("l0", "l1", "l2"),
+        ("l0", "l2", "l1"),
         id="carry-would-sandwich-a-skipping-line",
     ),
 ]

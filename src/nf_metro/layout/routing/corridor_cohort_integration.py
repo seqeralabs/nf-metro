@@ -26,6 +26,7 @@ from nf_metro.layout.constants import (
     graph_offset_step,
 )
 from nf_metro.layout.geometry import cotravelling_lane_clearance, spans_share_corridor
+from nf_metro.layout.lane_plan import interleaved_crossings
 from nf_metro.layout.route_plan import (
     BindingKind,
     EmissionBinding,
@@ -298,7 +299,8 @@ class CorridorCohortLedger:
         frozenset()
     )
     """``(member edge, perpendicular edge)`` pairs whose crossing the topology
-    forces (:func:`_forced_loop_crossings`)."""
+    forces (:func:`_forced_loop_crossings`) or the lane plan records
+    (:func:`~nf_metro.layout.lane_plan.interleaved_crossings`)."""
 
 
 def _reaches_along(
@@ -785,7 +787,7 @@ def build_corridor_cohort_ledger(
         | frozenset(ambiguous_path_rank_cohorts),
         offset_step=graph_offset_step(graph),
         curve_radius=curve_radius,
-        forced_crossings=_forced_loop_crossings(graph),
+        forced_crossings=_forced_loop_crossings(graph) | interleaved_crossings(graph),
     )
 
 

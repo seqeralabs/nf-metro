@@ -255,6 +255,11 @@ class ForcedCrossing:
     lines: tuple[str, ...]
     port: str | None = None
     """The entry two feeding bundles cross at; ``None`` for a merge's cycle."""
+    across: str | None = None
+    """The feeding exit whose bundle the first of :attr:`lines` passes
+    through to its lane between that bundle's lanes, the rest of
+    :attr:`lines`; ``None`` where one bundle into the entry exchanges the
+    lines itself, in its last bend."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -656,6 +661,9 @@ class _Tracks:
                 if key in self.lanes:
                     lanes[(junction, edge.line_id)] = self.lanes[key]
         across, seams = self._perpendicular_offsets(orders, turns)
+        for port_id in sorted(graph.ports):
+            if graph.ports[port_id].is_entry and not self.perpendicular(port_id):
+                self._record_interleaves(port_id)
         flat = {
             key: lane
             for key, lane in lanes.items()
@@ -742,9 +750,11 @@ class _Tracks:
                 lid: k if draw * sense > 0 else top - k for lid, k in lanes.items()
             }
         elif order is not None and order.lines is not None:
-            n = len(order.lines)
+            steps = self._fed_entry_steps(port_id, order.lines)
+            top = steps[-1]
             drawn = {
-                lid: i if draw > 0 else n - 1 - i for i, lid in enumerate(order.lines)
+                lid: k if draw > 0 else top - k
+                for k, lid in zip(steps, order.lines, strict=True)
             }
         else:
             drawn = {lid: self.lanes[(port_id, lid)] for lid in lines}
@@ -752,6 +762,38 @@ class _Tracks:
             least = min(drawn.values())
             drawn = {lid: k - least for lid, k in drawn.items()}
         return drawn
+
+    def _fed_entry_steps(self, port_id: str, lines: Sequence[str]) -> list[int]:
+        """Each of an exit's *lines*, in its order, as a step from the first:
+        the gaps the one flow-side entry they all cross into keeps between
+        them, else side by side."""
+        graph = self.graph
+        entries: set[str] = set()
+        for edge in graph.edges_from(port_id):
+            node = edge.target
+            while node in graph.junction_ids:
+                onward = [
+                    e for e in graph.edges_from(node) if e.line_id == edge.line_id
+                ]
+                if len(onward) != 1:
+                    break
+                node = onward[0].target
+            entries.add(node)
+        entry = entries.pop() if len(entries) == 1 else None
+        if (
+            entry is None
+            or entry not in graph.ports
+            or not graph.ports[entry].is_entry
+            or self.perpendicular(entry)
+            or any((entry, lid) not in self.lanes for lid in lines)
+        ):
+            return list(range(len(lines)))
+        held = [self.lanes[(entry, lid)] for lid in lines]
+        if held == sorted(held):
+            return [k - held[0] for k in held]
+        if held == sorted(held, reverse=True):
+            return [held[0] - k for k in held]
+        return list(range(len(lines)))
 
     def _turn_merge(
         self,
@@ -930,6 +972,33 @@ class _Tracks:
             self.seam_sources[(entry_id, lid)] = exit_id
         by_lane = sorted(lines, key=lambda lid: (lanes[lid], lid))
         return tuple(by_lane if self.senses[entry_id] > 0 else reversed(by_lane))
+
+    def _record_interleaves(self, entry_id: str) -> None:
+        """A line whose lane at *entry_id* lies between the lanes of a
+        feeding exit's bundle that does not carry it crosses that bundle."""
+        graph = self.graph
+        lines = graph.station_lines(entry_id)
+        if any((entry_id, lid) not in self.lanes for lid in lines):
+            return
+        feeding: dict[str, set[str]] = {}
+        for lid in lines:
+            for node, _via in self.builder.upstream_sources(entry_id, lid):
+                feeding.setdefault(node, set()).add(lid)
+        for node, carried in sorted(feeding.items()):
+            held = sorted(self.lanes[(entry_id, lid)] for lid in carried)
+            if node not in graph.ports or len(held) < 2:
+                continue
+            for lid in sorted(set(lines) - carried):
+                if held[0] < self.lanes[(entry_id, lid)] < held[-1]:
+                    self.forced.append(
+                        ForcedCrossing(
+                            graph.ports[entry_id].section_id,
+                            None,
+                            (lid, *sorted(carried)),
+                            entry_id,
+                            node,
+                        )
+                    )
 
     def _feeding_bundles(self, entry_id: str) -> list[list[str]]:
         """Each feeding exit's bundle of *entry_id*'s lines, two or more, in
@@ -2836,6 +2905,46 @@ def recorded_lane_plan(graph: MetroGraph) -> LanePlan | None:
     observed = _OBSERVED.get()
     held = observed.get(id(graph)) if observed is not None else None
     return held[1] if held is not None and held[0] is graph else None
+
+
+def entry_crossing_lines(graph: MetroGraph, port_id: str) -> frozenset[str]:
+    """The lines a recorded forced crossing exchanges at entry *port_id*:
+    their bundle keeps its own order up to the last corner and takes the
+    entry's lanes there."""
+    plan = recorded_lane_plan(graph)
+    if plan is None:
+        return frozenset()
+    return frozenset(
+        lid
+        for crossing in plan.tracks.forced
+        if crossing.port == port_id and crossing.across is None
+        for lid in crossing.lines
+    )
+
+
+def interleaved_crossings(
+    graph: MetroGraph,
+) -> frozenset[tuple[tuple[str, str, str], tuple[str, str, str]]]:
+    """Each ``(edge, edge)`` pair a recorded crossing between two feeding
+    bundles at an entry exchanges: the passing line's connector from any
+    other source against each crossed line's from the bundle's exit, both
+    ways round."""
+    plan = recorded_lane_plan(graph)
+    if plan is None:
+        return frozenset()
+    pairs: set[tuple[tuple[str, str, str], tuple[str, str, str]]] = set()
+    for crossing in plan.tracks.forced:
+        if crossing.port is None or crossing.across is None:
+            continue
+        passing, *crossed = crossing.lines
+        for edge in graph.edges_to(crossing.port):
+            if edge.line_id != passing or edge.source == crossing.across:
+                continue
+            for lid in crossed:
+                other = (crossing.across, crossing.port, lid)
+                key = (edge.source, edge.target, edge.line_id)
+                pairs.update(((key, other), (other, key)))
+    return frozenset(pairs)
 
 
 def _stored_offsets(graph: MetroGraph, plan: LanePlan) -> dict[tuple[str, str], float]:

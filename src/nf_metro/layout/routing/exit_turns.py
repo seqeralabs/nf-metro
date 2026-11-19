@@ -2147,7 +2147,11 @@ def _plan_turn_axes(
                 f"(rank, line) {sorted(rank_lines)}"
             )
         ranks = tuple(sorted(cohort_ranks))
-        cohort_rank = {rank: index for index, rank in enumerate(ranks)}
+        cohort_rank = {
+            rank: abs(ordered_lanes[rank][1] - ordered_lanes[ranks[0]][1])
+            / ctx.offset_step
+            for rank in ranks
+        }
         progression = lateral_order_sign(turn_direction)
         fixed_origins = tuple(
             seed.fixed_axis

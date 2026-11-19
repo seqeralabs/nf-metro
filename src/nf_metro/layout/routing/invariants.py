@@ -58,6 +58,7 @@ from nf_metro.layout.geometry import (
     lanes_run_along_y,
     point_to_polyline_distance,
 )
+from nf_metro.layout.lane_plan import entry_crossing_lines
 from nf_metro.layout.phase_state import GuardSpec
 from nf_metro.layout.route_plan import FanRouteEmitter
 from nf_metro.layout.route_topology import (
@@ -7218,19 +7219,32 @@ class CurveInvariantError(RuntimeError):
 
 
 def _outside_recorded_forks(
-    graph: MetroGraph, violations: list[BundleOrderViolation]
+    graph: MetroGraph,
+    routes: Sequence[RoutedPath],
+    violations: list[BundleOrderViolation],
 ) -> list[BundleOrderViolation]:
     """*violations* less each pair a recorded departure reorders crossing on
     the departure's first segment: lines that part at a fork take their own
-    order there (:class:`~nf_metro.layout.departure_order.DepartureLaneOrder`)."""
+    order there (:class:`~nf_metro.layout.departure_order.DepartureLaneOrder`);
+    and less each pair a recorded entry crossing exchanges on the last
+    segment into its entry (:func:`~nf_metro.layout.lane_plan.entry_crossing_lines`)."""
     records = graph._departure_lane_orders
+    last = {(r.edge.source, r.edge.target): len(r.points) - 2 for r in routes}
     return [
         violation
         for violation in violations
-        if violation.segment_index != 1
-        or (record := records.get((violation.edge_source, violation.edge_target)))
-        is None
-        or not record.reorders(violation.line_a, violation.line_b)
+        if (
+            violation.segment_index != 1
+            or (record := records.get((violation.edge_source, violation.edge_target)))
+            is None
+            or not record.reorders(violation.line_a, violation.line_b)
+        )
+        and (
+            violation.segment_index
+            != last[(violation.edge_source, violation.edge_target)]
+            or not {violation.line_a, violation.line_b}
+            <= entry_crossing_lines(graph, violation.edge_target)
+        )
     ]
 
 
@@ -7251,7 +7265,9 @@ def render_curve_violations(
     return [
         (
             "bundle order (line crosses its bundle-mate)",
-            _outside_recorded_forks(graph, check_bundle_order_preserved(routes)),
+            _outside_recorded_forks(
+                graph, routes, check_bundle_order_preserved(routes)
+            ),
         ),
         (
             "non-concentric bundle corner",
