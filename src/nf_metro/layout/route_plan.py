@@ -4042,11 +4042,20 @@ def _validate_planned_exit_turn_resources(
         unique_axes = tuple(dict.fromkeys(cohort_axes))
         unique_axes = tuple(sorted(unique_axes, key=lambda axis: axis.rank))
         progression = right_normal_axis_sign(turn_direction)
+        spacing = exit_turn_plan.spacing
+        planned = {
+            lane.rank: lane.planned_offset for lane in exit_turn_plan.source_lanes
+        }
         if any(
             abs(
                 right.coordinate
                 - left.coordinate
-                - progression * exit_turn_plan.spacing
+                - progression
+                * (
+                    spacing
+                    + abs(planned[right.rank] - planned[left.rank])
+                    - (right.rank - left.rank) * spacing
+                )
             )
             > 1e-6
             for left, right in zip(unique_axes, unique_axes[1:])

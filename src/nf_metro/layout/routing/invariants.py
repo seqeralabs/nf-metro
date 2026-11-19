@@ -7241,7 +7241,7 @@ def _outside_recorded_forks(
         )
         and (
             violation.segment_index
-            != last[(violation.edge_source, violation.edge_target)]
+            != last.get((violation.edge_source, violation.edge_target))
             or not {violation.line_a, violation.line_b}
             <= entry_crossing_lines(graph, violation.edge_target)
         )

@@ -96,7 +96,7 @@ def test_only_a_recorded_swap_on_the_first_segment_is_exempt() -> None:
     elsewhere = _flip("j", "other", "a", "b", 1)
     violations: list[BundleOrderViolation] = [exempt, later, elsewhere]
 
-    assert _outside_recorded_forks(graph, violations) == [later, elsewhere]
+    assert _outside_recorded_forks(graph, [], violations) == [later, elsewhere]
 
 
 def test_a_pass_that_ends_with_other_records_than_the_first_fails_closed() -> None:
