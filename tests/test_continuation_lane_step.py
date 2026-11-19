@@ -3,8 +3,8 @@
 Two lines cross into a section and run to a hub two stations in.  The hub ends
 them and starts two lines of its own that carry on to the next station.  The
 engine seats the ending bundle on the lanes it arrives on and seats the starting
-bundle on its own lanes beside them, so both the approach into the hub and the
-departure out of it draw as level runs with no mid-section step.
+bundle on those same lanes, so both the approach into the hub and the departure
+out of it draw as level runs with no mid-section step.
 """
 
 from __future__ import annotations
@@ -58,8 +58,9 @@ def test_hub_hand_over_draws_flat(run: tuple[str, str, str]) -> None:
     assert len(laterals) == 1, f"{run} is not level: {points}"
 
 
-def test_hub_seats_both_bundles_on_contiguous_lanes() -> None:
-    """The ending pair and the starting pair fill four adjacent lanes, no gap."""
+def test_hub_seats_the_starting_bundle_on_the_ending_bundles_lanes() -> None:
+    """The starting pair takes the ending pair's two lanes, so the hub's pill
+    spans one bundle's width rather than both side by side."""
     graph = parse_metro_mermaid(FIXTURE.read_text())
     compute_layout(graph)
     offsets = dict(compute_station_offsets(graph))
@@ -67,9 +68,4 @@ def test_hub_seats_both_bundles_on_contiguous_lanes() -> None:
         line_id: offsets[("results_hub", line_id)]
         for line_id in ("counts", "norm", "tables", "plots")
     }
-    ordered = sorted(hub.values())
-    step = ordered[1] - ordered[0]
-    assert step > 0
-    assert all(
-        right - left == pytest.approx(step) for left, right in zip(ordered, ordered[1:])
-    ), hub
+    assert hub == {"counts": 0.0, "norm": 4.0, "tables": 0.0, "plots": 4.0}

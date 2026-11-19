@@ -141,24 +141,28 @@ def test_perp_entry_fan_lands_on_distinct_peel_lanes() -> None:
 
     # Absolute landing x tracks section ``b``'s column, which #1988 seats a
     # fan-perp-entry curve runway into the feeding gap of. The guarded invariant
-    # is the peel order: h on the port centreline, g one OFFSET_STEP (4px)
+    # is the peel order: g on the port centreline, h one OFFSET_STEP (4px)
     # outboard of it.
     landings = {line_id: _landing_x(line_id) for line_id in ("g", "h")}
-    assert landings["g"] == 376.0
-    assert landings["h"] == 372.0
+    assert graph.stations[port_id].x == 372.0
+    assert landings["g"] == 372.0
+    assert landings["h"] == 368.0
 
 
-def test_constrained_feeder_keeps_its_own_order() -> None:
+def test_upstream_fed_feeder_carries_the_peel_order_from_its_chain_start() -> None:
+    """``a`` is fed by ``z``, so the peel order reaches ``a`` only by running
+    the whole chain from ``z`` in it: every station from ``z`` to the
+    divergence holds ``g`` and ``h`` on the same lanes, and nothing crosses."""
     graph = parse_metro_mermaid(_NON_FREE_FEEDER)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         compute_layout(graph)
         offsets = compute_station_offsets(graph)
-    feeder = {lid: offsets[("a1", lid)] for lid in ("g", "h")}
-    divergence = {lid: offsets[("b1", lid)] for lid in ("g", "h")}
-    assert feeder == {"g": 0.0, "h": 4.0}, (
-        "an upstream-fed feeder is not free and must keep its own bundle order"
-    )
-    assert divergence == {"g": 4.0, "h": 0.0}, (
-        "the divergence section still re-slots onto its own peel order"
-    )
+        routes = route_edges(graph, station_offsets=offsets)
+    for station_id in ("z1", "z2", "a1", "a2", "b1", "b2"):
+        assert {lid: offsets[(station_id, lid)] for lid in ("g", "h")} == {
+            "g": 4.0,
+            "h": 0.0,
+        }, station_id
+    crossings = check_route_segment_crossings(graph, (offsets, routes))
+    assert crossings == [], "\n".join(v.message() for v in crossings)

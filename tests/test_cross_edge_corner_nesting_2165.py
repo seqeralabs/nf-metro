@@ -109,9 +109,9 @@ def _radius_at(relative_path: str, line_id: str, corner: Point) -> float:
         pytest.param(
             "tests/fixtures/regressions/cross_column_perp_entry_overflow.mmd",
             {
-                ("somatic", (578.0, 1557.4)): 18.0,
-                ("tumor_only", (582.0, 1561.4)): 14.0,
-                ("germline", (586.0, 1565.4)): 10.0,
+                ("somatic", (570.0, 1557.4)): 18.0,
+                ("tumor_only", (574.0, 1561.4)): 14.0,
+                ("germline", (578.0, 1565.4)): 10.0,
             },
             id="cross_column_perp_entry_overflow",
         ),
