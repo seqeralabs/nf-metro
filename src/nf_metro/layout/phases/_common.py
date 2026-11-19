@@ -859,9 +859,10 @@ def _linear_entry_pill_lines(
     """The lines an entry-frame pill covers at *sid*, or ``None``.
 
     The cohort is the line set of the section's sole flow-side entry that
-    carries lines, when the section's flow-side exit carries all of it or none
-    of it; it defines the pill when it is a contiguous run of two or more lanes
-    and the station's one other line sits beside it.
+    carries lines, when one upstream node feeds all of it and the section's
+    flow-side exit carries all of it or none of it; it defines the pill when it
+    is a contiguous run of two or more lanes and the station's one other line
+    sits beside it.
     """
     if graph.compact_offsets or graph.line_spread is LineSpread.RAILS:
         return None
@@ -875,7 +876,7 @@ def _linear_entry_pill_lines(
         for pid in section.entry_ports
         if graph.ports[pid].side is entry_side and graph.station_lines(pid)
     ]
-    if len(entries) != 1:
+    if len(entries) != 1 or len({e.source for e in graph.edges_to(entries[0])}) != 1:
         return None
     inherited = tuple(sorted(graph.station_lines(entries[0])))
     inherited_set = set(inherited)

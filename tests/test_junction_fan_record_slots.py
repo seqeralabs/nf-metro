@@ -140,11 +140,18 @@ def test_an_entry_frame_pill_covers_the_sole_flow_entrys_lines(station: str) -> 
     )
 
 
-@pytest.mark.parametrize("station", ["q1x0", "q1x2"])
-def test_a_cohort_partly_leaving_by_the_flow_exit_keeps_the_full_pill(
-    station: str,
+@pytest.mark.parametrize(
+    ("path", "station"),
+    [
+        (REPROS / "bt_bottom_entry_rise_from_junction.mmd", "q1x0"),
+        (REPROS / "bt_bottom_entry_rise_from_junction.mmd", "q1x2"),
+        (TOPOLOGIES / "junction_entry_lane_rebase.mmd", "ribocode"),
+    ],
+    ids=["partly_leaving_q1x0", "partly_leaving_q1x2", "two_feeders"],
+)
+def test_a_cohort_not_carried_as_one_bundle_keeps_the_full_pill(
+    path: Path, station: str
 ) -> None:
-    path = REPROS / "bt_bottom_entry_rise_from_junction.mmd"
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
