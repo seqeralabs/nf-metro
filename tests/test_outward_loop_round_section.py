@@ -45,7 +45,7 @@ def _render(path: Path):
     plan = render_graph_result(
         graph, resolve_theme(None, graph, "light"), RenderConfig()
     ).plan
-    return graph, list(zip(plan.routes, plan.route_polylines, strict=True))
+    return plan.graph, list(zip(plan.routes, plan.route_polylines, strict=True))
 
 
 def _far_side_loops(graph, drawn):
@@ -112,3 +112,42 @@ def test_loops_into_one_port_nest_one_lane_apart_from_one_base(path: Path) -> No
                 b - a == pytest.approx(OFFSET_STEP) for a, b in pairwise(reach)
             ), (port_id, reach)
     assert nested, "fixture has no port two loops share"
+
+
+OWN_SECTION_FIXTURES = [
+    REGRESSIONS / "perp_entry_column_two_feeders.mmd",
+    REGRESSIONS / "exit_side_wrap_top_entry.mmd",
+    REGRESSIONS / "exit_side_wrap_bottom_entry.mmd",
+]
+
+
+@pytest.mark.parametrize("path", OWN_SECTION_FIXTURES, ids=lambda p: p.stem)
+def test_a_feeder_wrapping_to_a_perpendicular_port_clears_its_own_section(
+    path: Path,
+) -> None:
+    graph, drawn = _render(path)
+    wraps = 0
+    for route, line in drawn:
+        port = graph.ports.get(route.edge.target)
+        if port is None or port.side not in (PortSide.TOP, PortSide.BOTTOM):
+            continue
+        own = {
+            graph.stations[route.edge.source].section_id,
+            graph.stations[route.edge.target].section_id,
+        }
+        if None in own or len(own) < 2:
+            continue
+        wraps += 1
+        for sid in own:
+            sec = graph.sections[sid]
+            interior = (
+                sec.bbox_x + 2,
+                sec.bbox_y + 2,
+                sec.bbox_x + sec.bbox_w - 2,
+                sec.bbox_y + sec.bbox_h - 2,
+            )
+            assert not any(
+                segment_intersects_bbox(a[0], a[1], b[0], b[1], interior)
+                for a, b in pairwise(line)
+            ), f"{route.edge.source}->{route.edge.target} {route.line_id} crosses {sid}"
+    assert wraps, "fixture has no feeder into a perpendicular port"

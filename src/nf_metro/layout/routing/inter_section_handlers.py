@@ -5302,7 +5302,9 @@ def _top_entry_below_wrap_riser_x(
 
     def is_clear(rx: float) -> bool:
         return not (
-            _h_segment_crosses_other_section(graph, src.x, rx, src.y, exclude)
+            _h_segment_crosses_other_section(
+                graph, src.x, rx, src.y, exclude - {src.section_id}
+            )
             or _v_segment_crosses_other_section(graph, rx, src.y, above_y, exclude)
             or _h_segment_crosses_other_section(graph, rx, final_x, above_y, exclude)
         )
@@ -6074,7 +6076,9 @@ def _bottom_entry_above_wrap_riser_x(
 
     def is_clear(rx: float) -> bool:
         return not (
-            _h_segment_crosses_other_section(graph, src.x, rx, src.y, exclude)
+            _h_segment_crosses_other_section(
+                graph, src.x, rx, src.y, exclude - {src.section_id}
+            )
             or _v_segment_crosses_other_section(graph, rx, src.y, below_y, exclude)
             or _h_segment_crosses_other_section(graph, rx, final_x, below_y, exclude)
         )
