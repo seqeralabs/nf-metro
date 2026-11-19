@@ -8,10 +8,10 @@ clear of the row's header badges.  A merge trunk into a TOP or BOTTOM entry
 takes the staircase the port's other feeders take instead of reaching the port's
 edge from beyond the section.
 
-Which side of the row a branch passes is the lane plan's: on the side the exit
-faces, unless a line on a lane outside the branch's turn at the exit leaves for a
-node short of the branch's entry, which that side would cross.  Every branch is
-drawn on the side the record states.
+Which side of the row a branch passes is the lane plan's: the branch holding the
+outermost lanes of its turn at the exit passes on the side the exit faces, a
+branch inside other lanes on the other side.  Every branch is drawn on the side
+the record states.
 """
 
 from __future__ import annotations
@@ -250,7 +250,7 @@ def test_a_fork_branch_passes_the_row_on_the_side_no_outer_lane_crosses(
     fixture: Path, entry: str, exit_port: str, side: str
 ) -> None:
     """The outermost branch of a turn passes on the side its TOP exit faces;
-    a branch inside lanes that leave for a nearer entry passes the other side."""
+    a branch inside other lanes passes the other side."""
     graph, _drawn = _render(fixture)
     approach = _RECORDS[fixture].port_orders.approaches[(entry, exit_port)]  # type: ignore[attr-defined]
     below = approach.side * lateral_order_sign(port_travel(graph.ports[entry])) > 0
