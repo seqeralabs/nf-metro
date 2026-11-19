@@ -6,7 +6,8 @@
 * A line whose entry lane lies between the lanes of another feeding bundle
   crosses that bundle; the cohort compile accepts that crossing.
 * A perpendicular exit whose lines all cross into one flow-side entry takes
-  that entry's lanes, gaps kept, and its turn columns keep them.
+  that entry's lanes, gaps kept, and its turn columns keep them; columns
+  close up over an exit line that turns elsewhere.
 * A riser centred in a column gap declares it; a branch into a TOP or BOTTOM
   entry never runs inside the target box.
 """
@@ -69,6 +70,22 @@ def _route(routes: list[RoutedPath], source: str, target: str, line: str):
 
 @pytest.mark.parametrize("path", [CARRY_SANDWICH, FORK_PORT_STOP], ids=lambda p: p.stem)
 def test_maps_with_a_planned_crossing_render(path: Path) -> None:
+    render_string(path.read_text(), source_dir=str(path.parent))
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        Path(__file__).parents[1]
+        / "examples/topologies/exit_run_three_drop_columns.mmd",
+        REGRESSIONS / "departure_order_shared_run_no_record.mmd",
+    ],
+    ids=lambda p: p.stem,
+)
+def test_turn_columns_close_up_over_a_line_turning_elsewhere(path: Path) -> None:
+    """Two lines turning off one exit run either side of a line that turns
+    elsewhere take adjacent columns: only a planned lane no line takes at the
+    exit keeps a column."""
     render_string(path.read_text(), source_dir=str(path.parent))
 
 

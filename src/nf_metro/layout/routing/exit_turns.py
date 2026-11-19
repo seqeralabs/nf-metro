@@ -2147,10 +2147,14 @@ def _plan_turn_axes(
                 f"(rank, line) {sorted(rank_lines)}"
             )
         ranks = tuple(sorted(cohort_ranks))
+        # A planned lane no line takes at the exit (one the record holds for
+        # another feeder's line) keeps its column; an exit line turning off in
+        # another cohort does not.
         cohort_rank = {
-            rank: abs(ordered_lanes[rank][1] - ordered_lanes[ranks[0]][1])
-            / ctx.offset_step
-            for rank in ranks
+            rank: index
+            + abs(ordered_lanes[rank][1] - ordered_lanes[ranks[0]][1]) / ctx.offset_step
+            - (rank - ranks[0])
+            for index, rank in enumerate(ranks)
         }
         progression = lateral_order_sign(turn_direction)
         fixed_origins = tuple(
