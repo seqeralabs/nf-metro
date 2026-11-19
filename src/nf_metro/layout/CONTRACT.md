@@ -322,8 +322,9 @@ runtime check either:
 - `graph._fold_compressed_sections` - recorded at parse time for sections a
   lowered fold threshold relocated; read by the fold-exit-side guard and the
   render fold-abort chokepoint. A resolve-time flow reversal is recorded as a
-  `FLOW_REORIENTED_DIRECTION` decision in `graph.layout_provenance`; routing's
-  exit-port offset reads that typed reason instead of a second section set.
+  `FLOW_REORIENTED_DIRECTION` decision in `graph.layout_provenance`; the
+  explicit-grid direction guard accepts a non-LR direction only with that
+  typed reason, instead of a second section set.
 - `graph._departure_order_plan` - one layout's 7b' port decisions (a
   record, or none), reset when `compute_layout` starts; when they are decided
   and replayed is under "Departure record lifetime" below.
