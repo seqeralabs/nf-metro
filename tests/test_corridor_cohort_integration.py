@@ -73,6 +73,36 @@ ROOT = Path(__file__).parents[1]
 _BUILD_GALLERY_SCRIPT = ROOT / "scripts" / "build_gallery.py"
 
 
+def _compile(ledger, targets, **kwargs):  # type: ignore[no-untyped-def]
+    """Compile routes the test holds itself: no corner sizing, each route its
+    own live route, no lane regions read."""
+    return cci.compile_corridor_cohort_plan(
+        ledger,
+        targets,
+        **{
+            "corner_sizer": lambda _patched: (),
+            "live_route": lambda route: route,
+            "lane_region": lambda *_args: None,
+            **kwargs,
+        },
+    )
+
+
+def _problem(*args, **kwargs):  # type: ignore[no-untyped-def]
+    """An allocation problem with no scalar requests, forbidden intervals,
+    lane regions or forced crossings."""
+    return cci._problem(
+        *args,
+        **{
+            "scalar_requests": (),
+            "intervals_by_member": {},
+            "lane_region": lambda *_args: None,
+            "forced_crossings": frozenset(),
+            **kwargs,
+        },
+    )
+
+
 def _load_build_gallery():
     spec = importlib.util.spec_from_file_location(
         "build_gallery", _BUILD_GALLERY_SCRIPT
@@ -775,7 +805,6 @@ def _identity_claim(
         path_rank=0,
         endpoint_cohort_id=endpoint_cohort_id,
         endpoint_network_rank=endpoint_network_rank,
-        destination_boundary_carrier=endpoint_cohort_id is not None,
         destination_boundary_axis_sign=None,
         network_id=network_id,
         reservation_complete=True,
@@ -1300,7 +1329,7 @@ def test_fixed_endpoint_landing_is_planned_clear_of_an_unclaimed_fixed_lead() ->
 
     fixed_points_before = tuple(fixed_route.points)
 
-    plan = cci.compile_corridor_cohort_plan(ledger, targets, entry_port_for={})
+    plan = _compile(ledger, targets, entry_port_for={})
     cci.publish_corridor_cohort_plan(plan)
 
     (landing,) = plan.landings
@@ -1349,7 +1378,7 @@ def test_problem_rejects_an_infeasible_fixed_fixed_footprint_order() -> None:
     footprint_model = _MemberFootprintModel((), (), {}, (order,), (), ())
 
     with pytest.raises(CorridorCohortCompilationError, match="infeasible"):
-        cci._problem(
+        _problem(
             (),
             {},
             True,
@@ -1536,7 +1565,7 @@ def test_member_and_scalar_relation_occupy_one_problem(
 
     monkeypatch.setattr(cci, "solve_corridor_cohorts", spy_solve)
 
-    plan = cci.compile_corridor_cohort_plan(
+    plan = _compile(
         ledger,
         targets,
         scalar_requests=scalar_requests,
@@ -1607,7 +1636,7 @@ def test_compiler_counts_every_solve_call(monkeypatch: pytest.MonkeyPatch) -> No
 
     monkeypatch.setattr(cci, "solve_corridor_cohorts", counting_solve)
 
-    plan = cci.compile_corridor_cohort_plan(
+    plan = _compile(
         ledger,
         targets,
         scalar_requests=scalar_requests,
@@ -1693,7 +1722,7 @@ def test_component_on_segments_another_plan_owns_is_planned_without_a_solve() ->
     for _claim, target in claims:
         target.route.route_system_owned_segment_ranks = (0,)
 
-    plan = cci.compile_corridor_cohort_plan(
+    plan = _compile(
         _ledger_of(*claims),
         tuple(target for _claim, target in claims),
         entry_port_for={},
@@ -1736,7 +1765,7 @@ def test_component_with_an_incomplete_reservation_fails_closed(
         claims.append(peer_claim)
 
     with pytest.raises(cci.CorridorCohortCompilationError, match=match):
-        cci.compile_corridor_cohort_plan(
+        _compile(
             _ledger_of(*claims),
             tuple(target for _claim, target in claims),
             entry_port_for={},
@@ -1802,7 +1831,7 @@ def test_inconsistent_endpoint_cohort_fails_closed(
     )
 
     with pytest.raises(cci.CorridorCohortCompilationError, match=match):
-        cci.compile_corridor_cohort_plan(ledger, tuple(targets), entry_port_for={})
+        _compile(ledger, tuple(targets), entry_port_for={})
 
 
 def test_two_claims_on_one_member_segment_fail_closed() -> None:
@@ -1816,7 +1845,7 @@ def test_two_claims_on_one_member_segment_fail_closed() -> None:
     twin_target = replace(other[1], member_id="a")
 
     with pytest.raises(cci.CorridorCohortCompilationError, match="two claims"):
-        cci.compile_corridor_cohort_plan(
+        _compile(
             _ledger_of(first, (twin_claim, twin_target)),
             (first[1], twin_target),
             entry_port_for={},
@@ -1843,7 +1872,7 @@ def test_overlaid_endpoint_cohort_fails_the_compile() -> None:
         CorridorCohortCompilationError,
         match="corridor endpoint cohort cohort:x lays its lines over each other",
     ):
-        cci.compile_corridor_cohort_plan(
+        _compile(
             ledger,
             (first[1], second[1], incomplete[1]),
             entry_port_for={},
@@ -1858,9 +1887,7 @@ def test_endpoint_cohort_split_across_components_is_typed_compatibility() -> Non
     second = _cohort_member("b", "cohort:x", region=RowGapRegion(1, 2))
     ledger = _cohort_ledger((first, second), expected=frozenset({"a", "b"}))
 
-    plan = cci.compile_corridor_cohort_plan(
-        ledger, (first[1], second[1]), entry_port_for={}
-    )
+    plan = _compile(ledger, (first[1], second[1]), entry_port_for={})
 
     assert len(plan.components) == 2
     for component in plan.components:
@@ -1883,9 +1910,7 @@ def test_endpoint_cohort_without_claims_adds_no_component() -> None:
         offset_step=10.0,
     )
 
-    plan = cci.compile_corridor_cohort_plan(
-        ledger, (carrier_target,), entry_port_for={}
-    )
+    plan = _compile(ledger, (carrier_target,), entry_port_for={})
 
     (component,) = plan.components
     assert component.status is cci.CorridorAllocationStatus.PLANNED
@@ -1905,7 +1930,7 @@ def test_member_geometry_corridor_handoff_returns_heterogeneous_grants(
         cci, "_member_footprint_model", lambda *args, **kwargs: footprint_model
     )
 
-    plan = cci.compile_corridor_cohort_plan(
+    plan = _compile(
         ledger,
         targets,
         scalar_requests=scalar_requests,
@@ -1977,7 +2002,7 @@ def test_unwitnessed_blocking_obstacle_raises_instead_of_losing_its_shortfall(
     monkeypatch.setattr(cci, "solve_corridor_cohorts", fake_solve)
 
     with pytest.raises(CorridorCohortCompilationError, match="unwitnessed obstacles"):
-        cci.compile_corridor_cohort_plan(ledger, (target,), entry_port_for={})
+        _compile(ledger, (target,), entry_port_for={})
 
 
 def test_shortfall_without_a_directed_shift_sign_raises(
@@ -2035,7 +2060,7 @@ def test_shortfall_without_a_directed_shift_sign_raises(
     monkeypatch.setattr(cci, "solve_corridor_cohorts", fake_solve)
 
     with pytest.raises(CorridorCohortCompilationError, match="directed boundary side"):
-        cci.compile_corridor_cohort_plan(ledger, (target,), entry_port_for={})
+        _compile(ledger, (target,), entry_port_for={})
 
 
 def _top_entry_drops(routes, port_id: str) -> dict[str, tuple[float, int]]:
@@ -2313,7 +2338,7 @@ def test_endpoint_lanes_rank_past_an_interleaved_fixed_member(
     roles.update({item.claim_id: True for item in fixed})
     footprint_model = _MemberFootprintModel((), (), {}, (), (), ())
 
-    problem = cci._problem(
+    problem = _problem(
         claims, roles, True, step, 8.0, footprint_model, {}, corner_neighbours={}
     )
 
@@ -2408,7 +2433,7 @@ def _cohort_beside_a_fixed_lane(
     roles = {item.claim_id: False for item in movable}
     roles.update({item.claim_id: True for item in fixed})
     footprint_model = _MemberFootprintModel((), (), {}, (), (), ())
-    problem = cci._problem(
+    problem = _problem(
         claims,
         roles,
         True,
@@ -2817,7 +2842,6 @@ def _descend_then_run(
             path_rank=path_rank,
             endpoint_cohort_id=cohort_id if segment_rank == 2 else None,
             endpoint_network_rank=slot_rank if segment_rank == 2 else None,
-            destination_boundary_carrier=False,
             destination_boundary_axis_sign=(
                 1 if cohort_id is not None and segment_rank == 2 else None
             ),
@@ -2863,7 +2887,7 @@ def _compile_turning_routes(
         ambiguous_endpoint_cohort_ids=frozenset(),
         offset_step=4.0,
     )
-    return cci.compile_corridor_cohort_plan(
+    return _compile(
         ledger,
         tuple(target for _claims, target in members),
         entry_port_for={},

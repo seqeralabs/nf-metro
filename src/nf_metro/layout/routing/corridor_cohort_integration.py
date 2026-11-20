@@ -264,7 +264,6 @@ class CorridorCohortLedgerClaim:
     path_rank: int
     endpoint_cohort_id: str | None
     endpoint_network_rank: int | None
-    destination_boundary_carrier: bool
     destination_boundary_axis_sign: int | None
     network_id: str | None
     reservation_complete: bool
@@ -742,7 +741,6 @@ def build_corridor_cohort_ledger(
                     endpoint_network_rank=(
                         endpoint_ranks.get(member_id) if destination_claim else None
                     ),
-                    destination_boundary_carrier=claim_id in carrier_claim_ids,
                     destination_boundary_axis_sign=(
                         _destination_claim_axis_sign(
                             graph.ports[current_member.target.station_id].side,
@@ -1003,22 +1001,6 @@ the patch does not move included.  Returns nothing when no corner moves, and
 when the sizer declines a move it may not size (one that would re-size a route
 the plan does not own); every patch then keeps its route's own corner state.
 """
-
-
-def _no_corner_sizing(
-    _patched: Sequence[tuple[RoutedPath, Sequence[tuple[float, float]]]],
-) -> tuple[CorridorCornerSizing, ...]:
-    return ()
-
-
-def _same_route(route: RoutedPath) -> RoutedPath:
-    return route
-
-
-def _no_lane_region(
-    _route: RoutedPath, _segment_rank: int, _axis: int
-) -> tuple[float | None, float | None] | None:
-    return None
 
 
 @dataclass(slots=True)
@@ -3434,15 +3416,11 @@ def _problem(
     footprint_model: _MemberFootprintModel,
     witnesses_by_id: Mapping[str, CorridorFootprintWitness],
     *,
-    scalar_requests: tuple[CorridorScalarRequest, ...] = (),
-    intervals_by_member: Mapping[str, Sequence[CorridorForbiddenInterval]] = (
-        MappingProxyType({})
-    ),
+    scalar_requests: tuple[CorridorScalarRequest, ...],
+    intervals_by_member: Mapping[str, Sequence[CorridorForbiddenInterval]],
     corner_neighbours: Mapping[tuple[str, int], _CornerNeighbour],
-    lane_region: CorridorLaneRegionReader = _no_lane_region,
-    forced_crossings: frozenset[
-        tuple[tuple[str, str, str], tuple[str, str, str]]
-    ] = frozenset(),
+    lane_region: CorridorLaneRegionReader,
+    forced_crossings: frozenset[tuple[tuple[str, str, str], tuple[str, str, str]]],
 ) -> CorridorAllocationProblem:
     scalar_by_id = {
         request.variable.variable_id: request for request in scalar_requests
@@ -4354,10 +4332,10 @@ def compile_corridor_cohort_plan(
     targets: Sequence[CorridorCohortTarget],
     *,
     scalar_requests: Sequence[CorridorScalarRequest] = (),
-    corner_sizer: CorridorCornerSizer = _no_corner_sizing,
-    live_route: Callable[[RoutedPath], RoutedPath] = _same_route,
+    corner_sizer: CorridorCornerSizer,
+    live_route: Callable[[RoutedPath], RoutedPath],
     entry_port_for: Mapping[str, str],
-    lane_region: CorridorLaneRegionReader = _no_lane_region,
+    lane_region: CorridorLaneRegionReader,
 ) -> CorridorCohortPlan:
     """Solve every cohort from one route snapshot without publishing geometry.
 
