@@ -26,15 +26,19 @@ converging on the marker and re-fanning.  It tracks the feeder's own section
 lane (``_tb_x_offset``) for a vertical-flow feeder -- a ``-x`` downward (TB)
 drop and its ``+x`` upward (BT) image alike -- and the ``-x`` up-and-over riser
 side for any other feeder.  Where distinct lines share the entry on disjoint
-feeders (``needs_perp_approach_fan``), ``_perp_approach_fan_x`` instead fans them
-by bundle index, since those feeders share one column trunk.
+feeders (``needs_perp_approach_fan``), each crosses where the lane plan puts it
+(``_planned_entry_crossing``), since those feeders share one column trunk.
 """
 
 from __future__ import annotations
 
 from nf_metro.layout.constants import COORD_TOLERANCE
 from nf_metro.layout.geometry import lanes_run_along_x, lanes_run_along_y
-from nf_metro.layout.routing.common import needs_perp_approach_fan, resolve_section
+from nf_metro.layout.routing.common import (
+    ENTRY_SIDE_DIRECTION,
+    needs_perp_approach_fan,
+    resolve_section,
+)
 from nf_metro.layout.routing.context import (
     _get_offset,
     _max_offset_at,
@@ -42,9 +46,31 @@ from nf_metro.layout.routing.context import (
     _tb_x_offset,
 )
 from nf_metro.layout.routing.corners import reversed_offset
+from nf_metro.layout.routing.orientation import lateral_order_sign
 from nf_metro.parser.model import (
+    MetroGraph,
+    Port,
     PortSide,
 )
+
+
+def _lane_stacked_perp_entry(graph: MetroGraph, port_id: str) -> bool:
+    """Whether *port_id* is a TOP or BOTTOM entry of a section whose lanes
+    run along y."""
+    port = graph.ports[port_id]
+    if port.side not in (PortSide.TOP, PortSide.BOTTOM):
+        return False
+    return lanes_run_along_y(graph.section_for_port(port).direction)
+
+
+def _planned_entry_crossing(
+    ctx: _RoutingCtx, entry_port_id: str, line_id: str, port_x: float
+) -> float:
+    """Where the lane plan crosses *line_id* through a TOP or BOTTOM entry:
+    its offset read along the right-hand normal of the entry's travel."""
+    side = ctx.graph.ports[entry_port_id].side
+    sign = lateral_order_sign(ENTRY_SIDE_DIRECTION[side])
+    return port_x + sign * _get_offset(ctx, entry_port_id, line_id)
 
 
 def _bundled_feeders(
@@ -65,28 +91,6 @@ def _bundled_feeders(
     ]
 
 
-def _perp_approach_fan_x(
-    ctx: _RoutingCtx, entry_port_id: str, line_id: str, port_x: float
-) -> float:
-    """Per-line X channel a line takes into a distinct-line perp entry port.
-
-    Where distinct lines share a perpendicular entry (:func:`needs_perp_approach_fan`)
-    the single-line feeders all sit on one column trunk, so each must fan onto its
-    own approach channel rather than share the trunk X.  The bundle index orders
-    the feeders by approach: index 0 is the outermost feeder (the one descending
-    from furthest away, which wraps around the intervening boxes), so it takes the
-    channel furthest toward the turn side (``-x``) and the trunk-near feeder
-    (highest index) stays on ``port_x``.  This keeps the outermost approach on the
-    outside of the bend, matching the intra-section bundle order, so the feeders
-    do not cross.  The inter-section feeder drop and the intra-section drop both
-    anchor on this one X.  Lines without a bundled feeder stay on the trunk.
-    """
-    index, count, _source = next(
-        iter(_bundled_feeders(ctx, entry_port_id, line_id)), (0, 1, "")
-    )
-    return port_x - (count - 1 - index) * ctx.offset_step
-
-
 def _perp_entry_crossing_x(
     ctx: _RoutingCtx, entry_port_id: str, line_id: str, port_x: float
 ) -> float | None:
@@ -96,12 +100,10 @@ def _perp_entry_crossing_x(
     this one X so the line passes straight through the boundary rather than
     converging on the port marker and re-fanning.
 
-    A port with a dealt column (:class:`perp_columns.PerpEntryColumn`) is
-    crossed on that column's channel by every feeder.  Otherwise a distinct-line
-    perp entry (:func:`needs_perp_approach_fan`) fans its single-line feeders
-    onto parallel approach channels by bundle index --
-    :func:`_perp_approach_fan_x` -- since their feeder lanes all collapse onto
-    one column trunk.
+    A TOP or BOTTOM entry of a section whose lanes run along y, and a
+    distinct-line perp entry (:func:`needs_perp_approach_fan`), whose feeder
+    lanes all collapse onto one column trunk, are crossed where the lane plan
+    puts each line (:func:`_planned_entry_crossing`).
 
     Failing both, a vertical-flow (TB/BT) feeder dropping a *single* bundle crosses
     on its own section lane -- the exact X
@@ -118,11 +120,10 @@ def _perp_entry_crossing_x(
     index on that side.  Returns ``None`` when no bundled inter-section feeder
     reaches the port for this line (nothing to align to).
     """
-    column = ctx.perp_entry_columns.get(entry_port_id)
-    if column is not None and column.offsets is not None:
-        return port_x + column.offset(line_id)
-    if needs_perp_approach_fan(ctx.graph, entry_port_id):
-        return _perp_approach_fan_x(ctx, entry_port_id, line_id, port_x)
+    if _lane_stacked_perp_entry(ctx.graph, entry_port_id) or needs_perp_approach_fan(
+        ctx.graph, entry_port_id
+    ):
+        return _planned_entry_crossing(ctx, entry_port_id, line_id, port_x)
     feeders = _bundled_feeders(ctx, entry_port_id, line_id)
     if not feeders:
         return None
@@ -202,8 +203,37 @@ def _perp_riser_lateral(
     """
     entry_port_id = _aligned_horizontal_drop_entry(ctx, station_id)
     if entry_port_id is not None:
-        return _get_offset(ctx, entry_port_id, line_id)
+        return _planned_entry_crossing(ctx, entry_port_id, line_id, 0.0)
     if side == PortSide.TOP:
         return _get_offset(ctx, station_id, line_id)
     off = _get_offset(ctx, station_id, line_id)
     return reversed_offset(off, _max_offset_at(ctx, station_id))
+
+
+def perp_corridor_feeder(graph: MetroGraph, port_id: str) -> Port | None:
+    """The perpendicular exit port feeding entry *port_id* over the corridor.
+
+    A TOP/BOTTOM exit port on a same-row section rises into the inter-row
+    corridor band and runs across to feed a perpendicular entry (the
+    up-and-over shape); the exit and entry ports then share the corridor Y.
+    The drop out of that entry must continue the corridor's per-line descent
+    order, so it needs the feeding exit port's side.
+
+    A perpendicular exit that drops across rows into the entry below (the
+    LR -> TB top-drop) is *not* collinear with the entry and keeps its own
+    drop convention, so it is excluded by the shared-Y test.
+
+    This mirrors the exemption in ``_guard_perp_entry_feed_not_collinear``:
+    that guard permits exactly the collinear perp-exit feed this routes.
+    """
+    entry_y = graph.stations[port_id].y
+    for feed in graph.edges_to(port_id):
+        port = graph.ports.get(feed.source)
+        if (
+            port is not None
+            and not port.is_entry
+            and port.side in (PortSide.TOP, PortSide.BOTTOM)
+            and abs(graph.station_for_edge_source(feed).y - entry_y) <= COORD_TOLERANCE
+        ):
+            return port
+    return None

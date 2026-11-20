@@ -43,48 +43,14 @@ SIDE_BRANCH_FIXTURE = (
 )
 SIDE_BRANCH_PARTIAL = "down"
 
-# An explicit-grid single-row chain where the partial descent survives but its
-# section lands in an empty row grid, so the grid snap does not collapse the
-# descent onto the carrier slot.  A blind re-add would double-apply it.
-EXPLICIT_GRID_MMD = """\
-%%metro title: Adjacent Direct Partial Descent
-%%metro style: dark
-%%metro compact_offsets: true
-%%metro line: main | Main | #4CAF50
-%%metro line: side | Side | #ff9800
-%%metro grid: up | 0,0
-%%metro grid: partial | 1,0
-%%metro grid: carrier | 2,0
-%%metro grid: down | 3,0
-
-graph LR
-    subgraph up [Upstream]
-        %%metro exit: right | main, side
-        u_node[Source]
-    end
-
-    subgraph partial [Partial]
-        %%metro entry: left | side
-        %%metro exit: right | side
-        p_node[Side Step]
-    end
-
-    subgraph carrier [Carrier]
-        %%metro entry: left | main, side
-        %%metro exit: right | main, side
-        c_node[Carrier]
-    end
-
-    subgraph down [Report]
-        %%metro entry: left | main, side
-        d_node[Report]
-    end
-
-    u_node -->|side| p_node
-    u_node -->|main| c_node
-    p_node -->|side| c_node
-    c_node -->|main,side| d_node
-"""
+# The lane plan carries a handed-over line on one lane across the shared
+# boundary, so the flat hand-over of FIXTURE needs no descent.  This explicit-grid
+# chain still hands secD's line to secE a lane deeper under a symmetric diamond
+# style, so the descent fires there.
+DESCENT_FIXTURE = REPO / "examples" / "topologies" / "disjoint_sameline_trunks.mmd"
+DESCENT_DIRECTIVE = "%%metro diamond_style: symmetric\n"
+DESCENT_CARRIER = "secE"
+DESCENT_PARTIAL = "secD"
 
 
 def _layout():
@@ -93,11 +59,17 @@ def _layout():
     return graph
 
 
+def _descent_witness():
+    graph = parse_metro_mermaid(DESCENT_DIRECTIVE + DESCENT_FIXTURE.read_text())
+    engine.compute_layout(graph, validate=True)
+    return graph
+
+
 def test_partial_trunk_descends_below_carrier():
     """The partial's trunk seats one lane below the carrier trunk, not on it."""
-    graph = _layout()
-    carrier_trunk = _section_trunk_y(graph, graph.sections[CARRIER])
-    partial_trunk = _section_trunk_y(graph, graph.sections[PARTIAL])
+    graph = _descent_witness()
+    carrier_trunk = _section_trunk_y(graph, graph.sections[DESCENT_CARRIER])
+    partial_trunk = _section_trunk_y(graph, graph.sections[DESCENT_PARTIAL])
     assert carrier_trunk is not None and partial_trunk is not None
     descent = partial_trunk - carrier_trunk
     assert descent > 1.0, (
@@ -156,13 +128,12 @@ def test_phantom_step_descent_is_suppressed():
 def test_restore_is_idempotent_on_explicit_grid():
     """The grid-snap restore seats an explicit-grid descent once, not twice.
 
-    On a section that lands in an empty row grid the snap leaves the descent in
-    place, so the carrier-relative restore must find zero gap and add nothing --
-    a second restore must not move the section again.
+    The carrier-relative restore must find zero gap on a descent already in
+    place and add nothing -- a second restore must not move the section again.
     """
-    graph = parse_metro_mermaid(EXPLICIT_GRID_MMD)
+    graph = parse_metro_mermaid(DESCENT_DIRECTIVE + DESCENT_FIXTURE.read_text())
     engine.compute_layout(graph, validate=False)
-    record = graph._partial_trunk_descents.get("partial")
+    record = graph._partial_trunk_descents.get(DESCENT_PARTIAL)
     assert record is not None, "explicit-grid partial should record a descent"
     partial_st = graph.stations[record.partial_port]
     carrier_st = graph.stations[record.carrier_port]

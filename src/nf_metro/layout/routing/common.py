@@ -889,6 +889,9 @@ class RoutedPath:
     Set by wrap / around-section / TOP-entry handlers whose vertical
     channels follow a special concentric loop (all corners share one
     radius) that the standard L-shape re-stacking would break."""
+    seats_in_gap: bool = False
+    """The gap allocation seats this exempt route's declared channel with the
+    gap's other channels."""
     gap_slots: list[GapSlot] = field(default_factory=list)
     """Symbolic gap-relative slots for this route's vertical channel runs.
 
@@ -1234,6 +1237,9 @@ class PortPeeloffBundle(NamedTuple):
     trunk_sign: int
     vertical_sign: int
     port_lead_sign: int
+    crossed: frozenset[str] = frozenset()
+    """Lines a recorded forced crossing exchanges at the port
+    (:func:`~nf_metro.layout.lane_plan.entry_crossing_lines`)."""
 
 
 class OpposingEntryConfluence(NamedTuple):
@@ -2055,6 +2061,8 @@ def iter_port_peeloff_bundles(
             )
         ].append((rp, tail))
 
+    from nf_metro.layout.lane_plan import entry_crossing_lines
+
     for shape, entries in by_shape.items():
         port_id, trunk_sign, vertical_sign, port_lead_sign = shape
         # One representative tail per distinct line (a line feeding several
@@ -2079,15 +2087,20 @@ def iter_port_peeloff_bundles(
             trunk_sign,
             vertical_sign,
             port_lead_sign,
+            entry_crossing_lines(graph, port_id) & per_line.keys(),
         )
 
 
 def peeloff_trunk_line_order(bundle: PortPeeloffBundle) -> list[str]:
-    """Top-to-bottom trunk order implied by the destination port's line slots."""
-    port_order = sorted(bundle.per_line, key=lambda lid: bundle.per_line[lid].port_y)
-    if bundle.trunk_sign == bundle.port_lead_sign:
-        return port_order
-    return list(reversed(port_order))
+    """Top-to-bottom trunk order implied by the destination port's line slots;
+    lines a recorded crossing exchanges at the port keep their trunk order
+    among the slots they hold."""
+    per_line = bundle.per_line
+    port_order = sorted(per_line, key=lambda lid: per_line[lid].port_y)
+    if bundle.trunk_sign != bundle.port_lead_sign:
+        port_order.reverse()
+    kept = iter(sorted(bundle.crossed, key=lambda lid: per_line[lid].trunk_y))
+    return [next(kept) if lid in bundle.crossed else lid for lid in port_order]
 
 
 NO_LANDING_ORDERS: Mapping[str, Sequence[str]] = MappingProxyType({})
@@ -2150,7 +2163,9 @@ def peeloff_target_slots(
     slots = {
         lid: PeeloffSlot(
             x_slots[i if x_follows_trunk else n - 1 - i],
-            y_slots[i if y_follows_trunk else n - 1 - i],
+            per_line[lid].port_y
+            if bundle.crossed
+            else y_slots[i if y_follows_trunk else n - 1 - i],
             i if x_follows_trunk else n - 1 - i,
         )
         for i, lid in enumerate(ranked)

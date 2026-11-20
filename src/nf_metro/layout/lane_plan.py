@@ -1,12 +1,13 @@
 """The lane plan record: every planned lane decision, sealed once per layout.
 
 A :class:`LanePlan` is decided at the first offsets run of a layout whose
-placement has positioned the junctions (stage 5.1), from structure and that
-placement alone, and kept on the graph for the rest of the layout.  A new
-layout (each :func:`~nf_metro.layout.engine._layout_once`: the spread loop's
-attempts, the row-pitch and strike-clearance relays, the off-track and
-geometric-bypass relayouts) starts without one and seals its own; a record is
-never carried from one layout's placement to another's.
+placement has positioned the junctions (stage 5.1), outside validation, from
+structure and that placement alone, and kept on the graph for the rest of the
+layout.  A run before that writes the record its placement plans, keeping
+none.  A new layout (each :func:`~nf_metro.layout.engine._layout_once`: the
+spread loop's attempts, the row-pitch and strike-clearance relays, the
+off-track and geometric-bypass relayouts) starts without one and seals its
+own; a record is never carried from one layout's placement to another's.
 
 The record holds:
 
@@ -25,7 +26,14 @@ The record holds:
 - the :class:`TrackPlan`: every in-section ``(node, line)``'s lane, from which
   every exit's order is read, every perpendicular port's offsets and every
   run's turn-offs;
-- the :class:`SeamJoint`: the lanes either side of every straight seam.
+- the :class:`SeamJoint`: the lanes either side of every straight seam;
+- the *gap legs*: per inter-column gap, the connectors landing in it and the
+  way they run.  A connector into a LEFT or RIGHT entry that reaches it from
+  off its level lands from a leg in the gap on the entry's side: one passing
+  round its own band (a bypass or U-turn approach) runs to the entry from
+  the side it passes on, one from a section in the gap's other column from
+  its source's level.  Legs running opposite ways over a shared row are one
+  allocation of the gap.
 
 **The track plan.**  Sections are decided upstream first: a section's lanes
 need its entries' orders, and an exit's order is its lines' lanes at the port
@@ -73,7 +81,12 @@ feeding several consumers lays them in the merge of each consumer's lines as
 they lie after turning into it.  A port's drawing reads offsets toward its
 travel's right, except across a TOP or BOTTOM edge of a section whose lanes
 run along y: an entry's travel's right-hand normal, a BOTTOM exit's
-reflected.
+reflected.  An entry a line drops into straight from a perpendicular exit
+upstream along its travel, past no section box, shifts its offsets to put the
+line on its drop's lane, where every such line agrees on the shift and it is
+less than the port's line count.  A line an entry hands a farther consumer,
+lying on the turn's side of lines turning the same way into a nearer one,
+crosses them there: a forced crossing at that turn.
 
 **Turn-offs.**  At every port, and every junction continuing one port's
 run, lines meet a leg turning off (or joining) the run by their side of
@@ -111,20 +124,23 @@ off it), or for a line nothing feeds there, of the nearest consumer its last
 node leaves to.  A line a perpendicular entry of the section turns into the
 run upstream of its first node keeps a near-zero key on its port's side.
 Lines arriving from one side at one lateral nest by where they leave their
-sources: the farther upstream, the farther from that side.  A line that parts
+sources (read through bypass-V helpers): the farther upstream, the farther
+from that side.  A line that parts
 from the run to the side opposite the one it arrived from, where another of
 its lines carries on, ranks by the side it leaves to, outside the lines
 arriving there.  Ties fall to the source's lane, then the section slot.  A
 later part keeps every bundle entering it from an earlier part in that part's
-lane order.  A run moves its born lines and applies its section's peel and
-parting orders as the section order does.  An exit carries, on lines it
-shares with an upstream exit it descends from, that exit's order where both
-reach one entry.
+lane order; another bundle entering it that carries two of those lines the
+other way crosses them there.  A run moves its born lines and applies its
+section's peel and parting orders as the section order does.  An exit
+carries, on lines it shares with an upstream exit it descends from, that
+exit's order where both reach one entry.
 
 **Lanes.**  A fan plan's carriers keep their slot; a line riding a level edge
-into a part from an earlier part of its run keeps that lane, and a line
-riding a seam-pinned entry of the run its entry lane, unless a carrier's slot
-differs (pins).  The other lines take lanes in run order: one past the highest
+into a part from an earlier part of its run keeps that lane, a run whose lines
+are one node's whole bundle keeps that node's lanes, and a line riding a
+seam-pinned entry of the run its entry lane, unless a carrier's slot differs
+(pins).  The other lines take lanes in run order: one past the highest
 lane of an earlier line they coexist with; with none, the lane of an earlier
 line they hand over to at a shared station (on a side, the lowest or highest
 such lane, else the latest-ordered), else the run's floor (the lowest section
@@ -134,12 +150,16 @@ ordered before it; a hand-over lane below that floor is not taken.  A free
 line in a pinned run stays below the next pinned line it coexists with, a
 lane left for each free line between.  Where bundles enter a pinned part, a
 pin ordered after a bundle-mate pinned no lower is dropped, unless a carrier's
-slot fixes it, and each free line
-takes its section slot among the part's lines, lifted past its bundle-mates
-laned before it and the free line before it, clamped below its pinned
-bundle-mates after it.  A free line never takes a lane a line it coexists with
-holds, nor one beside a line that runs from the run's entry port past one of
-its stations where the other stops (a *breeze*): it steps up past both.
+slot fixes it, and each free line takes its section slot among the part's
+lines, lifted past its bundle-mates laned before it and the free line before
+it, clamped below its pinned bundle-mates after it.  A free line never takes a
+lane a line it coexists with holds, nor one beside a line that runs from the
+run's entry port past one of its stations where the other stops (a *breeze*):
+it steps up past both.  The run's stations then hold no lane none of its lines
+rides: the lanes between their outermost close up in order about its lowest
+pinned lane (else its lowest), lanes beyond them keeping their distance, where
+that moves no pinned lane: a line a straight seam pins never steps lanes along
+the straight run.
 
 **Lines in a seam-pinned run.**  Outside a part entered by bundles, a line
 riding no entry of a run holding a seam-pinned entry lies beside the fixed
@@ -161,12 +181,16 @@ overlap; touching at one coordinate is a hand-over when one terminates
 there arriving from upstream and the other is born there leaving
 downstream.
 
-Nothing in layout, routing or rendering reads the record.
+**Readers.**  Offsets runs write the record's lanes (:func:`planned_offsets`);
+routing reads the approaches, far sides and fork lanes (:func:`recorded_lane_plan`).
+Validation observes (:func:`observing`).
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from functools import partial
 from heapq import heapify, heappop, heappush
@@ -241,6 +265,28 @@ class ForcedCrossing:
     lines: tuple[str, ...]
     port: str | None = None
     """The entry two feeding bundles cross at; ``None`` for a merge's cycle."""
+    across: str | None = None
+    """The feeding exit whose bundle the first of :attr:`lines` passes
+    through to its lane between that bundle's lanes, the rest of
+    :attr:`lines`; ``None`` where one bundle into the entry exchanges the
+    lines itself, in its last bend."""
+    turn: str | None = None
+    """The consumer the first of :attr:`lines` turns into from a perpendicular
+    :attr:`port`, past the rest where they turn into nearer ones."""
+
+
+@dataclass(frozen=True, slots=True)
+class GapLeg:
+    """A connector's leg into a LEFT or RIGHT entry from off its level, in the
+    inter-column gap on the entry's side (see the module docstring)."""
+
+    entry_id: str
+    source_id: str
+    lines: tuple[str, ...]
+    rows: tuple[int, int]
+    """The grid rows the leg's ends lie in, lowest first."""
+    down: bool
+    """Whether the leg runs down the screen to the entry."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -309,11 +355,16 @@ class TrackPlan(_Sealed):
     cycle_sections: tuple[str, ...]
     """Sections reached again while their own lanes were being decided; an
     exit of such a section asked for round the cycle is undecided."""
+    rail_origins: Mapping[str, int] = field(default_factory=dict)
+    """Per port of a rail-laid section, its lowest plus its highest lane (or
+    offset, for a perpendicular port): twice the middle of its bundle, which
+    lies on the port, the middle of the fan out to the rails."""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "lanes", _frozen(self.lanes))
         object.__setattr__(self, "perpendicular", _frozen_nested(self.perpendicular))
         object.__setattr__(self, "turn_offs", _frozen(self.turn_offs))
+        object.__setattr__(self, "rail_origins", _frozen(self.rail_origins))
 
 
 @dataclass(frozen=True)
@@ -356,8 +407,11 @@ class LanePlan(_Sealed):
     connector leaves the exit's band on."""
     tracks: TrackPlan
     seams: SeamJoint
+    gap_legs: Mapping[int, tuple[GapLeg, ...]] = field(default_factory=dict)
+    """Keyed by the gap's lower column: the legs landing in it."""
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "gap_legs", _frozen(self.gap_legs))
         object.__setattr__(self, "order_travels", _frozen(self.order_travels))
         object.__setattr__(self, "lane_senses", _frozen(self.lane_senses))
         object.__setattr__(
@@ -637,6 +691,10 @@ class _Tracks:
                 if key in self.lanes:
                     lanes[(junction, edge.line_id)] = self.lanes[key]
         across, seams = self._perpendicular_offsets(orders, turns)
+        for port_id in sorted(graph.ports):
+            if graph.ports[port_id].is_entry and not self.perpendicular(port_id):
+                self._record_interleaves(port_id)
+                self._record_corridor_joins(port_id)
         flat = {
             key: lane
             for key, lane in lanes.items()
@@ -648,6 +706,7 @@ class _Tracks:
             self._turn_offs(lanes, across),
             tuple(self.forced),
             tuple(sorted(self.cycles)),
+            _rail_origins(graph, flat, across),
         )
         return plan, seams
 
@@ -664,7 +723,7 @@ class _Tracks:
         wanted = self.perpendicular_seams()
         across: dict[str, dict[str, int]] = {}
         seams: dict[str, dict[str, int]] = {}
-        for port_id in sorted(graph.ports):
+        for port_id in sorted(graph.ports, key=lambda p: (graph.ports[p].is_entry, p)):
             lines = graph.station_lines(port_id)
             if not self.perpendicular(port_id) or any(
                 (port_id, lid) not in self.lanes for lid in lines
@@ -681,8 +740,85 @@ class _Tracks:
             if want is not None and len({want[lid] - own[lid] for lid in lines}) == 1:
                 own = dict(want)
                 seams[port_id] = dict(want)
+            elif port.is_entry:
+                shift = {
+                    k - own[lid]
+                    for lid in lines
+                    for k in self._drops(port_id, lid, across)
+                }
+                if len(shift) == 1 and abs(step := shift.pop()) < len(lines):
+                    own = {lid: k + step for lid, k in own.items()}
+            if port.is_entry:
+                self._turn_crossings(port_id, consumers, own)
             across[port_id] = own
-        return across, seams
+        return dict(sorted(across.items())), seams
+
+    def _turn_crossings(
+        self, port_id: str, consumers: Sequence[ConsumerTurn], own: Mapping[str, int]
+    ) -> None:
+        """Record each line a perpendicular entry hands a farther consumer
+        that lies, at the port, on the turn's side of lines turning the same
+        way into a nearer one: it crosses them where they turn."""
+        graph = self.graph
+        port = graph.stations[port_id]
+        travel = port_travel(graph.ports[port_id])
+        (vx, vy), sign = direction_vector(travel), lateral_order_sign(travel)
+
+        def along(turn: ConsumerTurn) -> float:
+            at = graph.stations[turn.consumer_id]
+            return (at.x - port.x) * vx + (at.y - port.y) * vy
+
+        for far in consumers:
+            if far.turn is None:
+                continue
+            tx, ty = direction_vector(far.turn)
+            side = sign * (tx if vx == 0 else ty)
+            for lid in far.lines:
+                crossed = sorted(
+                    other
+                    for near in consumers
+                    if near.turn is far.turn
+                    and along(near) < along(far) - SAME_COORD_TOLERANCE
+                    for other in near.lines
+                    if side * (own[lid] - own[other]) > 0
+                )
+                if crossed:
+                    self.forced.append(
+                        ForcedCrossing(
+                            graph.ports[port_id].section_id,
+                            None,
+                            (lid, *crossed),
+                            port_id,
+                            turn=far.consumer_id,
+                        )
+                    )
+
+    def _drops(
+        self, port_id: str, lid: str, across: Mapping[str, Mapping[str, int]]
+    ) -> set[int]:
+        """*lid*'s offsets at perpendicular entry *port_id* on the lane it drops
+        in on straight from a perpendicular exit upstream along the entry's
+        travel, past no section box."""
+        graph = self.graph
+        travel = port_travel(graph.ports[port_id])
+        (vx, vy), sign = direction_vector(travel), lateral_order_sign(travel)
+        axis = "x" if vx == 0 else "y"
+        here = graph.stations[port_id]
+        out: set[int] = set()
+        for node, _via in self.builder.upstream_sources(port_id, lid):
+            there = graph.stations[node]
+            if (
+                node not in across
+                or port_travel(graph.ports[node]) is not travel
+                or (here.x - there.x) * vx + (here.y - there.y) * vy <= 0
+            ):
+                continue
+            base = there.x if axis == "x" else there.y
+            at = base + sign * across[node][lid] * self.step
+            k = _on_grid(sign * (at - (here.x if axis == "x" else here.y)) / self.step)
+            if k is not None and not _boxes_across(graph, port_id, node, at, axis):
+                out.add(k)
+        return out
 
     def _carry(
         self, port_id: str, draw: int, order: PortOrder | None
@@ -722,9 +858,11 @@ class _Tracks:
                 lid: k if draw * sense > 0 else top - k for lid, k in lanes.items()
             }
         elif order is not None and order.lines is not None:
-            n = len(order.lines)
+            steps = self._fed_entry_steps(port_id, order.lines)
+            top = steps[-1]
             drawn = {
-                lid: i if draw > 0 else n - 1 - i for i, lid in enumerate(order.lines)
+                lid: k if draw > 0 else top - k
+                for k, lid in zip(steps, order.lines, strict=True)
             }
         else:
             drawn = {lid: self.lanes[(port_id, lid)] for lid in lines}
@@ -732,6 +870,38 @@ class _Tracks:
             least = min(drawn.values())
             drawn = {lid: k - least for lid, k in drawn.items()}
         return drawn
+
+    def _fed_entry_steps(self, port_id: str, lines: Sequence[str]) -> list[int]:
+        """Each of an exit's *lines*, in its order, as a step from the first:
+        the gaps the one flow-side entry they all cross into keeps between
+        them, else side by side."""
+        graph = self.graph
+        entries: set[str] = set()
+        for edge in graph.edges_from(port_id):
+            node = edge.target
+            while node in graph.junction_ids:
+                onward = [
+                    e for e in graph.edges_from(node) if e.line_id == edge.line_id
+                ]
+                if len(onward) != 1:
+                    break
+                node = onward[0].target
+            entries.add(node)
+        entry = entries.pop() if len(entries) == 1 else None
+        if (
+            entry is None
+            or entry not in graph.ports
+            or not graph.ports[entry].is_entry
+            or self.perpendicular(entry)
+            or any((entry, lid) not in self.lanes for lid in lines)
+        ):
+            return list(range(len(lines)))
+        held = [self.lanes[(entry, lid)] for lid in lines]
+        if held == sorted(held):
+            return [k - held[0] for k in held]
+        if held == sorted(held, reverse=True):
+            return [held[0] - k for k in held]
+        return list(range(len(lines)))
 
     def _turn_merge(
         self,
@@ -911,16 +1081,68 @@ class _Tracks:
         by_lane = sorted(lines, key=lambda lid: (lanes[lid], lid))
         return tuple(by_lane if self.senses[entry_id] > 0 else reversed(by_lane))
 
+    def _feeders(self, entry_id: str) -> dict[str, list[str]]:
+        """Each node feeding *entry_id*, with the lines it feeds there."""
+        feeding: dict[str, list[str]] = {}
+        for lid in self.graph.station_lines(entry_id):
+            for node, _via in self.builder.upstream_sources(entry_id, lid):
+                feeding.setdefault(node, []).append(lid)
+        return feeding
+
+    def _record_interleaves(self, entry_id: str) -> None:
+        """A line whose lane at *entry_id* lies between the lanes of a
+        feeding exit's bundle that does not carry it crosses that bundle."""
+        graph = self.graph
+        lines = graph.station_lines(entry_id)
+        if any((entry_id, lid) not in self.lanes for lid in lines):
+            return
+        for node, carried in sorted(self._feeders(entry_id).items()):
+            held = sorted(self.lanes[(entry_id, lid)] for lid in carried)
+            if node not in graph.ports or len(held) < 2:
+                continue
+            for lid in sorted(set(lines).difference(carried)):
+                if held[0] < self.lanes[(entry_id, lid)] < held[-1]:
+                    self.forced.append(
+                        ForcedCrossing(
+                            graph.ports[entry_id].section_id,
+                            None,
+                            (lid, *sorted(carried)),
+                            entry_id,
+                            node,
+                        )
+                    )
+
+    def _record_corridor_joins(self, entry_id: str) -> None:
+        """Sources off *entry_id*'s level, ahead along its travel axis, join one
+        corridor toward it from their side: a later joiner's line lying past an
+        earlier one's from that side, across the entry's travel, crosses it (a
+        bundle keeps its travel order round its turns)."""
+        graph, port, lanes = self.graph, self.graph.stations[entry_id], self.lanes
+        tx, ty = direction_vector(port_travel(graph.ports[entry_id]))
+        ux, uy = abs(tx), abs(ty)
+        joins = []
+        for e in graph.edges_to(entry_id):
+            src = graph.stations[approach_source(graph, e.source, e.line_id)]
+            dx, dy = port.x - src.x, port.y - src.y
+            t, d = _sign(dx * ux + dy * uy), _sign(dx * uy + dy * ux)
+            if t == -(tx + ty) and d and (entry_id, e.line_id) in lanes:
+                joins.append(((t, d), t * (src.x * ux + src.y * uy), src.id, e.line_id))
+        sec, side = graph.ports[entry_id].section_id, self.senses[entry_id] * (ux or -1)
+        for (td, ahead, _b, lid), (td2, behind, a, m) in (
+            (j, k) for j in joins for k in joins
+        ):
+            past = (
+                (lanes[(entry_id, lid)] - lanes[(entry_id, m)]) * side * td[0] * td[1]
+            )
+            if td == td2 and behind < ahead and past > 0:
+                self.forced.append(ForcedCrossing(sec, None, (lid, m), entry_id, a))
+
     def _feeding_bundles(self, entry_id: str) -> list[list[str]]:
         """Each feeding exit's bundle of *entry_id*'s lines, two or more, in
         its order read up the entry's lane index."""
         graph, builder = self.graph, self.builder
-        feeding: dict[str, list[str]] = {}
-        for lid in graph.station_lines(entry_id):
-            for node, _via in builder.upstream_sources(entry_id, lid):
-                feeding.setdefault(node, []).append(lid)
         bundles = []
-        for node, carried in sorted(feeding.items()):
+        for node, carried in sorted(self._feeders(entry_id).items()):
             held = builder.order_of(node) if node in graph.ports else None
             if len(carried) < 2 or held is None or held.lines is None:
                 continue
@@ -943,10 +1165,7 @@ class _Tracks:
                 pins[lid] = min(found)
         if not pins:
             return pins
-        feeding: dict[str, list[str]] = {}
-        for lid in graph.station_lines(entry_id):
-            for node, _via in builder.upstream_sources(entry_id, lid):
-                feeding.setdefault(node, []).append(lid)
+        feeding = self._feeders(entry_id)
         for lid in sorted(pins):
             bundles = [
                 (node, carried)
@@ -1644,8 +1863,9 @@ class _Tracks:
         for chain in born_chains:
             order = _apply_chain(order, chain)
         chains = self._bundles_into(run) if key in sec.later_parts else []
+        mates = self._bundle_mates(run, chains) if chains else []
         if chains:
-            order = self._keep_bundles(run, order, chains)
+            order = self._keep_bundles(run, order, mates)
         for exit_id in [n for n in members if n in carried]:
             for chain in carried[exit_id]:
                 seq = [
@@ -1675,13 +1895,41 @@ class _Tracks:
         )
         if pins and chains:
             lanes = self._fill_bundled(
-                run, order, section_order, fixed, pins, chains, conflict
+                run, order, section_order, fixed, pins, mates, conflict
             )
         else:
             lanes = self._fill(
                 run, order, slots, fixed, bool(pins), arrival, conflict, riding, joins
             )
+        stops = (
+            [
+                lanes[lid]
+                for n in members
+                if n not in graph.ports
+                for lid in graph.station_lines(n)
+            ]
+            or [*lanes.values()]
+            or [0]
+        )
+        lo, hi = min(stops), max(stops)
+        held = sorted({v for v in lanes.values() if lo <= v <= hi})
+
+        def close(v: int) -> int:
+            return (
+                held.index(v)
+                if lo <= v <= hi
+                else v - lo
+                if v < lo
+                else v - hi + len(held) - 1
+            )
+
+        anchor = min((lanes[lid] for lid in fixed), default=lo)
+        packed = {lid: anchor - close(anchor) + close(v) for lid, v in lanes.items()}
+        if all(packed[lid] == lanes[lid] for lid in fixed):
+            lanes = packed
         for n in members:
+            if n in self.seam_lanes:
+                self.seam_lanes[n] = {lid: lanes[lid] for lid in self.seam_lanes[n]}
             for lid in graph.station_lines(n):
                 self.lanes[(n, lid)] = lanes[lid]
 
@@ -1705,18 +1953,42 @@ class _Tracks:
             out.append((e.line_id, lo, hi, e.source, e.target))
         return out
 
+    def _bundle_mates(
+        self, run: _Run, chains: Sequence[Sequence[str]]
+    ) -> list[tuple[str, str]]:
+        """Every ``(a, b)`` a bundle entering *run* carries *a* before *b*,
+        except a pair a bundle from an earlier part of the run's level run
+        carries the other way: the other bundle crosses them there."""
+        earlier = self._bundles_into(run, earlier_only=True)
+        held: dict[str, set[str]] = {lid: set() for lid in run.present}
+        for kept in earlier:
+            for a, b in zip(kept, kept[1:]):
+                held[a].add(b)
+        mates: list[tuple[str, str]] = []
+        for chain in chains:
+            for i, a in enumerate(chain):
+                for b in chain[i + 1 :]:
+                    if chain in earlier or not _reaches(held, b, a):
+                        mates.append((a, b))
+                        continue
+                    crossing = ForcedCrossing(
+                        run.sec.id, run.key, tuple(sorted((a, b)))
+                    )
+                    if crossing not in self.forced:
+                        self.forced.append(crossing)
+        return mates
+
     def _keep_bundles(
-        self, run: _Run, order: Sequence[str], chains: Sequence[Sequence[str]]
+        self, run: _Run, order: Sequence[str], mates: Sequence[tuple[str, str]]
     ) -> list[str]:
-        """*order* with every chain's lines in the chain's order."""
+        """*order* with every bundle-mate pair in its bundle's order."""
         position = {lid: i for i, lid in enumerate(order)}
         succ: dict[str, set[str]] = {lid: set() for lid in run.present}
         indeg = dict.fromkeys(run.present, 0)
-        for chain in chains:
-            for a, b in zip(chain, chain[1:]):
-                if b not in succ[a]:
-                    succ[a].add(b)
-                    indeg[b] += 1
+        for a, b in mates:
+            if b not in succ[a]:
+                succ[a].add(b)
+                indeg[b] += 1
         return self._kahn(
             run.present,
             succ,
@@ -1728,7 +2000,11 @@ class _Tracks:
 
     def _arrival(self, run: _Run, lid: str) -> _Arrival:
         """*lid*'s arrival key, neighbour lane, nest key and joining station on
-        *run*."""
+        *run*.  A line fed from several sources arrives from the one running
+        level into the run's port along its travel, whose lane cannot step on
+        that straight; else from the one bringing the most of the run's other
+        lines with it, the nearest among those: a lone feeder that turns in
+        joins its line's lane in the bundle rather than ordering the bundle."""
         graph, sec, sid = self.graph, run.sec, run.sec.id
         carriers = sorted(
             (n for n in run.members if lid in graph.station_lines(n)),
@@ -1759,9 +2035,31 @@ class _Tracks:
         if not near:
             return _Arrival(0.0, None, None, None)
         rank = min(p for p, _ in near)
+        port = graph.ports.get(carriers[0] if rank == 0 else carriers[-1])
+
+        def level(s: str) -> bool:
+            if port is None:
+                return False
+            vx, vy = direction_vector(port_travel(port))
+            at, here = graph.stations[s], graph.stations[port.id]
+            return abs((at.y - here.y) * vx - (at.x - here.x) * vy) <= SAME_Y_TOLERANCE
+
+        def shared(s: str) -> int:
+            ends = sec.outs if rank == 0 else sec.ins
+            return sum(
+                1
+                for m in run.present
+                if m != lid and any(n in run.member_set for n in ends.get((s, m), ()))
+            )
+
         source = min(
             (s for p, s in near if p == rank),
-            key=lambda s: (round(abs(self.lateral(s, sid) - run.lateral), 1), s),
+            key=lambda s: (
+                not level(s),
+                -shared(s),
+                round(abs(self.lateral(s, sid) - run.lateral), 1),
+                s,
+            ),
         )
         sign = self.frames(sid).secondary_sign
         side = round(sign * (self.lateral(source, sid) - run.lateral), 1)
@@ -1778,8 +2076,9 @@ class _Tracks:
         ):
             return _Arrival(side * _TURNED_IN, neighbour, None, None)
         nest = None
-        if abs(side) > _SIDED and rank == 0 and not is_bypass_v(source):
-            nest = round((1 if side > 0 else -1) * self.along(source, sid), 1)
+        if abs(side) > _SIDED and rank == 0:
+            origin = _edge_source(sec, source, lid)
+            nest = round((1 if side > 0 else -1) * self.along(origin, sid), 1)
         last = carriers[-1]
         leaving = sec.outs.get((last, lid), [])
         gone = [
@@ -1817,8 +2116,17 @@ class _Tracks:
         return _Arrival(side, neighbour, nest, carriers[0] if rank == 0 else None)
 
     def _part_pins(self, run: _Run, fixed: Mapping[str, int]) -> dict[str, int]:
-        """Lanes the run's lines keep from an earlier part of their level run."""
+        """Lanes the run's lines keep from an earlier part of their level run,
+        or from a node whose whole bundle continues into the run as all of it,
+        unless it turns there into a perpendicular port."""
         sec, sid = run.sec, run.sec.id
+        into: dict[str, set[str]] = {}
+        for (target, lid), sources in sec.ins.items():
+            onto = target in run.member_set and not (
+                target in self.graph.ports and self.perpendicular(target)
+            )
+            for node in sources if onto else ():
+                into.setdefault(_edge_source(sec, node, lid), set()).add(lid)
         pins: dict[str, int] = {}
         for (target, lid), sources in sorted(sec.ins.items()):
             if target not in run.member_set:
@@ -1826,12 +2134,20 @@ class _Tracks:
             for node in sources:
                 source = _edge_source(sec, node, lid)
                 lane = self.lanes.get((source, lid))
+                whole = (
+                    into.get(source)
+                    == set(self.graph.station_lines(source))
+                    == {*run.present}
+                )
                 if (
                     lane is None
                     or source in run.member_set
-                    or sec.level_run_of[source] != run.level_run
-                    or abs(self.lateral(source, sid) - self.lateral(target, sid))
-                    > SAME_Y_TOLERANCE
+                    or not whole
+                    and (
+                        sec.level_run_of[source] != run.level_run
+                        or abs(self.lateral(source, sid) - self.lateral(target, sid))
+                        > SAME_Y_TOLERANCE
+                    )
                     or fixed.get(lid, lane) != lane
                     or pins.get(lid, lane) != lane
                 ):
@@ -1839,12 +2155,18 @@ class _Tracks:
                 pins[lid] = lane
         return pins
 
-    def _bundles_into(self, run: _Run) -> list[list[str]]:
-        """Each in-section bundle entering *run*, in its source's lane order."""
+    def _bundles_into(self, run: _Run, earlier_only: bool = False) -> list[list[str]]:
+        """Each in-section bundle entering *run* (only those from an earlier
+        part of its level run where *earlier_only*), in its source's lane
+        order."""
         into: dict[str, list[str]] = {}
         for (source, lid), targets in run.sec.outs.items():
             if (
                 source not in run.member_set
+                and (
+                    not earlier_only
+                    or run.sec.level_run_of.get(source) == run.level_run
+                )
                 and lid in run.present
                 and (source, lid) in self.lanes
                 and any(t in run.member_set for t in targets)
@@ -1864,15 +2186,13 @@ class _Tracks:
         section_order: Sequence[str],
         fixed: dict[str, int],
         pins: Mapping[str, int],
-        chains: Sequence[Sequence[str]],
+        mates: Sequence[tuple[str, str]],
         conflict: _Conflict,
     ) -> dict[str, int]:
         present = run.present
         before: dict[str, set[str]] = {lid: set() for lid in present}
-        for chain in chains:
-            for i, a in enumerate(chain):
-                for b in chain[i + 1 :]:
-                    before[b].add(a)
+        for a, b in mates:
+            before[b].add(a)
         slotted = {lid for n, lid in self.fan_slots if n in run.member_set}
         for lid in sorted(pins):
             if (
@@ -2392,6 +2712,19 @@ class _Tracks:
         return found
 
 
+def _reaches(succ: Mapping[str, set[str]], start: str, goal: str) -> bool:
+    """Whether *goal* follows *start* through *succ*."""
+    seen, stack = {start}, [start]
+    while stack:
+        for nxt in succ[stack.pop()]:
+            if nxt == goal:
+                return True
+            if nxt not in seen:
+                seen.add(nxt)
+                stack.append(nxt)
+    return False
+
+
 def _past(mine: set[int], theirs: Sequence[set[int]]) -> int:
     """The side *mine* lies of every one of *theirs*, when all its sides lie
     at or past all of each one's and differ; ``0`` otherwise."""
@@ -2606,6 +2939,31 @@ def _travel_order(
     return out
 
 
+def _rail_origins(
+    graph: MetroGraph,
+    lanes: Mapping[tuple[str, str], int],
+    across: Mapping[str, Mapping[str, int]],
+) -> dict[str, int]:
+    if not graph.has_rail_sections:
+        return {}
+    out = {}
+    for port_id, port in sorted(graph.ports.items()):
+        if not graph.is_rail_section(port.section_id):
+            continue
+        values = (
+            list(across[port_id].values())
+            if port_id in across
+            else [
+                lanes[(port_id, lid)]
+                for lid in graph.station_lines(port_id)
+                if (port_id, lid) in lanes
+            ]
+        )
+        if values and min(values) + max(values):
+            out[port_id] = min(values) + max(values)
+    return out
+
+
 def build_lane_plan(graph: MetroGraph) -> LanePlan:
     """Decide *graph*'s lane plan from its structure and placement."""
     frames = _Frames(graph)
@@ -2632,7 +2990,62 @@ def build_lane_plan(graph: MetroGraph) -> LanePlan:
             dict(sorted(planner.seam_sources.items())),
             perpendicular_seams,
         ),
+        gap_legs=_gap_legs(graph, port_orders),
     )
+
+
+def _gap_legs(
+    graph: MetroGraph, port_orders: PortOrderPlan
+) -> dict[int, tuple[GapLeg, ...]]:
+    legs: dict[int, list[GapLeg]] = {}
+    for entry_id, port in sorted(graph.ports.items()):
+        if not port.is_entry or port.side not in (PortSide.LEFT, PortSide.RIGHT):
+            continue
+        sec = graph.section_for_port(port)
+        left = port.side is PortSide.LEFT
+        gap = sec.grid_col - 1 if left else sec.grid_col + sec.grid_col_span - 1
+        by_source: dict[str, list[str]] = {}
+        for edge in graph.edges_to(entry_id):
+            source = approach_source(graph, edge.source, edge.line_id)
+            by_source.setdefault(source, []).append(edge.line_id)
+        for source_id, lines in by_source.items():
+            approach = port_orders.approaches.get((entry_id, source_id))
+            src_port = _run_port(graph, source_id, leaving=True)
+            src = graph.section_for_port(graph.ports[src_port]) if src_port else sec
+            dy = graph.stations[entry_id].y - graph.stations[source_id].y
+            if approach is not None and approach.kind is not ApproachKind.LEVEL:
+                down = approach.side * direction_vector(port_travel(port))[0] < 0
+            elif (
+                approach is None
+                and abs(dy) > SAME_Y_TOLERANCE
+                and (src.grid_col + src.grid_col_span if left else src.grid_col)
+                == gap + 1
+            ):
+                down = dy > 0
+            else:
+                continue
+            rows = sorted((src.grid_row, sec.grid_row))
+            legs.setdefault(gap, []).append(
+                GapLeg(entry_id, source_id, tuple(lines), (rows[0], rows[1]), down)
+            )
+    return {gap: tuple(found) for gap, found in sorted(legs.items())}
+
+
+def gap_counter_runners(
+    graph: MetroGraph, entry_id: str, line_id: str
+) -> tuple[int, list[GapLeg]] | None:
+    """The gap *line_id*'s recorded leg into *entry_id* lands in, with the
+    legs running the other way through it over a shared row."""
+    plan = recorded_lane_plan(graph)
+    for gap, legs in (plan.gap_legs if plan is not None else {}).items():
+        for mine in (g for g in legs if g.entry_id == entry_id and line_id in g.lines):
+            lo, hi = mine.rows
+            return gap, [
+                g
+                for g in legs
+                if g.down is not mine.down and g.rows[0] <= hi and lo <= g.rows[1]
+            ]
+    return None
 
 
 def _draw_sign(graph: MetroGraph, port: Port) -> int:
@@ -2675,7 +3088,187 @@ def start_layout(graph: MetroGraph) -> None:
     graph._lane_plan = None
 
 
-def seal_lane_plan(graph: MetroGraph) -> None:
-    """Seal the layout's record at its first offsets run at or after 5.1."""
-    if graph._lane_plan is None and JUNCTIONS_POSITIONED in graph._stages_completed:
-        graph._lane_plan = build_lane_plan(graph)
+_OBSERVED: ContextVar[dict[int, tuple[MetroGraph, LanePlan]] | None] = ContextVar(
+    "lane_plan_observed", default=None
+)
+"""Inside :func:`observing`, each graph's provisional record by graph id."""
+
+
+@contextmanager
+def observing() -> Iterator[None]:
+    """Offsets runs inside read the record their placement plans, kept for
+    the scope, and never seal one."""
+    token = _OBSERVED.set({})
+    try:
+        yield
+    finally:
+        _OBSERVED.reset(token)
+
+
+def lane_plan_of(graph: MetroGraph) -> LanePlan:
+    """The layout's sealed record; else, sealing it at the first run at or
+    after 5.1 outside :func:`observing`, the record the current placement
+    plans."""
+    plan = recorded_lane_plan(graph)
+    if plan is not None:
+        return plan
+    plan = build_lane_plan(graph)
+    observed = _OBSERVED.get()
+    if observed is not None:
+        observed[id(graph)] = (graph, plan)
+    elif JUNCTIONS_POSITIONED in graph._stages_completed:
+        graph._lane_plan = plan
+    return plan
+
+
+def recorded_lane_plan(graph: MetroGraph) -> LanePlan | None:
+    """The record the layout's last offsets run read, without planning one:
+    the sealed record, or inside :func:`observing` the scope's provisional
+    one; ``None`` before either exists."""
+    if graph._lane_plan is not None:
+        return graph._lane_plan
+    observed = _OBSERVED.get()
+    held = observed.get(id(graph)) if observed is not None else None
+    return held[1] if held is not None and held[0] is graph else None
+
+
+def entry_crossing_lines(graph: MetroGraph, port_id: str) -> frozenset[str]:
+    """The lines a recorded forced crossing exchanges at entry *port_id*:
+    their bundle keeps its own order up to the last corner and takes the
+    entry's lanes there."""
+    plan = recorded_lane_plan(graph)
+    if plan is None:
+        return frozenset()
+    return frozenset(
+        lid
+        for crossing in plan.tracks.forced
+        if crossing.port == port_id
+        and crossing.across is None
+        and crossing.turn is None
+        for lid in crossing.lines
+    )
+
+
+def recorded_crossing_pairs(
+    graph: MetroGraph,
+) -> frozenset[tuple[tuple[str, str, str], tuple[str, str, str]]]:
+    """Each ``(edge, edge)`` pair a recorded crossing at an entry exchanges,
+    both ways round: between two feeding bundles, the passing line's connector
+    from any other source against each crossed line's from the bundle's exit
+    and that connector's same-line mates leaving its node with it;
+    within one bundle, its connectors of the lines it exchanges."""
+    plan = recorded_lane_plan(graph)
+    if plan is None:
+        return frozenset()
+    pairs: set[tuple[tuple[str, str, str], tuple[str, str, str]]] = set()
+    for crossing in plan.tracks.forced:
+        if crossing.port is None or crossing.turn is not None:
+            continue
+        passing, crossed = crossing.lines[0], crossing.lines[1:]
+        keys = [
+            (
+                (e.source, e.target, e.line_id),
+                approach_source(graph, e.source, e.line_id),
+            )
+            for e in graph.edges_to(crossing.port)
+        ]
+        if crossing.across is None:
+            pairs.update(
+                (key, other)
+                for key, _source in keys
+                for other, _other_source in keys
+                if key[0] == other[0]
+                and key[2] != other[2]
+                and {key[2], other[2]} <= set(crossing.lines)
+            )
+            continue
+        for key, source in keys:
+            if key[2] != passing or source == crossing.across:
+                continue
+            for other, other_source in keys:
+                if other[2] in crossed and other_source == crossing.across:
+                    for e in graph.edges_from(other[0]):
+                        if e.line_id == other[2]:
+                            mate = (e.source, e.target, e.line_id)
+                            pairs.update(((key, mate), (mate, key)))
+    return frozenset(pairs)
+
+
+def _stored_offsets(graph: MetroGraph, plan: LanePlan) -> dict[tuple[str, str], float]:
+    """Each recorded ``(node, line)``'s offset in lanes as its drawing reads
+    it, a rail section's port about its bundle's middle."""
+    tracks = plan.tracks
+    out: dict[tuple[str, str], float] = {
+        key: float(lane) for key, lane in tracks.lanes.items()
+    }
+    for port_id, values in tracks.perpendicular.items():
+        port = graph.ports[port_id]
+        sign = lateral_order_sign(port_travel(port)) * _draw_sign(graph, port)
+        for lid, value in values.items():
+            out[(port_id, lid)] = float(sign * value)
+    for port_id, both in tracks.rail_origins.items():
+        port = graph.ports[port_id]
+        sign = (
+            lateral_order_sign(port_travel(port)) * _draw_sign(graph, port)
+            if port_id in tracks.perpendicular
+            else 1
+        )
+        for lid in graph.station_lines(port_id):
+            if (port_id, lid) in out:
+                out[(port_id, lid)] -= sign * both / 2
+    return out
+
+
+def _line_neighbour(
+    graph: MetroGraph, node: str, line_id: str, held: Mapping[tuple[str, str], float]
+) -> float | None:
+    """The offset *line_id* holds at the nearest recorded node up its edges
+    from *node*, else down them: a node placed after the seal splits an edge
+    its line keeps its lane along."""
+    for walk in (graph.edges_to, graph.edges_from):
+        seen, frontier = {node}, [node]
+        while frontier:
+            ahead = []
+            for here in frontier:
+                for edge in walk(here):
+                    if edge.line_id != line_id:
+                        continue
+                    other = edge.source if walk == graph.edges_to else edge.target
+                    if other in seen:
+                        continue
+                    seen.add(other)
+                    if (other, line_id) in held:
+                        return held[(other, line_id)]
+                    ahead.append(other)
+            frontier = ahead
+    return None
+
+
+def planned_offsets(
+    graph: MetroGraph, plan: LanePlan, step: float
+) -> dict[tuple[str, str], float]:
+    """Every station line's offset: *plan*'s lane in *step* units, as its
+    drawing reads it; a node the record lacks takes its line's nearest
+    recorded neighbour's, a line with none lane zero."""
+    held = _stored_offsets(graph, plan)
+    out: dict[tuple[str, str], float] = {}
+    for node in graph.stations:
+        for lid in graph.station_lines(node):
+            lanes = held.get((node, lid))
+            if lanes is None:
+                lanes = _line_neighbour(graph, node, lid, held)
+            out[(node, lid)] = 0.0 if lanes is None else lanes * step
+    return out
+
+
+def approach_source(graph: MetroGraph, node: str, line_id: str) -> str:
+    """The node an approach record keys *line_id*'s connector from *node*
+    by: up through junctions each fed by one edge of the line."""
+    seen: set[str] = set()
+    while node in graph.junction_ids and node not in seen:
+        seen.add(node)
+        ups = [e.source for e in graph.edges_to(node) if e.line_id == line_id]
+        if len(ups) != 1:
+            return node
+        node = ups[0]
+    return node

@@ -26,6 +26,7 @@ from nf_metro.layout.constants import (
     graph_offset_step,
 )
 from nf_metro.layout.geometry import cotravelling_lane_clearance, spans_share_corridor
+from nf_metro.layout.lane_plan import recorded_crossing_pairs
 from nf_metro.layout.route_plan import (
     BindingKind,
     EmissionBinding,
@@ -54,6 +55,7 @@ from nf_metro.layout.routing.common import (
     RoutedPath,
     SourceTurnout,
     planner_owns_segment,
+    port_peeloff_tail,
     right_normal_axis_sign,
     segment_direction,
     tolerant_sign,
@@ -108,7 +110,6 @@ class CorridorCompatibilityReason(str, Enum):
     """Why a whole corridor component keeps its legacy geometry unmigrated."""
 
     INCOMPLETE_WITNESSES = "incomplete-witnesses"
-    OVERLAID_ENDPOINT_SLOTS = "overlaid-endpoint-slots"
 
 
 @dataclass(frozen=True, slots=True)
@@ -299,7 +300,8 @@ class CorridorCohortLedger:
         frozenset()
     )
     """``(member edge, perpendicular edge)`` pairs whose crossing the topology
-    forces (:func:`_forced_loop_crossings`)."""
+    forces (:func:`_forced_loop_crossings`) or the lane plan records
+    (:func:`~nf_metro.layout.lane_plan.recorded_crossing_pairs`)."""
 
 
 def _reaches_along(
@@ -786,7 +788,7 @@ def build_corridor_cohort_ledger(
         | frozenset(ambiguous_path_rank_cohorts),
         offset_step=graph_offset_step(graph),
         curve_radius=curve_radius,
-        forced_crossings=_forced_loop_crossings(graph),
+        forced_crossings=_forced_loop_crossings(graph) | recorded_crossing_pairs(graph),
     )
 
 
@@ -1462,10 +1464,8 @@ def _bind_claim(
 def _bind_ledger(
     ledger: CorridorCohortLedger,
     targets: Sequence[CorridorCohortTarget],
-) -> tuple[tuple[_BoundClaim, ...], frozenset[str]]:
-    landing_coordinates, overlaid_cohort_ids = _cohort_landing_coordinates(
-        ledger, targets
-    )
+) -> tuple[_BoundClaim, ...]:
+    landing_coordinates = _cohort_landing_coordinates(ledger, targets)
     by_key: defaultdict[
         tuple[str, tuple[str, str, str]], list[CorridorCohortTarget]
     ] = defaultdict(list)
@@ -1497,7 +1497,7 @@ def _bind_ledger(
         except CorridorCohortCompilationError:
             if claim.reservation_complete:
                 raise
-    return tuple(bound), overlaid_cohort_ids
+    return tuple(bound)
 
 
 def _directly_movable(claim: _BoundClaim) -> bool:
@@ -2627,7 +2627,7 @@ def _landing_frame(
 def _cohort_landing_coordinates(
     ledger: CorridorCohortLedger,
     targets: Sequence[CorridorCohortTarget],
-) -> tuple[dict[tuple[str, tuple[str, str, str]], float], frozenset[str]]:
+) -> dict[tuple[str, tuple[str, str, str]], float]:
     """Bind each endpoint member to the port slot its own network draws into.
 
     A network rank follows route emission order, which need not ascend with the
@@ -2635,9 +2635,8 @@ def _cohort_landing_coordinates(
     it keeps the one slot its members share.
 
     A cohort whose distinct networks draw into one slot, or whose one network
-    draws into two, has no lane order to hold: the offsets laid its lines over
-    each other at the port.  It binds no slots and is returned among the
-    overlaid cohorts, whose components keep their drawn geometry.
+    draws into two, has no lane order to hold: its lines lie over each other
+    at the port, which the lane plan never states, so the compile fails.
     """
     expected_by_cohort = dict(ledger.endpoint_members)
     ranks_by_member: defaultdict[str, set[tuple[str, int]]] = defaultdict(set)
@@ -2656,7 +2655,6 @@ def _cohort_landing_coordinates(
         targets_by_member[target.member_id].append(target)
 
     coordinates: dict[tuple[str, tuple[str, str, str]], float] = {}
-    overlaid_cohort_ids: set[str] = set()
     for cohort_id, expected_members in expected_by_cohort.items():
         if cohort_id in ledger.ambiguous_endpoint_cohort_ids:
             continue
@@ -2718,14 +2716,15 @@ def _cohort_landing_coordinates(
             for left, right in zip(ordered_slots, ordered_slots[1:])
         )
         if split or tied:
-            overlaid_cohort_ids.add(cohort_id)
-            continue
+            raise CorridorCohortCompilationError(
+                f"corridor endpoint cohort {cohort_id} lays its lines over each other"
+            )
         slot_by_rank = dict(zip(ranks, representative_slots))
         for member_id, target in member_targets.items():
             coordinates[(member_id, target.edge_key)] = slot_by_rank[
                 rank_by_member[member_id]
             ]
-    return coordinates, frozenset(overlaid_cohort_ids)
+    return coordinates
 
 
 def _overlap(left: _BoundClaim, right: _BoundClaim) -> bool:
@@ -3359,14 +3358,52 @@ def _next_seat_pitch(
     return pitch
 
 
+def _crossed_ranks_in_trunk_order(
+    order: list[int],
+    by_rank: Mapping[int, list[_BoundClaim]],
+    forced_crossings: frozenset[tuple[tuple[str, str, str], tuple[str, str, str]]],
+) -> list[int]:
+    keys = {rank: items[-1].target.edge_key for rank, items in by_rank.items()}
+    crossed = [
+        rank
+        for rank in order
+        if any(
+            (keys[rank], keys[other]) in forced_crossings
+            and keys[rank][0] == keys[other][0]
+            for other in order
+        )
+    ]
+    tails = {
+        rank: port_peeloff_tail(by_rank[rank][-1].target.route) for rank in crossed
+    }
+    if not crossed or any(tail is None for tail in tails.values()):
+        return order
+    first = tails[crossed[0]]
+    assert first is not None
+    kept = iter(
+        sorted(
+            crossed,
+            key=lambda rank: tails[rank].trunk_y,  # type: ignore[union-attr]
+            reverse=first.trunk_sign != first.port_lead_sign,
+        )
+    )
+    return [next(kept) if rank in crossed else rank for rank in order]
+
+
 def _local_boundary_ranks(
     claims: tuple[_BoundClaim, ...],
     fixed_claims: tuple[_BoundClaim, ...],
     pinned_seats: Mapping[tuple[str, int], float],
     offset_step: float,
     curve_radius: float,
+    forced_crossings: frozenset[tuple[tuple[str, str, str], tuple[str, str, str]]],
 ) -> dict[tuple[str, int], int]:
     """Each endpoint cohort rank's local boundary rank, dealt in port-slot order.
+
+    Lines one bundle exchanges at the port by a recorded crossing take that
+    exchange in their last bend, so up to it they keep their trunk order among
+    the slots they hold, as the peel-off drawing seats them
+    (:func:`~nf_metro.layout.routing.common.peeloff_trunk_line_order`).
 
     Every cohort claim ranks, fixed and counter-running alike, so a fixed lane
     between movable ones keeps its step and a lane pinned onto its line's fixed
@@ -3401,6 +3438,7 @@ def _local_boundary_ranks(
                 for rank, items in by_rank.items()
             }
         )
+        order = _crossed_ranks_in_trunk_order(order, by_rank, forced_crossings)
         pinned_rank = next(
             (rank for rank in order if (cohort_id, rank) in pinned_seats), None
         )
@@ -3452,6 +3490,9 @@ def _problem(
     ),
     corner_neighbours: Mapping[tuple[str, int], _CornerNeighbour],
     lane_region: CorridorLaneRegionReader = _no_lane_region,
+    forced_crossings: frozenset[
+        tuple[tuple[str, str, str], tuple[str, str, str]]
+    ] = frozenset(),
 ) -> CorridorAllocationProblem:
     scalar_by_id = {
         request.variable.variable_id: request for request in scalar_requests
@@ -3545,6 +3586,7 @@ def _problem(
         _pinned_endpoint_seats(movable, equalities, pinned),
         offset_step,
         curve_radius,
+        forced_crossings,
     )
     aliased_claims = tuple(item for item in claims if item.claim_id in aliases)
     scalar_equalities = [
@@ -4036,7 +4078,6 @@ def _component_plan(
     scalar_requests_by_id: Mapping[str, CorridorScalarRequest],
     intervals_by_member: Mapping[str, Sequence[CorridorForbiddenInterval]],
     solve: Callable[[CorridorAllocationProblem], CorridorAllocationResult],
-    overlaid_cohort_ids: frozenset[str],
     corner_neighbours: Mapping[tuple[str, int], _CornerNeighbour],
     lane_region: CorridorLaneRegionReader,
 ) -> CorridorCohortComponentPlan:
@@ -4045,8 +4086,7 @@ def _component_plan(
     Every physical overlap group and every relation-joined scalar variable the
     closure gave this component seats in one ``CorridorAllocationProblem``, so a
     member and a scalar joined by a typed relation always share one solve.  A
-    component holding an overlaid endpoint cohort has no slot order to seat
-    against and keeps its drawn geometry.  A component whose claims all lie on
+    component whose claims all lie on
     segments another plan already owns has nothing to allocate and is planned
     without a solve.
     """
@@ -4077,8 +4117,7 @@ def _component_plan(
     member_ids = tuple(sorted({item.ledger.member_id for item in component_claims}))
     problems: tuple[CorridorAllocationProblem, ...] = ()
     results: tuple[CorridorAllocationResult, ...] = ()
-    holds_overlaid_cohort = not overlaid_cohort_ids.isdisjoint(endpoint_ids)
-    if not holds_overlaid_cohort and (has_movable or component_scalar_requests):
+    if has_movable or component_scalar_requests:
         _require_seatable_claims(rank, component_claims, endpoint_ids, ledger)
         bound = {
             (item.ledger.endpoint_cohort_id, item.ledger.member_id) for item in claims
@@ -4098,10 +4137,11 @@ def _component_plan(
             intervals_by_member=intervals_by_member,
             corner_neighbours=corner_neighbours,
             lane_region=lane_region,
+            forced_crossings=ledger.forced_crossings,
         )
         problems = (problem,)
         results = (solve(problem),)
-    skipped = not holds_overlaid_cohort and not problems
+    skipped = not problems
     if skipped and not all(_is_terminal_fixed(item) for item in component_claims):
         raise CorridorCohortCompilationError(
             f"corridor component {rank} has nothing to solve and claims "
@@ -4145,12 +4185,8 @@ def _component_plan(
             sorted({(item.member_id, item.segment_rank) for item in allocations})
         )
     elif status is CorridorAllocationStatus.COMPATIBILITY:
-        if holds_overlaid_cohort:
-            reason = CorridorCompatibilityReason.OVERLAID_ENDPOINT_SLOTS
-        else:
-            reason = CorridorCompatibilityReason.INCOMPLETE_WITNESSES
         compatibility = CorridorCohortCompatibility(
-            reason,
+            CorridorCompatibilityReason.INCOMPLETE_WITNESSES,
             member_ids,
             spec.scalar_variable_ids,
             endpoint_ids,
@@ -4427,7 +4463,7 @@ def compile_corridor_cohort_plan(
     in, from its route, segment rank and coordinate axis, before the solve
     (see :class:`CorridorLaneRegion`); ``None`` leaves the segment unbounded.
     """
-    claims, overlaid_cohort_ids = _bind_ledger(ledger, targets)
+    claims = _bind_ledger(ledger, targets)
     scalar_requests_by_id = {
         request.variable.variable_id: request for request in scalar_requests
     }
@@ -4519,7 +4555,6 @@ def compile_corridor_cohort_plan(
             scalar_requests_by_id,
             intervals_by_member,
             solve,
-            overlaid_cohort_ids,
             corner_neighbours,
             lane_region,
         )

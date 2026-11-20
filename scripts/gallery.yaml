@@ -2577,8 +2577,9 @@ render_only:
   # tests/test_corridor_cohort_integration.py holds this map to what the
   # fixtures actually do.
   expected_aborts:
+    # seed_15's render aborts on two lines sharing one channel (#2041).
     hash_seed_determinism/seed_15: nf_metro.layout.routing.invariants.CurveInvariantError
-    hash_seed_determinism/seed_41: nf_metro.layout.routing.invariants.CurveInvariantError
+    hash_seed_determinism/seed_41: nf_metro.layout.routing.convergences.ConvergenceInvariantError
     hash_seed_determinism/seed_77: nf_metro.layout.routing.invariants.CurveInvariantError
   # Stems from tests/fixtures/ rendered into the "Test Fixtures" render-diff section.
   test_fixtures:

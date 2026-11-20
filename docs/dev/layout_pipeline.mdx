@@ -227,13 +227,14 @@ The Stage and Pass labels line up cleanly:
 ## Post-layout routing boundary
 
 The numbered stages settle station, port, junction and section coordinates.
-The routing pipeline then computes per-line station offsets, applies the exact slots owned by semantic fan plans, and builds complete exit-turn and convergence plans before building one atomic emission decision per route system.
+The routing pipeline then reads per-line station offsets from the lane plan, applies the exact slots owned by semantic fan plans, and builds complete exit-turn and convergence plans before building one atomic emission decision per route system.
 It then emits systems once, in canonical scaffold order.
 Whole-graph rail mode takes its documented short circuit instead.
 
-`compute_station_offsets` first produces the ordinary offset map.
+`compute_station_offsets` first produces the offset map: the layout's lane plan, sealed at its first offsets run at or after stage 5.1 and read through the record's draw accessors, so every lane routing draws is a planned one.
+Validation only observes: an offsets run inside `run_validate_guards` reads a provisional record and never seals one, so a validated layout draws the production layout.
 Immediately before emission, `_route_edges` applies planned fan carriers and builds the exit-turn plan once, then builds convergence plans from the same semantic scaffold and settled routing context.
-The exit-turn planner compacts each supported group onto its active lanes, commits the offsets it owns across the source seam, and assigns source-side turn axes from that same order.
+The exit-turn planner reads each supported group's source lanes from the record at the exit port and assigns source-side turn axes in that order; it writes no offset.
 The convergence planner freezes target trunks, ordered feeder joins, continuations and endpoint ownership.
 The route-system executor freezes one planned disposition for the complete system, and each planned inter-section family's stable ID.
 Ordinary and observed routing share this boundary.

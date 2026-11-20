@@ -40,6 +40,8 @@ ROOT = Path(__file__).parents[1]
 
 MERGE_RIGHT_ENTRY = "examples/topologies/merge_right_entry.mmd"
 
+MOVED_GRANT = "tests/data/corridor_cohort_witnesses/moved_trunk_grant.mmd"
+
 GRANTED_FIXTURES = (
     MERGE_RIGHT_ENTRY,
     "examples/topologies/plan_owned_distinct_lane_separation.mmd",
@@ -111,7 +113,8 @@ def _traced(monkeypatch: pytest.MonkeyPatch) -> Iterator[_Trace]:
 
     def prepare(*args, **kwargs):
         execution = real_prepare(*args, **kwargs)
-        stack[-1].executions.append(execution)
+        if stack:
+            stack[-1].executions.append(execution)
         return execution
 
     real_moved = svg._corridor_grant_moved_plan_ids
@@ -140,12 +143,11 @@ def _render(path: str) -> RoutePlan:
     return observed.route_plan
 
 
-@pytest.mark.parametrize("path", GRANTED_FIXTURES)
 def test_accepted_cohort_plan_is_persisted_once(
-    path: str, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     with _traced(monkeypatch) as trace:
-        published = _render(path)
+        published = _render(MOVED_GRANT)
 
     record = published.accepted_corridor_cohort_plan
     assert record is not None, "the published plan carries no accepted cohort plan"
@@ -222,7 +224,7 @@ def test_moved_grant_selects_its_plan_without_diagnostics(
 ) -> None:
     real_moved = svg._corridor_grant_moved_plan_ids
     with _traced(monkeypatch) as trace:
-        _render(MERGE_RIGHT_ENTRY)
+        _render(MOVED_GRANT)
 
     moved = [plan for plan in trace.compiling_plans if real_moved(plan)]
     assert moved, "no observation applied a convergence corridor grant"

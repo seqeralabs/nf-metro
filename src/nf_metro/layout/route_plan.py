@@ -583,7 +583,6 @@ ROUTE_SYSTEM_COMPATIBILITY_REASONS: Mapping[str, Mapping[str, CompatibilityFamil
                     "fixed-anchor-owned-by-another-plan",
                     "entry-bundle-owns-the-shared-seam-lanes",
                     "lane-arms-pinned-to-overlapping-corners",
-                    "linear-entry-frame-ownership-conflict",
                     "merge-branch-shares-the-descent-corner",
                     "overlapping-planned-turn-axes",
                     "shared-source-ownership-conflict",
@@ -1324,6 +1323,10 @@ class ExitTurnPlan:
     legacy_reason: str | None
     provenance: tuple[ReservationDecisionRef, ...]
     departure_orders: tuple[DepartureLaneOrder, ...]
+    nest_order: tuple[str, ...] = ()
+    """The member lines in the order they turn off the source run, along its
+    travel: their axes read along the run.  Two of the plan's start legs nest
+    by it at a shared corner, a later turn-off outer along the run."""
 
     def __post_init__(self) -> None:
         planned = self.disposition is ExitTurnDisposition.PLANNED
@@ -3896,35 +3899,6 @@ def _validate_exit_turn_demands(
             raise ValueError("exit-turn lane-transition demand is inconsistent")
 
 
-def _expected_source_lane_gaps(
-    plan: RoutePlan, exit_turn_plan: ExitTurnPlan
-) -> tuple[float, ...]:
-    """The offset each adjacent source-lane pair must span, in lane order.
-
-    Lanes normally compact to one ``spacing`` step per rank.  Where a planned
-    fan states the offsets of this exit source, its frame decides the pitch
-    instead: a fan holds one slot per line identity it carries anywhere in its
-    system, so a slot whose line is absent at this station is reserved rather
-    than forgotten, and the pair straddling it spans as many steps as the
-    fan's own slots are apart.
-    """
-    slots = {
-        assignment.line_id: assignment.slot
-        for fan_plan in plan.fan_plans
-        if fan_plan.owns_geometry
-        for carrier in fan_plan.offset_carriers
-        if carrier.station_id == exit_turn_plan.source_id
-        for assignment in carrier.assignments
-    }
-    lines = tuple(lane.line_id for lane in exit_turn_plan.source_lanes)
-    if any(line_id not in slots for line_id in lines):
-        return tuple(exit_turn_plan.spacing for _line in lines[1:])
-    return tuple(
-        abs(slots[right] - slots[left]) * exit_turn_plan.spacing
-        for left, right in zip(lines, lines[1:])
-    )
-
-
 def _validate_planned_exit_turn_resources(
     plan: RoutePlan,
     exit_turn_plan: ExitTurnPlan,
@@ -3957,13 +3931,11 @@ def _validate_planned_exit_turn_resources(
         expected_span,
     ):
         raise ValueError("exit-turn plan has inconsistent provenance")
-    offsets = tuple(lane.planned_offset for lane in exit_turn_plan.source_lanes)
-    expected_gaps = _expected_source_lane_gaps(plan, exit_turn_plan)
     if any(
-        abs(abs(right - left) - gap) > 1e-6
-        for (left, right), gap in zip(zip(offsets, offsets[1:]), expected_gaps)
+        abs(lane.planned_offset - lane.input_offset) > 1e-6
+        for lane in exit_turn_plan.source_lanes
     ):
-        raise ValueError("planned exit-turn source lanes are not compact")
+        raise ValueError("planned exit-turn source lanes are not the lane plan's")
     turning_assignment_ids = tuple(
         item.member_id
         for item in exit_turn_plan.assignments
@@ -4054,13 +4026,8 @@ def _validate_planned_exit_turn_resources(
         (right.input_offset - left.input_offset)
         * (right.planned_offset - left.planned_offset)
         <= 0
-        or abs(abs(right.planned_offset - left.planned_offset) - gap) > 1e-6
-        for (left, right), gap in zip(
-            zip(
-                exit_turn_plan.source_lanes,
-                exit_turn_plan.source_lanes[1:],
-            ),
-            expected_gaps,
+        for left, right in zip(
+            exit_turn_plan.source_lanes, exit_turn_plan.source_lanes[1:]
         )
     ):
         raise ValueError("exit-turn source lanes do not preserve travel order")
@@ -4075,11 +4042,20 @@ def _validate_planned_exit_turn_resources(
         unique_axes = tuple(dict.fromkeys(cohort_axes))
         unique_axes = tuple(sorted(unique_axes, key=lambda axis: axis.rank))
         progression = right_normal_axis_sign(turn_direction)
+        spacing = exit_turn_plan.spacing
+        planned = {
+            lane.rank: lane.planned_offset for lane in exit_turn_plan.source_lanes
+        }
         if any(
             abs(
                 right.coordinate
                 - left.coordinate
-                - progression * exit_turn_plan.spacing
+                - progression
+                * (
+                    spacing
+                    + abs(planned[right.rank] - planned[left.rank])
+                    - (right.rank - left.rank) * spacing
+                )
             )
             > 1e-6
             for left, right in zip(unique_axes, unique_axes[1:])

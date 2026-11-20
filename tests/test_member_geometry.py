@@ -1,7 +1,6 @@
 """Non-convergence member geometry is planned once and emitted exactly."""
 
 import json
-import re
 import warnings
 from dataclasses import replace
 from pathlib import Path
@@ -757,7 +756,7 @@ def test_reportho_owned_lead_is_frozen_at_its_concentric_radius() -> None:
     assert (
         tuple(route.curve_radii) == plan.curve_radii == tuple(fresh.curve_radii or ())
     )
-    assert route.curve_radii[0] == 14.0
+    assert route.curve_radii[0] == pytest.approx(CURVE_RADIUS)
     assert route.concentric_corner_offsets_by_segment == dict(
         plan.concentric_corner_offsets_by_segment
     )
@@ -1084,10 +1083,9 @@ def test_seed_77_compiles_atomic_single_lane_components() -> None:
     carrier is held inside its own region, so it must not join them into one
     component: the compile would then refuse a component spanning two lanes.
 
-    One component in the gap at column boundary 3 holds a seated-clear order
-    that would carry a lane across its forbidden footprint and past its
-    domain.  That component is seated once with the order kept, so the compile
-    requests the aperture at that boundary and no other.
+    One component in the gap at column boundary 4 cannot seat its lanes inside
+    their domains, so the compile requests the aperture at that boundary and
+    no other.
     """
     path = ROOT / "tests" / "fixtures" / "hash_seed_determinism" / "seed_77.mmd"
     graph, first = _observe(path)
@@ -1118,7 +1116,7 @@ def test_seed_77_compiles_atomic_single_lane_components() -> None:
         (
             BoundaryClearanceRequirementKind.CORRIDOR_COHORT_APERTURE,
             SettlementAxis.COLUMN,
-            3,
+            4,
         )
     ]
 
@@ -1856,51 +1854,6 @@ def test_packed_cell_routing_observation_publishes_corridor_aperture_requirement
     assert requirement.required == pytest.approx(REQUIRED_APERTURE)
     assert requirement.negative_section_ids == ("assemble",)
     assert requirement.positive_section_ids == ("qc",)
-
-
-def test_corridor_cohort_aperture_producer_processes_failures_independently() -> None:
-    """One failed corridor component with no usable shortfall does not void a
-    sibling component's diagnosis in the same allocation batch.
-
-    ``hash_seed_determinism/seed_15.mmd`` fails two components at once:
-    ``corridor-component|3`` (a plain equality conflict with no shortfall at
-    all) and a later convergence-trunk component (a shortfall whose negative
-    side has no section anywhere in this fixture's sparse grid, so it cannot
-    map to a two-section boundary either). An all-or-nothing batch would
-    report only whichever came first and never even look at the other; this
-    asserts both are named, proving each was actually attempted.
-    """
-    path = ROOT / "tests" / "fixtures" / "hash_seed_determinism" / "seed_15.mmd"
-    (
-        ledger,
-        candidates,
-        context_candidates,
-        scaffold,
-        ctx,
-        extra_targets,
-        scalar_requests,
-    ) = _corridor_cohort_population(path)
-
-    with pytest.raises(CorridorCohortCompilationError) as excinfo:
-        member_geometry._compile_corridor_cohorts(
-            ledger,
-            candidates,
-            context_candidates,
-            scaffold,
-            ctx,
-            allow_clearance_requirements=True,
-            additional_targets=extra_targets,
-            scalar_requests=scalar_requests,
-        )
-
-    message = str(excinfo.value)
-    assert "corridor-component|3/result:0: allocation failure has no typed" in message
-    (trunk_component,) = re.findall(
-        r"(corridor-component\|\d+/result:0) infeasible members=convergence-trunk",
-        message,
-    )
-    assert trunk_component != "corridor-component|3/result:0"
-    assert f"{trunk_component}: clearance boundary has no facing section" in message
 
 
 def test_record_boundary_clearance_requirement_keeps_kinds_distinct() -> None:

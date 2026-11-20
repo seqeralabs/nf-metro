@@ -1625,7 +1625,9 @@ def _centreline_port_ids(
     section hands off through is on the peeled branches' run just as much as
     their landing is.  A fan with no branch on the centreline states nothing
     about which port the trunk continues through, so there it is only the
-    landings that speak.
+    landings that speak: a port branches land on from both sides of the
+    centreline carries the whole fan straddling it, so it continues the
+    centreline.
     """
     holds_the_centreline = any(branch.lane_offset in (None, 0.0) for branch in branches)
     branch_port_ids = {
@@ -1649,6 +1651,17 @@ def _centreline_port_ids(
         if branch.lane_offset in (None, 0.0)
         for port_id in branch_port_ids[branch.id]
     }
+    if not holds_the_centreline:
+        landing_sides: dict[str, set[bool]] = {}
+        for branch in branches:
+            offset = branch.lane_offset
+            if offset is None or offset == 0.0:
+                continue
+            for port_id in branch_port_ids[branch.id]:
+                landing_sides.setdefault(port_id, set()).add(offset > 0)
+        offset_only_port_ids -= {
+            port_id for port_id, sides in landing_sides.items() if len(sides) == 2
+        }
     layout_section = graph.sections.get(layout_section_id or "")
     if direction is None or layout_section is None:
         return ()

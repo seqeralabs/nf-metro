@@ -58,6 +58,7 @@ from nf_metro.layout.geometry import (
     lanes_run_along_y,
     point_to_polyline_distance,
 )
+from nf_metro.layout.lane_plan import entry_crossing_lines, recorded_crossing_pairs
 from nf_metro.layout.phase_state import GuardSpec
 from nf_metro.layout.route_plan import FanRouteEmitter
 from nf_metro.layout.route_topology import (
@@ -1491,6 +1492,24 @@ def classify_merge_port_feeders(
     return horizontal, below, above
 
 
+def _feeding_exits(graph: MetroGraph, port_id: str, line_id: str) -> set[str]:
+    """The exit ports *line_id* reaches *port_id* from, through junctions."""
+    found: set[str] = set()
+    seen: set[str] = set()
+    stack = [port_id]
+    while stack:
+        node = stack.pop()
+        for edge in graph.edges_to(node):
+            if edge.line_id != line_id or edge.source in seen:
+                continue
+            seen.add(edge.source)
+            if edge.source in graph.junction_ids:
+                stack.append(edge.source)
+            elif edge.source in graph.ports and not graph.ports[edge.source].is_entry:
+                found.add(edge.source)
+    return found
+
+
 def check_merge_port_approach_side(
     graph,  # noqa: ANN001 - MetroGraph (avoid import cycle)
     offsets: dict[tuple[str, str], float],
@@ -1500,7 +1519,9 @@ def check_merge_port_approach_side(
     For every reconvergence merge port (see
     :func:`classify_merge_port_feeders`), a line rising from below must
     sit at or below every horizontal co-traveller, and a line descending
-    from above must sit at or above every horizontal co-traveller.
+    from above must sit at or above every horizontal co-traveller.  A
+    co-traveller leaving one exit port in the joiner's bundle bounds nothing:
+    the two keep that exit's order across the seam.
     """
     violations: list[MergePortApproachViolation] = []
     for port_id in graph.ports:
@@ -1508,10 +1529,23 @@ def check_merge_port_approach_side(
         if classified is None:
             continue
         horizontal, below, above = classified
-        horiz_offs = [offsets.get((port_id, lid), 0.0) for lid in horizontal]
-        max_horiz = max(horiz_offs)
-        min_horiz = min(horiz_offs)
+        exits = {
+            lid: _feeding_exits(graph, port_id, lid)
+            for lid in {*horizontal, *below, *above}
+        }
+
+        def bounds(joiner: str) -> list[float]:
+            return [
+                offsets.get((port_id, lid), 0.0)
+                for lid in horizontal
+                if not exits[lid] & exits[joiner]
+            ]
+
         for lid in below:
+            bound = bounds(lid)
+            if not bound:
+                continue
+            max_horiz = max(bound)
             off = offsets.get((port_id, lid), 0.0)
             if off < max_horiz - COORD_TOLERANCE_FINE:
                 violations.append(
@@ -1524,6 +1558,10 @@ def check_merge_port_approach_side(
                     )
                 )
         for lid in above:
+            bound = bounds(lid)
+            if not bound:
+                continue
+            min_horiz = min(bound)
             off = offsets.get((port_id, lid), 0.0)
             if off > min_horiz + COORD_TOLERANCE_FINE:
                 violations.append(
@@ -1678,7 +1716,7 @@ def check_convergence_shallow_feeder_concentric(
             shallow = [lid for lid, _, is_bypass in feeders if not is_bypass]
             bypass = [lid for lid, _, is_bypass in feeders if is_bypass]
         else:
-            entry = same_row_bypass_entry(graph, port_id, offsets)
+            entry = same_row_bypass_entry(graph, port_id)
             if entry is None:
                 continue
             shallow, bypass = list(entry.flat), list(entry.rising)
@@ -1879,6 +1917,59 @@ def _entry_order_reference(
     return consumer.id if consumer is not None else entry_id
 
 
+def _leaves_the_row(
+    graph: MetroGraph,
+    reference_id: str,
+    exit_port_id: str,
+    line_id: str,
+) -> bool:
+    """Whether *line_id* reaches a station off *reference_id*'s lane-axis
+    coordinate inside the exit's section on its way to *exit_port_id*."""
+    section_id = graph.ports[exit_port_id].section_id
+    lateral = "y" if lanes_run_along_y(graph.sections[section_id].direction) else "x"
+    level = getattr(graph.stations[reference_id], lateral)
+    seen = {reference_id}
+    stack = [reference_id]
+    while stack:
+        node = stack.pop()
+        for edge in graph.edges_from(node):
+            target = edge.target
+            if edge.line_id != line_id or target in seen or target == exit_port_id:
+                continue
+            station = graph.stations[target]
+            if station.section_id != section_id:
+                continue
+            seen.add(target)
+            if not station.is_port and abs(getattr(station, lateral) - level) > (
+                COORD_TOLERANCE
+            ):
+                return True
+            stack.append(target)
+    return False
+
+
+def _reversals_all_leave_the_row(
+    graph: MetroGraph,
+    reference_id: str,
+    exit_port_id: str,
+    entry_order: tuple[str, ...],
+    exit_order: tuple[str, ...],
+) -> bool:
+    """Whether every pair *exit_order* reverses from *entry_order* is two
+    lines that both leave the entry's row inside the section."""
+    rank = {lid: i for i, lid in enumerate(exit_order)}
+    leaves = {
+        lid: _leaves_the_row(graph, reference_id, exit_port_id, lid)
+        for lid in entry_order
+    }
+    return all(
+        leaves[a] and leaves[b]
+        for i, a in enumerate(entry_order)
+        for b in entry_order[i + 1 :]
+        if rank[a] > rank[b]
+    )
+
+
 def check_exit_inherits_entry_bundle_order(
     graph,  # noqa: ANN001 - MetroGraph (avoid import cycle)
     offsets: dict[tuple[str, str], float],
@@ -1899,6 +1990,11 @@ def check_exit_inherits_entry_bundle_order(
 
     The order an exit inherits comes from :func:`_entry_order_reference`, which
     for a perpendicular entry is the trunk rather than the port itself.
+
+    Two lines that both leave the entry's row inside the section part there
+    and take their own order, which the plan rejoins them in: their pair is
+    not held to the entry's order.  A line running level through the section
+    keeps its order against every other line.
     """
 
     def _order(port_id: str, lines: set[str]) -> tuple[str, ...]:
@@ -1929,6 +2025,10 @@ def check_exit_inherits_entry_bundle_order(
         through_entry_order = _order(reference_id, through_lines)
         through_exit_order = _order(port_id, through_lines)
         if through_entry_order != through_exit_order:
+            if _reversals_all_leave_the_row(
+                graph, reference_id, port_id, through_entry_order, through_exit_order
+            ):
+                continue
             violations.append(
                 ExitBundleOrderViolation(
                     section_id=section.id,
@@ -3834,12 +3934,14 @@ def check_no_dogleg_crosses_exempt_trunk(
     if not exempt:
         return []
     violations: list[DoglegCrossesExemptTrunk] = []
+    k = {id(r): (r.edge.source, r.edge.target, r.line_id) for r in routes}
+    forced = recorded_crossing_pairs(graph) if graph is not None else frozenset()
     for rp in routes:
         if not rp.is_inter_section or rp.normalize_exempt:
             continue
         for rank, seg in iter_horizontal_trunks(rp):
             for erp, exempt_rank, eseg in exempt:
-                if erp.line_id == rp.line_id:
+                if erp.line_id == rp.line_id or (k[id(rp)], k[id(erp)]) in forced:
                     continue
                 if abs(seg.y - eseg.y) >= 2 * OFFSET_STEP:
                     continue
@@ -7119,19 +7221,32 @@ class CurveInvariantError(RuntimeError):
 
 
 def _outside_recorded_forks(
-    graph: MetroGraph, violations: list[BundleOrderViolation]
+    graph: MetroGraph,
+    routes: Sequence[RoutedPath],
+    violations: list[BundleOrderViolation],
 ) -> list[BundleOrderViolation]:
     """*violations* less each pair a recorded departure reorders crossing on
     the departure's first segment: lines that part at a fork take their own
-    order there (:class:`~nf_metro.layout.departure_order.DepartureLaneOrder`)."""
+    order there (:class:`~nf_metro.layout.departure_order.DepartureLaneOrder`);
+    and less each pair a recorded entry crossing exchanges on the last
+    segment into its entry (:func:`~nf_metro.layout.lane_plan.entry_crossing_lines`)."""
     records = graph._departure_lane_orders
+    last = {(r.edge.source, r.edge.target): len(r.points) - 2 for r in routes}
     return [
         violation
         for violation in violations
-        if violation.segment_index != 1
-        or (record := records.get((violation.edge_source, violation.edge_target)))
-        is None
-        or not record.reorders(violation.line_a, violation.line_b)
+        if (
+            violation.segment_index != 1
+            or (record := records.get((violation.edge_source, violation.edge_target)))
+            is None
+            or not record.reorders(violation.line_a, violation.line_b)
+        )
+        and (
+            violation.segment_index
+            != last.get((violation.edge_source, violation.edge_target))
+            or not {violation.line_a, violation.line_b}
+            <= entry_crossing_lines(graph, violation.edge_target)
+        )
     ]
 
 
@@ -7152,7 +7267,9 @@ def render_curve_violations(
     return [
         (
             "bundle order (line crosses its bundle-mate)",
-            _outside_recorded_forks(graph, check_bundle_order_preserved(routes)),
+            _outside_recorded_forks(
+                graph, routes, check_bundle_order_preserved(routes)
+            ),
         ),
         (
             "non-concentric bundle corner",

@@ -14,7 +14,8 @@ from __future__ import annotations
 import warnings
 from pathlib import Path
 
-from conftest import curve_abort_softened, known_curve_abort
+import pytest
+from conftest import curve_abort_softened
 
 from nf_metro.layout.constants import STATION_ELBOW_TOLERANCE
 from nf_metro.layout.engine import compute_layout
@@ -158,18 +159,33 @@ def test_exit_bundle_turns_as_one_concentric_corner() -> None:
     assert not concentric, "\n".join(v.message() for v in concentric)
 
 
-@known_curve_abort(
-    "#2096",
-    reason="the approach fan's two feeders sit in separate corridor bundles, "
-    "so dna and rna both descend on the TOP entry's X",
-)
-def test_bundle_map_renders() -> None:
-    """The two-line map renders instead of aborting on defective bundle curves."""
+def test_bundle_map_renders_its_straight_drop_without_a_lateral_step(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``dna`` drops from qc's BOTTOM exit straight into align's TOP entry: the
+    drawn descent keeps one X from the exit to the entry."""
     from nf_metro.api import render_string
+    from nf_metro.layout.routing.common import apply_route_offsets
+    from nf_metro.render import svg
 
+    settled = []
+    real_settle = svg._settle_render_geometry
+
+    def settle(*args, **kwargs):
+        settled.append(real_settle(*args, **kwargs))
+        return settled[-1]
+
+    monkeypatch.setattr(svg, "_settle_render_geometry", settle)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         assert render_string(BUNDLE_MAP)
+    (drop,) = (
+        apply_route_offsets(rp, settled[-1].station_offsets)
+        for rp in settled[-1].routes
+        if (rp.edge.source, rp.edge.target)
+        == ("qc__exit_bottom_0", "align__entry_top_3")
+    )
+    assert len({round(x, 3) for x, _y in drop}) == 1, drop
 
 
 def test_bundle_map_clears_every_other_render_guard() -> None:
@@ -178,3 +194,21 @@ def test_bundle_map_clears_every_other_render_guard() -> None:
     with warnings.catch_warnings(), curve_abort_softened():
         warnings.simplefilter("ignore")
         assert render_string(BUNDLE_MAP)
+
+
+def test_a_bundle_joining_a_run_with_lines_of_its_own_does_not_keep_its_lanes() -> None:
+    """``star`` hands its whole bundle (``rna``) to ``sort``'s run, which also
+    carries ``dna`` level from ``bwa``: the run is not that bundle, so it fills
+    from its floor and ``dna`` stays on ``bwa``'s axis."""
+    from nf_metro.layout.lane_plan import recorded_lane_plan
+
+    graph = _laid_out(BUNDLE_MAP)
+    compute_station_offsets(graph)
+    plan = recorded_lane_plan(graph)
+    assert plan is not None
+    lanes = plan.tracks.lanes
+    assert (lanes[("bwa", "dna")], lanes[("sort", "dna")], lanes[("sort", "rna")]) == (
+        0,
+        0,
+        1,
+    )

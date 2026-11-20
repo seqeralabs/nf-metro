@@ -32,6 +32,7 @@ from nf_metro.layout.route_topology import (
     merge_fanout_junction_ids,
 )
 from nf_metro.layout.routing.common import (
+    EXIT_SIDE_DIRECTION,
     Direction,
     RoutedPath,
     _h_segment_penetrates_section,
@@ -42,13 +43,10 @@ from nf_metro.layout.routing.common import (
     merge_trunk_force_cross_row,
     resolve_section,
     resolve_section_colrow,
+    right_normal_axis_sign,
     row_bottom_edge,
     row_top_edge,
     vertical_flow_sections,
-)
-from nf_metro.layout.routing.perp_columns import (
-    PerpEntryColumn,
-    settled_perp_entry_columns,
 )
 from nf_metro.layout.routing.reserved_bands import ReservedCorridors
 from nf_metro.layout.routing.reversal import (
@@ -271,7 +269,6 @@ class _RoutingCtx:
         default_factory=dict
     )
     junction_fan_info: dict[_EdgeKey, tuple[int, int]] = field(default_factory=dict)
-    perp_entry_columns: Mapping[str, PerpEntryColumn] = field(default_factory=dict)
     fan_corridors: dict[str, FanCorridor] = field(default_factory=dict)
     section_trunk_y: dict[str, float] = field(default_factory=dict)
     merge_fanouts: set[str] = field(default_factory=set)
@@ -436,10 +433,9 @@ def _build_routing_context(
     all_x = [s.x for s in graph.stations.values()]
     fold_x = max(all_x) if all_x else 0
 
-    # Junctions fed by BOTTOM exit ports
     bottom_exit_junction_ports: dict[str, str] = {}
     for divergence_id, exit_port_id in divergence_exit_ports.items():
-        if graph.ports[exit_port_id].side is PortSide.BOTTOM:
+        if graph.ports[exit_port_id].side in (PortSide.TOP, PortSide.BOTTOM):
             bottom_exit_junction_ports[divergence_id] = exit_port_id
     bottom_exit_junctions = set(bottom_exit_junction_ports)
 
@@ -483,6 +479,7 @@ def _build_routing_context(
         divergence_sources,
         line_priority,
         skip_edges=all_exclude,
+        station_offsets=station_offsets,
         topology=topology,
     )
     resolved_offset_step = (
@@ -520,11 +517,6 @@ def _build_routing_context(
         curve_radius=curve_radius,
         validate_final_route_frames=validate_final_route_frames,
         junction_fan_info=junction_fan_info,
-        perp_entry_columns=(
-            {}
-            if station_offsets is None
-            else settled_perp_entry_columns(graph, station_offsets)
-        ),
         fan_corridors=fan_corridors,
         skip_edges=merge.skip_edges,
         section_trunk_y=section_trunk_y,
@@ -1194,12 +1186,49 @@ def _compute_bypass_gap_indices(
     return result
 
 
+def _junction_lead(graph: MetroGraph, jid: str) -> Direction:
+    """Direction of the exit run fan junction *jid* continues: the side of
+    the exit port feeding it."""
+    return EXIT_SIDE_DIRECTION[graph.ports[graph.edges_to(jid)[0].source].side]
+
+
+def fan_turning_slots(ctx: _RoutingCtx, jid: str) -> set[int]:
+    """Slots of junction *jid*'s fan held by lines that turn through its corner.
+
+    A line whose every branch reaches the same or the next grid cell along the
+    junction's lead on the lane it holds at the junction runs straight on.
+    """
+    branches = {
+        key: slot for key, slot in ctx.junction_fan_info.items() if key[0] == jid
+    }
+    if not ctx.station_offsets:
+        return {i for i, _n in branches.values()}
+    graph = ctx.graph
+    across = 1 if _junction_lead(graph, jid) in (Direction.L, Direction.R) else 0
+    jst = graph.stations[jid]
+    cell = _resolve_section_colrow(graph, jst)[1 - across]
+    turning: set[str] = set()
+    for key in branches:
+        edge = ctx.edge_by_key[key]
+        tgt = graph.station_for_edge_target(edge)
+        tgt_cell = _resolve_section_colrow(graph, tgt)[1 - across]
+        lane = (jst.x, jst.y)[across] + ctx.station_offsets[(jid, edge.line_id)]
+        tgt_lane = (tgt.x, tgt.y)[across] + ctx.station_offsets.get(
+            (edge.target, edge.line_id), 0.0
+        )
+        assert cell is not None and tgt_cell is not None
+        if abs(tgt_cell - cell) > 1 or abs(tgt_lane - lane) > COORD_TOLERANCE:
+            turning.add(edge.line_id)
+    return {i for (_s, _t, lid), (i, _n) in branches.items() if lid in turning}
+
+
 def _compute_junction_fan_info(
     graph: MetroGraph,
     junction_ids: Iterable[str],
     line_priority: dict[str, int],
     skip_edges: set[tuple[str, str, str]] | None = None,
     topology: RouteTopologyQuery | None = None,
+    station_offsets: Mapping[tuple[str, str], float] | None = None,
 ) -> dict[tuple[str, str, str], tuple[int, int]]:
     """Unified fan-out positions for junctions with mixed-direction edges.
 
@@ -1362,7 +1391,7 @@ def _compute_junction_fan_info(
         if not outgoing or not needs_unified:
             continue
 
-        # Assign one position per unique line_id (sorted by priority).
+        # Assign one position per unique line_id.
         # All edges of the same line share that position, including
         # edges previously SKIPPED for the bundle.  This makes a merge
         # branch route share the same source-side fan position as a
@@ -1373,18 +1402,26 @@ def _compute_junction_fan_info(
             for e in graph.edges_from(jid)
             if graph.station_for_edge_target(e).is_port or e.target in junction_ids
         ]
-        # A clean divergence (distinct lines peeling to disjoint targets) is
-        # ordered outermost-to-innermost by reach so the descent X order stays
-        # in phase with the source-section bundle's lead-in Y order; every other
-        # fan (co-travelling bundles, mixed targets) keeps declaration order.
-        peel_order = fanout_divergence_peel_order(graph, jid, line_priority, topology)
-        if peel_order is not None:
-            line_ids = peel_order
-        else:
+        # Each line's slot follows its planned lane at the junction, read
+        # travel-left first, so the descent X order is in phase with the lead-in
+        # it arrives on.  A rail layout plans no per-line offsets: there a clean
+        # divergence (distinct lines peeling to disjoint targets) is ordered
+        # outermost-to-innermost by reach and every other fan keeps declaration
+        # order.
+        fan_lines = {e.line_id for e in all_outgoing}
+        if station_offsets:
+            sign = right_normal_axis_sign(_junction_lead(graph, jid))
             line_ids = sorted(
-                {e.line_id for e in all_outgoing},
-                key=lambda lid: line_priority.get(lid, 0),
+                fan_lines,
+                key=lambda lid: (
+                    sign * station_offsets[(jid, lid)],
+                    line_priority.get(lid, 0),
+                ),
             )
+        else:
+            line_ids = fanout_divergence_peel_order(
+                graph, jid, line_priority, topology
+            ) or sorted(fan_lines, key=lambda lid: line_priority.get(lid, 0))
         line_pos = {lid: i for i, lid in enumerate(line_ids)}
         n = len(line_ids)
 

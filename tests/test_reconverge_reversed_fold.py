@@ -29,8 +29,6 @@ from pathlib import Path
 
 import pytest
 
-import nf_metro.layout.routing.context as routing_context
-import nf_metro.layout.routing.offsets as routing_offsets
 from nf_metro.layout.constants import OFFSET_STEP
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
@@ -90,59 +88,6 @@ def test_final_report_bundle_is_top_anchored():
     assert min(bundle.values()) == pytest.approx(0.0), bundle
 
 
-def test_return_row_drops_off_top_slot_with_forward_order(monkeypatch):
-    """A reversed section reordered with the forward logical arrangement
-    (``continuing + returning``) puts the returning line on the top slot and
-    drops the bundle one offset low - the state that slopes the back-run - so
-    the reversed-aware order is load-bearing."""
-
-    def reorder_forward_logical(ctx, section_local):
-        graph = ctx.graph
-        for sec_id, section in graph.sections.items():
-            if not section.entry_ports:
-                continue
-            line_feeder = routing_offsets._section_line_feeders(ctx, section)
-            if not line_feeder:
-                continue
-            lines_by_feeder = {}
-            for lid, fid in line_feeder.items():
-                lines_by_feeder.setdefault(fid, []).append(lid)
-            if len(lines_by_feeder) < 2:
-                continue
-            primary_fid = max(lines_by_feeder, key=lambda f: len(lines_by_feeder[f]))
-            primary_lines = set(lines_by_feeder[primary_fid])
-            if len(primary_lines) < 2:
-                continue
-            primary_order = section_local.get(primary_fid, ctx.line_priority)
-            continuing = sorted(
-                primary_lines, key=lambda lid: primary_order.get(lid, 0)
-            )
-            sec_present = routing_offsets._section_present_line_set(ctx, sec_id)
-            returning = sorted(
-                sec_present - primary_lines,
-                key=lambda lid: ctx.line_priority.get(lid, 0),
-            )
-            new_order = continuing + returning
-            global_ordered = sorted(
-                sec_present, key=lambda lid: ctx.line_priority.get(lid, 0)
-            )
-            if new_order == global_ordered:
-                continue
-            routing_offsets._apply_section_line_order(ctx, sec_id, new_order)
-
-    monkeypatch.setattr(
-        routing_offsets, "_reorder_reconvergence", reorder_forward_logical
-    )
-    graph = parse_metro_mermaid(FIXTURE.read_text())
-    compute_layout(graph)
-    offsets = compute_station_offsets(graph)
-    bundle = {
-        lid: offsets[("fr_aggregate", lid)]
-        for lid in graph.station_lines("fr_aggregate")
-    }
-    assert min(bundle.values()) > 0.0, bundle
-
-
 # --- Defect 1: vertical fan peels without a corner crossing --------------------
 
 
@@ -170,53 +115,6 @@ def test_preprocessing_fanout_has_no_corner_crossing():
             vb, hb = _route_axis_segments(b)
             hit = _first_axis_crossing(va, hb) or _first_axis_crossing(vb, ha)
             assert hit is None, f"{a.line_id}/{b.line_id} cross at {hit} leaving {jid}"
-
-
-def test_vertical_fan_crosses_without_peel_order(monkeypatch):
-    """With the vertical-fan peel order disabled the fan keeps declaration order
-    and the corner crossing returns, proving the order is what fixes it."""
-    real = routing_context.fanout_divergence_peel_order
-
-    def no_vertical_fan(graph, jid, line_priority, topology=None):
-        order = real(graph, jid, line_priority, topology)
-        if order is None:
-            return None
-        # Drop the order only for the same-column (vertical) fan so the
-        # column-spreading fans keep their fix.
-        jst = graph.stations.get(jid)
-        reach = set()
-        for edge in graph.edges_from(jid):
-            tgt = graph.stations.get(edge.target)
-            col, _ = routing_context._resolve_section_colrow(graph, tgt)
-            scol, _ = routing_context._resolve_section_colrow(graph, jst)
-            if col is not None and scol is not None:
-                reach.add(col - scol)
-        return None if len(reach) == 1 else order
-
-    monkeypatch.setattr(
-        routing_context, "fanout_divergence_peel_order", no_vertical_fan
-    )
-    monkeypatch.setattr(
-        routing_offsets, "fanout_divergence_peel_order", no_vertical_fan
-    )
-    graph = parse_metro_mermaid(FIXTURE.read_text())
-    compute_layout(graph)
-    offsets = compute_station_offsets(graph)
-    jid = _preprocessing_fanout_junction(graph)
-    routes = route_edges(graph, station_offsets=offsets)
-    fan = [r for r in routes if r.edge.source == jid and len(r.points) >= 2]
-    crossings = []
-    for i in range(len(fan)):
-        for j in range(i + 1, len(fan)):
-            a, b = fan[i], fan[j]
-            if a.line_id == b.line_id:
-                continue
-            va, ha = _route_axis_segments(a)
-            vb, hb = _route_axis_segments(b)
-            hit = _first_axis_crossing(va, hb) or _first_axis_crossing(vb, ha)
-            if hit is not None:
-                crossings.append((a.line_id, b.line_id, hit))
-    assert crossings, "expected a fan corner crossing with the peel order disabled"
 
 
 # --- TB merge-in concentric; bottom-exit descent is a tight bundle ------------

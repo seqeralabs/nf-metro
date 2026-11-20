@@ -1,0 +1,48 @@
+%%metro title: Later part entered by a crossing bundle
+%%metro line: l0 | Annotate_Pca | #e6194b
+%%metro line: l1 | Cluster | #3cb44b
+%%metro line: l2 | Fastqc | #4363d8
+%%metro grid: sec0 | 0,0
+%%metro grid: sec1 | 0,1
+%%metro grid: sec2 | 0,2
+
+graph LR
+    subgraph sec0 [Gather_Markdup 0]
+        %%metro direction: TB
+        s0n0[normalize_quant]
+        s0n1[align_fastqc_merge]
+        s0n2[fastqc]
+        s0n3[fastqc_assemble_report]
+        s0n0 -->|l0,l2| s0n1
+        s0n1 -->|l0,l2| s0n2
+        s0n2 -->|l0,l2| s0n3
+    end
+    subgraph sec1 [Report_Trim 1]
+        s1n0[bin]
+        s1n1[pca]
+        s1n2[summarise]
+        s1n3[index_align]
+        s1n4[markdup_cluster]
+        s1n0 -->|l0,l1| s1n1
+        s1n1 -->|l0| s1n3
+        s1n3 -->|l0,l2| s1n4
+        s1n1 -->|l1| s1n2
+        s1n2 -->|l1| s1n4
+        s1n0 -->|l2| s1n2
+        s1n2 -->|l2| s1n3
+    end
+    subgraph sec2 [Vcf_Stats_Merge 2]
+        s2n0[bam_normalize]
+        s2n1[merge_dedup_dedup]
+        s2n3[report_trim]
+        s2n4[annotate_annotate]
+        s2n0 -->|l0| s2n1
+        s2n1 -->|l0| s2n4
+        s2n0 -->|l1| s2n3
+        s2n3 -->|l1| s2n4
+    end
+    s0n3 -->|l0,l2| s1n0
+    s1n4 -->|l0,l1,l2| s2n0
+    s0n0 -->|l0| s1n2
+    s1n2 -->|l0,l2| s2n0
+    s0n3 -->|l2| s1n2

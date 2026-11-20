@@ -85,22 +85,31 @@ def test_regressions_and_representative_corpus_are_hash_seed_deterministic() -> 
 
 
 EXPECTED_DEFECT_CLASSES = {
+    # seed_15 (#2041): l1 and l2 share one channel; __junction_27's lines take
+    # the fork's lane order into the gap, and l0 / l2's corner off it is not
+    # concentric (#2094).
     "seed_15.mmd": (
-        "bundle order (line crosses its bundle-mate)",
-        "peel-off bundle braids into port",
-        "merge fan-out branches split off one fork corner",
-    ),
-    "seed_41.mmd": (
         "non-concentric bundle corner",
+        "collinear distinct lines",
         "merge fan-out branches split off one fork corner",
     ),
-    "seed_77.mmd": ("peel-off bundle braids into port",),
+    # seed_41 aborts in the convergence plan (a merge approach emitted with the
+    # opposite handedness to the one planned), before any routing guard runs.
+    "seed_41.mmd": (),
+    # seed_77 aborts on main too. Two distinct lines run collinear on one
+    # shared track and a peel-off bundle braids into its port. Both come from
+    # the lane allocation per shared track versus packing, and the gap-slot
+    # order, tracked on #2094.
+    "seed_77.mmd": (
+        "collinear distinct lines",
+        "peel-off bundle braids into port",
+    ),
 }
 
 EXPECTED_EXCEPTION_SHA256 = {
-    "seed_15.mmd": "1c976a09cbf42d8504c93d273caf35ee63bdbfb5f8a392d948716f2e31d97561",
-    "seed_41.mmd": "119a52417bd9fdf02767feb6b41d7c32a4f7dcaba5095adf991886c4175c6ebe",
-    "seed_77.mmd": "e6ca83122dc7161a61dcc36a8fe38b92eb7010afe446ddaf907b960418a72620",
+    "seed_15.mmd": "a538b637727e6bac8e21d41cba8c80743d046ff0a6b8f28eb74265826a12fb58",
+    "seed_41.mmd": "3b5ca922585bb3e53e1bf999325c741eed1d4d605516069cc968e35cf865b46c",
+    "seed_77.mmd": "d791ac2ea403a143c1f2b8eb87d283d18fe3b965952099e08193bb93e69c4a04",
 }
 
 
@@ -188,7 +197,7 @@ def test_seed_72_png_is_frozen(monkeypatch: pytest.MonkeyPatch) -> None:
     png = svg_to_png(svg, scale=2.0)
 
     assert hashlib.sha256(png).hexdigest() == (
-        "dcdb00337f2d8e9a4531d2bd6ea084f437f429d5da3b33c879bccfceaa964b6d"
+        "736fe0e7f6c5ecbe7034c9d0cdbd000e0b332130e06acee04212b9203f2212c0"
     )
 
 

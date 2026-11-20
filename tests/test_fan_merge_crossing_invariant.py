@@ -14,9 +14,8 @@ Covers:
   vertical-flow forks/merges without a partition crossing.
 * The seam-free regression trio (``tb_convergence_straight_drop``,
   ``tb_passthrough_continuation``, ``tb_trunk_through_fan``) is crossing-free.
-* Meaningfulness: with the seam-free positive-fan classification and the fan-in
-  lane-side seating both disabled the checker fires on all three, so the invariant
-  genuinely encodes the bug.
+* Meaningfulness: with every vertical-flow station's lanes transposed the checker
+  fires on all three, so the invariant genuinely encodes the bug.
 """
 
 from __future__ import annotations
@@ -25,8 +24,6 @@ from pathlib import Path
 
 import pytest
 
-import nf_metro.layout.phases.single_section as single_section
-import nf_metro.layout.routing.reversal as routing_reversal
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.invariants import check_fan_merge_no_partition_crossing
@@ -81,19 +78,20 @@ def test_seam_free_trio_is_crossing_free(name: str) -> None:
 
 
 @pytest.mark.parametrize("name", SEAM_FREE_TRIO)
-def test_checker_fires_without_seam_free_positive_fan(
-    name: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Forcing the seam-free sections back onto the default rotation lane sign
-    transposes their fork/merge bundle, reproducing the crossing the invariant is
-    meant to catch -- proving the check is not vacuous.  Fan-in seating also
-    resolves the transposed sign, so it is disabled alongside."""
-    monkeypatch.setattr(
-        routing_reversal, "_is_seam_free_section", lambda section: False
-    )
-    monkeypatch.setattr(
-        single_section, "_seat_fan_in_branches_on_lane_side", lambda *args: None
-    )
-    graph, routes, offsets = _route(EXAMPLE_TOPOLOGIES / f"{name}.mmd")
-    violations = check_fan_merge_no_partition_crossing(graph, routes, offsets)
-    assert violations, "expected a fork/merge crossing with the seam-free sign off"
+def test_checker_fires_on_transposed_vertical_lanes(name: str) -> None:
+    """Transposing every vertical-flow station's lanes -- the default rotation
+    lane sign the seam-free sections and the lane plan's port order avoid --
+    reproduces the fork/merge crossing the invariant is meant to catch, proving
+    the check is not vacuous."""
+    graph = parse_metro_mermaid((EXAMPLE_TOPOLOGIES / f"{name}.mmd").read_text())
+    compute_layout(graph)
+    vertical = {
+        sid for sid, sec in graph.sections.items() if sec.direction in ("TB", "BT")
+    }
+    transposed = {
+        key: -offset if graph.stations[key[0]].section_id in vertical else offset
+        for key, offset in compute_station_offsets(graph).items()
+    }
+    routes = route_edges(graph, station_offsets=transposed)
+    violations = check_fan_merge_no_partition_crossing(graph, routes, transposed)
+    assert violations, "expected a fork/merge crossing on transposed lanes"

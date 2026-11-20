@@ -15,11 +15,11 @@ import pytest
 
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
+from nf_metro.layout.routing.common import perp_entry_consumer
 from nf_metro.layout.routing.invariants import (
     check_bundle_order_preserved,
     check_perp_entry_boundary_consistent,
 )
-from nf_metro.layout.routing.offsets import _perp_entry_run_turns_right
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import PortSide
 
@@ -230,7 +230,7 @@ def test_left_exit_fan_perp_entry_bundle_order_preserved(label: str) -> None:
     as the mirror of the trunk for its entry side and turn direction, the two
     lines swap sides through the corner.  The arrival order reverses on an XOR of
     two independent axes -- the entry side (TOP versus BOTTOM) and the direction
-    the run turns out of the port (:func:`_perp_entry_run_turns_right`) -- so all
+    the run turns out of the port (toward its consumer) -- so all
     four combinations are pinned here.  Two invariants hold each: the intra turn
     keeps one bundle-order sign across the corner, and the inter-section approach
     and the intra drop cross the port boundary at one consistent per-line X (no
@@ -251,7 +251,11 @@ def test_left_exit_fan_perp_entry_bundle_order_preserved(label: str) -> None:
         and port.section_id == "b"
         and port.side in (PortSide.TOP, PortSide.BOTTOM)
     )
-    assert _perp_entry_run_turns_right(graph, entry_port_id) is expected_turns_right, (
+    consumer = perp_entry_consumer(graph, entry_port_id)
+    turns_right = consumer is not None and (
+        consumer.x > graph.stations[entry_port_id].x + 1e-6
+    )
+    assert turns_right is expected_turns_right, (
         f"{label}: fixture does not exercise the intended turn direction"
     )
     entry_bundle = [

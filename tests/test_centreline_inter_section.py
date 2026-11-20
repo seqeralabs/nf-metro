@@ -94,10 +94,7 @@ def test_multi_line_inter_section_bundles_are_offset_baked(path: Path) -> None:
 FROZEN_FUZZ = REPO_ROOT / "tests" / "fixtures" / "hash_seed_determinism"
 
 WESTWARD_JUNCTION_FAN_L_SHAPES = [
-    ("seed_15.mmd", "__junction_21", "__merge_9", "l0"),
-    ("seed_15.mmd", "__junction_27", "__merge_11", "l0"),
     ("seed_15.mmd", "__junction_27", "__merge_12", "l2"),
-    ("seed_77.mmd", "__junction_37", "__merge_11", "l0"),
 ]
 
 

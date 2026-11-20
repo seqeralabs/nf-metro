@@ -185,6 +185,10 @@ def _collect_corpus() -> list[tuple[Path, bool]]:
     (``regressions/approach_order_*`` and ``entry_slot_overlay_tied_feeders``)
     are walked too: each locks one decision of that pass, and no other corpus
     map reaches the arms those decisions sit on.
+
+    ``tests/data/gate_witnesses/`` holds generated maps that reach a routing arm
+    no authored map does.  Several abort later in the render; the arms they
+    witness lie before the abort, and the sweep tolerates it.
     """
     examples = PROJECT_ROOT / "examples"
     fixtures = PROJECT_ROOT / "tests" / "fixtures"
@@ -202,6 +206,10 @@ def _collect_corpus() -> list[tuple[Path, bool]]:
             False,
         ),
         (sorted(nextflow.glob("*.mmd")), True),
+        (
+            sorted((PROJECT_ROOT / "tests" / "data" / "gate_witnesses").glob("*.mmd")),
+            False,
+        ),
     ]
     candidates = [(p, is_nextflow) for paths, is_nextflow in sources for p in paths]
 

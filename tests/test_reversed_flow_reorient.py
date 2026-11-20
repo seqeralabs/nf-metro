@@ -9,8 +9,6 @@ re-anchor a single port and leave the flow pointing the wrong way.
 
 from __future__ import annotations
 
-from dataclasses import replace
-
 from orientation_transform import transformable_reason
 
 from nf_metro.layout.engine import compute_layout
@@ -48,9 +46,19 @@ def test_entry_right_exit_left_reorients_to_rl() -> None:
     )
 
 
-def test_routing_reads_the_reorientation_reason() -> None:
+def test_reoriented_exit_bundle_keeps_its_feeders_lanes() -> None:
+    """A re-oriented section's exit bundle stays in its feeders' lane frame.
+
+    ``src_sec`` flips to RL and both lines leave by its left exit from
+    different stations, ``l2`` from a row below ``l1``.  The exit port carries
+    each line on the lane its feeder holds it on, so the bundle keeps one frame
+    rather than re-centring on the port-nearest line.
+    """
     graph = parse_metro_mermaid(open(MULTILINE_REVERSED_FLOW).read())
     compute_layout(graph, validate=True)
+    assert graph.layout_provenance.direction_has_reason(
+        "src_sec", DecisionReason.FLOW_REORIENTED_DIRECTION
+    )
     geometry = {
         station_id: (station.x, station.y)
         for station_id, station in graph.stations.items()
@@ -60,21 +68,17 @@ def test_routing_reads_the_reorientation_reason() -> None:
         for port_id, port in graph.ports.items()
         if port.section_id == "src_sec" and not port.is_entry
     )
-    line_ids = graph.station_lines(exit_port)
     offsets = compute_station_offsets(graph)
+    feeders = {edge.line_id: edge.source for edge in graph.edges_to(exit_port)}
 
-    assert [offsets[(exit_port, line_id)] for line_id in line_ids] == [0.0, 4.0]
-
-    decision = graph.layout_provenance.directions["src_sec"]
-    graph.layout_provenance.directions["src_sec"] = replace(
-        decision, reason=DecisionReason.AUTO_DIRECTION
-    )
-    without_transition = compute_station_offsets(graph)
-
-    assert [without_transition[(exit_port, line_id)] for line_id in line_ids] == [
-        -4.0,
-        0.0,
-    ]
+    assert feeders == {"l1": "s2", "l2": "s3"}
+    assert {line_id: offsets[(exit_port, line_id)] for line_id in feeders} == {
+        "l1": 0.0,
+        "l2": 4.0,
+    }
+    assert {line_id: offsets[(exit_port, line_id)] for line_id in feeders} == {
+        line_id: offsets[(source, line_id)] for line_id, source in feeders.items()
+    }
     assert {
         station_id: (station.x, station.y)
         for station_id, station in graph.stations.items()

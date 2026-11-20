@@ -59,6 +59,7 @@ from nf_metro.layout.geometry import (
     section_lane_sign,
     segment_intersects_bbox,
 )
+from nf_metro.layout.lane_plan import observing
 from nf_metro.layout.pass_metrics import icon_half_height_approx, station_radius_approx
 from nf_metro.layout.phase_state import GuardSpec
 from nf_metro.layout.phases._common import (
@@ -6222,6 +6223,7 @@ def _ensure_pass_c_inputs(
     return offsets, routes
 
 
+@observing()
 def run_validate_guards(
     graph: MetroGraph,
     phase: str,
@@ -6241,6 +6243,9 @@ def run_validate_guards(
     followed by the final-only specs, reproducing the historical call order.
     A spec needing ``routes`` is skipped when routing failed.  Returns the
     shared ``(offsets, routes)``.
+
+    Runs under :func:`~nf_metro.layout.lane_plan.observing`: offsets runs read
+    the lane plan without sealing the layout's.
     """
     offsets, routes = _ensure_pass_c_inputs(
         graph,
@@ -6286,6 +6291,11 @@ _RENDER_LAYOUT_INVARIANT_SPECS: tuple[GuardSpec, ...] = tuple(
 )
 
 
+# The Tier-A guard whose violation aborts the default render instead of warning:
+# a route reaching its own section's port across that section is no drawing.
+_RENDER_ABORTING_GUARD = "_guard_inter_section_route_clears_own_section_interior"
+
+
 def deferred_final_route_guard_specs() -> tuple[GuardSpec, ...]:
     """Return final-checkpoint guards that require settled route geometry."""
     return tuple(spec for spec in GUARD_REGISTRY if "routes" in spec.needs)
@@ -6328,12 +6338,14 @@ def assert_render_layout_invariants(
     settlement, ``include_deferred_final`` also runs every route-dependent
     registry guard. Each guard raises ``PhaseInvariantError`` on its first
     violation rather than returning a list, so each runs in isolation and its
-    message is captured; the aggregate is one message. Without *strict* the
-    aggregate is a :class:`UserWarning`; with *strict* it raises
-    :class:`LayoutInvariantError`.
+    message is captured; the aggregate is one message. It raises
+    :class:`LayoutInvariantError` under *strict* or where
+    ``_RENDER_ABORTING_GUARD`` fired on a non-permissive graph; else it is a
+    :class:`UserWarning`.
     """
     available: dict[str, Any] = {"offsets": offsets, "routes": routes}
     messages: list[str] = []
+    aborting = False
     for spec in render_layout_invariant_specs(
         include_deferred_final=include_deferred_final
     ):
@@ -6341,6 +6353,7 @@ def assert_render_layout_invariants(
             spec.fn(graph, "render", **{name: available[name] for name in spec.needs})
         except PhaseInvariantError as exc:
             messages.append(f"[{spec.name}] {exc}")
+            aborting = aborting or spec.name == _RENDER_ABORTING_GUARD
     if not messages:
         return
 
@@ -6352,7 +6365,7 @@ def assert_render_layout_invariants(
         "(or the directive combination) that produced this geometry.\n  "
         f"{detail}"
     )
-    if strict:
+    if strict or (aborting and not graph.permissive):
         raise LayoutInvariantError(msg)
     warnings.warn(msg, category=PermissiveGuardWarning, stacklevel=2)
 

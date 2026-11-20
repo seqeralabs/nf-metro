@@ -171,7 +171,7 @@ LEDGER_REROUTE_CORPUS = (
 # implementation is exercised under rotation and reflection.
 DIRECTION_CORPUS = {
     "LR": ROOT / "examples" / "rnaseq_sections.mmd",
-    "RL": ROOT / "tests" / "fixtures" / "hash_seed_determinism" / "seed_41.mmd",
+    "RL": TOPOLOGIES / "manual_rl_row_nonconsumer_bypass.mmd",
     "TB": ROOT / "tests" / "fixtures" / "tb_exit_terminal_on_carrier.mmd",
     "BT": TOPOLOGIES / "bt_perp_left_entry_right_exit.mmd",
 }

@@ -1,0 +1,53 @@
+%%metro title: Fuzz 8400002
+%%metro style: seqera
+%%metro line: l0 | Filter_Summarise | #e6194b
+%%metro line: l1 | Quant_Align | #3cb44b
+%%metro line: l2 | Sort_Vcf | #4363d8
+%%metro line: l3 | Cluster_Classify | #f58231
+%%metro line: l4 | Align_Polish | #911eb4
+%%metro grid: sec0 | 0,3
+%%metro grid: sec1 | 0,1
+%%metro grid: sec2 | 0,2
+%%metro grid: sec3 | 0,0
+
+graph LR
+    subgraph sec0 [Markdup_Index 0]
+        s0n0[DEDUP]
+        s0n1[merge]
+        s0n2[annotate_fastqc]
+        s0n3[ANNOTATE]
+        s0n0 -->|l2,l3,l4| s0n1
+        s0n1 -->|l2,l3| s0n2
+        s0n2 -->|l2,l3| s0n3
+        s0n1 -->|l4| s0n3
+    end
+    subgraph sec1 [Qc 1]
+        s1n0[assemble]
+        s1n1[normalize]
+        s1n0 -->|l0,l2,l3| s1n1
+    end
+    subgraph sec2 [Cluster_Pca_Trim 2]
+        %%metro direction: BT
+        %%metro entry: bottom | l1, l3
+        %%metro entry: left | l4
+        s2n0[QC]
+        s2n1[assemble_qc_pca]
+        s2n2[count]
+        s2n1 -->|l1,l4| s2n2
+        s2n0 -->|l3,l4| s2n1
+    end
+    subgraph sec3 [Gather 3]
+        s3n0[annotate_assemble]
+        s3n1[trim_index]
+        s3n2[POLISH_EXPORT]
+        s3n1 -->|l0,l3| s3n2
+        s3n0 -->|l3| s3n1
+    end
+    s1n1 -->|l0| s3n1
+    s1n1 -->|l1| s2n1
+    s0n3 -->|l2,l3| s1n0
+    s1n1 -->|l3| s2n0
+    s2n1 -->|l3| s3n0
+    s0n3 -->|l4| s2n0
+    s0n3 -->|l4| s3n0
+    s0n3 -->|l4| s3n1
