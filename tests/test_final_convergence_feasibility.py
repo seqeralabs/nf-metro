@@ -80,7 +80,10 @@ def test_disjoint_same_system_exit_channels_do_not_share_a_carrier() -> None:
     assert not convergences._channels_share_source_carrier(first, second)
 
 
-def test_same_direction_distinct_lines_require_the_full_lane_step() -> None:
+@pytest.mark.parametrize("pitch", (OFFSET_STEP, 3.0))
+def test_same_direction_distinct_lines_require_the_maps_lane_pitch(
+    pitch: float,
+) -> None:
     first = convergences._PlanGapChannel(
         None,
         100.0,
@@ -98,15 +101,15 @@ def test_same_direction_distinct_lines_require_the_full_lane_step() -> None:
     )
     fused = replace(
         first,
-        coordinate=first.coordinate + OFFSET_STEP - COORD_TOLERANCE,
+        coordinate=first.coordinate + pitch - COORD_TOLERANCE,
         line_ids=frozenset({"second"}),
         claimant_member_ids=frozenset({"second-member"}),
         connector_ids=frozenset({"second-connector"}),
     )
 
-    assert convergences._gap_channels_crowd(first, fused)
+    assert convergences._gap_channels_crowd(first, fused, pitch)
     assert not convergences._gap_channels_crowd(
-        first, replace(fused, coordinate=first.coordinate + OFFSET_STEP)
+        first, replace(fused, coordinate=first.coordinate + pitch), pitch
     )
 
 
@@ -276,7 +279,7 @@ def test_coupled_flank_moves_do_not_leave_order_dependent_resident_channels(
     monkeypatch.setattr(
         convergences,
         "_gap_channels_crowd",
-        lambda channel, obstacle: bool(
+        lambda channel, obstacle, pitch: bool(
             channel.claimant_member_ids & {"trigger", "third"}
         ),
     )
@@ -306,6 +309,7 @@ def test_coupled_flank_moves_do_not_leave_order_dependent_resident_channels(
             plans,
             SimpleNamespace(),
             curve_radius=8.0,
+            pitch=OFFSET_STEP,
             fixed_channels=(fixed,),
         )
         return settled[2].coordinate
@@ -556,7 +560,11 @@ def test_starved_final_settlement_does_not_publish_crowded_plan(monkeypatch) -> 
         settle_global_convergence_execution(
             execution,
             graph,
-            SimpleNamespace(curve_radius=8.0, prior_exit_turn_dispositions=None),
+            SimpleNamespace(
+                curve_radius=8.0,
+                offset_step=OFFSET_STEP,
+                prior_exit_turn_dispositions=None,
+            ),
             exit_turn_plans=(),
             member_geometry=empty_member_geometry_execution(),
             planned_system_ids=frozenset({system_id}),
