@@ -884,7 +884,7 @@ def _right_entry_cross_row_turn_requirement(
     toward the first channel the wrap runs in
     (:func:`_right_entry_cross_row_channel_y`)."""
     facts = _build_inter_facts(edge, src, tgt, ctx)
-    if facts.is_left_exit:
+    if facts.is_left_fed:
         return _SourceTurnRequirement.declined(
             "unsupported-subshape:left-exit-right-entry-step"
         )

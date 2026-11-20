@@ -93,6 +93,7 @@ from nf_metro.layout.routing.common import (
     inter_row_wrap_band,
     iter_horizontal_trunks,
     iter_vertical_segments,
+    junction_source_ports,
     lowest_section_bottom_crossing_span,
     max_grid_row_with_content,
     merge_trunk_force_cross_row,
@@ -582,6 +583,18 @@ class _InterFacts:
         )
 
     @property
+    def is_left_fed(self) -> bool:
+        """Source leaves on the LEFT: a LEFT exit, or a fan-out junction fed by
+        one, whose branches leave on their feeding exit's side."""
+        return self.is_left_exit or (
+            self.edge.source in self.graph.junction_ids
+            and any(
+                not port.is_entry and port.side is PortSide.LEFT
+                for port in junction_source_ports(self.graph, self.edge.source)
+            )
+        )
+
+    @property
     def is_serpentine_left_exit_left_entry(self) -> bool:
         """LEFT exit dropping into a LEFT entry stacked in the same column."""
         return (
@@ -786,7 +799,7 @@ def _bypass_route_kind(f: _InterFacts) -> _BypassRoute:
             return _BypassRoute.LEFT_ENTRY_FAMILY
     if f.right_entry_from_left:
         return _BypassRoute.RIGHT_ENTRY_CROSS_ROW
-    if f.left_entry_from_right and f.is_left_exit:
+    if f.left_entry_from_right and f.is_left_fed:
         return _BypassRoute.LEFT_EXIT_AROUND_BELOW
     if packed_cell_same_row_bypass(
         f.entry_side,
@@ -1379,7 +1392,7 @@ def _route_right_entry_cross_row(f: _InterFacts) -> RoutedPath | None:
     keeps the feed order on both ports and stays parallel through the descent.
     """
     edge, src, tgt, ctx, graph = f.edge, f.src, f.tgt, f.ctx, f.graph
-    if f.is_left_exit and _left_exit_right_entry_step_is_clear(
+    if f.is_left_fed and _left_exit_right_entry_step_is_clear(
         graph, edge, src, tgt, ctx
     ):
         return _route_left_exit_right_entry_step(edge, src, tgt, ctx)
@@ -2021,6 +2034,7 @@ _INTER_SECTION_CLAIMS: tuple[_Rule, ...] = (
         "bottom-exit junction right landings",
         lambda f: (
             f.edge.source in f.ctx.bottom_exit_junctions
+            and not f.is_merge_trunk
             and f.bottom_exit_junction_route is _BottomExitJunctionRoute.FAN_LANDINGS
         ),
         lambda f: _route_bottom_exit_junction_right_landings(f),
@@ -2030,6 +2044,7 @@ _INTER_SECTION_CLAIMS: tuple[_Rule, ...] = (
         "bottom-exit junction via gap",
         lambda f: (
             f.edge.source in f.ctx.bottom_exit_junctions
+            and not f.is_merge_trunk
             and f.bottom_exit_junction_route is _BottomExitJunctionRoute.VIA_GAP
         ),
         lambda f: _route_bottom_exit_junction_via_gap_leaf(f),
@@ -2039,6 +2054,7 @@ _INTER_SECTION_CLAIMS: tuple[_Rule, ...] = (
         "bottom-exit junction",
         lambda f: (
             f.edge.source in f.ctx.bottom_exit_junctions
+            and not f.is_merge_trunk
             and f.bottom_exit_junction_route is _BottomExitJunctionRoute.PLAIN
         ),
         lambda f: _route_bottom_exit_junction(f),
@@ -2156,7 +2172,8 @@ _INTER_SECTION_CLAIMS: tuple[_Rule, ...] = (
         lambda f: f.is_serpentine_left_exit_left_entry,
         lambda f: _route_left_exit_left_entry_drop(f.edge, f.src, f.tgt, f.ctx),
     ),
-    # A LEFT exit reaching a far-side LEFT entry to its left with no intervening
+    # A LEFT exit (or a junction one feeds) reaching a far-side LEFT entry to
+    # its left with no intervening
     # section to hop (adjacent or same-row columns, so ``needs_bypass`` is False
     # and the bypass family never claims it): a straight L-shape ploughs the
     # target box to reach its far-edge port.  Wrap around below into the port's
@@ -2165,7 +2182,7 @@ _INTER_SECTION_CLAIMS: tuple[_Rule, ...] = (
     _Rule(
         RouteFamilyId.LEFT_EXIT_FAR_SIDE_WRAP,
         "LEFT exit -> far-side LEFT entry wrap",
-        lambda f: f.left_entry_from_right and f.is_left_exit,
+        lambda f: f.left_entry_from_right and f.is_left_fed,
         _route_left_exit_around_below_left_entry,
     ),
     _Rule(

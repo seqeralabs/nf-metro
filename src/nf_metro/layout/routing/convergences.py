@@ -16,7 +16,6 @@ from nf_metro.layout.constants import (
     COORD_TOLERANCE_FINE,
     CURVE_RADIUS,
     EDGE_TO_BUNDLE_CLEARANCE,
-    OFFSET_STEP,
     SAME_COORD_TOLERANCE,
     graph_offset_step,
 )
@@ -3144,12 +3143,15 @@ def _plan_gap_channels(
     return tuple(channels)
 
 
-def _gap_channels_crowd(first: _PlanGapChannel, second: _PlanGapChannel) -> bool:
+def _gap_channels_crowd(
+    first: _PlanGapChannel, second: _PlanGapChannel, pitch: float
+) -> bool:
     """Whether two distinct-line legs are too close in one corridor.
 
     ``same_line=False`` is sound because the caller filters an obstacle sharing
     any of the leg's lines before asking (:func:`_settle_opposing_gap_flanks`),
-    so every pair reaching here carries distinct lines.
+    so every pair reaching here carries distinct lines.  Same-direction legs
+    crowd only below *pitch*, the lane pitch the lane plan deals the map at.
     """
     if first.line_ids & second.line_ids:
         return False
@@ -3158,7 +3160,7 @@ def _gap_channels_crowd(first: _PlanGapChannel, second: _PlanGapChannel) -> bool
             same_line=False, counter_running=True, curve_radius=CURVE_RADIUS
         )
         if first.down is not second.down
-        else OFFSET_STEP
+        else pitch
     )
     return (
         first.gap == second.gap
@@ -3219,10 +3221,11 @@ def _member_represented_convergence_lane(
     convergence_channel: _PlanGapChannel,
     member_channel: _PlanGapChannel,
     member_channels: tuple[_PlanGapChannel, ...],
+    pitch: float,
 ) -> bool:
     """Whether frozen member geometry already owns the convergence stroke."""
     return any(
-        not _gap_channels_crowd(candidate, member_channel)
+        not _gap_channels_crowd(candidate, member_channel, pitch)
         and min(
             convergence_channel.y_hi,
             member_channel.y_hi,
@@ -3256,6 +3259,7 @@ def _flank_lane_coordinate(
     graph: MetroGraph,
     lookup: GapLookupGeometry,
     curve_radius: float,
+    pitch: float,
     *,
     carries_coupled_primary: bool = False,
     jointly_feasible: Callable[[float], bool] | None = None,
@@ -3326,7 +3330,9 @@ def _flank_lane_coordinate(
                 gap_edges, channel.coordinate
             ):
                 return False
-            if any(_gap_channels_crowd(channel, obstacle) for obstacle in obstacles):
+            if any(
+                _gap_channels_crowd(channel, obstacle, pitch) for obstacle in obstacles
+            ):
                 return False
         return jointly_feasible is None or jointly_feasible(candidate)
 
@@ -3447,6 +3453,7 @@ def _settle_opposing_gap_flanks(
     plans: tuple[ConvergencePlan, ...],
     graph: MetroGraph,
     curve_radius: float,
+    pitch: float,
     exit_owned_flanks: frozenset[tuple[ConvergencePlanId, int]] = frozenset(),
     fixed_channels: tuple[_PlanGapChannel, ...] = (),
     fixed_exit_channels: frozenset[tuple[EmissionMemberId, float]] = frozenset(),
@@ -3516,7 +3523,7 @@ def _settle_opposing_gap_flanks(
                 if any(not channel.line_ids & obstacle.line_ids for channel in seated)
             )
             if not seated or not any(
-                _gap_channels_crowd(channel, obstacle)
+                _gap_channels_crowd(channel, obstacle, pitch)
                 for channel in seated
                 for obstacle in obstacles
             ):
@@ -3576,6 +3583,7 @@ def _settle_opposing_gap_flanks(
                 graph,
                 lookup,
                 curve_radius,
+                pitch,
                 carries_coupled_primary=len(coupled_flanks) > 1,
                 jointly_feasible=landing_feasible,
             )
@@ -3595,7 +3603,7 @@ def _settle_opposing_gap_flanks(
                         if channel.flank_rank == flank_rank
                     )
                     if not moved_channels or any(
-                        _gap_channels_crowd(channel, obstacle)
+                        _gap_channels_crowd(channel, obstacle, pitch)
                         for channel in moved_channels
                         for obstacle in resident
                     ):
@@ -3636,7 +3644,7 @@ def _settle_opposing_gap_flanks(
                 obstacle
                 for obstacle in resident
                 if not channel.line_ids & obstacle.line_ids
-                and _gap_channels_crowd(channel, obstacle)
+                and _gap_channels_crowd(channel, obstacle, pitch)
             )
             if not obstacles:
                 continue
@@ -3667,7 +3675,7 @@ def _settle_opposing_gap_flanks(
                     None,
                 )
                 if moved_channel is None or any(
-                    _gap_channels_crowd(moved_channel, obstacle)
+                    _gap_channels_crowd(moved_channel, obstacle, pitch)
                     for obstacle in resident
                 ):
                     continue
@@ -4191,11 +4199,12 @@ def _validate_final_convergence_feasibility(
                     )
                 continue
             if _gap_channels_crowd(
-                channel, member_channel
+                channel, member_channel, ctx.offset_step
             ) and not _member_represented_convergence_lane(
                 channel,
                 member_channel,
                 fixed_channels,
+                ctx.offset_step,
             ):
                 raise FinalConvergenceFeasibilityError(
                     f"final convergence plan {plan.id} crowds a planned "
@@ -4464,6 +4473,7 @@ def build_convergence_plan_execution(
                 system_plans,
                 graph,
                 ctx.curve_radius,
+                ctx.offset_step,
                 exit_owned_flanks,
                 _planned_member_gap_channels(
                     system_plans,
@@ -4531,6 +4541,7 @@ def _settle_convergence_geometry(
         settled,
         graph,
         ctx.curve_radius,
+        ctx.offset_step,
         _exit_owned_flanks(settled, exit_turn_plans),
         fixed_channels,
         (
