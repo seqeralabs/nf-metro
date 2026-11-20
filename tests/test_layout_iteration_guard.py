@@ -14,14 +14,14 @@ lists, each checked on its own:
 
 * ``routing`` (route planning and emission: ``layout/routing/``, the planning
   modules named by ``guard.ROUTING_MODULES``, and every render module named by
-  ``guard.RENDER_MODULES``) is the PR #2015 merge gate: before #2015 merges to
-  ``main`` it may hold only shrink-only family rows (``removed_by`` line 59) for
-  mechanisms inherited unchanged from ``main``, and line 59 empties it after the
-  merge.  Its ``manual`` section holds cases the AST cannot see; each is checked
-  only by asserting that the named function exists, so removing the function
-  makes the entry stale.  Its pins (``pinned_later_passes``,
-  ``pinned_nested_passes``) keep route passes registered while anything calls
-  them.
+  ``guard.RENDER_MODULES``) is the PR #2015 merge gate (ruling R2, stated in
+  the list's ``gate`` text): when #2015 merges to ``main`` it holds only rows
+  whose ``removed_by`` starts with ``59``, each for a mechanism inherited
+  unchanged from ``main`` and not mirrored in the compile.  Its ``manual``
+  section holds cases the AST cannot see; each is checked only by asserting
+  that the named function exists, so removing the function makes the entry
+  stale.  Its pins (``pinned_later_passes``, ``pinned_nested_passes``) keep
+  route passes registered while anything calls them.
 * ``placement`` (``engine.py``, ``phases/``, ``geometric_bypass.py`` and the other
   modules of ``guard.PLACEMENT_MODULES``) is not a #2015 gate.  It is shrink-only
   and owned by #2171, the placement programme (#323/#1745).
@@ -89,8 +89,18 @@ def _where(hit: guard.Hit) -> str:
 
 
 @pytest.fixture(scope="module")
-def live() -> tuple[guard.Registry, list[guard.Hit]]:
-    return guard.scan(guard.parse_guarded(), _pins("routing"), _pins("nested"))
+def trees() -> dict[str, ast.Module]:
+    return guard.parse_guarded()
+
+
+@pytest.fixture(scope="module")
+def funcs(trees) -> list[guard.Func]:
+    return guard.collect_functions(trees)
+
+
+@pytest.fixture(scope="module")
+def live(trees) -> tuple[guard.Registry, list[guard.Hit]]:
+    return guard.scan(trees, _pins("routing"), _pins("nested"))
 
 
 @pytest.mark.parametrize("name", LISTS)
@@ -115,8 +125,7 @@ def test_allowlist_has_no_stale_entries(live, name):
     )
 
 
-def test_manual_entries_name_existing_functions():
-    funcs = guard.collect_functions(guard.parse_guarded())
+def test_manual_entries_name_existing_functions(funcs):
     defined = {f.site for f in funcs}
     stale = [m["site"] for m in _manual() if m["site"] not in defined]
     assert not stale, (
@@ -164,9 +173,9 @@ def test_placement_allowlist_count_is_the_ceiling():
     )
 
 
-def test_every_module_has_a_role():
+def test_every_module_has_a_role(trees):
     assert guard.module_role("render/unlisted.py") is None
-    unclassified = [m for m in guard.parse_guarded() if guard.module_role(m) is None]
+    unclassified = [m for m in trees if guard.module_role(m) is None]
     assert not unclassified, (
         "add each module to guard.ROUTING_MODULES, guard.PLACEMENT_MODULES or "
         "guard.RENDER_MODULES:\n" + "\n".join(unclassified)
@@ -215,9 +224,8 @@ def test_every_routing_table_pass_is_pinned(live):
     )
 
 
-def test_pinned_passes_are_called_somewhere(live):
+def test_pinned_passes_are_called_somewhere(live, funcs):
     reg, _ = live
-    funcs = guard.collect_functions(guard.parse_guarded())
     defined = {f.name for f in funcs}
     problems = []
     for name in _pins("later") + _pins("nested"):
@@ -235,9 +243,8 @@ def test_pinned_passes_are_called_somewhere(live):
     assert not problems, "\n".join(problems)
 
 
-def test_a_sub_pass_runs_inside_one_pass(live):
+def test_a_sub_pass_runs_inside_one_pass(live, funcs):
     reg, _ = live
-    funcs = guard.collect_functions(guard.parse_guarded())
     passes = reg.postpasses | reg.nested_passes
     problems = []
     for pin in _pins("nested"):
@@ -300,9 +307,9 @@ def _with_call_before_return(
         ),
     ],
 )
-def test_an_added_render_reroute_is_an_unlisted_hit(site, callee):
-    trees = _with_call_before_return(guard.parse_guarded(), site, callee)
-    _, hits = guard.scan(trees, _pins("routing"), _pins("nested"))
+def test_an_added_render_reroute_is_an_unlisted_hit(trees, site, callee):
+    mutated = _with_call_before_return(trees, site, callee)
+    _, hits = guard.scan(mutated, _pins("routing"), _pins("nested"))
     allowed = {_key(e) for name in LISTS for e in _entries(name)}
     new = [
         (h.rule, h.site, h.callee.split("#")[0]) for h in hits if h.key not in allowed

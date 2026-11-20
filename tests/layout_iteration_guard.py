@@ -573,6 +573,19 @@ def _render_reaches(reg: Registry) -> set[str]:
     return reg.entry_passes | reg.runners | reg.solver | reg.render_runners
 
 
+def _collect_render_runners(funcs: list[Func], reg: Registry) -> set[str]:
+    scope = [f for f in funcs if _in_render(f) and not is_checker(f)]
+    runners: set[str] = set()
+    while True:
+        reaches = _render_reaches(reg) | runners
+        found = {
+            f.name for f in scope if any(_call_name(c) in reaches for c in _calls(f))
+        }
+        if found <= runners:
+            return runners
+        runners |= found
+
+
 def build_registry(
     funcs: list[Func],
     pinned_passes: Iterable[str] = (),
@@ -680,17 +693,7 @@ def build_registry(
     reg.later_passes |= reg.postpasses | reg.nested_passes
     reg.runners -= reg.later_passes
 
-    render_scope = [f for f in funcs if _in_render(f) and not is_checker(f)]
-    changed = True
-    while changed:
-        changed = False
-        for func in render_scope:
-            if func.name in reg.render_runners:
-                continue
-            if any(_call_name(c) in _render_reaches(reg) for c in _calls(func)):
-                reg.render_runners.add(func.name)
-                changed = True
-
+    reg.render_runners = _collect_render_runners(funcs, reg)
     _find_delegates(funcs, reg)
     reg.wrappers = {
         f.name
@@ -989,16 +992,20 @@ def _exclusive(
     return False
 
 
-def _non_exclusive_pair(
+def _site_order(call: ast.Call) -> tuple[int, int]:
+    return (call.lineno, call.col_offset)
+
+
+def _non_exclusive_later_sites(
     sites: list[ast.Call], paths: dict[int, Path_], returned: set[int]
-) -> ast.Call | None:
-    """The later site of the first pair of *sites* that can both run."""
-    ordered = sorted(sites, key=lambda c: (c.lineno, c.col_offset))
-    for i, first in enumerate(ordered):
-        for later in ordered[i + 1 :]:
-            if not _exclusive(first, later, paths, returned):
-                return later
-    return None
+) -> list[ast.Call]:
+    """The sites of *sites*, in source order, that can run after an earlier one."""
+    ordered = sorted(sites, key=_site_order)
+    return [
+        later
+        for i, later in enumerate(ordered)
+        if any(not _exclusive(first, later, paths, returned) for first in ordered[:i])
+    ]
 
 
 def _marker_in(name: str, markers: tuple[str, ...]) -> bool:
@@ -1118,26 +1125,28 @@ class _Scanner:
                 counted = name in table_kinds
             else:
                 counted = name in runner_kinds or name in delegate_params
-            later = _non_exclusive_pair(sites, paths, returned) if counted else None
-            if later is not None:
-                self.add("rerun", func, name, later.lineno)
+            later = (
+                _non_exclusive_later_sites(sites, paths, returned) if counted else []
+            )
+            if later:
+                self.add("rerun", func, name, later[0].lineno)
 
     def render_reroutes(self, func: Func, calls: list[ast.Call]) -> None:
         """Every site of a render function that reaches the router or the
         layout, after its first."""
         reaches = _render_reaches(self.reg)
-        sites = sorted(
-            (c for c in calls if _call_name(c) in reaches),
-            key=lambda c: (c.lineno, c.col_offset),
-        )
+        sites = sorted((c for c in calls if _call_name(c) in reaches), key=_site_order)
+        counts: dict[str | None, int] = {}
+        ordinal: dict[int, int] = {}
+        for call in sites:
+            name = _call_name(call)
+            counts[name] = counts.get(name, 0) + 1
+            ordinal[id(call)] = counts[name]
         paths = _paths(func)
         returned = _returned_calls(func)
-        ordinals: dict[str, int] = {}
-        for i, call in enumerate(sites):
-            name = _call_name(call) or ""
-            ordinals[name] = ordinals.get(name, 0) + 1
-            if any(not _exclusive(prior, call, paths, returned) for prior in sites[:i]):
-                self.add("rerun", func, f"{name}#{ordinals[name]}", call.lineno)
+        for call in _non_exclusive_later_sites(sites, paths, returned):
+            callee = f"{_call_name(call)}#{ordinal[id(call)]}"
+            self.add("rerun", func, callee, call.lineno)
 
     def later_pass_reads(self, func: Func, calls: list[ast.Call]) -> None:
         reg = self.reg
