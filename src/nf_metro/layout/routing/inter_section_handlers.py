@@ -5637,12 +5637,23 @@ def _perp_entry_l_record(
     """Complete a perpendicular-entry record from its centreline.
 
     The route leads out horizontally and turns onto the landing column at
-    ``axis_coordinate``.
+    ``axis_coordinate``.  A centreline that reaches that column with no lead-in
+    states no turn: the emitted member is one straight vertical, and its run is
+    the drop itself.
 
     The turn leg is vertical, so it takes its X shift from the offset the
     bundle builder fans it by -- the source offset while the taper lies ahead
     of it, the target offset once it is the transition leg itself.
     """
+    if len(points) < 3:
+        return _PerpEntryLGeometry(
+            points,
+            members,
+            transition_leg,
+            fan_source_offsets,
+            _SourceSeam(_leg_direction(points[0], points[-1]), None, None, None),
+            seated_in_gap,
+        )
     source_offset, target_offset = next(
         (source, target)
         for _member_edge, member_line, source, target in members
@@ -5973,10 +5984,12 @@ def _perp_entry_l_geometry(
     # between them is too short to turn through: run the lead-in to that column
     # and turn down once.  Turning down beside the column and jogging across at
     # the port would step the line sideways right on the boundary, which the
-    # intra-section departure leaves at the landing column.
+    # intra-section departure leaves at the landing column.  A source standing
+    # in that column has no lead-in to run either, and only the drop is left.
     elif abs(lx0 - final_x) <= ctx.curve_radius:
-        points = ((sx, sy), (final_x, sy), (final_x, ty))
-        transition_leg = 1
+        lead_in = () if abs(final_x - sx) <= COORD_TOLERANCE else ((final_x, sy),)
+        points = ((sx, sy), *lead_in, (final_x, ty))
+        transition_leg = len(lead_in)
     else:
         if planned:
             # A planned turn axis, and the channel leg hanging off it, are
@@ -6075,6 +6088,8 @@ def _perp_entry_turn_anchors(
     into it the same way: those whose sources (a merge's feeders) lie behind
     their own landing lanes along the corner's approach.
     """
+    if len(points) < 3:
+        return ()
     heading = segment_direction(points[-3], points[-2])
     final_x = points[-1][0]
     graph = ctx.graph
