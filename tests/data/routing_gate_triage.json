@@ -271,10 +271,6 @@
     "note": "A merge feeder is a junction fed by an exit port, which always resolves a column, so the skip arm never fires.",
     "status": "defensive"
   },
-  "context.py::if pst is None:::#1": {
-    "note": "pst = graph.stations.get(port.id): a port is always registered as a backing station, so the guard is never taken across the corpus. Kept as a station-id string read (no Edge in hand), the idiom deferred by the #1438 single-endpoint migration for a future station-id accessor; the sibling section lookup here was migrated to graph.section_for_port.",
-    "status": "needs-review"
-  },
   "context.py::if sec and sec.grid_col >= 0:::#1": {
     "note": "grid-col sentinel: a rail-mode section carries grid_col == -1 (it is placed outside the section grid), so the negative-column arm returning None is load-bearing, not dead. No corpus routing path resolves a rail section's column, so the arm is un-exercised, but a rail topology can reach it; do not fold into a non-optional accessor.",
     "status": "needs-review"
@@ -807,10 +803,6 @@
     "note": "feasible()'s same-line-carrier clause, which forbids a candidate delta that would split a carrier the bundle already shares with a claim. No fixture reaches the feasibility search with a same-line source-compatible claim in range: _align_same_line_channels seats such a member on its claim before the bundle allocation runs. Reachable, wants a fixture.",
     "status": "needs-review"
   },
-  "member_geometry.py::if key in ctx.skip_edges:::#1": {
-    "note": "Subsumed by the convergence-edge check two lines above. Instrumenting all 348 fixtures: ctx.skip_edges holds exactly one merge-junction->entry-port hop, it is always present in scaffold.edge_order, and it is always also a convergence member edge, so the loop continues at the convergence arm and never tests skip_edges (0 of 141 fixtures). Proposed simplification: drop the two lines. Not applied here -- deletion is a deliberate separate pass, and a skip hop that is not convergence-owned is not ruled out by contract.",
-    "status": "candidate-dead"
-  },
   "member_geometry.py::if len(system_ids) != 1:::#1": {
     "note": "A complete same-destination bundle is resolved through one canonical route system. Mixed-system entries cannot be settled atomically and are defensively skipped.",
     "status": "defensive"
@@ -896,10 +888,6 @@
     "status": "defensive"
   },
   "normalize.py::if (::#10": {
-    "note": "Fan-descent re-seating declines when any member's channel boundary is route-system-owned and the group is not already on adjacent tracks. Reaching this gate with an owned channel means the gate above it let the group through on `settle_frozen_arcs and tight`, since a route-system boundary is one of the ways `_planner_owns_channel` answers true, so `tight` is already true here and this arm's `not tight` cannot hold. Instrumented across the whole corpus under four option settings: 122,516 evaluations of the gate, zero fires, and still zero when the condition is widened to `_planner_owns_channel` itself. No construction reaches the arm.",
-    "status": "candidate-dead"
-  },
-  "normalize.py::if (::#11": {
     "note": "A secondary lane declines to move when it faces no pinned obstacle but the obstacle it would step around already holds a fixed segment, so stepping cannot separate them. Every corpus crowding either pins its obstacle or leaves the obstacle's segments free, so the skip has no fixture; it needs a topology where a non-primary lane meets a fixed-segment obstacle.",
     "status": "needs-review"
   },
