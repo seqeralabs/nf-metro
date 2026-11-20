@@ -433,7 +433,6 @@ def _build_routing_context(
     all_x = [s.x for s in graph.stations.values()]
     fold_x = max(all_x) if all_x else 0
 
-    # Junctions fed by TOP/BOTTOM exit ports
     bottom_exit_junction_ports: dict[str, str] = {}
     for divergence_id, exit_port_id in divergence_exit_ports.items():
         if graph.ports[exit_port_id].side in (PortSide.TOP, PortSide.BOTTOM):

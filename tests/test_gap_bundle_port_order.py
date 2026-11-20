@@ -131,7 +131,7 @@ def _pairs(
         slots = _coincident_trunk_slots(
             [_trunk("a", "sa", PORT, travel), _trunk("b", "sb", PORT, travel)]
         )
-        return _band_port_constraints(slots, ctx)
+        return _band_port_constraints(slots, ctx, [])
     down = travel is Direction.D
     return _gap_pairs(
         graph,
@@ -384,7 +384,7 @@ def test_a_line_without_a_port_offset_decides_no_order(side, direction, travel):
         slots = _coincident_trunk_slots(
             [_trunk("a", "sa", PORT, travel), _trunk("b", "sb", PORT, travel)]
         )
-        assert _band_port_constraints(slots, ctx) == []
+        assert _band_port_constraints(slots, ctx, []) == []
     else:
         reach = [{PORT: {"sa"}}, {PORT: {"sb"}}]
         assert _port_lane_order_pairs(["a", "b"], reach, travel, ctx) == []

@@ -1492,7 +1492,7 @@ def classify_merge_port_feeders(
     return horizontal, below, above
 
 
-def _feeding_exits(graph, port_id: str, line_id: str) -> set[str]:  # noqa: ANN001
+def _feeding_exits(graph: MetroGraph, port_id: str, line_id: str) -> set[str]:
     """The exit ports *line_id* reaches *port_id* from, through junctions."""
     found: set[str] = set()
     seen: set[str] = set()
@@ -1918,14 +1918,14 @@ def _entry_order_reference(
 
 
 def _leaves_the_row(
-    graph,  # noqa: ANN001 - MetroGraph (avoid import cycle)
+    graph: MetroGraph,
     reference_id: str,
     exit_port_id: str,
     line_id: str,
 ) -> bool:
     """Whether *line_id* reaches a station off *reference_id*'s lane-axis
     coordinate inside the exit's section on its way to *exit_port_id*."""
-    section_id = graph.stations[exit_port_id].section_id
+    section_id = graph.ports[exit_port_id].section_id
     lateral = "y" if lanes_run_along_y(graph.sections[section_id].direction) else "x"
     level = getattr(graph.stations[reference_id], lateral)
     seen = {reference_id}
@@ -1949,7 +1949,7 @@ def _leaves_the_row(
 
 
 def _reversals_all_leave_the_row(
-    graph,  # noqa: ANN001 - MetroGraph (avoid import cycle)
+    graph: MetroGraph,
     reference_id: str,
     exit_port_id: str,
     entry_order: tuple[str, ...],

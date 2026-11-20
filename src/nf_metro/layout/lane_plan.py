@@ -1080,6 +1080,14 @@ class _Tracks:
         by_lane = sorted(lines, key=lambda lid: (lanes[lid], lid))
         return tuple(by_lane if self.senses[entry_id] > 0 else reversed(by_lane))
 
+    def _feeders(self, entry_id: str) -> dict[str, list[str]]:
+        """Each node feeding *entry_id*, with the lines it feeds there."""
+        feeding: dict[str, list[str]] = {}
+        for lid in self.graph.station_lines(entry_id):
+            for node, _via in self.builder.upstream_sources(entry_id, lid):
+                feeding.setdefault(node, []).append(lid)
+        return feeding
+
     def _record_interleaves(self, entry_id: str) -> None:
         """A line whose lane at *entry_id* lies between the lanes of a
         feeding exit's bundle that does not carry it crosses that bundle."""
@@ -1087,15 +1095,11 @@ class _Tracks:
         lines = graph.station_lines(entry_id)
         if any((entry_id, lid) not in self.lanes for lid in lines):
             return
-        feeding: dict[str, set[str]] = {}
-        for lid in lines:
-            for node, _via in self.builder.upstream_sources(entry_id, lid):
-                feeding.setdefault(node, set()).add(lid)
-        for node, carried in sorted(feeding.items()):
+        for node, carried in sorted(self._feeders(entry_id).items()):
             held = sorted(self.lanes[(entry_id, lid)] for lid in carried)
             if node not in graph.ports or len(held) < 2:
                 continue
-            for lid in sorted(set(lines) - carried):
+            for lid in sorted(set(lines).difference(carried)):
                 if held[0] < self.lanes[(entry_id, lid)] < held[-1]:
                     self.forced.append(
                         ForcedCrossing(
@@ -1136,12 +1140,8 @@ class _Tracks:
         """Each feeding exit's bundle of *entry_id*'s lines, two or more, in
         its order read up the entry's lane index."""
         graph, builder = self.graph, self.builder
-        feeding: dict[str, list[str]] = {}
-        for lid in graph.station_lines(entry_id):
-            for node, _via in builder.upstream_sources(entry_id, lid):
-                feeding.setdefault(node, []).append(lid)
         bundles = []
-        for node, carried in sorted(feeding.items()):
+        for node, carried in sorted(self._feeders(entry_id).items()):
             held = builder.order_of(node) if node in graph.ports else None
             if len(carried) < 2 or held is None or held.lines is None:
                 continue
@@ -1164,10 +1164,7 @@ class _Tracks:
                 pins[lid] = min(found)
         if not pins:
             return pins
-        feeding: dict[str, list[str]] = {}
-        for lid in graph.station_lines(entry_id):
-            for node, _via in builder.upstream_sources(entry_id, lid):
-                feeding.setdefault(node, []).append(lid)
+        feeding = self._feeders(entry_id)
         for lid in sorted(pins):
             bundles = [
                 (node, carried)
@@ -3113,16 +3110,14 @@ def lane_plan_of(graph: MetroGraph) -> LanePlan:
     """The layout's sealed record; else, sealing it at the first run at or
     after 5.1 outside :func:`observing`, the record the current placement
     plans."""
-    if graph._lane_plan is not None:
-        return graph._lane_plan
+    plan = recorded_lane_plan(graph)
+    if plan is not None:
+        return plan
+    plan = build_lane_plan(graph)
     observed = _OBSERVED.get()
     if observed is not None:
-        held = observed.get(id(graph))
-        if held is None or held[0] is not graph:
-            held = observed[id(graph)] = (graph, build_lane_plan(graph))
-        return held[1]
-    plan = build_lane_plan(graph)
-    if JUNCTIONS_POSITIONED in graph._stages_completed:
+        observed[id(graph)] = (graph, plan)
+    elif JUNCTIONS_POSITIONED in graph._stages_completed:
         graph._lane_plan = plan
     return plan
 

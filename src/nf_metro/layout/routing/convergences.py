@@ -571,21 +571,17 @@ def _landing_from_trial(
     if is_trunk:
         assert run is not None
         join_point = (run.xa, run.y)
-    elif run is not None:
-        from nf_metro.layout.routing.normalize import _land_feeder_on_run
-
+    else:
         key = (edge.source, edge.target, edge.line_id)
-        if key in ctx.merge.branch_edges:
+        if run is not None and key in ctx.merge.branch_edges:
+            from nf_metro.layout.routing.normalize import _land_feeder_on_run
+
             exit_turn_geometry = _exit_turn_geometry(route)
             _land_feeder_on_run(route, run, ctx)
             if exit_turn_geometry != _exit_turn_geometry(route):
                 raise ConvergenceOwnershipConflict(
                     "convergence landing conflicts with an upstream exit turn"
                 )
-        _bake_route(route, ctx)
-        join_point = _trunk_landing_point(route.points, trunk_points, ctx.curve_radius)
-        _connect_route_endpoint(route, join_point)
-    else:
         _bake_route(route, ctx)
         join_point = _trunk_landing_point(route.points, trunk_points, ctx.curve_radius)
         _connect_route_endpoint(route, join_point)

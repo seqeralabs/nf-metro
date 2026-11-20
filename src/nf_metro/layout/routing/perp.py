@@ -65,9 +65,8 @@ def _lane_stacked_perp_entry(graph: MetroGraph, port_id: str) -> bool:
 def _planned_entry_crossing(
     ctx: _RoutingCtx, entry_port_id: str, line_id: str, port_x: float
 ) -> float:
-    """Where the lane plan crosses *line_id* through a lane-stacked TOP or
-    BOTTOM entry: its offset read along the right-hand normal of the entry's
-    travel."""
+    """Where the lane plan crosses *line_id* through a TOP or BOTTOM entry:
+    its offset read along the right-hand normal of the entry's travel."""
     side = ctx.graph.ports[entry_port_id].side
     sign = lateral_order_sign(ENTRY_SIDE_DIRECTION[side])
     return port_x + sign * _get_offset(ctx, entry_port_id, line_id)

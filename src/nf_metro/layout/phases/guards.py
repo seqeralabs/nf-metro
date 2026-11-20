@@ -6338,10 +6338,10 @@ def assert_render_layout_invariants(
     settlement, ``include_deferred_final`` also runs every route-dependent
     registry guard. Each guard raises ``PhaseInvariantError`` on its first
     violation rather than returning a list, so each runs in isolation and its
-    message is captured; the aggregate is one message. Without *strict* the
-    aggregate is a :class:`UserWarning`, unless
-    ``_RENDER_ABORTING_GUARD`` fired on a non-permissive graph; otherwise it
-    raises :class:`LayoutInvariantError`.
+    message is captured; the aggregate is one message. It raises
+    :class:`LayoutInvariantError` under *strict* or where
+    ``_RENDER_ABORTING_GUARD`` fired on a non-permissive graph; else it is a
+    :class:`UserWarning`.
     """
     available: dict[str, Any] = {"offsets": offsets, "routes": routes}
     messages: list[str] = []

@@ -1050,8 +1050,7 @@ def _seat_beside_counter_runner(
             if other.down is not down
             and any(
                 abs(other.x - c.x) < BUNDLE_TO_BUNDLE_CLEARANCE - COORD_TOLERANCE_FINE
-                and min(other.y_hi, c.y_hi) - max(other.y_lo, c.y_lo)
-                > MIN_CORRIDOR_Y_OVERLAP
+                and spans_share_corridor(other.y_lo, other.y_hi, c.y_lo, c.y_hi)
                 for c in chans
             )
         ),
@@ -4029,8 +4028,7 @@ def _materialize_trunk_slots(
         if t.route.trunk_slot is not None
         and planner_owns_segment_or_boundary(t.route, t.idx)
     ]
-    declared = {(id(t.route), t.idx) for t in trunks}
-    trunks += [t for t in anchors if (id(t.route), t.idx) not in declared]
+    trunks += anchors
     held = frozenset((id(t.route), t.idx) for t in anchors)
     fixed_route_ids = fixed_route_ids | {id(t.route) for t in anchors}
     groups = _group_channel_trunks(trunks, step) if len(trunks) >= 2 else []
@@ -4559,12 +4557,11 @@ def _held_port_constraints(
     band: list[_HTrunk], slots: list[list[_HTrunk]], ctx: _RoutingCtx | None
 ) -> list[tuple[int, int]]:
     """The entry-port slot constraints *band*'s plan honours, else ``[]``."""
-    recorded = _recorded_band_pairs(slots, ctx)
-    constraints = _band_port_constraints(slots, ctx, recorded)
+    constraints = _band_port_constraints(slots, ctx, [])
     if not constraints:
         return []
     span_of: _SpanOf = {id(sg): _slot_span(sg) for sg in slots}
-    return _ranked_band_order(band, slots, span_of, constraints, recorded)[1]
+    return _ranked_band_order(band, slots, span_of, constraints, [])[1]
 
 
 def _honours_port_order(
@@ -4580,7 +4577,7 @@ def _honours_port_order(
 def _band_port_constraints(
     slots: list[list[_HTrunk]],
     ctx: _RoutingCtx | None,
-    recorded: list[tuple[int, int]] | None = None,
+    recorded: list[tuple[int, int]],
 ) -> list[tuple[int, int]]:
     """Slot pairs ``(a, b)`` an entry port's lane order puts *a* above *b*
     (:func:`_port_lane_order_pairs` along the band's travel), with every
@@ -4595,8 +4592,6 @@ def _band_port_constraints(
         travel,
         ctx,
     )
-    if recorded is None:
-        recorded = _recorded_band_pairs(slots, ctx)
     held = {frozenset(pair) for pair in recorded}
     return [pair for pair in pairs if frozenset(pair) not in held] + recorded
 
@@ -4604,7 +4599,7 @@ def _band_port_constraints(
 def _recorded_band_pairs(
     slots: list[list[_HTrunk]],
     ctx: _RoutingCtx | None,
-    held: frozenset[tuple[int, int]] = frozenset(),
+    held: frozenset[tuple[int, int]],
 ) -> list[tuple[int, int]]:
     """Slot pairs ``(a, b)``, ``a`` above ``b``, the plan nests at a corner an
     anchor in *held* turns at: same-way legs leaving or entering one node, one
