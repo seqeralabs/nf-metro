@@ -31,7 +31,7 @@ from nf_metro.layout.routing.normalize import (
     _slot_entry_reach,
     _VChannel,
 )
-from nf_metro.parser.model import Edge, MetroGraph, Port, PortSide, Section
+from nf_metro.parser.model import Edge, MetroGraph, Port, PortSide, Section, Station
 from nf_metro.render.svg import build_observed_render_plan
 
 PORT = "dst__entry_0"
@@ -46,6 +46,8 @@ def _graph(*edges: tuple[str, str, str], side: PortSide, direction: str) -> Metr
     graph.add_port(Port(id=PORT, section_id="dst", side=side))
     for source, target, line in edges:
         graph.add_edge(Edge(source, target, line))
+        for node in (source, target):
+            graph.stations.setdefault(node, Station(id=node, label=node))
     return graph
 
 
@@ -333,7 +335,8 @@ def _drawn_vertical_runs(plan) -> list[tuple[str, float, float, float, bool]]:
 def test_lines_rising_together_into_a_bt_bottom_entry_hold_its_lane_order():
     """m1 and m2 both rise into Zone 2's BOTTOM entry, which they enter
     travelling up, so every stretch where they rise side by side carries them
-    in the order the port does."""
+    in the order the port does.  m2's two feeders meet at a merge seated on the
+    port, so each line's port lane is read where it leaves the port inward."""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         graph = prepare_graph(BT_BOTTOM_ENTRY_MAP)
@@ -345,9 +348,9 @@ def test_lines_rising_together_into_a_bt_bottom_entry_hold_its_lane_order():
         if p.section_id == "z2" and p.is_entry and p.side is PortSide.BOTTOM
     )
     port_x = {
-        route.line_id: polyline[-1][0]
+        route.line_id: polyline[0][0]
         for route, polyline in zip(plan.routes, plan.route_polylines)
-        if route.edge.target == port
+        if route.edge.source == port
     }
     assert set(port_x) == {"m1", "m2"}
     port_m1_left = port_x["m1"] < port_x["m2"]

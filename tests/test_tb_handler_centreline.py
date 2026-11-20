@@ -162,17 +162,20 @@ def test_perp_entry_l_corner_clears_floor_when_fanned(stem: str) -> None:
 
     The inside-of-turn line anchors at ``CURVE_RADIUS`` and the rest fan
     outward.  A corner sized from the raw port centre instead pinches the inside
-    line below the floor (to a sub-floor kink).
+    line below the floor (to a sub-floor kink).  The arm's own ends are fanned
+    over the offsets the layout plans everywhere else, which the routing
+    context reads at every junction.
     """
     path = _find_fixture(stem)
     graph = parse_metro_mermaid(path.read_text())
     compute_layout(graph)
     groups = _multi_line_arms(graph, _perp_arms)
     assert groups, f"{stem}: expected a multi-line perp-entry arm"
+    planned = compute_station_offsets(graph)
     for (source, target), edges in groups.items():
         line_ids = list(dict.fromkeys(e.line_id for e in edges))
         n = len(line_ids)
-        offsets: dict[tuple[str, str], float] = {}
+        offsets = dict(planned)
         for j, line_id in enumerate(line_ids):
             d = (j - (n - 1) / 2) * _FAN_STEP
             offsets[(source, line_id)] = d

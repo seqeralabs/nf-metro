@@ -382,25 +382,10 @@ def test_stable_generated_inputs_have_no_plan_owned_fused_pair(path: Path) -> No
     )
 
 
-def test_novel_plan_owned_corridor_is_settled_before_freeze(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The gallery reproducer needs pre-freeze planning to remain renderable."""
+def test_novel_plan_owned_corridor_is_settled_before_freeze() -> None:
+    """The gallery reproducer's distinct co-travelling trunks are settled one
+    lane step apart before the freeze, so none is drawn fused."""
     path = EXAMPLE_TOPOLOGIES / "plan_owned_distinct_lane_separation.mmd"
-    monkeypatch.setattr(
-        convergences,
-        "_separate_distinct_cotravelling_trunks",
-        lambda plans, graph, member_runs: plans,
-    )
-    graph, routes, offsets = _route(path)
-    violations = check_no_fused_cotravelling_lines(graph, routes, offsets)
-    assert any(
-        {item.first_line, item.second_line} == {"primary", "secondary"}
-        and item.separation == pytest.approx(0.0)
-        for item in violations
-    )
-
-    monkeypatch.undo()
     graph, routes, offsets = _route(path)
     assert not check_no_fused_cotravelling_lines(graph, routes, offsets)
     assert _pair_separations(routes, offsets)[("primary", "secondary", "Y")] == (

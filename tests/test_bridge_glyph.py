@@ -15,6 +15,7 @@ interchange or a line's approach to a station join.  These tests pin:
   ``main``), while animation motion paths flow over it unchanged.
 """
 
+import math
 from collections.abc import Callable
 from pathlib import Path
 
@@ -37,6 +38,7 @@ from nf_metro.render.bridges import (
     _segment_intersection,
     compute_bridges,
 )
+from nf_metro.render.constants import BRIDGE_JOIN_TOLERANCE
 from nf_metro.render.path_geometry import materialize_source_turnout_paths
 from nf_metro.render.svg import (
     _render_edges,
@@ -683,7 +685,8 @@ def test_issue1322_forked_arms_recross_far_from_fork_is_bridged():
     """issue #1322: two l1 arms fork at a junction and re-cross perpendicular
     ~400px away, between Branch B and Feeder L1.  A third line (l2) corners
     through the same point, making the crossing cluster non-bipartite.  A
-    bridge must still fire on the l1 crossover: the shared fork explains a
+    bridge must still fire on the l1 crossover, its gap reaching past the
+    crossover on both sides even where it also spans l2: the shared fork explains a
     meeting only at the junction, not a re-cross in open space, and the
     distinct-colour l2 corner reads apart by colour so must not veto it."""
     path = Path(__file__).parent / "fixtures" / "target_entry_runway_bypass.mmd"
@@ -734,10 +737,12 @@ def test_issue1322_forked_arms_recross_far_from_fork_is_bridged():
     ]
     assert len(crossings) == 1
     cross_x, cross_y = crossings[0]
-    assert cross_x == pytest.approx(1432, abs=1)
+    fork = graph.stations[fork_source]
+    assert math.dist((cross_x, cross_y), (fork.x, fork.y)) > BRIDGE_JOIN_TOLERANCE
     assert any(
-        (bk.cut_a[0] + bk.cut_b[0]) / 2 == pytest.approx(cross_x, abs=1)
-        and (bk.cut_a[1] + bk.cut_b[1]) / 2 == pytest.approx(cross_y, abs=1)
+        min(bk.cut_a[0], bk.cut_b[0]) <= cross_x - BRIDGE_GAP_HALF
+        and max(bk.cut_a[0], bk.cut_b[0]) >= cross_x + BRIDGE_GAP_HALF
+        and bk.cut_a[1] == pytest.approx(cross_y, abs=1)
         for bk in l1_breaks
     ), "expected an l1 crossover bridge at the Branch B / Feeder L1 crossroads"
 

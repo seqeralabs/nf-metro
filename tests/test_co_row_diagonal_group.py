@@ -41,52 +41,15 @@ SHARED_DIAGONAL_BT = (
     / "co_column_feeders_shared_diagonal_bt.mmd"
 )
 
-# An entry-port feeder and a bypass-helper feeder of one station leave one row
-# in opposite lane order to the one they arrive in, so they cross exactly once
-# whatever their windows.
-SINGLE_FORCED_CROSSING = """\
-%%metro title: Co-row feeders with one forced crossing
-%%metro line: l0 | Polish_Pca | #e6194b
-%%metro line: l1 | Normalize | #3cb44b
-%%metro line: l2 | Annotate | #4363d8
-%%metro line: l3 | Qc | #f58231
-%%metro line: l4 | Gather_Call | #911eb4
-
-graph LR
-    subgraph sec0 [Dedup_Vcf_Sort 0]
-        %%metro exit: right | l0, l1, l2, l3, l4
-        s0n0[dedup_fastqc]
-        s0n1[align_normalize_assemble]
-        s0n0 -->|l0,l1,l3| s0n1
-    end
-    subgraph sec1 [Summarise_Index_Filter 1]
-        %%metro exit: top | l0, l1, l2, l3, l4
-        s1n0[assemble_cluster_count]
-        s1n1[BAM]
-        s1n2[dedup_index]
-        s1n0 -->|l0| s1n2
-        s1n0 -->|l1,l3,l4| s1n1
-        s1n1 -->|l1,l3,l4| s1n2
-    end
-    subgraph sec2 [Summarise_Index 2]
-        s2n0[markdup_index]
-        s2n1[gather]
-        s2n2[count_cluster]
-        s2n3[vcf_markdup]
-        s2n4[classify]
-        s2n0 -->|l0,l3,l4| s2n1
-        s2n1 -->|l0| s2n2
-        s2n0 -->|l2| s2n3
-        s2n3 -->|l2,l3| s2n4
-        s2n1 -->|l3| s2n3
-    end
-    s0n1 -->|l0,l1,l3,l4| s1n0
-    s1n2 -->|l0,l2,l3,l4| s2n0
-    s1n2 -->|l0| s2n4
-    s1n0 -->|l1| s2n0
-    s0n1 -->|l2| s1n2
-    s1n0 -->|l3| s2n4
-"""
+# Co-row feeders whose own windows never cross twice, while a shared window would
+# move them, keep their straights, keep them apart and meet no other diagonal:
+# only the untangling test declines the group.
+NEVER_CROSS_TWICE = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "regressions"
+    / "departure_order_fork_two_feeders.mmd",
+)
 
 
 def _render(text: str, source_dir: Path) -> tuple[RenderPlan, str]:
@@ -173,18 +136,13 @@ def test_co_row_feeders_turn_together() -> None:
     assert overlap >= min(span[1] - span[0] for span in (first_span, second_span)) / 2
 
 
-@pytest.mark.parametrize(
-    ("text", "source_dir"),
-    [
-        (SINGLE_FORCED_CROSSING, TOPOLOGIES),
-    ],
-    ids=["single_forced_crossing"],
-)
+@pytest.mark.parametrize("path", NEVER_CROSS_TWICE, ids=lambda path: path.stem)
 def test_feeders_that_never_cross_twice_render_unchanged(
-    monkeypatch: pytest.MonkeyPatch, text: str, source_dir: Path
+    monkeypatch: pytest.MonkeyPatch, path: Path
 ) -> None:
-    assert _render(text, source_dir)[1] == _render_without_groups(
-        monkeypatch, text, source_dir
+    text = path.read_text()
+    assert _render(text, path.parent)[1] == _render_without_groups(
+        monkeypatch, text, path.parent
     )
 
 

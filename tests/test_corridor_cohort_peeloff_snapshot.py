@@ -569,9 +569,10 @@ def test_recipe_named_copies_reach_the_compile_where_they_stand(
 def test_free_confluence_descent_reads_the_freeze_ownership(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``l2`` reaches ``sec2``'s left entry on a descent at x 472 that the
-    freeze will own, so the merge-fed confluence alignment the snapshot
-    replays leaves it there, as it does on the live routes."""
+    """``l2`` reaches ``sec2``'s left entry on a descent in the gap slot the
+    lane plan gives it, which the freeze will own, so the merge-fed confluence
+    alignment the snapshot replays leaves it there, as it does on the live
+    (drawn) route."""
     edge_key = ("__junction_5", "sec2__entry_left_3", "l2")
     descents: list[tuple[float, float]] = []
     compile_plan = member_geometry.compile_corridor_cohort_plan
@@ -587,7 +588,19 @@ def test_free_confluence_descent_reads_the_freeze_ownership(
         return compile_plan(ledger, targets, **kwargs)
 
     monkeypatch.setattr(member_geometry, "compile_corridor_cohort_plan", record)
-    _render(ROOT / "tests/fixtures/regressions/cohort_reverse_frame_seating.mmd")
+    path = ROOT / "tests/fixtures/regressions/cohort_reverse_frame_seating.mmd"
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+        plan = render_graph_result(
+            graph, resolve_theme(None, graph, "light"), RenderConfig()
+        ).plan
+    [drawn] = [
+        polyline
+        for route, polyline in zip(plan.routes, plan.route_polylines, strict=True)
+        if (route.edge.source, route.edge.target, route.line_id) == edge_key
+    ]
+    assert drawn[3][0] == pytest.approx(drawn[4][0])
 
     assert descents
-    assert set(descents) == {(472.0, 472.0)}
+    assert set(descents) == {(drawn[3][0], drawn[4][0])}
