@@ -1,0 +1,66 @@
+%%metro title: Fuzz 8404544
+%%metro style: nfcore
+%%metro line: l0 | Filter | #e6194b
+%%metro line: l1 | Assemble_Align | #3cb44b
+%%metro line: l2 | Dedup | #4363d8
+%%metro line: l3 | Call | #f58231
+%%metro grid: sec0 | 0,0
+%%metro grid: sec1 | 1,0
+%%metro grid: sec2 | 0,1
+%%metro grid: sec3 | 1,1
+%%metro grid: sec4 | 0,2
+
+graph LR
+    subgraph sec0 [Report_Bin 0]
+        s0n0[bam_assemble]
+        s0n1[qc]
+        s0n3[call_classify_call]
+        s0n0 -->|l1| s0n1
+        s0n1 -->|l3| s0n3
+    end
+    subgraph sec1 [Dedup 1]
+        %%metro direction: BT
+        %%metro entry: bottom | l0, l1, l3
+        s1n0[normalize_polish]
+        s1n1[bam]
+        s1n0 -->|l1,l3| s1n1
+    end
+    subgraph sec2 [Count_Report 2]
+        s2n0[filter_stats]
+        s2n1[annotate]
+        s2n2[summarise_polish_qc]
+        s2n3[FASTQC_QC]
+        s2n0 -->|l2| s2n2
+        s2n2 -->|l2,l3| s2n3
+        s2n1 -->|l3| s2n2
+    end
+    subgraph sec3 [Trim 3]
+        %%metro exit: top | l1
+        s3n0[cluster_dedup]
+        s3n1[trim]
+        s3n2[fastqc]
+        s3n3[export_markdup]
+        s3n4[summarise_gather_trim]
+        s3n0 -->|l1| s3n1
+        s3n1 -->|l1,l2| s3n2
+        s3n2 -->|l1| s3n4
+        s3n0 -->|l3| s3n3
+        s3n3 -->|l3| s3n4
+    end
+    subgraph sec4 [Normalize 4]
+        s4n0[normalize]
+        s4n2[stats_sort_align]
+        s4n0 -->|l1| s4n2
+    end
+    s0n3 -->|l0| s1n1
+    s0n1 -->|l1| s1n0
+    s1n1 -->|l1| s3n0
+    s3n4 -->|l1| s4n0
+    s1n1 -->|l1| s2n0
+    s2n0 -->|l1| s3n4
+    s2n3 -->|l2| s4n2
+    s2n0 -->|l2| s3n1
+    s2n2 -->|l2| s3n1
+    s0n3 -->|l3| s1n0
+    s1n1 -->|l3| s2n1
+    s2n3 -->|l3| s3n0
