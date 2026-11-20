@@ -32,12 +32,14 @@ from conftest import (
 
 from nf_metro.api import prepare_graph, resolve_theme
 from nf_metro.layout.constants import COORD_TOLERANCE, COORD_TOLERANCE_FINE
+from nf_metro.layout.phases.guards import LayoutInvariantError
 from nf_metro.layout.route_plan import build_route_plan_query
 from nf_metro.layout.route_reservations import (
     ColumnGapRegion,
     RowGapRegion,
     drawn_corridor_containment,
 )
+from nf_metro.layout.routing.exit_turns import ExitTurnInvariantError
 from nf_metro.render.svg import build_observed_render_plan
 
 _ROOT = Path(__file__).parents[1]
@@ -57,6 +59,23 @@ _CORPUS = _corpus()
 # here, but only the first three groups are meant to stay that way: an entry
 # that is a defect rather than a category carries the issue tracking it, so the
 # allow-list cannot quietly absorb a new one.
+# Maps that abort on main as well (ruling P), each pinned to the abort it raises
+# here so a change of failure is a named one.
+PINNED_ABORTS: dict[str, tuple[type[Exception], str]] = {
+    # #2094 line 7et (exit-turn planner reads the record; planned != drawn at
+    # the straight continuation).
+    "tests/fixtures/regressions/perp_entry_column_straight_drop.mmd": (
+        ExitTurnInvariantError,
+        "straight continuation changed source lane",
+    ),
+    # #2094 Part A follow-up (loop round and enter from outside): l4 crosses a
+    # section to reach sec2's BOTTOM entry, which the guard refuses loudly.
+    "tests/fixtures/regressions/perp_entry_column_opposite_side_fan.mmd": (
+        LayoutInvariantError,
+        r"_guard_no_route_through_section\] render: line 'l4'",
+    ),
+}
+
 KNOWN_NOT_RENDERING = frozenset(
     {
         # Frozen fuzz seeds: tests/test_hash_seed_determinism.py holds each one
@@ -182,6 +201,17 @@ def _out_of_band_claims(path: Path) -> dict[tuple[int, int], str] | None:
 )
 def test_realised_gap_claims_are_drawn_in_their_reserved_band(path: Path) -> None:
     rel = str(path.relative_to(_ROOT))
+    if rel in PINNED_ABORTS:
+        error, match = PINNED_ABORTS[rel]
+        with (
+            warnings.catch_warnings(),
+            curve_abort_softened(is_curve_abort_fixture(path)),
+            pytest.raises(error, match=match),
+        ):
+            warnings.simplefilter("ignore")
+            graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+            build_observed_render_plan(graph, resolve_theme(None, graph))
+        return
     violations = _out_of_band_claims(path)
     if violations is None:
         if rel in KNOWN_NOT_RENDERING:
