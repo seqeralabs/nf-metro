@@ -793,5 +793,4 @@ def test_a_rail_section_port_straddles_its_bundle(stem: str) -> None:
 
 
 def test_no_overlaid_endpoint_slot_compatibility() -> None:
-    reasons = corridor_cohort_integration.CorridorCompatibilityReason
-    assert "OVERLAID_ENDPOINT_SLOTS" not in reasons.__members__
+    assert not hasattr(corridor_cohort_integration, "CorridorCompatibilityReason")

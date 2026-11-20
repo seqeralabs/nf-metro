@@ -97,12 +97,6 @@ class CorridorCrossingDisposition(str, Enum):
     LEGAL_CROSSING = "legal-crossing"
 
 
-class CorridorCompatibilityReason(str, Enum):
-    """Why a whole corridor component keeps its legacy geometry unmigrated."""
-
-    INCOMPLETE_WITNESSES = "incomplete-witnesses"
-
-
 @dataclass(frozen=True, slots=True)
 class CorridorScalarVariable:
     variable_id: str
@@ -967,21 +961,6 @@ class CorridorCohortLanding:
 
 
 @dataclass(frozen=True, slots=True)
-class CorridorCohortCompatibility:
-    """Typed provenance for a whole unmigrated corridor group.
-
-    Names every member, scalar variable and endpoint cohort a component leaves
-    under its legacy geometry, so no compatibility disposition can stand without
-    saying which group it covers and why.
-    """
-
-    reason: CorridorCompatibilityReason
-    member_ids: tuple[str, ...]
-    scalar_variable_ids: tuple[str, ...]
-    endpoint_cohort_ids: tuple[str, ...]
-
-
-@dataclass(frozen=True, slots=True)
 class CorridorCohortComponentPlan:
     component_id: str
     endpoint_cohort_ids: tuple[str, ...]
@@ -991,7 +970,8 @@ class CorridorCohortComponentPlan:
     status: CorridorAllocationStatus
     allocations: tuple[CorridorCohortAllocation, ...] = ()
     protected_segments: tuple[tuple[str, int], ...] = ()
-    compatibility: CorridorCohortCompatibility | None = None
+    compatibility_scalar_ids: tuple[str, ...] = ()
+    """The scalar variables a COMPATIBILITY component leaves ungranted."""
 
 
 CornerInputs = tuple[tuple[int, tuple[float | None, float | None]], ...]
@@ -4059,7 +4039,6 @@ def _component_plan(
         tuple(claims[item] for item in physical[group]) for group in physical_ranks
     )
     has_movable = any(not is_fixed[item.claim_id] for item in component_claims)
-    member_ids = tuple(sorted({item.ledger.member_id for item in component_claims}))
     problems: tuple[CorridorAllocationProblem, ...] = ()
     results: tuple[CorridorAllocationResult, ...] = ()
     if has_movable or component_scalar_requests:
@@ -4117,7 +4096,7 @@ def _component_plan(
             status = CorridorAllocationStatus.FAILURE
     allocations: tuple[CorridorCohortAllocation, ...] = ()
     protected: tuple[tuple[str, int], ...] = ()
-    compatibility: CorridorCohortCompatibility | None = None
+    compatibility_scalar_ids: tuple[str, ...] = ()
     if status is CorridorAllocationStatus.PLANNED:
         by_claim = {item.claim_id: item for item in component_claims}
         allocations = tuple(
@@ -4130,12 +4109,7 @@ def _component_plan(
             sorted({(item.member_id, item.segment_rank) for item in allocations})
         )
     elif status is CorridorAllocationStatus.COMPATIBILITY:
-        compatibility = CorridorCohortCompatibility(
-            CorridorCompatibilityReason.INCOMPLETE_WITNESSES,
-            member_ids,
-            spec.scalar_variable_ids,
-            endpoint_ids,
-        )
+        compatibility_scalar_ids = spec.scalar_variable_ids
     return CorridorCohortComponentPlan(
         f"corridor-component|{rank}",
         endpoint_ids,
@@ -4145,7 +4119,7 @@ def _component_plan(
         status,
         allocations,
         protected,
-        compatibility,
+        compatibility_scalar_ids,
     )
 
 
@@ -4608,8 +4582,7 @@ def compile_corridor_cohort_plan(
     compatibility_scalar_ids = {
         variable_id
         for component in components
-        if component.compatibility is not None
-        for variable_id in component.compatibility.scalar_variable_ids
+        for variable_id in component.compatibility_scalar_ids
     }
     ungranted = (set(scalar_requests_by_id) - granted_ids) - compatibility_scalar_ids
     if len(granted_ids) != len(scalar_grants) or ungranted:

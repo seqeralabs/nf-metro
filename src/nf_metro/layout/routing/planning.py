@@ -139,8 +139,7 @@ def _compatibility_scalar_ids(cohorts: CorridorCohortPlan) -> frozenset[str]:
     return frozenset(
         variable_id
         for component in cohorts.components
-        if component.compatibility is not None
-        for variable_id in component.compatibility.scalar_variable_ids
+        for variable_id in component.compatibility_scalar_ids
     )
 
 

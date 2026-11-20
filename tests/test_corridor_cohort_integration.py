@@ -1620,11 +1620,12 @@ def test_compiler_counts_every_solve_call(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def _assert_no_silent_compatibility(plan: cci.CorridorCohortPlan) -> None:
-    """Every compatibility disposition names its whole group and migrates nothing."""
+    """Every compatibility disposition migrates nothing; only a compatibility
+    component leaves scalar variables ungranted."""
     for component in plan.components:
         if component.status is not cci.CorridorAllocationStatus.COMPATIBILITY:
+            assert component.compatibility_scalar_ids == ()
             continue
-        assert component.compatibility is not None
         assert component.allocations == ()
 
 
@@ -1700,7 +1701,7 @@ def test_component_on_segments_another_plan_owns_is_planned_without_a_solve() ->
 
     (component,) = plan.components
     assert component.status is cci.CorridorAllocationStatus.PLANNED
-    assert component.compatibility is None
+    assert component.compatibility_scalar_ids == ()
     assert component.problems == ()
     assert component.results == ()
     assert component.allocations == ()
@@ -1864,11 +1865,6 @@ def test_endpoint_cohort_split_across_components_is_typed_compatibility() -> Non
     assert len(plan.components) == 2
     for component in plan.components:
         assert component.status is cci.CorridorAllocationStatus.COMPATIBILITY
-        assert component.compatibility is not None
-        assert (
-            component.compatibility.reason
-            is cci.CorridorCompatibilityReason.INCOMPLETE_WITNESSES
-        )
         assert component.allocations == ()
     assert plan.allocations == ()
     _assert_no_silent_compatibility(plan)
@@ -1894,7 +1890,7 @@ def test_endpoint_cohort_without_claims_adds_no_component() -> None:
     (component,) = plan.components
     assert component.status is cci.CorridorAllocationStatus.PLANNED
     assert component.endpoint_cohort_ids == ()
-    assert component.compatibility is None
+    assert component.compatibility_scalar_ids == ()
 
 
 def test_member_geometry_corridor_handoff_returns_heterogeneous_grants(
