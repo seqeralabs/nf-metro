@@ -1036,7 +1036,7 @@ RECORD_USES = {
     "layout/routing/normalize.py": {"_draw_sign", "_run_port"},
     "layout/routing/exit_turns.py": {"gap_counter_runners"},
     "layout/routing/common.py": {"entry_crossing_lines"},
-    "layout/routing/invariants.py": {"entry_crossing_lines"},
+    "layout/routing/invariants.py": {"entry_crossing_lines", "recorded_crossing_pairs"},
     "layout/routing/corridor_cohort_integration.py": {"recorded_crossing_pairs"},
     "parser/model.py": {"LanePlan"},
 }
