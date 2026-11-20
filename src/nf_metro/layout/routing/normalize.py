@@ -6187,20 +6187,24 @@ def _distinct_line_order(chans: list[_VChannel], graph: MetroGraph) -> list[str]
 
 
 def _fork_line_order(order: list[str], chans: list[_VChannel]) -> list[str]:
-    """*order* with the lines leaving one station, each turning from its
-    departure lane straight into the gap, in the station's lane order carried
-    round that turn (the outside lane takes the outside column).  Read from
-    the channels' own route points, so no frame sign enters."""
+    """*order* with the lines whose every channel here leaves one station,
+    turning from its departure lane straight into the gap, in the station's
+    lane order carried round that turn (the outside lane takes the outside
+    column).  Read from the channels' own route points, so no frame sign
+    enters."""
     forks: dict[str, dict[str, float]] = defaultdict(dict)
+    owner: dict[str, str | None] = {}
     for ch in chans:
-        pts = ch.route.points
-        if ch.idx == 1 and abs(pts[0][1] - pts[1][1]) <= COORD_TOLERANCE:
+        pts, lid, src = ch.route.points, ch.route.line_id, ch.route.edge.source
+        first = ch.idx == 1 and abs(pts[0][1] - pts[1][1]) <= COORD_TOLERANCE
+        owner[lid] = src if first and owner.get(lid, src) == src else None
+        if first:
             turn = (pts[1][0] - pts[0][0]) * (pts[2][1] - pts[1][1])
-            lane = -pts[0][1] if turn > 0 else pts[0][1]
-            forks[ch.route.edge.source].setdefault(ch.route.line_id, lane)
-    for lines in forks.values():
-        slots = sorted(order.index(lid) for lid in lines)
-        for slot, lid in zip(slots, sorted(lines, key=lambda k: lines[k])):
+            forks[src].setdefault(lid, -pts[0][1] if turn > 0 else pts[0][1])
+    for src, lanes in forks.items():
+        mine = {lid: lane for lid, lane in lanes.items() if owner[lid] == src}
+        slots = sorted(order.index(lid) for lid in mine)
+        for slot, lid in zip(slots, sorted(mine, key=lambda k: mine[k])):
             order[slot] = lid
     return order
 
