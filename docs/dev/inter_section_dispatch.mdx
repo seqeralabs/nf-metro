@@ -80,6 +80,7 @@ Planned template construction resolves its frozen family through the same table'
 | 35  | `RIGHT_ENTRY_CROSS_ROW_WRAP`          | `RIGHT entry cross-row wrap`            | A source above and right of a RIGHT entry, merged or not, travels left unobstructed.  | `_route_right_entry_cross_row` uses the target-side band or around-below route.                              |
 | -   | `STANDARD_L_SHAPE`                    | _fall-through_                          | No rule matches.                                                                      | `_route_l_shape` emits the standard construction.                                                            |
 
+A fan-out junction fed by a LEFT exit counts as a LEFT exit for rules 19, 28 and 35 (`_InterFacts.is_left_fed`): its branches leave on that exit's side.
 Rules 10-12 never claim a merge's trunk edge: the convergence plan plans that edge as the merge trunk, so rules 13-14 route it.
 The promoted bottom-exit, bypass, and merge-entry leaves each have a stable family ID.
 Classification, source-turn planning, and production emission therefore all name the same geometry.

@@ -800,7 +800,7 @@ def _bypass_route_kind(f: _InterFacts) -> _BypassRoute:
             return _BypassRoute.LEFT_ENTRY_FAMILY
     if f.right_entry_from_left:
         return _BypassRoute.RIGHT_ENTRY_CROSS_ROW
-    if f.left_entry_from_right and f.is_left_exit:
+    if f.left_entry_from_right and f.is_left_fed:
         return _BypassRoute.LEFT_EXIT_AROUND_BELOW
     if packed_cell_same_row_bypass(
         f.entry_side,
@@ -2178,7 +2178,8 @@ _INTER_SECTION_CLAIMS: tuple[_Rule, ...] = (
         lambda f: f.is_serpentine_left_exit_left_entry,
         lambda f: _route_left_exit_left_entry_drop(f.edge, f.src, f.tgt, f.ctx),
     ),
-    # A LEFT exit reaching a far-side LEFT entry to its left with no intervening
+    # A LEFT exit (or a junction one feeds) reaching a far-side LEFT entry to
+    # its left with no intervening
     # section to hop (adjacent or same-row columns, so ``needs_bypass`` is False
     # and the bypass family never claims it): a straight L-shape ploughs the
     # target box to reach its far-edge port.  Wrap around below into the port's
@@ -2187,7 +2188,7 @@ _INTER_SECTION_CLAIMS: tuple[_Rule, ...] = (
     _Rule(
         RouteFamilyId.LEFT_EXIT_FAR_SIDE_WRAP,
         "LEFT exit -> far-side LEFT entry wrap",
-        lambda f: f.left_entry_from_right and f.is_left_exit,
+        lambda f: f.left_entry_from_right and f.is_left_fed,
         _route_left_exit_around_below_left_entry,
     ),
     _Rule(
