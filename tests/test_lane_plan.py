@@ -1029,6 +1029,7 @@ RECORD_USES = {
         "Approach",
         "SideRule",
         "approach_source",
+        "gap_counter_runners",
         "port_travel",
         "recorded_lane_plan",
     },
