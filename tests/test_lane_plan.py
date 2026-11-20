@@ -1012,12 +1012,13 @@ def _src_modules() -> Iterator[tuple[str, ast.Module]]:
 
 
 # Every module outside the record that imports from it, and what: the record's
-# lifetime hooks, its reader, the dispatch and invariant consumers, and the
-# graph field's type.
+# lifetime hooks, its reader, the dispatch, exit-turn and invariant consumers,
+# and the graph field's type.
 RECORD_USES = {
     "layout/engine.py": {"start_layout"},
     "layout/phases/guards.py": {"observing"},
     "layout/routing/offsets.py": {
+        "Approach",
         "approach_source",
         "lane_plan_of",
         "planned_offsets",
@@ -1033,6 +1034,7 @@ RECORD_USES = {
         "recorded_lane_plan",
     },
     "layout/routing/normalize.py": {"_draw_sign", "_run_port"},
+    "layout/routing/exit_turns.py": {"gap_counter_runners"},
     "layout/routing/common.py": {"entry_crossing_lines"},
     "layout/routing/invariants.py": {"entry_crossing_lines"},
     "layout/routing/corridor_cohort_integration.py": {"recorded_crossing_pairs"},
