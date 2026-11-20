@@ -19,7 +19,12 @@ from conftest import ROUTE_EMISSION_ABORT_FIXTURES
 from layout_metrics import compute_metrics
 
 import nf_metro.layout.routing.inter_section_handlers as inter_section_handlers
-from nf_metro.api import apply_layout_overrides, prepare_graph, resolve_theme
+from nf_metro.api import (
+    apply_layout_overrides,
+    prepare_graph,
+    render_string,
+    resolve_theme,
+)
 from nf_metro.layout.route_plan import (
     BindingKind,
     CoordinateRegime,
@@ -44,6 +49,7 @@ from nf_metro.layout.routing import (
     observe_route_edges,
     route_edges,
 )
+from nf_metro.layout.routing.invariants import CurveInvariantError
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import Edge, MetroGraph, Port, Section, Station
 from nf_metro.parser.provenance import (
@@ -65,7 +71,7 @@ from nf_metro.render.svg import build_render_plan, emit_render_plan
 ROOT = Path(__file__).parents[1]
 EXAMPLES = ROOT / "examples"
 FROZEN = ROOT / "tests" / "fixtures" / "hash_seed_determinism"
-SEED_15_ABORT = "convergence feeder opening turn is invalid"
+SEED_15_ABORT = "collinear overlay: line 'l2'"
 ROUTABLE_CORPUS = tuple(
     path
     for base in (ROOT / "examples", ROOT / "tests" / "fixtures")
@@ -723,12 +729,12 @@ def test_invalid_caller_line_order_is_not_recorded_as_typed_provenance() -> None
 
 @pytest.mark.parametrize("name", ["seed_15.mmd", "seed_72.mmd", "seed_77.mmd"])
 def test_frozen_sources_have_canonical_plan_serialisation(name: str) -> None:
-    if name == "seed_15.mmd":
-        # seed_15's convergence planning aborts (#2041).
-        with pytest.raises(ValueError, match=SEED_15_ABORT):
-            _observe(FROZEN / name)
-        return
     _graph, _routes, plan = _observe(FROZEN / name)
+    if name == "seed_15.mmd":
+        # seed_15 plans; its render aborts on two lines sharing one channel
+        # (#2041).
+        with pytest.raises(CurveInvariantError, match=SEED_15_ABORT):
+            render_string((FROZEN / name).read_text(), source_dir=str(FROZEN))
 
     encoded = serialize_route_plan(plan)
     assert encoded == serialize_route_plan(plan)
@@ -736,8 +742,8 @@ def test_frozen_sources_have_canonical_plan_serialisation(name: str) -> None:
 
 
 def test_frozen_source_plans_are_identical_across_supported_hash_seeds() -> None:
-    # seed_15 aborts in convergence planning (#2041) and is held to that abort
-    # by test_frozen_sources_have_canonical_plan_serialisation; genomeassembly
+    # seed_15's render aborts (#2041), held to that abort by
+    # test_frozen_sources_have_canonical_plan_serialisation; genomeassembly
     # carries three convergence plans through the same serialisation.
     paths = (
         *(FROZEN / name for name in ("seed_72.mmd", "seed_77.mmd")),
@@ -795,15 +801,6 @@ def test_route_emission_abort_fixture_aborts_on_its_owned_segment(
 
 def test_every_routable_corpus_connector_and_leg_has_exact_plan_coverage() -> None:
     for path in ROUTABLE_CORPUS:
-        if path == FROZEN / "seed_15.mmd":
-            # seed_15's convergence planning aborts (#2041).
-            with (
-                warnings.catch_warnings(),
-                pytest.raises(ValueError, match=SEED_15_ABORT),
-            ):
-                warnings.simplefilter("ignore")
-                _observe(path)
-            continue
         if path == FROZEN / "seed_41.mmd":
             # seed_41 aborts in its convergence plan; test_hash_seed_determinism.py
             # pins that abort with its defect classes.

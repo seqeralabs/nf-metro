@@ -354,13 +354,14 @@ def test_seed_15_preserves_its_stable_render_exception() -> None:
     path = FROZEN_FUZZ / "seed_15.mmd"
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
 
-    # seed_15 aborts in convergence planning, before the routing guards (#2041).
-    with pytest.raises(ValueError, match="convergence feeder opening turn is invalid"):
+    # seed_15's render aborts on two lines sharing one channel (#2041).
+    with pytest.raises(invariants.CurveInvariantError, match="collinear overlay"):
         build_observed_render_plan(graph, resolve_theme(None, graph))
 
 
 # seed_41 aborts in its convergence plan; test_hash_seed_determinism.py pins
-# that abort with its defect classes.
+# that abort with its defect classes. seed_15 routes, and its render aborts
+# later in the curve guard (#2041), pinned above.
 @pytest.mark.parametrize(
     "path",
     tuple(
@@ -372,13 +373,6 @@ def test_seed_15_preserves_its_stable_render_exception() -> None:
 )
 def test_stable_generated_inputs_have_no_plan_owned_fused_pair(path: Path) -> None:
     """The frozen fuzz seeds bound the live invariant's generated-input rate."""
-    if path.name == "seed_15.mmd":
-        # seed_15's convergence planning aborts (#2041).
-        with pytest.raises(
-            ValueError, match="convergence feeder opening turn is invalid"
-        ):
-            _route(path)
-        return
     graph, routes, offsets = _route(path)
     violations = check_no_fused_cotravelling_lines(graph, routes, offsets)
     plan_owned = [item for item in violations if item.plan_ids]

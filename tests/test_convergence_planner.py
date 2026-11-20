@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 import nf_metro.layout.routing.convergences as convergence_routing
-from nf_metro.api import prepare_graph
+from nf_metro.api import prepare_graph, render_string
 from nf_metro.layout.constants import CURVE_RADIUS
 from nf_metro.layout.geometry import point_to_polyline_distance
 from nf_metro.layout.port_order_plan import port_travel
@@ -47,6 +47,7 @@ from nf_metro.layout.routing.convergences import (
 )
 from nf_metro.layout.routing.corners import concentric_corner_radius_at
 from nf_metro.layout.routing.invariants import (
+    CurveInvariantError,
     check_merge_branches_meet_trunk,
     check_merge_feeders_land_on_trunk,
 )
@@ -59,7 +60,7 @@ TOPOLOGIES = ROOT / "examples" / "topologies"
 GUIDE = ROOT / "examples" / "guide"
 FROZEN = ROOT / "tests" / "fixtures" / "hash_seed_determinism"
 STAGGERED_ASSEMBLY = ROOT / "examples" / "genomeassembly_staggered.mmd"
-SEED_15_ABORT = "convergence feeder opening turn is invalid"
+SEED_15_ABORT = "collinear overlay: line 'l2'"
 
 
 def _observe(path: Path):
@@ -389,12 +390,12 @@ def test_multiple_lines_share_the_target_entry_bundle_order() -> None:
 
 @pytest.mark.parametrize("name", ("seed_15.mmd", "seed_77.mmd"))
 def test_frozen_recovery_seeds_have_complete_planned_convergences(name: str) -> None:
-    if name == "seed_15.mmd":
-        # seed_15's convergence planning aborts (#2041).
-        with pytest.raises(ValueError, match=SEED_15_ABORT):
-            _observe(FROZEN / name)
-        return
     graph, offsets, observed = _observe(FROZEN / name)
+    if name == "seed_15.mmd":
+        # seed_15's convergences plan; its render aborts on two lines sharing
+        # one channel (#2041).
+        with pytest.raises(CurveInvariantError, match=SEED_15_ABORT):
+            render_string((FROZEN / name).read_text(), source_dir=str(FROZEN))
 
     assert observed.plan.convergence_plans
     assert all(plan.owns_geometry for plan in observed.plan.convergence_plans)

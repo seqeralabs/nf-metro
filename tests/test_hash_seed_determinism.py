@@ -85,9 +85,11 @@ def test_regressions_and_representative_corpus_are_hash_seed_deterministic() -> 
 
 
 EXPECTED_DEFECT_CLASSES = {
-    # seed_15 aborts in convergence planning, before any routing guard runs
-    # (#2041), so its message names no defect class.
-    "seed_15.mmd": (),
+    # seed_15 (#2041): l1 and l2 share one channel.
+    "seed_15.mmd": (
+        "collinear distinct lines",
+        "merge fan-out branches split off one fork corner",
+    ),
     # seed_41 aborts in the convergence plan (a merge approach emitted with the
     # opposite handedness to the one planned), before any routing guard runs.
     "seed_41.mmd": (),
@@ -95,7 +97,7 @@ EXPECTED_DEFECT_CLASSES = {
 }
 
 EXPECTED_EXCEPTION_SHA256 = {
-    "seed_15.mmd": "cc5cab13f70c78921d6103905af0651a9bcc246eb404fa68343645fe7bddcb6f",
+    "seed_15.mmd": "e6b6f31b989feb709a645167e494b555aa69732f4d56b9097aa0dc69998d8c06",
     "seed_41.mmd": "3b5ca922585bb3e53e1bf999325c741eed1d4d605516069cc968e35cf865b46c",
     "seed_77.mmd": "e6ca83122dc7161a61dcc36a8fe38b92eb7010afe446ddaf907b960418a72620",
 }

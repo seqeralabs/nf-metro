@@ -30,11 +30,10 @@ SEMANTIC_VALID_LAYOUT_BROKEN = [
 ]
 
 DEFERRED_ROUTE_GUARD_FAILURES = [
-    # seed_15's routing aborts in convergence planning (#2041); validation
-    # reports the layout guard that fails before it.
+    # seed_15's render aborts on two lines sharing one channel (#2041).
     (
         "hash_seed_determinism/seed_15.mmd",
-        "exit port 's8__exit_left_8' leaves a 8.0px gap",
+        "collinear overlay",
     ),
     (
         "hash_seed_determinism/seed_77.mmd",
