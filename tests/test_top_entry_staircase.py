@@ -1,6 +1,6 @@
 """TOP-entry staircase routing: centreline-built, concentric, non-flipping.
 
-The TOP-entry staircase handler (``_route_top_entry_l_shape``) and its former
+The TOP-entry staircase handler (``_route_entry_l_shape``) and its former
 multi-line variant are folded onto the centreline builder
 (:func:`build_tapered_bundle`): the handler describes the staircase centreline
 and the builder fans every co-travelling line as a parallel offset with
