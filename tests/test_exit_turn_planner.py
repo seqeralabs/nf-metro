@@ -1955,7 +1955,7 @@ def test_cross_plan_station_lane_slots_are_checked_after_all_compaction(
         rank=len(first.source_lanes),
         member_ids=(),
         station_ids=("c__exit_right_2",),
-        planned_offset=second.source_lanes[0].planned_offset,
+        input_offset=second.source_lanes[0].input_offset,
     )
     modified_first = replace(
         first,
@@ -2781,7 +2781,7 @@ def test_custom_spacing_is_shared_by_offsets_plan_and_routes() -> None:
 
     assert plan.spacing == pytest.approx(10.0)
     assert all(
-        abs(right.planned_offset - left.planned_offset) == pytest.approx(10.0)
+        abs(right.input_offset - left.input_offset) == pytest.approx(10.0)
         for left, right in zip(plan.source_lanes, plan.source_lanes[1:])
     )
     # ``sheets`` runs straight between the two turning lanes and takes no

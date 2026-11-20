@@ -608,7 +608,7 @@ def test_every_planned_exit_turn_lane_is_the_record(path: Path) -> None:
         for lane in plan.source_lanes:
             for station_id in lane.station_ids:
                 held = drawn.offsets.get((station_id, lane.line_id), 0.0)
-                if abs(held - lane.planned_offset) > 1e-6:
+                if abs(held - lane.input_offset) > 1e-6:
                     wrong.append((station_id, lane.line_id))
     assert wrong == []
 

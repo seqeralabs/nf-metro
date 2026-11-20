@@ -1186,7 +1186,7 @@ def _exit_turn_decision(plan: ExitTurnPlan) -> tuple[object, ...]:
             item.rank,
             item.member_ids,
             item.station_ids,
-            item.planned_offset,
+            item.input_offset,
         )
         for item in plan.source_lanes
     )

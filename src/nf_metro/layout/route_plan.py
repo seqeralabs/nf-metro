@@ -1172,12 +1172,9 @@ class ExitSourceLane:
     member_ids: tuple[EmissionMemberId, ...]
     station_ids: tuple[str, ...]
     input_offset: float
-    planned_offset: float
 
     def __post_init__(self) -> None:
-        if not math.isfinite(self.input_offset) or not math.isfinite(
-            self.planned_offset
-        ):
+        if not math.isfinite(self.input_offset):
             raise ValueError("exit source-lane offsets must be finite")
 
 
@@ -3895,11 +3892,6 @@ def _validate_planned_exit_turn_resources(
         expected_span,
     ):
         raise ValueError("exit-turn plan has inconsistent provenance")
-    if any(
-        abs(lane.planned_offset - lane.input_offset) > 1e-6
-        for lane in exit_turn_plan.source_lanes
-    ):
-        raise ValueError("planned exit-turn source lanes are not the lane plan's")
     turning_assignment_ids = tuple(
         item.member_id
         for item in exit_turn_plan.assignments
@@ -3988,7 +3980,7 @@ def _validate_planned_exit_turn_resources(
         raise ValueError("exit-turn axes have inconsistent cohort membership")
     if any(
         (right.input_offset - left.input_offset)
-        * (right.planned_offset - left.planned_offset)
+        * (right.input_offset - left.input_offset)
         <= 0
         for left, right in zip(
             exit_turn_plan.source_lanes, exit_turn_plan.source_lanes[1:]
@@ -4007,9 +3999,7 @@ def _validate_planned_exit_turn_resources(
         unique_axes = tuple(sorted(unique_axes, key=lambda axis: axis.rank))
         progression = right_normal_axis_sign(turn_direction)
         spacing = exit_turn_plan.spacing
-        planned = {
-            lane.rank: lane.planned_offset for lane in exit_turn_plan.source_lanes
-        }
+        planned = {lane.rank: lane.input_offset for lane in exit_turn_plan.source_lanes}
         if any(
             abs(
                 right.coordinate
@@ -4198,7 +4188,7 @@ def _validate_exit_source_lanes(
                 owner = station_owners.setdefault(key, exit_turn_plan.id)
                 if owner != exit_turn_plan.id:
                     raise ValueError("exit-turn station lane has more than one owner")
-        elif lane.station_ids or lane.planned_offset != lane.input_offset:
+        elif lane.station_ids:
             raise ValueError("legacy exit-turn source lane cannot own offsets")
     lane_by_line = {lane.line_id: lane for lane in exit_turn_plan.source_lanes}
     return lane_by_rank, lane_by_line
@@ -4283,8 +4273,8 @@ def _validate_exit_lane_transitions(
             or transition.diagonal_run <= 0
             or transition.source_runway <= 0
             or transition.target_runway <= 0
-            or (source_owned and transition.source_lane_offset != lane.planned_offset)
-            or (target_owned and transition.target_lane_offset != lane.planned_offset)
+            or (source_owned and transition.source_lane_offset != lane.input_offset)
+            or (target_owned and transition.target_lane_offset != lane.input_offset)
         ):
             raise ValueError("exit-turn lane transition is inconsistent")
         owner = transition_owners.setdefault(transition.edge, exit_turn_plan.id)
