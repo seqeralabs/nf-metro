@@ -5,8 +5,9 @@ The offsets every routing pass reads are the record's lanes read through
 their draw accessors (:func:`nf_metro.layout.lane_plan.planned_offsets`),
 and the routing consumers take their decisions from the record: approach
 sides, far sides, perpendicular-entry crossings, exit-turn source lanes and
-the trunk-slot nest order.  Validation observes a layout and never seals its
-record, so a ``validate=True`` render draws the production render.
+the trunk-slot nest order.  Nothing reads the record before its layout
+decides it, validation included, so a ``validate=True`` render draws the
+production render.
 """
 
 from __future__ import annotations
@@ -36,7 +37,9 @@ from nf_metro.layout.geometry import (
     port_free_axis,
     station_lane_coord,
 )
-from nf_metro.layout.lane_plan import JUNCTIONS_POSITIONED, LanePlan
+from nf_metro.layout.lane_plan import LANE_PLAN_STAGE, LanePlan, LanePlanNotSealed
+from nf_metro.layout.phase_state import CANONICAL_STAGE_ORDER
+from nf_metro.layout.phases import guards as guards_module
 from nf_metro.layout.port_order_plan import ApproachKind, SideRule, port_travel
 from nf_metro.layout.route_plan import (
     ExitLaneTransitionPlacement,
@@ -52,7 +55,6 @@ from nf_metro.layout.routing.orientation import (
     DemandAxis,
     lateral_axis,
 )
-from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import LineSpread, MetroGraph
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -525,44 +527,58 @@ def test_a_validated_render_draws_the_production_render(stem: str) -> None:
     assert _md5(path, validate=True) == _md5(path, validate=False)
 
 
-def test_validation_scope_is_not_a_module_global() -> None:
-    """The observing scope lives in a context variable and is reset when
-    the guard dispatch leaves, raised or not."""
-    from contextvars import ContextVar
-
-    assert isinstance(lane_plan_module._OBSERVED, ContextVar)
-    graph = parse_metro_mermaid((ROOT / "examples" / "rnaseq_sections.mmd").read_text())
-    with pytest.raises(RuntimeError), lane_plan_module.observing():
-        assert lane_plan_module._OBSERVED.get() is not None
-        raise RuntimeError
-    assert lane_plan_module._OBSERVED.get() is None
-    del graph
+# ---- 5. no provisional records
 
 
-# ---- 5. provisional records
+def test_a_read_before_the_decision_raises() -> None:
+    """Reading lanes at any stage before the close of 6.12 raises; from the
+    decision on, every read returns the one decided record."""
+    early: list[str] = []
+    late: list[bool] = []
+    real = engine_module._snap
 
-
-def test_a_run_before_the_seal_writes_a_provisional_record() -> None:
-    """An offsets run before the junctions are positioned writes the record
-    its placement plans and stores nothing."""
-    seen: list[tuple[bool, bool]] = []
-    real = offsets_module.planned_offsets
-
-    def spy(graph: MetroGraph, plan: LanePlan, step: float) -> dict:
-        got = real(graph, plan, step)
-        if JUNCTIONS_POSITIONED not in graph._stages_completed:
-            want = real(graph, lane_plan_module.build_lane_plan(graph), step)
-            seen.append((got == want, graph._lane_plan is None))
-        return got
+    def snap(graph: MetroGraph, phase_id: str) -> None:
+        real(graph, phase_id)
+        if phase_id not in CANONICAL_STAGE_ORDER:
+            return
+        if CANONICAL_STAGE_ORDER.index(phase_id) < CANONICAL_STAGE_ORDER.index(
+            LANE_PLAN_STAGE
+        ):
+            with pytest.raises(LanePlanNotSealed):
+                offsets_module.compute_station_offsets(graph)
+            early.append(phase_id)
+        elif phase_id != LANE_PLAN_STAGE:
+            plan = graph._lane_plan
+            offsets_module.compute_station_offsets(graph)
+            late.append(plan is not None and graph._lane_plan is plan)
 
     with warnings.catch_warnings(), pytest.MonkeyPatch.context() as mp:
         warnings.simplefilter("ignore")
-        mp.setattr(offsets_module, "planned_offsets", spy)
+        mp.setattr(engine_module, "_snap", snap)
         for stem in ("rnaseq_sections", "wide_fan_out", "fold_bypass_creep_tight"):
             path = _curated(stem)
             prepare_graph(path.read_text(), source_dir=str(path.parent))
-    assert seen
-    assert all(equal and unsealed for equal, unsealed in seen)
+    assert "5.1" in early and "6.11" in early
+    assert late and all(late)
+
+
+def test_guards_reading_lanes_wait_for_the_decision() -> None:
+    """Every checkpoint guard that reads offsets or routes is first due at or
+    after the lane plan's decision, so no checkpoint routes a record nobody
+    draws."""
+    order = guards_module._PASS_C_BISECTION_ORDER
+    decided = order.index(f"after Stage {LANE_PLAN_STAGE}")
+    early = [
+        spec.name
+        for spec in guards_module.GUARD_REGISTRY
+        if spec.bisection_safe
+        and spec.needs & {"offsets", "routes"}
+        and (
+            spec.first_valid_stage is None
+            or order.index(spec.first_valid_stage) < decided
+        )
+    ]
+    assert early == []
 
 
 # ---- 6. convergence landing on a trunk corner

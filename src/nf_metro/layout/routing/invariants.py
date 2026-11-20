@@ -58,7 +58,11 @@ from nf_metro.layout.geometry import (
     lanes_run_along_y,
     point_to_polyline_distance,
 )
-from nf_metro.layout.lane_plan import entry_crossing_lines, recorded_crossing_pairs
+from nf_metro.layout.lane_plan import (
+    entry_crossed_pairs,
+    entry_crossing_lines,
+    recorded_crossing_pairs,
+)
 from nf_metro.layout.phase_state import GuardSpec
 from nf_metro.layout.route_plan import FanRouteEmitter
 from nf_metro.layout.route_topology import (
@@ -1686,7 +1690,8 @@ def check_convergence_shallow_feeder_concentric(
     lines join flat feeders (:func:`same_row_bypass_entry`): each bypass line
     must sit on the side of the flat band it arrives from, below it when it
     climbs in and above it when it comes down.  The lane plan's port orders
-    (``build_lane_plan``) assign the slot.
+    (``build_lane_plan``) assign the slot.  A pair of lines the lane plan
+    records crossing at the entry (:func:`entry_crossed_pairs`) is exempt.
     """
     from nf_metro.layout.routing.offsets import (
         _convergence_feeders,
@@ -1724,26 +1729,39 @@ def check_convergence_shallow_feeder_concentric(
         if not shallow:
             continue
         lane = {lid: offsets.get((port_id, lid), 0.0) for lid in graph.lines}
-        if bypass:
-            max_shallow = max(lane[lid] for lid in shallow)
-            min_bypass = min(lane[lid] for lid in bypass)
-            if max_shallow > min_bypass + COORD_TOLERANCE_FINE:
-                messages.append(
-                    f"convergence entry {port_id!r}: shallow feeder sits at offset "
-                    f"{max_shallow:.1f}, port-far of the climbing risers (min "
-                    f"{min_bypass:.1f}); it weaves across the turning bundle "
-                    f"instead of nesting on top"
-                )
-        if descending:
-            min_shallow = min(lane[lid] for lid in shallow)
-            max_descending = max(lane[lid] for lid in descending)
-            if max_descending > min_shallow - COORD_TOLERANCE_FINE:
-                messages.append(
-                    f"convergence entry {port_id!r}: a line coming down into the "
-                    f"port sits at offset {max_descending:.1f}, not above the "
-                    f"flat feeders (min {min_shallow:.1f}); it crosses them to "
-                    f"reach its lane"
-                )
+        crossed = entry_crossed_pairs(graph, port_id)
+        weaving = [
+            (lane[s], lane[b])
+            for s in shallow
+            for b in bypass
+            if lane[s] > lane[b] + COORD_TOLERANCE_FINE
+            and frozenset((s, b)) not in crossed
+        ]
+        if weaving:
+            max_shallow = max(s for s, _b in weaving)
+            min_bypass = min(b for _s, b in weaving)
+            messages.append(
+                f"convergence entry {port_id!r}: shallow feeder sits at offset "
+                f"{max_shallow:.1f}, port-far of the climbing risers (min "
+                f"{min_bypass:.1f}); it weaves across the turning bundle "
+                f"instead of nesting on top"
+            )
+        crossing = [
+            (lane[s], lane[d])
+            for s in shallow
+            for d in descending
+            if lane[d] > lane[s] - COORD_TOLERANCE_FINE
+            and frozenset((s, d)) not in crossed
+        ]
+        if crossing:
+            min_shallow = min(s for s, _d in crossing)
+            max_descending = max(d for _s, d in crossing)
+            messages.append(
+                f"convergence entry {port_id!r}: a line coming down into the "
+                f"port sits at offset {max_descending:.1f}, not above the "
+                f"flat feeders (min {min_shallow:.1f}); it crosses them to "
+                f"reach its lane"
+            )
     return messages
 
 
