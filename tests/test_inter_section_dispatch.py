@@ -375,6 +375,31 @@ def test_rule_selection(
     assert _selected(**overrides) == expected
 
 
+@pytest.mark.parametrize("route", tuple(H._BottomExitJunctionRoute))
+def test_a_bottom_exit_junctions_merge_trunk_routes_as_the_merge_trunk(
+    monkeypatch: pytest.MonkeyPatch, route: H._BottomExitJunctionRoute
+) -> None:
+    """One family per edge: the convergence plan plans a merge's trunk as its
+    trunk, so the trunk edge out of a bottom-exit junction is never claimed by
+    a bottom-exit junction rule, whichever shape that junction takes."""
+    monkeypatch.setattr(H, "_bottom_exit_junction_route_kind", lambda _f: route)
+    monkeypatch.setattr(
+        H, "_merge_trunk_shape", lambda _f: SimpleNamespace(around_below=False)
+    )
+    selected = _selected(
+        edge=SimpleNamespace(source="j", target="m", line_id="L"),
+        ctx=SimpleNamespace(
+            junction_ids=set(),
+            fanout_junctions=set(),
+            bottom_exit_junctions={"j"},
+            tb_sections=set(),
+            station_offsets={},
+            merge=SimpleNamespace(trunk_source={"m": "j"}, branch_edges=set()),
+        ),
+    )
+    assert selected == "merge trunk"
+
+
 def test_merge_entry_around_below_route_is_in_table() -> None:
     assert H._route_merge_entry_around_below in {
         rule.route for rule in H._INTER_SECTION_RULES

@@ -2040,6 +2040,7 @@ _INTER_SECTION_CLAIMS: tuple[_Rule, ...] = (
         "bottom-exit junction right landings",
         lambda f: (
             f.edge.source in f.ctx.bottom_exit_junctions
+            and not f.is_merge_trunk
             and f.bottom_exit_junction_route is _BottomExitJunctionRoute.FAN_LANDINGS
         ),
         lambda f: _route_bottom_exit_junction_right_landings(f),
@@ -2049,6 +2050,7 @@ _INTER_SECTION_CLAIMS: tuple[_Rule, ...] = (
         "bottom-exit junction via gap",
         lambda f: (
             f.edge.source in f.ctx.bottom_exit_junctions
+            and not f.is_merge_trunk
             and f.bottom_exit_junction_route is _BottomExitJunctionRoute.VIA_GAP
         ),
         lambda f: _route_bottom_exit_junction_via_gap_leaf(f),
@@ -2058,6 +2060,7 @@ _INTER_SECTION_CLAIMS: tuple[_Rule, ...] = (
         "bottom-exit junction",
         lambda f: (
             f.edge.source in f.ctx.bottom_exit_junctions
+            and not f.is_merge_trunk
             and f.bottom_exit_junction_route is _BottomExitJunctionRoute.PLAIN
         ),
         lambda f: _route_bottom_exit_junction(f),
