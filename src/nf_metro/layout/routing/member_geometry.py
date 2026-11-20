@@ -2943,8 +2943,6 @@ def build_member_geometry_execution(
                     if context is not None:
                         context_routes.append(context)
                     continue
-                if key in ctx.skip_edges:
-                    continue
                 edge = ctx.edge_by_key.get(key)
                 if edge is None:
                     failures[system_id] = "missing-emission-edge"

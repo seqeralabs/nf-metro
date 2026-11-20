@@ -3652,19 +3652,6 @@ def _bundle_divergent_distinct_descents(
         # arc centre there and nowhere later.
         if frozen and not (settle_frozen_arcs and tight):
             continue
-        # Reaching the next gate with an owned channel means the gate above let
-        # it through on ``settle_frozen_arcs and tight``, since a route-system
-        # boundary is one of the ways :func:`_planner_owns_channel` answers
-        # true.  Its ``not tight`` is therefore already false: it declines a
-        # group no construction produces.
-        if (
-            any(
-                route_system_owns_segment_boundary(channel.route, channel.idx)
-                for channel in chans
-            )
-            and not tight
-        ):
-            continue
 
         def obstructed(moves: list[tuple[_VChannel, float, float]]) -> bool:
             return any(

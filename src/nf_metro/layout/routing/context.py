@@ -1003,48 +1003,9 @@ def is_near_vertical_drop(dx: float, dy: float) -> bool:
     """Whether a junction-to-entry hop is the near-vertical same-column drop.
 
     The hop is within ``JUNCTION_MARGIN`` horizontally and far steeper than it is
-    wide.  Shared by the routing dispatch
-    (``_InterFacts.is_near_vertical_same_col_junction``) and the offset-reversal
-    predicate so the two cannot drift.
+    wide.
     """
     return abs(dx) <= JUNCTION_MARGIN + COORD_TOLERANCE and abs(dy) > abs(dx) * 3
-
-
-def is_near_vertical_junction_right_entry(graph: MetroGraph, port: Port) -> bool:
-    """Whether *port* is a RIGHT entry a multi-line fan-out junction drops into.
-
-    Detected so the section's line order can be reversed to match the descent's
-    transpose.  The
-    same near-vertical geometry the routing dispatch deflects to the standard
-    drop (``_InterFacts.takes_near_vertical_junction_drop``): the junction and
-    port share a grid column, the junction overhangs the port's outward edge, the
-    drop is near-vertical, and at least two lines descend together (mirroring the
-    dispatch's ``f.n >= 2``; a lone line has no bundle to transpose).
-    """
-    if not (port.is_entry and port.side is PortSide.RIGHT):
-        return False
-    psec = graph.section_for_port(port)
-    pst = graph.stations.get(port.id)
-    if pst is None:
-        return False
-    lines_by_source: dict[str, set[str]] = defaultdict(set)
-    for edge in graph.edges_to(port.id):
-        lines_by_source[edge.source].add(edge.line_id)
-    for source, lines in lines_by_source.items():
-        jst = graph.stations.get(source)
-        if (
-            source not in graph.junction_ids
-            or jst is None
-            or _resolve_section_col(graph, jst) != psec.grid_col
-        ):
-            continue
-        if (
-            len(lines) >= 2
-            and jst.x >= pst.x - COORD_TOLERANCE
-            and is_near_vertical_drop(pst.x - jst.x, pst.y - jst.y)
-        ):
-            return True
-    return False
 
 
 def _compute_bypass_gap_indices(
