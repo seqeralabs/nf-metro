@@ -233,6 +233,29 @@ def test_a_later_corridor_joiner_past_the_earlier_records_its_crossing() -> None
     )
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        Path(__file__).parents[1] / "examples/guide/03_fan_out.mmd",
+        Path(__file__).parents[1] / "examples/variant_calling.mmd",
+        Path(__file__).parents[1] / "examples/showcase/seqinspector.mmd",
+    ],
+    ids=lambda p: p.stem,
+)
+def test_off_level_joiners_running_with_the_entrys_travel_record_no_crossing(
+    path: Path,
+) -> None:
+    """Off-level sources whose connectors run toward the entry along its own
+    travel drop into it from their own side, each on its own leg: no
+    corridor holds them in one bundle, so their entry order forces nothing."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+    plan = recorded_lane_plan(graph)
+    assert plan is not None
+    assert plan.tracks.forced == ()
+
+
 def test_a_corridor_crossing_pairs_the_crossed_lines_stroke() -> None:
     """``svvcf`` crosses ``snvvcf`` where ``snvvcf``'s branches out of
     ``__junction_17`` still share one stroke, so the recorded pairs hold the

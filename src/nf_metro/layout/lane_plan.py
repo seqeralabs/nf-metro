@@ -1113,13 +1113,14 @@ class _Tracks:
         earlier one's from that side, across the entry's travel, crosses it (a
         bundle keeps its travel order round its turns)."""
         graph, port, lanes = self.graph, self.graph.stations[entry_id], self.lanes
-        ux, uy = (abs(v) for v in direction_vector(port_travel(graph.ports[entry_id])))
+        tx, ty = direction_vector(port_travel(graph.ports[entry_id]))
+        ux, uy = abs(tx), abs(ty)
         joins = []
         for e in graph.edges_to(entry_id):
             src = graph.stations[approach_source(graph, e.source, e.line_id)]
             dx, dy = port.x - src.x, port.y - src.y
             t, d = _sign(dx * ux + dy * uy), _sign(dx * uy + dy * ux)
-            if t and d and (entry_id, e.line_id) in lanes:
+            if t == -(tx + ty) and d and (entry_id, e.line_id) in lanes:
                 joins.append(((t, d), t * (src.x * ux + src.y * uy), src.id, e.line_id))
         sec, side = graph.ports[entry_id].section_id, self.senses[entry_id] * (ux or -1)
         for (td, ahead, _b, lid), (td2, behind, a, m) in itertools.product(
