@@ -215,8 +215,8 @@ from nf_metro.layout.port_order_plan import (
     PortOrder,
     PortOrderBuilder,
     PortOrderPlan,
-    _merge_orders,
     decide_ports,
+    merge_orders,
     port_travel,
 )
 from nf_metro.layout.routing.common import (
@@ -730,7 +730,7 @@ class _Tracks:
             ):
                 continue
             port = graph.ports[port_id]
-            draw = _draw_sign(graph, port) * right_normal_axis_sign(port_travel(port))
+            draw = draw_sign(graph, port) * right_normal_axis_sign(port_travel(port))
             drawn = self._carry(port_id, draw, orders.get(port_id))
             consumers = [t for t in turns.get(port_id, ()) if t.lines]
             if port.is_entry and len(consumers) >= 2:
@@ -927,7 +927,7 @@ class _Tracks:
             and set(order.lines) == set(lines)
             else sorted(lines)
         )
-        merged = _merge_orders(base, chains, lines)
+        merged = merge_orders(base, chains, lines)
         n = len(merged)
         return {lid: i if draw > 0 else n - 1 - i for i, lid in enumerate(merged)}
 
@@ -951,7 +951,7 @@ class _Tracks:
         out: dict[tuple[str, bool], TurnOff] = {}
         for node in sorted(graph.ports) + sorted(graph.junction_ids):
             for leaving in (True, False):
-                port_id = _run_port(graph, node, leaving)
+                port_id = run_port(graph, node, leaving)
                 if port_id is None:
                     continue
                 port = graph.ports[port_id]
@@ -970,7 +970,7 @@ class _Tracks:
                     if any(v is None for v in held.values()):
                         continue
                     sign = (
-                        _draw_sign(graph, port)
+                        draw_sign(graph, port)
                         if self.perpendicular(port_id)
                         else self.frames(port.section_id).secondary_sign
                     )
@@ -3014,7 +3014,7 @@ def _gap_legs(
             by_source.setdefault(source, []).append(edge.line_id)
         for source_id, lines in by_source.items():
             approach = port_orders.approaches.get((entry_id, source_id))
-            src_port = _run_port(graph, source_id, leaving=True)
+            src_port = run_port(graph, source_id, leaving=True)
             src = graph.section_for_port(graph.ports[src_port]) if src_port else sec
             dy = graph.stations[entry_id].y - graph.stations[source_id].y
             if approach is not None and approach.kind is not ApproachKind.LEVEL:
@@ -3052,7 +3052,7 @@ def gap_counter_runners(
     return None
 
 
-def _draw_sign(graph: MetroGraph, port: Port) -> int:
+def draw_sign(graph: MetroGraph, port: Port) -> int:
     """The sign a perpendicular port's drawing reads an offset with along its
     free axis: an entry across a TOP or BOTTOM edge of a section whose lanes
     run along y by its travel's right-hand normal, an exit across such a
@@ -3067,7 +3067,7 @@ def _draw_sign(graph: MetroGraph, port: Port) -> int:
     return 1
 
 
-def _run_port(graph: MetroGraph, node: str, leaving: bool) -> str | None:
+def run_port(graph: MetroGraph, node: str, leaving: bool) -> str | None:
     """The port whose run *node* continues: the node itself, or for a
     junction the one port feeding it (*leaving*) or fed by it, through
     junctions only."""
@@ -3212,13 +3212,13 @@ def _stored_offsets(graph: MetroGraph, plan: LanePlan) -> dict[tuple[str, str], 
     }
     for port_id, values in tracks.perpendicular.items():
         port = graph.ports[port_id]
-        sign = right_normal_axis_sign(port_travel(port)) * _draw_sign(graph, port)
+        sign = right_normal_axis_sign(port_travel(port)) * draw_sign(graph, port)
         for lid, value in values.items():
             out[(port_id, lid)] = float(sign * value)
     for port_id, both in tracks.rail_origins.items():
         port = graph.ports[port_id]
         sign = (
-            right_normal_axis_sign(port_travel(port)) * _draw_sign(graph, port)
+            right_normal_axis_sign(port_travel(port)) * draw_sign(graph, port)
             if port_id in tracks.perpendicular
             else 1
         )

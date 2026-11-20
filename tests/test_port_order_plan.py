@@ -194,7 +194,7 @@ ALLOWED_IMPORTS = {
             ("nf_metro.layout.constants", "COORD_TOLERANCE"),
             ("nf_metro.layout.geometry", "lanes_run_along_y"),
             ("nf_metro.layout.port_order_plan", "PortOrder"),
-            ("nf_metro.layout.port_order_plan", "_merge_orders"),
+            ("nf_metro.layout.port_order_plan", "merge_orders"),
             ("nf_metro.parser.model", "Port"),
             ("nf_metro.parser.model", "PortSide"),
             ("types", "MappingProxyType"),

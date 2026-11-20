@@ -1032,7 +1032,7 @@ RECORD_USES = {
         "port_travel",
         "recorded_lane_plan",
     },
-    "layout/routing/normalize.py": {"_draw_sign", "_run_port"},
+    "layout/routing/normalize.py": {"draw_sign", "run_port"},
     "layout/routing/exit_turns.py": {"gap_counter_runners"},
     "layout/routing/common.py": {"entry_crossing_lines"},
     "layout/routing/invariants.py": {"entry_crossing_lines", "recorded_crossing_pairs"},
@@ -1395,7 +1395,7 @@ def test_rotation_fixtures_cover_every_rule() -> None:
         name: getattr(builder_cls, name)
         for name in ("joining_side", "cell_lateral", "own_band", "_round_own_side")
     }
-    real_merge = port_order_plan_module._merge_orders
+    real_merge = port_order_plan_module.merge_orders
 
     def joining_side(self, ref, lateral, here, travel, kind):  # type: ignore[no-untyped-def]
         value = real["joining_side"](self, ref, lateral, here, travel, kind)
@@ -1433,7 +1433,7 @@ def test_rotation_fixtures_cover_every_rule() -> None:
         mp.setattr(builder_cls, "cell_lateral", cell_lateral)
         mp.setattr(builder_cls, "own_band", own_band)
         mp.setattr(builder_cls, "_round_own_side", round_own_side)
-        mp.setattr(port_order_plan_module, "_merge_orders", merge)
+        mp.setattr(port_order_plan_module, "merge_orders", merge)
         for path in ROTATION_FIXTURES:
             graph, _ = _rotation_case(path)
             plan = _plan(graph)

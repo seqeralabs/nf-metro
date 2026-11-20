@@ -33,7 +33,7 @@ from nf_metro.layout.geometry import (
     spans_share_corridor,
     station_lane_coord,
 )
-from nf_metro.layout.lane_plan import _draw_sign, _run_port
+from nf_metro.layout.lane_plan import draw_sign, run_port
 from nf_metro.layout.route_plan import (
     DemandAxis,
     ExitTurnPlan,
@@ -4606,7 +4606,7 @@ def _planned_leg_key(
     before them (end leg).  ``None`` where the node holds no planned lane."""
     graph = ctx.graph
     offset = (ctx.station_offsets or {}).get((node, line_id))
-    port_id = _run_port(graph, node, leaving=start)
+    port_id = run_port(graph, node, leaving=start)
     if offset is None or port_id is None:
         return None
     port = graph.ports[port_id]
@@ -4615,7 +4615,7 @@ def _planned_leg_key(
     station = graph.stations[node]
     if port.side in perpendicular_port_sides(section.direction):
         lane = getattr(station, port_free_axis(port.side)) + (
-            _draw_sign(graph, port) * offset
+            draw_sign(graph, port) * offset
         )
     else:
         frame = _section_lane_frame(graph, section, ctx.positive_fan)

@@ -289,7 +289,7 @@ def _section_extent(section: Section, rows: bool) -> tuple[float, float]:
     return (section.grid_col, section.grid_col + section.grid_col_span)
 
 
-def _merge_orders(
+def merge_orders(
     planned: list[str], chains: Sequence[Sequence[str]], lines: Sequence[str]
 ) -> list[str]:
     """Merge *chains* into one order, *planned* deciding between free lines."""
@@ -1003,7 +1003,7 @@ class PortOrderBuilder:
         bundled = {lid for chain in chains for lid in chain}
         if not chains:
             return ordered, bundled
-        return _merge_orders(ordered, chains, lines), bundled
+        return merge_orders(ordered, chains, lines), bundled
 
 
 def _tolerance_ranks(values: Mapping[str, float]) -> dict[str, int]:
