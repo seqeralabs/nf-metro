@@ -1565,8 +1565,8 @@ def _guard_corridor_fed_solo_rides_trunk(
     branches straddle the trunk and may each hold a lane aligning them with a
     downstream multi-line section, so they are not required to ride offset 0.
 
-    Where the lane plan fixes the line's lane by a fan seam, the lane it hands
-    the line on to a fan carrier's slot, the entry and consumer ride that lane
+    Where the lane plan fixes the line's lane by a fan seam (the lane that
+    lands it on a fan carrier's slot), the entry and consumer ride that lane
     instead of offset 0.
     """
     if offsets is None:

@@ -943,8 +943,9 @@ class _Tracks:
         crosses those lines there."""
         rank = {lid: i for i, lid in enumerate(ascending)}
         section_id = self.graph.ports[entry_id].section_id
+        feeders = sorted(self._feeders(entry_id).items())
         for passing in sorted(pins):
-            for source, carried in sorted(self._feeders(entry_id).items()):
+            for source, carried in feeders:
                 if passing in carried:
                     continue
                 crossed = tuple(
@@ -1113,11 +1114,10 @@ class _Tracks:
             return set()
         found: set[int] = set()
         for edge in graph.edges_from(exit_id):
-            slot = self.fan_slots.get((edge.target, line_id))
             if (
                 edge.line_id != line_id
-                or slot is None
                 or edge.target not in graph.ports
+                or (slot := self.fan_slots.get((edge.target, line_id))) is None
                 or not self._straight_seam(edge.target, exit_id)
             ):
                 continue
