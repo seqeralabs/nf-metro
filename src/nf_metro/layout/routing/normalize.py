@@ -470,18 +470,26 @@ def _layout_gap_bundle(
         bundles, pins = unseated, seated
     step = ctx.offset_step
 
-    # Left to right by current bundle centre, except that a leg leaving a
-    # junction standing inside the gap takes the side away from it: its turn
-    # needs the runway from the junction.
-    def order_key(bundle: tuple[bool, list[_VChannel]]) -> tuple[int, float]:
-        chans = bundle[1]
-        for ch in chans:
-            src = ctx.graph.stations[ch.route.edge.source]
-            if src.id in ctx.graph.junctions and gap_left < src.x < gap_right:
-                return (1 if 2 * src.x < gap_left + gap_right else -1, src.x)
-        return (0, sum(c.x for c in chans) / len(chans))
+    # Left to right by current bundle centre, except that the one branch a
+    # junction standing inside the gap sends off its level takes the side of
+    # the gap away from that junction: its turn needs the runway from it.
+    def runway_side(chans: list[_VChannel]) -> tuple[int, float] | None:
+        src, *more = {c.route.edge.source for c in chans}
+        js = ctx.graph.stations[src]
+        off_level = [
+            e
+            for e in ctx.graph.edges_from(src)
+            if abs(ctx.graph.stations[e.target].y - js.y) > COORD_TOLERANCE
+        ]
+        if more or src not in ctx.graph.junctions or len(off_level) != 1:
+            return None
+        if not gap_left < js.x < gap_right:
+            return None
+        return (1 if 2 * js.x < gap_left + gap_right else -1, js.x)
 
-    bundles.sort(key=order_key)
+    bundles.sort(
+        key=lambda b: runway_side(b[1]) or (0, sum(c.x for c in b[1]) / len(b[1]))
+    )
     # Distinct-line count per bundle drives the bundle width and the
     # per-line slotting: multiple segments sharing one line_id (a fan
     # whose line feeds several targets) overlay at a single x rather

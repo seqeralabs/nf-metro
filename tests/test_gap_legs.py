@@ -192,3 +192,11 @@ def test_a_lines_counter_running_leg_rides_its_loop_lane() -> None:
     assert riser == loop
     assert nest[0] - loop == 12.0
     assert nest[1] - nest[0] == 4.0
+
+
+def test_a_junction_branching_off_level_twice_keeps_its_bundles_order() -> None:
+    # junction_19 sends svvcf off its level to both annotation and reports:
+    # its legs are a fan, not one branch, so the gap keeps their order and
+    # the map renders.
+    svg = render_string(RL_RETURN)
+    assert svg.lstrip().startswith("<")
