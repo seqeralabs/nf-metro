@@ -1783,10 +1783,6 @@
     "note": "Finalized geometry returns None only through its own realization guards, which cannot fire (see _finalize_allocation_geometry).",
     "status": "defensive"
   },
-  "corridor_cohort_integration.py::if trace is not None:::#1": {
-    "note": "The final-solve settlement trace is recorded only when the caller passes a settlement trace, which the engine does for a plan-observed render. The sweep's observation probes do not carry one into this call. Exercised by tests/test_corridor_cohort_integration.py::test_final_solve_trace_is_emitted_from_the_integration_call_site. needs-review because the arm is reachable, not because it is unreachable.",
-    "status": "needs-review"
-  },
   "corridor_cohorts.py::if _q(equality.delta) == 0:::#1": {
     "note": "Only a zero-delta equality makes two lanes one for the corner-order yield; a non-zero delta (a scalar held off its bundle's run) never shares a problem with corner orders in the swept corpus. Exercised by tests/test_corridor_cohorts.py::test_lanes_an_offset_equality_ties_do_not_stand_as_one_for_the_yield. needs-review because the arm is reachable, not because it is unreachable.",
     "status": "needs-review"
@@ -1963,10 +1959,6 @@
     "note": "A cohort target with an endpoint lane axis and no coordinate is skipped. The two are set together on a target, so no target presents one; the operand narrows the type for the code below, and no test pins the skip.",
     "status": "defensive"
   },
-  "landing_deal.py::for line, natural_line in record.takes_lane_of:::#1": {
-    "note": "Reachable: a junction source with a DepartureLaneOrder record permutes the dealt slots. No swept fixture presents one (tests/fixtures/regressions/departure_order_carry_replay.mmd is outside the sweep's corpus roots); pinned by tests/test_entry_landing_deal.py::test_a_junction_source_deals_in_its_recorded_departure_order.",
-    "status": "needs-review"
-  },
   "landing_deal.py::if any(::#1": {
     "note": "Reachable: the IMMUTABLE_MOVED refusal fires when the deal would move a member whose slot is fixed. No swept fixture presents an immutable member whose dealt slot differs from its own; pinned by tests/test_entry_landing_deal.py::test_a_deal_moving_an_immutable_member_is_refused.",
     "status": "needs-review"
@@ -1978,10 +1970,6 @@
   "landing_deal.py::if exit_port is None or exit_port.is_entry or exit_port.section_id is None:::#1": {
     "note": "SOURCE_NOT_EXIT refusal when the walk up a junction chain ends at something that is not an exit port; no job of the 15k-job census reaches it and no test pins it.",
     "status": "defensive"
-  },
-  "landing_deal.py::if held is not None:::#1": {
-    "note": "Reachable: a junction on the walk up to the exit holds a DepartureLaneOrder record. No swept fixture presents one (tests/fixtures/regressions/departure_order_carry_replay.mmd is outside the sweep's corpus roots); pinned by tests/test_entry_landing_deal.py::test_a_junction_source_deals_in_its_recorded_departure_order.",
-    "status": "needs-review"
   },
   "landing_deal.py::if len(set(laterals.values())) != len(lines):::#1": {
     "note": "Reachable: EXIT_TIE refuses a bundle whose lines leave at one lateral coordinate, which no exit-order deal can separate. No swept fixture presents a tie; pinned by tests/test_entry_landing_deal.py::test_lines_tied_at_the_exit_are_refused.",
@@ -2007,14 +1995,6 @@
     "note": "planned_landing_orders skips an ENDPOINT_LANDING owner whose port is missing or not an entry. Every endpoint landing is framed from its target's endpoint lane axis, which _corridor_cohort_target sets only for an entry port, so no owner takes the arm; no test pins it.",
     "status": "defensive"
   },
-  "landing_deal.py::if record is not None:::#1": {
-    "note": "Two arms. A junction on the walk up to the exit holding a record is reachable, pinned by tests/test_entry_landing_deal.py::test_a_junction_source_deals_in_its_recorded_departure_order, and no swept fixture presents it (tests/fixtures/regressions/departure_order_carry_replay.mmd is outside the sweep's corpus roots). The refusal of a chain holding two records (JUNCTION_TWO_RECORDS) is defensive: no job of the 15k-job census reaches it and no test pins it.",
-    "status": "needs-review"
-  },
-  "landing_deal.py::if record is not None:::#2": {
-    "note": "Reachable: a source with a recorded departure order is dealt through the record. No swept fixture presents one; pinned by tests/test_entry_landing_deal.py::test_a_junction_source_deals_in_its_recorded_departure_order.",
-    "status": "needs-review"
-  },
   "landing_deal.py::if sequence and (::#1": {
     "note": "Reachable: AGAINST_SIDE refuses a bundle that leaves against its exit side or lands against its entry side. No swept fixture presents one (tests/data/landing_deal/arrives_against_entry_*.mmd do); pinned by tests/test_entry_landing_deal.py::test_a_source_travelling_against_its_exit_or_entry_side_is_refused.",
     "status": "needs-review"
@@ -2022,9 +2002,5 @@
   "landing_deal.py::if set(by_line) != {edge.line_id for edge in edges}:::#1": {
     "note": "INCOMPLETE refusal when the compile's targets omit a line entering the port; no job of the 15k-job census reaches it and no test pins it.",
     "status": "defensive"
-  },
-  "landing_deal.py::if set(record.lines) - set(lines):::#1": {
-    "note": "Two arms. A record naming only lines the source carries is reachable, pinned by tests/test_entry_landing_deal.py::test_a_junction_source_deals_in_its_recorded_departure_order, and no swept fixture presents it (tests/fixtures/regressions/departure_order_carry_replay.mmd is outside the sweep's corpus roots). The RECORD_MISMATCH refusal of a record naming a line the source does not carry is defensive: no job of the 15k-job census reaches it and no test pins it.",
-    "status": "needs-review"
   }
 }
