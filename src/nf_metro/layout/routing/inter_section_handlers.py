@@ -94,6 +94,7 @@ from nf_metro.layout.routing.common import (
     inter_row_wrap_band,
     iter_horizontal_trunks,
     iter_vertical_segments,
+    junction_source_ports,
     lowest_section_bottom_crossing_span,
     max_grid_row_with_content,
     merge_trunk_force_cross_row,
@@ -580,6 +581,18 @@ class _InterFacts:
             self.src_port is not None
             and not self.src_port.is_entry
             and self.src_port.side is PortSide.LEFT
+        )
+
+    @property
+    def is_left_fed(self) -> bool:
+        """Source leaves on the LEFT: a LEFT exit, or a fan-out junction fed by
+        one, whose branches leave on their feeding exit's side."""
+        return self.is_left_exit or (
+            self.edge.source in self.graph.junction_ids
+            and any(
+                not port.is_entry and port.side is PortSide.LEFT
+                for port in junction_source_ports(self.graph, self.edge.source)
+            )
         )
 
     @property
@@ -1380,7 +1393,7 @@ def _route_right_entry_cross_row(f: _InterFacts) -> RoutedPath | None:
     keeps the feed order on both ports and stays parallel through the descent.
     """
     edge, src, tgt, ctx, graph = f.edge, f.src, f.tgt, f.ctx, f.graph
-    if f.is_left_exit and _left_exit_right_entry_step_is_clear(
+    if f.is_left_fed and _left_exit_right_entry_step_is_clear(
         graph, edge, src, tgt, ctx
     ):
         return _route_left_exit_right_entry_step(edge, src, tgt, ctx)
