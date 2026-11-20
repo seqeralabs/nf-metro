@@ -1015,8 +1015,7 @@ def _bundle_with_owned_runner(
         for key in [k for k in by_gap if k[0] == lo]:
             for other in list(by_gap[key]):
                 if (
-                    other.down is not ch.down
-                    and other.route.line_id == ch.route.line_id
+                    other.route.line_id == ch.route.line_id
                     and other.route.edge.target == ch.route.edge.target
                 ):
                     side = 1 if other.x >= was else -1
