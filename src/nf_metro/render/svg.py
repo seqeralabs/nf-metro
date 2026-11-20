@@ -2415,12 +2415,11 @@ def _settle_render_geometry(
             _assert_settlement_decisions_frozen(
                 frozen_routes, frozen_plan, routes, routed_plan
             )
-        # The published ledger is the one settlement consumed.  Re-observing
-        # would let corridors appear, vanish, and change their required width
-        # across the very step whose contract is coordinate translation only.
-        # The routed observation exists to draw and to prove the decisions
-        # frozen.
-        if not pending_clearance:
+            # The published ledger is the one settlement consumed.  Re-observing
+            # would let corridors appear, vanish, and change their required width
+            # across the very step whose contract is coordinate translation only.
+            # The routed observation exists to draw and to prove the decisions
+            # frozen.
             route_plan = attach_reroute_ledger_delta(
                 adopt_route_reservation_ledger(
                     frozen_plan,
@@ -2430,13 +2429,11 @@ def _settle_render_geometry(
                 frozen_plan,
                 routed_plan,
             )
-        # adopt_route_reservation_ledger rebuilds the published plan from the
-        # frozen pass, which never saw the re-route's own diagnostics; carry
-        # forward the one class that names a decision the re-route was itself
-        # forced to discard (_adopt_prior_dispositions).
-        adopted_dispositions = (
-            () if pending_clearance else _disposition_overrides(routed_plan)
-        )
+            # adopt_route_reservation_ledger rebuilds the published plan from the
+            # frozen pass, which never saw the re-route's own diagnostics; carry
+            # forward the one class that names a decision the re-route was itself
+            # forced to discard (_adopt_prior_dispositions).
+            adopted_dispositions = _disposition_overrides(routed_plan)
         route_plan = _with_disposition_overrides(route_plan, adopted_dispositions)
         _attach_published_reservation_attribution(routes, route_plan)
         drawn_plan = routed_plan
