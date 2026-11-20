@@ -359,10 +359,6 @@
     "note": "The shared-terminal convergence declines ownership when seating its carrier would strand the carrier's own exit turn (issue #1949). tests/fixtures/topologies/convergence_shared_terminal_exit_turn.mmd takes the decline arm, but the gate sweep globs tests/fixtures/ non-recursively, so the fixture under its topologies/ subdirectory is not evaluated here; the render-diff and the dedicated regression tests own it instead.",
     "status": "needs-review"
   },
-  "convergences.py::if any(::#6": {
-    "note": "Reached by the corpus at 897747b0 and no longer: the branch's later commits (908637eb..04209e3d) changed which paths fire, so this arm lost its last covering fixture rather than becoming unreachable. Left un-exercised deliberately -- the render corpus is frozen for a measurement against main, so no fixture was authored.",
-    "status": "needs-review"
-  },
   "convergences.py::if axis is None:::#4": {
     "note": "A resident flank in _give_way_to was seated from a plan whose trunk axis was read to build it, so the plan still states one. The guard narrows the Optional before the flank move.",
     "status": "defensive"
