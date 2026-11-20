@@ -729,9 +729,9 @@ def test_the_shallow_feeder_check_reads_the_approach_record() -> None:
 
 
 def test_no_dealt_perpendicular_entry_columns() -> None:
-    from nf_metro.layout.routing import context, perp_columns
+    from nf_metro.layout.routing import context, perp
 
-    assert not hasattr(perp_columns, "PerpEntryColumn")
+    assert not hasattr(perp, "PerpEntryColumn")
     assert "perp_entry_columns" not in context._RoutingCtx.__dataclass_fields__
 
 
