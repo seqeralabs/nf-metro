@@ -325,10 +325,6 @@ runtime check either:
   `FLOW_REORIENTED_DIRECTION` decision in `graph.layout_provenance`; the
   explicit-grid direction guard accepts a non-LR direction only with that
   typed reason, instead of a second section set.
-- `graph._linear_entry_pill_lines_cache` - accepted linear-entry cohorts
-  projected by each station-offset computation. Marker bbox, label, and render
-  consumers use the cohort with the offset map produced by that computation;
-  the empty default means no entry frame owns marker geometry.
 - `graph._rail_y` - the per-section `{line_id: rail_y}` map produced by the
   opt-in rail-mode layout; read by the rail router, label placement, and rail
   guards, empty when rail mode is off.

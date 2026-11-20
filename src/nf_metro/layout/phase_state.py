@@ -311,24 +311,15 @@ PHASE_FIELD_REGISTRY: dict[str, PhaseFieldSpec] = {
     "_lane_plan": PhaseFieldSpec(
         name="_lane_plan",
         writer_stage="5.1",
-        reader_stages=(),
+        reader_stages=(STATION_OFFSET_LAYOUT, POST_LAYOUT),
         enforcement=FieldEnforcement.FALLBACK,
         why=(
             "the layout's lane plan record, cleared when each positioning pass "
             "starts and sealed at its first station-offset computation at or "
-            "after 5.1; nothing reads it, and 'Lane plan record' in "
+            "after 5.1; every station-offset computation and routing's record "
+            "consumers read it through lane_plan_of, which builds an unsealed "
+            "record before the seal, and 'Lane plan record' in "
             "layout/CONTRACT.md states its lifetime"
-        ),
-    ),
-    "_linear_entry_pill_lines_cache": PhaseFieldSpec(
-        name="_linear_entry_pill_lines_cache",
-        writer_stage=STATION_OFFSET_LAYOUT,
-        reader_stages=(STATION_OFFSET_LAYOUT, POST_LAYOUT),
-        enforcement=FieldEnforcement.FALLBACK,
-        why=(
-            "accepted linear-entry cohorts projected by each station-offset "
-            "computation; marker bbox, label, and render consumers use the "
-            "cohort with that offset map and tolerate the empty default"
         ),
     ),
     "_rail_y": PhaseFieldSpec(

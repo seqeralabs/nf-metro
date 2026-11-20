@@ -508,9 +508,6 @@ class MetroGraph:
     fan_plan_execution: FanPlanExecution | None = field(
         default=None, compare=False, repr=False
     )
-    _linear_entry_pill_lines_cache: dict[str, tuple[str, ...]] = field(
-        default_factory=dict, compare=False, repr=False
-    )
     _lane_plan: LanePlan | None = field(default=None, compare=False, repr=False)
     groups: list[StationGroup] = field(default_factory=list)
     grid_overrides: dict[str, tuple[int, int, int, int]] = field(default_factory=dict)

@@ -75,7 +75,6 @@ LATER_PHASE_NAMES = frozenset(
         "draft",
         "drafts",
         "fan_plan_execution",
-        "_linear_entry_pill_lines_cache",
         "compute_station_offsets",
         "route_edges",
     }
