@@ -18,6 +18,7 @@ from nf_metro.layout.departure_order import (
     departure_turn_rank,
 )
 from nf_metro.layout.geometry import lanes_run_along_y
+from nf_metro.layout.lane_plan import gap_counter_runners
 from nf_metro.layout.route_plan import (
     CoordinateRegime,
     DemandAxis,
@@ -67,6 +68,7 @@ from nf_metro.layout.routing.common import (
     OffsetRegime,
     RoutedPath,
     apply_route_offsets,
+    column_gap_edges,
     horizontal_direction,
     segment_direction,
     vertical_direction,
@@ -2951,11 +2953,39 @@ def _cross_plan_fallback_reasons(
             for second in plan.axes[rank + 1 :]
         ):
             reasons[plan.id] = "overlapping-planned-turn-axes"
+    for plan in plans:
+        if plan.id not in reasons and _turns_beside_a_counter_runner(
+            graph, ctx, plan, assignments_by_plan[plan.id]
+        ):
+            reasons[plan.id] = GAP_ALLOCATION_PENDING
     _add_shared_axis_contention_fallbacks(
         graph, ctx, plans, assignments_by_plan, reasons
     )
     _add_station_lane_collision_fallbacks(graph, ctx, plans, reasons)
     return reasons
+
+
+def _turns_beside_a_counter_runner(
+    graph: MetroGraph,
+    ctx: _RoutingCtx,
+    plan: ExitTurnPlan,
+    assignments: Mapping[ResolvedEdge, ExitTurnAssignment],
+) -> bool:
+    """Whether a column the plan states stands on a recorded gap leg another
+    leg runs against, and the gap's joint allocation has not yet seated it."""
+    for edge, assignment in assignments.items():
+        found = gap_counter_runners(graph, edge.target, edge.line_id)
+        if not found or not found[1] or _edge_key(edge) in ctx.settled_exit_turns:
+            continue
+        left, right = column_gap_edges(graph, found[0], found[0] + 1)
+        if any(
+            assignment.member_id in axis.claimant_member_ids
+            and axis.axis is DemandAxis.X
+            and left <= axis.coordinate <= right
+            for axis in plan.axes
+        ):
+            return True
+    return False
 
 
 def _add_shared_axis_contention_fallbacks(

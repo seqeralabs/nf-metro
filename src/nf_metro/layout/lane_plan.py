@@ -26,7 +26,14 @@ The record holds:
 - the :class:`TrackPlan`: every in-section ``(node, line)``'s lane, from which
   every exit's order is read, every perpendicular port's offsets and every
   run's turn-offs;
-- the :class:`SeamJoint`: the lanes either side of every straight seam.
+- the :class:`SeamJoint`: the lanes either side of every straight seam;
+- the *gap legs*: per inter-column gap, the connectors landing in it and the
+  way they run.  A connector into a LEFT or RIGHT entry that reaches it from
+  off its level lands from a leg in the gap on the entry's side: one passing
+  round its own band (a bypass or U-turn approach) runs to the entry from
+  the side it passes on, one from a section in the gap's other column from
+  its source's level.  Legs running opposite ways over a shared row are one
+  allocation of the gap.
 
 **The track plan.**  Sections are decided upstream first: a section's lanes
 need its entries' orders, and an exit's order is its lines' lanes at the port
@@ -268,6 +275,20 @@ class ForcedCrossing:
 
 
 @dataclass(frozen=True, slots=True)
+class GapLeg:
+    """A connector's leg into a LEFT or RIGHT entry from off its level, in the
+    inter-column gap on the entry's side (see the module docstring)."""
+
+    entry_id: str
+    source_id: str
+    lines: tuple[str, ...]
+    rows: tuple[int, int]
+    """The grid rows the leg's ends lie in, lowest first."""
+    down: bool
+    """Whether the leg runs down the screen to the entry."""
+
+
+@dataclass(frozen=True, slots=True)
 class TurnOff:
     """The lines one node's run hands into a leg, or takes from one."""
 
@@ -385,8 +406,11 @@ class LanePlan(_Sealed):
     connector leaves the exit's band on."""
     tracks: TrackPlan
     seams: SeamJoint
+    gap_legs: Mapping[int, tuple[GapLeg, ...]] = field(default_factory=dict)
+    """Keyed by the gap's lower column: the legs landing in it."""
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "gap_legs", _frozen(self.gap_legs))
         object.__setattr__(self, "order_travels", _frozen(self.order_travels))
         object.__setattr__(self, "lane_senses", _frozen(self.lane_senses))
         object.__setattr__(
@@ -2943,7 +2967,62 @@ def build_lane_plan(graph: MetroGraph) -> LanePlan:
             dict(sorted(planner.seam_sources.items())),
             perpendicular_seams,
         ),
+        gap_legs=_gap_legs(graph, port_orders),
     )
+
+
+def _gap_legs(
+    graph: MetroGraph, port_orders: PortOrderPlan
+) -> dict[int, tuple[GapLeg, ...]]:
+    legs: dict[int, list[GapLeg]] = {}
+    for entry_id, port in sorted(graph.ports.items()):
+        if not port.is_entry or port.side not in (PortSide.LEFT, PortSide.RIGHT):
+            continue
+        sec = graph.section_for_port(port)
+        left = port.side is PortSide.LEFT
+        gap = sec.grid_col - 1 if left else sec.grid_col + sec.grid_col_span - 1
+        by_source: dict[str, list[str]] = {}
+        for edge in graph.edges_to(entry_id):
+            source = approach_source(graph, edge.source, edge.line_id)
+            by_source.setdefault(source, []).append(edge.line_id)
+        for source_id, lines in by_source.items():
+            approach = port_orders.approaches.get((entry_id, source_id))
+            src_port = _run_port(graph, source_id, leaving=True)
+            src = graph.section_for_port(graph.ports[src_port]) if src_port else sec
+            dy = graph.stations[entry_id].y - graph.stations[source_id].y
+            if approach is not None and approach.kind is not ApproachKind.LEVEL:
+                down = approach.side * direction_vector(port_travel(port))[0] < 0
+            elif (
+                approach is None
+                and abs(dy) > SAME_Y_TOLERANCE
+                and (src.grid_col + src.grid_col_span if left else src.grid_col)
+                == gap + 1
+            ):
+                down = dy > 0
+            else:
+                continue
+            rows = sorted((src.grid_row, sec.grid_row))
+            legs.setdefault(gap, []).append(
+                GapLeg(entry_id, source_id, tuple(lines), (rows[0], rows[1]), down)
+            )
+    return {gap: tuple(found) for gap, found in sorted(legs.items())}
+
+
+def gap_counter_runners(
+    graph: MetroGraph, entry_id: str, line_id: str
+) -> tuple[int, list[GapLeg]] | None:
+    """The gap *line_id*'s recorded leg into *entry_id* lands in, with the
+    legs running the other way through it over a shared row."""
+    plan = recorded_lane_plan(graph)
+    for gap, legs in (plan.gap_legs if plan is not None else {}).items():
+        for mine in (g for g in legs if g.entry_id == entry_id and line_id in g.lines):
+            lo, hi = mine.rows
+            return gap, [
+                g
+                for g in legs
+                if g.down is not mine.down and g.rows[0] <= hi and lo <= g.rows[1]
+            ]
+    return None
 
 
 def _draw_sign(graph: MetroGraph, port: Port) -> int:
