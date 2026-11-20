@@ -116,6 +116,7 @@ from nf_metro.layout.routing.corners import (
     concentric_corner_radius,
     concentric_corner_radius_at,
     concentric_reference_radius_at,
+    reference_anchored_radius,
     resolve_curve_radii,
     resolve_curve_radius_at,
     wholesale_corner_translation,
@@ -1630,9 +1631,8 @@ def _size_concentric_members(
     if reference is None:
         return False
     for member, radius_index, offset, _desired in prepared:
-        radii = member.route.curve_radii
-        assert radii is not None
-        radii[radius_index] = concentric_corner_radius_at(
+        assert member.route.curve_radii is not None
+        member.route.curve_radii[radius_index] = concentric_corner_radius_at(
             member.points[member.rank - 1],
             member.points[member.rank],
             member.points[member.rank + 1],
@@ -5969,7 +5969,7 @@ def _restack_htrunk(
             ):
                 ys.append(y)
         depth = new_y - min(ys) if leg_up else max(ys) - new_y
-        rp.curve_radii[k + end - 1] = base_radius + depth
+        rp.curve_radii[k + end - 1] = reference_anchored_radius(depth, base_radius)
 
 
 def _join_fanout_upstream_tails(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:

@@ -187,7 +187,6 @@ Validation observes (:func:`observing`).
 
 from __future__ import annotations
 
-import itertools
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -813,8 +812,9 @@ class _Tracks:
                 or (here.x - there.x) * vx + (here.y - there.y) * vy <= 0
             ):
                 continue
-            at = getattr(there, axis) + sign * across[node][lid] * self.step
-            k = _on_grid(sign * (at - getattr(here, axis)) / self.step)
+            base = there.x if axis == "x" else there.y
+            at = base + sign * across[node][lid] * self.step
+            k = _on_grid(sign * (at - (here.x if axis == "x" else here.y)) / self.step)
             if k is not None and not _boxes_across(graph, port_id, node, at, axis):
                 out.add(k)
         return out
@@ -1123,8 +1123,8 @@ class _Tracks:
             if t == -(tx + ty) and d and (entry_id, e.line_id) in lanes:
                 joins.append(((t, d), t * (src.x * ux + src.y * uy), src.id, e.line_id))
         sec, side = graph.ports[entry_id].section_id, self.senses[entry_id] * (ux or -1)
-        for (td, ahead, _b, lid), (td2, behind, a, m) in itertools.product(
-            joins, joins
+        for (td, ahead, _b, lid), (td2, behind, a, m) in (
+            (j, k) for j in joins for k in joins
         ):
             past = (
                 (lanes[(entry_id, lid)] - lanes[(entry_id, m)]) * side * td[0] * td[1]
