@@ -65,6 +65,7 @@ from nf_metro.layout.routing.common import (
     apply_route_offsets,
     column_gap_edges,
     horizontal_direction,
+    right_normal_axis_sign,
     segment_direction,
     vertical_direction,
 )
@@ -131,7 +132,6 @@ from nf_metro.layout.routing.orientation import (
     direction_vector,
     get_point_coordinate,
     lateral_axis,
-    lateral_order_sign,
 )
 from nf_metro.layout.routing.perp import _perp_entry_crossing_x, _perp_riser_lateral
 from nf_metro.parser.model import Edge, MetroGraph, PortSide, Station
@@ -756,7 +756,7 @@ def _source_lane_order(
         for line_id, offset, _coordinate in sorted(
             values,
             key=lambda item: (
-                item[2] * lateral_order_sign(run_direction),
+                item[2] * right_normal_axis_sign(run_direction),
                 graph_rank.get(item[0], len(graph_rank)),
             ),
         )
@@ -1239,7 +1239,9 @@ def _plain_l_shape_turn_requirement(
     turn_direction = vertical_direction(turn_delta)
     if centreline_axis is None:
         centreline_axis = _l_shape_mid_x(edge, src, tgt, len(members), ctx)
-    emitted_axis = centreline_axis + lateral_order_sign(turn_direction) * target_offset
+    emitted_axis = (
+        centreline_axis + right_normal_axis_sign(turn_direction) * target_offset
+    )
     return _SourceTurnRequirement(
         horizontal_direction(emitted_axis - src.x),
         turn_direction,
@@ -2009,7 +2011,7 @@ def _pinned_ladders_keep_bundle_order(
     way by construction; across two ladders only the pins say so, and pins that
     step the other way draw strokes that swap sides inside the arc.
     """
-    progression = lateral_order_sign(turn_direction)
+    progression = right_normal_axis_sign(turn_direction)
     pinned = tuple(pins)
     return all(
         first.group_id == second.group_id
@@ -2160,7 +2162,7 @@ def _plan_turn_axes(
             - (rank - ranks[0])
             for index, rank in enumerate(ranks)
         }
-        progression = lateral_order_sign(turn_direction)
+        progression = right_normal_axis_sign(turn_direction)
         fixed_origins = tuple(
             seed.fixed_axis
             - progression * cohort_rank[seed.lane_rank] * ctx.offset_step

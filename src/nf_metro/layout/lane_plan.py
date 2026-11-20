@@ -223,9 +223,10 @@ from nf_metro.layout.routing.common import (
     ENTRY_SIDE_DIRECTION,
     EXIT_SIDE_DIRECTION,
     Direction,
+    right_normal_axis_sign,
 )
 from nf_metro.layout.routing.context import _section_lane_frame
-from nf_metro.layout.routing.orientation import direction_vector, lateral_order_sign
+from nf_metro.layout.routing.orientation import direction_vector
 from nf_metro.parser.model import (
     MetroGraph,
     Port,
@@ -445,7 +446,7 @@ def _toward(
 
 
 def _sense(frame: AxisFrame, travel: Direction) -> int:
-    return 1 if frame.secondary_sign * lateral_order_sign(travel) > 0 else -1
+    return 1 if frame.secondary_sign * right_normal_axis_sign(travel) > 0 else -1
 
 
 def _perpendicular_turns(
@@ -729,7 +730,7 @@ class _Tracks:
             ):
                 continue
             port = graph.ports[port_id]
-            draw = _draw_sign(graph, port) * lateral_order_sign(port_travel(port))
+            draw = _draw_sign(graph, port) * right_normal_axis_sign(port_travel(port))
             drawn = self._carry(port_id, draw, orders.get(port_id))
             consumers = [t for t in turns.get(port_id, ()) if t.lines]
             if port.is_entry and len(consumers) >= 2:
@@ -761,7 +762,7 @@ class _Tracks:
         graph = self.graph
         port = graph.stations[port_id]
         travel = port_travel(graph.ports[port_id])
-        (vx, vy), sign = direction_vector(travel), lateral_order_sign(travel)
+        (vx, vy), sign = direction_vector(travel), right_normal_axis_sign(travel)
 
         def along(turn: ConsumerTurn) -> float:
             at = graph.stations[turn.consumer_id]
@@ -800,7 +801,7 @@ class _Tracks:
         travel, past no section box."""
         graph = self.graph
         travel = port_travel(graph.ports[port_id])
-        (vx, vy), sign = direction_vector(travel), lateral_order_sign(travel)
+        (vx, vy), sign = direction_vector(travel), right_normal_axis_sign(travel)
         axis = "x" if vx == 0 else "y"
         here = graph.stations[port_id]
         out: set[int] = set()
@@ -934,7 +935,7 @@ class _Tracks:
         """*turn*'s lines travel-left to travel-right after turning into its
         consumer."""
         assert turn.turn is not None
-        across = lateral_order_sign(turn.turn) * sign
+        across = right_normal_axis_sign(turn.turn) * sign
         return sorted(
             turn.lines, key=lambda lid: across * self.lanes[(turn.consumer_id, lid)]
         )
@@ -974,7 +975,7 @@ class _Tracks:
                         else self.frames(port.section_id).secondary_sign
                     )
                     key = {
-                        lid: sign * lateral_order_sign(travel) * v
+                        lid: sign * right_normal_axis_sign(travel) * v
                         for lid, v in held.items()
                         if v is not None
                     }
@@ -1540,7 +1541,7 @@ class _Tracks:
             return None
         drawn = end_at + frame.secondary_sign * lane * self.step
         travel = port_travel(graph.ports[port_id])
-        return _on_grid(lateral_order_sign(travel) * (drawn - port_at) / self.step)
+        return _on_grid(right_normal_axis_sign(travel) * (drawn - port_at) / self.step)
 
     # ---- one section
 
@@ -3060,7 +3061,7 @@ def _draw_sign(graph: MetroGraph, port: Port) -> int:
         graph.section_for_port(port).direction
     ):
         if port.is_entry:
-            return lateral_order_sign(port_travel(port))
+            return right_normal_axis_sign(port_travel(port))
         if port.side is PortSide.BOTTOM:
             return -1
     return 1
@@ -3211,13 +3212,13 @@ def _stored_offsets(graph: MetroGraph, plan: LanePlan) -> dict[tuple[str, str], 
     }
     for port_id, values in tracks.perpendicular.items():
         port = graph.ports[port_id]
-        sign = lateral_order_sign(port_travel(port)) * _draw_sign(graph, port)
+        sign = right_normal_axis_sign(port_travel(port)) * _draw_sign(graph, port)
         for lid, value in values.items():
             out[(port_id, lid)] = float(sign * value)
     for port_id, both in tracks.rail_origins.items():
         port = graph.ports[port_id]
         sign = (
-            lateral_order_sign(port_travel(port)) * _draw_sign(graph, port)
+            right_normal_axis_sign(port_travel(port)) * _draw_sign(graph, port)
             if port_id in tracks.perpendicular
             else 1
         )

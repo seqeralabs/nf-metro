@@ -694,10 +694,6 @@ def _direct_axis_points(
     )
 
 
-def _direct_axis(merge: Station, entry: Station) -> ConvergenceTrunkAxis:
-    return _direct_axis_points((merge.x, merge.y), (entry.x, entry.y))
-
-
 def _shared_terminal_axis(
     routes: tuple[RoutedPath, ...],
     target_point: tuple[float, float],

@@ -33,10 +33,7 @@ from nf_metro.layout.route_plan import (
     EmissionMember,
     RoutePlan,
     RouteSemanticScaffold,
-    SettlementStage,
-    SettlementStageTrace,
     _canonical_json,
-    register_settlement_stage,
 )
 from nf_metro.layout.route_reservations import (
     CANVAS_EDGE_ON_NEGATIVE_SIDE,
@@ -88,12 +85,6 @@ CorridorFootprintSegmentKey = tuple[str, tuple[str, str, str], int]
 CorridorLaneRegionReader = Callable[
     [RoutedPath, int, int], tuple[float | None, float | None] | None
 ]
-
-
-class CorridorCohortClaimRole(str, Enum):
-    MOVABLE = "movable"
-    EQUALITY = "equality"
-    FIXED = "fixed"
 
 
 class CorridorScalarOwnerKind(str, Enum):
@@ -224,9 +215,6 @@ class CorridorFootprintWitness:
     coordinate_variable_id: str | None = None
     start_variable_id: str | None = None
     end_variable_id: str | None = None
-    coordinate_variable_offset: float = 0.0
-    start_variable_offset: float = 0.0
-    end_variable_offset: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -850,15 +838,12 @@ def build_corridor_footprint_witnesses(
             axis = 1 if direction in (Direction.R, Direction.L) else 0
             key = target.member_id, target.edge_key, segment_rank
             coordinate_variable = variables_by_segment.get(key)
-            coordinate_variable_offset = 0.0
             start_variable = variables_by_segment.get(
                 (target.member_id, target.edge_key, segment_rank - 1)
             )
-            start_variable_offset = 0.0
             end_variable = variables_by_segment.get(
                 (target.member_id, target.edge_key, segment_rank + 1)
             )
-            end_variable_offset = 0.0
             explicit_coordinate_controls = tuple(
                 controlled_points.get(
                     (target.member_id, target.edge_key, point_rank, axis)
@@ -881,7 +866,7 @@ def build_corridor_footprint_witnesses(
                         f"corridor footprint segment {key} has no affine "
                         "coordinate control"
                     )
-                variable_id, coordinate_variable_offset = coordinate_control
+                variable_id, _offset = coordinate_control
                 coordinate_variable = variables_by_id[variable_id]
             explicit_start = _resolve_explicit_control(
                 (target.member_id, target.edge_key, segment_rank, 1 - axis),
@@ -889,14 +874,14 @@ def build_corridor_footprint_witnesses(
                 variables_by_id,
             )
             if explicit_start is not None:
-                start_variable, start_variable_offset = explicit_start
+                start_variable, _offset = explicit_start
             explicit_end = _resolve_explicit_control(
                 (target.member_id, target.edge_key, segment_rank + 1, 1 - axis),
                 controlled_points,
                 variables_by_id,
             )
             if explicit_end is not None:
-                end_variable, end_variable_offset = explicit_end
+                end_variable, _offset = explicit_end
             for endpoint_variable in (start_variable, end_variable):
                 if endpoint_variable is not None and endpoint_variable.axis != 1 - axis:
                     raise CorridorCohortCompilationError(
@@ -946,9 +931,6 @@ def build_corridor_footprint_witnesses(
                     end_variable_id=(
                         None if end_variable is None else end_variable.variable_id
                     ),
-                    coordinate_variable_offset=coordinate_variable_offset,
-                    start_variable_offset=start_variable_offset,
-                    end_variable_offset=end_variable_offset,
                 )
             )
     return tuple(
@@ -1003,7 +985,7 @@ class CorridorCohortCompatibility:
 class CorridorCohortComponentPlan:
     component_id: str
     endpoint_cohort_ids: tuple[str, ...]
-    claim_roles: tuple[tuple[str, CorridorCohortClaimRole], ...]
+    claim_fixed: tuple[tuple[str, bool], ...]
     problems: tuple[CorridorAllocationProblem, ...]
     results: tuple[CorridorAllocationResult, ...]
     status: CorridorAllocationStatus
@@ -1078,16 +1060,6 @@ class CorridorCohortPlan:
     landings: tuple[CorridorCohortLanding, ...] = ()
     scalar_grants: tuple[CorridorScalarGrant, ...] = ()
     route_patches: tuple[_RoutePatch, ...] = ()
-    settlement_trace: SettlementStageTrace | None = None
-
-    @property
-    def solve_call_count(self) -> int:
-        """How many solver problems the compile built, one per non-empty component.
-
-        ``solve_corridor_cohorts`` decides a problem's corner orders before
-        seating it; a result's ``corner_tier`` names the corner orders it held.
-        """
-        return sum(len(component.problems) for component in self.components)
 
 
 class AcceptedCorridorOwnerKind(str, Enum):
@@ -1917,7 +1889,7 @@ def _member_footprint_model(
                         (),
                     )
                     if abs(witness.segment_rank - perpendicular.segment_rank) == 1
-                    and _footprints_overlap(witness, variable_witness)
+                    and _overlap(witness, variable_witness)
                 ),
                 None,
             )
@@ -2106,7 +2078,7 @@ def _cotravelling_turn_off_intervals(
             if not any(
                 abs(parallel.segment_rank - perpendicular.segment_rank) == 1
                 and parallel.direction is carrier.direction
-                and _footprints_overlap(parallel, carrier)
+                and _overlap(parallel, carrier)
                 and abs(parallel.coordinate - carrier.coordinate)
                 < pitch - COORD_TOLERANCE
                 for parallel in by_lane.get(
@@ -2727,7 +2699,10 @@ def _cohort_landing_coordinates(
     return coordinates
 
 
-def _overlap(left: _BoundClaim, right: _BoundClaim) -> bool:
+def _overlap(
+    left: _BoundClaim | CorridorFootprintWitness,
+    right: _BoundClaim | CorridorFootprintWitness,
+) -> bool:
     return _overlaps(
         left.longitudinal_start,
         left.longitudinal_end,
@@ -2786,15 +2761,12 @@ def _is_terminal_fixed(claim: _BoundClaim) -> bool:
     )
 
 
-def _roles(
-    claims: tuple[_BoundClaim, ...],
-) -> dict[str, CorridorCohortClaimRole]:
+def _fixed_claims(claims: tuple[_BoundClaim, ...]) -> dict[str, bool]:
+    """Per claim, whether the solver holds it where it stands."""
     terminal_fixed = {item.claim_id for item in claims if _is_terminal_fixed(item)}
-    roles = {
-        item.claim_id: (
-            CorridorCohortClaimRole.MOVABLE
-            if item.ledger.reservation_complete and item.claim_id not in terminal_fixed
-            else CorridorCohortClaimRole.FIXED
+    is_fixed = {
+        item.claim_id: not (
+            item.ledger.reservation_complete and item.claim_id not in terminal_fixed
         )
         for item in claims
     }
@@ -2802,21 +2774,21 @@ def _roles(
     while changed:
         changed = False
         for follower in claims:
-            if roles[follower.claim_id] != CorridorCohortClaimRole.FIXED:
+            if not is_fixed[follower.claim_id]:
                 continue
             if follower.claim_id in terminal_fixed:
                 continue
             if follower.ledger.network_id is None:
                 continue
             if any(
-                roles[leader.claim_id] != CorridorCohortClaimRole.FIXED
+                not is_fixed[leader.claim_id]
                 and leader.ledger.network_id == follower.ledger.network_id
                 and _same_lane(leader, follower)
                 for leader in claims
             ):
-                roles[follower.claim_id] = CorridorCohortClaimRole.EQUALITY
+                is_fixed[follower.claim_id] = False
                 changed = True
-    return roles
+    return is_fixed
 
 
 def _direction_owner(owner_id: str, direction: Direction) -> str:
@@ -3037,7 +3009,7 @@ def _scalar_pair_clearances(
         )
         for rank, left_id in enumerate(scalar_ids)
         for right_id in scalar_ids[rank + 1 :]
-        if _footprints_overlap(
+        if _overlap(
             left := scalar_witnesses[left_id], right := scalar_witnesses[right_id]
         )
     )
@@ -3045,7 +3017,7 @@ def _scalar_pair_clearances(
 
 def _claim_separations(
     claims: tuple[_BoundClaim, ...],
-    roles: Mapping[str, CorridorCohortClaimRole],
+    is_fixed: Mapping[str, bool],
     aliases: Mapping[str, str],
     offset_step: float,
     curve_radius: float,
@@ -3061,9 +3033,7 @@ def _claim_separations(
         for right in claims[rank + 1 :]:
             aliased = left.claim_id in aliases or right.claim_id in aliases
             if not _overlap(left, right) or (
-                not aliased
-                and roles[left.claim_id] is CorridorCohortClaimRole.FIXED
-                and roles[right.claim_id] is CorridorCohortClaimRole.FIXED
+                not aliased and is_fixed[left.claim_id] and is_fixed[right.claim_id]
             ):
                 continue
             distance = cotravelling_lane_clearance(
@@ -3477,7 +3447,7 @@ def _local_boundary_ranks(
 
 def _problem(
     claims: tuple[_BoundClaim, ...],
-    roles: dict[str, CorridorCohortClaimRole],
+    is_fixed: Mapping[str, bool],
     complete: bool,
     offset_step: float,
     curve_radius: float,
@@ -3503,14 +3473,11 @@ def _problem(
         for claim_id, variable_id in footprint_model.scalar_aliases.items()
         if claim_id in claim_ids
     }
-    movable = tuple(
-        item for item in claims if roles[item.claim_id] != CorridorCohortClaimRole.FIXED
-    )
+    movable = tuple(item for item in claims if not is_fixed[item.claim_id])
     fixed_claims = tuple(
         item
         for item in claims
-        if roles[item.claim_id] is CorridorCohortClaimRole.FIXED
-        and item.claim_id not in aliases
+        if is_fixed[item.claim_id] and item.claim_id not in aliases
     )
     movable_ids = {item.claim_id for item in movable}
     scalar_witness_matches: defaultdict[str, list[CorridorFootprintWitness]] = (
@@ -3647,7 +3614,7 @@ def _problem(
                 for member_id in lane_ids(bundle.variable_id)
             )
     separations, scalar_clearances = _claim_separations(
-        claims, roles, aliases, offset_step, curve_radius
+        claims, is_fixed, aliases, offset_step, curve_radius
     )
     # Branches of one line split to different targets share a lane, and each
     # target orders the other lines it gathers against its own branch.  A
@@ -3935,18 +3902,6 @@ def _endpoint_cohorts_whole(
     return whole
 
 
-def _footprints_overlap(
-    left: CorridorFootprintWitness,
-    right: CorridorFootprintWitness,
-) -> bool:
-    return _overlaps(
-        left.longitudinal_start,
-        left.longitudinal_end,
-        right.longitudinal_start,
-        right.longitudinal_end,
-    )
-
-
 def _clearance_resolver(
     problems: tuple[CorridorAllocationProblem, ...],
 ) -> Callable[[str, str], float]:
@@ -3971,7 +3926,7 @@ def _clearance_resolver(
 def _planned_allocations_are_atomic_and_clear(
     claims: tuple[_BoundClaim, ...],
     physical_claims: tuple[tuple[_BoundClaim, ...], ...],
-    roles: dict[str, CorridorCohortClaimRole],
+    is_fixed: Mapping[str, bool],
     problems: tuple[CorridorAllocationProblem, ...],
     results: tuple[CorridorAllocationResult, ...],
     scalar_variable_ids: frozenset[str],
@@ -3979,11 +3934,9 @@ def _planned_allocations_are_atomic_and_clear(
     allocated = tuple(
         claim_id for result in results for claim_id, _coordinate in result.allocations
     )
-    expected = {
-        item.claim_id
-        for item in claims
-        if roles[item.claim_id] != CorridorCohortClaimRole.FIXED
-    } | set(scalar_variable_ids)
+    expected = {item.claim_id for item in claims if not is_fixed[item.claim_id]} | set(
+        scalar_variable_ids
+    )
     if len(allocated) != len(set(allocated)) or set(allocated) != expected:
         return False
     coordinates = {
@@ -3993,11 +3946,7 @@ def _planned_allocations_are_atomic_and_clear(
     }
     required_clearance = _clearance_resolver(problems)
     for group in physical_claims:
-        movable = tuple(
-            item
-            for item in group
-            if roles[item.claim_id] != CorridorCohortClaimRole.FIXED
-        )
+        movable = tuple(item for item in group if not is_fixed[item.claim_id])
         for rank, left in enumerate(movable):
             for right in movable[rank + 1 :]:
                 if left.ledger.direction is right.ledger.direction or not _overlap(
@@ -4077,7 +4026,6 @@ def _component_plan(
     witnesses_by_id: Mapping[str, CorridorFootprintWitness],
     scalar_requests_by_id: Mapping[str, CorridorScalarRequest],
     intervals_by_member: Mapping[str, Sequence[CorridorForbiddenInterval]],
-    solve: Callable[[CorridorAllocationProblem], CorridorAllocationResult],
     corner_neighbours: Mapping[tuple[str, int], _CornerNeighbour],
     lane_region: CorridorLaneRegionReader,
 ) -> CorridorCohortComponentPlan:
@@ -4106,14 +4054,11 @@ def _component_plan(
             }
         )
     )
-    roles = _roles(component_claims)
+    is_fixed = _fixed_claims(component_claims)
     physical_claims = tuple(
         tuple(claims[item] for item in physical[group]) for group in physical_ranks
     )
-    has_movable = any(
-        roles[item.claim_id] != CorridorCohortClaimRole.FIXED
-        for item in component_claims
-    )
+    has_movable = any(not is_fixed[item.claim_id] for item in component_claims)
     member_ids = tuple(sorted({item.ledger.member_id for item in component_claims}))
     problems: tuple[CorridorAllocationProblem, ...] = ()
     results: tuple[CorridorAllocationResult, ...] = ()
@@ -4127,7 +4072,7 @@ def _component_plan(
         )
         problem = _problem(
             component_claims,
-            roles,
+            is_fixed,
             complete,
             ledger.offset_step,
             ledger.curve_radius,
@@ -4140,7 +4085,7 @@ def _component_plan(
             forced_crossings=ledger.forced_crossings,
         )
         problems = (problem,)
-        results = (solve(problem),)
+        results = (solve_corridor_cohorts(problem),)
     skipped = not problems
     if skipped and not all(_is_terminal_fixed(item) for item in component_claims):
         raise CorridorCohortCompilationError(
@@ -4163,7 +4108,7 @@ def _component_plan(
             _planned_allocations_are_atomic_and_clear(
                 component_claims,
                 physical_claims,
-                roles,
+                is_fixed,
                 problems,
                 results,
                 frozenset(spec.scalar_variable_ids),
@@ -4194,7 +4139,7 @@ def _component_plan(
     return CorridorCohortComponentPlan(
         f"corridor-component|{rank}",
         endpoint_ids,
-        tuple((item.claim_id, roles[item.claim_id]) for item in component_claims),
+        tuple((item.claim_id, is_fixed[item.claim_id]) for item in component_claims),
         problems,
         results,
         status,
@@ -4435,7 +4380,6 @@ def compile_corridor_cohort_plan(
     targets: Sequence[CorridorCohortTarget],
     *,
     scalar_requests: Sequence[CorridorScalarRequest] = (),
-    settlement_trace: SettlementStageTrace | None = None,
     corner_sizer: CorridorCornerSizer = _no_corner_sizing,
     live_route: Callable[[RoutedPath], RoutedPath] = _same_route,
     entry_port_for: Mapping[str, str],
@@ -4467,9 +4411,6 @@ def compile_corridor_cohort_plan(
     scalar_requests_by_id = {
         request.variable.variable_id: request for request in scalar_requests
     }
-
-    def solve(problem: CorridorAllocationProblem) -> CorridorAllocationResult:
-        return solve_corridor_cohorts(problem)
 
     footprint_model = _member_footprint_model(
         claims,
@@ -4554,7 +4495,6 @@ def compile_corridor_cohort_plan(
             witnesses_by_id,
             scalar_requests_by_id,
             intervals_by_member,
-            solve,
             corner_neighbours,
             lane_region,
         )
@@ -4621,7 +4561,7 @@ def compile_corridor_cohort_plan(
                     component.component_id,
                     -1,
                     CorridorAllocationFailureReason.INVALID,
-                    tuple(claim_id for claim_id, _role in component.claim_roles),
+                    tuple(claim_id for claim_id, _fixed in component.claim_fixed),
                     (),
                     (),
                     (),
@@ -4721,26 +4661,6 @@ def compile_corridor_cohort_plan(
         for component in components
     ]
     ordered_grants = tuple(sorted(scalar_grants, key=lambda item: item.variable_id))
-    solve_call_count = sum(len(component.problems) for component in components)
-    trace = settlement_trace
-    if trace is not None:
-        fingerprint = repr(
-            (
-                tuple(
-                    (allocation.claim_id, allocation.coordinate)
-                    for allocation in sorted(
-                        finalized_allocations, key=lambda item: item.claim_id
-                    )
-                ),
-                tuple(
-                    (grant.variable_id, grant.coordinate) for grant in ordered_grants
-                ),
-                solve_call_count,
-            )
-        )
-        trace = register_settlement_stage(
-            trace, SettlementStage.FINAL_SOLVE, geometry_fingerprint=fingerprint
-        )
     return CorridorCohortPlan(
         tuple(components),
         finalized_allocations,
@@ -4748,7 +4668,6 @@ def compile_corridor_cohort_plan(
         landings,
         ordered_grants,
         patches,
-        trace,
     )
 
 

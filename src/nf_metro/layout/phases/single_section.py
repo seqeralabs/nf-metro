@@ -591,7 +591,7 @@ def _seat_fan_in_branches_on_lane_side(
     """
     # assign_tracks seats lines in priority order, which is the section's lane
     # order only while no seam delivers an order of its own: at most one line
-    # enters the section (offsets._reorder_reconvergence leaves it on priority).
+    # enters the section (the lane plan leaves it on priority).
     seam_lines = {
         edge.line_id
         for port_id in section.entry_ports

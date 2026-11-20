@@ -46,11 +46,11 @@ from nf_metro.layout.route_plan import (
 from nf_metro.layout.routing import corridor_cohort_integration
 from nf_metro.layout.routing import exit_turns as exit_turns_module
 from nf_metro.layout.routing import offsets as offsets_module
+from nf_metro.layout.routing.common import right_normal_axis_sign
 from nf_metro.layout.routing.context import _section_lane_frame
 from nf_metro.layout.routing.orientation import (
     DemandAxis,
     lateral_axis,
-    lateral_order_sign,
 )
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import LineSpread, MetroGraph
@@ -174,7 +174,7 @@ def _planned_lateral(drawn: _Drawn, node: str, line_id: str, axis: str) -> float
             return None
         return (
             getattr(station, axis)
-            + lateral_order_sign(port_travel(port)) * value * drawn.step
+            + right_normal_axis_sign(port_travel(port)) * value * drawn.step
         )
     section = graph.sections.get(station.section_id or "")
     if (
@@ -362,7 +362,7 @@ def _origin(graph: MetroGraph, node: str, line_id: str) -> str:
 
 def _screen_side(graph: MetroGraph, entry_id: str, side: int) -> int:
     """Screen sign, on the entry's lateral axis, of the travel-frame *side*."""
-    return side * lateral_order_sign(port_travel(graph.ports[entry_id]))
+    return side * right_normal_axis_sign(port_travel(graph.ports[entry_id]))
 
 
 # Main's TOP/BOTTOM-entry L-shape drops straight in on the port column past a

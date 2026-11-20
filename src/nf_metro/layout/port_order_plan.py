@@ -96,6 +96,7 @@ from nf_metro.layout.routing.common import (
     Direction,
     _v_segment_crosses_other_section,
     resolve_section_colrow,
+    right_normal_axis_sign,
     section_ids_of_stations,
 )
 from nf_metro.layout.routing.context import (
@@ -108,7 +109,6 @@ from nf_metro.layout.routing.orientation import (
     direction_vector,
     get_point_coordinate,
     lateral_axis,
-    lateral_order_sign,
 )
 from nf_metro.parser.model import MetroGraph, Port, PortSide, Section
 
@@ -258,7 +258,7 @@ def _lateral(point: _Point, origin: _Point, travel: Direction) -> float:
     """Signed distance of *point* from *origin* across *travel*, positive to the
     traveller's right."""
     axis = lateral_axis(travel)
-    return lateral_order_sign(travel) * (
+    return right_normal_axis_sign(travel) * (
         get_point_coordinate(point, axis) - get_point_coordinate(origin, axis)
     )
 

@@ -1205,8 +1205,8 @@ def left_exit_around_below_geometry(f: _InterFacts) -> _LeftExitUnderTargetLoop:
 
     # West out of the exit, around below, then east into the LEFT port is a net
     # half-turn that transposes the bundle end-to-end.  The destination section
-    # takes the transposed order from the seam classifier (``_reorder_reconvergence``),
-    # so the entry offsets here are already the transposed order; the bundle tapers from
+    # takes the transposed order from the lane plan (``build_lane_plan``), so the
+    # entry offsets here are already the transposed order; the bundle tapers from
     # its exit offset out of the source to that entry offset into the port, the
     # taper following the loop's natural transpose so no line crosses a mate.
     members = [
@@ -1214,7 +1214,7 @@ def left_exit_around_below_geometry(f: _InterFacts) -> _LeftExitUnderTargetLoop:
     ]
     # Run the horizontal over the target's top when viable, else dip below it
     # (see :func:`_left_exit_wrap_over_top_y`).
-    over_gy = _left_exit_wrap_over_top_y(f, cx, vx)
+    over_gy = _left_exit_wrap_over_top_y(f)
     over_top = over_gy is not None
     channel_y = over_gy if over_gy is not None else by
     vx -= ctx.offset_step * _outward_loop_inner_lanes(
@@ -1286,11 +1286,7 @@ def _route_left_exit_around_below_left_entry(f: _InterFacts) -> RoutedPath | Non
     return route
 
 
-def _left_exit_wrap_over_top_y(
-    f: _InterFacts,
-    cx: float,
-    vx: float,
-) -> float | None:
+def _left_exit_wrap_over_top_y(f: _InterFacts) -> float | None:
     """Over-the-top channel Y for a same-row LEFT-exit far-LEFT-entry wrap loop.
 
     A same-row wrap dips below the target box; when the target is tall that dip
@@ -1298,10 +1294,9 @@ def _left_exit_wrap_over_top_y(
     lane plan's approach record loops the connector over the target's top
     (:attr:`SideRule.OVER_TOP`, decided from placement by
     :func:`left_exit_wrap_over_top_y`), the loop traverses the band ABOVE the
-    target row (:func:`_gap_above_channel_y`) between its ascent at *cx* and
-    descent at *vx*; otherwise it keeps the dip (``None``).
+    target row (:func:`_gap_above_channel_y`) between its ascent and descent;
+    otherwise it keeps the dip (``None``).
     """
-    del cx, vx
     approach = _approach_record(f.graph, f.edge)
     if approach is None or approach.rule is not SideRule.OVER_TOP:
         return None
@@ -2466,14 +2461,6 @@ def arrival_leg_of(
             lead = steps[last - 1]
             lead_along = lead[1][0] - lead[0][0]
     return ArrivalLeg(framed[-1][1], first_along, riser_lane, lead_along)
-
-
-def arrival_leg(edge: Edge, ctx: _RoutingCtx, frame: AxisFrame) -> ArrivalLeg | None:
-    """The :class:`ArrivalLeg` of the route *edge*'s dispatch rule draws.
-
-    The same draft :func:`arrival_approach` reads, taken in *frame*.
-    """
-    return arrival_leg_of(_dispatch_draft_points(edge, ctx), frame, ctx.curve_radius)
 
 
 @dataclass(frozen=True, slots=True)
@@ -7554,8 +7541,8 @@ def _route_right_entry_over_top(
     from the port's own outward side.  Approaching a right-side port from the
     left is a U-turn, which transposes the bundle end-to-end; the descent into
     the section therefore reverses the lines, matched by the section's reversed
-    internal order (driven from the arrival bundle by
-    :func:`offsets._reorder_reconvergence`).
+    internal order (decided from the arrival bundle by the lane plan,
+    :func:`~nf_metro.layout.lane_plan.build_lane_plan`).
 
     Built via :func:`build_concentric_bundle` from the bundle's centreline, so
     the loop cannot flip and every corner is concentric by construction.

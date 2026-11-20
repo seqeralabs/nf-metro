@@ -22,11 +22,7 @@ import pytest
 
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
-from nf_metro.layout.routing.context import (
-    lane_x,
-    port_arrival_order,
-    port_lane_coord,
-)
+from nf_metro.layout.routing.context import lane_x, port_lane_coord
 from nf_metro.layout.routing.invariants import (
     check_seam_approach_equals_departure,
     check_seam_segments_meet_at_port,
@@ -36,6 +32,16 @@ from nf_metro.parser.model import Edge, MetroGraph, Port, PortSide, Section, Sta
 
 ROOT = Path(__file__).resolve().parent.parent
 TOPOLOGIES = ROOT / "examples" / "topologies"
+
+
+def port_arrival_order(
+    graph: MetroGraph, port: Station, offsets: dict[tuple[str, str], float]
+) -> list[str]:
+    """Lines at *port* in the order they cross its edge, ties on line id."""
+    return sorted(
+        graph.station_lines(port.id),
+        key=lambda lid: (port_lane_coord(graph, port, lid, offsets), lid),
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -133,14 +139,6 @@ def test_lane_x_order_matches_arrival_order(direction: str) -> None:
     departure = port_arrival_order(graph, exit_, offsets)
 
     assert arrival == by_lane == departure
-
-
-def test_port_arrival_order_breaks_ties_on_line_id() -> None:
-    """Lines sharing a lane coordinate order by line id, not input listing."""
-    graph, _ = _mini_graph("TB")
-    entry = graph.stations["s__entry"]
-    tied = {("s__entry", lid): 4.0 for lid in ("a", "b")}
-    assert port_arrival_order(graph, entry, tied) == ["a", "b"]
 
 
 @pytest.mark.parametrize("direction", ["LR", "RL", "TB", "BT"])

@@ -677,26 +677,6 @@ def port_lane_coord(
     return station_lane_coord(frame, port, offset)
 
 
-def port_arrival_order(
-    graph: MetroGraph,
-    port: Station,
-    station_offsets: Mapping[tuple[str, str], float],
-    positive_fan: set[str] | None = None,
-) -> list[str]:
-    """Lines at *port* in the order they cross its edge (arrival order).
-
-    Ties (two lines sharing a lane coordinate) break on line id, so the order is
-    independent of the input line listing.
-    """
-    return sorted(
-        graph.station_lines(port.id),
-        key=lambda lid: (
-            port_lane_coord(graph, port, lid, station_offsets, positive_fan),
-            lid,
-        ),
-    )
-
-
 def _entry_port_for_line(
     graph: MetroGraph, section: Section, line_id: str
 ) -> Station | None:
@@ -993,9 +973,8 @@ def is_far_side_around_below_left_entry(graph: MetroGraph, port: Port) -> bool:
     westward, drops below every box, and rises into the far-side port from its
     outward side -- a half-turn that transposes the bundle end-to-end.  Routed
     by ``_route_left_exit_around_below_left_entry``; the destination section takes
-    the feeder's delivered order transposed once by the seam classifier
-    (``_reorder_reconvergence``) and the layout reserves left clearance for the
-    wrap.
+    the feeder's delivered order transposed once by the lane plan
+    (``build_lane_plan``) and the layout reserves left clearance for the wrap.
 
     Pure topology (grid columns, port sides, intervening sections), so it reads
     the same before global coordinates are assigned and after.
@@ -1035,7 +1014,7 @@ def is_near_vertical_junction_right_entry(graph: MetroGraph, port: Port) -> bool
     """Whether *port* is a RIGHT entry a multi-line fan-out junction drops into.
 
     Detected so the section's line order can be reversed to match the descent's
-    transpose (see ``_reverse_near_vertical_junction_right_entry_offsets``).  The
+    transpose.  The
     same near-vertical geometry the routing dispatch deflects to the standard
     drop (``_InterFacts.takes_near_vertical_junction_drop``): the junction and
     port share a grid column, the junction overhangs the port's outward edge, the

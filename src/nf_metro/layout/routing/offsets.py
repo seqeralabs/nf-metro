@@ -37,12 +37,12 @@ from nf_metro.layout.port_order_plan import Approach, port_travel
 from nf_metro.layout.routing.common import (
     bypass_bottom_y,
     merge_junction_ids,
+    right_normal_axis_sign,
 )
 from nf_metro.layout.routing.context import (
     _has_intervening_sections,
     _resolve_section_colrow,
 )
-from nf_metro.layout.routing.orientation import lateral_order_sign
 from nf_metro.parser.model import (
     Edge,
     LineSpread,
@@ -243,7 +243,7 @@ def _recorded_approach(graph: MetroGraph, edge: Edge) -> _Approach:
     if approach is None or approach.side == 0:
         return "flat"
     travel = port_travel(graph.ports[edge.target])
-    return "below" if approach.side * lateral_order_sign(travel) > 0 else "above"
+    return "below" if approach.side * right_normal_axis_sign(travel) > 0 else "above"
 
 
 def same_row_bypass_entry(graph: MetroGraph, port_id: str) -> SameRowBypassEntry | None:

@@ -58,6 +58,7 @@ from nf_metro.layout.routing.common import (
     convergence_owns_segment_boundary,
     feasible_same_destination_approach_proposals,
     iter_plannable_short_same_destination_bundles,
+    right_normal_axis_sign,
     same_destination_approach_slots,
     segment_direction,
 )
@@ -123,7 +124,7 @@ from nf_metro.layout.routing.normalize import (
     _VChannel,
     semantic_end_corners,
 )
-from nf_metro.layout.routing.orientation import direction_axis, lateral_order_sign
+from nf_metro.layout.routing.orientation import direction_axis
 from nf_metro.layout.routing.perp import _perp_entry_crossing_x
 from nf_metro.layout.routing.reserved_bands import (
     ReservedBand,
@@ -1438,7 +1439,7 @@ def _settled_exit_turns(
         }
         for candidate in cohort_candidates:
             lane_offsets[candidate.edge_key] = (
-                lateral_order_sign(candidate.turn_direction)
+                right_normal_axis_sign(candidate.turn_direction)
                 * lane_index[candidate.lane_rank]
                 * ctx.offset_step
             )
@@ -3539,29 +3540,6 @@ def _owned_corner_radius_mismatches(
             f"member geometry plan {plan.id} owned corner radius changed "
             f"at index {radius_index}"
         )
-
-
-def plan_corridor_cohorts(
-    ledger: CorridorCohortLedger,
-    targets: Sequence[CorridorCohortTarget],
-    *,
-    entry_port_for: Mapping[str, str],
-    scalar_requests: Sequence[CorridorScalarRequest] = (),
-) -> CorridorCohortPlan:
-    """Compile one corridor cohort snapshot into heterogeneous grants.
-
-    Passes member and convergence scalar requests to
-    :func:`compile_corridor_cohort_plan` and returns member allocations, exact
-    route patches and convergence scalar grants in one plan. It solves without
-    publishing: the caller decides whether to apply the returned patches, so no
-    geometry moves here.
-    """
-    return compile_corridor_cohort_plan(
-        ledger,
-        targets,
-        scalar_requests=scalar_requests,
-        entry_port_for=entry_port_for,
-    )
 
 
 _CornerState = tuple[

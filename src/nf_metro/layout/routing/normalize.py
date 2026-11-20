@@ -87,6 +87,7 @@ from nf_metro.layout.routing.common import (
     planner_owns_segment,
     planner_owns_segment_or_boundary,
     port_peeloff_tail,
+    right_normal_axis_sign,
     route_system_owns_segment_boundary,
     row_bottom_edge,
     row_local_gap_bundle_midpoint,
@@ -131,7 +132,6 @@ from nf_metro.layout.routing.offsets import (
 from nf_metro.layout.routing.orientation import (
     direction_vector,
     lateral_axis,
-    lateral_order_sign,
 )
 from nf_metro.layout.routing.reserved_bands import (
     ReservedBand,
@@ -4620,7 +4620,7 @@ def _planned_leg_key(
     else:
         frame = _section_lane_frame(graph, section, ctx.positive_fan)
         lane = station_lane_coord(frame, station, offset)
-    key = lane * lateral_order_sign(travel) * lateral_order_sign(leg)
+    key = lane * right_normal_axis_sign(travel) * right_normal_axis_sign(leg)
     if travel in (Direction.L, Direction.R) and _runs_on_through(
         graph, node, line_id, travel, start
     ):
@@ -4691,7 +4691,7 @@ def _entry_order_pair(
     )
     if abs(coord_i - coord_j) <= COORD_TOLERANCE:
         return None
-    sign = lateral_order_sign(travel) * lateral_order_sign(
+    sign = right_normal_axis_sign(travel) * right_normal_axis_sign(
         ENTRY_SIDE_DIRECTION[graph.ports[port_id].side]
     )
     return (i, j) if sign * coord_i < sign * coord_j else (j, i)

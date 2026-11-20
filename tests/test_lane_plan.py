@@ -59,6 +59,7 @@ from nf_metro.layout.routing.common import (
     EXIT_SIDE_DIRECTION,
     Direction,
     resolve_section_colrow,
+    right_normal_axis_sign,
 )
 from nf_metro.layout.routing.context import _section_lane_frame
 from nf_metro.layout.routing.offsets import (
@@ -66,7 +67,6 @@ from nf_metro.layout.routing.offsets import (
 )
 from nf_metro.layout.routing.orientation import (
     direction_vector,
-    lateral_order_sign,
 )
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import Edge, MetroGraph, PortSide
@@ -792,7 +792,7 @@ def _screen_side(graph: MetroGraph, entry_id: str, side: int) -> str:
     travel = port_travel(graph.ports[entry_id])
     if side == 0:
         return "flat"
-    return "below" if side * lateral_order_sign(travel) > 0 else "above"
+    return "below" if side * right_normal_axis_sign(travel) > 0 else "above"
 
 
 @contextmanager
@@ -1776,7 +1776,7 @@ def test_a_multi_consumer_perpendicular_entry_keeps_each_turn_side(path: Path) -
             lanes = {
                 lid: plan.tracks.lanes[(turn.consumer_id, lid)] for lid in turn.lines
             }
-            across = lateral_order_sign(turn.turn) * sign
+            across = right_normal_axis_sign(turn.turn) * sign
             after = sorted(turn.lines, key=lambda lid: across * lanes[lid])
             if sorted(turn.lines, key=offsets.__getitem__) != after:
                 bad.append((port_id, turn.consumer_id))
@@ -1804,7 +1804,7 @@ def test_a_multi_consumer_perpendicular_entry_keeps_each_turn_over_its_order() -
     for turn in turns:
         assert turn.turn is not None
         lanes = {lid: plan.tracks.lanes[(turn.consumer_id, lid)] for lid in turn.lines}
-        across = lateral_order_sign(turn.turn) * sign
+        across = right_normal_axis_sign(turn.turn) * sign
         chains.append(sorted(turn.lines, key=lambda lid: across * lanes[lid]))
     assert len(chains) == 2 and all(len(chain) >= 2 for chain in chains)
 

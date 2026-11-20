@@ -26,8 +26,10 @@ from nf_metro.layout.constants import COORD_TOLERANCE, INTER_ROW_HEADER_CLEARANC
 from nf_metro.layout.geometry import segment_intersects_bbox
 from nf_metro.layout.lane_plan import recorded_lane_plan
 from nf_metro.layout.port_order_plan import SideRule, port_travel
-from nf_metro.layout.routing.common import segments_properly_cross
-from nf_metro.layout.routing.orientation import lateral_order_sign
+from nf_metro.layout.routing.common import (
+    right_normal_axis_sign,
+    segments_properly_cross,
+)
 from nf_metro.parser.model import PortSide
 from nf_metro.themes import resolve_theme
 
@@ -253,7 +255,7 @@ def test_a_fork_branch_passes_the_row_on_the_side_no_outer_lane_crosses(
     a branch inside other lanes passes the other side."""
     graph, _drawn = _render(fixture)
     approach = _RECORDS[fixture].port_orders.approaches[(entry, exit_port)]  # type: ignore[attr-defined]
-    below = approach.side * lateral_order_sign(port_travel(graph.ports[entry])) > 0
+    below = approach.side * right_normal_axis_sign(port_travel(graph.ports[entry])) > 0
     assert approach.rule is SideRule.FORK_NEST
     assert ("below" if below else "above") == side
 

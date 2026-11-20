@@ -4889,8 +4889,8 @@ def _guard_entry_port_fed_only_by_ports(graph: MetroGraph, phase: str) -> None:
     ``_resolve_sections`` rewrites each inter-section edge into a chain
     ``source -> exit_port -> entry_port -> target``, so an entry port's
     incoming edges come from exit ports or fan-out junctions, all carrying
-    ``is_port=True``.  ``_section_line_feeders`` relies on this to read the
-    feeder section straight off the source's ``section_id``; a non-port
+    ``is_port=True``.  A feeder lookup relies on this to read the feeder
+    section straight off the source's ``section_id``; a non-port
     source would mean an internal station feeds an entry port directly,
     which would mis-attribute the reconvergence feeder ordering.
     """

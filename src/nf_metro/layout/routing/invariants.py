@@ -1685,8 +1685,8 @@ def check_convergence_shallow_feeder_concentric(
     holds at any flow-side entry of an LR or RL section where same-row bypass
     lines join flat feeders (:func:`same_row_bypass_entry`): each bypass line
     must sit on the side of the flat band it arrives from, below it when it
-    climbs in and above it when it comes down.  Mirrors the gating of
-    ``_order_convergence_entry_ports``, which assigns the slot.
+    climbs in and above it when it comes down.  The lane plan's port orders
+    (``build_lane_plan``) assign the slot.
     """
     from nf_metro.layout.routing.offsets import (
         _convergence_feeders,
@@ -2587,7 +2587,8 @@ def check_partial_branch_offset_gaps(
     across the section, so its interior gaps are deliberate and this
     check stays a no-op there.  The narrower non-compact rule -- no slot
     reserved for a line the section does not carry at all -- is settled
-    in ``offsets._close_section_dead_lanes`` rather than reported here.
+    by the lane plan's track lanes (``build_lane_plan``) rather than reported
+    here.
     """
     if not graph.compact_offsets:
         return []
@@ -7008,8 +7009,8 @@ def check_peeloff_concentric(
     Every contiguous concentric peel-off bundle - lines sharing one bypass trunk
     rising into a common LEFT entry port - owes the band
     :class:`PeeloffBundleCrossing` describes.  That band is set up front by
-    ``_convergence_line_order`` (riser peel-x) and
-    ``_order_convergence_entry_ports`` (port slots), so the bundle nests through
+    ``_convergence_line_order`` (riser peel-x) and the lane plan's port
+    orders (port slots), so the bundle nests through
     the standard layout path rather than by repair here.  A port in
     *landing_orders* owes the band in the order the plan lands it.
     """

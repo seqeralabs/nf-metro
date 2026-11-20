@@ -1614,39 +1614,9 @@ def test_compiler_counts_every_solve_call(monkeypatch: pytest.MonkeyPatch) -> No
         entry_port_for={},
     )
 
-    assert plan.solve_call_count == 1
-    assert calls == plan.solve_call_count
-
-
-def test_final_solve_trace_is_emitted_from_the_integration_call_site(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The one integration call site records ``FINAL_SOLVE`` on a passed trace."""
-    ledger, targets, scalar_requests, footprint_model = (
-        _member_scalar_relation_scenario()
-    )
-    monkeypatch.setattr(
-        cci, "_member_footprint_model", lambda *args, **kwargs: footprint_model
-    )
-    trace = SettlementStageTrace()
-    trace = register_settlement_stage(
-        trace, SettlementStage.DISCOVERY, geometry_fingerprint="discovery"
-    )
-    trace = register_settlement_stage(
-        trace, SettlementStage.APERTURE_SETTLEMENT, geometry_fingerprint="aperture"
-    )
-
-    plan = cci.compile_corridor_cohort_plan(
-        ledger,
-        targets,
-        scalar_requests=scalar_requests,
-        settlement_trace=trace,
-        entry_port_for={},
-    )
-
-    assert plan.settlement_trace is not None
-    assert plan.settlement_trace.records[-1].stage is SettlementStage.FINAL_SOLVE
-    assert plan.settlement_trace.records[-1].route_observation_rank is None
+    solve_call_count = sum(len(component.problems) for component in plan.components)
+    assert solve_call_count == 1
+    assert calls == solve_call_count
 
 
 def _assert_no_silent_compatibility(plan: cci.CorridorCohortPlan) -> None:
@@ -1734,9 +1704,7 @@ def test_component_on_segments_another_plan_owns_is_planned_without_a_solve() ->
     assert component.problems == ()
     assert component.results == ()
     assert component.allocations == ()
-    assert {role for _claim_id, role in component.claim_roles} == {
-        cci.CorridorCohortClaimRole.FIXED
-    }
+    assert {fixed for _claim_id, fixed in component.claim_fixed} == {True}
     assert plan.allocations == ()
 
 
@@ -1934,8 +1902,6 @@ def test_member_geometry_corridor_handoff_returns_heterogeneous_grants(
 ) -> None:
     """The member-geometry handoff compiles complete requests and receives grants
     without applying the convergence grants."""
-    from nf_metro.layout.routing import member_geometry
-
     ledger, targets, scalar_requests, footprint_model = (
         _member_scalar_relation_scenario()
     )
@@ -1943,7 +1909,7 @@ def test_member_geometry_corridor_handoff_returns_heterogeneous_grants(
         cci, "_member_footprint_model", lambda *args, **kwargs: footprint_model
     )
 
-    plan = member_geometry.plan_corridor_cohorts(
+    plan = cci.compile_corridor_cohort_plan(
         ledger,
         targets,
         scalar_requests=scalar_requests,
@@ -2347,8 +2313,8 @@ def test_endpoint_lanes_rank_past_an_interleaved_fixed_member(
     if outer_pinned:
         fixed.append(_fixed_copy(m3, "fixed-m3"))
     claims = (m1, m3, *fixed)
-    roles = {item.claim_id: cci.CorridorCohortClaimRole.MOVABLE for item in claims}
-    roles.update({item.claim_id: cci.CorridorCohortClaimRole.FIXED for item in fixed})
+    roles = {item.claim_id: False for item in claims}
+    roles.update({item.claim_id: True for item in fixed})
     footprint_model = _MemberFootprintModel((), (), {}, (), (), ())
 
     problem = cci._problem(
@@ -2443,8 +2409,8 @@ def _cohort_beside_a_fixed_lane(
             replace(_fixed_copy(feed, "fixed-m1-feed"), longitudinal_start=240.0)
         )
     claims = (*movable, *fixed)
-    roles = {item.claim_id: cci.CorridorCohortClaimRole.MOVABLE for item in movable}
-    roles.update({item.claim_id: cci.CorridorCohortClaimRole.FIXED for item in fixed})
+    roles = {item.claim_id: False for item in movable}
+    roles.update({item.claim_id: True for item in fixed})
     footprint_model = _MemberFootprintModel((), (), {}, (), (), ())
     problem = cci._problem(
         claims,

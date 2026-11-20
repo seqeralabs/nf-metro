@@ -6219,8 +6219,8 @@ def test_entry_port_fed_only_by_ports(fixture):
     ``_resolve_sections`` rewrites inter-section edges into
     ``source -> exit_port -> entry_port -> target`` chains, so an entry
     port's incoming edges come from exit ports or fan-out junctions, all
-    ``is_port=True``.  ``_section_line_feeders`` reads the feeder section
-    directly off the source's ``section_id``, relying on this; a non-port
+    ``is_port=True``.  A feeder lookup reads the feeder section directly
+    off the source's ``section_id``, relying on this; a non-port
     source would mean an internal station feeds an entry port directly.
     """
     graph = _layout(fixture)
@@ -6238,8 +6238,8 @@ def test_compact_multiline_entry_ports_pre_separated(fixture):
     """Multi-line entry ports already carry separated offsets before the
     entry-port pass runs.
 
-    ``_apply_compact_section_consistency`` assigns each section's entry lines
-    distinct ``i * offset_step`` offsets early in ``compute_station_offsets``,
+    The lane plan (``build_lane_plan``) assigns each section's entry lines
+    distinct ``i * offset_step`` offsets in ``compute_station_offsets``,
     so by the time the entry-port pass runs the offsets on a multi-line entry
     port are never all-equal.  This pins the precondition that made the
     compact entry-port separation pass a no-op.

@@ -122,25 +122,6 @@ ENTRY_SIDE_DIRECTION: Mapping[PortSide, Direction] = {
 """The direction a line travels entering an entry port on each side."""
 
 
-def offsets_hold(
-    offsets: Mapping[tuple[str, str], float],
-    expected: Iterable[tuple[str, str, float]],
-    tolerance: float,
-    *,
-    missing: float | None = None,
-) -> bool:
-    """Whether *offsets* holds every ``(station, line, offset)`` in *expected*.
-
-    A slot absent from *offsets* reads as *missing*, or fails when that is
-    ``None``.
-    """
-    for station_id, line_id, offset in expected:
-        actual = offsets.get((station_id, line_id), missing)
-        if actual is None or abs(actual - offset) > tolerance:
-            return False
-    return True
-
-
 def right_normal_axis_sign(direction: Direction) -> int:
     """Return the screen-axis sign of the right-hand normal to *direction*."""
     return 1 if direction in (Direction.R, Direction.U) else -1
