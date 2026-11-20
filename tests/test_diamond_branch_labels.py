@@ -17,6 +17,7 @@ from nf_metro.layout.labels import (
     _try_place,
     place_labels,
 )
+from nf_metro.layout.lane_plan import build_lane_plan
 from nf_metro.parser.model import Edge, MetroGraph, Section, Station
 
 _SEC_ID = "pipe"
@@ -40,6 +41,7 @@ def _build_graph(stations, edges):
         graph.stations[station.id] = station
         graph.sections[_SEC_ID].station_ids.append(station.id)
     graph.edges = list(edges)
+    graph._lane_plan = build_lane_plan(graph)
     return graph
 
 

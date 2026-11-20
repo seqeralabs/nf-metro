@@ -19,6 +19,7 @@ import pytest
 
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.labels import place_labels
+from nf_metro.layout.lane_plan import seal_lane_plan
 from nf_metro.layout.phases.spacing import _placed_name_label_station_ids
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import MetroGraph, Station
@@ -96,6 +97,7 @@ def test_terminus_label_suppressed_even_with_nonblank_label() -> None:
         terminus_names=["Reference"],
     )
     graph.stations["s"] = Station(id="s", label="Align", x=200.0, y=100.0)
+    seal_lane_plan(graph)
 
     placements = place_labels(graph)
     placed = {p.station_id for p in placements if p.station_id}
