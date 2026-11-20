@@ -1,7 +1,77 @@
 {
   "routing": {
-    "gate": "MERGE GATE: this list must be empty before the integration branch (PR #2015) merges to main (ruling GATE-SCOPE).  It covers route planning and emission: everything under layout/routing/ and the planning modules port_order_plan.py, route_plan.py, route_reservations.py, fan_plans.py, route_topology.py, seam_topology.py, fan_geometry.py, fan_ordering.py, envelope_settlement.py and settlement_demand.py.  It may only shrink.  removed_by names the #2094 list line or ruling that removes the entry, or 'unassigned'.  'entries' are detected by the guard; 'manual' are cases the AST cannot see, checked only by asserting that the named function exists, so deleting the function makes the entry stale.  'pinned_later_passes' and 'pinned_nested_passes' keep a route pass registered while anything calls it, whether or not the routing table runs it; a pin is valid to delete only when its pass has no callers left, and review checks that.",
+    "gate": "MERGE GATE (rulings GATE-SCOPE and R2): when the integration branch (PR #2015) merges to main, every row left has a removed_by starting with '59' (a shrink-only family row) and names a mechanism inherited unchanged from main and not mirrored in the compile.  Every other row goes before the merge, including every row for code #2015 adds and every row for a pass the compile mirrors; line 59 empties the list after the merge.  It covers route planning and emission: everything under layout/routing/, the planning modules port_order_plan.py, route_plan.py, route_reservations.py, fan_plans.py, route_topology.py, seam_topology.py, fan_geometry.py, fan_ordering.py, envelope_settlement.py and settlement_demand.py, and every render/ module, which routes the finished layout and settles its geometry.  It may only shrink.  removed_by names the #2094 list line or ruling that removes the entry, or 'unassigned'.  'entries' are detected by the guard; 'manual' are cases the AST cannot see, checked only by asserting that the named function exists, so deleting the function makes the entry stale.  'pinned_later_passes' and 'pinned_nested_passes' keep a route pass registered while anything calls it, whether or not the routing table runs it; a pin is valid to delete only when its pass has no callers left, and review checks that.",
     "entries": [
+      {
+        "rule": "rerun",
+        "site": "render/svg.py:_settle_clear_of_the_canvas_margins",
+        "callee": "_settle_render_geometry#2",
+        "removed_by": "59 (#2141: render-side router re-runs, after the merge)",
+        "replacement": "settle once and move the settled geometry, routes included, clear of the canvas margins; never re-settle a moved copy"
+      },
+      {
+        "rule": "retry-loop",
+        "site": "render/svg.py:_settle_clear_of_the_canvas_margins",
+        "callee": "_settle_render_geometry",
+        "removed_by": "59 (#2141: render-side router re-runs, after the merge)",
+        "replacement": "settle once and move the settled geometry, routes included, clear of the canvas margins; never re-settle a moved copy"
+      },
+      {
+        "rule": "rerun",
+        "site": "render/svg.py:_settle_render_geometry",
+        "callee": "_reconcile_carried_ports#1",
+        "removed_by": "59 (#2141: render-side router re-runs, after the merge)",
+        "replacement": "label growth is decided before routing, so no label pass carries a port that a routing pass has not seen and nothing re-routes after it"
+      },
+      {
+        "rule": "rerun",
+        "site": "render/svg.py:_settle_render_geometry",
+        "callee": "_reconcile_carried_ports#2",
+        "removed_by": "59 (#2141: render-side router re-runs, after the merge)",
+        "replacement": "label growth is decided before routing, so no label pass carries a port that a routing pass has not seen and nothing re-routes after it"
+      },
+      {
+        "rule": "rerun",
+        "site": "render/svg.py:_settle_render_geometry",
+        "callee": "_resettle#1",
+        "removed_by": "59 (#2141: render-side router re-runs, after the merge)",
+        "replacement": "header clearance is reserved when the rows are placed, so a label wrap cannot push a header into the box above and no re-route follows it"
+      },
+      {
+        "rule": "rerun",
+        "site": "render/svg.py:_settle_render_geometry",
+        "callee": "_resettle#2",
+        "removed_by": "59 (#2141: render-side router re-runs, after the merge)",
+        "replacement": "one settle per render: route once, settle the envelopes against that one ledger and draw the result; no re-route after a label pass, a header collision or a settlement"
+      },
+      {
+        "rule": "rerun",
+        "site": "render/svg.py:_settle_render_geometry",
+        "callee": "_resettle#3",
+        "removed_by": "59 (#2141: render-side router re-runs, after the merge)",
+        "replacement": "one settle per render: route once, settle the envelopes against that one ledger and draw the result; no re-route after a label pass, a header collision or a settlement"
+      },
+      {
+        "rule": "rerun",
+        "site": "render/svg.py:_settle_render_geometry",
+        "callee": "_resettle#4",
+        "removed_by": "7j (R3: the aperture re-route after the compile)",
+        "replacement": "the final compile runs inside the one settle's own routing pass; no aperture grant re-routes after the compile"
+      },
+      {
+        "rule": "rerun",
+        "site": "render/svg.py:_settle_render_geometry",
+        "callee": "_route#2",
+        "removed_by": "7j (#2015-added; R2: before the merge)",
+        "replacement": "draw the compiling observation: the pass that compiles the corridor cohorts is the drawn pass, so no second observation replays the drawn pass's inputs"
+      },
+      {
+        "rule": "rerun",
+        "site": "render/svg.py:_settle_render_geometry",
+        "callee": "_route#3",
+        "removed_by": "7j (#2015-added; R2: before the merge)",
+        "replacement": "a convergence grant is a plan decision the compiling pass draws; no ungranted replay routes the same inputs again to prove what the grant moved"
+      },
       {
         "rule": "route-postpass",
         "site": "routing/core.py:_route_edges",
@@ -397,6 +467,24 @@
         "shape": "routing moves placement after emission",
         "removed_by": "unassigned",
         "replacement": "seat bubble-centred markers at placement from the plan; routing returns routes and moves no station"
+      },
+      {
+        "site": "render/svg.py:_RouteObservationInputs.restore",
+        "shape": "replay: writes a routing pass's captured station, box and offset inputs back onto the graph so another observation routes them again",
+        "removed_by": "7j (#2015-added; R2: before the merge)",
+        "replacement": "the drawn pass is the compiling pass, so no routing pass's inputs are captured to be routed again"
+      },
+      {
+        "site": "render/svg.py:_RouteObservationInputs.restore_station_x",
+        "shape": "rollback: undoes routing's station centring so the aperture grant re-routes from the x the drawn pass read",
+        "removed_by": "7j (R3: the aperture re-route after the compile)",
+        "replacement": "station x is placed once from the plan; no rollback of a routing pass's centring before a later re-route"
+      },
+      {
+        "site": "render/svg.py:_restoring_route_observation_geometry",
+        "shape": "trial on the live graph followed by a rollback: an observation routes in place and its geometry is restored on exit",
+        "removed_by": "7j (#2015-added; R2: before the merge)",
+        "replacement": "the compiling observation is the drawn pass; nothing routes on the live graph to be undone"
       }
     ],
     "pinned_later_passes": [

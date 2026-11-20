@@ -1,10 +1,13 @@
-"""AST detector for iteration and look-ahead in ``src/nf_metro/layout/``.
+"""AST detector for iteration and look-ahead in ``src/nf_metro/layout/`` and
+``src/nf_metro/render/``.
 
 The layout decides each coordinate once, from plan-time inputs; later phases
-consume the decision.  This module finds code that works the other way: it runs
-a phase or writer speculatively, runs one again, or repairs a decision a phase
-already made.  It reads source with :mod:`ast` only and imports nothing from
-``nf_metro``.
+consume the decision, and the render routes the finished layout once and draws
+it.  This module finds code that works the other way: it runs a phase or writer
+speculatively, runs one again, or repairs a decision a phase already made.  It
+reads source with :mod:`ast` only and imports nothing from ``nf_metro``.  Layout
+modules are keyed by their path under ``layout/``, render modules by
+``render/`` and their path under it.
 
 Registry
 --------
@@ -54,6 +57,12 @@ from the source on each run:
   such as ``_bundle_same_destination_tails``; they are registered the same way.  The
   tests require every table pass to be pinned and every pin to name a function
   that exists and is called somewhere.
+* **render runners**: a render function that calls a route entry point (a
+  later pass of ``routing/core.py``, such as ``observe_route_edges_centred``),
+  a layout runner, a solver entry point or another render runner, to a fixed
+  point.  Nested functions count, so the ``_route`` and ``_resettle`` closures
+  of the render's settle are render runners.  A render runner is matched only
+  inside a render module.
 
 Guard modules (``phases/guards.py``, ``routing/invariants.py``) and functions
 named ``_guard*``, ``check_*`` or ``assert_*`` only check, so they are not
@@ -102,14 +111,22 @@ Detection rules
     ``continue``/``break``.  Inside a phase table, any phase appearing from two
     non-exclusive sites is a rerun: the later occurrence redoes or repairs the
     first.  A table phase passed to a wrapper such as ``_run_placement`` counts
-    as the phase, not the wrapper.
+    as the phase, not the wrapper.  In a render module every site that reaches
+    the router or the layout (a render runner, route entry point, layout runner
+    or solver entry point) counts against one route per function, whatever its
+    name: the first site is free, and each site that can run after an earlier
+    one is its own hit, whose callee carries its ordinal among the function's
+    sites of that name (``_resettle#3``).  A render function that gains a route
+    gains a hit.
 
 ``later-pass-read``
     A function other than a table or runner calls a later pass.
     The caller reads a product of stages that have not run yet, or runs routing
     to measure placement.  Inside a route pass only a call to another table or
     pinned pass is reported, which is a pass run both nested and on its own;
-    composing its own sub-passes is not.
+    composing its own sub-passes is not.  A render runner is read like a route
+    entry point: routing is the render's job, so only a table or pinned pass it
+    runs on the routes is reported.
 
 ``repair-named``
     A table phase whose name declares that it undoes or redoes an earlier
@@ -153,7 +170,9 @@ search over items rather than a ladder of alternatives.  A loop that only search
 (``for p in orders: if ok(p): break``) and calls the phase once after it is not
 detected.  A loop over a tuple of phases (``for step in (phase_a, phase_b):
 step(graph)``) is not detected.  A pin deleted while its pass has callers drops
-their rows; review checks that each deleted pin names a pass with no callers.
+their rows; review checks that each deleted pin names a pass with no callers.  A
+render ordinal names a site by position, so removing any site of a name leaves
+the last-numbered hit of that name stale, whichever site went.
 """
 
 from __future__ import annotations
@@ -163,7 +182,10 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
-LAYOUT_ROOT = Path(__file__).resolve().parent.parent / "src" / "nf_metro" / "layout"
+SOURCE_ROOT = Path(__file__).resolve().parent.parent / "src" / "nf_metro"
+LAYOUT_ROOT = SOURCE_ROOT / "layout"
+RENDER_ROOT = SOURCE_ROOT / "render"
+RENDER_PREFIX = "render/"
 
 # Modules by role.  ``routing`` is route planning and emission; ``placement`` is
 # section and station placement.  Every layout module has exactly one role.
@@ -197,6 +219,33 @@ PLACEMENT_MODULES = frozenset(
         "phase_state.py",
         "rail_mode.py",
         "section_placement.py",
+    }
+)
+
+# Render modules, keyed under ``render/``.  The render routes a finished layout
+# and settles its geometry, so a repeat in any of them re-observes routing: they
+# all take the ``routing`` role, and a new render module must be added here.
+RENDER_MODULES = frozenset(
+    {
+        "__init__.py",
+        "animate.py",
+        "bridges.py",
+        "constants.py",
+        "driver.py",
+        "font_embed.py",
+        "html.py",
+        "icons.py",
+        "legend.py",
+        "manifest.py",
+        "ns.py",
+        "path_geometry.py",
+        "plan.py",
+        "raster.py",
+        "section_header.py",
+        "style.py",
+        "svg.py",
+        "validate.py",
+        "video.py",
     }
 )
 
@@ -308,6 +357,7 @@ class Registry:
     nested_passes: set[str] = field(default_factory=set)
     entry_passes: set[str] = field(default_factory=set)
     later_passes: set[str] = field(default_factory=set)
+    render_runners: set[str] = field(default_factory=set)
     delegates: dict[str, set[str]] = field(default_factory=dict)
 
     @property
@@ -324,7 +374,10 @@ class Registry:
 
 
 def module_role(module: str) -> str | None:
-    """``"routing"`` or ``"placement"`` for a layout module path, else None."""
+    """``"routing"`` or ``"placement"`` for a layout or ``render/`` module path,
+    else None."""
+    if module.startswith(RENDER_PREFIX):
+        return "routing" if module[len(RENDER_PREFIX) :] in RENDER_MODULES else None
     if module.startswith("routing/") or module in ROUTING_MODULES:
         return "routing"
     if module.startswith("phases/") or module in PLACEMENT_MODULES:
@@ -397,6 +450,16 @@ def parse_layout(root: Path = LAYOUT_ROOT) -> dict[str, ast.Module]:
         path.relative_to(root).as_posix(): _parse(path.read_text())
         for path in sorted(root.rglob("*.py"))
     }
+
+
+def parse_render(root: Path = RENDER_ROOT) -> dict[str, ast.Module]:
+    """Parsed render modules keyed ``render/<path under root>``."""
+    return {RENDER_PREFIX + module: tree for module, tree in parse_layout(root).items()}
+
+
+def parse_guarded() -> dict[str, ast.Module]:
+    """Every module the guard scans: the layout and the render."""
+    return {**parse_layout(), **parse_render()}
 
 
 def parse_sources(sources: dict[str, str]) -> dict[str, ast.Module]:
@@ -499,6 +562,28 @@ def _postpass_calls(func: Func) -> list[ast.Call]:
         and _first_arg_name(call) == "routes"
         and not call.func.id.startswith(POSTPASS_SKIP_PREFIXES)
     ]
+
+
+def _in_render(func: Func) -> bool:
+    return func.module.startswith(RENDER_PREFIX)
+
+
+def _render_reaches(reg: Registry) -> set[str]:
+    """Names whose call from a render function runs the router or the layout."""
+    return reg.entry_passes | reg.runners | reg.solver | reg.render_runners
+
+
+def _collect_render_runners(funcs: list[Func], reg: Registry) -> set[str]:
+    scope = [f for f in funcs if _in_render(f) and not is_checker(f)]
+    runners: set[str] = set()
+    while True:
+        reaches = _render_reaches(reg) | runners
+        found = {
+            f.name for f in scope if any(_call_name(c) in reaches for c in _calls(f))
+        }
+        if found <= runners:
+            return runners
+        runners |= found
 
 
 def build_registry(
@@ -608,6 +693,7 @@ def build_registry(
     reg.later_passes |= reg.postpasses | reg.nested_passes
     reg.runners -= reg.later_passes
 
+    reg.render_runners = _collect_render_runners(funcs, reg)
     _find_delegates(funcs, reg)
     reg.wrappers = {
         f.name
@@ -652,6 +738,8 @@ def _is_registered(func: Func, name: str | None, reg: Registry) -> bool:
         return False
     if name in reg.solver_local:
         return func.module == SOLVER
+    if name in reg.render_runners and _in_render(func):
+        return True
     return name in reg.names or name in reg.delegates.get(func.site, set())
 
 
@@ -904,16 +992,20 @@ def _exclusive(
     return False
 
 
-def _non_exclusive_pair(
+def _site_order(call: ast.Call) -> tuple[int, int]:
+    return (call.lineno, call.col_offset)
+
+
+def _non_exclusive_later_sites(
     sites: list[ast.Call], paths: dict[int, Path_], returned: set[int]
-) -> ast.Call | None:
-    """The later site of the first pair of *sites* that can both run."""
-    ordered = sorted(sites, key=lambda c: (c.lineno, c.col_offset))
-    for i, first in enumerate(ordered):
-        for later in ordered[i + 1 :]:
-            if not _exclusive(first, later, paths, returned):
-                return later
-    return None
+) -> list[ast.Call]:
+    """The sites of *sites*, in source order, that can run after an earlier one."""
+    ordered = sorted(sites, key=_site_order)
+    return [
+        later
+        for i, later in enumerate(ordered)
+        if any(not _exclusive(first, later, paths, returned) for first in ordered[:i])
+    ]
 
 
 def _marker_in(name: str, markers: tuple[str, ...]) -> bool:
@@ -1005,6 +1097,9 @@ class _Scanner:
                 self.add("retry-loop", func, name, call.lineno, detail)
 
     def reruns(self, func: Func, calls: list[ast.Call]) -> None:
+        if _in_render(func):
+            self.render_reroutes(func, calls)
+            return
         reg = self.reg
         in_table = func.name in reg.tables
         sites_by_name: dict[str, list[ast.Call]] = {}
@@ -1030,15 +1125,35 @@ class _Scanner:
                 counted = name in table_kinds
             else:
                 counted = name in runner_kinds or name in delegate_params
-            later = _non_exclusive_pair(sites, paths, returned) if counted else None
-            if later is not None:
-                self.add("rerun", func, name, later.lineno)
+            later = (
+                _non_exclusive_later_sites(sites, paths, returned) if counted else []
+            )
+            if later:
+                self.add("rerun", func, name, later[0].lineno)
+
+    def render_reroutes(self, func: Func, calls: list[ast.Call]) -> None:
+        """Every site of a render function that reaches the router or the
+        layout, after its first."""
+        reaches = _render_reaches(self.reg)
+        sites = sorted((c for c in calls if _call_name(c) in reaches), key=_site_order)
+        counts: dict[str | None, int] = {}
+        ordinal: dict[int, int] = {}
+        for call in sites:
+            name = _call_name(call)
+            counts[name] = counts.get(name, 0) + 1
+            ordinal[id(call)] = counts[name]
+        paths = _paths(func)
+        returned = _returned_calls(func)
+        for call in _non_exclusive_later_sites(sites, paths, returned):
+            callee = f"{_call_name(call)}#{ordinal[id(call)]}"
+            self.add("rerun", func, callee, call.lineno)
 
     def later_pass_reads(self, func: Func, calls: list[ast.Call]) -> None:
         reg = self.reg
         if func.name in reg.tables | reg.runners | reg.routing_tables:
             return
-        if func.name in reg.entry_passes:
+        render_runner = _in_render(func) and func.name in reg.render_runners
+        if func.name in reg.entry_passes or render_runner:
             reportable = reg.postpasses | reg.nested_passes
         elif func.name in reg.postpasses | reg.nested_passes:
             reportable = reg.postpasses

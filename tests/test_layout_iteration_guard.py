@@ -1,22 +1,27 @@
-"""Structural guard: no iteration or look-ahead re-enters ``src/nf_metro/layout/``.
+"""Structural guard: no iteration or look-ahead re-enters the layout or the render.
 
 The layout decides each coordinate once, from plan-time inputs, and later phases
-consume the decision.  ``tests/layout_iteration_guard.py`` reads the layout
-source with :mod:`ast` and reports code that runs a phase or writer on a copy,
-runs a pass again, retries until a result holds, or rewrites a decision after
-it was made.  Its docstring defines the registry and each detection rule.
+consume the decision; the render routes the finished layout once and draws it.
+``tests/layout_iteration_guard.py`` reads ``src/nf_metro/layout/`` and
+``src/nf_metro/render/`` with :mod:`ast` and reports code that runs a phase or
+writer on a copy, runs a pass again, retries until a result holds, or rewrites a
+decision after it was made.  Its docstring defines the registry and each
+detection rule.
 
 The allowlist in ``tests/data/layout_iteration_allowlist.json`` names every
 existing hit, who removes it and the plan-time rule that replaces it.  It has two
 lists, each checked on its own:
 
-* ``routing`` (route planning and emission: ``layout/routing/`` and the planning
-  modules named by ``guard.ROUTING_MODULES``) is the PR #2015 merge gate: it
-  must be empty before #2015 merges to ``main``.  Its ``manual`` section holds
-  cases the AST cannot see; each is checked only by asserting that the named
-  function exists, so removing the function makes the entry stale.  Its pins
-  (``pinned_later_passes``, ``pinned_nested_passes``) keep route passes
-  registered while anything calls them.
+* ``routing`` (route planning and emission: ``layout/routing/``, the planning
+  modules named by ``guard.ROUTING_MODULES``, and every render module named by
+  ``guard.RENDER_MODULES``) is the PR #2015 merge gate (ruling R2, stated in
+  the list's ``gate`` text): when #2015 merges to ``main`` it holds only rows
+  whose ``removed_by`` starts with ``59``, each for a mechanism inherited
+  unchanged from ``main`` and not mirrored in the compile.  Its ``manual``
+  section holds cases the AST cannot see; each is checked only by asserting
+  that the named function exists, so removing the function makes the entry
+  stale.  Its pins (``pinned_later_passes``, ``pinned_nested_passes``) keep
+  route passes registered while anything calls them.
 * ``placement`` (``engine.py``, ``phases/``, ``geometric_bypass.py`` and the other
   modules of ``guard.PLACEMENT_MODULES``) is not a #2015 gate.  It is shrink-only
   and owned by #2171, the placement programme (#323/#1745).
@@ -26,12 +31,14 @@ entry fails, an entry that matches no hit fails (so a removal must delete its
 entry), and the entry count must equal the list's ceiling, so the commit that
 removes entries lowers the ceiling and a later addition has to raise it.  A commit
 that deletes one entry and adds another leaves the count unchanged; only the
-allowlist diff shows it.  Every layout module has a role, so
-a new module forces a decision about which list its hits belong to.
+allowlist diff shows it.  Every layout and render module has a role, so a new
+module forces a decision about which list its hits belong to.
 """
 
 from __future__ import annotations
 
+import ast
+import copy
 import json
 import re
 from pathlib import Path
@@ -40,7 +47,7 @@ import layout_iteration_guard as guard
 import pytest
 
 ALLOWLIST_PATH = Path(__file__).parent / "data" / "layout_iteration_allowlist.json"
-ROUTING_CEILING = 56
+ROUTING_CEILING = 69
 PLACEMENT_CEILING = 26
 PINNED_LATER_CEILING = 22
 PINNED_NESTED_CEILING = 1
@@ -82,8 +89,18 @@ def _where(hit: guard.Hit) -> str:
 
 
 @pytest.fixture(scope="module")
-def live() -> tuple[guard.Registry, list[guard.Hit]]:
-    return guard.scan(guard.parse_layout(), _pins("routing"), _pins("nested"))
+def trees() -> dict[str, ast.Module]:
+    return guard.parse_guarded()
+
+
+@pytest.fixture(scope="module")
+def funcs(trees) -> list[guard.Func]:
+    return guard.collect_functions(trees)
+
+
+@pytest.fixture(scope="module")
+def live(trees) -> tuple[guard.Registry, list[guard.Hit]]:
+    return guard.scan(trees, _pins("routing"), _pins("nested"))
 
 
 @pytest.mark.parametrize("name", LISTS)
@@ -108,8 +125,7 @@ def test_allowlist_has_no_stale_entries(live, name):
     )
 
 
-def test_manual_entries_name_existing_functions():
-    funcs = guard.collect_functions(guard.parse_layout())
+def test_manual_entries_name_existing_functions(funcs):
     defined = {f.site for f in funcs}
     stale = [m["site"] for m in _manual() if m["site"] not in defined]
     assert not stale, (
@@ -157,11 +173,12 @@ def test_placement_allowlist_count_is_the_ceiling():
     )
 
 
-def test_every_layout_module_has_a_role():
-    unclassified = [m for m in guard.parse_layout() if guard.module_role(m) is None]
+def test_every_module_has_a_role(trees):
+    assert guard.module_role("render/unlisted.py") is None
+    unclassified = [m for m in trees if guard.module_role(m) is None]
     assert not unclassified, (
-        "add each module to guard.ROUTING_MODULES or guard.PLACEMENT_MODULES:\n"
-        + "\n".join(unclassified)
+        "add each module to guard.ROUTING_MODULES, guard.PLACEMENT_MODULES or "
+        "guard.RENDER_MODULES:\n" + "\n".join(unclassified)
     )
 
 
@@ -182,6 +199,11 @@ def test_registry_is_derived_from_the_source(live):
     } <= reg.later_passes
     assert "compute_station_offsets" not in reg.later_passes
     assert "solve_corridor_cohorts" in reg.solver
+    assert {
+        "_settle_render_geometry",
+        "_settle_clear_of_the_canvas_margins",
+        "render_svg",
+    } <= reg.render_runners
 
 
 def _call_sites(funcs: list[guard.Func], name: str) -> list[str]:
@@ -202,9 +224,8 @@ def test_every_routing_table_pass_is_pinned(live):
     )
 
 
-def test_pinned_passes_are_called_somewhere(live):
+def test_pinned_passes_are_called_somewhere(live, funcs):
     reg, _ = live
-    funcs = guard.collect_functions(guard.parse_layout())
     defined = {f.name for f in funcs}
     problems = []
     for name in _pins("later") + _pins("nested"):
@@ -222,9 +243,8 @@ def test_pinned_passes_are_called_somewhere(live):
     assert not problems, "\n".join(problems)
 
 
-def test_a_sub_pass_runs_inside_one_pass(live):
+def test_a_sub_pass_runs_inside_one_pass(live, funcs):
     reg, _ = live
-    funcs = guard.collect_functions(guard.parse_layout())
     passes = reg.postpasses | reg.nested_passes
     problems = []
     for pin in _pins("nested"):
@@ -252,6 +272,49 @@ def test_pin_lists_are_sorted_and_unique():
 def test_pin_counts_are_the_ceilings():
     assert len(_pins("later")) == PINNED_LATER_CEILING
     assert len(_pins("nested")) == PINNED_NESTED_CEILING
+
+
+def _with_call_before_return(
+    trees: dict[str, ast.Module], site: str, callee: str
+) -> dict[str, ast.Module]:
+    """*trees* with ``callee()`` added as the last statement before *site*'s
+    final ``return``, located on that ``return``'s line."""
+    module, qualname = site.split(":", 1)
+    tree = copy.deepcopy(trees[module])
+    func = next(
+        f.node
+        for f in guard.collect_functions({module: tree})
+        if f.qualname == qualname
+    )
+    anchor = func.body[-1]
+    assert isinstance(anchor, ast.Return), site
+    stmt = ast.parse(f"{callee}()").body[0]
+    for node in ast.walk(stmt):
+        ast.copy_location(node, anchor)
+    func.body.insert(len(func.body) - 1, stmt)
+    return {**trees, module: tree}
+
+
+@pytest.mark.parametrize(
+    ("site", "callee"),
+    [
+        ("render/svg.py:_settle_render_geometry", "_resettle"),
+        ("render/svg.py:_settle_render_geometry", "_route"),
+        ("render/svg.py:_settle_render_geometry", "observe_route_edges_centred"),
+        (
+            "render/svg.py:_settle_clear_of_the_canvas_margins",
+            "_settle_render_geometry",
+        ),
+    ],
+)
+def test_an_added_render_reroute_is_an_unlisted_hit(trees, site, callee):
+    mutated = _with_call_before_return(trees, site, callee)
+    _, hits = guard.scan(mutated, _pins("routing"), _pins("nested"))
+    allowed = {_key(e) for name in LISTS for e in _entries(name)}
+    new = [
+        (h.rule, h.site, h.callee.split("#")[0]) for h in hits if h.key not in allowed
+    ]
+    assert new == [("rerun", site, callee)]
 
 
 # ---------------------------------------------------------------------------
@@ -330,6 +393,99 @@ def test_registry_of_synthetic_sources():
     assert reg.table_phases == {"phase_a", "phase_b", "write_offsets"}
     assert "_layout_once" in reg.runners
     assert "compute_station_offsets" in reg.later_passes
+
+
+ROUTER = CORE_TABLE + "\ndef route_edges(graph):\n    return _route_edges(graph)\n"
+
+
+def _hits_outside_router(**modules: str) -> list[guard.Hit]:
+    return [
+        h
+        for rule in guard.RULES
+        for h in _hits(rule, **modules)
+        if not h.site.startswith("routing/core.py:")
+    ]
+
+
+class TestRender:
+    def test_one_route_per_function_is_not_flagged(self):
+        render = (
+            "def draw(graph):\n    routes = route_edges(graph)\n    return routes\n"
+        )
+        hits = _hits_outside_router(routing__core=ROUTER, render__svg=render)
+        assert not hits
+
+    def test_each_reroute_after_the_first_is_its_own_hit(self):
+        render = (
+            "def settle(graph, collided):\n"
+            "    def _route():\n"
+            "        return route_edges(graph)\n"
+            "    def _resettle():\n"
+            "        return _route()\n"
+            "    routes = _route()\n"
+            "    if collided:\n"
+            "        routes = _resettle()\n"
+            "    routes = _resettle()\n"
+            "    return routes\n"
+        )
+        got = _callees("rerun", routing__core=ROUTER, render__svg=render)
+        assert got == {("settle", "_resettle#1"), ("settle", "_resettle#2")}
+
+    def test_exclusive_routes_are_not_flagged(self):
+        render = (
+            "def draw(graph, flat):\n"
+            "    if flat:\n"
+            "        return route_edges(graph)\n"
+            "    return route_edges(graph)\n"
+        )
+        assert not _hits("rerun", routing__core=ROUTER, render__svg=render)
+
+    def test_resettle_until_the_margins_hold_is_flagged(self):
+        render = (
+            "def settle(graph):\n"
+            "    return route_edges(graph)\n"
+            "def clear(source):\n"
+            "    graph = copy_for_render(source)\n"
+            "    settled = settle(graph)\n"
+            "    for moves in range(3):\n"
+            "        if fits(settled):\n"
+            "            break\n"
+            "        graph = copy_for_render(source)\n"
+            "        settled = settle(graph)\n"
+            "    return settled\n"
+        )
+        modules = {"routing__core": ROUTER, "render__svg": render}
+        assert _callees("retry-loop", **modules) == {("clear", "settle")}
+        assert _callees("rerun", **modules) == {("clear", "settle#2")}
+
+    def test_render_runner_names_are_matched_only_in_render(self):
+        render = "def settle(graph):\n    return route_edges(graph)\n"
+        engine = ENGINE + (
+            "\ndef spread(graph):\n    for _ in range(3):\n        settle(graph)\n"
+        )
+        hits = _hits_outside_router(
+            routing__core=ROUTER, render__svg=render, engine=engine
+        )
+        assert not hits
+
+    def test_layout_run_twice_by_the_render_is_flagged(self):
+        render = (
+            "def redraw(graph):\n"
+            "    _layout_once(graph)\n"
+            "    _layout_once(graph)\n"
+            "    return route_edges(graph)\n"
+        )
+        got = _callees("rerun", routing__core=ROUTER, render__svg=render)
+        assert got == {("redraw", "_layout_once#2"), ("redraw", "route_edges#1")}
+
+    def test_route_pass_run_by_the_render_is_flagged(self):
+        render = (
+            "def draw(graph):\n"
+            "    routes = route_edges(graph)\n"
+            "    tidy_trunks(routes, graph)\n"
+        )
+        got = _callees("later-pass-read", routing__core=ROUTER, render__svg=render)
+        assert got == {("draw", "tidy_trunks")}
 
 
 class TestLookaheadCopy:
