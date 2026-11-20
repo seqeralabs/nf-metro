@@ -157,8 +157,8 @@ domain grouping, not an axis swap, and likewise stays.
 | after Stage 1.1 | `_guard_section_bboxes_positive` |
 | after Stage 2.1 | finite coords, stations-in-sections, bboxes-positive |
 | after Stage 3.1 | ports-on-boundaries |
-| after exit-port align + row re-flush and the X-axis perp-port inset (Stages 3.4 to 3.5) | ports-on-boundaries |
-| after each Pass C sub-stage (bisection) | finite coords, bboxes-positive, ports-on-boundaries, station-x-column-drift, plus three phase-gated guards (see below) |
+| after exit-port align + row re-flush (Stage 3.4) | ports-on-boundaries |
+| after each Pass C sub-stage (bisection), including `after Stage 6.12c` once the box sizers that read the lane plan (the X-axis perp-port inset at 6.12a, the column-edge levelling at 6.12b, the TB bottom stretch at 6.12c) have run | finite coords, bboxes-positive, ports-on-boundaries, station-x-column-drift, plus three phase-gated guards (see below) |
 | after final | bisection set (all unconditional) + off-track-above-anchor, row-trunk-cy-consistent, inter-section-routes-in-row-band |
 
 Bisection checkpoints fire after every Pass C sub-stage (see the
@@ -171,7 +171,7 @@ bisection runner skips them earlier; see `_BISECTION_FIRST_VALID` in
 | Guard | First valid checkpoint | Transient because |
 |---|---|---|
 | `_guard_stations_in_sections` | after Stage 5.3 | Stage 5.2's off-track lift moves stations above the section bbox; Stage 5.3 grows the bbox to enclose them. |
-| `_guard_no_station_overlap` | after Stage 6.4 | Pre-snap fan placement can sit a fraction of a pitch off the row grid; Stage 6.4's snap pulls every station onto the grid while keeping same-column stations on distinct slots, after which markers must be collision-free. |
+| `_guard_no_station_overlap` | after Stage 6.12 | It reads station offsets, which read the lane plan decided at the close of Stage 6.12. Pre-snap fan placement can also sit a fraction of a pitch off the row grid until Stage 6.4's snap pulls every station onto the grid on distinct same-column slots. |
 | `_guard_no_line_crosses_non_consumer` | after Stage 6.14 | A sparse loop-side station sits on the trunk Y until Stage 6.14 shifts it to a half-grid offset; before that, sibling line bundles pass through its marker bbox. |
 
 Three further guards are excluded from the bisection set entirely
