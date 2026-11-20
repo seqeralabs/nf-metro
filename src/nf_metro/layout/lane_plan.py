@@ -13,20 +13,12 @@ The record holds:
 
 - the :class:`~nf_metro.layout.port_order_plan.PortOrderPlan`: every port's
   line order and every same-band entry approach;
-- each port's *lane sense*: whether its travel-left to travel-right order runs
-  up or down the section's lane index.  A port reads its order in its own
-  travel, a perpendicular port in the section flow's; a perpendicular entry
-  whose lines all turn to one consumer reads it in the travel of that turn;
-- each perpendicular entry's *turns*: per in-section consumer, the lines it
-  takes and the direction along the section's flow they turn to reach it;
 - *far-side approaches*: a connector from a flow-side exit to an off-band
   entry that the same line also reaches by a bypass from the entry's own band
   on the side facing the exit leaves the exit's band on its far side, so one
   line keeps one path per grid row;
 - the :class:`TrackPlan`: every in-section ``(node, line)``'s lane, from which
-  every exit's order is read, every perpendicular port's offsets and every
-  run's turn-offs;
-- the :class:`SeamJoint`: the lanes either side of every straight seam;
+  every exit's order is read, and every perpendicular port's offsets;
 - the *gap legs*: per inter-column gap, the connectors landing in it and the
   way they run.  A connector into a LEFT or RIGHT entry that reaches it from
   off its level lands from a leg in the gap on the entry's side: one passing
@@ -34,6 +26,13 @@ The record holds:
   the side it passes on, one from a section in the gap's other column from
   its source's level.  Legs running opposite ways over a shared row are one
   allocation of the gap.
+
+A port's *lane sense* is whether its travel-left to travel-right order runs
+up or down the section's lane index.  A port reads its order in its own
+travel, a perpendicular port in the section flow's; a perpendicular entry
+whose lines all turn to one consumer reads it in the travel of that turn.  A
+perpendicular entry's *turns* are, per in-section consumer, the lines it
+takes and the direction along the section's flow they turn to reach it.
 
 **The track plan.**  Sections are decided upstream first: a section's lanes
 need its entries' orders, and an exit's order is its lines' lanes at the port
@@ -87,12 +86,6 @@ line on its drop's lane, where every such line agrees on the shift and it is
 less than the port's line count.  A line an entry hands a farther consumer,
 lying on the turn's side of lines turning the same way into a nearer one,
 crosses them there: a forced crossing at that turn.
-
-**Turn-offs.**  At every port, and every junction continuing one port's
-run, lines meet a leg turning off (or joining) the run by their side of
-travel there, the side the leg heads for first, except that a line whose run
-carries on level through the node meets it beyond (before) every line whose
-run ends there; a junction lies on the run of the port it continues.
 
 **Section order.**  The merge of every entry's order read up the lane
 index, line priority deciding between lines no entry orders.  A line on no
@@ -198,7 +191,6 @@ from types import MappingProxyType
 from typing import NamedTuple, Self, TypeVar
 
 from nf_metro.layout.constants import (
-    COORD_TOLERANCE,
     SAME_COORD_TOLERANCE,
     SAME_Y_TOLERANCE,
     graph_offset_step,
@@ -289,32 +281,6 @@ class GapLeg:
     """Whether the leg runs down the screen to the entry."""
 
 
-@dataclass(frozen=True, slots=True)
-class TurnOff:
-    """The lines one node's run hands into a leg, or takes from one."""
-
-    node_id: str
-    leaving: bool
-    """``True`` where the lines leave the node's run, ``False`` where they
-    join it."""
-    travel: Direction
-    """The run's travel at the node."""
-    lines: tuple[str, ...]
-    """Travel-left to travel-right at the node."""
-    through: tuple[str, ...]
-    """Lines whose run carries on level through the node along its travel."""
-
-    def along(self, heads_right: bool) -> tuple[str, ...]:
-        """The lines in the order they meet a leg heading for the run's
-        travel-right (*heads_right*) or travel-left side, along the travel:
-        the side the leg heads for first, through lines beyond the rest when
-        leaving and before them when joining."""
-        by_side = self.lines[::-1] if heads_right else self.lines
-        ending = tuple(lid for lid in by_side if lid not in self.through)
-        through = tuple(lid for lid in by_side if lid in self.through)
-        return ending + through if self.leaving else through + ending
-
-
 def _frozen(mapping: Mapping[_K, _V]) -> Mapping[_K, _V]:
     return MappingProxyType(dict(mapping))
 
@@ -348,13 +314,7 @@ class TrackPlan(_Sealed):
     perpendicular: Mapping[str, Mapping[str, int]]
     """Per perpendicular port, each line's offset from the port in offset
     steps to the right of the port's travel (see the module docstring)."""
-    turn_offs: Mapping[tuple[str, bool], TurnOff]
-    """Keyed ``(node, leaving)``: every port's, and every junction's that
-    continues one port's run."""
     forced: tuple[ForcedCrossing, ...]
-    cycle_sections: tuple[str, ...]
-    """Sections reached again while their own lanes were being decided; an
-    exit of such a section asked for round the cycle is undecided."""
     rail_origins: Mapping[str, int] = field(default_factory=dict)
     """Per port of a rail-laid section, its lowest plus its highest lane (or
     offset, for a perpendicular port): twice the middle of its bundle, which
@@ -363,32 +323,7 @@ class TrackPlan(_Sealed):
     def __post_init__(self) -> None:
         object.__setattr__(self, "lanes", _frozen(self.lanes))
         object.__setattr__(self, "perpendicular", _frozen_nested(self.perpendicular))
-        object.__setattr__(self, "turn_offs", _frozen(self.turn_offs))
         object.__setattr__(self, "rail_origins", _frozen(self.rail_origins))
-
-
-@dataclass(frozen=True)
-class SeamJoint(_Sealed):
-    """The lanes either side of every straight seam (see the module
-    docstring)."""
-
-    entries: Mapping[str, Mapping[str, int]]
-    """Per flow-side entry some line crosses a straight seam into: every
-    line's lane at the entry by its pins, its fan carrier slots and the fill
-    round them, in its section lane frame: the entry's track lanes.  The
-    entry's seam order is read from these lanes."""
-    pins: Mapping[tuple[str, str], str]
-    """Keyed ``(entry, line)``: the exit a pinned line crosses straight from."""
-    perpendicular: Mapping[str, Mapping[str, int]]
-    """Per perpendicular port every line of which crosses a straight seam to a
-    facing flow-side port, where the offsets keeping each line straight are
-    the port's column carried one constant across: each line's offset, as in
-    :attr:`TrackPlan.perpendicular`."""
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "entries", _frozen_nested(self.entries))
-        object.__setattr__(self, "pins", _frozen(self.pins))
-        object.__setattr__(self, "perpendicular", _frozen_nested(self.perpendicular))
 
 
 @dataclass(frozen=True)
@@ -396,28 +331,15 @@ class LanePlan(_Sealed):
     """One layout's planned lane decisions (see the module docstring)."""
 
     port_orders: PortOrderPlan
-    order_travels: Mapping[str, Direction]
-    """The travel each port's order is read across."""
-    lane_senses: Mapping[str, int]
-    """``+1`` when a port's travel-left to travel-right order ascends the
-    section's lane index, else ``-1``."""
-    perpendicular_turns: Mapping[str, tuple[ConsumerTurn, ...]]
-    far_sides: Mapping[tuple[str, str, str], int]
-    """Keyed ``(entry, exit, line)``: the side, across the exit's travel, the
-    connector leaves the exit's band on."""
+    far_sides: frozenset[tuple[str, str, str]]
+    """``(entry, exit, line)`` of every connector that leaves its exit's band
+    on its far side."""
     tracks: TrackPlan
-    seams: SeamJoint
     gap_legs: Mapping[int, tuple[GapLeg, ...]] = field(default_factory=dict)
     """Keyed by the gap's lower column: the legs landing in it."""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "gap_legs", _frozen(self.gap_legs))
-        object.__setattr__(self, "order_travels", _frozen(self.order_travels))
-        object.__setattr__(self, "lane_senses", _frozen(self.lane_senses))
-        object.__setattr__(
-            self, "perpendicular_turns", _frozen(self.perpendicular_turns)
-        )
-        object.__setattr__(self, "far_sides", _frozen(self.far_sides))
 
 
 class _Frames:
@@ -544,9 +466,9 @@ def _far_side(
     return False
 
 
-def _far_sides(builder: PortOrderBuilder) -> dict[tuple[str, str, str], int]:
+def _far_sides(builder: PortOrderBuilder) -> frozenset[tuple[str, str, str]]:
     graph = builder.graph
-    out: dict[tuple[str, str, str], int] = {}
+    out: set[tuple[str, str, str]] = set()
     for exit_id in sorted(graph.ports):
         port = graph.ports[exit_id]
         section = graph.section_for_port(port)
@@ -570,8 +492,8 @@ def _far_sides(builder: PortOrderBuilder) -> dict[tuple[str, str, str], int]:
                 if abs(lateral) <= SAME_Y_TOLERANCE:
                     continue
                 if _far_side(builder, exit_id, entry_id, line_id, lateral):
-                    out[(entry_id, exit_id, line_id)] = -1 if lateral > 0 else 1
-    return out
+                    out.add((entry_id, exit_id, line_id))
+    return frozenset(out)
 
 
 _Spans = dict[str, list[tuple[float, float]]]
@@ -640,12 +562,15 @@ class _Tracks:
     upstream sections first.
     """
 
-    def __init__(
-        self, graph: MetroGraph, frames: _Frames, senses: Mapping[str, int]
-    ) -> None:
+    def __init__(self, graph: MetroGraph, frames: _Frames) -> None:
         self.graph = graph
         self.frames = frames
-        self.senses = senses
+        self.turns = _perpendicular_turns(graph, frames)
+        self.travels = _order_travels(graph, self.turns)
+        self.senses = {
+            port_id: _sense(frames(graph.ports[port_id].section_id), travel)
+            for port_id, travel in self.travels.items()
+        }
         self.step = graph_offset_step(graph)
         self.builder = PortOrderBuilder(graph, self.exit_order, self.seam_order)
         self.lanes: dict[tuple[str, str], int] = {}
@@ -653,7 +578,6 @@ class _Tracks:
         self.seam_sources: dict[tuple[str, str], str] = {}
         self.done: set[str] = set()
         self.busy: set[str] = set()
-        self.cycles: set[str] = set()
         self.forced: list[ForcedCrossing] = []
         self.descendants: dict[str, set[str]] = {}
         self.fan_slots: dict[tuple[str, str], int] = {}
@@ -676,13 +600,8 @@ class _Tracks:
         frame = self.frames(section_id)
         return frame.primary_sign * frame.primary.get(self.graph.stations[node])
 
-    def plan(
-        self,
-        orders: Mapping[str, PortOrder],
-        turns: Mapping[str, Sequence[ConsumerTurn]],
-    ) -> tuple[TrackPlan, dict[str, dict[str, int]]]:
-        """The track plan of the decided sections, and the perpendicular seams
-        it takes."""
+    def plan(self, orders: Mapping[str, PortOrder]) -> TrackPlan:
+        """The track plan of the decided sections."""
         graph = self.graph
         lanes = dict(self.lanes)
         for junction in sorted(graph.junction_ids):
@@ -690,7 +609,7 @@ class _Tracks:
                 key = (edge.source, edge.line_id)
                 if key in self.lanes:
                     lanes[(junction, edge.line_id)] = self.lanes[key]
-        across, seams = self._perpendicular_offsets(orders, turns)
+        across = self._perpendicular_offsets(orders)
         for port_id in sorted(graph.ports):
             if graph.ports[port_id].is_entry and not self.perpendicular(port_id):
                 self._record_interleaves(port_id)
@@ -700,29 +619,19 @@ class _Tracks:
             for key, lane in lanes.items()
             if key[0] not in graph.ports or not self.perpendicular(key[0])
         }
-        plan = TrackPlan(
-            flat,
-            across,
-            self._turn_offs(lanes, across),
-            tuple(self.forced),
-            tuple(sorted(self.cycles)),
-            _rail_origins(graph, flat, across),
+        return TrackPlan(
+            flat, across, tuple(self.forced), _rail_origins(graph, flat, across)
         )
-        return plan, seams
 
     # ---- perpendicular ports
 
     def _perpendicular_offsets(
-        self,
-        orders: Mapping[str, PortOrder],
-        turns: Mapping[str, Sequence[ConsumerTurn]],
-    ) -> tuple[dict[str, dict[str, int]], dict[str, dict[str, int]]]:
-        """Each perpendicular port's offsets (see :class:`TrackPlan`), and the
-        perpendicular seams among them (see :class:`SeamJoint`)."""
+        self, orders: Mapping[str, PortOrder]
+    ) -> dict[str, dict[str, int]]:
+        """Each perpendicular port's offsets (see :class:`TrackPlan`)."""
         graph = self.graph
         wanted = self.perpendicular_seams()
         across: dict[str, dict[str, int]] = {}
-        seams: dict[str, dict[str, int]] = {}
         for port_id in sorted(graph.ports, key=lambda p: (graph.ports[p].is_entry, p)):
             lines = graph.station_lines(port_id)
             if not self.perpendicular(port_id) or any(
@@ -732,14 +641,13 @@ class _Tracks:
             port = graph.ports[port_id]
             draw = draw_sign(graph, port) * right_normal_axis_sign(port_travel(port))
             drawn = self._carry(port_id, draw, orders.get(port_id))
-            consumers = [t for t in turns.get(port_id, ()) if t.lines]
+            consumers = [t for t in self.turns.get(port_id, ()) if t.lines]
             if port.is_entry and len(consumers) >= 2:
                 drawn = self._turn_merge(port_id, consumers, draw, orders.get(port_id))
             own = {lid: draw * v for lid, v in drawn.items()}
             want = wanted.get(port_id)
             if want is not None and len({want[lid] - own[lid] for lid in lines}) == 1:
                 own = dict(want)
-                seams[port_id] = dict(want)
             elif port.is_entry:
                 shift = {
                     k - own[lid]
@@ -751,7 +659,7 @@ class _Tracks:
             if port.is_entry:
                 self._turn_crossings(port_id, consumers, own)
             across[port_id] = own
-        return dict(sorted(across.items())), seams
+        return dict(sorted(across.items()))
 
     def _turn_crossings(
         self, port_id: str, consumers: Sequence[ConsumerTurn], own: Mapping[str, int]
@@ -939,84 +847,6 @@ class _Tracks:
         return sorted(
             turn.lines, key=lambda lid: across * self.lanes[(turn.consumer_id, lid)]
         )
-
-    # ---- turn-offs
-
-    def _turn_offs(
-        self,
-        lanes: Mapping[tuple[str, str], int],
-        across: Mapping[str, Mapping[str, int]],
-    ) -> dict[tuple[str, bool], TurnOff]:
-        graph = self.graph
-        out: dict[tuple[str, bool], TurnOff] = {}
-        for node in sorted(graph.ports) + sorted(graph.junction_ids):
-            for leaving in (True, False):
-                port_id = run_port(graph, node, leaving)
-                if port_id is None:
-                    continue
-                port = graph.ports[port_id]
-                if node == port_id and port.is_entry == leaving:
-                    continue
-                travel = (EXIT_SIDE_DIRECTION if leaving else ENTRY_SIDE_DIRECTION)[
-                    port.side
-                ]
-                key: dict[str, float]
-                if node in across:
-                    key = dict(across[node])
-                else:
-                    held = {
-                        lid: lanes.get((node, lid)) for lid in graph.station_lines(node)
-                    }
-                    if any(v is None for v in held.values()):
-                        continue
-                    sign = (
-                        draw_sign(graph, port)
-                        if self.perpendicular(port_id)
-                        else self.frames(port.section_id).secondary_sign
-                    )
-                    key = {
-                        lid: sign * right_normal_axis_sign(travel) * v
-                        for lid, v in held.items()
-                        if v is not None
-                    }
-                through = tuple(
-                    sorted(
-                        lid
-                        for lid in key
-                        if self._through(node, port_id, lid, travel, leaving)
-                    )
-                )
-                classes = [
-                    [key[lid] for lid in key if (lid in through) == flag]
-                    for flag in (True, False)
-                ]
-                if any(len(set(c)) != len(c) for c in classes) or not key:
-                    continue
-                lines = tuple(sorted(key, key=key.__getitem__))
-                out[(node, leaving)] = TurnOff(node, leaving, travel, lines, through)
-        return out
-
-    def _through(
-        self, node: str, port_id: str, lid: str, travel: Direction, leaving: bool
-    ) -> bool:
-        """Whether *lid*'s run carries on level through *node* along
-        *travel*: it also leaves the node level ahead (or arrives level from
-        behind).  A junction lies on the run of the port *port_id* it
-        continues."""
-        graph = self.graph
-        here, on = graph.stations[node], graph.stations[port_id]
-        vx, vy = direction_vector(travel)
-        edges = graph.edges_from(node) if leaving else graph.edges_to(node)
-        ahead = 1 if leaving else -1
-        for edge in edges:
-            if edge.line_id != lid:
-                continue
-            other = graph.stations[edge.target if leaving else edge.source]
-            along = (other.x - here.x) * vx + (other.y - here.y) * vy
-            across = (other.y - on.y) * vx - (other.x - on.x) * vy
-            if abs(across) <= COORD_TOLERANCE and along * ahead > COORD_TOLERANCE:
-                return True
-        return False
 
     def exit_order(self, port_id: str) -> tuple[str, ...] | None:
         """The exit's lines by lane, read across its travel."""
@@ -1478,7 +1308,7 @@ class _Tracks:
     def perpendicular_seams(self) -> dict[str, dict[str, int]]:
         """Per perpendicular port every line of which crosses a straight seam
         to a facing flow-side port centred on it, each line's offset that
-        keeps it straight (see :class:`SeamJoint`)."""
+        keeps it straight (see the module docstring)."""
         graph = self.graph
         out: dict[str, dict[str, int]] = {}
         for port_id in sorted(graph.ports):
@@ -1550,7 +1380,6 @@ class _Tracks:
         if section_id in self.done:
             return True
         if section_id in self.busy:
-            self.cycles.add(section_id)
             return False
         self.busy.add(section_id)
         graph = self.graph
@@ -2970,30 +2799,14 @@ def _rail_origins(
 
 def build_lane_plan(graph: MetroGraph) -> LanePlan:
     """Decide *graph*'s lane plan from its structure and placement."""
-    frames = _Frames(graph)
-    turns = _perpendicular_turns(graph, frames)
-    travels = _order_travels(graph, turns)
-    senses = {
-        port_id: _sense(frames(graph.ports[port_id].section_id), travel)
-        for port_id, travel in travels.items()
-    }
-    planner = _Tracks(graph, frames, senses)
+    planner = _Tracks(graph, _Frames(graph))
     for section_id in sorted(graph.sections):
         planner.section(section_id)
     port_orders = decide_ports(planner.builder)
-    tracks, perpendicular_seams = planner.plan(port_orders.orders, turns)
     return LanePlan(
         port_orders=port_orders,
-        order_travels=travels,
-        lane_senses=senses,
-        perpendicular_turns=turns,
         far_sides=_far_sides(planner.builder),
-        tracks=tracks,
-        seams=SeamJoint(
-            dict(sorted(planner.seam_lanes.items())),
-            dict(sorted(planner.seam_sources.items())),
-            perpendicular_seams,
-        ),
+        tracks=planner.plan(port_orders.orders),
         gap_legs=_gap_legs(graph, port_orders),
     )
 

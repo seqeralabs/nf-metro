@@ -1574,12 +1574,10 @@ through the record's draw accessors (`planned_offsets` in
 ### Lane plan record (sealed at a layout's first production offsets run at or after 5.1)
 
 - **Purpose**: Decide the layout's lanes once, from structure and placement:
-  every port's line order and same-band entry approach, each port's order
-  travel and lane sense, each perpendicular entry's consumer turns, the
-  far-side approaches, the track plan (every in-section `(node, line)`'s lane,
-  from which each exit's order is read), the seam joint (the lanes either side
-  of every straight seam), and each rail-section port's origin (the middle of
-  its own lanes).
+  every port's line order and same-band entry approach, the far-side
+  approaches, the track plan (every in-section `(node, line)`'s lane, from
+  which each exit's order is read, and every perpendicular port's offsets), and
+  each rail-section port's origin (the middle of its own lanes).
 - **Helpers**: `lane_plan_of` (`layout/lane_plan.py`) returns the sealed
   record, or builds one with `build_lane_plan` and seals it when the layout has
   completed 5.1; an offsets run before 5.1 reads the record its current

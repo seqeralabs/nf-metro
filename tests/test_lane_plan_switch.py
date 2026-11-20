@@ -18,7 +18,7 @@ import inspect
 import sys
 import textwrap
 import warnings
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -89,6 +89,9 @@ class _Drawn:
     polylines: list[list[tuple[float, float]]] = field(default_factory=list)
     step: float = 0.0
     exit_turns: tuple[ExitTurnPlan, ...] = ()
+    seam_pins: Mapping[tuple[str, str], str] = field(default_factory=dict)
+    """Keyed ``(entry, line)``: the exit the sealed record's planner pins a
+    line across a straight seam from."""
 
 
 @lru_cache(maxsize=None)
@@ -98,6 +101,12 @@ def _drawn(path: Path) -> _Drawn:
     translates; ``graph`` is ``None`` when the map aborts."""
     settled: list[tuple[MetroGraph, svg._SettledRenderGeometry]] = []
     real = svg._settle_render_geometry
+    planners: list[lane_plan_module._Tracks] = []
+
+    class Kept(lane_plan_module._Tracks):
+        def __init__(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            super().__init__(*args, **kwargs)
+            planners.append(self)
 
     def settle(
         graph: MetroGraph, *args: object, **kwargs: object
@@ -109,8 +118,10 @@ def _drawn(path: Path) -> _Drawn:
     with warnings.catch_warnings(), pytest.MonkeyPatch.context() as mp:
         warnings.simplefilter("ignore")
         mp.setattr(svg, "_settle_render_geometry", settle)
+        mp.setattr(lane_plan_module, "_Tracks", Kept)
         try:
             source = prepare_graph(path.read_text(), source_dir=str(path.parent))
+            seam_pins = dict(planners[-1].seam_sources) if planners else {}
             observed = svg.build_observed_render_plan(
                 source, resolve_theme(None, source)
             )
@@ -127,6 +138,7 @@ def _drawn(path: Path) -> _Drawn:
         [list(p) for p in last.route_polylines],
         graph_offset_step(graph),
         observed.route_plan.exit_turn_plans,
+        seam_pins,
     )
 
 
@@ -325,7 +337,7 @@ def test_a_seam_draws_the_order_it_joins(path: Path) -> None:
         (f.port, frozenset(f.lines)) for f in plan.tracks.forced if f.port is not None
     }
     by_seam: dict[tuple[str, str], list[str]] = {}
-    for (entry_id, lid), exit_id in plan.seams.pins.items():
+    for (entry_id, lid), exit_id in drawn.seam_pins.items():
         by_seam.setdefault((exit_id, entry_id), []).append(lid)
     wrong = []
     for (exit_id, entry_id), lines in by_seam.items():

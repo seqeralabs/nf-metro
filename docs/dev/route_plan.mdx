@@ -111,7 +111,7 @@ When a turn competes for a row or column gap, its provisional axis takes part in
 The settled axis and signed corner offset return to the exit-turn planner before it publishes the complete plan.
 The planner owns axes and transition requirements, and templates only realize those decisions as points and radii.
 Lanes are the lane plan's: the planner reads each source lane from the record at the exit port and never writes a station offset.
-Its published nest order (`ExitTurnPlan.nest_order`) is the order the two start legs of one planned plan nest in where they share a trunk slot; every other pair at a trunk anchor's corner nests by the record's turn-off order.
+Its published nest order (`ExitTurnPlan.nest_order`) is the order the two start legs of one planned plan nest in where they share a trunk slot; every other pair at a trunk anchor's corner nests by its lanes in the lane plan, a line whose run carries on level through the node meeting the leg beyond every line whose run ends there.
 
 Every downstream route-mutating pass is ratcheted against a snapshot of the owned segments and transitions.
 The general gap materializer treats a settled planned turn as validation-only.
@@ -254,7 +254,6 @@ Where a flow-side entry's lines part at the port, some running on level and the 
 An entry some of whose lines cross a straight seam (below) takes instead the order of its seam lanes: the lanes the seam's pins and the fill round them give its lines.
 An exit's order is its lines' lanes at the port in the track plan (below), read across the exit's travel.
 
-Each order states the field that decided it and the port's structural class.
 A port whose order needs an input the plan cannot supply is undecided and names that input, rather than taking a value a later phase wrote.
 
 ### Approaches
@@ -276,9 +275,9 @@ A fan plan's carrier slot at the entry fixes its line's lane as a pin does, and 
 The entry's other lines fill round the fixed lanes in the entry's order (by line declaration order when that order is undecided): those before the first fixed line take the free lanes below it, nearest first, and each later one the first free lane past the line before it.
 Where that passes a pinned line a feeding bundle carries it ahead of, the line takes instead the nearest free lane below the line before it, when no feeding bundle carries a line it then passes ahead of it: every feeding bundle keeps its order where one side allows it.
 Where two bundles into the entry carry the same lines in opposite orders, one of them crosses the seam whatever the entry's order: the track plan records the entry and those lines as a forced crossing.
-The seam joint records each such entry's seam lanes, which are its track lanes, and the exit each pinned line comes from.
+Each such entry's seam lanes are its track lanes.
 
-A perpendicular port every line of which crosses a straight seam, past no section box, to a facing flow-side port centred on it takes each line's offset from the port on the flow-side port's lane, read across the seam's travel, where those offsets are the port's own (below) shifted by one constant: the seam joint records them.
+A perpendicular port every line of which crosses a straight seam, past no section box, to a facing flow-side port centred on it takes each line's offset from the port on the flow-side port's lane, read across the seam's travel, where those offsets are the port's own (below) shifted by one constant.
 
 ### Perpendicular ports
 
@@ -289,14 +288,10 @@ Otherwise the lines lie side by side in the port's order.
 A perpendicular entry feeding several in-section consumers lays its lines side by side in the merge of each consumer's lines in the order they hold after turning into it, the port's order deciding the rest.
 The side a port's drawing reads offsets toward is the drawing's convention: across an LR or RL section's TOP or BOTTOM edge an entry's travel's right, an exit's on the BOTTOM edge reflected, every other port's as it stands.
 
-### Turn-offs
-
-Every port, and every junction continuing one port's run, records the order its lines meet a leg turning off its run (an exit, or a junction it feeds) or joining it (an entry, or a junction feeding it): the side of travel at the node, the side the leg heads for first, except that a line whose run carries on level through the node meets the leg beyond (leaving) or before (joining) every line whose run ends there; a junction lies on the run of the port it continues.
-
 ### Turns and lane senses
 
-Each perpendicular entry records, per in-section consumer, the lines it takes and the direction along the section's flow the lines turn to reach it.
-Each port records the travel its order is read across (its own, the section flow's at a perpendicular port, or the turn at a perpendicular entry whose lines all go to one consumer) and whether that order runs up or down the section's lane index.
+The planner takes, per perpendicular entry and in-section consumer, the lines the entry hands it and the direction along the section's flow the lines turn to reach it.
+Each port's order is read across a travel (its own, the section flow's at a perpendicular port, or the turn at a perpendicular entry whose lines all go to one consumer), and that order runs up or down the section's lane index.
 
 ### Track plan
 
