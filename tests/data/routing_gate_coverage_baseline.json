@@ -979,7 +979,6 @@
   "normalize.py::if planned_offsets is None:::#1",
   "normalize.py::if port is None or not port.is_entry:::#1",
   "normalize.py::if port is not None and port.is_entry:::#1",
-  "normalize.py::if recorded is None:::#1",
   "normalize.py::if ref is not None:::#1",
   "normalize.py::if rep_x[a] != rep_x[b]:::#1",
   "normalize.py::if route.curve_radii is None or membership is None:::#1",
