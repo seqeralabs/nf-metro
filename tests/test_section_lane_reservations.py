@@ -5,6 +5,10 @@ no marker should stretch to span it.  Scanned over the whole ``.mmd`` corpus
 rather than one fixture, because the lane a line lands on is decided from the
 section's line set and so every section is a candidate.
 
+A lane left empty because a line turned off before a straight seam may stay
+empty past it: the lines the seam carries straight either side of it keep their
+lanes through the straight run rather than step across into it.
+
 A line cut mid-section and rejoining on a different lane is deliberately *not*
 asserted against: the alternative is to hold its far lane at every stop, which
 reserves a level the nearer stations do not need and grows their markers, so the
@@ -130,11 +134,48 @@ def unridden_lanes(graph, offsets) -> list[tuple[str, str, float]]:
     return sorted(found)
 
 
+def held_across_a_straight_seam(graph, offsets, sec_id, sid, lane) -> bool:
+    """Whether *lane* at *sid* lies between two lines one straight seam into
+    *sec_id* holds level from one exit, where no line crossing the seam rides
+    the lane it carries straight across: a line turning off before the seam
+    left it."""
+    plan = graph._lane_plan
+    if plan is None:
+        return False
+    step = graph_offset_step(graph)
+    at_sid = {lid: offsets.get((sid, lid), 0.0) for lid in graph.station_lines(sid)}
+    held = [
+        (entry_id, exit_id, lid)
+        for (entry_id, lid), exit_id in plan.seams.pins.items()
+        if graph.ports[entry_id].section_id == sec_id and lid in at_sid
+    ]
+    for entry_id, exit_id, below in held:
+        at_exit = {
+            lid: plan.tracks.lanes.get((exit_id, lid))
+            for lid in graph.station_lines(entry_id)
+        }
+        there = at_exit[below] + round((lane - at_sid[below]) / step, 3)
+        if there not in at_exit.values() and any(
+            (entry_id, exit_id) == (e, x)
+            and at_sid[below] < lane < at_sid[above]
+            and at_exit[above] - at_exit[below]
+            == round((at_sid[above] - at_sid[below]) / step, 3)
+            for e, x, above in held
+        ):
+            return True
+    return False
+
+
 @pytest.mark.parametrize(("fixture_id", "path"), CORPUS, ids=CORPUS_IDS)
 def test_no_section_reserves_an_unridden_lane(fixture_id, path):
-    """No station stretches its drawn marker over a lane no section-mate rides."""
+    """No station stretches its drawn marker over a lane no section-mate rides,
+    unless a line turning off before a straight seam left it."""
     loaded = _lane_graph(path)
     if loaded is None:
         pytest.skip("compact mode, or nothing drawn")
     graph, offsets = loaded
-    assert unridden_lanes(graph, offsets) == []
+    assert [
+        found
+        for found in unridden_lanes(graph, offsets)
+        if not held_across_a_straight_seam(graph, offsets, *found)
+    ] == []

@@ -158,7 +158,8 @@ run's entry port past one of its stations where the other stops (a *breeze*):
 it steps up past both.  The run's stations then hold no lane none of its lines
 rides: the lanes between their outermost close up in order about its lowest
 pinned lane (else its lowest), lanes beyond them keeping their distance, where
-that moves no lane it keeps but a seam pin's.
+that moves no pinned lane: a line a straight seam pins never steps lanes along
+the straight run.
 
 **Lines in a seam-pinned run.**  Outside a part entered by bundles, a line
 riding no entry of a run holding a seam-pinned entry lies beside the fixed
@@ -1922,11 +1923,9 @@ class _Tracks:
                 else v - hi + len(held) - 1
             )
 
-        seamed = {lid for n in members for lid in self.seam_lanes.get(n, ())}
-        kept = [lid for lid in fixed if lid not in seamed]
-        anchor = min((lanes[lid] for lid in kept or fixed), default=lo)
+        anchor = min((lanes[lid] for lid in fixed), default=lo)
         packed = {lid: anchor - close(anchor) + close(v) for lid, v in lanes.items()}
-        if all(packed[lid] == lanes[lid] for lid in kept):
+        if all(packed[lid] == lanes[lid] for lid in fixed):
             lanes = packed
         for n in members:
             if n in self.seam_lanes:
