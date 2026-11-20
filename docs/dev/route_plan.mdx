@@ -111,7 +111,7 @@ When a turn competes for a row or column gap, its provisional axis takes part in
 The settled axis and signed corner offset return to the exit-turn planner before it publishes the complete plan.
 The planner owns axes and transition requirements, and templates only realize those decisions as points and radii.
 Lanes are the lane plan's: the planner reads each source lane from the record at the exit port and never writes a station offset.
-Its published nest order (`ExitTurnPlan.nest_order`) is the order the two start legs of one planned plan nest in where they share a trunk slot; every other pair at a trunk anchor's corner nests by its lanes in the lane plan, a line whose run carries on level through the node meeting the leg beyond every line whose run ends there.
+Its published nest order (`ExitTurnPlan.nest_order`) is the order the two start legs of one planned plan nest in where they share a trunk slot; every other pair at a trunk anchor's corner nests by its lanes in the lane plan, on a horizontal run, a line whose run carries on level through the node meeting a leaving leg beyond, and a joining leg before, every line whose run ends there.
 
 Every downstream route-mutating pass is ratcheted against a snapshot of the owned segments and transitions.
 The general gap materializer treats a settled planned turn as validation-only.

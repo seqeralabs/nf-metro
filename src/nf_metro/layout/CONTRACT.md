@@ -1598,15 +1598,13 @@ through the record's draw accessors (`planned_offsets` in
   top of `_layout_once`.
 - **Postcondition**: `graph._lane_plan` holds a `LanePlan` until the next
   layout starts: every port has a `PortOrder` (its lines travel-left to
-  travel-right with the sort field that decided it, or undecided with the
-  missing input named), every same-band `(entry, upstream source)` pair an
-  `Approach`, every in-section `(node, line)` and fed junction a lane, every
-  perpendicular port each line's offset across its travel, every port and
-  every junction continuing one port's run the order its lines turn off it,
-  every entry a straight seam pins its lanes, every entry two feeding bundles
-  cross at a forced crossing, every perpendicular port whose lines all cross
-  straight seams the offsets that keep them straight, and every rail-section
-  port whose lanes are off-centre its origin.  The record and its mappings are
+  travel-right, or undecided with the missing input named), every same-band
+  `(entry, upstream source)` pair an `Approach`, every in-section
+  `(node, line)` and fed junction a lane, every perpendicular port each line's
+  offset across its travel, every entry a straight seam pins its track lanes,
+  every entry two feeding bundles cross at a forced crossing, (among the
+  perpendicular offsets) the offsets that keep a perpendicular port's
+  straight-seam lines straight, and every rail-section port whose lanes are off-centre its origin.  The record and its mappings are
   read-only and shared, never copied, by a deep copy of the graph.  Later
   offsets runs of the layout, and routing and rendering after it, read the
   sealed record rather than rebuilding it, and a layout validated with

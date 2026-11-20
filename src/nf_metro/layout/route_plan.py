@@ -3979,9 +3979,7 @@ def _validate_planned_exit_turn_resources(
     ):
         raise ValueError("exit-turn axes have inconsistent cohort membership")
     if any(
-        (right.input_offset - left.input_offset)
-        * (right.input_offset - left.input_offset)
-        <= 0
+        right.input_offset == left.input_offset
         for left, right in zip(
             exit_turn_plan.source_lanes, exit_turn_plan.source_lanes[1:]
         )

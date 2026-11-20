@@ -641,7 +641,7 @@ SEAM_LANE_EXCEPTIONS: frozenset[tuple[str, str]] = frozenset()
 
 @pytest.mark.parametrize("path", CURATED, ids=lambda p: str(p.relative_to(ROOT)))
 def test_the_seam_lanes_are_the_track_lanes(path: Path) -> None:
-    """Every lane the seam joint records at an entry is the track plan's lane
+    """Every seam lane the planner fixes at an entry is the track plan's lane
     there, and an entry its seam lanes order reads that order across its
     track lanes."""
     run = _laid_out(path)
