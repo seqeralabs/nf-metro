@@ -1,7 +1,7 @@
 {
   "raised": [
     "LayoutInvariantError",
-    "the settled layout violates final invariants the renderer is about to draw. The map will render but is visibly broken; fix the layout (or the directive combination) that produced this geometry.\n  [_guard_no_line_crosses_non_consumer] render: line 'l0' on edge '__bypass_s0n1_s0n0_1' -> 'sec0__exit_top_0' crosses non-consumer station 's0n2' marker bbox (217.5,247.0)-(227.5,257.0); segment (222.5,324.0)->(222.5,203.6)\n  [_guard_fan_merge_no_partition_crossing] render: fork crossing at station 's0n0' (section 'sec0'): partitioning lines 'l2'/'l0' cross at (111.1, 391.9) -- their lane order is transposed against the neighbours they connect (+2 more)"
+    "the settled layout violates final invariants the renderer is about to draw. The map will render but is visibly broken; fix the layout (or the directive combination) that produced this geometry.\n  [_guard_no_line_crosses_non_consumer] render: line 'l0' on edge '__bypass_s0n1_s0n0_1' -> 'sec0__exit_top_0' crosses non-consumer station 's0n2' marker bbox (217.5,247.0)-(227.5,257.0); segment (222.5,324.0)->(222.5,203.6)\n  [_guard_fan_merge_no_partition_crossing] render: fork crossing at station 's0n1' (section 'sec0'): partitioning lines 'l1'/'l2' cross at (170.5, 312.1) -- their lane order is transposed against the neighbours they connect"
   ],
   "trace": [
     "_guard_no_same_row_backward_feed|None",
