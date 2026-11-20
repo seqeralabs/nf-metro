@@ -203,7 +203,6 @@ from nf_metro.layout.constants import (
     SAME_Y_TOLERANCE,
     graph_offset_step,
 )
-from nf_metro.layout.departure_order import JUNCTIONS_POSITIONED
 from nf_metro.layout.fan_ordering import fanout_divergence_peel_order
 from nf_metro.layout.geometry import (
     AxisFrame,
@@ -3091,6 +3090,9 @@ def start_layout(graph: MetroGraph) -> None:
     """Forget the previous layout's record: this layout seals its own."""
     graph._lane_plan = None
 
+
+# The stage after which junctions stand where routing will find them.
+JUNCTIONS_POSITIONED = "5.1"
 
 _OBSERVED: ContextVar[dict[int, tuple[MetroGraph, LanePlan]] | None] = ContextVar(
     "lane_plan_observed", default=None

@@ -374,11 +374,11 @@ def test_a_decided_port_seats_rank_and_port_y_in_the_decided_order(
     """The decided order disagrees with trunk depth; each line takes the whole
     slot, port Y and peel-X rank alike, that its decided position holds."""
     bundle = _peeloff_bundle(trunk_sign)
-    by_depth = peeloff_target_slots(bundle, 4.0, {})
+    by_depth = peeloff_target_slots(bundle, 4.0)
     depth_line_at = sorted(by_depth, key=lambda line: by_depth[line].port_y)
     decided_order = ("c", "a", "b")
 
-    slots = peeloff_target_slots(bundle, 4.0, {}, {"port": decided_order})
+    slots = peeloff_target_slots(bundle, 4.0, {"port": decided_order})
 
     assert sorted(slots, key=lambda line: slots[line].port_y) == list(decided_order)
     for position, line in enumerate(decided_order):
@@ -388,8 +388,8 @@ def test_a_decided_port_seats_rank_and_port_y_in_the_decided_order(
 def test_an_undecided_bundle_keeps_its_trunk_depth_order() -> None:
     bundle = _peeloff_bundle(1)
 
-    assert peeloff_target_slots(bundle, 4.0, {}, {"port": ("a", "b")}) == (
-        peeloff_target_slots(bundle, 4.0, {})
+    assert peeloff_target_slots(bundle, 4.0, {"port": ("a", "b")}) == (
+        peeloff_target_slots(bundle, 4.0)
     )
 
 

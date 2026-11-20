@@ -6,7 +6,7 @@ their order where it lands.  :func:`bundle_landing_deals` deals that order over
 each port's own landing slots (:func:`_entry_port_landing`), which only changes
 which line takes which slot, never the slot set.  Every input is plan-time
 state: station offsets, port sides, the source section's lane frame, the
-perpendicular riser lateral, recorded departure orders, and the direction
+perpendicular riser lateral, and the direction
 sequence (never the coordinates) of the routes as emitted.
 
 A port the deal cannot order is refused, once, with the reason; while the plan
@@ -63,13 +63,11 @@ class LandingDealRefusal(Enum):
     INCOMPLETE = "incomplete"
     LINE_FROM_TWO_SOURCES = "line-from-two-sources"
     JUNCTION_MULTI_UPSTREAM = "junction-multi-upstream"
-    JUNCTION_TWO_RECORDS = "junction-two-records"
     SOURCE_NOT_EXIT = "source-not-exit"
     TWO_SIDED = "two-sided"
     DEFERRED = "deferred"
     SPLIT_LANDING = "split-landing"
     EXIT_TIE = "exit-tie"
-    RECORD_MISMATCH = "record-mismatch"
     IMMUTABLE_MOVED = "immutable-moved"
     NOTHING_TO_DEAL = "nothing-to-deal"
     AGAINST_SIDE = "against-side"
@@ -189,12 +187,9 @@ def _source_deal(
     """Deal one source's *lines* over that source's own landing slots.
 
     A junction source is walked up to the exit port feeding it; its lines
-    leave at the junction's own offsets, permuted by the junction's recorded
-    departure order where one is held.
+    leave at the junction's own offsets.
     """
     graph = ctx.graph
-    records = graph._departure_lane_orders
-    record = None
     root = source
     walked: set[str] = set()
     while root not in graph.ports and root not in walked:
@@ -204,11 +199,6 @@ def _source_deal(
         }
         if len(upstream) != 1:
             raise _Refused(LandingDealRefusal.JUNCTION_MULTI_UPSTREAM)
-        held = records.get((root, port.id))
-        if held is not None:
-            if record is not None:
-                raise _Refused(LandingDealRefusal.JUNCTION_TWO_RECORDS)
-            record = held
         root = next(iter(upstream))
     exit_port = graph.ports.get(root)
     if exit_port is None or exit_port.is_entry or exit_port.section_id is None:
@@ -256,14 +246,7 @@ def _source_deal(
         coordinate = by_line[line][0].endpoint_lane_coordinate
         assert coordinate is not None
         slots.append(coordinate)
-    dealt = deal_by_exit_order(exit_port.side, laterals, port.side, slots)
-    if record is not None:
-        if set(record.lines) - set(lines):
-            raise _Refused(LandingDealRefusal.RECORD_MISMATCH)
-        natural = dict(dealt)
-        for line, natural_line in record.takes_lane_of:
-            dealt[line] = natural[natural_line]
-    return dealt
+    return deal_by_exit_order(exit_port.side, laterals, port.side, slots)
 
 
 def _runs_against(leg: tuple[int, int], travel: Direction) -> bool:

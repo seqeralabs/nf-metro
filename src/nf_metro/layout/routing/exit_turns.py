@@ -12,11 +12,6 @@ from nf_metro.layout.constants import (
     COORD_TOLERANCE,
     MIN_STRAIGHT_EDGE,
 )
-from nf_metro.layout.departure_order import (
-    DepartureLaneOrder,
-    departure_records,
-    departure_turn_rank,
-)
 from nf_metro.layout.geometry import lanes_run_along_y
 from nf_metro.layout.lane_plan import gap_counter_runners
 from nf_metro.layout.route_plan import (
@@ -2082,38 +2077,19 @@ def _turn_cohort_key_by_member(
     return keys
 
 
-def _departure_ranked_seeds(
-    departure_orders: tuple[DepartureLaneOrder, ...],
-    ordered_lanes: tuple[tuple[str, float], ...],
-    seeds: tuple[_AssignmentSeed, ...],
-) -> tuple[_AssignmentSeed, ...]:
-    """*seeds* with each recorded departure's lines ranked as the lines whose
-    lanes they take (:class:`~nf_metro.layout.departure_order.DepartureLaneOrder`)."""
-    records = departure_records(departure_orders)
-    rank = {line_id: index for index, (line_id, _offset) in enumerate(ordered_lanes)}
-    ranked = []
-    for seed in seeds:
-        line = seed.edge.line_id
-        assert seed.lane_rank == rank[line], (
-            "the route-plan checker re-derives turn ranks from the source lanes, "
-            "which carry the ordered-lane ranks"
-        )
-        departure = (seed.edge.source, seed.edge.target)
-        ranked.append(
-            replace(seed, lane_rank=departure_turn_rank(records, departure, line, rank))
-        )
-    return tuple(ranked)
-
-
 def _plan_turn_axes(
     ctx: _RoutingCtx,
     plan_id: ExitTurnPlanId,
     source_run_direction: Direction,
     ordered_lanes: tuple[tuple[str, float], ...],
     seeds: tuple[_AssignmentSeed, ...],
-    departure_orders: tuple[DepartureLaneOrder, ...],
 ) -> _AxisPlan:
-    seeds = _departure_ranked_seeds(departure_orders, ordered_lanes, seeds)
+    lane_ranks = {line_id: i for i, (line_id, _offset) in enumerate(ordered_lanes)}
+    for seed in seeds:
+        assert seed.lane_rank == lane_ranks[seed.edge.line_id], (
+            "the route-plan checker re-derives turn ranks from the source lanes, "
+            "which carry the ordered-lane ranks"
+        )
     turning_seeds = tuple(seed for seed in seeds if seed.turn_direction is not None)
     minimum_runway = max(
         (
@@ -2442,12 +2418,6 @@ def _build_group_plan(
     member_ids = tuple(scaffold.member_id_by_edge[edge] for edge in member_edges)
     system_member_ids = indexes.member_ids_by_system.get(system_id, ())
     outbound_edges = tuple(edge for edge in member_edges if edge.source == source_id)
-    records = ctx.graph._departure_lane_orders
-    departure_orders = tuple(
-        records[key]
-        for key in sorted({(source_id, edge.target) for edge in outbound_edges})
-        if key in records
-    )
     reason: str | None = None
     represented_connectors = {
         ref.connector_id
@@ -2550,7 +2520,6 @@ def _build_group_plan(
             run_direction,
             ordered_lanes,
             seeds,
-            departure_orders,
         )
         reason = axis_plan.legacy_reason
     axes = axis_plan.axes
@@ -2743,7 +2712,6 @@ def _build_group_plan(
         disposition,
         reason,
         decision_refs,
-        departure_orders,
         _nest_order(axes, run_direction),
     )
     diagnostic = (

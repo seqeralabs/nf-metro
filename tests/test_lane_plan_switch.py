@@ -31,13 +31,12 @@ import nf_metro.render.svg as svg
 from nf_metro.api import prepare_graph, render_string, resolve_theme
 from nf_metro.layout import engine as engine_module
 from nf_metro.layout.constants import graph_offset_step
-from nf_metro.layout.departure_order import JUNCTIONS_POSITIONED
 from nf_metro.layout.geometry import (
     perpendicular_port_sides,
     port_free_axis,
     station_lane_coord,
 )
-from nf_metro.layout.lane_plan import LanePlan
+from nf_metro.layout.lane_plan import JUNCTIONS_POSITIONED, LanePlan
 from nf_metro.layout.port_order_plan import ApproachKind, SideRule, port_travel
 from nf_metro.layout.route_plan import (
     ExitLaneTransitionPlacement,

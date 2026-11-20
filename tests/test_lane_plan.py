@@ -40,12 +40,11 @@ from nf_metro.api import render_string
 from nf_metro.layout import engine as engine_module
 from nf_metro.layout import fan_ordering
 from nf_metro.layout.constants import SAME_Y_TOLERANCE, graph_offset_step
-from nf_metro.layout.departure_order import JUNCTIONS_POSITIONED
 from nf_metro.layout.geometry import (
     packed_section_visual_rank,
     perpendicular_port_sides,
 )
-from nf_metro.layout.lane_plan import LanePlan
+from nf_metro.layout.lane_plan import JUNCTIONS_POSITIONED, LanePlan
 from nf_metro.layout.port_order_plan import (
     Approach,
     ApproachKind,

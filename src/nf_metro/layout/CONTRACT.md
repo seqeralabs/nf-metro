@@ -325,16 +325,6 @@ runtime check either:
   `FLOW_REORIENTED_DIRECTION` decision in `graph.layout_provenance`; the
   explicit-grid direction guard accepts a non-LR direction only with that
   typed reason, instead of a second section set.
-- `graph._departure_order_plan` - one layout's 7b' port decisions (a
-  record, or none), reset when `compute_layout` starts; when they are decided
-  and replayed is under "Departure record lifetime" below.
-- `graph._departure_lane_orders` - the `DepartureLaneOrder` records the latest
-  station-offset computation holds; read by routing's fan, gap, band,
-  exit-turn and seating consumers and the bundle-order curve check, empty when
-  no departure is recorded.
-- `graph._departure_record_keys` - the departure-record keys the layout's
-  first positioning pass ended with; every later pass must end with the same
-  keys or raises `DepartureRecordDriftError`.
 - `graph._linear_entry_pill_lines_cache` - accepted linear-entry cohorts
   projected by each station-offset computation. Marker bbox, label, and render
   consumers use the cohort with the offset map produced by that computation;
@@ -1628,8 +1618,8 @@ through the record's draw accessors (`planned_offsets` in
   sealed record rather than rebuilding it, and a layout validated with
   `validate=True` seals the same record at the same stage as without.
   Rail-mode and sectionless layouts never reach 5.1 and hold no record.
-- **Invariants preserved**: The record reads no lane offset, route, draft or
-  departure record.  `compute_station_offsets` returns exactly
+- **Invariants preserved**: The record reads no lane offset, route or draft.
+  `compute_station_offsets` returns exactly
   `planned_offsets(graph, record, step)`; a station line the record lacks
   (a node placed after the seal that splits a recorded edge) takes its line's
   nearest recorded neighbour's lane.

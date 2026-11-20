@@ -66,10 +66,7 @@ def compute_station_offsets(
     if graph.line_spread is LineSpread.RAILS:
         return {}
     resolved = offset_step if offset_step is not None else graph_offset_step(graph)
-    offsets = planned_offsets(graph, lane_plan_of(graph), resolved)
-    if graph._departure_order_plan is not None:
-        graph._departure_order_plan.seal(graph._stages_completed)
-    return offsets
+    return planned_offsets(graph, lane_plan_of(graph), resolved)
 
 
 def _convergence_feeders(
