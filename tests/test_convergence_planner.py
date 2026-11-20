@@ -36,12 +36,17 @@ from nf_metro.layout.route_reservations import (
     expected_convergence_foreign_references,
 )
 from nf_metro.layout.routing import compute_station_offsets, observe_route_edges
-from nf_metro.layout.routing.common import Direction, OffsetRegime, RoutedPath
+from nf_metro.layout.routing.common import (
+    Direction,
+    OffsetRegime,
+    RoutedPath,
+    right_normal_axis_sign,
+)
 from nf_metro.layout.routing.convergences import (
     ConvergenceInvariantError,
     ConvergencePlanningError,
     UnsupportedConvergenceError,
-    _direct_axis,
+    _direct_axis_points,
     _seat_route_on_trunk_flanks,
     validate_convergence_plans,
 )
@@ -51,7 +56,6 @@ from nf_metro.layout.routing.invariants import (
     check_merge_branches_meet_trunk,
     check_merge_feeders_land_on_trunk,
 )
-from nf_metro.layout.routing.orientation import lateral_order_sign
 from nf_metro.parser.model import Edge, MetroGraph, PortSide, Station
 from nf_metro.parser.route_topology import ResolvedEdge, build_route_topology_query
 
@@ -771,7 +775,7 @@ def test_perpendicular_entry_convergences_plan_one_trunk_per_crossing_column() -
     # Each trunk stands in the column the port states for its line, so no two
     # of them share one.  A perpendicular port states its lanes across its own
     # travel, so the screen column carries that travel's lateral sign.
-    sign = lateral_order_sign(port_travel(graph.ports[port.id]))
+    sign = right_normal_axis_sign(port_travel(graph.ports[port.id]))
     for line_id, coordinate in axis_by_line.items():
         assert coordinate == pytest.approx(port.x + sign * offsets[(port.id, line_id)])
     assert len(set(axis_by_line.values())) == len(plans)
@@ -953,7 +957,7 @@ def test_direct_trunk_axis_rotates_and_reverses(
 ) -> None:
     merge = Station("merge", "", x=10.0, y=10.0)
     entry = Station("entry", "", x=entry_point[0], y=entry_point[1])
-    trunk = _direct_axis(merge, entry)
+    trunk = _direct_axis_points((merge.x, merge.y), (entry.x, entry.y))
 
     assert trunk.axis is axis
     assert trunk.direction.value == direction

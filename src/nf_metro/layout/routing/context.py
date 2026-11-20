@@ -16,7 +16,6 @@ from nf_metro.layout.constants import (
     SAME_Y_TOLERANCE,
     graph_offset_step,
 )
-from nf_metro.layout.departure_order import relabel_departures
 from nf_metro.layout.fan_ordering import fanout_divergence_peel_order
 from nf_metro.layout.geometry import (
     AxisFrame,
@@ -677,26 +676,6 @@ def port_lane_coord(
     return station_lane_coord(frame, port, offset)
 
 
-def port_arrival_order(
-    graph: MetroGraph,
-    port: Station,
-    station_offsets: Mapping[tuple[str, str], float],
-    positive_fan: set[str] | None = None,
-) -> list[str]:
-    """Lines at *port* in the order they cross its edge (arrival order).
-
-    Ties (two lines sharing a lane coordinate) break on line id, so the order is
-    independent of the input line listing.
-    """
-    return sorted(
-        graph.station_lines(port.id),
-        key=lambda lid: (
-            port_lane_coord(graph, port, lid, station_offsets, positive_fan),
-            lid,
-        ),
-    )
-
-
 def _entry_port_for_line(
     graph: MetroGraph, section: Section, line_id: str
 ) -> Station | None:
@@ -993,9 +972,8 @@ def is_far_side_around_below_left_entry(graph: MetroGraph, port: Port) -> bool:
     westward, drops below every box, and rises into the far-side port from its
     outward side -- a half-turn that transposes the bundle end-to-end.  Routed
     by ``_route_left_exit_around_below_left_entry``; the destination section takes
-    the feeder's delivered order transposed once by the seam classifier
-    (``_reorder_reconvergence``) and the layout reserves left clearance for the
-    wrap.
+    the feeder's delivered order transposed once by the lane plan
+    (``build_lane_plan``) and the layout reserves left clearance for the wrap.
 
     Pure topology (grid columns, port sides, intervening sections), so it reads
     the same before global coordinates are assigned and after.
@@ -1024,48 +1002,9 @@ def is_near_vertical_drop(dx: float, dy: float) -> bool:
     """Whether a junction-to-entry hop is the near-vertical same-column drop.
 
     The hop is within ``JUNCTION_MARGIN`` horizontally and far steeper than it is
-    wide.  Shared by the routing dispatch
-    (``_InterFacts.is_near_vertical_same_col_junction``) and the offset-reversal
-    predicate so the two cannot drift.
+    wide.
     """
     return abs(dx) <= JUNCTION_MARGIN + COORD_TOLERANCE and abs(dy) > abs(dx) * 3
-
-
-def is_near_vertical_junction_right_entry(graph: MetroGraph, port: Port) -> bool:
-    """Whether *port* is a RIGHT entry a multi-line fan-out junction drops into.
-
-    Detected so the section's line order can be reversed to match the descent's
-    transpose (see ``_reverse_near_vertical_junction_right_entry_offsets``).  The
-    same near-vertical geometry the routing dispatch deflects to the standard
-    drop (``_InterFacts.takes_near_vertical_junction_drop``): the junction and
-    port share a grid column, the junction overhangs the port's outward edge, the
-    drop is near-vertical, and at least two lines descend together (mirroring the
-    dispatch's ``f.n >= 2``; a lone line has no bundle to transpose).
-    """
-    if not (port.is_entry and port.side is PortSide.RIGHT):
-        return False
-    psec = graph.section_for_port(port)
-    pst = graph.stations.get(port.id)
-    if pst is None:
-        return False
-    lines_by_source: dict[str, set[str]] = defaultdict(set)
-    for edge in graph.edges_to(port.id):
-        lines_by_source[edge.source].add(edge.line_id)
-    for source, lines in lines_by_source.items():
-        jst = graph.stations.get(source)
-        if (
-            source not in graph.junction_ids
-            or jst is None
-            or _resolve_section_col(graph, jst) != psec.grid_col
-        ):
-            continue
-        if (
-            len(lines) >= 2
-            and jst.x >= pst.x - COORD_TOLERANCE
-            and is_near_vertical_drop(pst.x - jst.x, pst.y - jst.y)
-        ):
-            return True
-    return False
 
 
 def _compute_bypass_gap_indices(
@@ -1084,9 +1023,7 @@ def _compute_bypass_gap_indices(
     assigns per-gap indices so each route gets a unique X offset.
 
     Edges in *skip_edges* are excluded so truncated merge branches
-    don't create gaps in the bundle.  A recorded departure
-    (:class:`~nf_metro.layout.departure_order.DepartureLaneOrder`) gives each
-    of its lines the first-gap index of the line whose lane it takes.
+    don't create gaps in the bundle.
 
     Returns
     -------
@@ -1177,12 +1114,6 @@ def _compute_bypass_gap_indices(
         g1_j, g1_n = gap1_idx.get(ek, (0, 1))
         g2_j, g2_n = gap2_idx.get(ek, (0, 1))
         result[ek] = (g1_j, g1_n, g2_j, g2_n)
-
-    relabel_departures(
-        graph._departure_lane_orders,
-        result,
-        lambda own, natural: (natural[0], own[1], own[2], own[3]),
-    )
     return result
 
 
@@ -1243,9 +1174,7 @@ def _compute_junction_fan_info(
     vertical channel X.
 
     Edges in *skip_edges* are excluded so that truncated merge branches
-    don't create gaps in the bundle.  A recorded departure
-    (:class:`~nf_metro.layout.departure_order.DepartureLaneOrder`) gives each
-    of its lines the position of the line whose lane it takes.
+    don't create gaps in the bundle.
     """
     _skip = skip_edges or set()
     result: dict[tuple[str, str, str], tuple[int, int]] = {}
@@ -1431,10 +1360,6 @@ def _compute_junction_fan_info(
                     line_pos[edge.line_id],
                     n,
                 )
-
-    relabel_departures(
-        graph._departure_lane_orders, result, lambda _own, natural: natural
-    )
     return result
 
 

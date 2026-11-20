@@ -1461,7 +1461,6 @@ def _aperture_scenario(
         path_rank=0,
         endpoint_cohort_id=None,
         endpoint_network_rank=None,
-        destination_boundary_carrier=False,
         destination_boundary_axis_sign=None,
         network_id=None,
         reservation_complete=True,

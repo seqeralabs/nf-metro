@@ -18,7 +18,7 @@ import inspect
 import sys
 import textwrap
 import warnings
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -31,13 +31,12 @@ import nf_metro.render.svg as svg
 from nf_metro.api import prepare_graph, render_string, resolve_theme
 from nf_metro.layout import engine as engine_module
 from nf_metro.layout.constants import graph_offset_step
-from nf_metro.layout.departure_order import JUNCTIONS_POSITIONED
 from nf_metro.layout.geometry import (
     perpendicular_port_sides,
     port_free_axis,
     station_lane_coord,
 )
-from nf_metro.layout.lane_plan import LanePlan
+from nf_metro.layout.lane_plan import JUNCTIONS_POSITIONED, LanePlan
 from nf_metro.layout.port_order_plan import ApproachKind, SideRule, port_travel
 from nf_metro.layout.route_plan import (
     ExitLaneTransitionPlacement,
@@ -47,11 +46,11 @@ from nf_metro.layout.route_plan import (
 from nf_metro.layout.routing import corridor_cohort_integration
 from nf_metro.layout.routing import exit_turns as exit_turns_module
 from nf_metro.layout.routing import offsets as offsets_module
+from nf_metro.layout.routing.common import right_normal_axis_sign
 from nf_metro.layout.routing.context import _section_lane_frame
 from nf_metro.layout.routing.orientation import (
     DemandAxis,
     lateral_axis,
-    lateral_order_sign,
 )
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import LineSpread, MetroGraph
@@ -90,6 +89,9 @@ class _Drawn:
     polylines: list[list[tuple[float, float]]] = field(default_factory=list)
     step: float = 0.0
     exit_turns: tuple[ExitTurnPlan, ...] = ()
+    seam_pins: Mapping[tuple[str, str], str] = field(default_factory=dict)
+    """Keyed ``(entry, line)``: the exit the sealed record's planner pins a
+    line across a straight seam from."""
 
 
 @lru_cache(maxsize=None)
@@ -99,6 +101,12 @@ def _drawn(path: Path) -> _Drawn:
     translates; ``graph`` is ``None`` when the map aborts."""
     settled: list[tuple[MetroGraph, svg._SettledRenderGeometry]] = []
     real = svg._settle_render_geometry
+    planners: list[lane_plan_module._Tracks] = []
+
+    class Kept(lane_plan_module._Tracks):
+        def __init__(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            super().__init__(*args, **kwargs)
+            planners.append(self)
 
     def settle(
         graph: MetroGraph, *args: object, **kwargs: object
@@ -110,8 +118,10 @@ def _drawn(path: Path) -> _Drawn:
     with warnings.catch_warnings(), pytest.MonkeyPatch.context() as mp:
         warnings.simplefilter("ignore")
         mp.setattr(svg, "_settle_render_geometry", settle)
+        mp.setattr(lane_plan_module, "_Tracks", Kept)
         try:
             source = prepare_graph(path.read_text(), source_dir=str(path.parent))
+            seam_pins = dict(planners[-1].seam_sources) if planners else {}
             observed = svg.build_observed_render_plan(
                 source, resolve_theme(None, source)
             )
@@ -128,6 +138,7 @@ def _drawn(path: Path) -> _Drawn:
         [list(p) for p in last.route_polylines],
         graph_offset_step(graph),
         observed.route_plan.exit_turn_plans,
+        seam_pins,
     )
 
 
@@ -175,7 +186,7 @@ def _planned_lateral(drawn: _Drawn, node: str, line_id: str, axis: str) -> float
             return None
         return (
             getattr(station, axis)
-            + lateral_order_sign(port_travel(port)) * value * drawn.step
+            + right_normal_axis_sign(port_travel(port)) * value * drawn.step
         )
     section = graph.sections.get(station.section_id or "")
     if (
@@ -326,7 +337,7 @@ def test_a_seam_draws_the_order_it_joins(path: Path) -> None:
         (f.port, frozenset(f.lines)) for f in plan.tracks.forced if f.port is not None
     }
     by_seam: dict[tuple[str, str], list[str]] = {}
-    for (entry_id, lid), exit_id in plan.seams.pins.items():
+    for (entry_id, lid), exit_id in drawn.seam_pins.items():
         by_seam.setdefault((exit_id, entry_id), []).append(lid)
     wrong = []
     for (exit_id, entry_id), lines in by_seam.items():
@@ -363,7 +374,7 @@ def _origin(graph: MetroGraph, node: str, line_id: str) -> str:
 
 def _screen_side(graph: MetroGraph, entry_id: str, side: int) -> int:
     """Screen sign, on the entry's lateral axis, of the travel-frame *side*."""
-    return side * lateral_order_sign(port_travel(graph.ports[entry_id]))
+    return side * right_normal_axis_sign(port_travel(graph.ports[entry_id]))
 
 
 # Main's TOP/BOTTOM-entry L-shape drops straight in on the port column past a
@@ -609,7 +620,7 @@ def test_every_planned_exit_turn_lane_is_the_record(path: Path) -> None:
         for lane in plan.source_lanes:
             for station_id in lane.station_ids:
                 held = drawn.offsets.get((station_id, lane.line_id), 0.0)
-                if abs(held - lane.planned_offset) > 1e-6:
+                if abs(held - lane.input_offset) > 1e-6:
                     wrong.append((station_id, lane.line_id))
     assert wrong == []
 
@@ -794,5 +805,4 @@ def test_a_rail_section_port_straddles_its_bundle(stem: str) -> None:
 
 
 def test_no_overlaid_endpoint_slot_compatibility() -> None:
-    reasons = corridor_cohort_integration.CorridorCompatibilityReason
-    assert "OVERLAID_ENDPOINT_SLOTS" not in reasons.__members__
+    assert not hasattr(corridor_cohort_integration, "CorridorCompatibilityReason")

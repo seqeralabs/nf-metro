@@ -5,14 +5,13 @@ from __future__ import annotations
 from typing import TypeAlias
 
 from nf_metro.layout.route_plan import DemandAxis, turn_handedness
-from nf_metro.layout.routing.common import Direction, right_normal_axis_sign
+from nf_metro.layout.routing.common import Direction
 
 __all__ = (
     "direction_axis",
     "direction_vector",
     "get_point_coordinate",
     "lateral_axis",
-    "lateral_order_sign",
     "turn_handedness",
 )
 
@@ -42,11 +41,6 @@ def direction_vector(direction: Direction) -> Vector:
         Direction.U: (0, -1),
         Direction.D: (0, 1),
     }[direction]
-
-
-def lateral_order_sign(direction: Direction) -> int:
-    """Return the screen-axis sign of the right-hand normal to *direction*."""
-    return right_normal_axis_sign(direction)
 
 
 def get_point_coordinate(point: Point, axis: DemandAxis) -> float:

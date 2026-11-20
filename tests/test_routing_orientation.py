@@ -1,13 +1,12 @@
 import pytest
 
 from nf_metro.layout.route_plan import DemandAxis, TurnHandedness
-from nf_metro.layout.routing.common import Direction
+from nf_metro.layout.routing.common import Direction, right_normal_axis_sign
 from nf_metro.layout.routing.orientation import (
     direction_axis,
     direction_vector,
     get_point_coordinate,
     lateral_axis,
-    lateral_order_sign,
     turn_handedness,
 )
 
@@ -37,7 +36,7 @@ def test_cardinal_axes(direction, travel_axis, cross_axis):
 )
 def test_cardinal_vectors_and_lateral_order(direction, vector, order_sign):
     assert direction_vector(direction) == vector
-    assert lateral_order_sign(direction) == order_sign
+    assert right_normal_axis_sign(direction) == order_sign
 
 
 @pytest.mark.parametrize(

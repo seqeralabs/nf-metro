@@ -96,6 +96,7 @@ from nf_metro.layout.routing.common import (
     Direction,
     _v_segment_crosses_other_section,
     resolve_section_colrow,
+    right_normal_axis_sign,
     section_ids_of_stations,
 )
 from nf_metro.layout.routing.context import (
@@ -108,7 +109,6 @@ from nf_metro.layout.routing.orientation import (
     direction_vector,
     get_point_coordinate,
     lateral_axis,
-    lateral_order_sign,
 )
 from nf_metro.parser.model import MetroGraph, Port, PortSide, Section
 
@@ -121,43 +121,6 @@ _PARTING = 0.1
 """Lateral within which an entry's consumer counts as level with it."""
 _U_TURN_SPREAD = 0.75
 _REACH_STEP = 0.01
-
-
-class PortClass(Enum):
-    """The structural kind of a port, by which inputs its order depends on.
-
-    Precedence runs top to bottom: a port takes the first kind it matches.
-    """
-
-    PERPENDICULAR = "perpendicular"
-    """On a section edge parallel to the flow, so its lines turn into or out of
-    the flow at the port."""
-    TWO_SIDED = "two-sided"
-    """Reference nodes on both sides of the port's lane."""
-    SHARED = "shared"
-    """Two or more distinct reference nodes, all on one side or level."""
-    JUNCTION = "junction"
-    """One reference node, joined to the port's far side through a junction."""
-    SINGLE_FEEDER = "flow-side single-feeder"
-    """One reference node and a direct seam."""
-
-
-class OrderBasis(Enum):
-    """The weakest sort field the port's order needed to separate two lines."""
-
-    SINGLE = "single"
-    LATERAL = "lateral"
-    REFINED = "refined"
-    PRIORITY = "priority"
-    BUNDLE = "bundle"
-    """A feeding exit's bundle order overrode the sort key."""
-    LANES = "lanes"
-    """An exit's lines in its section's planned lanes."""
-    SEAM = "seam"
-    """An entry's lines in the lanes its straight seams pin."""
-    DEPARTURE = "departure"
-    """A same-band bypass parting at the entry took the outermost place on
-    the side it leaves to."""
 
 
 class ApproachKind(Enum):
@@ -222,10 +185,8 @@ class PortOrder:
 
     port_id: str
     is_entry: bool
-    port_class: PortClass
     lines: tuple[str, ...] | None
     """Travel-left to travel-right; ``None`` when undecided."""
-    basis: OrderBasis | None
     missing: str | None = None
     """The input an undecided order lacks; ``None`` when decided."""
 
@@ -258,7 +219,7 @@ def _lateral(point: _Point, origin: _Point, travel: Direction) -> float:
     """Signed distance of *point* from *origin* across *travel*, positive to the
     traveller's right."""
     axis = lateral_axis(travel)
-    return lateral_order_sign(travel) * (
+    return right_normal_axis_sign(travel) * (
         get_point_coordinate(point, axis) - get_point_coordinate(origin, axis)
     )
 
@@ -289,7 +250,7 @@ def _section_extent(section: Section, rows: bool) -> tuple[float, float]:
     return (section.grid_col, section.grid_col + section.grid_col_span)
 
 
-def _merge_orders(
+def merge_orders(
     planned: list[str], chains: Sequence[Sequence[str]], lines: Sequence[str]
 ) -> list[str]:
     """Merge *chains* into one order, *planned* deciding between free lines."""
@@ -774,8 +735,7 @@ class PortOrderBuilder:
         if order.is_entry:
             pinned = self.seam_order(port_id, order.lines)
             if pinned is not None:
-                basis = OrderBasis.SINGLE if len(pinned) < 2 else OrderBasis.SEAM
-                order = PortOrder(port_id, True, order.port_class, pinned, basis)
+                order = PortOrder(port_id, True, pinned)
         self.in_progress.discard(port_id)
         self.decided[port_id] = order
         return order
@@ -804,12 +764,9 @@ class PortOrderBuilder:
         laterals: dict[str, float] = {}
         placed: dict[str, float] = {}
         kinds: dict[str, ApproachKind] = {}
-        measured_nodes: dict[str, float] = {}
-        via_junction = False
         missing: str | None = None
         for lid in lines:
             if port.is_entry:
-                via_junction |= any(via for _node, via in sources[lid])
                 nodes = [node for node, _via in sources[lid]]
             else:
                 nodes = self.exit_feeders(port_id, lid)
@@ -823,7 +780,6 @@ class PortOrderBuilder:
                 measured = {n: self.cell_lateral(n, port_id, travel) for n in nodes}
             else:
                 measured = {n: _lateral(self.point(n), origin, travel) for n in nodes}
-            measured_nodes.update(measured)
             if port.is_entry and len(nodes) > 1:
                 share = {
                     n: sum(
@@ -846,28 +802,19 @@ class PortOrderBuilder:
                 laterals[lid] = approach.lateral
                 kinds[lid] = approach.kind
                 placed[lid] = round(_lateral(self.point(ref), origin, travel), 1)
-        if not port.is_entry:
-            via_junction = self.feeds_junction(port_id)
-        port_class = _classify(
-            perpendicular,
-            set(measured_nodes),
-            list(measured_nodes.values()),
-            via_junction,
-        )
-        make = partial(PortOrder, port_id, port.is_entry, port_class)
+        make = partial(PortOrder, port_id, port.is_entry)
 
         if not port.is_entry:
             exit_lines = self.exit_order(port_id)
             if exit_lines is None:
-                return make(None, None, "its section's lanes (on a section cycle)")
-            basis = OrderBasis.SINGLE if len(exit_lines) < 2 else OrderBasis.LANES
-            return make(exit_lines, basis)
+                return make(None, "its section's lanes (on a section cycle)")
+            return make(exit_lines)
         if missing is not None:
-            return make(None, None, missing)
+            return make(None, missing)
         if perpendicular and len(lines) >= 2:
             self._round_own_side(refs, laterals, kinds, here, travel)
         if len(lines) < 2:
-            return make(tuple(lines), OrderBasis.SINGLE)
+            return make(tuple(lines))
 
         rank = _tolerance_ranks(laterals)
         refined: dict[str, tuple[float, ...]] = {}
@@ -886,7 +833,7 @@ class PortOrderBuilder:
                     why = (
                         "on a section cycle" if ref in self.in_progress else "undecided"
                     )
-                    return make(None, None, f"order of reference port {ref!r} ({why})")
+                    return make(None, f"order of reference port {ref!r} ({why})")
                 refined[lid] = (placed[lid], joins, upstream or 0)
         keys = {
             lid: (rank[lid], refined[lid], self.priority.get(lid, 0)) for lid in lines
@@ -896,10 +843,8 @@ class PortOrderBuilder:
         if not perpendicular:
             parted = self._depart(port_id, ordered, bundled, laterals, kinds)
             if parted != ordered:
-                return make(tuple(parted), OrderBasis.DEPARTURE)
-        if ordered != keyed:
-            return make(tuple(ordered), OrderBasis.BUNDLE)
-        return make(tuple(ordered), _basis(ordered, keys))
+                return make(tuple(parted))
+        return make(tuple(ordered))
 
     def _depart(
         self,
@@ -1003,7 +948,7 @@ class PortOrderBuilder:
         bundled = {lid for chain in chains for lid in chain}
         if not chains:
             return ordered, bundled
-        return _merge_orders(ordered, chains, lines), bundled
+        return merge_orders(ordered, chains, lines), bundled
 
 
 def _tolerance_ranks(values: Mapping[str, float]) -> dict[str, int]:
@@ -1018,35 +963,6 @@ def _tolerance_ranks(values: Mapping[str, float]) -> dict[str, int]:
         ranks[key] = rank
         previous = values[key]
     return ranks
-
-
-def _basis(
-    ordered: Sequence[str], keys: Mapping[str, tuple[int, tuple[float, ...], int]]
-) -> OrderBasis:
-    weakest = 0
-    for a, b in zip(ordered, ordered[1:]):
-        field_index = next(
-            (i for i, (x, y) in enumerate(zip(keys[a], keys[b])) if x != y), 2
-        )
-        weakest = max(weakest, field_index)
-    return (OrderBasis.LATERAL, OrderBasis.REFINED, OrderBasis.PRIORITY)[weakest]
-
-
-def _classify(
-    perpendicular: bool,
-    ref_nodes: set[str],
-    ref_laterals: Sequence[float],
-    via_junction: bool,
-) -> PortClass:
-    if perpendicular:
-        return PortClass.PERPENDICULAR
-    if len(ref_nodes) >= 2:
-        below = any(v < -SAME_Y_TOLERANCE for v in ref_laterals)
-        above = any(v > SAME_Y_TOLERANCE for v in ref_laterals)
-        return PortClass.TWO_SIDED if below and above else PortClass.SHARED
-    if via_junction:
-        return PortClass.JUNCTION
-    return PortClass.SINGLE_FEEDER
 
 
 def _same_band_sources(builder: PortOrderBuilder) -> list[tuple[str, str]]:

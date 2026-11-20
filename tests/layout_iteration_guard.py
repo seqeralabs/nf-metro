@@ -169,7 +169,6 @@ LAYOUT_ROOT = Path(__file__).resolve().parent.parent / "src" / "nf_metro" / "lay
 # section and station placement.  Every layout module has exactly one role.
 ROUTING_MODULES = frozenset(
     {
-        "departure_order.py",
         "envelope_settlement.py",
         "fan_geometry.py",
         "fan_ordering.py",

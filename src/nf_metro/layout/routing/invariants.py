@@ -1685,8 +1685,8 @@ def check_convergence_shallow_feeder_concentric(
     holds at any flow-side entry of an LR or RL section where same-row bypass
     lines join flat feeders (:func:`same_row_bypass_entry`): each bypass line
     must sit on the side of the flat band it arrives from, below it when it
-    climbs in and above it when it comes down.  Mirrors the gating of
-    ``_order_convergence_entry_ports``, which assigns the slot.
+    climbs in and above it when it comes down.  The lane plan's port orders
+    (``build_lane_plan``) assign the slot.
     """
     from nf_metro.layout.routing.offsets import (
         _convergence_feeders,
@@ -2587,7 +2587,8 @@ def check_partial_branch_offset_gaps(
     across the section, so its interior gaps are deliberate and this
     check stays a no-op there.  The narrower non-compact rule -- no slot
     reserved for a line the section does not carry at all -- is settled
-    in ``offsets._close_section_dead_lanes`` rather than reported here.
+    by the lane plan's track lanes (``build_lane_plan``) rather than reported
+    here.
     """
     if not graph.compact_offsets:
         return []
@@ -7008,8 +7009,8 @@ def check_peeloff_concentric(
     Every contiguous concentric peel-off bundle - lines sharing one bypass trunk
     rising into a common LEFT entry port - owes the band
     :class:`PeeloffBundleCrossing` describes.  That band is set up front by
-    ``_convergence_line_order`` (riser peel-x) and
-    ``_order_convergence_entry_ports`` (port slots), so the bundle nests through
+    ``_convergence_line_order`` (riser peel-x) and the lane plan's port
+    orders (port slots), so the bundle nests through
     the standard layout path rather than by repair here.  A port in
     *landing_orders* owes the band in the order the plan lands it.
     """
@@ -7043,9 +7044,7 @@ def check_peeloff_concentric(
             )
         if loose:
             continue
-        targets = peeloff_target_slots(
-            bundle, step, graph._departure_lane_orders, landing_orders
-        )
+        targets = peeloff_target_slots(bundle, step, landing_orders)
         for line_id, tail in bundle.per_line.items():
             slot = targets[line_id]
             if not tail_on_slot(tail, slot):
@@ -7067,9 +7066,7 @@ def check_peeloff_concentric(
         )
         if key in checked:
             continue
-        targets = peeloff_target_slots(
-            bundle, step, graph._departure_lane_orders, landing_orders
-        )
+        targets = peeloff_target_slots(bundle, step, landing_orders)
         for line_id, tail in bundle.per_line.items():
             slot = targets[line_id]
             if not tail_on_slot(tail, slot):
@@ -7220,33 +7217,22 @@ class CurveInvariantError(RuntimeError):
     """
 
 
-def _outside_recorded_forks(
+def _outside_recorded_crossings(
     graph: MetroGraph,
     routes: Sequence[RoutedPath],
     violations: list[BundleOrderViolation],
 ) -> list[BundleOrderViolation]:
-    """*violations* less each pair a recorded departure reorders crossing on
-    the departure's first segment: lines that part at a fork take their own
-    order there (:class:`~nf_metro.layout.departure_order.DepartureLaneOrder`);
-    and less each pair a recorded entry crossing exchanges on the last
-    segment into its entry (:func:`~nf_metro.layout.lane_plan.entry_crossing_lines`)."""
-    records = graph._departure_lane_orders
+    """*violations* less each pair a recorded entry crossing exchanges on the
+    last segment into its entry
+    (:func:`~nf_metro.layout.lane_plan.entry_crossing_lines`)."""
     last = {(r.edge.source, r.edge.target): len(r.points) - 2 for r in routes}
     return [
         violation
         for violation in violations
-        if (
-            violation.segment_index != 1
-            or (record := records.get((violation.edge_source, violation.edge_target)))
-            is None
-            or not record.reorders(violation.line_a, violation.line_b)
-        )
-        and (
-            violation.segment_index
-            != last.get((violation.edge_source, violation.edge_target))
-            or not {violation.line_a, violation.line_b}
-            <= entry_crossing_lines(graph, violation.edge_target)
-        )
+        if violation.segment_index
+        != last.get((violation.edge_source, violation.edge_target))
+        or not {violation.line_a, violation.line_b}
+        <= entry_crossing_lines(graph, violation.edge_target)
     ]
 
 
@@ -7267,7 +7253,7 @@ def render_curve_violations(
     return [
         (
             "bundle order (line crosses its bundle-mate)",
-            _outside_recorded_forks(
+            _outside_recorded_crossings(
                 graph, routes, check_bundle_order_preserved(routes)
             ),
         ),

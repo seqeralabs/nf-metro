@@ -271,10 +271,6 @@
     "note": "A merge feeder is a junction fed by an exit port, which always resolves a column, so the skip arm never fires.",
     "status": "defensive"
   },
-  "context.py::if pst is None:::#1": {
-    "note": "pst = graph.stations.get(port.id): a port is always registered as a backing station, so the guard is never taken across the corpus. Kept as a station-id string read (no Edge in hand), the idiom deferred by the #1438 single-endpoint migration for a future station-id accessor; the sibling section lookup here was migrated to graph.section_for_port.",
-    "status": "needs-review"
-  },
   "context.py::if sec and sec.grid_col >= 0:::#1": {
     "note": "grid-col sentinel: a rail-mode section carries grid_col == -1 (it is placed outside the section grid), so the negative-column arm returning None is load-bearing, not dead. No corpus routing path resolves a rail section's column, so the arm is un-exercised, but a rail topology can reach it; do not fold into a non-optional accessor.",
     "status": "needs-review"
@@ -332,20 +328,20 @@
     "status": "needs-review"
   },
   "convergences.py::if (::#10": {
-    "note": "Pre-existing gap, re-keyed from #8 by the gates the restored conflict conditions inserted earlier in the file (same never-executed line, same [0,0] split). Dead sub-block of _settle_opposing_gap_flanks' landing-opening move: its enclosing `if not obstacles:` never takes the has-obstacles arm, so no non-flank plan gap channel is ever crowded by a resident one and nothing below line 3072 runs. What would settle it is a fixture whose settled convergence gap channel crowds a resident member channel of a different line in the same column gap.",
-    "status": "candidate-dead"
+    "note": "_settle_opposing_gap_flanks' landing-opening move refusing a cleared opening that conflicts with its trunk's flank. The move runs only when a settled convergence gap channel crowds a resident member channel of a different line in the same column gap, which no gate-corpus map does; tests/fixtures/hash_seed_determinism/seed_41.mmd and the generated map w2_01264 (8k sample) do, both abort later, and both take the accept arm. What would settle the refuse arm is such a crowding whose cleared opening meets the trunk flank. needs-review because the arm is reachable, not because it is unreachable.",
+    "status": "needs-review"
   },
-  "convergences.py::if (::#15": {
-    "note": "Pre-existing gap, re-keyed from #11 by the gates the restored conflict conditions inserted earlier in the file (unchanged [0,18] split). validate_convergence_plans' re-check that a landing's join point sits on its plan's own trunk axis and on the trunk route's polyline. The join point is derived from the trunk axis when the plan is built and consume_convergence_route connects the emitted endpoint to it, so taking the raise arm means the planner contradicted its own axis: an engine bug and a hard abort, not a shippable topology.",
+  "convergences.py::if (::#20": {
+    "note": "validate_convergence_plans' re-check that a landing's join point sits on its plan's own trunk axis and on the trunk route's polyline. The join point is derived from the trunk axis when the plan is built and consume_convergence_route connects the emitted endpoint to it, so taking the raise arm means the planner contradicted its own axis: an engine bug and a hard abort, not a shippable topology.",
     "status": "defensive"
   },
-  "convergences.py::if (::#16": {
-    "note": "Pre-existing gap, re-keyed from #12 by the gates the restored conflict conditions inserted earlier in the file (unchanged [0,18] split). The raise for a covered continuation absent from the carrier member that is recorded as covering it. _reconcile_continuation_ownership only names a carrier whose route already spans the continuation's endpoints, so the raise arm reports an engine bug and aborts the render; no valid topology reaches it.",
+  "convergences.py::if (::#21": {
+    "note": "The raise for a covered continuation absent from the carrier member that is recorded as covering it. _reconcile_continuation_ownership only names a carrier whose route already spans the continuation's endpoints, so the raise arm reports an engine bug and aborts the render; no valid topology reaches it.",
     "status": "defensive"
   },
-  "convergences.py::if (::#17": {
-    "note": "Pre-existing gap, re-keyed from #13 by the gates the restored conflict conditions inserted earlier in the file (unchanged [0,0] split). Never executed rather than half-taken: its enclosing `if continuation.covered_by_member_id is not None:` never takes the None arm on any of the 18 fixtures that validate a planned convergence, so an uncovered outgoing continuation does not exist in this corpus. What would settle it is a topology whose continuation no endpoint owner's route spans, which _reconcile_continuation_ownership would then leave uncovered.",
-    "status": "candidate-dead"
+  "convergences.py::if (::#22": {
+    "note": "validate_convergence_plans' check that an outgoing continuation no endpoint owner's route spans is drawn from its planned start point to its planned end point. examples/riboseq_metro.mmd (and the generated maps f8500309 and f8403970 from the 8k sample) carry such a continuation and pass the check; the raise arm reports a continuation route that left its planned endpoints, which none of them does. needs-review because the raise arm is not yet classified.",
+    "status": "needs-review"
   },
   "convergences.py::if (::#4": {
     "note": "_opposing_landing_approaches' SHARED_APPROACH_CHANNEL condition: two feeders of one line whose approach runs stand on one coordinate travelling against each other. The loop reaches this pair test on 17 fixtures, so the shape of the scan is exercised. Neutralising _settle_opposing_landing_channels makes it fire on merge_bottom_row_bypass and merge_feeder_shared_channel_gap, at separation 0 with 150px of overlap, so that pass alone is what keeps it silent; the two opening passes account for none of it. Reachable. Reaching it is now a feasibility refusal rather than a change of emitter -- see #1712.",
@@ -680,8 +676,8 @@
     "status": "defensive"
   },
   "intra_handlers.py::if abs(tgt.x - src.x) >= COORD_TOLERANCE:::#1": {
-    "note": "_route_near_zero_gap_straight: a same-section, non-TB intra edge with |tgt.x - src.x| < COORD_TOLERANCE (1px) and non-zero dy is not constructible, so the straight-return (False) arm is never taken: layering assigns increasing X along edges so the minimum |dx| reaching the intra-section shapes across the corpus is 50px (port spacing / off-track output lead). TB same-track edges that could reach |dx|=0 are intercepted by _route_tb_internal before this handler. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
-    "status": "defensive"
+    "note": "_route_near_zero_gap_straight: the straight-return arm needs a same-section, non-TB intra edge with |tgt.x - src.x| < COORD_TOLERANCE (1px) and non-zero dy. Layering assigns increasing X along edges, so the minimum |dx| reaching the intra-section shapes across the gate corpus is 50px (port spacing / off-track output lead), and TB same-track edges that could reach |dx|=0 are intercepted by _route_tb_internal before this handler. The generated map f8403881 (8k sample, aborts later) takes it. needs-review because the arm is reachable, not because it is unreachable.",
+    "status": "needs-review"
   },
   "intra_handlers.py::if dy < -COORD_TOLERANCE_FINE:::#1": {
     "note": "Trunk-row entry bow (#1315). Exercised by tests/fixtures/regressions/entry_trunk_row_bow.mmd, which is kept out of the validate=True corpus and the gate-coverage corpus (it exercises the always-on render path only), so no clean corpus fixture takes this arm. The render-path invariant test test_entry_trunk_row_bow_clears_non_consumer covers the drawn detour.",
@@ -807,10 +803,6 @@
     "note": "feasible()'s same-line-carrier clause, which forbids a candidate delta that would split a carrier the bundle already shares with a claim. No fixture reaches the feasibility search with a same-line source-compatible claim in range: _align_same_line_channels seats such a member on its claim before the bundle allocation runs. Reachable, wants a fixture.",
     "status": "needs-review"
   },
-  "member_geometry.py::if key in ctx.skip_edges:::#1": {
-    "note": "Subsumed by the convergence-edge check two lines above. Instrumenting all 348 fixtures: ctx.skip_edges holds exactly one merge-junction->entry-port hop, it is always present in scaffold.edge_order, and it is always also a convergence member edge, so the loop continues at the convergence arm and never tests skip_edges (0 of 141 fixtures). Proposed simplification: drop the two lines. Not applied here -- deletion is a deliberate separate pass, and a skip hop that is not convergence-owned is not ruled out by contract.",
-    "status": "candidate-dead"
-  },
   "member_geometry.py::if len(system_ids) != 1:::#1": {
     "note": "A complete same-destination bundle is resolved through one canonical route system. Mixed-system entries cannot be settled atomically and are defensively skipped.",
     "status": "defensive"
@@ -876,8 +868,8 @@
     "status": "defensive"
   },
   "normalize.py::elif right_ok:::#1": {
-    "note": "The give-up arm in _clear_channel_x_in_band (neither the left nor the right cleared position lies within the caller's bound window). Both bounds are only ever supplied together by the cross-row bypass legs in _bypass_geometry (inter_section_handlers.py, the gap1/gap2 calls guarded by `if cross_row:`); every other caller passes at most one bound, so left_ok/right_ok defaults to True on the unset side and this arm cannot be reached from them. For an interior column pair those two bounds come from column_gap_edges reading the neighbouring sections' own edges, and _enforce_min_column_gaps/_enforce_min_row_gaps actively widen that same gap whenever a wider bundle needs to cross it, so a blocker large enough to defeat both directions would also have widened the bound that bounds it. The one place the bound is not backed by that widening is the map's own outermost edge, where column_gap_edges degenerates to a single point (no neighbouring column to widen against) -- exactly the riboseq_inter_row_corridor case that used to reach this arm before #1789. off_grid_gap_bundle_midpoint now seats the channel at that same degenerate edge, read from the routed bundle's own row, so it can no longer land inside the section whose row defines the degenerate bound. It would still fail if a different row of the same off-grid column reached further toward the map edge than the routed row and the scan's Y-band reached into that other row, but the only two call sites that ever supply dual bounds build a Y-band confined to the routed leg's own row plus the immediate inter-row gap (verified against riboseq_inter_row_corridor's own geometry, whose exercising band never reached the neighbouring row), so no swept fixture presents that shape. Two hand-built topologies replicating the off-grid-column, different-row-is-wider shape failed to reach _bypass_geometry's cross-row dual-bound legs at all -- the U-bypass dispatch conditions that select this code path did not fire for either. What would close it is a U-bypass route between two off-grid-column rows where the non-routed sibling row reaches further toward the map edge than the routed row over the exact band the descent scans.",
-    "status": "candidate-dead"
+    "note": "The give-up arm in _clear_channel_x_in_band (neither the left nor the right cleared position lies within the caller's bound window). Both bounds are supplied together only by the cross-row bypass legs in _bypass_geometry (inter_section_handlers.py, the gap1/gap2 calls guarded by `if cross_row:`); every other caller passes at most one bound. The gate corpus renders without validation and none of its production renders takes the arm; under validate=True examples/riboseq_metro.mmd and examples/topologies/bypass_left_entry_colspan_intervener.mmd take it, and in production the generated map f8401441 (fuzz sample, diamond_style straight, fold_threshold 4) does. needs-review because the arm is reachable, not because it is unreachable.",
+    "status": "needs-review"
   },
   "normalize.py::elif up_ok:::#1": {
     "note": "Same-line dogleg move-up / give-up fallback, reached only when both L1296 and L1298 are false. The true arm (->1301, move up because the lower gap is too tight) needs down_ok False and the else arm (->1303, leave fused) needs both rooms below min_sep; the reachable regime's inter-row band is auto-widened so both rooms stay >= min_sep=6 (observed 14/26), so neither is reached by a valid topology.",
@@ -896,10 +888,6 @@
     "status": "defensive"
   },
   "normalize.py::if (::#10": {
-    "note": "Fan-descent re-seating declines when any member's channel boundary is route-system-owned and the group is not already on adjacent tracks. Reaching this gate with an owned channel means the gate above it let the group through on `settle_frozen_arcs and tight`, since a route-system boundary is one of the ways `_planner_owns_channel` answers true, so `tight` is already true here and this arm's `not tight` cannot hold. Instrumented across the whole corpus under four option settings: 122,516 evaluations of the gate, zero fires, and still zero when the condition is widened to `_planner_owns_channel` itself. No construction reaches the arm.",
-    "status": "candidate-dead"
-  },
-  "normalize.py::if (::#11": {
     "note": "A secondary lane declines to move when it faces no pinned obstacle but the obstacle it would step around already holds a fixed segment, so stepping cannot separate them. Every corpus crowding either pins its obstacle or leaves the obstacle's segments free, so the skip has no fixture; it needs a topology where a non-primary lane meets a fixed-segment obstacle.",
     "status": "needs-review"
   },
@@ -996,8 +984,8 @@
     "status": "defensive"
   },
   "normalize.py::if len(turns) != 1:::#1": {
-    "note": "In _bundle_divergent_distinct_traverses: every fan in the corpus turns its traverses the same way, so the mixed-direction skip is never taken. Defensive.",
-    "status": "defensive"
+    "note": "In _bundle_divergent_distinct_traverses: every fan in the gate corpus turns its traverses the same way, so no gate-corpus map takes the mixed-direction skip. The generated map f8403881 (8k sample, aborts later) takes it. needs-review because the arm is reachable, not because it is unreachable.",
+    "status": "needs-review"
   },
   "normalize.py::if len({id(t.route) for t in grp}) < 2:::#2": {
     "note": "Single-route-group skip in _suboptimal_trunk_bands, validate-only: called from the _guard_* validator and a unit test, not the production render path the validate=False sweep exercises. Defensive.",
@@ -1232,8 +1220,8 @@
     "status": "defensive"
   },
   "inter_section_handlers.py::if _v_segment_crosses_other_section(graph, corner_x, src.y, ey, exclude):::#1": {
-    "note": "Drop-in viability test in _right_entry_drop_in_is_clear (#889). The cross-row RIGHT-entry rule fires only when the earlier bypass / plough rules ceded the edge, i.e. no section sits between source and port, so the outward-side descent runs clear; the not-clear arm covers only an exotic descent blocked by a wide same-column sibling no corpus fixture builds. Defensive.",
-    "status": "defensive"
+    "note": "Drop-in viability test in _right_entry_drop_in_is_clear (#889). The cross-row RIGHT-entry rule fires only when the earlier bypass / plough rules ceded the edge, i.e. no section sits between source and port, so the outward-side descent usually runs clear; the not-clear arm needs a descent blocked by a wide same-column sibling, which no gate-corpus map builds. The generated map f8403881 (8k sample, aborts later) takes it. needs-review because the arm is reachable, not because it is unreachable.",
+    "status": "needs-review"
   },
   "inter_section_handlers.py::if tgt_row is None:::#1": {
     "note": "In _left_exit_wrap_over_top_y: narrows the Optional target row for the band lookups below. A same-row wrap reaches it with both ends in placed sections, whose grid rows always resolve, so the unresolved arm cannot be taken.",
@@ -1300,35 +1288,35 @@
     "status": "defensive"
   },
   "member_geometry.py::if requirement.kind is not aperture:::#1": {
-    "note": "The corridor-cohort outcome validator's requirement-kind check. Its pass arm runs whenever a compile publishes an aperture requirement, which no corpus input does; tests/test_corridor_cohort_tail_compile.py and tests/test_member_geometry.py drive it on examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd under a directed separation its column-2 corridor cannot afford (tests/packed_cell_aperture.py), which publishes one aperture requirement at column boundary 2. The raise arm is a wiring-regression guard: every requirement the compile publishes is built by _corridor_cohort_aperture_requirements, which constructs only CORRIDOR_COHORT_APERTURE requirements.",
+    "note": "The corridor-cohort outcome validator's requirement-kind check. Its pass arm runs whenever a compile publishes an aperture requirement, which no gate-corpus map does (the generated map f8400148 (8k sample) does); tests/test_corridor_cohort_tail_compile.py and tests/test_member_geometry.py drive it on examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd under a directed separation its column-2 corridor cannot afford (tests/packed_cell_aperture.py), which publishes one aperture requirement at column boundary 2. The raise arm is a wiring-regression guard: every requirement the compile publishes is built by _corridor_cohort_aperture_requirements, which constructs only CORRIDOR_COHORT_APERTURE requirements.",
     "status": "defensive"
   },
   "member_geometry.py::if both_sides:::#1": {
-    "note": "The corridor-cohort outcome validator's disjoint-sides check. Its pass arm runs whenever a compile publishes an aperture requirement, which no corpus input does; tests/test_corridor_cohort_tail_compile.py and tests/test_member_geometry.py drive it on examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd under a directed separation its column-2 corridor cannot afford (tests/packed_cell_aperture.py), which publishes one aperture requirement at column boundary 2. The raise arm cannot fire: the requirement's region is an adjacent grid boundary (the producer rejects any other), and _corridor_boundary_sections puts a section on the negative side only when it ends at the lower index and on the positive side only when it starts at the next one, which no section of positive span does at once.",
+    "note": "The corridor-cohort outcome validator's disjoint-sides check. Its pass arm runs whenever a compile publishes an aperture requirement, which no gate-corpus map does (the generated map f8400148 (8k sample) does); tests/test_corridor_cohort_tail_compile.py and tests/test_member_geometry.py drive it on examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd under a directed separation its column-2 corridor cannot afford (tests/packed_cell_aperture.py), which publishes one aperture requirement at column boundary 2. The raise arm cannot fire: the requirement's region is an adjacent grid boundary (the producer rejects any other), and _corridor_boundary_sections puts a section on the negative side only when it ends at the lower index and on the positive side only when it starts at the next one, which no section of positive span does at once.",
     "status": "defensive"
   },
   "member_geometry.py::for requirement in requirements:::#1": {
-    "note": "The corridor-cohort outcome validator's loop over the requirements a compile publishes. Its empty arm runs on every aperture observation. Reached only when a corridor-cohort compile that may publish clearance requirements fails with a typed clearance shortfall. No corpus input presents one: every lane pair the render draws a clearance apart compiles in its drawn order, and a one-option-at-a-time plus random option sweep of every examples/ and tests/fixtures input (29,309 renders) compiles every aperture observation PLANNED. tests/test_corridor_cohort_tail_compile.py and tests/test_member_geometry.py drive it on examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd under a directed separation its column-2 corridor cannot afford (tests/packed_cell_aperture.py), which publishes one aperture requirement at column boundary 2.",
+    "note": "The corridor-cohort outcome validator's loop over the requirements a compile publishes. Its empty arm runs on every aperture observation. Reached only when a corridor-cohort compile that may publish clearance requirements fails with a typed clearance shortfall. No gate-corpus map presents one: every lane pair the render draws a clearance apart compiles in its drawn order there, and a one-option-at-a-time plus random option sweep of every examples/ and tests/fixtures input (29,309 renders) compiles every aperture observation PLANNED. The generated map f8400148 (8k sample) does: its compile fails with a typed shortfall and the render settles the aperture requirement it publishes. tests/test_corridor_cohort_tail_compile.py and tests/test_member_geometry.py drive it on examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd under a directed separation its column-2 corridor cannot afford (tests/packed_cell_aperture.py), which publishes one aperture requirement at column boundary 2.",
     "status": "needs-review"
   },
   "member_geometry.py::for failure in error.failures:::#1": {
-    "note": "_corridor_cohort_aperture_requirements' loop over a failed compile's components. Reached only when a corridor-cohort compile that may publish clearance requirements fails with a typed clearance shortfall. No corpus input presents one: every lane pair the render draws a clearance apart compiles in its drawn order, and a one-option-at-a-time plus random option sweep of every examples/ and tests/fixtures input (29,309 renders) compiles every aperture observation PLANNED. tests/test_corridor_cohort_tail_compile.py and tests/test_member_geometry.py drive it on examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd under a directed separation its column-2 corridor cannot afford (tests/packed_cell_aperture.py), which publishes one aperture requirement at column boundary 2.",
+    "note": "_corridor_cohort_aperture_requirements' loop over a failed compile's components. Reached only when a corridor-cohort compile that may publish clearance requirements fails with a typed clearance shortfall. No gate-corpus map presents one: every lane pair the render draws a clearance apart compiles in its drawn order there, and a one-option-at-a-time plus random option sweep of every examples/ and tests/fixtures input (29,309 renders) compiles every aperture observation PLANNED. The generated map f8400148 (8k sample) does: its compile fails with a typed shortfall and the render settles the aperture requirement it publishes. tests/test_corridor_cohort_tail_compile.py and tests/test_member_geometry.py drive it on examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd under a directed separation its column-2 corridor cannot afford (tests/packed_cell_aperture.py), which publishes one aperture requirement at column boundary 2.",
     "status": "needs-review"
   },
   "member_geometry.py::for claim in claims:::#1": {
-    "note": "_corridor_cohort_aperture_requirements collecting the sections a shortfall's claims sit in. Reached only when a corridor-cohort compile that may publish clearance requirements fails with a typed clearance shortfall. No corpus input presents one: every lane pair the render draws a clearance apart compiles in its drawn order, and a one-option-at-a-time plus random option sweep of every examples/ and tests/fixtures input (29,309 renders) compiles every aperture observation PLANNED. tests/test_corridor_cohort_tail_compile.py and tests/test_member_geometry.py drive it on examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd under a directed separation its column-2 corridor cannot afford (tests/packed_cell_aperture.py), which publishes one aperture requirement at column boundary 2.",
+    "note": "_corridor_cohort_aperture_requirements collecting the sections a shortfall's claims sit in. Reached only when a corridor-cohort compile that may publish clearance requirements fails with a typed clearance shortfall. No gate-corpus map presents one: every lane pair the render draws a clearance apart compiles in its drawn order there, and a one-option-at-a-time plus random option sweep of every examples/ and tests/fixtures input (29,309 renders) compiles every aperture observation PLANNED. The generated map f8400148 (8k sample) does: its compile fails with a typed shortfall and the render settles the aperture requirement it publishes. tests/test_corridor_cohort_tail_compile.py and tests/test_member_geometry.py drive it on examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd under a directed separation its column-2 corridor cannot afford (tests/packed_cell_aperture.py), which publishes one aperture requirement at column boundary 2.",
     "status": "needs-review"
   },
   "member_geometry.py::for obstacle in typed_obstacles.values():::#1": {
-    "note": "_corridor_cohort_aperture_requirements collecting the sections a shortfall's blockers sit in. Reached only when a corridor-cohort compile that may publish clearance requirements fails with a typed clearance shortfall. No corpus input presents one: every lane pair the render draws a clearance apart compiles in its drawn order, and a one-option-at-a-time plus random option sweep of every examples/ and tests/fixtures input (29,309 renders) compiles every aperture observation PLANNED. tests/test_corridor_cohort_tail_compile.py and tests/test_member_geometry.py drive it on examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd under a directed separation its column-2 corridor cannot afford (tests/packed_cell_aperture.py), which publishes one aperture requirement at column boundary 2.",
+    "note": "_corridor_cohort_aperture_requirements collecting the sections a shortfall's blockers sit in. Reached only when a corridor-cohort compile that may publish clearance requirements fails with a typed clearance shortfall. No gate-corpus map presents one: every lane pair the render draws a clearance apart compiles in its drawn order there, and a one-option-at-a-time plus random option sweep of every examples/ and tests/fixtures input (29,309 renders) compiles every aperture observation PLANNED. The generated map f8400148 (8k sample) does: its compile fails with a typed shortfall and the render settles the aperture requirement it publishes. tests/test_corridor_cohort_tail_compile.py and tests/test_member_geometry.py drive it on examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd under a directed separation its column-2 corridor cannot afford (tests/packed_cell_aperture.py), which publishes one aperture requirement at column boundary 2.",
     "status": "needs-review"
   },
   "member_geometry.py::for station_id in (edge_key[0], edge_key[1]):::#1": {
-    "note": "_local_section_ids, called only by _corridor_cohort_aperture_requirements. Reached only when a corridor-cohort compile that may publish clearance requirements fails with a typed clearance shortfall. No corpus input presents one: every lane pair the render draws a clearance apart compiles in its drawn order, and a one-option-at-a-time plus random option sweep of every examples/ and tests/fixtures input (29,309 renders) compiles every aperture observation PLANNED. tests/test_corridor_cohort_tail_compile.py and tests/test_member_geometry.py drive it on examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd under a directed separation its column-2 corridor cannot afford (tests/packed_cell_aperture.py), which publishes one aperture requirement at column boundary 2.",
+    "note": "_local_section_ids, called only by _corridor_cohort_aperture_requirements. Reached only when a corridor-cohort compile that may publish clearance requirements fails with a typed clearance shortfall. No gate-corpus map presents one: every lane pair the render draws a clearance apart compiles in its drawn order there, and a one-option-at-a-time plus random option sweep of every examples/ and tests/fixtures input (29,309 renders) compiles every aperture observation PLANNED. The generated map f8400148 (8k sample) does: its compile fails with a typed shortfall and the render settles the aperture requirement it publishes. tests/test_corridor_cohort_tail_compile.py and tests/test_member_geometry.py drive it on examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd under a directed separation its column-2 corridor cannot afford (tests/packed_cell_aperture.py), which publishes one aperture requirement at column boundary 2.",
     "status": "needs-review"
   },
   "member_geometry.py::if station is not None and station.section_id is not None:::#1": {
-    "note": "_local_section_ids skipping a junction endpoint, called only by _corridor_cohort_aperture_requirements. Reached only when a corridor-cohort compile that may publish clearance requirements fails with a typed clearance shortfall. No corpus input presents one: every lane pair the render draws a clearance apart compiles in its drawn order, and a one-option-at-a-time plus random option sweep of every examples/ and tests/fixtures input (29,309 renders) compiles every aperture observation PLANNED. tests/test_corridor_cohort_tail_compile.py and tests/test_member_geometry.py drive it on examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd under a directed separation its column-2 corridor cannot afford (tests/packed_cell_aperture.py), which publishes one aperture requirement at column boundary 2.",
+    "note": "_local_section_ids skipping a junction endpoint, called only by _corridor_cohort_aperture_requirements. Reached only when a corridor-cohort compile that may publish clearance requirements fails with a typed clearance shortfall. No gate-corpus map presents one: every lane pair the render draws a clearance apart compiles in its drawn order there, and a one-option-at-a-time plus random option sweep of every examples/ and tests/fixtures input (29,309 renders) compiles every aperture observation PLANNED. The generated map f8400148 (8k sample) does: its compile fails with a typed shortfall and the render settles the aperture requirement it publishes. tests/test_corridor_cohort_tail_compile.py and tests/test_member_geometry.py drive it on examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd under a directed separation its column-2 corridor cannot afford (tests/packed_cell_aperture.py), which publishes one aperture requirement at column boundary 2.",
     "status": "needs-review"
   },
   "offsets.py::if port is None:::#1": {
@@ -1392,8 +1380,8 @@
     "status": "needs-review"
   },
   "tb_handlers.py::if not _crossed_twice(departures, abs(late[0] - sp), src_lane, tgt_lane) and (::#1": {
-    "note": "The late single-diagonal attempt in _clear_lane_change. It is reached by `tests/test_flow_entry_bypass_crossings.py` (_LATER_DEPARTURES), `tests/test_vertical_flow_entry_runway.py` (_BYPASS_MAPS bypass_into_shared_column_bt) and 210 generated maps, but in every one that diagonal crosses a departing line twice, so the clears-the-footprints operand and its return are never evaluated: 0 of 8000.",
-    "status": "candidate-dead"
+    "note": "The late single-diagonal attempt in _clear_lane_change. tests/fixtures/regressions/approach_order_bottom_entry_refused.mmd reaches it and falls through (the diagonal crosses a departing line twice or a station footprint), as do `tests/test_flow_entry_bypass_crossings.py` (_LATER_DEPARTURES) and `tests/test_vertical_flow_entry_runway.py` (_BYPASS_MAPS bypass_into_shared_column_bt); the generated maps w2_00105, w2_00037 and f8401540 (8k sample, all abort later) take the return: there the late diagonal clears the departures and the footprints. needs-review because the arm is reachable, not because it is unreachable.",
+    "status": "needs-review"
   },
   "tb_handlers.py::if not st or st.is_port:::#1": {
     "note": "The loop skips the section's ports by id one statement earlier, and every id in section.station_ids resolves to a station, so the skip arm never fires. Not reached by the corpus, the test fixtures, or 8000 generated maps.",
@@ -1680,7 +1668,7 @@
     "status": "defensive"
   },
   "corridor_cohort_integration.py::elif status is CorridorAllocationStatus.COMPATIBILITY:::#1": {
-    "note": "A FAILURE result flows through the status chain to the compile error; the compiler aborts a render rather than publishing a failure, so the corpus cannot hold one. Exercised by tests/test_corridor_cohort_integration.py::test_shortfall_without_a_directed_shift_sign_raises and tests/test_corridor_cohort_integration.py::test_unwitnessed_blocking_obstacle_raises_instead_of_losing_its_shortfall. needs-review because the arm is reachable, not because it is unreachable.",
+    "note": "A FAILURE result flows through the status chain to the compile error. No gate-corpus map fails a compile; the generated map f8400148 (8k sample) does, and its render turns the failure's shortfall into an aperture requirement. Exercised by tests/test_corridor_cohort_integration.py::test_shortfall_without_a_directed_shift_sign_raises and tests/test_corridor_cohort_integration.py::test_unwitnessed_blocking_obstacle_raises_instead_of_losing_its_shortfall. needs-review because the arm is reachable, not because it is unreachable.",
     "status": "needs-review"
   },
   "corridor_cohort_integration.py::if target is None or not target.mutable:::#1": {
@@ -1736,7 +1724,7 @@
     "status": "defensive"
   },
   "corridor_cohort_integration.py::if shortfall is None:::#1": {
-    "note": "A FAILURE result without a clearance shortfall passes through the failure recorder, and one with a shortfall is validated. A corpus render cannot reach it because a failing compile aborts. Exercised by tests/test_corridor_cohort_integration.py::test_shortfall_without_a_directed_shift_sign_raises and tests/test_corridor_cohort_integration.py::test_unwitnessed_blocking_obstacle_raises_instead_of_losing_its_shortfall. needs-review because the arm is reachable, not because it is unreachable.",
+    "note": "A FAILURE result without a clearance shortfall passes through the failure recorder, and one with a shortfall is validated. No gate-corpus map fails a compile; the generated map f8400148 (8k sample) fails one with a shortfall. Exercised by tests/test_corridor_cohort_integration.py::test_shortfall_without_a_directed_shift_sign_raises and tests/test_corridor_cohort_integration.py::test_unwitnessed_blocking_obstacle_raises_instead_of_losing_its_shortfall. needs-review because the arm is reachable, not because it is unreachable.",
     "status": "needs-review"
   },
   "corridor_cohort_integration.py::if shortfall.required_shift_sign not in (-1, 1):::#1": {
@@ -1748,7 +1736,7 @@
     "status": "needs-review"
   },
   "corridor_cohort_integration.py::if component.status is not CorridorAllocationStatus.FAILURE:::#1": {
-    "note": "Failure recording visits only FAILURE components. A failing component aborts the render, so the recorder runs only under unit tests that compile an infeasible problem. Exercised by tests/test_corridor_cohort_integration.py::test_shortfall_without_a_directed_shift_sign_raises and tests/test_corridor_cohort_integration.py::test_unwitnessed_blocking_obstacle_raises_instead_of_losing_its_shortfall. needs-review because the arm is reachable, not because it is unreachable.",
+    "note": "Failure recording visits only FAILURE components. No gate-corpus map fails a compile, so there the recorder runs only under unit tests that compile an infeasible problem; the generated map f8400148 (8k sample) records a failing component. Exercised by tests/test_corridor_cohort_integration.py::test_shortfall_without_a_directed_shift_sign_raises and tests/test_corridor_cohort_integration.py::test_unwitnessed_blocking_obstacle_raises_instead_of_losing_its_shortfall. needs-review because the arm is reachable, not because it is unreachable.",
     "status": "needs-review"
   },
   "corridor_cohort_integration.py::for result_rank, result in enumerate(component.results):::#1": {
@@ -1768,7 +1756,7 @@
     "status": "defensive"
   },
   "corridor_cohort_integration.py::if failures:::#1": {
-    "note": "A compile with recorded failures raises the cohort allocation failure. The corpus holds no failing compile, so the raise runs only under unit tests with infeasible problems. Exercised by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once. needs-review because the arm is reachable, not because it is unreachable.",
+    "note": "A compile with recorded failures raises the cohort allocation failure. No gate-corpus map holds a failing compile, so there the raise runs only under unit tests with infeasible problems; the generated map f8400148 (8k sample) raises it and its render turns the failure into an aperture requirement. Exercised by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once. needs-review because the arm is reachable, not because it is unreachable.",
     "status": "needs-review"
   },
   "corridor_cohort_integration.py::if len(granted_ids) != len(scalar_grants) or ungranted:::#1": {
@@ -1782,10 +1770,6 @@
   "corridor_cohort_integration.py::if finalized_allocations is None:::#1": {
     "note": "Finalized geometry returns None only through its own realization guards, which cannot fire (see _finalize_allocation_geometry).",
     "status": "defensive"
-  },
-  "corridor_cohort_integration.py::if trace is not None:::#1": {
-    "note": "The final-solve settlement trace is recorded only when the caller passes a settlement trace, which the engine does for a plan-observed render. The sweep's observation probes do not carry one into this call. Exercised by tests/test_corridor_cohort_integration.py::test_final_solve_trace_is_emitted_from_the_integration_call_site. needs-review because the arm is reachable, not because it is unreachable.",
-    "status": "needs-review"
   },
   "corridor_cohorts.py::while frontier - reached:::#1": {
     "note": "The yield walks the corner orders above a directed separation's upper lane, so it runs only when one problem holds corner orders and a footprint order together. No render in the sweep's roots builds one; tests/fixtures/regressions/cohort_corner_turn_order.mmd does, outside them. Exercised by tests/test_corridor_cohorts.py::test_corner_orders_seat_over_the_footprint_order_they_contradict and tests/test_corridor_cohorts.py::test_a_footprint_order_a_chain_of_corner_orders_contradicts_gives_way. needs-review because the arm is reachable, not because it is unreachable.",
@@ -1900,7 +1884,7 @@
     "status": "needs-review"
   },
   "corridor_cohorts.py::if floor is not None and ceiling is not None and floor > ceiling:::#1": {
-    "note": "A root whose floor exceeds its ceiling raises while choosing a coordinate; the corpus's bounds are satisfiable for every root. Exercised by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once. needs-review because the arm is reachable, not because it is unreachable.",
+    "note": "A root whose floor exceeds its ceiling raises while choosing a coordinate; the gate corpus's bounds are satisfiable for every root; the generated map f8400148 (8k sample) holds one that is not. Exercised by tests/test_corridor_cohort_tail_compile.py::test_an_order_the_packed_cell_aperture_cannot_afford_requires_one_aperture and tests/test_corridor_cohort_tail_compile.py::test_packed_cell_aperture_grant_widens_its_column_boundary_once. needs-review because the arm is reachable, not because it is unreachable.",
     "status": "needs-review"
   },
   "corridor_cohorts.py::if after_feasible:::#1": {
@@ -1959,10 +1943,6 @@
     "note": "A cohort target with an endpoint lane axis and no coordinate is skipped. The two are set together on a target, so no target presents one; the operand narrows the type for the code below, and no test pins the skip.",
     "status": "defensive"
   },
-  "landing_deal.py::for line, natural_line in record.takes_lane_of:::#1": {
-    "note": "Reachable: a junction source with a DepartureLaneOrder record permutes the dealt slots. No swept fixture presents one (tests/fixtures/regressions/departure_order_carry_replay.mmd is outside the sweep's corpus roots); pinned by tests/test_entry_landing_deal.py::test_a_junction_source_deals_in_its_recorded_departure_order.",
-    "status": "needs-review"
-  },
   "landing_deal.py::if any(::#1": {
     "note": "Reachable: the IMMUTABLE_MOVED refusal fires when the deal would move a member whose slot is fixed. No swept fixture presents an immutable member whose dealt slot differs from its own; pinned by tests/test_entry_landing_deal.py::test_a_deal_moving_an_immutable_member_is_refused.",
     "status": "needs-review"
@@ -1974,10 +1954,6 @@
   "landing_deal.py::if exit_port is None or exit_port.is_entry or exit_port.section_id is None:::#1": {
     "note": "SOURCE_NOT_EXIT refusal when the walk up a junction chain ends at something that is not an exit port; no job of the 15k-job census reaches it and no test pins it.",
     "status": "defensive"
-  },
-  "landing_deal.py::if held is not None:::#1": {
-    "note": "Reachable: a junction on the walk up to the exit holds a DepartureLaneOrder record. No swept fixture presents one (tests/fixtures/regressions/departure_order_carry_replay.mmd is outside the sweep's corpus roots); pinned by tests/test_entry_landing_deal.py::test_a_junction_source_deals_in_its_recorded_departure_order.",
-    "status": "needs-review"
   },
   "landing_deal.py::if len(set(laterals.values())) != len(lines):::#1": {
     "note": "Reachable: EXIT_TIE refuses a bundle whose lines leave at one lateral coordinate, which no exit-order deal can separate. No swept fixture presents a tie; pinned by tests/test_entry_landing_deal.py::test_lines_tied_at_the_exit_are_refused.",
@@ -2003,14 +1979,6 @@
     "note": "planned_landing_orders skips an ENDPOINT_LANDING owner whose port is missing or not an entry. Every endpoint landing is framed from its target's endpoint lane axis, which _corridor_cohort_target sets only for an entry port, so no owner takes the arm; no test pins it.",
     "status": "defensive"
   },
-  "landing_deal.py::if record is not None:::#1": {
-    "note": "Two arms. A junction on the walk up to the exit holding a record is reachable, pinned by tests/test_entry_landing_deal.py::test_a_junction_source_deals_in_its_recorded_departure_order, and no swept fixture presents it (tests/fixtures/regressions/departure_order_carry_replay.mmd is outside the sweep's corpus roots). The refusal of a chain holding two records (JUNCTION_TWO_RECORDS) is defensive: no job of the 15k-job census reaches it and no test pins it.",
-    "status": "needs-review"
-  },
-  "landing_deal.py::if record is not None:::#2": {
-    "note": "Reachable: a source with a recorded departure order is dealt through the record. No swept fixture presents one; pinned by tests/test_entry_landing_deal.py::test_a_junction_source_deals_in_its_recorded_departure_order.",
-    "status": "needs-review"
-  },
   "landing_deal.py::if sequence and (::#1": {
     "note": "Reachable: AGAINST_SIDE refuses a bundle that leaves against its exit side or lands against its entry side. No swept fixture presents one (tests/data/landing_deal/arrives_against_entry_*.mmd do); pinned by tests/test_entry_landing_deal.py::test_a_source_travelling_against_its_exit_or_entry_side_is_refused.",
     "status": "needs-review"
@@ -2018,9 +1986,5 @@
   "landing_deal.py::if set(by_line) != {edge.line_id for edge in edges}:::#1": {
     "note": "INCOMPLETE refusal when the compile's targets omit a line entering the port; no job of the 15k-job census reaches it and no test pins it.",
     "status": "defensive"
-  },
-  "landing_deal.py::if set(record.lines) - set(lines):::#1": {
-    "note": "Two arms. A record naming only lines the source carries is reachable, pinned by tests/test_entry_landing_deal.py::test_a_junction_source_deals_in_its_recorded_departure_order, and no swept fixture presents it (tests/fixtures/regressions/departure_order_carry_replay.mmd is outside the sweep's corpus roots). The RECORD_MISMATCH refusal of a record naming a line the source does not carry is defensive: no job of the 15k-job census reaches it and no test pins it.",
-    "status": "needs-review"
   }
 }

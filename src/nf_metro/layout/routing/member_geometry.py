@@ -59,6 +59,7 @@ from nf_metro.layout.routing.common import (
     convergence_owns_segment_boundary,
     feasible_same_destination_approach_proposals,
     iter_plannable_short_same_destination_bundles,
+    right_normal_axis_sign,
     same_destination_approach_slots,
     segment_direction,
 )
@@ -124,7 +125,7 @@ from nf_metro.layout.routing.normalize import (
     _VChannel,
     semantic_end_corners,
 )
-from nf_metro.layout.routing.orientation import direction_axis, lateral_order_sign
+from nf_metro.layout.routing.orientation import direction_axis
 from nf_metro.layout.routing.perp import _perp_entry_crossing_x
 from nf_metro.layout.routing.reserved_bands import (
     ReservedBand,
@@ -1363,38 +1364,6 @@ def _corridor_hold_shift(
     return 0.0 if allowed is None else allowed.hold(0.0)
 
 
-def _departure_lane_rank(
-    route: RoutedPath,
-    lane_rank: int,
-    ctx: _RoutingCtx,
-    source_ranks: dict[str, dict[str, int]],
-) -> int:
-    """*lane_rank* moved by as many source lanes as separate *route*'s line
-    from the line whose lane a recorded departure gives it.
-
-    *source_ranks* caches each source station's lines by lane."""
-    source = route.edge.source
-    record = ctx.graph._departure_lane_orders.get((source, route.edge.target))
-    if record is None:
-        return lane_rank
-    if source not in source_ranks:
-        offsets = ctx.station_offsets or {}
-        held = sorted(
-            (
-                line_id
-                for line_id in ctx.graph.station_lines(source)
-                if (source, line_id) in offsets
-            ),
-            key=lambda line_id: offsets[(source, line_id)],
-        )
-        source_ranks[source] = {line_id: i for i, line_id in enumerate(held)}
-    rank = source_ranks[source]
-    natural = record.natural_rank(route.line_id, rank)
-    if natural is None:
-        return lane_rank
-    return lane_rank + natural - rank[route.line_id]
-
-
 def _settled_exit_turns(
     routes: Iterable[RoutedPath],
     ctx: _RoutingCtx,
@@ -1404,7 +1373,6 @@ def _settled_exit_turns(
     if ctx.exit_turns is None or not pending_plan_ids:
         return MappingProxyType({})
     candidates: list[_SettledTurnCandidate] = []
-    source_ranks: dict[str, dict[str, int]] = {}
 
     for route in routes:
         membership = ctx.exit_turns.membership_for_edge(route.edge)
@@ -1440,9 +1408,7 @@ def _settled_exit_turns(
                 ),
                 entry_group_id=assignment.entry_group_id,
                 rank=rank,
-                lane_rank=_departure_lane_rank(
-                    route, assignment.source_lane_rank, ctx, source_ranks
-                ),
+                lane_rank=assignment.source_lane_rank,
                 launch_coordinate=launch_coordinate,
                 required_runway=(
                     assignment.minimum_runway
@@ -1474,7 +1440,7 @@ def _settled_exit_turns(
         }
         for candidate in cohort_candidates:
             lane_offsets[candidate.edge_key] = (
-                lateral_order_sign(candidate.turn_direction)
+                right_normal_axis_sign(candidate.turn_direction)
                 * lane_index[candidate.lane_rank]
                 * ctx.offset_step
             )
@@ -2469,10 +2435,7 @@ def _seat_claimed_segments_before_freeze(
     placed it.  The pin is read from the segment rank -- as
     :func:`_upstream_plan_fixes_channel` reads it -- not the plan id: the settled
     two-pass path clears a member's segment rank (restoring it after this pass)
-    to hand it to seating, and reads as unpinned here.  A segment seated by
-    its entry port's slot order (``RoutedPath.port_slot_seated_ranks``) nests
-    against planner-owned columns the same way and is left where it was
-    seated.
+    to hand it to seating, and reads as unpinned here.
     """
     grouped: defaultdict[
         tuple[RouteSystemId, str, int, int],
@@ -2483,10 +2446,7 @@ def _seat_claimed_segments_before_freeze(
         if route.exit_turn_segment_rank is not None:
             continue
         for rank, (start, end) in enumerate(zip(route.points, route.points[1:])):
-            if (
-                not 1 <= rank <= len(route.points) - 3
-                or rank in route.port_slot_seated_ranks
-            ):
+            if not 1 <= rank <= len(route.points) - 3:
                 continue
             band = _segment_claim_band(ctx, route, rank)
             if band is None:
@@ -2999,8 +2959,6 @@ def build_member_geometry_execution(
                     )
                     if context is not None:
                         context_routes.append(context)
-                    continue
-                if key in ctx.skip_edges:
                     continue
                 edge = ctx.edge_by_key.get(key)
                 if edge is None:
@@ -3597,29 +3555,6 @@ def _owned_corner_radius_mismatches(
             f"member geometry plan {plan.id} owned corner radius changed "
             f"at index {radius_index}"
         )
-
-
-def plan_corridor_cohorts(
-    ledger: CorridorCohortLedger,
-    targets: Sequence[CorridorCohortTarget],
-    *,
-    entry_port_for: Mapping[str, str],
-    scalar_requests: Sequence[CorridorScalarRequest] = (),
-) -> CorridorCohortPlan:
-    """Compile one corridor cohort snapshot into heterogeneous grants.
-
-    Passes member and convergence scalar requests to
-    :func:`compile_corridor_cohort_plan` and returns member allocations, exact
-    route patches and convergence scalar grants in one plan. It solves without
-    publishing: the caller decides whether to apply the returned patches, so no
-    geometry moves here.
-    """
-    return compile_corridor_cohort_plan(
-        ledger,
-        targets,
-        scalar_requests=scalar_requests,
-        entry_port_for=entry_port_for,
-    )
 
 
 _CornerState = tuple[

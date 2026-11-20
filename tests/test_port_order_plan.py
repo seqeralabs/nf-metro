@@ -28,12 +28,7 @@ import nf_metro.layout.fan_plans as fan_plans_module
 import nf_metro.layout.lane_plan as lane_plan_module
 import nf_metro.layout.port_order_plan as port_order_plan_module
 from nf_metro.layout.engine import compute_layout
-from nf_metro.layout.port_order_plan import (
-    OrderBasis,
-    PortClass,
-    PortOrder,
-    PortOrderPlan,
-)
+from nf_metro.layout.port_order_plan import PortOrderPlan
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import (
     Edge,
@@ -75,9 +70,6 @@ LATER_PHASE_NAMES = frozenset(
         "draft",
         "drafts",
         "fan_plan_execution",
-        "_departure_lane_orders",
-        "_departure_order_plan",
-        "_linear_entry_pill_lines_cache",
         "compute_station_offsets",
         "route_edges",
     }
@@ -134,7 +126,7 @@ ALLOWED_IMPORTS = {
             ("nf_metro.layout.routing.orientation", "direction_vector"),
             ("nf_metro.layout.routing.orientation", "get_point_coordinate"),
             ("nf_metro.layout.routing.orientation", "lateral_axis"),
-            ("nf_metro.layout.routing.orientation", "lateral_order_sign"),
+            ("nf_metro.layout.routing.common", "right_normal_axis_sign"),
             ("nf_metro.parser.model", "MetroGraph"),
             ("nf_metro.parser.model", "Port"),
             ("nf_metro.parser.model", "PortSide"),
@@ -177,7 +169,6 @@ ALLOWED_IMPORTS = {
             ("nf_metro.layout.constants", "SAME_COORD_TOLERANCE"),
             ("nf_metro.layout.constants", "SAME_Y_TOLERANCE"),
             ("nf_metro.layout.constants", "graph_offset_step"),
-            ("nf_metro.layout.departure_order", "JUNCTIONS_POSITIONED"),
             ("nf_metro.layout.fan_ordering", "fanout_divergence_peel_order"),
             ("nf_metro.layout.geometry", "AxisFrame"),
             ("nf_metro.layout.geometry", "flow_entry_side"),
@@ -192,13 +183,13 @@ ALLOWED_IMPORTS = {
             ("nf_metro.layout.routing.common", "Direction"),
             ("nf_metro.layout.routing.context", "_section_lane_frame"),
             ("nf_metro.layout.routing.orientation", "direction_vector"),
-            ("nf_metro.layout.routing.orientation", "lateral_order_sign"),
+            ("nf_metro.layout.routing.common", "right_normal_axis_sign"),
             ("nf_metro.parser.model", "MetroGraph"),
             ("nf_metro.parser.model", "Section"),
             ("nf_metro.layout.constants", "COORD_TOLERANCE"),
             ("nf_metro.layout.geometry", "lanes_run_along_y"),
             ("nf_metro.layout.port_order_plan", "PortOrder"),
-            ("nf_metro.layout.port_order_plan", "_merge_orders"),
+            ("nf_metro.layout.port_order_plan", "merge_orders"),
             ("nf_metro.parser.model", "Port"),
             ("nf_metro.parser.model", "PortSide"),
             ("types", "MappingProxyType"),
@@ -251,6 +242,24 @@ def _plan(source: str) -> PortOrderPlan:
     return _port_orders(_laid_out(source))
 
 
+def _planned(
+    graph: MetroGraph,
+) -> tuple[lane_plan_module.LanePlan, lane_plan_module._Tracks]:
+    """*graph*'s lane plan and the planner that decided it."""
+    planners: list[lane_plan_module._Tracks] = []
+    real = lane_plan_module._Tracks
+
+    class Kept(real):  # type: ignore[valid-type, misc]
+        def __init__(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            super().__init__(*args, **kwargs)
+            planners.append(self)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(lane_plan_module, "_Tracks", Kept)
+        plan = lane_plan_module.build_lane_plan(graph)
+    return plan, planners[-1]
+
+
 @pytest.mark.parametrize("path", COVERAGE_FIXTURES, ids=lambda p: p.stem)
 def test_every_port_has_an_order(path: Path) -> None:
     graph = _laid_out(path.read_text())
@@ -293,7 +302,7 @@ def _orphaned(pinned: bool) -> tuple[MetroGraph, str, str]:
     """rnaseq_sections with the edge into a multi-line entry, one its straight
     seams pin or not, removed for its first line."""
     graph = _fresh_laid_out((ROOT / "examples" / "rnaseq_sections.mmd").read_text())
-    seamed = set(lane_plan_module.build_lane_plan(graph).seams.entries)
+    seamed = set(_planned(graph)[1].seam_lanes)
     entry_id, line_id = next(
         (pid, lid)
         for pid, port in sorted(graph.ports.items())
@@ -322,25 +331,18 @@ def test_seam_pins_decide_an_entry_its_sort_key_cannot() -> None:
     lanes' order even when a line lacks a reference node: the unpinned lines
     fill round the pins in line-id order."""
     graph, entry_id, line_id = _orphaned(pinned=True)
-    plan = lane_plan_module.build_lane_plan(graph)
+    plan, planner = _planned(graph)
     order = plan.port_orders.orders[entry_id]
-    lanes = plan.seams.entries[entry_id]
+    lanes = planner.seam_lanes[entry_id]
+    by_lane = sorted(lanes, key=lambda lid: (lanes[lid], lid))
+    if planner.senses[entry_id] < 0:
+        by_lane.reverse()
 
-    assert order.basis is OrderBasis.SEAM
-    assert order.lines is not None and line_id in order.lines
-    assert line_id not in {lid for e, lid in plan.seams.pins if e == entry_id}
-    free = [lid for lid in sorted(lanes) if (entry_id, lid) not in plan.seams.pins]
+    assert order.lines == tuple(by_lane)
+    assert line_id in order.lines
+    assert line_id not in {lid for e, lid in planner.seam_sources if e == entry_id}
+    free = [lid for lid in sorted(lanes) if (entry_id, lid) not in planner.seam_sources]
     assert sorted(free, key=lanes.__getitem__) == free
-
-
-def test_coverage_fixtures_exercise_every_port_class() -> None:
-    """The coverage fixtures exercise every :class:`PortClass`."""
-    seen = {
-        order.port_class
-        for path in COVERAGE_FIXTURES
-        for order in _plan(path.read_text())
-    }
-    assert seen == set(PortClass)
 
 
 def _tied_entry() -> MetroGraph:
@@ -369,32 +371,6 @@ def test_lines_tied_at_an_entry_fall_to_priority() -> None:
     order = _port_orders(_tied_entry()).orders["b_in"]
 
     assert order.lines == ("l2", "l1")
-    assert order.basis is OrderBasis.PRIORITY
-
-
-def test_order_bases_cover_every_kind() -> None:
-    """The coverage fixtures and the tied entry exercise every
-    :class:`OrderBasis`."""
-    seen = {
-        order.basis for path in COVERAGE_FIXTURES for order in _plan(path.read_text())
-    }
-    seen |= {order.basis for order in _port_orders(_tied_entry())}
-    seen |= {_departing_entry().basis}
-    assert seen == set(OrderBasis)
-
-
-def _departing_entry() -> PortOrder:
-    """The entry whose same-band bypass parts at the port for the side it
-    arrives on, ordered before its straight seams pin it."""
-    graph = _laid_out((TOPOLOGIES / "bypass_fan_in_outer_slot.mmd").read_text())
-    plan = lane_plan_module.build_lane_plan(graph)
-    planner = lane_plan_module._Tracks(
-        graph, lane_plan_module._Frames(graph), plan.lane_senses
-    )
-    planner.builder.seam_order = lambda _port_id, _order: None
-    order = planner.builder.order_of("integrate__entry_left_11")
-    assert order is not None
-    return order
 
 
 def _two_section_loop() -> MetroGraph:
@@ -450,7 +426,6 @@ def test_a_port_on_a_section_cycle_is_undecided() -> None:
     plan = lane_plan_module.build_lane_plan(_self_feeding_section())
     orders = plan.port_orders.orders
 
-    assert plan.tracks.cycle_sections == ("a",)
     assert not orders["a_0"].decided
     assert "section cycle" in (orders["a_0"].missing or "")
     assert not orders["a_1"].decided
@@ -475,7 +450,6 @@ def test_lines_from_one_station_take_lanes_by_priority() -> None:
     order = plan.port_orders.orders["a_out"]
 
     assert order.lines == ("l2", "l1")
-    assert order.basis is OrderBasis.LANES
     assert plan.tracks.lanes[("a_out", "l2")] == 0
     assert plan.tracks.lanes[("a_out", "l1")] == 1
 
@@ -521,7 +495,6 @@ def test_an_exit_against_the_flow_orders_across_its_own_travel(
     order = _port_orders(graph).orders["a_out"]
 
     assert order.lines == ("lower", "upper")
-    assert order.basis is OrderBasis.LANES
 
 
 def test_an_entry_without_grid_cells_is_undecided() -> None:

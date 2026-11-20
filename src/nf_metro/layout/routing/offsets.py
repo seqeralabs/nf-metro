@@ -37,12 +37,12 @@ from nf_metro.layout.port_order_plan import Approach, port_travel
 from nf_metro.layout.routing.common import (
     bypass_bottom_y,
     merge_junction_ids,
+    right_normal_axis_sign,
 )
 from nf_metro.layout.routing.context import (
     _has_intervening_sections,
     _resolve_section_colrow,
 )
-from nf_metro.layout.routing.orientation import lateral_order_sign
 from nf_metro.parser.model import (
     Edge,
     LineSpread,
@@ -62,14 +62,10 @@ def compute_station_offsets(
     Rail mode bakes absolute rail Ys into the route points and the pill span,
     so per-line offsets are not used; the map is empty.
     """
-    graph._linear_entry_pill_lines_cache.clear()
     if graph.line_spread is LineSpread.RAILS:
         return {}
     resolved = offset_step if offset_step is not None else graph_offset_step(graph)
-    offsets = planned_offsets(graph, lane_plan_of(graph), resolved)
-    if graph._departure_order_plan is not None:
-        graph._departure_order_plan.seal(graph._stages_completed)
-    return offsets
+    return planned_offsets(graph, lane_plan_of(graph), resolved)
 
 
 def _convergence_feeders(
@@ -247,7 +243,7 @@ def _recorded_approach(graph: MetroGraph, edge: Edge) -> _Approach:
     if approach is None or approach.side == 0:
         return "flat"
     travel = port_travel(graph.ports[edge.target])
-    return "below" if approach.side * lateral_order_sign(travel) > 0 else "above"
+    return "below" if approach.side * right_normal_axis_sign(travel) > 0 else "above"
 
 
 def same_row_bypass_entry(graph: MetroGraph, port_id: str) -> SameRowBypassEntry | None:

@@ -325,20 +325,6 @@ runtime check either:
   `FLOW_REORIENTED_DIRECTION` decision in `graph.layout_provenance`; the
   explicit-grid direction guard accepts a non-LR direction only with that
   typed reason, instead of a second section set.
-- `graph._departure_order_plan` - one layout's 7b' port decisions (a
-  record, or none), reset when `compute_layout` starts; when they are decided
-  and replayed is under "Departure record lifetime" below.
-- `graph._departure_lane_orders` - the `DepartureLaneOrder` records the latest
-  station-offset computation holds; read by routing's fan, gap, band,
-  exit-turn and seating consumers and the bundle-order curve check, empty when
-  no departure is recorded.
-- `graph._departure_record_keys` - the departure-record keys the layout's
-  first positioning pass ended with; every later pass must end with the same
-  keys or raises `DepartureRecordDriftError`.
-- `graph._linear_entry_pill_lines_cache` - accepted linear-entry cohorts
-  projected by each station-offset computation. Marker bbox, label, and render
-  consumers use the cohort with the offset map produced by that computation;
-  the empty default means no entry frame owns marker geometry.
 - `graph._rail_y` - the per-section `{line_id: rail_y}` map produced by the
   opt-in rail-mode layout; read by the rail router, label placement, and rail
   guards, empty when rail mode is off.
@@ -1588,12 +1574,10 @@ through the record's draw accessors (`planned_offsets` in
 ### Lane plan record (sealed at a layout's first production offsets run at or after 5.1)
 
 - **Purpose**: Decide the layout's lanes once, from structure and placement:
-  every port's line order and same-band entry approach, each port's order
-  travel and lane sense, each perpendicular entry's consumer turns, the
-  far-side approaches, the track plan (every in-section `(node, line)`'s lane,
-  from which each exit's order is read), the seam joint (the lanes either side
-  of every straight seam), and each rail-section port's origin (the middle of
-  its own lanes).
+  every port's line order and same-band entry approach, the far-side
+  approaches, the track plan (every in-section `(node, line)`'s lane, from
+  which each exit's order is read, and every perpendicular port's offsets), and
+  each rail-section port's origin (the middle of its own lanes).
 - **Helpers**: `lane_plan_of` (`layout/lane_plan.py`) returns the sealed
   record, or builds one with `build_lane_plan` and seals it when the layout has
   completed 5.1; an offsets run before 5.1 reads the record its current
@@ -1614,25 +1598,22 @@ through the record's draw accessors (`planned_offsets` in
   top of `_layout_once`.
 - **Postcondition**: `graph._lane_plan` holds a `LanePlan` until the next
   layout starts: every port has a `PortOrder` (its lines travel-left to
-  travel-right with the sort field that decided it, or undecided with the
-  missing input named), every same-band `(entry, upstream source)` pair an
-  `Approach`, every in-section `(node, line)` and fed junction a lane, every
-  perpendicular port each line's offset across its travel, every port and
-  every junction continuing one port's run the order its lines turn off it,
-  every entry a straight seam pins its lanes, every entry two feeding bundles
-  cross at a forced crossing, every perpendicular port whose lines all cross
-  straight seams the offsets that keep them straight, and every rail-section
-  port whose lanes are off-centre its origin.  The record and its mappings are
+  travel-right, or undecided with the missing input named), every same-band
+  `(entry, upstream source)` pair an `Approach`, every in-section
+  `(node, line)` and fed junction a lane, every perpendicular port each line's
+  offset across its travel, every entry a straight seam pins its track lanes,
+  every entry two feeding bundles cross at a forced crossing, (among the
+  perpendicular offsets) the offsets that keep a perpendicular port's
+  straight-seam lines straight, and every rail-section port whose lanes are off-centre its origin.  The record and its mappings are
   read-only and shared, never copied, by a deep copy of the graph.  Later
   offsets runs of the layout, and routing and rendering after it, read the
   sealed record rather than rebuilding it, and a layout validated with
   `validate=True` seals the same record at the same stage as without.
   Rail-mode and sectionless layouts never reach 5.1 and hold no record.
-- **Invariants preserved**: The record reads no lane offset, route, draft or
-  departure record.  `compute_station_offsets` returns exactly
-  `planned_offsets(graph, record, step)`; a station line the record lacks
-  (a node placed after the seal that splits a recorded edge) takes its line's
-  nearest recorded neighbour's lane.
+- **Invariants preserved**: The record reads no lane offset, route or draft.
+  `compute_station_offsets` returns exactly
+  `planned_offsets(graph, record, step)`; the record holds every station
+  line, and one it lacks fails closed.
 - **Readers**: `compute_station_offsets`; routing's approach-side consumers
   (the same-row bypass entry, the left-entry over-top and far-left U-turn
   wraps, the row-level bottom-row climb), the perpendicular-entry crossing

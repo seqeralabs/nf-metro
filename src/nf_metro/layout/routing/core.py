@@ -67,7 +67,6 @@ from nf_metro.layout.routing.inter_section_handlers import (  # noqa: F401
     _route_right_entry_via_gap_above,
     _route_right_entry_wrap,
     _route_tb_bottom_exit,
-    _route_top_entry_l_shape,
     _v1_corner_x,
     classify_inter_section_family,
     is_inter_section_edge,
@@ -142,8 +141,6 @@ from nf_metro.layout.routing.reserved_bands import (
 )
 from nf_metro.layout.routing.tb_handlers import (  # noqa: F401
     _compute_diagonal_placement,
-    _perp_entry_drop_delta,
-    _route_perp_entry,
     _route_tb_diagonal,
     _route_tb_internal,
     _route_tb_lr_entry,

@@ -1186,7 +1186,7 @@ def _exit_turn_decision(plan: ExitTurnPlan) -> tuple[object, ...]:
             item.rank,
             item.member_ids,
             item.station_ids,
-            item.planned_offset,
+            item.input_offset,
         )
         for item in plan.source_lanes
     )
@@ -2415,12 +2415,11 @@ def _settle_render_geometry(
             _assert_settlement_decisions_frozen(
                 frozen_routes, frozen_plan, routes, routed_plan
             )
-        # The published ledger is the one settlement consumed.  Re-observing
-        # would let corridors appear, vanish, and change their required width
-        # across the very step whose contract is coordinate translation only.
-        # The routed observation exists to draw and to prove the decisions
-        # frozen.
-        if not pending_clearance:
+            # The published ledger is the one settlement consumed.  Re-observing
+            # would let corridors appear, vanish, and change their required width
+            # across the very step whose contract is coordinate translation only.
+            # The routed observation exists to draw and to prove the decisions
+            # frozen.
             route_plan = attach_reroute_ledger_delta(
                 adopt_route_reservation_ledger(
                     frozen_plan,
@@ -2430,13 +2429,11 @@ def _settle_render_geometry(
                 frozen_plan,
                 routed_plan,
             )
-        # adopt_route_reservation_ledger rebuilds the published plan from the
-        # frozen pass, which never saw the re-route's own diagnostics; carry
-        # forward the one class that names a decision the re-route was itself
-        # forced to discard (_adopt_prior_dispositions).
-        adopted_dispositions = (
-            () if pending_clearance else _disposition_overrides(routed_plan)
-        )
+            # adopt_route_reservation_ledger rebuilds the published plan from the
+            # frozen pass, which never saw the re-route's own diagnostics; carry
+            # forward the one class that names a decision the re-route was itself
+            # forced to discard (_adopt_prior_dispositions).
+            adopted_dispositions = _disposition_overrides(routed_plan)
         route_plan = _with_disposition_overrides(route_plan, adopted_dispositions)
         _attach_published_reservation_attribution(routes, route_plan)
         drawn_plan = routed_plan
@@ -2466,7 +2463,6 @@ def _settle_render_geometry(
     assert last_route_inputs is not None
     drawn_inputs = last_route_inputs
     drawn_routes = routes
-    observed_state: _RouteObservationInputs | None = None
     ungranted_routes: list[RoutedPath] = []
     with _restoring_route_observation_geometry(graph):
         observed_offsets = drawn_inputs.restore(graph)
@@ -2479,14 +2475,17 @@ def _settle_render_geometry(
             reserved_bands=drawn_inputs.reserved_bands,
         )
         granted_plan_ids = _corridor_grant_moved_plan_ids(observed_plan)
-        adopt_observation = bool(granted_plan_ids) or (
-            observed_plan.accepted_corridor_cohort_plan is not None
-            and not observed_plan.boundary_clearance_requirements
-        )
-        if adopt_observation:
-            observed_state = _RouteObservationInputs.capture(
+        observed_state = (
+            _RouteObservationInputs.capture(
                 graph, observed_offsets, drawn_inputs.reserved_bands
             )
+            if granted_plan_ids
+            or (
+                observed_plan.accepted_corridor_cohort_plan is not None
+                and not observed_plan.boundary_clearance_requirements
+            )
+            else None
+        )
         if granted_plan_ids:
             ungranted_routes, _ = _route(
                 drawn_inputs.restore(graph),
@@ -2497,26 +2496,24 @@ def _settle_render_geometry(
             )
     aperture_requirements = _corridor_cohort_aperture_requirements(observed_plan)
     aperture_settlement: EnvelopeSettlement | None = None
-    if adopt_observation:
-        assert observed_state is not None
+    if observed_state is not None:
         if observed_plan.boundary_clearance_requirements:
             raise LayoutInvariantError(
                 "the observation that applied a convergence corridor grant also "
                 "published a boundary clearance requirement; a render settles one "
                 "batch and does not retry"
             )
+        translations: tuple[ReservationCoordinateTranslation, ...]
         if granted_plan_ids:
             _assert_grant_moves_only_its_convergences(
                 ungranted_routes, observed_routes, granted_plan_ids
             )
+            ledger, translations = observed_plan, ()
+        else:
+            ledger, translations = settled_plan, settlement.coordinate_translations
         station_offsets = observed_state.restore(graph)
         routes = observed_routes
         carried_ports = ()
-        ledger, translations = (
-            (observed_plan, ())
-            if granted_plan_ids
-            else (settled_plan, settlement.coordinate_translations)
-        )
         labels, route_plan = _publish_observed_routes(
             station_offsets,
             routes,

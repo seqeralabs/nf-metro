@@ -29,6 +29,7 @@ from pathlib import Path
 import pytest
 
 from nf_metro.api import render_string
+from nf_metro.layout import lane_plan as lane_plan_module
 from nf_metro.layout.constants import (
     COORD_TOLERANCE_FINE,
     graph_offset_step,
@@ -74,20 +75,37 @@ CORPUS_IDS = [fixture_id for fixture_id, _ in CORPUS]
 
 
 def _lane_graph(path: Path):
-    """The rendered graph and the lane map its drawing settles (permissive, so
-    a map that aborts on a guard still shows its drawing), or ``None`` when
-    lanes do not apply or nothing is drawn."""
+    """The rendered graph, the lane map its drawing settles (permissive, so
+    a map that aborts on a guard still shows its drawing) and the straight
+    seam pins of the planner behind its sealed record, or ``None`` when lanes
+    do not apply or nothing is drawn."""
     settled: list = []
     real = svg._settle_render_geometry
+    built: list[tuple[object, dict[tuple[str, str], str]]] = []
+    planners: list[lane_plan_module._Tracks] = []
+    real_build = lane_plan_module.build_lane_plan
+
+    class Kept(lane_plan_module._Tracks):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            planners.append(self)
+
+    def build(graph):
+        plan = real_build(graph)
+        built.append((plan, planners[-1].seam_sources))
+        return plan
 
     def settle(graph, *args, **kwargs):
         result = real(graph, *args, **kwargs)
-        settled.append((graph, result.station_offsets))
+        pins = next((p for plan, p in built if plan is graph._lane_plan), {})
+        settled.append((graph, result.station_offsets, pins))
         return result
 
     with pytest.MonkeyPatch.context() as mp, warnings.catch_warnings():
         warnings.simplefilter("ignore")
         mp.setattr(svg, "_settle_render_geometry", settle)
+        mp.setattr(lane_plan_module, "_Tracks", Kept)
+        mp.setattr(lane_plan_module, "build_lane_plan", build)
         with contextlib.suppress(Exception):
             render_string(
                 "%%metro permissive: true\n" + path.read_text(),
@@ -134,11 +152,11 @@ def unridden_lanes(graph, offsets) -> list[tuple[str, str, float]]:
     return sorted(found)
 
 
-def held_across_a_straight_seam(graph, offsets, sec_id, sid, lane) -> bool:
+def held_across_a_straight_seam(graph, offsets, pins, sec_id, sid, lane) -> bool:
     """Whether *lane* at *sid* lies between two lines one straight seam into
-    *sec_id* holds level from one exit, where no line crossing the seam rides
-    the lane it carries straight across: a line turning off before the seam
-    left it."""
+    *sec_id* holds level from one exit (*pins*: each seam-crossing entry line's
+    exit), where no line crossing the seam rides the lane it carries straight
+    across: a line turning off before the seam left it."""
     plan = graph._lane_plan
     if plan is None:
         return False
@@ -146,7 +164,7 @@ def held_across_a_straight_seam(graph, offsets, sec_id, sid, lane) -> bool:
     at_sid = {lid: offsets.get((sid, lid), 0.0) for lid in graph.station_lines(sid)}
     held = [
         (entry_id, exit_id, lid)
-        for (entry_id, lid), exit_id in plan.seams.pins.items()
+        for (entry_id, lid), exit_id in pins.items()
         if graph.ports[entry_id].section_id == sec_id and lid in at_sid
     ]
     for entry_id, exit_id, below in held:
@@ -173,9 +191,9 @@ def test_no_section_reserves_an_unridden_lane(fixture_id, path):
     loaded = _lane_graph(path)
     if loaded is None:
         pytest.skip("compact mode, or nothing drawn")
-    graph, offsets = loaded
+    graph, offsets, pins = loaded
     assert [
         found
         for found in unridden_lanes(graph, offsets)
-        if not held_across_a_straight_seam(graph, offsets, *found)
+        if not held_across_a_straight_seam(graph, offsets, pins, *found)
     ] == []

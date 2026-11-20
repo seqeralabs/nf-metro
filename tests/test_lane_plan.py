@@ -1,18 +1,16 @@
 """The lane plan record: sealed once per layout, total, deterministic, unread.
 
-:mod:`nf_metro.layout.lane_plan` decides every port's line order, every
-same-band entry approach, each port's order travel and lane sense, each
-perpendicular entry's consumer turns, the far-side approaches, every
-in-section lane and the lanes either side of every straight seam at the first
-offsets run of a layout at or after stage 5.1.  These tests hold the record's
-contract: one record per layout, replayed for the rest of it; total on every
-curated map; independent of the hash seed; pinned per curated map; read only
-by its named consumers; a rotated or reflected placement plans the rotated or
-reflected record; no seam
-changes a bundle's order, outside the listed seams where a straight-seam
-entry reverses one, or steps a line that crosses it straight; the seam joint's
-lanes are the track plan's, outside a listed entry; and a line born on an
-exit's level run leaves the exit on its consumers' side.
+:mod:`nf_metro.layout.lane_plan` decides every port's line order, every same-
+band entry approach, the far-side approaches and every in-section lane at the
+first offsets run of a layout at or after stage 5.1. These tests hold the
+record's contract: one record per layout, replayed for the rest of it; total
+on every curated map; independent of the hash seed; pinned per curated map;
+read only by its named consumers; a rotated or reflected placement plans the
+rotated or reflected record; no seam changes a bundle's order, outside the
+listed seams where a straight-seam entry reverses one, or steps a line that
+crosses it straight; the planner's seam lanes are the track plan's, outside a
+listed entry; and a line born on an exit's level run leaves the exit on its
+consumers' side.
 """
 
 from __future__ import annotations
@@ -25,7 +23,7 @@ import os
 import subprocess
 import sys
 import warnings
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
@@ -40,16 +38,14 @@ from nf_metro.api import render_string
 from nf_metro.layout import engine as engine_module
 from nf_metro.layout import fan_ordering
 from nf_metro.layout.constants import SAME_Y_TOLERANCE, graph_offset_step
-from nf_metro.layout.departure_order import JUNCTIONS_POSITIONED
 from nf_metro.layout.geometry import (
     packed_section_visual_rank,
     perpendicular_port_sides,
 )
-from nf_metro.layout.lane_plan import LanePlan
+from nf_metro.layout.lane_plan import JUNCTIONS_POSITIONED, LanePlan
 from nf_metro.layout.port_order_plan import (
     Approach,
     ApproachKind,
-    OrderBasis,
     SideRule,
     _lateral,
     port_travel,
@@ -60,6 +56,7 @@ from nf_metro.layout.routing.common import (
     EXIT_SIDE_DIRECTION,
     Direction,
     resolve_section_colrow,
+    right_normal_axis_sign,
 )
 from nf_metro.layout.routing.context import _section_lane_frame
 from nf_metro.layout.routing.offsets import (
@@ -67,7 +64,6 @@ from nf_metro.layout.routing.offsets import (
 )
 from nf_metro.layout.routing.orientation import (
     direction_vector,
-    lateral_order_sign,
 )
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import Edge, MetroGraph, PortSide
@@ -115,6 +111,26 @@ class _Run:
     graph: MetroGraph | None
     plans: list[LanePlan] = field(default_factory=list)
     failures: list[str] = field(default_factory=list)
+    planner: lane_plan_module._Tracks | None = None
+    """The planner behind the last record built."""
+
+
+@contextmanager
+def _keeping_planners(
+    keep: Callable[[lane_plan_module._Tracks], None],
+) -> Iterator[None]:
+    """Hand *keep* every planner a lane plan build makes: the builder state
+    behind each record."""
+    real = lane_plan_module._Tracks
+
+    class Kept(real):  # type: ignore[valid-type, misc]
+        def __init__(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            super().__init__(*args, **kwargs)
+            keep(self)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(lane_plan_module, "_Tracks", Kept)
+        yield
 
 
 @contextmanager
@@ -130,7 +146,10 @@ def _recording_builds(run: _Run) -> Iterator[None]:
         run.plans.append(plan)
         return plan
 
-    with pytest.MonkeyPatch.context() as mp:
+    def keep(planner: lane_plan_module._Tracks) -> None:
+        run.planner = planner
+
+    with pytest.MonkeyPatch.context() as mp, _keeping_planners(keep):
         mp.setattr(lane_plan_module, "build_lane_plan", spy)
         yield
 
@@ -158,6 +177,26 @@ def _plan(graph: MetroGraph) -> LanePlan:
     return lane_plan_module.build_lane_plan(graph)
 
 
+def _planned(graph: MetroGraph) -> tuple[LanePlan, lane_plan_module._Tracks]:
+    """*graph*'s lane plan and the planner that decided it."""
+    planners: list[lane_plan_module._Tracks] = []
+    with _keeping_planners(planners.append):
+        plan = _plan(graph)
+    return plan, planners[-1]
+
+
+def _perpendicular_seams(
+    planner: lane_plan_module._Tracks, plan: LanePlan
+) -> dict[str, Mapping[str, int]]:
+    """Each perpendicular port the plan carries straight across its seam: its
+    offsets are the ones the seam asks for."""
+    return {
+        port_id: offsets
+        for port_id, offsets in planner.perpendicular_seams().items()
+        if plan.tracks.perpendicular.get(port_id) == offsets
+    }
+
+
 def _no_exits(_port_id: str) -> None:
     return None
 
@@ -181,9 +220,10 @@ def test_every_sealed_record_is_total(path: Path) -> None:
         assert not run.plans
         return
     graph = run.graph
-    assert plan is run.plans[-1]
+    planner = run.planner
+    assert plan is run.plans[-1] and planner is not None
     assert set(plan.port_orders.orders) == set(graph.ports)
-    assert set(plan.order_travels) == set(graph.ports) == set(plan.lane_senses)
+    assert set(planner.travels) == set(graph.ports) == set(planner.senses)
     for order in plan.port_orders:
         if order.decided:
             assert order.lines is not None
@@ -201,7 +241,7 @@ def test_every_sealed_record_is_total(path: Path) -> None:
                 graph, _no_exits, _no_seams
             ).upstream_sources(entry_id, lid)
         }
-    for port_id, turns in plan.perpendicular_turns.items():
+    for port_id, turns in planner.turns.items():
         assert graph.ports[port_id].is_entry
         assert {lid for turn in turns for lid in turn.lines} <= set(
             graph.station_lines(port_id)
@@ -231,18 +271,16 @@ def test_every_sealed_record_is_total(path: Path) -> None:
     } == perpendicular
     for port_id, offsets in plan.tracks.perpendicular.items():
         assert len(set(offsets.values())) == len(offsets)
-    seams = plan.seams
-    for entry_id, lanes in seams.entries.items():
+    for entry_id, lanes in planner.seam_lanes.items():
         assert not _perpendicular(graph, entry_id) and graph.ports[entry_id].is_entry
         assert sorted(lanes) == graph.station_lines(entry_id)
         assert len(set(lanes.values())) == len(lanes)
-    for (entry_id, lid), exit_id in seams.pins.items():
-        assert lid in seams.entries[entry_id]
+    for (entry_id, lid), exit_id in planner.seam_sources.items():
+        assert lid in planner.seam_lanes[entry_id]
         assert lid in graph.station_lines(exit_id)
         assert not graph.ports[exit_id].is_entry
-    for port_id, offsets in seams.perpendicular.items():
+    for port_id in _perpendicular_seams(planner, plan):
         assert _perpendicular(graph, port_id)
-        assert offsets == plan.tracks.perpendicular[port_id]
 
 
 def _perpendicular(graph: MetroGraph, port_id: str) -> bool:
@@ -452,9 +490,7 @@ def test_an_undecided_seam_entry_fills_in_declaration_order() -> None:
     ).graph
     assert graph is not None and graph._lane_plan is not None
     entry_id = "z2__entry_left_2"
-    tracks = lane_plan_module._Tracks(
-        graph, lane_plan_module._Frames(graph), graph._lane_plan.lane_senses
-    )
+    tracks = lane_plan_module._Tracks(graph, lane_plan_module._Frames(graph))
     for section_id in sorted(graph.sections):
         tracks.section(section_id)
     filled: list[list[str]] = []
@@ -469,9 +505,7 @@ def test_an_undecided_seam_entry_fills_in_declaration_order() -> None:
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(lane_plan_module, "_fill_round_pins", spy)
         tracks.seam_order(entry_id, None)
-    ascending = (
-        declared if graph._lane_plan.lane_senses[entry_id] > 0 else declared[::-1]
-    )
+    ascending = declared if tracks.senses[entry_id] > 0 else declared[::-1]
     assert filled == [ascending]
 
 
@@ -582,20 +616,20 @@ def test_a_later_part_keeps_the_lanes_its_lines_carry_level_into_it() -> None:
         assert render_string(path.read_text(), source_dir=str(path.parent))
 
 
-def _seam_lane_disagreements(graph: MetroGraph) -> list[str]:
+def _seam_lane_disagreements(run: _Run) -> list[str]:
     """Entries whose seam lanes are not their track lanes, or whose seam
     order is not read from their track lanes."""
-    plan = graph._lane_plan
+    assert run.graph is not None and run.planner is not None
+    plan = run.graph._lane_plan
     assert plan is not None
     out = []
-    for entry_id, lanes in sorted(plan.seams.entries.items()):
+    for entry_id, lanes in sorted(run.planner.seam_lanes.items()):
         tracked = {lid: plan.tracks.lanes[(entry_id, lid)] for lid in lanes}
         by_lane = sorted(lanes, key=lambda lid: (tracked[lid], lid))
-        if plan.lane_senses[entry_id] < 0:
+        if run.planner.senses[entry_id] < 0:
             by_lane.reverse()
-        order = plan.port_orders.orders[entry_id]
-        if tracked != lanes or (
-            order.basis is OrderBasis.SEAM and order.lines != tuple(by_lane)
+        if tracked != lanes or plan.port_orders.orders[entry_id].lines != tuple(
+            by_lane
         ):
             out.append(entry_id)
     return out
@@ -607,15 +641,15 @@ SEAM_LANE_EXCEPTIONS: frozenset[tuple[str, str]] = frozenset()
 
 @pytest.mark.parametrize("path", CURATED, ids=lambda p: str(p.relative_to(ROOT)))
 def test_the_seam_lanes_are_the_track_lanes(path: Path) -> None:
-    """Every lane the seam joint records at an entry is the track plan's lane
+    """Every seam lane the planner fixes at an entry is the track plan's lane
     there, and an entry its seam lanes order reads that order across its
     track lanes."""
-    graph = _laid_out(path).graph
-    if graph is None or graph._lane_plan is None:
+    run = _laid_out(path)
+    if run.graph is None or run.graph._lane_plan is None:
         return
     disagree = [
         entry_id
-        for entry_id in _seam_lane_disagreements(graph)
+        for entry_id in _seam_lane_disagreements(run)
         if (_rel(path), entry_id) not in SEAM_LANE_EXCEPTIONS
     ]
     assert disagree == []
@@ -623,15 +657,15 @@ def test_the_seam_lanes_are_the_track_lanes(path: Path) -> None:
 
 @pytest.mark.parametrize(("rel", "entry_id"), sorted(SEAM_LANE_EXCEPTIONS), ids=str)
 def test_seam_lane_exceptions_are_live(rel: str, entry_id: str) -> None:
-    graph = _laid_out(ROOT / rel).graph
-    assert graph is not None and graph._lane_plan is not None
-    plan = graph._lane_plan
-    seam = plan.seams.entries[entry_id]
+    run = _laid_out(ROOT / rel)
+    assert run.graph is not None and run.graph._lane_plan is not None
+    assert run.planner is not None
+    plan = run.graph._lane_plan
+    seam = run.planner.seam_lanes[entry_id]
     by_seam = sorted(seam, key=lambda lid: (seam[lid], lid))
-    if plan.lane_senses[entry_id] < 0:
+    if run.planner.senses[entry_id] < 0:
         by_seam.reverse()
-    assert entry_id in _seam_lane_disagreements(graph)
-    assert plan.port_orders.orders[entry_id].basis is OrderBasis.SEAM
+    assert entry_id in _seam_lane_disagreements(run)
     assert plan.port_orders.orders[entry_id].lines == tuple(by_seam)
     assert any(plan.tracks.lanes[(entry_id, lid)] != lane for lid, lane in seam.items())
 
@@ -721,9 +755,10 @@ def test_a_born_line_leaves_on_its_consumers_side(path: Path) -> None:
     grid cell, on it by the side its approach record states.  A run holding
     a seam-pinned entry places its born lines by the seam-pinned run's rule
     instead."""
-    graph = _laid_out(path).graph
+    graph, planner = _laid_out(path).graph, _laid_out(path).planner
     if graph is None or graph._lane_plan is None:
         return
+    assert planner is not None
     plan = graph._lane_plan
     orders = plan.port_orders.orders
     wrong = []
@@ -741,7 +776,7 @@ def test_a_born_line_leaves_on_its_consumers_side(path: Path) -> None:
                 continue
             lines = orders[exit_id].lines
             run = _level_run(graph, section_id, exit_id)
-            if lines is None or any(n in plan.seams.entries for n in run):
+            if lines is None or any(n in planner.seam_lanes for n in run):
                 continue
             sides = {lid: _consumer_sides(graph, plan, exit_id, lid) for lid in lines}
             for born in lines:
@@ -778,7 +813,7 @@ def _screen_side(graph: MetroGraph, entry_id: str, side: int) -> str:
     travel = port_travel(graph.ports[entry_id])
     if side == 0:
         return "flat"
-    return "below" if side * lateral_order_sign(travel) > 0 else "above"
+    return "below" if side * right_normal_axis_sign(travel) > 0 else "above"
 
 
 @contextmanager
@@ -891,7 +926,9 @@ def test_the_record_does_not_depend_on_the_hash_seed(path: Path) -> None:
         "from pathlib import Path\n"
         f"g = parse_metro_mermaid(Path({str(path)!r}).read_text())\n"
         "compute_layout(g)\n"
-        "print(repr(g._lane_plan))\n"
+        "from dataclasses import replace\n"
+        "p = g._lane_plan\n"
+        "print(repr(p and replace(p, far_sides=sorted(p.far_sides))))\n"
     )
     outputs = set()
     for seed in ("0", "1", "4242"):
@@ -925,36 +962,17 @@ def _record_payload(plan: LanePlan) -> list[object]:
             for port_id, order in sorted(plan.port_orders.orders.items())
         ],
         [[f.section_id, f.run, f.port, list(f.lines)] for f in tracks.forced],
-        list(tracks.cycle_sections),
-        sorted(
-            [entry_id, lid, lane]
-            for entry_id, lanes in plan.seams.entries.items()
-            for lid, lane in lanes.items()
-        ),
-        sorted(
-            [entry_id, lid, exit_id]
-            for (entry_id, lid), exit_id in plan.seams.pins.items()
-        ),
-        sorted(
-            [port_id, lid, offset]
-            for port_id, offsets in plan.seams.perpendicular.items()
-            for lid, offset in offsets.items()
-        ),
         sorted(
             [port_id, lid, offset]
             for port_id, offsets in tracks.perpendicular.items()
             for lid, offset in offsets.items()
-        ),
-        sorted(
-            [t.node_id, t.leaving, t.travel.value, list(t.lines), list(t.through)]
-            for t in tracks.turn_offs.values()
         ),
     ] + ([sorted(tracks.rail_origins.items())] if tracks.rail_origins else [])
 
 
 def _map_digest(run: _Run) -> str | None:
     """Digest of every record *run*'s layouts sealed, in order: lanes, port
-    orders, forced crossings, cycle sections and seam lanes.  ``None`` when
+    orders, forced crossings and perpendicular offsets.  ``None`` when
     the map's layout aborts or seals no record."""
     if run.graph is None or run.graph._lane_plan is None:
         return None
@@ -1018,7 +1036,7 @@ RECORD_USES = {
         "port_travel",
         "recorded_lane_plan",
     },
-    "layout/routing/normalize.py": {"_draw_sign", "_run_port"},
+    "layout/routing/normalize.py": {"draw_sign", "run_port"},
     "layout/routing/member_geometry.py": {"recorded_lane_plan"},
     "layout/routing/exit_turns.py": {"gap_counter_runners"},
     "layout/routing/common.py": {"entry_crossing_lines"},
@@ -1169,11 +1187,55 @@ def _keeps_lane_frames(graph: MetroGraph, image: MetroGraph, turn: _Turn) -> boo
     )
 
 
+@contextmanager
+def _lateral_orders(found: set[str]) -> Iterator[None]:
+    """Collect into *found* every port whose order the ranks of its lines'
+    laterals alone decide: each line on its own rank, in rank order."""
+    builder_cls = port_order_plan_module.PortOrderBuilder
+    real_plan_port = builder_cls._plan_port
+    real_ranks = port_order_plan_module._tolerance_ranks
+    ranked: list[dict[str, int] | None] = []
+
+    def plan_port(self, port_id, port):  # type: ignore[no-untyped-def]
+        ranked.append(None)
+        order = real_plan_port(self, port_id, port)
+        ranks = ranked.pop()
+        if (
+            ranks is not None
+            and len(set(ranks.values())) == len(ranks)
+            and order.lines == tuple(sorted(ranks, key=ranks.__getitem__))
+        ):
+            found.add(port_id)
+        return order
+
+    def tolerance_ranks(values):  # type: ignore[no-untyped-def]
+        ranks = real_ranks(values)
+        ranked[-1] = ranks
+        return ranks
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(builder_cls, "_plan_port", plan_port)
+        mp.setattr(port_order_plan_module, "_tolerance_ranks", tolerance_ranks)
+        yield
+
+
+@dataclass(frozen=True)
+class _RotationCase:
+    graph: MetroGraph
+    plan: LanePlan
+    planner: lane_plan_module._Tracks
+    lateral: frozenset[str]
+    """Ports whose order their lines' lateral ranks alone decide."""
+
+
 @lru_cache(maxsize=None)
-def _rotation_case(path: Path) -> tuple[MetroGraph, LanePlan]:
+def _rotation_case(path: Path) -> _RotationCase:
     graph = _laid_out(path).graph
     assert graph is not None and not any(len(m) >= 2 for m in graph.cell_packs.values())
-    return graph, _plan(graph)
+    lateral: set[str] = set()
+    with _lateral_orders(lateral):
+        plan, planner = _planned(graph)
+    return _RotationCase(graph, plan, planner, frozenset(lateral))
 
 
 # Rotations that mirror some section's lane frame (see
@@ -1240,8 +1302,8 @@ def test_a_turned_placement_plans_the_turned_record(path: Path, turn: _Turn) -> 
     """Every rule reads its inputs in a travel frame, so turning the placement
     turns the record.
 
-    Every turn keeps each approach's kind, rule and reach and each port's
-    class, and turns each port's order travel and each perpendicular turn.  It
+    Every turn keeps each approach's kind, rule and reach, and turns each
+    port's order travel and each perpendicular turn.  It
     flips each approach side under a reflection, except the two side
     conventions dispatch draws: a turn-round U-turn loops on the traveller's
     right in every frame, and the screen-below side is the traveller's right
@@ -1262,16 +1324,17 @@ def test_a_turned_placement_plans_the_turned_record(path: Path, turn: _Turn) -> 
     A fork branch's side is read from its exit's lanes, so it turns with them
     only where the turn carries every lane direction.
 
-    Where the turn carries every convention side as well, it flips each far
-    side under a reflection and turns each order: a rotation keeps it; a
+    Where the turn carries every convention side as well, it keeps the far
+    sides and turns each order: a rotation keeps it; a
     reflection reverses a lateral-decided order, and, where the turn carries
     every lane direction, an order read from the lanes or the seam pins.  The
     turns in ``ORDER_TURN_EXCEPTIONS`` mirror some section's lane frame, and
     those in ``LANE_TURN_EXCEPTIONS`` turn some lanes differently, so neither
     is held to the orders."""
-    graph, reference = _rotation_case(path)
+    case = _rotation_case(path)
+    graph, reference, ref_planner = case.graph, case.plan, case.planner
     image_graph = _turned(graph, turn)
-    image = _plan(image_graph)
+    image, image_planner = _planned(image_graph)
     flip = -1 if turn.reflect else 1
     keeps_frames = _keeps_lane_frames(graph, image_graph, turn)
 
@@ -1286,46 +1349,38 @@ def test_a_turned_placement_plans_the_turned_record(path: Path, turn: _Turn) -> 
         else:
             assert got.side == flip * ref.side, key
 
-    for port_id, travel in reference.order_travels.items():
-        assert image.order_travels[port_id] is turn.travel(travel), port_id
-    for port_id, turns in reference.perpendicular_turns.items():
+    for port_id, travel in ref_planner.travels.items():
+        assert image_planner.travels[port_id] is turn.travel(travel), port_id
+    for port_id, turns in ref_planner.turns.items():
         assert [(t.consumer_id, t.lines, turn.travel(t.turn)) for t in turns] == [
-            (t.consumer_id, t.lines, t.turn) for t in image.perpendicular_turns[port_id]
+            (t.consumer_id, t.lines, t.turn) for t in image_planner.turns[port_id]
         ]
-    for port_id, ref_order in reference.port_orders.orders.items():
-        image_order = image.port_orders.orders[port_id]
-        assert image_order.port_class is ref_order.port_class, port_id
     if keeps_frames and (path.stem, turn.name) not in LANE_TURN_EXCEPTIONS:
         assert image.tracks.lanes == reference.tracks.lanes
-        assert image.seams.entries == reference.seams.entries
-        assert image.seams.pins == reference.seams.pins
-        assert image.seams.perpendicular == {
+        assert image_planner.seam_lanes == ref_planner.seam_lanes
+        assert image_planner.seam_sources == ref_planner.seam_sources
+        assert _perpendicular_seams(image_planner, image) == {
             port_id: {lid: flip * v for lid, v in offsets.items()}
-            for port_id, offsets in reference.seams.perpendicular.items()
+            for port_id, offsets in _perpendicular_seams(ref_planner, reference).items()
         }
         for port_id, offsets in reference.tracks.perpendicular.items():
             turned = image.tracks.perpendicular[port_id]
             assert len({turned[lid] - flip * v for lid, v in offsets.items()}) == 1
-        for at, ref_turn in reference.tracks.turn_offs.items():
-            got_turn = image.tracks.turn_offs[at]
-            assert got_turn.travel is turn.travel(ref_turn.travel), at
-            assert got_turn.through == ref_turn.through, at
-            ref_lines = ref_turn.lines[::-1] if turn.reflect else ref_turn.lines
-            assert got_turn.lines == ref_lines, at
 
     if not _conventions_kept(reference, image, turn):
         return
-    assert image.far_sides == {k: flip * v for k, v in reference.far_sides.items()}
+    assert image.far_sides == reference.far_sides
     if (path.stem, turn.name) in ORDER_TURN_EXCEPTIONS | LANE_TURN_EXCEPTIONS:
         return
     for port_id, ref_order in reference.port_orders.orders.items():
         image_order = image.port_orders.orders[port_id]
+        seamed = port_id in ref_planner.seam_lanes
         if not turn.reflect:
             assert image_order.lines == ref_order.lines, port_id
-        elif ref_order.basis is OrderBasis.LATERAL or (
-            keeps_frames and ref_order.basis in (OrderBasis.LANES, OrderBasis.SEAM)
+        elif ref_order.lines is not None and (
+            (port_id in case.lateral and not seamed)
+            or (keeps_frames and (seamed or not ref_order.is_entry))
         ):
-            assert ref_order.lines is not None
             assert image_order.lines == tuple(reversed(ref_order.lines)), port_id
 
 
@@ -1335,7 +1390,8 @@ def test_a_turned_placement_plans_the_turned_record(path: Path, turn: _Turn) -> 
 def test_order_turn_exceptions_are_live(stem: str, turn_name: str) -> None:
     path = next(p for p in ROTATION_FIXTURES if p.stem == stem)
     turn = next(t for t in TURNS if t.name == turn_name)
-    graph, reference = _rotation_case(path)
+    case = _rotation_case(path)
+    graph, reference = case.graph, case.plan
     image_graph = _turned(graph, turn)
     image = _plan(image_graph)
 
@@ -1354,7 +1410,7 @@ def test_order_turn_exceptions_are_live(stem: str, turn_name: str) -> None:
 def test_lane_turn_exceptions_are_live(stem: str, turn_name: str) -> None:
     path = next(p for p in ROTATION_FIXTURES if p.stem == stem)
     turn = next(t for t in TURNS if t.name == turn_name)
-    graph, _ = _rotation_case(path)
+    graph = _rotation_case(path).graph
     image_graph = _turned(graph, turn)
     read: dict[tuple[str, str], Approach] = {}
     turned: dict[tuple[str, str], Approach] = {}
@@ -1382,7 +1438,7 @@ def test_rotation_fixtures_cover_every_rule() -> None:
         name: getattr(builder_cls, name)
         for name in ("joining_side", "cell_lateral", "own_band", "_round_own_side")
     }
-    real_merge = port_order_plan_module._merge_orders
+    real_merge = port_order_plan_module.merge_orders
 
     def joining_side(self, ref, lateral, here, travel, kind):  # type: ignore[no-untyped-def]
         value = real["joining_side"](self, ref, lateral, here, travel, kind)
@@ -1420,14 +1476,14 @@ def test_rotation_fixtures_cover_every_rule() -> None:
         mp.setattr(builder_cls, "cell_lateral", cell_lateral)
         mp.setattr(builder_cls, "own_band", own_band)
         mp.setattr(builder_cls, "_round_own_side", round_own_side)
-        mp.setattr(port_order_plan_module, "_merge_orders", merge)
+        mp.setattr(port_order_plan_module, "merge_orders", merge)
         for path in ROTATION_FIXTURES:
-            graph, _ = _rotation_case(path)
-            plan = _plan(graph)
-            for port_id, turns in plan.perpendicular_turns.items():
+            graph = _rotation_case(path).graph
+            plan, planner = _planned(graph)
+            for port_id, turns in planner.turns.items():
                 if sum(t.turn is not None for t in turns) >= 2:
                     fired.add("multi-consumer turns")
-                default = plan.order_travels[port_id] is not port_travel(
+                default = planner.travels[port_id] is not port_travel(
                     graph.ports[port_id]
                 )
                 if len(turns) == 1 and turns[0].turn is not None and default:
@@ -1570,7 +1626,7 @@ def test_rotation_fixtures_cover_every_track_rule() -> None:
         for owner, name, spy in _track_rule_spies(fired):
             mp.setattr(owner, name, spy)
         for path in ROTATION_FIXTURES:
-            _plan(_rotation_case(path)[0])
+            _plan(_rotation_case(path).graph)
 
     assert fired >= {
         "run split",
@@ -1643,7 +1699,6 @@ BORN_AND_SEAM_SPIES = [
     (_TRACKS, "perpendicular_seams", "perpendicular seam", lambda v, *_a: bool(v)),
     (_TRACKS, "_carry", "perpendicular carry", lambda v, *_a: len(v) > 1),
     (_TRACKS, "_turn_merge", "turn merge", lambda v, *_a: len(v) > 1),
-    (_TRACKS, "_through", "through line", lambda v, *_a: v),
     (
         port_order_plan_module.PortOrderBuilder,
         "_depart",
@@ -1671,14 +1726,14 @@ def test_rotation_fixtures_cover_every_born_line_and_seam_rule() -> None:
         for owner, name, rule, when in BORN_AND_SEAM_SPIES:
             mp.setattr(owner, name, _firing(getattr(owner, name), rule, when, fired))
         for path in ROTATION_FIXTURES:
-            graph = _rotation_case(path)[0]
+            graph = _rotation_case(path).graph
             _plan(graph)
             _plan(_turned(graph, TURNS[0]))
 
     assert fired >= {rule for _owner, _name, rule, _when in BORN_AND_SEAM_SPIES}
 
 
-# ---- perpendicular ports, entry departures, turn-offs
+# ---- perpendicular ports, entry departures
 
 
 def _column(graph: MetroGraph, port_id: str) -> tuple[str, dict[str, int]] | None:
@@ -1711,25 +1766,27 @@ def test_a_perpendicular_port_carries_its_column(path: Path) -> None:
     holds that column's lanes across its travel, gaps kept, so the turn is
     concentric; an entry's innermost line lies on the port's coordinate, or
     the column's lane zero when the column holds none below its lines."""
-    graph = _laid_out(path).graph
+    graph, planner = _laid_out(path).graph, _laid_out(path).planner
     if graph is None or graph._lane_plan is None:
         return
+    assert planner is not None
     plan = graph._lane_plan
+    seams = _perpendicular_seams(planner, plan)
     bad = []
     for port_id, offsets in sorted(plan.tracks.perpendicular.items()):
         column = _column(graph, port_id)
-        consumers = [t for t in plan.perpendicular_turns.get(port_id, ())]
+        consumers = [t for t in planner.turns.get(port_id, ())]
         if column is None or len(consumers) > 1:
             continue
         _node, lanes = column
         if len(set(lanes.values())) != len(lanes):
             continue
-        sense = plan.lane_senses[port_id]
+        sense = planner.senses[port_id]
         shifts = {offsets[lid] - sense * lane for lid, lane in lanes.items()}
         if len(shifts) != 1:
             bad.append((port_id, "not concentric"))
             continue
-        if graph.ports[port_id].is_entry and port_id not in plan.seams.perpendicular:
+        if graph.ports[port_id].is_entry and port_id not in seams:
             anchor = 0 if min(lanes.values()) > 0 else None
             if anchor is None and 0 not in offsets.values():
                 bad.append((port_id, "innermost off the port"))
@@ -1743,12 +1800,13 @@ def test_a_multi_consumer_perpendicular_entry_keeps_each_turn_side(path: Path) -
     """A perpendicular entry feeding several in-section consumers lays its
     lines side by side, each consumer's lines in the order they hold after
     turning into it, read across that turn."""
-    graph = _laid_out(path).graph
+    graph, planner = _laid_out(path).graph, _laid_out(path).planner
     if graph is None or graph._lane_plan is None:
         return
+    assert planner is not None
     plan = graph._lane_plan
     bad = []
-    for port_id, turns in sorted(plan.perpendicular_turns.items()):
+    for port_id, turns in sorted(planner.turns.items()):
         if len(turns) < 2 or port_id not in plan.tracks.perpendicular:
             continue
         offsets = plan.tracks.perpendicular[port_id]
@@ -1763,7 +1821,7 @@ def test_a_multi_consumer_perpendicular_entry_keeps_each_turn_side(path: Path) -
             lanes = {
                 lid: plan.tracks.lanes[(turn.consumer_id, lid)] for lid in turn.lines
             }
-            across = lateral_order_sign(turn.turn) * sign
+            across = right_normal_axis_sign(turn.turn) * sign
             after = sorted(turn.lines, key=lambda lid: across * lanes[lid])
             if sorted(turn.lines, key=offsets.__getitem__) != after:
                 bad.append((port_id, turn.consumer_id))
@@ -1775,10 +1833,10 @@ def test_a_multi_consumer_perpendicular_entry_keeps_each_turn_over_its_order() -
     both of its consumers' turns, cross_column_perp_entry_overflow's
     reporting entry still lays each consumer's lines in the order they hold
     after turning into it."""
-    graph = _laid_out(
-        FIXTURES / "regressions" / "cross_column_perp_entry_overflow.mmd"
-    ).graph
+    run = _laid_out(FIXTURES / "regressions" / "cross_column_perp_entry_overflow.mmd")
+    graph = run.graph
     assert graph is not None and graph._lane_plan is not None
+    assert run.planner is not None
     plan = graph._lane_plan
     entry_id = "reporting__entry_top_7"
     order = plan.port_orders.orders[entry_id]
@@ -1786,12 +1844,12 @@ def test_a_multi_consumer_perpendicular_entry_keeps_each_turn_over_its_order() -
     reversed_order = replace(order, lines=order.lines[::-1])
     section = graph.section_for_port(graph.ports[entry_id])
     sign = _section_lane_frame(graph, section).secondary_sign
-    turns = plan.perpendicular_turns[entry_id]
+    turns = run.planner.turns[entry_id]
     chains: list[list[str]] = []
     for turn in turns:
         assert turn.turn is not None
         lanes = {lid: plan.tracks.lanes[(turn.consumer_id, lid)] for lid in turn.lines}
-        across = lateral_order_sign(turn.turn) * sign
+        across = right_normal_axis_sign(turn.turn) * sign
         chains.append(sorted(turn.lines, key=lambda lid: across * lanes[lid]))
     assert len(chains) == 2 and all(len(chain) >= 2 for chain in chains)
 
@@ -1800,14 +1858,12 @@ def test_a_multi_consumer_perpendicular_entry_keeps_each_turn_over_its_order() -
 
     side_by_side = {lid: i for i, lid in enumerate(reversed_order.lines or ())}
     assert not any(keeps(side_by_side, chain) for chain in chains)
-    tracks = lane_plan_module._Tracks(
-        graph, lane_plan_module._Frames(graph), plan.lane_senses
-    )
+    tracks = lane_plan_module._Tracks(graph, lane_plan_module._Frames(graph))
     for section_id in sorted(graph.sections):
         tracks.section(section_id)
     merged = tracks._turn_merge(entry_id, turns, 1, reversed_order)
-    across_ports, _seams = tracks._perpendicular_offsets(
-        {**plan.port_orders.orders, entry_id: reversed_order}, plan.perpendicular_turns
+    across_ports = tracks._perpendicular_offsets(
+        {**plan.port_orders.orders, entry_id: reversed_order}
     )
     for chain in chains:
         assert keeps(merged, chain)
@@ -1934,55 +1990,17 @@ def test_a_fan_carrier_keeps_its_slot(path: Path) -> None:
     assert moved == []
 
 
-@pytest.mark.parametrize("path", CURATED, ids=lambda p: str(p.relative_to(ROOT)))
-def test_a_through_line_turns_off_beyond_the_lines_ending(path: Path) -> None:
-    """Lines leaving a node's run into a leg (or joining it from one) meet
-    the leg in the order of their side of travel, the side the leg heads for
-    first, except that a line whose run carries on level through the node
-    turns off beyond (joins before) every line whose run ends there."""
-    graph = _laid_out(path).graph
-    if graph is None or graph._lane_plan is None:
-        return
-    bad = []
-    for key, turn_off in sorted(graph._lane_plan.tracks.turn_offs.items()):
-        assert sorted(turn_off.lines) == sorted(graph.station_lines(turn_off.node_id))
-        assert set(turn_off.through) <= set(turn_off.lines)
-        for heads_right in (False, True):
-            along = turn_off.along(heads_right)
-            by_side = turn_off.lines[::-1] if heads_right else turn_off.lines
-            ending = [lid for lid in by_side if lid not in turn_off.through]
-            through = [lid for lid in by_side if lid in turn_off.through]
-            expect = ending + through if turn_off.leaving else through + ending
-            if list(along) != expect:
-                bad.append(key)
-    assert bad == []
-
-
-def test_a_line_carrying_on_past_its_branch_turns_off_beyond() -> None:
-    """At the junction after riboseq_metro's alignment exit, rnaseq both runs
-    on level to Novel transcripts and branches down past it: its branch turns
-    off beyond riboseq, whose run ends there, whichever side the legs head."""
-    graph = _laid_out(ROOT / "examples" / "riboseq_metro.mmd").graph
-    assert graph is not None and graph._lane_plan is not None
-    turn_off = graph._lane_plan.tracks.turn_offs[("__junction_13", True)]
-    assert turn_off.through == ("rnaseq",)
-    assert turn_off.along(True)[-1] == turn_off.along(False)[-1] == "rnaseq"
-
-
 def test_the_record_is_immutable_and_survives_deepcopy() -> None:
     graph = _laid_out(TOPOLOGIES / "return_trunk_over_member_run.mmd").graph
     assert graph is not None and graph._lane_plan is not None
     plan = graph._lane_plan
     some_lane = next(iter(plan.tracks.lanes))
-    some_entry = next(iter(plan.seams.entries))
     with pytest.raises(TypeError):
         plan.tracks.lanes[some_lane] = 0  # type: ignore[index]
     with pytest.raises(TypeError):
-        plan.seams.entries[some_entry]["x"] = 0  # type: ignore[index]
-    with pytest.raises(TypeError):
         plan.port_orders.orders["x"] = None  # type: ignore[index]
-    with pytest.raises(TypeError):
-        plan.lane_senses["x"] = 1  # type: ignore[index]
+    with pytest.raises(AttributeError):
+        plan.far_sides.add(("x", "y", "z"))  # type: ignore[attr-defined]
     copied = deepcopy(graph)
     assert copied._lane_plan is plan
     assert deepcopy(plan) is plan

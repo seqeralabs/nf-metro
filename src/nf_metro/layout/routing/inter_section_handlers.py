@@ -1205,8 +1205,8 @@ def left_exit_around_below_geometry(f: _InterFacts) -> _LeftExitUnderTargetLoop:
 
     # West out of the exit, around below, then east into the LEFT port is a net
     # half-turn that transposes the bundle end-to-end.  The destination section
-    # takes the transposed order from the seam classifier (``_reorder_reconvergence``),
-    # so the entry offsets here are already the transposed order; the bundle tapers from
+    # takes the transposed order from the lane plan (``build_lane_plan``), so the
+    # entry offsets here are already the transposed order; the bundle tapers from
     # its exit offset out of the source to that entry offset into the port, the
     # taper following the loop's natural transpose so no line crosses a mate.
     members = [
@@ -1820,12 +1820,16 @@ def _route_perpendicular_entry_stair(
             _top_entry_above_channel_y(ctx, tgt_sec),
             ctx.reserved_bands.rows.at(tgt_sec.grid_row),
         )
-        return _route_top_entry_l_shape(edge, src, entry_port, n, ctx, channel_y)
+        return _route_entry_l_shape(
+            edge, src, entry_port, n, ctx, PortSide.TOP, channel_y
+        )
     channel_y = held_in_reserved_band(
         _bottom_entry_below_channel_y(ctx, tgt_sec),
         ctx.reserved_bands.rows.at(tgt_sec.grid_row + 1),
     )
-    return _route_bottom_entry_l_shape(edge, src, entry_port, n, ctx, channel_y)
+    return _route_entry_l_shape(
+        edge, src, entry_port, n, ctx, PortSide.BOTTOM, channel_y
+    )
 
 
 def _route_merge_entry_kind(
@@ -2009,14 +2013,16 @@ _INTER_SECTION_CLAIMS: tuple[_Rule, ...] = (
         RouteFamilyId.TOP_ENTRY_L_SHAPE,
         "TOP entry L-shape",
         lambda f: f.entry_side is PortSide.TOP,
-        lambda f: _route_top_entry_l_shape(f.edge, f.src, f.tgt, f.n, f.ctx),
+        lambda f: _route_entry_l_shape(f.edge, f.src, f.tgt, f.n, f.ctx, PortSide.TOP),
     ),
     # BOTTOM entry needs the mirror-image L-shape lead-in, for the same reason.
     _Rule(
         RouteFamilyId.BOTTOM_ENTRY_L_SHAPE,
         "BOTTOM entry L-shape",
         lambda f: f.entry_side is PortSide.BOTTOM,
-        lambda f: _route_bottom_entry_l_shape(f.edge, f.src, f.tgt, f.n, f.ctx),
+        lambda f: _route_entry_l_shape(
+            f.edge, f.src, f.tgt, f.n, f.ctx, PortSide.BOTTOM
+        ),
     ),
     # Same X, but NOT a stacked LEFT-exit -> LEFT-entry (shares the column's
     # left-edge X: a straight drop would run down the source box; the serpentine
@@ -2461,14 +2467,6 @@ def arrival_leg_of(
             lead = steps[last - 1]
             lead_along = lead[1][0] - lead[0][0]
     return ArrivalLeg(framed[-1][1], first_along, riser_lane, lead_along)
-
-
-def arrival_leg(edge: Edge, ctx: _RoutingCtx, frame: AxisFrame) -> ArrivalLeg | None:
-    """The :class:`ArrivalLeg` of the route *edge*'s dispatch rule draws.
-
-    The same draft :func:`arrival_approach` reads, taken in *frame*.
-    """
-    return arrival_leg_of(_dispatch_draft_points(edge, ctx), frame, ctx.curve_radius)
 
 
 @dataclass(frozen=True, slots=True)
@@ -5345,35 +5343,46 @@ def _top_entry_above_channel_y(ctx: _RoutingCtx, tgt_sec: Section) -> float:
     return max(corridor_y, badge_clear_y)
 
 
-def _top_entry_below_wrap_riser_x(
+def _entry_wrap_riser_x(
     src: Station,
     tgt: Station,
     final_x: float,
-    above_y: float,
+    channel_y: float,
+    side: PortSide,
     ctx: _RoutingCtx,
 ) -> float | None:
-    """Riser X to route a below-row feeder around a section into its TOP port.
+    """Riser X to route a feeder from beyond the far side of a section into
+    its TOP or BOTTOM (*side*) port.
 
     A TOP entry port sits on the target's top edge, so it must be entered from
-    above.  When the feeder's source section is in a lower grid row than the
-    target the inter-row channel lies *below* the target, and a straight rise
-    into the port would plough up through the box interior, striking the
-    interior station and its label (#1522).  The leg instead carries past one
-    vertical side of the box, rises to the channel above it, then comes back
-    over the top into the port.
+    above; a BOTTOM one from below.  When the feeder's source section lies in a
+    grid row on the other side of the target (lower for TOP, higher for
+    BOTTOM), the inter-row channel lies on the wrong side of the target, and a
+    straight run into the port would plough through the box interior, striking
+    the interior station and its label (#1522).  The leg instead carries past
+    one vertical side of the box, crosses to the channel at *channel_y* beyond
+    the port's own edge, then comes back into the port.
 
     Returns the X of that riser -- outside the box on a side clear of every
     other section, preferring the side away from the feeder's approach so the
-    leg carries past the box and returns over the top rather than re-crossing a
-    near-side approach.  Returns ``None`` when the feeder is level with or above
-    the target (the ordinary from-above approach), or when neither side is
-    clear (the fall-through route then handles it and the runtime guard stays
-    the backstop).
+    leg carries past the box and returns over the port's edge rather than
+    re-crossing a near-side approach.  Returns ``None`` when the feeder is
+    level with the target or on the port's side of it (the ordinary approach),
+    or when neither side is clear (the fall-through route then handles it and
+    the runtime guard stays the backstop).
     """
     graph = ctx.graph
     src_sec = resolve_section(graph, src)
     tgt_sec = resolve_section(graph, tgt)
-    if src_sec is None or tgt_sec is None or src_sec.grid_row <= tgt_sec.grid_row:
+    if (
+        src_sec is None
+        or tgt_sec is None
+        or (
+            src_sec.grid_row <= tgt_sec.grid_row
+            if side is PortSide.TOP
+            else src_sec.grid_row >= tgt_sec.grid_row
+        )
+    ):
         return None
 
     exclude = {sid for sid in (src.section_id, tgt.section_id) if sid is not None}
@@ -5382,8 +5391,6 @@ def _top_entry_below_wrap_riser_x(
     box_right = tgt_sec.bbox_x + tgt_sec.bbox_w
     right_x = col_right_edge(graph, tgt_sec.grid_col, default=box_right) + clearance
     left_x = col_left_edge(graph, tgt_sec.grid_col, default=box_left) - clearance
-    # Prefer the side away from the feeder so the leg carries past the box and
-    # returns over the top rather than re-crossing a near-side approach.
     prefer_right = src.x <= (box_left + box_right) / 2
     ordered = [right_x, left_x] if prefer_right else [left_x, right_x]
 
@@ -5392,8 +5399,8 @@ def _top_entry_below_wrap_riser_x(
             _h_segment_crosses_other_section(
                 graph, src.x, rx, src.y, exclude - {src.section_id}
             )
-            or _v_segment_crosses_other_section(graph, rx, src.y, above_y, exclude)
-            or _h_segment_crosses_other_section(graph, rx, final_x, above_y, exclude)
+            or _v_segment_crosses_other_section(graph, rx, src.y, channel_y, exclude)
+            or _h_segment_crosses_other_section(graph, rx, final_x, channel_y, exclude)
         )
 
     return next((rx for rx in ordered if is_clear(rx)), None)
@@ -5569,7 +5576,7 @@ def _perp_entry_bundle_members(
 ) -> list[tuple[Edge, str, float, float]]:
     """Per-line bundle members for a perpendicular (TOP or BOTTOM) entry port
     whose centreline lands on *final_x*, shared
-    by :func:`_route_top_entry_l_shape` and :func:`_route_bottom_entry_l_shape`.
+    by :func:`_route_entry_l_shape`.
 
     Every line lands on the X :func:`_perp_entry_landing_x` states for it, and
     the members carry that X as the lateral the bundle builder needs, so the
@@ -5958,12 +5965,11 @@ def _perp_entry_l_geometry(
     boundary_y = (
         _perp_entry_channel_y(ctx, tgt_sec, side) if tgt_sec is not None else ty
     )
-    if straight_drop:
-        wrap_x = None
-    elif is_top:
-        wrap_x = _top_entry_below_wrap_riser_x(src, tgt, final_x, boundary_y, ctx)
-    else:
-        wrap_x = _bottom_entry_above_wrap_riser_x(src, tgt, final_x, boundary_y, ctx)
+    wrap_x = (
+        None
+        if straight_drop
+        else _entry_wrap_riser_x(src, tgt, final_x, boundary_y, side, ctx)
+    )
 
     points: tuple[tuple[float, float], ...]
     if wrap_x is not None:
@@ -6127,28 +6133,36 @@ def _perp_entry_turn_is_planned(
     )
 
 
-def _route_top_entry_l_shape(
+def _route_entry_l_shape(
     edge: Edge,
     src: Station,
     tgt: Station,
     n: int,
     ctx: _RoutingCtx,
+    side: PortSide,
     channel_y: float | None = None,
 ) -> RoutedPath:
-    """Staircase route into a TOP entry port, fanned along one centreline.
+    """Staircase route into a TOP or BOTTOM (*side*) entry port, fanned along
+    one centreline: the trunk run in the inter-row gap beyond the port's edge
+    turns into the port.
 
     The shape is :func:`_perp_entry_l_geometry`; a junction standing in the
     port's own column travels that column instead, with no fan.
     """
+    family_id = (
+        RouteFamilyId.TOP_ENTRY_L_SHAPE
+        if side is PortSide.TOP
+        else RouteFamilyId.BOTTOM_ENTRY_L_SHAPE
+    )
     geometry = _perp_entry_l_geometry(
         edge,
         src,
         tgt,
         n,
         ctx,
-        PortSide.TOP,
+        side,
         channel_y,
-        planned=_perp_entry_turn_is_planned(edge, RouteFamilyId.TOP_ENTRY_L_SHAPE, ctx),
+        planned=_perp_entry_turn_is_planned(edge, family_id, ctx),
     )
     if geometry is None:
         straight_drop_route = _perp_entry_junction_straight_drop(edge, src, tgt, ctx)
@@ -6172,92 +6186,6 @@ def _bottom_entry_below_channel_y(ctx: _RoutingCtx, tgt_sec: Section) -> float:
         base_radius=ctx.curve_radius,
         default=tgt_sec.bbox_y + tgt_sec.bbox_h,
     )
-
-
-def _bottom_entry_above_wrap_riser_x(
-    src: Station,
-    tgt: Station,
-    final_x: float,
-    below_y: float,
-    ctx: _RoutingCtx,
-) -> float | None:
-    """Riser X to route an above-row feeder around a section into its BOTTOM port.
-
-    Mirror of :func:`_top_entry_below_wrap_riser_x` for the opposite entry
-    side: a BOTTOM entry port sits on the target's bottom edge, so it must be
-    entered from below.  When the feeder's source section is in a higher grid
-    row than the target the inter-row channel lies *above* the target, and a
-    straight drop into the port would plough down through the box interior.
-    The leg instead carries past one vertical side of the box, drops to the
-    channel below it, then comes back under the bottom into the port.
-
-    Returns the X of that riser -- outside the box on a side clear of every
-    other section, preferring the side away from the feeder's approach.
-    Returns ``None`` when the feeder is level with or below the target (the
-    ordinary from-below approach), or when neither side is clear (the
-    fall-through route then handles it and the runtime guard stays the
-    backstop).
-    """
-    graph = ctx.graph
-    src_sec = resolve_section(graph, src)
-    tgt_sec = resolve_section(graph, tgt)
-    if src_sec is None or tgt_sec is None or src_sec.grid_row >= tgt_sec.grid_row:
-        return None
-
-    exclude = {sid for sid in (src.section_id, tgt.section_id) if sid is not None}
-    clearance = ctx.curve_radius + SECTION_ROUTE_CLEARANCE
-    box_left = tgt_sec.bbox_x
-    box_right = tgt_sec.bbox_x + tgt_sec.bbox_w
-    right_x = col_right_edge(graph, tgt_sec.grid_col, default=box_right) + clearance
-    left_x = col_left_edge(graph, tgt_sec.grid_col, default=box_left) - clearance
-    # Prefer the side away from the feeder so the leg carries past the box and
-    # returns under the bottom rather than re-crossing a near-side approach.
-    prefer_right = src.x <= (box_left + box_right) / 2
-    ordered = [right_x, left_x] if prefer_right else [left_x, right_x]
-
-    def is_clear(rx: float) -> bool:
-        return not (
-            _h_segment_crosses_other_section(
-                graph, src.x, rx, src.y, exclude - {src.section_id}
-            )
-            or _v_segment_crosses_other_section(graph, rx, src.y, below_y, exclude)
-            or _h_segment_crosses_other_section(graph, rx, final_x, below_y, exclude)
-        )
-
-    return next((rx for rx in ordered if is_clear(rx)), None)
-
-
-def _route_bottom_entry_l_shape(
-    edge: Edge,
-    src: Station,
-    tgt: Station,
-    n: int,
-    ctx: _RoutingCtx,
-    channel_y: float | None = None,
-) -> RoutedPath:
-    """Staircase route into a BOTTOM entry port, fanned along one centreline.
-
-    Mirror of :func:`_route_top_entry_l_shape` for the opposite entry side: the
-    trunk run in the inter-row gap sits below the target section and rises into
-    the port.
-    """
-    geometry = _perp_entry_l_geometry(
-        edge,
-        src,
-        tgt,
-        n,
-        ctx,
-        PortSide.BOTTOM,
-        channel_y,
-        planned=_perp_entry_turn_is_planned(
-            edge, RouteFamilyId.BOTTOM_ENTRY_L_SHAPE, ctx
-        ),
-    )
-    if geometry is None:
-        straight_drop_route = _perp_entry_junction_straight_drop(edge, src, tgt, ctx)
-        assert straight_drop_route is not None
-        return straight_drop_route
-    return _perp_entry_finish_route(edge, geometry, ctx)
 
 
 def _left_exit_left_entry_drop_channel_x(
@@ -7618,8 +7546,8 @@ def _route_right_entry_over_top(
     from the port's own outward side.  Approaching a right-side port from the
     left is a U-turn, which transposes the bundle end-to-end; the descent into
     the section therefore reverses the lines, matched by the section's reversed
-    internal order (driven from the arrival bundle by
-    :func:`offsets._reorder_reconvergence`).
+    internal order (decided from the arrival bundle by the lane plan,
+    :func:`~nf_metro.layout.lane_plan.build_lane_plan`).
 
     Built via :func:`build_concentric_bundle` from the bundle's centreline, so
     the loop cannot flip and every corner is concentric by construction.

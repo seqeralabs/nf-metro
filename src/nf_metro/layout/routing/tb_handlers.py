@@ -38,6 +38,7 @@ from nf_metro.layout.routing.co_row import CoRowFeeder, DiagonalWindow, co_row_f
 from nf_metro.layout.routing.common import (
     OffsetRegime,
     RoutedPath,
+    right_normal_axis_sign,
     trailing_perp_side,
     vertical_direction,
 )
@@ -47,7 +48,6 @@ from nf_metro.layout.routing.context import (
     _section_lane_frame,
     _tb_x_offset,
 )
-from nf_metro.layout.routing.orientation import lateral_order_sign
 from nf_metro.layout.routing.perp import (
     _lane_stacked_perp_entry,
     _perp_entry_crossing_x,
@@ -1076,7 +1076,7 @@ def _route_perp_entry_from_corridor(
     td = _sign(ty - sy)
     hd = _sign(tx - sx)
     planned = _lane_stacked_perp_entry(ctx.graph, edge.source)
-    drop = lateral_order_sign(vertical_direction(ty - sy))
+    drop = right_normal_axis_sign(vertical_direction(ty - sy))
 
     def source_offset(line_id: str) -> float:
         if planned:

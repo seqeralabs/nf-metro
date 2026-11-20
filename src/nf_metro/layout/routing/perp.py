@@ -38,6 +38,7 @@ from nf_metro.layout.routing.common import (
     ENTRY_SIDE_DIRECTION,
     needs_perp_approach_fan,
     resolve_section,
+    right_normal_axis_sign,
 )
 from nf_metro.layout.routing.context import (
     _get_offset,
@@ -46,7 +47,6 @@ from nf_metro.layout.routing.context import (
     _tb_x_offset,
 )
 from nf_metro.layout.routing.corners import reversed_offset
-from nf_metro.layout.routing.orientation import lateral_order_sign
 from nf_metro.parser.model import (
     MetroGraph,
     Port,
@@ -69,7 +69,7 @@ def _planned_entry_crossing(
     """Where the lane plan crosses *line_id* through a TOP or BOTTOM entry:
     its offset read along the right-hand normal of the entry's travel."""
     side = ctx.graph.ports[entry_port_id].side
-    sign = lateral_order_sign(ENTRY_SIDE_DIRECTION[side])
+    sign = right_normal_axis_sign(ENTRY_SIDE_DIRECTION[side])
     return port_x + sign * _get_offset(ctx, entry_port_id, line_id)
 
 

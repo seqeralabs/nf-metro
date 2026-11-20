@@ -33,7 +33,7 @@ from nf_metro.layout.geometry import (
     spans_share_corridor,
     station_lane_coord,
 )
-from nf_metro.layout.lane_plan import _draw_sign, _run_port
+from nf_metro.layout.lane_plan import draw_sign, run_port
 from nf_metro.layout.route_plan import (
     DemandAxis,
     ExitTurnPlan,
@@ -87,6 +87,7 @@ from nf_metro.layout.routing.common import (
     planner_owns_segment,
     planner_owns_segment_or_boundary,
     port_peeloff_tail,
+    right_normal_axis_sign,
     route_system_owns_segment_boundary,
     row_bottom_edge,
     row_local_gap_bundle_midpoint,
@@ -132,7 +133,6 @@ from nf_metro.layout.routing.offsets import (
 from nf_metro.layout.routing.orientation import (
     direction_vector,
     lateral_axis,
-    lateral_order_sign,
 )
 from nf_metro.layout.routing.reserved_bands import (
     ReservedBand,
@@ -260,100 +260,6 @@ def _anchored_bundle_midpoint(
     return mid
 
 
-def _port_slot_seats(
-    chans: list[_VChannel],
-    down: bool,
-    pins: Mapping[tuple[bool, str], float],
-    ctx: _RoutingCtx,
-) -> dict[int, float] | None:
-    """Columns seating *chans* by the slot order of the entry port they land
-    on, keyed by ``id(channel)``, or ``None``.
-
-    Applies to a bundle whose every channel is a landing leg into one entry
-    port a recorded departure enters, holding at least one pinned line, where
-    two or more of that port's lines are pinned in this direction.  Pinned and
-    movable lines rank together by the port's slots; the pinned columns give
-    the step, which must be one bundle step, and its sign, so no frame sign
-    enters and a movable line can sit between pinned ones.
-    """
-    graph = ctx.graph
-    targets = {ch.route.edge.target for ch in chans}
-    if len(targets) != 1:
-        return None
-    port_id = next(iter(targets))
-    port = graph.ports.get(port_id)
-    if port is None or not port.is_entry:
-        return None
-    if any(len(ch.route.points) - ch.idx not in (2, 3) for ch in chans):
-        return None
-    records = graph._departure_lane_orders
-    if not any((ch.route.edge.source, port_id) in records for ch in chans):
-        return None
-    offsets = ctx.station_offsets or {}
-    moving = {ch.route.line_id for ch in chans}
-    pinned = {
-        line_id: column
-        for (pin_down, line_id), column in pins.items()
-        if pin_down is down and (port_id, line_id) in offsets
-    }
-    if len(pinned) < 2 or not moving & pinned.keys():
-        return None
-    if any((port_id, line_id) not in offsets for line_id in moving):
-        return None
-    lines = sorted(moving | pinned.keys(), key=lambda lid: offsets[(port_id, lid)])
-    rank = {line_id: index for index, line_id in enumerate(lines)}
-    anchors = sorted(pinned, key=rank.__getitem__)
-    steps = {
-        round((pinned[b] - pinned[a]) / (rank[b] - rank[a]), 6)
-        for a, b in zip(anchors, anchors[1:])
-    }
-    if len(steps) != 1:
-        return None
-    step = steps.pop()
-    if abs(abs(step) - ctx.offset_step) > COORD_TOLERANCE:
-        return None
-    origin = anchors[0]
-    return {
-        id(ch): pinned[origin] + (rank[ch.route.line_id] - rank[origin]) * step
-        for ch in chans
-    }
-
-
-def _seat_by_port_slots(
-    down: bool,
-    chans: list[_VChannel],
-    pins: Mapping[tuple[bool, str], float],
-    ctx: _RoutingCtx,
-) -> bool:
-    """Seat *chans* at :func:`_port_slot_seats`' columns; ``False`` when they
-    do not apply or a column would run through a section.
-
-    Corner radii restack by left-to-right position, which is what
-    :func:`_restack_channel`'s index means.  Each seated segment is marked on
-    its route, so the claim-band seating leaves it nested between the
-    planner-owned columns it was ranked against.
-    """
-    seats = _port_slot_seats(chans, down, pins, ctx)
-    if seats is None or any(
-        _section_intrudes(ctx.graph, seats[id(ch)], ch.y_lo, ch.y_hi) for ch in chans
-    ):
-        return False
-    first: dict[str, float] = {}
-    for ch in chans:
-        first.setdefault(ch.route.line_id, seats[id(ch)])
-    by_column = sorted(first, key=first.__getitem__)
-    for ch in chans:
-        _seat_channel(
-            ch, seats[id(ch)], by_column.index(ch.route.line_id), len(by_column), ctx
-        )
-        if ch.idx not in ch.route.port_slot_seated_ranks:
-            ch.route.port_slot_seated_ranks = (
-                *ch.route.port_slot_seated_ranks,
-                ch.idx,
-            )
-    return True
-
-
 def _seat_channel(ch: _VChannel, x: float, i: int, n: int, ctx: _RoutingCtx) -> None:
     """Seat *ch* at column *x* as slot *i* of an *n*-line bundle."""
     _restack_channel(ch, x, i, n, ctx.offset_step, ctx.curve_radius)
@@ -455,20 +361,7 @@ def _layout_gap_bundle(
     claim's own band, which settlement sized for exactly this bundle over the
     corridor's own span -- the shared gap edges name whichever sections happen
     to sit in the two columns, which is a different and wider set of blockers.
-
-    A bundle landing on a recorded departure's entry port among pinned lines
-    is seated by that port's slot order first (:func:`_seat_by_port_slots`),
-    and the remaining bundles take each seated line's column as its pin.
     """
-    if pins:
-        unseated: list[tuple[bool, list[_VChannel]]] = []
-        seated = dict(pins)
-        for down, chans in bundles:
-            if _seat_by_port_slots(down, chans, pins, ctx):
-                seated.update({(down, ch.route.line_id): ch.x for ch in chans})
-            else:
-                unseated.append((down, chans))
-        bundles, pins = unseated, seated
     step = ctx.offset_step
 
     # Left to right by current bundle centre, except that the one branch a
@@ -2695,12 +2588,7 @@ def _reconcile_port_peeloff_risers(
     """
     step = ctx.offset_step
     for bundle in iter_port_peeloff_bundles(routes, ctx.graph, step):
-        targets = peeloff_target_slots(
-            bundle,
-            step,
-            ctx.graph._departure_lane_orders,
-            landing_orders,
-        )
+        targets = peeloff_target_slots(bundle, step, landing_orders)
         n = len(bundle.per_line)
         seats: list[tuple[RoutedPath, _VChannel, PeeloffSlot]] = []
         settled = True
@@ -2810,9 +2698,7 @@ def _align_merge_fed_confluence_to_band(
         bundle = PortPeeloffBundle(
             port_id, entries, per_line, trunk_sign, vertical_sign, port_lead_sign
         )
-        slots = peeloff_target_slots(
-            bundle, step, ctx.graph._departure_lane_orders, landing_orders
-        )
+        slots = peeloff_target_slots(bundle, step, landing_orders)
         deltas = {
             (
                 round(per_line[lid].peel_x - slots[lid].peel_x, 3),
@@ -3765,19 +3651,6 @@ def _bundle_divergent_distinct_descents(
         # arc centre there and nowhere later.
         if frozen and not (settle_frozen_arcs and tight):
             continue
-        # Reaching the next gate with an owned channel means the gate above let
-        # it through on ``settle_frozen_arcs and tight``, since a route-system
-        # boundary is one of the ways :func:`_planner_owns_channel` answers
-        # true.  Its ``not tight`` is therefore already false: it declines a
-        # group no construction produces.
-        if (
-            any(
-                route_system_owns_segment_boundary(channel.route, channel.idx)
-                for channel in chans
-            )
-            and not tight
-        ):
-            continue
 
         def obstructed(moves: list[tuple[_VChannel, float, float]]) -> bool:
             return any(
@@ -4581,7 +4454,7 @@ def _band_port_constraints(
 ) -> list[tuple[int, int]]:
     """Slot pairs ``(a, b)`` an entry port's lane order puts *a* above *b*
     (:func:`_port_lane_order_pairs` along the band's travel), with every
-    pair a recorded departure decides (:func:`_recorded_band_pairs`) in place
+    pair the plan nests at a corner (:func:`_recorded_band_pairs`) in place
     of any other constraint on the same two slots."""
     if ctx is None or not ctx.station_offsets:
         return []
@@ -4715,7 +4588,7 @@ def _planned_leg_key(
     before them (end leg).  ``None`` where the node holds no planned lane."""
     graph = ctx.graph
     offset = (ctx.station_offsets or {}).get((node, line_id))
-    port_id = _run_port(graph, node, leaving=start)
+    port_id = run_port(graph, node, leaving=start)
     if offset is None or port_id is None:
         return None
     port = graph.ports[port_id]
@@ -4724,12 +4597,12 @@ def _planned_leg_key(
     station = graph.stations[node]
     if port.side in perpendicular_port_sides(section.direction):
         lane = getattr(station, port_free_axis(port.side)) + (
-            _draw_sign(graph, port) * offset
+            draw_sign(graph, port) * offset
         )
     else:
         frame = _section_lane_frame(graph, section, ctx.positive_fan)
         lane = station_lane_coord(frame, station, offset)
-    key = lane * lateral_order_sign(travel) * lateral_order_sign(leg)
+    key = lane * right_normal_axis_sign(travel) * right_normal_axis_sign(leg)
     if travel in (Direction.L, Direction.R) and _runs_on_through(
         graph, node, line_id, travel, start
     ):
@@ -4800,7 +4673,7 @@ def _entry_order_pair(
     )
     if abs(coord_i - coord_j) <= COORD_TOLERANCE:
         return None
-    sign = lateral_order_sign(travel) * lateral_order_sign(
+    sign = right_normal_axis_sign(travel) * right_normal_axis_sign(
         ENTRY_SIDE_DIRECTION[graph.ports[port_id].side]
     )
     return (i, j) if sign * coord_i < sign * coord_j else (j, i)
@@ -6093,7 +5966,7 @@ def _convergence_line_order(
     offset_step = graph_offset_step(graph)
     if not trunk_depths_contiguous(trunk_ys, len(src_cols), offset_step):
         return None
-    return sorted(_distinct_line_order(chans, graph), key=lambda lid: trunk_depth[lid])
+    return sorted(_distinct_line_order(chans), key=lambda lid: trunk_depth[lid])
 
 
 def _corridor_leadout_right(chans: list[_VChannel], default: bool) -> bool:
@@ -6129,7 +6002,7 @@ def _corridor_leadout_right(chans: list[_VChannel], default: bool) -> bool:
     return votes.count(True) >= votes.count(False)
 
 
-def _distinct_line_order(chans: list[_VChannel], graph: MetroGraph) -> list[str]:
+def _distinct_line_order(chans: list[_VChannel]) -> list[str]:
     """Left-to-right order of the distinct lines in one gap-bundle corridor.
 
     Channels sharing a ``line_id`` collapse to a single slot, so the order
@@ -6154,9 +6027,6 @@ def _distinct_line_order(chans: list[_VChannel], graph: MetroGraph) -> list[str]
     that strictly reduces crossings (genomeassembly: hic before assemblies),
     and mirrors the rule for UP bundles (subworkflows: the deeper
     preprocess_reporting sits to the RIGHT).
-
-    A recorded departure's lines then take the slots its own lines hold, in
-    the order :func:`_recorded_departure_line_order` gives them.
     """
     cost = _line_pair_costs(chans)
     rep_x: dict[str, float] = {}
@@ -6178,7 +6048,7 @@ def _distinct_line_order(chans: list[_VChannel], graph: MetroGraph) -> list[str]
         return -1 if a < b else (1 if a > b else 0)
 
     order = sorted(rep_x, key=functools.cmp_to_key(cmp))
-    return _recorded_departure_line_order(_fork_line_order(order, chans), chans, graph)
+    return _fork_line_order(order, chans)
 
 
 def _fork_line_order(order: list[str], chans: list[_VChannel]) -> list[str]:
@@ -6202,71 +6072,6 @@ def _fork_line_order(order: list[str], chans: list[_VChannel]) -> list[str]:
         for slot, lid in zip(slots, sorted(mine, key=lambda k: mine[k])):
             order[slot] = lid
     return order
-
-
-def _recorded_departure_line_order(
-    order: list[str], chans: list[_VChannel], graph: MetroGraph
-) -> list[str]:
-    """*order* with each recorded departure's lines reseated among their slots.
-
-    A recorded departure's lines cross once, at the fork, and are concentric
-    from there with the corner at the channel's far end, away from the fork:
-    the corner's inner line sits on the side its run leaves toward.  Read
-    from the channels' own route points, so no frame sign enters.
-    """
-    records = graph._departure_lane_orders
-    present: dict[tuple[str, str], list[_VChannel]] = {}
-    for ch in chans:
-        key = (ch.route.edge.source, ch.route.edge.target)
-        if key in records:
-            present.setdefault(key, []).append(ch)
-    for key, members in present.items():
-        record = records[key]
-        if not set(record.lines) <= {ch.route.line_id for ch in members} or not all(
-            lid in order for lid in record.lines
-        ):
-            continue
-        fork = graph.stations[key[0]]
-        far: dict[str, tuple[float, int]] = {}
-        for ch in members:
-            end = _far_corner(ch, fork.y)
-            if end is not None:
-                far.setdefault(ch.route.line_id, end)
-        if (
-            set(far) != set(record.lines)
-            or len({side for _, side in far.values()}) != 1
-        ):
-            continue
-        inner_first = sorted(record.lines, key=lambda lid: far[lid][0])
-        leaves_right = next(iter(far.values()))[1] > 0
-        by_column = inner_first[::-1] if leaves_right else inner_first
-        slots = sorted(order.index(lid) for lid in record.lines)
-        order = list(order)
-        for slot, lid in zip(slots, by_column, strict=True):
-            order[slot] = lid
-    return order
-
-
-def _far_corner(ch: _VChannel, fork_y: float) -> tuple[float, int] | None:
-    """``(depth, side)`` of *ch*'s corner at the end away from the fork.
-
-    *side* is the sign of the run the corner turns into; *depth* is the
-    corner's coordinate along the channel, measured in the direction leading
-    away from the channel's other end.  ``None`` when that end has no run.
-    """
-    pts = ch.route.points
-    a, b = ch.idx, ch.idx + 1
-    if abs(pts[a][1] - fork_y) <= abs(pts[b][1] - fork_y):
-        far, beyond, near = b, b + 1, a
-    else:
-        far, beyond, near = a, a - 1, b
-    if not 0 <= beyond < len(pts):
-        return None
-    side = pts[beyond][0] - pts[far][0]
-    if abs(side) < 1e-6:
-        return None
-    inward = 1.0 if pts[near][1] > pts[far][1] else -1.0
-    return -inward * pts[far][1], (1 if side > 0 else -1)
 
 
 def _line_pair_costs(chans: list[_VChannel]) -> Callable[[str, str], tuple[int, int]]:
@@ -6358,7 +6163,7 @@ def _port_ordered_line_order(chans: list[_VChannel], ctx: _RoutingCtx) -> list[s
     from the free order replaces it, unless it reverses or splits lines leaving
     one source station (:func:`_port_order_refused`).
     """
-    free = _distinct_line_order(chans, ctx.graph)
+    free = _distinct_line_order(chans)
     if len(free) < 2 or len(free) > _MAX_BAND_PERMUTE or not ctx.station_offsets:
         return free
     by_line: defaultdict[str, list[_VChannel]] = defaultdict(list)

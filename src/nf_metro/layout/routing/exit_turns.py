@@ -12,11 +12,6 @@ from nf_metro.layout.constants import (
     COORD_TOLERANCE,
     MIN_STRAIGHT_EDGE,
 )
-from nf_metro.layout.departure_order import (
-    DepartureLaneOrder,
-    departure_records,
-    departure_turn_rank,
-)
 from nf_metro.layout.geometry import lanes_run_along_y
 from nf_metro.layout.lane_plan import gap_counter_runners
 from nf_metro.layout.route_plan import (
@@ -70,6 +65,7 @@ from nf_metro.layout.routing.common import (
     apply_route_offsets,
     column_gap_edges,
     horizontal_direction,
+    right_normal_axis_sign,
     segment_direction,
     vertical_direction,
 )
@@ -136,7 +132,6 @@ from nf_metro.layout.routing.orientation import (
     direction_vector,
     get_point_coordinate,
     lateral_axis,
-    lateral_order_sign,
 )
 from nf_metro.layout.routing.perp import _perp_entry_crossing_x, _perp_riser_lateral
 from nf_metro.parser.model import Edge, MetroGraph, PortSide, Station
@@ -761,7 +756,7 @@ def _source_lane_order(
         for line_id, offset, _coordinate in sorted(
             values,
             key=lambda item: (
-                item[2] * lateral_order_sign(run_direction),
+                item[2] * right_normal_axis_sign(run_direction),
                 graph_rank.get(item[0], len(graph_rank)),
             ),
         )
@@ -1244,7 +1239,9 @@ def _plain_l_shape_turn_requirement(
     turn_direction = vertical_direction(turn_delta)
     if centreline_axis is None:
         centreline_axis = _l_shape_mid_x(edge, src, tgt, len(members), ctx)
-    emitted_axis = centreline_axis + lateral_order_sign(turn_direction) * target_offset
+    emitted_axis = (
+        centreline_axis + right_normal_axis_sign(turn_direction) * target_offset
+    )
     return _SourceTurnRequirement(
         horizontal_direction(emitted_axis - src.x),
         turn_direction,
@@ -2014,7 +2011,7 @@ def _pinned_ladders_keep_bundle_order(
     way by construction; across two ladders only the pins say so, and pins that
     step the other way draw strokes that swap sides inside the arc.
     """
-    progression = lateral_order_sign(turn_direction)
+    progression = right_normal_axis_sign(turn_direction)
     pinned = tuple(pins)
     return all(
         first.group_id == second.group_id
@@ -2082,38 +2079,19 @@ def _turn_cohort_key_by_member(
     return keys
 
 
-def _departure_ranked_seeds(
-    departure_orders: tuple[DepartureLaneOrder, ...],
-    ordered_lanes: tuple[tuple[str, float], ...],
-    seeds: tuple[_AssignmentSeed, ...],
-) -> tuple[_AssignmentSeed, ...]:
-    """*seeds* with each recorded departure's lines ranked as the lines whose
-    lanes they take (:class:`~nf_metro.layout.departure_order.DepartureLaneOrder`)."""
-    records = departure_records(departure_orders)
-    rank = {line_id: index for index, (line_id, _offset) in enumerate(ordered_lanes)}
-    ranked = []
-    for seed in seeds:
-        line = seed.edge.line_id
-        assert seed.lane_rank == rank[line], (
-            "the route-plan checker re-derives turn ranks from the source lanes, "
-            "which carry the ordered-lane ranks"
-        )
-        departure = (seed.edge.source, seed.edge.target)
-        ranked.append(
-            replace(seed, lane_rank=departure_turn_rank(records, departure, line, rank))
-        )
-    return tuple(ranked)
-
-
 def _plan_turn_axes(
     ctx: _RoutingCtx,
     plan_id: ExitTurnPlanId,
     source_run_direction: Direction,
     ordered_lanes: tuple[tuple[str, float], ...],
     seeds: tuple[_AssignmentSeed, ...],
-    departure_orders: tuple[DepartureLaneOrder, ...],
 ) -> _AxisPlan:
-    seeds = _departure_ranked_seeds(departure_orders, ordered_lanes, seeds)
+    lane_ranks = {line_id: i for i, (line_id, _offset) in enumerate(ordered_lanes)}
+    for seed in seeds:
+        assert seed.lane_rank == lane_ranks[seed.edge.line_id], (
+            "the route-plan checker re-derives turn ranks from the source lanes, "
+            "which carry the ordered-lane ranks"
+        )
     turning_seeds = tuple(seed for seed in seeds if seed.turn_direction is not None)
     minimum_runway = max(
         (
@@ -2184,7 +2162,7 @@ def _plan_turn_axes(
             - (rank - ranks[0])
             for index, rank in enumerate(ranks)
         }
-        progression = lateral_order_sign(turn_direction)
+        progression = right_normal_axis_sign(turn_direction)
         fixed_origins = tuple(
             seed.fixed_axis
             - progression * cohort_rank[seed.lane_rank] * ctx.offset_step
@@ -2342,13 +2320,13 @@ def _plan_lane_ownership(
     source_id: str,
     seeds: tuple[_AssignmentSeed, ...],
     ordered_lanes: tuple[tuple[str, float], ...],
-    planned_offsets: Mapping[str, float],
     source_run_direction: Direction,
 ) -> _LaneOwnership:
     assert ctx.station_offsets is not None
+    lane_offsets = dict(ordered_lanes)
     station_ids_by_line: dict[str, list[str]] = defaultdict(list)
     transitions: list[ExitLaneTransition] = []
-    for line_id, _input_offset in ordered_lanes:
+    for line_id, input_offset in ordered_lanes:
         claimant_member_ids = tuple(
             seed.member_id for seed in seeds if seed.edge.line_id == line_id
         )
@@ -2359,7 +2337,7 @@ def _plan_lane_ownership(
             source_id,
             line_id,
             claimant_member_ids,
-            planned_offsets[line_id],
+            input_offset,
             source_run_direction,
             ctx,
         )
@@ -2377,7 +2355,7 @@ def _plan_lane_ownership(
             seed.edge.target,
             seed.edge.line_id,
             seed.member_id,
-            planned_offsets[seed.edge.line_id],
+            lane_offsets[seed.edge.line_id],
             seed.run_direction or source_run_direction,
             seed.family_id,
             ctx,
@@ -2442,12 +2420,6 @@ def _build_group_plan(
     member_ids = tuple(scaffold.member_id_by_edge[edge] for edge in member_edges)
     system_member_ids = indexes.member_ids_by_system.get(system_id, ())
     outbound_edges = tuple(edge for edge in member_edges if edge.source == source_id)
-    records = ctx.graph._departure_lane_orders
-    departure_orders = tuple(
-        records[key]
-        for key in sorted({(source_id, edge.target) for edge in outbound_edges})
-        if key in records
-    )
     reason: str | None = None
     represented_connectors = {
         ref.connector_id
@@ -2504,7 +2476,7 @@ def _build_group_plan(
     seeds = classification.seeds
     unclassified_member_ids = classification.unclassified_member_ids
     reason = reason or classification.legacy_reason
-    planned_offsets = dict(ordered_lanes)
+    lane_offsets = dict(ordered_lanes)
     ownership = _LaneOwnership(MappingProxyType({}), (), None)
     if reason is None:
         ownership = _plan_lane_ownership(
@@ -2514,7 +2486,6 @@ def _build_group_plan(
             source_id,
             seeds,
             ordered_lanes,
-            planned_offsets,
             run_direction,
         )
         reason = ownership.legacy_reason
@@ -2522,7 +2493,7 @@ def _build_group_plan(
         tentative_offsets = dict(ctx.station_offsets or {})
         for line_id, station_ids in ownership.station_ids_by_line.items():
             for station_id in station_ids:
-                tentative_offsets[station_id, line_id] = planned_offsets[line_id]
+                tentative_offsets[station_id, line_id] = lane_offsets[line_id]
         final_classification = _classify_assignment_seeds(
             graph,
             replace(ctx, station_offsets=tentative_offsets, built_routes=[]),
@@ -2550,7 +2521,6 @@ def _build_group_plan(
             run_direction,
             ordered_lanes,
             seeds,
-            departure_orders,
         )
         reason = axis_plan.legacy_reason
     axes = axis_plan.axes
@@ -2577,9 +2547,6 @@ def _build_group_plan(
             ),
             station_ids_by_line.get(line_id, ()),
             input_offset,
-            planned_offsets[line_id]
-            if disposition is ExitTurnDisposition.PLANNED
-            else input_offset,
         )
         for rank, (line_id, input_offset) in enumerate(ordered_lanes)
     )
@@ -2743,7 +2710,6 @@ def _build_group_plan(
         disposition,
         reason,
         decision_refs,
-        departure_orders,
         _nest_order(axes, run_direction),
     )
     diagnostic = (
@@ -2792,7 +2758,6 @@ def _legacy_plan(plan: ExitTurnPlan, reason: str) -> ExitTurnPlan:
             replace(
                 lane,
                 station_ids=(),
-                planned_offset=lane.input_offset,
             )
             for lane in plan.source_lanes
         ),
@@ -2890,7 +2855,7 @@ def _cross_plan_fallback_reasons(
                         reasons[owner] = "shared-source-ownership-conflict"
                     reasons[plan.id] = "shared-source-ownership-conflict"
                 owners.add(plan.id)
-                planned_station_offsets[key] = lane.planned_offset
+                planned_station_offsets[key] = lane.input_offset
     for plan in plans:
         if plan.disposition is not ExitTurnDisposition.PLANNED or plan.id in reasons:
             continue
@@ -3116,7 +3081,7 @@ def _add_station_lane_collision_fallbacks(
                 )
                 if active:
                     plan, lane = active[0]
-                    final[line_id] = lane.planned_offset, plan.id
+                    final[line_id] = lane.input_offset, plan.id
                 else:
                     final[line_id] = (
                         (ctx.station_offsets or {}).get((station_id, line_id), 0.0),
@@ -3170,10 +3135,10 @@ def _planned_axis_cross_range(
             (edge.target, edge.line_id), 0.0
         )
         if plan.source_axis is DemandAxis.X:
-            values.extend((source.y + lane.planned_offset, target.y + target_offset))
+            values.extend((source.y + lane.input_offset, target.y + target_offset))
         else:
             source_offsets = dict(ctx.station_offsets or {})
-            source_offsets[edge.source, edge.line_id] = lane.planned_offset
+            source_offsets[edge.source, edge.line_id] = lane.input_offset
             tentative_ctx = replace(ctx, station_offsets=source_offsets)
             if assignment.planned_family_id in _PERPENDICULAR_EXIT_FAMILIES:
                 perp_geometry = _perp_exit_family_geometry(
@@ -3874,10 +3839,7 @@ def validate_exit_turn_plans(
                         )
                     )
                 if (station_id, lane.line_id) not in station_offsets or (
-                    abs(
-                        station_offsets[(station_id, lane.line_id)]
-                        - lane.planned_offset
-                    )
+                    abs(station_offsets[(station_id, lane.line_id)] - lane.input_offset)
                     > COORD_TOLERANCE
                 ):
                     raise ExitTurnInvariantError(
