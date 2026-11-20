@@ -798,7 +798,7 @@ def _column_run_anchor_shortfalls(graph: MetroGraph) -> Iterator[_ShortAnchorEdg
     Within a contiguous run of rows in one grid column whose members' content
     nearest an X edge stands at one X (:func:`...bbox._shared_anchor_runway_runs`)
     that edge is common, so a box short of it is a member the seating or the
-    Stage 3.6 levelling left behind.  A neighbour whose own row band the reach
+    Stage 6.12b levelling left behind.  A neighbour whose own row band the reach
     would eat into is the one legitimate shortfall
     (:func:`...bbox._column_neighbour_anchor_limit`) and is not yielded.
     """

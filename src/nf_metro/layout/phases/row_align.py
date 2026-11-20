@@ -1168,7 +1168,7 @@ def _perp_port_lead_edge_reserve(
     Balancing outermost port against outermost port keeps this independent of
     which end is the entry, so a reversed flow needs no special case.  The
     rotation -- a horizontal flow's TOP/BOTTOM pair clearing its left and right
-    edges -- is Stage 3.5's job, since X sizing has no per-section predictor to
+    edges -- is Stage 6.12a's job, since X sizing has no per-section predictor to
     fold a port term into.
 
     A section with fewer than two perpendicular ports has no pair to balance and
